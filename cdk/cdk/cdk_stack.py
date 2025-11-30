@@ -282,7 +282,7 @@ class CdkStack(Stack):
         self.user_pool_domain = self.user_pool.add_domain(
             "UserPoolDomain",
             cognito_domain=cognito.CognitoDomainOptions(
-                domain_prefix="popcorn-sales-manager"
+                domain_prefix=f"popcorn-sales-{self.account}"
             ),
         )
 
