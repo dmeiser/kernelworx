@@ -83,12 +83,6 @@ ipython_config.py
 # pyenv
 .python-version
 
-# pipenv
-Pipfile.lock
-
-# poetry
-poetry.lock
-
 # PEP 582
 __pypackages__/
 
@@ -124,7 +118,6 @@ cython_debug/
 
 # uv (Python package manager)
 .uv/
-uv.lock
 
 # ============================================================================
 # Node / Frontend
