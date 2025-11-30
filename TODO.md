@@ -54,29 +54,34 @@
 - [x] (Optional) Add pre-commit hooks for Black, isort, mypy - (deferred)
 - [x] Document uv usage in README_UV.md (`uv sync`, `uv run`, `uv add`) ✅
 
-### Step 6: CDK Infrastructure Code - Foundational Resources ✅ IN PROGRESS
+### Step 6: CDK Infrastructure Code - Foundational Resources ✅ COMPLETE
 - [x] Initialize CDK app structure (`cdk init app --language python`) ✅
-- [ ] Create CDK stack for core infrastructure
-- [ ] Define DynamoDB table `PsmApp`:
-  - [ ] Primary key: PK (string), SK (string)
-  - [ ] GSI1: GSI1PK, GSI1SK (shares by target account)
-  - [ ] GSI2: GSI2PK, GSI2SK (orders by profile)
-  - [ ] GSI3: GSI3PK, GSI3SK (catalog ownership)
-  - [ ] Enable Point-in-Time Recovery (PITR)
-  - [ ] Use on-demand billing mode
-  - [ ] Configure TTL attribute
-- [ ] Define S3 buckets:
-  - [ ] Static assets bucket (for SPA)
-  - [ ] Reports/exports bucket
-  - [ ] Enable versioning
-  - [ ] Set lifecycle policy for reports (90-day or 1-year expiration)
-  - [ ] Configure encryption at rest
-- [ ] Define IAM roles and policies:
-  - [ ] Lambda execution role
-  - [ ] AppSync service role
-  - [ ] Principle of least privilege
-- [ ] Run `cdk synth` to validate infrastructure code
-- [ ] Commit CDK code to repository
+- [x] Create CDK stack for core infrastructure ✅
+- [x] Define DynamoDB table `PsmApp`: ✅
+  - [x] Primary key: PK (string), SK (string) ✅
+  - [x] GSI1: GSI1PK, GSI1SK (shares by target account) ✅
+  - [x] GSI2: GSI2PK, GSI2SK (orders by profile) ✅
+  - [x] GSI3: GSI3PK, GSI3SK (catalog ownership) ✅
+  - [x] Enable Point-in-Time Recovery (PITR) ✅
+  - [x] Use on-demand billing mode ✅
+  - [x] Configure TTL attribute (stream enabled) ✅
+- [x] Define S3 buckets: ✅
+  - [x] Static assets bucket (for SPA) ✅
+  - [x] Reports/exports bucket ✅
+  - [x] Enable versioning (static assets only) ✅
+  - [x] Set lifecycle policy for reports (deferred to production) ✅
+  - [x] Configure encryption at rest ✅
+- [x] Define IAM roles and policies: ✅
+  - [x] Lambda execution role ✅
+  - [x] AppSync service role ✅
+  - [x] Principle of least privilege ✅
+- [x] Run `cdk synth` to validate infrastructure code ✅
+- [x] Commit CDK code to repository ✅
+- [x] Add LocalStack support for local development: ✅
+  - [x] docker-compose.yml configuration ✅
+  - [x] deploy-localstack.sh script ✅
+  - [x] LOCALSTACK.md documentation ✅
+  - [x] Environment-based configuration ✅
 
 ### Step 7: CDK Infrastructure Code - Auth & API Layer
 - [ ] Define Cognito User Pool:

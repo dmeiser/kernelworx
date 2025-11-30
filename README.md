@@ -111,13 +111,14 @@ cdk deploy --profile dev
 
 ## Architecture
 
-See the `.temp/Planning Documents/` directory for complete architecture documentation:
+See the `.temp/planning_documents/` directory for complete architecture documentation:
 
-- [System Architecture & SRS](/.temp/Planning%20Documents/psm_srs_v1.md)
-- [GraphQL Schema](/.temp/Planning%20Documents/graphql_schema_v1.md)
-- [DynamoDB Physical Schema](/.temp/Planning%20Documents/dynamodb_physical_schema_v1.md)
-- [Auth & Sharing Model](/.temp/Planning%20Documents/auth_and_sharing_model.md)
-- [Tech Stack Overview](/.temp/Planning%20Documents/tech_stack_and_architecture.md)
+- [System Architecture & SRS](.temp/planning_documents/psm_srs_v1.md)
+- [GraphQL Schema](.temp/planning_documents/graphql_schema_v1.md)
+- [DynamoDB Physical Schema](.temp/planning_documents/dynamodb_physical_schema_v1.md)
+- [Auth & Sharing Model](.temp/planning_documents/auth_and_sharing_model.md)
+- [Tech Stack Overview](.temp/planning_documents/tech_stack_and_architecture.md)
+- [Admin Console Spec](.temp/planning_documents/admin_console_spec_v1.md)
 
 ## Testing
 
