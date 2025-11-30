@@ -5,28 +5,29 @@ This project supports deploying to LocalStack for local development and testing.
 ## Prerequisites
 
 1. **Docker** must be running
-2. **LocalStack Community** (free) or **LocalStack Pro** (if OSS license approved)
+2. **LocalStack CLI** installed (`pip install localstack`)
+3. **awslocal CLI** installed (`pip install awscli-local`) - optional but recommended
+
+## Installation
+
+If you don't have LocalStack CLI installed:
+
+```bash
+pip install localstack
+pip install awscli-local  # Optional: awslocal wrapper for AWS CLI
+```
 
 ## Quick Start
 
 ### 1. Start LocalStack
 
 ```bash
-docker-compose up -d
-```
+# Start LocalStack in detached mode
+localstack start -d
 
-This starts LocalStack with the following services:
-- DynamoDB
-- S3
-- IAM
-- Lambda
-- Cognito (Pro only)
-- AppSync (Pro only)
-- CloudFront (Pro only)
-- SNS/SES
-- Kinesis Firehose
-- CloudWatch
-- EventBridge
+# Check status
+localstack status
+```
 
 ### 2. Deploy Infrastructure
 
@@ -35,7 +36,7 @@ This starts LocalStack with the following services:
 ```
 
 This script:
-- Checks LocalStack is running
+- Checks if LocalStack is running (starts it if not)
 - Sets environment variables
 - Bootstraps CDK
 - Synthesizes the stack
@@ -50,6 +51,9 @@ awslocal dynamodb list-tables
 # List S3 buckets
 awslocal s3 ls
 
+# List IAM roles
+awslocal iam list-roles
+
 # Scan DynamoDB table
 awslocal dynamodb scan --table-name PsmApp
 ```
@@ -59,55 +63,127 @@ awslocal dynamodb scan --table-name PsmApp
 If you prefer manual control:
 
 ```bash
+# Start LocalStack
+localstack start -d
+
 # Set environment variables
 export USE_LOCALSTACK=true
 export AWS_DEFAULT_REGION=us-east-1
 export AWS_ACCESS_KEY_ID=test
 export AWS_SECRET_ACCESS_KEY=test
 
+# Navigate to cdk directory
+cd cdk
+
 # Bootstrap CDK
-uv run cdk bootstrap
+npx cdk bootstrap --require-approval never
 
 # Synth stack
-uv run cdk synth
+npx cdk synth
 
 # Deploy
-uv run cdk deploy --require-approval never
+npx cdk deploy --require-approval never
+```
+
+## LocalStack Management
+
+### Start LocalStack
+```bash
+localstack start -d
+```
+
+### Stop LocalStack
+```bash
+localstack stop
+```
+
+### Check Status
+```bash
+localstack status
+```
+
+### View Logs
+```bash
+localstack logs
+```
+
+### Restart LocalStack
+```bash
+localstack restart
 ```
 
 ## LocalStack Pro Features
 
-If you have a LocalStack Pro license (free for OSS projects), you can use:
+LocalStack Community (free) supports:
+- DynamoDB
+- S3
+- IAM
+- Lambda
+- SNS/SES
+- CloudWatch
+- EventBridge
 
+LocalStack Pro (requires license) adds:
 - **Cognito**: User Pools and social login
 - **AppSync**: GraphQL API
 - **CloudFront**: CDN distribution
 
-Set your license key:
+### Free OSS License
 
+LocalStack offers free Pro licenses for open-source projects!
+
+**To apply:**
+1. Email: info@localstack.cloud
+2. Provide: GitHub repo URL, project description, MIT license
+3. Include: "Volunteer-run Scouting America popcorn sales management app"
+4. See [Step 4 in TODO.md](TODO.md#step-4-apply-for-localstack-pro-oss-license)
+
+**If approved:**
 ```bash
+# Set your license key
 export LOCALSTACK_API_KEY=your-key-here
-docker-compose up -d
+
+# Restart LocalStack
+localstack restart
 ```
 
 ## Troubleshooting
 
-### LocalStack not running
+### Permission Issues
+
+If you see "Permission denied" errors for `/var/lib/localstack/logs`:
+
 ```bash
-docker-compose ps
-docker-compose logs localstack
+# LocalStack CLI handles this automatically, but if using docker-compose:
+mkdir -p localstack-data
+sudo chown -R $USER:$USER localstack-data
+```
+
+### LocalStack not starting
+```bash
+# Check logs
+localstack logs
+
+# Try restarting
+localstack stop
+localstack start -d
 ```
 
 ### Reset LocalStack state
 ```bash
-docker-compose down -v
-rm -rf localstack-data/
-docker-compose up -d
+# Stop LocalStack
+localstack stop
+
+# Remove data directory
+rm -rf ~/.cache/localstack
+
+# Start fresh
+localstack start -d
 ```
 
 ### Check LocalStack health
 ```bash
-curl http://localhost:4566/_localstack/health
+curl http://localhost:4566/_localstack/health | jq
 ```
 
 ## Differences from AWS
@@ -121,31 +197,71 @@ All services use `http://localhost:4566`
 ### Credentials
 Use any credentials (e.g., `test` / `test`)
 
-## Integration with uv
-
-All commands use `uv run` to ensure proper Python environment:
-
-```bash
-uv run cdk synth
-uv run cdk deploy
-uv run cdk diff
-```
+### Region
+Default: `us-east-1` (configurable)
 
 ## Data Persistence
 
-LocalStack data persists in `localstack-data/` directory. This directory is gitignored.
+LocalStack data persists in `~/.cache/localstack/` directory.
 
 To start fresh:
 ```bash
-rm -rf localstack-data/
+localstack stop
+rm -rf ~/.cache/localstack
+localstack start -d
 ```
 
-## LocalStack Pro OSS License
+## Integration with uv
 
-If you receive a LocalStack Pro OSS license:
+All CDK commands use the virtualenv:
 
-1. Set your license key in `docker-compose.yml` or `.env`
-2. Restart LocalStack
-3. Cognito, AppSync, and CloudFront will be available
+```bash
+cd cdk
+npx cdk synth
+npx cdk deploy
+npx cdk diff
+```
 
-See [Step 4 in TODO.md](TODO.md#step-4-apply-for-localstack-pro-oss-license) for application details.
+## Using docker-compose (Alternative)
+
+If you prefer docker-compose, use:
+
+```bash
+docker-compose up -d
+```
+
+But the **recommended approach is `localstack start -d`** as it:
+- Handles permissions automatically
+- Easier to manage (start/stop/restart)
+- Better log access
+- Integrated health checks
+
+## Common Commands
+
+```bash
+# Start LocalStack
+localstack start -d
+
+# Deploy infrastructure
+./deploy-localstack.sh
+
+# List resources
+awslocal dynamodb list-tables
+awslocal s3 ls
+awslocal iam list-roles
+
+# Stop LocalStack
+localstack stop
+
+# View logs
+localstack logs --follow
+```
+
+## Next Steps
+
+After deploying to LocalStack:
+1. Test DynamoDB operations
+2. Test S3 uploads
+3. Test IAM permissions
+4. Prepare for Step 7 (Auth & API layer)
+

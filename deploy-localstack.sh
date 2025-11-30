@@ -14,12 +14,38 @@ echo "============================================================"
 echo ""
 
 # Check if LocalStack is running
-if ! docker ps | grep -q popcorn-sales-localstack; then
-    echo "❌ LocalStack is not running. Start it with: docker-compose up -d"
-    exit 1
+if ! localstack status | grep -q "running"; then
+    echo "LocalStack is not running. Starting it..."
+    
+    # Create localstack-data directory with proper permissions
+    mkdir -p localstack-data
+    
+    # Start LocalStack with CLI (no docker-compose)
+    localstack start -d
+    
+    echo ""
+    echo "Waiting for LocalStack to be ready..."
+    sleep 10
+    
+    # Wait for health check
+    echo "Checking LocalStack health..."
+    timeout=30
+    counter=0
+    until curl -s http://localhost:4566/_localstack/health > /dev/null 2>&1; do
+        counter=$((counter + 1))
+        if [ $counter -gt $timeout ]; then
+            echo "❌ LocalStack failed to start within ${timeout}s"
+            exit 1
+        fi
+        echo "  Waiting... ($counter/$timeout)"
+        sleep 1
+    done
+    
+    echo "✅ LocalStack is ready"
+else
+    echo "✅ LocalStack is already running"
 fi
 
-echo "✅ LocalStack is running"
 echo ""
 
 # Set environment variables for LocalStack
@@ -27,30 +53,22 @@ export AWS_DEFAULT_REGION=us-east-1
 export AWS_ACCESS_KEY_ID=test
 export AWS_SECRET_ACCESS_KEY=test
 export USE_LOCALSTACK=true
-export LOCALSTACK_ENDPOINT=http://localhost:4566
+export CDK_DEFAULT_ACCOUNT=000000000000
+export CDK_DEFAULT_REGION=us-east-1
 
-# Use cdklocal wrapper if available, otherwise use cdk with endpoint override
-if command -v cdklocal &> /dev/null; then
-    echo "Using cdklocal wrapper..."
-    CDK_CMD="cdklocal"
-else
-    echo "Using cdk with LocalStack endpoint..."
-    CDK_CMD="uv run cdk"
-    export CDK_DEFAULT_ACCOUNT=000000000000
-    export CDK_DEFAULT_REGION=us-east-1
-fi
+# Navigate to cdk directory
+cd cdk
 
-echo ""
 echo "Bootstrapping CDK (if needed)..."
-$CDK_CMD bootstrap
+npx cdk bootstrap --require-approval never
 
 echo ""
 echo "Synthesizing stack..."
-$CDK_CMD synth
+npx cdk synth
 
 echo ""
 echo "Deploying stack..."
-$CDK_CMD deploy --require-approval never
+npx cdk deploy --require-approval never
 
 echo ""
 echo "============================================================"
@@ -62,4 +80,8 @@ echo ""
 echo "To interact with resources:"
 echo "  awslocal dynamodb list-tables"
 echo "  awslocal s3 ls"
+echo "  awslocal iam list-roles"
+echo ""
+echo "To stop LocalStack:"
+echo "  localstack stop"
 echo ""
