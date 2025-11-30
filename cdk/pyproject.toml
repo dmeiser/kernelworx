@@ -1,0 +1,48 @@
+[project]
+name = "popcorn-sales-manager-cdk"
+version = "0.1.0"
+description = "AWS CDK infrastructure for Popcorn Sales Manager"
+requires-python = ">=3.13"
+dependencies = [
+    "aws-cdk-lib>=2.215.0",
+    "constructs>=10.0.0,<11.0.0",
+]
+
+[dependency-groups]
+dev = [
+    "black>=25.11.0",
+    "boto3-stubs[essential]>=1.41.5",
+    "isort>=7.0.0",
+    "moto>=5.1.17",
+    "mypy>=1.19.0",
+    "pytest>=9.0.1",
+    "pytest-cov>=7.0.0",
+]
+
+[tool.black]
+line-length = 100
+target-version = ["py313"]
+
+[tool.isort]
+profile = "black"
+line_length = 100
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "--strict-markers",
+    "--cov=cdk",
+    "--cov-report=term-missing",
+    "--cov-report=html",
+    "--cov-fail-under=100",
+]
