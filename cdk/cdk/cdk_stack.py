@@ -327,43 +327,46 @@ class CdkStack(Stack):
         # CloudFront Distribution for SPA
         # ====================================================================
 
-        # Origin Access Identity for S3
-        self.origin_access_identity = cloudfront.OriginAccessIdentity(
-            self, "OAI", comment="OAI for Popcorn Sales Manager SPA"
-        )
+        # Temporarily disabled - pending account verification support case
+        # TODO: Re-enable once account verification is complete
+        
+        # # Origin Access Identity for S3
+        # self.origin_access_identity = cloudfront.OriginAccessIdentity(
+        #     self, "OAI", comment="OAI for Popcorn Sales Manager SPA"
+        # )
 
-        # Grant CloudFront read access to static assets bucket
-        self.static_assets_bucket.grant_read(self.origin_access_identity)
+        # # Grant CloudFront read access to static assets bucket
+        # self.static_assets_bucket.grant_read(self.origin_access_identity)
 
-        # CloudFront distribution
-        self.distribution = cloudfront.Distribution(
-            self,
-            "Distribution",
-            default_behavior=cloudfront.BehaviorOptions(
-                origin=origins.S3Origin(
-                    self.static_assets_bucket,
-                    origin_access_identity=self.origin_access_identity,
-                ),
-                viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
-                cache_policy=cloudfront.CachePolicy.CACHING_OPTIMIZED,
-                compress=True,
-            ),
-            default_root_object="index.html",
-            error_responses=[
-                cloudfront.ErrorResponse(
-                    http_status=403,
-                    response_http_status=200,
-                    response_page_path="/index.html",
-                    ttl=Duration.seconds(0),
-                ),
-                cloudfront.ErrorResponse(
-                    http_status=404,
-                    response_http_status=200,
-                    response_page_path="/index.html",
-                    ttl=Duration.seconds(0),
-                ),
-            ],
-            price_class=cloudfront.PriceClass.PRICE_CLASS_100,  # US, Canada, Europe only
-            enabled=True,
-        )
+        # # CloudFront distribution
+        # self.distribution = cloudfront.Distribution(
+        #     self,
+        #     "Distribution",
+        #     default_behavior=cloudfront.BehaviorOptions(
+        #         origin=origins.S3Origin(
+        #             self.static_assets_bucket,
+        #             origin_access_identity=self.origin_access_identity,
+        #         ),
+        #         viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+        #         cache_policy=cloudfront.CachePolicy.CACHING_OPTIMIZED,
+        #         compress=True,
+        #     ),
+        #     default_root_object="index.html",
+        #     error_responses=[
+        #         cloudfront.ErrorResponse(
+        #             http_status=403,
+        #             response_http_status=200,
+        #             response_page_path="/index.html",
+        #             ttl=Duration.seconds(0),
+        #         ),
+        #         cloudfront.ErrorResponse(
+        #             http_status=404,
+        #             response_http_status=200,
+        #             response_page_path="/index.html",
+        #             ttl=Duration.seconds(0),
+        #         ),
+        #     ],
+        #     price_class=cloudfront.PriceClass.PRICE_CLASS_100,  # US, Canada, Europe only
+        #     enabled=True,
+        # )
 
