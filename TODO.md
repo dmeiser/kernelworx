@@ -395,12 +395,14 @@
 
 ### Core Layout & Navigation
 - [ ] Create AppLayout component with:
-  - [ ] Header (branding, user info, logout)
-  - [ ] NavBar (profile selector, navigation)
-  - [ ] MainContent (route outlet)
-  - [ ] ToastContainer for notifications
+ - [x] Create AppLayout component with:
+  - [x] Header (branding, user info, logout)
+  - [x] NavBar (profile selector, navigation)
+  - [x] MainContent (route outlet)
+  - [x] ToastContainer for notifications
 - [ ] Implement responsive design (mobile-first)
 - [ ] Add accessibility features (WCAG 2.1 AAA aspirational)
+ - [x] Implement responsive drawer-based nav for mobile
  - [ ] Ensure all components, styles, and layout honor `docs/BRANDING_GUIDE.html` (fonts, colors, spacing, COPPA styling). Visual inconsistencies must be documented and corrected during code review.
 - [ ] Configure Cognito Hosted UI branding and COPPA compliance:
   - [ ] Customize Hosted UI with app branding (logo, colors)
