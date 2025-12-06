@@ -129,7 +129,7 @@
 
 ## Phase 1: Backend - Core API & Data Layer
 
-**Status:** Phase 1 - Core Backend Implementation (SIGNIFICANT PROGRESS)  
+**Status:** Phase 1 - Core Backend Implementation (MAJOR MILESTONE ACHIEVED)  
 **Last Updated:** 2025-12-06
 
 ### Phase 1 Summary
@@ -137,28 +137,33 @@
 **Completed ✅:**
 - ✅ Code Quality: Black formatting, isort, mypy strict (0 errors), 100% test coverage (85 tests)
 - ✅ Lambda Functions: 4 profile sharing functions deployed (create/redeem invite, direct share, revoke)
-- ✅ DynamoDB VTL Resolvers: 8 query resolvers deployed and tested
-  - `getMyAccount`, `listMyProfiles`, `listSharedProfiles` (all working)
-  - `getSeason`, `listSeasonsByProfile` (working)
-  - `getOrder`, `listOrdersBySeason` (working)
-  - `getProfile` (needs GSI or composite key - returns null)
+- ✅ DynamoDB VTL Resolvers: 8 query resolvers deployed and tested - **ALL WORKING**
+  - `getMyAccount` ✅ (working)
+  - `listMyProfiles` ✅ (working)
+  - `listSharedProfiles` ✅ (working with GSI1)
+  - `getProfile` ✅ (working with GSI4)
+  - `getSeason` ✅ (working with GSI5)
+  - `listSeasonsByProfile` ✅ (working)
+  - `getOrder` ✅ (working with GSI6)
+  - `listOrdersBySeason` ✅ (working)
+- ✅ **GSI Fix Implemented (Option 1)**: Added GSI4/GSI5/GSI6 for direct ID lookups
+  - GSI4: profileId lookup (for getProfile)
+  - GSI5: seasonId lookup (for getSeason)
+  - GSI6: orderId lookup (for getOrder)
+  - All deployed and ACTIVE, all resolvers tested successfully
 - ✅ Testing Infrastructure: Automated test script + comprehensive documentation
-- ✅ All changes committed (commits: 6621f27, 63fbe42, 66b27ef, 46f5905)
+- ✅ All changes committed (commits: 6621f27, 63fbe42, 66b27ef, 46f5905, 8420179, c6fe031)
 
 **Known Issues:**
-- ⚠️ GetItem resolvers (getProfile, getSeason, getOrder) need design decision:
-  - Option 1: Add GSI on profileId/seasonId/orderId for direct lookups
-  - Option 2: Require parent IDs in queries (e.g., getProfile needs ownerAccountId)
-  - Option 3: Accept that list queries work, GetItem by ID requires parent context
+- ✅ **RESOLVED**: GetItem resolvers (getProfile, getSeason, getOrder) - Fixed with GSI implementation
 
 **Remaining for Full Phase 1 Completion:**
 - 🔄 Implement CRUD mutations (createProfile, updateProfile, createSeason, etc.)
 - 🔄 Implement catalog sharing/corrections (requires schema design)
 - 🔄 Implement report generation Lambda
-- 🔄 Fix GetItem resolvers (design decision needed)
 - 🔄 Integration testing against live AWS environment
 
-**Recommendation:** Phase 1 has sufficient backend functionality to begin Phase 2 (Frontend) development. The existing queries and mutations support core profile/season/order management. Remaining features can be implemented as needed.
+**Recommendation:** Phase 1 has excellent backend functionality for Phase 2 (Frontend) development. All core query operations work perfectly. Remaining CRUD mutations can be implemented as frontend needs arise.
 
 ---
 
@@ -167,8 +172,12 @@
 - [x] Implement GSI1 (Profiles Shared With Me) ✅
 - [x] Implement GSI2 (Orders by Profile) ✅
 - [x] Implement GSI3 (Catalog Ownership) ✅
+- [x] **Implement GSI4/GSI5/GSI6 (Direct ID Lookups)** ✅ (Added Dec 6, 2025)
+  - [x] GSI4: profileId lookup ✅
+  - [x] GSI5: seasonId lookup ✅
+  - [x] GSI6: orderId lookup ✅
 - [x] Add TTL configuration for ProfileInvite and CatalogShareInvite items ✅ (Added Dec 6, 2025)
-- [ ] Test key access patterns with sample data
+- [x] Test key access patterns with sample data ✅ (All 8 queries tested Dec 6, 2025)
 
 ### AppSync GraphQL API
 - [x] Deploy AppSync API with Cognito User Pools auth ✅ (Deployed in Phase 0)
@@ -184,9 +193,9 @@
   - [x] `listSharedProfiles` (GSI1) ✅ (working)
   - [x] `listSeasonsByProfile` ✅ (working)
   - [x] `listOrdersBySeason` ✅ (working)
-  - [x] `getProfile` ⚠️ (deployed, needs GSI fix)
-  - [x] `getSeason` ⚠️ (deployed, needs GSI fix)
-  - [x] `getOrder` ⚠️ (deployed, needs GSI fix)
+  - [x] `getProfile` ✅ (working with GSI4 - fixed Dec 6, 2025)
+  - [x] `getSeason` ✅ (working with GSI5 - fixed Dec 6, 2025)
+  - [x] `getOrder` ✅ (working with GSI6 - fixed Dec 6, 2025)
 - [ ] Create DynamoDB resolvers for CRUD mutations:
   - [ ] `createSellerProfile`, `updateSellerProfile`
   - [ ] `createSeason`, `updateSeason`
@@ -202,10 +211,17 @@
   - All using inline VTL mapping templates
   - Proper error handling in response templates
   - Authorization TODOs documented for getProfile
+- [x] **Added GSI4/GSI5/GSI6 for direct ID lookups** ✅ (Dec 6, 2025)
+  - GSI4: profileId → enables getProfile by ID
+  - GSI5: seasonId → enables getSeason by ID
+  - GSI6: orderId → enables getOrder by ID
+  - Updated resolvers to use Query operations on GSIs
+  - All 3 GSIs deployed sequentially (DynamoDB limitation)
+  - All resolvers now return correct data
 - [x] Created comprehensive testing infrastructure ✅ (Dec 6, 2025)
   - test_graphql_queries.sh: Automated end-to-end GraphQL testing
   - TESTING_GUIDE.md: Complete testing documentation
-  - All 8 resolvers tested and working (with noted GSI limitations)
+  - All 8 resolvers tested successfully (100% query coverage)
 
 ### Lambda Functions (Python)
 - [x] Set up Lambda deployment in CDK ✅ (Dec 6, 2025)
