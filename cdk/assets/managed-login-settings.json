@@ -11,7 +11,7 @@
       "spacingDensity": "REGULAR"
     },
     "form": {
-      "displayGraphics": true,
+      "displayGraphics": false,
       "location": {
         "horizontal": "CENTER",
         "vertical": "CENTER"

@@ -59,11 +59,24 @@ echo -e "Client ID: ${GREEN}$CLIENT_ID${NC}\n"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Check if assets exist
-LOGO_FILE="$SCRIPT_DIR/assets/cognito-logo.svg"
+LOGO_PNG="$SCRIPT_DIR/assets/cognito-logo.png"
+FAVICON_ICO="$SCRIPT_DIR/assets/favicon.ico"
 SETTINGS_FILE="$SCRIPT_DIR/assets/managed-login-settings.json"
 
-if [ ! -f "$LOGO_FILE" ]; then
-  echo -e "${RED}Error: Logo file not found: $LOGO_FILE${NC}"
+# Convert logos if they don't exist
+if [ ! -f "$LOGO_PNG" ] || [ ! -f "$FAVICON_ICO" ]; then
+  echo -e "${YELLOW}Converting SVG logo to PNG formats...${NC}"
+  cd "$SCRIPT_DIR/assets" && .venv/bin/python convert_logo.py
+  cd "$SCRIPT_DIR"
+fi
+
+if [ ! -f "$LOGO_PNG" ]; then
+  echo -e "${RED}Error: Logo file not found: $LOGO_PNG${NC}"
+  exit 1
+fi
+
+if [ ! -f "$FAVICON_ICO" ]; then
+  echo -e "${RED}Error: Favicon file not found: $FAVICON_ICO${NC}"
   exit 1
 fi
 
@@ -72,21 +85,42 @@ if [ ! -f "$SETTINGS_FILE" ]; then
   exit 1
 fi
 
-echo -e "${YELLOW}Encoding logo to base64...${NC}"
-LOGO_BASE64=$(base64 -w 0 < "$LOGO_FILE")
+echo -e "${YELLOW}Encoding logo and favicon to base64...${NC}"
+LOGO_BASE64=$(base64 -w 0 < "$LOGO_PNG")
+FAVICON_BASE64=$(base64 -w 0 < "$FAVICON_ICO")
 
 echo -e "${YELLOW}Reading branding settings...${NC}"
 SETTINGS_JSON=$(cat "$SETTINGS_FILE")
 
-echo -e "${YELLOW}Creating managed login branding configuration...${NC}\n"
+echo -e "${YELLOW}Creating managed login branding configuration with logo and favicon...${NC}\n"
 
-# Create JSON input for AWS CLI (without logo for now - test settings first)
+# Create Assets array with logo and favicon
+ASSETS_JSON=$(cat <<EOF
+[
+  {
+    "Category": "FORM_LOGO",
+    "ColorMode": "LIGHT",
+    "Extension": "PNG",
+    "Bytes": "$LOGO_BASE64"
+  },
+  {
+    "Category": "FAVICON_ICO",
+    "ColorMode": "LIGHT",
+    "Extension": "ICO",
+    "Bytes": "$FAVICON_BASE64"
+  }
+]
+EOF
+)
+
+# Create JSON input for AWS CLI with Settings and Assets
 cat > /tmp/cognito-branding-input.json <<EOF
 {
   "UserPoolId": "$USER_POOL_ID",
   "ClientId": "$CLIENT_ID",
   "UseCognitoProvidedValues": false,
-  "Settings": $SETTINGS_JSON
+  "Settings": $SETTINGS_JSON,
+  "Assets": $ASSETS_JSON
 }
 EOF
 
@@ -116,8 +150,8 @@ else
   echo -e "${YELLOW}Found existing branding: $BRANDING_ID${NC}"
   echo -e "${GREEN}Updating branding...${NC}\n"
   
-  # Add branding ID to input
-  jq --arg id "$BRANDING_ID" '. + {ManagedLoginBrandingId: $id}' \
+  # Remove ClientId and add ManagedLoginBrandingId for update
+  jq --arg id "$BRANDING_ID" 'del(.ClientId) | . + {ManagedLoginBrandingId: $id}' \
     /tmp/cognito-branding-input.json > /tmp/cognito-branding-update.json
   
   RESULT=$(aws cognito-idp update-managed-login-branding \
