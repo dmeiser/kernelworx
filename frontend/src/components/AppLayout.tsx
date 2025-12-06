@@ -23,62 +23,55 @@ export const AppLayout: React.FC<{ children?: React.ReactNode }> = ({ children }
   const { account, logout } = useAuth();
   const [drawerOpen, setDrawerOpen] = React.useState(false);
   const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
 
   const toggleDrawer = () => setDrawerOpen(!drawerOpen);
 
   return (
-    <Box sx={{ display: 'flex', minHeight: '100vh', flexDirection: 'column' }}>
-      <AppBar position="static" color="primary">
-        <Toolbar sx={{ px: { xs: 2, sm: 3 } }}>
-          <Container maxWidth="lg" disableGutters sx={{ display: 'flex', alignItems: 'center' }}>
-            {/* Menu button */}
-            <IconButton 
-              edge="start" 
-              color="inherit" 
-              aria-label="menu" 
+    <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
+      {/* Full-width AppBar */}
+      <AppBar position="static">
+        <Container maxWidth="lg">
+          <Toolbar disableGutters sx={{ minHeight: 64 }}>
+            <IconButton
+              color="inherit"
+              aria-label="open drawer"
+              edge="start"
               onClick={toggleDrawer}
               sx={{ mr: 2 }}
             >
               <MenuIcon />
             </IconButton>
-
-            {/* Title - responsive sizing and spacing */}
+            
             <Typography
               variant="h6"
+              noWrap
               component="div"
-              sx={{ 
-                fontFamily: 'Satisfy, Open Sans, cursive', 
-                fontWeight: 600, 
-                letterSpacing: '0.08em',
-                fontSize: { xs: '1.1rem', sm: '1.3rem', md: '1.5rem' },
+              sx={{
                 flexGrow: 1,
-                textAlign: { xs: 'left', sm: 'center' },
-                mr: { xs: 0, sm: 2 }
+                fontFamily: '"Satisfy", cursive',
+                fontWeight: 600,
+                letterSpacing: '0.08em',
+                fontSize: { xs: '1.25rem', sm: '1.5rem' },
               }}
             >
               🍿 Popcorn Sales Manager
             </Typography>
 
-            {/* User info and logout - responsive display */}
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              {!isMobile && account && (
-                <Typography variant="body2" sx={{ mr: 1 }}>
-                  {account.displayName}
-                </Typography>
-              )}
-              <Button 
-                color="inherit" 
-                onClick={logout}
-                size={isMobile ? 'small' : 'medium'}
-              >
-                {isMobile ? 'Logout' : 'Log out'}
-              </Button>
-            </Box>
-          </Container>
-        </Toolbar>
+            {!isMobile && account && (
+              <Typography variant="body2" sx={{ mr: 2 }}>
+                {account.displayName}
+              </Typography>
+            )}
+            
+            <Button color="inherit" onClick={logout}>
+              Log out
+            </Button>
+          </Toolbar>
+        </Container>
       </AppBar>
 
+      {/* Navigation Drawer */}
       <Drawer anchor="left" open={drawerOpen} onClose={toggleDrawer}>
         <Box sx={{ width: 250 }} role="presentation" onClick={toggleDrawer}>
           <List>
@@ -98,8 +91,9 @@ export const AppLayout: React.FC<{ children?: React.ReactNode }> = ({ children }
         </Box>
       </Drawer>
 
-      <Box component="main" sx={{ flexGrow: 1 }}>
-        <Container maxWidth="lg" sx={{ py: { xs: 2, sm: 3, md: 4 } }}>
+      {/* Main Content */}
+      <Box component="main" sx={{ flexGrow: 1, bgcolor: 'background.default' }}>
+        <Container maxWidth="lg" sx={{ py: 4 }}>
           {children}
           <Outlet />
         </Container>
