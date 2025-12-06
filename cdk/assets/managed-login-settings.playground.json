@@ -91,6 +91,13 @@
           "borderColor": "f44336ff"
         }
       }
+    },
+    "input": {
+      "lightMode": {
+        "defaults": {
+          "borderColor": "ccccccff"
+        }
+      }
     }
   },
   "componentClasses": {
@@ -102,8 +109,10 @@
       "lightMode": {
         "defaults": {
           "backgroundColor": "ffffffff",
-          "borderColor": "ccccccff"
-        }
+          "borderColor": "ccccccff",
+          "placeholderColor": "999999ff"
+        },
+        "placeholderColor": "999999ff"
       }
     },
     "inputLabel": {
