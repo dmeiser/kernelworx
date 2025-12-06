@@ -415,15 +415,29 @@
   - [x] Material Design persistent drawer pattern (desktop) with icons ✅
   - [x] Responsive mobile header with proper icon visibility ✅
   - [x] Removed Vite template CSS conflicts ✅
-- [x] Configure Cognito Hosted UI branding and COPPA compliance: ✅
-  - [x] Customize Hosted UI with app branding (Satisfy/Open Sans fonts, #1976d2 primary color) ✅
-  - [x] Add COPPA warning banner with 13+ age requirement via CSS ::before pseudo-element ✅
-  - [x] Styled input fields, buttons, error messages to match branding ✅
-  - [x] Social login button styling ✅
-  - [x] Added CfnOutput for Hosted UI testing URL ✅
+- [x] Configure Cognito Hosted UI branding and COPPA compliance: ✅ **DEPLOYED** (Dec 6, 2025)
+  - [x] **Attempted comprehensive CSS branding** - Discovered AWS restrictions ❌
+    - [x] AWS Cognito CSS whitelist is very restrictive (rejects complex selectors, pseudo-elements, @import)
+    - [x] Only .submitButton-customizable is reliably supported
+    - [x] Deployed minimal CSS: Primary blue button (#1976d2) ✅
+  - [x] **Logo prepared but not deployed** (CDK limitation) ⚠️
+    - [x] Created SVG popcorn logo (200x200, red bucket with white popcorn) ✅
+    - [x] Converted to base64 (2800 chars) ✅
+    - [x] CfnUserPoolUICustomizationAttachment doesn't support ImageFile property ❌
+    - [ ] **Manual upload required:** Use AWS Console or CLI after deployment (see cdk_stack.py comments)
+  - [ ] **COPPA warning deferred to app UI** ⚠️
+    - [x] Attempted CSS ::before pseudo-element - **Rejected by AWS** ❌
+    - [ ] Will implement in app sign-up flow instead (Step 6: Pages & Components)
+  - [x] Hosted UI URL deployed: https://popcorn-sales-manager-dev.auth.us-east-1.amazoncognito.com/ ✅
   - [ ] Add privacy notice for parents/guardians (deferred - requires separate policy page)
   - [ ] Add terms of service link (deferred - requires separate ToS page)
-  - [ ] Test signup flow with COPPA warning visible (requires CDK deployment)
+  
+  **Lessons Learned:**
+  - AWS Cognito Essentials tier != Advanced Security Mode (incompatible)
+  - Cognito CSS whitelist rejects: `.input-customizable`, `.banner-customizable`, `.anchor-customizable`
+  - Complex CSS features rejected: `:hover`, `::before`, `@import`, transitions, animations
+  - Logo must be uploaded via AWS Console or CLI (CDK doesn't expose ImageFile property)
+  - COPPA compliance best implemented in app UI, not Cognito Hosted UI
 
 ### Pages & Components
 - [ ] **LoginPage** - Cognito Hosted UI redirect
