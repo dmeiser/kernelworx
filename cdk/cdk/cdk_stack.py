@@ -560,6 +560,14 @@ class CdkStack(Stack):
             
             # Cognito Hosted UI Customization
             # Note: CSS must be inline (no external files) and max 100KB
+            # Read logo from assets
+            logo_path = os.path.join(os.path.dirname(__file__), "..", "assets", "cognito-logo-base64.txt")
+            try:
+                with open(logo_path, "r") as f:
+                    logo_base64 = f.read().strip()
+            except FileNotFoundError:
+                logo_base64 = None  # Deploy without logo if file not found
+                
             cognito_ui_css = """
                 /* Popcorn Sales Manager - Cognito Hosted UI Branding */
                 
@@ -700,14 +708,20 @@ class CdkStack(Stack):
             """
             
             # Apply UI customization
+            ui_customization_params = {
+                "user_pool_id": self.user_pool.user_pool_id,
+                "client_id": self.user_pool_client.user_pool_client_id,
+                "css": cognito_ui_css,
+            }
+            
+            # Add logo if available
+            if logo_base64:
+                ui_customization_params["image_file"] = logo_base64
+            
             cognito.CfnUserPoolUICustomizationAttachment(
                 self,
                 "UserPoolUICustomization",
-                user_pool_id=self.user_pool.user_pool_id,
-                client_id=self.user_pool_client.user_pool_client_id,
-                css=cognito_ui_css,
-                # Optional: Add logo image (must be base64 encoded, max 100KB)
-                # image_file="<base64-encoded-image-data>"
+                **ui_customization_params
             )
             
             # TODO: Re-enable custom domain after AWS account verification

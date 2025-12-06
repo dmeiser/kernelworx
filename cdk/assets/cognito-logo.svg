@@ -1,0 +1,48 @@
+<svg width="200" height="200" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+  <!-- Popcorn bucket -->
+  <defs>
+    <linearGradient id="bucketGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#e53935;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#c62828;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Bucket body -->
+  <path d="M 60 80 L 50 160 L 150 160 L 140 80 Z" fill="url(#bucketGrad)" stroke="#b71c1c" stroke-width="2"/>
+  
+  <!-- Bucket rim -->
+  <ellipse cx="100" cy="80" rx="42" ry="8" fill="#c62828" stroke="#b71c1c" stroke-width="2"/>
+  
+  <!-- Stripes on bucket -->
+  <path d="M 67 90 L 62 140" stroke="#fff" stroke-width="3" opacity="0.3"/>
+  <path d="M 85 90 L 78 140" stroke="#fff" stroke-width="3" opacity="0.3"/>
+  <path d="M 100 90 L 100 140" stroke="#fff" stroke-width="3" opacity="0.3"/>
+  <path d="M 115 90 L 122 140" stroke="#fff" stroke-width="3" opacity="0.3"/>
+  <path d="M 133 90 L 138 140" stroke="#fff" stroke-width="3" opacity="0.3"/>
+  
+  <!-- Popcorn pieces -->
+  <circle cx="85" cy="55" r="12" fill="#fff8e1"/>
+  <circle cx="90" cy="45" r="10" fill="#fff59d"/>
+  <circle cx="95" cy="60" r="11" fill="#fff9c4"/>
+  
+  <circle cx="105" cy="50" r="13" fill="#fff8e1"/>
+  <circle cx="110" cy="40" r="11" fill="#fff59d"/>
+  <circle cx="115" cy="55" r="10" fill="#fff9c4"/>
+  
+  <circle cx="75" cy="65" r="10" fill="#fff59d"/>
+  <circle cx="80" cy="70" r="9" fill="#fff8e1"/>
+  
+  <circle cx="120" cy="65" r="11" fill="#fff8e1"/>
+  <circle cx="125" cy="70" r="9" fill="#fff59d"/>
+  
+  <circle cx="100" cy="35" r="12" fill="#fff9c4"/>
+  <circle cx="95" cy="30" r="10" fill="#fff8e1"/>
+  <circle cx="105" cy="30" r="11" fill="#fff59d"/>
+  
+  <!-- Shadow details on popcorn */
+  <circle cx="88" cy="48" r="3" fill="#f9a825" opacity="0.4"/>
+  <circle cx="108" cy="43" r="4" fill="#f9a825" opacity="0.4"/>
+  <circle cx="78" cy="68" r="3" fill="#f9a825" opacity="0.4"/>
+  <circle cx="122" cy="68" r="3" fill="#f9a825" opacity="0.4"/>
+  <circle cx="98" cy="33" r="4" fill="#f9a825" opacity="0.4"/>
+</svg>
