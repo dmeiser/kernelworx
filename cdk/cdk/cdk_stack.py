@@ -380,6 +380,18 @@ class CdkStack(Stack):
             environment=lambda_env,
         )
 
+        self.request_season_report_fn = lambda_.Function(
+            self,
+            "RequestSeasonReportFn",
+            runtime=lambda_.Runtime.PYTHON_3_13,
+            handler="src.handlers.report_generation.request_season_report",
+            code=asset_bundling,
+            timeout=Duration.seconds(60),  # Reports may take longer
+            memory_size=512,  # More memory for Excel generation
+            role=self.lambda_execution_role,
+            environment=lambda_env,
+        )
+
         # ====================================================================
         # Cognito User Pool - Authentication (Essentials tier)
         # ====================================================================
@@ -647,6 +659,11 @@ class CdkStack(Stack):
             self.delete_order_ds = self.api.add_lambda_data_source(
                 "DeleteOrderDS",
                 lambda_function=self.delete_order_fn,
+            )
+
+            self.request_season_report_ds = self.api.add_lambda_data_source(
+                "RequestSeasonReportDS",
+                lambda_function=self.request_season_report_fn,
             )
 
             # Resolvers for profile sharing mutations
@@ -980,6 +997,83 @@ $util.toJson($ctx.result.items)
                 """),
             )
 
+            # getCatalog - Get a specific catalog by ID
+            self.dynamodb_datasource.create_resolver(
+                "GetCatalogResolver",
+                type_name="Query",
+                field_name="getCatalog",
+                request_mapping_template=appsync.MappingTemplate.from_string("""
+{
+    "version": "2017-02-28",
+    "operation": "GetItem",
+    "key": {
+        "PK": $util.dynamodb.toDynamoDBJson("CATALOG"),
+        "SK": $util.dynamodb.toDynamoDBJson($ctx.args.catalogId)
+    }
+}
+                """),
+                response_mapping_template=appsync.MappingTemplate.from_string("""
+#if($ctx.error)
+    $util.error($ctx.error.message, $ctx.error.type)
+#end
+$util.toJson($ctx.result)
+                """),
+            )
+
+            # listPublicCatalogs - List all public catalogs
+            self.dynamodb_datasource.create_resolver(
+                "ListPublicCatalogsResolver",
+                type_name="Query",
+                field_name="listPublicCatalogs",
+                request_mapping_template=appsync.MappingTemplate.from_string("""
+{
+    "version": "2017-02-28",
+    "operation": "Query",
+    "index": "GSI3",
+    "query": {
+        "expression": "GSI3PK = :gsi3pk AND begins_with(GSI3SK, :gsi3sk)",
+        "expressionValues": {
+            ":gsi3pk": $util.dynamodb.toDynamoDBJson("PUBLIC"),
+            ":gsi3sk": $util.dynamodb.toDynamoDBJson("CATALOG#")
+        }
+    }
+}
+                """),
+                response_mapping_template=appsync.MappingTemplate.from_string("""
+#if($ctx.error)
+    $util.error($ctx.error.message, $ctx.error.type)
+#end
+$util.toJson($ctx.result.items)
+                """),
+            )
+
+            # listMyCatalogs - List catalogs owned by current user
+            self.dynamodb_datasource.create_resolver(
+                "ListMyCatalogsResolver",
+                type_name="Query",
+                field_name="listMyCatalogs",
+                request_mapping_template=appsync.MappingTemplate.from_string("""
+{
+    "version": "2017-02-28",
+    "operation": "Query",
+    "index": "GSI3",
+    "query": {
+        "expression": "GSI3PK = :gsi3pk AND begins_with(GSI3SK, :gsi3sk)",
+        "expressionValues": {
+            ":gsi3pk": $util.dynamodb.toDynamoDBJson("ACCOUNT#$ctx.identity.sub"),
+            ":gsi3sk": $util.dynamodb.toDynamoDBJson("CATALOG#")
+        }
+    }
+}
+                """),
+                response_mapping_template=appsync.MappingTemplate.from_string("""
+#if($ctx.error)
+    $util.error($ctx.error.message, $ctx.error.type)
+#end
+$util.toJson($ctx.result.items)
+                """),
+            )
+
             # ================================================================
             # CRUD Mutation Resolvers
             # ================================================================
@@ -1089,6 +1183,129 @@ $util.toJson($ctx.result)
     #end
 #end
 ## Return true if successfully deleted
+$util.toJson(true)
+                """),
+            )
+
+            # createCatalog - Create a new catalog
+            self.dynamodb_datasource.create_resolver(
+                "CreateCatalogResolver",
+                type_name="Mutation",
+                field_name="createCatalog",
+                request_mapping_template=appsync.MappingTemplate.from_string("""
+#set($catalogId = "CATALOG#" + $util.autoId())
+#set($now = $util.time.nowISO8601())
+{
+    "version": "2017-02-28",
+    "operation": "PutItem",
+    "key": {
+        "PK": $util.dynamodb.toDynamoDBJson("CATALOG"),
+        "SK": $util.dynamodb.toDynamoDBJson($catalogId)
+    },
+    "attributeValues": {
+        "catalogId": $util.dynamodb.toDynamoDBJson($catalogId),
+        "catalogName": $util.dynamodb.toDynamoDBJson($ctx.args.input.catalogName),
+        "catalogType": $util.dynamodb.toDynamoDBJson("USER_CREATED"),
+        "ownerAccountId": $util.dynamodb.toDynamoDBJson($ctx.identity.sub),
+        "isPublic": $util.dynamodb.toDynamoDBJson($ctx.args.input.isPublic),
+        "products": $util.dynamodb.toDynamoDBJson($ctx.args.input.products),
+        "createdAt": $util.dynamodb.toDynamoDBJson($now),
+        "updatedAt": $util.dynamodb.toDynamoDBJson($now),
+        ## GSI3 for catalog listing
+        #if($ctx.args.input.isPublic)
+            "GSI3PK": $util.dynamodb.toDynamoDBJson("PUBLIC"),
+        #else
+            "GSI3PK": $util.dynamodb.toDynamoDBJson("ACCOUNT#$ctx.identity.sub"),
+        #end
+        "GSI3SK": $util.dynamodb.toDynamoDBJson($catalogId)
+    }
+}
+                """),
+                response_mapping_template=appsync.MappingTemplate.from_string("""
+#if($ctx.error)
+    $util.error($ctx.error.message, $ctx.error.type)
+#end
+$util.toJson($ctx.result)
+                """),
+            )
+
+            # updateCatalog - Update an existing catalog
+            self.dynamodb_datasource.create_resolver(
+                "UpdateCatalogResolver",
+                type_name="Mutation",
+                field_name="updateCatalog",
+                request_mapping_template=appsync.MappingTemplate.from_string("""
+#set($now = $util.time.nowISO8601())
+{
+    "version": "2017-02-28",
+    "operation": "UpdateItem",
+    "key": {
+        "PK": $util.dynamodb.toDynamoDBJson("CATALOG"),
+        "SK": $util.dynamodb.toDynamoDBJson($ctx.args.catalogId)
+    },
+    "update": {
+        "expression": "SET catalogName = :catalogName, isPublic = :isPublic, products = :products, updatedAt = :updatedAt, GSI3PK = :gsi3pk",
+        "expressionValues": {
+            ":catalogName": $util.dynamodb.toDynamoDBJson($ctx.args.input.catalogName),
+            ":isPublic": $util.dynamodb.toDynamoDBJson($ctx.args.input.isPublic),
+            ":products": $util.dynamodb.toDynamoDBJson($ctx.args.input.products),
+            ":updatedAt": $util.dynamodb.toDynamoDBJson($now),
+            #if($ctx.args.input.isPublic)
+                ":gsi3pk": $util.dynamodb.toDynamoDBJson("PUBLIC")
+            #else
+                ":gsi3pk": $util.dynamodb.toDynamoDBJson("ACCOUNT#$ctx.identity.sub")
+            #end
+        }
+    },
+    "condition": {
+        "expression": "attribute_exists(PK) AND ownerAccountId = :ownerId",
+        "expressionValues": {
+            ":ownerId": $util.dynamodb.toDynamoDBJson($ctx.identity.sub)
+        }
+    }
+}
+                """),
+                response_mapping_template=appsync.MappingTemplate.from_string("""
+#if($ctx.error)
+    #if($ctx.error.type == "DynamoDB:ConditionalCheckFailedException")
+        $util.error("Catalog not found or access denied", "Forbidden")
+    #else
+        $util.error($ctx.error.message, $ctx.error.type)
+    #end
+#end
+$util.toJson($ctx.result)
+                """),
+            )
+
+            # deleteCatalog - Delete a catalog (owner only)
+            self.dynamodb_datasource.create_resolver(
+                "DeleteCatalogResolver",
+                type_name="Mutation",
+                field_name="deleteCatalog",
+                request_mapping_template=appsync.MappingTemplate.from_string("""
+{
+    "version": "2017-02-28",
+    "operation": "DeleteItem",
+    "key": {
+        "PK": $util.dynamodb.toDynamoDBJson("CATALOG"),
+        "SK": $util.dynamodb.toDynamoDBJson($ctx.args.catalogId)
+    },
+    "condition": {
+        "expression": "attribute_exists(PK) AND ownerAccountId = :ownerId",
+        "expressionValues": {
+            ":ownerId": $util.dynamodb.toDynamoDBJson($ctx.identity.sub)
+        }
+    }
+}
+                """),
+                response_mapping_template=appsync.MappingTemplate.from_string("""
+#if($ctx.error)
+    #if($ctx.error.type == "DynamoDB:ConditionalCheckFailedException")
+        $util.error("Catalog not found or access denied", "Forbidden")
+    #else
+        $util.error($ctx.error.message, $ctx.error.type)
+    #end
+#end
 $util.toJson(true)
                 """),
             )
@@ -1205,6 +1422,13 @@ $util.toJson($ctx.result)
                 "DeleteOrderResolver",
                 type_name="Mutation",
                 field_name="deleteOrder",
+            )
+
+            # requestSeasonReport - Generate and download season report (Lambda resolver)
+            self.request_season_report_ds.create_resolver(
+                "RequestSeasonReportResolver",
+                type_name="Mutation",
+                field_name="requestSeasonReport",
             )
 
             # Custom domain for AppSync API

@@ -135,6 +135,16 @@ type ProfileInvite {
   createdByAccountId: ID!
 }
 
+type SeasonReport {
+  reportId: ID!
+  seasonId: ID!
+  profileId: ID!
+  reportUrl: AWSURL
+  status: String!
+  createdAt: AWSDateTime!
+  expiresAt: AWSDateTime
+}
+
 # ============================================================================
 # Input Types
 # ============================================================================
@@ -233,6 +243,11 @@ input RevokeShareInput {
   targetAccountId: ID!
 }
 
+input RequestSeasonReportInput {
+  seasonId: ID!
+  format: String
+}
+
 # ============================================================================
 # Query Root
 # ============================================================================
@@ -295,6 +310,9 @@ type Mutation {
   redeemProfileInvite(input: RedeemProfileInviteInput!): Share!
   shareProfileDirect(input: ShareProfileDirectInput!): Share!
   revokeShare(input: RevokeShareInput!): Boolean!
+  
+  # Report generation
+  requestSeasonReport(input: RequestSeasonReportInput!): SeasonReport!
 }
 
 # ============================================================================

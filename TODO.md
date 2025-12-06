@@ -135,22 +135,29 @@
 ### Phase 1 Summary
 
 **Completed ✅:**
-- ✅ Code Quality: Black formatting, isort, mypy strict (0 errors), 100% test coverage (85 tests)
-- ✅ Lambda Functions: **9 functions deployed** (4 sharing + 4 CRUD + 1 LogRetention helper)
+- ✅ Code Quality: Black formatting, isort, mypy strict (0 errors)
+- ✅ Lambda Functions: **10 functions deployed** (4 sharing + 4 CRUD + 1 report + 1 LogRetention helper)
   - Profile sharing: createProfileInvite, redeemProfileInvite, shareProfileDirect, revokeShare
   - Season/Order CRUD: updateSeason, deleteSeason, updateOrder, deleteOrder
-- ✅ DynamoDB Resolvers: **10/10 query resolvers** + **12/12 mutation resolvers** deployed
+  - Report generation: requestSeasonReport (Excel/CSV exports)
+- ✅ DynamoDB Resolvers: **13/13 query resolvers** + **15/15 mutation resolvers** deployed
   - All query operations: getMyAccount, getProfile, getSeason, getOrder, list operations
-  - All CRUD mutations: create/update/delete for Profiles, Seasons, Orders
+  - Catalog queries: getCatalog, listPublicCatalogs, listMyCatalogs
+  - All CRUD mutations: create/update/delete for Profiles, Seasons, Orders, Catalogs
   - All sharing mutations: createInvite, redeemInvite, shareDirect, revokeShare
+  - Report generation: requestSeasonReport
+- ✅ **Catalog Operations**: Full CRUD for public and private catalogs (GSI3)
+- ✅ **Report Generation**: Excel/CSV exports with S3 upload and pre-signed URLs
 - ✅ **GSI Fix Implemented**: Added GSI4/GSI5/GSI6 for direct ID lookups
 - ✅ Full authorization system (owner + share-based permissions)
 - ✅ Comprehensive validation and error handling
-- ✅ All changes committed and pushed to GitHub (commit 81d978e)
+- ✅ All changes committed and pushed to GitHub
 
 **Deferred to Post-v1:**
-- 📋 Catalog operations (requires schema design): listPublicCatalogs, createCatalog, etc.
-- 📋 Report generation Lambda (Excel/CSV exports)
+- 📋 Unit tests for report generation (0% coverage currently)
+- 📋 Unit tests for catalog operations
+- 📋 Integration testing for catalog CRUD
+- 📋 Integration testing for report generation
 - 📋 Season auto-archive (90 days inactivity)
 - 📋 Advanced audit logging (Kinesis Firehose)
 - 📋 Email notifications (SES/SNS)
@@ -192,7 +199,10 @@
   - [x] `listOrdersByProfile` ✅ (working with GSI2 - added Dec 6, 2025)
   - [x] `listSharesByProfile` ✅ (working - added Dec 6, 2025)
   - [x] `listInvitesByProfile` ✅ (working - added Dec 6, 2025)
-- [x] **Create DynamoDB VTL resolvers for CRUD mutations** ✅ (Dec 6, 2025 - **12/12 resolvers deployed**)
+  - [x] `getCatalog` ✅ (working - added Dec 6, 2025)
+  - [x] `listPublicCatalogs` ✅ (working with GSI3 - added Dec 6, 2025)
+  - [x] `listMyCatalogs` ✅ (working with GSI3 - added Dec 6, 2025)
+- [x] **Create DynamoDB VTL resolvers for CRUD mutations** ✅ (Dec 6, 2025 - **15/15 resolvers deployed**)
   - [x] `createSellerProfile` ✅ (VTL - tested, working)
   - [x] `updateSellerProfile` ✅ (VTL - tested, working with ownership check)
   - [x] `deleteSellerProfile` ✅ (VTL - added Dec 6, 2025)
@@ -202,10 +212,12 @@
   - [x] `createOrder` ✅ (VTL - tested, working with total calculation)
   - [x] `updateOrder` ✅ (Lambda - deployed Dec 6, 2025)
   - [x] `deleteOrder` ✅ (Lambda - deployed Dec 6, 2025)
+  - [x] `createCatalog` ✅ (VTL - added Dec 6, 2025)
+  - [x] `updateCatalog` ✅ (VTL - added Dec 6, 2025)
+  - [x] `deleteCatalog` ✅ (VTL - added Dec 6, 2025)
   - [x] All 4 sharing mutations (Lambda - createProfileInvite, redeemProfileInvite, shareProfileDirect, revokeShare) ✅
-- [ ] **Catalog operations** (deferred to post-v1 - requires schema design)
-  - [ ] `listPublicCatalogs`, `listMyCatalogs`, `getCatalog`
-  - [ ] `createCatalog`, `updateCatalog`, `deleteCatalog`
+  - [x] `requestSeasonReport` ✅ (Lambda - added Dec 6, 2025)
+- [x] **Catalog operations** ✅ (Added Dec 6, 2025 - all 6 resolvers deployed)
 - [x] Implement authorization checks in Lambda resolvers ✅ (Profile sharing done)
   - [x] Owner-based access (ownerAccountId) ✅
   - [x] Share-based access (READ/WRITE permissions) ✅
@@ -239,15 +251,15 @@
   - [x] `redeemProfileInvite` - Redeems invite codes to create shares ✅
   - [x] `shareProfileDirect` - Direct sharing without invites ✅
   - [x] `revokeShare` - Revokes profile access ✅
-- [ ] Implement catalog sharing Lambda functions:
+- [x] Implement report generation Lambda function: ✅ (Dec 6, 2025)
+  - [x] `requestSeasonReport` - CSV/XLSX export with S3 upload and pre-signed URLs ✅
+- [ ] Implement catalog sharing Lambda functions: (deferred to post-v1)
   - [ ] `createCatalogShareInvite`
   - [ ] `redeemCatalogShareInvite`
-- [ ] Implement catalog corrections Lambda functions:
+- [ ] Implement catalog corrections Lambda functions: (deferred to post-v1)
   - [ ] `createCatalogCorrection`
   - [ ] `acceptCatalogCorrection`
   - [ ] `rejectCatalogCorrection`
-- [ ] Implement report generation Lambda function:
-  - [ ] `requestSeasonReport` - CSV/XLSX export
 - [x] Define customer input validation rules: ✅
   - [x] Name (required) ✅
   - [x] Phone and/or Address (at least one required, both allowed) ✅
