@@ -431,7 +431,8 @@ class CdkStack(Stack):
                 ),
                 account_recovery=cognito.AccountRecovery.EMAIL_ONLY,
                 removal_policy=RemovalPolicy.RETAIN,
-                # Note: Advanced security features (Essentials tier) must be configured via CloudFormation properties
+                # Enable Cognito Essentials (Advanced Security) for better branding and security
+                advanced_security_mode=cognito.AdvancedSecurityMode.ENFORCED,
             )
 
             # Note: COPPA compliance warning (13+ age requirement) must be displayed
