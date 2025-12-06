@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Popcorn Sales Manager - Branding Guide</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+                'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background: #f5f5f5;
+            padding: 2rem;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 3rem;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        h1 {
+            color: #1976d2;
+            margin-bottom: 1rem;
+            font-size: 2.5rem;
+        }
+
+        h2 {
+            color: #1976d2;
+            margin: 2rem 0 1rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 2px solid #e0e0e0;
+        }
+
+        h3 {
+            color: #333;
+            margin: 1.5rem 0 0.75rem;
+        }
+
+        .subtitle {
+            color: #666;
+            font-size: 1.2rem;
+            margin-bottom: 2rem;
+        }
+
+        .section {
+            margin-bottom: 3rem;
+        }
+
+        /* Colors */
+        .color-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1.5rem;
+            margin-top: 1rem;
+        }
+
+        .color-card {
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .color-swatch {
+            height: 120px;
+            width: 100%;
+        }
+
+        .color-info {
+            padding: 1rem;
+            background: white;
+        }
+
+        .color-name {
+            font-weight: 600;
+            margin-bottom: 0.25rem;
+        }
+
+        .color-value {
+            font-family: 'Courier New', monospace;
+            font-size: 0.9rem;
+            color: #666;
+        }
+
+        /* Typography */
+        .typography-sample {
+            margin: 1rem 0;
+            padding: 1rem;
+            background: #f9f9f9;
+            border-left: 4px solid #1976d2;
+        }
+
+        .font-size-demo {
+            margin-bottom: 0.5rem;
+        }
+
+        /* Logo */
+        .logo-container {
+            display: flex;
+            align-items: center;
+            gap: 1.5rem;
+            padding: 2rem;
+            background: #f9f9f9;
+            border-radius: 8px;
+            margin: 1rem 0;
+        }
+
+        .logo-icon {
+            width: 64px;
+            height: 64px;
+            background: #1976d2;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2rem;
+            color: white;
+            font-weight: bold;
+        }
+
+        .logo-text {
+            flex: 1;
+        }
+
+        .app-name {
+            font-size: 1.8rem;
+            font-weight: 700;
+            color: #1976d2;
+            line-height: 1.2;
+        }
+
+        .app-tagline {
+            color: #666;
+            font-size: 0.95rem;
+            margin-top: 0.25rem;
+        }
+
+        /* Components */
+        .component-demo {
+            margin: 1.5rem 0;
+            padding: 1.5rem;
+            background: #f9f9f9;
+            border-radius: 8px;
+        }
+
+        .button {
+            padding: 10px 24px;
+            border-radius: 4px;
+            border: none;
+            font-size: 0.95rem;
+            font-weight: 500;
+            cursor: pointer;
+            margin-right: 1rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .button-primary {
+            background: #1976d2;
+            color: white;
+        }
+
+        .button-secondary {
+            background: white;
+            color: #1976d2;
+            border: 1px solid #1976d2;
+        }
+
+        .button-danger {
+            background: #dc004e;
+            color: white;
+        }
+
+        /* COPPA Warning */
+        .coppa-warning {
+            background: #fff3e0;
+            border-left: 4px solid #f57c00;
+            padding: 1.5rem;
+            margin: 1.5rem 0;
+            border-radius: 4px;
+        }
+
+        .coppa-warning h4 {
+            color: #e65100;
+            margin-bottom: 0.5rem;
+        }
+
+        /* Code blocks */
+        .code-block {
+            background: #2e3440;
+            color: #d8dee9;
+            padding: 1rem;
+            border-radius: 4px;
+            overflow-x: auto;
+            margin: 1rem 0;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9rem;
+        }
+
+        .code-block code {
+            color: #88c0d0;
+        }
+
+        /* Accessibility */
+        .accessibility-note {
+            background: #e3f2fd;
+            border-left: 4px solid #1976d2;
+            padding: 1rem;
+            margin: 1rem 0;
+            border-radius: 4px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 1rem 0;
+        }
+
+        th, td {
+            padding: 0.75rem;
+            text-align: left;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        th {
+            background: #f5f5f5;
+            font-weight: 600;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🍿 Popcorn Sales Manager</h1>
+        <p class="subtitle">Branding Guide & Design System</p>
+
+        <!-- Logo & Identity -->
+        <section class="section">
+            <h2>Logo & Identity</h2>
+            <div class="logo-container">
+                <div class="logo-icon">🍿</div>
+                <div class="logo-text">
+                    <div class="app-name">Popcorn Sales Manager</div>
+                    <div class="app-tagline">Manage your fundraising sales with ease</div>
+                </div>
+            </div>
+            <p><strong>Logo Usage:</strong> The popcorn emoji (🍿) serves as our app icon. Simple, recognizable, and on-brand.</p>
+        </section>
+
+        <!-- Color Palette -->
+        <section class="section">
+            <h2>Color Palette</h2>
+            
+            <h3>Primary Colors</h3>
+            <div class="color-grid">
+                <div class="color-card">
+                    <div class="color-swatch" style="background: #1976d2;"></div>
+                    <div class="color-info">
+                        <div class="color-name">Primary Blue</div>
+                        <div class="color-value">#1976d2</div>
+                        <div class="color-value">rgb(25, 118, 210)</div>
+                    </div>
+                </div>
+                <div class="color-card">
+                    <div class="color-swatch" style="background: #1565c0;"></div>
+                    <div class="color-info">
+                        <div class="color-name">Primary Blue (Dark)</div>
+                        <div class="color-value">#1565c0</div>
+                        <div class="color-value">rgb(21, 101, 192)</div>
+                    </div>
+                </div>
+                <div class="color-card">
+                    <div class="color-swatch" style="background: #42a5f5;"></div>
+                    <div class="color-info">
+                        <div class="color-name">Primary Blue (Light)</div>
+                        <div class="color-value">#42a5f5</div>
+                        <div class="color-value">rgb(66, 165, 245)</div>
+                    </div>
+                </div>
+            </div>
+
+            <h3>Secondary Colors</h3>
+            <div class="color-grid">
+                <div class="color-card">
+                    <div class="color-swatch" style="background: #dc004e;"></div>
+                    <div class="color-info">
+                        <div class="color-name">Accent/Error Red</div>
+                        <div class="color-value">#dc004e</div>
+                        <div class="color-value">rgb(220, 0, 78)</div>
+                    </div>
+                </div>
+                <div class="color-card">
+                    <div class="color-swatch" style="background: #f57c00;"></div>
+                    <div class="color-info">
+                        <div class="color-name">Warning Orange</div>
+                        <div class="color-value">#f57c00</div>
+                        <div class="color-value">rgb(245, 124, 0)</div>
+                    </div>
+                </div>
+                <div class="color-card">
+                    <div class="color-swatch" style="background: #388e3c;"></div>
+                    <div class="color-info">
+                        <div class="color-name">Success Green</div>
+                        <div class="color-value">#388e3c</div>
+                        <div class="color-value">rgb(56, 142, 60)</div>
+                    </div>
+                </div>
+            </div>
+
+            <h3>Neutral Colors</h3>
+            <div class="color-grid">
+                <div class="color-card">
+                    <div class="color-swatch" style="background: #333333;"></div>
+                    <div class="color-info">
+                        <div class="color-name">Text Primary</div>
+                        <div class="color-value">#333333</div>
+                        <div class="color-value">rgb(51, 51, 51)</div>
+                    </div>
+                </div>
+                <div class="color-card">
+                    <div class="color-swatch" style="background: #666666;"></div>
+                    <div class="color-info">
+                        <div class="color-name">Text Secondary</div>
+                        <div class="color-value">#666666</div>
+                        <div class="color-value">rgb(102, 102, 102)</div>
+                    </div>
+                </div>
+                <div class="color-card">
+                    <div class="color-swatch" style="background: #f5f5f5;"></div>
+                    <div class="color-info">
+                        <div class="color-name">Background Gray</div>
+                        <div class="color-value">#f5f5f5</div>
+                        <div class="color-value">rgb(245, 245, 245)</div>
+                    </div>
+                </div>
+                <div class="color-card">
+                    <div class="color-swatch" style="background: #ffffff; border: 1px solid #e0e0e0;"></div>
+                    <div class="color-info">
+                        <div class="color-name">White</div>
+                        <div class="color-value">#ffffff</div>
+                        <div class="color-value">rgb(255, 255, 255)</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Typography -->
+        <section class="section">
+            <h2>Typography</h2>
+            
+            <div class="typography-sample">
+                <div class="font-size-demo" style="font-size: 2.5rem; font-weight: 700;">Heading 1 - 2.5rem / 700</div>
+                <div class="font-size-demo" style="font-size: 2rem; font-weight: 600;">Heading 2 - 2rem / 600</div>
+                <div class="font-size-demo" style="font-size: 1.5rem; font-weight: 600;">Heading 3 - 1.5rem / 600</div>
+                <div class="font-size-demo" style="font-size: 1.25rem; font-weight: 500;">Heading 4 - 1.25rem / 500</div>
+                <div class="font-size-demo" style="font-size: 1rem;">Body Text - 1rem / 400</div>
+                <div class="font-size-demo" style="font-size: 0.875rem; color: #666;">Small Text - 0.875rem / 400</div>
+            </div>
+
+            <h3>Font Stack</h3>
+            <div class="code-block">
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+                    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+            </div>
+        </section>
+
+        <!-- Components -->
+        <section class="section">
+            <h2>Components</h2>
+            
+            <h3>Buttons</h3>
+            <div class="component-demo">
+                <button class="button button-primary">Primary Button</button>
+                <button class="button button-secondary">Secondary Button</button>
+                <button class="button button-danger">Danger Button</button>
+            </div>
+
+            <h3>COPPA Warning (Required on Signup)</h3>
+            <div class="coppa-warning">
+                <h4>⚠️ Age Requirement (COPPA Compliance)</h4>
+                <p>You must be at least 13 years old to create an account and use this service. By signing in, you confirm that you meet this age requirement.</p>
+                <p style="margin-top: 0.5rem; font-size: 0.9rem;">This application is designed for parents and guardians to manage their Scout's fundraising activities. We do not collect personal information from children under 13.</p>
+            </div>
+        </section>
+
+        <!-- Cognito Hosted UI Customization -->
+        <section class="section">
+            <h2>Cognito Hosted UI Customization</h2>
+            
+            <h3>Custom CSS for Cognito</h3>
+            <p>The following CSS will be applied to the Cognito Hosted UI to match our branding:</p>
+            
+            <div class="code-block">
+<code>/* Cognito Hosted UI Custom CSS */
+
+/* Logo */
+.logo-customizable {
+    max-width: 300px;
+    max-height: 80px;
+}
+
+/* Primary color (buttons, links) */
+.submitButton-customizable {
+    background-color: #1976d2 !important;
+    border-color: #1976d2 !important;
+}
+
+.submitButton-customizable:hover {
+    background-color: #1565c0 !important;
+    border-color: #1565c0 !important;
+}
+
+/* Error messages */
+.errorMessage-customizable {
+    color: #dc004e !important;
+}
+
+/* Input focus */
+.inputField-customizable:focus {
+    border-color: #1976d2 !important;
+    box-shadow: 0 0 0 2px rgba(25, 118, 210, 0.2) !important;
+}
+
+/* Links */
+.redirect-customizable,
+.textDescription-customizable a {
+    color: #1976d2 !important;
+}
+
+/* Background */
+.banner-customizable {
+    background-color: #f5f5f5 !important;
+}
+
+/* COPPA Warning - Add before sign-up form */
+.textDescription-customizable::before {
+    content: "⚠️ Age Requirement: You must be at least 13 years old to create an account.";
+    display: block;
+    background: #fff3e0;
+    border-left: 4px solid #f57c00;
+    padding: 12px;
+    margin-bottom: 16px;
+    border-radius: 4px;
+    color: #e65100;
+    font-weight: 500;
+}
+</code>
+            </div>
+
+            <h3>Configuration Values</h3>
+            <table>
+                <tr>
+                    <th>Setting</th>
+                    <th>Value</th>
+                </tr>
+                <tr>
+                    <td>App Name</td>
+                    <td>Popcorn Sales Manager</td>
+                </tr>
+                <tr>
+                    <td>Logo Image URL</td>
+                    <td>🍿 (or upload custom logo SVG/PNG)</td>
+                </tr>
+                <tr>
+                    <td>Primary Color</td>
+                    <td>#1976d2</td>
+                </tr>
+                <tr>
+                    <td>Background Color</td>
+                    <td>#f5f5f5</td>
+                </tr>
+            </table>
+        </section>
+
+        <!-- Accessibility -->
+        <section class="section">
+            <h2>Accessibility (WCAG 2.1 AAA Aspirational)</h2>
+            
+            <div class="accessibility-note">
+                <strong>Key Requirements:</strong>
+                <ul style="margin-top: 0.5rem; margin-left: 1.5rem;">
+                    <li>Minimum color contrast ratio: 7:1 for normal text, 4.5:1 for large text (AAA)</li>
+                    <li>All interactive elements accessible via keyboard</li>
+                    <li>ARIA labels on all form inputs and buttons</li>
+                    <li>Focus indicators visible and high-contrast</li>
+                    <li>Error messages announced to screen readers</li>
+                    <li>Semantic HTML structure</li>
+                </ul>
+            </div>
+
+            <h3>Color Contrast Checks</h3>
+            <table>
+                <tr>
+                    <th>Combination</th>
+                    <th>Ratio</th>
+                    <th>WCAG AAA</th>
+                </tr>
+                <tr>
+                    <td>Primary Blue (#1976d2) on White</td>
+                    <td>4.58:1</td>
+                    <td>✅ Large text only</td>
+                </tr>
+                <tr>
+                    <td>Text Primary (#333) on White</td>
+                    <td>12.63:1</td>
+                    <td>✅ All text</td>
+                </tr>
+                <tr>
+                    <td>Text Secondary (#666) on White</td>
+                    <td>5.74:1</td>
+                    <td>✅ All text</td>
+                </tr>
+                <tr>
+                    <td>White on Primary Blue (#1976d2)</td>
+                    <td>4.58:1</td>
+                    <td>✅ Large text / UI elements</td>
+                </tr>
+            </table>
+        </section>
+
+        <!-- Implementation Notes -->
+        <section class="section">
+            <h2>Implementation Notes</h2>
+            
+            <h3>MUI Theme Configuration</h3>
+            <div class="code-block">
+<code>const theme = createTheme({
+  palette: {
+    mode: 'light',
+    primary: {
+      main: '#1976d2',
+      dark: '#1565c0',
+      light: '#42a5f5',
+    },
+    secondary: {
+      main: '#dc004e',
+    },
+    error: {
+      main: '#dc004e',
+    },
+    warning: {
+      main: '#f57c00',
+    },
+    success: {
+      main: '#388e3c',
+    },
+    background: {
+      default: '#f5f5f5',
+      paper: '#ffffff',
+    },
+    text: {
+      primary: '#333333',
+      secondary: '#666666',
+    },
+  },
+  typography: {
+    fontFamily: [
+      '-apple-system',
+      'BlinkMacSystemFont',
+      '"Segoe UI"',
+      'Roboto',
+      '"Helvetica Neue"',
+      'Arial',
+      'sans-serif',
+    ].join(','),
+  },
+});
+</code>
+            </div>
+        </section>
+
+        <footer style="margin-top: 3rem; padding-top: 2rem; border-top: 1px solid #e0e0e0; color: #666; text-align: center;">
+            <p>Popcorn Sales Manager - Volunteer-Run Scouting America Fundraising Tool</p>
+            <p style="font-size: 0.875rem; margin-top: 0.5rem;">Licensed under MIT License</p>
+        </footer>
+    </div>
+</body>
+</html>
