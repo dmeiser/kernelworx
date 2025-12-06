@@ -4,6 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Popcorn Sales Manager - Branding Guide</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@600;700;800&display=swap" rel="stylesheet">
     <style>
         * {
             margin: 0;
@@ -30,21 +33,29 @@
         }
 
         h1 {
+            font-family: 'Poppins', sans-serif;
             color: #1976d2;
             margin-bottom: 1rem;
-            font-size: 2.5rem;
+            font-size: 3rem;
+            font-weight: 800;
+            letter-spacing: -0.02em;
         }
 
         h2 {
+            font-family: 'Poppins', sans-serif;
             color: #1976d2;
             margin: 2rem 0 1rem;
             padding-bottom: 0.5rem;
             border-bottom: 2px solid #e0e0e0;
+            font-weight: 700;
+            letter-spacing: -0.01em;
         }
 
         h3 {
+            font-family: 'Poppins', sans-serif;
             color: #333;
             margin: 1.5rem 0 0.75rem;
+            font-weight: 600;
         }
 
         .subtitle {
@@ -133,10 +144,12 @@
         }
 
         .app-name {
+            font-family: 'Poppins', sans-serif;
             font-size: 1.8rem;
             font-weight: 700;
             color: #1976d2;
             line-height: 1.2;
+            letter-spacing: -0.01em;
         }
 
         .app-tagline {
@@ -357,15 +370,21 @@
             <h2>Typography</h2>
             
             <div class="typography-sample">
-                <div class="font-size-demo" style="font-size: 2.5rem; font-weight: 700;">Heading 1 - 2.5rem / 700</div>
-                <div class="font-size-demo" style="font-size: 2rem; font-weight: 600;">Heading 2 - 2rem / 600</div>
-                <div class="font-size-demo" style="font-size: 1.5rem; font-weight: 600;">Heading 3 - 1.5rem / 600</div>
-                <div class="font-size-demo" style="font-size: 1.25rem; font-weight: 500;">Heading 4 - 1.25rem / 500</div>
-                <div class="font-size-demo" style="font-size: 1rem;">Body Text - 1rem / 400</div>
-                <div class="font-size-demo" style="font-size: 0.875rem; color: #666;">Small Text - 0.875rem / 400</div>
+                <div class="font-size-demo" style="font-family: 'Poppins', sans-serif; font-size: 3rem; font-weight: 800; letter-spacing: -0.02em;">Heading 1 - Poppins 3rem / 800</div>
+                <div class="font-size-demo" style="font-family: 'Poppins', sans-serif; font-size: 2rem; font-weight: 700; letter-spacing: -0.01em; margin-top: 1rem;">Heading 2 - Poppins 2rem / 700</div>
+                <div class="font-size-demo" style="font-family: 'Poppins', sans-serif; font-size: 1.5rem; font-weight: 600; margin-top: 1rem;">Heading 3 - Poppins 1.5rem / 600</div>
+                <div class="font-size-demo" style="font-size: 1.25rem; font-weight: 500; margin-top: 1rem;">Heading 4 - System 1.25rem / 500</div>
+                <div class="font-size-demo" style="font-size: 1rem; margin-top: 1rem;">Body Text - System 1rem / 400</div>
+                <div class="font-size-demo" style="font-size: 0.875rem; color: #666; margin-top: 0.5rem;">Small Text - System 0.875rem / 400</div>
             </div>
 
             <h3>Font Stack</h3>
+            <p><strong>Headings (H1-H3):</strong> Poppins from Google Fonts - Modern, friendly, readable</p>
+            <div class="code-block">
+                font-family: 'Poppins', sans-serif;
+            </div>
+            
+            <p style="margin-top: 1rem;"><strong>Body Text:</strong> System font stack for optimal performance</p>
             <div class="code-block">
                 font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
                     'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
@@ -571,6 +590,20 @@
       'Arial',
       'sans-serif',
     ].join(','),
+    h1: {
+      fontFamily: '"Poppins", sans-serif',
+      fontWeight: 800,
+      letterSpacing: '-0.02em',
+    },
+    h2: {
+      fontFamily: '"Poppins", sans-serif',
+      fontWeight: 700,
+      letterSpacing: '-0.01em',
+    },
+    h3: {
+      fontFamily: '"Poppins", sans-serif',
+      fontWeight: 600,
+    },
   },
 });
 </code>
