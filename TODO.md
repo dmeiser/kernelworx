@@ -352,15 +352,21 @@
 
 ## Phase 2: Frontend - React SPA
 
-### Project Setup
-- [ ] Initialize Vite + React + TypeScript project
-- [ ] Install dependencies:
-  - [ ] MUI (Material UI) for components
-  - [ ] Apollo Client for GraphQL
-  - [ ] react-router for routing
-  - [ ] AWS Amplify libraries for Cognito auth (or custom)
-- [ ] Configure build and dev server
-- [ ] Set up environment variables for API endpoints
+**Status:** Phase 2 - In Progress (Step 1/9 Complete)  
+**Last Updated:** 2025-12-06
+
+### Project Setup ✅ COMPLETE
+- [x] Initialize Vite + React + TypeScript project ✅
+- [x] Install dependencies: ✅
+  - [x] MUI (Material UI) for components ✅
+  - [x] Apollo Client for GraphQL ✅
+  - [x] react-router for routing ✅
+  - [x] AWS Amplify libraries for Cognito auth ✅
+- [x] Configure build and dev server ✅
+- [x] Set up environment variables for API endpoints ✅
+  - [x] Created .env with actual AWS values (User Pool, Client ID, AppSync endpoint) ✅
+  - [x] Updated .gitignore to exclude .env ✅
+  - [x] Dev server verified at http://localhost:5173/ ✅
 
 ### Authentication & Auth Context
 - [ ] Implement Cognito Hosted UI integration
