@@ -6,7 +6,7 @@
     <title>Popcorn Sales Manager - Branding Guide</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700&family=Montserrat:wght@700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700&family=Cabin:wght@700;800&display=swap" rel="stylesheet">
     <style>
         * {
             margin: 0;
@@ -33,22 +33,21 @@
         }
 
         h1 {
-            font-family: 'Montserrat', 'Open Sans', sans-serif;
+            font-family: 'Cabin', 'Open Sans', sans-serif;
             color: #1976d2;
             margin-bottom: 1rem;
             font-size: 3rem;
             font-weight: 800;
-            letter-spacing: -0.02em;
+            letter-spacing: -0.01em;
         }
 
         h2 {
-            font-family: 'Montserrat', 'Open Sans', sans-serif;
+            font-family: 'Cabin', 'Open Sans', sans-serif;
             color: #1976d2;
             margin: 2rem 0 1rem;
             padding-bottom: 0.5rem;
             border-bottom: 2px solid #e0e0e0;
             font-weight: 700;
-            letter-spacing: -0.01em;
         }
 
         h3 {
@@ -144,12 +143,11 @@
         }
 
         .app-name {
-            font-family: 'Montserrat', 'Open Sans', sans-serif;
+            font-family: 'Cabin', 'Open Sans', sans-serif;
             font-size: 1.8rem;
-            font-weight: 700;
+            font-weight: 800;
             color: #1976d2;
             line-height: 1.2;
-            letter-spacing: -0.01em;
         }
 
         .app-tagline {
@@ -370,8 +368,8 @@
             <h2>Typography</h2>
             
             <div class="typography-sample">
-                <div class="font-size-demo" style="font-family: 'Montserrat', sans-serif; font-size: 3rem; font-weight: 800; letter-spacing: -0.02em;">Heading 1 - Montserrat 3rem / 800</div>
-                <div class="font-size-demo" style="font-family: 'Montserrat', sans-serif; font-size: 2rem; font-weight: 700; letter-spacing: -0.01em; margin-top: 1rem;">Heading 2 - Montserrat 2rem / 700</div>
+                <div class="font-size-demo" style="font-family: 'Cabin', sans-serif; font-size: 3rem; font-weight: 800; letter-spacing: -0.01em;">Heading 1 - Cabin 3rem / 800</div>
+                <div class="font-size-demo" style="font-family: 'Cabin', sans-serif; font-size: 2rem; font-weight: 700; margin-top: 1rem;">Heading 2 - Cabin 2rem / 700</div>
                 <div class="font-size-demo" style="font-family: 'Open Sans', sans-serif; font-size: 1.5rem; font-weight: 700; margin-top: 1rem;">Heading 3 - Open Sans 1.5rem / 700</div>
                 <div class="font-size-demo" style="font-family: 'Open Sans', sans-serif; font-size: 1.25rem; font-weight: 600; margin-top: 1rem;">Heading 4 - Open Sans 1.25rem / 600</div>
                 <div class="font-size-demo" style="font-family: 'Open Sans', sans-serif; font-size: 1rem; margin-top: 1rem;">Body Text - Open Sans 1rem / 400</div>
@@ -385,9 +383,25 @@
                     'Helvetica Neue', Arial, sans-serif;
             </div>
             
-            <p style="margin-top: 1rem;"><strong>Display Font (H1-H2):</strong> Montserrat - Bold, geometric, pairs perfectly with Open Sans</p>
+            <p style="margin-top: 1rem;"><strong>Display Font (H1-H2 & App Title):</strong> Cabin - Friendly humanist sans-serif with distinctive personality, inspired by Edward Johnston's iconic signage work. Complements Open Sans perfectly while creating a memorable brand identity.</p>
             <div class="code-block">
-                font-family: 'Montserrat', 'Open Sans', sans-serif;
+                font-family: 'Cabin', 'Open Sans', sans-serif;
+            </div>
+            
+            <div style="margin-top: 1rem; padding: 1rem; background: #e3f2fd; border-left: 4px solid #1976d2; border-radius: 4px;">
+                <strong>Why Cabin?</strong>
+                <ul style="margin-top: 0.5rem; margin-left: 1.5rem; line-height: 1.8;">
+                    <li>✅ <strong>Professional yet approachable</strong> - Perfect balance for volunteer-run app</li>
+                    <li>✅ <strong>Excellent pairing with Open Sans</strong> - Both humanist sans-serifs with compatible x-heights</li>
+                    <li>✅ <strong>Distinctive branding</strong> - More personality than geometric fonts, but still professional</li>
+                    <li>✅ <strong>High readability</strong> - Clear at all sizes, works great for app names and headings</li>
+                    <li>❌ <strong>Rejected alternatives:</strong>
+                        <ul style="margin-left: 1.5rem; margin-top: 0.25rem;">
+                            <li>Dosis - Too geometric/modern, doesn't pair well with Open Sans</li>
+                            <li>Pacifico/Satisfy/Permanent Marker - Too casual/playful for financial/sales data</li>
+                        </ul>
+                    </li>
+                </ul>
             </div>
             
             <p style="margin-top: 1rem;"><strong>Body Text:</strong> System font stack for optimal performance</p>
@@ -588,6 +602,7 @@
   },
   typography: {
     fontFamily: [
+      '"Open Sans"',
       '-apple-system',
       'BlinkMacSystemFont',
       '"Segoe UI"',
@@ -597,19 +612,21 @@
       'sans-serif',
     ].join(','),
     h1: {
-      fontFamily: '"Inter", sans-serif',
-      fontWeight: 700,
-      letterSpacing: '-0.03em',
+      fontFamily: '"Cabin", "Open Sans", sans-serif',
+      fontWeight: 800,
+      letterSpacing: '-0.01em',
     },
     h2: {
-      fontFamily: '"Inter", sans-serif',
-      fontWeight: 600,
-      letterSpacing: '-0.02em',
+      fontFamily: '"Cabin", "Open Sans", sans-serif',
+      fontWeight: 700,
     },
     h3: {
-      fontFamily: '"Inter", sans-serif',
+      fontFamily: '"Open Sans", sans-serif',
+      fontWeight: 700,
+    },
+    h4: {
+      fontFamily: '"Open Sans", sans-serif',
       fontWeight: 600,
-      letterSpacing: '-0.01em',
     },
   },
 });
