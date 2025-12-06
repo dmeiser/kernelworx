@@ -7,6 +7,7 @@
 
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { fetchAuthSession, signInWithRedirect, signOut, getCurrentUser } from 'aws-amplify/auth';
+import { Hub } from 'aws-amplify/utils';
 import type { Account, AuthContextValue } from '../types/auth';
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -88,14 +89,49 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children, apolloClie
   }, [fetchAccountData]);
 
   /**
-   * Initialize auth state on mount
+   * Initialize auth state on mount and listen for auth events
    */
   useEffect(() => {
     checkAuthSession();
+
+    // Listen for auth events (OAuth callback, sign out, etc.)
+    const unsubscribe = Hub.listen('auth', ({ payload }) => {
+      switch (payload.event) {
+        case 'signInWithRedirect':
+          // User returned from Hosted UI - refresh session
+          checkAuthSession();
+          break;
+        case 'signInWithRedirect_failure':
+          console.error('Sign in failed:', payload.data);
+          setLoading(false);
+          break;
+        case 'signedOut':
+          setAccount(null);
+          setLoading(false);
+          break;
+        case 'tokenRefresh':
+          // Token was refreshed - update account data
+          checkAuthSession();
+          break;
+        case 'tokenRefresh_failure':
+          console.error('Token refresh failed:', payload.data);
+          setAccount(null);
+          break;
+      }
+    });
+
+    return unsubscribe;
   }, [checkAuthSession]);
 
   /**
    * Login via Cognito Hosted UI
+   * 
+   * This redirects the user to the Cognito Hosted UI at:
+   * https://{COGNITO_DOMAIN}/oauth2/authorize
+   * 
+   * The user will authenticate with their chosen social provider (Google/Facebook/Apple),
+   * and Cognito will redirect back to the app with an authorization code.
+   * Amplify automatically exchanges the code for JWT tokens.
    */
   const login = useCallback(async () => {
     try {
@@ -108,6 +144,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children, apolloClie
 
   /**
    * Logout and clear session
+   * 
+   * This signs the user out via Cognito and redirects to the sign-out URL.
    */
   const logout = useCallback(async () => {
     try {
