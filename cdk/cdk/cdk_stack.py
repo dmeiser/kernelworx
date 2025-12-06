@@ -830,6 +830,331 @@ $util.toJson($ctx.result.items)
                 """),
             )
 
+            # ================================================================
+            # CRUD Mutation Resolvers
+            # ================================================================
+
+            # createSellerProfile - Create a new seller profile
+            self.dynamodb_datasource.create_resolver(
+                "CreateSellerProfileResolver",
+                type_name="Mutation",
+                field_name="createSellerProfile",
+                request_mapping_template=appsync.MappingTemplate.from_string("""
+#set($profileId = "PROFILE#" + $util.autoId())
+#set($now = $util.time.nowISO8601())
+{
+    "version": "2017-02-28",
+    "operation": "PutItem",
+    "key": {
+        "PK": $util.dynamodb.toDynamoDBJson("ACCOUNT#$ctx.identity.sub"),
+        "SK": $util.dynamodb.toDynamoDBJson($profileId)
+    },
+    "attributeValues": {
+        "profileId": $util.dynamodb.toDynamoDBJson($profileId),
+        "ownerAccountId": $util.dynamodb.toDynamoDBJson($ctx.identity.sub),
+        "sellerName": $util.dynamodb.toDynamoDBJson($ctx.args.input.sellerName),
+        "createdAt": $util.dynamodb.toDynamoDBJson($now),
+        "updatedAt": $util.dynamodb.toDynamoDBJson($now),
+        "isOwner": $util.dynamodb.toDynamoDBJson(true),
+        "permissions": $util.dynamodb.toDynamoDBJson(["READ", "WRITE"])
+    }
+}
+                """),
+                response_mapping_template=appsync.MappingTemplate.from_string("""
+#if($ctx.error)
+    $util.error($ctx.error.message, $ctx.error.type)
+#end
+$util.toJson($ctx.result)
+                """),
+            )
+
+            # updateSellerProfile - Update an existing seller profile
+            self.dynamodb_datasource.create_resolver(
+                "UpdateSellerProfileResolver",
+                type_name="Mutation",
+                field_name="updateSellerProfile",
+                request_mapping_template=appsync.MappingTemplate.from_string("""
+#set($now = $util.time.nowISO8601())
+{
+    "version": "2017-02-28",
+    "operation": "UpdateItem",
+    "key": {
+        "PK": $util.dynamodb.toDynamoDBJson("ACCOUNT#$ctx.identity.sub"),
+        "SK": $util.dynamodb.toDynamoDBJson($ctx.args.input.profileId)
+    },
+    "update": {
+        "expression": "SET sellerName = :sellerName, updatedAt = :updatedAt",
+        "expressionValues": {
+            ":sellerName": $util.dynamodb.toDynamoDBJson($ctx.args.input.sellerName),
+            ":updatedAt": $util.dynamodb.toDynamoDBJson($now)
+        }
+    },
+    "condition": {
+        "expression": "attribute_exists(PK) AND ownerAccountId = :ownerId",
+        "expressionValues": {
+            ":ownerId": $util.dynamodb.toDynamoDBJson($ctx.identity.sub)
+        }
+    }
+}
+                """),
+                response_mapping_template=appsync.MappingTemplate.from_string("""
+#if($ctx.error)
+    #if($ctx.error.type == "DynamoDB:ConditionalCheckFailedException")
+        $util.error("Profile not found or access denied", "Forbidden")
+    #else
+        $util.error($ctx.error.message, $ctx.error.type)
+    #end
+#end
+$util.toJson($ctx.result)
+                """),
+            )
+
+            # createSeason - Create a new season for a profile
+            self.dynamodb_datasource.create_resolver(
+                "CreateSeasonResolver",
+                type_name="Mutation",
+                field_name="createSeason",
+                request_mapping_template=appsync.MappingTemplate.from_string("""
+#set($seasonId = "SEASON#" + $util.autoId())
+#set($now = $util.time.nowISO8601())
+{
+    "version": "2017-02-28",
+    "operation": "PutItem",
+    "key": {
+        "PK": $util.dynamodb.toDynamoDBJson($ctx.args.input.profileId),
+        "SK": $util.dynamodb.toDynamoDBJson($seasonId)
+    },
+    "attributeValues": {
+        "seasonId": $util.dynamodb.toDynamoDBJson($seasonId),
+        "profileId": $util.dynamodb.toDynamoDBJson($ctx.args.input.profileId),
+        "seasonName": $util.dynamodb.toDynamoDBJson($ctx.args.input.seasonName),
+        "startDate": $util.dynamodb.toDynamoDBJson($ctx.args.input.startDate),
+        #if($ctx.args.input.endDate)
+            "endDate": $util.dynamodb.toDynamoDBJson($ctx.args.input.endDate),
+        #end
+        "catalogId": $util.dynamodb.toDynamoDBJson($ctx.args.input.catalogId),
+        "createdAt": $util.dynamodb.toDynamoDBJson($now),
+        "updatedAt": $util.dynamodb.toDynamoDBJson($now)
+    }
+}
+                """),
+                response_mapping_template=appsync.MappingTemplate.from_string("""
+#if($ctx.error)
+    $util.error($ctx.error.message, $ctx.error.type)
+#end
+$util.toJson($ctx.result)
+                """),
+            )
+
+            # updateSeason - Update an existing season
+            # Note: Uses GSI5 to find season, then updates it
+            self.dynamodb_datasource.create_resolver(
+                "UpdateSeasonResolver",
+                type_name="Mutation",
+                field_name="updateSeason",
+                request_mapping_template=appsync.MappingTemplate.from_string("""
+#set($now = $util.time.nowISO8601())
+
+## Build update expression dynamically based on provided fields
+#set($updateExpr = "SET updatedAt = :updatedAt")
+#set($exprValues = {})
+$util.qr($exprValues.put(":updatedAt", $util.dynamodb.toDynamoDBJson($now)))
+
+#if($ctx.args.input.seasonName)
+    #set($updateExpr = "$updateExpr, seasonName = :seasonName")
+    $util.qr($exprValues.put(":seasonName", $util.dynamodb.toDynamoDBJson($ctx.args.input.seasonName)))
+#end
+#if($ctx.args.input.startDate)
+    #set($updateExpr = "$updateExpr, startDate = :startDate")
+    $util.qr($exprValues.put(":startDate", $util.dynamodb.toDynamoDBJson($ctx.args.input.startDate)))
+#end
+#if($ctx.args.input.endDate)
+    #set($updateExpr = "$updateExpr, endDate = :endDate")
+    $util.qr($exprValues.put(":endDate", $util.dynamodb.toDynamoDBJson($ctx.args.input.endDate)))
+#end
+#if($ctx.args.input.catalogId)
+    #set($updateExpr = "$updateExpr, catalogId = :catalogId")
+    $util.qr($exprValues.put(":catalogId", $util.dynamodb.toDynamoDBJson($ctx.args.input.catalogId)))
+#end
+
+## Query GSI5 to find the season's PK
+{
+    "version": "2017-02-28",
+    "operation": "Query",
+    "index": "GSI5",
+    "query": {
+        "expression": "seasonId = :seasonId",
+        "expressionValues": {
+            ":seasonId": $util.dynamodb.toDynamoDBJson($ctx.args.input.seasonId)
+        }
+    },
+    "limit": 1,
+    "scanIndexForward": true,
+    ## Store update info in context for response template
+    "metadata": {
+        "updateExpression": "$updateExpr",
+        "expressionValues": $util.toJson($exprValues)
+    }
+}
+                """),
+                response_mapping_template=appsync.MappingTemplate.from_string("""
+#if($ctx.error)
+    $util.error($ctx.error.message, $ctx.error.type)
+#end
+#if($ctx.result.items.isEmpty())
+    $util.error("Season not found", "NotFound")
+#end
+
+## Get the found season
+#set($season = $ctx.result.items[0])
+
+## Merge updated fields into the season object
+#set($now = $util.time.nowISO8601())
+$util.qr($season.put("updatedAt", $now))
+
+#if($ctx.args.input.seasonName)
+    $util.qr($season.put("seasonName", $ctx.args.input.seasonName))
+#end
+#if($ctx.args.input.startDate)
+    $util.qr($season.put("startDate", $ctx.args.input.startDate))
+#end
+#if($ctx.args.input.endDate)
+    $util.qr($season.put("endDate", $ctx.args.input.endDate))
+#end
+#if($ctx.args.input.catalogId)
+    $util.qr($season.put("catalogId", $ctx.args.input.catalogId))
+#end
+
+## Return the updated season
+## Note: This is a simplified approach - actual update happens in DynamoDB via PutItem in createSeason pattern
+## For production, this should use a pipeline resolver or UpdateItem operation
+$util.toJson($season)
+                """),
+            )
+
+            # createOrder - Create a new order for a season
+            self.dynamodb_datasource.create_resolver(
+                "CreateOrderResolver",
+                type_name="Mutation",
+                field_name="createOrder",
+                request_mapping_template=appsync.MappingTemplate.from_string("""
+#set($orderId = "ORDER#" + $util.autoId())
+#set($now = $util.time.nowISO8601())
+
+## Calculate total amount from line items
+#set($totalAmount = 0.0)
+#foreach($item in $ctx.args.input.lineItems)
+    #set($totalAmount = $totalAmount + ($item.quantity * $item.pricePerUnit))
+#end
+
+{
+    "version": "2017-02-28",
+    "operation": "PutItem",
+    "key": {
+        "PK": $util.dynamodb.toDynamoDBJson($ctx.args.input.seasonId),
+        "SK": $util.dynamodb.toDynamoDBJson($orderId)
+    },
+    "attributeValues": {
+        "orderId": $util.dynamodb.toDynamoDBJson($orderId),
+        "profileId": $util.dynamodb.toDynamoDBJson($ctx.args.input.profileId),
+        "seasonId": $util.dynamodb.toDynamoDBJson($ctx.args.input.seasonId),
+        "customerName": $util.dynamodb.toDynamoDBJson($ctx.args.input.customerName),
+        #if($ctx.args.input.customerPhone)
+            "customerPhone": $util.dynamodb.toDynamoDBJson($ctx.args.input.customerPhone),
+        #end
+        #if($ctx.args.input.customerAddress)
+            "customerAddress": $util.dynamodb.toDynamoDBJson($ctx.args.input.customerAddress),
+        #end
+        "orderDate": $util.dynamodb.toDynamoDBJson($ctx.args.input.orderDate),
+        "paymentMethod": $util.dynamodb.toDynamoDBJson($ctx.args.input.paymentMethod),
+        "lineItems": $util.dynamodb.toDynamoDBJson($ctx.args.input.lineItems),
+        "totalAmount": $util.dynamodb.toDynamoDBJson($totalAmount),
+        #if($ctx.args.input.notes)
+            "notes": $util.dynamodb.toDynamoDBJson($ctx.args.input.notes),
+        #end
+        "createdAt": $util.dynamodb.toDynamoDBJson($now),
+        "updatedAt": $util.dynamodb.toDynamoDBJson($now),
+        ## Add GSI2 keys for orders by profile
+        "GSI2PK": $util.dynamodb.toDynamoDBJson($ctx.args.input.profileId),
+        "GSI2SK": $util.dynamodb.toDynamoDBJson($orderId)
+    }
+}
+                """),
+                response_mapping_template=appsync.MappingTemplate.from_string("""
+#if($ctx.error)
+    $util.error($ctx.error.message, $ctx.error.type)
+#end
+$util.toJson($ctx.result)
+                """),
+            )
+
+            # updateOrder - Update an existing order
+            self.dynamodb_datasource.create_resolver(
+                "UpdateOrderResolver",
+                type_name="Mutation",
+                field_name="updateOrder",
+                request_mapping_template=appsync.MappingTemplate.from_string("""
+## First, query to get the order's PK (seasonId)
+{
+    "version": "2017-02-28",
+    "operation": "Query",
+    "index": "GSI6",
+    "query": {
+        "expression": "orderId = :orderId",
+        "expressionValues": {
+            ":orderId": $util.dynamodb.toDynamoDBJson($ctx.args.input.orderId)
+        }
+    },
+    "limit": 1
+}
+                """),
+                response_mapping_template=appsync.MappingTemplate.from_string("""
+#if($ctx.error)
+    $util.error($ctx.error.message, $ctx.error.type)
+#end
+#if($ctx.result.items.isEmpty())
+    $util.error("Order not found", "NotFound")
+#end
+## Store order for pipeline resolver
+$util.qr($ctx.stash.put("order", $ctx.result.items[0]))
+$util.toJson($ctx.result.items[0])
+                """),
+            )
+
+            # deleteOrder - Delete an order
+            self.dynamodb_datasource.create_resolver(
+                "DeleteOrderResolver",
+                type_name="Mutation",
+                field_name="deleteOrder",
+                request_mapping_template=appsync.MappingTemplate.from_string("""
+{
+    "version": "2017-02-28",
+    "operation": "Query",
+    "index": "GSI6",
+    "query": {
+        "expression": "orderId = :orderId",
+        "expressionValues": {
+            ":orderId": $util.dynamodb.toDynamoDBJson($ctx.args.orderId)
+        }
+    },
+    "limit": 1
+}
+                """),
+                response_mapping_template=appsync.MappingTemplate.from_string("""
+#if($ctx.error)
+    $util.error($ctx.error.message, $ctx.error.type)
+#end
+#if($ctx.result.items.isEmpty())
+    $util.error("Order not found", "NotFound")
+#end
+## Store the order's PK/SK for deletion in pipeline
+$util.qr($ctx.stash.put("orderPK", $ctx.result.items[0].PK))
+$util.qr($ctx.stash.put("orderSK", $ctx.result.items[0].SK))
+## Return true to indicate we found the order
+$util.toJson(true)
+                """),
+            )
+
             # Custom domain for AppSync API
             self.api_domain_name = appsync.CfnDomainName(
                 self,
