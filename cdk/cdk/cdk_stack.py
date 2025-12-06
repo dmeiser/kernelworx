@@ -902,6 +902,84 @@ $util.toJson($ctx.result.items)
                 """),
             )
 
+            # listOrdersByProfile - List all orders for a profile (across all seasons)
+            self.dynamodb_datasource.create_resolver(
+                "ListOrdersByProfileResolver",
+                type_name="Query",
+                field_name="listOrdersByProfile",
+                request_mapping_template=appsync.MappingTemplate.from_string("""
+{
+    "version": "2017-02-28",
+    "operation": "Query",
+    "index": "GSI2",
+    "query": {
+        "expression": "GSI2PK = :profileId",
+        "expressionValues": {
+            ":profileId": $util.dynamodb.toDynamoDBJson($ctx.args.profileId)
+        }
+    }
+}
+                """),
+                response_mapping_template=appsync.MappingTemplate.from_string("""
+#if($ctx.error)
+    $util.error($ctx.error.message, $ctx.error.type)
+#end
+$util.toJson($ctx.result.items)
+                """),
+            )
+
+            # listSharesByProfile - List all shares for a profile
+            self.dynamodb_datasource.create_resolver(
+                "ListSharesByProfileResolver",
+                type_name="Query",
+                field_name="listSharesByProfile",
+                request_mapping_template=appsync.MappingTemplate.from_string("""
+{
+    "version": "2017-02-28",
+    "operation": "Query",
+    "query": {
+        "expression": "PK = :pk AND begins_with(SK, :sk)",
+        "expressionValues": {
+            ":pk": $util.dynamodb.toDynamoDBJson($ctx.args.profileId),
+            ":sk": $util.dynamodb.toDynamoDBJson("SHARE#")
+        }
+    }
+}
+                """),
+                response_mapping_template=appsync.MappingTemplate.from_string("""
+#if($ctx.error)
+    $util.error($ctx.error.message, $ctx.error.type)
+#end
+$util.toJson($ctx.result.items)
+                """),
+            )
+
+            # listInvitesByProfile - List all active invites for a profile
+            self.dynamodb_datasource.create_resolver(
+                "ListInvitesByProfileResolver",
+                type_name="Query",
+                field_name="listInvitesByProfile",
+                request_mapping_template=appsync.MappingTemplate.from_string("""
+{
+    "version": "2017-02-28",
+    "operation": "Query",
+    "query": {
+        "expression": "PK = :pk AND begins_with(SK, :sk)",
+        "expressionValues": {
+            ":pk": $util.dynamodb.toDynamoDBJson($ctx.args.profileId),
+            ":sk": $util.dynamodb.toDynamoDBJson("INVITE#")
+        }
+    }
+}
+                """),
+                response_mapping_template=appsync.MappingTemplate.from_string("""
+#if($ctx.error)
+    $util.error($ctx.error.message, $ctx.error.type)
+#end
+$util.toJson($ctx.result.items)
+                """),
+            )
+
             # ================================================================
             # CRUD Mutation Resolvers
             # ================================================================
@@ -978,6 +1056,40 @@ $util.toJson($ctx.result)
     #end
 #end
 $util.toJson($ctx.result)
+                """),
+            )
+
+            # deleteSellerProfile - Delete a seller profile (owner only)
+            self.dynamodb_datasource.create_resolver(
+                "DeleteSellerProfileResolver",
+                type_name="Mutation",
+                field_name="deleteSellerProfile",
+                request_mapping_template=appsync.MappingTemplate.from_string("""
+{
+    "version": "2017-02-28",
+    "operation": "DeleteItem",
+    "key": {
+        "PK": $util.dynamodb.toDynamoDBJson("ACCOUNT#$ctx.identity.sub"),
+        "SK": $util.dynamodb.toDynamoDBJson($ctx.args.profileId)
+    },
+    "condition": {
+        "expression": "attribute_exists(PK) AND ownerAccountId = :ownerId",
+        "expressionValues": {
+            ":ownerId": $util.dynamodb.toDynamoDBJson($ctx.identity.sub)
+        }
+    }
+}
+                """),
+                response_mapping_template=appsync.MappingTemplate.from_string("""
+#if($ctx.error)
+    #if($ctx.error.type == "DynamoDB:ConditionalCheckFailedException")
+        $util.error("Profile not found or access denied", "Forbidden")
+    #else
+        $util.error($ctx.error.message, $ctx.error.type)
+    #end
+#end
+## Return true if successfully deleted
+$util.toJson(true)
                 """),
             )
 

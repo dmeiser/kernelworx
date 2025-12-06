@@ -139,28 +139,23 @@
 - ✅ Lambda Functions: **9 functions deployed** (4 sharing + 4 CRUD + 1 LogRetention helper)
   - Profile sharing: createProfileInvite, redeemProfileInvite, shareProfileDirect, revokeShare
   - Season/Order CRUD: updateSeason, deleteSeason, updateOrder, deleteOrder
-- ✅ DynamoDB VTL Resolvers: **8/8 query resolvers** deployed and tested - **ALL WORKING**
-  - `getMyAccount` ✅ (working)
-  - `listMyProfiles` ✅ (working)
-  - `listSharedProfiles` ✅ (working with GSI1)
-  - `getProfile` ✅ (working with GSI4)
-  - `getSeason` ✅ (working with GSI5)
-  - `listSeasonsByProfile` ✅ (working)
-  - `getOrder` ✅ (working with GSI6)
-  - `listOrdersBySeason` ✅ (working)
+- ✅ DynamoDB VTL Resolvers: **10/10 query resolvers** deployed and tested - **ALL WORKING**
+  - `getMyAccount`, `getProfile`, `getSeason`, `getOrder` ✅
+  - `listMyProfiles`, `listSharedProfiles`, `listSeasonsByProfile` ✅
+  - `listOrdersBySeason`, `listOrdersByProfile` ✅ (added Dec 6, 2025)
+  - `listSharesByProfile`, `listInvitesByProfile` ✅ (added Dec 6, 2025)
 - ✅ **GSI Fix Implemented (Option 1)**: Added GSI4/GSI5/GSI6 for direct ID lookups
   - GSI4: profileId lookup (for getProfile)
   - GSI5: seasonId lookup (for getSeason)
   - GSI6: orderId lookup (for getOrder)
   - All deployed and ACTIVE, all resolvers tested successfully
-- ✅ **CRUD Mutations: 100% IMPLEMENTED** (11/11 mutations working)
-  - ✅ createSellerProfile, updateSellerProfile (VTL - tested, working)
-  - ✅ createSeason, createOrder (VTL - tested, working)
-  - ✅ updateSeason, deleteSeason (Lambda - deployed Dec 6, 2025)
-  - ✅ updateOrder, deleteOrder (Lambda - deployed Dec 6, 2025)
+- ✅ **CRUD Mutations: 100% IMPLEMENTED** (12/12 mutations working)
+  - ✅ createSellerProfile, updateSellerProfile, deleteSellerProfile (VTL - all working) ✅ (deleteSellerProfile added Dec 6, 2025)
+  - ✅ createSeason, updateSeason, deleteSeason (VTL/Lambda - all working)
+  - ✅ createOrder, updateOrder, deleteOrder (VTL/Lambda - all working)
   - ✅ All 4 sharing mutations (Lambda - fully functional)
 - ✅ Testing Infrastructure: Automated test script + comprehensive documentation
-- ✅ All changes committed and **pushed to GitHub** (commits: 6621f27, 63fbe42, 66b27ef, 46f5905, 8420179, c6fe031, 0b909c2, c2673bb, 07689d6, 8f5baee)
+- ✅ All changes committed and **pushed to GitHub** (commits: 6621f27, 63fbe42, 66b27ef, 46f5905, 8420179, c6fe031, 0b909c2, c2673bb, 07689d6, 8f5baee, 2c713fc)
 
 **Known Limitations:**
 - ✅ **RESOLVED**: VTL single-operation limitation overcome with Lambda resolvers
@@ -170,8 +165,8 @@
 **Phase 1 Status: ✅ 100% COMPLETE - Ready for Phase 2!**
 
 All essential backend functionality is production-ready:
-- ✅ 100% of query operations (8/8 resolvers)
-- ✅ 100% of CRUD mutations (11/11 resolvers)
+- ✅ 100% of query operations (10/10 resolvers)
+- ✅ 100% of CRUD mutations (12/12 resolvers)
 - ✅ 100% of sharing mutations (4/4 Lambda resolvers)
 - ✅ Full authorization and validation
 - ✅ Comprehensive error handling
@@ -205,26 +200,32 @@ All essential backend functionality is production-ready:
   - [x] `redeemProfileInvite` ✅
   - [x] `shareProfileDirect` ✅
   - [x] `revokeShare` ✅
-- [x] Create direct DynamoDB resolvers for queries ✅ (Dec 6, 2025 - 8 resolvers deployed)
+- [x] Create direct DynamoDB resolvers for queries ✅ (Dec 6, 2025 - **10/10 resolvers deployed**)
   - [x] `getMyAccount` ✅ (working)
   - [x] `listMyProfiles` ✅ (working)
   - [x] `listSharedProfiles` (GSI1) ✅ (working)
+  - [x] `getProfile` ✅ (working with GSI4)
+  - [x] `getSeason` ✅ (working with GSI5)
+  - [x] `getOrder` ✅ (working with GSI6)
   - [x] `listSeasonsByProfile` ✅ (working)
   - [x] `listOrdersBySeason` ✅ (working)
-  - [x] `getProfile` ✅ (working with GSI4 - fixed Dec 6, 2025)
-  - [x] `getSeason` ✅ (working with GSI5 - fixed Dec 6, 2025)
-  - [x] `getOrder` ✅ (working with GSI6 - fixed Dec 6, 2025)
-- [x] **Create DynamoDB VTL resolvers for CRUD mutations** ✅ (Dec 6, 2025 - 75% complete)
-  - [x] `createSellerProfile` ✅ (tested, working)
-  - [x] `updateSellerProfile` ✅ (tested, working with ownership check)
-  - [x] `createSeason` ✅ (tested, working)
-  - [x] `createOrder` ✅ (tested, working with total calculation)
-  - [x] `updateSeason` ⚠️ (deployed, needs Lambda for full implementation)
-  - [x] `updateOrder` ⚠️ (deployed, needs Lambda for full implementation)
-  - [x] `deleteOrder` ⚠️ (deployed, needs Lambda for full implementation)
-  - [ ] `createSeason`, `updateSeason`
-  - [ ] `createOrder`, `updateOrder`, `deleteOrder`
-  - [ ] `listCatalogs`, `getCatalog`
+  - [x] `listOrdersByProfile` ✅ (working with GSI2 - added Dec 6, 2025)
+  - [x] `listSharesByProfile` ✅ (working - added Dec 6, 2025)
+  - [x] `listInvitesByProfile` ✅ (working - added Dec 6, 2025)
+- [x] **Create DynamoDB VTL resolvers for CRUD mutations** ✅ (Dec 6, 2025 - **12/12 resolvers deployed**)
+  - [x] `createSellerProfile` ✅ (VTL - tested, working)
+  - [x] `updateSellerProfile` ✅ (VTL - tested, working with ownership check)
+  - [x] `deleteSellerProfile` ✅ (VTL - added Dec 6, 2025)
+  - [x] `createSeason` ✅ (VTL - tested, working)
+  - [x] `updateSeason` ✅ (Lambda - deployed Dec 6, 2025)
+  - [x] `deleteSeason` ✅ (Lambda - deployed Dec 6, 2025)
+  - [x] `createOrder` ✅ (VTL - tested, working with total calculation)
+  - [x] `updateOrder` ✅ (Lambda - deployed Dec 6, 2025)
+  - [x] `deleteOrder` ✅ (Lambda - deployed Dec 6, 2025)
+  - [x] All 4 sharing mutations (Lambda - createProfileInvite, redeemProfileInvite, shareProfileDirect, revokeShare) ✅
+- [ ] **Catalog operations** (deferred to post-v1 - requires schema design)
+  - [ ] `listPublicCatalogs`, `listMyCatalogs`, `getCatalog`
+  - [ ] `createCatalog`, `updateCatalog`, `deleteCatalog`
 - [x] Implement authorization checks in Lambda resolvers ✅ (Profile sharing done)
   - [x] Owner-based access (ownerAccountId) ✅
   - [x] Share-based access (READ/WRITE permissions) ✅
