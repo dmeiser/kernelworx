@@ -330,6 +330,56 @@ class CdkStack(Stack):
             environment=lambda_env,
         )
 
+        # Season Operations Lambda Functions
+        self.update_season_fn = lambda_.Function(
+            self,
+            "UpdateSeasonFn",
+            runtime=lambda_.Runtime.PYTHON_3_13,
+            handler="src.handlers.season_operations.update_season",
+            code=asset_bundling,
+            timeout=Duration.seconds(30),
+            memory_size=256,
+            role=self.lambda_execution_role,
+            environment=lambda_env,
+        )
+
+        self.delete_season_fn = lambda_.Function(
+            self,
+            "DeleteSeasonFn",
+            runtime=lambda_.Runtime.PYTHON_3_13,
+            handler="src.handlers.season_operations.delete_season",
+            code=asset_bundling,
+            timeout=Duration.seconds(30),
+            memory_size=256,
+            role=self.lambda_execution_role,
+            environment=lambda_env,
+        )
+
+        # Order Operations Lambda Functions
+        self.update_order_fn = lambda_.Function(
+            self,
+            "UpdateOrderFn",
+            runtime=lambda_.Runtime.PYTHON_3_13,
+            handler="src.handlers.order_operations.update_order",
+            code=asset_bundling,
+            timeout=Duration.seconds(30),
+            memory_size=256,
+            role=self.lambda_execution_role,
+            environment=lambda_env,
+        )
+
+        self.delete_order_fn = lambda_.Function(
+            self,
+            "DeleteOrderFn",
+            runtime=lambda_.Runtime.PYTHON_3_13,
+            handler="src.handlers.order_operations.delete_order",
+            code=asset_bundling,
+            timeout=Duration.seconds(30),
+            memory_size=256,
+            role=self.lambda_execution_role,
+            environment=lambda_env,
+        )
+
         # ====================================================================
         # Cognito User Pool - Authentication (Essentials tier)
         # ====================================================================
@@ -575,6 +625,28 @@ class CdkStack(Stack):
             self.revoke_share_ds = self.api.add_lambda_data_source(
                 "RevokeShareDS",
                 lambda_function=self.revoke_share_fn,
+            )
+
+            # Lambda data sources for season operations
+            self.update_season_ds = self.api.add_lambda_data_source(
+                "UpdateSeasonDS",
+                lambda_function=self.update_season_fn,
+            )
+
+            self.delete_season_ds = self.api.add_lambda_data_source(
+                "DeleteSeasonDS",
+                lambda_function=self.delete_season_fn,
+            )
+
+            # Lambda data sources for order operations
+            self.update_order_ds = self.api.add_lambda_data_source(
+                "UpdateOrderDS",
+                lambda_function=self.update_order_fn,
+            )
+
+            self.delete_order_ds = self.api.add_lambda_data_source(
+                "DeleteOrderDS",
+                lambda_function=self.delete_order_fn,
             )
 
             # Resolvers for profile sharing mutations
@@ -946,90 +1018,11 @@ $util.toJson($ctx.result)
                 """),
             )
 
-            # updateSeason - Update an existing season
-            # Note: Uses GSI5 to find season, then updates it
-            self.dynamodb_datasource.create_resolver(
+            # updateSeason - Update an existing season (Lambda resolver)
+            self.update_season_ds.create_resolver(
                 "UpdateSeasonResolver",
                 type_name="Mutation",
                 field_name="updateSeason",
-                request_mapping_template=appsync.MappingTemplate.from_string("""
-#set($now = $util.time.nowISO8601())
-
-## Build update expression dynamically based on provided fields
-#set($updateExpr = "SET updatedAt = :updatedAt")
-#set($exprValues = {})
-$util.qr($exprValues.put(":updatedAt", $util.dynamodb.toDynamoDBJson($now)))
-
-#if($ctx.args.input.seasonName)
-    #set($updateExpr = "$updateExpr, seasonName = :seasonName")
-    $util.qr($exprValues.put(":seasonName", $util.dynamodb.toDynamoDBJson($ctx.args.input.seasonName)))
-#end
-#if($ctx.args.input.startDate)
-    #set($updateExpr = "$updateExpr, startDate = :startDate")
-    $util.qr($exprValues.put(":startDate", $util.dynamodb.toDynamoDBJson($ctx.args.input.startDate)))
-#end
-#if($ctx.args.input.endDate)
-    #set($updateExpr = "$updateExpr, endDate = :endDate")
-    $util.qr($exprValues.put(":endDate", $util.dynamodb.toDynamoDBJson($ctx.args.input.endDate)))
-#end
-#if($ctx.args.input.catalogId)
-    #set($updateExpr = "$updateExpr, catalogId = :catalogId")
-    $util.qr($exprValues.put(":catalogId", $util.dynamodb.toDynamoDBJson($ctx.args.input.catalogId)))
-#end
-
-## Query GSI5 to find the season's PK
-{
-    "version": "2017-02-28",
-    "operation": "Query",
-    "index": "GSI5",
-    "query": {
-        "expression": "seasonId = :seasonId",
-        "expressionValues": {
-            ":seasonId": $util.dynamodb.toDynamoDBJson($ctx.args.input.seasonId)
-        }
-    },
-    "limit": 1,
-    "scanIndexForward": true,
-    ## Store update info in context for response template
-    "metadata": {
-        "updateExpression": "$updateExpr",
-        "expressionValues": $util.toJson($exprValues)
-    }
-}
-                """),
-                response_mapping_template=appsync.MappingTemplate.from_string("""
-#if($ctx.error)
-    $util.error($ctx.error.message, $ctx.error.type)
-#end
-#if($ctx.result.items.isEmpty())
-    $util.error("Season not found", "NotFound")
-#end
-
-## Get the found season
-#set($season = $ctx.result.items[0])
-
-## Merge updated fields into the season object
-#set($now = $util.time.nowISO8601())
-$util.qr($season.put("updatedAt", $now))
-
-#if($ctx.args.input.seasonName)
-    $util.qr($season.put("seasonName", $ctx.args.input.seasonName))
-#end
-#if($ctx.args.input.startDate)
-    $util.qr($season.put("startDate", $ctx.args.input.startDate))
-#end
-#if($ctx.args.input.endDate)
-    $util.qr($season.put("endDate", $ctx.args.input.endDate))
-#end
-#if($ctx.args.input.catalogId)
-    $util.qr($season.put("catalogId", $ctx.args.input.catalogId))
-#end
-
-## Return the updated season
-## Note: This is a simplified approach - actual update happens in DynamoDB via PutItem in createSeason pattern
-## For production, this should use a pipeline resolver or UpdateItem operation
-$util.toJson($season)
-                """),
             )
 
             # createOrder - Create a new order for a season
@@ -1088,71 +1081,18 @@ $util.toJson($ctx.result)
                 """),
             )
 
-            # updateOrder - Update an existing order
-            self.dynamodb_datasource.create_resolver(
+            # updateOrder - Update an existing order (Lambda resolver)
+            self.update_order_ds.create_resolver(
                 "UpdateOrderResolver",
                 type_name="Mutation",
                 field_name="updateOrder",
-                request_mapping_template=appsync.MappingTemplate.from_string("""
-## First, query to get the order's PK (seasonId)
-{
-    "version": "2017-02-28",
-    "operation": "Query",
-    "index": "GSI6",
-    "query": {
-        "expression": "orderId = :orderId",
-        "expressionValues": {
-            ":orderId": $util.dynamodb.toDynamoDBJson($ctx.args.input.orderId)
-        }
-    },
-    "limit": 1
-}
-                """),
-                response_mapping_template=appsync.MappingTemplate.from_string("""
-#if($ctx.error)
-    $util.error($ctx.error.message, $ctx.error.type)
-#end
-#if($ctx.result.items.isEmpty())
-    $util.error("Order not found", "NotFound")
-#end
-## Store order for pipeline resolver
-$util.qr($ctx.stash.put("order", $ctx.result.items[0]))
-$util.toJson($ctx.result.items[0])
-                """),
             )
 
-            # deleteOrder - Delete an order
-            self.dynamodb_datasource.create_resolver(
+            # deleteOrder - Delete an order (Lambda resolver)
+            self.delete_order_ds.create_resolver(
                 "DeleteOrderResolver",
                 type_name="Mutation",
                 field_name="deleteOrder",
-                request_mapping_template=appsync.MappingTemplate.from_string("""
-{
-    "version": "2017-02-28",
-    "operation": "Query",
-    "index": "GSI6",
-    "query": {
-        "expression": "orderId = :orderId",
-        "expressionValues": {
-            ":orderId": $util.dynamodb.toDynamoDBJson($ctx.args.orderId)
-        }
-    },
-    "limit": 1
-}
-                """),
-                response_mapping_template=appsync.MappingTemplate.from_string("""
-#if($ctx.error)
-    $util.error($ctx.error.message, $ctx.error.type)
-#end
-#if($ctx.result.items.isEmpty())
-    $util.error("Order not found", "NotFound")
-#end
-## Store the order's PK/SK for deletion in pipeline
-$util.qr($ctx.stash.put("orderPK", $ctx.result.items[0].PK))
-$util.qr($ctx.stash.put("orderSK", $ctx.result.items[0].SK))
-## Return true to indicate we found the order
-$util.toJson(true)
-                """),
             )
 
             # Custom domain for AppSync API
