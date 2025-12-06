@@ -1,8 +1,7 @@
 #root {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 2rem;
-  text-align: left; /* use left-aligned content for readability on desktop */
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
 }
 
 .logo {

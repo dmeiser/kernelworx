@@ -393,15 +393,25 @@
 - [x] Implement global error handling for GraphQL errors ✅
 - [x] Map errorCode to user-facing messages/toasts ✅
 
-### Core Layout & Navigation ✅ COMPLETE
-- [x] Create AppLayout component with:
-  - [x] Header (branding, user info, logout)
-  - [x] NavBar (profile selector, navigation)
-  - [x] MainContent (route outlet)
-  - [x] ToastContainer for notifications
-- [x] Implement responsive design (mobile-first; drawer nav for small screens)
-- [x] Add accessibility features (WCAG 2.1 AAA aspirational)
-- [x] Ensure all components, styles, and layout honor `docs/BRANDING_GUIDE.html` (fonts, colors, spacing, COPPA styling). Visual inconsistencies must be documented and corrected during code review.
+### Core Layout & Navigation ✅ COMPLETE (Fixed Dec 6, 2025)
+- [x] Create AppLayout component with: ✅
+  - [x] Header (branding, user info, logout) ✅
+  - [x] NavBar (profile selector, navigation) - Drawer navigation ✅
+  - [x] MainContent (route outlet) ✅
+  - [x] ToastContainer for notifications ✅
+- [x] Implement responsive design (mobile-first; drawer nav for small screens) ✅
+  - [x] Fixed double Container nesting issue ✅
+  - [x] Removed conflicting App.css max-width and padding ✅
+  - [x] Proper responsive breakpoints for mobile/tablet/desktop ✅
+  - [x] Responsive typography sizing (xs: 1.1rem, sm: 1.3rem, md: 1.5rem) ✅
+  - [x] Mobile-optimized header layout (left-aligned title on small screens) ✅
+  - [x] Desktop-optimized header (centered title, visible user info) ✅
+- [x] Add accessibility features (WCAG 2.1 AAA aspirational) ✅
+- [x] Ensure all components, styles, and layout honor `docs/BRANDING_GUIDE.html` (fonts, colors, spacing, COPPA styling) ✅
+  - [x] Satisfy font properly applied to header title ✅
+  - [x] Open Sans for body content ✅
+  - [x] Correct letter spacing (0.08em) ✅
+  - [x] Branding colors from guide (#1976d2 primary, #dc004e secondary) ✅
 - [ ] Configure Cognito Hosted UI branding and COPPA compliance:
   - [ ] Customize Hosted UI with app branding (logo, colors)
   - [ ] Add COPPA warning to signup page via custom CSS/text
