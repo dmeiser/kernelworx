@@ -12,36 +12,62 @@ import {
   ListItemButton, 
   Container,
   useMediaQuery,
-  useTheme
+  useTheme,
+  Divider
 } from '@mui/material';
 import MenuIcon from '@mui/icons-material/Menu';
 import { useAuth } from '../contexts/AuthContext';
 import { Toast } from './Toast';
 import { Outlet } from 'react-router-dom';
 
+const DRAWER_WIDTH = 240;
+
 export const AppLayout: React.FC<{ children?: React.ReactNode }> = ({ children }) => {
   const { account, logout } = useAuth();
-  const [drawerOpen, setDrawerOpen] = React.useState(false);
+  const [mobileDrawerOpen, setMobileDrawerOpen] = React.useState(false);
   const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+  const isDesktop = useMediaQuery(theme.breakpoints.up('md'));
 
-  const toggleDrawer = () => setDrawerOpen(!drawerOpen);
+  const toggleMobileDrawer = () => setMobileDrawerOpen(!mobileDrawerOpen);
+
+  const drawerContent = (
+    <Box>
+      <Toolbar />
+      <Divider />
+      <List>
+        <ListItemButton>
+          <ListItemText primary="Profiles" />
+        </ListItemButton>
+        <ListItemButton>
+          <ListItemText primary="Seasons" />
+        </ListItemButton>
+        <ListItemButton>
+          <ListItemText primary="Reports" />
+        </ListItemButton>
+        <ListItemButton>
+          <ListItemText primary="Catalogs" />
+        </ListItemButton>
+      </List>
+    </Box>
+  );
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
+    <Box sx={{ display: 'flex' }}>
       {/* Full-width AppBar */}
-      <AppBar position="static">
-        <Container maxWidth="lg">
-          <Toolbar disableGutters sx={{ minHeight: 64 }}>
-            <IconButton
-              color="inherit"
-              aria-label="open drawer"
-              edge="start"
-              onClick={toggleDrawer}
-              sx={{ mr: 2 }}
-            >
-              <MenuIcon />
-            </IconButton>
+      <AppBar position="fixed" sx={{ zIndex: (theme) => theme.zIndex.drawer + 1 }}>
+        <Container maxWidth="xl">
+          <Toolbar disableGutters>
+            {!isDesktop && (
+              <IconButton
+                color="inherit"
+                aria-label="open drawer"
+                edge="start"
+                onClick={toggleMobileDrawer}
+                sx={{ mr: 2 }}
+              >
+                <MenuIcon />
+              </IconButton>
+            )}
             
             <Typography
               variant="h6"
@@ -58,7 +84,13 @@ export const AppLayout: React.FC<{ children?: React.ReactNode }> = ({ children }
               🍿 Popcorn Sales Manager
             </Typography>
 
-            {!isMobile && account && (
+            {!isDesktop && account && (
+              <Typography variant="body2" sx={{ mr: 2, display: { xs: 'none', sm: 'block' } }}>
+                {account.displayName}
+              </Typography>
+            )}
+
+            {isDesktop && account && (
               <Typography variant="body2" sx={{ mr: 2 }}>
                 {account.displayName}
               </Typography>
@@ -71,28 +103,49 @@ export const AppLayout: React.FC<{ children?: React.ReactNode }> = ({ children }
         </Container>
       </AppBar>
 
-      {/* Navigation Drawer */}
-      <Drawer anchor="left" open={drawerOpen} onClose={toggleDrawer}>
-        <Box sx={{ width: 250 }} role="presentation" onClick={toggleDrawer}>
-          <List>
-            <ListItemButton>
-              <ListItemText primary="Profiles" />
-            </ListItemButton>
-            <ListItemButton>
-              <ListItemText primary="Seasons" />
-            </ListItemButton>
-            <ListItemButton>
-              <ListItemText primary="Reports" />
-            </ListItemButton>
-            <ListItemButton>
-              <ListItemText primary="Catalogs" />
-            </ListItemButton>
-          </List>
-        </Box>
-      </Drawer>
+      {/* Navigation Drawer - Persistent on desktop, temporary on mobile */}
+      {isDesktop ? (
+        <Drawer
+          variant="permanent"
+          sx={{
+            width: DRAWER_WIDTH,
+            flexShrink: 0,
+            '& .MuiDrawer-paper': {
+              width: DRAWER_WIDTH,
+              boxSizing: 'border-box',
+            },
+          }}
+        >
+          {drawerContent}
+        </Drawer>
+      ) : (
+        <Drawer
+          variant="temporary"
+          anchor="left"
+          open={mobileDrawerOpen}
+          onClose={toggleMobileDrawer}
+          ModalProps={{ keepMounted: true }}
+          sx={{
+            '& .MuiDrawer-paper': {
+              width: DRAWER_WIDTH,
+              boxSizing: 'border-box',
+            },
+          }}
+        >
+          {drawerContent}
+        </Drawer>
+      )}
 
       {/* Main Content */}
-      <Box component="main" sx={{ flexGrow: 1, bgcolor: 'background.default' }}>
+      <Box
+        component="main"
+        sx={{
+          flexGrow: 1,
+          bgcolor: 'background.default',
+          minHeight: '100vh',
+        }}
+      >
+        <Toolbar />
         <Container maxWidth="lg" sx={{ py: 4 }}>
           {children}
           <Outlet />
