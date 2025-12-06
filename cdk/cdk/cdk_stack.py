@@ -546,15 +546,15 @@ class CdkStack(Stack):
                 prevent_user_existence_errors=True,
             )
 
-            # Cognito domain temporarily disabled while we fix the configuration
-            # The existing managed domain needs to be removed before we can create a new one
-            # TODO: Re-enable after cleanup
-            # self.user_pool_domain = self.user_pool.add_domain(
-            #     "UserPoolDomain",
-            #     cognito_domain=cognito.CognitoDomainOptions(
-            #         domain_prefix=f"popcorn-sales-manager-{env_name}",
-            #     ),
-            # )
+            # Standard Cognito domain (using default AWS domain)
+            # This provides Hosted UI at: https://popcorn-sales-manager-{env}.auth.{region}.amazoncognito.com
+            # Custom domain (login.{env}.psm.repeatersolutions.com) will be enabled after AWS account verification
+            self.user_pool_domain = self.user_pool.add_domain(
+                "UserPoolDomain",
+                cognito_domain=cognito.CognitoDomainOptions(
+                    domain_prefix=f"popcorn-sales-manager-{env_name}",
+                ),
+            )
             
             # TODO: Re-enable custom domain after AWS account verification
             # self.user_pool_domain = self.user_pool.add_domain(
