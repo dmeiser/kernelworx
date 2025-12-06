@@ -78,3 +78,17 @@ def get_correlation_id(event: Dict[str, Any]) -> str:
 
     # Generate new ID
     return str(uuid.uuid4())
+
+
+def get_logger(name: str, correlation_id: Optional[str] = None) -> StructuredLogger:
+    """
+    Get a structured logger instance.
+
+    Args:
+        name: Logger name (typically __name__)
+        correlation_id: Optional correlation ID for tracing
+
+    Returns:
+        StructuredLogger instance
+    """
+    return StructuredLogger(name, correlation_id)

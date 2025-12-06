@@ -75,3 +75,20 @@ def handle_error(error: Exception) -> Dict[str, Any]:
         "errorCode": ErrorCode.INTERNAL_ERROR,
         "message": "An unexpected error occurred. Please try again.",
     }
+
+
+def create_error_response(error_code: str, message: str) -> Dict[str, Any]:
+    """
+    Create standardized error response dictionary.
+
+    Args:
+        error_code: Error code (use ErrorCode constants)
+        message: Human-readable error message
+
+    Returns:
+        Error dictionary for GraphQL response
+    """
+    return {
+        "errorCode": error_code,
+        "message": message,
+    }

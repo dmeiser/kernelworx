@@ -47,6 +47,9 @@ def dynamodb_table(aws_credentials: None) -> Generator[Any, None, None]:
                 {"AttributeName": "GSI2SK", "AttributeType": "S"},
                 {"AttributeName": "GSI3PK", "AttributeType": "S"},
                 {"AttributeName": "GSI3SK", "AttributeType": "S"},
+                {"AttributeName": "profileId", "AttributeType": "S"},
+                {"AttributeName": "seasonId", "AttributeType": "S"},
+                {"AttributeName": "orderId", "AttributeType": "S"},
             ],
             GlobalSecondaryIndexes=[
                 {
@@ -70,6 +73,27 @@ def dynamodb_table(aws_credentials: None) -> Generator[Any, None, None]:
                     "KeySchema": [
                         {"AttributeName": "GSI3PK", "KeyType": "HASH"},
                         {"AttributeName": "GSI3SK", "KeyType": "RANGE"},
+                    ],
+                    "Projection": {"ProjectionType": "ALL"},
+                },
+                {
+                    "IndexName": "GSI4",
+                    "KeySchema": [
+                        {"AttributeName": "profileId", "KeyType": "HASH"},
+                    ],
+                    "Projection": {"ProjectionType": "ALL"},
+                },
+                {
+                    "IndexName": "GSI5",
+                    "KeySchema": [
+                        {"AttributeName": "seasonId", "KeyType": "HASH"},
+                    ],
+                    "Projection": {"ProjectionType": "ALL"},
+                },
+                {
+                    "IndexName": "GSI6",
+                    "KeySchema": [
+                        {"AttributeName": "orderId", "KeyType": "HASH"},
                     ],
                     "Projection": {"ProjectionType": "ALL"},
                 },
@@ -146,3 +170,62 @@ def appsync_event(sample_account_id: str) -> Dict[str, Any]:
             "parentTypeName": "Query",
         },
     }
+
+
+@pytest.fixture
+def sample_season_id() -> str:
+    """Sample season ID."""
+    return "SEASON#season-123-abc"
+
+
+@pytest.fixture
+def sample_season(
+    dynamodb_table: Any, sample_profile_id: str, sample_season_id: str
+) -> Dict[str, Any]:
+    """Create sample season in DynamoDB."""
+    season = {
+        "PK": sample_profile_id,
+        "SK": sample_season_id,
+        "seasonId": sample_season_id,
+        "profileId": sample_profile_id,
+        "name": "Fall 2025",
+        "startDate": "2025-09-01",
+        "catalogId": "CATALOG#default",
+        "createdAt": datetime.now(timezone.utc).isoformat(),
+    }
+
+    dynamodb_table.put_item(Item=season)
+    return season
+
+
+@pytest.fixture
+def sample_order_id() -> str:
+    """Sample order ID."""
+    return "ORDER#order-456-xyz"
+
+
+@pytest.fixture
+def sample_order(
+    dynamodb_table: Any, sample_profile_id: str, sample_season_id: str, sample_order_id: str
+) -> Dict[str, Any]:
+    """Create sample order in DynamoDB."""
+    order = {
+        "PK": sample_season_id,
+        "SK": sample_order_id,
+        "orderId": sample_order_id,
+        "seasonId": sample_season_id,
+        "profileId": sample_profile_id,
+        "customerName": "John Doe",
+        "customerPhone": "+15551234567",
+        "paymentMethod": "CASH",
+        "lineItems": [
+            {"productId": "PROD1", "quantity": 1, "pricePerUnit": 10.0},
+        ],
+        "totalAmount": 10.0,
+        "GSI2PK": sample_profile_id,
+        "GSI2SK": sample_order_id,
+        "createdAt": datetime.now(timezone.utc).isoformat(),
+    }
+
+    dynamodb_table.put_item(Item=order)
+    return order
