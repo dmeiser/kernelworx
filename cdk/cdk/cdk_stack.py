@@ -575,6 +575,214 @@ class CdkStack(Stack):
                 field_name="revokeShare",
             )
 
+            # DynamoDB resolvers for queries
+            # getMyAccount - Get current user's account
+            self.dynamodb_datasource.create_resolver(
+                "GetMyAccountResolver",
+                type_name="Query",
+                field_name="getMyAccount",
+                request_mapping_template=appsync.MappingTemplate.from_string("""
+{
+    "version": "2017-02-28",
+    "operation": "GetItem",
+    "key": {
+        "PK": $util.dynamodb.toDynamoDBJson("ACCOUNT#$ctx.identity.sub"),
+        "SK": $util.dynamodb.toDynamoDBJson("METADATA")
+    }
+}
+                """),
+                response_mapping_template=appsync.MappingTemplate.from_string("""
+#if($ctx.error)
+    $util.error($ctx.error.message, $ctx.error.type)
+#end
+#if($ctx.result.isEmpty())
+    $util.error("Account not found", "NotFound")
+#end
+$util.toJson($ctx.result)
+                """),
+            )
+
+            # getProfile - Get a specific profile by ID
+            self.dynamodb_datasource.create_resolver(
+                "GetProfileResolver",
+                type_name="Query",
+                field_name="getProfile",
+                request_mapping_template=appsync.MappingTemplate.from_string("""
+{
+    "version": "2017-02-28",
+    "operation": "GetItem",
+    "key": {
+        "PK": $util.dynamodb.toDynamoDBJson($ctx.args.profileId),
+        "SK": $util.dynamodb.toDynamoDBJson("METADATA")
+    }
+}
+                """),
+                response_mapping_template=appsync.MappingTemplate.from_string("""
+#if($ctx.error)
+    $util.error($ctx.error.message, $ctx.error.type)
+#end
+## Check authorization: caller must be owner or have share access
+#if($ctx.result.isEmpty())
+    $util.error("Profile not found", "NotFound")
+#end
+## TODO: Add authorization check here (owner or shared user)
+$util.toJson($ctx.result)
+                """),
+            )
+
+            # listMyProfiles - List profiles owned by current user
+            self.dynamodb_datasource.create_resolver(
+                "ListMyProfilesResolver",
+                type_name="Query",
+                field_name="listMyProfiles",
+                request_mapping_template=appsync.MappingTemplate.from_string("""
+{
+    "version": "2017-02-28",
+    "operation": "Query",
+    "query": {
+        "expression": "PK = :pk AND begins_with(SK, :sk)",
+        "expressionValues": {
+            ":pk": $util.dynamodb.toDynamoDBJson("ACCOUNT#$ctx.identity.sub"),
+            ":sk": $util.dynamodb.toDynamoDBJson("PROFILE#")
+        }
+    }
+}
+                """),
+                response_mapping_template=appsync.MappingTemplate.from_string("""
+#if($ctx.error)
+    $util.error($ctx.error.message, $ctx.error.type)
+#end
+$util.toJson($ctx.result.items)
+                """),
+            )
+
+            # listSharedProfiles - List profiles shared with current user (via GSI1)
+            self.dynamodb_datasource.create_resolver(
+                "ListSharedProfilesResolver",
+                type_name="Query",
+                field_name="listSharedProfiles",
+                request_mapping_template=appsync.MappingTemplate.from_string("""
+{
+    "version": "2017-02-28",
+    "operation": "Query",
+    "index": "GSI1",
+    "query": {
+        "expression": "GSI1PK = :gsi1pk AND begins_with(GSI1SK, :gsi1sk)",
+        "expressionValues": {
+            ":gsi1pk": $util.dynamodb.toDynamoDBJson("ACCOUNT#$ctx.identity.sub"),
+            ":gsi1sk": $util.dynamodb.toDynamoDBJson("SHARE#")
+        }
+    }
+}
+                """),
+                response_mapping_template=appsync.MappingTemplate.from_string("""
+#if($ctx.error)
+    $util.error($ctx.error.message, $ctx.error.type)
+#end
+## Extract profile IDs from shares and return them
+## In production, you'd batch-get the actual profiles
+$util.toJson($ctx.result.items)
+                """),
+            )
+
+            # getSeason - Get a specific season by ID
+            self.dynamodb_datasource.create_resolver(
+                "GetSeasonResolver",
+                type_name="Query",
+                field_name="getSeason",
+                request_mapping_template=appsync.MappingTemplate.from_string("""
+{
+    "version": "2017-02-28",
+    "operation": "GetItem",
+    "key": {
+        "PK": $util.dynamodb.toDynamoDBJson($ctx.args.seasonId),
+        "SK": $util.dynamodb.toDynamoDBJson("METADATA")
+    }
+}
+                """),
+                response_mapping_template=appsync.MappingTemplate.from_string("""
+#if($ctx.error)
+    $util.error($ctx.error.message, $ctx.error.type)
+#end
+$util.toJson($ctx.result)
+                """),
+            )
+
+            # listSeasonsByProfile - List all seasons for a profile
+            self.dynamodb_datasource.create_resolver(
+                "ListSeasonsByProfileResolver",
+                type_name="Query",
+                field_name="listSeasonsByProfile",
+                request_mapping_template=appsync.MappingTemplate.from_string("""
+{
+    "version": "2017-02-28",
+    "operation": "Query",
+    "query": {
+        "expression": "PK = :pk AND begins_with(SK, :sk)",
+        "expressionValues": {
+            ":pk": $util.dynamodb.toDynamoDBJson($ctx.args.profileId),
+            ":sk": $util.dynamodb.toDynamoDBJson("SEASON#")
+        }
+    }
+}
+                """),
+                response_mapping_template=appsync.MappingTemplate.from_string("""
+#if($ctx.error)
+    $util.error($ctx.error.message, $ctx.error.type)
+#end
+$util.toJson($ctx.result.items)
+                """),
+            )
+
+            # getOrder - Get a specific order by ID
+            self.dynamodb_datasource.create_resolver(
+                "GetOrderResolver",
+                type_name="Query",
+                field_name="getOrder",
+                request_mapping_template=appsync.MappingTemplate.from_string("""
+{
+    "version": "2017-02-28",
+    "operation": "GetItem",
+    "key": {
+        "PK": $util.dynamodb.toDynamoDBJson($ctx.args.orderId),
+        "SK": $util.dynamodb.toDynamoDBJson("METADATA")
+    }
+}
+                """),
+                response_mapping_template=appsync.MappingTemplate.from_string("""
+#if($ctx.error)
+    $util.error($ctx.error.message, $ctx.error.type)
+#end
+$util.toJson($ctx.result)
+                """),
+            )
+
+            # listOrdersBySeason - List all orders for a season
+            self.dynamodb_datasource.create_resolver(
+                "ListOrdersBySeasonResolver",
+                type_name="Query",
+                field_name="listOrdersBySeason",
+                request_mapping_template=appsync.MappingTemplate.from_string("""
+{
+    "version": "2017-02-28",
+    "operation": "Query",
+    "query": {
+        "expression": "PK = :pk AND begins_with(SK, :sk)",
+        "expressionValues": {
+            ":pk": $util.dynamodb.toDynamoDBJson($ctx.args.seasonId),
+            ":sk": $util.dynamodb.toDynamoDBJson("ORDER#")
+        }
+    }
+}
+                """),
+                response_mapping_template=appsync.MappingTemplate.from_string("""
+#if($ctx.error)
+    $util.error($ctx.error.message, $ctx.error.type)
+#end
+$util.toJson($ctx.result.items)
+                """),
+            )
+
             # Custom domain for AppSync API
             self.api_domain_name = appsync.CfnDomainName(
                 self,

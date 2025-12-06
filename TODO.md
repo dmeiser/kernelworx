@@ -231,6 +231,8 @@
 - [x] Wire up resolvers for profile sharing mutations ✅
 - [x] Deploy all changes to AWS dev environment ✅
 - [x] Fix deprecation warning: `pointInTimeRecovery` → `pointInTimeRecoverySpecification` ✅
+- [x] Add DynamoDB resolvers for basic queries (getMyAccount, getProfile, listMyProfiles, listSharedProfiles) ✅
+- [ ] Add more DynamoDB resolvers (seasons, orders, catalogs)
 - [ ] Test deployed mutations end-to-end via AppSync console
 
 ### Audit & Logging
