@@ -1,5 +1,5 @@
 import React from 'react';
-import { AppBar, Box, Toolbar, Typography, IconButton, Button, Drawer, List, ListItemText, ListItemButton } from '@mui/material';
+import { AppBar, Box, Toolbar, Typography, IconButton, Button, Drawer, List, ListItemText, ListItemButton, Container } from '@mui/material';
 import MenuIcon from '@mui/icons-material/Menu';
 import { useAuth } from '../contexts/AuthContext';
 import { Toast } from './Toast';
@@ -14,7 +14,8 @@ export const AppLayout: React.FC<{ children?: React.ReactNode }> = ({ children }
   return (
     <Box sx={{ display: 'flex', minHeight: '100vh', flexDirection: 'column' }}>
       <AppBar position="static" color="primary" sx={{ mb: 2 }}>
-        <Toolbar>
+        <Toolbar disableGutters>
+          <Container maxWidth="lg" sx={{ display: 'flex', alignItems: 'center' }}>
           <IconButton edge="start" color="inherit" aria-label="menu" onClick={toggleDrawer}>
             <MenuIcon />
           </IconButton>
@@ -28,7 +29,8 @@ export const AppLayout: React.FC<{ children?: React.ReactNode }> = ({ children }
           {account && (
             <Typography variant="body2" sx={{ mr: 2 }}>{account.displayName}</Typography>
           )}
-          <Button color="inherit" onClick={logout}>Log out</Button>
+            <Button color="inherit" onClick={logout}>Log out</Button>
+          </Container>
         </Toolbar>
       </AppBar>
 
@@ -51,10 +53,12 @@ export const AppLayout: React.FC<{ children?: React.ReactNode }> = ({ children }
         </Box>
       </Drawer>
 
-      <Box component="main" sx={{ flexGrow: 1, p: 3 }}>
-        {children}
-        {/* Support both nested routes or direct children usage */}
-        <Outlet />
+      <Box component="main" sx={{ flexGrow: 1, py: 3 }}>
+        <Container maxWidth="lg">
+          {children}
+          {/* Support both nested routes or direct children usage */}
+          <Outlet />
+        </Container>
       </Box>
 
       <Toast />
