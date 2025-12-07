@@ -88,23 +88,34 @@ export const AppLayout: React.FC<{ children?: React.ReactNode }> = ({ children }
               </IconButton>
             )}
             
-            <Typography
-              variant="h6"
-              noWrap
-              component="div"
-              sx={{
-                flexGrow: 1,
-                fontFamily: '"Kaushan Script", cursive',
-                fontWeight: 600,
-                letterSpacing: '0.08em',
-                fontSize: { xs: '1rem', sm: '1.25rem', md: '1.5rem' },
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              KernelWorx
-            </Typography>
+            <Box sx={{ display: 'flex', alignItems: 'center', flexGrow: 1 }}>
+              <Box
+                component="img"
+                src="/logo.svg"
+                alt="Popcorn kernel"
+                sx={{
+                  width: { xs: '28px', sm: '32px', md: '40px' },
+                  height: { xs: '28px', sm: '32px', md: '40px' },
+                  mr: { xs: 0.5, sm: 1 },
+                }}
+              />
+              <Typography
+                variant="h6"
+                noWrap
+                component="div"
+                sx={{
+                  fontFamily: '"Kaushan Script", cursive',
+                  fontWeight: 600,
+                  letterSpacing: '0.08em',
+                  fontSize: { xs: '1rem', sm: '1.25rem', md: '1.5rem' },
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                KernelWorx
+              </Typography>
+            </Box>
 
             {!isDesktop && account && (
               <Box sx={{ display: 'flex', alignItems: 'center', mr: 1 }}>
