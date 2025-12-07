@@ -3,7 +3,8 @@
 # Deploy Cognito Managed Login Branding
 #
 # This script configures the Cognito Hosted UI with:
-# - Custom logo (SVG popcorn bucket)
+# - Custom logo (PNG popcorn banner)
+# - Solid color background (SVG)
 # - Brand colors (primary blue #1976d2)
 # - COPPA compliance warning (13+ age requirement)
 # - Satisfy font for headings, Open Sans for body
@@ -11,6 +12,7 @@
 # Prerequisites:
 # - AWS CLI configured with appropriate credentials
 # - CDK stack deployed (to get User Pool ID and Client ID)
+# - Asset files (popcorn-banner.png, favicon.ico, page-background.svg) present in assets directory
 #
 # Usage:
 #   ./deploy-cognito-branding.sh
@@ -59,16 +61,10 @@ echo -e "Client ID: ${GREEN}$CLIENT_ID${NC}\n"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Check if assets exist
-LOGO_PNG="$SCRIPT_DIR/assets/cognito-logo.png"
+LOGO_PNG="$SCRIPT_DIR/assets/popcorn-banner.png"
 FAVICON_ICO="$SCRIPT_DIR/assets/favicon.ico"
+BACKGROUND_SVG="$SCRIPT_DIR/assets/page-background.svg"
 SETTINGS_FILE="$SCRIPT_DIR/assets/managed-login-settings.json"
-
-# Convert logos if they don't exist
-if [ ! -f "$LOGO_PNG" ] || [ ! -f "$FAVICON_ICO" ]; then
-  echo -e "${YELLOW}Converting SVG logo to PNG formats...${NC}"
-  cd "$SCRIPT_DIR/assets" && .venv/bin/python convert_logo.py
-  cd "$SCRIPT_DIR"
-fi
 
 if [ ! -f "$LOGO_PNG" ]; then
   echo -e "${RED}Error: Logo file not found: $LOGO_PNG${NC}"
@@ -80,21 +76,27 @@ if [ ! -f "$FAVICON_ICO" ]; then
   exit 1
 fi
 
+if [ ! -f "$BACKGROUND_SVG" ]; then
+  echo -e "${RED}Error: Background SVG file not found: $BACKGROUND_SVG${NC}"
+  exit 1
+fi
+
 if [ ! -f "$SETTINGS_FILE" ]; then
   echo -e "${RED}Error: Settings file not found: $SETTINGS_FILE${NC}"
   exit 1
 fi
 
-echo -e "${YELLOW}Encoding logo and favicon to base64...${NC}"
+echo -e "${YELLOW}Encoding assets to base64...${NC}"
 LOGO_BASE64=$(base64 -w 0 < "$LOGO_PNG")
 FAVICON_BASE64=$(base64 -w 0 < "$FAVICON_ICO")
+BACKGROUND_BASE64=$(base64 -w 0 < "$BACKGROUND_SVG")
 
 echo -e "${YELLOW}Reading branding settings...${NC}"
 SETTINGS_JSON=$(cat "$SETTINGS_FILE")
 
-echo -e "${YELLOW}Creating managed login branding configuration with logo and favicon...${NC}\n"
+echo -e "${YELLOW}Creating managed login branding configuration with logo, favicon, and background...${NC}\n"
 
-# Create Assets array with logo and favicon
+# Create Assets array with logo, favicon, and background
 ASSETS_JSON=$(cat <<EOF
 [
   {
@@ -108,6 +110,12 @@ ASSETS_JSON=$(cat <<EOF
     "ColorMode": "LIGHT",
     "Extension": "ICO",
     "Bytes": "$FAVICON_BASE64"
+  },
+  {
+    "Category": "PAGE_BACKGROUND",
+    "ColorMode": "LIGHT",
+    "Extension": "SVG",
+    "Bytes": "$BACKGROUND_BASE64"
   }
 ]
 EOF
@@ -194,5 +202,6 @@ echo -e "${GREEN}${HOSTED_UI_URL}${NC}\n"
 echo -e "You should see:"
 echo -e "  ✓ Primary blue buttons (#1976d2)"
 echo -e "  ✓ Styled form with custom colors"
-echo -e "  ✓ Brand colors throughout"
+echo -e "  ✓ Solid light gray background (#f5f5f5)"
+echo -e "  ✓ Popcorn banner logo in the form"
 echo -e "\n${YELLOW}Note: Do a hard refresh (Ctrl+Shift+R) to clear browser cache${NC}\n"
