@@ -109,6 +109,8 @@ export const AppLayout: React.FC<{ children?: React.ReactNode }> = ({ children }
                   letterSpacing: '0.08em',
                   fontSize: { xs: '28px', sm: '32px', md: '40px' },
                   lineHeight: 1,
+                  WebkitTextStroke: '0.8px rgba(255, 255, 255, 0.8)',
+                  textShadow: '0 1px 0 rgba(255,255,255,0.12), 0 2px 0 rgba(255,255,255,0.06)',
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
                   whiteSpace: 'nowrap',
