@@ -5,7 +5,9 @@ Implements:
 - createProfileInvite: Generate invite code for sharing profile
 - redeemProfileInvite: Redeem invite code to gain access
 - shareProfileDirect: Share profile directly with account (no invite)
-- revokeShare: Remove shared access
+
+NOTE: The following operation has been moved to AppSync resolvers:
+- revokeShare: Now a VTL DynamoDB resolver (see cdk_stack.py)
 """
 
 import os
@@ -16,7 +18,7 @@ from typing import Any, Dict
 import boto3
 from mypy_boto3_dynamodb.service_resource import Table
 
-from ..utils.auth import is_profile_owner, require_profile_access
+from ..utils.auth import is_profile_owner
 from ..utils.errors import AppError, ErrorCode
 from ..utils.logging import StructuredLogger, get_correlation_id
 
@@ -288,46 +290,6 @@ def share_profile_direct(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to share profile")
 
 
-def revoke_share(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
-    """
-    Revoke shared access to profile.
-
-    GraphQL mutation: revokeShare(profileId: ID!, accountId: ID!)
-
-    Returns:
-        {
-          success: Boolean!
-        }
-    """
-    logger = StructuredLogger(__name__, get_correlation_id(event))
-
-    try:
-        # Extract arguments
-        args = event["arguments"]
-        profile_id = args["profileId"]
-        target_account_id = args["accountId"]
-        caller_account_id = event["identity"]["sub"]
-
-        logger.info(
-            "Revoking share",
-            profile_id=profile_id,
-            target_account_id=target_account_id,
-        )
-
-        # Authorization: Must be owner
-        if not is_profile_owner(caller_account_id, profile_id):
-            raise AppError(ErrorCode.FORBIDDEN, "Only profile owner can revoke access")
-
-        # Delete share
-        table = get_table()
-        table.delete_item(Key={"PK": profile_id, "SK": f"SHARE#{target_account_id}"})
-
-        logger.info("Share revoked", target_account_id=target_account_id)
-
-        return {"success": True}
-
-    except AppError:
-        raise
-    except Exception as e:
-        logger.error("Failed to revoke share", error=str(e))
-        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to revoke share")
+# NOTE: revoke_share Lambda function REMOVED
+# This operation is now handled by a VTL DynamoDB resolver directly in AppSync
+# See cdk/cdk/cdk_stack.py - RevokeShareResolver

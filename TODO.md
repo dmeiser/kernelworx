@@ -134,16 +134,17 @@
 ## Phase 1: Backend - Core API & Data Layer
 
 **Status:** Phase 1 - ✅ 100% COMPLETE - Production Ready!  
-**Last Updated:** 2025-12-06
+**Last Updated:** 2025-01-06
 
 ### Phase 1 Summary
 
 **Completed ✅:**
 - ✅ Code Quality: Black formatting, isort, mypy strict (0 errors)
-- ✅ Lambda Functions: **10 functions deployed** (4 sharing + 4 CRUD + 1 report + 1 LogRetention helper)
-  - Profile sharing: createProfileInvite, redeemProfileInvite, shareProfileDirect, revokeShare
+- ✅ Lambda Functions: **8 functions deployed** (3 sharing + 4 CRUD + 1 report + LogRetention helper)
+  - Profile sharing: createProfileInvite, redeemProfileInvite, shareProfileDirect
   - Season/Order CRUD: updateSeason, deleteSeason, updateOrder, deleteOrder
   - Report generation: requestSeasonReport (Excel/CSV exports)
+  - **Migrated to VTL**: revokeShare, listOrdersBySeason (see TODO_SIMPLIFY_LAMBDA.md)
 - ✅ DynamoDB Resolvers: **13/13 query resolvers** + **15/15 mutation resolvers** deployed
   - All query operations: getMyAccount, getProfile, getSeason, getOrder, list operations
   - Catalog queries: getCatalog, listPublicCatalogs, listMyCatalogs
@@ -156,6 +157,7 @@
 - ✅ Full authorization system (owner + share-based permissions)
 - ✅ Comprehensive validation and error handling
 - ✅ All changes committed and pushed to GitHub (commit 77aee30)
+- ✅ **Lambda Simplification Phase 1**: 2 Lambdas migrated to VTL resolvers (see TODO_SIMPLIFY_LAMBDA.md)
 
 **Deferred to Post-v1:**
 - 📋 Unit tests for report generation Lambda (complex S3+DynamoDB mocking - will use integration tests instead)

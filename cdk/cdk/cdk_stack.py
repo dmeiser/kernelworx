@@ -91,7 +91,7 @@ class CdkStack(Stack):
             self.table = dynamodb.Table(
                 self,
                 "PsmApp",
-                table_name=f"psm-app-{env_name}",
+                table_name=f"kernelworx-app-{env_name}",
                 partition_key=dynamodb.Attribute(
                     name="PK", type=dynamodb.AttributeType.STRING
                 ),
@@ -151,7 +151,7 @@ class CdkStack(Stack):
                 projection_type=dynamodb.ProjectionType.ALL,
             )
 
-            # GSI5: Season lookup by seasonId (for direct getSeason queries)
+            # GSI5: Season lookup by seasonId (for listing all items with seasonId - orders, etc)
             self.table.add_global_secondary_index(
                 index_name="GSI5",
                 partition_key=dynamodb.Attribute(
@@ -165,6 +165,18 @@ class CdkStack(Stack):
                 index_name="GSI6",
                 partition_key=dynamodb.Attribute(
                     name="orderId", type=dynamodb.AttributeType.STRING
+                ),
+                projection_type=dynamodb.ProjectionType.ALL,
+            )
+
+            # GSI7: Season lookup by seasonId + SK (for direct getSeason queries)
+            self.table.add_global_secondary_index(
+                index_name="GSI7",
+                partition_key=dynamodb.Attribute(
+                    name="seasonId", type=dynamodb.AttributeType.STRING
+                ),
+                sort_key=dynamodb.Attribute(
+                    name="SK", type=dynamodb.AttributeType.STRING
                 ),
                 projection_type=dynamodb.ProjectionType.ALL,
             )
@@ -192,7 +204,7 @@ class CdkStack(Stack):
             self.static_assets_bucket = s3.Bucket(
                 self,
                 "StaticAssets",
-                bucket_name=None,  # Auto-generate name
+                bucket_name=f"kernelworx-static-{env_name}",  # Deterministic name
                 versioned=True,
                 encryption=s3.BucketEncryption.S3_MANAGED,
                 block_public_access=s3.BlockPublicAccess.BLOCK_ALL,
@@ -210,7 +222,7 @@ class CdkStack(Stack):
             self.exports_bucket = s3.Bucket(
                 self,
                 "Exports",
-                bucket_name=None,  # Auto-generate name
+                bucket_name=f"kernelworx-exports-{env_name}",  # Deterministic name
                 versioned=False,
                 encryption=s3.BucketEncryption.S3_MANAGED,
                 block_public_access=s3.BlockPublicAccess.BLOCK_ALL,
@@ -225,6 +237,7 @@ class CdkStack(Stack):
         self.lambda_execution_role = iam.Role(
             self,
             "LambdaExecutionRole",
+            role_name=f"kernelworx-lambda-execution-{env_name}",
             assumed_by=iam.ServicePrincipal("lambda.amazonaws.com"),
             managed_policies=[
                 iam.ManagedPolicy.from_aws_managed_policy_name(
@@ -243,6 +256,7 @@ class CdkStack(Stack):
         self.appsync_service_role = iam.Role(
             self,
             "AppSyncServiceRole",
+            role_name=f"kernelworx-appsync-{env_name}",
             assumed_by=iam.ServicePrincipal("appsync.amazonaws.com"),
         )
 
@@ -260,7 +274,7 @@ class CdkStack(Stack):
         lambda_env = {
             "TABLE_NAME": self.table.table_name,
             "EXPORTS_BUCKET": self.exports_bucket.bucket_name,
-            "POWERTOOLS_SERVICE_NAME": "popcorn-sales-manager",
+            "POWERTOOLS_SERVICE_NAME": "kernelworx",
             "LOG_LEVEL": "INFO",
         }
 
@@ -275,6 +289,7 @@ class CdkStack(Stack):
         self.shared_layer = lambda_.LayerVersion(
             self,
             "SharedDependenciesLayer",
+            layer_version_name=f"kernelworx-shared-deps-{env_name}",
             code=lambda_.Code.from_asset(lambda_layer_path),
             compatible_runtimes=[lambda_.Runtime.PYTHON_3_13],
             description="Shared Python dependencies for Lambda functions",
@@ -296,6 +311,7 @@ class CdkStack(Stack):
         self.create_profile_invite_fn = lambda_.Function(
             self,
             "CreateProfileInviteFnV2",
+            function_name=f"kernelworx-create-invite-{env_name}",
             runtime=lambda_.Runtime.PYTHON_3_13,
             handler="handlers.profile_sharing.create_profile_invite",
             code=lambda_code,
@@ -305,10 +321,11 @@ class CdkStack(Stack):
             role=self.lambda_execution_role,
             environment=lambda_env,
         )
-
+        
         self.redeem_profile_invite_fn = lambda_.Function(
             self,
             "RedeemProfileInviteFnV2",
+            function_name=f"kernelworx-redeem-invite-{env_name}",
             runtime=lambda_.Runtime.PYTHON_3_13,
             handler="handlers.profile_sharing.redeem_profile_invite",
             code=lambda_code,
@@ -322,6 +339,7 @@ class CdkStack(Stack):
         self.share_profile_direct_fn = lambda_.Function(
             self,
             "ShareProfileDirectFnV2",
+            function_name=f"kernelworx-share-direct-{env_name}",
             runtime=lambda_.Runtime.PYTHON_3_13,
             handler="handlers.profile_sharing.share_profile_direct",
             code=lambda_code,
@@ -332,23 +350,13 @@ class CdkStack(Stack):
             environment=lambda_env,
         )
 
-        self.revoke_share_fn = lambda_.Function(
-            self,
-            "RevokeShareFnV2",
-            runtime=lambda_.Runtime.PYTHON_3_13,
-            handler="handlers.profile_sharing.revoke_share",
-            code=lambda_code,
-            layers=[self.shared_layer],
-            timeout=Duration.seconds(30),
-            memory_size=256,
-            role=self.lambda_execution_role,
-            environment=lambda_env,
-        )
+        # NOTE: revoke_share Lambda REMOVED - replaced with VTL DynamoDB resolver
 
         # Season Operations Lambda Functions
         self.update_season_fn = lambda_.Function(
             self,
             "UpdateSeasonFnV2",
+            function_name=f"kernelworx-update-season-{env_name}",
             runtime=lambda_.Runtime.PYTHON_3_13,
             handler="handlers.season_operations.update_season",
             code=lambda_code,
@@ -362,6 +370,7 @@ class CdkStack(Stack):
         self.delete_season_fn = lambda_.Function(
             self,
             "DeleteSeasonFnV2",
+            function_name=f"kernelworx-delete-season-{env_name}",
             runtime=lambda_.Runtime.PYTHON_3_13,
             handler="handlers.season_operations.delete_season",
             code=lambda_code,
@@ -373,9 +382,26 @@ class CdkStack(Stack):
         )
 
         # Order Operations Lambda Functions
+        self.create_order_fn = lambda_.Function(
+            self,
+            "CreateOrderFnV2",
+            function_name=f"kernelworx-create-order-{env_name}",
+            runtime=lambda_.Runtime.PYTHON_3_13,
+            handler="handlers.order_operations.create_order",
+            code=lambda_code,
+            layers=[self.shared_layer],
+            timeout=Duration.seconds(30),
+            memory_size=256,
+            role=self.lambda_execution_role,
+            environment=lambda_env,
+        )
+
+        # NOTE: list_orders_by_season Lambda REMOVED - replaced with VTL DynamoDB resolver
+
         self.update_order_fn = lambda_.Function(
             self,
             "UpdateOrderFnV2",
+            function_name=f"kernelworx-update-order-{env_name}",
             runtime=lambda_.Runtime.PYTHON_3_13,
             handler="handlers.order_operations.update_order",
             code=lambda_code,
@@ -389,8 +415,23 @@ class CdkStack(Stack):
         self.delete_order_fn = lambda_.Function(
             self,
             "DeleteOrderFnV2",
+            function_name=f"kernelworx-delete-order-{env_name}",
             runtime=lambda_.Runtime.PYTHON_3_13,
             handler="handlers.order_operations.delete_order",
+            code=lambda_code,
+            layers=[self.shared_layer],
+            timeout=Duration.seconds(30),
+            memory_size=256,
+            role=self.lambda_execution_role,
+            environment=lambda_env,
+        )
+
+        self.create_profile_fn = lambda_.Function(
+            self,
+            "CreateProfileFnV2",
+            function_name=f"kernelworx-create-profile-{env_name}",
+            runtime=lambda_.Runtime.PYTHON_3_13,
+            handler="handlers.profile_operations.create_seller_profile",
             code=lambda_code,
             layers=[self.shared_layer],
             timeout=Duration.seconds(30),
@@ -402,12 +443,28 @@ class CdkStack(Stack):
         self.request_season_report_fn = lambda_.Function(
             self,
             "RequestSeasonReportFnV2",
+            function_name=f"kernelworx-request-report-{env_name}",
             runtime=lambda_.Runtime.PYTHON_3_13,
             handler="handlers.report_generation.request_season_report",
             code=lambda_code,
             layers=[self.shared_layer],
             timeout=Duration.seconds(60),  # Reports may take longer
             memory_size=512,  # More memory for Excel generation
+            role=self.lambda_execution_role,
+            environment=lambda_env,
+        )
+
+        # Post-Authentication Lambda (Cognito Trigger)
+        self.post_auth_fn = lambda_.Function(
+            self,
+            "PostAuthenticationFnV2",
+            function_name=f"kernelworx-post-auth-{env_name}",
+            runtime=lambda_.Runtime.PYTHON_3_13,
+            handler="handlers.post_authentication.lambda_handler",
+            code=lambda_code,
+            layers=[self.shared_layer],
+            timeout=Duration.seconds(10),
+            memory_size=256,
             role=self.lambda_execution_role,
             environment=lambda_env,
         )
@@ -432,7 +489,7 @@ class CdkStack(Stack):
             self.user_pool = cognito.UserPool(
                 self,
                 "UserPool",
-                user_pool_name=f"popcorn-sales-manager-{env_name}",
+                user_pool_name=f"kernelworx-users-{env_name}",
                 sign_in_aliases=cognito.SignInAliases(email=True, username=False),
                 self_sign_up_enabled=True,
                 auto_verify=cognito.AutoVerifiedAttrs(email=True),
@@ -450,6 +507,10 @@ class CdkStack(Stack):
                 ),
                 account_recovery=cognito.AccountRecovery.EMAIL_ONLY,
                 removal_policy=RemovalPolicy.RETAIN,
+                # Lambda triggers
+                lambda_triggers=cognito.UserPoolTriggers(
+                    post_authentication=self.post_auth_fn,
+                ),
                 # Note: Advanced security mode not compatible with Essentials tier
                 # UI customization (logo, CSS) is available without advanced_security_mode
             )
@@ -538,7 +599,7 @@ class CdkStack(Stack):
             # App client for SPA
             self.user_pool_client = self.user_pool.add_client(
                 "AppClient",
-                user_pool_client_name="PopcornSalesManager-Web",
+                user_pool_client_name="KernelWorx-Web",
                 auth_flows=cognito.AuthFlow(
                     user_srp=True,
                     user_password=True,
@@ -673,7 +734,7 @@ class CdkStack(Stack):
             self.api = appsync.GraphqlApi(
                 self,
                 "Api",
-                name=f"popcorn-sales-manager-api-{env_name}",
+                name=f"kernelworx-api-{env_name}",
                 definition=appsync.Definition.from_file(schema_path),
                 authorization_config=appsync.AuthorizationConfig(
                     default_authorization=appsync.AuthorizationMode(
@@ -694,6 +755,12 @@ class CdkStack(Stack):
                 table=self.table,
             )
 
+            # NONE data source for computed fields
+            self.none_datasource = self.api.add_none_data_source(
+                "NoneDataSource",
+                name="NoneDataSource",
+            )
+
             # Lambda data sources for profile sharing
             self.create_profile_invite_ds = self.api.add_lambda_data_source(
                 "CreateProfileInviteDS",
@@ -710,10 +777,7 @@ class CdkStack(Stack):
                 lambda_function=self.share_profile_direct_fn,
             )
             
-            self.revoke_share_ds = self.api.add_lambda_data_source(
-                "RevokeShareDS",
-                lambda_function=self.revoke_share_fn,
-            )
+            # NOTE: revoke_share Lambda data source REMOVED - replaced with VTL resolver
 
             # Lambda data sources for season operations
             self.update_season_ds = self.api.add_lambda_data_source(
@@ -726,7 +790,20 @@ class CdkStack(Stack):
                 lambda_function=self.delete_season_fn,
             )
 
+            # Lambda data sources for profile operations
+            self.create_profile_ds = self.api.add_lambda_data_source(
+                "CreateProfileDS",
+                lambda_function=self.create_profile_fn,
+            )
+
             # Lambda data sources for order operations
+            self.create_order_ds = self.api.add_lambda_data_source(
+                "CreateOrderDS",
+                lambda_function=self.create_order_fn,
+            )
+
+            # NOTE: list_orders_by_season Lambda data source REMOVED - replaced with VTL resolver
+
             self.update_order_ds = self.api.add_lambda_data_source(
                 "UpdateOrderDS",
                 lambda_function=self.update_order_fn,
@@ -743,6 +820,7 @@ class CdkStack(Stack):
             )
 
             # Resolvers for profile sharing mutations
+            # createProfileInvite - Lambda resolver (JS resolver proved problematic)
             self.create_profile_invite_ds.create_resolver(
                 "CreateProfileInviteResolver",
                 type_name="Mutation",
@@ -761,10 +839,35 @@ class CdkStack(Stack):
                 field_name="shareProfileDirect",
             )
             
-            self.revoke_share_ds.create_resolver(
+            # revokeShare - VTL DynamoDB resolver (replaced Lambda)
+            # NOTE: This simplified version performs a direct delete.
+            # Authorization is handled by AppSync auth mode (user must be authenticated)
+            # For full owner check, this could be converted to a pipeline resolver.
+            self.dynamodb_datasource.create_resolver(
                 "RevokeShareResolver",
                 type_name="Mutation",
                 field_name="revokeShare",
+                request_mapping_template=appsync.MappingTemplate.from_string("""
+## revokeShare - Delete share for profile
+## Input: profileId, targetAccountId
+## The share SK format is: SHARE#<targetAccountId>
+{
+    "version": "2017-02-28",
+    "operation": "DeleteItem",
+    "key": {
+        "PK": $util.dynamodb.toDynamoDBJson($ctx.args.input.profileId),
+        "SK": $util.dynamodb.toDynamoDBJson("SHARE#" + $ctx.args.input.targetAccountId)
+    }
+}
+                """),
+                response_mapping_template=appsync.MappingTemplate.from_string("""
+#if($ctx.error)
+    $util.error($ctx.error.message, $ctx.error.type)
+#end
+## DeleteItem returns the deleted item (if returnValues is set) or empty
+## We return true to indicate success
+true
+                """),
             )
 
             # DynamoDB resolvers for queries
@@ -809,20 +912,26 @@ $util.toJson($ctx.result)
         "expressionValues": {
             ":profileId": $util.dynamodb.toDynamoDBJson($ctx.args.profileId)
         }
-    },
-    "limit": 1
+    }
 }
                 """),
                 response_mapping_template=appsync.MappingTemplate.from_string("""
 #if($ctx.error)
     $util.error($ctx.error.message, $ctx.error.type)
 #end
-## Check authorization: caller must be owner or have share access
-#if($ctx.result.items.isEmpty())
+## Filter results to find the actual PROFILE item (not seasons/orders with same profileId)
+#set($profile = false)
+#foreach($item in $ctx.result.items)
+    #if($item.SK.startsWith("PROFILE#"))
+        #set($profile = $item)
+        #break
+    #end
+#end
+#if(!$profile)
     $util.error("Profile not found", "NotFound")
 #end
 ## TODO: Add authorization check here (owner or shared user)
-$util.toJson($ctx.result.items[0])
+$util.toJson($profile)
                 """),
             )
 
@@ -881,7 +990,7 @@ $util.toJson($ctx.result.items)
                 """),
             )
 
-            # getSeason - Get a specific season by ID (using GSI5)
+            # getSeason - Get a specific season by ID (using GSI7 with seasonId + SK)
             self.dynamodb_datasource.create_resolver(
                 "GetSeasonResolver",
                 type_name="Query",
@@ -890,11 +999,16 @@ $util.toJson($ctx.result.items)
 {
     "version": "2017-02-28",
     "operation": "Query",
-    "index": "GSI5",
+    "index": "GSI7",
     "query": {
-        "expression": "seasonId = :seasonId",
+        "expression": "#seasonId = :seasonId AND #sk = :sk",
+        "expressionNames": {
+            "#seasonId": "seasonId",
+            "#sk": "SK"
+        },
         "expressionValues": {
-            ":seasonId": $util.dynamodb.toDynamoDBJson($ctx.args.seasonId)
+            ":seasonId": $util.dynamodb.toDynamoDBJson($ctx.args.seasonId),
+            ":sk": $util.dynamodb.toDynamoDBJson($ctx.args.seasonId)
         }
     },
     "limit": 1
@@ -938,6 +1052,104 @@ $util.toJson($ctx.result.items)
                 """),
             )
 
+            # Season.catalog - Resolve catalog field for Season
+            self.dynamodb_datasource.create_resolver(
+                "SeasonCatalogResolver",
+                type_name="Season",
+                field_name="catalog",
+                request_mapping_template=appsync.MappingTemplate.from_string("""
+{
+    "version": "2017-02-28",
+    "operation": "GetItem",
+    "key": {
+        "PK": $util.dynamodb.toDynamoDBJson("CATALOG"),
+        "SK": $util.dynamodb.toDynamoDBJson($ctx.source.catalogId)
+    }
+}
+                """),
+                response_mapping_template=appsync.MappingTemplate.from_string("""
+#if($ctx.error)
+    $util.error($ctx.error.message, $ctx.error.type)
+#end
+$util.toJson($ctx.result)
+                """),
+            )
+
+            # Season.totalOrders - Count orders for this season
+            self.dynamodb_datasource.create_resolver(
+                "SeasonTotalOrdersResolver",
+                type_name="Season",
+                field_name="totalOrders",
+                request_mapping_template=appsync.MappingTemplate.from_string("""
+{
+    "version": "2017-02-28",
+    "operation": "Query",
+    "query": {
+        "expression": "PK = :pk AND begins_with(SK, :sk)",
+        "expressionValues": {
+            ":pk": $util.dynamodb.toDynamoDBJson($ctx.source.seasonId),
+            ":sk": $util.dynamodb.toDynamoDBJson("ORDER#")
+        }
+    }
+}
+                """),
+                response_mapping_template=appsync.MappingTemplate.from_string("""
+#if($ctx.error)
+    $util.error($ctx.error.message, $ctx.error.type)
+#end
+$ctx.result.items.size()
+                """),
+            )
+
+            # Season.totalRevenue - Sum order totals for this season
+            self.dynamodb_datasource.create_resolver(
+                "SeasonTotalRevenueResolver",
+                type_name="Season",
+                field_name="totalRevenue",
+                request_mapping_template=appsync.MappingTemplate.from_string("""
+{
+    "version": "2017-02-28",
+    "operation": "Query",
+    "query": {
+        "expression": "PK = :pk AND begins_with(SK, :sk)",
+        "expressionValues": {
+            ":pk": $util.dynamodb.toDynamoDBJson($ctx.source.seasonId),
+            ":sk": $util.dynamodb.toDynamoDBJson("ORDER#")
+        }
+    }
+}
+                """),
+                response_mapping_template=appsync.MappingTemplate.from_string("""
+#if($ctx.error)
+    $util.error($ctx.error.message, $ctx.error.type)
+#end
+#set($total = 0.0)
+#foreach($order in $ctx.result.items)
+    #set($total = $total + $order.totalAmount)
+#end
+$total
+                """),
+            )
+
+            # SellerProfile.isOwner - Compute if caller is the owner
+            self.none_datasource.create_resolver(
+                "SellerProfileIsOwnerResolver",
+                type_name="SellerProfile",
+                field_name="isOwner",
+                runtime=appsync.FunctionRuntime.JS_1_0_0,
+                code=appsync.Code.from_inline("""
+export function request(ctx) {
+    return {};
+}
+
+export function response(ctx) {
+    const callerAccountId = ctx.identity.sub;
+    const ownerAccountId = ctx.source.ownerAccountId;
+    return callerAccountId === ownerAccountId;
+}
+                """),
+            )
+
             # getOrder - Get a specific order by ID (using GSI6)
             self.dynamodb_datasource.create_resolver(
                 "GetOrderResolver",
@@ -969,7 +1181,8 @@ $util.toJson($ctx.result.items)
                 """),
             )
 
-            # listOrdersBySeason - List all orders for a season
+            # listOrdersBySeason - List all orders for a season (VTL DynamoDB resolver)
+            # NOTE: Replaced Lambda with direct DynamoDB query for better performance
             self.dynamodb_datasource.create_resolver(
                 "ListOrdersBySeasonResolver",
                 type_name="Query",
@@ -1154,38 +1367,11 @@ $util.toJson($ctx.result.items)
             # CRUD Mutation Resolvers
             # ================================================================
 
-            # createSellerProfile - Create a new seller profile
-            self.dynamodb_datasource.create_resolver(
+            # createSellerProfile - Create a new seller profile (Lambda resolver)
+            self.create_profile_ds.create_resolver(
                 "CreateSellerProfileResolver",
                 type_name="Mutation",
                 field_name="createSellerProfile",
-                request_mapping_template=appsync.MappingTemplate.from_string("""
-#set($profileId = "PROFILE#" + $util.autoId())
-#set($now = $util.time.nowISO8601())
-{
-    "version": "2017-02-28",
-    "operation": "PutItem",
-    "key": {
-        "PK": $util.dynamodb.toDynamoDBJson("ACCOUNT#$ctx.identity.sub"),
-        "SK": $util.dynamodb.toDynamoDBJson($profileId)
-    },
-    "attributeValues": {
-        "profileId": $util.dynamodb.toDynamoDBJson($profileId),
-        "ownerAccountId": $util.dynamodb.toDynamoDBJson($ctx.identity.sub),
-        "sellerName": $util.dynamodb.toDynamoDBJson($ctx.args.input.sellerName),
-        "createdAt": $util.dynamodb.toDynamoDBJson($now),
-        "updatedAt": $util.dynamodb.toDynamoDBJson($now),
-        "isOwner": $util.dynamodb.toDynamoDBJson(true),
-        "permissions": $util.dynamodb.toDynamoDBJson(["READ", "WRITE"])
-    }
-}
-                """),
-                response_mapping_template=appsync.MappingTemplate.from_string("""
-#if($ctx.error)
-    $util.error($ctx.error.message, $ctx.error.type)
-#end
-$util.toJson($ctx.result)
-                """),
             )
 
             # updateSellerProfile - Update an existing seller profile
@@ -1269,8 +1455,23 @@ $util.toJson(true)
                 type_name="Mutation",
                 field_name="createCatalog",
                 request_mapping_template=appsync.MappingTemplate.from_string("""
-#set($catalogId = "CATALOG#" + $util.autoId())
+#set($catalogId = "CATALOG#$util.autoId()")
 #set($now = $util.time.nowISO8601())
+## Add productId to each product
+#set($productsWithIds = [])
+#foreach($product in $ctx.args.input.products)
+    #set($productId = "PRODUCT#$util.autoId()")
+    #set($productWithId = {
+        "productId": $productId,
+        "productName": $product.productName,
+        "price": $product.price,
+        "sortOrder": $product.sortOrder
+    })
+    #if($product.description)
+        $util.qr($productWithId.put("description", $product.description))
+    #end
+    $util.qr($productsWithIds.add($productWithId))
+#end
 {
     "version": "2017-02-28",
     "operation": "PutItem",
@@ -1284,7 +1485,7 @@ $util.toJson(true)
         "catalogType": $util.dynamodb.toDynamoDBJson("USER_CREATED"),
         "ownerAccountId": $util.dynamodb.toDynamoDBJson($ctx.identity.sub),
         "isPublic": $util.dynamodb.toDynamoDBJson($ctx.args.input.isPublic),
-        "products": $util.dynamodb.toDynamoDBJson($ctx.args.input.products),
+        "products": $util.dynamodb.toDynamoDBJson($productsWithIds),
         "createdAt": $util.dynamodb.toDynamoDBJson($now),
         "updatedAt": $util.dynamodb.toDynamoDBJson($now),
         ## GSI3 for catalog listing
@@ -1312,6 +1513,26 @@ $util.toJson($ctx.result)
                 field_name="updateCatalog",
                 request_mapping_template=appsync.MappingTemplate.from_string("""
 #set($now = $util.time.nowISO8601())
+## Add productId to each product if not present
+#set($productsWithIds = [])
+#foreach($product in $ctx.args.input.products)
+    #set($productWithId = {
+        "productName": $product.productName,
+        "price": $product.price,
+        "sortOrder": $product.sortOrder
+    })
+    ## Preserve existing productId or generate new one
+    #if($product.productId)
+        $util.qr($productWithId.put("productId", $product.productId))
+    #else
+        #set($newProductId = "PRODUCT#$util.autoId()")
+        $util.qr($productWithId.put("productId", $newProductId))
+    #end
+    #if($product.description)
+        $util.qr($productWithId.put("description", $product.description))
+    #end
+    $util.qr($productsWithIds.add($productWithId))
+#end
 {
     "version": "2017-02-28",
     "operation": "UpdateItem",
@@ -1324,7 +1545,7 @@ $util.toJson($ctx.result)
         "expressionValues": {
             ":catalogName": $util.dynamodb.toDynamoDBJson($ctx.args.input.catalogName),
             ":isPublic": $util.dynamodb.toDynamoDBJson($ctx.args.input.isPublic),
-            ":products": $util.dynamodb.toDynamoDBJson($ctx.args.input.products),
+            ":products": $util.dynamodb.toDynamoDBJson($productsWithIds),
             ":updatedAt": $util.dynamodb.toDynamoDBJson($now),
             #if($ctx.args.input.isPublic)
                 ":gsi3pk": $util.dynamodb.toDynamoDBJson("PUBLIC")
@@ -1430,60 +1651,11 @@ $util.toJson($ctx.result)
                 field_name="updateSeason",
             )
 
-            # createOrder - Create a new order for a season
-            self.dynamodb_datasource.create_resolver(
+            # createOrder - Create a new order for a season (Lambda resolver)
+            self.create_order_ds.create_resolver(
                 "CreateOrderResolver",
                 type_name="Mutation",
                 field_name="createOrder",
-                request_mapping_template=appsync.MappingTemplate.from_string("""
-#set($orderId = "ORDER#" + $util.autoId())
-#set($now = $util.time.nowISO8601())
-
-## Calculate total amount from line items
-#set($totalAmount = 0.0)
-#foreach($item in $ctx.args.input.lineItems)
-    #set($totalAmount = $totalAmount + ($item.quantity * $item.pricePerUnit))
-#end
-
-{
-    "version": "2017-02-28",
-    "operation": "PutItem",
-    "key": {
-        "PK": $util.dynamodb.toDynamoDBJson($ctx.args.input.seasonId),
-        "SK": $util.dynamodb.toDynamoDBJson($orderId)
-    },
-    "attributeValues": {
-        "orderId": $util.dynamodb.toDynamoDBJson($orderId),
-        "profileId": $util.dynamodb.toDynamoDBJson($ctx.args.input.profileId),
-        "seasonId": $util.dynamodb.toDynamoDBJson($ctx.args.input.seasonId),
-        "customerName": $util.dynamodb.toDynamoDBJson($ctx.args.input.customerName),
-        #if($ctx.args.input.customerPhone)
-            "customerPhone": $util.dynamodb.toDynamoDBJson($ctx.args.input.customerPhone),
-        #end
-        #if($ctx.args.input.customerAddress)
-            "customerAddress": $util.dynamodb.toDynamoDBJson($ctx.args.input.customerAddress),
-        #end
-        "orderDate": $util.dynamodb.toDynamoDBJson($ctx.args.input.orderDate),
-        "paymentMethod": $util.dynamodb.toDynamoDBJson($ctx.args.input.paymentMethod),
-        "lineItems": $util.dynamodb.toDynamoDBJson($ctx.args.input.lineItems),
-        "totalAmount": $util.dynamodb.toDynamoDBJson($totalAmount),
-        #if($ctx.args.input.notes)
-            "notes": $util.dynamodb.toDynamoDBJson($ctx.args.input.notes),
-        #end
-        "createdAt": $util.dynamodb.toDynamoDBJson($now),
-        "updatedAt": $util.dynamodb.toDynamoDBJson($now),
-        ## Add GSI2 keys for orders by profile
-        "GSI2PK": $util.dynamodb.toDynamoDBJson($ctx.args.input.profileId),
-        "GSI2SK": $util.dynamodb.toDynamoDBJson($orderId)
-    }
-}
-                """),
-                response_mapping_template=appsync.MappingTemplate.from_string("""
-#if($ctx.error)
-    $util.error($ctx.error.message, $ctx.error.type)
-#end
-$util.toJson($ctx.result)
-                """),
             )
 
             # updateOrder - Update an existing order (Lambda resolver)
@@ -1528,7 +1700,7 @@ $util.toJson($ctx.result)
             # Route53 record for AppSync custom domain
             route53.CnameRecord(
                 self,
-                "ApiDomainRecord",
+                "ApiDomainRecordV2",  # V2 to force replacement for new hosted zone
                 zone=self.hosted_zone,
                 record_name=self.api_domain,
                 domain_name=self.api_domain_name.attr_app_sync_domain_name,

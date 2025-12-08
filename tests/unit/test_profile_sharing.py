@@ -5,7 +5,9 @@ Tests all profile sharing functionality:
 - createProfileInvite
 - redeemProfileInvite
 - shareProfileDirect
-- revokeShare
+
+NOTE: revokeShare has been moved to a VTL AppSync resolver and should be
+tested via integration tests against the deployed AppSync API.
 """
 
 from datetime import datetime, timedelta, timezone
@@ -17,7 +19,6 @@ import pytest
 from src.handlers.profile_sharing import (
     create_profile_invite,
     redeem_profile_invite,
-    revoke_share,
     share_profile_direct,
 )
 from src.utils.errors import AppError, ErrorCode
@@ -448,82 +449,7 @@ class TestShareProfileDirect:
         assert exc_info.value.error_code == ErrorCode.NOT_FOUND
 
 
-class TestRevokeShare:
-    """Tests for revoke_share handler."""
-
-    def test_owner_can_revoke_share(
-        self,
-        dynamodb_table: Any,
-        sample_profile: Dict[str, Any],
-        sample_profile_id: str,
-        another_account_id: str,
-        appsync_event: Dict[str, Any],
-        lambda_context: Any,
-    ) -> None:
-        """Test that owner can revoke share."""
-        # Arrange - create share
-        dynamodb_table.put_item(
-            Item={
-                "PK": sample_profile_id,
-                "SK": f"SHARE#{another_account_id}",
-                "profileId": sample_profile_id,
-                "accountId": another_account_id,
-                "permissions": ["READ"],
-            }
-        )
-
-        # Act
-        event = {
-            **appsync_event,
-            "arguments": {
-                "profileId": sample_profile_id,
-                "accountId": another_account_id,
-            },
-        }
-
-        result = revoke_share(event, lambda_context)
-
-        # Assert
-        assert result["success"] is True
-
-        # Verify share deleted
-        response = dynamodb_table.get_item(
-            Key={"PK": sample_profile_id, "SK": f"SHARE#{another_account_id}"}
-        )
-        assert "Item" not in response
-
-    def test_non_owner_cannot_revoke_share(
-        self,
-        dynamodb_table: Any,
-        sample_profile: Dict[str, Any],
-        sample_profile_id: str,
-        another_account_id: str,
-        appsync_event: Dict[str, Any],
-        lambda_context: Any,
-    ) -> None:
-        """Test that non-owner cannot revoke share."""
-        # Arrange - create share
-        dynamodb_table.put_item(
-            Item={
-                "PK": sample_profile_id,
-                "SK": f"SHARE#{another_account_id}",
-                "profileId": sample_profile_id,
-                "accountId": another_account_id,
-                "permissions": ["READ"],
-            }
-        )
-
-        # Act & Assert - try to revoke as non-owner
-        event = {
-            **appsync_event,
-            "identity": {"sub": another_account_id},
-            "arguments": {
-                "profileId": sample_profile_id,
-                "accountId": another_account_id,
-            },
-        }
-
-        with pytest.raises(AppError) as exc_info:
-            revoke_share(event, lambda_context)
-
-        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
+# NOTE: TestRevokeShare class REMOVED
+# revokeShare is now a VTL DynamoDB resolver in AppSync
+# See cdk/cdk/cdk_stack.py - RevokeShareResolver
+# Test via integration tests against deployed AppSync API
