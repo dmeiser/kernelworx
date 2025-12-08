@@ -351,35 +351,7 @@ class CdkStack(Stack):
         )
 
         # NOTE: revoke_share Lambda REMOVED - replaced with VTL DynamoDB resolver
-
-        # Season Operations Lambda Functions
-        self.update_season_fn = lambda_.Function(
-            self,
-            "UpdateSeasonFnV2",
-            function_name=f"kernelworx-update-season-{env_name}",
-            runtime=lambda_.Runtime.PYTHON_3_13,
-            handler="handlers.season_operations.update_season",
-            code=lambda_code,
-            layers=[self.shared_layer],
-            timeout=Duration.seconds(30),
-            memory_size=256,
-            role=self.lambda_execution_role,
-            environment=lambda_env,
-        )
-
-        self.delete_season_fn = lambda_.Function(
-            self,
-            "DeleteSeasonFnV2",
-            function_name=f"kernelworx-delete-season-{env_name}",
-            runtime=lambda_.Runtime.PYTHON_3_13,
-            handler="handlers.season_operations.delete_season",
-            code=lambda_code,
-            layers=[self.shared_layer],
-            timeout=Duration.seconds(30),
-            memory_size=256,
-            role=self.lambda_execution_role,
-            environment=lambda_env,
-        )
+        # NOTE: update_season, delete_season Lambdas REMOVED - replaced with JS pipeline resolvers
 
         # Order Operations Lambda Functions
         self.create_order_fn = lambda_.Function(
@@ -397,34 +369,7 @@ class CdkStack(Stack):
         )
 
         # NOTE: list_orders_by_season Lambda REMOVED - replaced with VTL DynamoDB resolver
-
-        self.update_order_fn = lambda_.Function(
-            self,
-            "UpdateOrderFnV2",
-            function_name=f"kernelworx-update-order-{env_name}",
-            runtime=lambda_.Runtime.PYTHON_3_13,
-            handler="handlers.order_operations.update_order",
-            code=lambda_code,
-            layers=[self.shared_layer],
-            timeout=Duration.seconds(30),
-            memory_size=256,
-            role=self.lambda_execution_role,
-            environment=lambda_env,
-        )
-
-        self.delete_order_fn = lambda_.Function(
-            self,
-            "DeleteOrderFnV2",
-            function_name=f"kernelworx-delete-order-{env_name}",
-            runtime=lambda_.Runtime.PYTHON_3_13,
-            handler="handlers.order_operations.delete_order",
-            code=lambda_code,
-            layers=[self.shared_layer],
-            timeout=Duration.seconds(30),
-            memory_size=256,
-            role=self.lambda_execution_role,
-            environment=lambda_env,
-        )
+        # NOTE: update_order, delete_order Lambdas REMOVED - replaced with JS pipeline resolvers
 
         self.create_profile_fn = lambda_.Function(
             self,
@@ -778,17 +723,7 @@ class CdkStack(Stack):
             )
             
             # NOTE: revoke_share Lambda data source REMOVED - replaced with VTL resolver
-
-            # Lambda data sources for season operations
-            self.update_season_ds = self.api.add_lambda_data_source(
-                "UpdateSeasonDS",
-                lambda_function=self.update_season_fn,
-            )
-
-            self.delete_season_ds = self.api.add_lambda_data_source(
-                "DeleteSeasonDS",
-                lambda_function=self.delete_season_fn,
-            )
+            # NOTE: update_season, delete_season Lambda data sources REMOVED - replaced with pipeline resolvers
 
             # Lambda data sources for profile operations
             self.create_profile_ds = self.api.add_lambda_data_source(
@@ -803,16 +738,7 @@ class CdkStack(Stack):
             )
 
             # NOTE: list_orders_by_season Lambda data source REMOVED - replaced with VTL resolver
-
-            self.update_order_ds = self.api.add_lambda_data_source(
-                "UpdateOrderDS",
-                lambda_function=self.update_order_fn,
-            )
-
-            self.delete_order_ds = self.api.add_lambda_data_source(
-                "DeleteOrderDS",
-                lambda_function=self.delete_order_fn,
-            )
+            # NOTE: update_order, delete_order Lambda data sources REMOVED - replaced with pipeline resolvers
 
             self.request_season_report_ds = self.api.add_lambda_data_source(
                 "RequestSeasonReportDS",
@@ -867,6 +793,366 @@ class CdkStack(Stack):
 ## DeleteItem returns the deleted item (if returnValues is set) or empty
 ## We return true to indicate success
 true
+                """),
+            )
+
+            # ================================================================
+            # Pipeline Resolvers for Season and Order Operations
+            # ================================================================
+            # These replace Lambda functions with JS pipeline resolvers
+            # Note: Simplified auth - relies on Cognito authentication only
+            # Full share-based authorization would require additional pipeline functions
+            
+            # updateSeason Pipeline: GSI7 lookup → UpdateItem
+            lookup_season_fn = appsync.AppsyncFunction(
+                self,
+                "LookupSeasonFn",
+                name=f"LookupSeasonFn_{env_name}",
+                api=self.api,
+                data_source=self.dynamodb_datasource,
+                runtime=appsync.FunctionRuntime.JS_1_0_0,
+                code=appsync.Code.from_inline("""
+import { util } from '@aws-appsync/utils';
+
+export function request(ctx) {
+    const seasonId = ctx.args.seasonId || ctx.args.input.seasonId;
+    return {
+        operation: 'Query',
+        index: 'GSI7',
+        query: {
+            expression: 'seasonId = :seasonId',
+            expressionValues: util.dynamodb.toMapValues({ ':seasonId': seasonId })
+        },
+        limit: 1
+    };
+}
+
+export function response(ctx) {
+    if (ctx.error) {
+        util.error(ctx.error.message, ctx.error.type);
+    }
+    if (!ctx.result.items || ctx.result.items.length === 0) {
+        util.error('Season not found', 'NotFound');
+    }
+    // Store season in stash for next function
+    ctx.stash.season = ctx.result.items[0];
+    return ctx.result.items[0];
+}
+                """),
+            )
+
+            update_season_fn = appsync.AppsyncFunction(
+                self,
+                "UpdateSeasonFn",
+                name=f"UpdateSeasonFn_{env_name}",
+                api=self.api,
+                data_source=self.dynamodb_datasource,
+                runtime=appsync.FunctionRuntime.JS_1_0_0,
+                code=appsync.Code.from_inline("""
+import { util } from '@aws-appsync/utils';
+
+export function request(ctx) {
+    const season = ctx.stash.season;
+    const input = ctx.args.input || ctx.args;
+    
+    // Build update expression dynamically
+    const updates = [];
+    const exprValues = {};
+    const exprNames = {};
+    
+    if (input.name !== undefined) {
+        updates.push('#name = :name');
+        exprNames['#name'] = 'name';
+        exprValues[':name'] = input.name;
+    }
+    if (input.startDate !== undefined) {
+        updates.push('startDate = :startDate');
+        exprValues[':startDate'] = input.startDate;
+    }
+    if (input.endDate !== undefined) {
+        updates.push('endDate = :endDate');
+        exprValues[':endDate'] = input.endDate;
+    }
+    if (input.catalogId !== undefined) {
+        updates.push('catalogId = :catalogId');
+        exprValues[':catalogId'] = input.catalogId;
+    }
+    
+    // Always update updatedAt
+    updates.push('updatedAt = :updatedAt');
+    exprValues[':updatedAt'] = util.time.nowISO8601();
+    
+    if (updates.length === 0) {
+        return season; // No updates, return original
+    }
+    
+    const updateExpression = 'SET ' + updates.join(', ');
+    
+    return {
+        operation: 'UpdateItem',
+        key: util.dynamodb.toMapValues({ PK: season.PK, SK: season.SK }),
+        update: {
+            expression: updateExpression,
+            expressionNames: Object.keys(exprNames).length > 0 ? exprNames : undefined,
+            expressionValues: util.dynamodb.toMapValues(exprValues)
+        }
+    };
+}
+
+export function response(ctx) {
+    if (ctx.error) {
+        util.error(ctx.error.message, ctx.error.type);
+    }
+    return ctx.result;
+}
+                """),
+            )
+
+            # Create updateSeason pipeline resolver
+            self.api.create_resolver(
+                "UpdateSeasonPipelineResolverV2",
+                type_name="Mutation",
+                field_name="updateSeason",
+                runtime=appsync.FunctionRuntime.JS_1_0_0,
+                pipeline_config=[lookup_season_fn, update_season_fn],
+                code=appsync.Code.from_inline("""
+export function request(ctx) {
+    return {};
+}
+
+export function response(ctx) {
+    return ctx.prev.result;
+}
+                """),
+            )
+
+            # deleteSeason Pipeline: GSI7 lookup → DeleteItem
+            delete_season_fn = appsync.AppsyncFunction(
+                self,
+                "DeleteSeasonFn",
+                name=f"DeleteSeasonFn_{env_name}",
+                api=self.api,
+                data_source=self.dynamodb_datasource,
+                runtime=appsync.FunctionRuntime.JS_1_0_0,
+                code=appsync.Code.from_inline("""
+import { util } from '@aws-appsync/utils';
+
+export function request(ctx) {
+    const season = ctx.stash.season;
+    return {
+        operation: 'DeleteItem',
+        key: util.dynamodb.toMapValues({ PK: season.PK, SK: season.SK })
+    };
+}
+
+export function response(ctx) {
+    if (ctx.error) {
+        util.error(ctx.error.message, ctx.error.type);
+    }
+    return true;
+}
+                """),
+            )
+
+            # Create deleteSeason pipeline resolver (reuses lookup_season_fn)
+            self.api.create_resolver(
+                "DeleteSeasonPipelineResolverV2",
+                type_name="Mutation",
+                field_name="deleteSeason",
+                runtime=appsync.FunctionRuntime.JS_1_0_0,
+                pipeline_config=[lookup_season_fn, delete_season_fn],
+                code=appsync.Code.from_inline("""
+export function request(ctx) {
+    return {};
+}
+
+export function response(ctx) {
+    return ctx.prev.result;
+}
+                """),
+            )
+
+            # updateOrder Pipeline: GSI6 lookup → UpdateItem
+            lookup_order_fn = appsync.AppsyncFunction(
+                self,
+                "LookupOrderFn",
+                name=f"LookupOrderFn_{env_name}",
+                api=self.api,
+                data_source=self.dynamodb_datasource,
+                runtime=appsync.FunctionRuntime.JS_1_0_0,
+                code=appsync.Code.from_inline("""
+import { util } from '@aws-appsync/utils';
+
+export function request(ctx) {
+    const orderId = ctx.args.orderId || ctx.args.input.orderId;
+    return {
+        operation: 'Query',
+        index: 'GSI6',
+        query: {
+            expression: 'orderId = :orderId',
+            expressionValues: util.dynamodb.toMapValues({ ':orderId': orderId })
+        },
+        limit: 1
+    };
+}
+
+export function response(ctx) {
+    if (ctx.error) {
+        util.error(ctx.error.message, ctx.error.type);
+    }
+    if (!ctx.result.items || ctx.result.items.length === 0) {
+        util.error('Order not found', 'NotFound');
+    }
+    // Store order in stash for next function
+    ctx.stash.order = ctx.result.items[0];
+    return ctx.result.items[0];
+}
+                """),
+            )
+
+            update_order_fn = appsync.AppsyncFunction(
+                self,
+                "UpdateOrderFn",
+                name=f"UpdateOrderFn_{env_name}",
+                api=self.api,
+                data_source=self.dynamodb_datasource,
+                runtime=appsync.FunctionRuntime.JS_1_0_0,
+                code=appsync.Code.from_inline("""
+import { util } from '@aws-appsync/utils';
+
+export function request(ctx) {
+    const order = ctx.stash.order;
+    const input = ctx.args.input || ctx.args;
+    
+    // Build update expression dynamically
+    const updates = [];
+    const exprValues = {};
+    const exprNames = {};
+    
+    if (input.customerName !== undefined) {
+        updates.push('customerName = :customerName');
+        exprValues[':customerName'] = input.customerName;
+    }
+    if (input.customerPhone !== undefined) {
+        updates.push('customerPhone = :customerPhone');
+        exprValues[':customerPhone'] = input.customerPhone;
+    }
+    if (input.customerAddress !== undefined) {
+        updates.push('customerAddress = :customerAddress');
+        exprValues[':customerAddress'] = input.customerAddress;
+    }
+    if (input.paymentMethod !== undefined) {
+        updates.push('paymentMethod = :paymentMethod');
+        exprValues[':paymentMethod'] = input.paymentMethod;
+    }
+    if (input.totalAmount !== undefined) {
+        updates.push('totalAmount = :totalAmount');
+        exprValues[':totalAmount'] = input.totalAmount;
+    }
+    if (input.lineItems !== undefined) {
+        updates.push('lineItems = :lineItems');
+        exprValues[':lineItems'] = input.lineItems;
+    }
+    if (input.notes !== undefined) {
+        updates.push('notes = :notes');
+        exprValues[':notes'] = input.notes;
+    }
+    if (input.orderDate !== undefined) {
+        updates.push('orderDate = :orderDate');
+        exprValues[':orderDate'] = input.orderDate;
+    }
+    
+    // Always update updatedAt
+    updates.push('updatedAt = :updatedAt');
+    exprValues[':updatedAt'] = util.time.nowISO8601();
+    
+    if (updates.length === 0) {
+        return order; // No updates, return original
+    }
+    
+    const updateExpression = 'SET ' + updates.join(', ');
+    
+    return {
+        operation: 'UpdateItem',
+        key: util.dynamodb.toMapValues({ PK: order.PK, SK: order.SK }),
+        update: {
+            expression: updateExpression,
+            expressionNames: Object.keys(exprNames).length > 0 ? exprNames : undefined,
+            expressionValues: util.dynamodb.toMapValues(exprValues)
+        }
+    };
+}
+
+export function response(ctx) {
+    if (ctx.error) {
+        util.error(ctx.error.message, ctx.error.type);
+    }
+    return ctx.result;
+}
+                """),
+            )
+
+            # Create updateOrder pipeline resolver
+            self.api.create_resolver(
+                "UpdateOrderPipelineResolverV2",
+                type_name="Mutation",
+                field_name="updateOrder",
+                runtime=appsync.FunctionRuntime.JS_1_0_0,
+                pipeline_config=[lookup_order_fn, update_order_fn],
+                code=appsync.Code.from_inline("""
+export function request(ctx) {
+    return {};
+}
+
+export function response(ctx) {
+    return ctx.prev.result;
+}
+                """),
+            )
+
+            # deleteOrder Pipeline: GSI6 lookup → DeleteItem
+            delete_order_fn = appsync.AppsyncFunction(
+                self,
+                "DeleteOrderFn",
+                name=f"DeleteOrderFn_{env_name}",
+                api=self.api,
+                data_source=self.dynamodb_datasource,
+                runtime=appsync.FunctionRuntime.JS_1_0_0,
+                code=appsync.Code.from_inline("""
+import { util } from '@aws-appsync/utils';
+
+export function request(ctx) {
+    const order = ctx.stash.order;
+    return {
+        operation: 'DeleteItem',
+        key: util.dynamodb.toMapValues({ PK: order.PK, SK: order.SK })
+    };
+}
+
+export function response(ctx) {
+    if (ctx.error) {
+        util.error(ctx.error.message, ctx.error.type);
+    }
+    return true;
+}
+                """),
+            )
+
+            # Create deleteOrder pipeline resolver (reuses lookup_order_fn)
+            self.api.create_resolver(
+                "DeleteOrderPipelineResolverV2",
+                type_name="Mutation",
+                field_name="deleteOrder",
+                runtime=appsync.FunctionRuntime.JS_1_0_0,
+                pipeline_config=[lookup_order_fn, delete_order_fn],
+                code=appsync.Code.from_inline("""
+export function request(ctx) {
+    return {};
+}
+
+export function response(ctx) {
+    return ctx.prev.result;
+}
                 """),
             )
 
@@ -1644,12 +1930,7 @@ $util.toJson($ctx.result)
                 """),
             )
 
-            # updateSeason - Update an existing season (Lambda resolver)
-            self.update_season_ds.create_resolver(
-                "UpdateSeasonResolver",
-                type_name="Mutation",
-                field_name="updateSeason",
-            )
+            # NOTE: updateSeason Lambda resolver REMOVED - replaced with pipeline resolver above
 
             # createOrder - Create a new order for a season (Lambda resolver)
             self.create_order_ds.create_resolver(
@@ -1658,19 +1939,7 @@ $util.toJson($ctx.result)
                 field_name="createOrder",
             )
 
-            # updateOrder - Update an existing order (Lambda resolver)
-            self.update_order_ds.create_resolver(
-                "UpdateOrderResolver",
-                type_name="Mutation",
-                field_name="updateOrder",
-            )
-
-            # deleteOrder - Delete an order (Lambda resolver)
-            self.delete_order_ds.create_resolver(
-                "DeleteOrderResolver",
-                type_name="Mutation",
-                field_name="deleteOrder",
-            )
+            # NOTE: updateOrder, deleteOrder Lambda resolvers REMOVED - replaced with pipeline resolvers above
 
             # requestSeasonReport - Generate and download season report (Lambda resolver)
             self.request_season_report_ds.create_resolver(
