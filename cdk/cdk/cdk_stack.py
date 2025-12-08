@@ -22,7 +22,7 @@ import os
 class CdkStack(Stack):
     """
     Popcorn Sales Manager - Core Infrastructure Stack
-    
+
     Creates foundational resources:
     - DynamoDB table with single-table design
     - S3 buckets for static assets and exports
@@ -38,21 +38,21 @@ class CdkStack(Stack):
         super().__init__(scope, construct_id, **kwargs)
 
         self.env_name = env_name
-        
+
         # Load configuration from environment variables
         base_domain = os.getenv("BASE_DOMAIN", "kernelworx.app")
 
         # ====================================================================
         # Route 53 & DNS Configuration
         # ====================================================================
-        
+
         # Import existing hosted zone
         self.hosted_zone = route53.HostedZone.from_lookup(
             self,
             "HostedZone",
             domain_name=base_domain,
         )
-        
+
         # Define domain names based on environment
         if env_name == "prod":
             self.site_domain = base_domain
@@ -80,24 +80,18 @@ class CdkStack(Stack):
         # ====================================================================
         # DynamoDB Table - Single Table Design
         # ====================================================================
-        
+
         # Check if we should import existing table
         existing_table_name = self.node.try_get_context("table_name")
         if existing_table_name:
-            self.table = dynamodb.Table.from_table_name(
-                self, "PsmApp", existing_table_name
-            )
+            self.table = dynamodb.Table.from_table_name(self, "PsmApp", existing_table_name)
         else:
             self.table = dynamodb.Table(
                 self,
                 "PsmApp",
                 table_name=f"kernelworx-app-{env_name}",
-                partition_key=dynamodb.Attribute(
-                    name="PK", type=dynamodb.AttributeType.STRING
-                ),
-                sort_key=dynamodb.Attribute(
-                    name="SK", type=dynamodb.AttributeType.STRING
-                ),
+                partition_key=dynamodb.Attribute(name="PK", type=dynamodb.AttributeType.STRING),
+                sort_key=dynamodb.Attribute(name="SK", type=dynamodb.AttributeType.STRING),
                 billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
                 point_in_time_recovery_specification=dynamodb.PointInTimeRecoverySpecification(
                     point_in_time_recovery_enabled=True
@@ -109,36 +103,24 @@ class CdkStack(Stack):
             # GSI1: Shares by target account (for "My Shared Profiles" view)
             self.table.add_global_secondary_index(
                 index_name="GSI1",
-                partition_key=dynamodb.Attribute(
-                    name="GSI1PK", type=dynamodb.AttributeType.STRING
-                ),
-                sort_key=dynamodb.Attribute(
-                    name="GSI1SK", type=dynamodb.AttributeType.STRING
-                ),
+                partition_key=dynamodb.Attribute(name="GSI1PK", type=dynamodb.AttributeType.STRING),
+                sort_key=dynamodb.Attribute(name="GSI1SK", type=dynamodb.AttributeType.STRING),
                 projection_type=dynamodb.ProjectionType.ALL,
             )
 
             # GSI2: Orders by profile (for cross-season order queries)
             self.table.add_global_secondary_index(
                 index_name="GSI2",
-                partition_key=dynamodb.Attribute(
-                    name="GSI2PK", type=dynamodb.AttributeType.STRING
-                ),
-                sort_key=dynamodb.Attribute(
-                    name="GSI2SK", type=dynamodb.AttributeType.STRING
-                ),
+                partition_key=dynamodb.Attribute(name="GSI2PK", type=dynamodb.AttributeType.STRING),
+                sort_key=dynamodb.Attribute(name="GSI2SK", type=dynamodb.AttributeType.STRING),
                 projection_type=dynamodb.ProjectionType.ALL,
             )
 
             # GSI3: Catalog ownership and sharing (for catalog management)
             self.table.add_global_secondary_index(
                 index_name="GSI3",
-                partition_key=dynamodb.Attribute(
-                    name="GSI3PK", type=dynamodb.AttributeType.STRING
-                ),
-                sort_key=dynamodb.Attribute(
-                    name="GSI3SK", type=dynamodb.AttributeType.STRING
-                ),
+                partition_key=dynamodb.Attribute(name="GSI3PK", type=dynamodb.AttributeType.STRING),
+                sort_key=dynamodb.Attribute(name="GSI3SK", type=dynamodb.AttributeType.STRING),
                 projection_type=dynamodb.ProjectionType.ALL,
             )
 
@@ -175,18 +157,18 @@ class CdkStack(Stack):
                 partition_key=dynamodb.Attribute(
                     name="seasonId", type=dynamodb.AttributeType.STRING
                 ),
-                sort_key=dynamodb.Attribute(
-                    name="SK", type=dynamodb.AttributeType.STRING
-                ),
+                sort_key=dynamodb.Attribute(name="SK", type=dynamodb.AttributeType.STRING),
                 projection_type=dynamodb.ProjectionType.ALL,
             )
 
             # TTL configuration for invite expiration
             # ProfileInvite and CatalogShareInvite items have expiresAt attribute
             cfn_table = self.table.node.default_child
-            cfn_table.time_to_live_specification = dynamodb.CfnTable.TimeToLiveSpecificationProperty(
-                attribute_name="expiresAt",
-                enabled=True,
+            cfn_table.time_to_live_specification = (
+                dynamodb.CfnTable.TimeToLiveSpecificationProperty(
+                    attribute_name="expiresAt",
+                    enabled=True,
+                )
             )
 
         # ====================================================================
@@ -281,11 +263,11 @@ class CdkStack(Stack):
         # Create Lambda Layer for shared dependencies
         # This reduces function deployment size by sharing common packages
         lambda_layer_path = os.path.join(os.path.dirname(__file__), "..", "lambda-layer")
-        
+
         # Check if layer exists, if not create it
         if not os.path.exists(lambda_layer_path):
             os.makedirs(lambda_layer_path, exist_ok=True)
-            
+
         self.shared_layer = lambda_.LayerVersion(
             self,
             "SharedDependenciesLayer",
@@ -297,7 +279,7 @@ class CdkStack(Stack):
 
         # Use only the src directory for Lambda code (not the entire repo)
         lambda_code_path = os.path.join(os.path.dirname(__file__), "..", "..", "src")
-        
+
         lambda_code = lambda_.Code.from_asset(
             lambda_code_path,
             exclude=[
@@ -321,7 +303,7 @@ class CdkStack(Stack):
             role=self.lambda_execution_role,
             environment=lambda_env,
         )
-        
+
         self.redeem_profile_invite_fn = lambda_.Function(
             self,
             "RedeemProfileInviteFnV2",
@@ -354,6 +336,7 @@ class CdkStack(Stack):
         # NOTE: update_season, delete_season Lambdas REMOVED - replaced with JS pipeline resolvers
 
         # Order Operations Lambda Functions
+
         self.create_order_fn = lambda_.Function(
             self,
             "CreateOrderFnV2",
@@ -482,7 +465,7 @@ class CdkStack(Stack):
 
             # Configure social identity providers (optional - only create if credentials provided)
             supported_providers = [cognito.UserPoolClientIdentityProvider.COGNITO]
-            
+
             # Google OAuth (only if credentials provided)
             if os.environ.get("GOOGLE_CLIENT_ID") and os.environ.get("GOOGLE_CLIENT_SECRET"):
                 google_provider = cognito.UserPoolIdentityProviderGoogle(
@@ -582,22 +565,24 @@ class CdkStack(Stack):
                     domain_prefix=f"kernelworx-{env_name}",
                 ),
             )
-            
+
             # Set domain to use Managed Login (version 2) instead of Hosted UI (classic)
             # This enables the branding deployed via deploy-cognito-branding.sh
             cfn_domain = self.user_pool_domain.node.default_child
             cfn_domain.add_property_override("ManagedLoginVersion", 2)
-            
+
             # Cognito Hosted UI Customization
             # Note: CSS must be inline (no external files) and max 100KB
             # Read logo from assets
-            logo_path = os.path.join(os.path.dirname(__file__), "..", "assets", "cognito-logo-base64.txt")
+            logo_path = os.path.join(
+                os.path.dirname(__file__), "..", "assets", "cognito-logo-base64.txt"
+            )
             try:
                 with open(logo_path, "r") as f:
                     logo_base64 = f.read().strip()
             except FileNotFoundError:
                 logo_base64 = None  # Deploy without logo if file not found
-                
+
             # AWS Cognito has a very restrictive whitelist of allowed CSS classes
             # Only submit button appears to be reliably supported
             # Other customization (logo, fonts, COPPA warning) must be done via:
@@ -609,7 +594,7 @@ class CdkStack(Stack):
                     background-color: #1976d2;
                 }
             """
-            
+
             # Apply UI customization
             ui_customization = cognito.CfnUserPoolUICustomizationAttachment(
                 self,
@@ -618,7 +603,7 @@ class CdkStack(Stack):
                 client_id=self.user_pool_client.user_pool_client_id,
                 css=cognito_ui_css,
             )
-            
+
             # Note: Logo (ImageFile) must be added via AWS Console or AWS CLI after deployment
             # CDK L1 construct doesn't expose the ImageFile property correctly
             # To add logo: aws cognito-idp set-ui-customization --user-pool-id <pool-id> --client-id <client-id> --image-file fileb://cognito-logo.png
@@ -629,7 +614,7 @@ class CdkStack(Stack):
                     value=f"Logo file ready at cdk/assets/cognito-logo-base64.txt ({len(logo_base64)} chars)",
                     description="Use AWS CLI to upload: aws cognito-idp set-ui-customization",
                 )
-            
+
             # TODO: Re-enable custom domain after AWS account verification
             # self.user_pool_domain = self.user_pool.add_domain(
             #     "UserPoolDomain",
@@ -638,7 +623,7 @@ class CdkStack(Stack):
             #         certificate=self.certificate,
             #     ),
             # )
-            # 
+            #
             # # Route53 record for Cognito custom domain
             # route53.ARecord(
             #     self,
@@ -663,9 +648,7 @@ class CdkStack(Stack):
         # ====================================================================
 
         # Read GraphQL schema from file
-        schema_path = os.path.join(
-            os.path.dirname(__file__), "..", "schema", "schema.graphql"
-        )
+        schema_path = os.path.join(os.path.dirname(__file__), "..", "schema", "schema.graphql")
 
         # Check if we should import existing API
         existing_api_id = self.node.try_get_context("appsync_api_id")
@@ -711,17 +694,17 @@ class CdkStack(Stack):
                 "CreateProfileInviteDS",
                 lambda_function=self.create_profile_invite_fn,
             )
-            
+
             self.redeem_profile_invite_ds = self.api.add_lambda_data_source(
                 "RedeemProfileInviteDS",
                 lambda_function=self.redeem_profile_invite_fn,
             )
-            
+
             self.share_profile_direct_ds = self.api.add_lambda_data_source(
                 "ShareProfileDirectDS",
                 lambda_function=self.share_profile_direct_fn,
             )
-            
+
             # NOTE: revoke_share Lambda data source REMOVED - replaced with VTL resolver
             # NOTE: update_season, delete_season Lambda data sources REMOVED - replaced with pipeline resolvers
 
@@ -746,25 +729,24 @@ class CdkStack(Stack):
             )
 
             # Resolvers for profile sharing mutations
-            # createProfileInvite - Lambda resolver (JS resolver proved problematic)
             self.create_profile_invite_ds.create_resolver(
                 "CreateProfileInviteResolver",
                 type_name="Mutation",
                 field_name="createProfileInvite",
             )
-            
+
             self.redeem_profile_invite_ds.create_resolver(
                 "RedeemProfileInviteResolver",
                 type_name="Mutation",
                 field_name="redeemProfileInvite",
             )
-            
+
             self.share_profile_direct_ds.create_resolver(
                 "ShareProfileDirectResolver",
                 type_name="Mutation",
                 field_name="shareProfileDirect",
             )
-            
+
             # revokeShare - VTL DynamoDB resolver (replaced Lambda)
             # NOTE: This simplified version performs a direct delete.
             # Authorization is handled by AppSync auth mode (user must be authenticated)
@@ -773,7 +755,8 @@ class CdkStack(Stack):
                 "RevokeShareResolver",
                 type_name="Mutation",
                 field_name="revokeShare",
-                request_mapping_template=appsync.MappingTemplate.from_string("""
+                request_mapping_template=appsync.MappingTemplate.from_string(
+                    """
 ## revokeShare - Delete share for profile
 ## Input: profileId, targetAccountId
 ## The share SK format is: SHARE#<targetAccountId>
@@ -785,15 +768,18 @@ class CdkStack(Stack):
         "SK": $util.dynamodb.toDynamoDBJson("SHARE#" + $ctx.args.input.targetAccountId)
     }
 }
-                """),
-                response_mapping_template=appsync.MappingTemplate.from_string("""
+                """
+                ),
+                response_mapping_template=appsync.MappingTemplate.from_string(
+                    """
 #if($ctx.error)
     $util.error($ctx.error.message, $ctx.error.type)
 #end
 ## DeleteItem returns the deleted item (if returnValues is set) or empty
 ## We return true to indicate success
 true
-                """),
+                """
+                ),
             )
 
             # ================================================================
@@ -802,7 +788,7 @@ true
             # These replace Lambda functions with JS pipeline resolvers
             # Note: Simplified auth - relies on Cognito authentication only
             # Full share-based authorization would require additional pipeline functions
-            
+
             # updateSeason Pipeline: GSI7 lookup → UpdateItem
             lookup_season_fn = appsync.AppsyncFunction(
                 self,
@@ -811,7 +797,8 @@ true
                 api=self.api,
                 data_source=self.dynamodb_datasource,
                 runtime=appsync.FunctionRuntime.JS_1_0_0,
-                code=appsync.Code.from_inline("""
+                code=appsync.Code.from_inline(
+                    """
 import { util } from '@aws-appsync/utils';
 
 export function request(ctx) {
@@ -838,7 +825,8 @@ export function response(ctx) {
     ctx.stash.season = ctx.result.items[0];
     return ctx.result.items[0];
 }
-                """),
+                """
+                ),
             )
 
             update_season_fn = appsync.AppsyncFunction(
@@ -848,7 +836,8 @@ export function response(ctx) {
                 api=self.api,
                 data_source=self.dynamodb_datasource,
                 runtime=appsync.FunctionRuntime.JS_1_0_0,
-                code=appsync.Code.from_inline("""
+                code=appsync.Code.from_inline(
+                    """
 import { util } from '@aws-appsync/utils';
 
 export function request(ctx) {
@@ -905,7 +894,8 @@ export function response(ctx) {
     }
     return ctx.result;
 }
-                """),
+                """
+                ),
             )
 
             # Create updateSeason pipeline resolver
@@ -915,7 +905,8 @@ export function response(ctx) {
                 field_name="updateSeason",
                 runtime=appsync.FunctionRuntime.JS_1_0_0,
                 pipeline_config=[lookup_season_fn, update_season_fn],
-                code=appsync.Code.from_inline("""
+                code=appsync.Code.from_inline(
+                    """
 export function request(ctx) {
     return {};
 }
@@ -923,7 +914,8 @@ export function request(ctx) {
 export function response(ctx) {
     return ctx.prev.result;
 }
-                """),
+                """
+                ),
             )
 
             # deleteSeason Pipeline: GSI7 lookup → DeleteItem
@@ -934,7 +926,8 @@ export function response(ctx) {
                 api=self.api,
                 data_source=self.dynamodb_datasource,
                 runtime=appsync.FunctionRuntime.JS_1_0_0,
-                code=appsync.Code.from_inline("""
+                code=appsync.Code.from_inline(
+                    """
 import { util } from '@aws-appsync/utils';
 
 export function request(ctx) {
@@ -951,7 +944,8 @@ export function response(ctx) {
     }
     return true;
 }
-                """),
+                """
+                ),
             )
 
             # Create deleteSeason pipeline resolver (reuses lookup_season_fn)
@@ -961,7 +955,8 @@ export function response(ctx) {
                 field_name="deleteSeason",
                 runtime=appsync.FunctionRuntime.JS_1_0_0,
                 pipeline_config=[lookup_season_fn, delete_season_fn],
-                code=appsync.Code.from_inline("""
+                code=appsync.Code.from_inline(
+                    """
 export function request(ctx) {
     return {};
 }
@@ -969,7 +964,8 @@ export function request(ctx) {
 export function response(ctx) {
     return ctx.prev.result;
 }
-                """),
+                """
+                ),
             )
 
             # updateOrder Pipeline: GSI6 lookup → UpdateItem
@@ -980,7 +976,8 @@ export function response(ctx) {
                 api=self.api,
                 data_source=self.dynamodb_datasource,
                 runtime=appsync.FunctionRuntime.JS_1_0_0,
-                code=appsync.Code.from_inline("""
+                code=appsync.Code.from_inline(
+                    """
 import { util } from '@aws-appsync/utils';
 
 export function request(ctx) {
@@ -1007,7 +1004,8 @@ export function response(ctx) {
     ctx.stash.order = ctx.result.items[0];
     return ctx.result.items[0];
 }
-                """),
+                """
+                ),
             )
 
             update_order_fn = appsync.AppsyncFunction(
@@ -1017,7 +1015,8 @@ export function response(ctx) {
                 api=self.api,
                 data_source=self.dynamodb_datasource,
                 runtime=appsync.FunctionRuntime.JS_1_0_0,
-                code=appsync.Code.from_inline("""
+                code=appsync.Code.from_inline(
+                    """
 import { util } from '@aws-appsync/utils';
 
 export function request(ctx) {
@@ -1089,7 +1088,8 @@ export function response(ctx) {
     }
     return ctx.result;
 }
-                """),
+                """
+                ),
             )
 
             # Create updateOrder pipeline resolver
@@ -1099,7 +1099,8 @@ export function response(ctx) {
                 field_name="updateOrder",
                 runtime=appsync.FunctionRuntime.JS_1_0_0,
                 pipeline_config=[lookup_order_fn, update_order_fn],
-                code=appsync.Code.from_inline("""
+                code=appsync.Code.from_inline(
+                    """
 export function request(ctx) {
     return {};
 }
@@ -1107,7 +1108,8 @@ export function request(ctx) {
 export function response(ctx) {
     return ctx.prev.result;
 }
-                """),
+                """
+                ),
             )
 
             # deleteOrder Pipeline: GSI6 lookup → DeleteItem
@@ -1118,7 +1120,8 @@ export function response(ctx) {
                 api=self.api,
                 data_source=self.dynamodb_datasource,
                 runtime=appsync.FunctionRuntime.JS_1_0_0,
-                code=appsync.Code.from_inline("""
+                code=appsync.Code.from_inline(
+                    """
 import { util } from '@aws-appsync/utils';
 
 export function request(ctx) {
@@ -1135,7 +1138,8 @@ export function response(ctx) {
     }
     return true;
 }
-                """),
+                """
+                ),
             )
 
             # Create deleteOrder pipeline resolver (reuses lookup_order_fn)
@@ -1145,7 +1149,8 @@ export function response(ctx) {
                 field_name="deleteOrder",
                 runtime=appsync.FunctionRuntime.JS_1_0_0,
                 pipeline_config=[lookup_order_fn, delete_order_fn],
-                code=appsync.Code.from_inline("""
+                code=appsync.Code.from_inline(
+                    """
 export function request(ctx) {
     return {};
 }
@@ -1153,7 +1158,8 @@ export function request(ctx) {
 export function response(ctx) {
     return ctx.prev.result;
 }
-                """),
+                """
+                ),
             )
 
             # DynamoDB resolvers for queries
@@ -1162,7 +1168,8 @@ export function response(ctx) {
                 "GetMyAccountResolver",
                 type_name="Query",
                 field_name="getMyAccount",
-                request_mapping_template=appsync.MappingTemplate.from_string("""
+                request_mapping_template=appsync.MappingTemplate.from_string(
+                    """
 {
     "version": "2017-02-28",
     "operation": "GetItem",
@@ -1171,8 +1178,10 @@ export function response(ctx) {
         "SK": $util.dynamodb.toDynamoDBJson("METADATA")
     }
 }
-                """),
-                response_mapping_template=appsync.MappingTemplate.from_string("""
+                """
+                ),
+                response_mapping_template=appsync.MappingTemplate.from_string(
+                    """
 #if($ctx.error)
     $util.error($ctx.error.message, $ctx.error.type)
 #end
@@ -1180,7 +1189,8 @@ export function response(ctx) {
     $util.error("Account not found", "NotFound")
 #end
 $util.toJson($ctx.result)
-                """),
+                """
+                ),
             )
 
             # getProfile - Get a specific profile by ID (using GSI4)
@@ -1188,7 +1198,8 @@ $util.toJson($ctx.result)
                 "GetProfileResolver",
                 type_name="Query",
                 field_name="getProfile",
-                request_mapping_template=appsync.MappingTemplate.from_string("""
+                request_mapping_template=appsync.MappingTemplate.from_string(
+                    """
 {
     "version": "2017-02-28",
     "operation": "Query",
@@ -1200,8 +1211,10 @@ $util.toJson($ctx.result)
         }
     }
 }
-                """),
-                response_mapping_template=appsync.MappingTemplate.from_string("""
+                """
+                ),
+                response_mapping_template=appsync.MappingTemplate.from_string(
+                    """
 #if($ctx.error)
     $util.error($ctx.error.message, $ctx.error.type)
 #end
@@ -1218,7 +1231,8 @@ $util.toJson($ctx.result)
 #end
 ## TODO: Add authorization check here (owner or shared user)
 $util.toJson($profile)
-                """),
+                """
+                ),
             )
 
             # listMyProfiles - List profiles owned by current user
@@ -1226,7 +1240,8 @@ $util.toJson($profile)
                 "ListMyProfilesResolver",
                 type_name="Query",
                 field_name="listMyProfiles",
-                request_mapping_template=appsync.MappingTemplate.from_string("""
+                request_mapping_template=appsync.MappingTemplate.from_string(
+                    """
 {
     "version": "2017-02-28",
     "operation": "Query",
@@ -1238,13 +1253,16 @@ $util.toJson($profile)
         }
     }
 }
-                """),
-                response_mapping_template=appsync.MappingTemplate.from_string("""
+                """
+                ),
+                response_mapping_template=appsync.MappingTemplate.from_string(
+                    """
 #if($ctx.error)
     $util.error($ctx.error.message, $ctx.error.type)
 #end
 $util.toJson($ctx.result.items)
-                """),
+                """
+                ),
             )
 
             # listSharedProfiles - List profiles shared with current user (via GSI1)
@@ -1252,7 +1270,8 @@ $util.toJson($ctx.result.items)
                 "ListSharedProfilesResolver",
                 type_name="Query",
                 field_name="listSharedProfiles",
-                request_mapping_template=appsync.MappingTemplate.from_string("""
+                request_mapping_template=appsync.MappingTemplate.from_string(
+                    """
 {
     "version": "2017-02-28",
     "operation": "Query",
@@ -1265,15 +1284,18 @@ $util.toJson($ctx.result.items)
         }
     }
 }
-                """),
-                response_mapping_template=appsync.MappingTemplate.from_string("""
+                """
+                ),
+                response_mapping_template=appsync.MappingTemplate.from_string(
+                    """
 #if($ctx.error)
     $util.error($ctx.error.message, $ctx.error.type)
 #end
 ## Extract profile IDs from shares and return them
 ## In production, you'd batch-get the actual profiles
 $util.toJson($ctx.result.items)
-                """),
+                """
+                ),
             )
 
             # getSeason - Get a specific season by ID (using GSI7 with seasonId + SK)
@@ -1281,7 +1303,8 @@ $util.toJson($ctx.result.items)
                 "GetSeasonResolver",
                 type_name="Query",
                 field_name="getSeason",
-                request_mapping_template=appsync.MappingTemplate.from_string("""
+                request_mapping_template=appsync.MappingTemplate.from_string(
+                    """
 {
     "version": "2017-02-28",
     "operation": "Query",
@@ -1299,8 +1322,10 @@ $util.toJson($ctx.result.items)
     },
     "limit": 1
 }
-                """),
-                response_mapping_template=appsync.MappingTemplate.from_string("""
+                """
+                ),
+                response_mapping_template=appsync.MappingTemplate.from_string(
+                    """
 #if($ctx.error)
     $util.error($ctx.error.message, $ctx.error.type)
 #end
@@ -1309,7 +1334,8 @@ $util.toJson($ctx.result.items)
 #else
     $util.toJson($ctx.result.items[0])
 #end
-                """),
+                """
+                ),
             )
 
             # listSeasonsByProfile - List all seasons for a profile
@@ -1317,7 +1343,8 @@ $util.toJson($ctx.result.items)
                 "ListSeasonsByProfileResolver",
                 type_name="Query",
                 field_name="listSeasonsByProfile",
-                request_mapping_template=appsync.MappingTemplate.from_string("""
+                request_mapping_template=appsync.MappingTemplate.from_string(
+                    """
 {
     "version": "2017-02-28",
     "operation": "Query",
@@ -1329,13 +1356,16 @@ $util.toJson($ctx.result.items)
         }
     }
 }
-                """),
-                response_mapping_template=appsync.MappingTemplate.from_string("""
+                """
+                ),
+                response_mapping_template=appsync.MappingTemplate.from_string(
+                    """
 #if($ctx.error)
     $util.error($ctx.error.message, $ctx.error.type)
 #end
 $util.toJson($ctx.result.items)
-                """),
+                """
+                ),
             )
 
             # Season.catalog - Resolve catalog field for Season
@@ -1343,7 +1373,8 @@ $util.toJson($ctx.result.items)
                 "SeasonCatalogResolver",
                 type_name="Season",
                 field_name="catalog",
-                request_mapping_template=appsync.MappingTemplate.from_string("""
+                request_mapping_template=appsync.MappingTemplate.from_string(
+                    """
 {
     "version": "2017-02-28",
     "operation": "GetItem",
@@ -1352,13 +1383,16 @@ $util.toJson($ctx.result.items)
         "SK": $util.dynamodb.toDynamoDBJson($ctx.source.catalogId)
     }
 }
-                """),
-                response_mapping_template=appsync.MappingTemplate.from_string("""
+                """
+                ),
+                response_mapping_template=appsync.MappingTemplate.from_string(
+                    """
 #if($ctx.error)
     $util.error($ctx.error.message, $ctx.error.type)
 #end
 $util.toJson($ctx.result)
-                """),
+                """
+                ),
             )
 
             # Season.totalOrders - Count orders for this season
@@ -1366,7 +1400,8 @@ $util.toJson($ctx.result)
                 "SeasonTotalOrdersResolver",
                 type_name="Season",
                 field_name="totalOrders",
-                request_mapping_template=appsync.MappingTemplate.from_string("""
+                request_mapping_template=appsync.MappingTemplate.from_string(
+                    """
 {
     "version": "2017-02-28",
     "operation": "Query",
@@ -1378,13 +1413,16 @@ $util.toJson($ctx.result)
         }
     }
 }
-                """),
-                response_mapping_template=appsync.MappingTemplate.from_string("""
+                """
+                ),
+                response_mapping_template=appsync.MappingTemplate.from_string(
+                    """
 #if($ctx.error)
     $util.error($ctx.error.message, $ctx.error.type)
 #end
 $ctx.result.items.size()
-                """),
+                """
+                ),
             )
 
             # Season.totalRevenue - Sum order totals for this season
@@ -1392,7 +1430,8 @@ $ctx.result.items.size()
                 "SeasonTotalRevenueResolver",
                 type_name="Season",
                 field_name="totalRevenue",
-                request_mapping_template=appsync.MappingTemplate.from_string("""
+                request_mapping_template=appsync.MappingTemplate.from_string(
+                    """
 {
     "version": "2017-02-28",
     "operation": "Query",
@@ -1404,8 +1443,10 @@ $ctx.result.items.size()
         }
     }
 }
-                """),
-                response_mapping_template=appsync.MappingTemplate.from_string("""
+                """
+                ),
+                response_mapping_template=appsync.MappingTemplate.from_string(
+                    """
 #if($ctx.error)
     $util.error($ctx.error.message, $ctx.error.type)
 #end
@@ -1414,7 +1455,8 @@ $ctx.result.items.size()
     #set($total = $total + $order.totalAmount)
 #end
 $total
-                """),
+                """
+                ),
             )
 
             # SellerProfile.isOwner - Compute if caller is the owner
@@ -1423,7 +1465,8 @@ $total
                 type_name="SellerProfile",
                 field_name="isOwner",
                 runtime=appsync.FunctionRuntime.JS_1_0_0,
-                code=appsync.Code.from_inline("""
+                code=appsync.Code.from_inline(
+                    """
 export function request(ctx) {
     return {};
 }
@@ -1433,7 +1476,8 @@ export function response(ctx) {
     const ownerAccountId = ctx.source.ownerAccountId;
     return callerAccountId === ownerAccountId;
 }
-                """),
+                """
+                ),
             )
 
             # getOrder - Get a specific order by ID (using GSI6)
@@ -1441,7 +1485,8 @@ export function response(ctx) {
                 "GetOrderResolver",
                 type_name="Query",
                 field_name="getOrder",
-                request_mapping_template=appsync.MappingTemplate.from_string("""
+                request_mapping_template=appsync.MappingTemplate.from_string(
+                    """
 {
     "version": "2017-02-28",
     "operation": "Query",
@@ -1454,8 +1499,10 @@ export function response(ctx) {
     },
     "limit": 1
 }
-                """),
-                response_mapping_template=appsync.MappingTemplate.from_string("""
+                """
+                ),
+                response_mapping_template=appsync.MappingTemplate.from_string(
+                    """
 #if($ctx.error)
     $util.error($ctx.error.message, $ctx.error.type)
 #end
@@ -1464,7 +1511,8 @@ export function response(ctx) {
 #else
     $util.toJson($ctx.result.items[0])
 #end
-                """),
+                """
+                ),
             )
 
             # listOrdersBySeason - List all orders for a season (VTL DynamoDB resolver)
@@ -1473,7 +1521,8 @@ export function response(ctx) {
                 "ListOrdersBySeasonResolver",
                 type_name="Query",
                 field_name="listOrdersBySeason",
-                request_mapping_template=appsync.MappingTemplate.from_string("""
+                request_mapping_template=appsync.MappingTemplate.from_string(
+                    """
 {
     "version": "2017-02-28",
     "operation": "Query",
@@ -1485,13 +1534,16 @@ export function response(ctx) {
         }
     }
 }
-                """),
-                response_mapping_template=appsync.MappingTemplate.from_string("""
+                """
+                ),
+                response_mapping_template=appsync.MappingTemplate.from_string(
+                    """
 #if($ctx.error)
     $util.error($ctx.error.message, $ctx.error.type)
 #end
 $util.toJson($ctx.result.items)
-                """),
+                """
+                ),
             )
 
             # listOrdersByProfile - List all orders for a profile (across all seasons)
@@ -1499,7 +1551,8 @@ $util.toJson($ctx.result.items)
                 "ListOrdersByProfileResolver",
                 type_name="Query",
                 field_name="listOrdersByProfile",
-                request_mapping_template=appsync.MappingTemplate.from_string("""
+                request_mapping_template=appsync.MappingTemplate.from_string(
+                    """
 {
     "version": "2017-02-28",
     "operation": "Query",
@@ -1511,13 +1564,16 @@ $util.toJson($ctx.result.items)
         }
     }
 }
-                """),
-                response_mapping_template=appsync.MappingTemplate.from_string("""
+                """
+                ),
+                response_mapping_template=appsync.MappingTemplate.from_string(
+                    """
 #if($ctx.error)
     $util.error($ctx.error.message, $ctx.error.type)
 #end
 $util.toJson($ctx.result.items)
-                """),
+                """
+                ),
             )
 
             # listSharesByProfile - List all shares for a profile
@@ -1525,7 +1581,8 @@ $util.toJson($ctx.result.items)
                 "ListSharesByProfileResolver",
                 type_name="Query",
                 field_name="listSharesByProfile",
-                request_mapping_template=appsync.MappingTemplate.from_string("""
+                request_mapping_template=appsync.MappingTemplate.from_string(
+                    """
 {
     "version": "2017-02-28",
     "operation": "Query",
@@ -1537,13 +1594,16 @@ $util.toJson($ctx.result.items)
         }
     }
 }
-                """),
-                response_mapping_template=appsync.MappingTemplate.from_string("""
+                """
+                ),
+                response_mapping_template=appsync.MappingTemplate.from_string(
+                    """
 #if($ctx.error)
     $util.error($ctx.error.message, $ctx.error.type)
 #end
 $util.toJson($ctx.result.items)
-                """),
+                """
+                ),
             )
 
             # listInvitesByProfile - List all active invites for a profile
@@ -1551,7 +1611,8 @@ $util.toJson($ctx.result.items)
                 "ListInvitesByProfileResolver",
                 type_name="Query",
                 field_name="listInvitesByProfile",
-                request_mapping_template=appsync.MappingTemplate.from_string("""
+                request_mapping_template=appsync.MappingTemplate.from_string(
+                    """
 {
     "version": "2017-02-28",
     "operation": "Query",
@@ -1563,13 +1624,16 @@ $util.toJson($ctx.result.items)
         }
     }
 }
-                """),
-                response_mapping_template=appsync.MappingTemplate.from_string("""
+                """
+                ),
+                response_mapping_template=appsync.MappingTemplate.from_string(
+                    """
 #if($ctx.error)
     $util.error($ctx.error.message, $ctx.error.type)
 #end
 $util.toJson($ctx.result.items)
-                """),
+                """
+                ),
             )
 
             # getCatalog - Get a specific catalog by ID
@@ -1577,7 +1641,8 @@ $util.toJson($ctx.result.items)
                 "GetCatalogResolver",
                 type_name="Query",
                 field_name="getCatalog",
-                request_mapping_template=appsync.MappingTemplate.from_string("""
+                request_mapping_template=appsync.MappingTemplate.from_string(
+                    """
 {
     "version": "2017-02-28",
     "operation": "GetItem",
@@ -1586,13 +1651,16 @@ $util.toJson($ctx.result.items)
         "SK": $util.dynamodb.toDynamoDBJson($ctx.args.catalogId)
     }
 }
-                """),
-                response_mapping_template=appsync.MappingTemplate.from_string("""
+                """
+                ),
+                response_mapping_template=appsync.MappingTemplate.from_string(
+                    """
 #if($ctx.error)
     $util.error($ctx.error.message, $ctx.error.type)
 #end
 $util.toJson($ctx.result)
-                """),
+                """
+                ),
             )
 
             # listPublicCatalogs - List all public catalogs
@@ -1600,7 +1668,8 @@ $util.toJson($ctx.result)
                 "ListPublicCatalogsResolver",
                 type_name="Query",
                 field_name="listPublicCatalogs",
-                request_mapping_template=appsync.MappingTemplate.from_string("""
+                request_mapping_template=appsync.MappingTemplate.from_string(
+                    """
 {
     "version": "2017-02-28",
     "operation": "Query",
@@ -1613,13 +1682,16 @@ $util.toJson($ctx.result)
         }
     }
 }
-                """),
-                response_mapping_template=appsync.MappingTemplate.from_string("""
+                """
+                ),
+                response_mapping_template=appsync.MappingTemplate.from_string(
+                    """
 #if($ctx.error)
     $util.error($ctx.error.message, $ctx.error.type)
 #end
 $util.toJson($ctx.result.items)
-                """),
+                """
+                ),
             )
 
             # listMyCatalogs - List catalogs owned by current user
@@ -1627,7 +1699,8 @@ $util.toJson($ctx.result.items)
                 "ListMyCatalogsResolver",
                 type_name="Query",
                 field_name="listMyCatalogs",
-                request_mapping_template=appsync.MappingTemplate.from_string("""
+                request_mapping_template=appsync.MappingTemplate.from_string(
+                    """
 {
     "version": "2017-02-28",
     "operation": "Query",
@@ -1640,13 +1713,16 @@ $util.toJson($ctx.result.items)
         }
     }
 }
-                """),
-                response_mapping_template=appsync.MappingTemplate.from_string("""
+                """
+                ),
+                response_mapping_template=appsync.MappingTemplate.from_string(
+                    """
 #if($ctx.error)
     $util.error($ctx.error.message, $ctx.error.type)
 #end
 $util.toJson($ctx.result.items)
-                """),
+                """
+                ),
             )
 
             # ================================================================
@@ -1665,7 +1741,8 @@ $util.toJson($ctx.result.items)
                 "UpdateSellerProfileResolver",
                 type_name="Mutation",
                 field_name="updateSellerProfile",
-                request_mapping_template=appsync.MappingTemplate.from_string("""
+                request_mapping_template=appsync.MappingTemplate.from_string(
+                    """
 #set($now = $util.time.nowISO8601())
 {
     "version": "2017-02-28",
@@ -1688,8 +1765,10 @@ $util.toJson($ctx.result.items)
         }
     }
 }
-                """),
-                response_mapping_template=appsync.MappingTemplate.from_string("""
+                """
+                ),
+                response_mapping_template=appsync.MappingTemplate.from_string(
+                    """
 #if($ctx.error)
     #if($ctx.error.type == "DynamoDB:ConditionalCheckFailedException")
         $util.error("Profile not found or access denied", "Forbidden")
@@ -1698,7 +1777,8 @@ $util.toJson($ctx.result.items)
     #end
 #end
 $util.toJson($ctx.result)
-                """),
+                """
+                ),
             )
 
             # deleteSellerProfile - Delete a seller profile (owner only)
@@ -1706,7 +1786,8 @@ $util.toJson($ctx.result)
                 "DeleteSellerProfileResolver",
                 type_name="Mutation",
                 field_name="deleteSellerProfile",
-                request_mapping_template=appsync.MappingTemplate.from_string("""
+                request_mapping_template=appsync.MappingTemplate.from_string(
+                    """
 {
     "version": "2017-02-28",
     "operation": "DeleteItem",
@@ -1721,8 +1802,10 @@ $util.toJson($ctx.result)
         }
     }
 }
-                """),
-                response_mapping_template=appsync.MappingTemplate.from_string("""
+                """
+                ),
+                response_mapping_template=appsync.MappingTemplate.from_string(
+                    """
 #if($ctx.error)
     #if($ctx.error.type == "DynamoDB:ConditionalCheckFailedException")
         $util.error("Profile not found or access denied", "Forbidden")
@@ -1732,7 +1815,8 @@ $util.toJson($ctx.result)
 #end
 ## Return true if successfully deleted
 $util.toJson(true)
-                """),
+                """
+                ),
             )
 
             # createCatalog - Create a new catalog
@@ -1740,7 +1824,8 @@ $util.toJson(true)
                 "CreateCatalogResolver",
                 type_name="Mutation",
                 field_name="createCatalog",
-                request_mapping_template=appsync.MappingTemplate.from_string("""
+                request_mapping_template=appsync.MappingTemplate.from_string(
+                    """
 #set($catalogId = "CATALOG#$util.autoId()")
 #set($now = $util.time.nowISO8601())
 ## Add productId to each product
@@ -1783,13 +1868,16 @@ $util.toJson(true)
         "GSI3SK": $util.dynamodb.toDynamoDBJson($catalogId)
     }
 }
-                """),
-                response_mapping_template=appsync.MappingTemplate.from_string("""
+                """
+                ),
+                response_mapping_template=appsync.MappingTemplate.from_string(
+                    """
 #if($ctx.error)
     $util.error($ctx.error.message, $ctx.error.type)
 #end
 $util.toJson($ctx.result)
-                """),
+                """
+                ),
             )
 
             # updateCatalog - Update an existing catalog
@@ -1797,7 +1885,8 @@ $util.toJson($ctx.result)
                 "UpdateCatalogResolver",
                 type_name="Mutation",
                 field_name="updateCatalog",
-                request_mapping_template=appsync.MappingTemplate.from_string("""
+                request_mapping_template=appsync.MappingTemplate.from_string(
+                    """
 #set($now = $util.time.nowISO8601())
 ## Add productId to each product if not present
 #set($productsWithIds = [])
@@ -1847,8 +1936,10 @@ $util.toJson($ctx.result)
         }
     }
 }
-                """),
-                response_mapping_template=appsync.MappingTemplate.from_string("""
+                """
+                ),
+                response_mapping_template=appsync.MappingTemplate.from_string(
+                    """
 #if($ctx.error)
     #if($ctx.error.type == "DynamoDB:ConditionalCheckFailedException")
         $util.error("Catalog not found or access denied", "Forbidden")
@@ -1857,7 +1948,8 @@ $util.toJson($ctx.result)
     #end
 #end
 $util.toJson($ctx.result)
-                """),
+                """
+                ),
             )
 
             # deleteCatalog - Delete a catalog (owner only)
@@ -1865,7 +1957,8 @@ $util.toJson($ctx.result)
                 "DeleteCatalogResolver",
                 type_name="Mutation",
                 field_name="deleteCatalog",
-                request_mapping_template=appsync.MappingTemplate.from_string("""
+                request_mapping_template=appsync.MappingTemplate.from_string(
+                    """
 {
     "version": "2017-02-28",
     "operation": "DeleteItem",
@@ -1880,8 +1973,10 @@ $util.toJson($ctx.result)
         }
     }
 }
-                """),
-                response_mapping_template=appsync.MappingTemplate.from_string("""
+                """
+                ),
+                response_mapping_template=appsync.MappingTemplate.from_string(
+                    """
 #if($ctx.error)
     #if($ctx.error.type == "DynamoDB:ConditionalCheckFailedException")
         $util.error("Catalog not found or access denied", "Forbidden")
@@ -1890,7 +1985,8 @@ $util.toJson($ctx.result)
     #end
 #end
 $util.toJson(true)
-                """),
+                """
+                ),
             )
 
             # createSeason - Create a new season for a profile
@@ -1898,7 +1994,8 @@ $util.toJson(true)
                 "CreateSeasonResolver",
                 type_name="Mutation",
                 field_name="createSeason",
-                request_mapping_template=appsync.MappingTemplate.from_string("""
+                request_mapping_template=appsync.MappingTemplate.from_string(
+                    """
 #set($seasonId = "SEASON#" + $util.autoId())
 #set($now = $util.time.nowISO8601())
 {
@@ -1921,13 +2018,16 @@ $util.toJson(true)
         "updatedAt": $util.dynamodb.toDynamoDBJson($now)
     }
 }
-                """),
-                response_mapping_template=appsync.MappingTemplate.from_string("""
+                """
+                ),
+                response_mapping_template=appsync.MappingTemplate.from_string(
+                    """
 #if($ctx.error)
     $util.error($ctx.error.message, $ctx.error.type)
 #end
 $util.toJson($ctx.result)
-                """),
+                """
+                ),
             )
 
             # NOTE: updateSeason Lambda resolver REMOVED - replaced with pipeline resolver above
@@ -1982,7 +2082,7 @@ $util.toJson($ctx.result)
         # Error: "Your account must be verified before you can add new CloudFront resources"
         # Action Required: Contact AWS Support to verify account
         # Once verified, uncomment the code below to enable CloudFront with custom domain
-        
+
         # # Origin Access Identity for S3
         # self.origin_access_identity = cloudfront.OriginAccessIdentity(
         #     self, "OAI", comment="OAI for Popcorn Sales Manager SPA"
@@ -2035,5 +2135,3 @@ $util.toJson($ctx.result)
         #         targets.CloudFrontTarget(self.distribution)
         #     ),
         # )
-
-

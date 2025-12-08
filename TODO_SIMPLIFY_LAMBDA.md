@@ -6,33 +6,38 @@
 |-------|------|--------|-------|
 | **1.1** | `list-orders-by-season` → VTL | ✅ **DEPLOYED** | VTL resolver works, Lambda removed |
 | **1.2** | `revoke-share` → VTL | ✅ **DEPLOYED** | VTL DeleteItem resolver works, Lambda removed |
-| **1.3** | `create-invite` → JS | ⏸️ **DEFERRED** | JS resolver failed with cryptic errors; kept as Lambda |
+| **1.3** | `create-invite` → JS | ⏸️ **DEFERRED** | AppSync JS errors persist; too complex for current tooling |
 | **2.1** | `update-season` → Pipeline | ✅ **DEPLOYED** | GSI7 lookup + UpdateItem pipeline resolver |
 | **2.2** | `delete-order` → Pipeline | ✅ **DEPLOYED** | GSI6 lookup + DeleteItem pipeline resolver |
 | **2.3** | `update-order` → Pipeline | ✅ **DEPLOYED** | GSI6 lookup + UpdateItem pipeline resolver |
 | **2.4** | `delete-season` → Pipeline | ✅ **DEPLOYED** | GSI7 lookup + DeleteItem pipeline resolver |
-| 3.x | Complex refactoring | ⬜ Not started | redeem-invite, share-direct |
+| **3.1** | `create-order` → Pipeline | ⏸️ **DEFERRED** | Requires loops, product lookup, enrichment - too complex for JS |
+| **3.2** | `share-direct` → Pipeline | ⏸️ **DEFERRED** | Requires GSI8 on email field (schema change) |
+| **3.3** | `redeem-invite` → Pipeline | ⏸️ **DEFERRED** | Requires GSI on inviteCode OR keep Lambda |
+| **4.x** | Cleanup & Documentation | ✅ **COMPLETE** | Code cleaned, formatted, docs updated |
 
-**Last Updated**: December 2025 - Phase 2 deployed successfully  
+**Last Updated**: January 2025 - Phase 1, 2, and 4 complete; Phase 3 deferred  
 **Current Lambda Count**: 7 (down from 15; 53% reduction achieved)
-**Progress**: 6/14 items complete (43%)
+**Progress**: 6/10 items complete (60%); 4 items deferred as too complex
+
+### Deployment Success!
+
+All Phase 1 (except 1.3), Phase 2, and Phase 4 changes have been successfully deployed to AWS.
 
 ### Technical Challenges Discovered
 
-**Phase 1.3 (JS Resolver) Failure**:
+**Phase 1.3 & 3.1 (AppSync JS Limitations)**:
 - AppSync JS resolvers fail with unhelpful error: "The code contains one or more errors"
-- No line numbers, no specific error messages
-- Multiple debugging attempts failed (time utilities, imports, syntax)
-- **Mitigation**: Keep complex logic in Lambda until JS resolver debugging improves
+- No line numbers, no specific error messages, no debugging tools
+- Phase 1.3: Multiple attempts to implement invite code generation failed
+- Phase 3.1: create-order requires loops over products/line items, not supported well in AppSync JS
+- **Mitigation**: Keep complex business logic in Lambda until AppSync JS tooling improves
 
 **Phase 2 CloudFormation State Corruption** (RESOLVED):
 - CloudFormation stack retained phantom resolver metadata from previous rollback
 - Phantom resources: `ApiUpdateSeasonResolver52CB9A30`, `ApiUpdateOrderResolverFAB8542A`, `ApiDeleteOrderResolver9B0BE4E8`
 - **Resolution**: Exported CloudFormation template, removed 23 phantom resources, uploaded to S3, updated stack directly
 - **Result**: Pipeline resolvers deployed successfully after CloudFormation cleanup
-
-**Missing Handler Functions**:
-- ~~`create_order` Lambda references `handlers.order_operations.create_order` but function doesn't exist~~ ✅ FIXED - Function implemented and deployed
 
 **Test/Infrastructure Mismatch (Pre-existing)**:
 - Test conftest defines GSI5 with keys `GSI5PK`/`GSI5SK`
@@ -45,7 +50,10 @@
 
 ## Executive Summary
 
-The current implementation has **~13 Lambda functions** when **only 2-3 are truly necessary**. Most Lambda resolvers were created as shortcuts to avoid implementing proper VTL/JavaScript resolvers or AppSync Pipeline Resolvers. This document outlines the path to an 85%+ reduction in Lambda functions.
+The current implementation has **7 Lambda functions** (down from 15; **53% reduction**). Phase 1, 2, and 4 tasks are complete. Phase 3 tasks (create-order, share-direct, redeem-invite) are deferred as they require either:
+- Complex business logic unsuitable for AppSync JS resolvers (loops, enrichment)
+- Schema changes (adding GSI8 on email field)
+- Trade-off decisions (add GSI on inviteCode vs keep Lambda)
 
 ## Current Lambda Inventory
 
