@@ -13,6 +13,26 @@
 **Last Updated**: Phase 1 deployed on January 2025  
 **Current Lambda Count**: ~13 (down from 15)
 
+### Technical Challenges Discovered
+
+**Phase 1.3 (JS Resolver) Failure**:
+- AppSync JS resolvers fail with unhelpful error: "The code contains one or more errors"
+- No line numbers, no specific error messages
+- Multiple debugging attempts failed (time utilities, imports, syntax)
+- **Mitigation**: Keep complex logic in Lambda until JS resolver debugging improves
+
+**Phase 2 Authorization Complexity**:
+- All update/delete operations use `check_profile_access()` which checks:
+  1. Profile ownership (`ownerAccountId == caller`)
+  2. Share-based access (`SHARE#{callerId}` with appropriate permissions)
+- This requires 2+ DynamoDB operations per request
+- VTL cannot easily handle conditional branching based on query results
+- **Mitigation**: Consider owner-only VTL for admin operations, keep Lambda for shared access
+
+**Missing Handler Functions**:
+- `create_order` Lambda references `handlers.order_operations.create_order` but function doesn't exist
+- This is a pre-existing bug, not caused by simplification work
+
 ---
 
 ## Executive Summary
@@ -547,33 +567,34 @@ When migrating from Lambda to VTL/JS resolvers:
 
 ### Phase 1: Quick Wins (3 Lambdas → 0)
 
-- [x] **1.1 Remove `list-orders-by-season` Lambda** ✅ COMPLETED
+- [x] **1.1 Remove `list-orders-by-season` Lambda** ✅ DEPLOYED
   - [x] Replace Lambda resolver with VTL DynamoDB resolver in `cdk_stack.py`
   - [x] Remove `self.list_orders_by_season_fn` Lambda function definition
   - [x] Remove `self.list_orders_by_season_ds` Lambda data source
   - [x] Remove `list_orders_by_season` function from `src/handlers/order_operations.py`
   - [x] Delete corresponding unit tests (or mark as skipped)
-  - [ ] Deploy and verify via GraphQL query
+  - [x] Deploy and verify via GraphQL query
   - [x] Update this checklist
 
-- [x] **1.2 Replace `revoke-share` with VTL** ✅ COMPLETED
+- [x] **1.2 Replace `revoke-share` with VTL** ✅ DEPLOYED
   - [x] Replace Lambda resolver with VTL DeleteItem resolver in `cdk_stack.py`
   - [x] Remove `self.revoke_share_fn` Lambda function definition
   - [x] Remove `self.revoke_share_ds` Lambda data source
   - [x] Remove `revoke_share` function from `src/handlers/profile_sharing.py`
   - [x] Delete corresponding unit tests
-  - [ ] Deploy and verify via GraphQL mutation
+  - [x] Deploy and verify via GraphQL mutation
   - [x] Update this checklist
 
-- [x] **1.3 Replace `create-invite` with JS Resolver** ✅ COMPLETED
-  - [x] Replace Lambda resolver with JS resolver in `cdk_stack.py`
-  - [x] Remove `self.create_profile_invite_fn` Lambda function definition
-  - [x] Remove `self.create_profile_invite_ds` Lambda data source
-  - [x] Remove `create_profile_invite` function from `src/handlers/profile_sharing.py`
-  - [x] Delete corresponding unit tests
+- [ ] **1.3 Replace `create-invite` with JS Resolver** ⏸️ DEFERRED
+  - [ ] Replace Lambda resolver with JS resolver in `cdk_stack.py`
+  - [ ] Remove `self.create_profile_invite_fn` Lambda function definition
+  - [ ] Remove `self.create_profile_invite_ds` Lambda data source
+  - [ ] Remove `create_profile_invite` function from `src/handlers/profile_sharing.py`
+  - [ ] Delete corresponding unit tests
   - [ ] Deploy and verify invite creation works
   - [ ] Verify TTL expiration field is set correctly
-  - [x] Update this checklist
+  - [ ] Update this checklist
+  - **DEFERRED REASON**: JS resolver failed repeatedly with cryptic AppSync error "The code contains one or more errors". Attempted fixes: corrected time utilities, added imports, simplified code. All failed. Keeping as Lambda until AppSync JS debugging improves.
 
 ### Phase 2: Pipeline Resolvers (5 Lambdas → 0)
 
@@ -675,12 +696,15 @@ When migrating from Lambda to VTL/JS resolvers:
 
 | Phase | Items | Completed | Status |
 |-------|-------|-----------|--------|
-| Phase 1 | 3 | 3 | ✅ Complete (pending deploy) |
+| Phase 1 | 3 | 2 | ✅ 2/3 Deployed (1 deferred) |
 | Phase 2 | 5 | 0 | ⬜ Not Started |
 | Phase 3 | 2 | 0 | ⬜ Not Started |
 | Phase 4 | 4 | 0 | ⬜ Not Started |
-| **Total** | **14** | **3** | **21%** |
+| **Total** | **14** | **2** | **14%** |
 
 **Target**: Reduce from 15 Lambdas to 2-3 Lambdas (80%+ reduction)
 
-**Current Status**: Reduced from 15 Lambdas to 12 Lambdas (20% reduction achieved)
+**Current Status**: Reduced from 15 Lambdas to ~13 Lambdas (13% reduction achieved)
+- ✅ `listOrdersBySeason` → VTL resolver (DEPLOYED)
+- ✅ `revokeShare` → VTL resolver (DEPLOYED)  
+- ⏸️ `createProfileInvite` → JS resolver (DEFERRED - kept as Lambda)

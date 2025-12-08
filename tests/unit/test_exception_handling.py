@@ -8,7 +8,6 @@ import pytest
 from src.handlers.profile_sharing import (
     create_profile_invite,
     redeem_profile_invite,
-    revoke_share,
     share_profile_direct,
 )
 from src.utils.errors import AppError, ErrorCode
@@ -98,30 +97,4 @@ class TestExceptionHandling:
 
         assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
 
-    @patch("src.handlers.profile_sharing.get_table")
-    def test_revoke_share_database_error(
-        self,
-        mock_get_table: MagicMock,
-        sample_profile_id: str,
-        appsync_event: Dict[str, Any],
-        lambda_context: Any,
-        another_account_id: str,
-    ) -> None:
-        """Test that database errors are handled in revoke_share."""
-        # Mock table to raise exception
-        mock_table = MagicMock()
-        mock_table.get_item.side_effect = Exception("Database connection failed")
-        mock_get_table.return_value = mock_table
-
-        event = {
-            **appsync_event,
-            "arguments": {
-                "profileId": sample_profile_id,
-                "accountId": another_account_id,
-            },
-        }
-
-        with pytest.raises(AppError) as exc_info:
-            revoke_share(event, lambda_context)
-
-        assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+    # NOTE: test_revoke_share_database_error removed - revoke_share was migrated to VTL resolver

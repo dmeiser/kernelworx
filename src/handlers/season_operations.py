@@ -15,7 +15,7 @@ logger = get_logger(__name__)
 
 # Initialize DynamoDB client
 dynamodb = boto3.resource("dynamodb")
-table_name = os.environ.get("DYNAMODB_TABLE_NAME", "psm-app-dev")
+table_name = os.environ.get("TABLE_NAME", "psm-app-dev")
 table = dynamodb.Table(table_name)
 
 
