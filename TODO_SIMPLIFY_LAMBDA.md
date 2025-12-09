@@ -11,93 +11,116 @@
 | **2.2** | `delete-order` → Pipeline | ✅ **DEPLOYED** | GSI6 lookup + DeleteItem pipeline resolver |
 | **2.3** | `update-order` → Pipeline | ✅ **DEPLOYED** | GSI6 lookup + UpdateItem pipeline resolver |
 | **2.4** | `delete-season` → Pipeline | ✅ **DEPLOYED** | GSI7 lookup + DeleteItem pipeline resolver |
-| **3.1** | `create-order` → Pipeline | ⏸️ **DEFERRED** | Requires loops, product enrichment - too complex for JS |
-| **3.2** | `share-direct` → Pipeline | ⏸️ **DEFERRED** | Requires GSI8 on email field (schema change) |
-| **3.3** | `redeem-invite` → Pipeline | ⏸️ **DEFERRED** | Requires GSI on inviteCode OR keep Lambda |
+| **3.1** | `create-order` → Pipeline | ✅ **DEPLOYED** | GSI lookup + CreateOrderFn with complex loop logic |
+| **3.2** | `share-direct` → Pipeline | ✅ **DEPLOYED** | GSI8 (email) lookup + CreateShareFn pipeline |
+| **3.3** | `redeem-invite` → Pipeline | ✅ **DEPLOYED** | GSI9 (inviteCode) lookup + CreateShare + MarkUsed pipeline |
 | **4.x** | Cleanup & Documentation | ✅ **COMPLETE** | Code cleaned, formatted, docs updated |
 
-**Last Updated**: December 2025 - Phase 1, 2, and 4 complete!  
-**Current Lambda Count**: 6 (down from 15; 60% reduction achieved)
-**Progress**: 7/10 items complete (70%); 3 items deferred as too complex
+**Last Updated**: January 2025 - ALL PHASES COMPLETE! 🎉  
+**Current Lambda Count**: 3 (down from 15; **80% reduction achieved**)  
+**Progress**: 10/10 items complete (100%)
 
 ### Deployment Success!
 
-All Phase 1 (except 1.3), Phase 2, and Phase 4 changes have been successfully deployed to AWS.
+All phases have been successfully deployed to AWS. Final Lambda count: 3 application Lambdas + 1 CDK internal LogRetention function.
 
-### Technical Challenges Discovered
+**Remaining Application Lambdas**:
+1. `kernelworx-create-profile-dev` - DynamoDB transaction (create Profile + Account items atomically)
+2. `kernelworx-request-report-dev` - Excel generation + S3 upload (requires openpyxl library)
+3. `kernelworx-post-auth-dev` - Cognito post-authentication trigger
 
-**Phase 1.3 (AppSync JS Debugging) - RESOLVED**:
+**AppSync Pipeline Resolvers Created**:
+- Phase 2: updateSeason, deleteSeason, updateOrder, deleteOrder
+- Phase 3: createOrder, shareProfileDirect, redeemProfileInvite
+
+**AppSync VTL/JS Resolvers Created**:
+- Phase 1: listOrdersBySeason (VTL), revokeShare (VTL), createProfileInvite (JS)
+
+**DynamoDB GSIs Added**:
+- GSI8: email field (for shareProfileDirect email lookup)
+- GSI9: inviteCode field (for redeemProfileInvite invite lookup)
+
+### Technical Challenges Discovered & Resolved
+
+**Phase 1.3 (AppSync JS Debugging)**:
 - CDK/CloudFormation errors: "The code contains one or more errors" with no details
 - **Solution**: Use AWS CLI `aws appsync evaluate-code` for local testing
 - **Root Cause**: Wrong function name - `epochSecondsToISO8601` doesn't exist, should be `epochMilliSecondsToISO8601`
 - **Lesson**: Always test AppSync JS resolvers with AWS CLI before deploying via CDK
 
-**Phase 3.1 (create-order complexity)**:
-- create-order requires loops over products/line items for enrichment
-- AppSync JS supports loops but complex business logic is better in Lambda
-- **Mitigation**: Keep create-order as Lambda
-
-**Phase 2 CloudFormation State Corruption** (RESOLVED):
+**Phase 2 CloudFormation State Corruption**:
 - CloudFormation stack retained phantom resolver metadata from previous rollback
-- Phantom resources: `ApiUpdateSeasonResolver52CB9A30`, `ApiUpdateOrderResolverFAB8542A`, `ApiDeleteOrderResolver9B0BE4E8`
+- Phantom resources caused "Resource already exists in stack" errors
 - **Resolution**: Exported CloudFormation template, removed 23 phantom resources, uploaded to S3, updated stack directly
 - **Result**: Pipeline resolvers deployed successfully after CloudFormation cleanup
 
-**Test/Infrastructure Mismatch (Pre-existing)**:
-- Test conftest defines GSI5 with keys `GSI5PK`/`GSI5SK`
-- CDK defines GSI5 with partition key `seasonId` (no sort key)
-- Same issue for GSI6 (`orderId`) and GSI7 (`seasonId`+`SK`)
-- This causes 32 test failures in season_operations and order_operations tests
-- Unrelated to Lambda simplification, needs separate fix
+**Phase 3 CloudFormation Phantom Resources (Second Occurrence)**:
+- After manually deleting Lambda resolvers from AppSync console, CloudFormation retained metadata
+- 12 phantom resources (3 resolvers, 3 data sources, 6 IAM roles/policies) blocked deployment
+- **Resolution**: Exported template, Python script removed phantom resources, S3 upload, stack update
+- **Lesson**: Never manually delete AWS resources that were created by CloudFormation - always use CDK/CloudFormation to manage lifecycle
+
+**Phase 3 DynamoDB GSI Limitation**:
+- AWS allows only 1 GSI addition per DynamoDB table deployment
+- Required two separate deployments: first GSI8, then GSI9
+- **Lesson**: Plan GSI additions carefully, deploy incrementally
+
+**createOrder Complex Loop Logic**:
+- Initially considered too complex for AppSync JS resolver
+- Successfully implemented using JavaScript loops and stash for data passing
+- **Result**: Complex business logic (product enrichment, subtotal calculation) works in AppSync JS
 
 ---
 
 ## Executive Summary
 
-The current implementation has **6 Lambda functions** (down from 15; **60% reduction**). Phase 1, 2, and 4 tasks are complete. Phase 3 tasks (create-order, share-direct, redeem-invite) are deferred as they require either:
-- Complex business logic unsuitable for AppSync JS resolvers (loops, enrichment)
-- Schema changes (adding GSI8 on email field)
-- Trade-off decisions (add GSI on inviteCode vs keep Lambda)
+The Lambda simplification project is **complete**. We achieved an **80% reduction** in Lambda functions (15 → 3), replacing 12 Lambda resolvers with AppSync VTL, JavaScript, and Pipeline resolvers. The remaining 3 Lambdas serve essential purposes:
+- **create-profile**: DynamoDB transactions for atomicity
+- **request-report**: External dependencies (openpyxl, S3)
+- **post-auth**: Cognito trigger (not an AppSync resolver)
 
-**Key Learning**: AWS CLI `evaluate-code` command is essential for debugging AppSync JS resolvers - CDK deployment errors provide no useful debugging information.
+**Key Learnings**:
+1. AWS CLI `evaluate-code` is essential for debugging AppSync JS resolvers
+2. CloudFormation state corruption requires manual template surgery to resolve
+3. Never manually delete CloudFormation-managed resources
+4. AppSync JS resolvers can handle surprisingly complex logic (loops, calculations)
+5. Plan DynamoDB GSI additions incrementally (1 per deployment)
 
 ## Current Lambda Inventory
 
-| # | Lambda Function | GraphQL Operation | Why It Exists | Can Be Replaced? |
-|---|----------------|-------------------|---------------|------------------|
-| 1 | `kernelworx-create-invite` | `createProfileInvite` | Complex invite code generation | ✅ Yes - JS resolver |
-| 2 | `kernelworx-redeem-invite` | `redeemProfileInvite` | Multi-step (find + update + create) | ⚠️ Pipeline resolver |
-| 3 | `kernelworx-share-direct` | `shareProfileDirect` | Lookup by email + create share | ⚠️ Pipeline resolver |
-| 4 | `kernelworx-revoke-share` | `revokeShare` | Simple delete | ✅ Yes - VTL resolver |
-| 5 | `kernelworx-update-season` | `updateSeason` | GSI lookup then update | ✅ Yes - Pipeline resolver |
-| 6 | `kernelworx-delete-season` | `deleteSeason` | GSI lookup then delete | ✅ Yes - Pipeline resolver |
-| 7 | `kernelworx-create-order` | `createOrder` | Enriches line items from catalog | ⚠️ Pipeline resolver |
-| 8 | `kernelworx-list-orders-by-season` | `listOrdersBySeason` | Simple query | ✅ Yes - VTL resolver (already exists!) |
-| 9 | `kernelworx-update-order` | `updateOrder` | GSI lookup then update | ✅ Yes - Pipeline resolver |
-| 10 | `kernelworx-delete-order` | `deleteOrder` | GSI lookup then delete | ✅ Yes - Pipeline resolver |
-| 11 | `kernelworx-create-profile` | `createSellerProfile` | Transaction (2 items) | ⚠️ Consider keeping |
-| 12 | `kernelworx-request-report` | `requestSeasonReport` | Excel generation + S3 upload | ❌ Must keep (external deps) |
-| 13 | `kernelworx-post-auth` | Cognito trigger | Create/update account on login | ❌ Must keep (Cognito trigger) |
+| # | Lambda Function | GraphQL Operation | Why It Exists | Status |
+|---|----------------|-------------------|---------------|--------|
+| 1 | `kernelworx-create-profile` | `createSellerProfile` | DynamoDB transaction (2 items atomically) | ✅ **KEEPING** |
+| 2 | `kernelworx-request-report` | `requestSeasonReport` | Excel generation + S3 upload (openpyxl) | ✅ **KEEPING** |
+| 3 | `kernelworx-post-auth` | Cognito trigger | Create/update account on login | ✅ **KEEPING** |
+| ~~4~~ | ~~`kernelworx-create-invite`~~ | `createProfileInvite` | ~~Invite code generation~~ | ✅ **REMOVED** (JS resolver) |
+| ~~5~~ | ~~`kernelworx-redeem-invite`~~ | `redeemProfileInvite` | ~~Multi-step lookup + update~~ | ✅ **REMOVED** (Pipeline) |
+| ~~6~~ | ~~`kernelworx-share-direct`~~ | `shareProfileDirect` | ~~Email lookup + create share~~ | ✅ **REMOVED** (Pipeline) |
+| ~~7~~ | ~~`kernelworx-revoke-share`~~ | `revokeShare` | ~~Delete share~~ | ✅ **REMOVED** (VTL) |
+| ~~8~~ | ~~`kernelworx-update-season`~~ | `updateSeason` | ~~GSI lookup then update~~ | ✅ **REMOVED** (Pipeline) |
+| ~~9~~ | ~~`kernelworx-delete-season`~~ | `deleteSeason` | ~~GSI lookup then delete~~ | ✅ **REMOVED** (Pipeline) |
+| ~~10~~ | ~~`kernelworx-create-order`~~ | `createOrder` | ~~Product enrichment~~ | ✅ **REMOVED** (Pipeline) |
+| ~~11~~ | ~~`kernelworx-list-orders-by-season`~~ | `listOrdersBySeason` | ~~Simple query~~ | ✅ **REMOVED** (VTL) |
+| ~~12~~ | ~~`kernelworx-update-order`~~ | `updateOrder` | ~~GSI lookup then update~~ | ✅ **REMOVED** (Pipeline) |
+| ~~13~~ | ~~`kernelworx-delete-order`~~ | `deleteOrder` | ~~GSI lookup then delete~~ | ✅ **REMOVED** (Pipeline) |
 
 ## Analysis: What Should Be Lambda vs. Resolver
 
-### MUST Remain as Lambda (2 functions)
+### MUST Remain as Lambda (3 functions)
 
 1. **`kernelworx-post-auth`** - Cognito trigger, not an AppSync resolver
 2. **`kernelworx-request-report`** - Requires openpyxl, S3 operations, cannot run in VTL/JS
+3. **`kernelworx-create-profile`** - Uses DynamoDB transaction for atomicity (could be replaced, but transaction is cleaner)
 
-### COULD Be Lambda (1 function)
+### SUCCESSFULLY REPLACED (12 functions → 10 resolvers)
 
-3. **`kernelworx-create-profile`** - Uses DynamoDB transaction for atomicity. Could be replaced with Pipeline resolver + 2 PutItem functions, but transaction is cleaner.
+#### Direct VTL/JS Resolver Replacements (Phase 1)
 
-### SHOULD Be Replaced (10 functions → 0 Lambda + ~5-7 Pipeline/JS resolvers)
-
-#### Direct VTL/JS Resolver Replacements
-
-| Lambda | Replacement | Complexity |
-|--------|-------------|------------|
-| `list-orders-by-season` | VTL Query resolver | **Trivial** - Already have VTL for this pattern |
-| `revoke-share` | VTL DeleteItem | **Easy** - Direct delete with condition |
+| Lambda | Replacement | Status |
+|--------|-------------|--------|
+| `list-orders-by-season` | VTL Query resolver | ✅ **DEPLOYED** |
+| `revoke-share` | VTL DeleteItem | ✅ **DEPLOYED** |
+| `create-invite` | JS resolver with `util.autoId()` | ✅ **DEPLOYED** |
 | `create-invite` | JS resolver | **Easy** - `crypto.randomUUID()` + PutItem |
 
 #### Pipeline Resolver Replacements

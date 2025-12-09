@@ -171,15 +171,13 @@ class CdkStack(Stack):
             )
 
             # GSI9: Invite lookup by inviteCode (for redeem-invite pipeline resolver)
-            # NOTE: Temporarily commented out - DynamoDB allows only 1 GSI addition per deployment
-            # Will deploy in second deployment after GSI8 is created
-            # self.table.add_global_secondary_index(
-            #     index_name="GSI9",
-            #     partition_key=dynamodb.Attribute(
-            #         name="inviteCode", type=dynamodb.AttributeType.STRING
-            #     ),
-            #     projection_type=dynamodb.ProjectionType.ALL,
-            # )
+            self.table.add_global_secondary_index(
+                index_name="GSI9",
+                partition_key=dynamodb.Attribute(
+                    name="inviteCode", type=dynamodb.AttributeType.STRING
+                ),
+                projection_type=dynamodb.ProjectionType.ALL,
+            )
 
             # TTL configuration for invite expiration
             # ProfileInvite and CatalogShareInvite items have expiresAt attribute
@@ -1459,133 +1457,130 @@ export function response(ctx) {
             )
 
             # ================================================================
-            # redeemProfileInvite Pipeline - TEMPORARILY DISABLED
-            # Requires GSI9 which can only be added after GSI8 is deployed
-            # Will be uncommented in second deployment
+            # redeemProfileInvite Pipeline: Query GSI9 for invite → Create Share → Mark invite used
             # ================================================================
-            # # redeemProfileInvite Pipeline: Query GSI9 for invite → Create Share → Mark invite used
-            # lookup_invite_fn = appsync.AppsyncFunction(
-            #     self,
-            #     "LookupInviteFn",
-            #     name=f"LookupInviteFn_{env_name}",
-            #     api=self.api,
-            #     data_source=self.dynamodb_datasource,
-            #     runtime=appsync.FunctionRuntime.JS_1_0_0,
-            #     code=appsync.Code.from_inline(
-            #         """
-# import { util } from '@aws-appsync/utils';
-# 
-# export function request(ctx) {
-#     const inviteCode = ctx.args.input.inviteCode;
-#     return {
-#         operation: 'Query',
-#         index: 'GSI9',
-#         query: {
-#             expression: 'inviteCode = :inviteCode',
-#             expressionValues: util.dynamodb.toMapValues({ ':inviteCode': inviteCode })
-#         },
-#         limit: 1
-#     };
-# }
-# 
-# export function response(ctx) {
-#     if (ctx.error) {
-#         util.error(ctx.error.message, ctx.error.type);
-#     }
-#     if (!ctx.result.items || ctx.result.items.length === 0) {
-#         util.error('Invalid invite code', 'NotFound');
-#     }
-#     
-#     const invite = ctx.result.items[0];
-#     
-#     // Check if invite is already used
-#     if (invite.used) {
-#         util.error('Invite code has already been used', 'ConflictException');
-#     }
-#     
-#     // Check if invite is expired
-#     const now = util.time.nowEpochSeconds();
-#     if (invite.TTL && invite.TTL < now) {
-#         util.error('Invite code has expired', 'ConflictException');
-#     }
-#     
-#     ctx.stash.invite = invite;
-#     ctx.stash.targetAccountId = ctx.identity.sub;
-#     
-#     return invite;
-# }
-#         """
-#     ),
-# )
-# 
-# mark_invite_used_fn = appsync.AppsyncFunction(
-#     self,
-#     "MarkInviteUsedFn",
-#     name=f"MarkInviteUsedFn_{env_name}",
-#     api=self.api,
-#     data_source=self.dynamodb_datasource,
-#     runtime=appsync.FunctionRuntime.JS_1_0_0,
-#     code=appsync.Code.from_inline(
-#         """
-# import { util } from '@aws-appsync/utils';
-# 
-# export function request(ctx) {
-#     const invite = ctx.stash.invite;
-#     const now = util.time.nowISO8601();
-#     
-#     return {
-#         operation: 'UpdateItem',
-#         key: util.dynamodb.toMapValues({ PK: invite.PK, SK: invite.SK }),
-#         update: {
-#             expression: 'SET used = :used, usedBy = :usedBy, usedAt = :usedAt',
-#             expressionValues: util.dynamodb.toMapValues({
-#                 ':used': true,
-#                 ':usedBy': ctx.identity.sub,
-#                 ':usedAt': now
-#             })
-#         },
-#         condition: { expression: 'attribute_exists(PK) AND used = :false' },
-#         expressionValues: util.dynamodb.toMapValues({ ':false': false })
-#     };
-# }
-# 
-# export function response(ctx) {
-#     if (ctx.error) {
-#         if (ctx.error.type === 'DynamoDB:ConditionalCheckFailedException') {
-#             util.error('Invite has already been used', 'ConflictException');
-#         }
-#         util.error(ctx.error.message, ctx.error.type);
-#     }
-#     return ctx.prev.result;
-# }
-#         """
-#     ),
-# )
-# 
-# # Create redeemProfileInvite pipeline resolver (reuses create_share_fn)
-# self.api.create_resolver(
-#     "RedeemProfileInvitePipelineResolver",
-#     type_name="Mutation",
-#     field_name="redeemProfileInvite",
-#     runtime=appsync.FunctionRuntime.JS_1_0_0,
-#     pipeline_config=[lookup_invite_fn, create_share_fn, mark_invite_used_fn],
-#     code=appsync.Code.from_inline(
-#         """
-# export function request(ctx) {
-#     // Set profileId from invite for create_share_fn
-#     ctx.args.input = {
-#         profileId: ctx.stash.invite.profileId,
-#         permissions: ctx.stash.invite.permissions
-#     };
-#     return {};
-# }
-# 
-# export function response(ctx) {
-#     return ctx.prev.result;
-# }
-#         """
-#     ),
-# )
+            lookup_invite_fn = appsync.AppsyncFunction(
+                self,
+                "LookupInviteFn",
+                name=f"LookupInviteFn_{env_name}",
+                api=self.api,
+                data_source=self.dynamodb_datasource,
+                runtime=appsync.FunctionRuntime.JS_1_0_0,
+                code=appsync.Code.from_inline(
+                    """
+import { util } from '@aws-appsync/utils';
+
+export function request(ctx) {
+    const inviteCode = ctx.args.input.inviteCode;
+    return {
+        operation: 'Query',
+        index: 'GSI9',
+        query: {
+            expression: 'inviteCode = :inviteCode',
+            expressionValues: util.dynamodb.toMapValues({ ':inviteCode': inviteCode })
+        },
+        limit: 1
+    };
+}
+
+export function response(ctx) {
+    if (ctx.error) {
+        util.error(ctx.error.message, ctx.error.type);
+    }
+    if (!ctx.result.items || ctx.result.items.length === 0) {
+        util.error('Invalid invite code', 'NotFound');
+    }
+    
+    const invite = ctx.result.items[0];
+    
+    // Check if invite is already used
+    if (invite.used) {
+        util.error('Invite code has already been used', 'ConflictException');
+    }
+    
+    // Check if invite is expired
+    const now = util.time.nowEpochSeconds();
+    if (invite.TTL && invite.TTL < now) {
+        util.error('Invite code has expired', 'ConflictException');
+    }
+    
+    ctx.stash.invite = invite;
+    ctx.stash.targetAccountId = ctx.identity.sub;
+    
+    return invite;
+}
+        """
+                ),
+            )
+
+            mark_invite_used_fn = appsync.AppsyncFunction(
+                self,
+                "MarkInviteUsedFn",
+                name=f"MarkInviteUsedFn_{env_name}",
+                api=self.api,
+                data_source=self.dynamodb_datasource,
+                runtime=appsync.FunctionRuntime.JS_1_0_0,
+                code=appsync.Code.from_inline(
+                    """
+import { util } from '@aws-appsync/utils';
+
+export function request(ctx) {
+    const invite = ctx.stash.invite;
+    const now = util.time.nowISO8601();
+    
+    return {
+        operation: 'UpdateItem',
+        key: util.dynamodb.toMapValues({ PK: invite.PK, SK: invite.SK }),
+        update: {
+            expression: 'SET used = :used, usedBy = :usedBy, usedAt = :usedAt',
+            expressionValues: util.dynamodb.toMapValues({
+                ':used': true,
+                ':usedBy': ctx.identity.sub,
+                ':usedAt': now
+            })
+        },
+        condition: { expression: 'attribute_exists(PK) AND used = :false' },
+        expressionValues: util.dynamodb.toMapValues({ ':false': false })
+    };
+}
+
+export function response(ctx) {
+    if (ctx.error) {
+        if (ctx.error.type === 'DynamoDB:ConditionalCheckFailedException') {
+            util.error('Invite has already been used', 'ConflictException');
+        }
+        util.error(ctx.error.message, ctx.error.type);
+    }
+    return ctx.prev.result;
+}
+        """
+                ),
+            )
+
+            # Create redeemProfileInvite pipeline resolver (reuses create_share_fn)
+            self.api.create_resolver(
+                "RedeemProfileInvitePipelineResolver",
+                type_name="Mutation",
+                field_name="redeemProfileInvite",
+                runtime=appsync.FunctionRuntime.JS_1_0_0,
+                pipeline_config=[lookup_invite_fn, create_share_fn, mark_invite_used_fn],
+                code=appsync.Code.from_inline(
+                    """
+export function request(ctx) {
+    // Set profileId from invite for create_share_fn
+    ctx.args.input = {
+        profileId: ctx.stash.invite.profileId,
+        permissions: ctx.stash.invite.permissions
+    };
+    return {};
+}
+
+export function response(ctx) {
+    return ctx.prev.result;
+}
+        """
+                ),
+            )
 
             # DynamoDB resolvers for queries
             # getMyAccount - Get current user's account
