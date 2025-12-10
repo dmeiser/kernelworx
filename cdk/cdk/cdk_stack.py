@@ -262,6 +262,14 @@ class CdkStack(Stack):
 
         # Grant AppSync role access to DynamoDB table
         self.table.grant_read_write_data(self.appsync_service_role)
+        
+        # Grant AppSync role access to all GSI indexes (required for imported tables)
+        self.appsync_service_role.add_to_policy(
+            iam.PolicyStatement(
+                actions=["dynamodb:Query", "dynamodb:Scan"],
+                resources=[f"{self.table.table_arn}/index/*"],
+            )
+        )
 
         # ====================================================================
         # Lambda Functions
@@ -370,14 +378,43 @@ class CdkStack(Stack):
             self.user_pool = cognito.UserPool.from_user_pool_id(
                 self, "UserPool", existing_user_pool_id
             )
-            # For imported pools, also get the client if provided
+            # For imported pools, either import existing client or create new one
             existing_client_id = self.node.try_get_context("user_pool_client_id")
             if existing_client_id:
                 self.user_pool_client = cognito.UserPoolClient.from_user_pool_client_id(
                     self, "AppClient", existing_client_id
                 )
-            # Note: When importing without a client, we can't create user pool domain or outputs
-            # that reference client_id. Those resources will be skipped.
+            else:
+                # Create new client for imported user pool
+                self.user_pool_client = self.user_pool.add_client(
+                    "AppClient",
+                    user_pool_client_name="KernelWorx-Web",
+                    auth_flows=cognito.AuthFlow(
+                        user_srp=True,
+                        user_password=True,
+                    ),
+                    o_auth=cognito.OAuthSettings(
+                        flows=cognito.OAuthFlows(
+                            authorization_code_grant=True,
+                            implicit_code_grant=True,
+                        ),
+                        scopes=[
+                            cognito.OAuthScope.EMAIL,
+                            cognito.OAuthScope.OPENID,
+                            cognito.OAuthScope.PROFILE,
+                        ],
+                        callback_urls=[
+                            f"https://{self.site_domain}",
+                            "http://localhost:5173",
+                        ],
+                        logout_urls=[
+                            f"https://{self.site_domain}",
+                            "http://localhost:5173",
+                        ],
+                    ),
+                    supported_identity_providers=[cognito.UserPoolClientIdentityProvider.COGNITO],
+                    prevent_user_existence_errors=True,
+                )
         else:
             self.user_pool = cognito.UserPool(
                 self,
@@ -647,6 +684,14 @@ class CdkStack(Stack):
             self.dynamodb_datasource = self.api.add_dynamo_db_data_source(
                 "DynamoDBDataSource",
                 table=self.table,
+            )
+            
+            # Grant GSI permissions to the DynamoDB data source role
+            self.dynamodb_datasource.grant_principal.add_to_principal_policy(
+                iam.PolicyStatement(
+                    actions=["dynamodb:Query", "dynamodb:Scan"],
+                    resources=[f"{self.table.table_arn}/index/*"],
+                )
             )
 
             # NONE data source for computed fields
@@ -919,9 +964,17 @@ export function response(ctx) {
 import { util } from '@aws-appsync/utils';
 
 export function request(ctx) {
-    // For idempotent delete operations, if item not found (explicitly null stash), skip auth check
+    // For idempotent delete operations ONLY, if item explicitly set to null by lookup function, skip auth
     // This preserves idempotent delete behavior (item already gone = success)
-    if (ctx.stash && (ctx.stash.order === null || ctx.stash.season === null)) {
+    // Check the correct field based on which operation
+    const isDeleteOperation = ctx.info.fieldName === 'deleteOrder' || ctx.info.fieldName === 'deleteSeason';
+    const isDeletingOrder = ctx.info.fieldName === 'deleteOrder';
+    const isDeletingSeason = ctx.info.fieldName === 'deleteSeason';
+    
+    const itemNotFound = (isDeletingOrder && ctx.stash.order === null) || 
+                         (isDeletingSeason && ctx.stash.season === null);
+    
+    if (isDeleteOperation && itemNotFound) {
         ctx.stash.skipAuth = true;
         // Return no-op request (won't be used)
         return {
@@ -1083,6 +1136,174 @@ export function response(ctx) {
     
     // Share exists but only has READ permission - access denied
     util.error('Forbidden: Only profile owner or users with WRITE permission can perform this action (share has READ only, permissions: ' + JSON.stringify(share.permissions) + ')', 'Unauthorized');
+}
+                """
+                ),
+            )
+
+            # VerifyProfileReadAccessFn: Checks if caller can READ profile data (owner OR has any share)
+            # Used by: getSeason, listSeasonsByProfile
+            # Less restrictive than VerifyProfileWriteAccessFn - allows READ or WRITE shares
+            verify_profile_read_access_fn = appsync.AppsyncFunction(
+                self,
+                "VerifyProfileReadAccessFn",
+                name=f"VerifyProfileReadAccessFn_{env_name}",
+                api=self.api,
+                data_source=self.dynamodb_datasource,
+                runtime=appsync.FunctionRuntime.JS_1_0_0,
+                code=appsync.Code.from_inline(
+                    """
+import { util } from '@aws-appsync/utils';
+
+export function request(ctx) {
+    // If season not found, skip this function
+    if (ctx.stash.seasonNotFound) {
+        // Return a no-op read that won't affect anything
+        // We use the first valid key pattern we know exists: any METADATA item
+        return {
+            operation: 'GetItem',
+            key: util.dynamodb.toMapValues({ 
+                PK: 'ACCOUNT#' + ctx.identity.sub, 
+                SK: 'METADATA' 
+            })
+        };
+    }
+    
+    // Extract profileId from args or stash
+    let profileId = null;
+    
+    if (ctx.args.profileId) {
+        profileId = ctx.args.profileId;
+    } else if (ctx.stash && ctx.stash.season && ctx.stash.season.profileId) {
+        profileId = ctx.stash.season.profileId;
+    }
+    
+    if (!profileId) {
+        util.error('Profile ID not found in request', 'BadRequest');
+    }
+    
+    // Store profileId in stash for next function
+    ctx.stash.profileId = profileId;
+    
+    // Get profile metadata to check ownership
+    return {
+        operation: 'GetItem',
+        key: util.dynamodb.toMapValues({ PK: profileId, SK: 'METADATA' }),
+        consistentRead: true
+    };
+}
+
+export function response(ctx) {
+    // If season not found, pass through (will return null at end)
+    if (ctx.stash.seasonNotFound) {
+        ctx.stash.authorized = false;
+        return { authorized: false };
+    }
+    
+    if (ctx.error) {
+        util.error(ctx.error.message, ctx.error.type);
+    }
+    
+    const profile = ctx.result;
+    
+    if (!profile) {
+        // Profile doesn't exist - for getSeason, we'll return null later
+        // For listSeasonsByProfile, we'll return empty array
+        ctx.stash.profileNotFound = true;
+        ctx.stash.authorized = false;
+        return { authorized: false };
+    }
+    
+    // Check if caller is owner
+    const callerSub = ctx.identity.sub;
+    const profileOwner = profile.ownerAccountId;
+    
+    if (profileOwner === callerSub) {
+        ctx.stash.isOwner = true;
+        ctx.stash.authorized = true;
+        return { authorized: true };
+    }
+    
+    // Not owner - need to check for share (READ or WRITE)
+    ctx.stash.isOwner = false;
+    return profile;
+}
+                """
+                ),
+            )
+            
+            # CheckShareReadPermissionsFn: Checks if non-owner has READ or WRITE permission
+            # Used in conjunction with VerifyProfileReadAccessFn
+            check_share_read_permissions_fn = appsync.AppsyncFunction(
+                self,
+                "CheckShareReadPermissionsFn",
+                name=f"CheckShareReadPermissionsFn_{env_name}",
+                api=self.api,
+                data_source=self.dynamodb_datasource,
+                runtime=appsync.FunctionRuntime.JS_1_0_0,
+                code=appsync.Code.from_inline(
+                    """
+import { util } from '@aws-appsync/utils';
+
+export function request(ctx) {
+    // If already authorized (owner), profile not found, or season not found, skip
+    if (ctx.stash.authorized || ctx.stash.profileNotFound || ctx.stash.seasonNotFound) {
+        // Use a no-op read
+        return {
+            operation: 'GetItem',
+            key: util.dynamodb.toMapValues({ 
+                PK: 'ACCOUNT#' + ctx.identity.sub, 
+                SK: 'METADATA' 
+            })
+        };
+    }
+    
+    const profileId = ctx.stash.profileId;
+    
+    return {
+        operation: 'GetItem',
+        key: util.dynamodb.toMapValues({ 
+            PK: profileId, 
+            SK: 'SHARE#' + ctx.identity.sub 
+        }),
+        consistentRead: true
+    };
+}
+
+export function response(ctx) {
+    // If already authorized, profile not found, or season not found, pass through
+    if (ctx.stash.authorized || ctx.stash.profileNotFound || ctx.stash.seasonNotFound) {
+        return { authorized: ctx.stash.authorized };
+    }
+    
+    if (ctx.error) {
+        util.error(ctx.error.message, ctx.error.type);
+    }
+    
+    const share = ctx.result;
+    
+    // No share found - access denied
+    if (!share || !share.PK) {
+        ctx.stash.authorized = false;
+        return { authorized: false };
+    }
+    
+    // Share exists - check for READ or WRITE permission
+    if (!share.permissions || !Array.isArray(share.permissions)) {
+        ctx.stash.authorized = false;
+        return { authorized: false };
+    }
+    
+    // Has READ or WRITE permission - authorized
+    if (share.permissions.includes('READ') || share.permissions.includes('WRITE')) {
+        ctx.stash.authorized = true;
+        ctx.stash.share = share;
+        return { authorized: true };
+    }
+    
+    // Share exists but no valid permissions
+    ctx.stash.authorized = false;
+    return { authorized: false };
 }
                 """
                 ),
@@ -1411,17 +1632,17 @@ export function request(ctx) {
     
     // Get the season's catalogId from the order
     const order = ctx.stash.order;
-    const seasonId = order.seasonId;
+    const seasonId = order.seasonId;  // Already has SEASON# prefix
+    const profileId = order.profileId;  // Already has PROFILE# prefix
     
-    // Query GSI7 to get season
+    // Use GetItem to fetch season (we know the exact PK and SK)
+    // Season stored as: PK=profileId, SK=seasonId
     return {
-        operation: 'Query',
-        index: 'GSI7',
-        query: {
-            expression: 'seasonId = :seasonId',
-            expressionValues: util.dynamodb.toMapValues({ ':seasonId': seasonId })
-        },
-        limit: 1
+        operation: 'GetItem',
+        key: util.dynamodb.toMapValues({ 
+            PK: profileId,
+            SK: seasonId
+        })
     };
 }
 
@@ -1434,11 +1655,11 @@ export function response(ctx) {
         util.error(ctx.error.message, ctx.error.type);
     }
     
-    if (!ctx.result.items || ctx.result.items.length === 0) {
+    if (!ctx.result) {
         util.error('Season not found', 'NotFound');
     }
     
-    const season = ctx.result.items[0];
+    const season = ctx.result;
     const catalogId = season.catalogId;
     
     if (!catalogId) {
@@ -1474,9 +1695,10 @@ export function request(ctx) {
     }
     
     const catalogId = ctx.stash.catalogId;
+    // Catalogs are stored with PK="CATALOG", SK=catalogId
     return {
         operation: 'GetItem',
-        key: util.dynamodb.toMapValues({ PK: catalogId, SK: 'METADATA' })
+        key: util.dynamodb.toMapValues({ PK: 'CATALOG', SK: catalogId })
     };
 }
 
@@ -2371,7 +2593,7 @@ $util.toJson($ctx.result.items)
         "expression": "GSI1PK = :gsi1pk AND begins_with(GSI1SK, :gsi1sk)",
         "expressionValues": {
             ":gsi1pk": $util.dynamodb.toDynamoDBJson("ACCOUNT#$ctx.identity.sub"),
-            ":gsi1sk": $util.dynamodb.toDynamoDBJson("SHARE#")
+            ":gsi1sk": $util.dynamodb.toDynamoDBJson("PROFILE#")
         }
     }
 }
@@ -2389,72 +2611,194 @@ $util.toJson($ctx.result.items)
                 ),
             )
 
-            # getSeason - Get a specific season by ID (using GSI7 with seasonId + SK)
-            self.dynamodb_datasource.create_resolver(
-                "GetSeasonResolver",
-                type_name="Query",
-                field_name="getSeason",
-                request_mapping_template=appsync.MappingTemplate.from_string(
+            # getSeason - Get a specific season by ID with authorization
+            # Pipeline: QuerySeasonFn → VerifyProfileReadAccessFn → CheckShareReadPermissionsFn → ReturnSeasonFn
+            
+            # Step 1: Query season from GSI7
+            query_season_fn = appsync.AppsyncFunction(
+                self,
+                "QuerySeasonFn",
+                name=f"QuerySeasonFn_{env_name}",
+                api=self.api,
+                data_source=self.dynamodb_datasource,
+                runtime=appsync.FunctionRuntime.JS_1_0_0,
+                code=appsync.Code.from_inline(
                     """
-{
-    "version": "2017-02-28",
-    "operation": "Query",
-    "index": "GSI7",
-    "query": {
-        "expression": "#seasonId = :seasonId AND #sk = :sk",
-        "expressionNames": {
-            "#seasonId": "seasonId",
-            "#sk": "SK"
+import { util } from '@aws-appsync/utils';
+
+export function request(ctx) {
+    const seasonId = ctx.args.seasonId;
+    return {
+        operation: 'Query',
+        index: 'GSI7',
+        query: {
+            expression: 'seasonId = :seasonId AND SK = :sk',
+            expressionValues: util.dynamodb.toMapValues({ 
+                ':seasonId': seasonId,
+                ':sk': seasonId
+            })
         },
-        "expressionValues": {
-            ":seasonId": $util.dynamodb.toDynamoDBJson($ctx.args.seasonId),
-            ":sk": $util.dynamodb.toDynamoDBJson($ctx.args.seasonId)
-        }
-    },
-    "limit": 1
+        limit: 1
+    };
+}
+
+export function response(ctx) {
+    if (ctx.error) {
+        util.error(ctx.error.message, ctx.error.type);
+    }
+    
+    if (!ctx.result.items || ctx.result.items.length === 0) {
+        // Season not found - return null (auth check will be skipped)
+        ctx.stash.seasonNotFound = true;
+        return null;
+    }
+    
+    const season = ctx.result.items[0];
+    ctx.stash.season = season;
+    
+    return season;
 }
                 """
                 ),
-                response_mapping_template=appsync.MappingTemplate.from_string(
+            )
+            
+            # Step 4: Return season if authorized, null otherwise
+            return_season_fn = appsync.AppsyncFunction(
+                self,
+                "ReturnSeasonFn",
+                name=f"ReturnSeasonFn_{env_name}",
+                api=self.api,
+                data_source=self.none_datasource,
+                runtime=appsync.FunctionRuntime.JS_1_0_0,
+                code=appsync.Code.from_inline(
                     """
-#if($ctx.error)
-    $util.error($ctx.error.message, $ctx.error.type)
-#end
-#if($ctx.result.items.isEmpty())
-    $util.toJson(null)
-#else
-    $util.toJson($ctx.result.items[0])
-#end
+import { util } from '@aws-appsync/utils';
+
+export function request(ctx) {
+    // No-op request (using None data source)
+    return {};
+}
+
+export function response(ctx) {
+    if (ctx.error) {
+        util.error(ctx.error.message, ctx.error.type);
+    }
+    
+    // If season not found, return null
+    if (ctx.stash.seasonNotFound) {
+        return null;
+    }
+    
+    // If not authorized, return null (query permissions model - don't error)
+    if (!ctx.stash.authorized) {
+        return null;
+    }
+    
+    // Authorized - return the season
+    return ctx.stash.season;
+}
+                """
+                ),
+            )
+            
+            # getSeason Pipeline Resolver
+            self.api.create_resolver(
+                "GetSeasonResolver",
+                type_name="Query",
+                field_name="getSeason",
+                runtime=appsync.FunctionRuntime.JS_1_0_0,
+                pipeline_config=[
+                    query_season_fn,
+                    verify_profile_read_access_fn,
+                    check_share_read_permissions_fn,
+                    return_season_fn
+                ],
+                code=appsync.Code.from_inline(
+                    """
+export function request(ctx) {
+    return {};
+}
+
+export function response(ctx) {
+    return ctx.prev.result;
+}
                 """
                 ),
             )
 
-            # listSeasonsByProfile - List all seasons for a profile
-            self.dynamodb_datasource.create_resolver(
-                "ListSeasonsByProfileResolver",
-                type_name="Query",
-                field_name="listSeasonsByProfile",
-                request_mapping_template=appsync.MappingTemplate.from_string(
+            # listSeasonsByProfile - List all seasons for a profile with authorization
+            # Pipeline: VerifyProfileReadAccessFn → CheckShareReadPermissionsFn → QuerySeasonsFn
+            
+            # Step 3: Query seasons (only if authorized)
+            query_seasons_fn = appsync.AppsyncFunction(
+                self,
+                "QuerySeasonsFn",
+                name=f"QuerySeasonsFn_{env_name}",
+                api=self.api,
+                data_source=self.dynamodb_datasource,
+                runtime=appsync.FunctionRuntime.JS_1_0_0,
+                code=appsync.Code.from_inline(
                     """
-{
-    "version": "2017-02-28",
-    "operation": "Query",
-    "query": {
-        "expression": "PK = :pk AND begins_with(SK, :sk)",
-        "expressionValues": {
-            ":pk": $util.dynamodb.toDynamoDBJson($ctx.args.profileId),
-            ":sk": $util.dynamodb.toDynamoDBJson("SEASON#")
-        }
+import { util } from '@aws-appsync/utils';
+
+export function request(ctx) {
+    // If not authorized or profile not found, return no-op
+    if (!ctx.stash.authorized || ctx.stash.profileNotFound) {
+        return {
+            operation: 'GetItem',
+            key: util.dynamodb.toMapValues({ PK: 'NOOP', SK: 'NOOP' })
+        };
     }
+    
+    const profileId = ctx.args.profileId;
+    return {
+        operation: 'Query',
+        query: {
+            expression: 'PK = :pk AND begins_with(SK, :sk)',
+            expressionValues: util.dynamodb.toMapValues({ 
+                ':pk': profileId,
+                ':sk': 'SEASON#'
+            })
+        }
+    };
+}
+
+export function response(ctx) {
+    if (ctx.error) {
+        util.error(ctx.error.message, ctx.error.type);
+    }
+    
+    // If not authorized or profile not found, return empty array
+    if (!ctx.stash.authorized || ctx.stash.profileNotFound) {
+        return [];
+    }
+    
+    return ctx.result.items || [];
 }
                 """
                 ),
-                response_mapping_template=appsync.MappingTemplate.from_string(
+            )
+            
+            # listSeasonsByProfile Pipeline Resolver
+            self.api.create_resolver(
+                "ListSeasonsByProfileResolver",
+                type_name="Query",
+                field_name="listSeasonsByProfile",
+                runtime=appsync.FunctionRuntime.JS_1_0_0,
+                pipeline_config=[
+                    verify_profile_read_access_fn,
+                    check_share_read_permissions_fn,
+                    query_seasons_fn
+                ],
+                code=appsync.Code.from_inline(
                     """
-#if($ctx.error)
-    $util.error($ctx.error.message, $ctx.error.type)
-#end
-$util.toJson($ctx.result.items)
+export function request(ctx) {
+    return {};
+}
+
+export function response(ctx) {
+    return ctx.prev.result;
+}
                 """
                 ),
             )
@@ -3080,43 +3424,71 @@ $util.toJson(true)
                 ),
             )
 
-            # createSeason - Create a new season for a profile
-            self.dynamodb_datasource.create_resolver(
-                "CreateSeasonResolver",
-                type_name="Mutation",
-                field_name="createSeason",
-                request_mapping_template=appsync.MappingTemplate.from_string(
+            # createSeason - Create a new season for a profile (Pipeline with authorization)
+            create_season_fn = appsync.AppsyncFunction(
+                self,
+                "CreateSeasonFn",
+                name=f"CreateSeasonFn_{env_name}",
+                api=self.api,
+                data_source=self.dynamodb_datasource,
+                runtime=appsync.FunctionRuntime.JS_1_0_0,
+                code=appsync.Code.from_inline(
                     """
-#set($seasonId = "SEASON#" + $util.autoId())
-#set($now = $util.time.nowISO8601())
-{
-    "version": "2017-02-28",
-    "operation": "PutItem",
-    "key": {
-        "PK": $util.dynamodb.toDynamoDBJson($ctx.args.input.profileId),
-        "SK": $util.dynamodb.toDynamoDBJson($seasonId)
-    },
-    "attributeValues": {
-        "seasonId": $util.dynamodb.toDynamoDBJson($seasonId),
-        "profileId": $util.dynamodb.toDynamoDBJson($ctx.args.input.profileId),
-        "seasonName": $util.dynamodb.toDynamoDBJson($ctx.args.input.seasonName),
-        "startDate": $util.dynamodb.toDynamoDBJson($ctx.args.input.startDate),
-        #if($ctx.args.input.endDate)
-            "endDate": $util.dynamodb.toDynamoDBJson($ctx.args.input.endDate),
-        #end
-        "catalogId": $util.dynamodb.toDynamoDBJson($ctx.args.input.catalogId),
-        "createdAt": $util.dynamodb.toDynamoDBJson($now),
-        "updatedAt": $util.dynamodb.toDynamoDBJson($now)
+import { util } from '@aws-appsync/utils';
+
+export function request(ctx) {
+    const seasonId = 'SEASON#' + util.autoId();
+    const now = util.time.nowISO8601();
+    const input = ctx.args.input;
+    
+    const season = {
+        PK: input.profileId,
+        SK: seasonId,
+        seasonId: seasonId,
+        profileId: input.profileId,
+        seasonName: input.seasonName,
+        startDate: input.startDate,
+        catalogId: input.catalogId,
+        createdAt: now,
+        updatedAt: now
+    };
+    
+    if (input.endDate) {
+        season.endDate = input.endDate;
     }
+    
+    return {
+        operation: 'PutItem',
+        key: util.dynamodb.toMapValues({ PK: input.profileId, SK: seasonId }),
+        attributeValues: util.dynamodb.toMapValues(season)
+    };
+}
+
+export function response(ctx) {
+    if (ctx.error) {
+        util.error(ctx.error.message, ctx.error.type);
+    }
+    return ctx.result;
 }
                 """
                 ),
-                response_mapping_template=appsync.MappingTemplate.from_string(
+            )
+
+            self.api.create_resolver(
+                "CreateSeasonResolver",  # Keep same logical ID to replace old resolver
+                type_name="Mutation",
+                field_name="createSeason",
+                runtime=appsync.FunctionRuntime.JS_1_0_0,
+                pipeline_config=[verify_profile_write_access_fn, check_share_permissions_fn, create_season_fn],
+                code=appsync.Code.from_inline(
                     """
-#if($ctx.error)
-    $util.error($ctx.error.message, $ctx.error.type)
-#end
-$util.toJson($ctx.result)
+export function request(ctx) {
+    return {};
+}
+
+export function response(ctx) {
+    return ctx.prev.result;
+}
                 """
                 ),
             )

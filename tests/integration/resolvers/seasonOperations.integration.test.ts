@@ -361,7 +361,6 @@ describe('Season Operations Integration Tests', () => {
         seasonName: 'Protected Season',
         startDate: new Date().toISOString(),
         endDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-        goalAmount: 500.0,
       };
 
       const { data: createData } = await ownerClient.mutate({
@@ -396,7 +395,6 @@ describe('Season Operations Integration Tests', () => {
         seasonName: 'Protected For Delete',
         startDate: new Date().toISOString(),
         endDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-        goalAmount: 500.0,
       };
 
       const { data: createData } = await ownerClient.mutate({

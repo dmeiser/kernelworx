@@ -541,12 +541,10 @@ describe('Order Operations Integration Tests', () => {
   /**
    * Authorization Tests - Bug #13
    * 
-   * Status: Authorization code deployed but tests still failing.
-   * Readonly users can still create/update/delete orders despite authorization functions.
-   * Requires investigation into why VerifyProfileWriteAccessFn isn't blocking access.
+   * Status: FIXED - VerifyProfileWriteAccessFn now properly blocks readonly users
    */
   describe('createOrder authorization', () => {
-    test.skip('readonly user cannot create order (Bug #13: authorization not working)', async () => {
+    test('readonly user cannot create order', async () => {
       const input = {
         profileId: testProfileId,
         seasonId: testSeasonId,
