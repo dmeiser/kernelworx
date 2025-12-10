@@ -3133,35 +3133,31 @@ $util.toJson($ctx.result)
             )
 
             # Custom domain for AppSync API
-            # TEMPORARILY DISABLED: CNAME conflict with certificate validation record
-            # AppSync custom domain creation fails with "CNAME already exists" error
-            # The certificate validation CNAME for api.dev.kernelworx.app conflicts
-            # TODO: Investigate alternative approach or wait for AWS support resolution
-            # self.api_domain_name = appsync.CfnDomainName(
-            #     self,
-            #     "ApiDomainNameV3",  # V3 to ensure new resource creation
-            #     certificate_arn=self.certificate.certificate_arn,
-            #     domain_name=self.api_domain,
-            # )
+            self.api_domain_name = appsync.CfnDomainName(
+                self,
+                "ApiDomainName",
+                certificate_arn=self.certificate.certificate_arn,
+                domain_name=self.api_domain,
+            )
 
-            # # Associate custom domain with API
-            # self.api_domain_association = appsync.CfnDomainNameApiAssociation(
-            #     self,
-            #     "ApiDomainAssociationV3",  # V3 to match domain name
-            #     api_id=self.api.api_id,
-            #     domain_name=self.api_domain_name.attr_domain_name,
-            # )
-            # # Ensure domain exists before association
-            # self.api_domain_association.add_dependency(self.api_domain_name)
+            # Associate custom domain with API
+            self.api_domain_association = appsync.CfnDomainNameApiAssociation(
+                self,
+                "ApiDomainAssociation",
+                api_id=self.api.api_id,
+                domain_name=self.api_domain_name.attr_domain_name,
+            )
+            # Ensure domain exists before association
+            self.api_domain_association.add_dependency(self.api_domain_name)
 
-            # # Route53 record for AppSync custom domain
-            # route53.CnameRecord(
-            #     self,
-            #     "ApiDomainRecordV3",  # V3 to force replacement
-            #     zone=self.hosted_zone,
-            #     record_name=self.api_domain,
-            #     domain_name=self.api_domain_name.attr_app_sync_domain_name,
-            # )
+            # Route53 record for AppSync custom domain
+            route53.CnameRecord(
+                self,
+                "ApiDomainRecord",
+                zone=self.hosted_zone,
+                record_name=self.api_domain,
+                domain_name=self.api_domain_name.attr_app_sync_domain_name,
+            )
 
         # ====================================================================
         # CloudFront Distribution for SPA
