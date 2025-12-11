@@ -13,6 +13,10 @@ if TYPE_CHECKING:
     from mypy_boto3_dynamodb.service_resource import Table
 
 from .errors import AppError, ErrorCode
+from .logging import get_logger
+
+# Initialize logger
+logger = get_logger(__name__)
 
 # Initialize DynamoDB resource
 dynamodb = boto3.resource("dynamodb", endpoint_url=os.getenv("DYNAMODB_ENDPOINT"))
@@ -28,12 +32,12 @@ def check_profile_access(
     caller_account_id: str, profile_id: str, required_permission: str = "READ"
 ) -> bool:
     """
-    Check if caller has access to a profile.
+    Check if caller has access to profile.
 
     Args:
         caller_account_id: Cognito sub (Account ID) of the caller
         profile_id: Profile ID to check access for
-        required_permission: "READ" or "WRITE"
+        required_permission: "READ" or "WRITE" (case-insensitive)
 
     Returns:
         True if caller has access, False otherwise
@@ -41,6 +45,9 @@ def check_profile_access(
     Raises:
         AppError: If profile not found
     """
+    # Normalize required_permission to uppercase for consistent comparison
+    required_permission = required_permission.upper()
+    
     table = get_table()
 
     # Get profile
@@ -64,9 +71,19 @@ def check_profile_access(
 
         # Type assertion: permissions is a list of strings
         if isinstance(permissions, list):
-            if required_permission == "READ" and "READ" in permissions:
+            # Normalize permissions to uppercase for case-insensitive comparison
+            # Handle both native Python lists ["READ"] and raw DynamoDB format [{"S": "READ"}]
+            normalized_permissions = []
+            for perm in permissions:
+                if isinstance(perm, str):
+                    normalized_permissions.append(perm.upper())
+                elif isinstance(perm, dict) and "S" in perm:
+                    normalized_permissions.append(perm["S"].upper())
+            
+            # WRITE permission implicitly grants READ access
+            if required_permission == "READ" and ("READ" in normalized_permissions or "WRITE" in normalized_permissions):
                 return True
-            if required_permission == "WRITE" and "WRITE" in permissions:
+            if required_permission == "WRITE" and "WRITE" in normalized_permissions:
                 return True
 
     return False

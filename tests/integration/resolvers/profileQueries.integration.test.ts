@@ -1,3 +1,4 @@
+import '../setup.ts';
 import { describe, it, expect, beforeAll, afterEach } from 'vitest';
 import { ApolloClient, gql, HttpLink, InMemoryCache } from '@apollo/client';
 import { createAuthenticatedClient, AuthenticatedClientResult } from '../setup/apolloClient';

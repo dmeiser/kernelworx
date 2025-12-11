@@ -9,6 +9,7 @@ interface TestResource {
   seasonId?: string;
   orderId?: string;
   shareAccountId?: string;
+  catalogIds?: string[];
 }
 
 /**
@@ -16,7 +17,7 @@ interface TestResource {
  * Deletes resources in proper order to avoid orphaned data.
  */
 export async function cleanupTestData(resources: TestResource): Promise<void> {
-  const { profileId, seasonId, orderId, shareAccountId } = resources;
+  const { profileId, seasonId, orderId, shareAccountId, catalogIds } = resources;
 
   try {
     // Delete shares first
@@ -37,6 +38,13 @@ export async function cleanupTestData(resources: TestResource): Promise<void> {
     // Delete seasons
     if (profileId && seasonId) {
       await deleteItem(profileId, seasonId);
+    }
+
+    // Delete catalogs
+    if (catalogIds && catalogIds.length > 0) {
+      for (const catalogId of catalogIds) {
+        await deleteCatalog(catalogId);
+      }
     }
 
     // Delete profile metadata
@@ -73,6 +81,33 @@ async function deleteInvites(profileId: string): Promise<void> {
 }
 
 /**
+ * Delete catalog and its products from DynamoDB.
+ */
+async function deleteCatalog(catalogId: string): Promise<void> {
+  // Catalogs use PK=CATALOG#{catalogId}, SK=METADATA
+  await deleteItem(catalogId, 'METADATA');
+  
+  // Also delete all products (they use SK=PRODUCT#{productId})
+  const queryCommand = new QueryCommand({
+    TableName: tableName,
+    KeyConditionExpression: 'PK = :pk AND begins_with(SK, :sk)',
+    ExpressionAttributeValues: {
+      ':pk': { S: catalogId },
+      ':sk': { S: 'PRODUCT#' },
+    },
+  });
+
+  const result = await dynamoClient.send(queryCommand);
+  
+  if (result.Items) {
+    for (const item of result.Items) {
+      const sk = item.SK.S!;
+      await deleteItem(catalogId, sk);
+    }
+  }
+}
+
+/**
  * Delete single item from DynamoDB.
  */
 async function deleteItem(pk: string, sk: string): Promise<void> {
@@ -102,7 +137,7 @@ export const DELETE_PROFILE = gql`
  * Delete test profile via GraphQL (requires appropriate permissions).
  */
 export async function deleteTestProfile(
-  client: ApolloClient<any>,
+  client: ApolloClient,
   profileId: string
 ): Promise<void> {
   try {

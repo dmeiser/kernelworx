@@ -249,6 +249,14 @@ class CdkStack(Stack):
         # Grant Lambda role access to DynamoDB table
         self.table.grant_read_write_data(self.lambda_execution_role)
 
+        # Grant Lambda role access to all GSI indexes (required for queries)
+        self.lambda_execution_role.add_to_policy(
+            iam.PolicyStatement(
+                actions=["dynamodb:Query", "dynamodb:Scan"],
+                resources=[f"{self.table.table_arn}/index/*"],
+            )
+        )
+
         # Grant Lambda role access to exports bucket
         self.exports_bucket.grant_read_write(self.lambda_execution_role)
 
@@ -2952,6 +2960,7 @@ export function response(ctx) {
 
             # listOrdersBySeason - List all orders for a season (VTL DynamoDB resolver)
             # NOTE: Replaced Lambda with direct DynamoDB query for better performance
+            # FIXED Bug #25: Now queries GSI5 (seasonId index) and filters for ORDER# items
             self.dynamodb_datasource.create_resolver(
                 "ListOrdersBySeasonResolver",
                 type_name="Query",
@@ -2961,10 +2970,16 @@ export function response(ctx) {
 {
     "version": "2017-02-28",
     "operation": "Query",
+    "index": "GSI5",
     "query": {
-        "expression": "PK = :pk AND begins_with(SK, :sk)",
+        "expression": "seasonId = :seasonId",
         "expressionValues": {
-            ":pk": $util.dynamodb.toDynamoDBJson($ctx.args.seasonId),
+            ":seasonId": $util.dynamodb.toDynamoDBJson($ctx.args.seasonId)
+        }
+    },
+    "filter": {
+        "expression": "begins_with(SK, :sk)",
+        "expressionValues": {
             ":sk": $util.dynamodb.toDynamoDBJson("ORDER#")
         }
     }
@@ -2982,6 +2997,7 @@ $util.toJson($ctx.result.items)
             )
 
             # listOrdersByProfile - List all orders for a profile (across all seasons)
+            # FIXED Bug #26: Now queries main table (PK=profileId) instead of GSI2
             self.dynamodb_datasource.create_resolver(
                 "ListOrdersByProfileResolver",
                 type_name="Query",
@@ -2991,11 +3007,11 @@ $util.toJson($ctx.result.items)
 {
     "version": "2017-02-28",
     "operation": "Query",
-    "index": "GSI2",
     "query": {
-        "expression": "GSI2PK = :profileId",
+        "expression": "PK = :pk AND begins_with(SK, :sk)",
         "expressionValues": {
-            ":profileId": $util.dynamodb.toDynamoDBJson($ctx.args.profileId)
+            ":pk": $util.dynamodb.toDynamoDBJson($ctx.args.profileId),
+            ":sk": $util.dynamodb.toDynamoDBJson("ORDER#")
         }
     }
 }
@@ -3072,6 +3088,7 @@ $util.toJson($ctx.result.items)
             )
 
             # getCatalog - Get a specific catalog by ID
+            # FIXED Bug #20: Added authorization check (owner or public catalog)
             self.dynamodb_datasource.create_resolver(
                 "GetCatalogResolver",
                 type_name="Query",
@@ -3093,7 +3110,23 @@ $util.toJson($ctx.result.items)
 #if($ctx.error)
     $util.error($ctx.error.message, $ctx.error.type)
 #end
-$util.toJson($ctx.result)
+## If catalog not found, return null
+#if(!$ctx.result || $ctx.result.isEmpty())
+    $util.toJson(null)
+#else
+    ## Check authorization: Allow if catalog is public OR caller is owner
+    #set($catalog = $ctx.result)
+    #set($callerAccountId = $ctx.identity.sub)
+    #set($isPublic = $catalog.isPublic)
+    #set($isOwner = $catalog.ownerAccountId == $callerAccountId)
+    
+    #if($isPublic || $isOwner)
+        $util.toJson($catalog)
+    #else
+        ## Non-owner accessing private catalog: return null
+        $util.toJson(null)
+    #end
+#end
                 """
                 ),
             )
@@ -3261,6 +3294,10 @@ $util.toJson(true)
                 field_name="createCatalog",
                 request_mapping_template=appsync.MappingTemplate.from_string(
                     """
+## Validate products array is not empty
+#if($ctx.args.input.products.size() == 0)
+    $util.error("Products array cannot be empty", "ValidationException")
+#end
 #set($catalogId = "CATALOG#$util.autoId()")
 #set($now = $util.time.nowISO8601())
 ## Add productId to each product

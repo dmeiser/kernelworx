@@ -1,3 +1,4 @@
+import '../setup.ts';
 /**
  * Integration tests for getMyAccount resolver
  * Tests retrieval of current authenticated user's account information

@@ -50,15 +50,17 @@ Integration tests validate AppSync resolvers by making real GraphQL requests aga
 ## Running Tests
 
 ```bash
-# Run all integration tests
-npm run test:integration
+# Run all integration tests (from root directory)
+npx vitest run tests/integration/
 
 # Run specific test file
-npm run test:integration -- profileSharing.integration.test.ts
+npx vitest run tests/integration/resolvers/catalogCrud.integration.test.ts
 
-# Run with coverage
-npm run test:integration -- --coverage
+# Watch mode
+npx vitest tests/integration/
 ```
+
+**Note**: Environment variables are loaded from `.env` in the project root via the setup file.
 
 ## Test Structure
 

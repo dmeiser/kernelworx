@@ -1,3 +1,4 @@
+import '../setup.ts';
 /**
  * Integration tests for createSeason VTL resolver
  * 

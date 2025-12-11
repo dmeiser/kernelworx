@@ -120,6 +120,28 @@ class TestCheckProfileAccess:
 
         assert result is False
 
+    def test_user_with_write_only_has_read_access(
+        self,
+        dynamodb_table: Any,
+        sample_profile: Any,
+        sample_profile_id: str,
+        another_account_id: str,
+    ) -> None:
+        """Test that user with only WRITE permission also has READ access."""
+        # Create share with WRITE only (no READ)
+        dynamodb_table.put_item(
+            Item={
+                "PK": sample_profile_id,
+                "SK": f"SHARE#{another_account_id}",
+                "permissions": ["WRITE"],
+            }
+        )
+
+        # User should have READ access because WRITE grants READ
+        result = check_profile_access(another_account_id, sample_profile_id, "READ")
+
+        assert result is True
+
     def test_shared_user_with_write_has_access(
         self,
         dynamodb_table: Any,
@@ -139,6 +161,35 @@ class TestCheckProfileAccess:
 
         result = check_profile_access(another_account_id, sample_profile_id, "WRITE")
 
+        assert result is True
+
+    def test_case_insensitive_permission_check(
+        self,
+        dynamodb_table: Any,
+        sample_profile: Any,
+        sample_profile_id: str,
+        another_account_id: str,
+    ) -> None:
+        """Test that permission checks are case-insensitive."""
+        # Create share with READ permission
+        dynamodb_table.put_item(
+            Item={
+                "PK": sample_profile_id,
+                "SK": f"SHARE#{another_account_id}",
+                "permissions": ["READ"],
+            }
+        )
+
+        # Test lowercase "read"
+        result = check_profile_access(another_account_id, sample_profile_id, "read")
+        assert result is True
+
+        # Test mixed case "Read"
+        result = check_profile_access(another_account_id, sample_profile_id, "Read")
+        assert result is True
+
+        # Test uppercase "READ"
+        result = check_profile_access(another_account_id, sample_profile_id, "READ")
         assert result is True
 
     def test_user_without_share_denied(

@@ -3,6 +3,19 @@
  * Loads environment variables and validates required config.
  */
 
+import dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { beforeEach } from 'vitest';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// Load .env from project root
+dotenv.config({ path: path.resolve(__dirname, '../../.env') });
+
+// Set test timeout to 30 seconds for all tests (API calls are slow)
+beforeEach(() => {}, { timeout: 30000 });
+
 // Validate required environment variables
 const requiredEnvVars = [
   'TEST_USER_POOL_ID',

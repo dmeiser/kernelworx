@@ -14,9 +14,15 @@ import boto3
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill
 
-from ..utils.auth import check_profile_access
-from ..utils.errors import AppError, ErrorCode, handle_error
-from ..utils.logging import get_logger
+# Handle both Lambda (absolute) and unit test (relative) imports
+try:
+    from utils.auth import check_profile_access
+    from utils.errors import AppError, ErrorCode, handle_error
+    from utils.logging import get_logger
+except ModuleNotFoundError:
+    from ..utils.auth import check_profile_access  # type: ignore
+    from ..utils.errors import AppError, ErrorCode, handle_error  # type: ignore
+    from ..utils.logging import get_logger  # type: ignore
 
 # Initialize AWS clients
 dynamodb = boto3.resource("dynamodb", endpoint_url=os.getenv("DYNAMODB_ENDPOINT"))
@@ -132,16 +138,20 @@ def request_season_report(event: Dict[str, Any], context: Any) -> Dict[str, Any]
 
 
 def _get_season(table: Any, season_id: str) -> Dict[str, Any] | None:
-    """Get season by ID using direct GetItem (season PK/SK known from seasonId)."""
+    """Get season by ID using GSI5 (seasonId index)."""
     # Season ID format: SEASON#uuid
-    # Season is stored with PK=profileId, SK=seasonId
-    # But we don't know the profileId yet, so we need to parse it from the season item
-    # Actually, we need to use GSI2 which has seasonId
+    # Seasons are stored with PK=profileId, SK=seasonId
+    # They also have a seasonId attribute for GSI5 queries
+    # Note: GSI5 may return both the season AND orders for that season,
+    # so we filter by SK to get only the season row
     response = table.query(
-        IndexName="GSI2",
-        KeyConditionExpression="GSI2PK = :pk",
-        ExpressionAttributeValues={":pk": season_id},
-        Limit=1,
+        IndexName="GSI5",
+        KeyConditionExpression="seasonId = :season_id",
+        FilterExpression="begins_with(SK, :sk_prefix)",
+        ExpressionAttributeValues={
+            ":season_id": season_id,
+            ":sk_prefix": "SEASON#",
+        },
     )
 
     items = response.get("Items", [])
