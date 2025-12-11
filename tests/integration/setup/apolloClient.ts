@@ -84,42 +84,4 @@ export async function createAuthenticatedClient(
   };
 }
 
-/**
- * Create unauthenticated client (for testing public catalog access with API_KEY auth).
- */
-export function createUnauthenticatedClient(): ApolloClient<any> {
-  const endpoint = process.env.TEST_APPSYNC_ENDPOINT;
-  const apiKey = process.env.TEST_APPSYNC_API_KEY;
-  
-  if (!endpoint) {
-    throw new Error('TEST_APPSYNC_ENDPOINT environment variable not set');
-  }
-  
-  if (!apiKey) {
-    throw new Error('TEST_APPSYNC_API_KEY environment variable not set');
-  }
 
-  // Create HTTP link
-  const httpLink = new HttpLink({
-    uri: endpoint,
-  });
-
-  // Add API key header using setContext
-  const apiKeyLink = setContext((_, { headers }) => {
-    return {
-      headers: {
-        ...headers,
-        'x-api-key': apiKey,
-      },
-    };
-  });
-
-  return new ApolloClient({
-    link: apiKeyLink.concat(httpLink),
-    cache: new InMemoryCache(),
-    defaultOptions: {
-      query: { fetchPolicy: 'no-cache' },
-      mutate: { fetchPolicy: 'no-cache' },
-    },
-  });
-}

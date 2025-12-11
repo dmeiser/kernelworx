@@ -314,6 +314,11 @@ describe('Profile Query Operations Integration Tests', () => {
       });
       const profileId2 = data2.createSellerProfile.profileId;
 
+      // Wait for GSI eventual consistency (Bug #21 - known issue)
+      // GSI3 index can take 7-10 seconds to become consistent when creating multiple items
+      // This test creates TWO profiles, which may take longer to propagate to GSI
+      await new Promise(resolve => setTimeout(resolve, 10000));
+
       // Act
       const { data } = await ownerClient.query({
         query: LIST_MY_PROFILES,
@@ -353,6 +358,11 @@ describe('Profile Query Operations Integration Tests', () => {
         variables: { input: { sellerName: profileName } },
       });
       testProfileId = createData.createSellerProfile.profileId;
+
+      // Wait for GSI eventual consistency (Bug #21 - known issue)
+      // GSI3 index can take 5-7 seconds to become consistent
+      // This test is inherently flaky due to AWS DynamoDB GSI eventual consistency
+      await new Promise(resolve => setTimeout(resolve, 7000));
 
       // Act
       const { data } = await ownerClient.query({

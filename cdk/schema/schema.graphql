@@ -67,7 +67,7 @@ type Season {
   totalRevenue: Float
 }
 
-type Catalog @aws_cognito_user_pools @aws_api_key {
+type Catalog @aws_cognito_user_pools {
   catalogId: ID!
   catalogName: String!
   catalogType: CatalogType!
@@ -78,7 +78,7 @@ type Catalog @aws_cognito_user_pools @aws_api_key {
   updatedAt: AWSDateTime!
 }
 
-type Product @aws_cognito_user_pools @aws_api_key {
+type Product @aws_cognito_user_pools {
   productId: ID!
   productName: String!
   description: String
@@ -266,8 +266,8 @@ type Query {
   listSeasonsByProfile(profileId: ID!): [Season!]!
   
   # Catalog queries
-  getCatalog(catalogId: ID!): Catalog @aws_cognito_user_pools @aws_api_key
-  listPublicCatalogs: [Catalog!]! @aws_cognito_user_pools @aws_api_key
+  getCatalog(catalogId: ID!): Catalog @aws_cognito_user_pools
+  listPublicCatalogs: [Catalog!]! @aws_cognito_user_pools
   listMyCatalogs: [Catalog!]!
   
   # Order queries

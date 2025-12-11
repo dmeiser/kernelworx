@@ -391,7 +391,8 @@ describe('Share Query Operations Integration Tests', () => {
       
       const expiredInviteCode = 'EXPIRED999';
       const now = Math.floor(Date.now() / 1000);
-      const expiredTTL = now - (7 * 24 * 60 * 60); // Expired 7 days ago
+      const pastDate = now - (7 * 24 * 60 * 60); // Date 7 days ago
+      const futureTTL = now + (7 * 24 * 60 * 60); // TTL 7 days in future (so DynamoDB doesn't auto-delete)
       
       const putCommand = new PutItemCommand({
         TableName: tableName,
@@ -402,10 +403,10 @@ describe('Share Query Operations Integration Tests', () => {
           profileId: { S: testProfileId },
           permissions: { L: [{ S: 'READ' }] },
           createdBy: { S: 'test-account-id' },
-          createdAt: { S: new Date(expiredTTL * 1000).toISOString() },
-          expiresAt: { S: new Date(expiredTTL * 1000).toISOString() },
+          createdAt: { S: new Date(pastDate * 1000).toISOString() },
+          expiresAt: { S: new Date(pastDate * 1000).toISOString() }, // Expired date
           used: { BOOL: false },
-          TTL: { N: expiredTTL.toString() },
+          TTL: { N: futureTTL.toString() }, // Future TTL so item persists for test
         },
       });
       

@@ -680,11 +680,6 @@ class CdkStack(Stack):
                         authorization_type=appsync.AuthorizationType.USER_POOL,
                         user_pool_config=appsync.UserPoolConfig(user_pool=self.user_pool),
                     ),
-                    additional_authorization_modes=[
-                        appsync.AuthorizationMode(
-                            authorization_type=appsync.AuthorizationType.API_KEY,
-                        ),
-                    ],
                 ),
                 xray_enabled=True,
                 log_config=appsync.LogConfig(
@@ -693,11 +688,10 @@ class CdkStack(Stack):
                 ),
             )
             
-            # Output API key for integration tests
             CfnOutput(
                 self,
                 "AppSyncApiKey",
-                value=self.api.api_key or "NOT_AVAILABLE",
+                value="NOT_AVAILABLE",
                 description="AppSync API Key for unauthenticated access to public catalogs",
             )
 
@@ -3630,7 +3624,9 @@ export function response(ctx) {
     }
     
     const items = ctx.result.items || [];
-    const now = util.time.nowEpochSeconds();
+    // Get current time in ISO string format
+    const nowEpochMillis = util.time.nowEpochMilliSeconds();
+    const now = util.time.epochMilliSecondsToISO8601(nowEpochMillis);
     
     // Filter out expired and used invites
     const activeInvites = items.filter(invite => {
@@ -3639,9 +3635,8 @@ export function response(ctx) {
             return false;
         }
         
-        // Skip if expired (expiresAt is ISO string, need to parse)
-        // DynamoDB stores TTL as epoch seconds, check that field if available
-        if (invite.TTL && invite.TTL < now) {
+        // Skip if expired (expiresAt is ISO string)
+        if (invite.expiresAt && invite.expiresAt < now) {
             return false;
         }
         

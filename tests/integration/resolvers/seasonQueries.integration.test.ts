@@ -157,6 +157,10 @@ describe('Season Query Resolvers Integration Tests', () => {
         });
         testSeasonId = seasonData.createSeason.seasonId;
 
+        // Wait for GSI7 eventual consistency (Bug #21 - known issue)
+        // GSI indexes can take 5-7 seconds to become consistent
+        await new Promise(resolve => setTimeout(resolve, 7000));
+
         // Act: Query season
         const { data } = await ownerClient.query({
           query: GET_SEASON,
