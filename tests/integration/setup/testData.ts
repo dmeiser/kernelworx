@@ -156,3 +156,35 @@ export async function deleteTestProfile(
 export function getTestPrefix(): string {
   return `TEST-${Date.now()}`;
 }
+
+/**
+ * Wait for GSI eventual consistency by polling until item appears in query results.
+ * This is a workaround for Bug #21 (GSI eventual consistency).
+ * 
+ * @param queryFn - Function that executes the GSI query (returns array of items)
+ * @param checkFn - Function that checks if expected item(s) are in results
+ * @param maxAttempts - Maximum number of polling attempts (default: 20)
+ * @param delayMs - Delay between attempts in milliseconds (default: 1000)
+ * @returns The query result when item is found, or throws after max attempts
+ */
+export async function waitForGSIConsistency<T>(
+  queryFn: () => Promise<T[]>,
+  checkFn: (items: T[]) => boolean,
+  maxAttempts: number = 20,
+  delayMs: number = 1000
+): Promise<T[]> {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const items = await queryFn();
+    if (checkFn(items)) {
+      console.log(`✅ GSI consistency achieved after ${attempt} attempts (${attempt * delayMs}ms)`);
+      return items;
+    }
+    
+    if (attempt < maxAttempts) {
+      console.log(`⏳ GSI not consistent yet, attempt ${attempt}/${maxAttempts}, waiting ${delayMs}ms...`);
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+    }
+  }
+  
+  throw new Error(`GSI consistency timeout after ${maxAttempts} attempts (${maxAttempts * delayMs}ms)`);
+}

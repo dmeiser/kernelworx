@@ -1318,5 +1318,59 @@ describe('Profile Sharing Integration Tests', () => {
       // Cleanup
       await cleanupTestData({ profileId });
     });
+
+    it('concurrent revocations of same share are idempotent', async () => {
+      // Arrange: Create profile and share
+      const { data: profileData } = await ownerClient.mutate({
+        mutation: CREATE_PROFILE,
+        variables: { input: { sellerName: `${getTestPrefix()}-ConcurrentRevoke` } },
+      });
+      const profileId = profileData.createSellerProfile.profileId;
+
+      await ownerClient.mutate({
+        mutation: SHARE_DIRECT,
+        variables: {
+          input: {
+            profileId,
+            targetAccountEmail: contributorEmail,
+            permissions: ['READ'],
+          },
+        },
+      });
+
+      // Act: Issue two concurrent revoke requests for the same share
+      const revokePromise1 = ownerClient.mutate({
+        mutation: REVOKE_SHARE,
+        variables: {
+          input: {
+            profileId,
+            targetAccountId: contributorAccountId,
+          },
+        },
+      });
+
+      const revokePromise2 = ownerClient.mutate({
+        mutation: REVOKE_SHARE,
+        variables: {
+          input: {
+            profileId,
+            targetAccountId: contributorAccountId,
+          },
+        },
+      });
+
+      // Wait for both to complete
+      const [result1, result2] = await Promise.all([revokePromise1, revokePromise2]);
+
+      // Assert: Both should succeed (idempotent behavior)
+      expect(result1.data.revokeShare).toBe(true);
+      expect(result2.data.revokeShare).toBe(true);
+
+      // Cleanup
+      await cleanupTestData({
+        profileId,
+        shareAccountId: contributorAccountId,
+      });
+    });
   });
 });

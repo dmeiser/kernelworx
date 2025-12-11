@@ -1,8 +1,9 @@
 import '../setup.ts';
-import { describe, it, expect, beforeAll, afterEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { ApolloClient, gql, HttpLink, InMemoryCache } from '@apollo/client';
 import { createAuthenticatedClient, AuthenticatedClientResult } from '../setup/apolloClient';
-import { cleanupTestData, getTestPrefix } from '../setup/testData';
+import { getTestPrefix, waitForGSIConsistency } from '../setup/testData';
+import { trackResource, cleanupAllTrackedResources } from '../setup/resourceTracker';
 
 // GraphQL Mutations (for test setup)
 const CREATE_PROFILE = gql`
@@ -68,13 +69,14 @@ const LIST_SHARED_PROFILES = gql`
 `;
 
 describe('Profile Query Operations Integration Tests', () => {
+  const SUITE_ID = 'profile-queries';
+  
   let ownerClient: ApolloClient<any>;
   let contributorClient: ApolloClient<any>;
   let readonlyClient: ApolloClient<any>;
   let ownerAccountId: string;
   let contributorAccountId: string;
   let contributorEmail: string;
-  let testProfileId: string;
 
   // Helper to create unauthenticated client
   const createUnauthenticatedClient = () => {
@@ -100,14 +102,8 @@ describe('Profile Query Operations Integration Tests', () => {
     contributorEmail = contributorAuth.email;
   });
 
-  afterEach(async () => {
-    // Clean up test data after each test
-    if (testProfileId) {
-      await cleanupTestData({
-        profileId: testProfileId,
-      });
-      testProfileId = '';
-    }
+  afterAll(async () => {
+    await cleanupAllTrackedResources(SUITE_ID);
   });
 
   describe('getProfile', () => {
@@ -297,6 +293,8 @@ describe('Profile Query Operations Integration Tests', () => {
   });
 
   describe('listMyProfiles', () => {
+    // NOTE: This test may take 60-120+ seconds due to GSI eventual consistency issues (Bug #21)
+    // when the DynamoDB table contains thousands of test items from previous runs
     it('returns all profiles owned by user', async () => {
       // Arrange: Create multiple profiles
       const profileName1 = `${getTestPrefix()}-Profile1`;
@@ -314,22 +312,28 @@ describe('Profile Query Operations Integration Tests', () => {
       });
       const profileId2 = data2.createSellerProfile.profileId;
 
-      // Wait for GSI eventual consistency (Bug #21 - known issue)
-      // GSI3 index can take 7-10 seconds to become consistent when creating multiple items
-      // This test creates TWO profiles, which may take longer to propagate to GSI
-      await new Promise(resolve => setTimeout(resolve, 10000));
-
-      // Act
-      const { data } = await ownerClient.query({
-        query: LIST_MY_PROFILES,
-        fetchPolicy: 'network-only',
-      });
+      // Wait for GSI eventual consistency with retry logic (Bug #21 - known AWS limitation)
+      // Poll listMyProfiles until both profiles appear in results
+      // Increased to 120 attempts (2 minutes) due to EXTREMELY slow GSI propagation when DB has thousands of test items
+      // This test may take up to 3+ minutes to complete in heavily polluted test environments
+      const profiles = await waitForGSIConsistency(
+        async () => {
+          const { data } = await ownerClient.query({
+            query: LIST_MY_PROFILES,
+            fetchPolicy: 'network-only',
+          });
+          return data.listMyProfiles;
+        },
+        (items: any[]) => {
+          const profileIds = items.map((p: any) => p.profileId);
+          return profileIds.includes(profileId1) && profileIds.includes(profileId2);
+        },
+        120, // maxAttempts (2 minutes of polling)
+        1000 // delayMs
+      );
 
       // Assert
-      expect(data.listMyProfiles).toBeDefined();
-      expect(Array.isArray(data.listMyProfiles)).toBe(true);
-      
-      const profileIds = data.listMyProfiles.map((p: any) => p.profileId);
+      const profileIds = profiles.map((p: any) => p.profileId);
       expect(profileIds).toContain(profileId1);
       expect(profileIds).toContain(profileId2);
 
@@ -350,6 +354,8 @@ describe('Profile Query Operations Integration Tests', () => {
       expect(Array.isArray(data.listMyProfiles)).toBe(true);
     });
 
+    // NOTE: This test may take 60-120+ seconds due to GSI eventual consistency issues (Bug #21)
+    // when the DynamoDB table contains thousands of test items from previous runs
     it('includes all profile fields', async () => {
       // Arrange: Create profile
       const profileName = `${getTestPrefix()}-FieldsTest`;
@@ -359,19 +365,25 @@ describe('Profile Query Operations Integration Tests', () => {
       });
       testProfileId = createData.createSellerProfile.profileId;
 
-      // Wait for GSI eventual consistency (Bug #21 - known issue)
-      // GSI3 index can take 5-7 seconds to become consistent
-      // This test is inherently flaky due to AWS DynamoDB GSI eventual consistency
-      await new Promise(resolve => setTimeout(resolve, 7000));
-
-      // Act
-      const { data } = await ownerClient.query({
-        query: LIST_MY_PROFILES,
-        fetchPolicy: 'network-only',
-      });
+      // Wait for GSI eventual consistency with retry logic (Bug #21 - known AWS limitation)
+      // Poll listMyProfiles until the profile appears in results
+      // Increased to 120 attempts (2 minutes) due to EXTREMELY slow GSI propagation when DB has thousands of test items
+      // This test may take up to 3+ minutes to complete in heavily polluted test environments
+      const profiles = await waitForGSIConsistency(
+        async () => {
+          const { data } = await ownerClient.query({
+            query: LIST_MY_PROFILES,
+            fetchPolicy: 'network-only',
+          });
+          return data.listMyProfiles;
+        },
+        (items: any[]) => items.some((p: any) => p.profileId === testProfileId),
+        120, // maxAttempts (2 minutes of polling)
+        1000 // delayMs
+      );
 
       // Assert
-      const profile = data.listMyProfiles.find((p: any) => p.profileId === testProfileId);
+      const profile = profiles.find((p: any) => p.profileId === testProfileId);
       expect(profile).toBeDefined();
       expect(profile).toHaveProperty('profileId');
       expect(profile).toHaveProperty('sellerName');

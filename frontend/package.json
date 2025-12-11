@@ -14,8 +14,6 @@
     "test:watch": "vitest --watch",
     "test:ui": "vitest --ui",
     "test:coverage": "vitest run --coverage",
-    "test:integration": "NODE_ENV=test vitest run --config ./vitest.integration.config.ts",
-    "test:integration:watch": "NODE_ENV=test vitest --config ./vitest.integration.config.ts",
     "test:e2e": "npx playwright test",
     "test:e2e:headed": "npx playwright test --headed",
     "test:e2e:report": "npx playwright show-report",

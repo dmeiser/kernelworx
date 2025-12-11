@@ -12,8 +12,16 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
-    testTimeout: 30000, // 30 seconds for API calls (default is 5s)
-    hookTimeout: 30000,
+    testTimeout: 240000, // 240 seconds (4 minutes) for API calls with GSI retry logic (extremely slow GSI with thousands of test items)
+    hookTimeout: 240000, // 240 seconds (4 minutes) for beforeAll with GSI retry logic (very slow GSI propagation)
     setupFiles: [path.resolve(__dirname, 'setup.ts')],
+    // Run tests sequentially to avoid GSI eventual consistency issues (Bug #21)
+    // When tests run in parallel, newly created items may not appear in GSI queries
+    // Sequential execution ensures each test's setup completes before next test starts
+    poolOptions: {
+      threads: {
+        singleThread: true,
+      },
+    },
   },
 });

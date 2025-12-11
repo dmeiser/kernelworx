@@ -17,7 +17,8 @@ import '../setup.ts';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { ApolloClient, gql } from '@apollo/client';
 import { createAuthenticatedClient, AuthenticatedClientResult } from '../setup/apolloClient';
-import { cleanupTestData } from '../setup/testData';
+import { waitForGSIConsistency } from '../setup/testData';
+import { trackResource, cleanupAllTrackedResources } from '../setup/resourceTracker';
 
 // GraphQL Queries
 const GET_CATALOG = gql`
@@ -92,6 +93,8 @@ const CREATE_CATALOG = gql`
 `;
 
 describe('Catalog Query Resolvers Integration Tests', () => {
+  const SUITE_ID = 'catalog-queries';
+  
   let ownerClient: ApolloClient;
   let contributorClient: ApolloClient;
   let readonlyClient: ApolloClient;
@@ -126,6 +129,7 @@ describe('Catalog Query Resolvers Integration Tests', () => {
       },
     });
     publicCatalogId = publicCatalog.data.createCatalog.catalogId;
+    trackResource(SUITE_ID, 'catalog', publicCatalogId, undefined, ownerClient);
 
     const privateCatalog = await ownerClient.mutate({
       mutation: CREATE_CATALOG,
@@ -140,6 +144,7 @@ describe('Catalog Query Resolvers Integration Tests', () => {
       },
     });
     privateCatalogId = privateCatalog.data.createCatalog.catalogId;
+    trackResource(SUITE_ID, 'catalog', privateCatalogId, undefined, ownerClient);
 
     // Create contributor catalogs
     const contributorPublic = await contributorClient.mutate({
@@ -155,6 +160,7 @@ describe('Catalog Query Resolvers Integration Tests', () => {
       },
     });
     contributorPublicCatalogId = contributorPublic.data.createCatalog.catalogId;
+    trackResource(SUITE_ID, 'catalog', contributorPublicCatalogId, undefined, contributorClient);
 
     const contributorPrivate = await contributorClient.mutate({
       mutation: CREATE_CATALOG,
@@ -169,18 +175,40 @@ describe('Catalog Query Resolvers Integration Tests', () => {
       },
     });
     contributorPrivateCatalogId = contributorPrivate.data.createCatalog.catalogId;
+    trackResource(SUITE_ID, 'catalog', contributorPrivateCatalogId, undefined, contributorClient);
+
+    console.log(`📋 Created catalogs:
+      - Public catalog: ${publicCatalogId}
+      - Private catalog: ${privateCatalogId}
+      - Contributor public: ${contributorPublicCatalogId}
+      - Contributor private: ${contributorPrivateCatalogId}`);
+
+    // Wait for GSI eventual consistency with retry logic (Bug #21 - known AWS limitation)
+    // Poll listPublicCatalogs until both public catalogs appear in results
+    // Increased to 60 attempts due to extremely slow GSI propagation when DB has thousands of test items
+    await waitForGSIConsistency(
+      async () => {
+        const { data }: any = await ownerClient.query({
+          query: LIST_PUBLIC_CATALOGS,
+          fetchPolicy: 'network-only',
+        });
+        console.log(`📊 listPublicCatalogs returned ${data.listPublicCatalogs.length} catalogs`);
+        return data.listPublicCatalogs;
+      },
+      (items: any[]) => {
+        const catalogIds = items.map((c: any) => c.catalogId);
+        const hasPublic = catalogIds.includes(publicCatalogId);
+        const hasContributor = catalogIds.includes(contributorPublicCatalogId);
+        console.log(`🔍 Checking: hasPublic=${hasPublic}, hasContributor=${hasContributor}`);
+        return hasPublic && hasContributor;
+      },
+      60, // maxAttempts (increased from 30)
+      1000 // delayMs
+    );
   });
 
   afterAll(async () => {
-    // Cleanup test catalogs
-    const catalogIds = [
-      publicCatalogId,
-      privateCatalogId,
-      contributorPublicCatalogId,
-      contributorPrivateCatalogId,
-    ].filter((id): id is string => id !== null);
-
-    await cleanupTestData({ catalogIds });
+    await cleanupAllTrackedResources(SUITE_ID);
   });
 
   describe('getCatalog', () => {
