@@ -15,8 +15,8 @@ import '../setup.ts';
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { ApolloClient, gql, InMemoryCache, HttpLink } from '@apollo/client';
-import { createAuthenticatedClient, AuthenticatedClientResult } from '../setup/apolloClient';
+import { ApolloClient, gql } from '@apollo/client';
+import { createAuthenticatedClient, createUnauthenticatedClient, AuthenticatedClientResult } from '../setup/apolloClient';
 import { cleanupTestData } from '../setup/testData';
 
 // GraphQL Queries
@@ -95,16 +95,6 @@ describe('Catalog Query Resolvers Integration Tests', () => {
   let ownerClient: ApolloClient;
   let contributorClient: ApolloClient;
   let readonlyClient: ApolloClient;
-  
-  // Helper to create unauthenticated client
-  const createUnauthenticatedClient = () => {
-    return new ApolloClient({
-      link: new HttpLink({
-        uri: process.env.VITE_APPSYNC_ENDPOINT,
-      }),
-      cache: new InMemoryCache(),
-    });
-  };
   
   // Test data
   let publicCatalogId: string | null = null;
@@ -290,8 +280,7 @@ describe('Catalog Query Resolvers Integration Tests', () => {
         expect(data.getCatalog).toBeNull(); // Expected behavior (FIXED)
       });
 
-      // SKIP: Unauthenticated access requires API_KEY auth mode (not currently configured)
-      it.skip('should allow unauthenticated user to get public catalog', async () => {
+      it('should allow unauthenticated user to get public catalog', async () => {
         const unauthClient = createUnauthenticatedClient();
         
         const { data }: any = await unauthClient.query({
@@ -304,17 +293,17 @@ describe('Catalog Query Resolvers Integration Tests', () => {
         expect((data as any).getCatalog.isPublic).toBe(true);
       });
 
-      // SKIP: Unauthenticated access requires API_KEY auth mode (not currently configured)
-      it.skip('should reject unauthenticated user accessing private catalog', async () => {
+      it('should reject unauthenticated user accessing private catalog', async () => {
         const unauthClient = createUnauthenticatedClient();
         
-        await expect(
-          unauthClient.query({
-            query: GET_CATALOG,
-            variables: { catalogId: privateCatalogId },
-            fetchPolicy: 'network-only',
-          })
-        ).rejects.toThrow();
+        const { data }: any = await unauthClient.query({
+          query: GET_CATALOG,
+          variables: { catalogId: privateCatalogId },
+          fetchPolicy: 'network-only',
+        });
+        
+        // Private catalog should return null for unauthenticated users
+        expect(data.getCatalog).toBeNull();
       });
     });
 
@@ -393,8 +382,7 @@ describe('Catalog Query Resolvers Integration Tests', () => {
         expect(data.listPublicCatalogs.length).toBeGreaterThan(0);
       });
 
-      // SKIP: Unauthenticated access requires API_KEY auth mode (not currently configured)
-      it.skip('should allow unauthenticated user to list public catalogs', async () => {
+      it('should allow unauthenticated user to list public catalogs', async () => {
         const unauthClient = createUnauthenticatedClient();
         
         const { data }: any = await unauthClient.query({

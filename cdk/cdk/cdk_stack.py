@@ -680,12 +680,25 @@ class CdkStack(Stack):
                         authorization_type=appsync.AuthorizationType.USER_POOL,
                         user_pool_config=appsync.UserPoolConfig(user_pool=self.user_pool),
                     ),
+                    additional_authorization_modes=[
+                        appsync.AuthorizationMode(
+                            authorization_type=appsync.AuthorizationType.API_KEY,
+                        ),
+                    ],
                 ),
                 xray_enabled=True,
                 log_config=appsync.LogConfig(
                     field_log_level=appsync.FieldLogLevel.ALL,
                     exclude_verbose_content=False,
                 ),
+            )
+            
+            # Output API key for integration tests
+            CfnOutput(
+                self,
+                "AppSyncApiKey",
+                value=self.api.api_key or "NOT_AVAILABLE",
+                description="AppSync API Key for unauthenticated access to public catalogs",
             )
 
             # DynamoDB data source
@@ -3691,7 +3704,7 @@ export function response(ctx) {
 #else
     ## Check authorization: Allow if catalog is public OR caller is owner
     #set($catalog = $ctx.result)
-    #set($callerAccountId = $ctx.identity.sub)
+    #set($callerAccountId = $util.defaultIfNull($ctx.identity.sub, ""))
     #set($isPublic = $catalog.isPublic)
     #set($isOwner = $catalog.ownerAccountId == $callerAccountId)
     
