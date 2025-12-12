@@ -3,6 +3,96 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { ApolloClient, gql, HttpLink, InMemoryCache } from '@apollo/client';
 import { createAuthenticatedClient, AuthenticatedClientResult } from '../setup/apolloClient';
 import { getTestPrefix, deleteTestAccounts } from '../setup/testData';
+import { DynamoDBClient, QueryCommand, DeleteItemCommand } from '@aws-sdk/client-dynamodb';
+
+// DynamoDB client for direct cleanup
+const dynamoClient = new DynamoDBClient({ region: 'us-east-1' });
+const TABLE_NAME = process.env.TABLE_NAME || 'kernelworx-app-dev';
+
+/**
+ * Helper to clean up a profile and all associated data (shares, invites, ownership record).
+ * Each test MUST call this at the end to ensure proper CRUD lifecycle cleanup.
+ */
+async function cleanupProfile(client: ApolloClient<any>, profileId: string): Promise<void> {
+  try {
+    // 1. Delete all invites for the profile via direct DynamoDB
+    const inviteResult = await dynamoClient.send(new QueryCommand({
+      TableName: TABLE_NAME,
+      KeyConditionExpression: 'PK = :pk AND begins_with(SK, :sk)',
+      ExpressionAttributeValues: {
+        ':pk': { S: profileId },
+        ':sk': { S: 'INVITE#' },
+      },
+      ProjectionExpression: 'PK, SK',
+    }));
+    
+    for (const item of inviteResult.Items || []) {
+      await dynamoClient.send(new DeleteItemCommand({
+        TableName: TABLE_NAME,
+        Key: { PK: item.PK, SK: item.SK },
+      }));
+    }
+    
+    // 2. Delete all shares for the profile via direct DynamoDB
+    const shareResult = await dynamoClient.send(new QueryCommand({
+      TableName: TABLE_NAME,
+      KeyConditionExpression: 'PK = :pk AND begins_with(SK, :sk)',
+      ExpressionAttributeValues: {
+        ':pk': { S: profileId },
+        ':sk': { S: 'SHARE#' },
+      },
+      ProjectionExpression: 'PK, SK',
+    }));
+    
+    for (const item of shareResult.Items || []) {
+      await dynamoClient.send(new DeleteItemCommand({
+        TableName: TABLE_NAME,
+        Key: { PK: item.PK, SK: item.SK },
+      }));
+    }
+    
+    // 3. Delete the profile via GraphQL (deletes PROFILE#xxx|METADATA and ACCOUNT#xxx|PROFILE#xxx)
+    try {
+      await client.mutate({
+        mutation: gql`mutation DeleteProfile($profileId: ID!) { deleteSellerProfile(profileId: $profileId) }`,
+        variables: { profileId },
+      });
+    } catch (e) {
+      // If GraphQL fails, delete directly via DynamoDB
+      // Delete profile metadata
+      try {
+        await dynamoClient.send(new DeleteItemCommand({
+          TableName: TABLE_NAME,
+          Key: { PK: { S: profileId }, SK: { S: 'METADATA' } },
+        }));
+      } catch (e2) { /* may not exist */ }
+      
+      // Delete ownership record (need to query GSI to find it, or scan ACCOUNT# records)
+      // Since we know the owner is the owner account, query for it
+      const ownershipResult = await dynamoClient.send(new QueryCommand({
+        TableName: TABLE_NAME,
+        IndexName: 'GSI1',
+        KeyConditionExpression: 'GSI1PK = :pk',
+        ExpressionAttributeValues: {
+          ':pk': { S: profileId },
+        },
+        ProjectionExpression: 'PK, SK',
+      }));
+      
+      for (const item of ownershipResult.Items || []) {
+        const pk = item.PK?.S || '';
+        if (pk.startsWith('ACCOUNT#')) {
+          await dynamoClient.send(new DeleteItemCommand({
+            TableName: TABLE_NAME,
+            Key: { PK: item.PK, SK: item.SK },
+          }));
+        }
+      }
+    }
+  } catch (error) {
+    console.error(`Error cleaning up profile ${profileId}:`, error);
+  }
+}
 
 
 // GraphQL Mutations
@@ -119,97 +209,16 @@ describe('Profile Sharing Integration Tests', () => {
   });
 
   afterAll(async () => {
-    console.log('Cleaning up profile sharing test data...');
-    const { DynamoDBClient, QueryCommand, DeleteItemCommand, ScanCommand } = await import('@aws-sdk/client-dynamodb');
-    const dynamoClient = new DynamoDBClient({ region: 'us-east-1' });
-    const tableName = process.env.TABLE_NAME || 'kernelworx-app-dev';
+    // Each test is responsible for cleaning up its own data via cleanupProfile()
+    // This afterAll is a safety net for any profiles that weren't cleaned up
+    console.log(`Cleaning up ${createdProfileIds.length} remaining profiles from profile sharing tests...`);
     
-    try {
-      // 1. Delete all invites and shares for all created profiles
-      for (const profileId of createdProfileIds) {
-        // Query and delete invites
-        const inviteResult = await dynamoClient.send(new QueryCommand({
-          TableName: tableName,
-          KeyConditionExpression: 'PK = :pk AND begins_with(SK, :sk)',
-          ExpressionAttributeValues: {
-            ':pk': { S: profileId },
-            ':sk': { S: 'INVITE#' },
-          },
-          ProjectionExpression: 'PK, SK',
-        }));
-        
-        for (const item of inviteResult.Items || []) {
-          await dynamoClient.send(new DeleteItemCommand({
-            TableName: tableName,
-            Key: { PK: item.PK, SK: item.SK },
-          }));
-        }
-        
-        // Query and delete shares
-        const shareResult = await dynamoClient.send(new QueryCommand({
-          TableName: tableName,
-          KeyConditionExpression: 'PK = :pk AND begins_with(SK, :sk)',
-          ExpressionAttributeValues: {
-            ':pk': { S: profileId },
-            ':sk': { S: 'SHARE#' },
-          },
-          ProjectionExpression: 'PK, SK',
-        }));
-        
-        for (const item of shareResult.Items || []) {
-          await dynamoClient.send(new DeleteItemCommand({
-            TableName: tableName,
-            Key: { PK: item.PK, SK: item.SK },
-          }));
-        }
-        
-        // Also delete METADATA directly
-        try {
-          await dynamoClient.send(new DeleteItemCommand({
-            TableName: tableName,
-            Key: { 
-              PK: { S: profileId }, 
-              SK: { S: 'METADATA' } 
-            },
-          }));
-        } catch (e) { /* may not exist */ }
-      }
-      
-      // 2. Delete ownership records via GraphQL (this also deletes ACCOUNT#xxx|profileId)
-      for (const profileId of createdProfileIds) {
-        try {
-          await ownerClient.mutate({
-            mutation: DELETE_PROFILE,
-            variables: { profileId },
-          });
-        } catch (e) { /* may already be deleted */ }
-      }
-      
-      // 3. Final sweep: Delete ALL non-account records (catch untracked orphans)
-      const scanResult = await dynamoClient.send(new ScanCommand({
-        TableName: tableName,
-        ProjectionExpression: 'PK, SK',
-      }));
-      
-      for (const item of scanResult.Items || []) {
-        const pk = item.PK?.S || '';
-        // Skip account records (those are created by Cognito and are exempt)
-        if (!pk.startsWith('ACCOUNT#')) {
-          await dynamoClient.send(new DeleteItemCommand({
-            TableName: tableName,
-            Key: { PK: item.PK, SK: item.SK },
-          }));
-        }
-      }
-      
-      // 4. Clean up account records
-      console.log('Cleaning up account records...');
-      // await deleteTestAccounts([ownerAccountId, contributorAccountId, readonlyAccountId]);
-      
-      console.log('Profile sharing test data cleanup complete.');
-    } catch (error) {
-      console.log('Error in cleanup:', error);
+    for (const profileId of createdProfileIds) {
+      console.log(`Cleaning up profile: ${profileId}`);
+      await cleanupProfile(ownerClient, profileId);
     }
+    
+    console.log('Profile sharing test data cleanup complete.');
   }, 60000);
 
 
@@ -1143,6 +1152,7 @@ describe('Profile Sharing Integration Tests', () => {
         },
       });
       const profileId = createResult.data?.createSellerProfile?.profileId;
+      createdProfileIds.push(profileId);
 
       const shareResult = await ownerClient.mutate({
         mutation: SHARE_DIRECT,

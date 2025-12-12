@@ -670,6 +670,10 @@ class CdkStack(Stack):
                 graphql_api_id=existing_api_id,
             )
         else:
+            # Determine if logging should be enabled (configurable via ENABLE_APPSYNC_LOGGING env var)
+            # Defaults to True if not specified
+            enable_appsync_logging = os.getenv("ENABLE_APPSYNC_LOGGING", "true").lower() == "true"
+            
             self.api = appsync.GraphqlApi(
                 self,
                 "Api",
@@ -685,7 +689,7 @@ class CdkStack(Stack):
                 log_config=appsync.LogConfig(
                     field_log_level=appsync.FieldLogLevel.ALL,
                     exclude_verbose_content=False,
-                ),
+                ) if enable_appsync_logging else None,
             )
             
             CfnOutput(
