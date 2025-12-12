@@ -1,5 +1,5 @@
 import '../setup.ts';
-import { describe, test, expect, beforeAll } from 'vitest';
+import { describe, test, expect, beforeAll, afterAll } from 'vitest';
 import { ApolloClient, NormalizedCacheObject, gql } from '@apollo/client';
 import { createAuthenticatedClient } from '../setup/apolloClient';
 
@@ -228,6 +228,10 @@ describe('Order Query Operations Integration Tests', () => {
   let emptySeasonId: string;
   let emptyProfileId: string;
 
+  // Account IDs for cleanup
+  let contributorAccountId: string;
+  let readonlyAccountId: string;
+
   beforeAll(async () => {
     try {
       // Authenticate all test users
@@ -327,6 +331,7 @@ describe('Order Query Operations Integration Tests', () => {
           },
         },
       });
+      contributorAccountId = share1Data.shareProfileDirect.targetAccountId;
 
       // 5. Share profile with readonly (READ)
       console.log('Step 7: Sharing profile with readonly...');
@@ -340,6 +345,7 @@ describe('Order Query Operations Integration Tests', () => {
           },
         },
       });
+      readonlyAccountId = share2Data.shareProfileDirect.targetAccountId;
 
       // 6. Create test orders
       console.log('Step 8: Creating test orders...');
@@ -475,6 +481,65 @@ describe('Order Query Operations Integration Tests', () => {
     } catch (error) {
       console.error('Error in beforeAll:', error);
       throw error;
+    }
+  }, 30000);
+
+  afterAll(async () => {
+    // Clean up all test data in reverse order
+    console.log('Cleaning up order query test data...');
+    
+    try {
+      // 1. Delete all orders
+      for (const orderId of [testOrderId1, testOrderId2, unsharedOrderId]) {
+        if (orderId) {
+          await ownerClient.mutate({
+            mutation: DELETE_ORDER,
+            variables: { orderId },
+          });
+        }
+      }
+      
+      // 2. Revoke shares (before deleting profile)
+      for (const accountId of [contributorAccountId, readonlyAccountId]) {
+        if (accountId) {
+          await ownerClient.mutate({
+            mutation: REVOKE_SHARE,
+            variables: { input: { profileId: testProfileId, targetAccountId: accountId } },
+          });
+        }
+      }
+      
+      // 3. Delete seasons
+      for (const seasonId of [testSeasonId, emptySeasonId, unsharedSeasonId]) {
+        if (seasonId) {
+          await ownerClient.mutate({
+            mutation: DELETE_SEASON,
+            variables: { seasonId },
+          });
+        }
+      }
+      
+      // 4. Delete catalog
+      if (testCatalogId) {
+        await ownerClient.mutate({
+          mutation: DELETE_CATALOG,
+          variables: { catalogId: testCatalogId },
+        });
+      }
+      
+      // 5. Delete profiles
+      for (const profileId of [testProfileId, unsharedProfileId, emptyProfileId]) {
+        if (profileId) {
+          await ownerClient.mutate({
+            mutation: DELETE_PROFILE,
+            variables: { profileId },
+          });
+        }
+      }
+      
+      console.log('Order query test data cleanup complete.');
+    } catch (error) {
+      console.log('Error in cleanup (may be expected if some data already cleaned):', error);
     }
   }, 30000);
 

@@ -3833,9 +3833,54 @@ $util.toJson($ctx.result)
             )
 
             # deleteSellerProfile - Delete a seller profile (owner only)
-            # Pipeline resolver to delete both ownership and metadata records
+            # 3-step Pipeline resolver:
+            # 1. Verify ownership by looking up profile metadata
+            # 2. Delete the ownership record (ACCOUNT#{userId}|{profileId})
+            # 3. Delete the metadata record (PROFILE#{profileId}|METADATA)
             
-            # Step 1: Verify ownership and delete the ownership record (ACCOUNT#{userId}|PROFILE#{profileId})
+            # Step 1: Verify ownership
+            verify_profile_owner_for_delete_fn = appsync.AppsyncFunction(
+                self,
+                "VerifyProfileOwnerForDeleteFn",
+                name=f"VerifyProfileOwnerForDeleteFn_{env_name}",
+                api=self.api,
+                data_source=self.dynamodb_datasource,
+                runtime=appsync.FunctionRuntime.JS_1_0_0,
+                code=appsync.Code.from_inline(
+                    """
+import { util } from '@aws-appsync/utils';
+
+export function request(ctx) {
+    const profileId = ctx.args.profileId;
+    return {
+        operation: 'GetItem',
+        key: util.dynamodb.toMapValues({ 
+            PK: profileId, 
+            SK: 'METADATA' 
+        })
+    };
+}
+
+export function response(ctx) {
+    if (ctx.error) {
+        util.error(ctx.error.message, ctx.error.type);
+    }
+    if (!ctx.result) {
+        util.error('Profile not found', 'NotFound');
+    }
+    if (ctx.result.ownerAccountId !== ctx.identity.sub) {
+        util.error('Forbidden: Only profile owner can delete profile', 'Unauthorized');
+    }
+    // Store for next steps
+    ctx.stash.profileId = ctx.args.profileId;
+    ctx.stash.ownerAccountId = ctx.result.ownerAccountId;
+    return ctx.result;
+}
+        """
+                ),
+            )
+
+            # Step 2: Delete the ownership record (ACCOUNT#{userId}|{profileId})
             delete_profile_ownership_fn = appsync.AppsyncFunction(
                 self,
                 "DeleteProfileOwnershipFn",
@@ -3848,33 +3893,22 @@ $util.toJson($ctx.result)
 import { util } from '@aws-appsync/utils';
 
 export function request(ctx) {
-    const profileId = ctx.args.profileId;
-    const ownerId = ctx.identity.sub;
+    const profileId = ctx.stash.profileId;
+    const ownerId = ctx.stash.ownerAccountId;
     
     return {
         operation: 'DeleteItem',
         key: util.dynamodb.toMapValues({ 
             PK: 'ACCOUNT#' + ownerId, 
             SK: profileId 
-        }),
-        condition: {
-            expression: 'attribute_exists(PK) AND ownerAccountId = :ownerId',
-            expressionValues: util.dynamodb.toMapValues({
-                ':ownerId': ownerId
-            })
-        }
+        })
     };
 }
 
 export function response(ctx) {
     if (ctx.error) {
-        if (ctx.error.type === 'DynamoDB:ConditionalCheckFailedException') {
-            util.error('Profile not found or access denied', 'Forbidden');
-        }
         util.error(ctx.error.message, ctx.error.type);
     }
-    // Store profileId in stash for next function
-    ctx.stash.profileId = ctx.args.profileId;
     return true;
 }
         """
@@ -3921,7 +3955,7 @@ export function response(ctx) {
                 type_name="Mutation",
                 field_name="deleteSellerProfile",
                 runtime=appsync.FunctionRuntime.JS_1_0_0,
-                pipeline_config=[delete_profile_ownership_fn, delete_profile_metadata_fn],
+                pipeline_config=[verify_profile_owner_for_delete_fn, delete_profile_ownership_fn, delete_profile_metadata_fn],
                 code=appsync.Code.from_inline(
                     """
 export function request(ctx) {

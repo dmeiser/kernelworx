@@ -1,5 +1,5 @@
 import '../setup.ts';
-import { describe, test, expect, beforeAll } from 'vitest';
+import { describe, test, expect, beforeAll, afterAll } from 'vitest';
 import { ApolloClient, NormalizedCacheObject, gql } from '@apollo/client';
 import { createAuthenticatedClient } from '../setup/apolloClient';
 
@@ -125,6 +125,38 @@ const DELETE_ORDER = gql`
   }
 `;
 
+const DELETE_SEASON = gql`
+  mutation DeleteSeason($seasonId: ID!) {
+    deleteSeason(seasonId: $seasonId)
+  }
+`;
+
+const DELETE_CATALOG = gql`
+  mutation DeleteCatalog($catalogId: ID!) {
+    deleteCatalog(catalogId: $catalogId)
+  }
+`;
+
+const DELETE_PROFILE = gql`
+  mutation DeleteProfile($profileId: ID!) {
+    deleteSellerProfile(profileId: $profileId)
+  }
+`;
+
+const REVOKE_SHARE = gql`
+  mutation RevokeShare($input: RevokeShareInput!) {
+    revokeShare(input: $input)
+  }
+`;
+
+const LIST_ORDERS_BY_SEASON = gql`
+  query ListOrdersBySeason($seasonId: ID!) {
+    listOrdersBySeason(seasonId: $seasonId) {
+      orderId
+    }
+  }
+`;
+
 describe('Order Operations Integration Tests', () => {
   const SUITE_ID = 'order-operations';
   
@@ -137,6 +169,8 @@ describe('Order Operations Integration Tests', () => {
   let testSeasonId: string;
   let testCatalogId: string;
   let testProductId: string;
+  let contributorAccountId: string;
+  let readonlyAccountId: string;
 
   beforeAll(async () => {
     // Authenticate all test users
@@ -228,6 +262,7 @@ describe('Order Operations Integration Tests', () => {
         },
       },
     });
+    contributorAccountId = share1Data.shareProfileDirect.targetAccountId;
 
     // 5. Share profile with readonly (READ)
     const { data: share2Data } = await ownerClient.mutate({
@@ -240,8 +275,77 @@ describe('Order Operations Integration Tests', () => {
         },
       },
     });
+    readonlyAccountId = share2Data.shareProfileDirect.targetAccountId;
 
     console.log(`Test data created: Profile=${testProfileId}, Season=${testSeasonId}, Product=${testProductId}`);
+  }, 30000);
+
+  afterAll(async () => {
+    // Clean up all test data in reverse order
+    console.log('Cleaning up test data...');
+    
+    // 1. Delete all orders in the season
+    try {
+      const { data: ordersData } = await ownerClient.query({
+        query: LIST_ORDERS_BY_SEASON,
+        variables: { seasonId: testSeasonId },
+        fetchPolicy: 'network-only',
+      });
+      for (const order of ordersData.listOrdersBySeason || []) {
+        await ownerClient.mutate({
+          mutation: DELETE_ORDER,
+          variables: { orderId: order.orderId },
+        });
+      }
+    } catch (e) {
+      console.log('Error cleaning up orders:', e);
+    }
+    
+    // 2. Revoke shares
+    try {
+      await ownerClient.mutate({
+        mutation: REVOKE_SHARE,
+        variables: { input: { profileId: testProfileId, targetAccountId: contributorAccountId } },
+      });
+      await ownerClient.mutate({
+        mutation: REVOKE_SHARE,
+        variables: { input: { profileId: testProfileId, targetAccountId: readonlyAccountId } },
+      });
+    } catch (e) {
+      console.log('Error revoking shares:', e);
+    }
+    
+    // 3. Delete season
+    try {
+      await ownerClient.mutate({
+        mutation: DELETE_SEASON,
+        variables: { seasonId: testSeasonId },
+      });
+    } catch (e) {
+      console.log('Error deleting season:', e);
+    }
+    
+    // 4. Delete catalog
+    try {
+      await ownerClient.mutate({
+        mutation: DELETE_CATALOG,
+        variables: { catalogId: testCatalogId },
+      });
+    } catch (e) {
+      console.log('Error deleting catalog:', e);
+    }
+    
+    // 5. Delete profile
+    try {
+      await ownerClient.mutate({
+        mutation: DELETE_PROFILE,
+        variables: { profileId: testProfileId },
+      });
+    } catch (e) {
+      console.log('Error deleting profile:', e);
+    }
+    
+    console.log('Test data cleanup complete.');
   }, 30000);
 
 

@@ -215,7 +215,6 @@ describe('Season Query Resolvers Integration Tests', () => {
           variables: { input: { sellerName: `${getTestPrefix()}-Profile` } },
         });
         const profileId = profileData.createSellerProfile.profileId;
-        await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId: profileId } });
 
         const { data: catalogData } = await ownerClient.mutate({
           mutation: CREATE_CATALOG,
@@ -228,7 +227,6 @@ describe('Season Query Resolvers Integration Tests', () => {
           },
         });
         const catalogId = catalogData.createCatalog.catalogId;
-        await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId: catalogId } });
 
         const { data: seasonData } = await ownerClient.mutate({
           mutation: CREATE_SEASON,
@@ -253,6 +251,11 @@ describe('Season Query Resolvers Integration Tests', () => {
         // Assert
         expect(data.getSeason).toBeDefined();
         expect(data.getSeason.seasonId).toBe(seasonId);
+        
+        // Cleanup
+        await ownerClient.mutate({ mutation: DELETE_SEASON, variables: { seasonId } });
+        await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId } });
+        await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
       });
 
       it('should allow shared user (READ) to get season', async () => {
@@ -262,7 +265,6 @@ describe('Season Query Resolvers Integration Tests', () => {
           variables: { input: { sellerName: `${getTestPrefix()}-Profile` } },
         });
         const profileId = profileData.createSellerProfile.profileId;
-        await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId: profileId } });
 
         const { data: catalogData } = await ownerClient.mutate({
           mutation: CREATE_CATALOG,
@@ -275,7 +277,6 @@ describe('Season Query Resolvers Integration Tests', () => {
           },
         });
         const catalogId = catalogData.createCatalog.catalogId;
-        await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId: catalogId } });
 
         const { data: seasonData } = await ownerClient.mutate({
           mutation: CREATE_SEASON,
@@ -312,6 +313,12 @@ describe('Season Query Resolvers Integration Tests', () => {
         // Assert
         expect(data.getSeason).toBeDefined();
         expect(data.getSeason.seasonId).toBe(seasonId);
+        
+        // Cleanup
+        await ownerClient.mutate({ mutation: REVOKE_SHARE, variables: { input: { profileId, targetAccountId: readonlyAccountId } } });
+        await ownerClient.mutate({ mutation: DELETE_SEASON, variables: { seasonId } });
+        await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId } });
+        await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
       });
 
       it('should NOT allow non-shared user to get season', async () => {
@@ -321,7 +328,6 @@ describe('Season Query Resolvers Integration Tests', () => {
           variables: { input: { sellerName: `${getTestPrefix()}-Profile` } },
         });
         const profileId = profileData.createSellerProfile.profileId;
-        await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId: profileId } });
 
         const { data: catalogData } = await ownerClient.mutate({
           mutation: CREATE_CATALOG,
@@ -334,7 +340,6 @@ describe('Season Query Resolvers Integration Tests', () => {
           },
         });
         const catalogId = catalogData.createCatalog.catalogId;
-        await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId: catalogId } });
 
         const { data: seasonData } = await ownerClient.mutate({
           mutation: CREATE_SEASON,
@@ -358,6 +363,11 @@ describe('Season Query Resolvers Integration Tests', () => {
 
         // Assert: Should return null due to authorization failure
         expect(data.getSeason).toBeNull();
+        
+        // Cleanup
+        await ownerClient.mutate({ mutation: DELETE_SEASON, variables: { seasonId } });
+        await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId } });
+        await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
       });
     });
   });
@@ -371,7 +381,6 @@ describe('Season Query Resolvers Integration Tests', () => {
           variables: { input: { sellerName: `${getTestPrefix()}-Profile` } },
         });
         const profileId = profileData.createSellerProfile.profileId;
-        await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId: profileId } });
 
         const { data: catalogData } = await ownerClient.mutate({
           mutation: CREATE_CATALOG,
@@ -384,7 +393,6 @@ describe('Season Query Resolvers Integration Tests', () => {
           },
         });
         const catalogId = catalogData.createCatalog.catalogId;
-        await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId: catalogId } });
 
         // Create multiple seasons
         const { data: season1Data } = await ownerClient.mutate({
@@ -398,6 +406,7 @@ describe('Season Query Resolvers Integration Tests', () => {
             },
           },
         });
+        const seasonId1 = season1Data.createSeason.seasonId;
 
         const { data: season2Data } = await ownerClient.mutate({
           mutation: CREATE_SEASON,
@@ -410,6 +419,7 @@ describe('Season Query Resolvers Integration Tests', () => {
             },
           },
         });
+        const seasonId2 = season2Data.createSeason.seasonId;
 
         // Act: List seasons
         const { data } = await ownerClient.query({
@@ -424,6 +434,12 @@ describe('Season Query Resolvers Integration Tests', () => {
         expect(data.listSeasonsByProfile[0].seasonId).toBeDefined();
         expect(data.listSeasonsByProfile[0].seasonName).toContain('Season');
         expect(data.listSeasonsByProfile[1].seasonId).toBeDefined();
+        
+        // Cleanup
+        await ownerClient.mutate({ mutation: DELETE_SEASON, variables: { seasonId: seasonId1 } });
+        await ownerClient.mutate({ mutation: DELETE_SEASON, variables: { seasonId: seasonId2 } });
+        await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId } });
+        await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
       });
 
       it('should return empty array for profile with no seasons', async () => {
@@ -433,7 +449,6 @@ describe('Season Query Resolvers Integration Tests', () => {
           variables: { input: { sellerName: `${getTestPrefix()}-Profile` } },
         });
         const profileId = profileData.createSellerProfile.profileId;
-        await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId: profileId } });
 
         // Act
         const { data } = await ownerClient.query({
@@ -469,7 +484,6 @@ describe('Season Query Resolvers Integration Tests', () => {
           variables: { input: { sellerName: `${getTestPrefix()}-Profile` } },
         });
         const profileId = profileData.createSellerProfile.profileId;
-        await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId: profileId } });
 
         const { data: catalogData } = await ownerClient.mutate({
           mutation: CREATE_CATALOG,
@@ -482,7 +496,6 @@ describe('Season Query Resolvers Integration Tests', () => {
           },
         });
         const catalogId = catalogData.createCatalog.catalogId;
-        await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId: catalogId } });
 
         const { data: seasonData } = await ownerClient.mutate({
           mutation: CREATE_SEASON,
@@ -495,6 +508,7 @@ describe('Season Query Resolvers Integration Tests', () => {
             },
           },
         });
+        const seasonId = seasonData.createSeason.seasonId;
 
         // Act
         const { data } = await ownerClient.query({
@@ -506,6 +520,11 @@ describe('Season Query Resolvers Integration Tests', () => {
         // Assert
         expect(data.listSeasonsByProfile).toBeDefined();
         expect(data.listSeasonsByProfile.length).toBeGreaterThan(0);
+        
+        // Cleanup
+        await ownerClient.mutate({ mutation: DELETE_SEASON, variables: { seasonId } });
+        await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId } });
+        await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
       });
 
       it('should allow shared user (READ) to list seasons', async () => {
@@ -515,7 +534,6 @@ describe('Season Query Resolvers Integration Tests', () => {
           variables: { input: { sellerName: `${getTestPrefix()}-Profile` } },
         });
         const profileId = profileData.createSellerProfile.profileId;
-        await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId: profileId } });
 
         const { data: catalogData } = await ownerClient.mutate({
           mutation: CREATE_CATALOG,
@@ -528,7 +546,6 @@ describe('Season Query Resolvers Integration Tests', () => {
           },
         });
         const catalogId = catalogData.createCatalog.catalogId;
-        await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId: catalogId } });
 
         const { data: seasonData } = await ownerClient.mutate({
           mutation: CREATE_SEASON,
@@ -541,6 +558,7 @@ describe('Season Query Resolvers Integration Tests', () => {
             },
           },
         });
+        const seasonId = seasonData.createSeason.seasonId;
 
         // Share profile with readonly user
         const { data: shareData }: any = await ownerClient.mutate({
@@ -564,6 +582,12 @@ describe('Season Query Resolvers Integration Tests', () => {
         // Assert
         expect(data.listSeasonsByProfile).toBeDefined();
         expect(data.listSeasonsByProfile.length).toBeGreaterThan(0);
+        
+        // Cleanup
+        await ownerClient.mutate({ mutation: REVOKE_SHARE, variables: { input: { profileId, targetAccountId: readonlyAccountId } } });
+        await ownerClient.mutate({ mutation: DELETE_SEASON, variables: { seasonId } });
+        await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId } });
+        await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
       });
 
       it('should NOT allow non-shared user to list seasons', async () => {
@@ -573,7 +597,6 @@ describe('Season Query Resolvers Integration Tests', () => {
           variables: { input: { sellerName: `${getTestPrefix()}-Profile` } },
         });
         const profileId = profileData.createSellerProfile.profileId;
-        await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId: profileId } });
 
         const { data: catalogData } = await ownerClient.mutate({
           mutation: CREATE_CATALOG,
@@ -586,7 +609,6 @@ describe('Season Query Resolvers Integration Tests', () => {
           },
         });
         const catalogId = catalogData.createCatalog.catalogId;
-        await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId: catalogId } });
 
         const { data: seasonData } = await ownerClient.mutate({
           mutation: CREATE_SEASON,
@@ -599,6 +621,7 @@ describe('Season Query Resolvers Integration Tests', () => {
             },
           },
         });
+        const seasonId = seasonData.createSeason.seasonId;
 
         // Act: Contributor (not shared) lists seasons
         const { data } = await contributorClient.query({
@@ -609,6 +632,11 @@ describe('Season Query Resolvers Integration Tests', () => {
 
         // Assert: Should return empty array due to authorization failure
         expect(data.listSeasonsByProfile).toEqual([]);
+        
+        // Cleanup
+        await ownerClient.mutate({ mutation: DELETE_SEASON, variables: { seasonId } });
+        await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId } });
+        await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
       });
     });
   });

@@ -1,5 +1,5 @@
 import '../setup.ts';
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { ApolloClient, gql, HttpLink, InMemoryCache } from '@apollo/client';
 import { createAuthenticatedClient, AuthenticatedClientResult } from '../setup/apolloClient';
 import { getTestPrefix } from '../setup/testData';
@@ -32,6 +32,12 @@ const UPDATE_PROFILE = gql`
 const DELETE_PROFILE = gql`
   mutation DeleteSellerProfile($profileId: ID!) {
     deleteSellerProfile(profileId: $profileId)
+  }
+`;
+
+const REVOKE_SHARE = gql`
+  mutation RevokeShare($input: RevokeShareInput!) {
+    revokeShare(input: $input)
   }
 `;
 
@@ -69,6 +75,21 @@ describe('Profile Operations Integration Tests', () => {
   let contributorAccountId: string;
   let readonlyAccountId: string;
 
+  // Track created profiles and shares for cleanup
+  const createdProfileIds: string[] = [];
+  const createdShares: { profileId: string; targetAccountId: string }[] = [];
+
+  // Helper to create profile and track for cleanup
+  const createAndTrackProfile = async (sellerName: string) => {
+    const { data } = await ownerClient.mutate({
+      mutation: CREATE_PROFILE,
+      variables: { input: { sellerName } },
+    });
+    const profileId = data.createSellerProfile.profileId;
+    createdProfileIds.push(profileId);
+    return { data, profileId };
+  };
+
   // Helper to create unauthenticated client
   const createUnauthenticatedClient = () => {
     return new ApolloClient({
@@ -93,6 +114,41 @@ describe('Profile Operations Integration Tests', () => {
     readonlyAccountId = readonlyAuth.accountId;
   });
 
+  afterAll(async () => {
+    // Clean up all test data in reverse order
+    console.log('Cleaning up profile operations test data...');
+    
+    try {
+      // 1. Revoke all shares first
+      for (const share of createdShares) {
+        try {
+          await ownerClient.mutate({
+            mutation: REVOKE_SHARE,
+            variables: { input: { profileId: share.profileId, targetAccountId: share.targetAccountId } },
+          });
+        } catch (e) {
+          // Share may already be revoked or profile already deleted
+        }
+      }
+      
+      // 2. Delete all profiles
+      for (const profileId of createdProfileIds) {
+        try {
+          await ownerClient.mutate({
+            mutation: DELETE_PROFILE,
+            variables: { profileId },
+          });
+        } catch (e) {
+          // Profile may already be deleted by a test
+        }
+      }
+      
+      console.log('Profile operations test data cleanup complete.');
+    } catch (error) {
+      console.log('Error in cleanup:', error);
+    }
+  }, 30000);
+
 
   describe('createSellerProfile (Lambda Resolver)', () => {
     it('creates profile with valid sellerName', async () => {
@@ -106,6 +162,7 @@ describe('Profile Operations Integration Tests', () => {
       });
 
       const testProfileId = data.createSellerProfile.profileId;
+      createdProfileIds.push(testProfileId);
 
       // Assert
       expect(data.createSellerProfile.profileId).toMatch(/^PROFILE#/);
@@ -124,11 +181,13 @@ describe('Profile Operations Integration Tests', () => {
         mutation: CREATE_PROFILE,
         variables: { input: { sellerName: profileName1 } },
       });
+      createdProfileIds.push(data1.createSellerProfile.profileId);
       
       const { data: data2 } = await ownerClient.mutate({
         mutation: CREATE_PROFILE,
         variables: { input: { sellerName: profileName2 } },
       });
+      createdProfileIds.push(data2.createSellerProfile.profileId);
 
       // Assert
       expect(data1.createSellerProfile.profileId).not.toBe(data2.createSellerProfile.profileId);
@@ -143,6 +202,7 @@ describe('Profile Operations Integration Tests', () => {
       });
 
       const testProfileId = data.createSellerProfile.profileId;
+      createdProfileIds.push(testProfileId);
 
       // Assert
       expect(data.createSellerProfile.ownerAccountId).toBe(ownerAccountId);
@@ -157,6 +217,7 @@ describe('Profile Operations Integration Tests', () => {
       });
 
       const testProfileId = data.createSellerProfile.profileId;
+      createdProfileIds.push(testProfileId);
 
       // Assert
       expect(data.createSellerProfile.createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
@@ -173,6 +234,7 @@ describe('Profile Operations Integration Tests', () => {
       });
 
       const testProfileId = data.createSellerProfile.profileId;
+      createdProfileIds.push(testProfileId);
 
       // Assert
       expect(data.createSellerProfile).toBeDefined();
@@ -212,6 +274,7 @@ describe('Profile Operations Integration Tests', () => {
       });
 
       const testProfileId = data.createSellerProfile.profileId;
+      createdProfileIds.push(testProfileId);
 
       // Assert
       expect(data.createSellerProfile.sellerName).toBe(profileName);
@@ -226,6 +289,7 @@ describe('Profile Operations Integration Tests', () => {
       });
 
       const testProfileId = data.createSellerProfile.profileId;
+      createdProfileIds.push(testProfileId);
 
       // Assert
       expect(data.createSellerProfile.sellerName).toBe(profileName);
@@ -240,6 +304,7 @@ describe('Profile Operations Integration Tests', () => {
       });
 
       const testProfileId = data.createSellerProfile.profileId;
+      createdProfileIds.push(testProfileId);
 
       // Assert
       expect(data.createSellerProfile).toHaveProperty('profileId');
@@ -259,6 +324,7 @@ describe('Profile Operations Integration Tests', () => {
         variables: { input: { sellerName: profileName } },
       });
       const testProfileId = createData.createSellerProfile.profileId;
+      createdProfileIds.push(testProfileId);
 
       // Act: Update profile
       const newName = `${getTestPrefix()}-UpdatedName`;
@@ -285,6 +351,7 @@ describe('Profile Operations Integration Tests', () => {
         variables: { input: { sellerName: profileName } },
       });
       const testProfileId = createData.createSellerProfile.profileId;
+      createdProfileIds.push(testProfileId);
       const originalUpdatedAt = createData.createSellerProfile.updatedAt;
 
       // Wait a moment to ensure timestamp differs
@@ -315,6 +382,7 @@ describe('Profile Operations Integration Tests', () => {
         variables: { input: { sellerName: profileName } },
       });
       const testProfileId = createData.createSellerProfile.profileId;
+      createdProfileIds.push(testProfileId);
 
       // Act
       const newName = `${getTestPrefix()}-OwnerUpdated`;
@@ -340,12 +408,14 @@ describe('Profile Operations Integration Tests', () => {
         variables: { input: { sellerName: profileName } },
       });
       const testProfileId = createData.createSellerProfile.profileId;
+      createdProfileIds.push(testProfileId);
 
       // Share with contributor (WRITE access)
       const SHARE_DIRECT = gql`
         mutation ShareProfileDirect($input: ShareProfileDirectInput!) {
           shareProfileDirect(input: $input) {
             shareId
+            targetAccountId
           }
         }
       `;
@@ -359,6 +429,7 @@ describe('Profile Operations Integration Tests', () => {
           },
         },
       });
+      createdShares.push({ profileId: testProfileId, targetAccountId: shareData.shareProfileDirect.targetAccountId });
 
       // Act & Assert: Contributor tries to update
       const newName = `${getTestPrefix()}-AttemptedUpdate`;
@@ -383,12 +454,14 @@ describe('Profile Operations Integration Tests', () => {
         variables: { input: { sellerName: profileName } },
       });
       const testProfileId = createData.createSellerProfile.profileId;
+      createdProfileIds.push(testProfileId);
 
       // Share with readonly (READ access)
       const SHARE_DIRECT = gql`
         mutation ShareProfileDirect($input: ShareProfileDirectInput!) {
           shareProfileDirect(input: $input) {
             shareId
+            targetAccountId
           }
         }
       `;
@@ -402,6 +475,7 @@ describe('Profile Operations Integration Tests', () => {
           },
         },
       });
+      createdShares.push({ profileId: testProfileId, targetAccountId: shareData.shareProfileDirect.targetAccountId });
 
       // Act & Assert: Readonly tries to update
       const newName = `${getTestPrefix()}-AttemptedUpdate`;
