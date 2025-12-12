@@ -500,6 +500,7 @@ describe('Profile Operations Integration Tests', () => {
         variables: { input: { sellerName: profileName } },
       });
       const testProfileId = createData.createSellerProfile.profileId;
+      createdProfileIds.push(testProfileId);
 
       // Act & Assert: Contributor (not shared) tries to update
       const newName = `${getTestPrefix()}-AttemptedUpdate`;
@@ -524,6 +525,7 @@ describe('Profile Operations Integration Tests', () => {
         variables: { input: { sellerName: profileName } },
       });
       const testProfileId = createData.createSellerProfile.profileId;
+      createdProfileIds.push(testProfileId);
 
       // Act & Assert
       const unauthClient = createUnauthenticatedClient();
@@ -566,6 +568,7 @@ describe('Profile Operations Integration Tests', () => {
         variables: { input: { sellerName: profileName } },
       });
       const testProfileId = createData.createSellerProfile.profileId;
+      createdProfileIds.push(testProfileId);
 
       // Act & Assert - Update will fail, so no update tracked
       await expect(
