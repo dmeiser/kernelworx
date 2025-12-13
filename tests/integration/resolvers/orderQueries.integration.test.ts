@@ -1277,5 +1277,115 @@ describe('Order Query Operations Integration Tests', () => {
       await ownerClient.mutate({ mutation: DELETE_ORDER, variables: { orderId: order2Id } });
       await ownerClient.mutate({ mutation: DELETE_SEASON, variables: { seasonId: season2Id } });
     }, 15000);
+
+    test('Performance: Listing orders for profile with many orders', async () => {
+      // Create many orders for this test
+      const createdOrderIds: string[] = [];
+      const orderCount = 20;
+
+      for (let i = 0; i < orderCount; i++) {
+        const { data: orderData }: any = await ownerClient.mutate({
+          mutation: CREATE_ORDER,
+          variables: {
+            input: {
+              profileId: testProfileId,
+              seasonId: testSeasonId,
+              customerName: `Performance Customer ${i}`,
+              orderDate: new Date(Date.now() - i * 86400000).toISOString(), // Different dates
+              paymentMethod: i % 3 === 0 ? 'CASH' : i % 3 === 1 ? 'CHECK' : 'CREDIT_CARD',
+              lineItems: [{ productId: testProductId, quantity: i + 1 }],
+            },
+          },
+        });
+        createdOrderIds.push(orderData.createOrder.orderId);
+      }
+
+      // Measure query performance for listOrdersByProfile
+      const startTimeProfile = Date.now();
+      const { data: profileData }: any = await ownerClient.query({
+        query: LIST_ORDERS_BY_PROFILE,
+        variables: { profileId: testProfileId },
+        fetchPolicy: 'network-only',
+      });
+      const profileQueryTime = Date.now() - startTimeProfile;
+
+      console.log(`📊 Performance: listOrdersByProfile with ${orderCount} orders took ${profileQueryTime}ms`);
+
+      // Assert: Query should complete in reasonable time (under 5 seconds)
+      expect(profileQueryTime).toBeLessThan(5000);
+      expect(profileData.listOrdersByProfile.length).toBeGreaterThanOrEqual(orderCount);
+
+      // Measure query performance for listOrdersBySeason
+      const startTimeSeason = Date.now();
+      const { data: seasonData }: any = await ownerClient.query({
+        query: LIST_ORDERS_BY_SEASON,
+        variables: { seasonId: testSeasonId },
+        fetchPolicy: 'network-only',
+      });
+      const seasonQueryTime = Date.now() - startTimeSeason;
+
+      console.log(`📊 Performance: listOrdersBySeason with ${orderCount} orders took ${seasonQueryTime}ms`);
+
+      // Assert: Query should complete in reasonable time (under 5 seconds)
+      expect(seasonQueryTime).toBeLessThan(5000);
+      expect(seasonData.listOrdersBySeason.length).toBeGreaterThanOrEqual(orderCount);
+
+      // Cleanup
+      for (const orderId of createdOrderIds) {
+        await ownerClient.mutate({ mutation: DELETE_ORDER, variables: { orderId } });
+      }
+    }, 60000);
+
+    test('Performance: Listing orders ordered by orderDate', async () => {
+      // Create orders with different dates to test ordering
+      const createdOrderIds: string[] = [];
+      const orderDates = [
+        new Date('2024-03-15').toISOString(),
+        new Date('2024-01-01').toISOString(),
+        new Date('2024-06-20').toISOString(),
+        new Date('2024-02-28').toISOString(),
+      ];
+
+      for (let i = 0; i < orderDates.length; i++) {
+        const { data: orderData }: any = await ownerClient.mutate({
+          mutation: CREATE_ORDER,
+          variables: {
+            input: {
+              profileId: testProfileId,
+              seasonId: testSeasonId,
+              customerName: `Order Date Test Customer ${i}`,
+              orderDate: orderDates[i],
+              paymentMethod: 'CASH',
+              lineItems: [{ productId: testProductId, quantity: 1 }],
+            },
+          },
+        });
+        createdOrderIds.push(orderData.createOrder.orderId);
+      }
+
+      // Query orders
+      const { data }: any = await ownerClient.query({
+        query: LIST_ORDERS_BY_SEASON,
+        variables: { seasonId: testSeasonId },
+        fetchPolicy: 'network-only',
+      });
+
+      // Verify all our orders are in the results
+      const returnedOrderIds = data.listOrdersBySeason.map((o: any) => o.orderId);
+      for (const orderId of createdOrderIds) {
+        expect(returnedOrderIds).toContain(orderId);
+      }
+
+      // Verify order dates are present
+      const ourOrders = data.listOrdersBySeason.filter((o: any) => 
+        createdOrderIds.includes(o.orderId)
+      );
+      expect(ourOrders.length).toBe(orderDates.length);
+
+      // Cleanup
+      for (const orderId of createdOrderIds) {
+        await ownerClient.mutate({ mutation: DELETE_ORDER, variables: { orderId } });
+      }
+    }, 30000);
   });
 });

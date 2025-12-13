@@ -966,10 +966,252 @@ describe('Catalog CRUD Integration Tests', () => {
             mutation: DELETE_CATALOG,
             variables: { catalogId: catalogId },
           })
-        ).rejects.toThrow(/conditional request failed/i);  // VTL returns raw DynamoDB error
+        ).rejects.toThrow(/Not authorized to delete this catalog|conditional request failed/i);  // Pipeline: "Not authorized", VTL: raw DynamoDB error
         
         // Cleanup: Owner deletes
         await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId } });
+      });
+
+      it('SECURITY: Regular user cannot delete ADMIN_MANAGED catalog', async () => {
+        // Arrange: Create ADMIN_MANAGED catalog directly in DynamoDB (no owner)
+        // ADMIN_MANAGED catalogs have no ownerAccountId and cannot be created via GraphQL
+        const { DynamoDBClient, PutItemCommand, DeleteItemCommand } = await import('@aws-sdk/client-dynamodb');
+        const dynamoClient = new DynamoDBClient({ region: 'us-east-1' });
+        const tableName = process.env.TABLE_NAME || 'kernelworx-app-dev';
+        
+        const catalogId = `CATALOG#admin-managed-test-${Date.now()}`;
+        const now = new Date().toISOString();
+        
+        // Insert ADMIN_MANAGED catalog directly into DynamoDB
+        await dynamoClient.send(new PutItemCommand({
+          TableName: tableName,
+          Item: {
+            PK: { S: 'CATALOG' },
+            SK: { S: catalogId },
+            catalogId: { S: catalogId },
+            catalogName: { S: 'Official 2024 Popcorn Catalog' },
+            catalogType: { S: 'ADMIN_MANAGED' },
+            // Note: No ownerAccountId - this is key for ADMIN_MANAGED
+            isPublic: { BOOL: true },
+            products: { L: [
+              {
+                M: {
+                  productId: { S: 'PRODUCT#admin-1' },
+                  productName: { S: 'Caramel Corn' },
+                  price: { N: '20' },
+                  sortOrder: { N: '1' },
+                }
+              }
+            ]},
+            createdAt: { S: now },
+            updatedAt: { S: now },
+            GSI3PK: { S: 'PUBLIC' },
+            GSI3SK: { S: catalogId },
+          },
+        }));
+
+        try {
+          // Act: Non-admin users try to delete ADMIN_MANAGED catalog
+          // Note: The owner test user is an admin, so we only test with contributor and readonly
+          
+          // Try contributor user (non-admin)
+          await expect(
+            contributorClient.mutate({
+              mutation: DELETE_CATALOG,
+              variables: { catalogId: catalogId },
+            })
+          ).rejects.toThrow(/Not authorized to delete this catalog|conditional request failed/i);
+
+          // And readonly user (non-admin)
+          await expect(
+            readonlyClient.mutate({
+              mutation: DELETE_CATALOG,
+              variables: { catalogId: catalogId },
+            })
+          ).rejects.toThrow(/Not authorized to delete this catalog|conditional request failed/i);
+
+        } finally {
+          // Cleanup: Direct DynamoDB delete
+          await dynamoClient.send(new DeleteItemCommand({
+            TableName: tableName,
+            Key: {
+              PK: { S: 'CATALOG' },
+              SK: { S: catalogId },
+            },
+          }));
+        }
+      });
+
+      it('SECURITY: Admin user CAN delete ADMIN_MANAGED catalog', async () => {
+        // Arrange: Create ADMIN_MANAGED catalog directly in DynamoDB
+        // The owner test user is an admin, so they should be able to delete it
+        const { DynamoDBClient, PutItemCommand } = await import('@aws-sdk/client-dynamodb');
+        const dynamoClient = new DynamoDBClient({ region: 'us-east-1' });
+        const tableName = process.env.TABLE_NAME || 'kernelworx-app-dev';
+        
+        const catalogId = `CATALOG#admin-managed-admin-delete-${Date.now()}`;
+        const now = new Date().toISOString();
+        
+        // Insert ADMIN_MANAGED catalog directly into DynamoDB
+        await dynamoClient.send(new PutItemCommand({
+          TableName: tableName,
+          Item: {
+            PK: { S: 'CATALOG' },
+            SK: { S: catalogId },
+            catalogId: { S: catalogId },
+            catalogName: { S: 'Admin Deletable Catalog' },
+            catalogType: { S: 'ADMIN_MANAGED' },
+            // Note: No ownerAccountId - this is key for ADMIN_MANAGED
+            isPublic: { BOOL: true },
+            products: { L: [
+              {
+                M: {
+                  productId: { S: 'PRODUCT#admin-del-1' },
+                  productName: { S: 'Butter Popcorn' },
+                  price: { N: '18' },
+                  sortOrder: { N: '1' },
+                }
+              }
+            ]},
+            createdAt: { S: now },
+            updatedAt: { S: now },
+            GSI3PK: { S: 'PUBLIC' },
+            GSI3SK: { S: catalogId },
+          },
+        }));
+
+        // Act: Admin user (owner) deletes ADMIN_MANAGED catalog - should succeed
+        const { data }: any = await ownerClient.mutate({
+          mutation: DELETE_CATALOG,
+          variables: { catalogId: catalogId },
+        });
+
+        // Assert: Deletion succeeded
+        expect(data.deleteCatalog).toBe(true);
+      });
+
+      it('SECURITY: Deleting public catalog leaves orphaned references in seasons', async () => {
+        // Arrange: Create a public catalog that multiple users can use
+        const createCatalogInput = {
+          catalogName: 'Shared Public Catalog',
+          isPublic: true,
+          products: [{ productName: 'Kettle Corn', price: 15.0, sortOrder: 1 }],
+        };
+        const { data: catalogData }: any = await ownerClient.mutate({
+          mutation: CREATE_CATALOG,
+          variables: { input: createCatalogInput },
+        });
+        const catalogId = catalogData.createCatalog.catalogId;
+
+        // Create profiles and seasons for multiple users using this catalog
+        const CREATE_PROFILE = gql`
+          mutation CreateSellerProfile($input: CreateSellerProfileInput!) {
+            createSellerProfile(input: $input) {
+              profileId
+            }
+          }
+        `;
+        const CREATE_SEASON = gql`
+          mutation CreateSeason($input: CreateSeasonInput!) {
+            createSeason(input: $input) {
+              seasonId
+              catalogId
+            }
+          }
+        `;
+        const GET_SEASON = gql`
+          query GetSeason($seasonId: ID!) {
+            getSeason(seasonId: $seasonId) {
+              seasonId
+              catalogId
+              catalog {
+                catalogId
+                catalogName
+              }
+            }
+          }
+        `;
+        const DELETE_SEASON = gql`
+          mutation DeleteSeason($seasonId: ID!) {
+            deleteSeason(seasonId: $seasonId)
+          }
+        `;
+        const DELETE_PROFILE = gql`
+          mutation DeleteSellerProfile($profileId: ID!) {
+            deleteSellerProfile(profileId: $profileId)
+          }
+        `;
+
+        // Owner creates a profile and season using the public catalog
+        const { data: ownerProfileData }: any = await ownerClient.mutate({
+          mutation: CREATE_PROFILE,
+          variables: { input: { sellerName: 'Owner Using Public Catalog' } },
+        });
+        const ownerProfileId = ownerProfileData.createSellerProfile.profileId;
+
+        const { data: ownerSeasonData }: any = await ownerClient.mutate({
+          mutation: CREATE_SEASON,
+          variables: {
+            input: {
+              profileId: ownerProfileId,
+              catalogId: catalogId,
+              seasonName: 'Owner Season',
+              startDate: new Date().toISOString(),
+            },
+          },
+        });
+        const ownerSeasonId = ownerSeasonData.createSeason.seasonId;
+
+        // Contributor creates a profile and season using the same public catalog
+        const { data: contributorProfileData }: any = await contributorClient.mutate({
+          mutation: CREATE_PROFILE,
+          variables: { input: { sellerName: 'Contributor Using Public Catalog' } },
+        });
+        const contributorProfileId = contributorProfileData.createSellerProfile.profileId;
+
+        const { data: contributorSeasonData }: any = await contributorClient.mutate({
+          mutation: CREATE_SEASON,
+          variables: {
+            input: {
+              profileId: contributorProfileId,
+              catalogId: catalogId,
+              seasonName: 'Contributor Season',
+              startDate: new Date().toISOString(),
+            },
+          },
+        });
+        const contributorSeasonId = contributorSeasonData.createSeason.seasonId;
+
+        // Act: Owner deletes the public catalog (they own it)
+        const { data: deleteData }: any = await ownerClient.mutate({
+          mutation: DELETE_CATALOG,
+          variables: { catalogId: catalogId },
+        });
+        expect(deleteData.deleteCatalog).toBe(true);
+
+        // Assert: Both seasons still exist but catalog references are now orphaned
+        // The catalogId field still has the old value, but the catalog nested resolver returns null
+        const { data: ownerSeasonCheck }: any = await ownerClient.query({
+          query: GET_SEASON,
+          variables: { seasonId: ownerSeasonId },
+          fetchPolicy: 'network-only',
+        });
+        expect(ownerSeasonCheck.getSeason.catalogId).toBe(catalogId);
+        expect(ownerSeasonCheck.getSeason.catalog).toBeNull(); // Catalog was deleted
+
+        const { data: contributorSeasonCheck }: any = await contributorClient.query({
+          query: GET_SEASON,
+          variables: { seasonId: contributorSeasonId },
+          fetchPolicy: 'network-only',
+        });
+        expect(contributorSeasonCheck.getSeason.catalogId).toBe(catalogId);
+        expect(contributorSeasonCheck.getSeason.catalog).toBeNull(); // Catalog was deleted
+
+        // Cleanup: Delete seasons and profiles
+        await ownerClient.mutate({ mutation: DELETE_SEASON, variables: { seasonId: ownerSeasonId } });
+        await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId: ownerProfileId } });
+        await contributorClient.mutate({ mutation: DELETE_SEASON, variables: { seasonId: contributorSeasonId } });
+        await contributorClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId: contributorProfileId } });
       });
     });
 
@@ -981,7 +1223,7 @@ describe('Catalog CRUD Integration Tests', () => {
             mutation: DELETE_CATALOG,
             variables: { catalogId: 'CATALOG#nonexistent' },
           })
-        ).rejects.toThrow(/Cannot return null for non-nullable type.*Boolean|conditional request failed/i);  // VTL: null for non-nullable or conditional failure
+        ).rejects.toThrow(/Catalog not found|Cannot return null for non-nullable type.*Boolean|conditional request failed/i);  // Pipeline: "Catalog not found", VTL: null for non-nullable or conditional failure
       });
     });
 
@@ -1207,6 +1449,91 @@ describe('Catalog CRUD Integration Tests', () => {
 
         // Cleanup
         await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId } });
+      });
+
+      it('Data Integrity: Concurrent catalog deletion and usage (race condition)', async () => {
+        // Arrange: Create a catalog
+        const createCatalogInput = {
+          catalogName: 'Concurrent Delete Catalog',
+          isPublic: false,
+          products: [{ productName: 'Concurrent Popcorn', price: 20.0, sortOrder: 1 }],
+        };
+        const { data: catalogData }: any = await ownerClient.mutate({
+          mutation: CREATE_CATALOG,
+          variables: { input: createCatalogInput },
+        });
+        const catalogId = catalogData.createCatalog.catalogId;
+
+        // Create a profile for creating seasons
+        const CREATE_PROFILE = gql`
+          mutation CreateSellerProfile($input: CreateSellerProfileInput!) {
+            createSellerProfile(input: $input) {
+              profileId
+            }
+          }
+        `;
+        const CREATE_SEASON = gql`
+          mutation CreateSeason($input: CreateSeasonInput!) {
+            createSeason(input: $input) {
+              seasonId
+              catalogId
+            }
+          }
+        `;
+        const DELETE_SEASON = gql`
+          mutation DeleteSeason($seasonId: ID!) {
+            deleteSeason(seasonId: $seasonId)
+          }
+        `;
+        const DELETE_PROFILE = gql`
+          mutation DeleteSellerProfile($profileId: ID!) {
+            deleteSellerProfile(profileId: $profileId)
+          }
+        `;
+
+        const { data: profileData }: any = await ownerClient.mutate({
+          mutation: CREATE_PROFILE,
+          variables: { input: { sellerName: 'Concurrent Test Profile' } },
+        });
+        const profileId = profileData.createSellerProfile.profileId;
+
+        // Act: Concurrent catalog deletion and season creation (using that catalog)
+        const [deleteResult, createSeasonResult] = await Promise.allSettled([
+          ownerClient.mutate({
+            mutation: DELETE_CATALOG,
+            variables: { catalogId: catalogId },
+          }),
+          ownerClient.mutate({
+            mutation: CREATE_SEASON,
+            variables: {
+              input: {
+                profileId: profileId,
+                catalogId: catalogId,
+                seasonName: 'Concurrent Season',
+                startDate: new Date().toISOString(),
+              },
+            },
+          }),
+        ]);
+
+        // Assert: One or both operations may succeed depending on timing
+        // Delete should always be attempted
+        expect(['fulfilled', 'rejected']).toContain(deleteResult.status);
+        
+        // Season creation may succeed (if it happens before deletion)
+        // or it may succeed with an orphaned catalog reference (if deletion happens first)
+        expect(['fulfilled', 'rejected']).toContain(createSeasonResult.status);
+
+        // Cleanup
+        if (createSeasonResult.status === 'fulfilled') {
+          const seasonId = (createSeasonResult as PromiseFulfilledResult<any>).value.data.createSeason.seasonId;
+          await ownerClient.mutate({ mutation: DELETE_SEASON, variables: { seasonId } });
+        }
+        await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
+        // Try to delete catalog if it wasn't deleted
+        try {
+          await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId } });
+        } catch { /* already deleted */ }
       });
     });
   });

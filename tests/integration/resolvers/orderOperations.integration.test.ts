@@ -737,6 +737,54 @@ describe('Order Operations Integration Tests', () => {
       const afterOrderIds = listAfterData.listOrdersBySeason.map((o: any) => o.orderId);
       expect(afterOrderIds).not.toContain(orderId);
     }, 15000);
+
+    test('Data Integrity: Concurrent deletion of same order (idempotent)', async () => {
+      // Create an order first
+      const createInput = {
+        profileId: testProfileId,
+        seasonId: testSeasonId,
+        customerName: 'Concurrent Delete Test',
+        orderDate: new Date().toISOString(),
+        paymentMethod: 'CASH',
+        lineItems: [
+          {
+            productId: testProductId,
+            quantity: 1,
+          },
+        ],
+      };
+
+      const { data: createData } = await ownerClient.mutate({
+        mutation: CREATE_ORDER,
+        variables: { input: createInput },
+      });
+
+      const orderId = createData.createOrder.orderId;
+
+      // Act: Issue two concurrent delete requests for the same order
+      const [result1, result2] = await Promise.all([
+        ownerClient.mutate({
+          mutation: DELETE_ORDER,
+          variables: { orderId },
+        }),
+        ownerClient.mutate({
+          mutation: DELETE_ORDER,
+          variables: { orderId },
+        }),
+      ]);
+
+      // Assert: Both should succeed (idempotent behavior)
+      expect(result1.data.deleteOrder).toBe(true);
+      expect(result2.data.deleteOrder).toBe(true);
+
+      // Verify the order is actually deleted
+      const { data: verifyData }: any = await ownerClient.query({
+        query: GET_ORDER,
+        variables: { orderId },
+        fetchPolicy: 'network-only',
+      });
+      expect(verifyData.getOrder).toBeNull();
+    }, 15000);
   });
 
   /**
@@ -767,6 +815,55 @@ describe('Order Operations Integration Tests', () => {
         })
       ).rejects.toThrow(/forbidden|not authorized|unauthorized/i);
     }, 10000);
+
+    test('SECURITY: non-owner without shares cannot create order on others profile', async () => {
+      // Arrange: Create a NEW profile without sharing it with contributor
+      const { data: newProfile } = await ownerClient.mutate({
+        mutation: CREATE_SELLER_PROFILE,
+        variables: { input: { sellerName: 'No Share Profile' } },
+      });
+      const noShareProfileId = newProfile.createSellerProfile.profileId;
+
+      // Create a season for the new profile
+      const { data: newSeason } = await ownerClient.mutate({
+        mutation: CREATE_SEASON,
+        variables: {
+          input: {
+            profileId: noShareProfileId,
+            seasonName: 'No Share Season',
+            startDate: new Date('2025-01-01').toISOString(),
+            catalogId: testCatalogId,
+          },
+        },
+      });
+      const noShareSeasonId = newSeason.createSeason.seasonId;
+
+      // Wait for GSI propagation
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      try {
+        // Act: Contributor (who has NO share on this new profile) tries to create order
+        const input = {
+          profileId: noShareProfileId,
+          seasonId: noShareSeasonId,
+          customerName: 'Unauthorized Order',
+          orderDate: new Date().toISOString(),
+          paymentMethod: 'CASH',
+          lineItems: [{ productId: testProductId, quantity: 1 }],
+        };
+
+        await expect(
+          contributorClient.mutate({
+            mutation: CREATE_ORDER,
+            variables: { input },
+          })
+        ).rejects.toThrow(/forbidden|not authorized|unauthorized/i);
+      } finally {
+        // Cleanup
+        await ownerClient.mutate({ mutation: DELETE_SEASON, variables: { seasonId: noShareSeasonId } });
+        await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId: noShareProfileId } });
+      }
+    }, 20000);
   });
 
   describe('updateOrder authorization', () => {
@@ -806,6 +903,68 @@ describe('Order Operations Integration Tests', () => {
         })
       ).rejects.toThrow(/forbidden|not authorized|unauthorized/i);
     }, 10000);
+
+    test('SECURITY: non-owner without shares cannot update order on others profile', async () => {
+      // Arrange: Create a NEW profile without sharing it with contributor
+      const { data: newProfile } = await ownerClient.mutate({
+        mutation: CREATE_SELLER_PROFILE,
+        variables: { input: { sellerName: 'No Share Update Profile' } },
+      });
+      const noShareProfileId = newProfile.createSellerProfile.profileId;
+
+      // Create a season for the new profile
+      const { data: newSeason } = await ownerClient.mutate({
+        mutation: CREATE_SEASON,
+        variables: {
+          input: {
+            profileId: noShareProfileId,
+            seasonName: 'No Share Update Season',
+            startDate: new Date('2025-01-01').toISOString(),
+            catalogId: testCatalogId,
+          },
+        },
+      });
+      const noShareSeasonId = newSeason.createSeason.seasonId;
+
+      // Wait for GSI propagation
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // Owner creates an order on the non-shared profile
+      const { data: orderData } = await ownerClient.mutate({
+        mutation: CREATE_ORDER,
+        variables: {
+          input: {
+            profileId: noShareProfileId,
+            seasonId: noShareSeasonId,
+            customerName: 'Protected Order',
+            orderDate: new Date().toISOString(),
+            paymentMethod: 'CASH',
+            lineItems: [{ productId: testProductId, quantity: 1 }],
+          },
+        },
+      });
+      const orderId = orderData.createOrder.orderId;
+
+      try {
+        // Act: Contributor (who has NO share on this profile) tries to update order
+        await expect(
+          contributorClient.mutate({
+            mutation: UPDATE_ORDER,
+            variables: {
+              input: {
+                orderId,
+                customerName: 'Unauthorized Update',
+              },
+            },
+          })
+        ).rejects.toThrow(/forbidden|not authorized|unauthorized/i);
+      } finally {
+        // Cleanup
+        await ownerClient.mutate({ mutation: DELETE_ORDER, variables: { orderId } });
+        await ownerClient.mutate({ mutation: DELETE_SEASON, variables: { seasonId: noShareSeasonId } });
+        await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId: noShareProfileId } });
+      }
+    }, 25000);
   });
 
   describe('deleteOrder authorization', () => {
@@ -840,6 +999,63 @@ describe('Order Operations Integration Tests', () => {
         })
       ).rejects.toThrow(/forbidden|not authorized|unauthorized/i);
     }, 10000);
+
+    test('SECURITY: non-owner without shares cannot delete order on others profile', async () => {
+      // Arrange: Create a NEW profile without sharing it with contributor
+      const { data: newProfile } = await ownerClient.mutate({
+        mutation: CREATE_SELLER_PROFILE,
+        variables: { input: { sellerName: 'No Share Delete Profile' } },
+      });
+      const noShareProfileId = newProfile.createSellerProfile.profileId;
+
+      // Create a season for the new profile
+      const { data: newSeason } = await ownerClient.mutate({
+        mutation: CREATE_SEASON,
+        variables: {
+          input: {
+            profileId: noShareProfileId,
+            seasonName: 'No Share Delete Season',
+            startDate: new Date('2025-01-01').toISOString(),
+            catalogId: testCatalogId,
+          },
+        },
+      });
+      const noShareSeasonId = newSeason.createSeason.seasonId;
+
+      // Wait for GSI propagation
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // Owner creates an order on the non-shared profile
+      const { data: orderData } = await ownerClient.mutate({
+        mutation: CREATE_ORDER,
+        variables: {
+          input: {
+            profileId: noShareProfileId,
+            seasonId: noShareSeasonId,
+            customerName: 'Protected Order Delete',
+            orderDate: new Date().toISOString(),
+            paymentMethod: 'CASH',
+            lineItems: [{ productId: testProductId, quantity: 1 }],
+          },
+        },
+      });
+      const orderId = orderData.createOrder.orderId;
+
+      try {
+        // Act: Contributor (who has NO share on this profile) tries to delete order
+        await expect(
+          contributorClient.mutate({
+            mutation: DELETE_ORDER,
+            variables: { orderId },
+          })
+        ).rejects.toThrow(/forbidden|not authorized|unauthorized/i);
+      } finally {
+        // Cleanup
+        await ownerClient.mutate({ mutation: DELETE_ORDER, variables: { orderId } });
+        await ownerClient.mutate({ mutation: DELETE_SEASON, variables: { seasonId: noShareSeasonId } });
+        await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId: noShareProfileId } });
+      }
+    }, 25000);
   });
 
   /**

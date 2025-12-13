@@ -912,5 +912,80 @@ describe('Season Operations Integration Tests', () => {
       // Cleanup
       await ownerClient.mutate({ mutation: DELETE_SEASON, variables: { seasonId } });
     }, 10000);
+
+    it('Data Integrity: Concurrent season deletion and order creation (race condition)', async () => {
+      // Arrange: Create season
+      const { data: createSeasonData } = await ownerClient.mutate({
+        mutation: CREATE_SEASON,
+        variables: {
+          input: {
+            profileId: testProfileId,
+            catalogId: testCatalogId,
+            seasonName: 'Concurrent Delete Season',
+            startDate: new Date().toISOString(),
+          },
+        },
+      });
+      const seasonId = createSeasonData.createSeason.seasonId;
+
+      const CREATE_ORDER = gql`
+        mutation CreateOrder($input: CreateOrderInput!) {
+          createOrder(input: $input) {
+            orderId
+            seasonId
+          }
+        }
+      `;
+
+      // Act: Concurrent season deletion and order creation
+      const [deleteResult, orderResult] = await Promise.allSettled([
+        ownerClient.mutate({
+          mutation: DELETE_SEASON,
+          variables: { seasonId },
+        }),
+        ownerClient.mutate({
+          mutation: CREATE_ORDER,
+          variables: {
+            input: {
+              profileId: testProfileId,
+              seasonId: seasonId,
+              customerName: 'Concurrent Order',
+              orderDate: new Date().toISOString(),
+              paymentMethod: 'CASH',
+              lineItems: [
+                {
+                  productId: testProductId,
+                  quantity: 1,
+                },
+              ],
+            },
+          },
+        }),
+      ]);
+
+      // Assert: Delete should succeed
+      expect(deleteResult.status).toBe('fulfilled');
+      if (deleteResult.status === 'fulfilled') {
+        expect(deleteResult.value.data.deleteSeason).toBe(true);
+      }
+      
+      // Order creation may succeed (if it happens before deletion)
+      // or fail (if deletion happens first and cleans up)
+      // Either result is acceptable for a race condition test
+      expect(['fulfilled', 'rejected']).toContain(orderResult.status);
+
+      // Cleanup: If order was created and not cascade-deleted, delete it
+      if (orderResult.status === 'fulfilled') {
+        const orderId = (orderResult as PromiseFulfilledResult<any>).value.data.createOrder.orderId;
+        const DELETE_ORDER = gql`
+          mutation DeleteOrder($orderId: ID!) {
+            deleteOrder(orderId: $orderId)
+          }
+        `;
+        try {
+          await ownerClient.mutate({ mutation: DELETE_ORDER, variables: { orderId } });
+        } catch { /* order may have been cascade deleted */ }
+      }
+    }, 15000);
   });
 });

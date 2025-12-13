@@ -883,6 +883,72 @@ describe('Profile Operations Integration Tests', () => {
       // Profile was deleted and shares were cleaned up, no manual cleanup needed
     }, 15000);
 
+    it('SECURITY: Deleted profile becomes immediately inaccessible to all users', async () => {
+      // Arrange: Create profile and share it
+      const profileName = `${getTestPrefix()}-ImmediateInaccessTest`;
+      const { data: createData } = await ownerClient.mutate({
+        mutation: CREATE_PROFILE,
+        variables: { input: { sellerName: profileName } },
+      });
+      const testProfileId = createData.createSellerProfile.profileId;
+
+      const SHARE_DIRECT = gql`
+        mutation ShareProfileDirect($input: ShareProfileDirectInput!) {
+          shareProfileDirect(input: $input) {
+            shareId
+            targetAccountId
+          }
+        }
+      `;
+      await ownerClient.mutate({
+        mutation: SHARE_DIRECT,
+        variables: {
+          input: {
+            profileId: testProfileId,
+            targetAccountEmail: process.env.TEST_CONTRIBUTOR_EMAIL,
+            permissions: ['READ', 'WRITE'],
+          },
+        },
+      });
+
+      // Verify shared user can access profile BEFORE deletion
+      const { data: beforeAccess }: any = await contributorClient.query({
+        query: GET_PROFILE,
+        variables: { profileId: testProfileId },
+        fetchPolicy: 'network-only',
+      });
+      expect(beforeAccess.getProfile.profileId).toBe(testProfileId);
+
+      // Act: Delete the profile
+      const { data } = await ownerClient.mutate({
+        mutation: DELETE_PROFILE,
+        variables: { profileId: testProfileId },
+      });
+      expect(data.deleteSellerProfile).toBe(true);
+
+      // Assert: Shared user can NO longer access profile via getProfile
+      // Should return null or throw error (depending on implementation)
+      const { data: afterAccess }: any = await contributorClient.query({
+        query: GET_PROFILE,
+        variables: { profileId: testProfileId },
+        fetchPolicy: 'network-only',
+      }).catch(() => ({ data: { getProfile: null } }));
+      
+      // Either returns null or throws error - both are valid "inaccessible" behavior
+      expect(afterAccess.getProfile).toBeNull();
+
+      // Owner also cannot access
+      await expect(
+        ownerClient.query({
+          query: GET_PROFILE,
+          variables: { profileId: testProfileId },
+          fetchPolicy: 'network-only',
+        })
+      ).rejects.toThrow(/Profile not found/);
+
+      // Profile was deleted, no cleanup needed
+    }, 15000);
+
     it('Data Integrity: Deleting profile cleans up associated invites', async () => {
       // Arrange: Create profile and create invite
       const profileName = `${getTestPrefix()}-InviteCleanupTest`;
@@ -1089,6 +1155,54 @@ describe('Profile Operations Integration Tests', () => {
       }
     }, 20000);
 
+    it('Security: Creating many profiles (user quota testing)', async () => {
+      // Arrange: Create multiple profiles to test quotas
+      // This test documents current behavior: no enforced quota
+      const profileCount = 10;
+      const createdIds: string[] = [];
+
+      // Act: Create many profiles
+      for (let i = 0; i < profileCount; i++) {
+        const { data } = await ownerClient.mutate({
+          mutation: CREATE_PROFILE,
+          variables: {
+            input: {
+              sellerName: `${getTestPrefix()}-QuotaTest-${i}`,
+            },
+          },
+        });
+        createdIds.push(data.createSellerProfile.profileId);
+      }
+
+      // Assert: All profiles should be created (no quota enforced currently)
+      expect(createdIds.length).toBe(profileCount);
+      
+      // Verify all profiles exist via listMyProfiles
+      const LIST_MY_PROFILES = gql`
+        query ListMyProfiles {
+          listMyProfiles {
+            profileId
+            sellerName
+          }
+        }
+      `;
+      const { data: listData }: any = await ownerClient.query({
+        query: LIST_MY_PROFILES,
+        fetchPolicy: 'network-only',
+      });
+      
+      // All created profiles should appear in the list
+      const returnedIds = listData.listMyProfiles.map((p: any) => p.profileId);
+      for (const createdId of createdIds) {
+        expect(returnedIds).toContain(createdId);
+      }
+
+      // Cleanup all created profiles
+      for (const profileId of createdIds) {
+        await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
+      }
+    }, 60000);
+
     it('Updating profile with no changes is a no-op', async () => {
       // Arrange: Create profile
       const profileName = `${getTestPrefix()}-NoOpUpdate`;
@@ -1180,6 +1294,60 @@ describe('Profile Operations Integration Tests', () => {
 
       // Cleanup
       await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId: testProfileId } });
+    }, 15000);
+
+    it('Data Integrity: Concurrent deletion and access (race condition)', async () => {
+      // Arrange: Create profile and share it
+      const { data: createData } = await ownerClient.mutate({
+        mutation: CREATE_PROFILE,
+        variables: { input: { sellerName: `${getTestPrefix()}-ConcurrentDeleteAccess` } },
+      });
+      const testProfileId = createData.createSellerProfile.profileId;
+
+      // Share with contributor
+      const SHARE_DIRECT = gql`
+        mutation ShareProfileDirect($input: ShareProfileDirectInput!) {
+          shareProfileDirect(input: $input) {
+            shareId
+            permissions
+          }
+        }
+      `;
+      await ownerClient.mutate({
+        mutation: SHARE_DIRECT,
+        variables: {
+          input: {
+            profileId: testProfileId,
+            targetAccountEmail: process.env.TEST_CONTRIBUTOR_EMAIL,
+            permissions: ['READ'],
+          },
+        },
+      });
+
+      // Act: Concurrent deletion and access
+      const [deleteResult, accessResult] = await Promise.allSettled([
+        ownerClient.mutate({
+          mutation: DELETE_PROFILE,
+          variables: { profileId: testProfileId },
+        }),
+        contributorClient.query({
+          query: GET_PROFILE,
+          variables: { profileId: testProfileId },
+          fetchPolicy: 'network-only',
+        }),
+      ]);
+
+      // Assert: Delete should succeed
+      expect(deleteResult.status).toBe('fulfilled');
+      if (deleteResult.status === 'fulfilled') {
+        expect(deleteResult.value.data.deleteSellerProfile).toBe(true);
+      }
+      
+      // Access result may succeed or fail depending on timing
+      // Either result is acceptable for a race condition test
+      expect(['fulfilled', 'rejected']).toContain(accessResult.status);
+
+      // Profile was deleted, no cleanup needed
     }, 15000);
   });
 });

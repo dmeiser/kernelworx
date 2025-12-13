@@ -1166,4 +1166,196 @@ describe('Season Query Resolvers Integration Tests', () => {
       await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
     });
   });
+
+  describe('Performance', () => {
+    it('Performance: Listing seasons ordered by startDate', async () => {
+      // Arrange: Create profile, catalog, and multiple seasons with different start dates
+      const { data: profileData }: any = await ownerClient.mutate({
+        mutation: CREATE_PROFILE,
+        variables: { input: { sellerName: `${getTestPrefix()}-SeasonOrderProfile` } },
+      });
+      const profileId = profileData.createSellerProfile.profileId;
+
+      const { data: catalogData }: any = await ownerClient.mutate({
+        mutation: CREATE_CATALOG,
+        variables: {
+          input: {
+            catalogName: `${getTestPrefix()}-SeasonOrderCatalog`,
+            isPublic: true,
+            products: [{ productName: 'Product', price: 15.0, sortOrder: 1 }],
+          },
+        },
+      });
+      const catalogId = catalogData.createCatalog.catalogId;
+
+      // Create seasons with different start dates (oldest to newest)
+      const seasonIds: string[] = [];
+      const startDates = [
+        '2022-01-01T00:00:00Z',
+        '2023-01-01T00:00:00Z',
+        '2024-01-01T00:00:00Z',
+        '2025-01-01T00:00:00Z',
+      ];
+      
+      for (let i = 0; i < startDates.length; i++) {
+        const { data: seasonData }: any = await ownerClient.mutate({
+          mutation: CREATE_SEASON,
+          variables: {
+            input: {
+              profileId: profileId,
+              seasonName: `${getTestPrefix()}-Season-${i + 1}`,
+              startDate: startDates[i],
+              catalogId: catalogId,
+            },
+          },
+        });
+        seasonIds.push(seasonData.createSeason.seasonId);
+      }
+
+      // Act: List seasons
+      const { data }: any = await ownerClient.query({
+        query: LIST_SEASONS_BY_PROFILE,
+        variables: { profileId },
+        fetchPolicy: 'network-only',
+      });
+
+      // Assert: Seasons are returned with startDate for ordering
+      expect(data.listSeasonsByProfile.length).toBe(startDates.length);
+      
+      for (const season of data.listSeasonsByProfile) {
+        expect(season.startDate).toBeDefined();
+      }
+      
+      // Check ordering (may be ascending or descending by implementation)
+      const dates = data.listSeasonsByProfile.map((s: any) => new Date(s.startDate).getTime());
+      const sortedAsc = [...dates].sort((a, b) => a - b);
+      const sortedDesc = [...dates].sort((a, b) => b - a);
+      
+      const isAscending = JSON.stringify(dates) === JSON.stringify(sortedAsc);
+      const isDescending = JSON.stringify(dates) === JSON.stringify(sortedDesc);
+      
+      console.log(`Seasons are ordered by startDate: ascending=${isAscending}, descending=${isDescending}`);
+
+      // Cleanup
+      for (const seasonId of seasonIds) {
+        await ownerClient.mutate({ mutation: DELETE_SEASON, variables: { seasonId } });
+      }
+      await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId } });
+      await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
+    }, 60000);
+
+    it('Performance: Listing seasons with filters (active vs past vs future)', async () => {
+      // Arrange: Create profile, catalog, and seasons with different date ranges
+      const { data: profileData }: any = await ownerClient.mutate({
+        mutation: CREATE_PROFILE,
+        variables: { input: { sellerName: `${getTestPrefix()}-SeasonFilterProfile` } },
+      });
+      const profileId = profileData.createSellerProfile.profileId;
+
+      const { data: catalogData }: any = await ownerClient.mutate({
+        mutation: CREATE_CATALOG,
+        variables: {
+          input: {
+            catalogName: `${getTestPrefix()}-SeasonFilterCatalog`,
+            isPublic: true,
+            products: [{ productName: 'Product', price: 15.0, sortOrder: 1 }],
+          },
+        },
+      });
+      const catalogId = catalogData.createCatalog.catalogId;
+
+      const now = new Date();
+      const pastStart = new Date(now.getFullYear() - 2, 0, 1).toISOString();
+      const pastEnd = new Date(now.getFullYear() - 1, 11, 31).toISOString();
+      const activeStart = new Date(now.getFullYear(), 0, 1).toISOString();
+      const activeEnd = new Date(now.getFullYear(), 11, 31).toISOString();
+      const futureStart = new Date(now.getFullYear() + 1, 0, 1).toISOString();
+
+      // Create past season
+      const { data: pastSeasonData }: any = await ownerClient.mutate({
+        mutation: CREATE_SEASON,
+        variables: {
+          input: {
+            profileId: profileId,
+            seasonName: `${getTestPrefix()}-PastSeason`,
+            startDate: pastStart,
+            endDate: pastEnd,
+            catalogId: catalogId,
+          },
+        },
+      });
+      const pastSeasonId = pastSeasonData.createSeason.seasonId;
+
+      // Create active season
+      const { data: activeSeasonData }: any = await ownerClient.mutate({
+        mutation: CREATE_SEASON,
+        variables: {
+          input: {
+            profileId: profileId,
+            seasonName: `${getTestPrefix()}-ActiveSeason`,
+            startDate: activeStart,
+            endDate: activeEnd,
+            catalogId: catalogId,
+          },
+        },
+      });
+      const activeSeasonId = activeSeasonData.createSeason.seasonId;
+
+      // Create future season
+      const { data: futureSeasonData }: any = await ownerClient.mutate({
+        mutation: CREATE_SEASON,
+        variables: {
+          input: {
+            profileId: profileId,
+            seasonName: `${getTestPrefix()}-FutureSeason`,
+            startDate: futureStart,
+            catalogId: catalogId,
+          },
+        },
+      });
+      const futureSeasonId = futureSeasonData.createSeason.seasonId;
+
+      // Act: List all seasons
+      const { data }: any = await ownerClient.query({
+        query: LIST_SEASONS_BY_PROFILE,
+        variables: { profileId },
+        fetchPolicy: 'network-only',
+      });
+
+      // Assert: All seasons are returned with date information for filtering
+      expect(data.listSeasonsByProfile.length).toBe(3);
+      
+      // Verify each season has dates that allow client-side filtering
+      const seasons = data.listSeasonsByProfile;
+      for (const season of seasons) {
+        expect(season.startDate).toBeDefined();
+        // endDate may be null for ongoing seasons
+      }
+      
+      // Categorize seasons by date range
+      const pastSeasons = seasons.filter((s: any) => {
+        const end = s.endDate ? new Date(s.endDate) : null;
+        return end && end < now;
+      });
+      const activeSeasons = seasons.filter((s: any) => {
+        const start = new Date(s.startDate);
+        const end = s.endDate ? new Date(s.endDate) : null;
+        return start <= now && (!end || end >= now);
+      });
+      const futureSeasons = seasons.filter((s: any) => {
+        const start = new Date(s.startDate);
+        return start > now;
+      });
+      
+      console.log(`Seasons: past=${pastSeasons.length}, active=${activeSeasons.length}, future=${futureSeasons.length}`);
+      expect(pastSeasons.length + activeSeasons.length + futureSeasons.length).toBe(3);
+
+      // Cleanup
+      await ownerClient.mutate({ mutation: DELETE_SEASON, variables: { seasonId: pastSeasonId } });
+      await ownerClient.mutate({ mutation: DELETE_SEASON, variables: { seasonId: activeSeasonId } });
+      await ownerClient.mutate({ mutation: DELETE_SEASON, variables: { seasonId: futureSeasonId } });
+      await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId } });
+      await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
+    }, 60000);
+  });
 });

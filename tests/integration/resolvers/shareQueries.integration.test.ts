@@ -728,5 +728,70 @@ describe('Share Query Operations Integration Tests', () => {
         variables: { profileId },
       });
     }, 15000);
+
+    test('Performance: Listing shares ordered by createdAt', async () => {
+      // Create a new profile specifically for this test
+      const { data: profileData }: any = await ownerClient.mutate({
+        mutation: CREATE_SELLER_PROFILE,
+        variables: { input: { sellerName: 'Shares Ordering Test Profile' } },
+      });
+      const profileId = profileData.createSellerProfile.profileId;
+
+      // Share with contributor first (should have earlier createdAt)
+      await ownerClient.mutate({
+        mutation: SHARE_PROFILE_DIRECT,
+        variables: {
+          input: {
+            profileId,
+            targetAccountEmail: process.env.TEST_CONTRIBUTOR_EMAIL,
+            permissions: ['READ', 'WRITE'],
+          },
+        },
+      });
+
+      // Small delay to ensure different timestamps
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // Share with readonly second (should have later createdAt)
+      await ownerClient.mutate({
+        mutation: SHARE_PROFILE_DIRECT,
+        variables: {
+          input: {
+            profileId,
+            targetAccountEmail: process.env.TEST_READONLY_EMAIL,
+            permissions: ['READ'],
+          },
+        },
+      });
+
+      // Measure query performance
+      const startTime = Date.now();
+      const { data }: any = await ownerClient.query({
+        query: LIST_SHARES_BY_PROFILE,
+        variables: { profileId },
+        fetchPolicy: 'network-only',
+      });
+      const queryTime = Date.now() - startTime;
+
+      console.log(`📊 Performance: listSharesByProfile took ${queryTime}ms`);
+
+      // Assert: Query should complete in reasonable time (under 5 seconds)
+      expect(queryTime).toBeLessThan(5000);
+
+      // Assert: Both shares should be present
+      expect(data.listSharesByProfile.length).toBe(2);
+
+      // Verify shares have createdAt timestamps
+      for (const share of data.listSharesByProfile) {
+        expect(share.createdAt).toBeDefined();
+        expect(typeof share.createdAt).toBe('string');
+      }
+
+      // Cleanup
+      await ownerClient.mutate({
+        mutation: DELETE_PROFILE,
+        variables: { profileId },
+      });
+    }, 15000);
   });
 });

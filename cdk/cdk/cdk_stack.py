@@ -4674,40 +4674,167 @@ $util.toJson($ctx.result)
                 ),
             )
 
-            # deleteCatalog - Delete a catalog (owner only)
-            self.dynamodb_datasource.create_resolver(
-                "DeleteCatalogResolver",
+            # deleteCatalog - Delete a catalog (owner or admin for ADMIN_MANAGED)
+            # Pipeline resolver with 3 steps:
+            # 1. Get caller's Account to check isAdmin
+            # 2. Get Catalog to check catalogType and ownerAccountId
+            # 3. Delete if authorized
+            
+            # Step 1: Get caller's account to check isAdmin
+            get_caller_account_for_delete_fn = appsync.AppsyncFunction(
+                self,
+                "GetCallerAccountForDeleteFn",
+                name=f"GetCallerAccountForDeleteFn_{env_name}",
+                api=self.api,
+                data_source=self.dynamodb_datasource,
+                runtime=appsync.FunctionRuntime.JS_1_0_0,
+                code=appsync.Code.from_inline(
+                    """
+import { util } from '@aws-appsync/utils';
+
+export function request(ctx) {
+    const callerId = ctx.identity.sub;
+    return {
+        operation: 'GetItem',
+        key: util.dynamodb.toMapValues({
+            PK: 'ACCOUNT#' + callerId,
+            SK: 'METADATA'
+        })
+    };
+}
+
+export function response(ctx) {
+    if (ctx.error) {
+        return util.error(ctx.error.message, ctx.error.type);
+    }
+    // Store account info for next step
+    ctx.stash.callerAccount = ctx.result;
+    ctx.stash.callerId = ctx.identity.sub;
+    return ctx.result;
+}
+                    """
+                ),
+            )
+
+            # Step 2: Get catalog to check catalogType and ownerAccountId
+            get_catalog_for_delete_fn = appsync.AppsyncFunction(
+                self,
+                "GetCatalogForDeleteFn",
+                name=f"GetCatalogForDeleteFn_{env_name}",
+                api=self.api,
+                data_source=self.dynamodb_datasource,
+                runtime=appsync.FunctionRuntime.JS_1_0_0,
+                code=appsync.Code.from_inline(
+                    """
+import { util } from '@aws-appsync/utils';
+
+export function request(ctx) {
+    const catalogId = ctx.args.catalogId;
+    return {
+        operation: 'GetItem',
+        key: util.dynamodb.toMapValues({
+            PK: 'CATALOG',
+            SK: catalogId
+        })
+    };
+}
+
+export function response(ctx) {
+    if (ctx.error) {
+        return util.error(ctx.error.message, ctx.error.type);
+    }
+    if (!ctx.result) {
+        return util.error('Catalog not found', 'NotFound');
+    }
+    
+    const catalog = ctx.result;
+    const callerAccount = ctx.stash.callerAccount;
+    const callerId = ctx.stash.callerId;
+    const isAdmin = callerAccount && callerAccount.isAdmin === true;
+    const isOwner = catalog.ownerAccountId === callerId;
+    const isAdminManaged = catalog.catalogType === 'ADMIN_MANAGED';
+    
+    // Authorization logic:
+    // - Owner can delete their own catalogs (USER_CREATED)
+    // - Admin can delete ADMIN_MANAGED catalogs
+    if (isOwner) {
+        ctx.stash.authorized = true;
+    } else if (isAdminManaged && isAdmin) {
+        ctx.stash.authorized = true;
+    } else {
+        return util.error('Not authorized to delete this catalog', 'Forbidden');
+    }
+    
+    ctx.stash.catalog = catalog;
+    return catalog;
+}
+                    """
+                ),
+            )
+
+            # Step 3: Delete the catalog
+            delete_catalog_fn = appsync.AppsyncFunction(
+                self,
+                "DeleteCatalogFn",
+                name=f"DeleteCatalogFn_{env_name}",
+                api=self.api,
+                data_source=self.dynamodb_datasource,
+                runtime=appsync.FunctionRuntime.JS_1_0_0,
+                code=appsync.Code.from_inline(
+                    """
+import { util } from '@aws-appsync/utils';
+
+export function request(ctx) {
+    if (!ctx.stash.authorized) {
+        return util.error('Not authorized', 'Forbidden');
+    }
+    
+    const catalogId = ctx.args.catalogId;
+    return {
+        operation: 'DeleteItem',
+        key: util.dynamodb.toMapValues({
+            PK: 'CATALOG',
+            SK: catalogId
+        })
+    };
+}
+
+export function response(ctx) {
+    if (ctx.error) {
+        return util.error(ctx.error.message, ctx.error.type);
+    }
+    return true;
+}
+                    """
+                ),
+            )
+
+            # Pipeline resolver for deleteCatalog
+            appsync.Resolver(
+                self,
+                "DeleteCatalogPipelineResolver",
+                api=self.api,
                 type_name="Mutation",
                 field_name="deleteCatalog",
-                request_mapping_template=appsync.MappingTemplate.from_string(
+                runtime=appsync.FunctionRuntime.JS_1_0_0,
+                pipeline_config=[
+                    get_caller_account_for_delete_fn,
+                    get_catalog_for_delete_fn,
+                    delete_catalog_fn,
+                ],
+                code=appsync.Code.from_inline(
                     """
-{
-    "version": "2017-02-28",
-    "operation": "DeleteItem",
-    "key": {
-        "PK": $util.dynamodb.toDynamoDBJson("CATALOG"),
-        "SK": $util.dynamodb.toDynamoDBJson($ctx.args.catalogId)
-    },
-    "condition": {
-        "expression": "attribute_exists(PK) AND ownerAccountId = :ownerId",
-        "expressionValues": {
-            ":ownerId": $util.dynamodb.toDynamoDBJson($ctx.identity.sub)
-        }
-    }
+export function request(ctx) {
+    return {};
 }
-                """
-                ),
-                response_mapping_template=appsync.MappingTemplate.from_string(
+
+export function response(ctx) {
+    if (ctx.error) {
+        return util.error(ctx.error.message, ctx.error.type);
+    }
+    return ctx.result;
+}
                     """
-#if($ctx.error)
-    #if($ctx.error.type == "DynamoDB:ConditionalCheckFailedException")
-        $util.error("Catalog not found or access denied", "Forbidden")
-    #else
-        $util.error($ctx.error.message, $ctx.error.type)
-    #end
-#end
-$util.toJson(true)
-                """
                 ),
             )
 

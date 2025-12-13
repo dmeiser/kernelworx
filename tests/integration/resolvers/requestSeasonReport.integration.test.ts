@@ -614,6 +614,90 @@ describe('requestSeasonReport Integration Tests', () => {
     });
   });
 
+  describe('Performance', () => {
+    test('Performance: Requesting report for season with many orders', async () => {
+      // Arrange: Create a season with many orders
+      const performanceSeasonResponse = await ownerClient.mutate({
+        mutation: CREATE_SEASON,
+        variables: {
+          input: {
+            profileId: testProfileId,
+            seasonName: 'Performance Test Season',
+            catalogId: testCatalogId,
+            startDate: '2024-01-01T00:00:00.000Z',
+            endDate: '2024-12-31T23:59:59.999Z',
+          },
+        },
+      });
+      const performanceSeasonId = performanceSeasonResponse.data.createSeason.seasonId;
+      const orderIds: string[] = [];
+
+      try {
+        // Create 25 orders to test performance
+        const orderCount = 25;
+        for (let i = 0; i < orderCount; i++) {
+          const orderResponse = await ownerClient.mutate({
+            mutation: CREATE_ORDER,
+            variables: {
+              input: {
+                profileId: testProfileId,
+                seasonId: performanceSeasonId,
+                customerName: `Performance Customer ${i + 1}`,
+                customerPhone: `555-${String(i).padStart(4, '0')}`,
+                orderDate: `2024-0${Math.floor(i / 10) + 1}-${String((i % 28) + 1).padStart(2, '0')}T12:00:00.000Z`,
+                paymentMethod: 'CASH',
+                lineItems: [
+                  {
+                    productId: productId1,
+                    quantity: i + 1, // Varying quantities
+                  },
+                ],
+              },
+            },
+          });
+          orderIds.push(orderResponse.data.createOrder.orderId);
+        }
+
+        // Act: Request report and measure time
+        const startTime = Date.now();
+        const result = await ownerClient.mutate({
+          mutation: REQUEST_SEASON_REPORT,
+          variables: {
+            input: {
+              seasonId: performanceSeasonId,
+            },
+          },
+        });
+        const endTime = Date.now();
+        const reportGenerationTime = endTime - startTime;
+
+        // Assert: Report should complete successfully
+        expect(result.data.requestSeasonReport).toBeDefined();
+        expect(result.data.requestSeasonReport.status).toBe('COMPLETED');
+        expect(result.data.requestSeasonReport.reportUrl).toBeDefined();
+        
+        // Performance check: Report generation should complete within reasonable time
+        // Lambda timeout is typically 30 seconds, but report generation should be much faster
+        expect(reportGenerationTime).toBeLessThan(15000); // Less than 15 seconds
+        
+        console.log(`Report generation for ${orderCount} orders took ${reportGenerationTime}ms`);
+
+      } finally {
+        // Cleanup: Delete orders and season
+        for (const orderId of orderIds) {
+          await ownerClient.mutate({
+            mutation: DELETE_ORDER,
+            variables: { orderId },
+          });
+        }
+        await ownerClient.mutate({
+          mutation: DELETE_SEASON,
+          variables: { seasonId: performanceSeasonId },
+        });
+      }
+    }, 120000); // 2 minute timeout for this performance test (includes 25 order creations)
+  });
+
   describe('Edge Cases', () => {
     let emptySeasonId: string;
 

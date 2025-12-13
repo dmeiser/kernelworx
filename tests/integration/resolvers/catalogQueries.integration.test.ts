@@ -748,6 +748,96 @@ describe('Catalog Query Resolvers Integration Tests', () => {
       expect(ownerPublicCatalog).toBeDefined();
       expect(ownerPublicCatalog.isPublic).toBe(true);
     });
+
+    it('Performance: Listing public catalogs when there are many', async () => {
+      // Create multiple public catalogs
+      const createdCatalogIds: string[] = [];
+
+      for (let i = 0; i < 10; i++) {
+        const { data: catalogData }: any = await ownerClient.mutate({
+          mutation: CREATE_CATALOG,
+          variables: {
+            input: {
+              catalogName: `Performance Public Catalog ${i}`,
+              isPublic: true,
+              products: [
+                { productName: `Product ${i}`, price: 10.0 + i, sortOrder: 1 },
+              ],
+            },
+          },
+        });
+        createdCatalogIds.push(catalogData.createCatalog.catalogId);
+      }
+
+      // Measure query performance
+      const startTime = Date.now();
+      const { data }: any = await readonlyClient.query({
+        query: LIST_PUBLIC_CATALOGS,
+        fetchPolicy: 'network-only',
+      });
+      const endTime = Date.now();
+      const queryTime = endTime - startTime;
+
+      console.log(`📊 Performance: listPublicCatalogs with many catalogs took ${queryTime}ms`);
+
+      // Assert: Query should complete in reasonable time (under 5 seconds)
+      expect(queryTime).toBeLessThan(5000);
+
+      // Assert: Should return array with at least our created catalogs
+      expect(Array.isArray(data.listPublicCatalogs)).toBe(true);
+      expect(data.listPublicCatalogs.length).toBeGreaterThanOrEqual(10);
+
+      // Cleanup
+      for (const catalogId of createdCatalogIds) {
+        await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId } });
+      }
+    }, 60000);
+
+    it('Performance: Listing public catalogs ordered by name or createdAt', async () => {
+      // Note: Current VTL resolver doesn't support ordering parameters, but we test
+      // that results are returned consistently for large result sets
+      const createdCatalogIds: string[] = [];
+
+      // Create catalogs with names that would sort differently alphabetically
+      const names = ['Zebra Catalog', 'Alpha Catalog', 'Middle Catalog'];
+      for (const name of names) {
+        const { data: catalogData }: any = await ownerClient.mutate({
+          mutation: CREATE_CATALOG,
+          variables: {
+            input: {
+              catalogName: name,
+              isPublic: true,
+              products: [
+                { productName: 'Product A', price: 10.0, sortOrder: 1 },
+              ],
+            },
+          },
+        });
+        createdCatalogIds.push(catalogData.createCatalog.catalogId);
+      }
+
+      // Query and verify we get results
+      const { data }: any = await readonlyClient.query({
+        query: LIST_PUBLIC_CATALOGS,
+        fetchPolicy: 'network-only',
+      });
+
+      // Assert: All our catalogs should be in the results
+      expect(Array.isArray(data.listPublicCatalogs)).toBe(true);
+      
+      const catalogNames = data.listPublicCatalogs
+        .filter((c: any) => createdCatalogIds.includes(c.catalogId))
+        .map((c: any) => c.catalogName);
+      
+      expect(catalogNames).toContain('Zebra Catalog');
+      expect(catalogNames).toContain('Alpha Catalog');
+      expect(catalogNames).toContain('Middle Catalog');
+
+      // Cleanup
+      for (const catalogId of createdCatalogIds) {
+        await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId } });
+      }
+    }, 30000);
   });
 
   describe('listMyCatalogs additional tests', () => {
@@ -815,6 +905,62 @@ describe('Catalog Query Resolvers Integration Tests', () => {
         });
         expect(directData.getCatalog).not.toBeNull();
         expect(directData.getCatalog.catalogId).toBe(catalogId);
+      }
+
+      // Cleanup
+      for (const catalogId of createdCatalogIds) {
+        await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId } });
+      }
+    }, 30000);
+
+    it('Performance: Listing catalogs ordered by name or createdAt', async () => {
+      // Note: Current VTL resolver doesn't support ordering parameters, but we test
+      // that results are returned consistently for user's catalogs
+      const createdCatalogIds: string[] = [];
+
+      // Create catalogs with names that would sort differently alphabetically
+      const names = ['Zzz My Catalog', 'Aaa My Catalog', 'Mmm My Catalog'];
+      for (const name of names) {
+        const { data: catalogData }: any = await ownerClient.mutate({
+          mutation: CREATE_CATALOG,
+          variables: {
+            input: {
+              catalogName: name,
+              isPublic: false, // Private catalogs for this test
+              products: [
+                { productName: 'Product A', price: 10.0, sortOrder: 1 },
+              ],
+            },
+          },
+        });
+        createdCatalogIds.push(catalogData.createCatalog.catalogId);
+      }
+
+      // Measure query performance
+      const startTime = Date.now();
+      const { data }: any = await ownerClient.query({
+        query: LIST_MY_CATALOGS,
+        fetchPolicy: 'network-only',
+      });
+      const endTime = Date.now();
+      const queryTime = endTime - startTime;
+
+      console.log(`📊 Performance: listMyCatalogs took ${queryTime}ms`);
+
+      // Assert: Query should complete in reasonable time (under 5 seconds)
+      expect(queryTime).toBeLessThan(5000);
+
+      // Assert: Should return array
+      expect(Array.isArray(data.listMyCatalogs)).toBe(true);
+
+      // Verify our catalogs exist by direct fetch (bypassing GSI consistency issues)
+      for (const catalogId of createdCatalogIds) {
+        const { data: directData }: any = await ownerClient.query({
+          query: GET_CATALOG,
+          variables: { catalogId },
+          fetchPolicy: 'network-only',
+        });
+        expect(directData.getCatalog).not.toBeNull();
       }
 
       // Cleanup
