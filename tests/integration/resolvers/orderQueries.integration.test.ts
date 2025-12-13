@@ -855,4 +855,427 @@ describe('Order Query Operations Integration Tests', () => {
       expect(data.listOrdersByProfile).toEqual([]);
     });
   });
+
+  // ========================================
+  // 5.12.4: Order Edge Cases
+  // ========================================
+
+  describe('5.12.4: Order Edge Cases', () => {
+    test('Order with CASH payment method', async () => {
+      // Create order with CASH
+      const { data: orderData }: any = await ownerClient.mutate({
+        mutation: CREATE_ORDER,
+        variables: {
+          input: {
+            profileId: testProfileId,
+            seasonId: testSeasonId,
+            customerName: 'Cash Customer',
+            orderDate: new Date().toISOString(),
+            paymentMethod: 'CASH',
+            lineItems: [{ productId: testProductId, quantity: 1 }],
+          },
+        },
+      });
+      const orderId = orderData.createOrder.orderId;
+
+      // Query the order
+      const { data }: any = await ownerClient.query({
+        query: GET_ORDER,
+        variables: { orderId },
+        fetchPolicy: 'network-only',
+      });
+
+      expect(data.getOrder.paymentMethod).toBe('CASH');
+
+      // Cleanup
+      await ownerClient.mutate({
+        mutation: DELETE_ORDER,
+        variables: { orderId },
+      });
+    });
+
+    test('Order with CHECK payment method', async () => {
+      const { data: orderData }: any = await ownerClient.mutate({
+        mutation: CREATE_ORDER,
+        variables: {
+          input: {
+            profileId: testProfileId,
+            seasonId: testSeasonId,
+            customerName: 'Check Customer',
+            orderDate: new Date().toISOString(),
+            paymentMethod: 'CHECK',
+            lineItems: [{ productId: testProductId, quantity: 1 }],
+          },
+        },
+      });
+      const orderId = orderData.createOrder.orderId;
+
+      const { data }: any = await ownerClient.query({
+        query: GET_ORDER,
+        variables: { orderId },
+        fetchPolicy: 'network-only',
+      });
+
+      expect(data.getOrder.paymentMethod).toBe('CHECK');
+
+      await ownerClient.mutate({
+        mutation: DELETE_ORDER,
+        variables: { orderId },
+      });
+    });
+
+    test('Order with CREDIT_CARD payment method', async () => {
+      const { data: orderData }: any = await ownerClient.mutate({
+        mutation: CREATE_ORDER,
+        variables: {
+          input: {
+            profileId: testProfileId,
+            seasonId: testSeasonId,
+            customerName: 'Credit Card Customer',
+            orderDate: new Date().toISOString(),
+            paymentMethod: 'CREDIT_CARD',
+            lineItems: [{ productId: testProductId, quantity: 1 }],
+          },
+        },
+      });
+      const orderId = orderData.createOrder.orderId;
+
+      const { data }: any = await ownerClient.query({
+        query: GET_ORDER,
+        variables: { orderId },
+        fetchPolicy: 'network-only',
+      });
+
+      expect(data.getOrder.paymentMethod).toBe('CREDIT_CARD');
+
+      await ownerClient.mutate({
+        mutation: DELETE_ORDER,
+        variables: { orderId },
+      });
+    });
+
+    test('Order with OTHER payment method', async () => {
+      const { data: orderData }: any = await ownerClient.mutate({
+        mutation: CREATE_ORDER,
+        variables: {
+          input: {
+            profileId: testProfileId,
+            seasonId: testSeasonId,
+            customerName: 'Other Payment Customer',
+            orderDate: new Date().toISOString(),
+            paymentMethod: 'OTHER',
+            lineItems: [{ productId: testProductId, quantity: 1 }],
+          },
+        },
+      });
+      const orderId = orderData.createOrder.orderId;
+
+      const { data }: any = await ownerClient.query({
+        query: GET_ORDER,
+        variables: { orderId },
+        fetchPolicy: 'network-only',
+      });
+
+      expect(data.getOrder.paymentMethod).toBe('OTHER');
+
+      await ownerClient.mutate({
+        mutation: DELETE_ORDER,
+        variables: { orderId },
+      });
+    });
+
+    test('Order totalAmount calculation is correct with multiple items', async () => {
+      // Create order with multiple line items of same product
+      const { data: orderData }: any = await ownerClient.mutate({
+        mutation: CREATE_ORDER,
+        variables: {
+          input: {
+            profileId: testProfileId,
+            seasonId: testSeasonId,
+            customerName: 'Total Calculation Customer',
+            orderDate: new Date().toISOString(),
+            paymentMethod: 'CASH',
+            lineItems: [
+              { productId: testProductId, quantity: 5 }, // 5 x price
+            ],
+          },
+        },
+      });
+      const orderId = orderData.createOrder.orderId;
+
+      const { data }: any = await ownerClient.query({
+        query: GET_ORDER,
+        variables: { orderId },
+        fetchPolicy: 'network-only',
+      });
+
+      // Verify line items have correct subtotals
+      expect(data.getOrder.lineItems.length).toBe(1);
+      
+      const lineItem = data.getOrder.lineItems[0];
+      expect(lineItem.quantity).toBe(5);
+      expect(lineItem.subtotal).toBe(lineItem.quantity * lineItem.pricePerUnit);
+      
+      // totalAmount should match the subtotal
+      expect(data.getOrder.totalAmount).toBe(lineItem.subtotal);
+
+      await ownerClient.mutate({
+        mutation: DELETE_ORDER,
+        variables: { orderId },
+      });
+    });
+
+    test('Order without optional customerPhone field', async () => {
+      // Create order without customerPhone
+      const { data: orderData }: any = await ownerClient.mutate({
+        mutation: CREATE_ORDER,
+        variables: {
+          input: {
+            profileId: testProfileId,
+            seasonId: testSeasonId,
+            customerName: 'No Phone Customer',
+            orderDate: new Date().toISOString(),
+            paymentMethod: 'CASH',
+            lineItems: [{ productId: testProductId, quantity: 1 }],
+            // No customerPhone
+          },
+        },
+      });
+      const orderId = orderData.createOrder.orderId;
+
+      const { data }: any = await ownerClient.query({
+        query: GET_ORDER,
+        variables: { orderId },
+        fetchPolicy: 'network-only',
+      });
+
+      expect(data.getOrder.customerName).toBe('No Phone Customer');
+      expect(data.getOrder.customerPhone).toBeNull();
+
+      await ownerClient.mutate({
+        mutation: DELETE_ORDER,
+        variables: { orderId },
+      });
+    });
+
+    test('Order with optional customerPhone field', async () => {
+      const { data: orderData }: any = await ownerClient.mutate({
+        mutation: CREATE_ORDER,
+        variables: {
+          input: {
+            profileId: testProfileId,
+            seasonId: testSeasonId,
+            customerName: 'Phone Customer',
+            customerPhone: '555-123-4567',
+            orderDate: new Date().toISOString(),
+            paymentMethod: 'CASH',
+            lineItems: [{ productId: testProductId, quantity: 1 }],
+          },
+        },
+      });
+      const orderId = orderData.createOrder.orderId;
+
+      const { data }: any = await ownerClient.query({
+        query: GET_ORDER,
+        variables: { orderId },
+        fetchPolicy: 'network-only',
+      });
+
+      expect(data.getOrder.customerPhone).toBe('555-123-4567');
+
+      await ownerClient.mutate({
+        mutation: DELETE_ORDER,
+        variables: { orderId },
+      });
+    });
+
+    test('Order with many line items', async () => {
+      // Create an order with multiple line items
+      // Note: We need to create products in the catalog first
+      const { data: catalogData }: any = await ownerClient.mutate({
+        mutation: CREATE_CATALOG,
+        variables: {
+          input: {
+            catalogName: 'Many Line Items Catalog',
+            isPublic: false,
+            products: [
+              { productName: 'Product A', price: 5.0, sortOrder: 1 },
+              { productName: 'Product B', price: 10.0, sortOrder: 2 },
+              { productName: 'Product C', price: 15.0, sortOrder: 3 },
+              { productName: 'Product D', price: 20.0, sortOrder: 4 },
+              { productName: 'Product E', price: 25.0, sortOrder: 5 },
+            ],
+          },
+        },
+      });
+      const catalogId = catalogData.createCatalog.catalogId;
+      const productIds = catalogData.createCatalog.products.map((p: any) => p.productId);
+
+      // Create season with this catalog
+      const { data: seasonData }: any = await ownerClient.mutate({
+        mutation: CREATE_SEASON,
+        variables: {
+          input: {
+            profileId: testProfileId,
+            seasonId: undefined,
+            seasonName: 'Many Line Items Season',
+            catalogId,
+            startDate: new Date().toISOString(),
+          },
+        },
+      });
+      const seasonId = seasonData.createSeason.seasonId;
+
+      // Create order with 5 line items
+      const { data: orderData }: any = await ownerClient.mutate({
+        mutation: CREATE_ORDER,
+        variables: {
+          input: {
+            profileId: testProfileId,
+            seasonId,
+            customerName: 'Many Items Customer',
+            orderDate: new Date().toISOString(),
+            paymentMethod: 'CASH',
+            lineItems: productIds.map((id: string, idx: number) => ({
+              productId: id,
+              quantity: idx + 1,
+            })),
+          },
+        },
+      });
+      const orderId = orderData.createOrder.orderId;
+
+      // Query the order
+      const { data }: any = await ownerClient.query({
+        query: GET_ORDER,
+        variables: { orderId },
+        fetchPolicy: 'network-only',
+      });
+
+      // Assert: All 5 line items should be present
+      expect(data.getOrder.lineItems).toHaveLength(5);
+      
+      // Verify each line item has required fields
+      for (const lineItem of data.getOrder.lineItems) {
+        expect(lineItem.productId).toBeDefined();
+        expect(lineItem.productName).toBeDefined();
+        expect(lineItem.quantity).toBeGreaterThan(0);
+        expect(lineItem.pricePerUnit).toBeDefined();
+        expect(lineItem.subtotal).toBe(lineItem.quantity * lineItem.pricePerUnit);
+      }
+
+      // Cleanup
+      await ownerClient.mutate({ mutation: DELETE_ORDER, variables: { orderId } });
+      await ownerClient.mutate({ mutation: DELETE_SEASON, variables: { seasonId } });
+      await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId } });
+    }, 15000);
+
+    test('Listing orders for season with many orders', async () => {
+      // Create 5 orders for the test season
+      const createdOrderIds: string[] = [];
+
+      for (let i = 0; i < 5; i++) {
+        const { data: orderData }: any = await ownerClient.mutate({
+          mutation: CREATE_ORDER,
+          variables: {
+            input: {
+              profileId: testProfileId,
+              seasonId: testSeasonId,
+              customerName: `Many Orders Customer ${i}`,
+              orderDate: new Date().toISOString(),
+              paymentMethod: 'CASH',
+              lineItems: [{ productId: testProductId, quantity: i + 1 }],
+            },
+          },
+        });
+        createdOrderIds.push(orderData.createOrder.orderId);
+      }
+
+      // Query all orders for season
+      const { data }: any = await ownerClient.query({
+        query: LIST_ORDERS_BY_SEASON,
+        variables: { seasonId: testSeasonId },
+        fetchPolicy: 'network-only',
+      });
+
+      // Assert: All created orders should be in the result
+      const returnedOrderIds = data.listOrdersBySeason.map((o: any) => o.orderId);
+      for (const orderId of createdOrderIds) {
+        expect(returnedOrderIds).toContain(orderId);
+      }
+
+      // Cleanup
+      for (const orderId of createdOrderIds) {
+        await ownerClient.mutate({ mutation: DELETE_ORDER, variables: { orderId } });
+      }
+    }, 20000);
+
+    test('Listing orders across multiple seasons', async () => {
+      // Create a second season
+      const { data: season2Data }: any = await ownerClient.mutate({
+        mutation: CREATE_SEASON,
+        variables: {
+          input: {
+            profileId: testProfileId,
+            seasonName: 'Second Season For Orders',
+            catalogId: testCatalogId,
+            startDate: new Date().toISOString(),
+          },
+        },
+      });
+      const season2Id = season2Data.createSeason.seasonId;
+
+      // Create orders in both seasons
+      const { data: order1Data }: any = await ownerClient.mutate({
+        mutation: CREATE_ORDER,
+        variables: {
+          input: {
+            profileId: testProfileId,
+            seasonId: testSeasonId,
+            customerName: 'Season 1 Customer',
+            orderDate: new Date().toISOString(),
+            paymentMethod: 'CASH',
+            lineItems: [{ productId: testProductId, quantity: 1 }],
+          },
+        },
+      });
+      const order1Id = order1Data.createOrder.orderId;
+
+      const { data: order2Data }: any = await ownerClient.mutate({
+        mutation: CREATE_ORDER,
+        variables: {
+          input: {
+            profileId: testProfileId,
+            seasonId: season2Id,
+            customerName: 'Season 2 Customer',
+            orderDate: new Date().toISOString(),
+            paymentMethod: 'CHECK',
+            lineItems: [{ productId: testProductId, quantity: 2 }],
+          },
+        },
+      });
+      const order2Id = order2Data.createOrder.orderId;
+
+      // List orders by profile - should include orders from both seasons
+      const { data }: any = await ownerClient.query({
+        query: LIST_ORDERS_BY_PROFILE,
+        variables: { profileId: testProfileId },
+        fetchPolicy: 'network-only',
+      });
+
+      const orderIds = data.listOrdersByProfile.map((o: any) => o.orderId);
+      expect(orderIds).toContain(order1Id);
+      expect(orderIds).toContain(order2Id);
+
+      // Verify both seasons are represented
+      const seasonIds = data.listOrdersByProfile.map((o: any) => o.seasonId);
+      expect(seasonIds).toContain(testSeasonId);
+      expect(seasonIds).toContain(season2Id);
+
+      // Cleanup
+      await ownerClient.mutate({ mutation: DELETE_ORDER, variables: { orderId: order1Id } });
+      await ownerClient.mutate({ mutation: DELETE_ORDER, variables: { orderId: order2Id } });
+      await ownerClient.mutate({ mutation: DELETE_SEASON, variables: { seasonId: season2Id } });
+    }, 15000);
+  });
 });

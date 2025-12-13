@@ -317,6 +317,39 @@ describe('Profile Operations Integration Tests', () => {
       expect(data.createSellerProfile).toHaveProperty('createdAt');
       expect(data.createSellerProfile).toHaveProperty('updatedAt');
     });
+
+    it('accepts sellerName with Unicode and emoji characters', async () => {
+      // Arrange & Act - Test international characters and emojis
+      const profileName = `${getTestPrefix()}-Scout 日本語 🍿 émoji José`;
+      const { data } = await ownerClient.mutate({
+        mutation: CREATE_PROFILE,
+        variables: { input: { sellerName: profileName } },
+      });
+
+      const testProfileId = data.createSellerProfile.profileId;
+      createdProfileIds.push(testProfileId);
+
+      // Assert - Unicode characters should be stored and retrieved correctly
+      expect(data.createSellerProfile.sellerName).toBe(profileName);
+    });
+
+    it('accepts very long sellerName (boundary test)', async () => {
+      // Arrange & Act - Create a profile with a very long name (255 characters)
+      const baseName = `${getTestPrefix()}-`;
+      const longName = baseName + 'A'.repeat(255 - baseName.length);
+      
+      const { data } = await ownerClient.mutate({
+        mutation: CREATE_PROFILE,
+        variables: { input: { sellerName: longName } },
+      });
+
+      const testProfileId = data.createSellerProfile.profileId;
+      createdProfileIds.push(testProfileId);
+
+      // Assert - Long name should be stored correctly
+      expect(data.createSellerProfile.sellerName).toBe(longName);
+      expect(data.createSellerProfile.sellerName.length).toBe(255);
+    });
   });
 
   describe('updateSellerProfile (VTL Resolver)', () => {
@@ -787,5 +820,366 @@ describe('Profile Operations Integration Tests', () => {
         })
       ).rejects.toThrow();
     });
+
+    it('Data Integrity: Deleting profile cleans up associated shares', async () => {
+      // Arrange: Create profile and share it
+      const profileName = `${getTestPrefix()}-ShareCleanupTest`;
+      const { data: createData } = await ownerClient.mutate({
+        mutation: CREATE_PROFILE,
+        variables: { input: { sellerName: profileName } },
+      });
+      const testProfileId = createData.createSellerProfile.profileId;
+
+      const SHARE_DIRECT = gql`
+        mutation ShareProfileDirect($input: ShareProfileDirectInput!) {
+          shareProfileDirect(input: $input) {
+            shareId
+            targetAccountId
+          }
+        }
+      `;
+      const { data: shareData } = await ownerClient.mutate({
+        mutation: SHARE_DIRECT,
+        variables: {
+          input: {
+            profileId: testProfileId,
+            targetAccountEmail: process.env.TEST_CONTRIBUTOR_EMAIL,
+            permissions: ['READ'],
+          },
+        },
+      });
+      const targetAccountId = shareData.shareProfileDirect.targetAccountId;
+
+      // Verify share exists via listSharedProfiles
+      const LIST_SHARED_PROFILES = gql`
+        query ListSharedProfiles {
+          listSharedProfiles {
+            profileId
+          }
+        }
+      `;
+      const { data: beforeDelete }: any = await contributorClient.query({
+        query: LIST_SHARED_PROFILES,
+        fetchPolicy: 'network-only',
+      });
+      const beforeProfileIds = beforeDelete.listSharedProfiles.map((p: any) => p.profileId);
+      expect(beforeProfileIds).toContain(testProfileId);
+
+      // Act: Delete the profile
+      const { data } = await ownerClient.mutate({
+        mutation: DELETE_PROFILE,
+        variables: { profileId: testProfileId },
+      });
+      expect(data.deleteSellerProfile).toBe(true);
+
+      // Assert: Share should no longer appear for contributor
+      const { data: afterDelete }: any = await contributorClient.query({
+        query: LIST_SHARED_PROFILES,
+        fetchPolicy: 'network-only',
+      });
+      const afterProfileIds = afterDelete.listSharedProfiles.map((p: any) => p.profileId);
+      expect(afterProfileIds).not.toContain(testProfileId);
+
+      // Profile was deleted and shares were cleaned up, no manual cleanup needed
+    }, 15000);
+
+    it('Data Integrity: Deleting profile cleans up associated invites', async () => {
+      // Arrange: Create profile and create invite
+      const profileName = `${getTestPrefix()}-InviteCleanupTest`;
+      const { data: createData } = await ownerClient.mutate({
+        mutation: CREATE_PROFILE,
+        variables: { input: { sellerName: profileName } },
+      });
+      const testProfileId = createData.createSellerProfile.profileId;
+
+      const CREATE_INVITE = gql`
+        mutation CreateProfileInvite($input: CreateProfileInviteInput!) {
+          createProfileInvite(input: $input) {
+            inviteCode
+          }
+        }
+      `;
+      const { data: inviteData } = await ownerClient.mutate({
+        mutation: CREATE_INVITE,
+        variables: {
+          input: {
+            profileId: testProfileId,
+            permissions: ['READ'],
+          },
+        },
+      });
+      const inviteCode = inviteData.createProfileInvite.inviteCode;
+
+      // Verify invite exists via listInvitesByProfile
+      const LIST_INVITES = gql`
+        query ListInvitesByProfile($profileId: ID!) {
+          listInvitesByProfile(profileId: $profileId) {
+            inviteCode
+          }
+        }
+      `;
+      const { data: beforeDelete }: any = await ownerClient.query({
+        query: LIST_INVITES,
+        variables: { profileId: testProfileId },
+        fetchPolicy: 'network-only',
+      });
+      const beforeInviteCodes = beforeDelete.listInvitesByProfile.map((i: any) => i.inviteCode);
+      expect(beforeInviteCodes).toContain(inviteCode);
+
+      // Act: Delete the profile
+      const { data } = await ownerClient.mutate({
+        mutation: DELETE_PROFILE,
+        variables: { profileId: testProfileId },
+      });
+      expect(data.deleteSellerProfile).toBe(true);
+
+      // Assert: Invites should be cleaned up
+      // Note: After profile deletion, listInvitesByProfile returns empty since profile is gone
+      // We verify via direct DynamoDB check that the invite record is deleted
+      const { DynamoDBClient, GetItemCommand } = await import('@aws-sdk/client-dynamodb');
+      const dynamoClient = new DynamoDBClient({ region: 'us-east-1' });
+      const tableName = process.env.TABLE_NAME || 'kernelworx-app-dev';
+      const result = await dynamoClient.send(new GetItemCommand({
+        TableName: tableName,
+        Key: {
+          PK: { S: testProfileId },
+          SK: { S: `INVITE#${inviteCode}` },
+        },
+      }));
+      expect(result.Item).toBeUndefined();
+
+      // Profile was deleted and invites were cleaned up, no manual cleanup needed
+    }, 15000);
+
+    it('Data Integrity: Deleting profile cleans up associated seasons', async () => {
+      // Arrange: Create profile, catalog, and season
+      const profileName = `${getTestPrefix()}-SeasonCleanupTest`;
+      const { data: createData } = await ownerClient.mutate({
+        mutation: CREATE_PROFILE,
+        variables: { input: { sellerName: profileName } },
+      });
+      const testProfileId = createData.createSellerProfile.profileId;
+
+      // Create a catalog first (required for season)
+      const CREATE_CATALOG = gql`
+        mutation CreateCatalog($input: CreateCatalogInput!) {
+          createCatalog(input: $input) {
+            catalogId
+          }
+        }
+      `;
+      const { data: catalogData } = await ownerClient.mutate({
+        mutation: CREATE_CATALOG,
+        variables: {
+          input: {
+            catalogName: 'Test Catalog for Cleanup',
+            isPublic: false,
+            products: [
+              {
+                productName: 'Test Product',
+                description: 'Test product',
+                price: 10.00,
+                sortOrder: 1,
+              },
+            ],
+          },
+        },
+      });
+      const catalogId = catalogData.createCatalog.catalogId;
+
+      const CREATE_SEASON = gql`
+        mutation CreateSeason($input: CreateSeasonInput!) {
+          createSeason(input: $input) {
+            seasonId
+            seasonName
+          }
+        }
+      `;
+      const { data: seasonData } = await ownerClient.mutate({
+        mutation: CREATE_SEASON,
+        variables: {
+          input: {
+            profileId: testProfileId,
+            seasonName: 'Test Season for Cleanup',
+            startDate: new Date().toISOString(),
+            catalogId: catalogId,
+          },
+        },
+      });
+      const seasonId = seasonData.createSeason.seasonId;
+
+      // Verify season exists via listSeasonsByProfile
+      const LIST_SEASONS = gql`
+        query ListSeasonsByProfile($profileId: ID!) {
+          listSeasonsByProfile(profileId: $profileId) {
+            seasonId
+          }
+        }
+      `;
+      const { data: beforeDelete }: any = await ownerClient.query({
+        query: LIST_SEASONS,
+        variables: { profileId: testProfileId },
+        fetchPolicy: 'network-only',
+      });
+      const beforeSeasonIds = beforeDelete.listSeasonsByProfile.map((s: any) => s.seasonId);
+      expect(beforeSeasonIds).toContain(seasonId);
+
+      // Act: Delete the profile
+      const { data } = await ownerClient.mutate({
+        mutation: DELETE_PROFILE,
+        variables: { profileId: testProfileId },
+      });
+      expect(data.deleteSellerProfile).toBe(true);
+
+      // Assert: Seasons should be cleaned up (no orphaned records)
+      // We verify via direct DynamoDB check that the season record is deleted
+      const { DynamoDBClient, GetItemCommand, DeleteItemCommand } = await import('@aws-sdk/client-dynamodb');
+      const dynamoClient = new DynamoDBClient({ region: 'us-east-1' });
+      const tableName = process.env.TABLE_NAME || 'kernelworx-app-dev';
+      const result = await dynamoClient.send(new GetItemCommand({
+        TableName: tableName,
+        Key: {
+          PK: { S: testProfileId },
+          SK: { S: seasonId },
+        },
+      }));
+      expect(result.Item).toBeUndefined();
+
+      // Cleanup: Delete the catalog (not owned by profile, so must be deleted separately)
+      const DELETE_CATALOG = gql`
+        mutation DeleteCatalog($catalogId: ID!) {
+          deleteCatalog(catalogId: $catalogId)
+        }
+      `;
+      await ownerClient.mutate({
+        mutation: DELETE_CATALOG,
+        variables: { catalogId: catalogId },
+      });
+
+      // Profile was deleted and seasons were cleaned up
+    }, 15000);
+
+    it('Concurrent profile creation by same user creates unique profiles', async () => {
+      // Arrange: Create multiple profiles concurrently
+      const profilePromises = Array.from({ length: 3 }, (_, i) =>
+        ownerClient.mutate({
+          mutation: CREATE_PROFILE,
+          variables: {
+            input: {
+              sellerName: `${getTestPrefix()}-ConcurrentProfile-${i}`,
+            },
+          },
+        })
+      );
+
+      // Act: Execute all profile creations concurrently
+      const results = await Promise.allSettled(profilePromises);
+
+      // Assert: All profiles should be created successfully with unique IDs
+      const successes = results.filter(r => r.status === 'fulfilled');
+      expect(successes.length).toBe(3);
+
+      const profileIds = successes.map(r => (r as PromiseFulfilledResult<any>).value.data.createSellerProfile.profileId);
+      const uniqueProfileIds = new Set(profileIds);
+      expect(uniqueProfileIds.size).toBe(3);
+
+      // Cleanup all created profiles
+      for (const profileId of profileIds) {
+        await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
+      }
+    }, 20000);
+
+    it('Updating profile with no changes is a no-op', async () => {
+      // Arrange: Create profile
+      const profileName = `${getTestPrefix()}-NoOpUpdate`;
+      const { data: createData } = await ownerClient.mutate({
+        mutation: CREATE_PROFILE,
+        variables: { input: { sellerName: profileName } },
+      });
+      const testProfileId = createData.createSellerProfile.profileId;
+
+      // Get original updatedAt
+      const { data: originalData } = await ownerClient.query({
+        query: gql`query GetProfile($profileId: ID!) { getProfile(profileId: $profileId) { profileId sellerName updatedAt } }`,
+        variables: { profileId: testProfileId },
+        fetchPolicy: 'network-only',
+      });
+      const originalUpdatedAt = originalData.getProfile.updatedAt;
+
+      // Wait a bit to ensure timestamp would change if updated
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // Act: Update with no changes (same name)
+      const { data: updateData } = await ownerClient.mutate({
+        mutation: UPDATE_PROFILE,
+        variables: {
+          input: {
+            profileId: testProfileId,
+            sellerName: profileName, // Same name
+          },
+        },
+      });
+
+      // Assert: Profile still has same name
+      expect(updateData.updateSellerProfile.sellerName).toBe(profileName);
+      // updatedAt might change even for no-op (implementation dependent)
+
+      // Cleanup
+      await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId: testProfileId } });
+    }, 10000);
+
+    it('Updating profile that has active shares preserves share access', async () => {
+      // Arrange: Create profile and share it
+      const { data: createData } = await ownerClient.mutate({
+        mutation: CREATE_PROFILE,
+        variables: { input: { sellerName: `${getTestPrefix()}-SharedProfile` } },
+      });
+      const testProfileId = createData.createSellerProfile.profileId;
+
+      // Share with contributor
+      const SHARE_DIRECT = gql`
+        mutation ShareProfileDirect($input: ShareProfileDirectInput!) {
+          shareProfileDirect(input: $input) {
+            shareId
+            permissions
+          }
+        }
+      `;
+      await ownerClient.mutate({
+        mutation: SHARE_DIRECT,
+        variables: {
+          input: {
+            profileId: testProfileId,
+            targetAccountEmail: process.env.TEST_CONTRIBUTOR_EMAIL,
+            permissions: ['READ', 'WRITE'],
+          },
+        },
+      });
+
+      // Act: Update the profile
+      const { data: updateData } = await ownerClient.mutate({
+        mutation: UPDATE_PROFILE,
+        variables: {
+          input: {
+            profileId: testProfileId,
+            sellerName: `${getTestPrefix()}-UpdatedSharedProfile`,
+          },
+        },
+      });
+
+      expect(updateData.updateSellerProfile.sellerName).toContain('UpdatedSharedProfile');
+
+      // Assert: Contributor can still access the profile
+      const { data: accessData } = await contributorClient.query({
+        query: gql`query GetProfile($profileId: ID!) { getProfile(profileId: $profileId) { profileId sellerName } }`,
+        variables: { profileId: testProfileId },
+        fetchPolicy: 'network-only',
+      });
+      expect(accessData.getProfile.profileId).toBe(testProfileId);
+      expect(accessData.getProfile.sellerName).toContain('UpdatedSharedProfile');
+
+      // Cleanup
+      await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId: testProfileId } });
+    }, 15000);
   });
 });

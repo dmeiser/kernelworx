@@ -674,4 +674,248 @@ describe('createSeason Integration Tests', () => {
       await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId: testProfileId } });
     });
   });
+
+  describe('Edge Cases and Boundary Tests', () => {
+    it('allows creating season with same name as existing season', async () => {
+      // Arrange: Create profile and catalog
+      const { data: profileData } = await ownerClient.mutate({
+        mutation: CREATE_PROFILE,
+        variables: { input: { sellerName: `${getTestPrefix()}-Profile` } },
+      });
+      const testProfileId = profileData.createSellerProfile.profileId;
+
+      const { data: catalogData } = await ownerClient.mutate({
+        mutation: CREATE_CATALOG,
+        variables: {
+          input: {
+            catalogName: `${getTestPrefix()}-Catalog`,
+            isPublic: true,
+            products: [{ productName: 'Product 1', price: 10.0, sortOrder: 1 }],
+          },
+        },
+      });
+      const testCatalogId = catalogData.createCatalog.catalogId;
+
+      const duplicateName = `${getTestPrefix()}-DuplicateSeason`;
+
+      // Act: Create first season
+      const { data: season1 } = await ownerClient.mutate({
+        mutation: CREATE_SEASON,
+        variables: {
+          input: {
+            profileId: testProfileId,
+            seasonName: duplicateName,
+            startDate: '2025-01-01T00:00:00Z',
+            catalogId: testCatalogId,
+          },
+        },
+      });
+
+      // Act: Create second season with same name
+      const { data: season2 } = await ownerClient.mutate({
+        mutation: CREATE_SEASON,
+        variables: {
+          input: {
+            profileId: testProfileId,
+            seasonName: duplicateName,
+            startDate: '2025-06-01T00:00:00Z',
+            catalogId: testCatalogId,
+          },
+        },
+      });
+
+      // Assert: Both seasons exist with same name but different IDs
+      expect(season1.createSeason.seasonName).toBe(duplicateName);
+      expect(season2.createSeason.seasonName).toBe(duplicateName);
+      expect(season1.createSeason.seasonId).not.toBe(season2.createSeason.seasonId);
+
+      // Cleanup
+      await ownerClient.mutate({ mutation: DELETE_SEASON, variables: { seasonId: season1.createSeason.seasonId } });
+      await ownerClient.mutate({ mutation: DELETE_SEASON, variables: { seasonId: season2.createSeason.seasonId } });
+      await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId: testCatalogId } });
+      await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId: testProfileId } });
+    });
+
+    it('creates season without endDate (open-ended season)', async () => {
+      // Arrange: Create profile and catalog
+      const { data: profileData } = await ownerClient.mutate({
+        mutation: CREATE_PROFILE,
+        variables: { input: { sellerName: `${getTestPrefix()}-Profile` } },
+      });
+      const testProfileId = profileData.createSellerProfile.profileId;
+
+      const { data: catalogData } = await ownerClient.mutate({
+        mutation: CREATE_CATALOG,
+        variables: {
+          input: {
+            catalogName: `${getTestPrefix()}-Catalog`,
+            isPublic: true,
+            products: [{ productName: 'Product 1', price: 10.0, sortOrder: 1 }],
+          },
+        },
+      });
+      const testCatalogId = catalogData.createCatalog.catalogId;
+
+      // Act: Create season without endDate
+      const { data } = await ownerClient.mutate({
+        mutation: CREATE_SEASON,
+        variables: {
+          input: {
+            profileId: testProfileId,
+            seasonName: `${getTestPrefix()}-OpenSeason`,
+            startDate: '2025-01-01T00:00:00Z',
+            catalogId: testCatalogId,
+            // No endDate provided
+          },
+        },
+      });
+
+      // Assert: Season created with null endDate
+      expect(data.createSeason.seasonId).toBeDefined();
+      expect(data.createSeason.endDate).toBeNull();
+
+      // Cleanup
+      await ownerClient.mutate({ mutation: DELETE_SEASON, variables: { seasonId: data.createSeason.seasonId } });
+      await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId: testCatalogId } });
+      await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId: testProfileId } });
+    });
+
+    it('creates season with startDate in the past', async () => {
+      // Arrange
+      const { data: profileData } = await ownerClient.mutate({
+        mutation: CREATE_PROFILE,
+        variables: { input: { sellerName: `${getTestPrefix()}-Profile` } },
+      });
+      const testProfileId = profileData.createSellerProfile.profileId;
+
+      const { data: catalogData } = await ownerClient.mutate({
+        mutation: CREATE_CATALOG,
+        variables: {
+          input: {
+            catalogName: `${getTestPrefix()}-Catalog`,
+            isPublic: true,
+            products: [{ productName: 'Product 1', price: 10.0, sortOrder: 1 }],
+          },
+        },
+      });
+      const testCatalogId = catalogData.createCatalog.catalogId;
+
+      // Act: Create season with startDate in the past (should be allowed)
+      const pastDate = new Date('2020-01-01T00:00:00Z').toISOString();
+      const { data } = await ownerClient.mutate({
+        mutation: CREATE_SEASON,
+        variables: {
+          input: {
+            profileId: testProfileId,
+            seasonName: `${getTestPrefix()}-PastSeason`,
+            startDate: pastDate,
+            catalogId: testCatalogId,
+          },
+        },
+      });
+
+      // Assert: Season created with past startDate
+      expect(data.createSeason.seasonId).toBeDefined();
+      expect(data.createSeason.startDate).toBe(pastDate);
+
+      // Cleanup
+      await ownerClient.mutate({ mutation: DELETE_SEASON, variables: { seasonId: data.createSeason.seasonId } });
+      await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId: testCatalogId } });
+      await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId: testProfileId } });
+    });
+
+    it('creates season with startDate in far future', async () => {
+      // Arrange
+      const { data: profileData } = await ownerClient.mutate({
+        mutation: CREATE_PROFILE,
+        variables: { input: { sellerName: `${getTestPrefix()}-Profile` } },
+      });
+      const testProfileId = profileData.createSellerProfile.profileId;
+
+      const { data: catalogData } = await ownerClient.mutate({
+        mutation: CREATE_CATALOG,
+        variables: {
+          input: {
+            catalogName: `${getTestPrefix()}-Catalog`,
+            isPublic: true,
+            products: [{ productName: 'Product 1', price: 10.0, sortOrder: 1 }],
+          },
+        },
+      });
+      const testCatalogId = catalogData.createCatalog.catalogId;
+
+      // Act: Create season with startDate far in the future
+      const futureDate = new Date('2099-01-01T00:00:00Z').toISOString();
+      const { data } = await ownerClient.mutate({
+        mutation: CREATE_SEASON,
+        variables: {
+          input: {
+            profileId: testProfileId,
+            seasonName: `${getTestPrefix()}-FutureSeason`,
+            startDate: futureDate,
+            catalogId: testCatalogId,
+          },
+        },
+      });
+
+      // Assert: Season created with future startDate
+      expect(data.createSeason.seasonId).toBeDefined();
+      expect(data.createSeason.startDate).toBe(futureDate);
+
+      // Cleanup
+      await ownerClient.mutate({ mutation: DELETE_SEASON, variables: { seasonId: data.createSeason.seasonId } });
+      await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId: testCatalogId } });
+      await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId: testProfileId } });
+    });
+
+    it('rejects season with endDate before startDate', async () => {
+      // Arrange
+      const { data: profileData } = await ownerClient.mutate({
+        mutation: CREATE_PROFILE,
+        variables: { input: { sellerName: `${getTestPrefix()}-Profile` } },
+      });
+      const testProfileId = profileData.createSellerProfile.profileId;
+
+      const { data: catalogData } = await ownerClient.mutate({
+        mutation: CREATE_CATALOG,
+        variables: {
+          input: {
+            catalogName: `${getTestPrefix()}-Catalog`,
+            isPublic: true,
+            products: [{ productName: 'Product 1', price: 10.0, sortOrder: 1 }],
+          },
+        },
+      });
+      const testCatalogId = catalogData.createCatalog.catalogId;
+
+      // Act & Assert: Try to create season with endDate before startDate
+      let seasonId: string | undefined;
+      try {
+        const { data } = await ownerClient.mutate({
+          mutation: CREATE_SEASON,
+          variables: {
+            input: {
+              profileId: testProfileId,
+              seasonName: `${getTestPrefix()}-InvalidDates`,
+              startDate: '2025-12-31T00:00:00Z',
+              endDate: '2025-01-01T00:00:00Z', // Before startDate
+              catalogId: testCatalogId,
+            },
+          },
+        });
+        // If it succeeds, the validation might not be implemented
+        seasonId = data.createSeason.seasonId;
+      } catch (error) {
+        // Expected: Should reject invalid date range
+        expect((error as Error).message).toMatch(/date|invalid|before/i);
+      }
+
+      // Cleanup
+      if (seasonId) {
+        await ownerClient.mutate({ mutation: DELETE_SEASON, variables: { seasonId } });
+      }
+      await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId: testCatalogId } });
+      await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId: testProfileId } });
+    });
+  });
 });

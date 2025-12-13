@@ -613,4 +613,127 @@ describe('requestSeasonReport Integration Tests', () => {
       expect(result.data.requestSeasonReport.reportUrl).toContain('.xlsx');
     });
   });
+
+  describe('Edge Cases', () => {
+    let emptySeasonId: string;
+
+    beforeAll(async () => {
+      // Create a season with no orders for empty report testing
+      const emptySeasonResponse = await ownerClient.mutate({
+        mutation: CREATE_SEASON,
+        variables: {
+          input: {
+            profileId: testProfileId,
+            seasonName: 'Empty Season - No Orders',
+            catalogId: testCatalogId,
+            startDate: '2024-01-01T00:00:00.000Z',
+            endDate: '2024-12-31T23:59:59.999Z',
+          },
+        },
+      });
+      emptySeasonId = emptySeasonResponse.data.createSeason.seasonId;
+    });
+
+    afterAll(async () => {
+      // Clean up empty season
+      if (emptySeasonId) {
+        await ownerClient.mutate({
+          mutation: DELETE_SEASON,
+          variables: { seasonId: emptySeasonId },
+        });
+      }
+    });
+
+    test('should generate report for season with no orders', async () => {
+      const result = await ownerClient.mutate({
+        mutation: REQUEST_SEASON_REPORT,
+        variables: {
+          input: {
+            seasonId: emptySeasonId,
+          },
+        },
+      });
+
+      expect(result.data.requestSeasonReport).toBeDefined();
+      expect(result.data.requestSeasonReport.reportId).toBeDefined();
+      expect(result.data.requestSeasonReport.seasonId).toBe(emptySeasonId);
+      expect(result.data.requestSeasonReport.profileId).toBe(testProfileId);
+      expect(result.data.requestSeasonReport.reportUrl).toBeDefined();
+      expect(result.data.requestSeasonReport.status).toBe('COMPLETED');
+      // URL should still be valid S3 URL (with or without region in domain)
+      expect(result.data.requestSeasonReport.reportUrl).toMatch(/^https:\/\/.*\.s3(\..*)?\.amazonaws\.com/);
+    });
+
+    test('should generate CSV report for season with no orders', async () => {
+      const result = await ownerClient.mutate({
+        mutation: REQUEST_SEASON_REPORT,
+        variables: {
+          input: {
+            seasonId: emptySeasonId,
+            format: 'csv',
+          },
+        },
+      });
+
+      expect(result.data.requestSeasonReport).toBeDefined();
+      expect(result.data.requestSeasonReport.reportUrl).toContain('.csv');
+    });
+
+    test('should handle concurrent report requests for same season', async () => {
+      // Fire off multiple concurrent requests - use different formats to ensure unique S3 keys
+      const concurrentRequests = [
+        ownerClient.mutate({
+          mutation: REQUEST_SEASON_REPORT,
+          variables: { input: { seasonId: testSeasonId, format: 'xlsx' } },
+        }),
+        ownerClient.mutate({
+          mutation: REQUEST_SEASON_REPORT,
+          variables: { input: { seasonId: testSeasonId, format: 'csv' } },
+        }),
+      ];
+
+      // All requests should complete successfully
+      const results = await Promise.all(concurrentRequests);
+
+      for (const result of results) {
+        expect(result.data.requestSeasonReport).toBeDefined();
+        expect(result.data.requestSeasonReport.status).toBe('COMPLETED');
+        expect(result.data.requestSeasonReport.reportUrl).toBeDefined();
+      }
+
+      // Verify both reports were generated (different formats in URLs)
+      const urls = results.map(r => r.data.requestSeasonReport.reportUrl);
+      const xlsxUrls = urls.filter((u: string) => u.includes('.xlsx'));
+      const csvUrls = urls.filter((u: string) => u.includes('.csv'));
+      expect(xlsxUrls.length).toBe(1);
+      expect(csvUrls.length).toBe(1);
+
+      // URLs should be different (different S3 keys due to different extensions)
+      expect(urls[0]).not.toBe(urls[1]);
+    });
+
+    test('should include correct totals in report metadata', async () => {
+      // Request a report and verify the response includes expected fields
+      const result = await ownerClient.mutate({
+        mutation: REQUEST_SEASON_REPORT,
+        variables: {
+          input: {
+            seasonId: testSeasonId,
+          },
+        },
+      });
+
+      // Verify report metadata is correct
+      expect(result.data.requestSeasonReport).toBeDefined();
+      expect(result.data.requestSeasonReport.seasonId).toBe(testSeasonId);
+      expect(result.data.requestSeasonReport.profileId).toBe(testProfileId);
+      expect(result.data.requestSeasonReport.createdAt).toBeDefined();
+      expect(result.data.requestSeasonReport.expiresAt).toBeDefined();
+      
+      // Verify expiration is in the future
+      const expiresAt = new Date(result.data.requestSeasonReport.expiresAt);
+      const now = new Date();
+      expect(expiresAt.getTime()).toBeGreaterThan(now.getTime());
+    });
+  });
 });

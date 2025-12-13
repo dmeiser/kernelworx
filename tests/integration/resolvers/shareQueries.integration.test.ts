@@ -374,6 +374,75 @@ describe('Share Query Operations Integration Tests', () => {
 
       expect(data.listSharesByProfile).toEqual([]);
     });
+
+    test('Data Integrity: Listing shares includes both READ and WRITE permissions', async () => {
+      // The testShareId share was created with ['READ', 'WRITE'] permissions
+      const { data }: any = await ownerClient.query({
+        query: LIST_SHARES_BY_PROFILE,
+        variables: { profileId: testProfileId },
+        fetchPolicy: 'network-only',
+      });
+
+      const share = data.listSharesByProfile.find((s: any) => s.shareId === testShareId);
+      expect(share).toBeDefined();
+      expect(share.permissions).toContain('READ');
+      expect(share.permissions).toContain('WRITE');
+    });
+
+    test('Data Integrity: Listing shares after revocation (should not appear)', async () => {
+      // Create a new profile and share it for this test
+      const { data: profileData }: any = await ownerClient.mutate({
+        mutation: CREATE_SELLER_PROFILE,
+        variables: {
+          input: {
+            sellerName: 'Revocation Test Profile',
+          },
+        },
+      });
+      const tempProfileId = profileData.createSellerProfile.profileId;
+
+      // Create a share
+      const { data: shareData }: any = await ownerClient.mutate({
+        mutation: SHARE_PROFILE_DIRECT,
+        variables: {
+          input: {
+            profileId: tempProfileId,
+            targetAccountEmail: process.env.TEST_CONTRIBUTOR_EMAIL!,
+            permissions: ['READ'],
+          },
+        },
+      });
+      const tempShareId = shareData.shareProfileDirect.shareId;
+      const tempTargetAccountId = shareData.shareProfileDirect.targetAccountId;
+
+      // Verify share exists in list
+      const { data: beforeRevoke }: any = await ownerClient.query({
+        query: LIST_SHARES_BY_PROFILE,
+        variables: { profileId: tempProfileId },
+        fetchPolicy: 'network-only',
+      });
+      expect(beforeRevoke.listSharesByProfile.some((s: any) => s.shareId === tempShareId)).toBe(true);
+
+      // Revoke the share
+      await ownerClient.mutate({
+        mutation: REVOKE_SHARE,
+        variables: { input: { profileId: tempProfileId, targetAccountId: tempTargetAccountId } },
+      });
+
+      // Verify share no longer in list
+      const { data: afterRevoke }: any = await ownerClient.query({
+        query: LIST_SHARES_BY_PROFILE,
+        variables: { profileId: tempProfileId },
+        fetchPolicy: 'network-only',
+      });
+      expect(afterRevoke.listSharesByProfile.some((s: any) => s.shareId === tempShareId)).toBe(false);
+
+      // Cleanup temp profile
+      await ownerClient.mutate({
+        mutation: DELETE_PROFILE,
+        variables: { profileId: tempProfileId },
+      });
+    });
   });
 
   // ========================================
@@ -549,5 +618,115 @@ describe('Share Query Operations Integration Tests', () => {
       const inviteCodes = data.listInvitesByProfile.map((i: any) => i.inviteCode);
       expect(inviteCodes).not.toContain(usedInviteCode);
     });
+
+    test('Listing invites for profile with many invites', async () => {
+      // Create a new profile specifically for this test
+      const { data: profileData }: any = await ownerClient.mutate({
+        mutation: CREATE_SELLER_PROFILE,
+        variables: { input: { sellerName: 'Many Invites Test Profile' } },
+      });
+      const profileId = profileData.createSellerProfile.profileId;
+
+      // Create 5 invites for this profile
+      const createdInviteCodes: string[] = [];
+      for (let i = 0; i < 5; i++) {
+        const { data: inviteData }: any = await ownerClient.mutate({
+          mutation: CREATE_PROFILE_INVITE,
+          variables: {
+            input: {
+              profileId,
+              permissions: i % 2 === 0 ? ['READ'] : ['READ', 'WRITE'],
+            },
+          },
+        });
+        createdInviteCodes.push(inviteData.createProfileInvite.inviteCode);
+      }
+
+      // Query invites
+      const { data }: any = await ownerClient.query({
+        query: LIST_INVITES_BY_PROFILE,
+        variables: { profileId },
+        fetchPolicy: 'network-only',
+      });
+
+      // Assert: All 5 invites should be returned
+      expect(data.listInvitesByProfile.length).toBeGreaterThanOrEqual(5);
+      const returnedInviteCodes = data.listInvitesByProfile.map((i: any) => i.inviteCode);
+      for (const inviteCode of createdInviteCodes) {
+        expect(returnedInviteCodes).toContain(inviteCode);
+      }
+
+      // Cleanup - delete profile (which should cascade delete invites)
+      await ownerClient.mutate({
+        mutation: DELETE_PROFILE,
+        variables: { profileId },
+      });
+    }, 20000);
+  });
+
+  describe('listSharesByProfile additional tests', () => {
+    test('Listing shares for profile with many shares', async () => {
+      // Note: We only have 3 test users (owner, contributor, readonly)
+      // So we can share with 2 of them at most from a new profile
+      // This test verifies the pattern works with available users
+
+      // Create a new profile specifically for this test
+      const { data: profileData }: any = await ownerClient.mutate({
+        mutation: CREATE_SELLER_PROFILE,
+        variables: { input: { sellerName: 'Many Shares Test Profile' } },
+      });
+      const profileId = profileData.createSellerProfile.profileId;
+
+      // Share with contributor (WRITE)
+      await ownerClient.mutate({
+        mutation: SHARE_PROFILE_DIRECT,
+        variables: {
+          input: {
+            profileId,
+            targetAccountEmail: process.env.TEST_CONTRIBUTOR_EMAIL,
+            permissions: ['READ', 'WRITE'],
+          },
+        },
+      });
+
+      // Share with readonly (READ)
+      await ownerClient.mutate({
+        mutation: SHARE_PROFILE_DIRECT,
+        variables: {
+          input: {
+            profileId,
+            targetAccountEmail: process.env.TEST_READONLY_EMAIL,
+            permissions: ['READ'],
+          },
+        },
+      });
+
+      // Query shares
+      const { data }: any = await ownerClient.query({
+        query: LIST_SHARES_BY_PROFILE,
+        variables: { profileId },
+        fetchPolicy: 'network-only',
+      });
+
+      // Assert: Both shares should be present
+      expect(data.listSharesByProfile.length).toBeGreaterThanOrEqual(2);
+
+      // Verify different permission levels
+      const permissions = data.listSharesByProfile.map((s: any) => s.permissions);
+      const hasReadOnly = permissions.some((p: string[]) => 
+        p.includes('READ') && !p.includes('WRITE')
+      );
+      const hasReadWrite = permissions.some((p: string[]) => 
+        p.includes('READ') && p.includes('WRITE')
+      );
+      expect(hasReadOnly).toBe(true);
+      expect(hasReadWrite).toBe(true);
+
+      // Cleanup
+      await ownerClient.mutate({
+        mutation: DELETE_PROFILE,
+        variables: { profileId },
+      });
+    }, 15000);
   });
 });

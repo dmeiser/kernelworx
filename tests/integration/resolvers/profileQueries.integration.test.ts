@@ -176,6 +176,8 @@ describe('Profile Query Operations Integration Tests', () => {
       expect(data.getProfile.sellerName).toBe(profileName);
       expect(data.getProfile.ownerAccountId).toBe(ownerAccountId);
       expect(data.getProfile.isOwner).toBe(true);
+      // Owner gets full READ and WRITE permissions
+      expect(data.getProfile.permissions).toEqual(['READ', 'WRITE']);
     });
 
     it('includes all profile fields', async () => {
@@ -237,8 +239,8 @@ describe('Profile Query Operations Integration Tests', () => {
       // Assert
       expect(data.getProfile.profileId).toBe(profileId);
       expect(data.getProfile.isOwner).toBe(false);
-      // TODO: Bug - permissions field is null, needs field resolver implementation
-      expect(data.getProfile.permissions).toBeNull();
+      // FIXED: permissions field now returns the caller's share permissions
+      expect(data.getProfile.permissions).toEqual(['READ']);
     });
 
     it('returns profile for shared user with WRITE access', async () => {
@@ -273,8 +275,8 @@ describe('Profile Query Operations Integration Tests', () => {
       // Assert
       expect(data.getProfile.profileId).toBe(profileId);
       expect(data.getProfile.isOwner).toBe(false);
-      // TODO: Bug - permissions field is null, needs field resolver implementation
-      expect(data.getProfile.permissions).toBeNull();
+      // FIXED: permissions field now returns the caller's share permissions
+      expect(data.getProfile.permissions).toEqual(['WRITE']);
     });
 
     it('rejects non-shared user accessing profile', async () => {
@@ -287,18 +289,14 @@ describe('Profile Query Operations Integration Tests', () => {
       const profileId = createData.createSellerProfile.profileId;
       createdProfileIds.push(profileId);
 
-      // Act: Contributor (not shared) queries profile
-      // TODO: Bug - getProfile doesn't enforce authorization, returns profile with permissions: null
-      const { data } = await contributorClient.query({
-        query: GET_PROFILE,
-        variables: { profileId },
-        fetchPolicy: 'network-only',
-      });
-
-      // Assert: Currently returns profile (should reject!)
-      expect(data.getProfile.profileId).toBe(profileId);
-      expect(data.getProfile.isOwner).toBe(false);
-      expect(data.getProfile.permissions).toBeNull();
+      // Act & Assert: Contributor (not shared) queries profile - should be rejected
+      await expect(
+        contributorClient.query({
+          query: GET_PROFILE,
+          variables: { profileId },
+          fetchPolicy: 'network-only',
+        })
+      ).rejects.toThrow(/not authorized|unauthorized/i);
     });
 
     it('rejects unauthenticated user accessing profile', async () => {
@@ -742,6 +740,186 @@ describe('Profile Query Operations Integration Tests', () => {
           fetchPolicy: 'network-only',
         })
       ).rejects.toThrow();
+    });
+
+    it('listing profiles after share revocation (should not appear)', async () => {
+      // Arrange: Create profile and share with contributor
+      const profileName = `${getTestPrefix()}-RevokeShareTest`;
+      const { data: createData } = await ownerClient.mutate({
+        mutation: CREATE_PROFILE,
+        variables: { input: { sellerName: profileName } },
+      });
+      const profileId = createData.createSellerProfile.profileId;
+      createdProfileIds.push(profileId);
+
+      const { data: shareData }: any = await ownerClient.mutate({
+        mutation: SHARE_DIRECT,
+        variables: {
+          input: {
+            profileId,
+            targetAccountEmail: contributorEmail,
+            permissions: ['READ'],
+          },
+        },
+      });
+      const targetAccountId = shareData.shareProfileDirect.targetAccountId;
+
+      // Verify share appears in list
+      const { data: beforeRevoke } = await contributorClient.query({
+        query: LIST_SHARED_PROFILES,
+        fetchPolicy: 'network-only',
+      });
+      expect(beforeRevoke.listSharedProfiles.some((p: any) => p.profileId === profileId)).toBe(true);
+
+      // Revoke the share
+      await ownerClient.mutate({
+        mutation: REVOKE_SHARE,
+        variables: { input: { profileId, targetAccountId } },
+      });
+
+      // Act: List shared profiles again
+      const { data: afterRevoke } = await contributorClient.query({
+        query: LIST_SHARED_PROFILES,
+        fetchPolicy: 'network-only',
+      });
+
+      // Assert: Profile should no longer appear
+      expect(afterRevoke.listSharedProfiles.some((p: any) => p.profileId === profileId)).toBe(false);
+    });
+
+    it('listing profiles with mixed READ/WRITE permissions', async () => {
+      // Arrange: Create two profiles with different permissions
+      const profile1Name = `${getTestPrefix()}-ReadShareProfile`;
+      const { data: create1Data } = await ownerClient.mutate({
+        mutation: CREATE_PROFILE,
+        variables: { input: { sellerName: profile1Name } },
+      });
+      const profile1Id = create1Data.createSellerProfile.profileId;
+      createdProfileIds.push(profile1Id);
+
+      const profile2Name = `${getTestPrefix()}-WriteShareProfile`;
+      const { data: create2Data } = await ownerClient.mutate({
+        mutation: CREATE_PROFILE,
+        variables: { input: { sellerName: profile2Name } },
+      });
+      const profile2Id = create2Data.createSellerProfile.profileId;
+      createdProfileIds.push(profile2Id);
+
+      // Share profile1 with READ
+      const { data: share1Data }: any = await ownerClient.mutate({
+        mutation: SHARE_DIRECT,
+        variables: {
+          input: {
+            profileId: profile1Id,
+            targetAccountEmail: contributorEmail,
+            permissions: ['READ'],
+          },
+        },
+      });
+      createdShares.push({ profileId: profile1Id, targetAccountId: share1Data.shareProfileDirect.targetAccountId });
+
+      // Share profile2 with WRITE
+      const { data: share2Data }: any = await ownerClient.mutate({
+        mutation: SHARE_DIRECT,
+        variables: {
+          input: {
+            profileId: profile2Id,
+            targetAccountEmail: contributorEmail,
+            permissions: ['READ', 'WRITE'],
+          },
+        },
+      });
+      createdShares.push({ profileId: profile2Id, targetAccountId: share2Data.shareProfileDirect.targetAccountId });
+
+      // Act: List shared profiles
+      const { data } = await contributorClient.query({
+        query: LIST_SHARED_PROFILES,
+        fetchPolicy: 'network-only',
+      });
+
+      // Assert: Both profiles appear with correct permissions
+      const readProfile = data.listSharedProfiles.find((p: any) => p.profileId === profile1Id);
+      const writeProfile = data.listSharedProfiles.find((p: any) => p.profileId === profile2Id);
+
+      expect(readProfile).toBeDefined();
+      expect(readProfile.permissions).toEqual(['READ']);
+
+      expect(writeProfile).toBeDefined();
+      expect(writeProfile.permissions).toEqual(['READ', 'WRITE']);
+    });
+  });
+
+  describe('Profile Edge Cases', () => {
+    it('handles profile with Unicode/special characters in sellerName', async () => {
+      // Arrange: Create profile with Unicode characters
+      const profileName = `${getTestPrefix()}-Unicode-日本語-Émojis-🍿`;
+      const { data: createData } = await ownerClient.mutate({
+        mutation: CREATE_PROFILE,
+        variables: { input: { sellerName: profileName } },
+      });
+      const profileId = createData.createSellerProfile.profileId;
+      createdProfileIds.push(profileId);
+
+      // Act
+      const { data } = await ownerClient.query({
+        query: GET_PROFILE,
+        variables: { profileId },
+        fetchPolicy: 'network-only',
+      });
+
+      // Assert: Unicode characters are preserved
+      expect(data.getProfile.sellerName).toBe(profileName);
+      expect(data.getProfile.sellerName).toContain('日本語');
+      expect(data.getProfile.sellerName).toContain('🍿');
+    });
+
+    it('handles profile with very long sellerName', async () => {
+      // Arrange: Create profile with a long name (close to max allowed)
+      // Assuming 255 character limit is reasonable
+      const longName = `${getTestPrefix()}-` + 'A'.repeat(200);
+      const { data: createData } = await ownerClient.mutate({
+        mutation: CREATE_PROFILE,
+        variables: { input: { sellerName: longName } },
+      });
+      const profileId = createData.createSellerProfile.profileId;
+      createdProfileIds.push(profileId);
+
+      // Act
+      const { data } = await ownerClient.query({
+        query: GET_PROFILE,
+        variables: { profileId },
+        fetchPolicy: 'network-only',
+      });
+
+      // Assert: Long name is preserved
+      expect(data.getProfile.sellerName).toBe(longName);
+      expect(data.getProfile.sellerName.length).toBeGreaterThan(200);
+    });
+
+    it('handles concurrent profile access during query', async () => {
+      // Arrange: Create profile
+      const profileName = `${getTestPrefix()}-ConcurrentAccess`;
+      const { data: createData } = await ownerClient.mutate({
+        mutation: CREATE_PROFILE,
+        variables: { input: { sellerName: profileName } },
+      });
+      const profileId = createData.createSellerProfile.profileId;
+      createdProfileIds.push(profileId);
+
+      // Act: Fire off multiple concurrent queries
+      const concurrentQueries = [
+        ownerClient.query({ query: GET_PROFILE, variables: { profileId }, fetchPolicy: 'network-only' }),
+        ownerClient.query({ query: GET_PROFILE, variables: { profileId }, fetchPolicy: 'network-only' }),
+        ownerClient.query({ query: GET_PROFILE, variables: { profileId }, fetchPolicy: 'network-only' }),
+      ];
+
+      const results = await Promise.all(concurrentQueries);
+
+      // Assert: All queries return the same data
+      for (const result of results) {
+        expect(result.data.getProfile.profileId).toBe(profileId);
+        expect(result.data.getProfile.sellerName).toBe(profileName);
+      }
     });
   });
 });

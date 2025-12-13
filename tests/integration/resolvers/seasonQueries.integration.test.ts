@@ -487,6 +487,89 @@ describe('Season Query Resolvers Integration Tests', () => {
         expect(data.listSeasonsByProfile).toBeDefined();
         expect(data.listSeasonsByProfile).toEqual([]);
       });
+
+      it('should not include deleted season in list', async () => {
+        // Arrange: Create profile, catalog, and seasons
+        const { data: profileData } = await ownerClient.mutate({
+          mutation: CREATE_PROFILE,
+          variables: { input: { sellerName: `${getTestPrefix()}-Profile` } },
+        });
+        const profileId = profileData.createSellerProfile.profileId;
+
+        const { data: catalogData } = await ownerClient.mutate({
+          mutation: CREATE_CATALOG,
+          variables: {
+            input: {
+              catalogName: `${getTestPrefix()}-Catalog`,
+              isPublic: true,
+              products: [{ productName: 'Product 1', price: 10.0, sortOrder: 1 }],
+            },
+          },
+        });
+        const catalogId = catalogData.createCatalog.catalogId;
+
+        // Create two seasons
+        const { data: season1Data } = await ownerClient.mutate({
+          mutation: CREATE_SEASON,
+          variables: {
+            input: {
+              profileId: profileId,
+              seasonName: `${getTestPrefix()}-SeasonToKeep`,
+              startDate: '2025-01-01T00:00:00Z',
+              catalogId: catalogId,
+            },
+          },
+        });
+        const seasonIdToKeep = season1Data.createSeason.seasonId;
+
+        const { data: season2Data } = await ownerClient.mutate({
+          mutation: CREATE_SEASON,
+          variables: {
+            input: {
+              profileId: profileId,
+              seasonName: `${getTestPrefix()}-SeasonToDelete`,
+              startDate: '2025-06-01T00:00:00Z',
+              catalogId: catalogId,
+            },
+          },
+        });
+        const seasonIdToDelete = season2Data.createSeason.seasonId;
+
+        // Verify both appear in list
+        const { data: beforeDelete } = await ownerClient.query({
+          query: LIST_SEASONS_BY_PROFILE,
+          variables: { profileId: profileId },
+          fetchPolicy: 'network-only',
+        });
+        expect(beforeDelete.listSeasonsByProfile.length).toBe(2);
+        const beforeSeasonIds = beforeDelete.listSeasonsByProfile.map((s: any) => s.seasonId);
+        expect(beforeSeasonIds).toContain(seasonIdToKeep);
+        expect(beforeSeasonIds).toContain(seasonIdToDelete);
+
+        // Delete one season
+        await ownerClient.mutate({
+          mutation: DELETE_SEASON,
+          variables: { seasonId: seasonIdToDelete },
+        });
+
+        // Act: List seasons again
+        const { data: afterDelete } = await ownerClient.query({
+          query: LIST_SEASONS_BY_PROFILE,
+          variables: { profileId: profileId },
+          fetchPolicy: 'network-only',
+        });
+
+        // Assert: Only the kept season should appear
+        expect(afterDelete.listSeasonsByProfile.length).toBe(1);
+        const afterSeasonIds = afterDelete.listSeasonsByProfile.map((s: any) => s.seasonId);
+        expect(afterSeasonIds).toContain(seasonIdToKeep);
+        expect(afterSeasonIds).not.toContain(seasonIdToDelete);
+
+        // Cleanup
+        await ownerClient.mutate({ mutation: DELETE_SEASON, variables: { seasonId: seasonIdToKeep } });
+        await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId } });
+        await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
+      }, 15000);
     });
 
     describe('Authorization', () => {
@@ -651,6 +734,436 @@ describe('Season Query Resolvers Integration Tests', () => {
         await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId } });
         await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
       });
+    });
+  });
+
+  describe('Season with optional endDate', () => {
+    it('should return season without endDate (open-ended season)', async () => {
+      // Arrange
+      const { data: profileData } = await ownerClient.mutate({
+        mutation: CREATE_PROFILE,
+        variables: { input: { sellerName: `${getTestPrefix()}-Profile` } },
+      });
+      const profileId = profileData.createSellerProfile.profileId;
+
+      const { data: catalogData } = await ownerClient.mutate({
+        mutation: CREATE_CATALOG,
+        variables: {
+          input: {
+            catalogName: `${getTestPrefix()}-Catalog`,
+            isPublic: true,
+            products: [{ productName: 'Product 1', price: 10.0, sortOrder: 1 }],
+          },
+        },
+      });
+      const catalogId = catalogData.createCatalog.catalogId;
+
+      // Create season without endDate
+      const { data: seasonData } = await ownerClient.mutate({
+        mutation: CREATE_SEASON,
+        variables: {
+          input: {
+            profileId: profileId,
+            seasonName: `${getTestPrefix()}-OpenSeason`,
+            startDate: '2025-01-01T00:00:00Z',
+            // No endDate specified
+            catalogId: catalogId,
+          },
+        },
+      });
+      const seasonId = seasonData.createSeason.seasonId;
+
+      // Act
+      const { data } = await ownerClient.query({
+        query: GET_SEASON,
+        variables: { seasonId: seasonId },
+        fetchPolicy: 'network-only',
+      });
+
+      // Assert
+      expect(data.getSeason.endDate).toBeNull();
+      expect(data.getSeason.startDate).toBe('2025-01-01T00:00:00Z');
+
+      // Cleanup
+      await ownerClient.mutate({ mutation: DELETE_SEASON, variables: { seasonId } });
+      await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId } });
+      await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
+    });
+
+    it('should return season with both startDate and endDate', async () => {
+      // Arrange
+      const { data: profileData } = await ownerClient.mutate({
+        mutation: CREATE_PROFILE,
+        variables: { input: { sellerName: `${getTestPrefix()}-Profile` } },
+      });
+      const profileId = profileData.createSellerProfile.profileId;
+
+      const { data: catalogData } = await ownerClient.mutate({
+        mutation: CREATE_CATALOG,
+        variables: {
+          input: {
+            catalogName: `${getTestPrefix()}-Catalog`,
+            isPublic: true,
+            products: [{ productName: 'Product 1', price: 10.0, sortOrder: 1 }],
+          },
+        },
+      });
+      const catalogId = catalogData.createCatalog.catalogId;
+
+      const { data: seasonData } = await ownerClient.mutate({
+        mutation: CREATE_SEASON,
+        variables: {
+          input: {
+            profileId: profileId,
+            seasonName: `${getTestPrefix()}-ClosedSeason`,
+            startDate: '2025-01-01T00:00:00Z',
+            endDate: '2025-06-30T23:59:59Z',
+            catalogId: catalogId,
+          },
+        },
+      });
+      const seasonId = seasonData.createSeason.seasonId;
+
+      // Act
+      const { data } = await ownerClient.query({
+        query: GET_SEASON,
+        variables: { seasonId: seasonId },
+        fetchPolicy: 'network-only',
+      });
+
+      // Assert
+      expect(data.getSeason.startDate).toBe('2025-01-01T00:00:00Z');
+      expect(data.getSeason.endDate).toBe('2025-06-30T23:59:59Z');
+
+      // Cleanup
+      await ownerClient.mutate({ mutation: DELETE_SEASON, variables: { seasonId } });
+      await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId } });
+      await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
+    });
+  });
+
+  describe('listSeasonsByProfile after delete', () => {
+    it('should not show deleted season in list', async () => {
+      // Arrange
+      const { data: profileData } = await ownerClient.mutate({
+        mutation: CREATE_PROFILE,
+        variables: { input: { sellerName: `${getTestPrefix()}-Profile` } },
+      });
+      const profileId = profileData.createSellerProfile.profileId;
+
+      const { data: catalogData } = await ownerClient.mutate({
+        mutation: CREATE_CATALOG,
+        variables: {
+          input: {
+            catalogName: `${getTestPrefix()}-Catalog`,
+            isPublic: true,
+            products: [{ productName: 'Product 1', price: 10.0, sortOrder: 1 }],
+          },
+        },
+      });
+      const catalogId = catalogData.createCatalog.catalogId;
+
+      const { data: season1Data } = await ownerClient.mutate({
+        mutation: CREATE_SEASON,
+        variables: {
+          input: {
+            profileId: profileId,
+            seasonName: `${getTestPrefix()}-Season1`,
+            startDate: '2025-01-01T00:00:00Z',
+            catalogId: catalogId,
+          },
+        },
+      });
+      const seasonId1 = season1Data.createSeason.seasonId;
+
+      const { data: season2Data } = await ownerClient.mutate({
+        mutation: CREATE_SEASON,
+        variables: {
+          input: {
+            profileId: profileId,
+            seasonName: `${getTestPrefix()}-Season2`,
+            startDate: '2025-06-01T00:00:00Z',
+            catalogId: catalogId,
+          },
+        },
+      });
+      const seasonId2 = season2Data.createSeason.seasonId;
+
+      // Delete one season
+      await ownerClient.mutate({ mutation: DELETE_SEASON, variables: { seasonId: seasonId1 } });
+
+      // Act
+      const { data } = await ownerClient.query({
+        query: LIST_SEASONS_BY_PROFILE,
+        variables: { profileId: profileId },
+        fetchPolicy: 'network-only',
+      });
+
+      // Assert: Only one season should remain
+      expect(data.listSeasonsByProfile.length).toBe(1);
+      expect(data.listSeasonsByProfile[0].seasonId).toBe(seasonId2);
+
+      // Cleanup
+      await ownerClient.mutate({ mutation: DELETE_SEASON, variables: { seasonId: seasonId2 } });
+      await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId } });
+      await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
+    });
+  });
+
+  describe('getSeason with computed fields', () => {
+    const GET_SEASON_WITH_COMPUTED = gql`
+      query GetSeason($seasonId: ID!) {
+        getSeason(seasonId: $seasonId) {
+          seasonId
+          seasonName
+          catalogId
+          totalOrders
+          totalRevenue
+          catalog {
+            catalogId
+            catalogName
+            products {
+              productId
+              productName
+              price
+            }
+          }
+        }
+      }
+    `;
+
+    const CREATE_CATALOG_WITH_PRODUCTS = gql`
+      mutation CreateCatalog($input: CreateCatalogInput!) {
+        createCatalog(input: $input) {
+          catalogId
+          catalogName
+          products {
+            productId
+            productName
+            price
+          }
+        }
+      }
+    `;
+
+    const CREATE_ORDER = gql`
+      mutation CreateOrder($input: CreateOrderInput!) {
+        createOrder(input: $input) {
+          orderId
+          seasonId
+          totalAmount
+        }
+      }
+    `;
+
+    const DELETE_ORDER = gql`
+      mutation DeleteOrder($orderId: ID!) {
+        deleteOrder(orderId: $orderId)
+      }
+    `;
+
+    it('should return totalOrders and totalRevenue fields', async () => {
+      // Arrange: Create profile, catalog with a product, season, and orders
+      const { data: profileData } = await ownerClient.mutate({
+        mutation: CREATE_PROFILE,
+        variables: { input: { sellerName: `${getTestPrefix()}-ComputedFieldsProfile` } },
+      });
+      const profileId = profileData.createSellerProfile.profileId;
+
+      const { data: catalogData } = await ownerClient.mutate({
+        mutation: CREATE_CATALOG_WITH_PRODUCTS,
+        variables: {
+          input: {
+            catalogName: `${getTestPrefix()}-ComputedCatalog`,
+            isPublic: true,
+            products: [
+              { productName: 'Popcorn', price: 10.0, sortOrder: 1 },
+              { productName: 'Candy', price: 5.0, sortOrder: 2 },
+            ],
+          },
+        },
+      });
+      const catalogId = catalogData.createCatalog.catalogId;
+      const product1Id = catalogData.createCatalog.products[0].productId;
+      const product2Id = catalogData.createCatalog.products[1].productId;
+
+      const { data: seasonData } = await ownerClient.mutate({
+        mutation: CREATE_SEASON,
+        variables: {
+          input: {
+            profileId: profileId,
+            seasonName: `${getTestPrefix()}-ComputedSeason`,
+            startDate: '2025-01-01T00:00:00Z',
+            catalogId: catalogId,
+          },
+        },
+      });
+      const seasonId = seasonData.createSeason.seasonId;
+
+      // Create 2 orders with specific amounts
+      const { data: order1Data } = await ownerClient.mutate({
+        mutation: CREATE_ORDER,
+        variables: {
+          input: {
+            profileId: profileId,
+            seasonId: seasonId,
+            customerName: 'Customer 1',
+            orderDate: new Date().toISOString(),
+            paymentMethod: 'CASH',
+            lineItems: [
+              { productId: product1Id, quantity: 2 }, // 2 x $10 = $20
+            ],
+          },
+        },
+      });
+      const orderId1 = order1Data.createOrder.orderId;
+
+      const { data: order2Data } = await ownerClient.mutate({
+        mutation: CREATE_ORDER,
+        variables: {
+          input: {
+            profileId: profileId,
+            seasonId: seasonId,
+            customerName: 'Customer 2',
+            orderDate: new Date().toISOString(),
+            paymentMethod: 'CHECK',
+            lineItems: [
+              { productId: product1Id, quantity: 1 }, // 1 x $10 = $10
+              { productId: product2Id, quantity: 3 }, // 3 x $5 = $15
+            ],
+          },
+        },
+      });
+      const orderId2 = order2Data.createOrder.orderId;
+
+      // Act: Get season with computed fields
+      const { data } = await ownerClient.query({
+        query: GET_SEASON_WITH_COMPUTED,
+        variables: { seasonId: seasonId },
+        fetchPolicy: 'network-only',
+      });
+
+      // Assert: Check computed fields
+      expect(data.getSeason.totalOrders).toBe(2);
+      expect(data.getSeason.totalRevenue).toBe(45); // $20 + $10 + $15 = $45
+
+      // Assert: Check catalog field resolver
+      expect(data.getSeason.catalog).not.toBeNull();
+      expect(data.getSeason.catalog.catalogId).toBe(catalogId);
+      expect(data.getSeason.catalog.products).toHaveLength(2);
+
+      // Cleanup
+      await ownerClient.mutate({ mutation: DELETE_ORDER, variables: { orderId: orderId1 } });
+      await ownerClient.mutate({ mutation: DELETE_ORDER, variables: { orderId: orderId2 } });
+      await ownerClient.mutate({ mutation: DELETE_SEASON, variables: { seasonId } });
+      await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId } });
+      await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
+    });
+
+    it('should return catalog data via field resolver', async () => {
+      // Arrange: Create profile, catalog, and season
+      const { data: profileData } = await ownerClient.mutate({
+        mutation: CREATE_PROFILE,
+        variables: { input: { sellerName: `${getTestPrefix()}-CatalogResolverProfile` } },
+      });
+      const profileId = profileData.createSellerProfile.profileId;
+
+      const catalogName = `${getTestPrefix()}-TestCatalogName`;
+      const { data: catalogData } = await ownerClient.mutate({
+        mutation: CREATE_CATALOG,
+        variables: {
+          input: {
+            catalogName: catalogName,
+            isPublic: false,
+            products: [
+              { productName: 'Caramel Corn', price: 12.50, sortOrder: 1 },
+            ],
+          },
+        },
+      });
+      const catalogId = catalogData.createCatalog.catalogId;
+
+      const { data: seasonData } = await ownerClient.mutate({
+        mutation: CREATE_SEASON,
+        variables: {
+          input: {
+            profileId: profileId,
+            seasonName: `${getTestPrefix()}-CatalogResolverSeason`,
+            startDate: '2025-03-01T00:00:00Z',
+            catalogId: catalogId,
+          },
+        },
+      });
+      const seasonId = seasonData.createSeason.seasonId;
+
+      // Act: Get season with catalog field
+      const { data } = await ownerClient.query({
+        query: GET_SEASON_WITH_COMPUTED,
+        variables: { seasonId: seasonId },
+        fetchPolicy: 'network-only',
+      });
+
+      // Assert: Catalog should be populated via field resolver
+      expect(data.getSeason.catalog).toBeDefined();
+      expect(data.getSeason.catalog.catalogName).toBe(catalogName);
+      expect(data.getSeason.catalog.products).toHaveLength(1);
+      expect(data.getSeason.catalog.products[0].productName).toBe('Caramel Corn');
+      expect(data.getSeason.catalog.products[0].price).toBe(12.50);
+
+      // Cleanup
+      await ownerClient.mutate({ mutation: DELETE_SEASON, variables: { seasonId } });
+      await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId } });
+      await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
+    });
+
+    it('should return zero for totalOrders and totalRevenue when season has no orders', async () => {
+      // Arrange: Create profile, catalog, and season (no orders)
+      const { data: profileData } = await ownerClient.mutate({
+        mutation: CREATE_PROFILE,
+        variables: { input: { sellerName: `${getTestPrefix()}-NoOrdersProfile` } },
+      });
+      const profileId = profileData.createSellerProfile.profileId;
+
+      const { data: catalogData } = await ownerClient.mutate({
+        mutation: CREATE_CATALOG,
+        variables: {
+          input: {
+            catalogName: `${getTestPrefix()}-NoOrdersCatalog`,
+            isPublic: true,
+            products: [{ productName: 'Product', price: 15.0, sortOrder: 1 }],
+          },
+        },
+      });
+      const catalogId = catalogData.createCatalog.catalogId;
+
+      const { data: seasonData } = await ownerClient.mutate({
+        mutation: CREATE_SEASON,
+        variables: {
+          input: {
+            profileId: profileId,
+            seasonName: `${getTestPrefix()}-NoOrdersSeason`,
+            startDate: '2025-04-01T00:00:00Z',
+            catalogId: catalogId,
+          },
+        },
+      });
+      const seasonId = seasonData.createSeason.seasonId;
+
+      // Act: Get season with computed fields
+      const { data } = await ownerClient.query({
+        query: GET_SEASON_WITH_COMPUTED,
+        variables: { seasonId: seasonId },
+        fetchPolicy: 'network-only',
+      });
+
+      // Assert: Should return 0 for both computed fields (or null)
+      expect(data.getSeason.totalOrders).toBe(0);
+      expect(data.getSeason.totalRevenue).toBe(0);
+
+      // Cleanup
+      await ownerClient.mutate({ mutation: DELETE_SEASON, variables: { seasonId } });
+      await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId } });
+      await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
     });
   });
 });

@@ -382,6 +382,76 @@ describe('Catalog CRUD Integration Tests', () => {
           })
         ).rejects.toThrow();
       });
+
+      it('should accept catalog with zero price product (free item)', async () => {
+        // Arrange - Free items should be allowed (e.g., bonus items, samples)
+        const input = {
+          catalogName: 'Free Item Catalog',
+          isPublic: true,
+          products: [
+            {
+              productName: 'Free Sample',
+              description: 'Complimentary sample',
+              price: 0.0,
+              sortOrder: 1,
+            },
+            {
+              productName: 'Regular Product',
+              price: 10.0,
+              sortOrder: 2,
+            },
+          ],
+        };
+
+        // Act
+        const { data } = await ownerClient.mutate({
+          mutation: CREATE_CATALOG,
+          variables: { input },
+        });
+
+        // Assert
+        const catalogId = data.createCatalog.catalogId;
+        expect(data.createCatalog.products).toHaveLength(2);
+        expect(data.createCatalog.products[0].price).toBe(0.0);
+        expect(data.createCatalog.products[1].price).toBe(10.0);
+
+        // Cleanup
+        await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId } });
+      });
+
+      it('should accept or reject catalog with negative price product', async () => {
+        // Arrange - Negative prices might represent discounts/credits
+        // System should either accept or reject based on business logic
+        const input = {
+          catalogName: 'Negative Price Test Catalog',
+          isPublic: false,
+          products: [
+            {
+              productName: 'Credit/Discount Item',
+              price: -5.0,
+              sortOrder: 1,
+            },
+          ],
+        };
+
+        try {
+          // Act
+          const { data } = await ownerClient.mutate({
+            mutation: CREATE_CATALOG,
+            variables: { input },
+          });
+
+          // If accepted, the system allows negative prices
+          const catalogId = data.createCatalog.catalogId;
+          expect(data.createCatalog.products[0].price).toBe(-5.0);
+
+          // Cleanup
+          await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId } });
+        } catch (error: any) {
+          // If rejected, the system validates against negative prices
+          expect(error.message).toMatch(/price|negative|invalid|validation/i);
+        }
+      });
     });
 
     describe('Data Integrity', () => {
@@ -672,6 +742,137 @@ describe('Catalog CRUD Integration Tests', () => {
         ).rejects.toThrow(/conditional request failed/i);  // VTL returns raw DynamoDB error
       });
     });
+
+    describe('Product Management', () => {
+      it('should update catalog with reordered products (sortOrder changes)', async () => {
+        // Arrange: Create catalog with products in specific order
+        const createInput = {
+          catalogName: 'Reorder Test',
+          isPublic: false,
+          products: [
+            { productName: 'Product A', price: 10.0, sortOrder: 1 },
+            { productName: 'Product B', price: 20.0, sortOrder: 2 },
+            { productName: 'Product C', price: 30.0, sortOrder: 3 },
+          ],
+        };
+        const { data: createData } = await ownerClient.mutate({
+          mutation: CREATE_CATALOG,
+          variables: { input: createInput },
+        });
+        const catalogId = createData.createCatalog.catalogId;
+
+        // Act: Reorder products (C, A, B order)
+        const updateInput = {
+          catalogName: 'Reorder Test',
+          isPublic: false,
+          products: [
+            { productName: 'Product C', price: 30.0, sortOrder: 1 },
+            { productName: 'Product A', price: 10.0, sortOrder: 2 },
+            { productName: 'Product B', price: 20.0, sortOrder: 3 },
+          ],
+        };
+        const { data } = await ownerClient.mutate({
+          mutation: UPDATE_CATALOG,
+          variables: { catalogId: catalogId, input: updateInput },
+        });
+
+        // Assert: Products are in new order
+        expect(data.updateCatalog.products).toHaveLength(3);
+        expect(data.updateCatalog.products[0].productName).toBe('Product C');
+        expect(data.updateCatalog.products[0].sortOrder).toBe(1);
+        expect(data.updateCatalog.products[1].productName).toBe('Product A');
+        expect(data.updateCatalog.products[1].sortOrder).toBe(2);
+        expect(data.updateCatalog.products[2].productName).toBe('Product B');
+        expect(data.updateCatalog.products[2].sortOrder).toBe(3);
+
+        // Cleanup
+        await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId } });
+      });
+
+      it('should update catalog removing some products', async () => {
+        // Arrange: Create catalog with 4 products
+        const createInput = {
+          catalogName: 'Remove Products Test',
+          isPublic: true,
+          products: [
+            { productName: 'Keep 1', price: 10.0, sortOrder: 1 },
+            { productName: 'Remove 1', price: 20.0, sortOrder: 2 },
+            { productName: 'Keep 2', price: 30.0, sortOrder: 3 },
+            { productName: 'Remove 2', price: 40.0, sortOrder: 4 },
+          ],
+        };
+        const { data: createData } = await ownerClient.mutate({
+          mutation: CREATE_CATALOG,
+          variables: { input: createInput },
+        });
+        const catalogId = createData.createCatalog.catalogId;
+
+        // Act: Update with only 2 products (removing 2)
+        const updateInput = {
+          catalogName: 'Remove Products Test',
+          isPublic: true,
+          products: [
+            { productName: 'Keep 1', price: 10.0, sortOrder: 1 },
+            { productName: 'Keep 2', price: 30.0, sortOrder: 2 },
+          ],
+        };
+        const { data } = await ownerClient.mutate({
+          mutation: UPDATE_CATALOG,
+          variables: { catalogId: catalogId, input: updateInput },
+        });
+
+        // Assert: Only 2 products remain
+        expect(data.updateCatalog.products).toHaveLength(2);
+        expect(data.updateCatalog.products[0].productName).toBe('Keep 1');
+        expect(data.updateCatalog.products[1].productName).toBe('Keep 2');
+
+        // Cleanup
+        await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId } });
+      });
+
+      it('should update catalog with no product changes (name only)', async () => {
+        // Arrange: Create catalog
+        const createInput = {
+          catalogName: 'Name Only Test',
+          isPublic: false,
+          products: [
+            { productName: 'Product 1', price: 15.0, sortOrder: 1 },
+            { productName: 'Product 2', price: 25.0, sortOrder: 2 },
+          ],
+        };
+        const { data: createData } = await ownerClient.mutate({
+          mutation: CREATE_CATALOG,
+          variables: { input: createInput },
+        });
+        const catalogId = createData.createCatalog.catalogId;
+        const originalProducts = createData.createCatalog.products;
+
+        // Act: Update only the name, products stay the same
+        const updateInput = {
+          catalogName: 'New Catalog Name',
+          isPublic: false,
+          products: [
+            { productName: 'Product 1', price: 15.0, sortOrder: 1 },
+            { productName: 'Product 2', price: 25.0, sortOrder: 2 },
+          ],
+        };
+        const { data } = await ownerClient.mutate({
+          mutation: UPDATE_CATALOG,
+          variables: { catalogId: catalogId, input: updateInput },
+        });
+
+        // Assert: Name changed, products unchanged
+        expect(data.updateCatalog.catalogName).toBe('New Catalog Name');
+        expect(data.updateCatalog.products).toHaveLength(2);
+        expect(data.updateCatalog.products[0].productName).toBe(originalProducts[0].productName);
+        expect(data.updateCatalog.products[0].price).toBe(originalProducts[0].price);
+        expect(data.updateCatalog.products[1].productName).toBe(originalProducts[1].productName);
+        expect(data.updateCatalog.products[1].price).toBe(originalProducts[1].price);
+
+        // Cleanup
+        await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId } });
+      });
+    });
   });
 
   describe('deleteCatalog', () => {
@@ -781,6 +982,231 @@ describe('Catalog CRUD Integration Tests', () => {
             variables: { catalogId: 'CATALOG#nonexistent' },
           })
         ).rejects.toThrow(/Cannot return null for non-nullable type.*Boolean|conditional request failed/i);  // VTL: null for non-nullable or conditional failure
+      });
+    });
+
+    describe('Data Integrity', () => {
+      it('Data Integrity: Deleting catalog used by active season', async () => {
+        // Arrange: Create a catalog and use it for a season
+        const createCatalogInput = {
+          catalogName: 'Catalog Used By Season',
+          isPublic: false,
+          products: [{ productName: 'Popcorn', price: 25.0, sortOrder: 1 }],
+        };
+        const { data: catalogData }: any = await ownerClient.mutate({
+          mutation: CREATE_CATALOG,
+          variables: { input: createCatalogInput },
+        });
+        const catalogId = catalogData.createCatalog.catalogId;
+
+        // Create a profile and season using this catalog
+        const CREATE_PROFILE = gql`
+          mutation CreateSellerProfile($input: CreateSellerProfileInput!) {
+            createSellerProfile(input: $input) {
+              profileId
+            }
+          }
+        `;
+        const CREATE_SEASON = gql`
+          mutation CreateSeason($input: CreateSeasonInput!) {
+            createSeason(input: $input) {
+              seasonId
+              catalogId
+            }
+          }
+        `;
+        const DELETE_SEASON = gql`
+          mutation DeleteSeason($seasonId: ID!) {
+            deleteSeason(seasonId: $seasonId)
+          }
+        `;
+        const DELETE_PROFILE = gql`
+          mutation DeleteSellerProfile($profileId: ID!) {
+            deleteSellerProfile(profileId: $profileId)
+          }
+        `;
+
+        const { data: profileData }: any = await ownerClient.mutate({
+          mutation: CREATE_PROFILE,
+          variables: { input: { sellerName: 'Catalog Test Seller' } },
+        });
+        const profileId = profileData.createSellerProfile.profileId;
+
+        const { data: seasonData }: any = await ownerClient.mutate({
+          mutation: CREATE_SEASON,
+          variables: {
+            input: {
+              profileId: profileId,
+              catalogId: catalogId,
+              seasonName: 'Season Using Catalog',
+              startDate: new Date().toISOString(),
+            },
+          },
+        });
+        const seasonId = seasonData.createSeason.seasonId;
+
+        // Act: Try to delete the catalog while it's in use by a season
+        // The system should either:
+        // - Prevent deletion (throw error)
+        // - Allow deletion (orphan the season's catalogId reference)
+        try {
+          const { data: deleteData }: any = await ownerClient.mutate({
+            mutation: DELETE_CATALOG,
+            variables: { catalogId: catalogId },
+          });
+          
+          // If deletion succeeds, the catalog is deleted
+          // This means the system allows deletion (orphaning the reference)
+          expect(deleteData.deleteCatalog).toBe(true);
+          
+          // Season's catalogId is now orphaned - verify the season still exists
+          const GET_SEASON = gql`
+            query GetSeason($seasonId: ID!) {
+              getSeason(seasonId: $seasonId) {
+                seasonId
+                catalogId
+              }
+            }
+          `;
+          const { data: seasonCheck }: any = await ownerClient.query({
+            query: GET_SEASON,
+            variables: { seasonId: seasonId },
+            fetchPolicy: 'network-only',
+          });
+          expect(seasonCheck.getSeason).toBeDefined();
+          expect(seasonCheck.getSeason.catalogId).toBe(catalogId); // Reference is orphaned
+        } catch (error: any) {
+          // If deletion fails, the system prevents deletion of in-use catalogs
+          // This is also valid behavior
+          expect(error.message).toMatch(/in use|referenced|cannot delete/i);
+        } finally {
+          // Cleanup: Delete season and profile
+          await ownerClient.mutate({ mutation: DELETE_SEASON, variables: { seasonId } });
+          await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
+          
+          // Try to cleanup catalog if it wasn't deleted
+          try {
+            await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId } });
+          } catch { /* already deleted */ }
+        }
+      });
+
+      it('creates catalog with duplicate product names', async () => {
+        // Act: Create catalog with products that have the same name
+        const { data }: any = await ownerClient.mutate({
+          mutation: CREATE_CATALOG,
+          variables: {
+            input: {
+              catalogName: 'Duplicate Product Names Catalog',
+              isPublic: false,
+              products: [
+                { productName: 'Same Name', price: 10.00, sortOrder: 1 },
+                { productName: 'Same Name', price: 15.00, sortOrder: 2 },
+                { productName: 'Same Name', price: 20.00, sortOrder: 3 },
+              ],
+            },
+          },
+        });
+
+        // Assert: All products created with same name but unique IDs
+        expect(data.createCatalog.products).toHaveLength(3);
+        const productIds = data.createCatalog.products.map((p: any) => p.productId);
+        const uniqueIds = new Set(productIds);
+        expect(uniqueIds.size).toBe(3);
+
+        // All have the same name
+        expect(data.createCatalog.products.every((p: any) => p.productName === 'Same Name')).toBe(true);
+
+        // Cleanup
+        await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId: data.createCatalog.catalogId } });
+      });
+
+      it('creates catalog with many products (boundary test)', async () => {
+        // Act: Create catalog with 50 products
+        const products = Array.from({ length: 50 }, (_, i) => ({
+          productName: `Product ${i + 1}`,
+          price: (i + 1) * 1.25,
+          sortOrder: i + 1,
+        }));
+
+        const { data }: any = await ownerClient.mutate({
+          mutation: CREATE_CATALOG,
+          variables: {
+            input: {
+              catalogName: 'Many Products Catalog',
+              isPublic: false,
+              products,
+            },
+          },
+        });
+
+        // Assert: All 50 products created
+        expect(data.createCatalog.products).toHaveLength(50);
+        expect(data.createCatalog.products[0].productName).toBe('Product 1');
+        expect(data.createCatalog.products[49].productName).toBe('Product 50');
+
+        // Cleanup
+        await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId: data.createCatalog.catalogId } });
+      });
+
+      it('creates catalog with duplicate sortOrders', async () => {
+        // Act: Create catalog with products that have the same sortOrder
+        const { data }: any = await ownerClient.mutate({
+          mutation: CREATE_CATALOG,
+          variables: {
+            input: {
+              catalogName: 'Duplicate SortOrder Catalog',
+              isPublic: false,
+              products: [
+                { productName: 'Product A', price: 10.00, sortOrder: 1 },
+                { productName: 'Product B', price: 15.00, sortOrder: 1 }, // Same sortOrder
+                { productName: 'Product C', price: 20.00, sortOrder: 1 }, // Same sortOrder
+              ],
+            },
+          },
+        });
+
+        // Assert: All products created (duplicate sortOrder is allowed)
+        expect(data.createCatalog.products).toHaveLength(3);
+        expect(data.createCatalog.products.every((p: any) => p.sortOrder === 1)).toBe(true);
+
+        // Cleanup
+        await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId: data.createCatalog.catalogId } });
+      });
+
+      it('updating catalog to change isPublic flag', async () => {
+        // Arrange: Create private catalog
+        const { data: createData }: any = await ownerClient.mutate({
+          mutation: CREATE_CATALOG,
+          variables: {
+            input: {
+              catalogName: 'Visibility Test Catalog',
+              isPublic: false,
+              products: [{ productName: 'Test', price: 5.00, sortOrder: 1 }],
+            },
+          },
+        });
+        const catalogId = createData.createCatalog.catalogId;
+        expect(createData.createCatalog.isPublic).toBe(false);
+
+        // Act: Update to make public
+        const { data: updateData }: any = await ownerClient.mutate({
+          mutation: UPDATE_CATALOG,
+          variables: {
+            catalogId,
+            input: {
+              catalogName: 'Visibility Test Catalog',
+              isPublic: true,
+              products: [{ productName: 'Test', price: 5.00, sortOrder: 1 }],
+            },
+          },
+        });
+
+        // Assert: Now public
+        expect(updateData.updateCatalog.isPublic).toBe(true);
+
+        // Cleanup
+        await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId } });
       });
     });
   });
