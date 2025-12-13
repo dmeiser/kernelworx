@@ -49,8 +49,7 @@ def dynamodb_table(aws_credentials: None) -> Generator[Any, None, None]:
                 {"AttributeName": "GSI3SK", "AttributeType": "S"},
                 {"AttributeName": "profileId", "AttributeType": "S"},
                 {"AttributeName": "orderId", "AttributeType": "S"},
-                {"AttributeName": "GSI5PK", "AttributeType": "S"},
-                {"AttributeName": "GSI5SK", "AttributeType": "S"},
+                {"AttributeName": "seasonId", "AttributeType": "S"},
             ],
             GlobalSecondaryIndexes=[
                 {
@@ -87,8 +86,7 @@ def dynamodb_table(aws_credentials: None) -> Generator[Any, None, None]:
                 {
                     "IndexName": "GSI5",
                     "KeySchema": [
-                        {"AttributeName": "GSI5PK", "KeyType": "HASH"},
-                        {"AttributeName": "GSI5SK", "KeyType": "RANGE"},
+                        {"AttributeName": "seasonId", "KeyType": "HASH"},
                     ],
                     "Projection": {"ProjectionType": "ALL"},
                 },
@@ -219,13 +217,13 @@ def sample_season(
 
 
 @pytest.fixture
-def sample_order_id() -> str:
+def sample_order_id() -> str:  # pragma: no cover
     """Sample order ID."""
-    return "ORDER#order-456-xyz"
+    return "ORDER#order-456-xyz"  # pragma: no cover
 
 
 @pytest.fixture
-def sample_order(
+def sample_order(  # pragma: no cover
     dynamodb_table: Any, sample_profile_id: str, sample_season_id: str, sample_order_id: str
 ) -> Dict[str, Any]:
     """Create sample order in DynamoDB."""

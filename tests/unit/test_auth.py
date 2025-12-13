@@ -234,6 +234,153 @@ class TestCheckProfileAccess:
 
         assert result is False
 
+    def test_shared_user_with_dict_format_permissions(
+        self,
+        dynamodb_table: Any,
+        sample_profile: Any,
+        sample_profile_id: str,
+        another_account_id: str,
+    ) -> None:
+        """Test that user with dict-format permissions is recognized."""
+        # Create share with dict-format permissions (raw DynamoDB format)
+        dynamodb_table.put_item(
+            Item={
+                "PK": sample_profile_id,
+                "SK": f"SHARE#{another_account_id}",
+                "permissions": [{"S": "READ"}],  # Dict format instead of list of strings
+            }
+        )
+
+        result = check_profile_access(another_account_id, sample_profile_id, "READ")
+
+        assert result is True
+
+    def test_shared_user_with_non_list_permissions(
+        self,
+        dynamodb_table: Any,
+        sample_profile: Any,
+        sample_profile_id: str,
+        another_account_id: str,
+    ) -> None:
+        """Test that user with non-list permissions is denied access."""
+        # Create share with non-list permissions
+        dynamodb_table.put_item(
+            Item={
+                "PK": sample_profile_id,
+                "SK": f"SHARE#{another_account_id}",
+                "permissions": {"READ": True},  # Dict instead of list
+            }
+        )
+
+        result = check_profile_access(another_account_id, sample_profile_id, "READ")
+
+        assert result is False
+
+    def test_shared_user_with_mixed_permission_formats(
+        self,
+        dynamodb_table: Any,
+        sample_profile: Any,
+        sample_profile_id: str,
+        another_account_id: str,
+    ) -> None:
+        """Test that user with mixed permission formats is recognized."""
+        # Create share with mixed permission formats
+        dynamodb_table.put_item(
+            Item={
+                "PK": sample_profile_id,
+                "SK": f"SHARE#{another_account_id}",
+                "permissions": ["WRITE", {"S": "READ"}],  # Mix of string and dict
+            }
+        )
+
+        result = check_profile_access(another_account_id, sample_profile_id, "READ")
+
+        assert result is True
+
+    def test_shared_user_with_write_only_for_write_request(
+        self,
+        dynamodb_table: Any,
+        sample_profile: Any,
+        sample_profile_id: str,
+        another_account_id: str,
+    ) -> None:
+        """Test that user with WRITE permission gets WRITE access."""
+        # Create share with WRITE permission only
+        dynamodb_table.put_item(
+            Item={
+                "PK": sample_profile_id,
+                "SK": f"SHARE#{another_account_id}",
+                "permissions": ["WRITE"],
+            }
+        )
+
+        result = check_profile_access(another_account_id, sample_profile_id, "WRITE")
+
+        assert result is True
+
+    def test_shared_user_with_read_only_denied_write(
+        self,
+        dynamodb_table: Any,
+        sample_profile: Any,
+        sample_profile_id: str,
+        another_account_id: str,
+    ) -> None:
+        """Test that user with READ-only permission is denied WRITE."""
+        # Create share with READ permission only
+        dynamodb_table.put_item(
+            Item={
+                "PK": sample_profile_id,
+                "SK": f"SHARE#{another_account_id}",
+                "permissions": ["READ"],
+            }
+        )
+
+        result = check_profile_access(another_account_id, sample_profile_id, "WRITE")
+
+        assert result is False
+
+    def test_shared_user_with_empty_permissions_list(
+        self,
+        dynamodb_table: Any,
+        sample_profile: Any,
+        sample_profile_id: str,
+        another_account_id: str,
+    ) -> None:
+        """Test that user with empty permissions list is denied access."""
+        # Create share with empty permissions
+        dynamodb_table.put_item(
+            Item={
+                "PK": sample_profile_id,
+                "SK": f"SHARE#{another_account_id}",
+                "permissions": [],
+            }
+        )
+
+        result = check_profile_access(another_account_id, sample_profile_id, "READ")
+
+        assert result is False
+
+    def test_shared_user_with_dict_permission_without_s_key(
+        self,
+        dynamodb_table: Any,
+        sample_profile: Any,
+        sample_profile_id: str,
+        another_account_id: str,
+    ) -> None:
+        """Test that user with dict permission without 'S' key is denied access."""
+        # Create share with dict permission that doesn't have "S" key
+        dynamodb_table.put_item(
+            Item={
+                "PK": sample_profile_id,
+                "SK": f"SHARE#{another_account_id}",
+                "permissions": [{"N": "123"}],  # Dict with N key instead of S
+            }
+        )
+
+        result = check_profile_access(another_account_id, sample_profile_id, "READ")
+
+        assert result is False
+
 
 class TestRequireProfileAccess:
     """Tests for require_profile_access function."""

@@ -10,6 +10,8 @@ from src.utils.validation import (
     validate_address,
     validate_customer_input,
     validate_invite_code,
+    validate_order_update,
+    validate_season_update,
 )
 
 
@@ -243,3 +245,205 @@ class TestValidateInviteCode:
             validate_invite_code("ABC-12345")
 
         assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+
+
+class TestValidateSeasonUpdate:
+    """Tests for validate_season_update function."""
+
+    def test_validate_season_update_valid(self) -> None:
+        """Test valid season update."""
+        updates = {"name": "Fall 2025"}
+
+        result = validate_season_update(updates)
+
+        assert result is None
+
+    def test_validate_season_update_empty_name(self) -> None:
+        """Test that empty name returns error."""
+        updates = {"name": ""}
+
+        result = validate_season_update(updates)
+
+        assert result is not None
+        assert result["errorCode"] == "INVALID_INPUT"
+
+    def test_validate_season_update_dates(self) -> None:
+        """Test valid date update."""
+        updates = {"startDate": "2025-09-01", "endDate": "2025-11-30"}
+
+        result = validate_season_update(updates)
+
+        assert result is None
+
+    def test_validate_season_update_invalid_date_order(self) -> None:
+        """Test that endDate before startDate returns error."""
+        updates = {"startDate": "2025-11-30", "endDate": "2025-09-01"}
+
+        result = validate_season_update(updates)
+
+        assert result is not None
+        assert result["errorCode"] == "INVALID_INPUT"
+
+    def test_validate_season_update_empty_start_date(self) -> None:
+        """Test that empty startDate returns error."""
+        updates = {"startDate": ""}
+
+        result = validate_season_update(updates)
+
+        assert result is not None
+        assert result["errorCode"] == "INVALID_INPUT"
+
+    def test_validate_season_update_empty_end_date(self) -> None:
+        """Test that empty endDate is allowed (open-ended season)."""
+        updates = {"startDate": "2025-09-01", "endDate": ""}
+
+        result = validate_season_update(updates)
+
+        assert result is None
+
+    def test_validate_season_update_no_updates(self) -> None:
+        """Test that empty updates dict returns None."""
+        result = validate_season_update({})
+
+        assert result is None
+
+
+class TestValidateOrderUpdate:
+    """Tests for validate_order_update function."""
+
+    def test_validate_order_update_valid(self) -> None:
+        """Test valid order update."""
+        updates = {"customerName": "John Doe"}
+
+        result = validate_order_update(updates)
+
+        assert result is None
+
+    def test_validate_order_update_empty_name(self) -> None:
+        """Test that empty customer name returns error."""
+        updates = {"customerName": ""}
+
+        result = validate_order_update(updates)
+
+        assert result is not None
+        assert result["errorCode"] == "INVALID_INPUT"
+
+    def test_validate_order_update_invalid_phone(self) -> None:
+        """Test that invalid phone returns error."""
+        updates = {"customerPhone": "123"}
+
+        result = validate_order_update(updates)
+
+        assert result is not None
+        assert result["errorCode"] == "INVALID_INPUT"
+
+    def test_validate_order_update_valid_phone(self) -> None:
+        """Test valid phone in order update."""
+        updates = {"customerPhone": "5551234567"}
+
+        result = validate_order_update(updates)
+
+        assert result is None
+
+    def test_validate_order_update_valid_line_items(self) -> None:
+        """Test valid line items."""
+        updates = {
+            "lineItems": [
+                {"productId": "PROD1", "quantity": 2, "pricePerUnit": 10.0},
+                {"productId": "PROD2", "quantity": 1, "pricePerUnit": 15.0},
+            ]
+        }
+
+        result = validate_order_update(updates)
+
+        assert result is None
+
+    def test_validate_order_update_empty_line_items(self) -> None:
+        """Test that empty line items returns error."""
+        updates = {"lineItems": []}
+
+        result = validate_order_update(updates)
+
+        assert result is not None
+        assert result["errorCode"] == "INVALID_INPUT"
+
+    def test_validate_order_update_invalid_line_item_quantity(self) -> None:
+        """Test that invalid quantity returns error."""
+        updates = {"lineItems": [{"productId": "PROD1", "quantity": 0}]}
+
+        result = validate_order_update(updates)
+
+        assert result is not None
+        assert result["errorCode"] == "INVALID_INPUT"
+
+    def test_validate_order_update_invalid_line_item_missing_product_id(self) -> None:
+        """Test that missing productId returns error."""
+        updates = {"lineItems": [{"quantity": 1}]}
+
+        result = validate_order_update(updates)
+
+        assert result is not None
+        assert result["errorCode"] == "INVALID_INPUT"
+
+    def test_validate_order_update_invalid_line_item_not_array(self) -> None:
+        """Test that non-array line items returns error."""
+        updates = {"lineItems": "not an array"}
+
+        result = validate_order_update(updates)
+
+        assert result is not None
+        assert result["errorCode"] == "INVALID_INPUT"
+
+    def test_validate_order_update_invalid_line_item_not_dict(self) -> None:
+        """Test that line item not being dict returns error."""
+        updates = {"lineItems": ["not a dict"]}
+
+        result = validate_order_update(updates)
+
+        assert result is not None
+        assert result["errorCode"] == "INVALID_INPUT"
+
+    def test_validate_order_update_invalid_price_per_unit(self) -> None:
+        """Test that non-numeric pricePerUnit returns error."""
+        updates = {"lineItems": [{"productId": "PROD1", "quantity": 1, "pricePerUnit": "abc"}]}
+
+        result = validate_order_update(updates)
+
+        assert result is not None
+        assert result["errorCode"] == "INVALID_INPUT"
+
+    def test_validate_order_update_invalid_payment_method(self) -> None:
+        """Test that invalid payment method returns error."""
+        updates = {"paymentMethod": "BITCOIN"}
+
+        result = validate_order_update(updates)
+
+        assert result is not None
+        assert result["errorCode"] == "INVALID_INPUT"
+
+    def test_validate_order_update_valid_payment_methods(self) -> None:
+        """Test all valid payment methods."""
+        for method in ["CASH", "CHECK", "CREDIT_CARD", "ONLINE"]:
+            updates = {"paymentMethod": method}
+            result = validate_order_update(updates)
+            assert result is None, f"Payment method {method} should be valid"
+
+    def test_validate_order_update_invalid_address(self) -> None:
+        """Test that invalid address returns error."""
+        updates = {
+            "customerAddress": {
+                "street": "123 Main St",
+                # Missing city, state, zip
+            }
+        }
+
+        result = validate_order_update(updates)
+
+        assert result is not None
+        assert result["errorCode"] == "INVALID_INPUT"
+
+    def test_validate_order_update_no_updates(self) -> None:
+        """Test that empty updates dict returns None."""
+        result = validate_order_update({})
+
+        assert result is None

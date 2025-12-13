@@ -7,7 +7,11 @@ from typing import Any, Dict
 
 import boto3
 
-from utils.logging import get_logger
+# Handle both Lambda (absolute) and unit test (relative) imports
+try:
+    from utils.logging import get_logger
+except ModuleNotFoundError:
+    from ..utils.logging import get_logger  # type: ignore
 
 logger = get_logger(__name__)
 
