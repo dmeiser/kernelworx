@@ -90,10 +90,11 @@ export const SeasonLayout: React.FC = () => {
   // Debug logging
   if (seasonError) {
     console.error("Season query error:", seasonError);
+    const apolloError = seasonError as any;
     console.log("Season error details:", {
       message: seasonError.message,
-      graphQLErrors: seasonError.graphQLErrors,
-      networkError: seasonError.networkError,
+      graphQLErrors: apolloError.graphQLErrors,
+      networkError: apolloError.networkError,
     });
   }
 

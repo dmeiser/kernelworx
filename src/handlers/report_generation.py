@@ -175,105 +175,114 @@ def _get_season_orders(table: Any, profile_id: str, season_id: str) -> list[Dict
     return list(items) if items else []
 
 
+def _format_address(address: Dict[str, Any] | None) -> str:
+    """Format address object as string."""
+    if not address:
+        return ""
+    parts = []
+    if address.get("street"):
+        parts.append(address["street"])
+    if address.get("city") or address.get("state") or address.get("zipCode"):
+        city_state_zip = " ".join(
+            filter(
+                None,
+                [address.get("city"), address.get("state"), address.get("zipCode")],
+            )
+        )
+        if city_state_zip:
+            parts.append(city_state_zip)
+    return ", ".join(parts)
+
+
 def _generate_csv_report(season: Dict[str, Any], orders: list[Dict[str, Any]]) -> bytes:
-    """Generate CSV report."""
+    """Generate CSV report with product columns."""
     import csv
     from io import StringIO
 
     output = StringIO()
     writer = csv.writer(output)
 
-    # Header
-    writer.writerow([f"Season Report: {season.get('name', season.get('seasonName', 'Unknown'))}"])
-    writer.writerow([f"Start Date: {season['startDate']}"])
-    writer.writerow([f"End Date: {season.get('endDate', 'Ongoing')}"])
-    writer.writerow([])
-
-    # Orders header
-    writer.writerow(
-        [
-            "Order Date",
-            "Customer Name",
-            "Customer Phone",
-            "Payment Method",
-            "Total Amount",
-            "Notes",
-        ]
+    # Get all unique products
+    all_products = sorted(
+        set(
+            item.get("productName", "")
+            for order in orders
+            for item in order.get("lineItems", [])
+            if item.get("productName")
+        )
     )
+
+    # Headers: Name, Phone, Address, Product 1, Product 2, ..., Total
+    headers = ["Name", "Phone", "Address"] + all_products + ["Total"]
+    writer.writerow(headers)
 
     # Orders
     for order in orders:
-        writer.writerow(
-            [
-                order.get("orderDate", ""),
-                order.get("customerName", ""),
-                order.get("customerPhone", ""),
-                order.get("paymentMethod", ""),
-                order.get("totalAmount", 0),
-                order.get("notes", ""),
-            ]
-        )
+        row = [
+            order.get("customerName", ""),
+            order.get("customerPhone", ""),
+            _format_address(order.get("customerAddress", {})),
+        ]
 
-    # Summary
-    total_orders = len(orders)
-    total_revenue = sum(float(order.get("totalAmount", 0)) for order in orders)
-    writer.writerow([])
-    writer.writerow(["Summary"])
-    writer.writerow(["Total Orders", total_orders])
-    writer.writerow(["Total Revenue", f"${total_revenue:.2f}"])
+        # Add product quantities
+        line_items_by_product = {
+            item.get("productName", ""): item.get("quantity", 0)
+            for item in order.get("lineItems", [])
+        }
+        for product in all_products:
+            row.append(line_items_by_product.get(product, ""))
+
+        # Add total
+        row.append(order.get("totalAmount", 0))
+        writer.writerow(row)
 
     return output.getvalue().encode("utf-8")
 
 
 def _generate_excel_report(season: Dict[str, Any], orders: list[Dict[str, Any]]) -> bytes:
-    """Generate Excel report."""
+    """Generate Excel report with product columns."""
     wb = Workbook()
     ws = wb.active
     assert ws is not None, "Workbook must have an active worksheet"
-    ws.title = "Season Report"
+    ws.title = "Orders"
 
     # Header styling
     header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
     header_font = Font(bold=True, color="FFFFFF")
 
-    # Title
-    ws["A1"] = f"Season Report: {season.get('name', season.get('seasonName', 'Unknown'))}"
-    ws["A1"].font = Font(bold=True, size=14)
-    ws["A2"] = f"Start Date: {season['startDate']}"
-    ws["A3"] = f"End Date: {season.get('endDate', 'Ongoing')}"
+    # Get all unique products
+    all_products = sorted(
+        set(
+            item.get("productName", "")
+            for order in orders
+            for item in order.get("lineItems", [])
+            if item.get("productName")
+        )
+    )
 
-    # Orders header (row 5)
-    headers = [
-        "Order Date",
-        "Customer Name",
-        "Customer Phone",
-        "Payment Method",
-        "Total Amount",
-        "Notes",
-    ]
+    # Headers: Name, Phone, Address, Product 1, Product 2, ..., Total
+    headers = ["Name", "Phone", "Address"] + all_products + ["Total"]
     for col, header in enumerate(headers, start=1):
-        cell = ws.cell(row=5, column=col, value=header)
+        cell = ws.cell(row=1, column=col, value=header)
         cell.fill = header_fill
         cell.font = header_font
 
     # Orders data
-    for row_idx, order in enumerate(orders, start=6):
-        ws.cell(row=row_idx, column=1, value=order.get("orderDate", ""))
-        ws.cell(row=row_idx, column=2, value=order.get("customerName", ""))
-        ws.cell(row=row_idx, column=3, value=order.get("customerPhone", ""))
-        ws.cell(row=row_idx, column=4, value=order.get("paymentMethod", ""))
-        ws.cell(row=row_idx, column=5, value=float(order.get("totalAmount", 0)))
-        ws.cell(row=row_idx, column=6, value=order.get("notes", ""))
+    for row_idx, order in enumerate(orders, start=2):
+        ws.cell(row=row_idx, column=1, value=order.get("customerName", ""))
+        ws.cell(row=row_idx, column=2, value=order.get("customerPhone", ""))
+        ws.cell(row=row_idx, column=3, value=_format_address(order.get("customerAddress", {})))
 
-    # Summary
-    summary_row = len(orders) + 7
-    ws.cell(row=summary_row, column=1, value="Summary").font = Font(bold=True)
-    ws.cell(row=summary_row + 1, column=1, value="Total Orders:")
-    ws.cell(row=summary_row + 1, column=2, value=len(orders))
-    ws.cell(row=summary_row + 2, column=1, value="Total Revenue:")
+        # Add product quantities
+        line_items_by_product = {
+            item.get("productName", ""): item.get("quantity", 0)
+            for item in order.get("lineItems", [])
+        }
+        for col_idx, product in enumerate(all_products, start=4):
+            ws.cell(row=row_idx, column=col_idx, value=line_items_by_product.get(product, ""))
 
-    total_revenue = sum(float(order.get("totalAmount", 0)) for order in orders)
-    ws.cell(row=summary_row + 2, column=2, value=total_revenue)
+        # Add total
+        ws.cell(row=row_idx, column=len(headers), value=float(order.get("totalAmount", 0)))
 
     # Auto-size columns
     for column in ws.columns:

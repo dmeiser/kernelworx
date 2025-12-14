@@ -283,8 +283,8 @@ export const DELETE_ORDER = gql`
 `;
 
 export const REQUEST_SEASON_REPORT = gql`
-  mutation RequestSeasonReport($seasonId: ID!, $format: String!) {
-    requestSeasonReport(seasonId: $seasonId, format: $format) {
+  mutation RequestSeasonReport($input: RequestSeasonReportInput!) {
+    requestSeasonReport(input: $input) {
       reportId
       seasonId
       profileId

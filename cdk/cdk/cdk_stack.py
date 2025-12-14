@@ -63,17 +63,24 @@ class CdkStack(Stack):
             self.api_domain = f"api.{env_name}.{base_domain}"
             self.cognito_domain = f"login.{env_name}.{base_domain}"
 
-        # ACM Certificate for custom domains (must be in us-east-1 for CloudFront/Cognito)
-        # Note: Cognito custom domain temporarily disabled due to account verification requirement
-        # Certificate includes AppSync API domain and CloudFront site domain
+        # ACM Certificate for AppSync API and CloudFront (must be in us-east-1 for CloudFront)
+        # This certificate is used for api.{domain} and {site_domain}
         self.certificate = acm.Certificate(
             self,
             "Certificate",
             domain_name=self.api_domain,
             subject_alternative_names=[
-                # self.cognito_domain,  # Uncomment when Cognito custom domain is re-enabled
-                self.site_domain,  # CloudFront distribution enabled
+                self.site_domain,  # CloudFront distribution
             ],
+            validation=acm.CertificateValidation.from_dns(self.hosted_zone),
+        )
+
+        # Separate ACM Certificate for Cognito custom domain
+        # Must be in us-east-1 for Cognito
+        self.cognito_certificate = acm.Certificate(
+            self,
+            "CognitoCertificate",
+            domain_name=self.cognito_domain,
             validation=acm.CertificateValidation.from_dns(self.hosted_zone),
         )
 
@@ -625,25 +632,29 @@ class CdkStack(Stack):
                     description="Use AWS CLI to upload: aws cognito-idp set-ui-customization",
                 )
 
-            # TODO: Re-enable custom domain after AWS account verification
-            # self.user_pool_domain = self.user_pool.add_domain(
-            #     "UserPoolDomain",
-            #     custom_domain=cognito.CustomDomainOptions(
-            #         domain_name=self.cognito_domain,
-            #         certificate=self.certificate,
-            #     ),
-            # )
-            #
-            # # Route53 record for Cognito custom domain
-            # route53.ARecord(
-            #     self,
-            #     "CognitoDomainRecord",
-            #     zone=self.hosted_zone,
-            #     record_name=self.cognito_domain,
-            #     target=route53.RecordTarget.from_alias(
-            #         targets.UserPoolDomainTarget(self.user_pool_domain)
-            #     ),
-            # )
+        # ====================================================================
+        # Cognito Custom Domain Configuration (applies to both new and imported pools)
+        # ====================================================================
+
+        # Custom domain configuration (login.{env}.kernelworx.app or login.kernelworx.app)
+        self.user_pool_domain = self.user_pool.add_domain(
+            "UserPoolDomain",
+            custom_domain=cognito.CustomDomainOptions(
+                domain_name=self.cognito_domain,
+                certificate=self.cognito_certificate,
+            ),
+        )
+
+        # Route53 record for Cognito custom domain
+        route53.ARecord(
+            self,
+            "CognitoDomainRecord",
+            zone=self.hosted_zone,
+            record_name=self.cognito_domain,
+            target=route53.RecordTarget.from_alias(
+                targets.UserPoolDomainTarget(self.user_pool_domain)
+            ),
+        )
 
         # Output Cognito Hosted UI URL for easy access (only if user pool was created, not imported)
         if hasattr(self, 'user_pool_domain') and hasattr(self, 'user_pool_client'):

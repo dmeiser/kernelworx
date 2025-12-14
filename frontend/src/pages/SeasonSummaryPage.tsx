@@ -17,7 +17,6 @@ import {
 import {
   ShoppingCart,
   AttachMoney,
-  TrendingUp,
   People,
 } from "@mui/icons-material";
 import { LIST_ORDERS_BY_SEASON } from "../lib/graphql";
@@ -61,7 +60,6 @@ export const SeasonSummaryPage: React.FC = () => {
   );
   const uniqueCustomers = new Set(orders.map((order) => order.customerName))
     .size;
-  const averageOrderValue = totalOrders > 0 ? totalRevenue / totalOrders : 0;
 
   // Payment method breakdown
   const paymentBreakdown = orders.reduce(
@@ -148,22 +146,6 @@ export const SeasonSummaryPage: React.FC = () => {
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
                   Total Revenue
-                </Typography>
-              </Box>
-            </Stack>
-          </Paper>
-        </Grid>
-
-        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-          <Paper sx={{ p: 3 }}>
-            <Stack direction="row" spacing={2} alignItems="center">
-              <TrendingUp color="secondary" sx={{ fontSize: 40 }} />
-              <Box>
-                <Typography variant="h4">
-                  {formatCurrency(averageOrderValue)}
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  Avg Order Value
                 </Typography>
               </Box>
             </Stack>
