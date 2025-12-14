@@ -109,11 +109,16 @@ export const ReportsPage: React.FC = () => {
     if (!phone) return "-";
     // Remove all non-digit characters
     const digits = phone.replace(/\D/g, "");
-    // Format as (XXX) XXX-XXXX if we have 10 digits
+    // Format as (XXX) XXX-XXXX for 10 digits (US format)
     if (digits.length === 10) {
       return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
     }
-    // Return original if not 10 digits
+    // Format as (XXX) XXX-XXXX for 11 digits (with 1 country code, just use last 10)
+    if (digits.length === 11) {
+      const last10 = digits.slice(-10);
+      return `(${last10.slice(0, 3)}) ${last10.slice(3, 6)}-${last10.slice(6)}`;
+    }
+    // Return original if can't format standardly
     return phone;
   };
 
@@ -123,98 +128,6 @@ export const ReportsPage: React.FC = () => {
         Reports & Exports
       </Typography>
 
-      {/* Generate Report */}
-      <Paper sx={{ p: 3, mb: 3 }}>
-        <Typography variant="h6" gutterBottom>
-          Generate Season Report
-        </Typography>
-        <Typography variant="body2" color="text.secondary" paragraph>
-          Export all orders for this season to Excel or CSV format. The report
-          includes customer names, contact info, order details, payment methods,
-          and totals.
-        </Typography>
-
-        <Stack direction="row" spacing={2} alignItems="center" mb={2}>
-          <FormControl sx={{ minWidth: 200 }}>
-            <InputLabel>Format</InputLabel>
-            <Select
-              value={format}
-              label="Format"
-              onChange={(e) => setFormat(e.target.value as "CSV" | "XLSX")}
-              disabled={loading}
-            >
-              <MenuItem value="XLSX">
-                <Stack direction="row" spacing={1} alignItems="center">
-                  <FileIcon fontSize="small" />
-                  <span>Excel (XLSX)</span>
-                </Stack>
-              </MenuItem>
-              <MenuItem value="CSV">
-                <Stack direction="row" spacing={1} alignItems="center">
-                  <FileIcon fontSize="small" />
-                  <span>CSV</span>
-                </Stack>
-              </MenuItem>
-            </Select>
-          </FormControl>
-
-          <Button
-            variant="contained"
-            startIcon={
-              loading ? <CircularProgress size={20} /> : <DownloadIcon />
-            }
-            onClick={handleGenerateReport}
-            disabled={loading}
-          >
-            {loading ? "Generating..." : "Generate Report"}
-          </Button>
-        </Stack>
-
-        {error && (
-          <Alert severity="error" sx={{ mt: 2 }}>
-            Failed to generate report: {error.message}
-          </Alert>
-        )}
-
-        {lastReport && (
-          <Alert
-            severity={lastReport.status === "COMPLETED" ? "success" : "info"}
-            sx={{ mt: 2 }}
-          >
-            {lastReport.status === "COMPLETED" && lastReport.reportUrl ? (
-              <Stack spacing={1}>
-                <Typography variant="body2">
-                  ✅ Report generated successfully! Your download is ready.
-                </Typography>
-                <Link
-                  href={lastReport.reportUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  download
-                  sx={{ fontWeight: "medium" }}
-                >
-                  Download Report ({format})
-                </Link>
-                {lastReport.expiresAt && (
-                  <Typography variant="caption" color="text.secondary">
-                    Link expires:{" "}
-                    {new Date(lastReport.expiresAt).toLocaleString()}
-                  </Typography>
-                )}
-              </Stack>
-            ) : lastReport.status === "PENDING" ? (
-              <Typography variant="body2">
-                ⏳ Report is being generated. This may take a moment...
-              </Typography>
-            ) : (
-              <Typography variant="body2">
-                ❌ Report generation failed. Please try again.
-              </Typography>
-            )}
-          </Alert>
-        )}
-      </Paper>
-
       {/* Report Info */}
       <Paper sx={{ p: 3 }}>
         <Typography variant="h6" gutterBottom>
@@ -222,19 +135,12 @@ export const ReportsPage: React.FC = () => {
         </Typography>
         <Stack spacing={1}>
           <Typography variant="body2">
-            • <strong>Excel (XLSX):</strong> Formatted spreadsheet with multiple
-            columns, suitable for further analysis and pivot tables.
+            • <strong>Excel (XLSX):</strong> Formatted spreadsheet with product columns,
+            suitable for further analysis and pivot tables.
           </Typography>
           <Typography variant="body2">
             • <strong>CSV:</strong> Plain text file, compatible with all
             spreadsheet programs and databases.
-          </Typography>
-          <Typography variant="body2">
-            • Report links expire after 24 hours for security reasons.
-          </Typography>
-          <Typography variant="body2">
-            • All customer data is securely encrypted during storage and
-            transmission.
           </Typography>
         </Stack>
       </Paper>
@@ -316,7 +222,7 @@ export const ReportsPage: React.FC = () => {
                   {orders.map((order) => (
                     <TableRow key={order.orderId}>
                       <TableCell>{order.customerName}</TableCell>
-                      <TableCell>{order.customerPhone || "-"}</TableCell>
+                      <TableCell>{formatPhone(order.customerPhone)}</TableCell>
                       <TableCell>
                         {order.customerAddress ? (
                           <Box sx={{ fontSize: "0.875rem" }}>

@@ -33,11 +33,16 @@ function formatPhone(phone?: string): string {
   if (!phone) return "";
   // Remove all non-digit characters
   const digits = phone.replace(/\D/g, "");
-  // Format as (XXX) XXX-XXXX if we have 10 digits
+  // Format as (XXX) XXX-XXXX for 10 digits (US format)
   if (digits.length === 10) {
     return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
   }
-  // Return as-is if not 10 digits (might be international or custom format)
+  // Format as (XXX) XXX-XXXX for 11 digits (with 1 country code, just use last 10)
+  if (digits.length === 11) {
+    const last10 = digits.slice(-10);
+    return `(${last10.slice(0, 3)}) ${last10.slice(3, 6)}-${last10.slice(6)}`;
+  }
+  // Return original if can't format standardly
   return phone;
 }
 
