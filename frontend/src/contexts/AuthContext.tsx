@@ -15,6 +15,7 @@ import React, {
 import {
   fetchAuthSession,
   signInWithRedirect,
+  signIn,
   signOut,
   getCurrentUser,
 } from "aws-amplify/auth";
@@ -118,7 +119,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   }, [checkAuthSession]);
 
   /**
-   * Login via Cognito Hosted UI
+   * Login via Cognito Hosted UI (for social providers)
    *
    * This redirects the user to the Cognito Hosted UI at:
    * https://{COGNITO_DOMAIN}/oauth2/authorize
@@ -140,6 +141,26 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       throw error;
     }
   }, []);
+
+  /**
+   * Login with email and password (custom UI)
+   * 
+   * This uses Amplify's direct sign-in without redirecting to Hosted UI.
+   * After successful sign-in, the auth state will be updated automatically.
+   */
+  const loginWithPassword = useCallback(async (email: string, password: string) => {
+    try {
+      const { isSignedIn } = await signIn({ username: email, password });
+      if (isSignedIn) {
+        // Refresh the auth session to update account state
+        await checkAuthSession();
+      }
+      return { isSignedIn };
+    } catch (error) {
+      console.error("Email/password login failed:", error);
+      throw error;
+    }
+  }, [checkAuthSession]);
 
   /**
    * Logout and clear session
@@ -182,6 +203,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     isAuthenticated: !!account,
     isAdmin: account?.isAdmin ?? false,
     login,
+    loginWithPassword,
     logout,
     refreshSession,
   };

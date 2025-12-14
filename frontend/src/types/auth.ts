@@ -24,8 +24,11 @@ export interface AuthContextValue {
   /** Whether user has admin privileges */
   isAdmin: boolean;
 
-  /** Initiate login flow via Cognito Hosted UI */
+  /** Initiate login flow via Cognito Hosted UI (for social login) */
   login: () => Promise<void>;
+
+  /** Sign in with email and password (custom UI) */
+  loginWithPassword: (email: string, password: string) => Promise<{ isSignedIn: boolean }>;
 
   /** Sign out current user and clear session */
   logout: () => Promise<void>;

@@ -451,6 +451,12 @@ class CdkStack(Stack):
                     require_symbols=True,
                 ),
                 account_recovery=cognito.AccountRecovery.EMAIL_ONLY,
+                # Enable MFA with TOTP (software tokens) and SMS as options
+                mfa=cognito.Mfa.OPTIONAL,
+                mfa_second_factor=cognito.MfaSecondFactor(
+                    sms=True,  # Allow SMS MFA
+                    otp=True,  # Allow TOTP (software tokens like Google Authenticator)
+                ),
                 removal_policy=RemovalPolicy.RETAIN,
                 # Lambda triggers
                 lambda_triggers=cognito.UserPoolTriggers(

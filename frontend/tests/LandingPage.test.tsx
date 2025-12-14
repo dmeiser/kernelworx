@@ -145,9 +145,8 @@ describe('LandingPage', () => {
     });
   });
 
-  it('calls login when Login button is clicked and user not authenticated', async () => {
+  it('navigates to /login when Login button is clicked and user not authenticated', async () => {
     const user = userEvent.setup();
-    vi.mocked(amplifyAuth.signInWithRedirect).mockResolvedValue(undefined);
 
     renderWithAuth(false);
 
@@ -159,7 +158,7 @@ describe('LandingPage', () => {
     await user.click(loginButton);
 
     await waitFor(() => {
-      expect(amplifyAuth.signInWithRedirect).toHaveBeenCalled();
+      expect(mockNavigate).toHaveBeenCalledWith('/login');
     });
   });
 

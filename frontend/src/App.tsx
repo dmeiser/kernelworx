@@ -16,6 +16,7 @@ import { ProfileSeasonsPage } from "./pages/ProfileSeasonsPage";
 import { SellerProfileManagementPage } from "./pages/SellerProfileManagementPage";
 import { SeasonLayout } from "./pages/SeasonLayout";
 import { SettingsPage } from "./pages/SettingsPage";
+import { AccountSecurityPage } from "./pages/AccountSecurityPage";
 import { AcceptInvitePage } from "./pages/AcceptInvitePage";
 import { AdminPage } from "./pages/AdminPage";
 import { CatalogsPage } from "./pages/CatalogsPage";
@@ -96,6 +97,17 @@ function App() {
                   <ProtectedRoute>
                     <AppLayout>
                       <SettingsPage />
+                    </AppLayout>
+                  </ProtectedRoute>
+                }
+              />
+
+              <Route
+                path="/account/security"
+                element={
+                  <ProtectedRoute>
+                    <AppLayout>
+                      <AccountSecurityPage />
                     </AppLayout>
                   </ProtectedRoute>
                 }

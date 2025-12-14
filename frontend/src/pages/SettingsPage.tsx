@@ -175,6 +175,14 @@ export const SettingsPage: React.FC = () => {
         <Stack spacing={2}>
           <Button
             variant="outlined"
+            onClick={() => navigate("/account/security")}
+            fullWidth
+            sx={{ justifyContent: "flex-start" }}
+          >
+            Account Security (Password & MFA)
+          </Button>
+          <Button
+            variant="outlined"
             onClick={() => navigate("/profiles")}
             fullWidth
             sx={{ justifyContent: "flex-start" }}

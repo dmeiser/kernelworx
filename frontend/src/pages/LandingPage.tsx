@@ -24,13 +24,13 @@ import { useAuth } from "../contexts/AuthContext";
 
 export const LandingPage: React.FC = () => {
   const navigate = useNavigate();
-  const { isAuthenticated, login } = useAuth();
+  const { isAuthenticated } = useAuth();
 
-  const handleLogin = async () => {
+  const handleLogin = () => {
     if (isAuthenticated) {
       navigate("/profiles");
     } else {
-      await login();
+      navigate("/login");
     }
   };
 
