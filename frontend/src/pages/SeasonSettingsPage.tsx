@@ -20,12 +20,18 @@ import {
   DialogContent,
   DialogActions,
   CircularProgress,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
 } from "@mui/material";
 import { Delete as DeleteIcon } from "@mui/icons-material";
 import {
   GET_SEASON,
   UPDATE_SEASON,
   DELETE_SEASON,
+  LIST_PUBLIC_CATALOGS,
+  LIST_MY_CATALOGS,
 } from "../lib/graphql";
 
 interface Season {
@@ -35,6 +41,12 @@ interface Season {
   endDate?: string;
   catalogId: string;
   profileId: string;
+}
+
+interface Catalog {
+  catalogId: string;
+  catalogName: string;
+  catalogType: string;
 }
 
 export const SeasonSettingsPage: React.FC = () => {
@@ -50,6 +62,7 @@ export const SeasonSettingsPage: React.FC = () => {
   const [seasonName, setSeasonName] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
+  const [catalogId, setCatalogId] = useState("");
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
 
   // Fetch season
@@ -62,12 +75,26 @@ export const SeasonSettingsPage: React.FC = () => {
     skip: !seasonId,
   });
 
+  // Fetch catalogs
+  const { data: publicCatalogsData } = useQuery<{
+    listPublicCatalogs: Catalog[];
+  }>(LIST_PUBLIC_CATALOGS);
+
+  const { data: myCatalogsData } = useQuery<{
+    listMyCatalogs: Catalog[];
+  }>(LIST_MY_CATALOGS);
+
+  const publicCatalogs = publicCatalogsData?.listPublicCatalogs || [];
+  const myCatalogs = myCatalogsData?.listMyCatalogs || [];
+  const allCatalogs = [...publicCatalogs, ...myCatalogs];
+
   // Initialize form when season loads
   React.useEffect(() => {
     if (seasonData?.getSeason) {
       setSeasonName(seasonData.getSeason.seasonName);
       setStartDate(seasonData.getSeason.startDate?.split("T")[0] || "");
       setEndDate(seasonData.getSeason.endDate?.split("T")[0] || "");
+      setCatalogId(seasonData.getSeason.catalogId);
     }
   }, [seasonData]);
 
@@ -88,7 +115,7 @@ export const SeasonSettingsPage: React.FC = () => {
   const season = seasonData?.getSeason;
 
   const handleSaveChanges = async () => {
-    if (!seasonId || !seasonName.trim()) return;
+    if (!seasonId || !seasonName.trim() || !catalogId) return;
 
     // Convert YYYY-MM-DD to ISO 8601 datetime
     const startDateTime = new Date(startDate + "T00:00:00.000Z").toISOString();
@@ -103,6 +130,7 @@ export const SeasonSettingsPage: React.FC = () => {
           seasonName: seasonName.trim(),
           startDate: startDateTime,
           endDate: endDateTime,
+          catalogId,
         },
       },
     });
@@ -132,7 +160,8 @@ export const SeasonSettingsPage: React.FC = () => {
     season.startDate &&
     (seasonName !== season.seasonName ||
       startDate !== season.startDate.split("T")[0] ||
-      endDate !== (season.endDate?.split("T")[0] || ""));
+      endDate !== (season.endDate?.split("T")[0] || "") ||
+      catalogId !== season.catalogId);
 
   return (
     <Box>
@@ -180,6 +209,21 @@ export const SeasonSettingsPage: React.FC = () => {
             disabled={updating}
             InputLabelProps={{ shrink: true }}
           />
+          <FormControl fullWidth disabled={updating}>
+            <InputLabel>Product Catalog</InputLabel>
+            <Select
+              value={catalogId}
+              onChange={(e) => setCatalogId(e.target.value)}
+              label="Product Catalog"
+            >
+              {allCatalogs.map((catalog) => (
+                <MenuItem key={catalog.catalogId} value={catalog.catalogId}>
+                  {catalog.catalogName}
+                  {catalog.catalogType === "ADMIN_MANAGED" && " (Official)"}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
           <Button
             variant="contained"
             onClick={handleSaveChanges}

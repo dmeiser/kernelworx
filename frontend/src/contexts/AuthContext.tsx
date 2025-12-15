@@ -150,12 +150,20 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
    */
   const loginWithPassword = useCallback(async (email: string, password: string) => {
     try {
-      const { isSignedIn } = await signIn({ username: email, password });
-      if (isSignedIn) {
-        // Refresh the auth session to update account state
+      const result = await signIn({ username: email, password });
+      
+      // Check if sign-in is complete or if there's a next step (MFA, etc.)
+      if (result.isSignedIn) {
+        // Sign-in complete - refresh the auth session
         await checkAuthSession();
+        return result;
+      } else if (result.nextStep) {
+        // There's a next step (MFA challenge, new password required, etc.)
+        // Return the result so the UI can handle it
+        return result;
       }
-      return { isSignedIn };
+      
+      return result;
     } catch (error) {
       console.error("Email/password login failed:", error);
       throw error;

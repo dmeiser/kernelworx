@@ -390,9 +390,14 @@ class CdkStack(Stack):
         # Check if we should import existing user pool
         existing_user_pool_id = self.node.try_get_context("user_pool_id")
         if existing_user_pool_id:
+            # Import existing User Pool
+            # Note: WebAuthn Relying Party ID must be configured manually via AWS Console
+            # at: Cognito > User Pools > [Pool] > App Integration > Passkey
+            # Set "Third-party domain" to the application domain (e.g., dev.kernelworx.app)
             self.user_pool = cognito.UserPool.from_user_pool_id(
                 self, "UserPool", existing_user_pool_id
             )
+            
             # For imported pools, either import existing client or create new one
             existing_client_id = self.node.try_get_context("user_pool_client_id")
             if existing_client_id:
@@ -430,6 +435,17 @@ class CdkStack(Stack):
                     supported_identity_providers=[cognito.UserPoolClientIdentityProvider.COGNITO],
                     prevent_user_existence_errors=True,
                 )
+                # Enable ALLOW_USER_AUTH for WebAuthn/passkey support
+                cfn_client = self.user_pool_client.node.default_child
+                cfn_client.add_property_override(
+                    "ExplicitAuthFlows",
+                    [
+                        "ALLOW_REFRESH_TOKEN_AUTH",
+                        "ALLOW_USER_PASSWORD_AUTH",
+                        "ALLOW_USER_SRP_AUTH",
+                        "ALLOW_USER_AUTH",  # Required for WebAuthn/passkeys
+                    ]
+                )
         else:
             self.user_pool = cognito.UserPool(
                 self,
@@ -457,6 +473,17 @@ class CdkStack(Stack):
                     sms=True,  # Allow SMS MFA
                     otp=True,  # Allow TOTP (software tokens like Google Authenticator)
                 ),
+                # Enable choice-based authentication with password and passkeys
+                sign_in_policy=cognito.SignInPolicy(
+                    allowed_first_auth_factors=cognito.AllowedFirstAuthFactors(
+                        password=True,
+                        passkey=True,
+                    )
+                ),
+                # Set WebAuthn Relying Party ID to app domain (not auth domain)
+                passkey_relying_party_id=self.site_domain,  # e.g., dev.kernelworx.app
+                # User verification preferred (default) - allows authenticators without UV capability
+                passkey_user_verification=cognito.PasskeyUserVerification.PREFERRED,
                 removal_policy=RemovalPolicy.RETAIN,
                 # Lambda triggers
                 lambda_triggers=cognito.UserPoolTriggers(
@@ -554,6 +581,7 @@ class CdkStack(Stack):
                 auth_flows=cognito.AuthFlow(
                     user_srp=True,
                     user_password=True,
+                    user=True,  # Required for WebAuthn/passkeys (ALLOW_USER_AUTH)
                 ),
                 o_auth=cognito.OAuthSettings(
                     flows=cognito.OAuthFlows(
@@ -579,13 +607,12 @@ class CdkStack(Stack):
                 prevent_user_existence_errors=True,
             )
 
-            # Standard Cognito domain (using default AWS domain)
-            # This provides Hosted UI at: https://kernelworx-{env}.auth.{region}.amazoncognito.com
-            # Custom domain (login.{env}.kernelworx.app) will be enabled after AWS account verification
+            # Custom domain configuration (login.{env}.kernelworx.app or login.kernelworx.app)
             self.user_pool_domain = self.user_pool.add_domain(
                 "UserPoolDomain",
-                cognito_domain=cognito.CognitoDomainOptions(
-                    domain_prefix=f"kernelworx-{env_name}",
+                custom_domain=cognito.CustomDomainOptions(
+                    domain_name=self.cognito_domain,
+                    certificate=self.cognito_certificate,
                 ),
             )
 
@@ -639,28 +666,31 @@ class CdkStack(Stack):
                 )
 
         # ====================================================================
-        # Cognito Custom Domain Configuration (applies to both new and imported pools)
+        # Cognito Custom Domain Configuration (for imported pools only)
         # ====================================================================
 
-        # Custom domain configuration (login.{env}.kernelworx.app or login.kernelworx.app)
-        self.user_pool_domain = self.user_pool.add_domain(
-            "UserPoolDomain",
-            custom_domain=cognito.CustomDomainOptions(
-                domain_name=self.cognito_domain,
-                certificate=self.cognito_certificate,
-            ),
-        )
+        if existing_user_pool_id:
+            # For imported pools, import the existing custom domain
+            # (new pools already created their domain in the else block above)
+            self.user_pool_domain = cognito.UserPoolDomain.from_domain_name(
+                self, "UserPoolDomain", self.cognito_domain
+            )
 
         # Route53 record for Cognito custom domain
-        route53.ARecord(
-            self,
-            "CognitoDomainRecord",
-            zone=self.hosted_zone,
-            record_name=self.cognito_domain,
-            target=route53.RecordTarget.from_alias(
-                targets.UserPoolDomainTarget(self.user_pool_domain)
-            ),
-        )
+        # For imported pools, assume the record already exists
+        # For new pools, create the record with RETAIN policy
+        if not existing_user_pool_id:
+            # Create new Route53 record for new pools
+            self.cognito_domain_record = route53.ARecord(
+                self,
+                "CognitoDomainRecord",
+                zone=self.hosted_zone,
+                record_name=self.cognito_domain,
+                target=route53.RecordTarget.from_alias(
+                    targets.UserPoolDomainTarget(self.user_pool_domain)
+                ),
+            )
+            self.cognito_domain_record.apply_removal_policy(RemovalPolicy.RETAIN)
 
         # Output Cognito Hosted UI URL for easy access (only if user pool was created, not imported)
         if hasattr(self, 'user_pool_domain') and hasattr(self, 'user_pool_client'):
@@ -4878,14 +4908,11 @@ export function response(ctx) {
     const callerId = ctx.stash.callerId;
     const isAdmin = callerAccount && callerAccount.isAdmin === true;
     const isOwner = catalog.ownerAccountId === callerId;
-    const isAdminManaged = catalog.catalogType === 'ADMIN_MANAGED';
     
     // Authorization logic:
-    // - Owner can delete their own catalogs (USER_CREATED)
-    // - Admin can delete ADMIN_MANAGED catalogs
-    if (isOwner) {
-        ctx.stash.authorized = true;
-    } else if (isAdminManaged && isAdmin) {
+    // - Owner can delete their own catalogs
+    // - Admin can delete ANY catalog (both USER_CREATED and ADMIN_MANAGED)
+    if (isOwner || isAdmin) {
         ctx.stash.authorized = true;
     } else {
         return util.error('Not authorized to delete this catalog', 'Forbidden');
@@ -4898,7 +4925,66 @@ export function response(ctx) {
                 ),
             )
 
-            # Step 3: Delete the catalog
+            # Step 3: Check if catalog is in use by any seasons
+            check_catalog_usage_fn = appsync.AppsyncFunction(
+                self,
+                "CheckCatalogUsageFn",
+                name=f"CheckCatalogUsageFn_{env_name}",
+                api=self.api,
+                data_source=self.dynamodb_datasource,
+                runtime=appsync.FunctionRuntime.JS_1_0_0,
+                code=appsync.Code.from_inline(
+                    """
+import { util } from '@aws-appsync/utils';
+
+export function request(ctx) {
+    const catalogId = ctx.args.catalogId;
+    console.log('CheckCatalogUsageFn request - catalogId:', catalogId);
+    // Scan table to find seasons using this catalog
+    // Seasons don't have catalogId in any GSI, so we must use Scan with FilterExpression
+    const scanRequest = {
+        operation: 'Scan',
+        consistentRead: true,  // CRITICAL: Ensure we see recently created seasons
+        filter: {
+            expression: 'begins_with(SK, :seasonPrefix) AND catalogId = :catalogId',
+            expressionValues: util.dynamodb.toMapValues({
+                ':seasonPrefix': 'SEASON#',
+                ':catalogId': catalogId
+            })
+        },
+        limit: 5  // Only need a few examples
+    };
+    console.log('Scan request:', JSON.stringify(scanRequest));
+    return scanRequest;
+}
+
+export function response(ctx) {
+    if (ctx.error) {
+        console.error('CheckCatalogUsageFn error:', JSON.stringify(ctx.error));
+        return util.error(ctx.error.message, ctx.error.type);
+    }
+    
+    console.log('CheckCatalogUsageFn response:', JSON.stringify(ctx.result));
+    
+    const seasons = ctx.result.items || [];
+    console.log('Found seasons count:', seasons.length);
+    
+    if (seasons.length > 0) {
+        // Catalog is in use - return error with details
+        const seasonNames = seasons.map(s => s.seasonName || 'Unknown').slice(0, 3).join(', ');
+        const message = `Cannot delete catalog: ${seasons.length} season(s) are using it (e.g., ${seasonNames}). Please update or delete those seasons first.`;
+        console.error('Blocking deletion:', message);
+        return util.error(message, 'CatalogInUse');
+    }
+    
+    console.log('Catalog not in use, proceeding with deletion');
+    return ctx.prev.result;  // Pass through catalog from previous step
+}
+                    """
+                ),
+            )
+
+            # Step 4: Delete the catalog
             delete_catalog_fn = appsync.AppsyncFunction(
                 self,
                 "DeleteCatalogFn",
@@ -4946,6 +5032,7 @@ export function response(ctx) {
                 pipeline_config=[
                     get_caller_account_for_delete_fn,
                     get_catalog_for_delete_fn,
+                    check_catalog_usage_fn,
                     delete_catalog_fn,
                 ],
                 code=appsync.Code.from_inline(

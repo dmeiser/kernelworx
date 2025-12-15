@@ -1090,7 +1090,33 @@ describe('Catalog CRUD Integration Tests', () => {
         expect(data.deleteCatalog).toBe(true);
       });
 
-      it('SECURITY: Deleting public catalog leaves orphaned references in seasons', async () => {
+      it('SECURITY: Admin user CAN delete USER_CREATED catalog owned by another user', async () => {
+        // Arrange: Contributor creates a catalog
+        const createInput = {
+          catalogName: 'Contributor Catalog for Admin Delete Test',
+          isPublic: true,
+          products: [{ productName: 'Test Product', price: 15.0, sortOrder: 1 }],
+        };
+        const { data: createData } = await contributorClient.mutate({
+          mutation: CREATE_CATALOG,
+          variables: { input: createInput },
+        });
+        const catalogId = createData.createCatalog.catalogId;
+
+        // Verify contributor is the owner
+        expect(createData.createCatalog.ownerAccountId).toBe(contributorAccountId);
+
+        // Act: Admin user (owner) deletes contributor's catalog - should succeed
+        const { data }: any = await ownerClient.mutate({
+          mutation: DELETE_CATALOG,
+          variables: { catalogId: catalogId },
+        });
+
+        // Assert: Deletion succeeded
+        expect(data.deleteCatalog).toBe(true);
+      });
+
+      it('SECURITY: Cannot delete catalog that is in use by seasons', async () => {
         // Arrange: Create a public catalog that multiple users can use
         const createCatalogInput = {
           catalogName: 'Shared Public Catalog',
@@ -1182,35 +1208,29 @@ describe('Catalog CRUD Integration Tests', () => {
         });
         const contributorSeasonId = contributorSeasonData.createSeason.seasonId;
 
-        // Act: Owner deletes the public catalog (they own it)
-        const { data: deleteData }: any = await ownerClient.mutate({
-          mutation: DELETE_CATALOG,
-          variables: { catalogId: catalogId },
-        });
-        expect(deleteData.deleteCatalog).toBe(true);
+        // Act & Assert: Owner tries to delete the public catalog but should fail
+        // because 2 seasons are using it
+        await expect(
+          ownerClient.mutate({
+            mutation: DELETE_CATALOG,
+            variables: { catalogId: catalogId },
+          })
+        ).rejects.toThrow(/cannot delete catalog.*season.*using it/i);
 
-        // Assert: Both seasons still exist but catalog references are now orphaned
-        // The catalogId field still has the old value, but the catalog nested resolver returns null
-        const { data: ownerSeasonCheck }: any = await ownerClient.query({
-          query: GET_SEASON,
-          variables: { seasonId: ownerSeasonId },
+        // Verify catalog still exists
+        const { data: catalogCheck }: any = await ownerClient.query({
+          query: gql`query GetCatalog($catalogId: ID!) { getCatalog(catalogId: $catalogId) { catalogId catalogName } }`,
+          variables: { catalogId },
           fetchPolicy: 'network-only',
         });
-        expect(ownerSeasonCheck.getSeason.catalogId).toBe(catalogId);
-        expect(ownerSeasonCheck.getSeason.catalog).toBeNull(); // Catalog was deleted
+        expect(catalogCheck.getCatalog).toBeDefined();
+        expect(catalogCheck.getCatalog.catalogName).toBe('Shared Public Catalog');
 
-        const { data: contributorSeasonCheck }: any = await contributorClient.query({
-          query: GET_SEASON,
-          variables: { seasonId: contributorSeasonId },
-          fetchPolicy: 'network-only',
-        });
-        expect(contributorSeasonCheck.getSeason.catalogId).toBe(catalogId);
-        expect(contributorSeasonCheck.getSeason.catalog).toBeNull(); // Catalog was deleted
-
-        // Cleanup: Delete seasons and profiles
+        // Cleanup: Delete seasons first, then catalog, then profiles
         await ownerClient.mutate({ mutation: DELETE_SEASON, variables: { seasonId: ownerSeasonId } });
-        await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId: ownerProfileId } });
         await contributorClient.mutate({ mutation: DELETE_SEASON, variables: { seasonId: contributorSeasonId } });
+        await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId } }); // Now deletion should succeed
+        await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId: ownerProfileId } });
         await contributorClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId: contributorProfileId } });
       });
     });

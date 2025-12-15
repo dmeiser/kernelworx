@@ -4,10 +4,10 @@
  * Allows users to:
  * - Change password
  * - Set up multi-factor authentication (TOTP)
- * - Manage MFA devices
+ * - Register and manage passkeys (WebAuthn)
  */
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Box,
   Button,
@@ -19,6 +19,10 @@ import {
   CircularProgress,
   Divider,
   IconButton,
+  List,
+  ListItem,
+  ListItemText,
+  ListItemIcon,
 } from '@mui/material';
 import {
   ArrowBack as BackIcon,
@@ -27,9 +31,21 @@ import {
   QrCode2 as QrCodeIcon,
   Delete as DeleteIcon,
   CheckCircle as CheckIcon,
+  Fingerprint as PasskeyIcon,
+  Add as AddIcon,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
-import { updatePassword, setUpTOTP, verifyTOTPSetup, updateMFAPreference } from 'aws-amplify/auth';
+import { 
+  updatePassword, 
+  setUpTOTP, 
+  verifyTOTPSetup, 
+  updateMFAPreference,
+  fetchMFAPreference,
+  associateWebAuthnCredential,
+  listWebAuthnCredentials,
+  deleteWebAuthnCredential,
+  type AuthWebAuthnCredential,
+} from 'aws-amplify/auth';
 import QRCode from 'qrcode';
 
 export const AccountSecurityPage: React.FC = () => {
@@ -51,6 +67,39 @@ export const AccountSecurityPage: React.FC = () => {
   const [mfaSuccess, setMfaSuccess] = useState(false);
   const [mfaLoading, setMfaLoading] = useState(false);
   const [mfaEnabled, setMfaEnabled] = useState(false);
+
+  // Passkey state
+  const [passkeys, setPasskeys] = useState<AuthWebAuthnCredential[]>([]);
+  const [passkeyName, setPasskeyName] = useState('');
+  const [passkeyError, setPasskeyError] = useState<string | null>(null);
+  const [passkeySuccess, setPasskeySuccess] = useState(false);
+  const [passkeyLoading, setPasskeyLoading] = useState(false);
+
+  // Load MFA and passkey status on mount
+  useEffect(() => {
+    loadMFAStatus();
+    loadPasskeys();
+  }, []);
+
+  const loadMFAStatus = async () => {
+    try {
+      const mfaPreference = await fetchMFAPreference();
+      // Check if TOTP is enabled
+      setMfaEnabled(mfaPreference.enabled?.includes('TOTP') || mfaPreference.preferred === 'TOTP');
+    } catch (err: any) {
+      console.error('Failed to load MFA status:', err);
+    }
+  };
+
+  const loadPasskeys = async () => {
+    try {
+      const result = await listWebAuthnCredentials();
+      setPasskeys(result.credentials || []);
+    } catch (err: any) {
+      console.error('Failed to load passkeys:', err);
+      // Passkeys might not be configured yet - don't show error to user
+    }
+  };
 
   // Handle password change
   const handlePasswordChange = async (e: React.FormEvent) => {
@@ -87,6 +136,26 @@ export const AccountSecurityPage: React.FC = () => {
 
   // Set up MFA
   const handleSetupMFA = async () => {
+    // Check if passkeys are enabled - MFA and passkeys cannot be used together
+    if (passkeys.length > 0) {
+      if (!window.confirm('TOTP MFA and Passkeys cannot be used together. Do you want to delete all passkeys and enable MFA?')) {
+        return;
+      }
+      
+      // Delete all passkeys first
+      try {
+        for (const passkey of passkeys) {
+          if (passkey.credentialId) {
+            await deleteWebAuthnCredential({ credentialId: passkey.credentialId });
+          }
+        }
+        await loadPasskeys();
+      } catch (err: any) {
+        setMfaError('Failed to remove passkeys: ' + err.message);
+        return;
+      }
+    }
+
     setMfaError(null);
     setMfaLoading(true);
 
@@ -148,6 +217,66 @@ export const AccountSecurityPage: React.FC = () => {
       setMfaError(err.message || 'Failed to disable MFA');
     } finally {
       setMfaLoading(false);
+    }
+  };
+
+  // Register a new passkey
+  const handleRegisterPasskey = async () => {
+    if (!passkeyName.trim()) {
+      setPasskeyError('Please enter a name for this passkey');
+      return;
+    }
+
+    // Check if MFA is enabled - passkeys and TOTP MFA cannot be used together
+    if (mfaEnabled) {
+      if (!window.confirm('Passkeys and TOTP MFA cannot be used together. Do you want to disable MFA and register this passkey?')) {
+        return;
+      }
+      
+      // Disable MFA first
+      try {
+        await updateMFAPreference({ totp: 'DISABLED' });
+        setMfaEnabled(false);
+      } catch (err: any) {
+        setPasskeyError('Failed to disable MFA: ' + err.message);
+        return;
+      }
+    }
+
+    setPasskeyError(null);
+    setPasskeySuccess(false);
+    setPasskeyLoading(true);
+
+    try {
+      await associateWebAuthnCredential();
+      setPasskeySuccess(true);
+      setPasskeyName('');
+      await loadPasskeys(); // Reload the list
+    } catch (err: any) {
+      console.error('Passkey registration failed:', err);
+      setPasskeyError(err.message || 'Failed to register passkey. Make sure your browser supports passkeys and you have a compatible authenticator.');
+    } finally {
+      setPasskeyLoading(false);
+    }
+  };
+
+  // Delete a passkey
+  const handleDeletePasskey = async (credentialId: string) => {
+    if (!window.confirm('Are you sure you want to delete this passkey?')) {
+      return;
+    }
+
+    setPasskeyError(null);
+    setPasskeyLoading(true);
+
+    try {
+      await deleteWebAuthnCredential({ credentialId });
+      await loadPasskeys(); // Reload the list
+    } catch (err: any) {
+      console.error('Delete passkey failed:', err);
+      setPasskeyError(err.message || 'Failed to delete passkey');
+    } finally {
+      setPasskeyLoading(false);
     }
   };
 
@@ -241,6 +370,14 @@ export const AccountSecurityPage: React.FC = () => {
         <Typography variant="body2" color="text.secondary" paragraph>
           Add an extra layer of security to your account by requiring a verification code from your phone.
         </Typography>
+
+        {/* Passkey Conflict Warning */}
+        {passkeys.length > 0 && !mfaEnabled && (
+          <Alert severity="warning" sx={{ mb: 2 }}>
+            <strong>Note:</strong> You have {passkeys.length} passkey{passkeys.length > 1 ? 's' : ''} registered. 
+            TOTP MFA and Passkeys cannot be used together. Enabling MFA will delete all your passkeys.
+          </Alert>
+        )}
 
         {mfaSuccess && (
           <Alert severity="success" sx={{ mb: 2 }} onClose={() => setMfaSuccess(false)}>
@@ -354,6 +491,104 @@ export const AccountSecurityPage: React.FC = () => {
             </form>
           </Box>
         )}
+      </Paper>
+
+      {/* Passkeys Section */}
+      <Paper sx={{ p: 3 }}>
+        <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }}>
+          <PasskeyIcon color="primary" />
+          <Typography variant="h6">Passkeys (Passwordless Login)</Typography>
+        </Stack>
+
+        <Typography variant="body2" color="text.secondary" paragraph>
+          Passkeys let you sign in securely without a password - using your fingerprint, face, or device PIN.
+        </Typography>
+
+        {/* MFA Conflict Warning */}
+        {mfaEnabled && (
+          <Alert severity="warning" sx={{ mb: 2 }}>
+            <strong>Note:</strong> Passkeys and TOTP MFA cannot be used together. 
+            Registering a passkey will disable your current MFA setup. Passkeys provide 
+            strong authentication without requiring a separate MFA app.
+          </Alert>
+        )}
+
+        {passkeySuccess && (
+          <Alert severity="success" sx={{ mb: 2 }} onClose={() => setPasskeySuccess(false)}>
+            Passkey registered successfully!
+          </Alert>
+        )}
+
+        {passkeyError && (
+          <Alert severity="error" sx={{ mb: 2 }} onClose={() => setPasskeyError(null)}>
+            {passkeyError}
+          </Alert>
+        )}
+
+        {/* Registered Passkeys List */}
+        {passkeys.length > 0 && (
+          <Box sx={{ mb: 3 }}>
+            <Typography variant="subtitle2" gutterBottom>
+              Registered Passkeys
+            </Typography>
+            <List>
+              {passkeys.map((pk) => (
+                <ListItem
+                  key={pk.credentialId || Math.random()}
+                  secondaryAction={
+                    <IconButton
+                      edge="end"
+                      onClick={() => pk.credentialId && handleDeletePasskey(pk.credentialId)}
+                      disabled={passkeyLoading || !pk.credentialId}
+                    >
+                      <DeleteIcon />
+                    </IconButton>
+                  }
+                >
+                  <ListItemIcon>
+                    <PasskeyIcon />
+                  </ListItemIcon>
+                  <ListItemText
+                    primary={pk.friendlyCredentialName || 'Unnamed Passkey'}
+                    secondary={pk.createdAt ? `Created: ${new Date(pk.createdAt).toLocaleDateString()}` : 'Unknown date'}
+                  />
+                </ListItem>
+              ))}
+            </List>
+          </Box>
+        )}
+
+        {/* Register New Passkey */}
+        <Box>
+          <Typography variant="subtitle2" gutterBottom>
+            Register a New Passkey
+          </Typography>
+          <Stack direction="row" spacing={2} alignItems="flex-start">
+            <TextField
+              label="Passkey Name"
+              value={passkeyName}
+              onChange={(e) => setPasskeyName(e.target.value)}
+              placeholder="e.g., My iPhone, Work Laptop"
+              disabled={passkeyLoading}
+              sx={{ flex: 1 }}
+              helperText="Give this passkey a name to remember which device it's for"
+            />
+            <Button
+              variant="contained"
+              startIcon={passkeyLoading ? <CircularProgress size={20} /> : <AddIcon />}
+              onClick={handleRegisterPasskey}
+              disabled={passkeyLoading || !passkeyName.trim()}
+            >
+              Register
+            </Button>
+          </Stack>
+          <Alert severity="info" sx={{ mt: 2 }}>
+            <Typography variant="caption">
+              <strong>Note:</strong> Passkeys use your device's built-in security (Touch ID, Face ID, Windows Hello, etc.).
+              You'll be prompted to authenticate with your device when registering.
+            </Typography>
+          </Alert>
+        </Box>
       </Paper>
     </Box>
   );

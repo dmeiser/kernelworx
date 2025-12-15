@@ -21,9 +21,10 @@ import {
   CircularProgress,
   Link as MuiLink,
 } from '@mui/material';
-import { Google as GoogleIcon, Facebook as FacebookIcon, Apple as AppleIcon } from '@mui/icons-material';
+import { Google as GoogleIcon, Facebook as FacebookIcon, Apple as AppleIcon, Fingerprint as FingerprintIcon } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { confirmSignIn, signIn } from 'aws-amplify/auth';
 
 export const LoginPage: React.FC = () => {
   const navigate = useNavigate();
@@ -33,6 +34,9 @@ export const LoginPage: React.FC = () => {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [mfaCode, setMfaCode] = useState('');
+  const [showMfa, setShowMfa] = useState(false);
+  const [showPasskeyPrompt, setShowPasskeyPrompt] = useState(false);
 
   // If already logged in, redirect to profiles
   useEffect(() => {
@@ -50,13 +54,108 @@ export const LoginPage: React.FC = () => {
     setLoading(true);
 
     try {
-      await loginWithPassword(email, password);
-      // On success, navigate to the intended destination
-      navigate(from, { replace: true });
+      const result = await loginWithPassword(email, password);
+      
+      if (result.isSignedIn) {
+        // Login successful, navigate to destination
+        navigate(from, { replace: true });
+      } else if (result.nextStep?.signInStep === 'CONFIRM_SIGN_IN_WITH_TOTP_CODE') {
+        // MFA required
+        setShowMfa(true);
+        setLoading(false);
+      } else if (result.nextStep) {
+        // Some other challenge we don't handle yet
+        setError(`Additional step required: ${result.nextStep.signInStep}`);
+        setLoading(false);
+      }
     } catch (err: any) {
       console.error('Login failed:', err);
       setError(err.message || 'Login failed. Please check your credentials.');
-    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleMfaSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setLoading(true);
+
+    try {
+      const result = await confirmSignIn({ challengeResponse: mfaCode });
+      
+      if (result.isSignedIn) {
+        // Wait a bit for auth state to propagate
+        await new Promise(resolve => setTimeout(resolve, 500));
+        // Force a page reload to ensure auth state is fresh
+        window.location.href = from;
+      } else {
+        setError('MFA verification failed');
+        setLoading(false);
+      }
+    } catch (err: any) {
+      console.error('MFA failed:', err);
+      setError(err.message || 'Invalid MFA code');
+      setLoading(false);
+    }
+  };
+
+  const handlePasskeyLogin = async () => {
+    if (!email) {
+      setError('Please enter your email address');
+      return;
+    }
+
+    setError(null);
+    setLoading(true);
+
+    try {
+      // Sign in with USER_AUTH flow
+      const result = await signIn({ 
+        username: email,
+        options: {
+          authFlowType: 'USER_AUTH',
+        }
+      });
+      
+      if (result.isSignedIn) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+        window.location.href = from;
+      } else if (result.nextStep?.signInStep === 'CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTION') {
+        // Multiple auth methods available - check what's available and select WebAuthn
+        console.log('Available auth factors:', result.nextStep);
+        
+        // Select WebAuthn from available options
+        const confirmResult = await confirmSignIn({
+          challengeResponse: 'WEB_AUTHN',
+        });
+        
+        if (confirmResult.isSignedIn) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+          window.location.href = from;
+        } else if (confirmResult.nextStep?.signInStep === 'CONFIRM_SIGN_IN_WITH_WEBAUTHN_CREDENTIAL') {
+          // Now the WebAuthn prompt should appear
+          setShowPasskeyPrompt(true);
+          setLoading(false);
+        } else {
+          setError(`Unexpected step after selecting WebAuthn: ${confirmResult.nextStep?.signInStep}`);
+          setLoading(false);
+        }
+      } else if (result.nextStep?.signInStep === 'CONFIRM_SIGN_IN_WITH_WEBAUTHN_CREDENTIAL') {
+        // Passkey challenge initiated directly
+        setShowPasskeyPrompt(true);
+        setLoading(false);
+      } else if (result.nextStep?.signInStep === 'CONFIRM_SIGN_IN_WITH_PASSWORD') {
+        // Cognito chose password - this means WebAuthn isn't available or user doesn't have passkey
+        setError('No passkey found for this account. Please register a passkey first or use password login.');
+        setLoading(false);
+      } else if (result.nextStep) {
+        console.log('Unexpected next step:', result.nextStep);
+        setError(`Unexpected step: ${result.nextStep.signInStep}`);
+        setLoading(false);
+      }
+    } catch (err: any) {
+      console.error('Passkey login failed:', err);
+      setError(err.message || 'Passkey authentication failed. Make sure you have a passkey registered.');
       setLoading(false);
     }
   };
@@ -118,8 +217,61 @@ export const LoginPage: React.FC = () => {
           </Alert>
         )}
 
-        {/* Email/Password Form */}
-        <form onSubmit={handleEmailLogin}>
+        {/* Passkey Prompt Info */}
+        {showPasskeyPrompt && (
+          <Alert severity="info" sx={{ mb: 3 }}>
+            Use your security key, fingerprint, or face recognition to sign in
+          </Alert>
+        )}
+
+        {/* MFA Code Form */}
+        {showMfa ? (
+          <form onSubmit={handleMfaSubmit}>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+              Enter the 6-digit code from your authenticator app
+            </Typography>
+            <Stack spacing={2} sx={{ mb: 3 }}>
+              <TextField
+                label="MFA Code"
+                type="text"
+                value={mfaCode}
+                onChange={(e) => setMfaCode(e.target.value)}
+                required
+                fullWidth
+                autoComplete="one-time-code"
+                disabled={loading}
+                inputProps={{ maxLength: 6, pattern: '[0-9]*' }}
+                autoFocus
+              />
+            </Stack>
+
+            <Button
+              type="submit"
+              variant="contained"
+              fullWidth
+              size="large"
+              disabled={loading || mfaCode.length !== 6}
+              sx={{ mb: 2 }}
+            >
+              {loading ? <CircularProgress size={24} /> : 'Verify'}
+            </Button>
+
+            <Button
+              variant="text"
+              fullWidth
+              onClick={() => {
+                setShowMfa(false);
+                setMfaCode('');
+                setPassword('');
+              }}
+              disabled={loading}
+            >
+              Back to Login
+            </Button>
+          </form>
+        ) : (
+          /* Email/Password Form */
+          <form onSubmit={handleEmailLogin}>
           <Stack spacing={2} sx={{ mb: 3 }}>
             <TextField
               label="Email"
@@ -163,21 +315,37 @@ export const LoginPage: React.FC = () => {
             fullWidth
             size="large"
             disabled={loading}
-            sx={{ mb: 3 }}
+            sx={{ mb: 2 }}
           >
             {loading ? <CircularProgress size={24} /> : 'Sign In'}
           </Button>
+
+          {/* Passkey Login Button */}
+          <Button
+            variant="outlined"
+            fullWidth
+            size="large"
+            startIcon={<FingerprintIcon />}
+            onClick={handlePasskeyLogin}
+            disabled={loading}
+            sx={{ mb: 3 }}
+          >
+            Sign In with Passkey
+          </Button>
         </form>
+        )}
 
         {/* Divider */}
-        <Divider sx={{ my: 3 }}>
-          <Typography variant="body2" color="text.secondary">
-            OR
-          </Typography>
-        </Divider>
+        {!showMfa && (
+          <>
+            <Divider sx={{ my: 3 }}>
+              <Typography variant="body2" color="text.secondary">
+                OR
+              </Typography>
+            </Divider>
 
-        {/* Social Login Buttons */}
-        <Stack spacing={2} sx={{ mb: 3 }}>
+            {/* Social Login Buttons */}
+            <Stack spacing={2} sx={{ mb: 3 }}>
           <Button
             variant="outlined"
             fullWidth
@@ -232,6 +400,8 @@ export const LoginPage: React.FC = () => {
             You must be at least 13 years old to create an account (COPPA compliance).
           </Typography>
         </Alert>
+          </>
+        )}
       </Paper>
     </Box>
   );
