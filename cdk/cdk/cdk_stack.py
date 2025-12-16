@@ -3154,11 +3154,12 @@ export function response(ctx) {
                 field_name="getMyAccount",
                 request_mapping_template=appsync.MappingTemplate.from_string(
                     """
+#set($accountId = "ACCOUNT#$ctx.identity.sub")
 {
     "version": "2017-02-28",
     "operation": "GetItem",
     "key": {
-        "accountId": $util.dynamodb.toDynamoDBJson("ACCOUNT#" + $ctx.identity.sub)
+        "accountId": $util.dynamodb.toDynamoDBJson($accountId)
     }
 }
                 """
