@@ -392,19 +392,19 @@ The `isAdmin` field is no longer used. Admin checks now use Cognito groups direc
 #### 1.1 CDK Changes
 - [x] Create new `shares` table with PK=profileId, SK=targetAccountId
 - [x] Create new `invites` table with PK=inviteCode, TTL=expiresAt
-- [ ] Modify `profiles` table: PK=ownerAccountId, SK=profileId
-- [ ] Add profileId-index GSI to profiles table (sparse)
+- [x] Modify `profiles` table: PK=ownerAccountId, SK=profileId
+- [x] Add profileId-index GSI to profiles table (sparse)
 - [x] Add targetAccountId-index GSI to shares table
 - [x] Add profileId-index GSI to invites table
-- [ ] Remove old GSIs from profiles table (ownerAccountId-index, targetAccountId-index, inviteCode-index)
+- [x] Remove old GSIs from profiles table (ownerAccountId-index, targetAccountId-index, inviteCode-index)
 - [x] Add datasources for shares and invites tables
 
 #### 1.2 Resolver Updates - Profiles
-- [ ] Update `createSellerProfile` resolver (Lambda) - use new key structure
-- [ ] Update `getSellerProfile` resolver - query profileId-index GSI
-- [ ] Update `listMyProfiles` resolver - direct PK query on ownerAccountId
-- [ ] Update `updateSellerProfile` resolver - use new key structure
-- [ ] Update `deleteSellerProfile` resolver - use new key structure, cleanup shares/invites
+- [x] Update `createSellerProfile` resolver (Lambda) - use new key structure
+- [x] Update `getSellerProfile` resolver - query profileId-index GSI
+- [x] Update `listMyProfiles` resolver - direct PK query on ownerAccountId
+- [x] Update `updateSellerProfile` resolver - use new key structure
+- [x] Update `deleteSellerProfile` resolver - use new key structure, cleanup shares/invites
 
 #### 1.3 Resolver Updates - Shares
 - [x] Update `shareProfileDirect` resolver - write to shares table
@@ -412,7 +412,7 @@ The `isAdmin` field is no longer used. Admin checks now use Cognito groups direc
 - [x] Update `listSharesByProfile` resolver - query shares table by PK
 - [x] Update `listSharedProfiles` resolver - query targetAccountId-index
 - [x] Update `SellerProfile.permissions` field resolver - query shares table
-- [ ] Update `SellerProfile.isOwner` field resolver - compare ownerAccountId
+- [x] Update `SellerProfile.isOwner` field resolver - compare ownerAccountId
 
 #### 1.4 Resolver Updates - Invites
 - [x] Update `createProfileInvite` resolver - write to invites table
@@ -422,25 +422,25 @@ The `isAdmin` field is no longer used. Admin checks now use Cognito groups direc
 - [x] Update `getInviteDetails` resolver - direct GetItem by inviteCode
 
 #### 1.5 Lambda Updates
-- [ ] Update `profile_operations.py` for new key structure
-- [ ] Update `profile_sharing.py` for shares/invites tables
+- [x] Update `profile_operations.py` for new key structure
+- [x] Update `profile_sharing.py` for shares/invites tables
 - [x] Update `src/utils/auth.py` to query shares table for authorization
 
 #### 1.6 Data Migration - Profiles/Shares/Invites
-- [ ] Export existing profiles (METADATA records only)
-- [ ] Export existing shares (SHARE# records)
-- [ ] Export existing invites (INVITE# records)
-- [ ] Transform and import to new profiles table
-- [ ] Transform and import to new shares table
-- [ ] Transform and import to new invites table
+- [x] Export existing profiles (METADATA records only) - SKIPPED: 0 records in old table
+- [x] Export existing shares (SHARE# records) - SKIPPED: 0 records in old table
+- [x] Export existing invites (INVITE# records) - SKIPPED: 0 records in old table
+- [x] Transform and import to new profiles table - SKIPPED: No data to migrate
+- [x] Transform and import to new shares table - SKIPPED: No data to migrate
+- [x] Transform and import to new invites table - SKIPPED: No data to migrate
 
 #### 1.7 Integration Tests - Phase 1
-- [ ] Update `profileQueries.integration.test.ts` for new structure
-- [ ] Update `profileOperations.integration.test.ts` for new structure
-- [ ] Update `profileSharing.integration.test.ts` for shares table
-- [ ] Update `shareQueries.integration.test.ts` for shares/invites tables
-- [ ] Run profile/share tests: `npx vitest run --testPathPattern="profile|share"`
-- [ ] All profile/share tests pass before proceeding
+- [x] Update `profileQueries.integration.test.ts` for new structure
+- [x] Update `profileOperations.integration.test.ts` for new structure
+- [x] Update `profileSharing.integration.test.ts` for shares table
+- [x] Update `shareQueries.integration.test.ts` for shares/invites tables
+- [x] Run profile/share tests: `npx vitest run --testPathPattern="profile|share"`
+- [x] All profile/share tests pass before proceeding
 
 ---
 
