@@ -26,7 +26,7 @@ def aws_credentials() -> None:
     os.environ["TABLE_NAME"] = "PsmApp"  # Legacy - kept for backward compat
     os.environ["ACCOUNTS_TABLE_NAME"] = "kernelworx-accounts-ue1-dev"
     os.environ["CATALOGS_TABLE_NAME"] = "kernelworx-catalogs-ue1-dev"
-    os.environ["PROFILES_TABLE_NAME"] = "kernelworx-profiles-ue1-dev"
+    os.environ["PROFILES_TABLE_NAME"] = "kernelworx-profiles-v2-ue1-dev"
     os.environ["SEASONS_TABLE_NAME"] = "kernelworx-seasons-ue1-dev"
     os.environ["ORDERS_TABLE_NAME"] = "kernelworx-orders-ue1-dev"
     os.environ["SHARES_TABLE_NAME"] = "kernelworx-shares-ue1-dev"
@@ -98,40 +98,26 @@ def dynamodb_table(aws_credentials: None) -> Generator[Any, None, None]:
         )
 
         # ================================================================
-        # Profiles Table
+        # Profiles Table V2 - NEW SCHEMA
+        # PK: ownerAccountId, SK: profileId, GSI: profileId-index
+        # This enables direct query for listMyProfiles (no GSI needed)
+        # Shares and invites are in separate dedicated tables
         # ================================================================
         profiles_table = dynamodb.create_table(
-            TableName="kernelworx-profiles-ue1-dev",
+            TableName="kernelworx-profiles-v2-ue1-dev",
             KeySchema=[
-                {"AttributeName": "profileId", "KeyType": "HASH"},
-                {"AttributeName": "recordType", "KeyType": "RANGE"},
+                {"AttributeName": "ownerAccountId", "KeyType": "HASH"},
+                {"AttributeName": "profileId", "KeyType": "RANGE"},
             ],
             AttributeDefinitions=[
-                {"AttributeName": "profileId", "AttributeType": "S"},
-                {"AttributeName": "recordType", "AttributeType": "S"},
                 {"AttributeName": "ownerAccountId", "AttributeType": "S"},
-                {"AttributeName": "targetAccountId", "AttributeType": "S"},
-                {"AttributeName": "inviteCode", "AttributeType": "S"},
+                {"AttributeName": "profileId", "AttributeType": "S"},
             ],
             GlobalSecondaryIndexes=[
                 {
-                    "IndexName": "ownerAccountId-index",
+                    "IndexName": "profileId-index",
                     "KeySchema": [
-                        {"AttributeName": "ownerAccountId", "KeyType": "HASH"},
-                    ],
-                    "Projection": {"ProjectionType": "ALL"},
-                },
-                {
-                    "IndexName": "targetAccountId-index",
-                    "KeySchema": [
-                        {"AttributeName": "targetAccountId", "KeyType": "HASH"},
-                    ],
-                    "Projection": {"ProjectionType": "ALL"},
-                },
-                {
-                    "IndexName": "inviteCode-index",
-                    "KeySchema": [
-                        {"AttributeName": "inviteCode", "KeyType": "HASH"},
+                        {"AttributeName": "profileId", "KeyType": "HASH"},
                     ],
                     "Projection": {"ProjectionType": "ALL"},
                 },
@@ -294,14 +280,19 @@ def sample_profile_id() -> str:
 def sample_profile(
     dynamodb_table: Any, sample_account_id: str, sample_profile_id: str
 ) -> Dict[str, Any]:
-    """Create sample profile in DynamoDB (multi-table design)."""
-    # Multi-table design: profileId is PK, recordType is SK
+    """Create sample profile in DynamoDB (multi-table design V2).
+
+    V2 schema: PK=ownerAccountId, SK=profileId
+    GSI: profileId-index for direct profile lookups
+    """
+    # Multi-table design V2: ownerAccountId is PK, profileId is SK
+    # Store ownerAccountId with ACCOUNT# prefix for consistency with resolver ownership checks
     profile = {
+        "ownerAccountId": sample_account_id,  # Note: tests use raw ID, real data uses ACCOUNT# prefix
         "profileId": sample_profile_id,
-        "recordType": "METADATA",
-        "ownerAccountId": sample_account_id,
-        "scoutName": "Test Scout",
+        "sellerName": "Test Scout",
         "createdAt": datetime.now(timezone.utc).isoformat(),
+        "updatedAt": datetime.now(timezone.utc).isoformat(),
     }
 
     dynamodb_table.put_item(Item=profile)

@@ -23,8 +23,8 @@ dynamodb = boto3.resource("dynamodb", endpoint_url=os.getenv("DYNAMODB_ENDPOINT"
 
 
 def get_profiles_table() -> "Table":
-    """Get profiles DynamoDB table instance (multi-table design)."""
-    table_name = os.getenv("PROFILES_TABLE_NAME", "kernelworx-profiles-ue1-dev")
+    """Get profiles DynamoDB table instance (multi-table design V2)."""
+    table_name = os.getenv("PROFILES_TABLE_NAME", "kernelworx-profiles-v2-ue1-dev")
     return dynamodb.Table(table_name)
 
 
@@ -62,13 +62,20 @@ def check_profile_access(
 
     profiles_table = get_profiles_table()
 
-    # Get profile metadata (multi-table design: PK=profileId, SK=recordType)
-    response = profiles_table.get_item(Key={"profileId": profile_id, "recordType": "METADATA"})
+    # Multi-table design V2: Query profileId-index GSI
+    # Profile table structure: PK=ownerAccountId, SK=profileId, GSI=profileId-index
+    response = profiles_table.query(
+        IndexName="profileId-index",
+        KeyConditionExpression="profileId = :profileId",
+        ExpressionAttributeValues={":profileId": profile_id},
+        Limit=1,
+    )
 
-    if "Item" not in response:
+    items = response.get("Items", [])
+    if not items:
         raise AppError(ErrorCode.NOT_FOUND, f"Profile {profile_id} not found")
 
-    profile = response["Item"]
+    profile = items[0]
 
     # Check if caller is owner
     # ownerAccountId in storage includes ACCOUNT# prefix
@@ -147,14 +154,23 @@ def is_profile_owner(caller_account_id: str, profile_id: str) -> bool:
     """
     table = get_profiles_table()
 
-    # Multi-table design: PK=profileId, SK=recordType
-    response = table.get_item(Key={"profileId": profile_id, "recordType": "METADATA"})
+    # Multi-table design V2: Query profileId-index GSI
+    # Profile table structure: PK=ownerAccountId, SK=profileId, GSI=profileId-index
+    response = table.query(
+        IndexName="profileId-index",
+        KeyConditionExpression="profileId = :profileId",
+        ExpressionAttributeValues={":profileId": profile_id},
+        Limit=1,
+    )
 
-    if "Item" not in response:
+    items = response.get("Items", [])
+    if not items:
         raise AppError(ErrorCode.NOT_FOUND, f"Profile {profile_id} not found")
 
-    profile = response["Item"]
-    return profile.get("ownerAccountId") == caller_account_id
+    profile = items[0]
+    stored_owner = profile.get("ownerAccountId", "")
+    # Handle both with and without prefix for backward compatibility
+    return stored_owner == caller_account_id or stored_owner == f"ACCOUNT#{caller_account_id}"
 
 
 def get_account(account_id: str) -> Optional[Dict[str, Any]]:

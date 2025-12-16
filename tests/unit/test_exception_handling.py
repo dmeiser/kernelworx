@@ -2,6 +2,8 @@
 
 NOTE: Tests only cover remaining Lambda function (create_profile_invite).
 Tests for migrated functions (redeem_profile_invite, share_profile_direct) removed.
+
+Updated for V2 multi-table design (profiles, shares, invites tables).
 """
 
 from typing import Any, Dict
@@ -16,33 +18,34 @@ from src.utils.errors import AppError, ErrorCode
 class TestExceptionHandling:
     """Tests for exception handling in Lambda handlers."""
 
-    @patch("src.handlers.profile_sharing.get_profiles_table")
+    @patch("src.handlers.profile_sharing.get_invites_table")
     @patch("src.utils.auth.get_profiles_table")
     def test_create_invite_database_error(
         self,
         mock_auth_table: MagicMock,
-        mock_sharing_table: MagicMock,
+        mock_invites_table: MagicMock,
         sample_profile_id: str,
         sample_account_id: str,
         appsync_event: Dict[str, Any],
         lambda_context: Any,
     ) -> None:
         """Test that database errors are handled in create_invite."""
-        # Mock auth table to return valid profile (owner check)
+        # Mock auth table to return valid profile (V2 uses Query on profileId-index)
         auth_mock = MagicMock()
-        auth_mock.get_item.return_value = {
-            "Item": {
-                "profileId": sample_profile_id,
-                "recordType": "METADATA",
-                "ownerAccountId": sample_account_id,
-            }
+        auth_mock.query.return_value = {
+            "Items": [
+                {
+                    "profileId": sample_profile_id,
+                    "ownerAccountId": sample_account_id,
+                }
+            ]
         }
         mock_auth_table.return_value = auth_mock
 
-        # Mock sharing table to raise exception on put_item
-        sharing_mock = MagicMock()
-        sharing_mock.put_item.side_effect = Exception("Database connection failed")
-        mock_sharing_table.return_value = sharing_mock
+        # Mock invites table to raise exception on put_item
+        invites_mock = MagicMock()
+        invites_mock.put_item.side_effect = Exception("Database connection failed")
+        mock_invites_table.return_value = invites_mock
 
         event = {
             **appsync_event,

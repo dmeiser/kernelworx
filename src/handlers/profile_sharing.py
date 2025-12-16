@@ -6,8 +6,9 @@ Implements:
 - redeemProfileInvite: Redeem invite code to gain access
 - shareProfileDirect: Share profile directly with account (no invite)
 
-NOTE: The following operation has been moved to AppSync resolvers:
-- revokeShare: Now a VTL DynamoDB resolver (see cdk_stack.py)
+NOTE: Most of these operations have been migrated to AppSync resolvers (pipeline/JS).
+This Lambda code is kept for reference and potential future use.
+See cdk_stack.py for the actual implementations.
 """
 
 import os
@@ -26,9 +27,9 @@ from ..utils.logging import StructuredLogger, get_correlation_id
 dynamodb = boto3.resource("dynamodb", endpoint_url=os.getenv("DYNAMODB_ENDPOINT"))
 
 
-def get_profiles_table() -> Table:
-    """Get DynamoDB profiles table instance (multi-table design)."""
-    table_name = os.getenv("PROFILES_TABLE_NAME", "kernelworx-profiles-ue1-dev")
+def get_invites_table() -> Table:
+    """Get DynamoDB invites table instance (V2 design - separate table)."""
+    table_name = os.getenv("INVITES_TABLE_NAME", "kernelworx-invites-ue1-dev")
     return dynamodb.Table(table_name)
 
 
@@ -42,6 +43,10 @@ def create_profile_invite(event: Dict[str, Any], context: Any) -> Dict[str, Any]
     Create profile invite code.
 
     GraphQL mutation: createProfileInvite(profileId: ID!, permissions: [Permission!]!)
+
+    NOTE: This Lambda is not used by AppSync anymore - the operation is handled by
+    a pipeline resolver (VerifyProfileOwnerForInviteFn → CreateInviteFn).
+    This code is kept for reference and potential future use.
 
     Returns:
         {
@@ -83,19 +88,18 @@ def create_profile_invite(event: Dict[str, Any], context: Any) -> Dict[str, Any]
 
         # Calculate expiration (14 days from now)
         expires_at = datetime.now(timezone.utc) + timedelta(days=14)
+        expires_at_epoch = int(expires_at.timestamp())
 
-        # Store invite in DynamoDB (multi-table design: profiles table)
-        table = get_profiles_table()
+        # Store invite in DynamoDB (V2 design: invites table with inviteCode as PK)
+        table = get_invites_table()
         invite_item = {
-            "profileId": profile_id,  # PK
-            "recordType": f"INVITE#{invite_code}",  # SK
-            "inviteCode": invite_code,  # GSI: inviteCode-index
+            "inviteCode": invite_code,  # PK
+            "profileId": profile_id,
             "permissions": permissions,
             "createdBy": caller_account_id,
             "createdAt": datetime.now(timezone.utc).isoformat(),
-            "expiresAt": expires_at.isoformat(),
+            "expiresAt": expires_at_epoch,  # Epoch seconds for TTL
             "used": False,
-            "TTL": int(expires_at.timestamp()),  # Auto-delete after expiration
         }
 
         table.put_item(Item=invite_item)

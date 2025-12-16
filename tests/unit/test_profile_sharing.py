@@ -11,7 +11,7 @@ NOTE: The following have been migrated to AppSync resolvers:
 
 For AppSync resolver testing strategy, see docs/APPSYNC_TESTING_STRATEGY.md
 
-Updated for multi-table design (profiles table).
+Updated for V2 multi-table design (profiles, shares, invites tables).
 """
 
 from datetime import datetime, timezone
@@ -29,6 +29,7 @@ class TestCreateProfileInvite:
     def test_owner_can_create_invite(
         self,
         dynamodb_table: Any,
+        invites_table: Any,
         sample_profile: Dict[str, Any],
         sample_profile_id: str,
         sample_account_id: str,
@@ -55,16 +56,16 @@ class TestCreateProfileInvite:
         assert result["permissions"] == ["READ"]
         assert "expiresAt" in result
 
-        # Verify invite stored in DynamoDB (multi-table design)
-        response = dynamodb_table.get_item(
-            Key={"profileId": sample_profile_id, "recordType": f"INVITE#{result['inviteCode']}"}
-        )
+        # Verify invite stored in DynamoDB (V2 design: invites table with inviteCode as PK)
+        response = invites_table.get_item(Key={"inviteCode": result["inviteCode"]})
         assert "Item" in response
         assert response["Item"]["used"] is False
+        assert response["Item"]["profileId"] == sample_profile_id
 
     def test_write_permissions_allowed(
         self,
         dynamodb_table: Any,
+        invites_table: Any,
         sample_profile: Dict[str, Any],
         sample_profile_id: str,
         appsync_event: Dict[str, Any],
@@ -133,6 +134,7 @@ class TestCreateProfileInvite:
     def test_invite_has_14_day_expiration(
         self,
         dynamodb_table: Any,
+        invites_table: Any,
         sample_profile: Dict[str, Any],
         sample_profile_id: str,
         appsync_event: Dict[str, Any],

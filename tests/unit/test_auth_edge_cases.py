@@ -20,9 +20,9 @@ class TestAuthEdgeCases:
         sample_profile_id: str,
     ) -> None:
         """Test that database errors propagate from check_profile_access."""
-        # Mock table to raise exception
+        # Mock table to raise exception on query (V2 schema uses Query on profileId-index)
         mock_table = MagicMock()
-        mock_table.get_item.side_effect = Exception("Database error")
+        mock_table.query.side_effect = Exception("Database error")
         mock_get_profiles_table.return_value = mock_table
 
         with pytest.raises(Exception, match="Database error"):

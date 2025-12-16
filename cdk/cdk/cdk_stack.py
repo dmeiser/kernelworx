@@ -260,16 +260,19 @@ class CdkStack(Stack):
             projection_type=dynamodb.ProjectionType.ALL,
         )
 
-        # Profiles Table (includes shares, invites, ownership records)
+        # Profiles Table - stores profile METADATA only
+        # NEW STRUCTURE (V2): PK=ownerAccountId, SK=profileId
+        # This enables direct query for listMyProfiles (no GSI needed)
+        # Shares and invites are in separate tables now
         self.profiles_table = dynamodb.Table(
             self,
-            "ProfilesTable",
-            table_name=f"kernelworx-profiles-ue1-{env_name}",
+            "ProfilesTableV2",
+            table_name=f"kernelworx-profiles-v2-ue1-{env_name}",
             partition_key=dynamodb.Attribute(
-                name="profileId", type=dynamodb.AttributeType.STRING
+                name="ownerAccountId", type=dynamodb.AttributeType.STRING
             ),
             sort_key=dynamodb.Attribute(
-                name="recordType", type=dynamodb.AttributeType.STRING
+                name="profileId", type=dynamodb.AttributeType.STRING
             ),
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
             point_in_time_recovery_specification=dynamodb.PointInTimeRecoverySpecification(
@@ -278,40 +281,13 @@ class CdkStack(Stack):
             removal_policy=RemovalPolicy.RETAIN,
         )
 
-        # GSI for profile owner lookup (list my profiles)
+        # GSI for direct profile lookup by profileId (sparse index for getProfile)
         self.profiles_table.add_global_secondary_index(
-            index_name="ownerAccountId-index",
+            index_name="profileId-index",
             partition_key=dynamodb.Attribute(
-                name="ownerAccountId", type=dynamodb.AttributeType.STRING
+                name="profileId", type=dynamodb.AttributeType.STRING
             ),
             projection_type=dynamodb.ProjectionType.ALL,
-        )
-
-        # GSI for shares by target account (list shared profiles)
-        self.profiles_table.add_global_secondary_index(
-            index_name="targetAccountId-index",
-            partition_key=dynamodb.Attribute(
-                name="targetAccountId", type=dynamodb.AttributeType.STRING
-            ),
-            projection_type=dynamodb.ProjectionType.ALL,
-        )
-
-        # GSI for invite code lookup
-        self.profiles_table.add_global_secondary_index(
-            index_name="inviteCode-index",
-            partition_key=dynamodb.Attribute(
-                name="inviteCode", type=dynamodb.AttributeType.STRING
-            ),
-            projection_type=dynamodb.ProjectionType.ALL,
-        )
-
-        # TTL for profile invites
-        cfn_profiles_table = self.profiles_table.node.default_child
-        cfn_profiles_table.time_to_live_specification = (
-            dynamodb.CfnTable.TimeToLiveSpecificationProperty(
-                attribute_name="TTL",
-                enabled=True,
-            )
         )
 
         # Shares Table (NEW - separated from profiles for cleaner design)
@@ -1231,13 +1207,15 @@ class CdkStack(Stack):
 import { util } from '@aws-appsync/utils';
 
 export function request(ctx) {
+    // NEW STRUCTURE: Query profileId-index GSI to find profile
     const profileId = ctx.args.input.profileId;
     return {
-        operation: 'GetItem',
-        key: util.dynamodb.toMapValues({ 
-            profileId: profileId, 
-            recordType: 'METADATA' 
-        })
+        operation: 'Query',
+        index: 'profileId-index',
+        query: {
+            expression: 'profileId = :profileId',
+            expressionValues: util.dynamodb.toMapValues({ ':profileId': profileId })
+        }
     };
 }
 
@@ -1245,11 +1223,12 @@ export function response(ctx) {
     if (ctx.error) {
         util.error(ctx.error.message, ctx.error.type);
     }
-    if (!ctx.result || ctx.result.ownerAccountId !== 'ACCOUNT#' + ctx.identity.sub) {
+    const profile = ctx.result.items && ctx.result.items[0];
+    if (!profile || profile.ownerAccountId !== 'ACCOUNT#' + ctx.identity.sub) {
         util.error('Forbidden: Only profile owner can create invites', 'Unauthorized');
     }
-    ctx.stash.profile = ctx.result;
-    return ctx.result;
+    ctx.stash.profile = profile;
+    return profile;
 }
         """
                 ),
@@ -1273,6 +1252,9 @@ export function request(ctx) {
     const permissions = input.permissions;
     const callerAccountId = ctx.identity.sub;
     
+    // Get ownerAccountId from profile in stash (for BatchGetItem on profiles table)
+    const ownerAccountId = ctx.stash.profile ? ctx.stash.profile.ownerAccountId : null;
+    
     // Generate invite code (first 10 chars of UUID, uppercase)
     const inviteCode = util.autoId().substring(0, 10).toUpperCase();
     
@@ -1291,6 +1273,7 @@ export function request(ctx) {
     const attributes = {
         inviteCode: inviteCode,
         profileId: profileId,
+        ownerAccountId: ownerAccountId,  // Store for BatchGetItem on profiles table
         permissions: permissions,
         createdBy: callerAccountId,
         createdAt: now,
@@ -1367,13 +1350,15 @@ export function response(ctx) {
 import { util } from '@aws-appsync/utils';
 
 export function request(ctx) {
+    // NEW STRUCTURE: Query profileId-index GSI to find profile
     const profileId = ctx.args.input.profileId;
     return {
-        operation: 'GetItem',
-        key: util.dynamodb.toMapValues({ 
-            profileId: profileId, 
-            recordType: 'METADATA' 
-        })
+        operation: 'Query',
+        index: 'profileId-index',
+        query: {
+            expression: 'profileId = :profileId',
+            expressionValues: util.dynamodb.toMapValues({ ':profileId': profileId })
+        }
     };
 }
 
@@ -1381,11 +1366,12 @@ export function response(ctx) {
     if (ctx.error) {
         util.error(ctx.error.message, ctx.error.type);
     }
-    if (!ctx.result || ctx.result.ownerAccountId !== 'ACCOUNT#' + ctx.identity.sub) {
+    const profile = ctx.result.items && ctx.result.items[0];
+    if (!profile || profile.ownerAccountId !== 'ACCOUNT#' + ctx.identity.sub) {
         util.error('Forbidden: Only profile owner can revoke shares', 'Unauthorized');
     }
-    ctx.stash.profile = ctx.result;
-    return ctx.result;
+    ctx.stash.profile = profile;
+    return profile;
 }
         """
                 ),
@@ -1470,13 +1456,16 @@ export function response(ctx) {
 import { util } from '@aws-appsync/utils';
 
 export function request(ctx) {
+    // NEW STRUCTURE: Query profileId-index GSI to find profile
     const profileId = ctx.args.profileId;
-    const inviteCode = ctx.args.inviteCode;
     
-    // Verify caller is the profile owner
     return {
-        operation: 'GetItem',
-        key: util.dynamodb.toMapValues({ profileId: profileId, recordType: 'METADATA' })
+        operation: 'Query',
+        index: 'profileId-index',
+        query: {
+            expression: 'profileId = :profileId',
+            expressionValues: util.dynamodb.toMapValues({ ':profileId': profileId })
+        }
     };
 }
 
@@ -1485,7 +1474,7 @@ export function response(ctx) {
         util.error(ctx.error.message, ctx.error.type);
     }
     
-    const profile = ctx.result;
+    const profile = ctx.result.items && ctx.result.items[0];
     const callerAccountId = 'ACCOUNT#' + ctx.identity.sub;
     
     // Check if caller is the owner
@@ -1590,7 +1579,7 @@ export function request(ctx) {
         // Return no-op request (won't be used)
         return {
             operation: 'GetItem',
-            key: util.dynamodb.toMapValues({ profileId: 'NOOP', recordType: 'NOOP' })
+            key: util.dynamodb.toMapValues({ ownerAccountId: 'NOOP', profileId: 'NOOP' })
         };
     }
     
@@ -1618,11 +1607,14 @@ export function request(ctx) {
         }), 'BadRequest');
     }
     
-    // Get profile metadata from profiles table
+    // NEW STRUCTURE: Query profileId-index GSI to find profile
     return {
-        operation: 'GetItem',
-        key: util.dynamodb.toMapValues({ profileId: profileId, recordType: 'METADATA' }),
-        consistentRead: true
+        operation: 'Query',
+        index: 'profileId-index',
+        query: {
+            expression: 'profileId = :profileId',
+            expressionValues: util.dynamodb.toMapValues({ ':profileId': profileId })
+        }
     };
 }
 
@@ -1636,7 +1628,7 @@ export function response(ctx) {
         util.error(ctx.error.message, ctx.error.type);
     }
     
-    const profile = ctx.result;
+    const profile = ctx.result.items && ctx.result.items[0];
     
     if (!profile) {
         util.error('Profile not found', 'NotFound');
@@ -1771,7 +1763,7 @@ export function request(ctx) {
         // Return a no-op read
         return {
             operation: 'GetItem',
-            key: util.dynamodb.toMapValues({ profileId: 'NOOP', recordType: 'NOOP' })
+            key: util.dynamodb.toMapValues({ ownerAccountId: 'NOOP', profileId: 'NOOP' })
         };
     }
     
@@ -1780,7 +1772,7 @@ export function request(ctx) {
         // Return a no-op read
         return {
             operation: 'GetItem',
-            key: util.dynamodb.toMapValues({ profileId: 'NOOP', recordType: 'NOOP' })
+            key: util.dynamodb.toMapValues({ ownerAccountId: 'NOOP', profileId: 'NOOP' })
         };
     }
     
@@ -1803,11 +1795,14 @@ export function request(ctx) {
     // Store profileId in stash for next function
     ctx.stash.profileId = profileId;
     
-    // Get profile metadata from profiles table to check ownership
+    // NEW STRUCTURE: Query profileId-index GSI to find profile
     return {
-        operation: 'GetItem',
-        key: util.dynamodb.toMapValues({ profileId: profileId, recordType: 'METADATA' }),
-        consistentRead: true
+        operation: 'Query',
+        index: 'profileId-index',
+        query: {
+            expression: 'profileId = :profileId',
+            expressionValues: util.dynamodb.toMapValues({ ':profileId': profileId })
+        }
     };
 }
 
@@ -1828,7 +1823,7 @@ export function response(ctx) {
         util.error(ctx.error.message, ctx.error.type);
     }
     
-    const profile = ctx.result;
+    const profile = ctx.result.items && ctx.result.items[0];
     
     if (!profile) {
         // Profile doesn't exist - for getSeason, we'll return null later
@@ -2933,14 +2928,15 @@ export function response(ctx) {
 import { util } from '@aws-appsync/utils';
 
 export function request(ctx) {
+    // NEW STRUCTURE: Query profileId-index GSI to find profile
     const profileId = ctx.args.input.profileId;
     return {
-        operation: 'GetItem',
-        key: util.dynamodb.toMapValues({ 
-            profileId: profileId, 
-            recordType: 'METADATA' 
-        }),
-        consistentRead: true
+        operation: 'Query',
+        index: 'profileId-index',
+        query: {
+            expression: 'profileId = :profileId',
+            expressionValues: util.dynamodb.toMapValues({ ':profileId': profileId })
+        }
     };
 }
 
@@ -2949,12 +2945,13 @@ export function response(ctx) {
         util.error(ctx.error.message, ctx.error.type);
     }
     // Check ownership - ownerAccountId uses ACCOUNT# prefix now
+    const profile = ctx.result.items && ctx.result.items[0];
     const expectedOwner = 'ACCOUNT#' + ctx.identity.sub;
-    if (!ctx.result || ctx.result.ownerAccountId !== expectedOwner) {
+    if (!profile || profile.ownerAccountId !== expectedOwner) {
         util.error('Forbidden: Only profile owner can share profiles', 'Unauthorized');
     }
-    ctx.stash.profile = ctx.result;
-    return ctx.result;
+    ctx.stash.profile = profile;
+    return profile;
 }
         """
                 ),
@@ -3075,6 +3072,14 @@ export function request(ctx) {
     const permissions = input.permissions || ctx.stash.invite.permissions;
     const now = util.time.nowISO8601();
     
+    // Get ownerAccountId from stash - check profile (shareProfileDirect) or invite (redeemProfileInvite)
+    var ownerAccountId = null;
+    if (ctx.stash.profile && ctx.stash.profile.ownerAccountId) {
+        ownerAccountId = ctx.stash.profile.ownerAccountId;
+    } else if (ctx.stash.invite && ctx.stash.invite.ownerAccountId) {
+        ownerAccountId = ctx.stash.invite.ownerAccountId;
+    }
+    
     // Strip ACCOUNT# prefix if present - store clean ID
     if (targetAccountId && targetAccountId.startsWith('ACCOUNT#')) {
         targetAccountId = targetAccountId.substring(8);
@@ -3089,6 +3094,7 @@ export function request(ctx) {
         targetAccountId: targetAccountId,
         shareId: shareId,
         permissions: permissions,
+        ownerAccountId: ownerAccountId,  // Store for BatchGetItem lookup
         createdByAccountId: ctx.identity.sub,
         createdAt: now
     };
@@ -3323,11 +3329,14 @@ export function request(ctx) {
     // Store profileId for authorization check
     ctx.stash.profileId = profileId;
     
-    // Direct GetItem on profiles table using profileId and METADATA recordType
+    // NEW STRUCTURE: Query profileId-index GSI to find profile
     return {
-        operation: 'GetItem',
-        key: util.dynamodb.toMapValues({ profileId: profileId, recordType: 'METADATA' }),
-        consistentRead: true
+        operation: 'Query',
+        index: 'profileId-index',
+        query: {
+            expression: 'profileId = :profileId',
+            expressionValues: util.dynamodb.toMapValues({ ':profileId': profileId })
+        }
     };
 }
 
@@ -3336,8 +3345,8 @@ export function response(ctx) {
         util.error(ctx.error.message, ctx.error.type);
     }
     
-    // GetItem returns the profile directly (or null)
-    const profile = ctx.result;
+    // Query returns items array
+    const profile = ctx.result.items && ctx.result.items[0];
     
     if (!profile) {
         util.error('Profile not found', 'NotFound');
@@ -3453,7 +3462,7 @@ export function response(ctx) {
             )
 
             # listMyProfiles - List profiles owned by current user
-            # Uses GSI1 (ownerAccountId-index) on profiles table to find METADATA records
+            # NEW STRUCTURE: Query by PK (ownerAccountId) - no GSI needed
             self.profiles_datasource.create_resolver(
                 "ListMyProfilesResolver",
                 type_name="Query",
@@ -3467,13 +3476,6 @@ export function response(ctx) {
         "expression": "ownerAccountId = :ownerAccountId",
         "expressionValues": {
             ":ownerAccountId": $util.dynamodb.toDynamoDBJson("ACCOUNT#$ctx.identity.sub")
-        }
-    },
-    "index": "ownerAccountId-index",
-    "filter": {
-        "expression": "recordType = :recordType",
-        "expressionValues": {
-            ":recordType": $util.dynamodb.toDynamoDBJson("METADATA")
         }
     },
     "limit": 100
@@ -3522,20 +3524,30 @@ export function response(ctx) {
         return util.error(ctx.error.message, ctx.error.type);
     }
     const shares = ctx.result.items || [];
-    const profileIdSet = {};
+    
+    // Collect unique profiles with their ownerAccountIds for BatchGetItem
+    const profileKeys = [];
+    const seenProfileIds = {};
     for (const share of shares) {
-        profileIdSet[share.profileId] = true;
+        if (!seenProfileIds[share.profileId] && share.ownerAccountId) {
+            seenProfileIds[share.profileId] = true;
+            profileKeys.push({
+                profileId: share.profileId,
+                ownerAccountId: share.ownerAccountId
+            });
+        }
     }
-    const profileIds = Object.keys(profileIdSet);
+    
     ctx.stash.shares = shares;
-    ctx.stash.profileIds = profileIds;
-    return profileIds;
+    ctx.stash.profileKeys = profileKeys;
+    return profileKeys;
 }
                     """
                 ),
             )
 
-            # Step 2: Batch get METADATA records for shared profiles
+            # Step 2: Batch get profile records for shared profiles
+            # NEW STRUCTURE: Uses ownerAccountId + profileId as keys
             profiles_table_name = self.profiles_table.table_name
             batch_get_profiles_fn = appsync.AppsyncFunction(
                 self,
@@ -3549,14 +3561,15 @@ export function response(ctx) {
 import {{ util }} from '@aws-appsync/utils';
 
 export function request(ctx) {{
-    const profileIds = ctx.stash.profileIds || [];
-    if (profileIds.length === 0) {{
+    const profileKeys = ctx.stash.profileKeys || [];
+    if (profileKeys.length === 0) {{
         return {{ payload: [] }};
     }}
     
     const keys = [];
-    for (const profileId of profileIds) {{
-        keys.push(util.dynamodb.toMapValues({{ profileId: profileId, recordType: 'METADATA' }}));
+    for (const pk of profileKeys) {{
+        // NEW STRUCTURE: PK=ownerAccountId, SK=profileId
+        keys.push(util.dynamodb.toMapValues({{ ownerAccountId: pk.ownerAccountId, profileId: pk.profileId }}));
     }}
     
     return {{
@@ -4406,26 +4419,33 @@ export function request(ctx) {
     
     // Validate profileId format - must start with 'PROFILE#' and have a UUID
     if (!profileId || !profileId.startsWith('PROFILE#')) {
-        // Invalid format - set flags to deny and skip GetItem
+        // Invalid format - set flags to deny and skip Query
         ctx.stash.isOwner = false;
         ctx.stash.hasWritePermission = false;
         ctx.stash.skipGetItem = true;
         return {
-            operation: 'GetItem',
-            key: util.dynamodb.toMapValues({ profileId: 'NOOP', recordType: 'NOOP' })
+            operation: 'Query',
+            index: 'profileId-index',
+            query: {
+                expression: 'profileId = :profileId',
+                expressionValues: util.dynamodb.toMapValues({ ':profileId': 'NOOP' })
+            }
         };
     }
     
-    // Get profile metadata to check ownership - uses profileId/recordType keys
+    // NEW STRUCTURE: Query profileId-index GSI to find profile
     return {
-        operation: 'GetItem',
-        key: util.dynamodb.toMapValues({ profileId: profileId, recordType: 'METADATA' }),
-        consistentRead: true
+        operation: 'Query',
+        index: 'profileId-index',
+        query: {
+            expression: 'profileId = :profileId',
+            expressionValues: util.dynamodb.toMapValues({ ':profileId': profileId })
+        }
     };
 }
 
 export function response(ctx) {
-    // Check if we skipped GetItem due to validation
+    // Check if we skipped Query due to validation
     if (ctx.stash.skipGetItem) {
         return { authorized: false };
     }
@@ -4437,7 +4457,7 @@ export function response(ctx) {
         return { authorized: false };
     }
     
-    const profile = ctx.result;
+    const profile = ctx.result.items && ctx.result.items[0];
     
     if (!profile) {
         // Profile not found - return empty list
@@ -4591,10 +4611,14 @@ import { util } from '@aws-appsync/utils';
 export function request(ctx) {
     const profileId = ctx.args.profileId;
     
-    // Get profile metadata using profileId/recordType keys
+    // NEW STRUCTURE: Query profileId-index GSI to find profile
     return {
-        operation: 'GetItem',
-        key: util.dynamodb.toMapValues({ profileId: profileId, recordType: 'METADATA' })
+        operation: 'Query',
+        index: 'profileId-index',
+        query: {
+            expression: 'profileId = :profileId',
+            expressionValues: util.dynamodb.toMapValues({ ':profileId': profileId })
+        }
     };
 }
 
@@ -4603,7 +4627,7 @@ export function response(ctx) {
         util.error(ctx.error.message, ctx.error.type);
     }
     
-    const profile = ctx.result;
+    const profile = ctx.result.items && ctx.result.items[0];
     const callerAccountId = ctx.identity.sub;
     
     // Profile not found
@@ -4845,48 +4869,113 @@ $util.toJson($ctx.result.items)
                 field_name="createSellerProfile",
             )
 
-            # updateSellerProfile - Update an existing seller profile - uses profiles table
-            self.profiles_datasource.create_resolver(
+            # updateSellerProfile - Pipeline resolver: Lookup profile → Update profile
+            # Step 1: Query profile by profileId using GSI
+            lookup_profile_for_update_fn = appsync.AppsyncFunction(
+                self,
+                "LookupProfileForUpdateFn",
+                name=f"LookupProfileForUpdateFn_{env_name}",
+                api=self.api,
+                data_source=self.profiles_datasource,
+                runtime=appsync.FunctionRuntime.JS_1_0_0,
+                code=appsync.Code.from_inline(
+                    """
+import { util } from '@aws-appsync/utils';
+
+export function request(ctx) {
+    const profileId = ctx.args.input.profileId;
+    // NEW STRUCTURE: Query profileId-index GSI to find profile
+    return {
+        operation: 'Query',
+        index: 'profileId-index',
+        query: {
+            expression: 'profileId = :profileId',
+            expressionValues: util.dynamodb.toMapValues({ ':profileId': profileId })
+        }
+    };
+}
+
+export function response(ctx) {
+    if (ctx.error) {
+        util.error(ctx.error.message, ctx.error.type);
+    }
+    const profile = ctx.result.items && ctx.result.items[0];
+    if (!profile) {
+        util.error('Profile not found or access denied', 'Forbidden');
+    }
+    // Check ownership
+    const expectedOwner = 'ACCOUNT#' + ctx.identity.sub;
+    if (profile.ownerAccountId !== expectedOwner) {
+        util.error('Profile not found or access denied', 'Forbidden');
+    }
+    ctx.stash.profile = profile;
+    return profile;
+}
+                    """
+                ),
+            )
+
+            # Step 2: Update the profile
+            update_profile_fn = appsync.AppsyncFunction(
+                self,
+                "UpdateProfileFn",
+                name=f"UpdateProfileFn_{env_name}",
+                api=self.api,
+                data_source=self.profiles_datasource,
+                runtime=appsync.FunctionRuntime.JS_1_0_0,
+                code=appsync.Code.from_inline(
+                    """
+import { util } from '@aws-appsync/utils';
+
+export function request(ctx) {
+    const profile = ctx.stash.profile;
+    const input = ctx.args.input;
+    const now = util.time.nowISO8601();
+    
+    // NEW STRUCTURE: Update using ownerAccountId + profileId keys
+    return {
+        operation: 'UpdateItem',
+        key: util.dynamodb.toMapValues({ 
+            ownerAccountId: profile.ownerAccountId, 
+            profileId: input.profileId 
+        }),
+        update: {
+            expression: 'SET sellerName = :sellerName, updatedAt = :updatedAt',
+            expressionValues: util.dynamodb.toMapValues({
+                ':sellerName': input.sellerName,
+                ':updatedAt': now
+            })
+        }
+    };
+}
+
+export function response(ctx) {
+    if (ctx.error) {
+        util.error(ctx.error.message, ctx.error.type);
+    }
+    return ctx.result;
+}
+                    """
+                ),
+            )
+
+            # Create updateSellerProfile pipeline resolver
+            self.api.create_resolver(
                 "UpdateSellerProfileResolver",
                 type_name="Mutation",
                 field_name="updateSellerProfile",
-                request_mapping_template=appsync.MappingTemplate.from_string(
+                runtime=appsync.FunctionRuntime.JS_1_0_0,
+                pipeline_config=[lookup_profile_for_update_fn, update_profile_fn],
+                code=appsync.Code.from_inline(
                     """
-#set($now = $util.time.nowISO8601())
-{
-    "version": "2017-02-28",
-    "operation": "UpdateItem",
-    "key": {
-        "profileId": $util.dynamodb.toDynamoDBJson($ctx.args.input.profileId),
-        "recordType": $util.dynamodb.toDynamoDBJson("METADATA")
-    },
-    "update": {
-        "expression": "SET sellerName = :sellerName, updatedAt = :updatedAt",
-        "expressionValues": {
-            ":sellerName": $util.dynamodb.toDynamoDBJson($ctx.args.input.sellerName),
-            ":updatedAt": $util.dynamodb.toDynamoDBJson($now)
-        }
-    },
-    "condition": {
-        "expression": "attribute_exists(profileId) AND ownerAccountId = :ownerId",
-        "expressionValues": {
-            ":ownerId": $util.dynamodb.toDynamoDBJson("ACCOUNT#$ctx.identity.sub")
-        }
-    }
+export function request(ctx) {
+    return {};
 }
-                """
-                ),
-                response_mapping_template=appsync.MappingTemplate.from_string(
+
+export function response(ctx) {
+    return ctx.prev.result;
+}
                     """
-#if($ctx.error)
-    #if($ctx.error.type == "DynamoDB:ConditionalCheckFailedException")
-        $util.error("Profile not found or access denied", "Forbidden")
-    #else
-        $util.error($ctx.error.message, $ctx.error.type)
-    #end
-#end
-$util.toJson($ctx.result)
-                """
                 ),
             )
 
@@ -4916,13 +5005,14 @@ import { util } from '@aws-appsync/utils';
 
 export function request(ctx) {
     const profileId = ctx.args.profileId;
-    // Get profile metadata using profileId/recordType keys
+    // NEW STRUCTURE: Query profileId-index GSI to find profile
     return {
-        operation: 'GetItem',
-        key: util.dynamodb.toMapValues({ 
-            profileId: profileId, 
-            recordType: 'METADATA' 
-        })
+        operation: 'Query',
+        index: 'profileId-index',
+        query: {
+            expression: 'profileId = :profileId',
+            expressionValues: util.dynamodb.toMapValues({ ':profileId': profileId })
+        }
     };
 }
 
@@ -4930,17 +5020,18 @@ export function response(ctx) {
     if (ctx.error) {
         util.error(ctx.error.message, ctx.error.type);
     }
-    if (!ctx.result) {
+    const profile = ctx.result.items && ctx.result.items[0];
+    if (!profile) {
         util.error('Profile not found', 'NotFound');
     }
     // ownerAccountId now has 'ACCOUNT#' prefix
-    if (ctx.result.ownerAccountId !== 'ACCOUNT#' + ctx.identity.sub) {
+    if (profile.ownerAccountId !== 'ACCOUNT#' + ctx.identity.sub) {
         util.error('Forbidden: Only profile owner can delete profile', 'Unauthorized');
     }
     // Store for next steps
     ctx.stash.profileId = ctx.args.profileId;
-    ctx.stash.ownerAccountId = ctx.result.ownerAccountId;
-    return ctx.result;
+    ctx.stash.ownerAccountId = profile.ownerAccountId;
+    return profile;
 }
         """
                 ),
@@ -5202,7 +5293,7 @@ export function request(ctx) {
     // This is now a no-op - just return success
     return {
         operation: 'GetItem',
-        key: util.dynamodb.toMapValues({ profileId: 'NOOP', recordType: 'NOOP' })
+        key: util.dynamodb.toMapValues({ ownerAccountId: 'NOOP', profileId: 'NOOP' })
     };
 }
 
@@ -5214,7 +5305,7 @@ export function response(ctx) {
                 ),
             )
 
-            # Step 9: Delete the metadata record - uses profiles table with profileId/recordType keys
+            # Step 9: Delete the profile record - uses profiles table with new key structure
             delete_profile_metadata_fn = appsync.AppsyncFunction(
                 self,
                 "DeleteProfileMetadataFn",
@@ -5228,13 +5319,14 @@ import { util } from '@aws-appsync/utils';
 
 export function request(ctx) {
     const profileId = ctx.stash.profileId;
+    const ownerAccountId = ctx.stash.ownerAccountId;
     
-    // Delete profile metadata using profileId/recordType keys
+    // NEW STRUCTURE: Delete profile using ownerAccountId as PK and profileId as SK
     return {
         operation: 'DeleteItem',
         key: util.dynamodb.toMapValues({ 
-            profileId: profileId, 
-            recordType: 'METADATA' 
+            ownerAccountId: ownerAccountId, 
+            profileId: profileId 
         })
     };
 }

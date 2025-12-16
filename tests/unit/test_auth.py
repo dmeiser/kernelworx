@@ -218,20 +218,22 @@ class TestCheckProfileAccess:
 
         assert exc_info.value.error_code == ErrorCode.NOT_FOUND
 
-    def test_profile_without_owner_denies_access(
+    def test_profile_with_different_owner_denies_access(
         self,
         dynamodb_table: Any,
         sample_account_id: str,
     ) -> None:
-        """Test that profile without ownerAccountId denies access."""
-        # Create profile without ownerAccountId (edge case)
-        profile_id = "PROFILE#orphan"
+        """Test that profile with different owner denies access (V2 schema edge case)."""
+        # In V2 schema, ownerAccountId is PK so it always exists
+        # Create profile owned by someone else
+        profile_id = "PROFILE#other-owner-profile"
+        other_owner = "other-owner-account"
         dynamodb_table.put_item(
             Item={
+                "ownerAccountId": other_owner,
                 "profileId": profile_id,
-                "recordType": "METADATA",
-                "profileId": profile_id,
-                # No ownerAccountId
+                "sellerName": "Other Owner's Profile",
+                "createdAt": "2025-01-01T00:00:00+00:00",
             }
         )
 

@@ -81,7 +81,7 @@ class TestCreateSellerProfile:
         appsync_event: Dict[str, Any],
         lambda_context: Any,
     ) -> None:
-        """Test that profile metadata item is written correctly with multi-table keys."""
+        """Test that profile item is written correctly with new V2 key structure."""
         # Arrange
         mock_dynamodb = MagicMock()
         mock_client.return_value = mock_dynamodb
@@ -99,21 +99,22 @@ class TestCreateSellerProfile:
         assert call_args is not None
         items = call_args.kwargs["TransactItems"]
 
-        # Multi-table design: only 1 item - the profile metadata
+        # V2 design: only 1 item - the profile record
         assert len(items) == 1
-        metadata_item = items[0]["Put"]["Item"]
-        # Keys are profileId and recordType (not PK/SK)
-        assert metadata_item["profileId"]["S"].startswith("PROFILE#")
-        assert metadata_item["recordType"]["S"] == "METADATA"
+        profile_item = items[0]["Put"]["Item"]
+        # New V2 keys: PK=ownerAccountId, SK=profileId
+        expected_owner = f"ACCOUNT#{event['identity']['sub']}"
+        assert profile_item["ownerAccountId"]["S"] == expected_owner
+        assert profile_item["profileId"]["S"].startswith("PROFILE#")
 
     @patch("src.handlers.profile_operations.boto3.client")
-    def test_create_seller_profile_metadata_has_owner_with_prefix(
+    def test_create_seller_profile_has_owner_with_prefix(
         self,
         mock_client: MagicMock,
         appsync_event: Dict[str, Any],
         lambda_context: Any,
     ) -> None:
-        """Test that ownerAccountId includes ACCOUNT# prefix for GSI lookup."""
+        """Test that ownerAccountId includes ACCOUNT# prefix for PK (V2 design)."""
         # Arrange
         mock_dynamodb = MagicMock()
         mock_client.return_value = mock_dynamodb
@@ -131,10 +132,10 @@ class TestCreateSellerProfile:
         assert call_args is not None
         items = call_args.kwargs["TransactItems"]
 
-        metadata_item = items[0]["Put"]["Item"]
-        # ownerAccountId should have ACCOUNT# prefix for consistency with resolvers
+        profile_item = items[0]["Put"]["Item"]
+        # ownerAccountId should have ACCOUNT# prefix (now used as PK in V2 design)
         expected_owner = f"ACCOUNT#{event['identity']['sub']}"
-        assert metadata_item["ownerAccountId"]["S"] == expected_owner
+        assert profile_item["ownerAccountId"]["S"] == expected_owner
 
     @patch("src.handlers.profile_operations.boto3.client")
     def test_create_seller_profile_error_handling(

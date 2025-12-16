@@ -199,39 +199,38 @@ describe('Share Query Operations Integration Tests', () => {
     const dynamoClient = new DynamoDBClient({ region: 'us-east-1' });
     
     try {
-      // 1. Delete all invites for testProfileId (uses profiles table with profileId/recordType)
+      // 1. Delete all invites for testProfileId (V2: invites table with profileId-index GSI)
       const inviteResult = await dynamoClient.send(new QueryCommand({
-        TableName: TABLE_NAMES.profiles,
-        KeyConditionExpression: 'profileId = :pid AND begins_with(recordType, :rt)',
+        TableName: TABLE_NAMES.invites,
+        IndexName: 'profileId-index',
+        KeyConditionExpression: 'profileId = :pid',
         ExpressionAttributeValues: {
           ':pid': { S: testProfileId },
-          ':rt': { S: 'INVITE#' },
         },
-        ProjectionExpression: 'profileId, recordType',
+        ProjectionExpression: 'inviteCode',
       }));
       
       for (const item of inviteResult.Items || []) {
         await dynamoClient.send(new DeleteItemCommand({
-          TableName: TABLE_NAMES.profiles,
-          Key: { profileId: item.profileId, recordType: item.recordType },
+          TableName: TABLE_NAMES.invites,
+          Key: { inviteCode: item.inviteCode },
         }));
       }
       
-      // 2. Delete any remaining shares for testProfileId
+      // 2. Delete any remaining shares for testProfileId (V2: shares table with PK=profileId)
       const shareResult = await dynamoClient.send(new QueryCommand({
-        TableName: TABLE_NAMES.profiles,
-        KeyConditionExpression: 'profileId = :pid AND begins_with(recordType, :rt)',
+        TableName: TABLE_NAMES.shares,
+        KeyConditionExpression: 'profileId = :pid',
         ExpressionAttributeValues: {
           ':pid': { S: testProfileId },
-          ':rt': { S: 'SHARE#' },
         },
-        ProjectionExpression: 'profileId, recordType',
+        ProjectionExpression: 'profileId, targetAccountId',
       }));
       
       for (const item of shareResult.Items || []) {
         await dynamoClient.send(new DeleteItemCommand({
-          TableName: TABLE_NAMES.profiles,
-          Key: { profileId: item.profileId, recordType: item.recordType },
+          TableName: TABLE_NAMES.shares,
+          Key: { profileId: item.profileId, targetAccountId: item.targetAccountId },
         }));
       }
       
@@ -546,8 +545,8 @@ describe('Share Query Operations Integration Tests', () => {
     });
 
     test('Data Integrity: Does not return expired invites', async () => {
-      // Create expired invite by directly inserting into DynamoDB
-      const { DynamoDBClient, PutItemCommand } = await import('@aws-sdk/client-dynamodb');
+      // Create expired invite by directly inserting into invites table
+      const { DynamoDBClient, PutItemCommand, DeleteItemCommand } = await import('@aws-sdk/client-dynamodb');
       const dynamoClient = new DynamoDBClient({ region: 'us-east-1' });
       
       const expiredInviteCode = 'EXPIRED999';
@@ -555,18 +554,18 @@ describe('Share Query Operations Integration Tests', () => {
       const pastDate = now - (7 * 24 * 60 * 60); // Date 7 days ago
       const futureTTL = now + (7 * 24 * 60 * 60); // TTL 7 days in future (so DynamoDB doesn't auto-delete)
       
+      // Invites table schema: PK=inviteCode, expiresAt is epoch seconds
       const putCommand = new PutItemCommand({
-        TableName: TABLE_NAMES.profiles,
+        TableName: TABLE_NAMES.invites,
         Item: {
-          profileId: { S: testProfileId },
-          recordType: { S: `INVITE#${expiredInviteCode}` },
           inviteCode: { S: expiredInviteCode },
+          profileId: { S: testProfileId },
+          ownerAccountId: { S: 'ACCOUNT#test-account-id' },
           permissions: { L: [{ S: 'READ' }] },
           createdBy: { S: 'test-account-id' },
           createdAt: { S: new Date(pastDate * 1000).toISOString() },
-          expiresAt: { S: new Date(pastDate * 1000).toISOString() }, // Expired date
+          expiresAt: { N: pastDate.toString() }, // Expired epoch timestamp
           used: { BOOL: false },
-          TTL: { N: futureTTL.toString() }, // Future TTL so item persists for test
         },
       });
       
@@ -582,6 +581,12 @@ describe('Share Query Operations Integration Tests', () => {
       // Should not include the expired invite
       const inviteCodes = data.listInvitesByProfile.map((i: any) => i.inviteCode);
       expect(inviteCodes).not.toContain(expiredInviteCode);
+      
+      // Clean up the expired invite we created
+      await dynamoClient.send(new DeleteItemCommand({
+        TableName: TABLE_NAMES.invites,
+        Key: { inviteCode: { S: expiredInviteCode } },
+      }));
     });
 
     test('Data Integrity: Does not return used invites', async () => {

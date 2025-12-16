@@ -1001,14 +1001,13 @@ describe('Profile Operations Integration Tests', () => {
 
       // Assert: Invites should be cleaned up
       // Note: After profile deletion, listInvitesByProfile returns empty since profile is gone
-      // We verify via direct DynamoDB check that the invite record is deleted
+      // We verify via direct DynamoDB check that the invite record is deleted from invites table
       const { DynamoDBClient, GetItemCommand } = await import('@aws-sdk/client-dynamodb');
       const dynamoClient = new DynamoDBClient({ region: 'us-east-1' });
       const result = await dynamoClient.send(new GetItemCommand({
-        TableName: TABLE_NAMES.profiles,
+        TableName: TABLE_NAMES.invites,
         Key: {
-          profileId: { S: testProfileId },
-          recordType: { S: `INVITE#${inviteCode}` },
+          inviteCode: { S: inviteCode },
         },
       }));
       expect(result.Item).toBeUndefined();
@@ -1175,23 +1174,26 @@ describe('Profile Operations Integration Tests', () => {
       expect(createdIds.length).toBe(profileCount);
       
       // Verify all profiles exist via listMyProfiles
-      const LIST_MY_PROFILES = gql`
-        query ListMyProfiles {
-          listMyProfiles {
+      // Note: listMyProfiles has a limit of 100, so if the user has more than 100 profiles
+      // from previous test runs, not all created profiles may appear in the list.
+      // Instead, we verify that all created profiles can be fetched individually.
+      const GET_PROFILE = gql`
+        query GetProfile($profileId: ID!) {
+          getProfile(profileId: $profileId) {
             profileId
             sellerName
           }
         }
       `;
-      const { data: listData }: any = await ownerClient.query({
-        query: LIST_MY_PROFILES,
-        fetchPolicy: 'network-only',
-      });
       
-      // All created profiles should appear in the list
-      const returnedIds = listData.listMyProfiles.map((p: any) => p.profileId);
       for (const createdId of createdIds) {
-        expect(returnedIds).toContain(createdId);
+        const { data: profileData }: any = await ownerClient.query({
+          query: GET_PROFILE,
+          variables: { profileId: createdId },
+          fetchPolicy: 'network-only',
+        });
+        expect(profileData.getProfile).not.toBeNull();
+        expect(profileData.getProfile.profileId).toBe(createdId);
       }
 
       // Cleanup all created profiles

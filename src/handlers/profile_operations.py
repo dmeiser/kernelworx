@@ -18,8 +18,8 @@ logger = get_logger(__name__)
 # Initialize DynamoDB client
 dynamodb = boto3.resource("dynamodb")
 
-# Multi-table design: profiles table for profile records
-profiles_table_name = os.environ.get("PROFILES_TABLE_NAME", "kernelworx-profiles-ue1-dev")
+# Multi-table design V2: profiles table for profile records
+profiles_table_name = os.environ.get("PROFILES_TABLE_NAME", "kernelworx-profiles-v2-ue1-dev")
 profiles_table = dynamodb.Table(profiles_table_name)
 
 
@@ -27,9 +27,12 @@ def create_seller_profile(event: Dict[str, Any], context: Any) -> Dict[str, Any]
     """
     Create a new seller profile.
 
-    In the multi-table design, profiles are stored in the profiles table with:
-    - PK: profileId (e.g., "PROFILE#abc123")
-    - SK: recordType (e.g., "METADATA", "SHARE#...", "INVITE#...")
+    In the multi-table design (V2), profiles are stored in the profiles table with:
+    - PK: ownerAccountId (e.g., "ACCOUNT#abc123")
+    - SK: profileId (e.g., "PROFILE#abc123")
+
+    This allows efficient listing of all profiles owned by an account via PK query.
+    GSI (profileId-index) enables lookup by profileId.
 
     Args:
         event: AppSync resolver event with arguments and identity
@@ -66,20 +69,20 @@ def create_seller_profile(event: Dict[str, Any], context: Any) -> Dict[str, Any]
             "updatedAt": now,
         }
 
-        # In multi-table design, we only need to create the profile METADATA record
-        # in the profiles table. The ownerAccountId field + GSI (ownerAccountId-index)
-        # enables listing profiles owned by an account.
+        # In multi-table design V2, profiles table uses:
+        # - PK: ownerAccountId (ACCOUNT#sub) - enables listMyProfiles via PK query
+        # - SK: profileId (PROFILE#uuid) - unique profile identifier
+        # - GSI: profileId-index - enables getProfile and authorization lookups
         dynamodb_client = boto3.client("dynamodb")
         dynamodb_client.transact_write_items(
             TransactItems=[
                 {
-                    # Profile metadata item: for direct profile lookup and authorization
+                    # Profile item: PK=ownerAccountId, SK=profileId
                     "Put": {
                         "TableName": profiles_table_name,
                         "Item": {
-                            "profileId": {"S": profile_id},
-                            "recordType": {"S": "METADATA"},
-                            "ownerAccountId": {"S": owner_account_id_stored},  # Store with prefix
+                            "ownerAccountId": {"S": owner_account_id_stored},  # PK
+                            "profileId": {"S": profile_id},  # SK
                             "sellerName": {"S": seller_name},
                             "createdAt": {"S": now},
                             "updatedAt": {"S": now},
