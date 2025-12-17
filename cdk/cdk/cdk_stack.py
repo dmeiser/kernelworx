@@ -3613,7 +3613,11 @@ import {{ util }} from '@aws-appsync/utils';
 export function request(ctx) {{
     const profileKeys = ctx.stash.profileKeys || [];
     if (profileKeys.length === 0) {{
-        return {{ payload: [] }};
+        // Return no-op for empty keys
+        return {{
+            operation: 'GetItem',
+            key: util.dynamodb.toMapValues({{ id: 'NOOP' }})
+        }};
     }}
     
     const keys = [];
