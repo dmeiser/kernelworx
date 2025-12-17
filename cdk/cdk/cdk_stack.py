@@ -3613,10 +3613,14 @@ import {{ util }} from '@aws-appsync/utils';
 export function request(ctx) {{
     const profileKeys = ctx.stash.profileKeys || [];
     if (profileKeys.length === 0) {{
-        // Return no-op for empty keys
+        // Return empty result without calling DynamoDB
+        ctx.stash.skipBatchGet = true;
         return {{
-            operation: 'GetItem',
-            key: util.dynamodb.toMapValues({{ id: 'NOOP' }})
+            operation: 'Query',
+            query: {{
+                expression: 'ownerAccountId = :noop',
+                expressionValues: util.dynamodb.toMapValues({{ ':noop': 'NOOP' }})
+            }}
         }};
     }}
     
@@ -3635,6 +3639,10 @@ export function request(ctx) {{
 }}
 
 export function response(ctx) {{
+    if (ctx.stash.skipBatchGet) {{
+        return [];
+    }}
+    
     if (ctx.error) {{
         util.error(ctx.error.message, ctx.error.type);
     }}
