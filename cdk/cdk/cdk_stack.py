@@ -3509,31 +3509,35 @@ export function response(ctx) {
 
             # listMyProfiles - List profiles owned by current user
             # NEW STRUCTURE: Query by PK (ownerAccountId) - no GSI needed
-            self.profiles_datasource.create_resolver(
+            self.api.create_resolver(
                 "ListMyProfilesResolver",
                 type_name="Query",
                 field_name="listMyProfiles",
-                request_mapping_template=appsync.MappingTemplate.from_string(
+                data_source=self.profiles_datasource,
+                runtime=appsync.FunctionRuntime.JS_1_0_0,
+                code=appsync.Code.from_inline(
                     """
-{
-    "version": "2017-02-28",
-    "operation": "Query",
-    "query": {
-        "expression": "ownerAccountId = :ownerAccountId",
-        "expressionValues": {
-            ":ownerAccountId": $util.dynamodb.toDynamoDBJson("ACCOUNT#$ctx.identity.sub")
-        }
-    },
-    "limit": 500
+import { util } from '@aws-appsync/utils';
+
+export function request(ctx) {
+    // NEW STRUCTURE: Query by PK (ownerAccountId)
+    const ownerAccountId = 'ACCOUNT#' + ctx.identity.sub;
+    return {
+        operation: 'Query',
+        query: {
+            expression: 'ownerAccountId = :ownerAccountId',
+            expressionValues: util.dynamodb.toMapValues({ ':ownerAccountId': ownerAccountId })
+        },
+        limit: 500
+    };
 }
-                """
-                ),
-                response_mapping_template=appsync.MappingTemplate.from_string(
-                    """
-#if($ctx.error)
-    $util.error($ctx.error.message, $ctx.error.type)
-#end
-$util.toJson($ctx.result.items)
+
+export function response(ctx) {
+    if (ctx.error) {
+        util.error(ctx.error.message, ctx.error.type);
+    }
+    return ctx.result.items || [];
+}
                 """
                 ),
             )
