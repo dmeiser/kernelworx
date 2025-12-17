@@ -3524,7 +3524,7 @@ export function response(ctx) {
             ":ownerAccountId": $util.dynamodb.toDynamoDBJson("ACCOUNT#$ctx.identity.sub")
         }
     },
-    "limit": 100
+    "limit": 500
 }
                 """
                 ),
