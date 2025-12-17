@@ -27,7 +27,7 @@ def aws_credentials() -> None:
     os.environ["ACCOUNTS_TABLE_NAME"] = "kernelworx-accounts-ue1-dev"
     os.environ["CATALOGS_TABLE_NAME"] = "kernelworx-catalogs-ue1-dev"
     os.environ["PROFILES_TABLE_NAME"] = "kernelworx-profiles-v2-ue1-dev"
-    os.environ["SEASONS_TABLE_NAME"] = "kernelworx-seasons-ue1-dev"
+    os.environ["SEASONS_TABLE_NAME"] = "kernelworx-seasons-v2-ue1-dev"
     os.environ["ORDERS_TABLE_NAME"] = "kernelworx-orders-ue1-dev"
     os.environ["SHARES_TABLE_NAME"] = "kernelworx-shares-ue1-dev"
     os.environ["INVITES_TABLE_NAME"] = "kernelworx-invites-ue1-dev"
@@ -126,22 +126,31 @@ def dynamodb_table(aws_credentials: None) -> Generator[Any, None, None]:
         )
 
         # ================================================================
-        # Seasons Table
+        # Seasons Table V2 (PK=profileId, SK=seasonId)
         # ================================================================
         seasons_table = dynamodb.create_table(
-            TableName="kernelworx-seasons-ue1-dev",
+            TableName="kernelworx-seasons-v2-ue1-dev",
             KeySchema=[
-                {"AttributeName": "seasonId", "KeyType": "HASH"},
+                {"AttributeName": "profileId", "KeyType": "HASH"},
+                {"AttributeName": "seasonId", "KeyType": "RANGE"},
             ],
             AttributeDefinitions=[
-                {"AttributeName": "seasonId", "AttributeType": "S"},
                 {"AttributeName": "profileId", "AttributeType": "S"},
+                {"AttributeName": "seasonId", "AttributeType": "S"},
+                {"AttributeName": "catalogId", "AttributeType": "S"},
             ],
             GlobalSecondaryIndexes=[
                 {
-                    "IndexName": "profileId-index",
+                    "IndexName": "seasonId-index",
                     "KeySchema": [
-                        {"AttributeName": "profileId", "KeyType": "HASH"},
+                        {"AttributeName": "seasonId", "KeyType": "HASH"},
+                    ],
+                    "Projection": {"ProjectionType": "ALL"},
+                },
+                {
+                    "IndexName": "catalogId-index",
+                    "KeySchema": [
+                        {"AttributeName": "catalogId", "KeyType": "HASH"},
                     ],
                     "Projection": {"ProjectionType": "ALL"},
                 },
@@ -347,14 +356,14 @@ def sample_season_id() -> str:
 def sample_season(
     dynamodb_table: Any, sample_profile_id: str, sample_season_id: str
 ) -> Dict[str, Any]:
-    """Create sample season in DynamoDB (multi-table design)."""
+    """Create sample season in DynamoDB (V2: PK=profileId, SK=seasonId)."""
     # Multi-table design: need to access seasons table directly
     dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
-    seasons_table = dynamodb.Table("kernelworx-seasons-ue1-dev")
+    seasons_table = dynamodb.Table("kernelworx-seasons-v2-ue1-dev")
 
     season = {
-        "seasonId": sample_season_id,
-        "profileId": sample_profile_id,
+        "profileId": sample_profile_id,  # PK
+        "seasonId": sample_season_id,  # SK
         "seasonName": "Fall 2025",
         "startDate": "2025-09-01",
         "catalogId": "CATALOG#default",

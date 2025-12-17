@@ -1,22 +1,23 @@
-from aws_cdk import (
-    Stack,
-    RemovalPolicy,
-    Duration,
-    aws_dynamodb as dynamodb,
-    aws_s3 as s3,
-    aws_iam as iam,
-    aws_cognito as cognito,
-    aws_appsync as appsync,
-    aws_lambda as lambda_,
-    aws_cloudfront as cloudfront,
-    aws_cloudfront_origins as origins,
-    aws_route53 as route53,
-    aws_route53_targets as targets,
-    aws_certificatemanager as acm,
-    CfnOutput,
-)
-from constructs import Construct
 import os
+
+from aws_cdk import (
+    CfnOutput,
+    Duration,
+    RemovalPolicy,
+    Stack,
+)
+from aws_cdk import aws_appsync as appsync
+from aws_cdk import aws_certificatemanager as acm
+from aws_cdk import aws_cloudfront as cloudfront
+from aws_cdk import aws_cloudfront_origins as origins
+from aws_cdk import aws_cognito as cognito
+from aws_cdk import aws_dynamodb as dynamodb
+from aws_cdk import aws_iam as iam
+from aws_cdk import aws_lambda as lambda_
+from aws_cdk import aws_route53 as route53
+from aws_cdk import aws_route53_targets as targets
+from aws_cdk import aws_s3 as s3
+from constructs import Construct
 
 
 class CdkStack(Stack):
@@ -171,9 +172,7 @@ class CdkStack(Stack):
             # GSI8: Account lookup by email (for share-direct pipeline resolver)
             self.table.add_global_secondary_index(
                 index_name="GSI8",
-                partition_key=dynamodb.Attribute(
-                    name="email", type=dynamodb.AttributeType.STRING
-                ),
+                partition_key=dynamodb.Attribute(name="email", type=dynamodb.AttributeType.STRING),
                 projection_type=dynamodb.ProjectionType.ALL,
             )
 
@@ -205,9 +204,7 @@ class CdkStack(Stack):
             self,
             "AccountsTable",
             table_name=f"kernelworx-accounts-ue1-{env_name}",
-            partition_key=dynamodb.Attribute(
-                name="accountId", type=dynamodb.AttributeType.STRING
-            ),
+            partition_key=dynamodb.Attribute(name="accountId", type=dynamodb.AttributeType.STRING),
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
             point_in_time_recovery_specification=dynamodb.PointInTimeRecoverySpecification(
                 point_in_time_recovery_enabled=True
@@ -218,9 +215,7 @@ class CdkStack(Stack):
         # GSI for email lookup (account by email)
         self.accounts_table.add_global_secondary_index(
             index_name="email-index",
-            partition_key=dynamodb.Attribute(
-                name="email", type=dynamodb.AttributeType.STRING
-            ),
+            partition_key=dynamodb.Attribute(name="email", type=dynamodb.AttributeType.STRING),
             projection_type=dynamodb.ProjectionType.ALL,
         )
 
@@ -229,9 +224,7 @@ class CdkStack(Stack):
             self,
             "CatalogsTable",
             table_name=f"kernelworx-catalogs-ue1-{env_name}",
-            partition_key=dynamodb.Attribute(
-                name="catalogId", type=dynamodb.AttributeType.STRING
-            ),
+            partition_key=dynamodb.Attribute(name="catalogId", type=dynamodb.AttributeType.STRING),
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
             point_in_time_recovery_specification=dynamodb.PointInTimeRecoverySpecification(
                 point_in_time_recovery_enabled=True
@@ -254,9 +247,7 @@ class CdkStack(Stack):
             partition_key=dynamodb.Attribute(
                 name="isPublicStr", type=dynamodb.AttributeType.STRING
             ),
-            sort_key=dynamodb.Attribute(
-                name="createdAt", type=dynamodb.AttributeType.STRING
-            ),
+            sort_key=dynamodb.Attribute(name="createdAt", type=dynamodb.AttributeType.STRING),
             projection_type=dynamodb.ProjectionType.ALL,
         )
 
@@ -271,9 +262,7 @@ class CdkStack(Stack):
             partition_key=dynamodb.Attribute(
                 name="ownerAccountId", type=dynamodb.AttributeType.STRING
             ),
-            sort_key=dynamodb.Attribute(
-                name="profileId", type=dynamodb.AttributeType.STRING
-            ),
+            sort_key=dynamodb.Attribute(name="profileId", type=dynamodb.AttributeType.STRING),
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
             point_in_time_recovery_specification=dynamodb.PointInTimeRecoverySpecification(
                 point_in_time_recovery_enabled=True
@@ -284,9 +273,7 @@ class CdkStack(Stack):
         # GSI for direct profile lookup by profileId (sparse index for getProfile)
         self.profiles_table.add_global_secondary_index(
             index_name="profileId-index",
-            partition_key=dynamodb.Attribute(
-                name="profileId", type=dynamodb.AttributeType.STRING
-            ),
+            partition_key=dynamodb.Attribute(name="profileId", type=dynamodb.AttributeType.STRING),
             projection_type=dynamodb.ProjectionType.ALL,
         )
 
@@ -297,12 +284,8 @@ class CdkStack(Stack):
             self,
             "SharesTable",
             table_name=f"kernelworx-shares-ue1-{env_name}",
-            partition_key=dynamodb.Attribute(
-                name="profileId", type=dynamodb.AttributeType.STRING
-            ),
-            sort_key=dynamodb.Attribute(
-                name="targetAccountId", type=dynamodb.AttributeType.STRING
-            ),
+            partition_key=dynamodb.Attribute(name="profileId", type=dynamodb.AttributeType.STRING),
+            sort_key=dynamodb.Attribute(name="targetAccountId", type=dynamodb.AttributeType.STRING),
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
             point_in_time_recovery_specification=dynamodb.PointInTimeRecoverySpecification(
                 point_in_time_recovery_enabled=True
@@ -326,9 +309,7 @@ class CdkStack(Stack):
             self,
             "InvitesTable",
             table_name=f"kernelworx-invites-ue1-{env_name}",
-            partition_key=dynamodb.Attribute(
-                name="inviteCode", type=dynamodb.AttributeType.STRING
-            ),
+            partition_key=dynamodb.Attribute(name="inviteCode", type=dynamodb.AttributeType.STRING),
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
             point_in_time_recovery_specification=dynamodb.PointInTimeRecoverySpecification(
                 point_in_time_recovery_enabled=True
@@ -339,9 +320,7 @@ class CdkStack(Stack):
         # GSI for "invites for this profile" query
         self.invites_table.add_global_secondary_index(
             index_name="profileId-index",
-            partition_key=dynamodb.Attribute(
-                name="profileId", type=dynamodb.AttributeType.STRING
-            ),
+            partition_key=dynamodb.Attribute(name="profileId", type=dynamodb.AttributeType.STRING),
             projection_type=dynamodb.ProjectionType.ALL,
         )
 
@@ -354,14 +333,15 @@ class CdkStack(Stack):
             )
         )
 
-        # Seasons Table
+        # Seasons Table V2
+        # NEW STRUCTURE: PK=profileId, SK=seasonId
+        # This enables direct query for listSeasonsByProfile (no GSI needed)
         self.seasons_table = dynamodb.Table(
             self,
-            "SeasonsTable",
-            table_name=f"kernelworx-seasons-ue1-{env_name}",
-            partition_key=dynamodb.Attribute(
-                name="seasonId", type=dynamodb.AttributeType.STRING
-            ),
+            "SeasonsTableV2",
+            table_name=f"kernelworx-seasons-v2-ue1-{env_name}",
+            partition_key=dynamodb.Attribute(name="profileId", type=dynamodb.AttributeType.STRING),
+            sort_key=dynamodb.Attribute(name="seasonId", type=dynamodb.AttributeType.STRING),
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
             point_in_time_recovery_specification=dynamodb.PointInTimeRecoverySpecification(
                 point_in_time_recovery_enabled=True
@@ -369,24 +349,17 @@ class CdkStack(Stack):
             removal_policy=RemovalPolicy.RETAIN,
         )
 
-        # GSI for seasons by profile
+        # GSI for direct getSeason by seasonId (sparse index)
         self.seasons_table.add_global_secondary_index(
-            index_name="profileId-index",
-            partition_key=dynamodb.Attribute(
-                name="profileId", type=dynamodb.AttributeType.STRING
-            ),
-            sort_key=dynamodb.Attribute(
-                name="createdAt", type=dynamodb.AttributeType.STRING
-            ),
+            index_name="seasonId-index",
+            partition_key=dynamodb.Attribute(name="seasonId", type=dynamodb.AttributeType.STRING),
             projection_type=dynamodb.ProjectionType.ALL,
         )
 
         # GSI for seasons by catalog (for checking catalog in-use before deletion)
         self.seasons_table.add_global_secondary_index(
             index_name="catalogId-index",
-            partition_key=dynamodb.Attribute(
-                name="catalogId", type=dynamodb.AttributeType.STRING
-            ),
+            partition_key=dynamodb.Attribute(name="catalogId", type=dynamodb.AttributeType.STRING),
             projection_type=dynamodb.ProjectionType.KEYS_ONLY,
         )
 
@@ -395,9 +368,7 @@ class CdkStack(Stack):
             self,
             "OrdersTable",
             table_name=f"kernelworx-orders-ue1-{env_name}",
-            partition_key=dynamodb.Attribute(
-                name="orderId", type=dynamodb.AttributeType.STRING
-            ),
+            partition_key=dynamodb.Attribute(name="orderId", type=dynamodb.AttributeType.STRING),
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
             point_in_time_recovery_specification=dynamodb.PointInTimeRecoverySpecification(
                 point_in_time_recovery_enabled=True
@@ -408,24 +379,16 @@ class CdkStack(Stack):
         # GSI for orders by season
         self.orders_table.add_global_secondary_index(
             index_name="seasonId-index",
-            partition_key=dynamodb.Attribute(
-                name="seasonId", type=dynamodb.AttributeType.STRING
-            ),
-            sort_key=dynamodb.Attribute(
-                name="createdAt", type=dynamodb.AttributeType.STRING
-            ),
+            partition_key=dynamodb.Attribute(name="seasonId", type=dynamodb.AttributeType.STRING),
+            sort_key=dynamodb.Attribute(name="createdAt", type=dynamodb.AttributeType.STRING),
             projection_type=dynamodb.ProjectionType.ALL,
         )
 
         # GSI for orders by profile (cross-season order lookup)
         self.orders_table.add_global_secondary_index(
             index_name="profileId-index",
-            partition_key=dynamodb.Attribute(
-                name="profileId", type=dynamodb.AttributeType.STRING
-            ),
-            sort_key=dynamodb.Attribute(
-                name="createdAt", type=dynamodb.AttributeType.STRING
-            ),
+            partition_key=dynamodb.Attribute(name="profileId", type=dynamodb.AttributeType.STRING),
+            sort_key=dynamodb.Attribute(name="createdAt", type=dynamodb.AttributeType.STRING),
             projection_type=dynamodb.ProjectionType.ALL,
         )
 
@@ -536,7 +499,7 @@ class CdkStack(Stack):
 
         # Grant AppSync role access to DynamoDB table
         self.table.grant_read_write_data(self.appsync_service_role)
-        
+
         # Grant AppSync role access to all GSI indexes (required for imported tables)
         self.appsync_service_role.add_to_policy(
             iam.PolicyStatement(
@@ -705,7 +668,7 @@ class CdkStack(Stack):
             self.user_pool = cognito.UserPool.from_user_pool_id(
                 self, "UserPool", existing_user_pool_id
             )
-            
+
             # For imported pools, either import existing client or create new one
             existing_client_id = self.node.try_get_context("user_pool_client_id")
             if existing_client_id:
@@ -752,7 +715,7 @@ class CdkStack(Stack):
                         "ALLOW_USER_PASSWORD_AUTH",
                         "ALLOW_USER_SRP_AUTH",
                         "ALLOW_USER_AUTH",  # Required for WebAuthn/passkeys
-                    ]
+                    ],
                 )
         else:
             self.user_pool = cognito.UserPool(
@@ -1003,7 +966,7 @@ class CdkStack(Stack):
             self.cognito_domain_record.apply_removal_policy(RemovalPolicy.RETAIN)
 
         # Output Cognito Hosted UI URL for easy access (only if user pool was created, not imported)
-        if hasattr(self, 'user_pool_domain') and hasattr(self, 'user_pool_client'):
+        if hasattr(self, "user_pool_domain") and hasattr(self, "user_pool_client"):
             CfnOutput(
                 self,
                 "CognitoHostedUIUrl",
@@ -1030,7 +993,7 @@ class CdkStack(Stack):
             # Determine if logging should be enabled (configurable via ENABLE_APPSYNC_LOGGING env var)
             # Defaults to True if not specified
             enable_appsync_logging = os.getenv("ENABLE_APPSYNC_LOGGING", "true").lower() == "true"
-            
+
             self.api = appsync.GraphqlApi(
                 self,
                 "Api",
@@ -1043,12 +1006,16 @@ class CdkStack(Stack):
                     ),
                 ),
                 xray_enabled=True,
-                log_config=appsync.LogConfig(
-                    field_log_level=appsync.FieldLogLevel.ALL,
-                    exclude_verbose_content=False,
-                ) if enable_appsync_logging else None,
+                log_config=(
+                    appsync.LogConfig(
+                        field_log_level=appsync.FieldLogLevel.ALL,
+                        exclude_verbose_content=False,
+                    )
+                    if enable_appsync_logging
+                    else None
+                ),
             )
-            
+
             CfnOutput(
                 self,
                 "AppSyncApiKey",
@@ -1061,7 +1028,7 @@ class CdkStack(Stack):
                 "DynamoDBDataSource",
                 table=self.table,
             )
-            
+
             # Grant GSI permissions to the DynamoDB data source role
             self.dynamodb_datasource.grant_principal.add_to_principal_policy(
                 iam.PolicyStatement(
@@ -1073,7 +1040,7 @@ class CdkStack(Stack):
             # ================================================================
             # Multi-table data sources (new architecture)
             # ================================================================
-            
+
             # Accounts table data source
             self.accounts_datasource = self.api.add_dynamo_db_data_source(
                 "AccountsDataSource",
@@ -1085,7 +1052,7 @@ class CdkStack(Stack):
                     resources=[f"{self.accounts_table.table_arn}/index/*"],
                 )
             )
-            
+
             # Catalogs table data source
             self.catalogs_datasource = self.api.add_dynamo_db_data_source(
                 "CatalogsDataSource",
@@ -1097,7 +1064,7 @@ class CdkStack(Stack):
                     resources=[f"{self.catalogs_table.table_arn}/index/*"],
                 )
             )
-            
+
             # Profiles table data source
             self.profiles_datasource = self.api.add_dynamo_db_data_source(
                 "ProfilesDataSource",
@@ -1109,7 +1076,7 @@ class CdkStack(Stack):
                     resources=[f"{self.profiles_table.table_arn}/index/*"],
                 )
             )
-            
+
             # Seasons table data source
             self.seasons_datasource = self.api.add_dynamo_db_data_source(
                 "SeasonsDataSource",
@@ -1121,7 +1088,7 @@ class CdkStack(Stack):
                     resources=[f"{self.seasons_table.table_arn}/index/*"],
                 )
             )
-            
+
             # Orders table data source
             self.orders_datasource = self.api.add_dynamo_db_data_source(
                 "OrdersDataSource",
@@ -1549,7 +1516,7 @@ export function response(ctx) {
             # ================================================================
             # SHARED AUTHORIZATION FUNCTION
             # ================================================================
-            
+
             # VerifyProfileWriteAccessFn: Checks if caller is owner OR has WRITE permission
             # Used by: createOrder, updateOrder, deleteOrder, updateSeason, deleteSeason
             verify_profile_write_access_fn = appsync.AppsyncFunction(
@@ -1655,7 +1622,7 @@ export function response(ctx) {
                 """
                 ),
             )
-            
+
             # CheckSharePermissionsFn: Checks if non-owner has WRITE permission via share
             # Used in conjunction with VerifyProfileWriteAccessFn above
             # NOW USES SHARES TABLE
@@ -1850,7 +1817,7 @@ export function response(ctx) {
                 """
                 ),
             )
-            
+
             # CheckShareReadPermissionsFn: Checks if non-owner has READ or WRITE permission
             # Used in conjunction with VerifyProfileReadAccessFn
             # NOW USES SHARES TABLE
@@ -1949,11 +1916,15 @@ import { util } from '@aws-appsync/utils';
 
 export function request(ctx) {
     const seasonId = ctx.args.seasonId || ctx.args.input.seasonId;
-    // Direct GetItem on seasons table using seasonId as primary key
+    // Query seasonId-index GSI to find the season (V2: PK=profileId, SK=seasonId)
     return {
-        operation: 'GetItem',
-        key: util.dynamodb.toMapValues({ seasonId: seasonId }),
-        consistentRead: true
+        operation: 'Query',
+        index: 'seasonId-index',
+        query: {
+            expression: 'seasonId = :seasonId',
+            expressionValues: util.dynamodb.toMapValues({ ':seasonId': seasonId })
+        },
+        consistentRead: false
     };
 }
 
@@ -1961,12 +1932,12 @@ export function response(ctx) {
     if (ctx.error) {
         util.error(ctx.error.message, ctx.error.type);
     }
-    if (!ctx.result) {
+    if (!ctx.result.items || ctx.result.items.length === 0) {
         util.error('Season not found', 'NotFound');
     }
     // Store season in stash for next function
-    ctx.stash.season = ctx.result;
-    return ctx.result;
+    ctx.stash.season = ctx.result.items[0];
+    return ctx.result.items[0];
 }
                 """
                 ),
@@ -2019,9 +1990,10 @@ export function request(ctx) {
     
     const updateExpression = 'SET ' + updates.join(', ');
     
+    // V2: Use composite key (profileId, seasonId)
     return {
         operation: 'UpdateItem',
-        key: util.dynamodb.toMapValues({ seasonId: season.seasonId }),
+        key: util.dynamodb.toMapValues({ profileId: season.profileId, seasonId: season.seasonId }),
         update: {
             expression: updateExpression,
             expressionNames: Object.keys(exprNames).length > 0 ? exprNames : undefined,
@@ -2062,7 +2034,12 @@ export function response(ctx) {
                 type_name="Mutation",
                 field_name="updateSeason",
                 runtime=appsync.FunctionRuntime.JS_1_0_0,
-                pipeline_config=[lookup_season_fn, verify_profile_write_access_fn, check_share_permissions_fn, update_season_fn],
+                pipeline_config=[
+                    lookup_season_fn,
+                    verify_profile_write_access_fn,
+                    check_share_permissions_fn,
+                    update_season_fn,
+                ],
                 code=appsync.Code.from_inline(
                     """
 export function request(ctx) {
@@ -2078,7 +2055,7 @@ export function response(ctx) {
 
             # deleteSeason Pipeline: Direct GetItem → DeleteItem
             # Separate lookup for delete - doesn't error on missing season (idempotent)
-            # Now uses seasons_datasource with direct seasonId key
+            # V2: Query seasonId-index GSI since PK=profileId, SK=seasonId
             lookup_season_for_delete_fn = appsync.AppsyncFunction(
                 self,
                 "LookupSeasonForDeleteFn",
@@ -2092,11 +2069,15 @@ import { util } from '@aws-appsync/utils';
 
 export function request(ctx) {
     const seasonId = ctx.args.seasonId;
-    // Direct GetItem on seasons table using seasonId as primary key
+    // Query seasonId-index GSI to find the season (V2: PK=profileId, SK=seasonId)
     return {
-        operation: 'GetItem',
-        key: util.dynamodb.toMapValues({ seasonId: seasonId }),
-        consistentRead: true
+        operation: 'Query',
+        index: 'seasonId-index',
+        query: {
+            expression: 'seasonId = :seasonId',
+            expressionValues: util.dynamodb.toMapValues({ ':seasonId': seasonId })
+        },
+        consistentRead: false
     };
 }
 
@@ -2107,20 +2088,20 @@ export function response(ctx) {
     
     // For delete, if season not found, that's OK (idempotent)
     // Just store null in stash and let delete function handle it
-    if (!ctx.result) {
+    if (!ctx.result.items || ctx.result.items.length === 0) {
         ctx.stash.season = null;
         return null;
     }
     
     // Note: Authorization is simplified - relies on Cognito authentication
     // Full share-based authorization would require additional pipeline functions
-    ctx.stash.season = ctx.result;
-    return ctx.result;
+    ctx.stash.season = ctx.result.items[0];
+    return ctx.result.items[0];
 }
                 """
                 ),
             )
-            
+
             # Query orders for the season to delete (for cleanup)
             # Uses orders table with seasonId-index GSI
             query_season_orders_for_delete_fn = appsync.AppsyncFunction(
@@ -2179,7 +2160,7 @@ export function response(ctx) {
                 """
                 ),
             )
-            
+
             # Delete orders associated with the season
             # Uses orders_datasource with orderId key
             delete_season_orders_fn = appsync.AppsyncFunction(
@@ -2219,7 +2200,7 @@ export function response(ctx) {
                 """
                 ),
             )
-            
+
             # Delete season from seasons table
             delete_season_fn = appsync.AppsyncFunction(
                 self,
@@ -2242,13 +2223,14 @@ export function request(ctx) {
         ctx.stash.skipDelete = true;
         return {
             operation: 'GetItem',
-            key: util.dynamodb.toMapValues({ seasonId: 'NOOP' })
+            key: util.dynamodb.toMapValues({ profileId: 'NOOP', seasonId: 'NOOP' })
         };
     }
     
+    // V2: Use composite key (profileId, seasonId)
     return {
         operation: 'DeleteItem',
-        key: util.dynamodb.toMapValues({ seasonId: season.seasonId })
+        key: util.dynamodb.toMapValues({ profileId: season.profileId, seasonId: season.seasonId })
     };
 }
 
@@ -2269,7 +2251,14 @@ export function response(ctx) {
                 type_name="Mutation",
                 field_name="deleteSeason",
                 runtime=appsync.FunctionRuntime.JS_1_0_0,
-                pipeline_config=[lookup_season_for_delete_fn, verify_profile_write_access_fn, check_share_permissions_fn, query_season_orders_for_delete_fn, delete_season_orders_fn, delete_season_fn],
+                pipeline_config=[
+                    lookup_season_for_delete_fn,
+                    verify_profile_write_access_fn,
+                    check_share_permissions_fn,
+                    query_season_orders_for_delete_fn,
+                    delete_season_orders_fn,
+                    delete_season_fn,
+                ],
                 code=appsync.Code.from_inline(
                     """
 export function request(ctx) {
@@ -2322,7 +2311,7 @@ export function response(ctx) {
             )
 
             # Bug #16 fix: Get catalog for updateOrder when lineItems are being updated
-            # First looks up the season, then fetches the catalog
+            # First looks up the season via GSI, then fetches the catalog
             get_catalog_for_update_order_fn = appsync.AppsyncFunction(
                 self,
                 "GetCatalogForUpdateOrderFn",
@@ -2338,10 +2327,15 @@ export function request(ctx) {
     // Only fetch catalog if lineItems are being updated
     if (!ctx.args.input.lineItems) {
         ctx.stash.skipCatalog = true;
-        // Return no-op request
+        // Return no-op query (will return empty)
         return {
-            operation: 'GetItem',
-            key: util.dynamodb.toMapValues({ seasonId: 'NOOP' })
+            operation: 'Query',
+            index: 'seasonId-index',
+            query: {
+                expression: 'seasonId = :seasonId',
+                expressionValues: util.dynamodb.toMapValues({ ':seasonId': 'NOOP' })
+            },
+            limit: 1
         };
     }
     
@@ -2349,11 +2343,15 @@ export function request(ctx) {
     const order = ctx.stash.order;
     const seasonId = order.seasonId;
     
-    // Direct GetItem on seasons table
+    // Query seasonId-index GSI to find season (V2 schema)
     return {
-        operation: 'GetItem',
-        key: util.dynamodb.toMapValues({ seasonId: seasonId }),
-        consistentRead: true
+        operation: 'Query',
+        index: 'seasonId-index',
+        query: {
+            expression: 'seasonId = :seasonId',
+            expressionValues: util.dynamodb.toMapValues({ ':seasonId': seasonId })
+        },
+        limit: 1
     };
 }
 
@@ -2366,11 +2364,12 @@ export function response(ctx) {
         util.error(ctx.error.message, ctx.error.type);
     }
     
-    if (!ctx.result) {
+    const items = ctx.result.items || [];
+    if (items.length === 0) {
         util.error('Season not found', 'NotFound');
     }
     
-    const season = ctx.result;
+    const season = items[0];
     const catalogId = season.catalogId;
     
     if (!catalogId) {
@@ -2574,7 +2573,14 @@ export function response(ctx) {
                 type_name="Mutation",
                 field_name="updateOrder",
                 runtime=appsync.FunctionRuntime.JS_1_0_0,
-                pipeline_config=[lookup_order_fn, verify_profile_write_access_fn, check_share_permissions_fn, get_catalog_for_update_order_fn, fetch_catalog_for_update_fn, update_order_fn],
+                pipeline_config=[
+                    lookup_order_fn,
+                    verify_profile_write_access_fn,
+                    check_share_permissions_fn,
+                    get_catalog_for_update_order_fn,
+                    fetch_catalog_for_update_fn,
+                    update_order_fn,
+                ],
                 code=appsync.Code.from_inline(
                     """
 export function request(ctx) {
@@ -2630,7 +2636,7 @@ export function response(ctx) {
                 """
                 ),
             )
-            
+
             # Delete order from orders table
             delete_order_fn = appsync.AppsyncFunction(
                 self,
@@ -2680,7 +2686,12 @@ export function response(ctx) {
                 type_name="Mutation",
                 field_name="deleteOrder",
                 runtime=appsync.FunctionRuntime.JS_1_0_0,
-                pipeline_config=[lookup_order_for_delete_fn, verify_profile_write_access_fn, check_share_permissions_fn, delete_order_fn],
+                pipeline_config=[
+                    lookup_order_for_delete_fn,
+                    verify_profile_write_access_fn,
+                    check_share_permissions_fn,
+                    delete_order_fn,
+                ],
                 code=appsync.Code.from_inline(
                     """
 export function request(ctx) {
@@ -2700,7 +2711,7 @@ export function response(ctx) {
 
             # createOrder Pipeline: Verify access → Query season → GetItem catalog → PutItem order
             # Step 1: Get season to find catalogId
-            # Now uses seasons_datasource with direct seasonId key
+            # Uses seasonId-index GSI to look up season (V2 schema: PK=profileId, SK=seasonId)
             get_season_for_order_fn = appsync.AppsyncFunction(
                 self,
                 "GetSeasonForOrderFn",
@@ -2715,11 +2726,15 @@ import { util } from '@aws-appsync/utils';
 export function request(ctx) {
     const seasonId = ctx.args.input.seasonId;
     
-    // Direct GetItem on seasons table
+    // Query seasonId-index GSI to find season (V2 schema)
     return {
-        operation: 'GetItem',
-        key: util.dynamodb.toMapValues({ seasonId: seasonId }),
-        consistentRead: true
+        operation: 'Query',
+        index: 'seasonId-index',
+        query: {
+            expression: 'seasonId = :seasonId',
+            expressionValues: util.dynamodb.toMapValues({ ':seasonId': seasonId })
+        },
+        limit: 1
     };
 }
 
@@ -2727,11 +2742,13 @@ export function response(ctx) {
     if (ctx.error) {
         util.error(ctx.error.message, ctx.error.type);
     }
-    if (!ctx.result) {
+    
+    const items = ctx.result.items || [];
+    if (items.length === 0) {
         util.error('Season not found', 'NotFound');
     }
     
-    const season = ctx.result;
+    const season = items[0];
     if (!season.catalogId) {
         util.error('Season has no catalog assigned', 'BadRequest');
     }
@@ -2745,7 +2762,7 @@ export function response(ctx) {
                 """
                 ),
             )
-            
+
             # Step 2: Get catalog using catalogId from stash
             # Now uses catalogs_datasource with direct catalogId key
             get_catalog_fn = appsync.AppsyncFunction(
@@ -2901,7 +2918,13 @@ export function response(ctx) {
                 type_name="Mutation",
                 field_name="createOrder",
                 runtime=appsync.FunctionRuntime.JS_1_0_0,
-                pipeline_config=[verify_profile_write_access_fn, check_share_permissions_fn, get_season_for_order_fn, get_catalog_fn, create_order_fn],
+                pipeline_config=[
+                    verify_profile_write_access_fn,
+                    check_share_permissions_fn,
+                    get_season_for_order_fn,
+                    get_catalog_fn,
+                    create_order_fn,
+                ],
                 code=appsync.Code.from_inline(
                     """
 export function request(ctx) {
@@ -3307,7 +3330,7 @@ $util.toJson($ctx.result)
 
             # getProfile - Get a specific profile by ID with authorization
             # Pipeline: FetchProfileFn -> CheckProfileReadAuthFn
-            
+
             # FetchProfileFn: Get the profile from profiles table directly
             fetch_profile_fn = appsync.AppsyncFunction(
                 self,
@@ -3359,7 +3382,7 @@ export function response(ctx) {
                     """
                 ),
             )
-            
+
             # CheckProfileReadAuthFn: Check if caller is owner or has share
             # NOW USES SHARES TABLE
             check_profile_read_auth_fn = appsync.AppsyncFunction(
@@ -3435,7 +3458,7 @@ export function response(ctx) {
                     """
                 ),
             )
-            
+
             # getProfile Pipeline Resolver
             appsync.Resolver(
                 self,
@@ -3633,8 +3656,9 @@ export function response(ctx) { return ctx.prev.result; }
 
             # getSeason - Get a specific season by ID with authorization
             # Pipeline: QuerySeasonFn → VerifyProfileReadAccessFn → CheckShareReadPermissionsFn → ReturnSeasonFn
-            
-            # Step 1: Get season directly from seasons table
+
+            # Step 1: Get season from seasons table using seasonId-index GSI
+            # V2 STRUCTURE: PK=profileId, SK=seasonId, GSI=seasonId-index
             query_season_fn = appsync.AppsyncFunction(
                 self,
                 "QuerySeasonFn",
@@ -3648,11 +3672,15 @@ import { util } from '@aws-appsync/utils';
 
 export function request(ctx) {
     const seasonId = ctx.args.seasonId;
-    // Direct GetItem on seasons table
+    // V2: Query seasonId-index GSI since PK is now profileId
     return {
-        operation: 'GetItem',
-        key: util.dynamodb.toMapValues({ seasonId: seasonId }),
-        consistentRead: true
+        operation: 'Query',
+        index: 'seasonId-index',
+        query: {
+            expression: 'seasonId = :seasonId',
+            expressionValues: util.dynamodb.toMapValues({ ':seasonId': seasonId })
+        },
+        limit: 1
     };
 }
 
@@ -3661,13 +3689,13 @@ export function response(ctx) {
         util.error(ctx.error.message, ctx.error.type);
     }
     
-    if (!ctx.result) {
+    if (!ctx.result || !ctx.result.items || ctx.result.items.length === 0) {
         // Season not found - return null (auth check will be skipped)
         ctx.stash.seasonNotFound = true;
         return null;
     }
     
-    const season = ctx.result;
+    const season = ctx.result.items[0];
     ctx.stash.season = season;
     
     return season;
@@ -3675,7 +3703,7 @@ export function response(ctx) {
                 """
                 ),
             )
-            
+
             # Step 4: Return season if authorized, null otherwise
             return_season_fn = appsync.AppsyncFunction(
                 self,
@@ -3714,7 +3742,7 @@ export function response(ctx) {
                 """
                 ),
             )
-            
+
             # getSeason Pipeline Resolver
             self.api.create_resolver(
                 "GetSeasonResolver",
@@ -3725,7 +3753,7 @@ export function response(ctx) {
                     query_season_fn,
                     verify_profile_read_access_fn,
                     check_share_read_permissions_fn,
-                    return_season_fn
+                    return_season_fn,
                 ],
                 code=appsync.Code.from_inline(
                     """
@@ -3742,8 +3770,9 @@ export function response(ctx) {
 
             # listSeasonsByProfile - List all seasons for a profile with authorization
             # Pipeline: VerifyProfileReadAccessFn → CheckShareReadPermissionsFn → QuerySeasonsFn
-            
+
             # Step 3: Query seasons from seasons table (only if authorized)
+            # V2 STRUCTURE: PK=profileId, SK=seasonId - direct query, no GSI needed
             query_seasons_fn = appsync.AppsyncFunction(
                 self,
                 "QuerySeasonsFn",
@@ -3759,16 +3788,19 @@ export function request(ctx) {
     // If not authorized or profile not found, return no-op
     if (!ctx.stash.authorized || ctx.stash.profileNotFound) {
         return {
-            operation: 'GetItem',
-            key: util.dynamodb.toMapValues({ seasonId: 'NOOP' })
+            operation: 'Query',
+            query: {
+                expression: 'profileId = :profileId AND seasonId = :seasonId',
+                expressionValues: util.dynamodb.toMapValues({ ':profileId': 'NOOP', ':seasonId': 'NOOP' })
+            },
+            limit: 1
         };
     }
     
     const profileId = ctx.args.profileId;
-    // Query seasons table using profileId-index GSI
+    // V2: Direct PK query on profileId (no GSI needed)
     return {
         operation: 'Query',
-        index: 'profileId-index',
         query: {
             expression: 'profileId = :profileId',
             expressionValues: util.dynamodb.toMapValues({ ':profileId': profileId })
@@ -3791,7 +3823,7 @@ export function response(ctx) {
                 """
                 ),
             )
-            
+
             # listSeasonsByProfile Pipeline Resolver
             self.api.create_resolver(
                 "ListSeasonsByProfileResolver",
@@ -3801,7 +3833,7 @@ export function response(ctx) {
                 pipeline_config=[
                     verify_profile_read_access_fn,
                     check_share_read_permissions_fn,
-                    query_seasons_fn
+                    query_seasons_fn,
                 ],
                 code=appsync.Code.from_inline(
                     """
@@ -4030,7 +4062,7 @@ export function response(ctx) {
 
             # getOrder - Get a specific order by ID with authorization (Pipeline Resolver)
             # Pipeline: QueryOrderFn → VerifyProfileReadAccessFn → CheckShareReadPermissionsFn → ReturnOrderFn
-            
+
             # Step 1: Get order from orders table directly
             query_order_fn = appsync.AppsyncFunction(
                 self,
@@ -4075,7 +4107,7 @@ export function response(ctx) {
                 """
                 ),
             )
-            
+
             # Step 4: Return order if authorized, null otherwise
             return_order_fn = appsync.AppsyncFunction(
                 self,
@@ -4114,7 +4146,7 @@ export function response(ctx) {
                 """
                 ),
             )
-            
+
             # getOrder Pipeline Resolver
             self.api.create_resolver(
                 "GetOrderResolver",
@@ -4125,7 +4157,7 @@ export function response(ctx) {
                     query_order_fn,
                     verify_profile_read_access_fn,
                     check_share_read_permissions_fn,
-                    return_order_fn
+                    return_order_fn,
                 ],
                 code=appsync.Code.from_inline(
                     """
@@ -4145,8 +4177,8 @@ export function response(ctx) {
             # FIXED Bug #25: Now uses GSI5 with filter for ORDER# items
             # FIXED Bug #23: Added authorization check
             # Pipeline: LookupSeasonForOrdersFn → VerifyProfileReadAccessFn → CheckShareReadPermissionsFn → QueryOrdersBySeasonFn
-            
-            # Step 1: Lookup season to get profileId (uses seasons table with direct GetItem)
+
+            # Step 1: Lookup season to get profileId (uses seasonId-index GSI, V2 schema)
             lookup_season_for_orders_fn = appsync.AppsyncFunction(
                 self,
                 "LookupSeasonForOrdersFn",
@@ -4160,11 +4192,15 @@ import { util } from '@aws-appsync/utils';
 
 export function request(ctx) {
     const seasonId = ctx.args.seasonId;
-    // Direct GetItem on seasons table using seasonId as primary key
+    // Query seasonId-index GSI to find season (V2 schema: PK=profileId, SK=seasonId)
     return {
-        operation: 'GetItem',
-        key: util.dynamodb.toMapValues({ seasonId: seasonId }),
-        consistentRead: true
+        operation: 'Query',
+        index: 'seasonId-index',
+        query: {
+            expression: 'seasonId = :seasonId',
+            expressionValues: util.dynamodb.toMapValues({ ':seasonId': seasonId })
+        },
+        limit: 1
     };
 }
 
@@ -4173,14 +4209,15 @@ export function response(ctx) {
         util.error(ctx.error.message, ctx.error.type);
     }
     
-    if (!ctx.result) {
+    const items = ctx.result.items || [];
+    if (items.length === 0) {
         // Season not found - return empty, skip auth (will return empty array)
         ctx.stash.seasonNotFound = true;
         ctx.stash.authorized = false;
         return null;
     }
     
-    const season = ctx.result;
+    const season = items[0];
     ctx.stash.season = season;
     ctx.stash.profileId = season.profileId;
     
@@ -4189,7 +4226,7 @@ export function response(ctx) {
                 """
                 ),
             )
-            
+
             # Step 4: Query orders (only if authorized) - uses orders table
             query_orders_by_season_fn = appsync.AppsyncFunction(
                 self,
@@ -4241,7 +4278,7 @@ export function response(ctx) {
                 """
                 ),
             )
-            
+
             # listOrdersBySeason Pipeline Resolver
             self.api.create_resolver(
                 "ListOrdersBySeasonResolver",
@@ -4252,7 +4289,7 @@ export function response(ctx) {
                     lookup_season_for_orders_fn,
                     verify_profile_read_access_fn,
                     check_share_read_permissions_fn,
-                    query_orders_by_season_fn
+                    query_orders_by_season_fn,
                 ],
                 code=appsync.Code.from_inline(
                     """
@@ -4271,7 +4308,7 @@ export function response(ctx) {
             # FIXED Bug #26: Now queries main table (PK=profileId) instead of GSI2
             # FIXED Bug #24: Added authorization check
             # Pipeline: VerifyProfileReadAccessFn → CheckShareReadPermissionsFn → QueryOrdersByProfileFn
-            
+
             # Query orders function - uses orders table with profileId-index GSI
             query_orders_by_profile_fn = appsync.AppsyncFunction(
                 self,
@@ -4323,7 +4360,7 @@ export function response(ctx) {
                 """
                 ),
             )
-            
+
             # listOrdersByProfile Pipeline Resolver
             self.api.create_resolver(
                 "ListOrdersByProfileResolver",
@@ -4333,7 +4370,7 @@ export function response(ctx) {
                 pipeline_config=[
                     verify_profile_read_access_fn,
                     check_share_read_permissions_fn,
-                    query_orders_by_profile_fn
+                    query_orders_by_profile_fn,
                 ],
                 code=appsync.Code.from_inline(
                     """
@@ -4351,7 +4388,7 @@ export function response(ctx) {
             # listSharesByProfile - List all shares for a profile with authorization (Pipeline Resolver)
             # FIXED Bug #27/#28: Added authorization check (owner or WRITE permission required)
             # Pipeline: VerifyProfileWriteAccessOrOwnerFn → QuerySharesFn
-            
+
             # Function to query shares (only if authorized) - NOW USES SHARES TABLE
             query_shares_fn = appsync.AppsyncFunction(
                 self,
@@ -4401,7 +4438,7 @@ export function response(ctx) {
                 """
                 ),
             )
-            
+
             # Verification function for shares (owner or WRITE permission) - uses profiles table
             verify_profile_write_or_owner_fn = appsync.AppsyncFunction(
                 self,
@@ -4494,7 +4531,7 @@ export function response(ctx) {
                 """
                 ),
             )
-            
+
             # Check WRITE permission function - NOW USES SHARES TABLE
             check_write_permission_fn = appsync.AppsyncFunction(
                 self,
@@ -4570,7 +4607,7 @@ export function response(ctx) {
                 """
                 ),
             )
-            
+
             # listSharesByProfile Pipeline Resolver
             self.api.create_resolver(
                 "ListSharesByProfileResolver",
@@ -4580,7 +4617,7 @@ export function response(ctx) {
                 pipeline_config=[
                     verify_profile_write_or_owner_fn,
                     check_write_permission_fn,
-                    query_shares_fn
+                    query_shares_fn,
                 ],
                 code=appsync.Code.from_inline(
                     """
@@ -4990,7 +5027,7 @@ export function response(ctx) {
             # 7. Delete all seasons (TransactWriteItems)
             # 8. Delete the ownership record (ACCOUNT#{userId}|{profileId})
             # 9. Delete the metadata record (PROFILE#{profileId}|METADATA)
-            
+
             # Step 1: Verify ownership - uses profiles table
             verify_profile_owner_for_delete_fn = appsync.AppsyncFunction(
                 self,
@@ -5140,7 +5177,9 @@ export function request(ctx) {
     return {
         operation: 'BatchDeleteItem',
         tables: {
-            '""" + self.shares_table.table_name + """': keys
+            '"""
+                    + self.shares_table.table_name
+                    + """': keys
         }
     };
 }
@@ -5181,7 +5220,9 @@ export function request(ctx) {
     return {
         operation: 'BatchDeleteItem',
         tables: {
-            '""" + self.invites_table.table_name + """': keys
+            '"""
+                    + self.invites_table.table_name
+                    + """': keys
         }
     };
 }
@@ -5208,10 +5249,9 @@ import { util } from '@aws-appsync/utils';
 
 export function request(ctx) {
     const profileId = ctx.stash.profileId;
-    // Query seasons table using profileId-index GSI
+    // V2: Direct PK query on profileId (no GSI needed)
     return {
         operation: 'Query',
-        index: 'profileId-index',
         query: {
             expression: 'profileId = :profileId',
             expressionValues: util.dynamodb.toMapValues({
@@ -5249,14 +5289,16 @@ export function request(ctx) {
     
     // If no seasons to delete, skip
     if (seasons.length === 0) {
-        return { operation: 'GetItem', key: util.dynamodb.toMapValues({ seasonId: 'SKIP' }) };
+        return { operation: 'Query', query: { expression: 'profileId = :pk AND seasonId = :sk', expressionValues: util.dynamodb.toMapValues({ ':pk': 'SKIP', ':sk': 'SKIP' }) }, limit: 1 };
     }
     
-    // Build delete requests (max 100 items per TransactWriteItems) using seasonId key
+    // V2: Build delete requests (max 100 items per TransactWriteItems) using composite key (profileId, seasonId)
     const transactItems = seasons.slice(0, 100).map(season => ({
-        table: '""" + self.seasons_table.table_name + """',
+        table: '"""
+                    + self.seasons_table.table_name
+                    + """',
         operation: 'DeleteItem',
-        key: util.dynamodb.toMapValues({ seasonId: season.seasonId })
+        key: util.dynamodb.toMapValues({ profileId: season.profileId, seasonId: season.seasonId })
     }));
     
     return {
@@ -5356,7 +5398,7 @@ export function response(ctx) {
                     query_profile_seasons_fn,
                     delete_profile_seasons_fn,
                     delete_profile_ownership_fn,
-                    delete_profile_metadata_fn
+                    delete_profile_metadata_fn,
                 ],
                 code=appsync.Code.from_inline(
                     """
@@ -5721,6 +5763,7 @@ export function response(ctx) {
             )
 
             # createSeason - Create a new season for a profile (Pipeline with authorization) - uses seasons table
+            # V2 STRUCTURE: PK=profileId, SK=seasonId
             create_season_fn = appsync.AppsyncFunction(
                 self,
                 "CreateSeasonFn",
@@ -5737,10 +5780,10 @@ export function request(ctx) {
     const now = util.time.nowISO8601();
     const input = ctx.args.input;
     
-    // Season record in new multi-table design uses seasonId as primary key
+    // V2 Season table structure: PK=profileId, SK=seasonId
     const season = {
-        seasonId: seasonId,
         profileId: input.profileId,
+        seasonId: seasonId,
         seasonName: input.seasonName,
         startDate: input.startDate,
         catalogId: input.catalogId,
@@ -5754,7 +5797,7 @@ export function request(ctx) {
     
     return {
         operation: 'PutItem',
-        key: util.dynamodb.toMapValues({ seasonId: seasonId }),
+        key: util.dynamodb.toMapValues({ profileId: input.profileId, seasonId: seasonId }),
         attributeValues: util.dynamodb.toMapValues(season)
     };
 }
@@ -5774,7 +5817,11 @@ export function response(ctx) {
                 type_name="Mutation",
                 field_name="createSeason",
                 runtime=appsync.FunctionRuntime.JS_1_0_0,
-                pipeline_config=[verify_profile_write_access_fn, check_share_permissions_fn, create_season_fn],
+                pipeline_config=[
+                    verify_profile_write_access_fn,
+                    check_share_permissions_fn,
+                    create_season_fn,
+                ],
                 code=appsync.Code.from_inline(
                     """
 export function request(ctx) {
@@ -5885,7 +5932,5 @@ export function response(ctx) {
             "SiteDomainRecord",
             zone=self.hosted_zone,
             record_name=self.site_domain,
-            target=route53.RecordTarget.from_alias(
-                targets.CloudFrontTarget(self.distribution)
-            ),
+            target=route53.RecordTarget.from_alias(targets.CloudFrontTarget(self.distribution)),
         )

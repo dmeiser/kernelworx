@@ -448,33 +448,33 @@ The `isAdmin` field is no longer used. Admin checks now use Cognito groups direc
 **Estimated: 2-3 hours**
 
 #### 2.1 CDK Changes
-- [ ] Modify `seasons` table: PK=profileId, SK=seasonId
-- [ ] Add seasonId-index GSI (sparse, for direct getSeason)
-- [ ] Keep catalogId-index GSI (for catalog in-use check)
-- [ ] Remove profileId-index GSI (now PK)
+- [x] Modify `seasons` table: PK=profileId, SK=seasonId
+- [x] Add seasonId-index GSI (sparse, for direct getSeason)
+- [x] Keep catalogId-index GSI (for catalog in-use check)
+- [x] Remove profileId-index GSI (now PK)
 
 #### 2.2 Resolver Updates
-- [ ] Update `createSeason` resolver - use new key structure
-- [ ] Update `getSeason` resolver - query seasonId-index GSI
-- [ ] Update `listSeasonsByProfile` resolver - direct PK query
-- [ ] Update `updateSeason` resolver - use new key structure
-- [ ] Update `deleteSeason` resolver - use new key structure
-- [ ] Update `CheckCatalogUsageFn` - still uses catalogId-index
+- [x] Update `createSeason` resolver - use new key structure
+- [x] Update `getSeason` resolver - query seasonId-index GSI
+- [x] Update `listSeasonsByProfile` resolver - direct PK query
+- [x] Update `updateSeason` resolver - use new key structure
+- [x] Update `deleteSeason` resolver - use new key structure
+- [x] Update `CheckCatalogUsageFn` - still uses catalogId-index
 
 #### 2.3 Lambda Updates
-- [ ] Update `season_operations.py` if applicable
+- [x] Update `season_operations.py` if applicable
 
 #### 2.4 Data Migration - Seasons
-- [ ] Export existing seasons
-- [ ] Transform: seasonId→SK, profileId→PK
-- [ ] Import to new seasons table
+- [x] Export existing seasons - SKIPPED: 0 records in old table
+- [x] Transform: seasonId→SK, profileId→PK - SKIPPED: No data to migrate
+- [x] Import to new seasons table - SKIPPED: No data to migrate
 
 #### 2.5 Integration Tests - Phase 2
-- [ ] Update `seasonQueries.integration.test.ts` for new structure
-- [ ] Update `seasonOperations.integration.test.ts` for new structure
-- [ ] Update `createSeason.integration.test.ts` for new structure
-- [ ] Run season tests: `npx vitest run --testPathPattern="season"`
-- [ ] All season tests pass before proceeding
+- [x] Update `seasonQueries.integration.test.ts` for new structure
+- [x] Update `seasonOperations.integration.test.ts` for new structure
+- [x] Update `createSeason.integration.test.ts` for new structure
+- [x] Run season tests: `npx vitest run --testPathPattern="season"`
+- [x] All season tests pass before proceeding
 
 ---
 
