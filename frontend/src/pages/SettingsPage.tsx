@@ -36,7 +36,7 @@ export const SettingsPage: React.FC = () => {
       </Typography>
 
       {/* Quick Actions */}
-      <Paper sx={{ p: 3, mb: 3 }}>
+      <Paper sx={{ p: { xs: 2, sm: 3 }, mb: { xs: 2, sm: 3 } }}>
         <Typography variant="h6" gutterBottom>
           Quick Actions
         </Typography>
@@ -72,7 +72,7 @@ export const SettingsPage: React.FC = () => {
       </Paper>
 
       {/* Data & Privacy */}
-      <Paper sx={{ p: 3, mb: 3 }}>
+      <Paper sx={{ p: { xs: 2, sm: 3 }, mb: { xs: 2, sm: 3 } }}>
         <Typography variant="h6" gutterBottom>
           Data & Privacy
         </Typography>
@@ -100,7 +100,7 @@ export const SettingsPage: React.FC = () => {
       </Paper>
 
       {/* About */}
-      <Paper sx={{ p: 3, mb: 3 }}>
+      <Paper sx={{ p: { xs: 2, sm: 3 }, mb: { xs: 2, sm: 3 } }}>
         <Typography variant="h6" gutterBottom>
           About KernelWorx
         </Typography>
@@ -131,7 +131,7 @@ export const SettingsPage: React.FC = () => {
       {/* Logout */}
       <Paper
         sx={{
-          p: 3,
+          p: { xs: 2, sm: 3 },
           borderColor: "error.main",
           borderWidth: 1,
           borderStyle: "solid",

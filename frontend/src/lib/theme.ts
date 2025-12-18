@@ -25,12 +25,25 @@ export const theme = createTheme({
       "Arial",
       "sans-serif",
     ].join(","),
+    // Base font size - slightly larger on mobile for readability
+    fontSize: 15,
+    body1: {
+      fontSize: "1rem",
+      "@media (max-width: 600px)": {
+        fontSize: "0.9375rem", // 15px on mobile
+      },
+    },
+    body2: {
+      fontSize: "0.875rem",
+      "@media (max-width: 600px)": {
+        fontSize: "0.8125rem", // 13px on mobile
+      },
+    },
     h1: {
       fontFamily: '"Kaushan Script", "Atkinson Hyperlegible", cursive',
       fontWeight: 600,
       letterSpacing: "0.08em",
       fontSize: "2rem",
-      // Larger on medium and up
       "@media (min-width: 900px)": {
         fontSize: "3rem",
       },
@@ -38,10 +51,100 @@ export const theme = createTheme({
     h2: {
       fontFamily: '"Atkinson Hyperlegible", "Lexend", "Inter", sans-serif',
       fontWeight: 700,
+      fontSize: "1.75rem",
+      "@media (max-width: 600px)": {
+        fontSize: "1.5rem",
+      },
     },
     h3: {
       fontFamily: '"Atkinson Hyperlegible", "Lexend", "Inter", sans-serif',
       fontWeight: 700,
+      fontSize: "1.5rem",
+      "@media (max-width: 600px)": {
+        fontSize: "1.25rem",
+      },
+    },
+    h4: {
+      fontSize: "1.5rem",
+      fontWeight: 600,
+      "@media (max-width: 600px)": {
+        fontSize: "1.25rem",
+      },
+    },
+    h5: {
+      fontSize: "1.25rem",
+      fontWeight: 600,
+      "@media (max-width: 600px)": {
+        fontSize: "1.125rem",
+      },
+    },
+    h6: {
+      fontSize: "1.125rem",
+      fontWeight: 600,
+      "@media (max-width: 600px)": {
+        fontSize: "1rem",
+      },
+    },
+    button: {
+      textTransform: "none",
+      fontWeight: 500,
+      fontSize: "0.9375rem",
+      "@media (max-width: 600px)": {
+        fontSize: "0.875rem",
+      },
+    },
+  },
+  components: {
+    MuiContainer: {
+      styleOverrides: {
+        root: {
+          "@media (max-width: 600px)": {
+            paddingLeft: "12px",
+            paddingRight: "12px",
+          },
+        },
+      },
+    },
+    MuiPaper: {
+      styleOverrides: {
+        root: {
+          "@media (max-width: 600px)": {
+            // Reduce padding on mobile
+            "&.MuiPaper-root": {
+              // Use data attribute or class for conditional padding
+            },
+          },
+        },
+      },
+    },
+    MuiButton: {
+      styleOverrides: {
+        root: {
+          "@media (max-width: 600px)": {
+            paddingTop: "6px",
+            paddingBottom: "6px",
+            paddingLeft: "12px",
+            paddingRight: "12px",
+            minHeight: "36px",
+          },
+        },
+        sizeLarge: {
+          "@media (max-width: 600px)": {
+            paddingTop: "8px",
+            paddingBottom: "8px",
+            fontSize: "0.9375rem",
+          },
+        },
+      },
+    },
+    MuiIconButton: {
+      styleOverrides: {
+        root: {
+          "@media (max-width: 600px)": {
+            padding: "8px",
+          },
+        },
+      },
     },
   },
 });

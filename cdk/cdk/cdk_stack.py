@@ -739,10 +739,12 @@ class CdkStack(Stack):
                         callback_urls=[
                             f"https://{self.site_domain}",
                             "http://localhost:5173",
+                            "https://local.dev.appworx.app:5173",
                         ],
                         logout_urls=[
                             f"https://{self.site_domain}",
                             "http://localhost:5173",
+                            "https://local.dev.appworx.app:5173",
                         ],
                     ),
                     supported_identity_providers=[cognito.UserPoolClientIdentityProvider.COGNITO],
@@ -910,11 +912,13 @@ class CdkStack(Stack):
                     ],
                     callback_urls=[
                         "http://localhost:5173",
+                        "https://local.dev.appworx.app:5173",
                         f"https://{self.site_domain}",
                         f"https://{self.site_domain}/callback",
                     ],
                     logout_urls=[
                         "http://localhost:5173",
+                        "https://local.dev.appworx.app:5173",
                         f"https://{self.site_domain}",
                     ],
                 ),
