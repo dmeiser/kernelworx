@@ -16,7 +16,6 @@ import {
   InputLabel,
   Select,
   MenuItem,
-  ListSubheader,
   Alert,
   CircularProgress,
 } from "@mui/material";
@@ -162,6 +161,15 @@ export const CreateSeasonDialog: React.FC<CreateSeasonDialogProps> = ({
               value={catalogId}
               onChange={(e) => setCatalogId(e.target.value)}
               label="Product Catalog"
+              MenuProps={{
+                slotProps: {
+                  paper: {
+                    sx: {
+                      maxHeight: 300,
+                    },
+                  },
+                },
+              }}
             >
               {catalogsLoading && (
                 <MenuItem disabled>
@@ -174,34 +182,30 @@ export const CreateSeasonDialog: React.FC<CreateSeasonDialogProps> = ({
               )}
               
               {/* My Catalogs Section */}
-              {myCatalogs.length > 0 && (
-                <>
-                  <ListSubheader sx={{ fontWeight: 600, backgroundColor: "#f5f5f5" }}>
-                    My Catalogs
-                  </ListSubheader>
-                  {myCatalogs.map((catalog) => (
-                    <MenuItem key={catalog.catalogId} value={catalog.catalogId}>
-                      {catalog.catalogName}
-                      {catalog.catalogType === "ADMIN_MANAGED" && " (Official)"}
-                    </MenuItem>
-                  ))}
-                </>
-              )}
+              {myCatalogs.length > 0 && [
+                <MenuItem key="my-header" disabled sx={{ fontWeight: 600, backgroundColor: "#f5f5f5", opacity: 1 }}>
+                  My Catalogs
+                </MenuItem>,
+                ...myCatalogs.map((catalog) => (
+                  <MenuItem key={catalog.catalogId} value={catalog.catalogId}>
+                    {catalog.catalogName}
+                    {catalog.catalogType === "ADMIN_MANAGED" && " (Official)"}
+                  </MenuItem>
+                ))
+              ]}
               
               {/* Public Catalogs Section */}
-              {filteredPublicCatalogs.length > 0 && (
-                <>
-                  <ListSubheader sx={{ fontWeight: 600, backgroundColor: "#f5f5f5" }}>
-                    Public Catalogs
-                  </ListSubheader>
-                  {filteredPublicCatalogs.map((catalog) => (
-                    <MenuItem key={catalog.catalogId} value={catalog.catalogId}>
-                      {catalog.catalogName}
-                      {catalog.catalogType === "ADMIN_MANAGED" && " (Official)"}
-                    </MenuItem>
-                  ))}
-                </>
-              )}
+              {filteredPublicCatalogs.length > 0 && [
+                <MenuItem key="public-header" disabled sx={{ fontWeight: 600, backgroundColor: "#f5f5f5", opacity: 1 }}>
+                  Public Catalogs
+                </MenuItem>,
+                ...filteredPublicCatalogs.map((catalog) => (
+                  <MenuItem key={catalog.catalogId} value={catalog.catalogId}>
+                    {catalog.catalogName}
+                    {catalog.catalogType === "ADMIN_MANAGED" && " (Official)"}
+                  </MenuItem>
+                ))
+              ]}
             </Select>
           </FormControl>
 

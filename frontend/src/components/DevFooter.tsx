@@ -16,7 +16,7 @@ export const DevFooter: React.FC = () => {
     <Box
       component="footer"
       sx={{
-        position: "fixed",
+        position: { xs: "relative", sm: "fixed" },
         bottom: 0,
         left: 0,
         right: 0,
@@ -24,8 +24,9 @@ export const DevFooter: React.FC = () => {
         px: 2,
         bgcolor: "rgba(0, 0, 0, 0.7)",
         backdropFilter: "blur(4px)",
-        zIndex: 9999,
+        zIndex: 1000,
         textAlign: "center",
+        marginTop: { xs: 2, sm: 0 },
       }}
     >
       <Tooltip title={<span style={{ whiteSpace: "pre-line" }}>{getDetailedBuildInfo()}</span>} placement="top">
