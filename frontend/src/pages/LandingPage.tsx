@@ -21,7 +21,6 @@ import {
 } from "@mui/material";
 import { Login as LoginIcon } from "@mui/icons-material";
 import { useAuth } from "../contexts/AuthContext";
-import { getVersionString, isDevelopment } from "../lib/buildInfo";
 
 export const LandingPage: React.FC = () => {
   const navigate = useNavigate();
@@ -197,18 +196,13 @@ export const LandingPage: React.FC = () => {
           </Box>
 
           {/* Footer */}
-          <Box textAlign="center" sx={{ pt: 4 }}>
+          <Box textAlign="center" sx={{ pt: 4, pb: 4 }}>
             <Typography variant="body2" color="text.secondary">
               Built with ❤️ for Scouting America volunteers
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
               Open source • MIT License • Free to use
             </Typography>
-            {isDevelopment() && (
-              <Typography variant="caption" color="text.disabled" sx={{ mt: 1, display: "block" }}>
-                {getVersionString()}
-              </Typography>
-            )}
           </Box>
         </Stack>
       </Container>

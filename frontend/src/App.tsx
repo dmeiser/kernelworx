@@ -9,6 +9,7 @@ import { CssBaseline, ThemeProvider } from "@mui/material";
 import { ApolloProvider } from "@apollo/client/react";
 import { AuthProvider } from "./contexts/AuthContext";
 import { ProtectedRoute } from "./components/ProtectedRoute";
+import { DevFooter } from "./components/DevFooter";
 import { LandingPage } from "./pages/LandingPage";
 import { LoginPage } from "./pages/LoginPage";
 import { SignupPage } from "./pages/SignupPage";
@@ -140,6 +141,7 @@ function App() {
               {/* 404 catch-all */}
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
+            <DevFooter />
           </AuthProvider>
         </BrowserRouter>
       </ApolloProvider>

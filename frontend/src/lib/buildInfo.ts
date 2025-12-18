@@ -11,16 +11,44 @@ export const buildInfo = {
 
 /**
  * Check if we're in a development environment
+ * This checks the runtime hostname, not build mode
  */
 export const isDevelopment = (): boolean => {
-  // Check if hostname indicates dev environment
-  const hostname = typeof window !== "undefined" ? window.location.hostname : "";
-  return (
-    hostname === "localhost" ||
-    hostname.startsWith("dev.") ||
-    hostname.includes(".dev.") ||
-    import.meta.env.DEV
-  );
+  // Always check hostname at runtime - this works regardless of build mode
+  if (typeof window === "undefined") {
+    return false;
+  }
+  
+  const hostname = window.location.hostname;
+  
+  // Dev environments: localhost, dev.*, *.dev.*
+  if (hostname === "localhost" || hostname === "127.0.0.1") {
+    return true;
+  }
+  if (hostname.startsWith("dev.")) {
+    return true;
+  }
+  if (hostname.includes(".dev.")) {
+    return true;
+  }
+  
+  return false;
+};
+
+/**
+ * Get build time formatted in UTC
+ */
+export const getBuildTimeUTC = (): string => {
+  const buildDate = new Date(buildInfo.buildTime);
+  return buildDate.toISOString().replace("T", " ").replace(/\.\d{3}Z$/, " UTC");
+};
+
+/**
+ * Get short build time (just date and time, no seconds)
+ */
+export const getShortBuildTime = (): string => {
+  const buildDate = new Date(buildInfo.buildTime);
+  return buildDate.toISOString().slice(0, 16).replace("T", " ") + " UTC";
 };
 
 /**
@@ -35,6 +63,5 @@ export const getVersionString = (): string => {
  * Get detailed build info for debugging
  */
 export const getDetailedBuildInfo = (): string => {
-  const buildDate = new Date(buildInfo.buildTime);
-  return `Version: ${buildInfo.version}\nCommit: ${buildInfo.commit}\nBranch: ${buildInfo.branch}\nBuilt: ${buildDate.toLocaleString()}`;
+  return `Version: ${buildInfo.version}\nCommit: ${buildInfo.commit}\nBranch: ${buildInfo.branch}\nBuilt: ${getBuildTimeUTC()}`;
 };

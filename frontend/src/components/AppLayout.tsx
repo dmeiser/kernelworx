@@ -16,7 +16,6 @@ import {
   useMediaQuery,
   useTheme,
   Divider,
-  Tooltip,
 } from "@mui/material";
 import MenuIcon from "@mui/icons-material/Menu";
 import PersonIcon from "@mui/icons-material/Person";
@@ -29,7 +28,6 @@ import CardGiftcardIcon from "@mui/icons-material/CardGiftcard";
 import { useAuth } from "../contexts/AuthContext";
 import { Toast } from "./Toast";
 import { Outlet } from "react-router-dom";
-import { getVersionString, getDetailedBuildInfo, isDevelopment } from "../lib/buildInfo";
 
 const DRAWER_WIDTH = 240;
 
@@ -133,20 +131,6 @@ export const AppLayout: React.FC<{ children?: React.ReactNode }> = ({
           </>
         )}
       </List>
-      {/* Version info at bottom of drawer - only in dev */}
-      {isDevelopment() && (
-        <Box sx={{ p: 2, borderTop: 1, borderColor: "divider" }}>
-          <Tooltip title={getDetailedBuildInfo()} placement="top">
-            <Typography
-              variant="caption"
-              color="text.secondary"
-              sx={{ cursor: "help", display: "block", textAlign: "center" }}
-            >
-              {getVersionString()}
-            </Typography>
-          </Tooltip>
-        </Box>
-      )}
     </Box>
   );
 

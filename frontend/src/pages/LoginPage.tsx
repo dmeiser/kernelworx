@@ -30,7 +30,7 @@ import {
 import { useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { confirmSignIn, signIn } from "aws-amplify/auth";
-import { getVersionString, isDevelopment } from "../lib/buildInfo";
+import type { SignInOutput } from "aws-amplify/auth";
 
 export const LoginPage: React.FC = () => {
   const navigate = useNavigate();
@@ -60,14 +60,34 @@ export const LoginPage: React.FC = () => {
     setLoading(true);
 
     try {
-      const result = await loginWithPassword(email, password);
+      const result = (await loginWithPassword(email, password)) as SignInOutput;
 
       if (result.isSignedIn) {
         // Login successful, navigate to destination
         navigate(from, { replace: true });
+      } else if (result.nextStep?.signInStep === "CONFIRM_SIGN_IN_WITH_TOTP_CODE") {
+        // TOTP MFA required - show MFA form
+        setShowMfa(true);
+        setMfaCode("");
+        setLoading(false);
+      } else if (result.nextStep?.signInStep === "CONFIRM_SIGN_IN_WITH_SMS_CODE") {
+        // SMS MFA required - show MFA form
+        setShowMfa(true);
+        setMfaCode("");
+        setLoading(false);
+      } else if (result.nextStep?.signInStep === "CONFIRM_SIGN_IN_WITH_EMAIL_CODE") {
+        // Email MFA required - show MFA form
+        setShowMfa(true);
+        setMfaCode("");
+        setLoading(false);
+      } else if (result.nextStep) {
+        // Other challenge types
+        console.log("Unexpected next step:", result.nextStep);
+        setError(`Unexpected authentication step: ${result.nextStep.signInStep}`);
+        setLoading(false);
       } else {
-        // For MFA or other challenges, user needs to use a different flow
-        setError("Additional authentication required. Please try again.");
+        // No nextStep and not signed in - unclear state
+        setError("Authentication failed. Please try again.");
         setLoading(false);
       }
     } catch (err: any) {
@@ -86,10 +106,15 @@ export const LoginPage: React.FC = () => {
       const result = await confirmSignIn({ challengeResponse: mfaCode });
 
       if (result.isSignedIn) {
-        // Wait a bit for auth state to propagate
-        await new Promise((resolve) => setTimeout(resolve, 500));
-        // Force a page reload to ensure auth state is fresh
-        window.location.href = from;
+        // MFA successful - refresh auth session to pick up new tokens
+        // Then navigate to destination. The AuthContext will detect the new session.
+        setShowMfa(false);
+        setMfaCode("");
+        setPassword("");
+        // Refresh auth session and trigger redirect via useEffect hook
+        setTimeout(() => {
+          navigate(from, { replace: true });
+        }, 500);
       } else {
         setError("MFA verification failed");
         setLoading(false);
@@ -416,6 +441,7 @@ export const LoginPage: React.FC = () => {
               severity="warning"
               sx={{
                 mt: 3,
+                mb: 4,
                 backgroundColor: "#fff3e0",
                 borderLeft: "4px solid #f57c00",
                 "& .MuiAlert-icon": {
@@ -428,17 +454,6 @@ export const LoginPage: React.FC = () => {
                 years old to create an account (COPPA compliance).
               </Typography>
             </Alert>
-
-            {/* Version info - dev only */}
-            {isDevelopment() && (
-              <Typography
-                variant="caption"
-                color="text.disabled"
-                sx={{ mt: 2, display: "block", textAlign: "center" }}
-              >
-                {getVersionString()}
-              </Typography>
-            )}
           </>
         )}
       </Paper>
