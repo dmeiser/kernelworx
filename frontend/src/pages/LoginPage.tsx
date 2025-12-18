@@ -30,6 +30,7 @@ import {
 import { useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { confirmSignIn, signIn } from "aws-amplify/auth";
+import { getVersionString, isDevelopment } from "../lib/buildInfo";
 
 export const LoginPage: React.FC = () => {
   const navigate = useNavigate();
@@ -427,6 +428,17 @@ export const LoginPage: React.FC = () => {
                 years old to create an account (COPPA compliance).
               </Typography>
             </Alert>
+
+            {/* Version info - dev only */}
+            {isDevelopment() && (
+              <Typography
+                variant="caption"
+                color="text.disabled"
+                sx={{ mt: 2, display: "block", textAlign: "center" }}
+              >
+                {getVersionString()}
+              </Typography>
+            )}
           </>
         )}
       </Paper>

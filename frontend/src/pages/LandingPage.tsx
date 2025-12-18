@@ -21,6 +21,7 @@ import {
 } from "@mui/material";
 import { Login as LoginIcon } from "@mui/icons-material";
 import { useAuth } from "../contexts/AuthContext";
+import { getVersionString, isDevelopment } from "../lib/buildInfo";
 
 export const LandingPage: React.FC = () => {
   const navigate = useNavigate();
@@ -203,6 +204,11 @@ export const LandingPage: React.FC = () => {
             <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
               Open source • MIT License • Free to use
             </Typography>
+            {isDevelopment() && (
+              <Typography variant="caption" color="text.disabled" sx={{ mt: 1, display: "block" }}>
+                {getVersionString()}
+              </Typography>
+            )}
           </Box>
         </Stack>
       </Container>
