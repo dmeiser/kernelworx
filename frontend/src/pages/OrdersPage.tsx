@@ -31,7 +31,6 @@ import { SeasonSummaryTiles } from "../components/SeasonSummaryTiles";
 import {
   LIST_ORDERS_BY_SEASON,
   DELETE_ORDER,
-  GET_SEASON,
   GET_PROFILE,
 } from "../lib/graphql";
 
@@ -54,12 +53,6 @@ interface Order {
   notes?: string;
 }
 
-interface Product {
-  productId: string;
-  productName: string;
-  price: number;
-}
-
 export const OrdersPage: React.FC = () => {
   const { profileId: encodedProfileId, seasonId: encodedSeasonId } = useParams<{ profileId: string; seasonId: string }>();
   const profileId = encodedProfileId ? decodeURIComponent(encodedProfileId) : "";
@@ -70,12 +63,6 @@ export const OrdersPage: React.FC = () => {
   const { data: profileData } = useQuery<{ getProfile: any }>(GET_PROFILE, {
     variables: { profileId },
     skip: !profileId,
-  });
-
-  // Fetch season (for catalog/products)
-  const { data: seasonData } = useQuery<{ getSeason: any }>(GET_SEASON, {
-    variables: { seasonId },
-    skip: !seasonId,
   });
 
   // Fetch orders
@@ -97,7 +84,6 @@ export const OrdersPage: React.FC = () => {
   });
 
   const orders = ordersData?.listOrdersBySeason || [];
-  const products: Product[] = seasonData?.getSeason?.catalog?.products || [];
   const profile = profileData?.getProfile;
   const hasWritePermission = profile?.isOwner || profile?.permissions?.includes('WRITE');
 
