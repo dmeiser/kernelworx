@@ -157,7 +157,7 @@ export const ProfileCard: React.FC<ProfileCardProps> = ({
                 color="text.secondary"
                 sx={{ display: "block", mb: 1, fontWeight: 500 }}
               >
-                Current Season: {latestSeason.seasonName}
+                Current Season: {latestSeason.seasonName} {latestSeason.seasonYear}
               </Typography>
               <Stack direction="row" spacing={2}>
                 <Box>

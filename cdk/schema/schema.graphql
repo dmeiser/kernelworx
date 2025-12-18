@@ -147,6 +147,7 @@ type ProfileInvite {
 type UnitReport {
   unitType: String!
   unitNumber: Int!
+  seasonName: String!
   seasonYear: Int!
   sellers: [UnitSellerSummary!]!
   totalSales: Float!
@@ -327,7 +328,7 @@ type Query {
   listInvitesByProfile(profileId: ID!): [ProfileInvite!]!
   
   # Unit reporting
-  getUnitReport(unitType: String!, unitNumber: Int!, seasonYear: Int!): UnitReport
+  getUnitReport(unitType: String!, unitNumber: Int!, seasonName: String!, seasonYear: Int!): UnitReport
 }
 
 # ============================================================================

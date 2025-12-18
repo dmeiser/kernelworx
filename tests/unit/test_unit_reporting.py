@@ -19,6 +19,7 @@ class TestGetUnitReport:
             "arguments": {
                 "unitType": "Pack",
                 "unitNumber": 158,
+                "seasonName": "Fall",
                 "seasonYear": 2024,
             },
             "identity": {"sub": "test-account-123"},
@@ -51,11 +52,13 @@ class TestGetUnitReport:
             {
                 "seasonId": "SEASON#season1",
                 "profileId": "PROFILE#profile1",
+                "seasonName": "Fall",
                 "seasonYear": 2024,
             },
             {
                 "seasonId": "SEASON#season2",
                 "profileId": "PROFILE#profile2",
+                "seasonName": "Fall",
                 "seasonYear": 2024,
             },
         ]
@@ -141,6 +144,7 @@ class TestGetUnitReport:
         # Assert
         assert result["unitType"] == "Pack"
         assert result["unitNumber"] == 158
+        assert result["seasonName"] == "Fall"
         assert result["seasonYear"] == 2024
         assert len(result["sellers"]) == 2
         assert result["totalSales"] == 300.0
@@ -173,6 +177,7 @@ class TestGetUnitReport:
         # Assert
         assert result["unitType"] == "Pack"
         assert result["unitNumber"] == 158
+        assert result["seasonName"] == "Fall"
         assert result["seasonYear"] == 2024
         assert result["sellers"] == []
         assert result["totalSales"] == 0.0
@@ -346,6 +351,7 @@ class TestGetUnitReport:
             "arguments": {
                 "unitType": "Pack",
                 "unitNumber": 158,
+                "seasonName": "Spring",
                 "seasonYear": 2023,  # Different year
             },
             "identity": {"sub": "test-account-123"},
@@ -354,13 +360,14 @@ class TestGetUnitReport:
         mock_profiles_table.scan.return_value = {"Items": sample_profiles}
         mock_check_access.return_value = True
 
-        # No seasons for 2023
+        # No seasons for Spring 2023
         mock_seasons_table.query.return_value = {"Items": []}
 
         # Act
         result = get_unit_report(event, lambda_context)
 
         # Assert
+        assert result["seasonName"] == "Spring"
         assert result["seasonYear"] == 2023
         assert result["sellers"] == []
         assert result["totalSales"] == 0.0
@@ -389,6 +396,7 @@ class TestGetUnitReport:
                 {
                     "seasonId": "SEASON#season1",
                     "profileId": "PROFILE#profile1",
+                    "seasonName": "Fall",
                     "seasonYear": 2024,
                 }
             ]

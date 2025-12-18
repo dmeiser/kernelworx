@@ -74,6 +74,7 @@ interface UnitSellerSummary {
 interface UnitReport {
   unitType: string;
   unitNumber: number;
+  seasonName: string;
   seasonYear: number;
   sellers: UnitSellerSummary[];
   totalSales: number;
@@ -82,11 +83,20 @@ interface UnitReport {
 
 type ReportView = "summary" | "detailed" | "unit";
 
+const SEASON_NAMES = [
+  "Fall",
+  "Spring",
+  "Summer",
+  "Winter",
+  "Annual",
+];
+
 export const UnitReportsPage: React.FC = () => {
   const currentYear = new Date().getFullYear();
 
   const [unitType, setUnitType] = useState<string>("");
   const [unitNumber, setUnitNumber] = useState<string>("");
+  const [seasonName, setSeasonName] = useState<string>("Fall");
   const [seasonYear, setSeasonYear] = useState<number>(currentYear);
   const [reportView, setReportView] = useState<ReportView>("summary");
 
@@ -109,7 +119,7 @@ export const UnitReportsPage: React.FC = () => {
     }
   }, [accountData]);
 
-  const canGenerateReport = unitType && unitNumber && seasonYear;
+  const canGenerateReport = unitType && unitNumber && seasonName && seasonYear;
 
   const { data, loading, error, refetch } = useQuery<{
     getUnitReport: UnitReport;
@@ -117,6 +127,7 @@ export const UnitReportsPage: React.FC = () => {
     variables: {
       unitType,
       unitNumber: unitNumber ? parseInt(unitNumber, 10) : 0,
+      seasonName,
       seasonYear,
     },
     skip: !canGenerateReport,
@@ -199,7 +210,7 @@ export const UnitReportsPage: React.FC = () => {
     XLSX.utils.book_append_sheet(wb, detailedSheet, "Detailed Orders");
 
     // Download
-    const fileName = `${report.unitType}_${report.unitNumber}_${report.seasonYear}_Report.xlsx`;
+    const fileName = `${report.unitType}_${report.unitNumber}_${report.seasonName}_${report.seasonYear}_Report.xlsx`;
     XLSX.writeFile(wb, fileName);
   };
 
@@ -247,7 +258,21 @@ export const UnitReportsPage: React.FC = () => {
               />
 
               <TextField
-                label="Season Year"
+                select
+                label="Season"
+                value={seasonName}
+                onChange={(e) => setSeasonName(e.target.value)}
+                fullWidth
+              >
+                {SEASON_NAMES.map((name) => (
+                  <MenuItem key={name} value={name}>
+                    {name}
+                  </MenuItem>
+                ))}
+              </TextField>
+
+              <TextField
+                label="Year"
                 type="number"
                 value={seasonYear}
                 onChange={(e) => setSeasonYear(parseInt(e.target.value, 10))}
@@ -286,7 +311,8 @@ export const UnitReportsPage: React.FC = () => {
                   alignItems="center"
                 >
                   <Typography variant="h5">
-                    {report.unitType} {report.unitNumber} - {report.seasonYear}
+                    {report.unitType} {report.unitNumber} - {report.seasonName}{" "}
+                    {report.seasonYear}
                   </Typography>
                   <Button
                     variant="outlined"

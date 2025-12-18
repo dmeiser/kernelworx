@@ -456,15 +456,18 @@ export const GET_UNIT_REPORT = gql`
   query GetUnitReport(
     $unitType: String!
     $unitNumber: Int!
+    $seasonName: String!
     $seasonYear: Int!
   ) {
     getUnitReport(
       unitType: $unitType
       unitNumber: $unitNumber
+      seasonName: $seasonName
       seasonYear: $seasonYear
     ) {
       unitType
       unitNumber
+      seasonName
       seasonYear
       totalSales
       totalOrders

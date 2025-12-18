@@ -41,6 +41,7 @@ def get_unit_report(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         event: AppSync resolver event with arguments:
             - unitType: String (e.g., "Pack", "Troop")
             - unitNumber: Int (e.g., 158)
+            - seasonName: String (e.g., "Fall", "Spring")
             - seasonYear: Int (e.g., 2024)
         context: Lambda context (unused)
 
@@ -51,12 +52,13 @@ def get_unit_report(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         # Extract parameters
         unit_type = event["arguments"]["unitType"]
         unit_number = int(event["arguments"]["unitNumber"])
+        season_name = event["arguments"]["seasonName"]
         season_year = int(event["arguments"]["seasonYear"])
         caller_account_id = event["identity"]["sub"]
 
         logger.info(
             f"Generating unit report for {unit_type} {unit_number}, "
-            f"season {season_year}, caller {caller_account_id}"
+            f"season {season_name} {season_year}, caller {caller_account_id}"
         )
 
         # Step 1: Find all profiles in this unit
@@ -77,6 +79,7 @@ def get_unit_report(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             return {
                 "unitType": unit_type,
                 "unitNumber": unit_number,
+                "seasonName": season_name,
                 "seasonYear": season_year,
                 "sellers": [],
                 "totalSales": 0.0,
@@ -106,6 +109,7 @@ def get_unit_report(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             return {
                 "unitType": unit_type,
                 "unitNumber": unit_number,
+                "seasonName": season_name,
                 "seasonYear": season_year,
                 "sellers": [],
                 "totalSales": 0.0,
@@ -124,8 +128,8 @@ def get_unit_report(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             # Get seasons for this profile
             seasons_response = seasons_table.query(
                 KeyConditionExpression=Key("profileId").eq(profile_id),
-                FilterExpression="seasonYear = :year",
-                ExpressionAttributeValues={":year": season_year},
+                FilterExpression="seasonName = :name AND seasonYear = :year",
+                ExpressionAttributeValues={":name": season_name, ":year": season_year},
             )
 
             seasons = seasons_response.get("Items", [])
@@ -189,6 +193,7 @@ def get_unit_report(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         return {
             "unitType": unit_type,
             "unitNumber": unit_number,
+            "seasonName": season_name,
             "seasonYear": season_year,
             "sellers": sellers,
             "totalSales": total_unit_sales,
