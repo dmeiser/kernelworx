@@ -4,8 +4,8 @@ set -e
 # Helper script to deploy CDK with automatic resource import
 # This detects existing AWS resources and either imports or deploys them
 
-ENV=${1:-dev}
-STACK_NAME="popcorn-sales-manager-${ENV}"
+ENV="dev"
+STACK_NAME="kernelworx-${ENV}"
 
 echo "===================================================================="
 echo "CDK Deployment with Auto-Import for environment: $ENV"
@@ -35,20 +35,20 @@ EOF
     fi
     
     # Check for existing S3 buckets
-    STATIC_BUCKET=$(aws s3 ls | grep -E "popcorn-sales-manager-${ENV}-staticassets" | awk '{print $3}' | head -1)
+    STATIC_BUCKET=$(aws s3 ls | grep -E "kernelworx-static-${ENV}" | awk '{print $3}' | head -1)
     if [ -n "$STATIC_BUCKET" ]; then
         echo "✓ Found existing static assets bucket: $STATIC_BUCKET"
         RESOURCES_TO_IMPORT+=("StaticAssets|$STATIC_BUCKET")
     fi
     
-    EXPORTS_BUCKET=$(aws s3 ls | grep -E "popcorn-sales-manager-${ENV}-exports" | awk '{print $3}' | head -1)
+    EXPORTS_BUCKET=$(aws s3 ls | grep -E "kernelworx-exports-${ENV}" | awk '{print $3}' | head -1)
     if [ -n "$EXPORTS_BUCKET" ]; then
         echo "✓ Found existing exports bucket: $EXPORTS_BUCKET"
         RESOURCES_TO_IMPORT+=("Exports|$EXPORTS_BUCKET")
     fi
     
     # Check for existing Cognito User Pool
-    USER_POOL_NAME="popcorn-sales-manager-${ENV}"
+    USER_POOL_NAME="kernelworx-users-${ENV}"
     USER_POOL_ID=$(aws cognito-idp list-user-pools --max-results 60 | \
         jq -r ".UserPools[] | select(.Name==\"$USER_POOL_NAME\") | .Id" 2>/dev/null | head -1)
     if [ -n "$USER_POOL_ID" ]; then
@@ -57,7 +57,7 @@ EOF
     fi
     
     # Check for existing AppSync API
-    API_NAME="popcorn-sales-manager-api-${ENV}"
+    API_NAME="kernelworx-api-${ENV}"
     API_ID=$(aws appsync list-graphql-apis | \
         jq -r ".graphqlApis[] | select(.name==\"$API_NAME\") | .apiId" 2>/dev/null | head -1)
     if [ -n "$API_ID" ]; then

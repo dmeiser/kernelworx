@@ -1,14 +1,14 @@
 /**
  * Protected route wrapper component
- * 
+ *
  * Redirects to login if user is not authenticated.
  * Optionally requires admin privileges.
  */
 
-import React from 'react';
-import { Navigate } from 'react-router-dom';
-import { useAuth } from '../contexts/AuthContext';
-import { Box, CircularProgress, Typography } from '@mui/material';
+import React from "react";
+import { Navigate } from "react-router-dom";
+import { useAuth } from "../contexts/AuthContext";
+import { Box, CircularProgress, Typography } from "@mui/material";
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
@@ -16,9 +16,9 @@ interface ProtectedRouteProps {
   requireAdmin?: boolean;
 }
 
-export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ 
-  children, 
-  requireAdmin = false 
+export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
+  children,
+  requireAdmin = false,
 }) => {
   const { isAuthenticated, isAdmin, loading } = useAuth();
 

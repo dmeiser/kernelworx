@@ -1,10 +1,20 @@
 /// <reference types="vitest" />
 import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
+import fs from 'fs'
 
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
+  server: {
+    host: '0.0.0.0', // Listen on all interfaces
+    port: 5173,
+    strictPort: true,
+    https: {
+      key: fs.readFileSync('.cert/key.pem'),
+      cert: fs.readFileSync('.cert/cert.pem'),
+    },
+  },
   test: {
     globals: true,
     environment: 'jsdom',

@@ -29,16 +29,16 @@ env = cdk.Environment(
     region=os.getenv("AWS_REGION") or os.getenv("CDK_DEFAULT_REGION", "us-east-1"),
 )
 
-# Environment-specific stack name
-stack_name = f"popcorn-sales-manager-{env_name}"
+# Environment-specific stack name with deterministic naming
+stack_name = f"kernelworx-{env_name}"
 
 CdkStack(
     app,
-    f"CdkStack-{env_name}",
+    f"KernelWorxStack-{env_name}",
     stack_name=stack_name,
     env_name=env_name,
     env=env,
-    description=f"Popcorn Sales Manager - Core Infrastructure ({env_name})",
+    description=f"KernelWorx - Core Infrastructure ({env_name})",
 )
 
 app.synth()

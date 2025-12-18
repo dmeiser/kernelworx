@@ -96,6 +96,16 @@ open htmlcov/index.html
 - Ensure every file shows 100%
 - **All tests must pass** - zero failures, zero errors
 
+**Test Cleanup Requirements**:
+- **CRITICAL**: All automated tests (unit, integration, and any other) must clean up after themselves
+- Each test must delete any DynamoDB records created during testing
+- Each test must delete any S3 objects created during testing
+- Before marking a test as "complete", verify cleanup by:
+  1. Running the test successfully
+  2. Checking DynamoDB/S3 to confirm all test data has been deleted
+- Use `@mock_dynamodb` and `@mock_s3` decorators from `moto` to ensure proper cleanup
+- Tests that leave orphaned data are considered INCOMPLETE and must be fixed before merge
+
 **Mocking Strategy**:
 - Use `moto` for mocking AWS services (DynamoDB, S3, SNS/SES, EventBridge)
 - Use `pytest` fixtures for common test data
@@ -203,12 +213,110 @@ Before claiming work is complete:
 **GraphQL Schema**: Defined in `Planning Documents/graphql_schema_v1.md`
 **DynamoDB Schema**: Defined in `Planning Documents/dynamodb_physical_schema_v1.md`
 **Authorization Model**: Owner-based + Share-based (READ/WRITE permissions)
-**Auth Flow**: Cognito User Pools → AppSync → Lambda resolvers
+**Auth Flow**: Cognito User Pools → AppSync → Lambda/VTL/JS resolvers
+
+## Lambda Simplification Initiative
+
+**Status**: Phase 2 Complete - 53% reduction achieved (see `TODO_SIMPLIFY_LAMBDA.md`)
+
+The project initially had 15 Lambda functions. After Phase 1 and Phase 2 implementations, it now has 7 Lambda functions (53% reduction). The goal is to reduce to 2-3 functions (only those that truly require Lambda).
+
+### Resolver Types (Prefer in This Order)
+
+1. **VTL Resolvers** - Best for simple GetItem/PutItem/Query/DeleteItem
+2. **JavaScript Resolvers** - Best for computed fields, ID generation, simple logic
+3. **Pipeline Resolvers** - Best for multi-step operations (Query GSI → Update/Delete)
+4. **Lambda Resolvers** - Only for external dependencies (S3, Excel, email) or complex transactions
+
+### Lambda Functions to KEEP (2-3 total)
+
+| Function | Reason |
+|----------|--------|
+| `kernelworx-post-auth` | Cognito trigger (not AppSync) |
+| `kernelworx-request-report` | Requires openpyxl, S3 operations |
+| `kernelworx-create-profile` | DynamoDB transaction (optional - could be pipeline) |
+
+### Lambda Functions to REMOVE (10-12 total)
+
+Replace with VTL/JS/Pipeline resolvers. See `TODO_SIMPLIFY_LAMBDA.md` for detailed migration plan.
+
+**Quick Wins (VTL/JS)** - ✅ COMPLETED:
+- ✅ `list-orders-by-season` → VTL Query (DEPLOYED)
+- ✅ `revoke-share` → VTL DeleteItem (DEPLOYED)
+- ⏸️ `create-invite` → JS resolver (DEFERRED - kept as Lambda due to AppSync JS issues)
+
+**Pipeline Resolvers** - ✅ COMPLETED:
+- ✅ `update-season` → Query GSI7 → UpdateItem (DEPLOYED)
+- ✅ `update-order` → Query GSI6 → UpdateItem (DEPLOYED)
+- ✅ `delete-season` → Query GSI7 → DeleteItem (DEPLOYED)
+- ✅ `delete-order` → Query GSI6 → DeleteItem (DEPLOYED)
+- `delete-order` → Query GSI6 → DeleteItem
+- `create-order` → GetItem catalog → PutItem order (with JS for line item enrichment)
+
+### AppSync Resolver Patterns
+
+**VTL Query Pattern** (use for list operations):
+```vtl
+{
+    "version": "2017-02-28",
+    "operation": "Query",
+    "query": {
+        "expression": "PK = :pk AND begins_with(SK, :sk)",
+        "expressionValues": {
+            ":pk": $util.dynamodb.toDynamoDBJson($ctx.args.seasonId),
+            ":sk": $util.dynamodb.toDynamoDBJson("ORDER#")
+        }
+    }
+}
+```
+
+**JavaScript Resolver Pattern** (use for computed values):
+```javascript
+export function request(ctx) {
+    const inviteCode = util.autoId().substring(0, 8).toUpperCase();
+    return {
+        operation: "PutItem",
+        key: util.dynamodb.toMapValues({ PK: ctx.args.profileId, SK: `INVITE#${inviteCode}` }),
+        attributeValues: util.dynamodb.toMapValues({
+            inviteCode,
+            expiresAt: util.time.nowEpochSeconds() + (14 * 24 * 60 * 60),
+            // ...
+        }),
+        condition: { expression: "attribute_not_exists(PK)" }
+    };
+}
+
+export function response(ctx) {
+    return ctx.result;
+}
+```
+
+**Pipeline Resolver Pattern** (use for GSI lookup → mutation):
+```python
+# In CDK - create pipeline with two functions
+pipeline = api.create_resolver(
+    "UpdateSeasonPipeline",
+    type_name="Mutation",
+    field_name="updateSeason",
+    pipeline_config=[lookup_function, update_function],
+    # request/response templates pass data between functions
+)
+```
+
+### Key Principle: Avoid Lambda When Possible
+
+**Before creating a Lambda resolver, ask:**
+1. Can this be a single DynamoDB operation? → Use VTL
+2. Does it need ID generation or simple computation? → Use JS resolver
+3. Does it need to query then update/delete? → Use Pipeline resolver
+4. Does it need external services (S3, email) or transactions? → Use Lambda
 
 ## Key Files
 
 - `TODO.md`: Track progress and current phase
+- `TODO_SIMPLIFY_LAMBDA.md`: Lambda reduction analysis and migration plan
 - `Planning Documents/`: Complete requirements, architecture, schemas
+- `docs/VTL_RESOLVER_NOTES.md`: VTL resolver capabilities and limitations
 - `GAP_ANALYSIS.md`: Planning completeness assessment
 - `AGENT.md`: This file - AI agent rules and guidelines
 - `.github/copilot-instructions.md`: GitHub Copilot specific instructions

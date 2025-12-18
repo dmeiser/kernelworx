@@ -2,9 +2,9 @@
  * ProfileSeasonsPage - List all seasons for a specific seller profile
  */
 
-import React, { useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { useQuery, useMutation } from '@apollo/client/react';
+import React, { useState } from "react";
+import { useParams, useNavigate } from "react-router-dom";
+import { useQuery, useMutation } from "@apollo/client/react";
 import {
   Typography,
   Box,
@@ -16,18 +16,18 @@ import {
   IconButton,
   Breadcrumbs,
   Link,
-} from '@mui/material';
+} from "@mui/material";
 import {
   Add as AddIcon,
   ArrowBack as ArrowBackIcon,
-} from '@mui/icons-material';
-import { SeasonCard } from '../components/SeasonCard';
-import { CreateSeasonDialog } from '../components/CreateSeasonDialog';
+} from "@mui/icons-material";
+import { SeasonCard } from "../components/SeasonCard";
+import { CreateSeasonDialog } from "../components/CreateSeasonDialog";
 import {
   GET_PROFILE,
   LIST_SEASONS_BY_PROFILE,
   CREATE_SEASON,
-} from '../lib/graphql';
+} from "../lib/graphql";
 
 interface Season {
   seasonId: string;
@@ -47,7 +47,10 @@ interface Profile {
 }
 
 export const ProfileSeasonsPage: React.FC = () => {
-  const { profileId } = useParams<{ profileId: string }>();
+  const { profileId: encodedProfileId } = useParams<{ profileId: string }>();
+  const profileId = encodedProfileId
+    ? decodeURIComponent(encodedProfileId)
+    : "";
   const navigate = useNavigate();
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
 
@@ -83,16 +86,25 @@ export const ProfileSeasonsPage: React.FC = () => {
     seasonName: string,
     startDate: string,
     endDate: string | null,
-    catalogId: string
+    catalogId: string,
   ) => {
     if (!profileId) return;
+
+    // Convert YYYY-MM-DD to ISO 8601 datetime
+    const startDateTime = new Date(startDate + "T00:00:00.000Z").toISOString();
+    const endDateTime = endDate
+      ? new Date(endDate + "T23:59:59.999Z").toISOString()
+      : null;
+
     await createSeason({
       variables: {
-        profileId,
-        seasonName,
-        startDate,
-        endDate,
-        catalogId,
+        input: {
+          profileId,
+          seasonName,
+          startDate: startDateTime,
+          endDate: endDateTime,
+          catalogId,
+        },
       },
     });
   };
@@ -102,11 +114,16 @@ export const ProfileSeasonsPage: React.FC = () => {
   const loading = profileLoading || seasonsLoading;
   const error = profileError || seasonsError;
 
-  const canEdit = profile?.isOwner || profile?.permissions?.includes('WRITE');
+  const canEdit = profile?.isOwner || profile?.permissions?.includes("WRITE");
 
   if (loading && !profile) {
     return (
-      <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
+      <Box
+        display="flex"
+        justifyContent="center"
+        alignItems="center"
+        minHeight="400px"
+      >
         <CircularProgress />
       </Box>
     );
@@ -127,18 +144,25 @@ export const ProfileSeasonsPage: React.FC = () => {
         <Link
           component="button"
           variant="body1"
-          onClick={() => navigate('/profiles')}
-          sx={{ textDecoration: 'none', cursor: 'pointer' }}
+          onClick={() => navigate("/profiles")}
+          sx={{ textDecoration: "none", cursor: "pointer" }}
         >
           Profiles
         </Link>
-        <Typography color="text.primary">{profile?.sellerName || 'Loading...'}</Typography>
+        <Typography color="text.primary">
+          {profile?.sellerName || "Loading..."}
+        </Typography>
       </Breadcrumbs>
 
       {/* Header */}
-      <Stack direction="row" justifyContent="space-between" alignItems="center" mb={3}>
+      <Stack
+        direction="row"
+        justifyContent="space-between"
+        alignItems="center"
+        mb={3}
+      >
         <Stack direction="row" alignItems="center" spacing={2}>
-          <IconButton onClick={() => navigate('/profiles')} edge="start">
+          <IconButton onClick={() => navigate("/profiles")} edge="start">
             <ArrowBackIcon />
           </IconButton>
           <Box>
@@ -191,7 +215,7 @@ export const ProfileSeasonsPage: React.FC = () => {
         <Alert severity="info">
           {canEdit
             ? 'No sales seasons yet. Click "New Season" to get started!'
-            : 'No sales seasons have been created for this profile yet.'}
+            : "No sales seasons have been created for this profile yet."}
         </Alert>
       )}
 

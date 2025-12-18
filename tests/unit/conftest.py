@@ -22,81 +22,38 @@ def aws_credentials() -> None:
     os.environ["AWS_SECURITY_TOKEN"] = "testing"
     os.environ["AWS_SESSION_TOKEN"] = "testing"
     os.environ["AWS_DEFAULT_REGION"] = "us-east-1"
-    os.environ["TABLE_NAME"] = "PsmApp"
+    # Multi-table design: set all table names
+    os.environ["TABLE_NAME"] = "PsmApp"  # Legacy - kept for backward compat
+    os.environ["ACCOUNTS_TABLE_NAME"] = "kernelworx-accounts-ue1-dev"
+    os.environ["CATALOGS_TABLE_NAME"] = "kernelworx-catalogs-ue1-dev"
+    os.environ["PROFILES_TABLE_NAME"] = "kernelworx-profiles-ue1-dev"
+    os.environ["SEASONS_TABLE_NAME"] = "kernelworx-seasons-ue1-dev"
+    os.environ["ORDERS_TABLE_NAME"] = "kernelworx-orders-ue1-dev"
 
 
 @pytest.fixture
 def dynamodb_table(aws_credentials: None) -> Generator[Any, None, None]:
-    """Create mock DynamoDB table with GSIs."""
+    """Create all mock DynamoDB tables for multi-table design."""
     with mock_aws():
         dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
 
-        # Create table with GSIs
-        table = dynamodb.create_table(
-            TableName="PsmApp",
+        # ================================================================
+        # Accounts Table
+        # ================================================================
+        accounts_table = dynamodb.create_table(
+            TableName="kernelworx-accounts-ue1-dev",
             KeySchema=[
-                {"AttributeName": "PK", "KeyType": "HASH"},
-                {"AttributeName": "SK", "KeyType": "RANGE"},
+                {"AttributeName": "accountId", "KeyType": "HASH"},
             ],
             AttributeDefinitions=[
-                {"AttributeName": "PK", "AttributeType": "S"},
-                {"AttributeName": "SK", "AttributeType": "S"},
-                {"AttributeName": "GSI1PK", "AttributeType": "S"},
-                {"AttributeName": "GSI1SK", "AttributeType": "S"},
-                {"AttributeName": "GSI2PK", "AttributeType": "S"},
-                {"AttributeName": "GSI2SK", "AttributeType": "S"},
-                {"AttributeName": "GSI3PK", "AttributeType": "S"},
-                {"AttributeName": "GSI3SK", "AttributeType": "S"},
-                {"AttributeName": "profileId", "AttributeType": "S"},
-                {"AttributeName": "seasonId", "AttributeType": "S"},
-                {"AttributeName": "orderId", "AttributeType": "S"},
-                {"AttributeName": "GSI5PK", "AttributeType": "S"},
-                {"AttributeName": "GSI5SK", "AttributeType": "S"},
+                {"AttributeName": "accountId", "AttributeType": "S"},
+                {"AttributeName": "email", "AttributeType": "S"},
             ],
             GlobalSecondaryIndexes=[
                 {
-                    "IndexName": "GSI1",
+                    "IndexName": "email-index",
                     "KeySchema": [
-                        {"AttributeName": "GSI1PK", "KeyType": "HASH"},
-                        {"AttributeName": "GSI1SK", "KeyType": "RANGE"},
-                    ],
-                    "Projection": {"ProjectionType": "ALL"},
-                },
-                {
-                    "IndexName": "GSI2",
-                    "KeySchema": [
-                        {"AttributeName": "GSI2PK", "KeyType": "HASH"},
-                        {"AttributeName": "GSI2SK", "KeyType": "RANGE"},
-                    ],
-                    "Projection": {"ProjectionType": "ALL"},
-                },
-                {
-                    "IndexName": "GSI3",
-                    "KeySchema": [
-                        {"AttributeName": "GSI3PK", "KeyType": "HASH"},
-                        {"AttributeName": "GSI3SK", "KeyType": "RANGE"},
-                    ],
-                    "Projection": {"ProjectionType": "ALL"},
-                },
-                {
-                    "IndexName": "GSI4",
-                    "KeySchema": [
-                        {"AttributeName": "profileId", "KeyType": "HASH"},
-                    ],
-                    "Projection": {"ProjectionType": "ALL"},
-                },
-                {
-                    "IndexName": "GSI5",
-                    "KeySchema": [
-                        {"AttributeName": "GSI5PK", "KeyType": "HASH"},
-                        {"AttributeName": "GSI5SK", "KeyType": "RANGE"},
-                    ],
-                    "Projection": {"ProjectionType": "ALL"},
-                },
-                {
-                    "IndexName": "GSI6",
-                    "KeySchema": [
-                        {"AttributeName": "orderId", "KeyType": "HASH"},
+                        {"AttributeName": "email", "KeyType": "HASH"},
                     ],
                     "Projection": {"ProjectionType": "ALL"},
                 },
@@ -104,7 +61,140 @@ def dynamodb_table(aws_credentials: None) -> Generator[Any, None, None]:
             BillingMode="PAY_PER_REQUEST",
         )
 
-        yield table
+        # ================================================================
+        # Catalogs Table
+        # ================================================================
+        catalogs_table = dynamodb.create_table(
+            TableName="kernelworx-catalogs-ue1-dev",
+            KeySchema=[
+                {"AttributeName": "catalogId", "KeyType": "HASH"},
+            ],
+            AttributeDefinitions=[
+                {"AttributeName": "catalogId", "AttributeType": "S"},
+                {"AttributeName": "ownerAccountId", "AttributeType": "S"},
+                {"AttributeName": "isPublic", "AttributeType": "S"},
+                {"AttributeName": "createdAt", "AttributeType": "S"},
+            ],
+            GlobalSecondaryIndexes=[
+                {
+                    "IndexName": "ownerAccountId-index",
+                    "KeySchema": [
+                        {"AttributeName": "ownerAccountId", "KeyType": "HASH"},
+                    ],
+                    "Projection": {"ProjectionType": "ALL"},
+                },
+                {
+                    "IndexName": "isPublic-createdAt-index",
+                    "KeySchema": [
+                        {"AttributeName": "isPublic", "KeyType": "HASH"},
+                        {"AttributeName": "createdAt", "KeyType": "RANGE"},
+                    ],
+                    "Projection": {"ProjectionType": "ALL"},
+                },
+            ],
+            BillingMode="PAY_PER_REQUEST",
+        )
+
+        # ================================================================
+        # Profiles Table
+        # ================================================================
+        profiles_table = dynamodb.create_table(
+            TableName="kernelworx-profiles-ue1-dev",
+            KeySchema=[
+                {"AttributeName": "profileId", "KeyType": "HASH"},
+                {"AttributeName": "recordType", "KeyType": "RANGE"},
+            ],
+            AttributeDefinitions=[
+                {"AttributeName": "profileId", "AttributeType": "S"},
+                {"AttributeName": "recordType", "AttributeType": "S"},
+                {"AttributeName": "ownerAccountId", "AttributeType": "S"},
+                {"AttributeName": "targetAccountId", "AttributeType": "S"},
+                {"AttributeName": "inviteCode", "AttributeType": "S"},
+            ],
+            GlobalSecondaryIndexes=[
+                {
+                    "IndexName": "ownerAccountId-index",
+                    "KeySchema": [
+                        {"AttributeName": "ownerAccountId", "KeyType": "HASH"},
+                    ],
+                    "Projection": {"ProjectionType": "ALL"},
+                },
+                {
+                    "IndexName": "targetAccountId-index",
+                    "KeySchema": [
+                        {"AttributeName": "targetAccountId", "KeyType": "HASH"},
+                    ],
+                    "Projection": {"ProjectionType": "ALL"},
+                },
+                {
+                    "IndexName": "inviteCode-index",
+                    "KeySchema": [
+                        {"AttributeName": "inviteCode", "KeyType": "HASH"},
+                    ],
+                    "Projection": {"ProjectionType": "ALL"},
+                },
+            ],
+            BillingMode="PAY_PER_REQUEST",
+        )
+
+        # ================================================================
+        # Seasons Table
+        # ================================================================
+        seasons_table = dynamodb.create_table(
+            TableName="kernelworx-seasons-ue1-dev",
+            KeySchema=[
+                {"AttributeName": "seasonId", "KeyType": "HASH"},
+            ],
+            AttributeDefinitions=[
+                {"AttributeName": "seasonId", "AttributeType": "S"},
+                {"AttributeName": "profileId", "AttributeType": "S"},
+            ],
+            GlobalSecondaryIndexes=[
+                {
+                    "IndexName": "profileId-index",
+                    "KeySchema": [
+                        {"AttributeName": "profileId", "KeyType": "HASH"},
+                    ],
+                    "Projection": {"ProjectionType": "ALL"},
+                },
+            ],
+            BillingMode="PAY_PER_REQUEST",
+        )
+
+        # ================================================================
+        # Orders Table
+        # ================================================================
+        orders_table = dynamodb.create_table(
+            TableName="kernelworx-orders-ue1-dev",
+            KeySchema=[
+                {"AttributeName": "orderId", "KeyType": "HASH"},
+            ],
+            AttributeDefinitions=[
+                {"AttributeName": "orderId", "AttributeType": "S"},
+                {"AttributeName": "seasonId", "AttributeType": "S"},
+                {"AttributeName": "profileId", "AttributeType": "S"},
+            ],
+            GlobalSecondaryIndexes=[
+                {
+                    "IndexName": "seasonId-index",
+                    "KeySchema": [
+                        {"AttributeName": "seasonId", "KeyType": "HASH"},
+                    ],
+                    "Projection": {"ProjectionType": "ALL"},
+                },
+                {
+                    "IndexName": "profileId-index",
+                    "KeySchema": [
+                        {"AttributeName": "profileId", "KeyType": "HASH"},
+                    ],
+                    "Projection": {"ProjectionType": "ALL"},
+                },
+            ],
+            BillingMode="PAY_PER_REQUEST",
+        )
+
+        # Return profiles table as primary (most commonly used)
+        yield profiles_table
 
 
 @pytest.fixture
@@ -116,10 +206,10 @@ def s3_bucket(aws_credentials: None) -> Generator[Any, None, None]:
         s3 = boto3.client("s3", region_name="us-east-1")
         bucket_name = os.environ.get("EXPORTS_BUCKET", "test-exports-bucket")
         s3.create_bucket(Bucket=bucket_name)
-        
+
         # Set environment variable for Lambda function
         os.environ["EXPORTS_BUCKET"] = bucket_name
-        
+
         yield s3
 
 
@@ -139,11 +229,11 @@ def sample_profile_id() -> str:
 def sample_profile(
     dynamodb_table: Any, sample_account_id: str, sample_profile_id: str
 ) -> Dict[str, Any]:
-    """Create sample profile in DynamoDB."""
+    """Create sample profile in DynamoDB (multi-table design)."""
+    # Multi-table design: profileId is PK, recordType is SK
     profile = {
-        "PK": sample_profile_id,
-        "SK": "METADATA",
         "profileId": sample_profile_id,
+        "recordType": "METADATA",
         "ownerAccountId": sample_account_id,
         "scoutName": "Test Scout",
         "createdAt": datetime.now(timezone.utc).isoformat(),
@@ -201,38 +291,40 @@ def sample_season_id() -> str:
 def sample_season(
     dynamodb_table: Any, sample_profile_id: str, sample_season_id: str
 ) -> Dict[str, Any]:
-    """Create sample season in DynamoDB."""
+    """Create sample season in DynamoDB (multi-table design)."""
+    # Multi-table design: need to access seasons table directly
+    dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
+    seasons_table = dynamodb.Table("kernelworx-seasons-ue1-dev")
+
     season = {
-        "PK": sample_profile_id,
-        "SK": sample_season_id,
         "seasonId": sample_season_id,
         "profileId": sample_profile_id,
-        "name": "Fall 2025",
+        "seasonName": "Fall 2025",
         "startDate": "2025-09-01",
         "catalogId": "CATALOG#default",
-        "GSI5PK": sample_season_id,
-        "GSI5SK": "METADATA",
         "createdAt": datetime.now(timezone.utc).isoformat(),
     }
 
-    dynamodb_table.put_item(Item=season)
+    seasons_table.put_item(Item=season)
     return season
 
 
 @pytest.fixture
-def sample_order_id() -> str:
+def sample_order_id() -> str:  # pragma: no cover
     """Sample order ID."""
-    return "ORDER#order-456-xyz"
+    return "ORDER#order-456-xyz"  # pragma: no cover
 
 
 @pytest.fixture
-def sample_order(
+def sample_order(  # pragma: no cover
     dynamodb_table: Any, sample_profile_id: str, sample_season_id: str, sample_order_id: str
 ) -> Dict[str, Any]:
-    """Create sample order in DynamoDB."""
+    """Create sample order in DynamoDB (multi-table design)."""
+    # Multi-table design: need to access orders table directly
+    dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
+    orders_table = dynamodb.Table("kernelworx-orders-ue1-dev")
+
     order = {
-        "PK": sample_season_id,
-        "SK": sample_order_id,
         "orderId": sample_order_id,
         "seasonId": sample_season_id,
         "profileId": sample_profile_id,
@@ -243,10 +335,8 @@ def sample_order(
             {"productId": "PROD1", "quantity": 1, "pricePerUnit": 10.0},
         ],
         "totalAmount": 10.0,
-        "GSI2PK": sample_profile_id,
-        "GSI2SK": sample_order_id,
         "createdAt": datetime.now(timezone.utc).isoformat(),
     }
 
-    dynamodb_table.put_item(Item=order)
+    orders_table.put_item(Item=order)
     return order

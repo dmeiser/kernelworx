@@ -1,6 +1,6 @@
 """Tests for error handling utilities."""
 
-from src.utils.errors import AppError, ErrorCode, handle_error
+from src.utils.errors import AppError, ErrorCode, create_error_response, handle_error
 
 
 class TestAppError:
@@ -75,3 +75,22 @@ class TestErrorCode:
         assert ErrorCode.INSUFFICIENT_PERMISSIONS == "INSUFFICIENT_PERMISSIONS"
         assert ErrorCode.INTERNAL_ERROR == "INTERNAL_ERROR"
         assert ErrorCode.DATABASE_ERROR == "DATABASE_ERROR"
+
+
+class TestCreateErrorResponse:
+    """Tests for create_error_response function."""
+
+    def test_create_error_response(self) -> None:
+        """Test creating error response dictionary."""
+        result = create_error_response(ErrorCode.NOT_FOUND, "Profile not found")
+
+        assert result["errorCode"] == ErrorCode.NOT_FOUND
+        assert result["message"] == "Profile not found"
+        assert isinstance(result, dict)
+
+    def test_create_error_response_with_different_code(self) -> None:
+        """Test creating error response with different error code."""
+        result = create_error_response(ErrorCode.FORBIDDEN, "Access denied")
+
+        assert result["errorCode"] == ErrorCode.FORBIDDEN
+        assert result["message"] == "Access denied"

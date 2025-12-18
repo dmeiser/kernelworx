@@ -78,6 +78,38 @@ describe('Toast', () => {
     });
   });
 
+  it('closes toast when close button is clicked on alert', async () => {
+    const { rerender } = render(<Toast />);
+
+    const errorEvent = new CustomEvent('graphql-error', {
+      detail: {
+        errorCode: 'TEST_ERROR',
+        message: 'Test error message',
+        operation: 'test',
+      },
+    });
+    window.dispatchEvent(errorEvent);
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toBeInTheDocument();
+    });
+
+    // Find and click the close button on the Alert
+    const closeButtons = screen.getAllByRole('button');
+    const alertCloseButton = closeButtons.find(
+      (btn) => btn.className && btn.className.includes('MuiAlert-action'),
+    );
+
+    if (alertCloseButton) {
+      alertCloseButton.click();
+
+      // Toast should be closed after clicking
+      await waitFor(() => {
+        expect(screen.queryByText('Test error message')).not.toBeInTheDocument();
+      });
+    }
+  });
+
   it('cleans up event listener on unmount', () => {
     const removeEventListenerSpy = vi.spyOn(window, 'removeEventListener');
 

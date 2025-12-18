@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Coming Soon — KernelWorx</title>
+  <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+  <style>
+    :root { --brand-blue: #1976d2; --brand-white: #ffffff; }
+    html,body { height:100%; margin:0; }
+    body {
+      display:flex; align-items:center; justify-content:center; flex-direction:column;
+      background: var(--brand-blue);
+      font-family: -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+      color: var(--brand-white);
+    }
+    .brand-title {
+      font-family: "Kaushan Script", cursive; font-weight:600; letter-spacing:0.08em;
+      font-size: clamp(2rem, 6vw, 4rem); margin: 0 0 1rem; color: var(--brand-white);
+      -webkit-text-stroke: 0.8px rgba(255,255,255,0.8);
+      text-shadow: 0 1px 0 rgba(255,255,255,0.12), 0 2px 0 rgba(255,255,255,0.06);
+      text-align:center;
+    }
+    .logo-wrap { display:flex; align-items:center; justify-content:center; }
+    .logo-wrap img { width: min(40vw, 240px); height: auto; display:block; }
+    .meta { margin-top:1rem; opacity:0.95; font-size:0.95rem; }
+  </style>
+</head>
+<body>
+  <h1 class="brand-title">Coming Soon</h1>
+  <div class="logo-wrap">
+    <?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="256" height="256">
+  <style>
+    /* Rotate clockwise once every 60s */
+    .spin { transform-origin: 50% 50%; transform-box: fill-box; animation: spin 60s linear infinite; }
+    @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+  </style>
+  <g class="spin">
+    <!-- Reference the original logo file in the same directory -->
+    <image href="logo.svg" x="0" y="0" width="100%" height="100%" preserveAspectRatio="xMidYMid meet" />
+  </g>
+</svg>
+  </div>
+  <div class="meta">KernelWorx — Launching soon</div>
+  <!-- Generated: 2025-12-09T22:27:22.478Z -->
+</body>
+</html>

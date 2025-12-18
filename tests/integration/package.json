@@ -1,0 +1,17 @@
+{
+  "name": "popcorn-sales-manager-integration-tests",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest"
+  },
+  "devDependencies": {
+    "@apollo/client": "^4.0.9",
+    "@aws-sdk/client-cognito-identity-provider": "^3.947.0",
+    "@aws-sdk/client-dynamodb": "^3.947.0",
+    "aws-amplify": "^6.15.8",
+    "vitest": "^4.0.15",
+    "dotenv": "^17.2.3"
+  }
+}

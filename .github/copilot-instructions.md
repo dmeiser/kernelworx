@@ -3,7 +3,7 @@
 
 Essential knowledge for GitHub Copilot when working on this volunteer-run Scouting America popcorn sales management application.
 
-## 0. CRITICAL GIT RULES
+## 0. CRITICAL GIT AND DEPLOYMENT RULES
 
 **NEVER push directly to main branch!**
 
@@ -15,6 +15,17 @@ Essential knowledge for GitHub Copilot when working on this volunteer-run Scouti
 - ✅ ALWAYS create PRs for all changes
 - ✅ Let humans review and approve PRs
 - ✅ Let humans merge PRs after approval
+
+**NEVER modify AWS resources directly without explicit permission!**
+
+- ❌ NEVER run AWS CLI commands that modify resources (create, delete, update) without explicit user instruction
+- ❌ NEVER manually delete AWS resources created by CloudFormation
+- ❌ NEVER run `aws cloudformation update-stack` or similar commands without permission
+- ❌ NEVER deploy to production environment without explicit permission
+- ✅ You ARE permitted to deploy to **dev environment only** by running `./deploy.sh` in the `cdk/` folder as part of normal workflow
+- ✅ ALWAYS use `cdk diff` to preview changes before deploying
+- ✅ ONLY use read-only AWS CLI commands (describe, list, get) for verification
+- ✅ ASK before running any AWS command that modifies infrastructure outside of CDK
 
 ## 1. Project Architecture
 
@@ -94,7 +105,18 @@ def test_create_profile():
     # Test your function
     result = create_profile(...)
     assert result['profileId'] is not None
+    # moto automatically cleans up all DynamoDB/S3 data after @mock_* decorator exits
 ```
+
+**Test Cleanup Requirements**:
+- **CRITICAL**: All automated tests (unit, integration, and any other) MUST clean up after themselves
+- Each test must delete any DynamoDB records it created
+- Each test must delete any S3 objects it created
+- Before marking a test as "complete", verification is REQUIRED:
+  1. The test must run and pass
+  2. DynamoDB/S3 must be checked to confirm all test data has been deleted
+- Use `@mock_dynamodb`, `@mock_s3`, etc. from `moto` - they automatically clean up when the test ends
+- **Important**: Tests with leftover data (orphaned records) are INCOMPLETE and MUST be fixed before merge
 
 ## 4. TypeScript/React Code Standards (Frontend)
 
@@ -204,38 +226,65 @@ def check_profile_access(caller_account_id: str, profile_id: str, action: str) -
     return False
 ```
 
-## 7. GraphQL Resolver Pattern
+## 7. GraphQL Resolver Pattern - PREFER NON-LAMBDA
 
-**AppSync Lambda Resolver**:
-```python
-import json
-from typing import Any, Dict
+**⚠️ IMPORTANT**: Before creating a Lambda resolver, consider alternatives. See `TODO_SIMPLIFY_LAMBDA.md`.
 
-def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
-    """
-    AppSync Lambda resolver handler.
-    
-    event['info']['fieldName'] = GraphQL field name
-    event['arguments'] = GraphQL arguments
-    event['identity'] = Cognito identity
-    """
-    field_name = event['info']['fieldName']
-    arguments = event['arguments']
-    caller_account_id = event['identity']['sub']
-    
-    # Authorization check
-    if not check_profile_access(caller_account_id, arguments['profileId'], 'read'):
-        raise Exception("Forbidden")
-    
-    # Business logic
-    if field_name == 'getProfile':
-        return get_profile(arguments['profileId'])
-    elif field_name == 'createOrder':
-        return create_order(arguments['profileId'], arguments['seasonId'], arguments)
-    # ...
-    
-    raise Exception(f"Unknown field: {field_name}")
+**Resolver Type Priority** (use first option that works):
+1. **VTL Resolver** - Simple CRUD, single DynamoDB operation
+2. **JavaScript Resolver** - ID generation, computed fields, simple logic
+3. **Pipeline Resolver** - Multi-step operations (GSI query → update/delete)
+4. **Lambda Resolver** - ONLY for external services (S3, Excel) or transactions
+
+### VTL Resolver Example (preferred for simple queries):
+```vtl
+{
+    "version": "2017-02-28",
+    "operation": "Query",
+    "query": {
+        "expression": "PK = :pk AND begins_with(SK, :sk)",
+        "expressionValues": {
+            ":pk": $util.dynamodb.toDynamoDBJson($ctx.args.seasonId),
+            ":sk": $util.dynamodb.toDynamoDBJson("ORDER#")
+        }
+    }
+}
 ```
+
+### JavaScript Resolver Example (for computed values):
+```javascript
+export function request(ctx) {
+    const inviteCode = util.autoId().substring(0, 8).toUpperCase();
+    return {
+        operation: "PutItem",
+        key: util.dynamodb.toMapValues({ PK: ctx.args.profileId, SK: `INVITE#${inviteCode}` }),
+        attributeValues: util.dynamodb.toMapValues({
+            inviteCode,
+            expiresAt: util.time.nowEpochSeconds() + (14 * 24 * 60 * 60),
+        }),
+        condition: { expression: "attribute_not_exists(PK)" }  // Prevents collisions
+    };
+}
+
+export function response(ctx) {
+    return ctx.result;
+}
+```
+
+### Pipeline Resolver (for GSI lookup → mutation):
+Use when you need to query a GSI to find PK/SK, then update or delete the item.
+
+### Lambda Resolver (ONLY when necessary):
+```python
+def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    """Only use for: S3 operations, Excel generation, email, transactions."""
+    # ...
+```
+
+**Currently required as Lambda:**
+- `post-auth` (Cognito trigger)
+- `request-report` (Excel/S3)
+- `create-profile` (DynamoDB transaction)
 
 ## 8. Common Patterns
 
@@ -300,7 +349,9 @@ def generate_report(profile_id: str, season_id: str) -> str:
 ## 10. Key Files Reference
 
 - `TODO.md`: Current phase and task tracking
+- `TODO_SIMPLIFY_LAMBDA.md`: Lambda reduction plan (15 → 7 completed, target: 2-3 Lambdas)
 - `AGENT.md`: Detailed AI agent rules and quality standards
+- `docs/VTL_RESOLVER_NOTES.md`: VTL resolver implementation notes
 - `Planning Documents/`: Complete requirements and architecture
   - `graphql_schema_v1.md`: GraphQL API definition
   - `dynamodb_physical_schema_v1.md`: DynamoDB table design
@@ -343,9 +394,8 @@ uv run mypy src/
 # Test with coverage
 uv run pytest tests/unit --cov=src --cov-fail-under=100
 
-# Deploy CDK
-cdk diff
-cdk deploy --profile dev
+# Deploy CDK (from cdk/ directory)
+cd cdk && ./deploy.sh
 ```
 
 **Frontend (React/TypeScript)**:

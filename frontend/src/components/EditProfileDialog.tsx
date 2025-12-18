@@ -2,7 +2,7 @@
  * EditProfileDialog component - Dialog for editing a seller profile name
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from "react";
 import {
   Dialog,
   DialogTitle,
@@ -11,7 +11,7 @@ import {
   Button,
   TextField,
   Box,
-} from '@mui/material';
+} from "@mui/material";
 
 interface EditProfileDialogProps {
   open: boolean;
@@ -43,7 +43,7 @@ export const EditProfileDialog: React.FC<EditProfileDialogProps> = ({
       await onSubmit(profileId, sellerName.trim());
       onClose();
     } catch (error) {
-      console.error('Failed to update profile:', error);
+      console.error("Failed to update profile:", error);
     } finally {
       setLoading(false);
     }
@@ -68,7 +68,11 @@ export const EditProfileDialog: React.FC<EditProfileDialogProps> = ({
             value={sellerName}
             onChange={(e) => setSellerName(e.target.value)}
             onKeyPress={(e) => {
-              if (e.key === 'Enter' && sellerName.trim() && sellerName !== currentName) {
+              if (
+                e.key === "Enter" &&
+                sellerName.trim() &&
+                sellerName !== currentName
+              ) {
                 handleSubmit();
               }
             }}
@@ -85,7 +89,7 @@ export const EditProfileDialog: React.FC<EditProfileDialogProps> = ({
           variant="contained"
           disabled={!sellerName.trim() || sellerName === currentName || loading}
         >
-          {loading ? 'Saving...' : 'Save Changes'}
+          {loading ? "Saving..." : "Save Changes"}
         </Button>
       </DialogActions>
     </Dialog>

@@ -44,7 +44,7 @@ describe('CreateProfileDialog', () => {
       <CreateProfileDialog open={true} onClose={vi.fn()} onSubmit={vi.fn()} />
     );
 
-    const submitButton = screen.getByRole('button', { name: /Create Profile/i });
+    const submitButton = screen.getByRole('button', { name: /Create Seller/i });
     expect(submitButton).toBeDisabled();
   });
 
@@ -57,7 +57,7 @@ describe('CreateProfileDialog', () => {
     const nameInput = screen.getByLabelText(/Seller Name/i);
     await user.type(nameInput, 'Scout Alpha');
 
-    const submitButton = screen.getByRole('button', { name: /Create Profile/i });
+    const submitButton = screen.getByRole('button', { name: /Create Seller/i });
     expect(submitButton).not.toBeDisabled();
   });
 
@@ -73,7 +73,7 @@ describe('CreateProfileDialog', () => {
     const nameInput = screen.getByLabelText(/Seller Name/i);
     await user.type(nameInput, '  Scout Alpha  ');
 
-    const submitButton = screen.getByRole('button', { name: /Create Profile/i });
+    const submitButton = screen.getByRole('button', { name: /Create Seller/i });
     await user.click(submitButton);
 
     expect(onSubmit).toHaveBeenCalledWith('Scout Alpha');
@@ -91,7 +91,7 @@ describe('CreateProfileDialog', () => {
     const nameInput = screen.getByLabelText(/Seller Name/i);
     await user.type(nameInput, 'Scout Alpha');
 
-    const submitButton = screen.getByRole('button', { name: /Create Profile/i });
+    const submitButton = screen.getByRole('button', { name: /Create Seller/i });
     await user.click(submitButton);
 
     await waitFor(() => {
@@ -111,7 +111,7 @@ describe('CreateProfileDialog', () => {
     const nameInput = screen.getByLabelText(/Seller Name/i);
     await user.type(nameInput, 'Scout Alpha');
 
-    const submitButton = screen.getByRole('button', { name: /Create Profile/i });
+    const submitButton = screen.getByRole('button', { name: /Create Seller/i });
     await user.click(submitButton);
 
     await waitFor(() => {
@@ -131,7 +131,7 @@ describe('CreateProfileDialog', () => {
     const nameInput = screen.getByLabelText(/Seller Name/i);
     await user.type(nameInput, 'Scout Alpha');
 
-    const submitButton = screen.getByRole('button', { name: /Create Profile/i });
+    const submitButton = screen.getByRole('button', { name: /Create Seller/i });
     await user.click(submitButton);
 
     await waitFor(() => {
@@ -185,7 +185,7 @@ describe('CreateProfileDialog', () => {
     const nameInput = screen.getByLabelText(/Seller Name/i);
     await user.type(nameInput, '   ');
 
-    const submitButton = screen.getByRole('button', { name: /Create Profile/i });
+    const submitButton = screen.getByRole('button', { name: /Create Seller/i });
     expect(submitButton).toBeDisabled();
   });
 });

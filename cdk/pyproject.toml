@@ -1,5 +1,5 @@
 [project]
-name = "popcorn-sales-manager-cdk"
+name = "kernelworx-cdk"
 version = "0.1.0"
 description = "AWS CDK infrastructure for Popcorn Sales Manager"
 requires-python = ">=3.14"

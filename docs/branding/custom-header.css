@@ -1,0 +1,103 @@
+/**
+ * Custom CSS for Cognito Managed Login - KernelWorx Header
+ * 
+ * This CSS creates a header that matches the main site AppBar:
+ * - Blue gradient background (#1976d2)
+ * - Popcorn kernel logo + "KernelWorx" text
+ * - Kaushan Script font for branding
+ * - Responsive design
+ * 
+ * The CSS is injected into the Cognito Hosted UI via the
+ * customCss property in managed-login-settings.json
+ */
+
+/* Create a header bar at the top of the page */
+body::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 64px;
+  background: linear-gradient(135deg, #1976d2 0%, #1565c0 100%);
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  z-index: 1000;
+}
+
+/* Add KernelWorx branding to the header */
+body::after {
+  content: 'KernelWorx';
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: 'Kaushan Script', cursive;
+  font-size: 40px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: white;
+  -webkit-text-stroke: 0.8px rgba(255, 255, 255, 0.8);
+  text-shadow: 
+    0 1px 0 rgba(255,255,255,0.12), 
+    0 2px 0 rgba(255,255,255,0.06),
+    0 2px 8px rgba(0,0,0,0.15);
+  z-index: 1001;
+  white-space: nowrap;
+}
+
+/* Load Kaushan Script font */
+@import url('https://fonts.googleapis.com/css2?family=Kaushan+Script&display=swap');
+
+/* Adjust page content to account for header */
+body {
+  padding-top: 80px !important;
+  min-height: calc(100vh - 80px) !important;
+}
+
+/* Add popcorn kernel logo before the text (using background image) */
+body::after {
+  padding-left: 50px;
+  background-image: url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA1MTIgNTEyIj4KICA8IS0tIFBvcGNvcm4ga2VybmVsIGljb24gLS0+CiAgPHBhdGggZmlsbD0iI2ZmZiIgZD0iTTI1NiA2NEMxNTAuNCA2NCA2NCAxNTAuNCA2NCAyNTZzODYuNCAxOTIgMTkyIDE5MiAxOTItODYuNCAxOTItMTkyUzM2MS42IDY0IDI1NiA2NHptMCAzMjBjLTcwLjcgMC0xMjgtNTcuMy0xMjgtMTI4czU3LjMtMTI4IDEyOC0xMjggMTI4IDU3LjMgMTI4IDEyOC01Ny4zIDEyOC0xMjggMTI4eiIvPgo8L3N2Zz4=');
+  background-repeat: no-repeat;
+  background-position: left center;
+  background-size: 40px 40px;
+}
+
+/* Responsive adjustments for mobile */
+@media (max-width: 600px) {
+  body::after {
+    font-size: 28px;
+    top: 18px;
+    padding-left: 38px;
+    background-size: 28px 28px;
+  }
+  
+  body::before {
+    height: 56px;
+  }
+  
+  body {
+    padding-top: 72px !important;
+  }
+}
+
+/* Style the login form to have better spacing */
+#container {
+  margin-top: 20px;
+}
+
+/* Add subtle animation to header on page load */
+@keyframes slideDown {
+  from {
+    transform: translateX(-50%) translateY(-20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(-50%) translateY(0);
+    opacity: 1;
+  }
+}
+
+body::after {
+  animation: slideDown 0.6s ease-out;
+}

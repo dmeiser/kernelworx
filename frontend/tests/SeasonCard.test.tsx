@@ -39,9 +39,6 @@ describe('SeasonCard', () => {
     );
 
     expect(screen.getByText('Fall 2025 Popcorn Sale')).toBeInTheDocument();
-    expect(screen.getByText(/Season ID:/i)).toBeInTheDocument();
-    // substring(0, 8) of "season-123-456" = "season-1"
-    expect(screen.getByText(/season-1/i)).toBeInTheDocument();
   });
 
   test('displays formatted date range', () => {

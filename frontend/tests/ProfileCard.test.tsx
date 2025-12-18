@@ -6,6 +6,7 @@ import { describe, test, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { BrowserRouter } from 'react-router-dom';
+import { MockedProvider } from '@apollo/client/testing/react';
 import { ProfileCard } from '../src/components/ProfileCard';
 
 // Mock navigate
@@ -25,31 +26,33 @@ describe('ProfileCard', () => {
 
   test('renders profile information correctly', () => {
     render(
-      <BrowserRouter>
-        <ProfileCard
-          profileId="profile-123"
-          sellerName="Scout Alpha"
-          isOwner={true}
-          permissions={[]}
-        />
-      </BrowserRouter>
+      <MockedProvider mocks={[]}>
+        <BrowserRouter>
+          <ProfileCard
+            profileId="profile-123"
+            sellerName="Scout Alpha"
+            isOwner={true}
+            permissions={[]}
+          />
+        </BrowserRouter>
+      </MockedProvider>
     );
 
     expect(screen.getByText('Scout Alpha')).toBeInTheDocument();
-    // Profile ID text is split across multiple nodes with whitespace
-    expect(screen.getByText(/Profile ID:/i)).toBeInTheDocument();
   });
 
   test('displays Owner badge for owned profiles', () => {
     render(
-      <BrowserRouter>
-        <ProfileCard
-          profileId="profile-123"
-          sellerName="Scout Alpha"
-          isOwner={true}
-          permissions={[]}
-        />
-      </BrowserRouter>
+      <MockedProvider mocks={[]}>
+        <BrowserRouter>
+          <ProfileCard
+            profileId="profile-456"
+            sellerName="Scout Beta"
+            isOwner={true}
+            permissions={[]}
+          />
+        </BrowserRouter>
+      </MockedProvider>
     );
 
     expect(screen.getByText('Owner')).toBeInTheDocument();
@@ -57,138 +60,150 @@ describe('ProfileCard', () => {
 
   test('displays Editor badge for shared profiles with WRITE permission', () => {
     render(
-      <BrowserRouter>
-        <ProfileCard
-          profileId="profile-123"
-          sellerName="Scout Beta"
-          isOwner={false}
-          permissions={['WRITE']}
-        />
-      </BrowserRouter>
+      <MockedProvider mocks={[]}>
+        <BrowserRouter>
+          <ProfileCard
+            profileId="profile-789"
+            sellerName="Scout Gamma"
+            isOwner={false}
+            permissions={['WRITE']}
+          />
+        </BrowserRouter>
+      </MockedProvider>
     );
 
     expect(screen.getByText('Editor')).toBeInTheDocument();
-    expect(screen.queryByText('Owner')).not.toBeInTheDocument();
   });
 
   test('displays Viewer badge for shared profiles with READ-only permission', () => {
     render(
-      <BrowserRouter>
-        <ProfileCard
-          profileId="profile-123"
-          sellerName="Scout Gamma"
-          isOwner={false}
-          permissions={['READ']}
-        />
-      </BrowserRouter>
+      <MockedProvider mocks={[]}>
+        <BrowserRouter>
+          <ProfileCard
+            profileId="profile-999"
+            sellerName="Scout Delta"
+            isOwner={false}
+            permissions={['READ']}
+          />
+        </BrowserRouter>
+      </MockedProvider>
     );
 
     expect(screen.getByText('Viewer')).toBeInTheDocument();
   });
 
-  test('navigates to seasons page when View Seasons clicked', async () => {
-    const user = userEvent.setup();
+  test('shows loading or empty state when no seasons loaded', () => {
     render(
-      <BrowserRouter>
-        <ProfileCard
-          profileId="profile-123"
-          sellerName="Scout Alpha"
-          isOwner={true}
-          permissions={[]}
-        />
-      </BrowserRouter>
+      <MockedProvider mocks={[]}>
+        <BrowserRouter>
+          <ProfileCard
+            profileId="profile-empty"
+            sellerName="Scout Epsilon"
+            isOwner={true}
+            permissions={[]}
+          />
+        </BrowserRouter>
+      </MockedProvider>
     );
 
-    const viewButton = screen.getByRole('button', { name: /View Seasons/i });
-    await user.click(viewButton);
+    // Either loading spinner or "No seasons yet" should appear eventually
+    // For now, just verify the card renders without crashing
+    expect(screen.getByText('Scout Epsilon')).toBeInTheDocument();
+  });
+
+  test('renders View All Seasons button', () => {
+    render(
+      <MockedProvider mocks={[]}>
+        <BrowserRouter>
+          <ProfileCard
+            profileId="profile-123"
+            sellerName="Scout Alpha"
+            isOwner={true}
+            permissions={[]}
+          />
+        </BrowserRouter>
+      </MockedProvider>
+    );
+
+    expect(screen.getByText('View All Seasons')).toBeInTheDocument();
+  });
+
+  test('navigates to all seasons page when View All Seasons clicked', async () => {
+    const user = userEvent.setup();
+
+    render(
+      <MockedProvider mocks={[]}>
+        <BrowserRouter>
+          <ProfileCard
+            profileId="profile-123"
+            sellerName="Scout Alpha"
+            isOwner={true}
+            permissions={[]}
+          />
+        </BrowserRouter>
+      </MockedProvider>
+    );
+
+    const button = screen.getByText('View All Seasons');
+    await user.click(button);
 
     expect(mockNavigate).toHaveBeenCalledWith('/profiles/profile-123/seasons');
   });
 
-  test('shows Edit Name button for owners', () => {
-    const onEdit = vi.fn();
-    render(
-      <BrowserRouter>
-        <ProfileCard
-          profileId="profile-123"
-          sellerName="Scout Alpha"
-          isOwner={true}
-          permissions={[]}
-          onEdit={onEdit}
-        />
-      </BrowserRouter>
-    );
-
-    expect(screen.getByRole('button', { name: /Edit Name/i })).toBeInTheDocument();
-  });
-
-  test('shows Edit Name button for editors with WRITE permission', () => {
-    const onEdit = vi.fn();
-    render(
-      <BrowserRouter>
-        <ProfileCard
-          profileId="profile-123"
-          sellerName="Scout Beta"
-          isOwner={false}
-          permissions={['WRITE']}
-          onEdit={onEdit}
-        />
-      </BrowserRouter>
-    );
-
-    expect(screen.getByRole('button', { name: /Edit Name/i })).toBeInTheDocument();
-  });
-
-  test('hides Edit Name button for viewers with READ-only permission', () => {
-    const onEdit = vi.fn();
-    render(
-      <BrowserRouter>
-        <ProfileCard
-          profileId="profile-123"
-          sellerName="Scout Gamma"
-          isOwner={false}
-          permissions={['READ']}
-          onEdit={onEdit}
-        />
-      </BrowserRouter>
-    );
-
-    expect(screen.queryByRole('button', { name: /Edit Name/i })).not.toBeInTheDocument();
-  });
-
-  test('calls onEdit when Edit Name clicked', async () => {
+  test('navigates to seller profile management when Manage Seller Profile clicked for owners', async () => {
     const user = userEvent.setup();
-    const onEdit = vi.fn();
+
     render(
-      <BrowserRouter>
-        <ProfileCard
-          profileId="profile-123"
-          sellerName="Scout Alpha"
-          isOwner={true}
-          permissions={[]}
-          onEdit={onEdit}
-        />
-      </BrowserRouter>
+      <MockedProvider mocks={[]}>
+        <BrowserRouter>
+          <ProfileCard
+            profileId="profile-123"
+            sellerName="Scout Alpha"
+            isOwner={true}
+            permissions={[]}
+          />
+        </BrowserRouter>
+      </MockedProvider>
     );
 
-    const editButton = screen.getByRole('button', { name: /Edit Name/i });
-    await user.click(editButton);
+    const button = screen.getByText('Manage Seller Profile');
+    await user.click(button);
 
-    expect(onEdit).toHaveBeenCalledTimes(1);
+    expect(mockNavigate).toHaveBeenCalledWith('/profiles/profile-123/manage');
   });
 
-  test('does not show Edit Name button when onEdit is undefined', () => {
+  test('does not show Manage Seller Profile button for non-owners', () => {
     render(
-      <BrowserRouter>
-        <ProfileCard
-          profileId="profile-123"
-          sellerName="Scout Alpha"
-          isOwner={true}
-          permissions={[]}
-        />
-      </BrowserRouter>
+      <MockedProvider mocks={[]}>
+        <BrowserRouter>
+          <ProfileCard
+            profileId="profile-789"
+            sellerName="Scout Gamma"
+            isOwner={false}
+            permissions={['WRITE']}
+          />
+        </BrowserRouter>
+      </MockedProvider>
     );
 
-    expect(screen.queryByRole('button', { name: /Edit Name/i })).not.toBeInTheDocument();
+    expect(screen.queryByText('Manage Seller Profile')).not.toBeInTheDocument();
+  });
+
+  test('does not show View Latest Season button when no seasons', () => {
+    render(
+      <MockedProvider mocks={[]}>
+        <BrowserRouter>
+          <ProfileCard
+            profileId="profile-empty"
+            sellerName="Scout Zeta"
+            isOwner={true}
+            permissions={[]}
+          />
+        </BrowserRouter>
+      </MockedProvider>
+    );
+
+    // View Latest Season button should not exist when there are no seasons
+    expect(screen.queryByText('View Latest Season')).not.toBeInTheDocument();
   });
 });

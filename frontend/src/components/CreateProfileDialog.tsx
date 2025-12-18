@@ -2,7 +2,7 @@
  * CreateProfileDialog component - Dialog for creating a new seller profile
  */
 
-import React, { useState } from 'react';
+import React, { useState } from "react";
 import {
   Dialog,
   DialogTitle,
@@ -11,7 +11,7 @@ import {
   Button,
   TextField,
   Box,
-} from '@mui/material';
+} from "@mui/material";
 
 interface CreateProfileDialogProps {
   open: boolean;
@@ -24,7 +24,7 @@ export const CreateProfileDialog: React.FC<CreateProfileDialogProps> = ({
   onClose,
   onSubmit,
 }) => {
-  const [sellerName, setSellerName] = useState('');
+  const [sellerName, setSellerName] = useState("");
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async () => {
@@ -33,10 +33,10 @@ export const CreateProfileDialog: React.FC<CreateProfileDialogProps> = ({
     setLoading(true);
     try {
       await onSubmit(sellerName.trim());
-      setSellerName('');
+      setSellerName("");
       onClose();
     } catch (error) {
-      console.error('Failed to create profile:', error);
+      console.error("Failed to create profile:", error);
     } finally {
       setLoading(false);
     }
@@ -44,7 +44,7 @@ export const CreateProfileDialog: React.FC<CreateProfileDialogProps> = ({
 
   const handleClose = () => {
     if (!loading) {
-      setSellerName('');
+      setSellerName("");
       onClose();
     }
   };
@@ -62,7 +62,7 @@ export const CreateProfileDialog: React.FC<CreateProfileDialogProps> = ({
             value={sellerName}
             onChange={(e) => setSellerName(e.target.value)}
             onKeyPress={(e) => {
-              if (e.key === 'Enter' && sellerName.trim()) {
+              if (e.key === "Enter" && sellerName.trim()) {
                 handleSubmit();
               }
             }}
@@ -80,7 +80,7 @@ export const CreateProfileDialog: React.FC<CreateProfileDialogProps> = ({
           variant="contained"
           disabled={!sellerName.trim() || loading}
         >
-          {loading ? 'Creating...' : 'Create Profile'}
+          {loading ? "Creating..." : "Create Seller"}
         </Button>
       </DialogActions>
     </Dialog>

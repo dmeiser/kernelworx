@@ -2,8 +2,8 @@
  * CreateSeasonDialog component - Dialog for creating a new sales season
  */
 
-import React, { useState, useEffect } from 'react';
-import { useQuery } from '@apollo/client/react';
+import React, { useState, useEffect } from "react";
+import { useQuery } from "@apollo/client/react";
 import {
   Dialog,
   DialogTitle,
@@ -18,8 +18,8 @@ import {
   MenuItem,
   Alert,
   CircularProgress,
-} from '@mui/material';
-import { LIST_PUBLIC_CATALOGS, LIST_MY_CATALOGS } from '../lib/graphql';
+} from "@mui/material";
+import { LIST_PUBLIC_CATALOGS, LIST_MY_CATALOGS } from "../lib/graphql";
 
 interface CreateSeasonDialogProps {
   open: boolean;
@@ -28,7 +28,7 @@ interface CreateSeasonDialogProps {
     seasonName: string,
     startDate: string,
     endDate: string | null,
-    catalogId: string
+    catalogId: string,
   ) => Promise<void>;
 }
 
@@ -43,10 +43,10 @@ export const CreateSeasonDialog: React.FC<CreateSeasonDialogProps> = ({
   onClose,
   onSubmit,
 }) => {
-  const [seasonName, setSeasonName] = useState('');
-  const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate] = useState('');
-  const [catalogId, setCatalogId] = useState('');
+  const [seasonName, setSeasonName] = useState("");
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const [catalogId, setCatalogId] = useState("");
   const [loading, setLoading] = useState(false);
 
   // Fetch catalogs
@@ -66,7 +66,7 @@ export const CreateSeasonDialog: React.FC<CreateSeasonDialogProps> = ({
   // Set default start date to today
   useEffect(() => {
     if (open && !startDate) {
-      const today = new Date().toISOString().split('T')[0];
+      const today = new Date().toISOString().split("T")[0];
       setStartDate(today);
     }
   }, [open, startDate]);
@@ -78,13 +78,13 @@ export const CreateSeasonDialog: React.FC<CreateSeasonDialogProps> = ({
     try {
       await onSubmit(seasonName.trim(), startDate, endDate || null, catalogId);
       // Reset form
-      setSeasonName('');
-      setStartDate('');
-      setEndDate('');
-      setCatalogId('');
+      setSeasonName("");
+      setStartDate("");
+      setEndDate("");
+      setCatalogId("");
       onClose();
     } catch (error) {
-      console.error('Failed to create season:', error);
+      console.error("Failed to create season:", error);
     } finally {
       setLoading(false);
     }
@@ -92,16 +92,19 @@ export const CreateSeasonDialog: React.FC<CreateSeasonDialogProps> = ({
 
   const handleClose = () => {
     if (!loading) {
-      setSeasonName('');
-      setStartDate('');
-      setEndDate('');
-      setCatalogId('');
+      setSeasonName("");
+      setStartDate("");
+      setEndDate("");
+      setCatalogId("");
       onClose();
     }
   };
 
   const isFormValid =
-    seasonName.trim() && startDate && catalogId && (!endDate || endDate >= startDate);
+    seasonName.trim() &&
+    startDate &&
+    catalogId &&
+    (!endDate || endDate >= startDate);
 
   return (
     <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth>
@@ -164,7 +167,7 @@ export const CreateSeasonDialog: React.FC<CreateSeasonDialogProps> = ({
               {allCatalogs.map((catalog) => (
                 <MenuItem key={catalog.catalogId} value={catalog.catalogId}>
                   {catalog.catalogName}
-                  {catalog.catalogType === 'ADMIN_MANAGED' && ' (Official)'}
+                  {catalog.catalogType === "ADMIN_MANAGED" && " (Official)"}
                 </MenuItem>
               ))}
             </Select>
@@ -172,7 +175,8 @@ export const CreateSeasonDialog: React.FC<CreateSeasonDialogProps> = ({
 
           {allCatalogs.length === 0 && !catalogsLoading && (
             <Alert severity="warning">
-              No product catalogs are available. You'll need a catalog to create a season.
+              No product catalogs are available. You'll need a catalog to create
+              a season.
             </Alert>
           )}
         </Stack>
@@ -181,8 +185,12 @@ export const CreateSeasonDialog: React.FC<CreateSeasonDialogProps> = ({
         <Button onClick={handleClose} disabled={loading}>
           Cancel
         </Button>
-        <Button onClick={handleSubmit} variant="contained" disabled={!isFormValid || loading}>
-          {loading ? 'Creating...' : 'Create Season'}
+        <Button
+          onClick={handleSubmit}
+          variant="contained"
+          disabled={!isFormValid || loading}
+        >
+          {loading ? "Creating..." : "Create Season"}
         </Button>
       </DialogActions>
     </Dialog>

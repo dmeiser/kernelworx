@@ -1,5 +1,5 @@
 [project]
-name = "popcorn-sales-manager"
+name = "kernelworx"
 version = "0.1.0"
 description = "Popcorn Sales Manager - Lambda functions and backend code"
 requires-python = ">=3.13"
@@ -17,6 +17,7 @@ dev = [
     "mypy>=1.19.0",
     "pytest>=9.0.1",
     "pytest-cov>=7.0.0",
+    "types-openpyxl>=3.1.5.20250919",
 ]
 
 [tool.black]
@@ -46,3 +47,19 @@ addopts = [
     "--cov-report=html",
     "--cov-fail-under=100",
 ]
+
+[tool.coverage.run]
+branch = true
+omit = []
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "@abstractmethod",
+]
+precision = 2

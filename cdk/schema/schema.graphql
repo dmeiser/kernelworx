@@ -38,7 +38,12 @@ enum CatalogType {
 type Account {
   accountId: ID!
   email: AWSEmail!
-  isAdmin: Boolean!
+  givenName: String
+  familyName: String
+  city: String
+  state: String
+  unitNumber: String
+  # Note: isAdmin is determined from JWT cognito:groups claim, not stored in DynamoDB
   createdAt: AWSDateTime!
   updatedAt: AWSDateTime!
 }
@@ -67,7 +72,7 @@ type Season {
   totalRevenue: Float
 }
 
-type Catalog {
+type Catalog @aws_cognito_user_pools {
   catalogId: ID!
   catalogName: String!
   catalogType: CatalogType!
@@ -78,7 +83,7 @@ type Catalog {
   updatedAt: AWSDateTime!
 }
 
-type Product {
+type Product @aws_cognito_user_pools {
   productId: ID!
   productName: String!
   description: String
@@ -91,7 +96,7 @@ type Order {
   profileId: ID!
   seasonId: ID!
   customerName: String!
-  customerPhone: AWSPhone
+  customerPhone: String
   customerAddress: Address
   orderDate: AWSDateTime!
   paymentMethod: PaymentMethod!
@@ -191,7 +196,7 @@ input CreateOrderInput {
   profileId: ID!
   seasonId: ID!
   customerName: String!
-  customerPhone: AWSPhone
+  customerPhone: String
   customerAddress: AddressInput
   orderDate: AWSDateTime!
   paymentMethod: PaymentMethod!
@@ -202,7 +207,7 @@ input CreateOrderInput {
 input UpdateOrderInput {
   orderId: ID!
   customerName: String
-  customerPhone: AWSPhone
+  customerPhone: String
   customerAddress: AddressInput
   orderDate: AWSDateTime
   paymentMethod: PaymentMethod
@@ -243,6 +248,14 @@ input RevokeShareInput {
   targetAccountId: ID!
 }
 
+input UpdateMyAccountInput {
+  givenName: String
+  familyName: String
+  city: String
+  state: String
+  unitNumber: String
+}
+
 input RequestSeasonReportInput {
   seasonId: ID!
   format: String
@@ -266,8 +279,8 @@ type Query {
   listSeasonsByProfile(profileId: ID!): [Season!]!
   
   # Catalog queries
-  getCatalog(catalogId: ID!): Catalog
-  listPublicCatalogs: [Catalog!]!
+  getCatalog(catalogId: ID!): Catalog @aws_cognito_user_pools
+  listPublicCatalogs: [Catalog!]! @aws_cognito_user_pools
   listMyCatalogs: [Catalog!]!
   
   # Order queries
@@ -285,6 +298,9 @@ type Query {
 # ============================================================================
 
 type Mutation {
+  # Account mutations
+  updateMyAccount(input: UpdateMyAccountInput!): Account!
+  
   # Profile mutations
   createSellerProfile(input: CreateSellerProfileInput!): SellerProfile!
   updateSellerProfile(input: UpdateSellerProfileInput!): SellerProfile!
@@ -307,6 +323,7 @@ type Mutation {
   
   # Sharing mutations
   createProfileInvite(input: CreateProfileInviteInput!): ProfileInvite!
+  deleteProfileInvite(profileId: ID!, inviteCode: ID!): Boolean!
   redeemProfileInvite(input: RedeemProfileInviteInput!): Share!
   shareProfileDirect(input: ShareProfileDirectInput!): Share!
   revokeShare(input: RevokeShareInput!): Boolean!

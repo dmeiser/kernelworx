@@ -1,11 +1,11 @@
 /**
  * AdminPage - Admin console for managing users, profiles, and system-wide settings
- * 
+ *
  * Only visible when user has isAdmin=true
  */
 
-import React, { useState } from 'react';
-import { useQuery } from '@apollo/client/react';
+import React, { useState } from "react";
+import { useQuery } from "@apollo/client/react";
 import {
   Box,
   Typography,
@@ -22,13 +22,13 @@ import {
   TableRow,
   Chip,
   Stack,
-} from '@mui/material';
+} from "@mui/material";
 import {
   People as PeopleIcon,
   Inventory as CatalogIcon,
   Info as InfoIcon,
-} from '@mui/icons-material';
-import { LIST_MY_PROFILES, LIST_PUBLIC_CATALOGS } from '../lib/graphql';
+} from "@mui/icons-material";
+import { LIST_MY_PROFILES, LIST_PUBLIC_CATALOGS } from "../lib/graphql";
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -82,8 +82,8 @@ export const AdminPage: React.FC = () => {
       </Typography>
 
       <Alert severity="warning" sx={{ mb: 3 }}>
-        <strong>Administrator Access:</strong> You have elevated privileges. Use this console
-        responsibly.
+        <strong>Administrator Access:</strong> You have elevated privileges. Use
+        this console responsibly.
       </Alert>
 
       {/* Tabs */}
@@ -102,8 +102,8 @@ export const AdminPage: React.FC = () => {
             All Seller Profiles
           </Typography>
           <Typography variant="body2" color="text.secondary" paragraph>
-            View all seller profiles in the system. Full CRUD operations coming in future
-            updates.
+            View all seller profiles in the system. Full CRUD operations coming
+            in future updates.
           </Typography>
 
           {profilesLoading && (
@@ -113,7 +113,9 @@ export const AdminPage: React.FC = () => {
           )}
 
           {profilesError && (
-            <Alert severity="error">Failed to load profiles: {profilesError.message}</Alert>
+            <Alert severity="error">
+              Failed to load profiles: {profilesError.message}
+            </Alert>
           )}
 
           {!profilesLoading && !profilesError && profiles.length > 0 && (
@@ -171,7 +173,8 @@ export const AdminPage: React.FC = () => {
             Product Catalogs
           </Typography>
           <Typography variant="body2" color="text.secondary" paragraph>
-            Manage official product catalogs. Create, edit, and deactivate catalog items.
+            Manage official product catalogs. Create, edit, and deactivate
+            catalog items.
           </Typography>
 
           {catalogsLoading && (
@@ -181,25 +184,32 @@ export const AdminPage: React.FC = () => {
           )}
 
           {catalogsError && (
-            <Alert severity="error">Failed to load catalogs: {catalogsError.message}</Alert>
+            <Alert severity="error">
+              Failed to load catalogs: {catalogsError.message}
+            </Alert>
           )}
 
           {!catalogsLoading && !catalogsError && catalogs.length > 0 && (
             <Stack spacing={2}>
               {catalogs.map((catalog: any) => (
                 <Paper key={catalog.catalogId} variant="outlined" sx={{ p: 2 }}>
-                  <Stack direction="row" justifyContent="space-between" alignItems="start">
+                  <Stack
+                    direction="row"
+                    justifyContent="space-between"
+                    alignItems="start"
+                  >
                     <Box>
                       <Typography variant="subtitle1" fontWeight="medium">
                         {catalog.catalogName}
                       </Typography>
                       <Typography variant="body2" color="text.secondary">
-                        {catalog.catalogType} • {catalog.products?.length || 0} products
+                        {catalog.catalogType} • {catalog.products?.length || 0}{" "}
+                        products
                       </Typography>
                     </Box>
                     <Chip
-                      label={catalog.isPublic ? 'Public' : 'Private'}
-                      color={catalog.isPublic ? 'success' : 'default'}
+                      label={catalog.isPublic ? "Public" : "Private"}
+                      color={catalog.isPublic ? "success" : "default"}
                       size="small"
                     />
                   </Stack>
@@ -209,12 +219,14 @@ export const AdminPage: React.FC = () => {
           )}
 
           {!catalogsLoading && !catalogsError && catalogs.length === 0 && (
-            <Alert severity="info">No catalogs found. Create your first catalog!</Alert>
+            <Alert severity="info">
+              No catalogs found. Create your first catalog!
+            </Alert>
           )}
 
           <Alert severity="info" sx={{ mt: 3 }}>
-            <strong>Coming Soon:</strong> Full catalog management (create, edit, delete items).
-            For now, use the AWS Console or GraphQL API directly.
+            <strong>Coming Soon:</strong> Full catalog management (create, edit,
+            delete items). For now, use the AWS Console or GraphQL API directly.
           </Alert>
         </Paper>
       </TabPanel>
@@ -243,30 +255,47 @@ export const AdminPage: React.FC = () => {
               <Typography variant="subtitle2" color="text.secondary">
                 Database
               </Typography>
-              <Typography variant="body1">Amazon DynamoDB (On-Demand)</Typography>
+              <Typography variant="body1">
+                Amazon DynamoDB (On-Demand)
+              </Typography>
             </Box>
             <Box>
               <Typography variant="subtitle2" color="text.secondary">
                 Authentication
               </Typography>
-              <Typography variant="body1">AWS Cognito (Social Login Enabled)</Typography>
+              <Typography variant="body1">
+                AWS Cognito (Social Login Enabled)
+              </Typography>
             </Box>
             <Box>
               <Typography variant="subtitle2" color="text.secondary">
                 File Storage
               </Typography>
-              <Typography variant="body1">Amazon S3 (Reports & Exports)</Typography>
+              <Typography variant="body1">
+                Amazon S3 (Reports & Exports)
+              </Typography>
             </Box>
           </Stack>
 
           <Alert severity="info" sx={{ mt: 3 }}>
             <strong>Admin Features In Development:</strong>
-            <ul style={{ margin: '8px 0', paddingLeft: '20px' }}>
-              <li>User management (view all users, reset passwords, disable accounts)</li>
+            <ul style={{ margin: "8px 0", paddingLeft: "20px" }}>
+              <li>
+                User management (view all users, reset passwords, disable
+                accounts)
+              </li>
               <li>Profile management (transfer ownership, hard delete)</li>
-              <li>Order management (view all orders, restore soft-deleted, hard delete)</li>
-              <li>Catalog CRUD (create, edit, delete official catalogs and products)</li>
-              <li>System analytics (usage stats, popular products, revenue trends)</li>
+              <li>
+                Order management (view all orders, restore soft-deleted, hard
+                delete)
+              </li>
+              <li>
+                Catalog CRUD (create, edit, delete official catalogs and
+                products)
+              </li>
+              <li>
+                System analytics (usage stats, popular products, sales trends)
+              </li>
               <li>Audit logs (view all admin actions and changes)</li>
             </ul>
           </Alert>

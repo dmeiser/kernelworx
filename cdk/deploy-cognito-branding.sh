@@ -29,16 +29,24 @@ echo -e "${GREEN}=== Cognito Managed Login Branding Deployment ===${NC}\n"
 
 # Get stack outputs
 echo -e "${YELLOW}Getting CloudFormation outputs...${NC}"
-STACK_NAME="popcorn-sales-manager-dev"
+STACK_NAME="kernelworx-dev"
 
-# Extract User Pool ID from CDK stack
+# Extract User Pool ID from CDK stack (works for both imported and managed)
 USER_POOL_ID=$(aws cloudformation describe-stack-resources \
   --stack-name "$STACK_NAME" \
   --query 'StackResources[?ResourceType==`AWS::Cognito::UserPool`].PhysicalResourceId' \
   --output text)
 
+# If not found in stack (imported resource), find by name
 if [ -z "$USER_POOL_ID" ]; then
-  echo -e "${RED}Error: Could not find User Pool ID in stack $STACK_NAME${NC}"
+  echo -e "${YELLOW}User Pool not found in stack, searching by name...${NC}"
+  USER_POOL_ID=$(aws cognito-idp list-user-pools --max-results 20 \
+    --query "UserPools[?Name=='kernelworx-users-dev'].Id" \
+    --output text)
+fi
+
+if [ -z "$USER_POOL_ID" ]; then
+  echo -e "${RED}Error: Could not find User Pool ID${NC}"
   exit 1
 fi
 
@@ -95,13 +103,19 @@ BACKGROUND_BASE64=$(base64 -w 0 < "$BACKGROUND_SVG")
 echo -e "${YELLOW}Reading branding settings...${NC}"
 SETTINGS_JSON=$(cat "$SETTINGS_FILE")
 
-echo -e "${YELLOW}Creating managed login branding configuration with logo, favicon, and background...${NC}\n"
+echo -e "${YELLOW}Creating managed login branding configuration with logo, favicon, background, and header...${NC}\n"
 
-# Create Assets array with logo, favicon, and background
+# Create Assets array with logo, favicon, background, and header logo
 ASSETS_JSON=$(cat <<EOF
 [
   {
     "Category": "FORM_LOGO",
+    "ColorMode": "LIGHT",
+    "Extension": "PNG",
+    "Bytes": "$LOGO_BASE64"
+  },
+  {
+    "Category": "PAGE_HEADER_LOGO",
     "ColorMode": "LIGHT",
     "Extension": "PNG",
     "Bytes": "$LOGO_BASE64"
@@ -175,19 +189,19 @@ rm -f /tmp/cognito-branding-input.json /tmp/cognito-branding-update.json
 
 # Show Hosted UI URL
 REGION=$(aws configure get region)
-HOSTED_UI_URL="https://popcorn-sales-manager-dev.auth.${REGION}.amazoncognito.com/login?client_id=${CLIENT_ID}&response_type=code&redirect_uri=http://localhost:5173"
+HOSTED_UI_URL="https://kernelworx-dev.auth.${REGION}.amazoncognito.com/login?client_id=${CLIENT_ID}&response_type=code&redirect_uri=http://localhost:5173"
 
 # Ensure domain is using Managed Login (not Hosted UI classic)
 echo -e "${YELLOW}Verifying domain branding version...${NC}"
 CURRENT_VERSION=$(aws cognito-idp describe-user-pool-domain \
-  --domain popcorn-sales-manager-dev \
+  --domain kernelworx-dev \
   --query 'DomainDescription.ManagedLoginVersion' \
   --output text)
 
 if [ "$CURRENT_VERSION" != "2" ]; then
   echo -e "${YELLOW}Domain is using version $CURRENT_VERSION. Updating to Managed Login v2...${NC}"
   aws cognito-idp update-user-pool-domain \
-    --domain popcorn-sales-manager-dev \
+    --domain kernelworx-dev \
     --user-pool-id "$USER_POOL_ID" \
     --managed-login-version 2 \
     --output json > /dev/null

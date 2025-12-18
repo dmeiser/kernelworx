@@ -16,7 +16,7 @@ echo -e "${YELLOW}=== Popcorn Sales Manager - GraphQL Query Testing ===${NC}\n"
 # Get API endpoint from AWS
 echo "Getting API endpoint..."
 API_ENDPOINT=$(aws appsync list-graphql-apis \
-  --query "graphqlApis[?name=='popcorn-sales-manager-api-dev'].uris.GRAPHQL" \
+  --query "graphqlApis[?name=='kernelworx-api-dev'].uris.GRAPHQL" \
   --output text)
 
 if [ -z "$API_ENDPOINT" ]; then

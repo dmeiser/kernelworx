@@ -5,7 +5,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, renderHook } from '@testing-library/react';
+import { act } from '@testing-library/react';
 import { AuthProvider, useAuth } from '../src/contexts/AuthContext';
 import * as amplifyAuth from 'aws-amplify/auth';
 import * as amplifyUtils from 'aws-amplify/utils';
@@ -166,31 +167,31 @@ describe('AuthContext', () => {
     });
   });
 
-  it('handles login failure', async () => {
+  it('catches errors during login', async () => {
     const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.mocked(amplifyAuth.fetchAuthSession).mockResolvedValue({ tokens: undefined } as any);
     vi.mocked(amplifyAuth.signInWithRedirect).mockRejectedValue(new Error('Login failed'));
-    
-    const { rerender } = render(
-      <AuthProvider>
-        <TestComponent />
-      </AuthProvider>
-    );
-    
-    await waitFor(() => {
-      expect(screen.getByTestId('loading')).toHaveTextContent('false');
+
+    const { result } = renderHook(() => useAuth(), {
+      wrapper: AuthProvider,
     });
-    
-    const loginButton = screen.getByText('Login');
-    
-    // Click will trigger the promise rejection, but we catch it in the handler
-    loginButton.click();
-    
-    // Wait for error to be logged
+
     await waitFor(() => {
-      expect(consoleErrorSpy).toHaveBeenCalledWith('Login failed:', expect.any(Error));
+      expect(result.current).toBeDefined();
     });
-    
+
+    // Login should reject and log error
+    let caughtError: Error | undefined;
+    try {
+      await act(async () => {
+        await result.current.login();
+      });
+    } catch (error) {
+      caughtError = error as Error;
+    }
+
+    expect(caughtError).toBeInstanceOf(Error);
+    expect(consoleErrorSpy).toHaveBeenCalledWith('Login failed:', expect.any(Error));
     consoleErrorSpy.mockRestore();
   });
 

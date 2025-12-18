@@ -1,10 +1,13 @@
 /**
- * SeasonSettingsPage - Season metadata and sharing settings
+ * SeasonSettingsPage - Season-specific settings only
+ *
+ * Note: Profile-level settings (invites, shares, profile deletion) have been moved
+ * to ProfileManagementPage to clarify that invites belong to profiles, not seasons.
  */
 
-import React, { useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { useQuery, useMutation } from '@apollo/client/react';
+import React, { useState } from "react";
+import { useParams, useNavigate } from "react-router-dom";
+import { useQuery, useMutation } from "@apollo/client/react";
 import {
   Box,
   Typography,
@@ -12,25 +15,24 @@ import {
   Stack,
   TextField,
   Button,
-  Alert,
-  IconButton,
   Dialog,
   DialogTitle,
   DialogContent,
   DialogActions,
   CircularProgress,
-} from '@mui/material';
-import {
-  Delete as DeleteIcon,
-  ContentCopy as CopyIcon,
-  Share as ShareIcon,
-} from '@mui/icons-material';
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+} from "@mui/material";
+import { Delete as DeleteIcon } from "@mui/icons-material";
 import {
   GET_SEASON,
   UPDATE_SEASON,
   DELETE_SEASON,
-  CREATE_PROFILE_INVITE,
-} from '../lib/graphql';
+  LIST_PUBLIC_CATALOGS,
+  LIST_MY_CATALOGS,
+} from "../lib/graphql";
 
 interface Season {
   seasonId: string;
@@ -41,14 +43,27 @@ interface Season {
   profileId: string;
 }
 
+interface Catalog {
+  catalogId: string;
+  catalogName: string;
+  catalogType: string;
+}
+
 export const SeasonSettingsPage: React.FC = () => {
-  const { profileId, seasonId } = useParams<{ profileId: string; seasonId: string }>();
+  const { profileId: encodedProfileId, seasonId: encodedSeasonId } = useParams<{
+    profileId: string;
+    seasonId: string;
+  }>();
+  const profileId = encodedProfileId
+    ? decodeURIComponent(encodedProfileId)
+    : "";
+  const seasonId = encodedSeasonId ? decodeURIComponent(encodedSeasonId) : "";
   const navigate = useNavigate();
-  const [seasonName, setSeasonName] = useState('');
-  const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate] = useState('');
+  const [seasonName, setSeasonName] = useState("");
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const [catalogId, setCatalogId] = useState("");
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
-  const [inviteCode, setInviteCode] = useState<string | null>(null);
 
   // Fetch season
   const {
@@ -60,12 +75,26 @@ export const SeasonSettingsPage: React.FC = () => {
     skip: !seasonId,
   });
 
+  // Fetch catalogs
+  const { data: publicCatalogsData } = useQuery<{
+    listPublicCatalogs: Catalog[];
+  }>(LIST_PUBLIC_CATALOGS);
+
+  const { data: myCatalogsData } = useQuery<{
+    listMyCatalogs: Catalog[];
+  }>(LIST_MY_CATALOGS);
+
+  const publicCatalogs = publicCatalogsData?.listPublicCatalogs || [];
+  const myCatalogs = myCatalogsData?.listMyCatalogs || [];
+  const allCatalogs = [...publicCatalogs, ...myCatalogs];
+
   // Initialize form when season loads
   React.useEffect(() => {
     if (seasonData?.getSeason) {
       setSeasonName(seasonData.getSeason.seasonName);
-      setStartDate(seasonData.getSeason.startDate?.split('T')[0] || '');
-      setEndDate(seasonData.getSeason.endDate?.split('T')[0] || '');
+      setStartDate(seasonData.getSeason.startDate?.split("T")[0] || "");
+      setEndDate(seasonData.getSeason.endDate?.split("T")[0] || "");
+      setCatalogId(seasonData.getSeason.catalogId);
     }
   }, [seasonData]);
 
@@ -79,29 +108,30 @@ export const SeasonSettingsPage: React.FC = () => {
   // Delete season mutation
   const [deleteSeason] = useMutation(DELETE_SEASON, {
     onCompleted: () => {
-      navigate(`/profiles/${profileId}/seasons`);
-    },
-  });
-
-  // Create profile invite
-  const [createInvite, { loading: creatingInvite }] = useMutation<{
-    createProfileInvite: { inviteCode: string };
-  }>(CREATE_PROFILE_INVITE, {
-    onCompleted: (data) => {
-      setInviteCode(data.createProfileInvite.inviteCode);
+      navigate(`/profiles/${encodeURIComponent(profileId || "")}/seasons`);
     },
   });
 
   const season = seasonData?.getSeason;
 
   const handleSaveChanges = async () => {
-    if (!seasonId || !seasonName.trim()) return;
+    if (!seasonId || !seasonName.trim() || !catalogId) return;
+
+    // Convert YYYY-MM-DD to ISO 8601 datetime
+    const startDateTime = new Date(startDate + "T00:00:00.000Z").toISOString();
+    const endDateTime = endDate
+      ? new Date(endDate + "T23:59:59.999Z").toISOString()
+      : null;
+
     await updateSeason({
       variables: {
-        seasonId,
-        seasonName: seasonName.trim(),
-        startDate,
-        endDate: endDate || null,
+        input: {
+          seasonId,
+          seasonName: seasonName.trim(),
+          startDate: startDateTime,
+          endDate: endDateTime,
+          catalogId,
+        },
       },
     });
   };
@@ -111,25 +141,14 @@ export const SeasonSettingsPage: React.FC = () => {
     await deleteSeason({ variables: { seasonId } });
   };
 
-  const handleCreateInvite = async () => {
-    if (!profileId) return;
-    await createInvite({
-      variables: {
-        profileId,
-        permissions: ['READ', 'WRITE'],
-      },
-    });
-  };
-
-  const handleCopyInviteCode = () => {
-    if (inviteCode) {
-      navigator.clipboard.writeText(inviteCode);
-    }
-  };
-
   if (loading) {
     return (
-      <Box display="flex" justifyContent="center" alignItems="center" minHeight="200px">
+      <Box
+        display="flex"
+        justifyContent="center"
+        alignItems="center"
+        minHeight="200px"
+      >
         <CircularProgress />
       </Box>
     );
@@ -140,14 +159,29 @@ export const SeasonSettingsPage: React.FC = () => {
     season.seasonName &&
     season.startDate &&
     (seasonName !== season.seasonName ||
-      startDate !== season.startDate.split('T')[0] ||
-      endDate !== (season.endDate?.split('T')[0] || ''));
+      startDate !== season.startDate.split("T")[0] ||
+      endDate !== (season.endDate?.split("T")[0] || "") ||
+      catalogId !== season.catalogId);
 
   return (
     <Box>
-      <Typography variant="h5" gutterBottom>
-        Season Settings
-      </Typography>
+      <Stack
+        direction="row"
+        justifyContent="space-between"
+        alignItems="center"
+        sx={{ mb: 3 }}
+      >
+        <Typography variant="h5">Season Settings</Typography>
+        <Button
+          variant="text"
+          color="primary"
+          onClick={() =>
+            navigate(`/profiles/${encodeURIComponent(profileId)}/manage`)
+          }
+        >
+          Manage Seller Profile
+        </Button>
+      </Stack>
 
       {/* Basic Settings */}
       <Paper sx={{ p: 3, mb: 3 }}>
@@ -180,58 +214,46 @@ export const SeasonSettingsPage: React.FC = () => {
             disabled={updating}
             InputLabelProps={{ shrink: true }}
           />
+          <FormControl fullWidth disabled={updating}>
+            <InputLabel>Product Catalog</InputLabel>
+            <Select
+              value={catalogId}
+              onChange={(e) => setCatalogId(e.target.value)}
+              label="Product Catalog"
+            >
+              {allCatalogs.map((catalog) => (
+                <MenuItem key={catalog.catalogId} value={catalog.catalogId}>
+                  {catalog.catalogName}
+                  {catalog.catalogType === "ADMIN_MANAGED" && " (Official)"}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
           <Button
             variant="contained"
             onClick={handleSaveChanges}
             disabled={!hasChanges || updating}
           >
-            {updating ? 'Saving...' : 'Save Changes'}
+            {updating ? "Saving..." : "Save Changes"}
           </Button>
         </Stack>
       </Paper>
 
-      {/* Profile Sharing */}
-      <Paper sx={{ p: 3, mb: 3 }}>
-        <Typography variant="h6" gutterBottom>
-          Profile Sharing
-        </Typography>
-        <Typography variant="body2" color="text.secondary" paragraph>
-          Share this seller profile with others. They will be able to view and edit all seasons
-          for this profile.
-        </Typography>
-        <Button
-          variant="outlined"
-          startIcon={creatingInvite ? <CircularProgress size={20} /> : <ShareIcon />}
-          onClick={handleCreateInvite}
-          disabled={creatingInvite}
-        >
-          Generate Invite Code
-        </Button>
-        {inviteCode && (
-          <Alert severity="success" sx={{ mt: 2 }}>
-            <Stack direction="row" spacing={1} alignItems="center">
-              <Typography variant="body2">
-                Invite Code: <strong>{inviteCode}</strong>
-              </Typography>
-              <IconButton size="small" onClick={handleCopyInviteCode}>
-                <CopyIcon fontSize="small" />
-              </IconButton>
-            </Stack>
-            <Typography variant="caption" display="block" mt={1}>
-              Share this code with others. It expires in 14 days and can only be used once.
-            </Typography>
-          </Alert>
-        )}
-      </Paper>
-
       {/* Danger Zone */}
-      <Paper sx={{ p: 3, borderColor: 'error.main', borderWidth: 1, borderStyle: 'solid' }}>
+      <Paper
+        sx={{
+          p: 3,
+          borderColor: "error.main",
+          borderWidth: 1,
+          borderStyle: "solid",
+        }}
+      >
         <Typography variant="h6" gutterBottom color="error">
           Danger Zone
         </Typography>
         <Typography variant="body2" color="text.secondary" paragraph>
-          Deleting this season will permanently remove all orders and data. This action cannot be
-          undone.
+          Deleting this season will permanently remove all orders and data. This
+          action cannot be undone.
         </Typography>
         <Button
           variant="outlined"
@@ -243,18 +265,25 @@ export const SeasonSettingsPage: React.FC = () => {
         </Button>
       </Paper>
 
-      {/* Delete Confirmation Dialog */}
-      <Dialog open={deleteConfirmOpen} onClose={() => setDeleteConfirmOpen(false)}>
+      {/* Delete Season Confirmation Dialog */}
+      <Dialog
+        open={deleteConfirmOpen}
+        onClose={() => setDeleteConfirmOpen(false)}
+      >
         <DialogTitle>Delete Season?</DialogTitle>
         <DialogContent>
           <Typography>
-            Are you sure you want to delete "{season?.seasonName}"? All orders and data will be
-            permanently deleted. This action cannot be undone.
+            Are you sure you want to delete "{season?.seasonName}"? All orders
+            and data will be permanently deleted. This action cannot be undone.
           </Typography>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setDeleteConfirmOpen(false)}>Cancel</Button>
-          <Button onClick={handleDeleteSeason} color="error" variant="contained">
+          <Button
+            onClick={handleDeleteSeason}
+            color="error"
+            variant="contained"
+          >
             Delete Permanently
           </Button>
         </DialogActions>

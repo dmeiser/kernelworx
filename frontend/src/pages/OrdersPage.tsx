@@ -2,9 +2,9 @@
  * OrdersPage - List and manage orders for a season
  */
 
-import React, { useState } from 'react';
-import { useParams } from 'react-router-dom';
-import { useQuery, useMutation } from '@apollo/client/react';
+import React, { useState } from "react";
+import { useParams } from "react-router-dom";
+import { useQuery, useMutation } from "@apollo/client/react";
 import {
   Box,
   Button,
@@ -21,14 +21,20 @@ import {
   TableRow,
   IconButton,
   Chip,
-} from '@mui/material';
+} from "@mui/material";
 import {
   Add as AddIcon,
   Edit as EditIcon,
   Delete as DeleteIcon,
-} from '@mui/icons-material';
-import { OrderEditorDialog } from '../components/OrderEditorDialog';
-import { LIST_ORDERS_BY_SEASON, DELETE_ORDER, GET_SEASON } from '../lib/graphql';
+} from "@mui/icons-material";
+import { OrderEditorDialog } from "../components/OrderEditorDialog";
+import { SeasonSummaryTiles } from "../components/SeasonSummaryTiles";
+import {
+  LIST_ORDERS_BY_SEASON,
+  DELETE_ORDER,
+  GET_SEASON,
+  GET_PROFILE,
+} from "../lib/graphql";
 
 interface LineItem {
   productId: string;
@@ -56,9 +62,17 @@ interface Product {
 }
 
 export const OrdersPage: React.FC = () => {
-  const { seasonId } = useParams<{ seasonId: string }>();
+  const { profileId: encodedProfileId, seasonId: encodedSeasonId } = useParams<{ profileId: string; seasonId: string }>();
+  const profileId = encodedProfileId ? decodeURIComponent(encodedProfileId) : "";
+  const seasonId = encodedSeasonId ? decodeURIComponent(encodedSeasonId) : "";
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
+
+  // Fetch profile (for permissions check)
+  const { data: profileData } = useQuery<{ getProfile: any }>(GET_PROFILE, {
+    variables: { profileId },
+    skip: !profileId,
+  });
 
   // Fetch season (for catalog/products)
   const { data: seasonData } = useQuery<{ getSeason: any }>(GET_SEASON, {
@@ -86,6 +100,14 @@ export const OrdersPage: React.FC = () => {
 
   const orders = ordersData?.listOrdersBySeason || [];
   const products: Product[] = seasonData?.getSeason?.catalog?.products || [];
+  const profile = profileData?.getProfile;
+  const hasWritePermission = profile?.isOwner || profile?.permissions?.includes('WRITE');
+
+  console.log("[OrdersPage] seasonId:", seasonId);
+  console.log("[OrdersPage] getSeason:", seasonData?.getSeason);
+  console.log("[OrdersPage] catalog:", seasonData?.getSeason?.catalog);
+  console.log("[OrdersPage] products:", products);
+  console.log("[OrdersPage] products.length:", products.length);
 
   const handleCreateOrder = () => {
     setEditingOrder(null);
@@ -98,53 +120,91 @@ export const OrdersPage: React.FC = () => {
   };
 
   const handleDeleteOrder = async (orderId: string) => {
-    if (confirm('Are you sure you want to delete this order?')) {
+    if (confirm("Are you sure you want to delete this order?")) {
       await deleteOrder({ variables: { orderId } });
     }
   };
 
   const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: "USD",
     }).format(amount);
   };
 
   const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
+    return new Date(dateString).toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
     });
   };
 
-  const paymentMethodColors: Record<string, 'default' | 'primary' | 'secondary' | 'success' | 'warning'> = {
-    CASH: 'success',
-    CHECK: 'primary',
-    CREDIT_CARD: 'secondary',
-    OTHER: 'default',
+  const formatPhoneNumber = (phone: string) => {
+    // Format +1XXXXXXXXXX as (XXX) XXX-XXXX
+    const digits = phone.replace(/\D/g, "");
+    if (digits.length === 11 && digits.startsWith("1")) {
+      const areaCode = digits.slice(1, 4);
+      const prefix = digits.slice(4, 7);
+      const lineNumber = digits.slice(7, 11);
+      return `(${areaCode}) ${prefix}-${lineNumber}`;
+    }
+    return phone; // Return as-is if format is unexpected
+  };
+
+  const paymentMethodColors: Record<
+    string,
+    "default" | "primary" | "secondary" | "success" | "warning"
+  > = {
+    CASH: "success",
+    CHECK: "primary",
+    CREDIT_CARD: "secondary",
+    OTHER: "default",
   };
 
   if (ordersLoading) {
     return (
-      <Box display="flex" justifyContent="center" alignItems="center" minHeight="200px">
+      <Box
+        display="flex"
+        justifyContent="center"
+        alignItems="center"
+        minHeight="200px"
+      >
         <CircularProgress />
       </Box>
     );
   }
 
   if (ordersError) {
-    return <Alert severity="error">Failed to load orders: {ordersError.message}</Alert>;
+    return (
+      <Alert severity="error">
+        Failed to load orders: {ordersError.message}
+      </Alert>
+    );
   }
 
   return (
     <Box>
+      {/* Summary Tiles */}
+      <SeasonSummaryTiles seasonId={seasonId} />
+
       {/* Header */}
-      <Stack direction="row" justifyContent="space-between" alignItems="center" mb={3}>
+      <Stack
+        direction="row"
+        justifyContent="space-between"
+        alignItems="center"
+        mb={3}
+      >
         <Typography variant="h5">Orders</Typography>
-        <Button variant="contained" startIcon={<AddIcon />} onClick={handleCreateOrder}>
-          New Order
-        </Button>
+        {hasWritePermission && (
+          <Button
+            variant="contained"
+            startIcon={<AddIcon />}
+            onClick={handleCreateOrder}
+          >
+            New Order
+          </Button>
+        )}
       </Stack>
 
       {/* Orders Table */}
@@ -173,17 +233,23 @@ export const OrdersPage: React.FC = () => {
                   </TableCell>
                   <TableCell>
                     <Typography variant="body2" color="text.secondary">
-                      {order.customerPhone || '—'}
+                      {order.customerPhone
+                        ? formatPhoneNumber(order.customerPhone)
+                        : "—"}
                     </Typography>
                   </TableCell>
                   <TableCell>
                     <Typography variant="body2">
-                      {order.lineItems.reduce((sum, item) => sum + item.quantity, 0)} items
+                      {order.lineItems.reduce(
+                        (sum, item) => sum + item.quantity,
+                        0,
+                      )}{" "}
+                      items
                     </Typography>
                   </TableCell>
                   <TableCell>
                     <Chip
-                      label={order.paymentMethod.replace('_', ' ')}
+                      label={order.paymentMethod.replace("_", " ")}
                       size="small"
                       color={paymentMethodColors[order.paymentMethod]}
                     />
@@ -194,20 +260,24 @@ export const OrdersPage: React.FC = () => {
                     </Typography>
                   </TableCell>
                   <TableCell align="right">
-                    <IconButton
-                      size="small"
-                      onClick={() => handleEditOrder(order)}
-                      color="primary"
-                    >
-                      <EditIcon fontSize="small" />
-                    </IconButton>
-                    <IconButton
-                      size="small"
-                      onClick={() => handleDeleteOrder(order.orderId)}
-                      color="error"
-                    >
-                      <DeleteIcon fontSize="small" />
-                    </IconButton>
+                    {hasWritePermission && (
+                      <>
+                        <IconButton
+                          size="small"
+                          onClick={() => handleEditOrder(order)}
+                          color="primary"
+                        >
+                          <EditIcon fontSize="small" />
+                        </IconButton>
+                        <IconButton
+                          size="small"
+                          onClick={() => handleDeleteOrder(order.orderId)}
+                          color="error"
+                        >
+                          <DeleteIcon fontSize="small" />
+                        </IconButton>
+                      </>
+                    )}
                   </TableCell>
                 </TableRow>
               ))}

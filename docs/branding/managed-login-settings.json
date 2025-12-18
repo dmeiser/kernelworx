@@ -3,7 +3,7 @@
     "global": {
       "colorSchemeMode": "LIGHT",
       "pageHeader": {
-        "enabled": false
+        "enabled": true
       },
       "pageFooter": {
         "enabled": false
@@ -85,6 +85,21 @@
           "backgroundColor": "ffebeeFF",
           "borderColor": "f44336ff"
         }
+      }
+    },
+    "pageHeader": {
+      "backgroundImage": {
+        "enabled": false
+      },
+      "lightMode": {
+        "background": {
+          "color": "1976d2ff"
+        },
+        "borderColor": "1565c0ff"
+      },
+      "logo": {
+        "enabled": true,
+        "location": "CENTER"
       }
     }
   },

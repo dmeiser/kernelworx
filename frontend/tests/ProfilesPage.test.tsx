@@ -327,7 +327,7 @@ describe.skip('ProfilesPage', () => {
       expect(screen.getByText(/You don't have any seller profiles yet/i)).toBeInTheDocument();
     });
 
-    const createButton = screen.getByRole('button', { name: /Create Profile/i });
+    const createButton = screen.getByRole('button', { name: /Create Seller/i });
     await user.click(createButton);
 
     expect(screen.getByRole('dialog')).toBeInTheDocument();
@@ -401,11 +401,11 @@ describe.skip('ProfilesPage', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Create Profile/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Create Seller/i })).toBeInTheDocument();
     });
 
     // Open dialog
-    const createButton = screen.getByRole('button', { name: /Create Profile/i });
+    const createButton = screen.getByRole('button', { name: /Create Seller/i });
     await user.click(createButton);
 
     // Fill in name
@@ -413,7 +413,7 @@ describe.skip('ProfilesPage', () => {
     await user.type(nameInput, 'New Scout');
 
     // Submit
-    const submitButton = screen.getByRole('button', { name: /Create Profile/i });
+    const submitButton = screen.getByRole('button', { name: /Create Seller/i });
     await user.click(submitButton);
 
     // Dialog should close

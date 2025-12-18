@@ -2,7 +2,7 @@
  * GraphQL queries and mutations for the app
  */
 
-import { gql } from '@apollo/client';
+import { gql } from "@apollo/client";
 
 // ============================================================================
 // Fragments
@@ -92,7 +92,27 @@ export const GET_MY_ACCOUNT = gql`
     getMyAccount {
       accountId
       email
-      isAdmin
+      givenName
+      familyName
+      city
+      state
+      unitNumber
+      createdAt
+      updatedAt
+    }
+  }
+`;
+
+export const UPDATE_MY_ACCOUNT = gql`
+  mutation UpdateMyAccount($input: UpdateMyAccountInput!) {
+    updateMyAccount(input: $input) {
+      accountId
+      email
+      givenName
+      familyName
+      city
+      state
+      unitNumber
       createdAt
       updatedAt
     }
@@ -200,6 +220,32 @@ export const GET_CATALOG = gql`
   }
 `;
 
+export const LIST_INVITES_BY_PROFILE = gql`
+  query ListInvitesByProfile($profileId: ID!) {
+    listInvitesByProfile(profileId: $profileId) {
+      inviteCode
+      profileId
+      permissions
+      expiresAt
+      createdAt
+      createdByAccountId
+    }
+  }
+`;
+
+export const LIST_SHARES_BY_PROFILE = gql`
+  query ListSharesByProfile($profileId: ID!) {
+    listSharesByProfile(profileId: $profileId) {
+      shareId
+      profileId
+      targetAccountId
+      permissions
+      createdAt
+      createdByAccountId
+    }
+  }
+`;
+
 // ============================================================================
 // Mutations
 // ============================================================================
@@ -207,7 +253,7 @@ export const GET_CATALOG = gql`
 export const CREATE_SELLER_PROFILE = gql`
   ${SELLER_PROFILE_FRAGMENT}
   mutation CreateSellerProfile($sellerName: String!) {
-    createSellerProfile(sellerName: $sellerName) {
+    createSellerProfile(input: { sellerName: $sellerName }) {
       ...SellerProfileFields
     }
   }
@@ -216,7 +262,9 @@ export const CREATE_SELLER_PROFILE = gql`
 export const UPDATE_SELLER_PROFILE = gql`
   ${SELLER_PROFILE_FRAGMENT}
   mutation UpdateSellerProfile($profileId: ID!, $sellerName: String!) {
-    updateSellerProfile(profileId: $profileId, sellerName: $sellerName) {
+    updateSellerProfile(
+      input: { profileId: $profileId, sellerName: $sellerName }
+    ) {
       ...SellerProfileFields
     }
   }
@@ -224,16 +272,14 @@ export const UPDATE_SELLER_PROFILE = gql`
 
 export const DELETE_SELLER_PROFILE = gql`
   mutation DeleteSellerProfile($profileId: ID!) {
-    deleteSellerProfile(profileId: $profileId) {
-      profileId
-    }
+    deleteSellerProfile(profileId: $profileId)
   }
 `;
 
 export const CREATE_SEASON = gql`
   ${SEASON_FRAGMENT}
-  mutation CreateSeason($profileId: ID!, $seasonName: String!, $startDate: AWSDateTime!, $endDate: AWSDateTime, $catalogId: ID!) {
-    createSeason(profileId: $profileId, seasonName: $seasonName, startDate: $startDate, endDate: $endDate, catalogId: $catalogId) {
+  mutation CreateSeason($input: CreateSeasonInput!) {
+    createSeason(input: $input) {
       ...SeasonFields
     }
   }
@@ -241,8 +287,8 @@ export const CREATE_SEASON = gql`
 
 export const UPDATE_SEASON = gql`
   ${SEASON_FRAGMENT}
-  mutation UpdateSeason($seasonId: ID!, $seasonName: String, $startDate: AWSDateTime, $endDate: AWSDateTime, $catalogId: ID) {
-    updateSeason(seasonId: $seasonId, seasonName: $seasonName, startDate: $startDate, endDate: $endDate, catalogId: $catalogId) {
+  mutation UpdateSeason($input: UpdateSeasonInput!) {
+    updateSeason(input: $input) {
       ...SeasonFields
     }
   }
@@ -250,9 +296,7 @@ export const UPDATE_SEASON = gql`
 
 export const DELETE_SEASON = gql`
   mutation DeleteSeason($seasonId: ID!) {
-    deleteSeason(seasonId: $seasonId) {
-      seasonId
-    }
+    deleteSeason(seasonId: $seasonId)
   }
 `;
 
@@ -267,8 +311,8 @@ export const CREATE_ORDER = gql`
 
 export const UPDATE_ORDER = gql`
   ${ORDER_FRAGMENT}
-  mutation UpdateOrder($orderId: ID!, $input: UpdateOrderInput!) {
-    updateOrder(orderId: $orderId, input: $input) {
+  mutation UpdateOrder($input: UpdateOrderInput!) {
+    updateOrder(input: $input) {
       ...OrderFields
     }
   }
@@ -276,15 +320,13 @@ export const UPDATE_ORDER = gql`
 
 export const DELETE_ORDER = gql`
   mutation DeleteOrder($orderId: ID!) {
-    deleteOrder(orderId: $orderId) {
-      orderId
-    }
+    deleteOrder(orderId: $orderId)
   }
 `;
 
 export const REQUEST_SEASON_REPORT = gql`
-  mutation RequestSeasonReport($seasonId: ID!, $format: String!) {
-    requestSeasonReport(seasonId: $seasonId, format: $format) {
+  mutation RequestSeasonReport($input: RequestSeasonReportInput!) {
+    requestSeasonReport(input: $input) {
       reportId
       seasonId
       profileId
@@ -297,8 +339,8 @@ export const REQUEST_SEASON_REPORT = gql`
 `;
 
 export const CREATE_PROFILE_INVITE = gql`
-  mutation CreateProfileInvite($profileId: ID!, $permissions: [PermissionType!]!) {
-    createProfileInvite(profileId: $profileId, permissions: $permissions) {
+  mutation CreateProfileInvite($input: CreateProfileInviteInput!) {
+    createProfileInvite(input: $input) {
       inviteCode
       profileId
       permissions
@@ -310,8 +352,8 @@ export const CREATE_PROFILE_INVITE = gql`
 `;
 
 export const REDEEM_PROFILE_INVITE = gql`
-  mutation RedeemProfileInvite($inviteCode: ID!) {
-    redeemProfileInvite(inviteCode: $inviteCode) {
+  mutation RedeemProfileInvite($input: RedeemProfileInviteInput!) {
+    redeemProfileInvite(input: $input) {
       shareId
       profileId
       targetAccountId
@@ -323,8 +365,8 @@ export const REDEEM_PROFILE_INVITE = gql`
 `;
 
 export const SHARE_PROFILE_DIRECT = gql`
-  mutation ShareProfileDirect($profileId: ID!, $targetAccountId: ID!, $permissions: [PermissionType!]!) {
-    shareProfileDirect(profileId: $profileId, targetAccountId: $targetAccountId, permissions: $permissions) {
+  mutation ShareProfileDirect($input: ShareProfileDirectInput!) {
+    shareProfileDirect(input: $input) {
       shareId
       profileId
       targetAccountId
@@ -336,10 +378,8 @@ export const SHARE_PROFILE_DIRECT = gql`
 `;
 
 export const REVOKE_SHARE = gql`
-  mutation RevokeShare($shareId: ID!) {
-    revokeShare(shareId: $shareId) {
-      shareId
-    }
+  mutation RevokeShare($input: RevokeShareInput!) {
+    revokeShare(input: $input)
   }
 `;
 
@@ -364,5 +404,11 @@ export const UPDATE_CATALOG = gql`
 export const DELETE_CATALOG = gql`
   mutation DeleteCatalog($catalogId: ID!) {
     deleteCatalog(catalogId: $catalogId)
+  }
+`;
+
+export const DELETE_PROFILE_INVITE = gql`
+  mutation DeleteProfileInvite($profileId: ID!, $inviteCode: ID!) {
+    deleteProfileInvite(profileId: $profileId, inviteCode: $inviteCode)
   }
 `;

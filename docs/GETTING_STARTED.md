@@ -129,8 +129,8 @@ If you have existing resources from a previous deployment, add them to your `.en
 
 ```bash
 # Edit cdk/.env
-STATIC_BUCKET_NAME=popcorn-sales-manager-dev-staticassetsddee9873-eo2c9kyxltjk
-EXPORTS_BUCKET_NAME=popcorn-sales-manager-dev-exports25637afb-jigya2wljfid
+STATIC_BUCKET_NAME=kernelworx-static-dev
+EXPORTS_BUCKET_NAME=kernelworx-exports-dev
 TABLE_NAME=psm-app-dev
 USER_POOL_ID=us-east-1_m861e2M
 APPSYNC_API_ID=xxxxxxxxxxxxx
@@ -145,7 +145,7 @@ Then deploy normally with `./deploy.sh` - the script will automatically pass the
 aws dynamodb list-tables --query 'TableNames[?contains(@, `psm`)]'
 
 # Find S3 buckets
-aws s3 ls | grep popcorn-sales-manager
+aws s3 ls | grep kernelworx
 
 # Find Cognito User Pools
 aws cognito-idp list-user-pools --max-results 60 | grep popcorn
@@ -167,7 +167,7 @@ ENVIRONMENT=prod
 ```
 
 Each environment gets its own isolated resources with environment-specific naming.
-- S3 buckets: `popcorn-sales-manager-{env}-staticassets*` and `popcorn-sales-manager-{env}-exports*`
+- S3 buckets: `kernelworx-static-{env}` and `kernelworx-exports-{env}`
 
 ## Social Authentication (Optional)
 
@@ -251,7 +251,7 @@ After deployment, CDK outputs key resource identifiers:
 ```bash
 # Get stack outputs
 aws cloudformation describe-stacks \
-  --stack-name popcorn-sales-manager-dev \
+  --stack-name kernelworx-dev \
   --query 'Stacks[0].Outputs'
 ```
 
@@ -277,7 +277,7 @@ Use the auto-import deployment method:
 ```bash
 # Delete the failed changeset
 aws cloudformation delete-change-set \
-  --stack-name popcorn-sales-manager-dev \
+  --stack-name kernelworx-dev \
   --change-set-name <changeset-name>
 ```
 
