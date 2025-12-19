@@ -182,15 +182,19 @@ export const ProfilesPage: React.FC = () => {
   const allSharedProfiles: Profile[] =
     sharedProfilesData?.listSharedProfiles || [];
   
-  // Debug logging
-  console.log("ProfilesPage filter debug:", {
-    showReadOnlyProfiles,
+  // Debug logging for intermittent shared profile loading issues
+  console.log("ProfilesPage shared profiles debug:", {
+    sharedProfilesLoading,
+    sharedProfilesError: sharedProfilesError?.message,
+    graphQLErrors: sharedProfilesError?.graphQLErrors?.map(e => ({
+      message: e.message,
+      path: e.path,
+      extensions: e.extensions
+    })),
+    networkError: sharedProfilesError?.networkError,
+    sharedProfilesData,
     allSharedProfilesCount: allSharedProfiles.length,
-    profilesWithPermissions: allSharedProfiles.map(p => ({
-      sellerName: p.sellerName,
-      permissions: p.permissions,
-      hasWrite: p.permissions.includes("WRITE")
-    }))
+    showReadOnlyProfiles,
   });
   
   const sharedProfiles = allSharedProfiles.filter(

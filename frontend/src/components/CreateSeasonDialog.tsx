@@ -2,7 +2,7 @@
  * CreateSeasonDialog component - Dialog for creating a new sales season
  */
 
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import { useQuery } from "@apollo/client/react";
 import {
   Dialog,

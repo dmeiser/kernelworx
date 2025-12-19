@@ -45,6 +45,7 @@ import { GET_SEASON, GET_PROFILE } from "../lib/graphql";
 interface Season {
   seasonId: string;
   seasonName: string;
+  seasonYear: number;
   profileId: string;
   startDate: string;
   endDate?: string;
@@ -160,7 +161,7 @@ export const SeasonLayout: React.FC = () => {
         >
           {profile?.sellerName || "Loading..."}
         </Link>
-        <Typography color="text.primary">{season.seasonName}</Typography>
+        <Typography color="text.primary">{season.seasonName} {season.seasonYear}</Typography>
       </Breadcrumbs>
 
       {/* Header */}
@@ -177,7 +178,7 @@ export const SeasonLayout: React.FC = () => {
         </IconButton>
         <Box flexGrow={1}>
           <Typography variant="h4" component="h1">
-            {season.seasonName}
+            {season.seasonName} {season.seasonYear}
           </Typography>
           <Typography variant="body2" color="text.secondary">
             {new Date(season.startDate).toLocaleDateString("en-US", {

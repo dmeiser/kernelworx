@@ -35,7 +35,6 @@ export const SeasonCard: React.FC<SeasonCardProps> = ({
   profileId,
   seasonName,
   seasonYear,
-  startDate,
   endDate,
   totalOrders,
   totalRevenue,

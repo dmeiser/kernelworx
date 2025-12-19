@@ -28,6 +28,7 @@ import { LIST_SEASONS_BY_PROFILE } from "../lib/graphql";
 interface Season {
   seasonId: string;
   seasonName: string;
+  seasonYear: number;
   totalOrders: number;
   totalRevenue: number;
   startDate: string;

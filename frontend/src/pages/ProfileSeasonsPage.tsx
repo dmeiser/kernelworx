@@ -32,6 +32,7 @@ import {
 interface Season {
   seasonId: string;
   seasonName: string;
+  seasonYear: number;
   startDate: string;
   endDate?: string;
   catalogId: string;
