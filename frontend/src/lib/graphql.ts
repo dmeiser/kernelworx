@@ -466,12 +466,14 @@ export const GET_UNIT_REPORT = gql`
     $unitNumber: Int!
     $seasonName: String!
     $seasonYear: Int!
+    $catalogId: ID!
   ) {
     getUnitReport(
       unitType: $unitType
       unitNumber: $unitNumber
       seasonName: $seasonName
       seasonYear: $seasonYear
+      catalogId: $catalogId
     ) {
       unitType
       unitNumber
@@ -498,6 +500,25 @@ export const GET_UNIT_REPORT = gql`
           }
         }
       }
+    }
+  }
+`;
+
+export const LIST_UNIT_CATALOGS = gql`
+  ${CATALOG_FRAGMENT}
+  query ListUnitCatalogs(
+    $unitType: String!
+    $unitNumber: Int!
+    $seasonName: String!
+    $seasonYear: Int!
+  ) {
+    listUnitCatalogs(
+      unitType: $unitType
+      unitNumber: $unitNumber
+      seasonName: $seasonName
+      seasonYear: $seasonYear
+    ) {
+      ...CatalogFields
     }
   }
 `;

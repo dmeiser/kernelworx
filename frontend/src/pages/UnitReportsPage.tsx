@@ -35,7 +35,11 @@ import {
   Download as DownloadIcon,
   Assessment as ReportIcon,
 } from "@mui/icons-material";
-import { GET_UNIT_REPORT, GET_MY_ACCOUNT } from "../lib/graphql";
+import {
+  GET_UNIT_REPORT,
+  GET_MY_ACCOUNT,
+  LIST_UNIT_CATALOGS,
+} from "../lib/graphql";
 import * as XLSX from "xlsx";
 
 const UNIT_TYPES = [
@@ -98,7 +102,8 @@ export const UnitReportsPage: React.FC = () => {
   const [unitNumber, setUnitNumber] = useState<string>("");
   const [seasonName, setSeasonName] = useState<string>("Fall");
   const [seasonYear, setSeasonYear] = useState<number>(currentYear);
-  const [reportView, setReportView] = useState<ReportView>("summary");
+  const [catalogId, setCatalogId] = useState<string>("");
+  const [reportView, setReportView] = useState<ReportView>("unit");
 
   // Get user's account to pre-populate their unit
   const { data: accountData } = useQuery<{
@@ -107,6 +112,22 @@ export const UnitReportsPage: React.FC = () => {
       unitNumber?: number;
     };
   }>(GET_MY_ACCOUNT);
+
+  // Get catalogs used in this unit
+  const canFetchCatalogs = unitType && unitNumber && seasonName && seasonYear;
+  const { data: unitCatalogsData } = useQuery<{
+    listUnitCatalogs: Array<{ catalogId: string; catalogName: string }>;
+  }>(LIST_UNIT_CATALOGS, {
+    variables: {
+      unitType,
+      unitNumber: unitNumber ? parseInt(unitNumber, 10) : 0,
+      seasonName,
+      seasonYear,
+    },
+    skip: !canFetchCatalogs,
+  });
+
+  const availableCatalogs = unitCatalogsData?.listUnitCatalogs || [];
 
   React.useEffect(() => {
     if (accountData?.getMyAccount) {
@@ -119,7 +140,7 @@ export const UnitReportsPage: React.FC = () => {
     }
   }, [accountData]);
 
-  const canGenerateReport = unitType && unitNumber && seasonName && seasonYear;
+  const canGenerateReport = unitType && unitNumber && seasonName && seasonYear && catalogId;
 
   const { data, loading, error, refetch } = useQuery<{
     getUnitReport: UnitReport;
@@ -129,6 +150,7 @@ export const UnitReportsPage: React.FC = () => {
       unitNumber: unitNumber ? parseInt(unitNumber, 10) : 0,
       seasonName,
       seasonYear,
+      catalogId,
     },
     skip: !canGenerateReport,
   });
@@ -256,7 +278,9 @@ export const UnitReportsPage: React.FC = () => {
                 fullWidth
                 inputProps={{ min: 1, step: 1 }}
               />
+            </Stack>
 
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
               <TextField
                 select
                 label="Season"
@@ -279,6 +303,29 @@ export const UnitReportsPage: React.FC = () => {
                 fullWidth
                 inputProps={{ min: 2020, max: currentYear + 1, step: 1 }}
               />
+
+              <TextField
+                select
+                label="Catalog"
+                value={catalogId}
+                onChange={(e) => setCatalogId(e.target.value)}
+                fullWidth
+                required
+                disabled={!canFetchCatalogs || availableCatalogs.length === 0}
+                helperText={
+                  !canFetchCatalogs
+                    ? "Select unit and season first"
+                    : availableCatalogs.length === 0
+                      ? "No catalogs found for this unit/season"
+                      : "Select catalog to compare scouts using same products"
+                }
+              >
+                {availableCatalogs.map((catalog) => (
+                  <MenuItem key={catalog.catalogId} value={catalog.catalogId}>
+                    {catalog.catalogName}
+                  </MenuItem>
+                ))}
+              </TextField>
             </Stack>
 
             <Button
@@ -355,27 +402,27 @@ export const UnitReportsPage: React.FC = () => {
             {report.sellers.length > 0 && (
               <Stack direction="row" spacing={1}>
                 <Button
-                  variant={reportView === "summary" ? "contained" : "outlined"}
-                  onClick={() => setReportView("summary")}
-                >
-                  Seller Summary
-                </Button>
-                <Button
-                  variant={reportView === "detailed" ? "contained" : "outlined"}
-                  onClick={() => setReportView("detailed")}
-                >
-                  Detailed Seller
-                </Button>
-                <Button
                   variant={reportView === "unit" ? "contained" : "outlined"}
                   onClick={() => setReportView("unit")}
                 >
                   Unit Summary
                 </Button>
+                <Button
+                  variant={reportView === "summary" ? "contained" : "outlined"}
+                  onClick={() => setReportView("summary")}
+                >
+                  Seller Report
+                </Button>
+                <Button
+                  variant={reportView === "detailed" ? "contained" : "outlined"}
+                  onClick={() => setReportView("detailed")}
+                >
+                  Order Details
+                </Button>
               </Stack>
             )}
 
-            {/* Seller Summary View */}
+            {/* Seller Report View - Products by Seller */}
             {reportView === "summary" && report.sellers.length > 0 && (
               <Paper>
                 <TableContainer>
@@ -383,38 +430,114 @@ export const UnitReportsPage: React.FC = () => {
                     <TableHead>
                       <TableRow>
                         <TableCell>
-                          <strong>Seller Name</strong>
+                          <strong>Scout Name</strong>
                         </TableCell>
-                        <TableCell align="right">
-                          <strong>Orders</strong>
-                        </TableCell>
-                        <TableCell align="right">
-                          <strong>Total Sales</strong>
-                        </TableCell>
+                        {(() => {
+                          // Get all unique product names across all sellers
+                          const allProducts = new Set<string>();
+                          report.sellers.forEach((seller) => {
+                            seller.orders.forEach((order) => {
+                              order.lineItems.forEach((item) => {
+                                allProducts.add(item.productName);
+                              });
+                            });
+                          });
+                          const productList = Array.from(allProducts).sort();
+
+                          return (
+                            <>
+                              {productList.map((productName) => (
+                                <TableCell key={productName} align="right">
+                                  <strong>{productName}</strong>
+                                </TableCell>
+                              ))}
+                              <TableCell align="right">
+                                <strong>Total Sales</strong>
+                              </TableCell>
+                            </>
+                          );
+                        })()}
                       </TableRow>
                     </TableHead>
                     <TableBody>
-                      {report.sellers.map((seller) => (
-                        <TableRow key={seller.profileId}>
-                          <TableCell>{seller.sellerName}</TableCell>
-                          <TableCell align="right">
-                            {seller.orderCount}
-                          </TableCell>
-                          <TableCell align="right">
-                            {formatCurrency(seller.totalSales)}
-                          </TableCell>
-                        </TableRow>
-                      ))}
+                      {report.sellers.map((seller) => {
+                        // Get all unique products across all sellers for consistent columns
+                        const allProducts = new Set<string>();
+                        report.sellers.forEach((s) => {
+                          s.orders.forEach((order) => {
+                            order.lineItems.forEach((item) => {
+                              allProducts.add(item.productName);
+                            });
+                          });
+                        });
+                        const productList = Array.from(allProducts).sort();
+
+                        // Aggregate quantities by product for this seller
+                        const productTotals: Record<string, number> = {};
+                        seller.orders.forEach((order) => {
+                          order.lineItems.forEach((item) => {
+                            productTotals[item.productName] =
+                              (productTotals[item.productName] || 0) +
+                              item.quantity;
+                          });
+                        });
+
+                        return (
+                          <TableRow key={seller.profileId}>
+                            <TableCell>{seller.sellerName}</TableCell>
+                            {productList.map((productName) => (
+                              <TableCell key={productName} align="right">
+                                {productTotals[productName] || 0}
+                              </TableCell>
+                            ))}
+                            <TableCell align="right">
+                              {formatCurrency(seller.totalSales)}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                      {/* Totals Row */}
                       <TableRow>
                         <TableCell>
                           <strong>Total</strong>
                         </TableCell>
-                        <TableCell align="right">
-                          <strong>{report.totalOrders}</strong>
-                        </TableCell>
-                        <TableCell align="right">
-                          <strong>{formatCurrency(report.totalSales)}</strong>
-                        </TableCell>
+                        {(() => {
+                          // Get all unique products
+                          const allProducts = new Set<string>();
+                          report.sellers.forEach((s) => {
+                            s.orders.forEach((order) => {
+                              order.lineItems.forEach((item) => {
+                                allProducts.add(item.productName);
+                              });
+                            });
+                          });
+                          const productList = Array.from(allProducts).sort();
+
+                          // Calculate totals for each product
+                          const grandTotals: Record<string, number> = {};
+                          report.sellers.forEach((seller) => {
+                            seller.orders.forEach((order) => {
+                              order.lineItems.forEach((item) => {
+                                grandTotals[item.productName] =
+                                  (grandTotals[item.productName] || 0) +
+                                  item.quantity;
+                              });
+                            });
+                          });
+
+                          return (
+                            <>
+                              {productList.map((productName) => (
+                                <TableCell key={productName} align="right">
+                                  <strong>{grandTotals[productName] || 0}</strong>
+                                </TableCell>
+                              ))}
+                              <TableCell align="right">
+                                <strong>{formatCurrency(report.totalSales)}</strong>
+                              </TableCell>
+                            </>
+                          );
+                        })()}
                       </TableRow>
                     </TableBody>
                   </Table>

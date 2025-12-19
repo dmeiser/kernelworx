@@ -43,6 +43,7 @@ def get_unit_report(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             - unitNumber: Int (e.g., 158)
             - seasonName: String (e.g., "Fall", "Spring")
             - seasonYear: Int (e.g., 2024)
+            - catalogId: String (required - ensures scouts use same catalog)
         context: Lambda context (unused)
 
     Returns:
@@ -54,11 +55,13 @@ def get_unit_report(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         unit_number = int(event["arguments"]["unitNumber"])
         season_name = event["arguments"]["seasonName"]
         season_year = int(event["arguments"]["seasonYear"])
+        catalog_id = event["arguments"]["catalogId"]  # Required
         caller_account_id = event["identity"]["sub"]
 
         logger.info(
             f"Generating unit report for {unit_type} {unit_number}, "
-            f"season {season_name} {season_year}, caller {caller_account_id}"
+            f"season {season_name} {season_year}, "
+            f"catalog {catalog_id}, caller {caller_account_id}"
         )
 
         # Step 1: Find all profiles in this unit
@@ -125,11 +128,15 @@ def get_unit_report(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             profile_id = profile["profileId"]
             seller_name = profile["sellerName"]
 
-            # Get seasons for this profile
+            # Get seasons for this profile (filter by catalog)
             seasons_response = seasons_table.query(
                 KeyConditionExpression=Key("profileId").eq(profile_id),
-                FilterExpression="seasonName = :name AND seasonYear = :year",
-                ExpressionAttributeValues={":name": season_name, ":year": season_year},
+                FilterExpression="seasonName = :name AND seasonYear = :year AND catalogId = :cid",
+                ExpressionAttributeValues={
+                    ":name": season_name,
+                    ":year": season_year,
+                    ":cid": catalog_id,
+                },
             )
 
             seasons = seasons_response.get("Items", [])

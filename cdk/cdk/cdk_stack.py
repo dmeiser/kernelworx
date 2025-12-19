@@ -695,6 +695,20 @@ class CdkStack(Stack):
             environment=lambda_env,
         )
 
+        self.list_unit_catalogs_fn = lambda_.Function(
+            self,
+            "ListUnitCatalogsFn",
+            function_name=rn("kernelworx-list-unit-catalogs"),
+            runtime=lambda_.Runtime.PYTHON_3_13,
+            handler="handlers.list_unit_catalogs.list_unit_catalogs",
+            code=lambda_code,
+            layers=[self.shared_layer],
+            timeout=Duration.seconds(30),
+            memory_size=512,
+            role=self.lambda_execution_role,
+            environment=lambda_env,
+        )
+
         # Account Operations Lambda Functions
         self.update_my_account_fn = lambda_.Function(
             self,
@@ -1213,6 +1227,11 @@ class CdkStack(Stack):
             self.unit_reporting_ds = self.api.add_lambda_data_source(
                 "UnitReportingDS",
                 lambda_function=self.unit_reporting_fn,
+            )
+
+            self.list_unit_catalogs_ds = self.api.add_lambda_data_source(
+                "ListUnitCatalogsDS",
+                lambda_function=self.list_unit_catalogs_fn,
             )
 
             # Lambda data sources for account operations
@@ -5869,6 +5888,13 @@ export function response(ctx) {
                 "GetUnitReportResolver",
                 type_name="Query",
                 field_name="getUnitReport",
+            )
+
+            # listUnitCatalogs - List catalogs used in unit (Lambda resolver)
+            self.list_unit_catalogs_ds.create_resolver(
+                "ListUnitCatalogsResolver",
+                type_name="Query",
+                field_name="listUnitCatalogs",
             )
 
             # updateMyAccount - Update user metadata in DynamoDB (Lambda resolver)
