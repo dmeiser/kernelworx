@@ -9,11 +9,11 @@ const dynamoClient = new DynamoDBClient({ region: 'us-east-1' });
 // Orders table V2 uses: PK=seasonId, SK=orderId, GSI=orderId-index
 // Shares and Invites are now in separate dedicated tables
 export const TABLE_NAMES = {
-  profiles: process.env.PROFILES_TABLE_NAME || 'kernelworx-profiles-v2-ue1-dev',
+  profiles: process.env.PROFILES_TABLE_NAME || 'kernelworx-profiles-ue1-dev',
   shares: process.env.SHARES_TABLE_NAME || 'kernelworx-shares-ue1-dev',
   invites: process.env.INVITES_TABLE_NAME || 'kernelworx-invites-ue1-dev',
-  seasons: process.env.SEASONS_TABLE_NAME || 'kernelworx-seasons-v2-ue1-dev',
-  orders: process.env.ORDERS_TABLE_NAME || 'kernelworx-orders-v2-ue1-dev',
+  seasons: process.env.SEASONS_TABLE_NAME || 'kernelworx-seasons-ue1-dev',
+  orders: process.env.ORDERS_TABLE_NAME || 'kernelworx-orders-ue1-dev',
   catalogs: process.env.CATALOGS_TABLE_NAME || 'kernelworx-catalogs-ue1-dev',
   accounts: process.env.ACCOUNTS_TABLE_NAME || 'kernelworx-accounts-ue1-dev',
 };

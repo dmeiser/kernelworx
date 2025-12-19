@@ -1,6 +1,7 @@
 import { ApolloClient, InMemoryCache, HttpLink, ApolloLink } from '@apollo/client';
 import { setContext } from '@apollo/client/link/context';
 import { signInUser, AuthResult } from './cognitoAuth';
+import { getAwsConfig } from './awsConfig';
 
 interface AuthConfig {
   accessToken: string;
@@ -21,10 +22,9 @@ export interface AuthenticatedClientResult {
 export async function createAuthenticatedClient(
   userType: 'owner' | 'contributor' | 'readonly'
 ): Promise<AuthenticatedClientResult> {
-  const endpoint = process.env.TEST_APPSYNC_ENDPOINT;
-  if (!endpoint) {
-    throw new Error('TEST_APPSYNC_ENDPOINT environment variable not set');
-  }
+  // Get endpoint dynamically from AWS
+  const config = await getAwsConfig();
+  const endpoint = config.appSyncEndpoint;
 
   // Get credentials for specified user type
   let email: string;

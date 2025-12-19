@@ -136,6 +136,25 @@ type Share {
   createdByAccountId: ID!
 }
 
+# Lightweight share info (deprecated - use SharedProfile from listMyShares)
+type ShareInfo {
+  profileId: ID!
+  permissions: [PermissionType!]!
+}
+
+# Full profile data with share permissions - returned by listMyShares
+type SharedProfile {
+  profileId: ID!
+  ownerAccountId: ID!
+  sellerName: String!
+  unitType: String
+  unitNumber: Int
+  createdAt: AWSDateTime!
+  updatedAt: AWSDateTime!
+  isOwner: Boolean!
+  permissions: [PermissionType!]!
+}
+
 type ProfileInvite {
   inviteCode: ID!
   profileId: ID!
@@ -310,7 +329,7 @@ type Query {
   # Profile queries
   getProfile(profileId: ID!): SellerProfile
   listMyProfiles: [SellerProfile!]!
-  listSharedProfiles: [SellerProfile!]!
+  listMyShares: [SharedProfile!]!
   
   # Season queries
   getSeason(seasonId: ID!): Season

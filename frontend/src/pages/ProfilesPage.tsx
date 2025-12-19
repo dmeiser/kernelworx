@@ -4,7 +4,7 @@
 
 import React, { useState, useEffect } from "react";
 import { useAuth } from "../contexts/AuthContext";
-import { useLazyQuery, useMutation } from "@apollo/client/react";
+import { useLazyQuery, useMutation, useApolloClient } from "@apollo/client/react";
 import { useNavigate } from "react-router-dom";
 import {
   Typography,
@@ -28,7 +28,7 @@ import { CreateProfileDialog } from "../components/CreateProfileDialog";
 import { EditProfileDialog } from "../components/EditProfileDialog";
 import {
   LIST_MY_PROFILES,
-  LIST_SHARED_PROFILES,
+  LIST_MY_SHARES,
   CREATE_SELLER_PROFILE,
   UPDATE_SELLER_PROFILE,
   DELETE_SELLER_PROFILE,
@@ -130,15 +130,37 @@ export const ProfilesPage: React.FC = () => {
     notifyOnNetworkStatusChange: true,
   });
 
-  // Fetch shared profiles
-  const [loadSharedProfiles, {
-    data: sharedProfilesData,
-    loading: sharedProfilesLoading,
-    error: sharedProfilesError,
-  }] = useLazyQuery<{ listSharedProfiles: Profile[] }>(LIST_SHARED_PROFILES, {
-    fetchPolicy: "network-only",
-    notifyOnNetworkStatusChange: true,
-  });
+  // Shared profiles state - we fetch shares then individual profiles
+  const apolloClient = useApolloClient();
+  const [sharedProfiles, setSharedProfiles] = useState<Profile[]>([]);
+  const [sharedProfilesLoading, setSharedProfilesLoading] = useState(false);
+  const [sharedProfilesError, setSharedProfilesError] = useState<Error | null>(null);
+  const [sharedProfilesLoaded, setSharedProfilesLoaded] = useState(false);
+
+  // Function to load shared profiles - now returns full profile data in a single query
+  const loadSharedProfiles = React.useCallback(async () => {
+    setSharedProfilesLoading(true);
+    setSharedProfilesError(null);
+    
+    try {
+      // Single query returns full profile data with permissions
+      const result = await apolloClient.query<{
+        listMyShares: Profile[]
+      }>({
+        query: LIST_MY_SHARES,
+        fetchPolicy: "network-only",
+      });
+      
+      const profiles = result.data?.listMyShares || [];
+      setSharedProfiles(profiles);
+      setSharedProfilesLoaded(true);
+    } catch (err) {
+      console.error("Failed to load shared profiles:", err);
+      setSharedProfilesError(err instanceof Error ? err : new Error("Failed to load shared profiles"));
+    } finally {
+      setSharedProfilesLoading(false);
+    }
+  }, [apolloClient]);
 
   // When auth becomes ready, trigger queries explicitly to avoid race conditions
   // Note: We use a ref to track if we've already triggered the queries to prevent double-firing
@@ -204,10 +226,9 @@ export const ProfilesPage: React.FC = () => {
   };
 
   const myProfiles: Profile[] = myProfilesData?.listMyProfiles || [];
-  const allSharedProfiles: Profile[] =
-    sharedProfilesData?.listSharedProfiles || [];
   
-  const sharedProfiles = allSharedProfiles.filter((profile) => {
+  // Filter shared profiles based on read-only preference
+  const filteredSharedProfiles = sharedProfiles.filter((profile) => {
     const hasWrite = profile.permissions.includes("WRITE");
     // When showReadOnlyProfiles is true: show all profiles
     // When showReadOnlyProfiles is false: show only profiles with WRITE permission
@@ -217,7 +238,7 @@ export const ProfilesPage: React.FC = () => {
   // Wait for BOTH profile queries to complete before showing any profiles
   // This prevents the jarring UX of owned profiles appearing before shared profiles
   const profilesLoading = myProfilesLoading || sharedProfilesLoading;
-  const bothProfilesLoaded = myProfilesData !== undefined && sharedProfilesData !== undefined;
+  const bothProfilesLoaded = myProfilesData !== undefined && sharedProfilesLoaded;
   const loading = profilesLoading || accountLoading;
   const error = myProfilesError || sharedProfilesError;
 
@@ -312,14 +333,14 @@ export const ProfilesPage: React.FC = () => {
       )}
 
       {/* Shared Profiles */}
-      {sharedProfiles.length > 0 && (
+      {filteredSharedProfiles.length > 0 && (
         <Box>
           {myProfiles.length > 0 && <Divider sx={{ my: 4 }} />}
           <Typography variant="h6" gutterBottom>
             Seller Profiles Shared With Me
           </Typography>
           <Grid container spacing={2}>
-            {sharedProfiles.map((profile) => (
+            {filteredSharedProfiles.map((profile) => (
               <Grid key={profile.profileId} size={{ xs: 12, sm: 6, md: 4 }}>
                 <ProfileCard
                   profileId={profile.profileId}
@@ -336,7 +357,7 @@ export const ProfilesPage: React.FC = () => {
       )}
 
       {/* Empty State */}
-      {myProfiles.length === 0 && sharedProfiles.length === 0 && !loading && (
+      {myProfiles.length === 0 && filteredSharedProfiles.length === 0 && !loading && (
         <Alert severity="info">
           You don't have any seller profiles yet. Click "Create Seller" to get
           started!

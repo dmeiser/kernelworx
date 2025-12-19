@@ -36,7 +36,7 @@ import {
   LIST_PUBLIC_CATALOGS,
   LIST_MY_CATALOGS,
   LIST_MY_PROFILES,
-  LIST_SHARED_PROFILES,
+  LIST_MY_SHARES,
   LIST_SEASONS_BY_PROFILE,
   CREATE_CATALOG,
   UPDATE_CATALOG,
@@ -88,13 +88,17 @@ export const CatalogsPage: React.FC = () => {
     LIST_MY_PROFILES,
   );
   const { data: sharedProfilesData } = useQuery<{
-    listSharedProfiles: any[];
-  }>(LIST_SHARED_PROFILES);
+    listMyShares: { profileId: string; permissions: string[] }[];
+  }>(LIST_MY_SHARES);
 
-  // Get all user's profile IDs
+  // Get all user's profile IDs (owned + shared)
   const allUserProfiles = [
-    ...(myProfilesData?.listMyProfiles || []),
-    ...(sharedProfilesData?.listSharedProfiles || []),
+    ...(myProfilesData?.listMyProfiles || []).map((p) => ({
+      profileId: p.profileId,
+    })),
+    ...(sharedProfilesData?.listMyShares || []).map((p) => ({
+      profileId: p.profileId,
+    })),
   ];
 
   // State to track catalogs in use

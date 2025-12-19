@@ -47,6 +47,7 @@ const CREATE_SEASON = gql`
     createSeason(input: $input) {
       seasonId
       seasonName
+      seasonYear
       catalogId
       startDate
       endDate
@@ -238,6 +239,7 @@ describe('Order Operations Integration Tests', () => {
         input: {
           profileId: testProfileId,
           seasonName: 'Order Test Season',
+          seasonYear: 2025,
           startDate: new Date('2025-01-01T00:00:00Z').toISOString(),
           endDate: new Date('2025-12-31T23:59:59Z').toISOString(),
           catalogId: testCatalogId,
@@ -831,6 +833,7 @@ describe('Order Operations Integration Tests', () => {
           input: {
             profileId: noShareProfileId,
             seasonName: 'No Share Season',
+            seasonYear: 2025,
             startDate: new Date('2025-01-01').toISOString(),
             catalogId: testCatalogId,
           },
@@ -919,6 +922,7 @@ describe('Order Operations Integration Tests', () => {
           input: {
             profileId: noShareProfileId,
             seasonName: 'No Share Update Season',
+            seasonYear: 2025,
             startDate: new Date('2025-01-01').toISOString(),
             catalogId: testCatalogId,
           },
@@ -1015,6 +1019,7 @@ describe('Order Operations Integration Tests', () => {
           input: {
             profileId: noShareProfileId,
             seasonName: 'No Share Delete Season',
+            seasonYear: 2025,
             startDate: new Date('2025-01-01').toISOString(),
             catalogId: testCatalogId,
           },
@@ -1446,6 +1451,7 @@ describe('Order Operations Integration Tests', () => {
           input: {
             profileId: testProfileId,
             seasonName: 'Many Items Season',
+            seasonYear: 2025,
             startDate: new Date('2025-06-01T00:00:00Z').toISOString(),
             catalogId: catalogId,
           },
@@ -1551,6 +1557,7 @@ describe('Order Operations Integration Tests', () => {
           input: {
             profileId: testProfileId,
             seasonName: 'Precision Season',
+            seasonYear: 2025,
             startDate: new Date('2025-07-01T00:00:00Z').toISOString(),
             catalogId: catalogId,
           },

@@ -55,6 +55,7 @@ const CREATE_SEASON = gql`
     createSeason(input: $input) {
       seasonId
       seasonName
+      seasonYear
       catalogId
       startDate
       endDate
@@ -210,6 +211,7 @@ describe('requestSeasonReport Integration Tests', () => {
         input: {
           profileId: testProfileId,
           seasonName: 'Report Test Season 2024',
+          seasonYear: 2025,
           catalogId: testCatalogId,
           startDate: '2024-01-01T00:00:00.000Z',
           endDate: '2024-12-31T23:59:59.999Z',
@@ -623,6 +625,7 @@ describe('requestSeasonReport Integration Tests', () => {
           input: {
             profileId: testProfileId,
             seasonName: 'Performance Test Season',
+            seasonYear: 2025,
             catalogId: testCatalogId,
             startDate: '2024-01-01T00:00:00.000Z',
             endDate: '2024-12-31T23:59:59.999Z',
@@ -709,6 +712,7 @@ describe('requestSeasonReport Integration Tests', () => {
           input: {
             profileId: testProfileId,
             seasonName: 'Empty Season - No Orders',
+            seasonYear: 2025,
             catalogId: testCatalogId,
             startDate: '2024-01-01T00:00:00.000Z',
             endDate: '2024-12-31T23:59:59.999Z',

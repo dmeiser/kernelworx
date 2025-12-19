@@ -3584,14 +3584,16 @@ export function response(ctx) {
                 """
                 ),
             )
-
-            # listSharedProfiles - Pipeline resolver to get profiles shared with current user
-            # Step 1: Query shares table GSI (targetAccountId-index) for shares where targetAccountId = current user
-            # NOW USES SHARES TABLE
-            list_shares_fn = appsync.AppsyncFunction(
+            
+            # listMyShares - Pipeline resolver to get full profile data for shares
+            # Step 1: Query shares table GSI to get shares with ownerAccountId
+            # Step 2: BatchGetItem on profiles table to get full profiles, merge permissions
+            
+            # Step 1: Query shares for current user
+            list_my_shares_query_fn = appsync.AppsyncFunction(
                 self,
-                "ListSharesFn",
-                name=f"ListSharesFn_{env_name}",
+                "ListMySharesQueryFn",
+                name=f"ListMySharesQueryFn_{env_name}",
                 api=self.api,
                 data_source=self.shares_datasource,
                 runtime=appsync.FunctionRuntime.JS_1_0_0,
@@ -3616,150 +3618,141 @@ export function response(ctx) {
     if (ctx.error) {
         util.error(ctx.error.message, ctx.error.type);
     }
+    
     const shares = ctx.result.items || [];
     
-    // Collect unique profiles with their ownerAccountIds for BatchGetItem
-    const profileKeys = [];
-    const seenProfileIds = {};
+    // Deduplicate by profileId and store shares in stash for later merging
+    const sharesByProfileId = {};
     for (const share of shares) {
-        // Validate that share has required fields before adding
-        if (share.profileId && share.ownerAccountId && !seenProfileIds[share.profileId]) {
-            seenProfileIds[share.profileId] = true;
-            profileKeys.push({
+        if (share.profileId && share.ownerAccountId && !sharesByProfileId[share.profileId]) {
+            sharesByProfileId[share.profileId] = {
                 profileId: share.profileId,
-                ownerAccountId: share.ownerAccountId
-            });
+                ownerAccountId: share.ownerAccountId,
+                permissions: share.permissions || []
+            };
         }
     }
     
-    ctx.stash.shares = shares;
-    ctx.stash.profileKeys = profileKeys;
-    return profileKeys;
+    ctx.stash.sharesByProfileId = sharesByProfileId;
+    ctx.stash.profileKeys = Object.values(sharesByProfileId).map(s => ({
+        ownerAccountId: s.ownerAccountId,
+        profileId: s.profileId
+    }));
+    
+    return Object.values(sharesByProfileId);
 }
                     """
                 ),
             )
-
-            # Step 2: Batch get profile records for shared profiles
-            # NEW STRUCTURE: Uses ownerAccountId + profileId as keys
-            batch_get_profiles_fn = appsync.AppsyncFunction(
+            
+            # Step 2: BatchGetItem on profiles table
+            list_my_shares_batch_get_fn = appsync.AppsyncFunction(
                 self,
-                "BatchGetSharedProfilesFn",
-                name=f"BatchGetSharedProfilesFn_{env_name}",
+                "ListMySharesBatchGetFn",
+                name=f"ListMySharesBatchGetFn_{env_name}",
                 api=self.api,
                 data_source=self.profiles_datasource,
                 runtime=appsync.FunctionRuntime.JS_1_0_0,
                 code=appsync.Code.from_inline(
                     """
-import { util } from '@aws-appsync/utils';
+import { util, runtime } from '@aws-appsync/utils';
 
 export function request(ctx) {
-    const profileKeys = ctx.stash.profileKeys || [];
-    if (profileKeys.length === 0) {
-        // Return empty result without calling DynamoDB
-        ctx.stash.skipBatchGet = true;
-        return {
-            operation: 'Query',
-            query: {
-                expression: 'ownerAccountId = :noop',
-                expressionValues: util.dynamodb.toMapValues({ ':noop': 'NOOP' })
-            }
-        };
+    const keys = ctx.stash.profileKeys || [];
+    
+    // If no shares, skip the request entirely - use runtime.earlyReturn
+    if (keys.length === 0) {
+        return runtime.earlyReturn([]);
     }
     
-    // Use Query on profileId-index instead of BatchGetItem
-    // BatchGetItem was failing with "key element does not match schema" errors
-    // Since we typically have one shared profile, Query on GSI is simpler and works
-    const firstProfile = profileKeys[0];
-    const profileId = firstProfile.profileId;
+    // BatchGetItem supports up to 100 keys
+    // For now, take first 100 (pagination can be added later if needed)
+    const batchKeys = keys.slice(0, 100).map(k => util.dynamodb.toMapValues({
+        ownerAccountId: k.ownerAccountId,
+        profileId: k.profileId
+    }));
     
-    if (!profileId || typeof profileId !== 'string') {
-        ctx.stash.skipBatchGet = true;
-        return {
-            operation: 'Query',
-            query: {
-                expression: 'ownerAccountId = :noop',
-                expressionValues: util.dynamodb.toMapValues({ ':noop': 'NOOP' })
-            }
-        };
-    }
-    
-    // Store remaining keys for multiple queries (pagination could be added later)
-    ctx.stash.remainingKeys = profileKeys.slice(1);
-    ctx.stash.allProfiles = [];
-    
-    // Query the profileId-index GSI to get the profile
     return {
-        operation: 'Query',
-        index: 'profileId-index',
-        query: {
-            expression: 'profileId = :profileId',
-            expressionValues: util.dynamodb.toMapValues({ ':profileId': profileId })
+        operation: 'BatchGetItem',
+        tables: {
+            '${PROFILES_TABLE}': {
+                keys: batchKeys,
+                consistentRead: false
+            }
         }
     };
 }
 
 export function response(ctx) {
-    if (ctx.stash.skipBatchGet) {
-        return [];
-    }
-    
     if (ctx.error) {
-        // Log the error but return empty results rather than failing the whole query
-        console.error('Query error:', JSON.stringify(ctx.error));
+        util.error(ctx.error.message, ctx.error.type);
+    }
+    
+    const sharesByProfileId = ctx.stash.sharesByProfileId || {};
+    // Add ACCOUNT# prefix to match ownerAccountId format in profiles table
+    const callerAccountId = 'ACCOUNT#' + ctx.identity.sub;
+    
+    // Handle empty shares case
+    if (Object.keys(sharesByProfileId).length === 0) {
         return [];
     }
     
-    // Query returns items array
-    const queryResult = ctx.result.items || [];
-    const shares = ctx.stash.shares || [];
+    // Get profiles from BatchGetItem response
+    const profiles = ctx.result.data && ctx.result.data['${PROFILES_TABLE}'] || [];
     
+    // Helper to strip ACCOUNT# prefix for API response format
+    // Note: profileId keeps PROFILE# prefix, only ownerAccountId is stripped
+    function stripAccountPrefix(s) {
+        if (!s) return s;
+        if (s.startsWith('ACCOUNT#')) return s.substring(8);
+        return s;
+    }
+    
+    // Merge profile data with permissions
     const result = [];
-    for (const profile of queryResult) {
-        if (profile) {
-            let permissions = [];
-            for (const share of shares) {
-                if (share.profileId === profile.profileId) {
-                    permissions = share.permissions || [];
-                    break;
-                }
-            }
-            const enrichedProfile = {};
-            for (const key in profile) {
-                enrichedProfile[key] = profile[key];
-            }
-            enrichedProfile.permissions = permissions;
-            result.push(enrichedProfile);
+    for (const profile of profiles) {
+        const share = sharesByProfileId[profile.profileId];
+        if (share) {
+            result.push({
+                profileId: profile.profileId,  // Keep PROFILE# prefix
+                ownerAccountId: stripAccountPrefix(profile.ownerAccountId),  // Strip ACCOUNT# prefix
+                sellerName: profile.sellerName,
+                unitType: profile.unitType || null,
+                unitNumber: profile.unitNumber || null,
+                createdAt: profile.createdAt,
+                updatedAt: profile.updatedAt,
+                isOwner: profile.ownerAccountId === callerAccountId,
+                permissions: share.permissions
+            });
         }
     }
     
-    // TODO: If we have remainingKeys, we'd need to handle them
-    // For now, we only support fetching the first shared profile
-    // Most users have few shared profiles, so this is acceptable
-    // Full support would require a pipeline with multiple Query functions
-    // or using Lambda
-    
     return result;
+}
+                    """.replace(
+                        "${PROFILES_TABLE}", self.profiles_table.table_name
+                    )
+                ),
+            )
+            
+            # Create listMyShares pipeline resolver
+            self.api.create_resolver(
+                "ListMySharesPipelineResolver",
+                type_name="Query",
+                field_name="listMyShares",
+                runtime=appsync.FunctionRuntime.JS_1_0_0,
+                pipeline_config=[list_my_shares_query_fn, list_my_shares_batch_get_fn],
+                code=appsync.Code.from_inline(
+                    """
+export function request(ctx) {
+    return {};
+}
+
+export function response(ctx) {
+    return ctx.prev.result;
 }
                     """
                 ),
-            )
-
-            # Create pipeline resolver for listSharedProfiles
-            appsync.Resolver(
-                self,
-                "ListSharedProfilesResolver",
-                api=self.api,
-                type_name="Query",
-                field_name="listSharedProfiles",
-                runtime=appsync.FunctionRuntime.JS_1_0_0,
-                code=appsync.Code.from_inline(
-                    """
-export function request(ctx) { return {}; }
-export function response(ctx) { return ctx.prev.result; }
-                    """
-                ),
-                pipeline_config=[list_shares_fn, batch_get_profiles_fn],
             )
 
             # getSeason - Get a specific season by ID with authorization
@@ -5948,6 +5941,7 @@ export function request(ctx) {
         profileId: input.profileId,
         seasonId: seasonId,
         seasonName: input.seasonName,
+        seasonYear: input.seasonYear,
         startDate: input.startDate,
         catalogId: input.catalogId,
         createdAt: now,

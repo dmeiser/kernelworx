@@ -39,6 +39,7 @@ const CREATE_SEASON = gql`
       seasonId
       profileId
       seasonName
+      seasonYear
       startDate
       endDate
       catalogId
@@ -89,6 +90,7 @@ const GET_SEASON = gql`
       seasonId
       profileId
       seasonName
+      seasonYear
       startDate
       endDate
       catalogId
@@ -104,6 +106,7 @@ const LIST_SEASONS_BY_PROFILE = gql`
       seasonId
       profileId
       seasonName
+      seasonYear
       startDate
       endDate
       catalogId
@@ -172,6 +175,7 @@ describe('Season Query Resolvers Integration Tests', () => {
             input: {
               profileId: profileId,
               seasonName: `${getTestPrefix()}-Season`,
+              seasonYear: 2025,
               startDate: '2025-01-01T00:00:00Z',
               endDate: '2025-12-31T23:59:59Z',
               catalogId: catalogId,
@@ -244,6 +248,7 @@ describe('Season Query Resolvers Integration Tests', () => {
             input: {
               profileId: profileId,
               seasonName: `${getTestPrefix()}-Season`,
+              seasonYear: 2025,
               startDate: '2025-01-01T00:00:00Z',
               catalogId: catalogId,
             },
@@ -294,6 +299,7 @@ describe('Season Query Resolvers Integration Tests', () => {
             input: {
               profileId: profileId,
               seasonName: `${getTestPrefix()}-Season`,
+              seasonYear: 2025,
               startDate: '2025-01-01T00:00:00Z',
               catalogId: catalogId,
             },
@@ -357,6 +363,7 @@ describe('Season Query Resolvers Integration Tests', () => {
             input: {
               profileId: profileId,
               seasonName: `${getTestPrefix()}-Season`,
+              seasonYear: 2025,
               startDate: '2025-01-01T00:00:00Z',
               catalogId: catalogId,
             },
@@ -411,6 +418,7 @@ describe('Season Query Resolvers Integration Tests', () => {
             input: {
               profileId: profileId,
               seasonName: `${getTestPrefix()}-Season1`,
+              seasonYear: 2025,
               startDate: '2025-01-01T00:00:00Z',
               catalogId: catalogId,
             },
@@ -424,6 +432,7 @@ describe('Season Query Resolvers Integration Tests', () => {
             input: {
               profileId: profileId,
               seasonName: `${getTestPrefix()}-Season2`,
+              seasonYear: 2025,
               startDate: '2025-06-01T00:00:00Z',
               catalogId: catalogId,
             },
@@ -515,6 +524,7 @@ describe('Season Query Resolvers Integration Tests', () => {
             input: {
               profileId: profileId,
               seasonName: `${getTestPrefix()}-SeasonToKeep`,
+              seasonYear: 2025,
               startDate: '2025-01-01T00:00:00Z',
               catalogId: catalogId,
             },
@@ -528,6 +538,7 @@ describe('Season Query Resolvers Integration Tests', () => {
             input: {
               profileId: profileId,
               seasonName: `${getTestPrefix()}-SeasonToDelete`,
+              seasonYear: 2025,
               startDate: '2025-06-01T00:00:00Z',
               catalogId: catalogId,
             },
@@ -599,6 +610,7 @@ describe('Season Query Resolvers Integration Tests', () => {
             input: {
               profileId: profileId,
               seasonName: `${getTestPrefix()}-Season`,
+              seasonYear: 2025,
               startDate: '2025-01-01T00:00:00Z',
               catalogId: catalogId,
             },
@@ -649,6 +661,7 @@ describe('Season Query Resolvers Integration Tests', () => {
             input: {
               profileId: profileId,
               seasonName: `${getTestPrefix()}-Season`,
+              seasonYear: 2025,
               startDate: '2025-01-01T00:00:00Z',
               catalogId: catalogId,
             },
@@ -712,6 +725,7 @@ describe('Season Query Resolvers Integration Tests', () => {
             input: {
               profileId: profileId,
               seasonName: `${getTestPrefix()}-Season`,
+              seasonYear: 2025,
               startDate: '2025-01-01T00:00:00Z',
               catalogId: catalogId,
             },
@@ -765,6 +779,7 @@ describe('Season Query Resolvers Integration Tests', () => {
           input: {
             profileId: profileId,
             seasonName: `${getTestPrefix()}-OpenSeason`,
+            seasonYear: 2025,
             startDate: '2025-01-01T00:00:00Z',
             // No endDate specified
             catalogId: catalogId,
@@ -816,6 +831,7 @@ describe('Season Query Resolvers Integration Tests', () => {
           input: {
             profileId: profileId,
             seasonName: `${getTestPrefix()}-ClosedSeason`,
+            seasonYear: 2025,
             startDate: '2025-01-01T00:00:00Z',
             endDate: '2025-06-30T23:59:59Z',
             catalogId: catalogId,
@@ -869,6 +885,7 @@ describe('Season Query Resolvers Integration Tests', () => {
           input: {
             profileId: profileId,
             seasonName: `${getTestPrefix()}-Season1`,
+            seasonYear: 2025,
             startDate: '2025-01-01T00:00:00Z',
             catalogId: catalogId,
           },
@@ -882,6 +899,7 @@ describe('Season Query Resolvers Integration Tests', () => {
           input: {
             profileId: profileId,
             seasonName: `${getTestPrefix()}-Season2`,
+            seasonYear: 2025,
             startDate: '2025-06-01T00:00:00Z',
             catalogId: catalogId,
           },
@@ -916,6 +934,7 @@ describe('Season Query Resolvers Integration Tests', () => {
         getSeason(seasonId: $seasonId) {
           seasonId
           seasonName
+          seasonYear
           catalogId
           totalOrders
           totalRevenue
@@ -993,6 +1012,7 @@ describe('Season Query Resolvers Integration Tests', () => {
           input: {
             profileId: profileId,
             seasonName: `${getTestPrefix()}-ComputedSeason`,
+            seasonYear: 2025,
             startDate: '2025-01-01T00:00:00Z',
             catalogId: catalogId,
           },
@@ -1089,6 +1109,7 @@ describe('Season Query Resolvers Integration Tests', () => {
           input: {
             profileId: profileId,
             seasonName: `${getTestPrefix()}-CatalogResolverSeason`,
+            seasonYear: 2025,
             startDate: '2025-03-01T00:00:00Z',
             catalogId: catalogId,
           },
@@ -1142,6 +1163,7 @@ describe('Season Query Resolvers Integration Tests', () => {
           input: {
             profileId: profileId,
             seasonName: `${getTestPrefix()}-NoOrdersSeason`,
+            seasonYear: 2025,
             startDate: '2025-04-01T00:00:00Z',
             catalogId: catalogId,
           },
@@ -1204,6 +1226,7 @@ describe('Season Query Resolvers Integration Tests', () => {
             input: {
               profileId: profileId,
               seasonName: `${getTestPrefix()}-Season-${i + 1}`,
+              seasonYear: 2025,
               startDate: startDates[i],
               catalogId: catalogId,
             },
@@ -1278,6 +1301,7 @@ describe('Season Query Resolvers Integration Tests', () => {
           input: {
             profileId: profileId,
             seasonName: `${getTestPrefix()}-PastSeason`,
+            seasonYear: 2025,
             startDate: pastStart,
             endDate: pastEnd,
             catalogId: catalogId,
@@ -1293,6 +1317,7 @@ describe('Season Query Resolvers Integration Tests', () => {
           input: {
             profileId: profileId,
             seasonName: `${getTestPrefix()}-ActiveSeason`,
+            seasonYear: 2025,
             startDate: activeStart,
             endDate: activeEnd,
             catalogId: catalogId,
@@ -1308,6 +1333,7 @@ describe('Season Query Resolvers Integration Tests', () => {
           input: {
             profileId: profileId,
             seasonName: `${getTestPrefix()}-FutureSeason`,
+            seasonYear: 2025,
             startDate: futureStart,
             catalogId: catalogId,
           },

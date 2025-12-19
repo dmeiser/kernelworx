@@ -158,7 +158,7 @@ export const apolloClient = new ApolloClient({
               return incoming;
             },
           },
-          listSharedProfiles: {
+          listMyShares: {
             merge(_existing, incoming) {
               return incoming;
             },

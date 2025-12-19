@@ -143,11 +143,18 @@ export const LIST_MY_PROFILES = gql`
   }
 `;
 
-export const LIST_SHARED_PROFILES = gql`
-  ${SELLER_PROFILE_FRAGMENT}
-  query ListSharedProfiles {
-    listSharedProfiles {
-      ...SellerProfileFields
+export const LIST_MY_SHARES = gql`
+  query ListMyShares {
+    listMyShares {
+      profileId
+      ownerAccountId
+      sellerName
+      unitType
+      unitNumber
+      createdAt
+      updatedAt
+      isOwner
+      permissions
     }
   }
 `;

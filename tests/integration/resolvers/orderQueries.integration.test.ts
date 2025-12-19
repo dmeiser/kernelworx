@@ -50,6 +50,7 @@ const CREATE_SEASON = gql`
     createSeason(input: $input) {
       seasonId
       seasonName
+      seasonYear
       catalogId
       startDate
       endDate
@@ -293,6 +294,7 @@ describe('Order Query Operations Integration Tests', () => {
           input: {
             profileId: testProfileId,
             seasonName: 'Order Query Test Season',
+            seasonYear: 2025,
             startDate: new Date('2025-01-01T00:00:00Z').toISOString(),
             endDate: new Date('2025-12-31T23:59:59Z').toISOString(),
             catalogId: testCatalogId,
@@ -420,6 +422,7 @@ describe('Order Query Operations Integration Tests', () => {
           input: {
             profileId: unsharedProfileId,
             seasonName: 'Unshared Season',
+            seasonYear: 2025,
             startDate: new Date('2025-01-01T00:00:00Z').toISOString(),
             endDate: new Date('2025-12-31T23:59:59Z').toISOString(),
             catalogId: testCatalogId,
@@ -459,6 +462,7 @@ describe('Order Query Operations Integration Tests', () => {
           input: {
             profileId: testProfileId,  // Use shared profile so owner can query it
             seasonName: 'Empty Season',
+            seasonYear: 2025,
             startDate: new Date('2026-01-01T00:00:00Z').toISOString(),
             endDate: new Date('2026-12-31T23:59:59Z').toISOString(),
             catalogId: testCatalogId,
@@ -1119,6 +1123,7 @@ describe('Order Query Operations Integration Tests', () => {
             profileId: testProfileId,
             seasonId: undefined,
             seasonName: 'Many Line Items Season',
+            seasonYear: 2025,
             catalogId,
             startDate: new Date().toISOString(),
           },
@@ -1218,6 +1223,7 @@ describe('Order Query Operations Integration Tests', () => {
           input: {
             profileId: testProfileId,
             seasonName: 'Second Season For Orders',
+            seasonYear: 2025,
             catalogId: testCatalogId,
             startDate: new Date().toISOString(),
           },

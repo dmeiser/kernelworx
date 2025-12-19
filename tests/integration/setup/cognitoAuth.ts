@@ -1,4 +1,5 @@
 import { CognitoIdentityProviderClient, InitiateAuthCommand, AuthFlowType } from '@aws-sdk/client-cognito-identity-provider';
+import { getAwsConfig } from './awsConfig';
 
 export interface CognitoTokens {
   accessToken: string;
@@ -21,19 +22,16 @@ export interface AuthResult {
  * Sign in a user and return Cognito tokens with account ID.
  */
 export async function signInUser(email: string, password: string): Promise<AuthResult> {
-  const userPoolId = process.env.TEST_USER_POOL_ID;
-  const clientId = process.env.TEST_USER_POOL_CLIENT_ID;
-  
-  if (!userPoolId || !clientId) {
-    throw new Error('TEST_USER_POOL_ID or TEST_USER_POOL_CLIENT_ID not set');
-  }
+  // Get config dynamically from AWS
+  const config = await getAwsConfig();
+  const { userPoolId, userPoolClientId, region } = config;
 
-  const client = new CognitoIdentityProviderClient({ region: 'us-east-1' });
+  const client = new CognitoIdentityProviderClient({ region });
 
   try {
     const command = new InitiateAuthCommand({
       AuthFlow: AuthFlowType.USER_PASSWORD_AUTH,
-      ClientId: clientId,
+      ClientId: userPoolClientId,
       AuthParameters: {
         USERNAME: email,
         PASSWORD: password,

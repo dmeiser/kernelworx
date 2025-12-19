@@ -1,11 +1,19 @@
 /**
  * ProfilesPage component tests
  * 
- * NOTE: These tests are currently skipped due to a Vitest/MUI Grid import issue.
- * The Grid component in MUI v7 uses ESM exports that don't resolve properly in Vitest.
+ * NOTE: These tests are currently skipped due to:
+ * 1. A Vitest/MUI Grid import issue - The Grid component in MUI v7 uses ESM exports 
+ *    that don't resolve properly in Vitest.
+ * 2. API changes - listSharedProfiles was replaced with listMyShares which returns 
+ *    just share info ({profileId, permissions}), and the frontend now fetches 
+ *    full profiles via parallel getProfile calls.
+ * 
  * The page works correctly in runtime. Related components (ProfileCard, dialogs) have full coverage.
  * 
- * TODO: Investigate Vitest ESM configuration or wait for MUI v7 stable release.
+ * TODO: When unskipping these tests:
+ * - Investigate Vitest ESM configuration or wait for MUI v7 stable release.
+ * - Update mocks to use LIST_MY_SHARES and GET_PROFILE instead of LIST_SHARED_PROFILES
+ * - Mock apolloClient.query() for the parallel profile fetching
  */
 
 import { describe, test, expect, vi } from 'vitest';
@@ -16,7 +24,8 @@ import { BrowserRouter } from 'react-router-dom';
 import { ProfilesPage } from '../src/pages/ProfilesPage';
 import {
   LIST_MY_PROFILES,
-  LIST_SHARED_PROFILES,
+  LIST_MY_SHARES,
+  GET_PROFILE,
   CREATE_SELLER_PROFILE,
   UPDATE_SELLER_PROFILE,
 } from '../src/lib/graphql';

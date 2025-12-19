@@ -196,8 +196,8 @@ test_query "listMyProfiles" \
 test_query "getProfile" \
   "query { getProfile(profileId: \\\"PROFILE#test-profile-001\\\") { profileId sellerName ownerAccountId } }"
 
-test_query "listSharedProfiles" \
-  "query { listSharedProfiles { profileId permissions } }"
+test_query "listMyShares" \
+  "query { listMyShares { profileId permissions } }"
 
 test_query "getSeason" \
   "query { getSeason(seasonId: \\\"SEASON#test-season-001\\\") { seasonId profileId seasonName catalogId } }"

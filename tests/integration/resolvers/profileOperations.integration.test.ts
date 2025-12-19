@@ -850,19 +850,19 @@ describe('Profile Operations Integration Tests', () => {
       });
       const targetAccountId = shareData.shareProfileDirect.targetAccountId;
 
-      // Verify share exists via listSharedProfiles
-      const LIST_SHARED_PROFILES = gql`
-        query ListSharedProfiles {
-          listSharedProfiles {
+      // Verify share exists via listMyShares
+      const LIST_MY_SHARES = gql`
+        query ListMyShares {
+          listMyShares {
             profileId
           }
         }
       `;
       const { data: beforeDelete }: any = await contributorClient.query({
-        query: LIST_SHARED_PROFILES,
+        query: LIST_MY_SHARES,
         fetchPolicy: 'network-only',
       });
-      const beforeProfileIds = beforeDelete.listSharedProfiles.map((p: any) => p.profileId);
+      const beforeProfileIds = beforeDelete.listMyShares.map((p: any) => p.profileId);
       expect(beforeProfileIds).toContain(testProfileId);
 
       // Act: Delete the profile
@@ -874,10 +874,10 @@ describe('Profile Operations Integration Tests', () => {
 
       // Assert: Share should no longer appear for contributor
       const { data: afterDelete }: any = await contributorClient.query({
-        query: LIST_SHARED_PROFILES,
+        query: LIST_MY_SHARES,
         fetchPolicy: 'network-only',
       });
-      const afterProfileIds = afterDelete.listSharedProfiles.map((p: any) => p.profileId);
+      const afterProfileIds = afterDelete.listMyShares.map((p: any) => p.profileId);
       expect(afterProfileIds).not.toContain(testProfileId);
 
       // Profile was deleted and shares were cleaned up, no manual cleanup needed
@@ -1056,6 +1056,7 @@ describe('Profile Operations Integration Tests', () => {
           createSeason(input: $input) {
             seasonId
             seasonName
+            seasonYear
           }
         }
       `;
@@ -1065,6 +1066,7 @@ describe('Profile Operations Integration Tests', () => {
           input: {
             profileId: testProfileId,
             seasonName: 'Test Season for Cleanup',
+            seasonYear: 2025,
             startDate: new Date().toISOString(),
             catalogId: catalogId,
           },

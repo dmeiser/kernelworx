@@ -47,6 +47,7 @@ const CREATE_SEASON = gql`
     createSeason(input: $input) {
       seasonId
       seasonName
+      seasonYear
       catalogId
       startDate
       endDate
@@ -184,6 +185,7 @@ describe('Season Operations Integration Tests', () => {
         input: {
           profileId: testProfileId,
           seasonName: 'Original Season Name',
+          seasonYear: 2025,
           startDate: new Date('2025-01-01T00:00:00Z').toISOString(),
           endDate: new Date('2025-12-31T23:59:59Z').toISOString(),
           catalogId: testCatalogId,
@@ -278,6 +280,7 @@ describe('Season Operations Integration Tests', () => {
       const input = {
         seasonId: testSeasonId,
         seasonName: 'Updated Season Name',
+        seasonYear: 2025,
       };
 
       const { data } = await ownerClient.mutate({
@@ -295,6 +298,7 @@ describe('Season Operations Integration Tests', () => {
       const input = {
         seasonId: testSeasonId,
         seasonName: 'Contributor Updated Name',
+        seasonYear: 2025,
       };
 
       const { data } = await contributorClient.mutate({
@@ -330,6 +334,7 @@ describe('Season Operations Integration Tests', () => {
       const input = {
         seasonId: 'SEASON#non-existent-season',
         seasonName: 'Should Fail',
+        seasonYear: 2025,
       };
 
       await expect(
@@ -348,6 +353,7 @@ describe('Season Operations Integration Tests', () => {
           input: {
             profileId: testProfileId,
             seasonName: 'Date Validation Test Season',
+            seasonYear: 2025,
             startDate: new Date('2030-06-01T00:00:00Z').toISOString(),
             endDate: new Date('2030-12-31T23:59:59Z').toISOString(),
             catalogId: testCatalogId,
@@ -393,6 +399,7 @@ describe('Season Operations Integration Tests', () => {
           input: {
             profileId: testProfileId,
             seasonName: 'Season To Remove EndDate',
+            seasonYear: 2025,
             startDate: new Date('2031-01-01T00:00:00Z').toISOString(),
             endDate: new Date('2031-12-31T23:59:59Z').toISOString(),
             catalogId: testCatalogId,
@@ -438,6 +445,7 @@ describe('Season Operations Integration Tests', () => {
           input: {
             profileId: testProfileId,
             seasonName: 'Season to Delete',
+            seasonYear: 2025,
             startDate: new Date('2026-01-01T00:00:00Z').toISOString(),
             endDate: new Date('2026-12-31T23:59:59Z').toISOString(),
             catalogId: testCatalogId,
@@ -473,6 +481,7 @@ describe('Season Operations Integration Tests', () => {
           input: {
             profileId: testProfileId,
             seasonName: 'Season for Contributor to Delete',
+            seasonYear: 2025,
             startDate: new Date('2027-01-01T00:00:00Z').toISOString(),
             endDate: new Date('2027-12-31T23:59:59Z').toISOString(),
             catalogId: testCatalogId,
@@ -510,6 +519,7 @@ describe('Season Operations Integration Tests', () => {
           input: {
             profileId: testProfileId,
             seasonName,
+            seasonYear: 2028,
             startDate: new Date('2028-01-01T00:00:00Z').toISOString(),
             endDate: new Date('2028-12-31T23:59:59Z').toISOString(),
             catalogId: testCatalogId,
@@ -532,6 +542,7 @@ describe('Season Operations Integration Tests', () => {
           input: {
             profileId: testProfileId,
             seasonName,
+            seasonYear: 2029,
             startDate: new Date('2029-01-01T00:00:00Z').toISOString(),
             endDate: new Date('2029-12-31T23:59:59Z').toISOString(),
             catalogId: testCatalogId,
@@ -561,6 +572,7 @@ describe('Season Operations Integration Tests', () => {
         profileId: testProfileId,
         catalogId: testCatalogId,
         seasonName: 'Protected Season',
+        seasonYear: 2025,
         startDate: new Date().toISOString(),
         endDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
       };
@@ -580,6 +592,7 @@ describe('Season Operations Integration Tests', () => {
             input: {
               seasonId,
               seasonName: 'Readonly Update Attempt',
+              seasonYear: 2025,
             },
           },
         })
@@ -597,6 +610,7 @@ describe('Season Operations Integration Tests', () => {
         profileId: testProfileId,
         catalogId: testCatalogId,
         seasonName: 'Protected For Delete',
+        seasonYear: 2025,
         startDate: new Date().toISOString(),
         endDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
       };
@@ -628,6 +642,7 @@ describe('Season Operations Integration Tests', () => {
         profileId: testProfileId,
         catalogId: testCatalogId,
         seasonName: 'Full Update Test',
+        seasonYear: 2025,
         startDate: new Date().toISOString(),
         endDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
       };
@@ -649,6 +664,7 @@ describe('Season Operations Integration Tests', () => {
           input: {
             seasonId,
             seasonName: 'Fully Updated Season',
+            seasonYear: 2025,
             startDate: newStartDate,
             endDate: newEndDate,
           },
@@ -670,6 +686,7 @@ describe('Season Operations Integration Tests', () => {
         profileId: testProfileId,
         catalogId: testCatalogId,
         seasonName: 'Season With Orders',
+        seasonYear: 2025,
         startDate: new Date().toISOString(),
       };
 
@@ -758,6 +775,7 @@ describe('Season Operations Integration Tests', () => {
             profileId: testProfileId,
             catalogId: testCatalogId,
             seasonName: 'Non-existent Catalog Test',
+            seasonYear: 2025,
             startDate: new Date().toISOString(),
           },
         },
@@ -795,6 +813,7 @@ describe('Season Operations Integration Tests', () => {
             profileId: testProfileId,
             catalogId: testCatalogId,
             seasonName: 'Season With Orders For Update',
+            seasonYear: 2025,
             startDate: new Date().toISOString(),
           },
         },
@@ -833,6 +852,7 @@ describe('Season Operations Integration Tests', () => {
           input: {
             seasonId,
             seasonName: 'Updated Season Name With Orders',
+            seasonYear: 2025,
           },
         },
       });
@@ -877,6 +897,7 @@ describe('Season Operations Integration Tests', () => {
             profileId: testProfileId,
             catalogId: testCatalogId,
             seasonName: 'Concurrent Update Test',
+            seasonYear: 2025,
             startDate: new Date().toISOString(),
           },
         },
@@ -891,6 +912,7 @@ describe('Season Operations Integration Tests', () => {
             input: {
               seasonId,
               seasonName: 'Update 1',
+              seasonYear: 2025,
             },
           },
         }),
@@ -922,6 +944,7 @@ describe('Season Operations Integration Tests', () => {
             profileId: testProfileId,
             catalogId: testCatalogId,
             seasonName: 'Concurrent Delete Season',
+            seasonYear: 2025,
             startDate: new Date().toISOString(),
           },
         },

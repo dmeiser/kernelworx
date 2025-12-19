@@ -67,13 +67,17 @@ const REVOKE_SHARE = gql`
   }
 `;
 
-const LIST_SHARED_PROFILES = gql`
-  query ListSharedProfiles {
-    listSharedProfiles {
+const LIST_MY_SHARES = gql`
+  query ListMyShares {
+    listMyShares {
       profileId
-      # TODO: Bug - listSharedProfiles returns Share items not SellerProfile items
-      # Share items only have: shareId, profileId, targetAccountId, permissions, createdByAccountId, createdAt
-      # Need to implement batch-get of actual profiles
+      ownerAccountId
+      sellerName
+      unitType
+      unitNumber
+      createdAt
+      updatedAt
+      isOwner
       permissions
     }
   }
@@ -466,7 +470,7 @@ describe('Profile Query Operations Integration Tests', () => {
       expect(profileIds).not.toContain(profileId);
     });
 
-    it('does not return shared profiles (those are in listSharedProfiles)', async () => {
+    it('does not return shared profiles (those are in listMyShares)', async () => {
       // Arrange: Create and share profile
       const profileName = `${getTestPrefix()}-SharedProfile`;
       const { data: createData } = await ownerClient.mutate({
@@ -523,7 +527,7 @@ describe('Profile Query Operations Integration Tests', () => {
     });
   });
 
-  describe('listSharedProfiles', () => {
+  describe('listMyShares', () => {
     it('returns all profiles shared with user', async () => {
       // Arrange: Create and share profiles
       const profileName1 = `${getTestPrefix()}-Shared1`;
@@ -570,15 +574,15 @@ describe('Profile Query Operations Integration Tests', () => {
 
       // Act: Contributor queries shared profiles
       const { data } = await contributorClient.query({
-        query: LIST_SHARED_PROFILES,
+        query: LIST_MY_SHARES,
         fetchPolicy: 'network-only',
       });
 
       // Assert
-      expect(data.listSharedProfiles).toBeDefined();
-      expect(Array.isArray(data.listSharedProfiles)).toBe(true);
+      expect(data.listMyShares).toBeDefined();
+      expect(Array.isArray(data.listMyShares)).toBe(true);
       
-      const profileIds = data.listSharedProfiles.map((p: any) => p.profileId);
+      const profileIds = data.listMyShares.map((p: any) => p.profileId);
       expect(profileIds).toContain(profileId1);
       expect(profileIds).toContain(profileId2);
     });
@@ -586,13 +590,13 @@ describe('Profile Query Operations Integration Tests', () => {
     it('returns empty array if no shared profiles', async () => {
       // Act: Owner queries shared profiles (should be empty)
       const { data } = await ownerClient.query({
-        query: LIST_SHARED_PROFILES,
+        query: LIST_MY_SHARES,
         fetchPolicy: 'network-only',
       });
 
       // Assert
-      expect(data.listSharedProfiles).toBeDefined();
-      expect(Array.isArray(data.listSharedProfiles)).toBe(true);
+      expect(data.listMyShares).toBeDefined();
+      expect(Array.isArray(data.listMyShares)).toBe(true);
     });
 
     it('includes share permissions for each profile', async () => {
@@ -619,15 +623,21 @@ describe('Profile Query Operations Integration Tests', () => {
 
       // Act
       const { data } = await contributorClient.query({
-        query: LIST_SHARED_PROFILES,
+        query: LIST_MY_SHARES,
         fetchPolicy: 'network-only',
       });
 
-      // Assert: Share items have permissions
-      const profile = data.listSharedProfiles.find((p: any) => p.profileId === profileId);
+      // Assert: Share items have full profile data and permissions
+      const profile = data.listMyShares.find((p: any) => p.profileId === profileId);
       expect(profile).toBeDefined();
       expect(profile.permissions).toContain('READ');
       expect(profile.permissions).toContain('WRITE');
+      // Verify full profile fields are returned
+      expect(profile.sellerName).toBe(profileName);
+      expect(profile.ownerAccountId).toBe(ownerAccountId);
+      expect(profile.isOwner).toBe(false);  // Shared with contributor, not owner
+      expect(profile.createdAt).toBeDefined();
+      expect(profile.updatedAt).toBeDefined();
     });
 
     it('does not return owned profiles (those are in listMyProfiles)', async () => {
@@ -642,12 +652,12 @@ describe('Profile Query Operations Integration Tests', () => {
 
       // Act: Owner queries shared profiles
       const { data } = await ownerClient.query({
-        query: LIST_SHARED_PROFILES,
+        query: LIST_MY_SHARES,
         fetchPolicy: 'network-only',
       });
 
-      // Assert: Owned profile should not appear in listSharedProfiles
-      const profileIds = data.listSharedProfiles.map((p: any) => p.profileId);
+      // Assert: Owned profile should not appear in listMyShares
+      const profileIds = data.listMyShares.map((p: any) => p.profileId);
       expect(profileIds).not.toContain(profileId);
     });
 
@@ -675,12 +685,12 @@ describe('Profile Query Operations Integration Tests', () => {
 
       // Act
       const { data } = await contributorClient.query({
-        query: LIST_SHARED_PROFILES,
+        query: LIST_MY_SHARES,
         fetchPolicy: 'network-only',
       });
 
       // Assert
-      const profile = data.listSharedProfiles.find((p: any) => p.profileId === profileId);
+      const profile = data.listMyShares.find((p: any) => p.profileId === profileId);
       expect(profile).toBeDefined();
       expect(profile.permissions).toEqual(['READ']);
     });
@@ -709,12 +719,12 @@ describe('Profile Query Operations Integration Tests', () => {
 
       // Act
       const { data } = await contributorClient.query({
-        query: LIST_SHARED_PROFILES,
+        query: LIST_MY_SHARES,
         fetchPolicy: 'network-only',
       });
 
       // Assert
-      const profile = data.listSharedProfiles.find((p: any) => p.profileId === profileId);
+      const profile = data.listMyShares.find((p: any) => p.profileId === profileId);
       expect(profile).toBeDefined();
       expect(profile.permissions).toEqual(['WRITE']);
     });
@@ -722,13 +732,13 @@ describe('Profile Query Operations Integration Tests', () => {
     it('authenticated user can list shared profiles', async () => {
       // Act
       const { data } = await contributorClient.query({
-        query: LIST_SHARED_PROFILES,
+        query: LIST_MY_SHARES,
         fetchPolicy: 'network-only',
       });
 
       // Assert
-      expect(data.listSharedProfiles).toBeDefined();
-      expect(Array.isArray(data.listSharedProfiles)).toBe(true);
+      expect(data.listMyShares).toBeDefined();
+      expect(Array.isArray(data.listMyShares)).toBe(true);
     });
 
     it('unauthenticated user cannot list shared profiles', async () => {
@@ -736,7 +746,7 @@ describe('Profile Query Operations Integration Tests', () => {
       const unauthClient = createUnauthenticatedClient();
       await expect(
         unauthClient.query({
-          query: LIST_SHARED_PROFILES,
+          query: LIST_MY_SHARES,
           fetchPolicy: 'network-only',
         })
       ).rejects.toThrow();
@@ -766,10 +776,10 @@ describe('Profile Query Operations Integration Tests', () => {
 
       // Verify share appears in list
       const { data: beforeRevoke } = await contributorClient.query({
-        query: LIST_SHARED_PROFILES,
+        query: LIST_MY_SHARES,
         fetchPolicy: 'network-only',
       });
-      expect(beforeRevoke.listSharedProfiles.some((p: any) => p.profileId === profileId)).toBe(true);
+      expect(beforeRevoke.listMyShares.some((p: any) => p.profileId === profileId)).toBe(true);
 
       // Revoke the share
       await ownerClient.mutate({
@@ -779,12 +789,12 @@ describe('Profile Query Operations Integration Tests', () => {
 
       // Act: List shared profiles again
       const { data: afterRevoke } = await contributorClient.query({
-        query: LIST_SHARED_PROFILES,
+        query: LIST_MY_SHARES,
         fetchPolicy: 'network-only',
       });
 
       // Assert: Profile should no longer appear
-      expect(afterRevoke.listSharedProfiles.some((p: any) => p.profileId === profileId)).toBe(false);
+      expect(afterRevoke.listMyShares.some((p: any) => p.profileId === profileId)).toBe(false);
     });
 
     it('listing profiles with mixed READ/WRITE permissions', async () => {
@@ -833,13 +843,13 @@ describe('Profile Query Operations Integration Tests', () => {
 
       // Act: List shared profiles
       const { data } = await contributorClient.query({
-        query: LIST_SHARED_PROFILES,
+        query: LIST_MY_SHARES,
         fetchPolicy: 'network-only',
       });
 
       // Assert: Both profiles appear with correct permissions
-      const readProfile = data.listSharedProfiles.find((p: any) => p.profileId === profile1Id);
-      const writeProfile = data.listSharedProfiles.find((p: any) => p.profileId === profile2Id);
+      const readProfile = data.listMyShares.find((p: any) => p.profileId === profile1Id);
+      const writeProfile = data.listMyShares.find((p: any) => p.profileId === profile2Id);
 
       expect(readProfile).toBeDefined();
       expect(readProfile.permissions).toEqual(['READ']);
