@@ -27,6 +27,7 @@ export const SEASON_FRAGMENT = gql`
     seasonId
     profileId
     seasonName
+    seasonYear
     startDate
     endDate
     catalogId

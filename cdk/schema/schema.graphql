@@ -200,7 +200,8 @@ input UpdateSellerProfileInput {
 input CreateSeasonInput {
   profileId: ID!
   seasonName: String!
-  startDate: AWSDateTime!
+  seasonYear: Int!
+  startDate: AWSDateTime
   endDate: AWSDateTime
   catalogId: ID!
 }
@@ -208,6 +209,7 @@ input CreateSeasonInput {
 input UpdateSeasonInput {
   seasonId: ID!
   seasonName: String
+  seasonYear: Int
   startDate: AWSDateTime
   endDate: AWSDateTime
   catalogId: ID

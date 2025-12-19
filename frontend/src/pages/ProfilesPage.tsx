@@ -181,8 +181,27 @@ export const ProfilesPage: React.FC = () => {
   const myProfiles: Profile[] = myProfilesData?.listMyProfiles || [];
   const allSharedProfiles: Profile[] =
     sharedProfilesData?.listSharedProfiles || [];
+  
+  // Debug logging
+  console.log("ProfilesPage filter debug:", {
+    showReadOnlyProfiles,
+    allSharedProfilesCount: allSharedProfiles.length,
+    profilesWithPermissions: allSharedProfiles.map(p => ({
+      sellerName: p.sellerName,
+      permissions: p.permissions,
+      hasWrite: p.permissions.includes("WRITE")
+    }))
+  });
+  
   const sharedProfiles = allSharedProfiles.filter(
-    (profile) => showReadOnlyProfiles || profile.permissions.includes("WRITE"),
+    (profile) => {
+      const hasWrite = profile.permissions.includes("WRITE");
+      // When showReadOnlyProfiles is true: show all profiles
+      // When showReadOnlyProfiles is false: show only profiles with WRITE permission
+      const included = showReadOnlyProfiles || hasWrite;
+      console.log(`Profile "${profile.sellerName}": permissions=${JSON.stringify(profile.permissions)}, hasWrite=${hasWrite}, showReadOnly=${showReadOnlyProfiles}, included=${included}`);
+      return included;
+    }
   );
 
   const loading = myProfilesLoading || sharedProfilesLoading || accountLoading;

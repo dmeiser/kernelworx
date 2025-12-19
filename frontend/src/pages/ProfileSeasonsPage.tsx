@@ -84,25 +84,17 @@ export const ProfileSeasonsPage: React.FC = () => {
 
   const handleCreateSeason = async (
     seasonName: string,
-    startDate: string,
-    endDate: string | null,
+    seasonYear: number,
     catalogId: string,
   ) => {
     if (!profileId) return;
-
-    // Convert YYYY-MM-DD to ISO 8601 datetime
-    const startDateTime = new Date(startDate + "T00:00:00.000Z").toISOString();
-    const endDateTime = endDate
-      ? new Date(endDate + "T23:59:59.999Z").toISOString()
-      : null;
 
     await createSeason({
       variables: {
         input: {
           profileId,
           seasonName,
-          startDate: startDateTime,
-          endDate: endDateTime,
+          seasonYear,
           catalogId,
         },
       },
@@ -199,8 +191,7 @@ export const ProfileSeasonsPage: React.FC = () => {
               <SeasonCard
                 seasonId={season.seasonId}
                 seasonName={season.seasonName}
-                startDate={season.startDate}
-                endDate={season.endDate}
+                seasonYear={season.seasonYear}
                 totalOrders={season.totalOrders}
                 totalRevenue={season.totalRevenue}
                 profileId={profileId}

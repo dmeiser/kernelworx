@@ -23,7 +23,8 @@ interface SeasonCardProps {
   seasonId: string;
   profileId: string;
   seasonName: string;
-  startDate: string;
+  seasonYear: number;
+  startDate?: string;
   endDate?: string;
   totalOrders?: number;
   totalRevenue?: number;
@@ -33,6 +34,7 @@ export const SeasonCard: React.FC<SeasonCardProps> = ({
   seasonId,
   profileId,
   seasonName,
+  seasonYear,
   startDate,
   endDate,
   totalOrders,
@@ -44,14 +46,6 @@ export const SeasonCard: React.FC<SeasonCardProps> = ({
     navigate(
       `/profiles/${encodeURIComponent(profileId)}/seasons/${encodeURIComponent(seasonId)}`,
     );
-  };
-
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString("en-US", {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-    });
   };
 
   const isActive = !endDate || new Date(endDate) >= new Date();
@@ -69,15 +63,10 @@ export const SeasonCard: React.FC<SeasonCardProps> = ({
               mb={1}
             >
               <Typography variant="h6" component="h3">
-                {seasonName}
+                {seasonName} {seasonYear}
               </Typography>
               {isActive && <Chip label="Active" color="success" size="small" />}
             </Stack>
-
-            <Typography variant="body2" color="text.secondary">
-              {formatDate(startDate)}
-              {endDate && ` - ${formatDate(endDate)}`}
-            </Typography>
           </Box>
 
           {/* Stats */}

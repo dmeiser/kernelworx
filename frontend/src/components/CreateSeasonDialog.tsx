@@ -26,8 +26,7 @@ interface CreateSeasonDialogProps {
   onClose: () => void;
   onSubmit: (
     seasonName: string,
-    startDate: string,
-    endDate: string | null,
+    seasonYear: number,
     catalogId: string,
   ) => Promise<void>;
 }
@@ -38,14 +37,15 @@ interface Catalog {
   catalogType: string;
 }
 
+const SEASON_OPTIONS = ["Fall", "Spring", "Summer", "Winter"];
+
 export const CreateSeasonDialog: React.FC<CreateSeasonDialogProps> = ({
   open,
   onClose,
   onSubmit,
 }) => {
-  const [seasonName, setSeasonName] = useState("");
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
+  const [seasonName, setSeasonName] = useState("Fall");
+  const [seasonYear, setSeasonYear] = useState(new Date().getFullYear());
   const [catalogId, setCatalogId] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -70,24 +70,15 @@ export const CreateSeasonDialog: React.FC<CreateSeasonDialogProps> = ({
 
   const catalogsLoading = publicLoading || myLoading;
 
-  // Set default start date to today
-  useEffect(() => {
-    if (open && !startDate) {
-      const today = new Date().toISOString().split("T")[0];
-      setStartDate(today);
-    }
-  }, [open, startDate]);
-
   const handleSubmit = async () => {
-    if (!seasonName.trim() || !startDate || !catalogId) return;
+    if (!seasonName.trim() || !catalogId) return;
 
     setLoading(true);
     try {
-      await onSubmit(seasonName.trim(), startDate, endDate || null, catalogId);
+      await onSubmit(seasonName.trim(), seasonYear, catalogId);
       // Reset form
-      setSeasonName("");
-      setStartDate("");
-      setEndDate("");
+      setSeasonName("Fall");
+      setSeasonYear(new Date().getFullYear());
       setCatalogId("");
       onClose();
     } catch (error) {
@@ -99,19 +90,14 @@ export const CreateSeasonDialog: React.FC<CreateSeasonDialogProps> = ({
 
   const handleClose = () => {
     if (!loading) {
-      setSeasonName("");
-      setStartDate("");
-      setEndDate("");
+      setSeasonName("Fall");
+      setSeasonYear(new Date().getFullYear());
       setCatalogId("");
       onClose();
     }
   };
 
-  const isFormValid =
-    seasonName.trim() &&
-    startDate &&
-    catalogId &&
-    (!endDate || endDate >= startDate);
+  const isFormValid = seasonName.trim() && catalogId;
 
   return (
     <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth>
@@ -119,39 +105,31 @@ export const CreateSeasonDialog: React.FC<CreateSeasonDialogProps> = ({
       <DialogContent>
         <Stack spacing={3} pt={1}>
           {/* Season Name */}
-          <TextField
-            autoFocus
-            fullWidth
-            label="Season Name"
-            placeholder="e.g., Fall 2025 Popcorn Sale"
-            value={seasonName}
-            onChange={(e) => setSeasonName(e.target.value)}
-            disabled={loading}
-            helperText="A descriptive name for this sales season"
-          />
+          <FormControl fullWidth disabled={loading}>
+            <InputLabel>Season Name</InputLabel>
+            <Select
+              value={seasonName}
+              onChange={(e) => setSeasonName(e.target.value)}
+              label="Season Name"
+            >
+              {SEASON_OPTIONS.map((season) => (
+                <MenuItem key={season} value={season}>
+                  {season}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
 
-          {/* Start Date */}
+          {/* Season Year */}
           <TextField
             fullWidth
-            label="Start Date"
-            type="date"
-            value={startDate}
-            onChange={(e) => setStartDate(e.target.value)}
+            label="Year"
+            type="number"
+            value={seasonYear}
+            onChange={(e) => setSeasonYear(parseInt(e.target.value, 10))}
             disabled={loading}
-            InputLabelProps={{ shrink: true }}
-          />
-
-          {/* End Date (Optional) */}
-          <TextField
-            fullWidth
-            label="End Date (Optional)"
-            type="date"
-            value={endDate}
-            onChange={(e) => setEndDate(e.target.value)}
-            disabled={loading}
-            InputLabelProps={{ shrink: true }}
-            helperText="Leave blank if the season is ongoing"
-            error={!!endDate && endDate < startDate}
+            inputProps={{ min: 2020, max: new Date().getFullYear() + 5, step: 1 }}
+            helperText="Year of this sales season"
           />
 
           {/* Catalog Selection */}
