@@ -84,9 +84,9 @@ export const CatalogsPage: React.FC = () => {
   } = useQuery<{ listMyCatalogs: Catalog[] }>(LIST_MY_CATALOGS);
 
   // Fetch user's profiles to check catalog usage
-  const { data: myProfilesData } = useQuery<{ listMyProfiles: any[] }>(
-    LIST_MY_PROFILES,
-  );
+  const { data: myProfilesData } = useQuery<{
+    listMyProfiles: Array<{ profileId: string }>;
+  }>(LIST_MY_PROFILES);
   const { data: sharedProfilesData } = useQuery<{
     listMyShares: { profileId: string; permissions: string[] }[];
   }>(LIST_MY_SHARES);
@@ -105,9 +105,9 @@ export const CatalogsPage: React.FC = () => {
   const [catalogsInUse, setCatalogsInUse] = useState<Set<string>>(new Set());
 
   // Lazy query for fetching seasons
-  const [fetchSeasons] = useLazyQuery<{ listSeasonsByProfile: any[] }>(
-    LIST_SEASONS_BY_PROFILE,
-  );
+  const [fetchSeasons] = useLazyQuery<{
+    listSeasonsByProfile: Array<{ catalogId: string }>;
+  }>(LIST_SEASONS_BY_PROFILE);
 
   // Fetch seasons for all profiles and determine catalog usage
   useEffect(() => {
@@ -142,7 +142,7 @@ export const CatalogsPage: React.FC = () => {
     if (allUserProfiles.length > 0) {
       fetchAllSeasons();
     }
-  }, [myProfilesData, sharedProfilesData, fetchSeasons]);
+  }, [allUserProfiles, fetchSeasons]);
 
   // Create catalog
   const [createCatalog] = useMutation(CREATE_CATALOG, {

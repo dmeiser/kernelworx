@@ -37,14 +37,17 @@ vi.mock('react-router-dom', async () => {
 
 const renderWithAuth = (isAuthenticated = false) => {
   if (isAuthenticated) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     vi.mocked(amplifyAuth.fetchAuthSession).mockResolvedValue({
       tokens: { idToken: { toString: () => 'mock-token' } },
     } as any);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     vi.mocked(amplifyAuth.getCurrentUser).mockResolvedValue({
       userId: 'user-123',
       username: 'testuser',
     } as any);
   } else {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     vi.mocked(amplifyAuth.fetchAuthSession).mockResolvedValue({
       tokens: undefined,
     } as any);

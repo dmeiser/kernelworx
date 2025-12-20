@@ -30,26 +30,21 @@ const httpLink = createHttpLink({
  * requests from reaching AppSync with empty ctx.identity.sub values.
  */
 const authLink = setContext(async (_, { headers }) => {
-  try {
-    const session = await fetchAuthSession();
-    const token = session.tokens?.idToken?.toString();
+  const session = await fetchAuthSession();
+  const token = session.tokens?.idToken?.toString();
 
-    if (!token) {
-      // Don't send the request without a valid token
-      // This prevents race conditions where queries fire before auth is ready
-      throw new Error("No valid auth token available");
-    }
-
-    return {
-      headers: {
-        ...headers,
-        Authorization: `Bearer ${token}`,
-      },
-    };
-  } catch (error) {
-    // Re-throw to prevent the request from proceeding without valid auth
-    throw error;
+  if (!token) {
+    // Don't send the request without a valid token
+    // This prevents race conditions where queries fire before auth is ready
+    throw new Error("No valid auth token available");
   }
+
+  return {
+    headers: {
+      ...headers,
+      Authorization: `Bearer ${token}`,
+    },
+  };
 });
 
 /**

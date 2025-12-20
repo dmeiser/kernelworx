@@ -280,3 +280,41 @@ def lookup_appsync_domain(domain_name: str) -> Optional[dict]:
         return None
     except Exception:
         return None
+
+
+@functools.lru_cache(maxsize=128)
+def lookup_route53_record(hosted_zone_id: str, record_name: str, record_type: str = "A") -> Optional[dict]:
+    """Check if a Route53 record exists.
+    
+    Args:
+        hosted_zone_id: The hosted zone ID (e.g., Z039490427CKS98SYWOJN)
+        record_name: The full record name with trailing dot (e.g., dev.kernelworx.app.)
+        record_type: The record type (A, CNAME, AAAA, etc.)
+    
+    Returns:
+        Dict with record info if found, None otherwise
+    """
+    client = get_client("route53")
+    # Ensure record name ends with a dot
+    if not record_name.endswith("."):
+        record_name = record_name + "."
+    try:
+        response = client.list_resource_record_sets(
+            HostedZoneId=hosted_zone_id,
+            StartRecordName=record_name,
+            StartRecordType=record_type,
+            MaxItems="1",
+        )
+        records = response.get("ResourceRecordSets", [])
+        if records and records[0].get("Name") == record_name and records[0].get("Type") == record_type:
+            record = records[0]
+            return {
+                "name": record["Name"],
+                "type": record["Type"],
+                "alias_target": record.get("AliasTarget"),
+                "resource_records": record.get("ResourceRecords"),
+                "ttl": record.get("TTL"),
+            }
+    except Exception:
+        pass
+    return None

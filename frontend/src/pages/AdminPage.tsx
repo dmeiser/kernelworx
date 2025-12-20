@@ -59,14 +59,28 @@ export const AdminPage: React.FC = () => {
     data: profilesData,
     loading: profilesLoading,
     error: profilesError,
-  } = useQuery<{ listMyProfiles: any[] }>(LIST_MY_PROFILES);
+  } = useQuery<{
+    listMyProfiles: Array<{
+      profileId: string;
+      sellerName: string;
+      ownerAccountId: string;
+      isOwner: boolean;
+    }>;
+  }>(LIST_MY_PROFILES);
 
   // Fetch public catalogs
   const {
     data: catalogsData,
     loading: catalogsLoading,
     error: catalogsError,
-  } = useQuery<{ listPublicCatalogs: any[] }>(LIST_PUBLIC_CATALOGS);
+  } = useQuery<{
+    listPublicCatalogs: Array<{
+      catalogId: string;
+      name: string;
+      description: string;
+      isActive: boolean;
+    }>;
+  }>(LIST_PUBLIC_CATALOGS);
 
   const profiles = profilesData?.listMyProfiles || [];
   const catalogs = catalogsData?.listPublicCatalogs || [];
@@ -130,7 +144,13 @@ export const AdminPage: React.FC = () => {
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {profiles.map((profile: any) => (
+                  {profiles.map(
+                    (profile: {
+                      profileId: string;
+                      sellerName: string;
+                      ownerAccountId: string;
+                      isOwner: boolean;
+                    }) => (
                     <TableRow key={profile.profileId} hover>
                       <TableCell>
                         <Typography variant="body2" fontFamily="monospace">
@@ -191,7 +211,13 @@ export const AdminPage: React.FC = () => {
 
           {!catalogsLoading && !catalogsError && catalogs.length > 0 && (
             <Stack spacing={2}>
-              {catalogs.map((catalog: any) => (
+              {catalogs.map(
+                (catalog: {
+                  catalogId: string;
+                  name: string;
+                  description: string;
+                  isActive: boolean;
+                }) => (
                 <Paper key={catalog.catalogId} variant="outlined" sx={{ p: 2 }}>
                   <Stack
                     direction="row"

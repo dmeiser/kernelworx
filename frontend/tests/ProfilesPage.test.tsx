@@ -24,8 +24,6 @@ import { BrowserRouter } from 'react-router-dom';
 import { ProfilesPage } from '../src/pages/ProfilesPage';
 import {
   LIST_MY_PROFILES,
-  LIST_MY_SHARES,
-  GET_PROFILE,
   CREATE_SELLER_PROFILE,
   UPDATE_SELLER_PROFILE,
 } from '../src/lib/graphql';

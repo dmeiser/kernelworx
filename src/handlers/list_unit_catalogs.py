@@ -108,8 +108,9 @@ def list_unit_catalogs(event: Dict[str, Any], context: Any) -> List[Dict[str, An
 
             # Collect catalog IDs
             for season in seasons:
-                if "catalogId" in season:
-                    catalog_ids.add(season["catalogId"])
+                catalog_id = season.get("catalogId")
+                if catalog_id is not None and isinstance(catalog_id, str):
+                    catalog_ids.add(catalog_id)
 
         logger.info(f"Found {len(catalog_ids)} unique catalogs in use")
 

@@ -69,10 +69,13 @@ describe("reportExport utilities", () => {
       click: vi.fn(),
       style: {},
     };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     vi.spyOn(document, "createElement").mockReturnValue(mockElement as any);
     
     // Mock appendChild/removeChild
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     vi.spyOn(document.body, "appendChild").mockReturnValue(mockElement as any);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     vi.spyOn(document.body, "removeChild").mockReturnValue(mockElement as any);
   });
 

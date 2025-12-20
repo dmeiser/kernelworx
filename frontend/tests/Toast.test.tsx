@@ -79,7 +79,7 @@ describe('Toast', () => {
   });
 
   it('closes toast when close button is clicked on alert', async () => {
-    const { rerender } = render(<Toast />);
+    render(<Toast />);
 
     const errorEvent = new CustomEvent('graphql-error', {
       detail: {

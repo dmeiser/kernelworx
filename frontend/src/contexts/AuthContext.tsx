@@ -39,7 +39,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
    * Fetch account data from GraphQL API
    */
   const fetchAccountData = useCallback(
-    async (_accountId: string): Promise<Account | null> => {
+    async (): Promise<Account | null> => {
       try {
         const { data } = await apolloClient.query<{ getMyAccount: Account }>({
           query: GET_MY_ACCOUNT,

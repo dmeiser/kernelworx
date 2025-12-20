@@ -52,7 +52,8 @@ export const LoginPage: React.FC = () => {
   }, [isAuthenticated, navigate]);
 
   // Get the redirect path from location state (defaults to /profiles)
-  const from = (location.state as any)?.from?.pathname || "/profiles";
+  const from = (location.state as { from?: { pathname?: string } } | undefined)
+    ?.from?.pathname || "/profiles";
 
   const handleEmailLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -98,9 +99,11 @@ export const LoginPage: React.FC = () => {
         setError("Authentication failed. Please try again.");
         setLoading(false);
       }
-    } catch (err: any) {
-      console.error("Login failed:", err);
-      setError(err.message || "Login failed. Please check your credentials.");
+    } catch (err: unknown) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const error = err as any;
+      console.error("Login failed:", error);
+      setError(error.message || "Login failed. Please check your credentials.");
       setLoading(false);
     }
   };
@@ -127,9 +130,11 @@ export const LoginPage: React.FC = () => {
         setError("MFA verification failed");
         setLoading(false);
       }
-    } catch (err: any) {
-      console.error("MFA failed:", err);
-      setError(err.message || "Invalid MFA code");
+    } catch (err: unknown) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const error = err as any;
+      console.error("MFA failed:", error);
+      setError(error.message || "Invalid MFA code");
       setLoading(false);
     }
   };
@@ -195,10 +200,12 @@ export const LoginPage: React.FC = () => {
         setError(`Unexpected step: ${result.nextStep.signInStep}`);
         setLoading(false);
       }
-    } catch (err: any) {
-      console.error("Passkey login failed:", err);
+    } catch (err: unknown) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const error = err as any;
+      console.error("Passkey login failed:", error);
       setError(
-        err.message ||
+        error.message ||
           "Passkey authentication failed. Make sure you have a passkey registered.",
       );
       setLoading(false);
@@ -219,8 +226,10 @@ export const LoginPage: React.FC = () => {
       const identityProvider = provider.toLowerCase();
 
       window.location.href = `https://${domain}/oauth2/authorize?client_id=${clientId}&response_type=code&redirect_uri=${redirectUri}&identity_provider=${identityProvider}&scope=openid+email+profile`;
-    } catch (err: any) {
-      console.error("Social login failed:", err);
+    } catch (err: unknown) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const error = err as any;
+      console.error("Social login failed:", error);
       setError(`${provider} login failed. Please try again.`);
       setLoading(false);
     }

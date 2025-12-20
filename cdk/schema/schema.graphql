@@ -69,6 +69,11 @@ type Season {
   startDate: AWSDateTime!
   endDate: AWSDateTime
   catalogId: ID!
+  unitType: String          # NEW: Optional unit information
+  unitNumber: Int           # NEW: Required when unitType provided
+  city: String              # NEW: Required when unitType provided (for unit uniqueness)
+  state: String             # NEW: Required when unitType provided (for unit uniqueness)
+  prefillCode: String       # NEW: If season was created from campaign prefill
   createdAt: AWSDateTime!
   updatedAt: AWSDateTime!
   catalog: Catalog
@@ -93,6 +98,26 @@ type Product @aws_cognito_user_pools {
   description: String
   price: Float!
   sortOrder: Int!
+}
+
+type CampaignPrefill {
+  prefillCode: String!
+  catalogId: ID!
+  catalog: Catalog!
+  seasonName: String!
+  seasonYear: Int!
+  startDate: AWSDate
+  endDate: AWSDate
+  unitType: String!
+  unitNumber: Int!
+  city: String!
+  state: String!
+  createdBy: ID!
+  createdByName: String!
+  creatorMessage: String!
+  description: String
+  isActive: Boolean!
+  createdAt: AWSDateTime!
 }
 
 type Order {
@@ -219,11 +244,17 @@ input UpdateSellerProfileInput {
 
 input CreateSeasonInput {
   profileId: ID!
-  seasonName: String!
-  seasonYear: Int!
+  seasonName: String
+  seasonYear: Int
   startDate: AWSDateTime
   endDate: AWSDateTime
-  catalogId: ID!
+  catalogId: ID
+  unitType: String
+  unitNumber: Int
+  city: String
+  state: String
+  prefillCode: String
+  shareWithCreator: Boolean
 }
 
 input UpdateSeasonInput {
@@ -281,6 +312,27 @@ input AddressInput {
   city: String
   state: String
   zipCode: String
+}
+
+input CreateCampaignPrefillInput {
+  catalogId: ID!
+  seasonName: String!
+  seasonYear: Int!
+  startDate: AWSDate
+  endDate: AWSDate
+  unitType: String!
+  unitNumber: Int!
+  city: String!
+  state: String!
+  creatorMessage: String!
+  description: String
+}
+
+input UpdateCampaignPrefillInput {
+  prefillCode: String!
+  creatorMessage: String
+  description: String
+  isActive: Boolean
 }
 
 input CreateProfileInviteInput {
@@ -349,8 +401,14 @@ type Query {
   listSharesByProfile(profileId: ID!): [Share!]!
   listInvitesByProfile(profileId: ID!): [ProfileInvite!]!
   
+  # Campaign prefill queries
+  getCampaignPrefill(prefillCode: String!): CampaignPrefill
+  listMyCampaignPrefills: [CampaignPrefill!]!
+  findCampaignPrefills(unitType: String!, unitNumber: Int!, city: String!, state: String!, seasonName: String!, seasonYear: Int!): [CampaignPrefill!]!
+  
   # Unit reporting
   listUnitCatalogs(unitType: String!, unitNumber: Int!, seasonName: String!, seasonYear: Int!): [Catalog!]!
+  listUnitSeasonCatalogs(unitType: String!, unitNumber: Int!, city: String!, state: String!, seasonName: String!, seasonYear: Int!): [Catalog!]!
   getUnitReport(unitType: String!, unitNumber: Int!, seasonName: String!, seasonYear: Int!, catalogId: ID!): UnitReport
 }
 
@@ -382,6 +440,13 @@ type Mutation {
   createOrder(input: CreateOrderInput!): Order!
   updateOrder(input: UpdateOrderInput!): Order!
   deleteOrder(orderId: ID!): Boolean!
+  
+  # Campaign prefill mutations
+  createCampaignPrefill(input: CreateCampaignPrefillInput!): CampaignPrefill!
+  
+  updateCampaignPrefill(input: UpdateCampaignPrefillInput!): CampaignPrefill!
+  
+  deleteCampaignPrefill(prefillCode: String!): Boolean!
   
   # Sharing mutations
   createProfileInvite(input: CreateProfileInviteInput!): ProfileInvite!

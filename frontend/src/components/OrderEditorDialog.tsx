@@ -137,6 +137,7 @@ export const OrderEditorDialog: React.FC<OrderEditorDialogProps> = ({
   };
 
   // Initialize form when dialog opens
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (open) {
       if (order) {
@@ -243,7 +244,7 @@ export const OrderEditorDialog: React.FC<OrderEditorDialogProps> = ({
   const handleSubmit = async () => {
     if (!isFormValid || !profileId) return;
 
-    const input: any = {
+    const input: Record<string, unknown> = {
       customerName: customerName.trim(),
       orderDate: new Date(orderDate + "T00:00:00.000Z").toISOString(),
       paymentMethod,
@@ -326,22 +327,24 @@ export const OrderEditorDialog: React.FC<OrderEditorDialogProps> = ({
           },
         });
       }
-    } catch (err: any) {
-      console.error("Failed to save order - FULL ERROR:", err);
-      console.error("Error name:", err.name);
-      console.error("Error message:", err.message);
-      console.error("Error stack:", err.stack);
-      console.error("Error constructor:", err.constructor.name);
-      console.error("Error keys:", Object.keys(err));
-      if (err.graphQLErrors) {
-        console.error("GraphQL Errors:", err.graphQLErrors);
-        console.error("First GraphQL Error:", err.graphQLErrors[0]);
-        if (err.graphQLErrors[0]) {
-          console.error("Error extensions:", err.graphQLErrors[0].extensions);
-          console.error("Error source:", err.graphQLErrors[0].source);
+    } catch (err: unknown) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const error = err as any;
+      console.error("Failed to save order - FULL ERROR:", error);
+      console.error("Error name:", error.name);
+      console.error("Error message:", error.message);
+      console.error("Error stack:", error.stack);
+      console.error("Error constructor:", error.constructor?.name);
+      console.error("Error keys:", Object.keys(error || {}));
+      if (error.graphQLErrors) {
+        console.error("GraphQL Errors:", error.graphQLErrors);
+        console.error("First GraphQL Error:", error.graphQLErrors[0]);
+        if (error.graphQLErrors[0]) {
+          console.error("Error extensions:", error.graphQLErrors[0].extensions);
+          console.error("Error source:", error.graphQLErrors[0].source);
         }
       }
-      if (err.networkError) {
+      if (error.networkError) {
         console.error("Network Error:", err.networkError);
         console.error(
           "Network Error statusCode:",

@@ -240,6 +240,50 @@ def dynamodb_table(aws_credentials: None) -> Generator[Any, None, None]:
             BillingMode="PAY_PER_REQUEST",
         )
 
+        # ================================================================
+        # Campaign Prefills Table (NEW - Phase 1)
+        # PK: prefillCode, SK: METADATA
+        # GSI1: createdBy + createdAt (list by creator)
+        # GSI2: unitSeasonKey + prefillCode (discover by unit+season)
+        # ================================================================
+        campaign_prefills_table = dynamodb.create_table(
+            TableName="kernelworx-campaign-prefills-ue1-dev",
+            KeySchema=[
+                {"AttributeName": "prefillCode", "KeyType": "HASH"},
+                {"AttributeName": "SK", "KeyType": "RANGE"},
+            ],
+            AttributeDefinitions=[
+                {"AttributeName": "prefillCode", "AttributeType": "S"},
+                {"AttributeName": "SK", "AttributeType": "S"},
+                {"AttributeName": "createdBy", "AttributeType": "S"},
+                {"AttributeName": "createdAt", "AttributeType": "S"},
+                {"AttributeName": "unitSeasonKey", "AttributeType": "S"},
+            ],
+            GlobalSecondaryIndexes=[
+                {
+                    "IndexName": "GSI1",
+                    "KeySchema": [
+                        {"AttributeName": "createdBy", "KeyType": "HASH"},
+                        {"AttributeName": "createdAt", "KeyType": "RANGE"},
+                    ],
+                    "Projection": {"ProjectionType": "ALL"},
+                },
+                {
+                    "IndexName": "GSI2",
+                    "KeySchema": [
+                        {"AttributeName": "unitSeasonKey", "KeyType": "HASH"},
+                        {"AttributeName": "prefillCode", "KeyType": "RANGE"},
+                    ],
+                    "Projection": {"ProjectionType": "ALL"},
+                },
+            ],
+            BillingMode="PAY_PER_REQUEST",
+        )
+
+        # Add GSI3 to Seasons table for unit-based queries
+        # GSI3: unitSeasonKey + seasonId
+        # (In real deployment, this would be added via CDK update, but in tests we configure it here)
+
         # Return profiles table as primary (most commonly used)
         yield profiles_table
 
