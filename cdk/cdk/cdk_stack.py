@@ -847,6 +847,36 @@ class CdkStack(Stack):
             environment=lambda_env,
         )
 
+        # New list_unit_season_catalogs Lambda (uses GSI3 for season-based queries)
+        self.list_unit_season_catalogs_fn = lambda_.Function(
+            self,
+            "ListUnitSeasonCatalogsFn",
+            function_name=rn("kernelworx-list-unit-season-catalogs"),
+            runtime=lambda_.Runtime.PYTHON_3_13,
+            handler="handlers.list_unit_catalogs.list_unit_season_catalogs",
+            code=lambda_code,
+            layers=[self.shared_layer],
+            timeout=Duration.seconds(30),
+            memory_size=512,
+            role=self.lambda_execution_role,
+            environment=lambda_env,
+        )
+
+        # Season Operations Lambda (with transaction support for prefill + share creation)
+        self.season_operations_fn = lambda_.Function(
+            self,
+            "SeasonOperationsFn",
+            function_name=rn("kernelworx-season-operations"),
+            runtime=lambda_.Runtime.PYTHON_3_13,
+            handler="handlers.season_operations.create_season",
+            code=lambda_code,
+            layers=[self.shared_layer],
+            timeout=Duration.seconds(30),
+            memory_size=512,
+            role=self.lambda_execution_role,
+            environment=lambda_env,
+        )
+
         # Account Operations Lambda Functions
         self.update_my_account_fn = lambda_.Function(
             self,
@@ -1417,6 +1447,18 @@ class CdkStack(Stack):
         self.list_unit_catalogs_ds = self.api.add_lambda_data_source(
             "ListUnitCatalogsDS",
             lambda_function=self.list_unit_catalogs_fn,
+        )
+
+        # New data source for list_unit_season_catalogs (uses GSI3)
+        self.list_unit_season_catalogs_ds = self.api.add_lambda_data_source(
+            "ListUnitSeasonCatalogsDS",
+            lambda_function=self.list_unit_season_catalogs_fn,
+        )
+
+        # Season operations data source (with transaction support)
+        self.season_operations_ds = self.api.add_lambda_data_source(
+            "SeasonOperationsDS",
+            lambda_function=self.season_operations_fn,
         )
 
         # Lambda data sources for account operations
@@ -6595,78 +6637,14 @@ export function response(ctx) {
             ),
         )
 
-        # createSeason - Create a new season for a profile (Pipeline with authorization) - uses seasons table
-        # V2 STRUCTURE: PK=profileId, SK=seasonId
-        create_season_fn = appsync.AppsyncFunction(
-            self,
-            "CreateSeasonFn",
-            name=f"CreateSeasonFn_{env_name}",
-            api=self.api,
-            data_source=self.seasons_datasource,
-            runtime=appsync.FunctionRuntime.JS_1_0_0,
-            code=appsync.Code.from_inline(
-                """
-import { util } from '@aws-appsync/utils';
-
-export function request(ctx) {
-    const seasonId = 'SEASON#' + util.autoId();
-    const now = util.time.nowISO8601();
-    const input = ctx.args.input;
-    
-    // V2 Season table structure: PK=profileId, SK=seasonId
-    const season = {
-        profileId: input.profileId,
-        seasonId: seasonId,
-        seasonName: input.seasonName,
-        seasonYear: input.seasonYear,
-        startDate: input.startDate,
-        catalogId: input.catalogId,
-        createdAt: now,
-        updatedAt: now
-    };
-    
-    if (input.endDate) {
-        season.endDate = input.endDate;
-    }
-    
-    return {
-        operation: 'PutItem',
-        key: util.dynamodb.toMapValues({ profileId: input.profileId, seasonId: seasonId }),
-        attributeValues: util.dynamodb.toMapValues(season)
-    };
-}
-
-export function response(ctx) {
-    if (ctx.error) {
-        util.error(ctx.error.message, ctx.error.type);
-    }
-    return ctx.result;
-}
-            """
-            ),
-        )
-
-        self.api.create_resolver(
+        # createSeason - Create a new season for a profile (Lambda resolver with transaction support)
+        # Supports: prefillCode, shareWithCreator, unit fields (unitType, unitNumber, city, state)
+        # Uses DynamoDB transactions to atomically create season + optional share
+        # NOTE: Previous JS pipeline resolver replaced with Lambda for transaction support
+        self.season_operations_ds.create_resolver(
             "CreateSeasonResolver",  # Keep same logical ID to replace old resolver
             type_name="Mutation",
             field_name="createSeason",
-            runtime=appsync.FunctionRuntime.JS_1_0_0,
-            pipeline_config=[
-                verify_profile_write_access_fn,
-                check_share_permissions_fn,
-                create_season_fn,
-            ],
-            code=appsync.Code.from_inline(
-                """
-export function request(ctx) {
-    return {};
-}
-
-export function response(ctx) {
-    return ctx.prev.result;
-}
-            """
-            ),
         )
 
         # NOTE: updateSeason Lambda resolver REMOVED - replaced with pipeline resolver above
@@ -6687,11 +6665,18 @@ export function response(ctx) {
             field_name="getUnitReport",
         )
 
-        # listUnitCatalogs - List catalogs used in unit (Lambda resolver)
+        # listUnitCatalogs - List catalogs used in unit (Lambda resolver) - DEPRECATED, use listUnitSeasonCatalogs
         self.list_unit_catalogs_ds.create_resolver(
             "ListUnitCatalogsResolver",
             type_name="Query",
             field_name="listUnitCatalogs",
+        )
+
+        # listUnitSeasonCatalogs - List catalogs used in unit+season using GSI3 (Lambda resolver)
+        self.list_unit_season_catalogs_ds.create_resolver(
+            "ListUnitSeasonCatalogsResolver",
+            type_name="Query",
+            field_name="listUnitSeasonCatalogs",
         )
 
         # updateMyAccount - Update user metadata in DynamoDB (Lambda resolver)

@@ -431,3 +431,331 @@ class TestListUnitCatalogs:
         assert result == []
         # get_item should not be called since no valid catalog IDs
         mock_catalogs_table.get_item.assert_not_called()
+
+
+class TestListUnitSeasonCatalogs:
+    """Tests for list_unit_season_catalogs Lambda handler using GSI3."""
+
+    @pytest.fixture
+    def event(self) -> Dict[str, Any]:
+        """Sample AppSync event for list unit season catalogs request."""
+        return {
+            "arguments": {
+                "unitType": "Pack",
+                "unitNumber": 158,
+                "city": "Springfield",
+                "state": "IL",
+                "seasonName": "Fall",
+                "seasonYear": 2024,
+            },
+            "identity": {"sub": "test-account-123"},
+        }
+
+    @pytest.fixture
+    def lambda_context(self) -> MagicMock:
+        """Mock Lambda context."""
+        context = MagicMock()
+        context.function_name = "list_unit_season_catalogs"
+        context.memory_limit_in_mb = 128
+        context.invoked_function_arn = "arn:aws:lambda:us-east-1:123456789012:function:test"
+        context.aws_request_id = "test-request-id"
+        return context
+
+    @pytest.fixture
+    def sample_seasons(self) -> list[Dict[str, Any]]:
+        """Sample seasons from GSI3 query."""
+        return [
+            {
+                "seasonId": "SEASON#season1",
+                "profileId": "PROFILE#profile1",
+                "catalogId": "catalog-123",
+                "unitSeasonKey": "Pack#158#Springfield#IL#Fall#2024",
+            },
+            {
+                "seasonId": "SEASON#season2",
+                "profileId": "PROFILE#profile2",
+                "catalogId": "catalog-456",
+                "unitSeasonKey": "Pack#158#Springfield#IL#Fall#2024",
+            },
+        ]
+
+    @pytest.fixture
+    def sample_catalogs(self) -> Dict[str, Dict[str, Any]]:
+        """Sample catalogs by ID."""
+        return {
+            "catalog-123": {
+                "catalogId": "catalog-123",
+                "catalogName": "Alpha Catalog",
+                "isActive": True,
+            },
+            "catalog-456": {
+                "catalogId": "catalog-456",
+                "catalogName": "Zebra Catalog",
+                "isActive": True,
+            },
+        }
+
+    @patch("src.handlers.list_unit_catalogs.check_profile_access")
+    @patch("src.handlers.list_unit_catalogs.catalogs_table")
+    @patch("src.handlers.list_unit_catalogs.seasons_table")
+    def test_list_unit_season_catalogs_success(
+        self,
+        mock_seasons_table: MagicMock,
+        mock_catalogs_table: MagicMock,
+        mock_check_access: MagicMock,
+        event: Dict[str, Any],
+        lambda_context: MagicMock,
+        sample_seasons: list[Dict[str, Any]],
+        sample_catalogs: Dict[str, Dict[str, Any]],
+    ) -> None:
+        """Test successful catalog listing using GSI3."""
+        from src.handlers.list_unit_catalogs import list_unit_season_catalogs
+
+        # Arrange
+        mock_seasons_table.query.return_value = {"Items": sample_seasons}
+        mock_check_access.return_value = True
+
+        def get_item_side_effect(**kwargs: Any) -> Dict[str, Any]:
+            catalog_id = kwargs["Key"]["catalogId"]
+            if catalog_id in sample_catalogs:
+                return {"Item": sample_catalogs[catalog_id]}
+            return {}
+
+        mock_catalogs_table.get_item.side_effect = get_item_side_effect
+
+        # Act
+        result = list_unit_season_catalogs(event, lambda_context)
+
+        # Assert
+        assert len(result) == 2
+        # Sorted by catalog name
+        assert result[0]["catalogName"] == "Alpha Catalog"
+        assert result[1]["catalogName"] == "Zebra Catalog"
+        # Verify GSI3 was queried
+        mock_seasons_table.query.assert_called_once()
+        call_kwargs = mock_seasons_table.query.call_args.kwargs
+        assert call_kwargs["IndexName"] == "GSI3"
+
+    @patch("src.handlers.list_unit_catalogs.seasons_table")
+    def test_list_unit_season_catalogs_no_seasons(
+        self,
+        mock_seasons_table: MagicMock,
+        event: Dict[str, Any],
+        lambda_context: MagicMock,
+    ) -> None:
+        """Test listing when no seasons found in GSI3."""
+        from src.handlers.list_unit_catalogs import list_unit_season_catalogs
+
+        # Arrange
+        mock_seasons_table.query.return_value = {"Items": []}
+
+        # Act
+        result = list_unit_season_catalogs(event, lambda_context)
+
+        # Assert
+        assert result == []
+
+    @patch("src.handlers.list_unit_catalogs.check_profile_access")
+    @patch("src.handlers.list_unit_catalogs.seasons_table")
+    def test_list_unit_season_catalogs_no_access(
+        self,
+        mock_seasons_table: MagicMock,
+        mock_check_access: MagicMock,
+        event: Dict[str, Any],
+        lambda_context: MagicMock,
+        sample_seasons: list[Dict[str, Any]],
+    ) -> None:
+        """Test listing when caller has no access to any profiles."""
+        from src.handlers.list_unit_catalogs import list_unit_season_catalogs
+
+        # Arrange
+        mock_seasons_table.query.return_value = {"Items": sample_seasons}
+        mock_check_access.return_value = False
+
+        # Act
+        result = list_unit_season_catalogs(event, lambda_context)
+
+        # Assert
+        assert result == []
+        assert mock_check_access.call_count == 2
+
+    @patch("src.handlers.list_unit_catalogs.check_profile_access")
+    @patch("src.handlers.list_unit_catalogs.catalogs_table")
+    @patch("src.handlers.list_unit_catalogs.seasons_table")
+    def test_list_unit_season_catalogs_partial_access(
+        self,
+        mock_seasons_table: MagicMock,
+        mock_catalogs_table: MagicMock,
+        mock_check_access: MagicMock,
+        event: Dict[str, Any],
+        lambda_context: MagicMock,
+        sample_seasons: list[Dict[str, Any]],
+        sample_catalogs: Dict[str, Dict[str, Any]],
+    ) -> None:
+        """Test listing when caller has access to only some profiles."""
+        from src.handlers.list_unit_catalogs import list_unit_season_catalogs
+
+        # Arrange
+        mock_seasons_table.query.return_value = {"Items": sample_seasons}
+
+        # Grant access only to first profile
+        def check_access_side_effect(
+            caller_account_id: str, profile_id: str, required_permission: str
+        ) -> bool:
+            return profile_id == "PROFILE#profile1"
+
+        mock_check_access.side_effect = check_access_side_effect
+        mock_catalogs_table.get_item.return_value = {"Item": sample_catalogs["catalog-123"]}
+
+        # Act
+        result = list_unit_season_catalogs(event, lambda_context)
+
+        # Assert - Only catalog from accessible profile
+        assert len(result) == 1
+        assert result[0]["catalogId"] == "catalog-123"
+
+    @patch("src.handlers.list_unit_catalogs.check_profile_access")
+    @patch("src.handlers.list_unit_catalogs.catalogs_table")
+    @patch("src.handlers.list_unit_catalogs.seasons_table")
+    def test_list_unit_season_catalogs_duplicate_catalogs(
+        self,
+        mock_seasons_table: MagicMock,
+        mock_catalogs_table: MagicMock,
+        mock_check_access: MagicMock,
+        event: Dict[str, Any],
+        lambda_context: MagicMock,
+        sample_catalogs: Dict[str, Dict[str, Any]],
+    ) -> None:
+        """Test that duplicate catalog IDs are deduplicated."""
+        from src.handlers.list_unit_catalogs import list_unit_season_catalogs
+
+        # Arrange - Both seasons use the same catalog
+        seasons = [
+            {
+                "seasonId": "SEASON#season1",
+                "profileId": "PROFILE#profile1",
+                "catalogId": "catalog-123",
+            },
+            {
+                "seasonId": "SEASON#season2",
+                "profileId": "PROFILE#profile2",
+                "catalogId": "catalog-123",
+            },
+        ]
+        mock_seasons_table.query.return_value = {"Items": seasons}
+        mock_check_access.return_value = True
+        mock_catalogs_table.get_item.return_value = {"Item": sample_catalogs["catalog-123"]}
+
+        # Act
+        result = list_unit_season_catalogs(event, lambda_context)
+
+        # Assert
+        assert len(result) == 1
+        assert result[0]["catalogId"] == "catalog-123"
+
+    @patch("src.handlers.list_unit_catalogs.check_profile_access")
+    @patch("src.handlers.list_unit_catalogs.catalogs_table")
+    @patch("src.handlers.list_unit_catalogs.seasons_table")
+    def test_list_unit_season_catalogs_catalog_fetch_error(
+        self,
+        mock_seasons_table: MagicMock,
+        mock_catalogs_table: MagicMock,
+        mock_check_access: MagicMock,
+        event: Dict[str, Any],
+        lambda_context: MagicMock,
+        sample_seasons: list[Dict[str, Any]],
+        sample_catalogs: Dict[str, Dict[str, Any]],
+    ) -> None:
+        """Test graceful handling when catalog fetch fails."""
+        from src.handlers.list_unit_catalogs import list_unit_season_catalogs
+
+        # Arrange
+        mock_seasons_table.query.return_value = {"Items": sample_seasons}
+        mock_check_access.return_value = True
+
+        # First catalog succeeds, second fails
+        def get_item_side_effect(**kwargs: Any) -> Dict[str, Any]:
+            catalog_id = kwargs["Key"]["catalogId"]
+            if catalog_id == "catalog-123":
+                return {"Item": sample_catalogs["catalog-123"]}
+            raise Exception("DynamoDB error")
+
+        mock_catalogs_table.get_item.side_effect = get_item_side_effect
+
+        # Act
+        result = list_unit_season_catalogs(event, lambda_context)
+
+        # Assert - Should return the successful catalog
+        assert len(result) == 1
+        assert result[0]["catalogId"] == "catalog-123"
+
+    @patch("src.handlers.list_unit_catalogs.seasons_table")
+    def test_list_unit_season_catalogs_error_handling(
+        self,
+        mock_seasons_table: MagicMock,
+        event: Dict[str, Any],
+        lambda_context: MagicMock,
+    ) -> None:
+        """Test error handling when GSI3 query fails."""
+        from src.handlers.list_unit_catalogs import list_unit_season_catalogs
+
+        # Arrange
+        mock_seasons_table.query.side_effect = Exception("DynamoDB error")
+
+        # Act & Assert
+        with pytest.raises(Exception, match="DynamoDB error"):
+            list_unit_season_catalogs(event, lambda_context)
+
+    @patch("src.handlers.list_unit_catalogs.check_profile_access")
+    @patch("src.handlers.list_unit_catalogs.seasons_table")
+    def test_list_unit_season_catalogs_season_without_catalog(
+        self,
+        mock_seasons_table: MagicMock,
+        mock_check_access: MagicMock,
+        event: Dict[str, Any],
+        lambda_context: MagicMock,
+    ) -> None:
+        """Test handling when seasons don't have catalog IDs."""
+        from src.handlers.list_unit_catalogs import list_unit_season_catalogs
+
+        # Arrange
+        mock_seasons_table.query.return_value = {
+            "Items": [
+                {"seasonId": "SEASON#season1", "profileId": "PROFILE#profile1"},  # No catalogId
+                {"seasonId": "SEASON#season2", "profileId": "PROFILE#profile2", "catalogId": None},
+            ]
+        }
+        mock_check_access.return_value = True
+
+        # Act
+        result = list_unit_season_catalogs(event, lambda_context)
+
+        # Assert
+        assert result == []
+
+    @patch("src.handlers.list_unit_catalogs.check_profile_access")
+    @patch("src.handlers.list_unit_catalogs.catalogs_table")
+    @patch("src.handlers.list_unit_catalogs.seasons_table")
+    def test_list_unit_season_catalogs_catalog_not_found(
+        self,
+        mock_seasons_table: MagicMock,
+        mock_catalogs_table: MagicMock,
+        mock_check_access: MagicMock,
+        event: Dict[str, Any],
+        lambda_context: MagicMock,
+        sample_seasons: list[Dict[str, Any]],
+    ) -> None:
+        """Test handling when catalog doesn't exist in table."""
+        from src.handlers.list_unit_catalogs import list_unit_season_catalogs
+
+        # Arrange
+        mock_seasons_table.query.return_value = {"Items": sample_seasons}
+        mock_check_access.return_value = True
+        # Catalog not found - empty response without Item key
+        mock_catalogs_table.get_item.return_value = {}
+
+        # Act
+        result = list_unit_season_catalogs(event, lambda_context)
+
+        # Assert - No catalogs returned since none found
+        assert result == []

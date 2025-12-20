@@ -159,6 +159,9 @@ describe('Campaign Prefill CRUD Operations', () => {
   let ownerAccountId: string;
   let profileId: string;
   let catalogId: string;
+  
+  // Track all created prefills for cleanup
+  const createdPrefillCodes: string[] = [];
 
   beforeAll(async () => {
     testPrefix = getTestPrefix();
@@ -201,6 +204,18 @@ describe('Campaign Prefill CRUD Operations', () => {
   });
 
   afterAll(async () => {
+    // Clean up ALL tracked prefills first (handles failed tests)
+    for (const prefillCode of createdPrefillCodes) {
+      try {
+        await ownerClient.mutate({
+          mutation: DELETE_CAMPAIGN_PREFILL,
+          variables: { prefillCode },
+        });
+      } catch {
+        // Ignore errors - prefill may already be deleted
+      }
+    }
+
     // Clean up test data
     if (catalogId) {
       await ownerClient.mutate({
@@ -220,14 +235,22 @@ describe('Campaign Prefill CRUD Operations', () => {
     // and will be recreated by the post-authentication Lambda trigger
     // await deleteTestAccounts([ownerAccountId]);
   });
+  
+  // Helper to create a prefill and track it for cleanup
+  const createAndTrackPrefill = async (input: any) => {
+    const result = await ownerClient.mutate({
+      mutation: CREATE_CAMPAIGN_PREFILL,
+      variables: { input },
+    });
+    const prefillCode = result.data.createCampaignPrefill.prefillCode;
+    createdPrefillCodes.push(prefillCode);
+    return result;
+  };
 
   describe('CreateCampaignPrefill', () => {
     it('should create a campaign prefill with all required fields', async () => {
       const unitNumber = getUniqueUnitNumber();
-      const result = await ownerClient.mutate({
-        mutation: CREATE_CAMPAIGN_PREFILL,
-        variables: {
-          input: {
+      const result = await createAndTrackPrefill({
             catalogId,
             seasonName: 'Spring',
             seasonYear: 2025,
@@ -239,8 +262,6 @@ describe('Campaign Prefill CRUD Operations', () => {
             state: 'IL',
             creatorMessage: 'Support our pack!',
             description: 'Spring popcorn sale for pack 123',
-          },
-        },
       });
 
       expect(result.data.createCampaignPrefill).toBeDefined();
@@ -255,11 +276,7 @@ describe('Campaign Prefill CRUD Operations', () => {
       expect(result.data.createCampaignPrefill.isActive).toBe(true);
       expect(result.data.createCampaignPrefill.createdBy).toBe(ownerAccountId);
 
-      // Clean up
-      await ownerClient.mutate({
-        mutation: DELETE_CAMPAIGN_PREFILL,
-        variables: { prefillCode: result.data.createCampaignPrefill.prefillCode },
-      });
+      // Cleanup handled by afterAll via createdPrefillCodes tracking
     });
 
     it('should reject creation without required fields', async () => {
@@ -292,10 +309,7 @@ describe('Campaign Prefill CRUD Operations', () => {
     let prefillCode: string;
 
     beforeAll(async () => {
-      const result = await ownerClient.mutate({
-        mutation: CREATE_CAMPAIGN_PREFILL,
-        variables: {
-          input: {
+      const result = await createAndTrackPrefill({
             catalogId,
             seasonName: 'Summer',
             seasonYear: 2025,
@@ -307,20 +321,11 @@ describe('Campaign Prefill CRUD Operations', () => {
             state: 'TX',
             creatorMessage: 'Help fund summer activities!',
             description: 'Summer sale for troop 456',
-          },
-        },
       });
       prefillCode = result.data.createCampaignPrefill.prefillCode;
     });
 
-    afterAll(async () => {
-      if (prefillCode) {
-        await ownerClient.mutate({
-          mutation: DELETE_CAMPAIGN_PREFILL,
-          variables: { prefillCode },
-        });
-      }
-    });
+    // Cleanup handled by top-level afterAll via createdPrefillCodes tracking
 
     it('should retrieve campaign prefill by prefillCode', async () => {
       const result = await ownerClient.query({
@@ -348,12 +353,9 @@ describe('Campaign Prefill CRUD Operations', () => {
 
   describe('ListMyCampaignPrefills', () => {
     beforeAll(async () => {
-      // Create a few prefills for the owner
+      // Create a few prefills for the owner - tracked for cleanup
       for (let i = 0; i < 3; i++) {
-        await ownerClient.mutate({
-          mutation: CREATE_CAMPAIGN_PREFILL,
-          variables: {
-            input: {
+        await createAndTrackPrefill({
               catalogId,
               seasonName: 'Fall',
               seasonYear: 2025,
@@ -365,11 +367,11 @@ describe('Campaign Prefill CRUD Operations', () => {
               state: 'CO',
               creatorMessage: `Pack ${100 + i} fall sale`,
               description: `Fall campaign for pack ${100 + i}`,
-            },
-          },
         });
       }
     });
+
+    // Cleanup handled by top-level afterAll via createdPrefillCodes tracking
 
     it('should list all campaign prefills created by the current user', async () => {
       const result = await ownerClient.query({
@@ -397,10 +399,7 @@ describe('Campaign Prefill CRUD Operations', () => {
     let prefillCode: string;
 
     beforeAll(async () => {
-      const result = await ownerClient.mutate({
-        mutation: CREATE_CAMPAIGN_PREFILL,
-        variables: {
-          input: {
+      const result = await createAndTrackPrefill({
             catalogId,
             seasonName: 'Winter',
             seasonYear: 2025,
@@ -412,20 +411,11 @@ describe('Campaign Prefill CRUD Operations', () => {
             state: 'WA',
             creatorMessage: 'Winter fundraiser',
             description: 'Holiday season sale',
-          },
-        },
       });
       prefillCode = result.data.createCampaignPrefill.prefillCode;
     });
 
-    afterAll(async () => {
-      if (prefillCode) {
-        await ownerClient.mutate({
-          mutation: DELETE_CAMPAIGN_PREFILL,
-          variables: { prefillCode },
-        });
-      }
-    });
+    // Cleanup handled by top-level afterAll via createdPrefillCodes tracking
 
     it('should update campaign prefill fields', async () => {
       const result = await ownerClient.mutate({
@@ -473,11 +463,8 @@ describe('Campaign Prefill CRUD Operations', () => {
 
   describe('DeleteCampaignPrefill', () => {
     it('should delete campaign prefill', async () => {
-      // Create a prefill
-      const createResult = await ownerClient.mutate({
-        mutation: CREATE_CAMPAIGN_PREFILL,
-        variables: {
-          input: {
+      // Create a prefill - track it even though we delete, in case test fails mid-way
+      const createResult = await createAndTrackPrefill({
             catalogId,
             seasonName: 'Spring',
             seasonYear: 2026,
@@ -489,8 +476,6 @@ describe('Campaign Prefill CRUD Operations', () => {
             state: 'MA',
             creatorMessage: 'Temporary prefill',
             description: 'To be deleted',
-          },
-        },
       });
       const prefillCode = createResult.data.createCampaignPrefill.prefillCode;
 
@@ -516,11 +501,8 @@ describe('Campaign Prefill CRUD Operations', () => {
     });
 
     it('should reject deletion by non-creator', async () => {
-      // Create a prefill
-      const createResult = await ownerClient.mutate({
-        mutation: CREATE_CAMPAIGN_PREFILL,
-        variables: {
-          input: {
+      // Create a prefill - tracked for cleanup
+      const createResult = await createAndTrackPrefill({
             catalogId,
             seasonName: 'Spring',
             seasonYear: 2026,
@@ -532,8 +514,6 @@ describe('Campaign Prefill CRUD Operations', () => {
             state: 'OR',
             creatorMessage: 'Protected prefill',
             description: 'Should not be deletable',
-          },
-        },
       });
       const prefillCode = createResult.data.createCampaignPrefill.prefillCode;
 
@@ -554,11 +534,7 @@ describe('Campaign Prefill CRUD Operations', () => {
       // NOTE: Do NOT delete test accounts - they are shared across test runs
       // await deleteTestAccounts([otherResult.accountId]);
       
-      // Clean up the prefill since it wasn't deleted
-      await ownerClient.mutate({
-        mutation: DELETE_CAMPAIGN_PREFILL,
-        variables: { prefillCode },
-      });
+      // Cleanup handled by top-level afterAll via createdPrefillCodes tracking
     });
   });
 });

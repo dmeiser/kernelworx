@@ -1,4 +1,4 @@
-"""Unit tests for unit reporting Lambda handler."""
+"""Unit tests for unit reporting Lambda handler (GSI3-based implementation)."""
 
 from decimal import Decimal
 from typing import Any, Dict
@@ -10,15 +10,17 @@ from src.handlers.unit_reporting import get_unit_report
 
 
 class TestGetUnitReport:
-    """Tests for get_unit_report Lambda handler."""
+    """Tests for get_unit_report Lambda handler using GSI3 season queries."""
 
     @pytest.fixture
     def event(self) -> Dict[str, Any]:
-        """Sample AppSync event for unit report request."""
+        """Sample AppSync event for unit report request with city/state."""
         return {
             "arguments": {
                 "unitType": "Pack",
                 "unitNumber": 158,
+                "city": "Springfield",
+                "state": "IL",
                 "seasonName": "Fall",
                 "seasonYear": 2024,
                 "catalogId": "catalog-123",
@@ -27,40 +29,40 @@ class TestGetUnitReport:
         }
 
     @pytest.fixture
-    def sample_profiles(self) -> list[Dict[str, Any]]:
-        """Sample profiles in a unit."""
-        return [
-            {
+    def sample_profiles(self) -> Dict[str, Dict[str, Any]]:
+        """Sample profiles by profileId (for get_item mocking)."""
+        return {
+            "PROFILE#profile1": {
                 "profileId": "PROFILE#profile1",
                 "ownerAccountId": "test-account-123",
                 "sellerName": "Scout 1",
-                "unitType": "Pack",
-                "unitNumber": 158,
             },
-            {
+            "PROFILE#profile2": {
                 "profileId": "PROFILE#profile2",
                 "ownerAccountId": "test-account-456",
                 "sellerName": "Scout 2",
-                "unitType": "Pack",
-                "unitNumber": 158,
             },
-        ]
+        }
 
     @pytest.fixture
     def sample_seasons(self) -> list[Dict[str, Any]]:
-        """Sample seasons for profiles."""
+        """Sample seasons returned from GSI3 query."""
         return [
             {
                 "seasonId": "SEASON#season1",
                 "profileId": "PROFILE#profile1",
                 "seasonName": "Fall",
                 "seasonYear": 2024,
+                "catalogId": "catalog-123",
+                "unitSeasonKey": "Pack#158#Springfield#IL#Fall#2024",
             },
             {
                 "seasonId": "SEASON#season2",
                 "profileId": "PROFILE#profile2",
                 "seasonName": "Fall",
                 "seasonYear": 2024,
+                "catalogId": "catalog-123",
+                "unitSeasonKey": "Pack#158#Springfield#IL#Fall#2024",
             },
         ]
 
@@ -117,26 +119,29 @@ class TestGetUnitReport:
         mock_orders_table: MagicMock,
         mock_check_access: MagicMock,
         event: Dict[str, Any],
-        sample_profiles: list[Dict[str, Any]],
+        sample_profiles: Dict[str, Dict[str, Any]],
         sample_seasons: list[Dict[str, Any]],
         sample_orders: Dict[str, list[Dict[str, Any]]],
         lambda_context: Any,
     ) -> None:
-        """Test successful unit report generation."""
-        # Arrange
-        mock_profiles_table.scan.return_value = {"Items": sample_profiles}
+        """Test successful unit report generation using GSI3."""
+        # Arrange - GSI3 query returns seasons directly
+        mock_seasons_table.query.return_value = {"Items": sample_seasons}
         mock_check_access.return_value = True
 
-        # Return seasons one at a time
-        mock_seasons_table.query.side_effect = [
-            {"Items": [sample_seasons[0]]},  # profile1
-            {"Items": [sample_seasons[1]]},  # profile2
-        ]
+        # Mock profile lookups
+        def get_item_side_effect(Key: Dict[str, str]) -> Dict[str, Any]:
+            profile_id = Key["profileId"]
+            if profile_id in sample_profiles:
+                return {"Item": sample_profiles[profile_id]}
+            return {}
 
-        # Return orders one at a time
+        mock_profiles_table.get_item.side_effect = get_item_side_effect
+
+        # Return orders for each season
         mock_orders_table.query.side_effect = [
-            {"Items": sample_orders["SEASON#season1"]},  # season1
-            {"Items": sample_orders["SEASON#season2"]},  # season2
+            {"Items": sample_orders["SEASON#season1"]},
+            {"Items": sample_orders["SEASON#season2"]},
         ]
 
         # Act
@@ -151,26 +156,21 @@ class TestGetUnitReport:
         assert result["totalSales"] == 300.0
         assert result["totalOrders"] == 2
 
-        # Check seller details
-        seller1 = next(s for s in result["sellers"] if s["sellerName"] == "Scout 1")
-        assert seller1["totalSales"] == 100.0
-        assert seller1["orderCount"] == 1
-        assert len(seller1["orders"]) == 1
+        # Verify GSI3 query was called correctly
+        mock_seasons_table.query.assert_called_once()
+        call_kwargs = mock_seasons_table.query.call_args.kwargs
+        assert call_kwargs["IndexName"] == "GSI3"
 
-        seller2 = next(s for s in result["sellers"] if s["sellerName"] == "Scout 2")
-        assert seller2["totalSales"] == 200.0
-        assert seller2["orderCount"] == 1
-
-    @patch("src.handlers.unit_reporting.profiles_table")
-    def test_get_unit_report_no_profiles_found(
+    @patch("src.handlers.unit_reporting.seasons_table")
+    def test_get_unit_report_no_seasons_found(
         self,
-        mock_profiles_table: MagicMock,
+        mock_seasons_table: MagicMock,
         event: Dict[str, Any],
         lambda_context: Any,
     ) -> None:
-        """Test report when no profiles exist for unit."""
-        # Arrange
-        mock_profiles_table.scan.return_value = {"Items": []}
+        """Test report when no seasons exist for unit+season."""
+        # Arrange - GSI3 query returns no seasons
+        mock_seasons_table.query.return_value = {"Items": []}
 
         # Act
         result = get_unit_report(event, lambda_context)
@@ -185,18 +185,18 @@ class TestGetUnitReport:
         assert result["totalOrders"] == 0
 
     @patch("src.handlers.unit_reporting.check_profile_access")
-    @patch("src.handlers.unit_reporting.profiles_table")
+    @patch("src.handlers.unit_reporting.seasons_table")
     def test_get_unit_report_no_access(
         self,
-        mock_profiles_table: MagicMock,
+        mock_seasons_table: MagicMock,
         mock_check_access: MagicMock,
         event: Dict[str, Any],
-        sample_profiles: list[Dict[str, Any]],
+        sample_seasons: list[Dict[str, Any]],
         lambda_context: Any,
     ) -> None:
         """Test report when caller has no access to any profiles."""
         # Arrange
-        mock_profiles_table.scan.return_value = {"Items": sample_profiles}
+        mock_seasons_table.query.return_value = {"Items": sample_seasons}
         mock_check_access.return_value = False
 
         # Act
@@ -218,22 +218,28 @@ class TestGetUnitReport:
         mock_orders_table: MagicMock,
         mock_check_access: MagicMock,
         event: Dict[str, Any],
-        sample_profiles: list[Dict[str, Any]],
+        sample_profiles: Dict[str, Dict[str, Any]],
         sample_seasons: list[Dict[str, Any]],
         sample_orders: Dict[str, list[Dict[str, Any]]],
         lambda_context: Any,
     ) -> None:
         """Test report when caller only has access to some profiles."""
         # Arrange
-        mock_profiles_table.scan.return_value = {"Items": sample_profiles}
+        mock_seasons_table.query.return_value = {"Items": sample_seasons}
 
         # Grant access only to profile1
-        def check_access_side_effect(*args, **kwargs):
+        def check_access_side_effect(*args: Any, **kwargs: Any) -> bool:
             return kwargs["profile_id"] == "PROFILE#profile1"
 
         mock_check_access.side_effect = check_access_side_effect
 
-        mock_seasons_table.query.return_value = {"Items": sample_seasons[:1]}
+        def get_item_side_effect(Key: Dict[str, str]) -> Dict[str, Any]:
+            profile_id = Key["profileId"]
+            if profile_id in sample_profiles:
+                return {"Item": sample_profiles[profile_id]}
+            return {}
+
+        mock_profiles_table.get_item.side_effect = get_item_side_effect
 
         mock_orders_table.query.return_value = {"Items": sample_orders["SEASON#season1"]}
 
@@ -257,22 +263,28 @@ class TestGetUnitReport:
         mock_orders_table: MagicMock,
         mock_check_access: MagicMock,
         event: Dict[str, Any],
-        sample_profiles: list[Dict[str, Any]],
+        sample_profiles: Dict[str, Dict[str, Any]],
         sample_seasons: list[Dict[str, Any]],
         lambda_context: Any,
     ) -> None:
-        """Test report when profiles exist but have no orders."""
+        """Test report when seasons exist but have no orders."""
         # Arrange
-        mock_profiles_table.scan.return_value = {"Items": sample_profiles}
+        mock_seasons_table.query.return_value = {"Items": sample_seasons}
         mock_check_access.return_value = True
 
-        mock_seasons_table.query.return_value = {"Items": sample_seasons}
+        def get_item_side_effect(Key: Dict[str, str]) -> Dict[str, Any]:
+            profile_id = Key["profileId"]
+            if profile_id in sample_profiles:
+                return {"Item": sample_profiles[profile_id]}
+            return {}
+
+        mock_profiles_table.get_item.side_effect = get_item_side_effect
         mock_orders_table.query.return_value = {"Items": []}
 
         # Act
         result = get_unit_report(event, lambda_context)
 
-        # Assert
+        # Assert - no sellers because they have no orders/sales
         assert result["sellers"] == []
         assert result["totalSales"] == 0.0
         assert result["totalOrders"] == 0
@@ -288,20 +300,23 @@ class TestGetUnitReport:
         mock_orders_table: MagicMock,
         mock_check_access: MagicMock,
         event: Dict[str, Any],
-        sample_profiles: list[Dict[str, Any]],
+        sample_profiles: Dict[str, Dict[str, Any]],
         sample_seasons: list[Dict[str, Any]],
         sample_orders: Dict[str, list[Dict[str, Any]]],
         lambda_context: Any,
     ) -> None:
         """Test that sellers are sorted by total sales descending."""
         # Arrange
-        mock_profiles_table.scan.return_value = {"Items": sample_profiles}
+        mock_seasons_table.query.return_value = {"Items": sample_seasons}
         mock_check_access.return_value = True
 
-        mock_seasons_table.query.side_effect = [
-            {"Items": [sample_seasons[0]]},
-            {"Items": [sample_seasons[1]]},
-        ]
+        def get_item_side_effect(Key: Dict[str, str]) -> Dict[str, Any]:
+            profile_id = Key["profileId"]
+            if profile_id in sample_profiles:
+                return {"Item": sample_profiles[profile_id]}
+            return {}
+
+        mock_profiles_table.get_item.side_effect = get_item_side_effect
 
         mock_orders_table.query.side_effect = [
             {"Items": sample_orders["SEASON#season1"]},
@@ -311,21 +326,20 @@ class TestGetUnitReport:
         # Act
         result = get_unit_report(event, lambda_context)
 
-        # Assert
-        # Sellers should be sorted by totalSales descending
+        # Assert - Sellers sorted by totalSales descending
         assert result["sellers"][0]["totalSales"] == 200.0  # Scout 2
         assert result["sellers"][1]["totalSales"] == 100.0  # Scout 1
 
-    @patch("src.handlers.unit_reporting.profiles_table")
+    @patch("src.handlers.unit_reporting.seasons_table")
     def test_get_unit_report_error_handling(
         self,
-        mock_profiles_table: MagicMock,
+        mock_seasons_table: MagicMock,
         event: Dict[str, Any],
         lambda_context: Any,
     ) -> None:
         """Test error handling when DynamoDB fails."""
         # Arrange
-        mock_profiles_table.scan.side_effect = Exception("DynamoDB error")
+        mock_seasons_table.query.side_effect = Exception("DynamoDB error")
 
         # Act & Assert
         with pytest.raises(Exception) as exc_info:
@@ -333,36 +347,28 @@ class TestGetUnitReport:
 
         assert "DynamoDB error" in str(exc_info.value)
 
-    @patch("src.handlers.unit_reporting.check_profile_access")
-    @patch("src.handlers.unit_reporting.orders_table")
     @patch("src.handlers.unit_reporting.seasons_table")
-    @patch("src.handlers.unit_reporting.profiles_table")
     def test_get_unit_report_different_season_year(
         self,
-        mock_profiles_table: MagicMock,
         mock_seasons_table: MagicMock,
-        mock_orders_table: MagicMock,
-        mock_check_access: MagicMock,
-        sample_profiles: list[Dict[str, Any]],
         lambda_context: Any,
     ) -> None:
-        """Test report filters by season year correctly."""
-        # Arrange
+        """Test report filters by season year correctly via GSI3 key."""
+        # Arrange - Different season
         event = {
             "arguments": {
                 "unitType": "Pack",
                 "unitNumber": 158,
+                "city": "Springfield",
+                "state": "IL",
                 "seasonName": "Spring",
-                "seasonYear": 2023,  # Different year
+                "seasonYear": 2023,
                 "catalogId": "catalog-123",
             },
             "identity": {"sub": "test-account-123"},
         }
 
-        mock_profiles_table.scan.return_value = {"Items": sample_profiles}
-        mock_check_access.return_value = True
-
-        # No seasons for Spring 2023
+        # GSI3 query returns no seasons for Spring 2023
         mock_seasons_table.query.return_value = {"Items": []}
 
         # Act
@@ -378,6 +384,75 @@ class TestGetUnitReport:
     @patch("src.handlers.unit_reporting.orders_table")
     @patch("src.handlers.unit_reporting.seasons_table")
     @patch("src.handlers.unit_reporting.profiles_table")
+    def test_get_unit_report_multiple_seasons_same_profile(
+        self,
+        mock_profiles_table: MagicMock,
+        mock_seasons_table: MagicMock,
+        mock_orders_table: MagicMock,
+        mock_check_access: MagicMock,
+        event: Dict[str, Any],
+        sample_profiles: Dict[str, Dict[str, Any]],
+        lambda_context: Any,
+    ) -> None:
+        """Test report with one profile having multiple seasons (covers branch 109->111)."""
+        # Arrange - Same profile has TWO seasons for the same unit+season
+        multi_seasons = [
+            {
+                "seasonId": "SEASON#season1",
+                "profileId": "PROFILE#profile1",
+                "seasonName": "Fall",
+                "seasonYear": 2024,
+                "catalogId": "catalog-123",
+                "unitSeasonKey": "Pack#158#Springfield#IL#Fall#2024",
+            },
+            {
+                "seasonId": "SEASON#season1b",
+                "profileId": "PROFILE#profile1",  # Same profile!
+                "seasonName": "Fall",
+                "seasonYear": 2024,
+                "catalogId": "catalog-123",
+                "unitSeasonKey": "Pack#158#Springfield#IL#Fall#2024",
+            },
+        ]
+        mock_seasons_table.query.return_value = {"Items": multi_seasons}
+        mock_check_access.return_value = True
+
+        def get_item_side_effect(Key: Dict[str, str]) -> Dict[str, Any]:
+            profile_id = Key["profileId"]
+            if profile_id in sample_profiles:
+                return {"Item": sample_profiles[profile_id]}
+            return {}
+
+        mock_profiles_table.get_item.side_effect = get_item_side_effect
+
+        # Order for first season only
+        mock_orders_table.query.return_value = {
+            "Items": [
+                {
+                    "orderId": "ORDER#order1",
+                    "seasonId": "SEASON#season1",
+                    "customerName": "Customer 1",
+                    "orderDate": "2024-10-01T12:00:00Z",
+                    "totalAmount": Decimal("50.00"),
+                    "lineItems": [],
+                },
+            ]
+        }
+
+        # Act
+        result = get_unit_report(event, lambda_context)
+
+        # Assert - Profile appears once even with 2 seasons
+        assert len(result["sellers"]) == 1
+        assert result["sellers"][0]["sellerName"] == "Scout 1"
+        # Orders from both seasons are queried (same mock response for both)
+        assert result["totalOrders"] == 2
+        assert result["totalSales"] == 100.0  # 50.00 * 2 seasons
+
+    @patch("src.handlers.unit_reporting.check_profile_access")
+    @patch("src.handlers.unit_reporting.orders_table")
+    @patch("src.handlers.unit_reporting.seasons_table")
+    @patch("src.handlers.unit_reporting.profiles_table")
     def test_get_unit_report_multiple_orders_per_seller(
         self,
         mock_profiles_table: MagicMock,
@@ -385,24 +460,31 @@ class TestGetUnitReport:
         mock_orders_table: MagicMock,
         mock_check_access: MagicMock,
         event: Dict[str, Any],
-        sample_profiles: list[Dict[str, Any]],
+        sample_profiles: Dict[str, Dict[str, Any]],
         lambda_context: Any,
     ) -> None:
         """Test report with seller having multiple orders."""
-        # Arrange
-        mock_profiles_table.scan.return_value = {"Items": [sample_profiles[0]]}  # Only profile1
+        # Arrange - Only one profile/season
+        single_season = [
+            {
+                "seasonId": "SEASON#season1",
+                "profileId": "PROFILE#profile1",
+                "seasonName": "Fall",
+                "seasonYear": 2024,
+                "catalogId": "catalog-123",
+                "unitSeasonKey": "Pack#158#Springfield#IL#Fall#2024",
+            }
+        ]
+        mock_seasons_table.query.return_value = {"Items": single_season}
         mock_check_access.return_value = True
 
-        mock_seasons_table.query.return_value = {
-            "Items": [
-                {
-                    "seasonId": "SEASON#season1",
-                    "profileId": "PROFILE#profile1",
-                    "seasonName": "Fall",
-                    "seasonYear": 2024,
-                }
-            ]
-        }
+        def get_item_side_effect(Key: Dict[str, str]) -> Dict[str, Any]:
+            profile_id = Key["profileId"]
+            if profile_id in sample_profiles:
+                return {"Item": sample_profiles[profile_id]}
+            return {}
+
+        mock_profiles_table.get_item.side_effect = get_item_side_effect
 
         # Multiple orders for season1
         mock_orders_table.query.return_value = {
@@ -453,3 +535,82 @@ class TestGetUnitReport:
         assert len(seller["orders"]) == 2
         assert result["totalSales"] == 250.0
         assert result["totalOrders"] == 2
+
+    @patch("src.handlers.unit_reporting.check_profile_access")
+    @patch("src.handlers.unit_reporting.orders_table")
+    @patch("src.handlers.unit_reporting.seasons_table")
+    @patch("src.handlers.unit_reporting.profiles_table")
+    def test_get_unit_report_without_city_state(
+        self,
+        mock_profiles_table: MagicMock,
+        mock_seasons_table: MagicMock,
+        mock_orders_table: MagicMock,
+        mock_check_access: MagicMock,
+        sample_profiles: Dict[str, Dict[str, Any]],
+        sample_seasons: list[Dict[str, Any]],
+        sample_orders: Dict[str, list[Dict[str, Any]]],
+        lambda_context: Any,
+    ) -> None:
+        """Test report works with empty city/state (backward compatibility)."""
+        # Arrange - event without city/state
+        event = {
+            "arguments": {
+                "unitType": "Pack",
+                "unitNumber": 158,
+                "seasonName": "Fall",
+                "seasonYear": 2024,
+                "catalogId": "catalog-123",
+            },
+            "identity": {"sub": "test-account-123"},
+        }
+
+        mock_seasons_table.query.return_value = {"Items": sample_seasons}
+        mock_check_access.return_value = True
+
+        def get_item_side_effect(Key: Dict[str, str]) -> Dict[str, Any]:
+            profile_id = Key["profileId"]
+            if profile_id in sample_profiles:
+                return {"Item": sample_profiles[profile_id]}
+            return {}
+
+        mock_profiles_table.get_item.side_effect = get_item_side_effect
+
+        mock_orders_table.query.side_effect = [
+            {"Items": sample_orders["SEASON#season1"]},
+            {"Items": sample_orders["SEASON#season2"]},
+        ]
+
+        # Act
+        result = get_unit_report(event, lambda_context)
+
+        # Assert - should still work, will use empty strings for city/state
+        assert result["unitType"] == "Pack"
+        assert result["unitNumber"] == 158
+
+    @patch("src.handlers.unit_reporting.check_profile_access")
+    @patch("src.handlers.unit_reporting.seasons_table")
+    @patch("src.handlers.unit_reporting.profiles_table")
+    def test_get_unit_report_profile_not_found(
+        self,
+        mock_profiles_table: MagicMock,
+        mock_seasons_table: MagicMock,
+        mock_check_access: MagicMock,
+        event: Dict[str, Any],
+        sample_seasons: list[Dict[str, Any]],
+        lambda_context: Any,
+    ) -> None:
+        """Test report handles missing profile gracefully."""
+        # Arrange
+        mock_seasons_table.query.return_value = {"Items": sample_seasons}
+        mock_check_access.return_value = True
+
+        # Profile get_item returns empty
+        mock_profiles_table.get_item.return_value = {}
+
+        # Act
+        result = get_unit_report(event, lambda_context)
+
+        # Assert - no accessible profiles since they couldn't be fetched
+        assert result["sellers"] == []
+        assert result["totalSales"] == 0.0
+        assert result["totalOrders"] == 0

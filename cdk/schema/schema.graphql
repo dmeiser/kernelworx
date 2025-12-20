@@ -409,7 +409,7 @@ type Query {
   # Unit reporting
   listUnitCatalogs(unitType: String!, unitNumber: Int!, seasonName: String!, seasonYear: Int!): [Catalog!]!
   listUnitSeasonCatalogs(unitType: String!, unitNumber: Int!, city: String!, state: String!, seasonName: String!, seasonYear: Int!): [Catalog!]!
-  getUnitReport(unitType: String!, unitNumber: Int!, seasonName: String!, seasonYear: Int!, catalogId: ID!): UnitReport
+  getUnitReport(unitType: String!, unitNumber: Int!, city: String, state: String, seasonName: String!, seasonYear: Int!, catalogId: ID!): UnitReport
 }
 
 # ============================================================================

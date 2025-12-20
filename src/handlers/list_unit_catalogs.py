@@ -137,3 +137,102 @@ def list_unit_catalogs(event: Dict[str, Any], context: Any) -> List[Dict[str, An
     except Exception as e:
         logger.error(f"Error listing unit catalogs: {str(e)}", exc_info=True)
         raise
+
+
+def _build_unit_season_key(
+    unit_type: str, unit_number: int, city: str, state: str, season_name: str, season_year: int
+) -> str:
+    """Build the GSI3 partition key for unit+season queries."""
+    return f"{unit_type}#{unit_number}#{city}#{state}#{season_name}#{season_year}"
+
+
+def list_unit_season_catalogs(event: Dict[str, Any], context: Any) -> List[Dict[str, Any]]:
+    """
+    List all catalogs used by scouts in a unit+season using GSI3.
+
+    This is the new season-based version that uses city+state for unit uniqueness.
+
+    Args:
+        event: AppSync resolver event with arguments:
+            - unitType: String (e.g., "Pack", "Troop")
+            - unitNumber: Int (e.g., 158)
+            - city: String (e.g., "Springfield") - Required for unit uniqueness
+            - state: String (e.g., "IL") - Required for unit uniqueness
+            - seasonName: String (e.g., "Fall", "Spring")
+            - seasonYear: Int (e.g., 2024)
+        context: Lambda context (unused)
+
+    Returns:
+        List of Catalog objects
+    """
+    try:
+        # Extract parameters
+        unit_type = event["arguments"]["unitType"]
+        unit_number = int(event["arguments"]["unitNumber"])
+        city = event["arguments"]["city"]
+        state = event["arguments"]["state"]
+        season_name = event["arguments"]["seasonName"]
+        season_year = int(event["arguments"]["seasonYear"])
+        caller_account_id = event["identity"]["sub"]
+
+        logger.info(
+            f"Listing catalogs for {unit_type} {unit_number} in {city}, {state}, "
+            f"season {season_name} {season_year}, caller {caller_account_id}"
+        )
+
+        # Step 1: Query GSI3 to find all seasons matching unit+season criteria
+        unit_season_key = _build_unit_season_key(
+            unit_type, unit_number, city, state, season_name, season_year
+        )
+
+        seasons_response = seasons_table.query(
+            IndexName="GSI3",
+            KeyConditionExpression=Key("unitSeasonKey").eq(unit_season_key),
+        )
+
+        unit_seasons = seasons_response.get("Items", [])
+        logger.info(f"Found {len(unit_seasons)} seasons for unit+season")
+
+        if not unit_seasons:
+            return []
+
+        # Step 2: Filter seasons by caller's access to profile and collect catalog IDs
+        catalog_ids: Set[str] = set()
+
+        for season in unit_seasons:
+            profile_id = season["profileId"]
+            has_access = check_profile_access(
+                caller_account_id=caller_account_id,
+                profile_id=profile_id,
+                required_permission="READ",
+            )
+            if has_access:
+                catalog_id = season.get("catalogId")
+                if catalog_id is not None and isinstance(catalog_id, str):
+                    catalog_ids.add(catalog_id)
+
+        logger.info(f"Found {len(catalog_ids)} unique catalogs in accessible seasons")
+
+        if not catalog_ids:
+            return []
+
+        # Step 3: Fetch catalog details for all unique catalog IDs
+        catalogs: List[Dict[str, Any]] = []
+
+        for catalog_id in catalog_ids:
+            try:
+                catalog_response = catalogs_table.get_item(Key={"catalogId": catalog_id})
+                if "Item" in catalog_response:
+                    catalogs.append(catalog_response["Item"])
+            except Exception as e:
+                logger.warning(f"Failed to fetch catalog {catalog_id}: {str(e)}")
+
+        # Sort by catalog name
+        catalogs.sort(key=lambda c: c.get("catalogName", ""))
+
+        logger.info(f"Returning {len(catalogs)} catalogs")
+        return catalogs
+
+    except Exception as e:
+        logger.error(f"Error listing unit season catalogs: {str(e)}", exc_info=True)
+        raise

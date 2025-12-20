@@ -1,4 +1,4 @@
-"""Lambda resolver for unit-level reporting."""
+"""Lambda resolver for unit-level reporting using season-based queries."""
 
 import os
 from typing import Any, Dict, List, cast
@@ -20,27 +20,35 @@ logger = get_logger(__name__)
 dynamodb = boto3.resource("dynamodb")
 
 # Multi-table design V2
-accounts_table_name = os.environ.get("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-v2-ue1-dev")
 profiles_table_name = os.environ.get("PROFILES_TABLE_NAME", "kernelworx-profiles-v2-ue1-dev")
 seasons_table_name = os.environ.get("SEASONS_TABLE_NAME", "kernelworx-seasons-v2-ue1-dev")
 orders_table_name = os.environ.get("ORDERS_TABLE_NAME", "kernelworx-orders-v2-ue1-dev")
 
-accounts_table = dynamodb.Table(accounts_table_name)
 profiles_table = dynamodb.Table(profiles_table_name)
 seasons_table = dynamodb.Table(seasons_table_name)
 orders_table = dynamodb.Table(orders_table_name)
 
 
+def _build_unit_season_key(
+    unit_type: str, unit_number: int, city: str, state: str, season_name: str, season_year: int
+) -> str:
+    """Build the GSI3 partition key for unit+season queries."""
+    return f"{unit_type}#{unit_number}#{city}#{state}#{season_name}#{season_year}"
+
+
 def get_unit_report(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
-    Generate unit-level popcorn sales report.
+    Generate unit-level popcorn sales report using season-based GSI3 queries.
 
-    Aggregates data across all SellerProfiles in a unit that the caller has access to.
+    Queries seasons directly by unit+season key, then filters by caller's read access
+    to each profile. This is more efficient than scanning all profiles.
 
     Args:
         event: AppSync resolver event with arguments:
             - unitType: String (e.g., "Pack", "Troop")
             - unitNumber: Int (e.g., 158)
+            - city: String (e.g., "Springfield") - Required for unit uniqueness
+            - state: String (e.g., "IL") - Required for unit uniqueness
             - seasonName: String (e.g., "Fall", "Spring")
             - seasonYear: Int (e.g., 2024)
             - catalogId: String (required - ensures scouts use same catalog)
@@ -53,32 +61,36 @@ def get_unit_report(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         # Extract parameters
         unit_type = event["arguments"]["unitType"]
         unit_number = int(event["arguments"]["unitNumber"])
+        city = event["arguments"].get("city", "")
+        state = event["arguments"].get("state", "")
         season_name = event["arguments"]["seasonName"]
         season_year = int(event["arguments"]["seasonYear"])
         catalog_id = event["arguments"]["catalogId"]  # Required
         caller_account_id = event["identity"]["sub"]
 
         logger.info(
-            f"Generating unit report for {unit_type} {unit_number}, "
+            f"Generating unit report for {unit_type} {unit_number} in {city}, {state}, "
             f"season {season_name} {season_year}, "
             f"catalog {catalog_id}, caller {caller_account_id}"
         )
 
-        # Step 1: Find all profiles in this unit
-        # Scan profiles table for matching unitType and unitNumber
-        profiles_response = profiles_table.scan(
-            FilterExpression="unitType = :ut AND unitNumber = :un",
-            ExpressionAttributeValues={
-                ":ut": unit_type,
-                ":un": unit_number,
-            },
+        # Step 1: Query GSI3 to find all seasons matching unit+season criteria
+        unit_season_key = _build_unit_season_key(
+            unit_type, unit_number, city, state, season_name, season_year
         )
 
-        unit_profiles = profiles_response.get("Items", [])
-        logger.info(f"Found {len(unit_profiles)} profiles in {unit_type} {unit_number}")
+        seasons_response = seasons_table.query(
+            IndexName="GSI3",
+            KeyConditionExpression=Key("unitSeasonKey").eq(unit_season_key),
+            FilterExpression="catalogId = :cid",
+            ExpressionAttributeValues={":cid": catalog_id},
+        )
 
-        if not unit_profiles:
-            # No profiles found for this unit
+        unit_seasons = seasons_response.get("Items", [])
+        logger.info(f"Found {len(unit_seasons)} seasons for unit+season+catalog")
+
+        if not unit_seasons:
+            # No seasons found
             return {
                 "unitType": unit_type,
                 "unitNumber": unit_number,
@@ -89,26 +101,37 @@ def get_unit_report(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 "totalOrders": 0,
             }
 
-        # Step 2: Filter to only profiles the caller can access
-        accessible_profiles: List[Dict[str, Any]] = []
-        for profile in unit_profiles:
-            profile_id = profile["profileId"]
-            # Check access: owner or has share
+        # Step 2: Group seasons by profile and filter by access
+        # Build a map of profileId -> seasons for that profile
+        profile_seasons: Dict[str, List[Dict[str, Any]]] = {}
+        for season in unit_seasons:
+            profile_id = cast(str, season["profileId"])
+            if profile_id not in profile_seasons:
+                profile_seasons[profile_id] = []
+            profile_seasons[profile_id].append(season)
+
+        # Step 3: For each profile, check access and get profile details
+        accessible_profiles: Dict[str, Dict[str, Any]] = {}
+        for profile_id in profile_seasons.keys():
             has_access = check_profile_access(
                 caller_account_id=caller_account_id,
                 profile_id=profile_id,
                 required_permission="READ",
             )
-
             if has_access:
-                accessible_profiles.append(profile)
+                # Fetch profile details
+                profile_response = profiles_table.get_item(Key={"profileId": profile_id})
+                profile = profile_response.get("Item")
+                if profile:
+                    accessible_profiles[profile_id] = profile
 
         logger.info(
-            f"Caller has access to {len(accessible_profiles)} of " f"{len(unit_profiles)} profiles"
+            f"Caller has access to {len(accessible_profiles)} of "
+            f"{len(profile_seasons)} profiles"
         )
 
         if not accessible_profiles:
-            # Caller has no access to any profiles in this unit
+            # Caller has no access to any profiles
             return {
                 "unitType": unit_type,
                 "unitNumber": unit_number,
@@ -119,29 +142,15 @@ def get_unit_report(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 "totalOrders": 0,
             }
 
-        # Step 3: For each accessible profile, get seasons and orders
+        # Step 4: For each accessible profile, get orders for its seasons
         sellers: List[Dict[str, Any]] = []
         total_unit_sales = 0.0
         total_unit_orders = 0
 
-        for profile in accessible_profiles:
-            profile_id = profile["profileId"]
-            seller_name = profile["sellerName"]
+        for profile_id, profile in accessible_profiles.items():
+            seller_name = profile.get("sellerName", "Unknown")
+            seasons = profile_seasons[profile_id]
 
-            # Get seasons for this profile (filter by catalog)
-            seasons_response = seasons_table.query(
-                KeyConditionExpression=Key("profileId").eq(profile_id),
-                FilterExpression="seasonName = :name AND seasonYear = :year AND catalogId = :cid",
-                ExpressionAttributeValues={
-                    ":name": season_name,
-                    ":year": season_year,
-                    ":cid": catalog_id,
-                },
-            )
-
-            seasons = seasons_response.get("Items", [])
-
-            # Aggregate orders across all seasons for this year
             seller_orders: List[Dict[str, Any]] = []
             seller_total_sales = 0.0
 
@@ -175,7 +184,7 @@ def get_unit_report(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     seller_orders.append(order_detail)
                     seller_total_sales += float(cast(float, order["totalAmount"]))
 
-            # Add seller summary
+            # Add seller summary if they have any data
             if seller_orders or seller_total_sales > 0:
                 sellers.append(
                     {
