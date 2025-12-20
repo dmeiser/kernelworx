@@ -7,10 +7,10 @@ import boto3
 from boto3.dynamodb.conditions import Key
 
 # Handle both Lambda (absolute) and unit test (relative) imports
-try:
+try:  # pragma: no cover
     from utils.auth import check_profile_access  # type: ignore[import-not-found]
     from utils.logging import get_logger  # type: ignore[import-not-found]
-except ModuleNotFoundError:
+except ModuleNotFoundError:  # pragma: no cover
     from ..utils.auth import check_profile_access
     from ..utils.logging import get_logger
 

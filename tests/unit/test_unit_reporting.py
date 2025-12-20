@@ -21,6 +21,7 @@ class TestGetUnitReport:
                 "unitNumber": 158,
                 "seasonName": "Fall",
                 "seasonYear": 2024,
+                "catalogId": "catalog-123",
             },
             "identity": {"sub": "test-account-123"},
         }
@@ -353,6 +354,7 @@ class TestGetUnitReport:
                 "unitNumber": 158,
                 "seasonName": "Spring",
                 "seasonYear": 2023,  # Different year
+                "catalogId": "catalog-123",
             },
             "identity": {"sub": "test-account-123"},
         }

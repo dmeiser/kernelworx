@@ -860,3 +860,107 @@ class TestListMyShares:
         # Should still return the successful profiles
         assert len(result) == 1
         assert result[0]["profileId"] == profile_id
+
+    def test_handles_unprocessed_keys_empty_list(
+        self,
+        dynamodb_table: Any,
+        shares_table: Any,
+        another_account_id: str,
+        sample_account_id: str,
+        appsync_event: Dict[str, Any],
+        lambda_context: Any,
+    ) -> None:
+        """Test handling when UnprocessedKeys has empty Keys list."""
+        from unittest.mock import patch
+
+        from src.handlers.profile_sharing import list_my_shares
+
+        owner_id = f"ACCOUNT#{sample_account_id}"
+        profile_id = "PROFILE#empty-keys-test"
+
+        # Create a share
+        shares_table.put_item(
+            Item={
+                "profileId": profile_id,
+                "targetAccountId": another_account_id,
+                "ownerAccountId": owner_id,
+                "permissions": ["READ"],
+                "createdAt": "2024-01-01T00:00:00Z",
+            }
+        )
+
+        event = {**appsync_event, "identity": {"sub": another_account_id}}
+
+        # Mock response with empty unprocessed keys list
+        mock_response = {
+            "Responses": {
+                "kernelworx-profiles-v2-ue1-dev": [
+                    {
+                        "ownerAccountId": owner_id,
+                        "profileId": profile_id,
+                        "sellerName": "Test",
+                        "createdAt": "2024-01-01T00:00:00Z",
+                        "updatedAt": "2024-01-01T00:00:00Z",
+                    }
+                ]
+            },
+            "UnprocessedKeys": {
+                "kernelworx-profiles-v2-ue1-dev": {
+                    "Keys": []  # Empty list - covers the falsy branch
+                }
+            },
+        }
+        with patch(
+            "src.handlers.profile_sharing.dynamodb.batch_get_item",
+            return_value=mock_response,
+        ):
+            result = list_my_shares(event, lambda_context)
+
+        # Should return the profile
+        assert len(result) == 1
+        assert result[0]["profileId"] == profile_id
+
+    def test_handles_share_with_invalid_profile_and_owner_ids(
+        self,
+        dynamodb_table: Any,
+        shares_table: Any,
+        another_account_id: str,
+        sample_account_id: str,
+        appsync_event: Dict[str, Any],
+        lambda_context: Any,
+    ) -> None:
+        """Test handling shares where both profileId and ownerAccountId are invalid."""
+        from unittest.mock import patch
+
+        from src.handlers.profile_sharing import list_my_shares
+
+        # Create a share with valid IDs first, then mock invalid response
+        owner_id = f"ACCOUNT#{sample_account_id}"
+        profile_id = "PROFILE#test-invalid"
+
+        shares_table.put_item(
+            Item={
+                "profileId": profile_id,
+                "targetAccountId": another_account_id,
+                "ownerAccountId": owner_id,
+                "permissions": ["READ"],
+                "createdAt": "2024-01-01T00:00:00Z",
+            }
+        )
+
+        event = {**appsync_event, "identity": {"sub": another_account_id}}
+
+        # Mock batch_get_item to return an empty list (profiles not found)
+        # This exercises the for loop with empty all_profiles
+        mock_response = {
+            "Responses": {"kernelworx-profiles-v2-ue1-dev": []},
+            "UnprocessedKeys": {},
+        }
+        with patch(
+            "src.handlers.profile_sharing.dynamodb.batch_get_item",
+            return_value=mock_response,
+        ):
+            result = list_my_shares(event, lambda_context)
+
+        # Empty result since no profiles were returned
+        assert result == []

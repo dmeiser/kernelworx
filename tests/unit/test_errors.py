@@ -94,3 +94,51 @@ class TestCreateErrorResponse:
 
         assert result["errorCode"] == ErrorCode.FORBIDDEN
         assert result["message"] == "Access denied"
+
+
+class TestValidationError:
+    """Tests for ValidationError convenience class."""
+
+    def test_validation_error_basic(self) -> None:
+        """Test creating ValidationError with message only."""
+        from src.utils.errors import ValidationError
+
+        error = ValidationError("Field is required")
+
+        assert error.error_code == ErrorCode.INVALID_INPUT
+        assert error.message == "Field is required"
+        assert error.details == {}
+
+    def test_validation_error_with_details(self) -> None:
+        """Test creating ValidationError with details."""
+        from src.utils.errors import ValidationError
+
+        error = ValidationError("Field is invalid", {"field": "email"})
+
+        assert error.error_code == ErrorCode.INVALID_INPUT
+        assert error.message == "Field is invalid"
+        assert error.details == {"field": "email"}
+
+
+class TestAuthorizationError:
+    """Tests for AuthorizationError convenience class."""
+
+    def test_authorization_error_basic(self) -> None:
+        """Test creating AuthorizationError with message only."""
+        from src.utils.errors import AuthorizationError
+
+        error = AuthorizationError("Access denied")
+
+        assert error.error_code == ErrorCode.FORBIDDEN
+        assert error.message == "Access denied"
+        assert error.details == {}
+
+    def test_authorization_error_with_details(self) -> None:
+        """Test creating AuthorizationError with details."""
+        from src.utils.errors import AuthorizationError
+
+        error = AuthorizationError("Access denied", {"resource": "profile"})
+
+        assert error.error_code == ErrorCode.FORBIDDEN
+        assert error.message == "Access denied"
+        assert error.details == {"resource": "profile"}

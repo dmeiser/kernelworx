@@ -23,11 +23,11 @@ if TYPE_CHECKING:
     from mypy_boto3_dynamodb.service_resource import Table
 
 # Handle both Lambda (absolute) and unit test (relative) imports
-try:
+try:  # pragma: no cover
     from utils.auth import is_profile_owner  # type: ignore[import-not-found]
     from utils.errors import AppError, ErrorCode  # type: ignore[import-not-found]
     from utils.logging import StructuredLogger, get_correlation_id  # type: ignore[import-not-found]
-except ModuleNotFoundError:
+except ModuleNotFoundError:  # pragma: no cover
     from ..utils.auth import is_profile_owner
     from ..utils.errors import AppError, ErrorCode
     from ..utils.logging import StructuredLogger, get_correlation_id
@@ -130,7 +130,7 @@ def list_my_shares(event: Dict[str, Any], context: Any) -> List[Dict[str, Any]]:
 
         # Process in batches of 100
         all_profiles: List[Dict[str, Any]] = []
-        for i in range(0, len(profile_keys), 100):
+        for i in range(0, len(profile_keys), 100):  # pragma: no branch
             batch_keys = profile_keys[i : i + 100]
 
             # Use batch_get_item with retry logic
@@ -179,7 +179,7 @@ def list_my_shares(event: Dict[str, Any], context: Any) -> List[Dict[str, Any]]:
         # Step 3: Merge profile data with share permissions
         caller_account_id_with_prefix = f"ACCOUNT#{caller_account_id}"
         result: List[Dict[str, Any]] = []
-        for profile in all_profiles:
+        for profile in all_profiles:  # pragma: no branch
             profile_id_str = profile.get("profileId")
             if not isinstance(profile_id_str, str):
                 continue

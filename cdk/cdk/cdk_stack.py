@@ -1,4 +1,5 @@
 import os
+from typing import Any
 
 from aws_cdk import (
     CfnOutput,
@@ -33,14 +34,14 @@ REGION_ABBREVIATIONS = {
     "eu-west-3": "ew3",
     "eu-central-1": "ec1",
     "eu-north-1": "en1",
-    "ap-northeast-1": "ane1",   # Tokyo
-    "ap-northeast-2": "ane2",   # Seoul
-    "ap-northeast-3": "ane3",   # Osaka
-    "ap-southeast-1": "ase1",   # Singapore
-    "ap-southeast-2": "ase2",   # Sydney
-    "ap-south-1": "as1",        # Mumbai
-    "sa-east-1": "se1",        # São Paulo
-    "ca-central-1": "cc1",     # Canada
+    "ap-northeast-1": "ane1",  # Tokyo
+    "ap-northeast-2": "ane2",  # Seoul
+    "ap-northeast-3": "ane3",  # Osaka
+    "ap-southeast-1": "ase1",  # Singapore
+    "ap-southeast-2": "ase2",  # Sydney
+    "ap-south-1": "as1",  # Mumbai
+    "sa-east-1": "se1",  # São Paulo
+    "ca-central-1": "cc1",  # Canada
 }
 
 
@@ -58,7 +59,7 @@ class CdkStack(Stack):
     """
 
     def __init__(
-        self, scope: Construct, construct_id: str, env_name: str = "dev", **kwargs
+        self, scope: Construct, construct_id: str, env_name: str = "dev", **kwargs: Any
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
@@ -66,13 +67,13 @@ class CdkStack(Stack):
 
         # Get region abbreviation for resource naming
         # Uses CDK_DEFAULT_REGION or falls back to us-east-1
-        region = os.getenv("AWS_REGION") or os.getenv("CDK_DEFAULT_REGION", "us-east-1")
+        region = os.getenv("AWS_REGION") or os.getenv("CDK_DEFAULT_REGION") or "us-east-1"
         self.region_abbrev = REGION_ABBREVIATIONS.get(region, region[:3])
 
         # Helper for consistent resource naming: {name}-{region}-{env}
-        def rn(name: str) -> str:
+        def rn(name: str, abbrev: str = self.region_abbrev, env: str = env_name) -> str:
             """Generate resource name with region and environment suffix."""
-            return f"{name}-{self.region_abbrev}-{env_name}"
+            return f"{name}-{abbrev}-{env}"
 
         self.resource_name = rn  # Make available to instance methods
 
@@ -142,7 +143,7 @@ class CdkStack(Stack):
         # Auto-discover existing table by name pattern
         psm_table_name = rn("kernelworx-app")
         existing_psm_table = resource_lookup.lookup_dynamodb_table(psm_table_name)
-        
+
         if existing_psm_table:
             self.table = dynamodb.Table.from_table_arn(
                 self, "PsmApp", existing_psm_table["table_arn"]
@@ -242,7 +243,8 @@ class CdkStack(Stack):
             # TTL configuration for invite expiration
             # ProfileInvite and CatalogShareInvite items have expiresAt attribute
             cfn_table = self.table.node.default_child
-            cfn_table.time_to_live_specification = (
+            assert cfn_table is not None
+            cfn_table.time_to_live_specification = (  # type: ignore
                 dynamodb.CfnTable.TimeToLiveSpecificationProperty(
                     attribute_name="expiresAt",
                     enabled=True,
@@ -265,14 +267,16 @@ class CdkStack(Stack):
                 self,
                 "AccountsTable",
                 table_name=accounts_table_name,
-            partition_key=dynamodb.Attribute(name="accountId", type=dynamodb.AttributeType.STRING),
-            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
-            point_in_time_recovery_specification=dynamodb.PointInTimeRecoverySpecification(
-                point_in_time_recovery_enabled=True
-            ),
-            removal_policy=RemovalPolicy.RETAIN,
-            deletion_protection=True,
-        )
+                partition_key=dynamodb.Attribute(
+                    name="accountId", type=dynamodb.AttributeType.STRING
+                ),
+                billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
+                point_in_time_recovery_specification=dynamodb.PointInTimeRecoverySpecification(
+                    point_in_time_recovery_enabled=True
+                ),
+                removal_policy=RemovalPolicy.RETAIN,
+                deletion_protection=True,
+            )
             # GSI for email lookup (account by email) - only for new tables
             self.accounts_table.add_global_secondary_index(
                 index_name="email-index",
@@ -292,7 +296,9 @@ class CdkStack(Stack):
                 self,
                 "CatalogsTable",
                 table_name=catalogs_table_name,
-                partition_key=dynamodb.Attribute(name="catalogId", type=dynamodb.AttributeType.STRING),
+                partition_key=dynamodb.Attribute(
+                    name="catalogId", type=dynamodb.AttributeType.STRING
+                ),
                 billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
                 point_in_time_recovery_specification=dynamodb.PointInTimeRecoverySpecification(
                     point_in_time_recovery_enabled=True
@@ -333,21 +339,23 @@ class CdkStack(Stack):
                 self,
                 "ProfilesTableV2",
                 table_name=profiles_table_name,
-            partition_key=dynamodb.Attribute(
-                name="ownerAccountId", type=dynamodb.AttributeType.STRING
-            ),
-            sort_key=dynamodb.Attribute(name="profileId", type=dynamodb.AttributeType.STRING),
-            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
-            point_in_time_recovery_specification=dynamodb.PointInTimeRecoverySpecification(
-                point_in_time_recovery_enabled=True
-            ),
-            removal_policy=RemovalPolicy.RETAIN,
-            deletion_protection=True,
-        )
+                partition_key=dynamodb.Attribute(
+                    name="ownerAccountId", type=dynamodb.AttributeType.STRING
+                ),
+                sort_key=dynamodb.Attribute(name="profileId", type=dynamodb.AttributeType.STRING),
+                billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
+                point_in_time_recovery_specification=dynamodb.PointInTimeRecoverySpecification(
+                    point_in_time_recovery_enabled=True
+                ),
+                removal_policy=RemovalPolicy.RETAIN,
+                deletion_protection=True,
+            )
             # GSI for direct profile lookup by profileId - only for new tables
             self.profiles_table.add_global_secondary_index(
                 index_name="profileId-index",
-                partition_key=dynamodb.Attribute(name="profileId", type=dynamodb.AttributeType.STRING),
+                partition_key=dynamodb.Attribute(
+                    name="profileId", type=dynamodb.AttributeType.STRING
+                ),
                 projection_type=dynamodb.ProjectionType.ALL,
             )
 
@@ -366,15 +374,19 @@ class CdkStack(Stack):
                 self,
                 "SharesTable",
                 table_name=shares_table_name,
-            partition_key=dynamodb.Attribute(name="profileId", type=dynamodb.AttributeType.STRING),
-            sort_key=dynamodb.Attribute(name="targetAccountId", type=dynamodb.AttributeType.STRING),
-            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
-            point_in_time_recovery_specification=dynamodb.PointInTimeRecoverySpecification(
-                point_in_time_recovery_enabled=True
-            ),
-            removal_policy=RemovalPolicy.RETAIN,
-            deletion_protection=True,
-        )
+                partition_key=dynamodb.Attribute(
+                    name="profileId", type=dynamodb.AttributeType.STRING
+                ),
+                sort_key=dynamodb.Attribute(
+                    name="targetAccountId", type=dynamodb.AttributeType.STRING
+                ),
+                billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
+                point_in_time_recovery_specification=dynamodb.PointInTimeRecoverySpecification(
+                    point_in_time_recovery_enabled=True
+                ),
+                removal_policy=RemovalPolicy.RETAIN,
+                deletion_protection=True,
+            )
             # GSI for "profiles shared with me" query - only for new tables
             self.shares_table.add_global_secondary_index(
                 index_name="targetAccountId-index",
@@ -399,24 +411,29 @@ class CdkStack(Stack):
                 self,
                 "InvitesTable",
                 table_name=invites_table_name,
-            partition_key=dynamodb.Attribute(name="inviteCode", type=dynamodb.AttributeType.STRING),
-            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
-            point_in_time_recovery_specification=dynamodb.PointInTimeRecoverySpecification(
-                point_in_time_recovery_enabled=True
-            ),
-            removal_policy=RemovalPolicy.RETAIN,
-            deletion_protection=True,
-        )
+                partition_key=dynamodb.Attribute(
+                    name="inviteCode", type=dynamodb.AttributeType.STRING
+                ),
+                billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
+                point_in_time_recovery_specification=dynamodb.PointInTimeRecoverySpecification(
+                    point_in_time_recovery_enabled=True
+                ),
+                removal_policy=RemovalPolicy.RETAIN,
+                deletion_protection=True,
+            )
             # GSI for "invites for this profile" query - only for new tables
             self.invites_table.add_global_secondary_index(
                 index_name="profileId-index",
-                partition_key=dynamodb.Attribute(name="profileId", type=dynamodb.AttributeType.STRING),
+                partition_key=dynamodb.Attribute(
+                    name="profileId", type=dynamodb.AttributeType.STRING
+                ),
                 projection_type=dynamodb.ProjectionType.ALL,
             )
 
             # TTL for invites (automatic expiration) - only for new tables
             cfn_invites_table = self.invites_table.node.default_child
-            cfn_invites_table.time_to_live_specification = (
+            assert cfn_invites_table is not None
+            cfn_invites_table.time_to_live_specification = (  # type: ignore
                 dynamodb.CfnTable.TimeToLiveSpecificationProperty(
                     attribute_name="expiresAt",
                     enabled=True,
@@ -438,26 +455,32 @@ class CdkStack(Stack):
                 self,
                 "SeasonsTableV2",
                 table_name=seasons_table_name,
-            partition_key=dynamodb.Attribute(name="profileId", type=dynamodb.AttributeType.STRING),
-            sort_key=dynamodb.Attribute(name="seasonId", type=dynamodb.AttributeType.STRING),
-            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
-            point_in_time_recovery_specification=dynamodb.PointInTimeRecoverySpecification(
-                point_in_time_recovery_enabled=True
-            ),
-            removal_policy=RemovalPolicy.RETAIN,
-            deletion_protection=True,
-        )
+                partition_key=dynamodb.Attribute(
+                    name="profileId", type=dynamodb.AttributeType.STRING
+                ),
+                sort_key=dynamodb.Attribute(name="seasonId", type=dynamodb.AttributeType.STRING),
+                billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
+                point_in_time_recovery_specification=dynamodb.PointInTimeRecoverySpecification(
+                    point_in_time_recovery_enabled=True
+                ),
+                removal_policy=RemovalPolicy.RETAIN,
+                deletion_protection=True,
+            )
             # GSI for direct getSeason by seasonId - only for new tables
             self.seasons_table.add_global_secondary_index(
                 index_name="seasonId-index",
-                partition_key=dynamodb.Attribute(name="seasonId", type=dynamodb.AttributeType.STRING),
+                partition_key=dynamodb.Attribute(
+                    name="seasonId", type=dynamodb.AttributeType.STRING
+                ),
                 projection_type=dynamodb.ProjectionType.ALL,
             )
 
             # GSI for seasons by catalog - only for new tables
             self.seasons_table.add_global_secondary_index(
                 index_name="catalogId-index",
-                partition_key=dynamodb.Attribute(name="catalogId", type=dynamodb.AttributeType.STRING),
+                partition_key=dynamodb.Attribute(
+                    name="catalogId", type=dynamodb.AttributeType.STRING
+                ),
                 projection_type=dynamodb.ProjectionType.KEYS_ONLY,
             )
 
@@ -476,27 +499,77 @@ class CdkStack(Stack):
                 self,
                 "OrdersTableV2",
                 table_name=orders_table_name,
-            partition_key=dynamodb.Attribute(name="seasonId", type=dynamodb.AttributeType.STRING),
-            sort_key=dynamodb.Attribute(name="orderId", type=dynamodb.AttributeType.STRING),
-            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
-            point_in_time_recovery_specification=dynamodb.PointInTimeRecoverySpecification(
-                point_in_time_recovery_enabled=True
-            ),
-            removal_policy=RemovalPolicy.RETAIN,
-            deletion_protection=True,
-        )
+                partition_key=dynamodb.Attribute(
+                    name="seasonId", type=dynamodb.AttributeType.STRING
+                ),
+                sort_key=dynamodb.Attribute(name="orderId", type=dynamodb.AttributeType.STRING),
+                billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
+                point_in_time_recovery_specification=dynamodb.PointInTimeRecoverySpecification(
+                    point_in_time_recovery_enabled=True
+                ),
+                removal_policy=RemovalPolicy.RETAIN,
+                deletion_protection=True,
+            )
             # GSI for direct order lookup by orderId - only for new tables
             self.orders_table.add_global_secondary_index(
                 index_name="orderId-index",
-                partition_key=dynamodb.Attribute(name="orderId", type=dynamodb.AttributeType.STRING),
+                partition_key=dynamodb.Attribute(
+                    name="orderId", type=dynamodb.AttributeType.STRING
+                ),
                 projection_type=dynamodb.ProjectionType.ALL,
             )
 
             # GSI for orders by profile - only for new tables
             self.orders_table.add_global_secondary_index(
                 index_name="profileId-index",
-                partition_key=dynamodb.Attribute(name="profileId", type=dynamodb.AttributeType.STRING),
+                partition_key=dynamodb.Attribute(
+                    name="profileId", type=dynamodb.AttributeType.STRING
+                ),
                 sort_key=dynamodb.Attribute(name="createdAt", type=dynamodb.AttributeType.STRING),
+                projection_type=dynamodb.ProjectionType.ALL,
+            )
+
+        # Campaign Prefills Table
+        # PK: prefillCode (enables direct lookup)
+        # GSI1: createdBy + createdAt (for "my prefills" listing)
+        # GSI2: unitSeasonKey (for unit+season discovery)
+        prefills_table_name = rn("kernelworx-campaign-prefills")
+        existing_prefills_table = resource_lookup.lookup_dynamodb_table(prefills_table_name)
+        if existing_prefills_table:
+            self.prefills_table = dynamodb.Table.from_table_arn(
+                self, "CampaignPrefillsTable", existing_prefills_table["table_arn"]
+            )
+        else:
+            self.prefills_table = dynamodb.Table(
+                self,
+                "CampaignPrefillsTable",
+                table_name=prefills_table_name,
+                partition_key=dynamodb.Attribute(
+                    name="prefillCode", type=dynamodb.AttributeType.STRING
+                ),
+                billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
+                point_in_time_recovery_specification=dynamodb.PointInTimeRecoverySpecification(
+                    point_in_time_recovery_enabled=True
+                ),
+                removal_policy=RemovalPolicy.RETAIN,
+                deletion_protection=True,
+            )
+            # GSI1: List prefills by creator (for "my prefills" view)
+            self.prefills_table.add_global_secondary_index(
+                index_name="GSI1",
+                partition_key=dynamodb.Attribute(
+                    name="createdBy", type=dynamodb.AttributeType.STRING
+                ),
+                sort_key=dynamodb.Attribute(name="createdAt", type=dynamodb.AttributeType.STRING),
+                projection_type=dynamodb.ProjectionType.ALL,
+            )
+            # GSI2: Find prefills by unit+season (for discovery during season creation)
+            # unitSeasonKey format: {unitType}#{unitNumber}#{city}#{state}#{seasonName}#{seasonYear}
+            self.prefills_table.add_global_secondary_index(
+                index_name="GSI2",
+                partition_key=dynamodb.Attribute(
+                    name="unitSeasonKey", type=dynamodb.AttributeType.STRING
+                ),
                 projection_type=dynamodb.ProjectionType.ALL,
             )
 
@@ -524,9 +597,7 @@ class CdkStack(Stack):
         # Exports bucket (for generated reports) - auto-import if exists
         exports_bucket_name = rn("kernelworx-exports")
         if resource_lookup.lookup_s3_bucket(exports_bucket_name):
-            self.exports_bucket = s3.Bucket.from_bucket_name(
-                self, "Exports", exports_bucket_name
-            )
+            self.exports_bucket = s3.Bucket.from_bucket_name(self, "Exports", exports_bucket_name)
         else:
             self.exports_bucket = s3.Bucket(
                 self,
@@ -574,6 +645,7 @@ class CdkStack(Stack):
         self.orders_table.grant_read_write_data(self.lambda_execution_role)
         self.shares_table.grant_read_write_data(self.lambda_execution_role)
         self.invites_table.grant_read_write_data(self.lambda_execution_role)
+        self.prefills_table.grant_read_write_data(self.lambda_execution_role)
 
         # Grant Lambda role access to new table GSI indexes
         for table in [
@@ -584,6 +656,7 @@ class CdkStack(Stack):
             self.orders_table,
             self.shares_table,
             self.invites_table,
+            self.prefills_table,
         ]:
             self.lambda_execution_role.add_to_policy(
                 iam.PolicyStatement(
@@ -622,6 +695,7 @@ class CdkStack(Stack):
         self.orders_table.grant_read_write_data(self.appsync_service_role)
         self.shares_table.grant_read_write_data(self.appsync_service_role)
         self.invites_table.grant_read_write_data(self.appsync_service_role)
+        self.prefills_table.grant_read_write_data(self.appsync_service_role)
 
         # Grant AppSync role access to new table GSI indexes
         for table in [
@@ -876,7 +950,8 @@ class CdkStack(Stack):
             )
             # Set RETAIN policy so the client survives stack deletion
             cfn_client = self.user_pool_client.node.default_child
-            cfn_client.apply_removal_policy(RemovalPolicy.RETAIN)
+            assert cfn_client is not None
+            cfn_client.apply_removal_policy(RemovalPolicy.RETAIN)  # type: ignore
         else:
             self.user_pool = cognito.UserPool(
                 self,
@@ -926,7 +1001,8 @@ class CdkStack(Stack):
 
             # Configure user attribute update settings to require verification for email changes
             cfn_user_pool = self.user_pool.node.default_child
-            cfn_user_pool.user_attribute_update_settings = (
+            assert cfn_user_pool is not None
+            cfn_user_pool.user_attribute_update_settings = (  # type: ignore
                 cognito.CfnUserPool.UserAttributeUpdateSettingsProperty(
                     attributes_require_verification_before_update=["email"]
                 )
@@ -1046,9 +1122,7 @@ class CdkStack(Stack):
             # site distribution and DNS first, then creating the Cognito
             # custom domain after DNS has propagated. Control this behaviour
             # with the context key `create_cognito_domain` (default: True).
-            create_cognito_domain_ctx = self.node.try_get_context(
-                "create_cognito_domain"
-            )
+            create_cognito_domain_ctx = self.node.try_get_context("create_cognito_domain")
             # Handle string values from CLI (e.g., -c create_cognito_domain=false)
             if create_cognito_domain_ctx is None:
                 create_cognito_domain = True
@@ -1082,7 +1156,7 @@ class CdkStack(Stack):
             existing_domain = resource_lookup.lookup_user_pool_domain(existing_user_pool_id)
             if existing_domain:
                 # Domain exists - import it
-                self.user_pool_domain = cognito.UserPoolDomain.from_domain_name(
+                self.user_pool_domain = cognito.UserPoolDomain.from_domain_name(  # type: ignore[assignment]
                     self, "UserPoolDomain", existing_domain
                 )
                 # Look up the CloudFront distribution and create Route53 record
@@ -1114,7 +1188,7 @@ class CdkStack(Stack):
         # (controlled by `create_cognito_domain` context flag).
         if not existing_user_pool_id and create_cognito_domain:
             # Create new Route53 record for new pools
-            self.cognito_domain_record = route53.ARecord(
+            self.cognito_domain_record = route53.ARecord(  # type: ignore[assignment]
                 self,
                 "CognitoDomainRecord",
                 zone=self.hosted_zone,
@@ -1181,7 +1255,7 @@ class CdkStack(Stack):
             "DynamoDBDataSource",
             table=self.table,
         )
-        self.dynamodb_datasource.node.default_child.apply_removal_policy(RemovalPolicy.RETAIN)
+        self.dynamodb_datasource.node.default_child.apply_removal_policy(RemovalPolicy.RETAIN)  # type: ignore
 
         # Grant GSI permissions to the DynamoDB data source role
         self.dynamodb_datasource.grant_principal.add_to_principal_policy(
@@ -1200,7 +1274,7 @@ class CdkStack(Stack):
             "AccountsDataSource",
             table=self.accounts_table,
         )
-        self.accounts_datasource.node.default_child.apply_removal_policy(RemovalPolicy.RETAIN)
+        self.accounts_datasource.node.default_child.apply_removal_policy(RemovalPolicy.RETAIN)  # type: ignore
         self.accounts_datasource.grant_principal.add_to_principal_policy(
             iam.PolicyStatement(
                 actions=["dynamodb:Query", "dynamodb:Scan"],
@@ -1213,7 +1287,7 @@ class CdkStack(Stack):
             "CatalogsDataSource",
             table=self.catalogs_table,
         )
-        self.catalogs_datasource.node.default_child.apply_removal_policy(RemovalPolicy.RETAIN)
+        self.catalogs_datasource.node.default_child.apply_removal_policy(RemovalPolicy.RETAIN)  # type: ignore
         self.catalogs_datasource.grant_principal.add_to_principal_policy(
             iam.PolicyStatement(
                 actions=["dynamodb:Query", "dynamodb:Scan"],
@@ -1226,7 +1300,7 @@ class CdkStack(Stack):
             "ProfilesDataSource",
             table=self.profiles_table,
         )
-        self.profiles_datasource.node.default_child.apply_removal_policy(RemovalPolicy.RETAIN)
+        self.profiles_datasource.node.default_child.apply_removal_policy(RemovalPolicy.RETAIN)  # type: ignore
         self.profiles_datasource.grant_principal.add_to_principal_policy(
             iam.PolicyStatement(
                 actions=["dynamodb:Query", "dynamodb:Scan"],
@@ -1239,7 +1313,7 @@ class CdkStack(Stack):
             "SeasonsDataSource",
             table=self.seasons_table,
         )
-        self.seasons_datasource.node.default_child.apply_removal_policy(RemovalPolicy.RETAIN)
+        self.seasons_datasource.node.default_child.apply_removal_policy(RemovalPolicy.RETAIN)  # type: ignore
         self.seasons_datasource.grant_principal.add_to_principal_policy(
             iam.PolicyStatement(
                 actions=["dynamodb:Query", "dynamodb:Scan"],
@@ -1252,7 +1326,7 @@ class CdkStack(Stack):
             "OrdersDataSource",
             table=self.orders_table,
         )
-        self.orders_datasource.node.default_child.apply_removal_policy(RemovalPolicy.RETAIN)
+        self.orders_datasource.node.default_child.apply_removal_policy(RemovalPolicy.RETAIN)  # type: ignore
         self.orders_datasource.grant_principal.add_to_principal_policy(
             iam.PolicyStatement(
                 actions=["dynamodb:Query", "dynamodb:Scan"],
@@ -1265,7 +1339,7 @@ class CdkStack(Stack):
             "SharesDataSource",
             table=self.shares_table,
         )
-        self.shares_datasource.node.default_child.apply_removal_policy(RemovalPolicy.RETAIN)
+        self.shares_datasource.node.default_child.apply_removal_policy(RemovalPolicy.RETAIN)  # type: ignore
         self.shares_datasource.grant_principal.add_to_principal_policy(
             iam.PolicyStatement(
                 actions=["dynamodb:Query", "dynamodb:Scan"],
@@ -1278,11 +1352,24 @@ class CdkStack(Stack):
             "InvitesDataSource",
             table=self.invites_table,
         )
-        self.invites_datasource.node.default_child.apply_removal_policy(RemovalPolicy.RETAIN)
+        self.invites_datasource.node.default_child.apply_removal_policy(RemovalPolicy.RETAIN)  # type: ignore
         self.invites_datasource.grant_principal.add_to_principal_policy(
             iam.PolicyStatement(
                 actions=["dynamodb:Query", "dynamodb:Scan"],
                 resources=[f"{self.invites_table.table_arn}/index/*"],
+            )
+        )
+
+        # Campaign Prefills table data source
+        self.prefills_datasource = self.api.add_dynamo_db_data_source(
+            "CampaignPrefillsDataSource",
+            table=self.prefills_table,
+        )
+        self.prefills_datasource.node.default_child.apply_removal_policy(RemovalPolicy.RETAIN)  # type: ignore
+        self.prefills_datasource.grant_principal.add_to_principal_policy(
+            iam.PolicyStatement(
+                actions=["dynamodb:Query", "dynamodb:Scan"],
+                resources=[f"{self.prefills_table.table_arn}/index/*"],
             )
         )
 
@@ -1291,7 +1378,7 @@ class CdkStack(Stack):
             "NoneDataSource",
             name="NoneDataSource",
         )
-        self.none_datasource.node.default_child.apply_removal_policy(RemovalPolicy.RETAIN)
+        self.none_datasource.node.default_child.apply_removal_policy(RemovalPolicy.RETAIN)  # type: ignore
 
         # Lambda data sources for profile sharing
         # NOTE: create_profile_invite data source REMOVED - replaced with JS resolver
@@ -3722,7 +3809,7 @@ export function response(ctx) {
             """
             ),
         )
-        
+
         # listMyShares - Lambda resolver for reliable profile fetching
         # NOTE: Previously used a pipeline resolver with BatchGetItem, but AppSync's
         # BatchGetItem has intermittent "key element does not match schema" errors.
@@ -5014,6 +5101,618 @@ export function response(ctx) {
         )
 
         # ================================================================
+        # Campaign Prefill Query Resolvers
+        # ================================================================
+
+        # getCampaignPrefill - Get a specific prefill by code (public read)
+        self.prefills_datasource.create_resolver(
+            "GetCampaignPrefillResolver",
+            type_name="Query",
+            field_name="getCampaignPrefill",
+            request_mapping_template=appsync.MappingTemplate.from_string(
+                """
+{
+    "version": "2017-02-28",
+    "operation": "GetItem",
+    "key": {
+        "prefillCode": $util.dynamodb.toDynamoDBJson($ctx.args.prefillCode),
+        "SK": $util.dynamodb.toDynamoDBJson("METADATA")
+    }
+}
+            """
+            ),
+            response_mapping_template=appsync.MappingTemplate.from_string(
+                """
+#if($ctx.error)
+    $util.error($ctx.error.message, $ctx.error.type)
+#end
+## Return null if not found or inactive
+#if(!$ctx.result || $ctx.result.isEmpty())
+    $util.toJson(null)
+#else
+    #if($ctx.result.isActive == false)
+        $util.toJson(null)
+    #else
+        $util.toJson($ctx.result)
+    #end
+#end
+            """
+            ),
+        )
+
+        # listMyCampaignPrefills - List prefills created by current user (GSI1)
+        self.api.create_resolver(
+            "ListMyCampaignPrefillsResolver",
+            type_name="Query",
+            field_name="listMyCampaignPrefills",
+            data_source=self.prefills_datasource,
+            runtime=appsync.FunctionRuntime.JS_1_0_0,
+            code=appsync.Code.from_inline(
+                """
+import { util } from '@aws-appsync/utils';
+
+export function request(ctx) {
+    const createdBy = ctx.identity.sub;
+    return {
+        operation: 'Query',
+        index: 'GSI1',
+        query: {
+            expression: 'createdBy = :createdBy',
+            expressionValues: util.dynamodb.toMapValues({ ':createdBy': createdBy })
+        },
+        scanIndexForward: false  // Most recent first
+    };
+}
+
+export function response(ctx) {
+    if (ctx.error) {
+        util.error(ctx.error.message, ctx.error.type);
+    }
+    // Filter out inactive prefills (for loop instead of filter())
+    const items = ctx.result.items || [];
+    const activeItems = [];
+    for (const item of items) {
+        if (item.isActive !== false) {
+            activeItems.push(item);
+        }
+    }
+    return activeItems;
+}
+            """
+            ),
+        )
+
+        # findCampaignPrefills - Find prefills by unit+season (GSI2)
+        self.api.create_resolver(
+            "FindCampaignPrefillsResolver",
+            type_name="Query",
+            field_name="findCampaignPrefills",
+            data_source=self.prefills_datasource,
+            runtime=appsync.FunctionRuntime.JS_1_0_0,
+            code=appsync.Code.from_inline(
+                """
+import { util } from '@aws-appsync/utils';
+
+export function request(ctx) {
+    // Build the composite key for GSI2
+    // Format: {unitType}#{unitNumber}#{city}#{state}#{seasonName}#{seasonYear}
+    // Use string concatenation (array.join() not available in APPSYNC_JS)
+    const unitNumStr = '' + ctx.args.unitNumber;
+    const seasonYearStr = '' + ctx.args.seasonYear;
+    const unitSeasonKey = ctx.args.unitType + '#' + unitNumStr + '#' + ctx.args.city + '#' + ctx.args.state + '#' + ctx.args.seasonName + '#' + seasonYearStr;
+    
+    return {
+        operation: 'Query',
+        index: 'GSI2',
+        query: {
+            expression: 'unitSeasonKey = :unitSeasonKey',
+            expressionValues: util.dynamodb.toMapValues({ ':unitSeasonKey': unitSeasonKey })
+        }
+    };
+}
+
+export function response(ctx) {
+    if (ctx.error) {
+        util.error(ctx.error.message, ctx.error.type);
+    }
+    // Filter out inactive prefills
+    const items = ctx.result.items || [];
+    const activeItems = [];
+    for (const item of items) {
+        if (item.isActive !== false) {
+            activeItems.push(item);
+        }
+    }
+    return activeItems;
+}
+            """
+            ),
+        )
+
+        # ================================================================
+        # Campaign Prefill Mutation Resolvers
+        # ================================================================
+
+        # createCampaignPrefill - Pipeline resolver: Count existing → Create with rate limit
+        # Step 1: Count existing prefills for rate limiting
+        count_user_prefills_fn = appsync.AppsyncFunction(
+            self,
+            "CountUserPrefillsFn",
+            name=f"CountUserPrefillsFn_{env_name}",
+            api=self.api,
+            data_source=self.prefills_datasource,
+            runtime=appsync.FunctionRuntime.JS_1_0_0,
+            code=appsync.Code.from_inline(
+                """
+import { util } from '@aws-appsync/utils';
+
+export function request(ctx) {
+    const createdBy = ctx.identity.sub;
+    return {
+        operation: 'Query',
+        index: 'GSI1',
+        query: {
+            expression: 'createdBy = :createdBy',
+            expressionValues: util.dynamodb.toMapValues({ ':createdBy': createdBy })
+        },
+        select: 'COUNT'
+    };
+}
+
+export function response(ctx) {
+    if (ctx.error) {
+        util.error(ctx.error.message, ctx.error.type);
+    }
+    const count = ctx.result.scannedCount || 0;
+    // Rate limit: 50 prefills per user
+    if (count >= 50) {
+        util.error('Rate limit exceeded: Maximum 50 campaign prefills per user', 'RateLimitExceeded');
+    }
+    ctx.stash.prefillCount = count;
+    return count;
+}
+                """
+            ),
+        )
+
+        # Step 2: Get catalog info (for validation and display name)
+        get_catalog_for_prefill_fn = appsync.AppsyncFunction(
+            self,
+            "GetCatalogForPrefillFn",
+            name=f"GetCatalogForPrefillFn_{env_name}",
+            api=self.api,
+            data_source=self.catalogs_datasource,
+            runtime=appsync.FunctionRuntime.JS_1_0_0,
+            code=appsync.Code.from_inline(
+                """
+import { util } from '@aws-appsync/utils';
+
+export function request(ctx) {
+    return {
+        operation: 'GetItem',
+        key: util.dynamodb.toMapValues({ catalogId: ctx.args.input.catalogId })
+    };
+}
+
+export function response(ctx) {
+    if (ctx.error) {
+        util.error(ctx.error.message, ctx.error.type);
+    }
+    if (!ctx.result) {
+        util.error('Catalog not found', 'NotFound');
+    }
+    // Check if catalog is accessible (public or owned by user)
+    const catalog = ctx.result;
+    const callerAccountId = 'ACCOUNT#' + ctx.identity.sub;
+    const isPublic = catalog.isPublic === true || catalog.isPublic === 'true';
+    const isOwner = catalog.ownerAccountId === callerAccountId;
+    if (!isPublic && !isOwner) {
+        util.error('Catalog not accessible', 'Forbidden');
+    }
+    ctx.stash.catalog = catalog;
+    return catalog;
+}
+                """
+            ),
+        )
+
+        # Step 3: Get account info (for createdByName)
+        get_account_for_prefill_fn = appsync.AppsyncFunction(
+            self,
+            "GetAccountForPrefillFn",
+            name=f"GetAccountForPrefillFn_{env_name}",
+            api=self.api,
+            data_source=self.accounts_datasource,
+            runtime=appsync.FunctionRuntime.JS_1_0_0,
+            code=appsync.Code.from_inline(
+                """
+import { util } from '@aws-appsync/utils';
+
+export function request(ctx) {
+    // accountId has ACCOUNT# prefix in DynamoDB
+    const accountId = 'ACCOUNT#' + ctx.identity.sub;
+    return {
+        operation: 'GetItem',
+        key: util.dynamodb.toMapValues({ accountId: accountId })
+    };
+}
+
+export function response(ctx) {
+    if (ctx.error) {
+        util.error(ctx.error.message, ctx.error.type);
+    }
+    if (!ctx.result) {
+        util.error('Account not found', 'NotFound');
+    }
+    ctx.stash.account = ctx.result;
+    return ctx.result;
+}
+                """
+            ),
+        )
+
+        # Step 4: Create the prefill
+        create_prefill_fn = appsync.AppsyncFunction(
+            self,
+            "CreatePrefillFn",
+            name=f"CreatePrefillFn_{env_name}",
+            api=self.api,
+            data_source=self.prefills_datasource,
+            runtime=appsync.FunctionRuntime.JS_1_0_0,
+            code=appsync.Code.from_inline(
+                """
+import { util } from '@aws-appsync/utils';
+
+export function request(ctx) {
+    const input = ctx.args.input;
+    const account = ctx.stash.account;
+    const now = util.time.nowISO8601();
+    
+    // Generate prefill code: UNITTYPE + UNITNUMBER + SEASON + YEAR
+    // Convert numbers to strings using template literal (String() not available in APPSYNC_JS)
+    const seasonYearStr = '' + input.seasonYear;
+    const unitNumStr = '' + input.unitNumber;
+    const seasonAbbrev = input.seasonName.substring(0, 4).toUpperCase();
+    const yearAbbrev = seasonYearStr.substring(2);
+    const prefillCode = input.unitType.toUpperCase() + unitNumStr + '-' + seasonAbbrev + '-' + input.state.toUpperCase() + '-' + yearAbbrev;
+    
+    // Build unit+season composite key for GSI2
+    const unitSeasonKey = input.unitType + '#' + unitNumStr + '#' + input.city + '#' + input.state + '#' + input.seasonName + '#' + seasonYearStr;
+    
+    // Build display name from account
+    let createdByName = 'Unknown';
+    if (account.givenName && account.familyName) {
+        createdByName = account.givenName + ' ' + account.familyName;
+    } else if (account.email) {
+        createdByName = account.email;
+    }
+    
+    const item = {
+        prefillCode: prefillCode,
+        catalogId: input.catalogId,
+        seasonName: input.seasonName,
+        seasonYear: input.seasonYear,
+        unitType: input.unitType,
+        unitNumber: input.unitNumber,
+        city: input.city,
+        state: input.state,
+        createdBy: ctx.identity.sub,
+        createdByName: createdByName,
+        creatorMessage: input.creatorMessage,
+        isActive: true,
+        createdAt: now,
+        unitSeasonKey: unitSeasonKey
+    };
+    
+    // Add optional fields
+    if (input.startDate) {
+        item.startDate = input.startDate;
+    }
+    if (input.endDate) {
+        item.endDate = input.endDate;
+    }
+    if (input.description) {
+        item.description = input.description;
+    }
+    
+    // Add SK to item for sort key
+    item.SK = 'METADATA';
+    
+    return {
+        operation: 'PutItem',
+        key: util.dynamodb.toMapValues({ prefillCode: prefillCode, SK: 'METADATA' }),
+        attributeValues: util.dynamodb.toMapValues(item),
+        condition: {
+            expression: 'attribute_not_exists(prefillCode)'
+        }
+    };
+}
+
+export function response(ctx) {
+    if (ctx.error) {
+        if (ctx.error.type === 'DynamoDB:ConditionalCheckFailedException') {
+            util.error('A campaign prefill with this code already exists. Please try again.', 'ConflictException');
+        }
+        util.error(ctx.error.message, ctx.error.type);
+    }
+    return ctx.result;
+}
+                """
+            ),
+        )
+
+        self.api.create_resolver(
+            "CreateCampaignPrefillPipelineResolver",
+            type_name="Mutation",
+            field_name="createCampaignPrefill",
+            runtime=appsync.FunctionRuntime.JS_1_0_0,
+            pipeline_config=[
+                count_user_prefills_fn,
+                get_catalog_for_prefill_fn,
+                get_account_for_prefill_fn,
+                create_prefill_fn,
+            ],
+            code=appsync.Code.from_inline(
+                """
+export function request(ctx) {
+    return {};
+}
+
+export function response(ctx) {
+    return ctx.prev.result;
+}
+                """
+            ),
+        )
+
+        # updateCampaignPrefill - Pipeline resolver: Get → Authorize → Update
+        # Step 1: Get existing prefill
+        get_prefill_for_update_fn = appsync.AppsyncFunction(
+            self,
+            "GetPrefillForUpdateFn",
+            name=f"GetPrefillForUpdateFn_{env_name}",
+            api=self.api,
+            data_source=self.prefills_datasource,
+            runtime=appsync.FunctionRuntime.JS_1_0_0,
+            code=appsync.Code.from_inline(
+                """
+import { util } from '@aws-appsync/utils';
+
+export function request(ctx) {
+    return {
+        operation: 'GetItem',
+        key: util.dynamodb.toMapValues({ prefillCode: ctx.args.input.prefillCode, SK: 'METADATA' })
+    };
+}
+
+export function response(ctx) {
+    if (ctx.error) {
+        util.error(ctx.error.message, ctx.error.type);
+    }
+    if (!ctx.result) {
+        util.error('Campaign prefill not found', 'NotFound');
+    }
+    // Check ownership
+    if (ctx.result.createdBy !== ctx.identity.sub) {
+        util.error('Only the creator can update this campaign prefill', 'Forbidden');
+    }
+    ctx.stash.prefill = ctx.result;
+    return ctx.result;
+}
+                """
+            ),
+        )
+
+        # Step 2: Update the prefill
+        update_prefill_fn = appsync.AppsyncFunction(
+            self,
+            "UpdatePrefillFn",
+            name=f"UpdatePrefillFn_{env_name}",
+            api=self.api,
+            data_source=self.prefills_datasource,
+            runtime=appsync.FunctionRuntime.JS_1_0_0,
+            code=appsync.Code.from_inline(
+                """
+import { util } from '@aws-appsync/utils';
+
+export function request(ctx) {
+    const input = ctx.args.input;
+    const prefill = ctx.stash.prefill;
+    
+    // Build update expression for allowed fields only
+    const expressionNames = {};
+    const expressionValues = {};
+    const updateParts = [];
+    
+    if (input.creatorMessage !== undefined && input.creatorMessage !== null) {
+        expressionNames['#creatorMessage'] = 'creatorMessage';
+        expressionValues[':creatorMessage'] = input.creatorMessage;
+        updateParts.push('#creatorMessage = :creatorMessage');
+    }
+    
+    if (input.description !== undefined) {
+        expressionNames['#description'] = 'description';
+        expressionValues[':description'] = input.description;
+        updateParts.push('#description = :description');
+    }
+    
+    if (input.isActive !== undefined && input.isActive !== null) {
+        expressionNames['#isActive'] = 'isActive';
+        expressionValues[':isActive'] = input.isActive;
+        updateParts.push('#isActive = :isActive');
+    }
+    
+    if (updateParts.length === 0) {
+        // No updates provided, just return existing prefill
+        return {
+            operation: 'GetItem',
+            key: util.dynamodb.toMapValues({ prefillCode: input.prefillCode, SK: 'METADATA' })
+        };
+    }
+    
+    return {
+        operation: 'UpdateItem',
+        key: util.dynamodb.toMapValues({ prefillCode: input.prefillCode, SK: 'METADATA' }),
+        update: {
+            expression: 'SET ' + updateParts.join(', '),
+            expressionNames: expressionNames,
+            expressionValues: util.dynamodb.toMapValues(expressionValues)
+        }
+    };
+}
+
+export function response(ctx) {
+    if (ctx.error) {
+        util.error(ctx.error.message, ctx.error.type);
+    }
+    return ctx.result;
+}
+                """
+            ),
+        )
+
+        self.api.create_resolver(
+            "UpdateCampaignPrefillPipelineResolver",
+            type_name="Mutation",
+            field_name="updateCampaignPrefill",
+            runtime=appsync.FunctionRuntime.JS_1_0_0,
+            pipeline_config=[get_prefill_for_update_fn, update_prefill_fn],
+            code=appsync.Code.from_inline(
+                """
+export function request(ctx) {
+    return {};
+}
+
+export function response(ctx) {
+    return ctx.prev.result;
+}
+                """
+            ),
+        )
+
+        # deleteCampaignPrefill - Pipeline resolver: Get → Authorize → Soft Delete
+        # Reuse get_prefill_for_update_fn for authorization
+        # Step 2: Soft delete (set isActive = false)
+        soft_delete_prefill_fn = appsync.AppsyncFunction(
+            self,
+            "SoftDeletePrefillFn",
+            name=f"SoftDeletePrefillFn_{env_name}",
+            api=self.api,
+            data_source=self.prefills_datasource,
+            runtime=appsync.FunctionRuntime.JS_1_0_0,
+            code=appsync.Code.from_inline(
+                """
+import { util } from '@aws-appsync/utils';
+
+export function request(ctx) {
+    return {
+        operation: 'UpdateItem',
+        key: util.dynamodb.toMapValues({ prefillCode: ctx.args.prefillCode, SK: 'METADATA' }),
+        update: {
+            expression: 'SET #isActive = :isActive',
+            expressionNames: { '#isActive': 'isActive' },
+            expressionValues: util.dynamodb.toMapValues({ ':isActive': false })
+        }
+    };
+}
+
+export function response(ctx) {
+    if (ctx.error) {
+        util.error(ctx.error.message, ctx.error.type);
+    }
+    return true;
+}
+                """
+            ),
+        )
+
+        # Need a version of get_prefill that works with prefillCode as direct argument
+        get_prefill_for_delete_fn = appsync.AppsyncFunction(
+            self,
+            "GetPrefillForDeleteFn",
+            name=f"GetPrefillForDeleteFn_{env_name}",
+            api=self.api,
+            data_source=self.prefills_datasource,
+            runtime=appsync.FunctionRuntime.JS_1_0_0,
+            code=appsync.Code.from_inline(
+                """
+import { util } from '@aws-appsync/utils';
+
+export function request(ctx) {
+    return {
+        operation: 'GetItem',
+        key: util.dynamodb.toMapValues({ prefillCode: ctx.args.prefillCode, SK: 'METADATA' })
+    };
+}
+
+export function response(ctx) {
+    if (ctx.error) {
+        util.error(ctx.error.message, ctx.error.type);
+    }
+    if (!ctx.result) {
+        util.error('Campaign prefill not found', 'NotFound');
+    }
+    // Check ownership
+    if (ctx.result.createdBy !== ctx.identity.sub) {
+        util.error('Only the creator can delete this campaign prefill', 'Forbidden');
+    }
+    ctx.stash.prefill = ctx.result;
+    return ctx.result;
+}
+                """
+            ),
+        )
+
+        self.api.create_resolver(
+            "DeleteCampaignPrefillPipelineResolver",
+            type_name="Mutation",
+            field_name="deleteCampaignPrefill",
+            runtime=appsync.FunctionRuntime.JS_1_0_0,
+            pipeline_config=[get_prefill_for_delete_fn, soft_delete_prefill_fn],
+            code=appsync.Code.from_inline(
+                """
+export function request(ctx) {
+    return {};
+}
+
+export function response(ctx) {
+    return ctx.prev.result;
+}
+                """
+            ),
+        )
+
+        # ================================================================
+        # CampaignPrefill Field Resolvers
+        # ================================================================
+
+        # catalog - Resolve catalog for CampaignPrefill
+        self.catalogs_datasource.create_resolver(
+            "CampaignPrefillCatalogResolver",
+            type_name="CampaignPrefill",
+            field_name="catalog",
+            request_mapping_template=appsync.MappingTemplate.from_string(
+                """
+{
+    "version": "2017-02-28",
+    "operation": "GetItem",
+    "key": {
+        "catalogId": $util.dynamodb.toDynamoDBJson($ctx.source.catalogId)
+    }
+}
+            """
+            ),
+            response_mapping_template=appsync.MappingTemplate.from_string(
+                """
+#if($ctx.error)
+    $util.error($ctx.error.message, $ctx.error.type)
+#end
+$util.toJson($ctx.result)
+            """
+            ),
+        )
+
+        # ================================================================
         # CRUD Mutation Resolvers
         # ================================================================
 
@@ -6074,7 +6773,7 @@ export function response(ctx) {
             record_name=self.api_domain,
             domain_name=self.api_domain_name.attr_app_sync_domain_name,
         )
-        self.api_domain_record.node.default_child.apply_removal_policy(RemovalPolicy.RETAIN)
+        self.api_domain_record.node.default_child.apply_removal_policy(RemovalPolicy.RETAIN)  # type: ignore
 
         # ====================================================================
         # CloudFront Distribution for SPA
@@ -6084,7 +6783,7 @@ export function response(ctx) {
         self.origin_access_identity = cloudfront.OriginAccessIdentity(
             self, "OAI", comment="OAI for Popcorn Sales Manager SPA"
         )
-        self.origin_access_identity.node.default_child.apply_removal_policy(RemovalPolicy.RETAIN)
+        self.origin_access_identity.node.default_child.apply_removal_policy(RemovalPolicy.RETAIN)  # type: ignore
 
         # Grant CloudFront read access to static assets bucket
         self.static_assets_bucket.grant_read(self.origin_access_identity)
@@ -6134,7 +6833,7 @@ export function response(ctx) {
             record_name=self.site_domain,
             target=route53.RecordTarget.from_alias(targets.CloudFrontTarget(self.distribution)),
         )
-        self.site_domain_record.node.default_child.apply_removal_policy(RemovalPolicy.RETAIN)
+        self.site_domain_record.node.default_child.apply_removal_policy(RemovalPolicy.RETAIN)  # type: ignore
 
         # Add dependency: UserPoolDomain requires the parent domain A record to exist
         # Cognito custom domain login.dev.kernelworx.app needs dev.kernelworx.app to resolve

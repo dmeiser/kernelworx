@@ -7,24 +7,24 @@ This allows CDK to import resources instead of creating new ones.
 
 import functools
 import os
-from typing import Optional
+from typing import Any, Optional
 
 import boto3
 
 # Cache boto3 clients
-_clients: dict = {}
+_clients: dict[str, Any] = {}
 
 
-def get_client(service: str):
+def get_client(service: str) -> Any:
     """Get a cached boto3 client."""
     if service not in _clients:
         region = os.getenv("AWS_REGION") or os.getenv("CDK_DEFAULT_REGION", "us-east-1")
-        _clients[service] = boto3.client(service, region_name=region)
+        _clients[service] = boto3.client(service, region_name=region)  # type: ignore[call-overload]
     return _clients[service]
 
 
 @functools.lru_cache(maxsize=128)
-def lookup_user_pool_by_name(name_prefix: str) -> Optional[dict]:
+def lookup_user_pool_by_name(name_prefix: str) -> Optional[dict[str, str]]:
     """Find a Cognito User Pool by name prefix."""
     client = get_client("cognito-idp")
     try:
@@ -42,7 +42,9 @@ def lookup_user_pool_by_name(name_prefix: str) -> Optional[dict]:
 
 
 @functools.lru_cache(maxsize=128)
-def lookup_user_pool_client(user_pool_id: str, client_name_prefix: str = "") -> Optional[dict]:
+def lookup_user_pool_client(
+    user_pool_id: str, client_name_prefix: str = ""
+) -> Optional[dict[str, str]]:
     """Find a Cognito User Pool Client by name prefix. If prefix empty, return first client."""
     client = get_client("cognito-idp")
     try:
@@ -62,7 +64,7 @@ def lookup_user_pool_client(user_pool_id: str, client_name_prefix: str = "") -> 
 
 
 @functools.lru_cache(maxsize=128)
-def lookup_dynamodb_table(table_name: str) -> Optional[dict]:
+def lookup_dynamodb_table(table_name: str) -> Optional[dict[str, str]]:
     """Check if a DynamoDB table exists and get its ARN."""
     client = get_client("dynamodb")
     try:
@@ -89,7 +91,7 @@ def lookup_s3_bucket(bucket_name: str) -> bool:
 
 
 @functools.lru_cache(maxsize=128)
-def lookup_cloudfront_distribution(domain_name: str) -> Optional[dict]:
+def lookup_cloudfront_distribution(domain_name: str) -> Optional[dict[str, str]]:
     """Find a CloudFront distribution by domain alias."""
     client = get_client("cloudfront")
     try:
@@ -108,7 +110,7 @@ def lookup_cloudfront_distribution(domain_name: str) -> Optional[dict]:
 
 
 @functools.lru_cache(maxsize=128)
-def lookup_oai(comment_prefix: str) -> Optional[dict]:
+def lookup_oai(comment_prefix: str) -> Optional[dict[str, str]]:
     """Find a CloudFront Origin Access Identity by comment prefix."""
     client = get_client("cloudfront")
     try:
@@ -135,14 +137,15 @@ def lookup_certificate(domain_name: str) -> Optional[str]:
         for page in paginator.paginate():
             for cert in page.get("CertificateSummaryList", []):
                 if cert["DomainName"] == domain_name:
-                    return cert["CertificateArn"]
+                    result: str = cert["CertificateArn"]
+                    return result
     except Exception:
         pass
     return None
 
 
 @functools.lru_cache(maxsize=128)
-def lookup_appsync_api(api_name: str) -> Optional[dict]:
+def lookup_appsync_api(api_name: str) -> Optional[dict[str, str]]:
     """Find an AppSync API by name."""
     client = get_client("appsync")
     try:
@@ -166,7 +169,8 @@ def lookup_iam_role(role_name: str) -> Optional[str]:
     client = get_client("iam")
     try:
         response = client.get_role(RoleName=role_name)
-        return response["Role"]["Arn"]
+        result: str = response["Role"]["Arn"]
+        return result
     except client.exceptions.NoSuchEntityException:
         return None
     except Exception:
@@ -174,7 +178,7 @@ def lookup_iam_role(role_name: str) -> Optional[str]:
 
 
 @functools.lru_cache(maxsize=128)
-def lookup_lambda_function(function_name: str) -> Optional[dict]:
+def lookup_lambda_function(function_name: str) -> Optional[dict[str, str]]:
     """Find a Lambda function by name."""
     client = get_client("lambda")
     try:
@@ -190,7 +194,7 @@ def lookup_lambda_function(function_name: str) -> Optional[dict]:
 
 
 @functools.lru_cache(maxsize=128)
-def lookup_lambda_layer(layer_name: str) -> Optional[dict]:
+def lookup_lambda_layer(layer_name: str) -> Optional[dict[str, Any]]:
     """Find the latest version of a Lambda layer by name."""
     client = get_client("lambda")
     try:
@@ -213,11 +217,11 @@ def lookup_user_pool_domain(user_pool_id: str) -> Optional[str]:
     client = get_client("cognito-idp")
     try:
         response = client.describe_user_pool(UserPoolId=user_pool_id)
-        custom_domain = response.get("UserPool", {}).get("CustomDomain")
+        custom_domain: Optional[str] = response.get("UserPool", {}).get("CustomDomain")
         if custom_domain:
             return custom_domain
         # Also check the regular (Cognito-hosted) domain
-        domain = response.get("UserPool", {}).get("Domain")
+        domain: Optional[str] = response.get("UserPool", {}).get("Domain")
         if domain:
             return domain
     except Exception:
@@ -237,7 +241,7 @@ def lookup_cognito_domain_cloudfront(domain: str) -> Optional[str]:
     try:
         response = client.describe_user_pool_domain(Domain=domain)
         domain_desc = response.get("DomainDescription", {})
-        cf_distribution = domain_desc.get("CloudFrontDistribution")
+        cf_distribution: Optional[str] = domain_desc.get("CloudFrontDistribution")
         if cf_distribution:
             return cf_distribution
     except Exception:
@@ -246,7 +250,7 @@ def lookup_cognito_domain_cloudfront(domain: str) -> Optional[str]:
 
 
 @functools.lru_cache(maxsize=128)
-def lookup_user_pool_by_id(user_pool_id: str) -> Optional[dict]:
+def lookup_user_pool_by_id(user_pool_id: str) -> Optional[dict[str, Optional[str]]]:
     """Get a Cognito User Pool by ID (not by name)."""
     client = get_client("cognito-idp")
     try:
@@ -264,7 +268,7 @@ def lookup_user_pool_by_id(user_pool_id: str) -> Optional[dict]:
 
 
 @functools.lru_cache(maxsize=128)
-def lookup_appsync_domain(domain_name: str) -> Optional[dict]:
+def lookup_appsync_domain(domain_name: str) -> Optional[dict[str, Optional[str]]]:
     """Find an AppSync custom domain by name."""
     client = get_client("appsync")
     try:
@@ -283,14 +287,16 @@ def lookup_appsync_domain(domain_name: str) -> Optional[dict]:
 
 
 @functools.lru_cache(maxsize=128)
-def lookup_route53_record(hosted_zone_id: str, record_name: str, record_type: str = "A") -> Optional[dict]:
+def lookup_route53_record(
+    hosted_zone_id: str, record_name: str, record_type: str = "A"
+) -> Optional[dict[str, Any]]:
     """Check if a Route53 record exists.
-    
+
     Args:
         hosted_zone_id: The hosted zone ID (e.g., Z039490427CKS98SYWOJN)
         record_name: The full record name with trailing dot (e.g., dev.kernelworx.app.)
         record_type: The record type (A, CNAME, AAAA, etc.)
-    
+
     Returns:
         Dict with record info if found, None otherwise
     """
@@ -306,7 +312,11 @@ def lookup_route53_record(hosted_zone_id: str, record_name: str, record_type: st
             MaxItems="1",
         )
         records = response.get("ResourceRecordSets", [])
-        if records and records[0].get("Name") == record_name and records[0].get("Type") == record_type:
+        if (
+            records
+            and records[0].get("Name") == record_name
+            and records[0].get("Type") == record_type
+        ):
             record = records[0]
             return {
                 "name": record["Name"],
