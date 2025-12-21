@@ -132,7 +132,9 @@ export const SignupPage: React.FC = () => {
           "Password does not meet requirements: minimum 8 characters with uppercase, lowercase, numbers, and symbols",
         );
       } else if (error.name === "InvalidParameterException") {
-        setError(error.message || "Invalid input. Please check your information");
+        setError(
+          error.message || "Invalid input. Please check your information",
+        );
       } else {
         setError(error.message || "Signup failed. Please try again");
       }

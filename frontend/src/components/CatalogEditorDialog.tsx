@@ -32,6 +32,7 @@ interface Catalog {
   catalogName: string;
   isPublic: boolean;
   products: Product[];
+  isDeleted?: boolean;
 }
 
 interface CatalogEditorDialogProps {

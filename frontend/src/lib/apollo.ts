@@ -24,7 +24,7 @@ const httpLink = createHttpLink({
 
 /**
  * Authentication link - adds Cognito JWT to Authorization header
- * 
+ *
  * IMPORTANT: This link ensures a valid token exists before sending requests.
  * If no token is available, it throws an error to prevent unauthenticated
  * requests from reaching AppSync with empty ctx.identity.sub values.

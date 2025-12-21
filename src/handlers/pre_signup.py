@@ -76,9 +76,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     user_attributes = event.get("request", {}).get("userAttributes", {})
     email = user_attributes.get("email", "")
 
-    logger.info(
-        f"Pre-signup trigger: source={trigger_source}, username={username}, email={email}"
-    )
+    logger.info(f"Pre-signup trigger: source={trigger_source}, username={username}, email={email}")
 
     # Only process federated sign-ups (external providers)
     if trigger_source != "PreSignUp_ExternalProvider":
@@ -115,9 +113,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         existing_user = existing_users[0]
         existing_username = existing_user["Username"]
 
-        logger.info(
-            f"Found existing user {existing_username} for email {email}, linking identity"
-        )
+        logger.info(f"Found existing user {existing_username} for email {email}, linking identity")
 
         # Parse the federated username to get provider info
         # Format: "Google_123456789" or "Facebook_123456789"
@@ -141,9 +137,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             },
         )
 
-        logger.info(
-            f"Successfully linked {provider_name} identity to user {existing_username}"
-        )
+        logger.info(f"Successfully linked {provider_name} identity to user {existing_username}")
 
         # Raise an exception to prevent duplicate user creation
         # The federated identity is now linked to the existing user
@@ -156,9 +150,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     except cognito.exceptions.InvalidParameterException as e:
         # Link may already exist, which is fine
         logger.warning(f"Link may already exist: {e}")
-        raise Exception(
-            f"Account with email {email} already exists. Please sign in again."
-        )
+        raise Exception(f"Account with email {email} already exists. Please sign in again.")
 
     except Exception as e:
         if "already exists" in str(e) or "has been linked" in str(e):

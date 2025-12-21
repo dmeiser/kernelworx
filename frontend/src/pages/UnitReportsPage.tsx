@@ -87,13 +87,7 @@ interface UnitReport {
 
 type ReportView = "summary" | "detailed" | "unit";
 
-const SEASON_NAMES = [
-  "Fall",
-  "Spring",
-  "Summer",
-  "Winter",
-  "Annual",
-];
+const SEASON_NAMES = ["Fall", "Spring", "Summer", "Winter", "Annual"];
 
 export const UnitReportsPage: React.FC = () => {
   const currentYear = new Date().getFullYear();
@@ -140,7 +134,8 @@ export const UnitReportsPage: React.FC = () => {
     }
   }, [accountData]);
 
-  const canGenerateReport = unitType && unitNumber && seasonName && seasonYear && catalogId;
+  const canGenerateReport =
+    unitType && unitNumber && seasonName && seasonYear && catalogId;
 
   const { data, loading, error, refetch } = useQuery<{
     getUnitReport: UnitReport;
@@ -529,11 +524,15 @@ export const UnitReportsPage: React.FC = () => {
                             <>
                               {productList.map((productName) => (
                                 <TableCell key={productName} align="right">
-                                  <strong>{grandTotals[productName] || 0}</strong>
+                                  <strong>
+                                    {grandTotals[productName] || 0}
+                                  </strong>
                                 </TableCell>
                               ))}
                               <TableCell align="right">
-                                <strong>{formatCurrency(report.totalSales)}</strong>
+                                <strong>
+                                  {formatCurrency(report.totalSales)}
+                                </strong>
                               </TableCell>
                             </>
                           );

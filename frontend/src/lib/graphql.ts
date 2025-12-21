@@ -282,14 +282,8 @@ export const LIST_SHARES_BY_PROFILE = gql`
 
 export const CREATE_SELLER_PROFILE = gql`
   ${SELLER_PROFILE_FRAGMENT}
-  mutation CreateSellerProfile(
-    $sellerName: String!
-  ) {
-    createSellerProfile(
-      input: {
-        sellerName: $sellerName
-      }
-    ) {
+  mutation CreateSellerProfile($sellerName: String!) {
+    createSellerProfile(input: { sellerName: $sellerName }) {
       ...SellerProfileFields
     }
   }
@@ -298,7 +292,9 @@ export const CREATE_SELLER_PROFILE = gql`
 export const UPDATE_SELLER_PROFILE = gql`
   ${SELLER_PROFILE_FRAGMENT}
   mutation UpdateSellerProfile($profileId: ID!, $sellerName: String!) {
-    updateSellerProfile(input: { profileId: $profileId, sellerName: $sellerName }) {
+    updateSellerProfile(
+      input: { profileId: $profileId, sellerName: $sellerName }
+    ) {
       ...SellerProfileFields
     }
   }

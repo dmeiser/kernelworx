@@ -194,9 +194,12 @@ echo "   Invalidation ID: $INVALIDATION_ID"
 # ============================================================
 # Done!
 # ============================================================
+DEPLOY_TIME=$(date '+%Y-%m-%d %H:%M:%S %Z')
+
 echo ""
 echo "✅ Deployment complete!"
 echo ""
 echo "   Site URL: https://${SITE_DOMAIN}"
 echo "   CloudFront invalidation may take 1-2 minutes to complete."
+echo "   Deployed at: ${DEPLOY_TIME}"
 echo ""

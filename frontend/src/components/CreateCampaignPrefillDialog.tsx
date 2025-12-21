@@ -43,11 +43,56 @@ interface CreateCampaignPrefillDialogProps {
 
 const UNIT_TYPES = ["Pack", "Troop", "Crew", "Ship", "Post"];
 const US_STATES = [
-  "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA",
-  "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD",
-  "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ",
-  "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC",
-  "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY",
+  "AL",
+  "AK",
+  "AZ",
+  "AR",
+  "CA",
+  "CO",
+  "CT",
+  "DE",
+  "FL",
+  "GA",
+  "HI",
+  "ID",
+  "IL",
+  "IN",
+  "IA",
+  "KS",
+  "KY",
+  "LA",
+  "ME",
+  "MD",
+  "MA",
+  "MI",
+  "MN",
+  "MS",
+  "MO",
+  "MT",
+  "NE",
+  "NV",
+  "NH",
+  "NJ",
+  "NM",
+  "NY",
+  "NC",
+  "ND",
+  "OH",
+  "OK",
+  "OR",
+  "PA",
+  "RI",
+  "SC",
+  "SD",
+  "TN",
+  "TX",
+  "UT",
+  "VT",
+  "VA",
+  "WA",
+  "WV",
+  "WI",
+  "WY",
 ];
 
 const BASE_URL = window.location.origin;
@@ -82,13 +127,13 @@ export const CreateCampaignPrefillDialog: React.FC<
 
   const publicCatalogs = publicCatalogsData?.listPublicCatalogs || [];
   const myCatalogs = myCatalogsData?.listMyCatalogs || [];
-  
+
   // Deduplicate: remove catalogs from public list that are also in my list
   const myIdSet = new Set(myCatalogs.map((c) => c.catalogId));
   const filteredPublicCatalogs = publicCatalogs.filter(
-    (c) => !myIdSet.has(c.catalogId)
+    (c) => !myIdSet.has(c.catalogId),
   );
-  
+
   const catalogsLoading = publicLoading || myLoading;
 
   // Create mutation
@@ -156,7 +201,9 @@ export const CreateCampaignPrefillDialog: React.FC<
       onSuccess();
     } catch (err) {
       const errorMessage =
-        err instanceof Error ? err.message : "Failed to create campaign prefill";
+        err instanceof Error
+          ? err.message
+          : "Failed to create campaign prefill";
       setError(errorMessage);
     } finally {
       setIsSubmitting(false);

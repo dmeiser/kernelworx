@@ -27,7 +27,10 @@ import {
   Alert,
   AlertTitle,
 } from "@mui/material";
-import { Delete as DeleteIcon, Warning as WarningIcon } from "@mui/icons-material";
+import {
+  Delete as DeleteIcon,
+  Warning as WarningIcon,
+} from "@mui/icons-material";
 import {
   GET_SEASON,
   UPDATE_SEASON,
@@ -55,6 +58,7 @@ interface Catalog {
   catalogId: string;
   catalogName: string;
   catalogType: string;
+  isDeleted?: boolean;
 }
 
 export const SeasonSettingsPage: React.FC = () => {
@@ -95,7 +99,9 @@ export const SeasonSettingsPage: React.FC = () => {
 
   const publicCatalogs = publicCatalogsData?.listPublicCatalogs || [];
   const myCatalogs = myCatalogsData?.listMyCatalogs || [];
-  const allCatalogs = [...publicCatalogs, ...myCatalogs];
+  const allCatalogs = [...publicCatalogs, ...myCatalogs].filter(
+    (c) => c.isDeleted !== true,
+  );
 
   // Initialize form when season loads
   React.useEffect(() => {
@@ -341,8 +347,14 @@ export const SeasonSettingsPage: React.FC = () => {
           </Typography>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setUnitChangeConfirmOpen(false)}>Cancel</Button>
-          <Button onClick={handleSaveChanges} color="warning" variant="contained">
+          <Button onClick={() => setUnitChangeConfirmOpen(false)}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handleSaveChanges}
+            color="warning"
+            variant="contained"
+          >
             Save Anyway
           </Button>
         </DialogActions>

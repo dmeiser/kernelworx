@@ -56,7 +56,7 @@ interface EditCampaignPrefillDialogProps {
       description?: string;
       creatorMessage?: string;
       isActive?: boolean;
-    }
+    },
   ) => Promise<void>;
 }
 
@@ -68,7 +68,7 @@ export const EditCampaignPrefillDialog: React.FC<
 > = ({ open, prefill, onClose, onSave }) => {
   const [description, setDescription] = useState(prefill.description || "");
   const [creatorMessage, setCreatorMessage] = useState(
-    prefill.creatorMessage || ""
+    prefill.creatorMessage || "",
   );
   const [isActive, setIsActive] = useState(prefill.isActive);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -89,7 +89,9 @@ export const EditCampaignPrefillDialog: React.FC<
 
   const handleSubmit = async () => {
     if (creatorMessage.length > MAX_CREATOR_MESSAGE_LENGTH) {
-      setError(`Creator message must be ${MAX_CREATOR_MESSAGE_LENGTH} characters or less`);
+      setError(
+        `Creator message must be ${MAX_CREATOR_MESSAGE_LENGTH} characters or less`,
+      );
       return;
     }
 
@@ -104,7 +106,9 @@ export const EditCampaignPrefillDialog: React.FC<
       });
     } catch (err) {
       const errorMessage =
-        err instanceof Error ? err.message : "Failed to update campaign prefill";
+        err instanceof Error
+          ? err.message
+          : "Failed to update campaign prefill";
       setError(errorMessage);
     } finally {
       setIsSubmitting(false);

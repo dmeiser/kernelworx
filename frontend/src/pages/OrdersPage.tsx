@@ -86,10 +86,13 @@ export const OrdersPage: React.FC = () => {
   }, [isMobile]);
 
   // Fetch profile (for permissions check)
-  const { data: profileData } = useQuery<{ getProfile: ProfilePermissions }>(GET_PROFILE, {
-    variables: { profileId },
-    skip: !profileId,
-  });
+  const { data: profileData } = useQuery<{ getProfile: ProfilePermissions }>(
+    GET_PROFILE,
+    {
+      variables: { profileId },
+      skip: !profileId,
+    },
+  );
 
   // Fetch orders
   const {

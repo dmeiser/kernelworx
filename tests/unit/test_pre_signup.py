@@ -258,9 +258,7 @@ class TestErrorHandling:
         """Should handle case where link already exists"""
         with patch("boto3.client") as mock_client:
             mock_cognito = MagicMock()
-            mock_cognito.list_users.return_value = {
-                "Users": [{"Username": "existing-user-uuid"}]
-            }
+            mock_cognito.list_users.return_value = {"Users": [{"Username": "existing-user-uuid"}]}
             # Simulate link already exists error
             mock_cognito.exceptions = MagicMock()
             mock_cognito.exceptions.InvalidParameterException = type(
@@ -307,9 +305,7 @@ class TestErrorHandling:
 
         with patch("boto3.client") as mock_client:
             mock_cognito = MagicMock()
-            mock_cognito.list_users.return_value = {
-                "Users": [{"Username": "existing-user-uuid"}]
-            }
+            mock_cognito.list_users.return_value = {"Users": [{"Username": "existing-user-uuid"}]}
             mock_client.return_value = mock_cognito
 
             result = lambda_handler(federated_signup_event, lambda_context)

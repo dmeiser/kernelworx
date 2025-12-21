@@ -44,8 +44,9 @@ export const LoginPage: React.FC = () => {
   const [showPasskeyPrompt, setShowPasskeyPrompt] = useState(false);
 
   // Get the redirect path from location state (defaults to /profiles)
-  const from = (location.state as { from?: { pathname?: string } } | undefined)
-    ?.from?.pathname || "/profiles";
+  const from =
+    (location.state as { from?: { pathname?: string } } | undefined)?.from
+      ?.pathname || "/profiles";
 
   // If already logged in, redirect to intended destination
   useEffect(() => {
@@ -218,9 +219,9 @@ export const LoginPage: React.FC = () => {
     try {
       // Save redirect path to sessionStorage for OAuth callback
       if (from !== "/profiles") {
-        sessionStorage.setItem('oauth_redirect', from);
+        sessionStorage.setItem("oauth_redirect", from);
       }
-      
+
       // Use Amplify's signInWithRedirect for social login
       // This ensures proper OAuth callback handling
       await signInWithRedirect({ provider });

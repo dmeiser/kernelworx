@@ -90,7 +90,10 @@ export const SeasonLayout: React.FC = () => {
   // Debug logging
   if (seasonError) {
     console.error("Season query error:", seasonError);
-    const apolloError = seasonError as { graphQLErrors?: unknown; networkError?: unknown };
+    const apolloError = seasonError as {
+      graphQLErrors?: unknown;
+      networkError?: unknown;
+    };
     console.log("Season error details:", {
       message: seasonError.message,
       graphQLErrors: apolloError.graphQLErrors,
@@ -161,7 +164,9 @@ export const SeasonLayout: React.FC = () => {
         >
           {profile?.sellerName || "Loading..."}
         </Link>
-        <Typography color="text.primary">{season.seasonName} {season.seasonYear}</Typography>
+        <Typography color="text.primary">
+          {season.seasonName} {season.seasonYear}
+        </Typography>
       </Breadcrumbs>
 
       {/* Header */}

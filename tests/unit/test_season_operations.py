@@ -178,6 +178,7 @@ class TestCreateSeason:
         """Sample campaign prefill."""
         return {
             "prefillCode": "PACK158FALL2024",
+            "SK": "METADATA",
             "seasonName": "Fall",
             "seasonYear": 2024,
             "catalogId": "catalog-prefill",
@@ -421,11 +422,6 @@ class TestCreateSeason:
         # Test missing catalogId
         event["arguments"]["input"]["seasonYear"] = 2024
         with pytest.raises(ValueError, match="catalogId is required"):
-            create_season(event, lambda_context)
-
-        # Test missing startDate
-        event["arguments"]["input"]["catalogId"] = "catalog-123"
-        with pytest.raises(ValueError, match="startDate is required"):
             create_season(event, lambda_context)
 
     @patch("src.handlers.season_operations.check_profile_access")
@@ -691,8 +687,8 @@ class TestGetProfile:
         """Test successful profile retrieval."""
         from src.handlers.season_operations import _get_profile
 
-        mock_profiles_table.get_item.return_value = {
-            "Item": {"profileId": "PROFILE#123", "sellerName": "Test"}
+        mock_profiles_table.query.return_value = {
+            "Items": [{"profileId": "PROFILE#123", "sellerName": "Test"}]
         }
 
         result = _get_profile("PROFILE#123")
@@ -705,7 +701,7 @@ class TestGetProfile:
         """Test profile not found returns None."""
         from src.handlers.season_operations import _get_profile
 
-        mock_profiles_table.get_item.return_value = {}
+        mock_profiles_table.query.return_value = {"Items": []}
 
         result = _get_profile("NONEXISTENT")
 
@@ -716,7 +712,7 @@ class TestGetProfile:
         """Test profile error returns None."""
         from src.handlers.season_operations import _get_profile
 
-        mock_profiles_table.get_item.side_effect = Exception("DynamoDB error")
+        mock_profiles_table.query.side_effect = Exception("DynamoDB error")
 
         result = _get_profile("PROFILE#123")
 

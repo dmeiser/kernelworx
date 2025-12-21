@@ -38,21 +38,18 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   /**
    * Fetch account data from GraphQL API
    */
-  const fetchAccountData = useCallback(
-    async (): Promise<Account | null> => {
-      try {
-        const { data } = await apolloClient.query<{ getMyAccount: Account }>({
-          query: GET_MY_ACCOUNT,
-          fetchPolicy: "network-only", // Always fetch fresh data
-        });
-        return data?.getMyAccount ?? null;
-      } catch (error) {
-        console.error("Failed to fetch account data:", error);
-        return null;
-      }
-    },
-    [],
-  );
+  const fetchAccountData = useCallback(async (): Promise<Account | null> => {
+    try {
+      const { data } = await apolloClient.query<{ getMyAccount: Account }>({
+        query: GET_MY_ACCOUNT,
+        fetchPolicy: "network-only", // Always fetch fresh data
+      });
+      return data?.getMyAccount ?? null;
+    } catch (error) {
+      console.error("Failed to fetch account data:", error);
+      return null;
+    }
+  }, []);
 
   /**
    * Check current auth session and load account data
@@ -115,9 +112,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           // User returned from Hosted UI - refresh session
           checkAuthSession().then(() => {
             // Check if there's a saved redirect path from before OAuth login
-            const savedRedirect = sessionStorage.getItem('oauth_redirect');
+            const savedRedirect = sessionStorage.getItem("oauth_redirect");
             if (savedRedirect) {
-              sessionStorage.removeItem('oauth_redirect');
+              sessionStorage.removeItem("oauth_redirect");
               window.location.href = savedRedirect;
             }
           });

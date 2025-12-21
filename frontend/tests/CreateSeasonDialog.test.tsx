@@ -32,11 +32,13 @@ const mockPublicCatalogs = [
     catalogId: 'catalog-1',
     catalogName: 'Official 2025 Catalog',
     catalogType: 'PUBLIC',
+    isDeleted: false,
   },
   {
     catalogId: 'catalog-2',
     catalogName: 'Troop 123 Custom',
     catalogType: 'PUBLIC',
+    isDeleted: false,
   },
 ];
 
@@ -45,6 +47,7 @@ const mockMyCatalogs = [
     catalogId: 'catalog-3',
     catalogName: 'My Private Catalog',
     catalogType: 'PRIVATE',
+    isDeleted: false,
   },
 ];
 

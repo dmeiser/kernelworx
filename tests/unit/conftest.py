@@ -340,9 +340,9 @@ def sample_profile(
     GSI: profileId-index for direct profile lookups
     """
     # Multi-table design V2: ownerAccountId is PK, profileId is SK
-    # Store ownerAccountId with ACCOUNT# prefix for consistency with resolver ownership checks
+    # Store ownerAccountId with ACCOUNT# prefix for consistency with production
     profile = {
-        "ownerAccountId": sample_account_id,  # Note: tests use raw ID, real data uses ACCOUNT# prefix
+        "ownerAccountId": f"ACCOUNT#{sample_account_id}",  # Use ACCOUNT# prefix like production
         "profileId": sample_profile_id,
         "sellerName": "Test Scout",
         "createdAt": datetime.now(timezone.utc).isoformat(),

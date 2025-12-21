@@ -62,6 +62,20 @@ def check_profile_access(
 
     profiles_table = get_profiles_table()
 
+    # OPTIMIZATION: Try direct get_item first (strongly consistent, handles newly created profiles)
+    # This is faster and avoids GSI eventual consistency issues for owner checks
+    # Profile table uses ACCOUNT# prefix for ownerAccountId
+    profile = None
+    direct_response = profiles_table.get_item(
+        Key={"ownerAccountId": f"ACCOUNT#{caller_account_id}", "profileId": profile_id}
+    )
+
+    if "Item" in direct_response:
+        # Found via direct lookup - caller is the owner
+        profile = direct_response["Item"]
+        return True  # Owner has full access
+
+    # Not the owner, query GSI to find the actual owner
     # Multi-table design V2: Query profileId-index GSI
     # Profile table structure: PK=ownerAccountId, SK=profileId, GSI=profileId-index
     response = profiles_table.query(
@@ -77,13 +91,7 @@ def check_profile_access(
 
     profile = items[0]
 
-    # Check if caller is owner
-    # ownerAccountId in storage includes ACCOUNT# prefix
-    stored_owner = profile.get("ownerAccountId", "")
-    # Handle both with and without prefix for backward compatibility
-    if stored_owner == caller_account_id or stored_owner == f"ACCOUNT#{caller_account_id}":
-        return True
-
+    # At this point, caller is not the owner (we already checked that above)
     # Check if caller has appropriate share (NOW USES SHARES TABLE)
     # Shares table: PK=profileId, SK=targetAccountId
     shares_table = get_shares_table()

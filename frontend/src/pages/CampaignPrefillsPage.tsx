@@ -76,7 +76,7 @@ const BASE_URL = window.location.origin;
 export const CampaignPrefillsPage: React.FC = () => {
   const navigate = useNavigate();
   const [editingPrefill, setEditingPrefill] = useState<CampaignPrefill | null>(
-    null
+    null,
   );
   const [deactivateDialogOpen, setDeactivateDialogOpen] = useState(false);
   const [prefillToDeactivate, setPrefillToDeactivate] =
@@ -88,14 +88,9 @@ export const CampaignPrefillsPage: React.FC = () => {
   const [snackbarMessage, setSnackbarMessage] = useState("");
 
   // Fetch user's campaign prefills
-  const {
-    data,
-    loading,
-    error,
-    refetch,
-  } = useQuery<{ listMyCampaignPrefills: CampaignPrefill[] }>(
-    LIST_MY_CAMPAIGN_PREFILLS
-  );
+  const { data, loading, error, refetch } = useQuery<{
+    listMyCampaignPrefills: CampaignPrefill[];
+  }>(LIST_MY_CAMPAIGN_PREFILLS);
 
   // Update mutation (for editing)
   const [updatePrefill] = useMutation(UPDATE_CAMPAIGN_PREFILL, {
@@ -193,7 +188,11 @@ export const CampaignPrefillsPage: React.FC = () => {
 
   const handleSaveEdit = async (
     prefillCode: string,
-    updates: { description?: string; creatorMessage?: string; isActive?: boolean }
+    updates: {
+      description?: string;
+      creatorMessage?: string;
+      isActive?: boolean;
+    },
   ) => {
     await updatePrefill({
       variables: {
@@ -325,7 +324,11 @@ export const CampaignPrefillsPage: React.FC = () => {
                   </TableCell>
                   <TableCell>
                     {prefill.unitType} {prefill.unitNumber}
-                    <Typography variant="caption" display="block" color="text.secondary">
+                    <Typography
+                      variant="caption"
+                      display="block"
+                      color="text.secondary"
+                    >
                       {prefill.city}, {prefill.state}
                     </Typography>
                   </TableCell>
@@ -347,7 +350,11 @@ export const CampaignPrefillsPage: React.FC = () => {
                     )}
                   </TableCell>
                   <TableCell align="right">
-                    <Stack direction="row" spacing={0.5} justifyContent="flex-end">
+                    <Stack
+                      direction="row"
+                      spacing={0.5}
+                      justifyContent="flex-end"
+                    >
                       <Tooltip title="Copy Link">
                         <IconButton
                           size="small"

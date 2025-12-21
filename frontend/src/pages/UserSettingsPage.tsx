@@ -226,7 +226,10 @@ export const UserSettingsPage: React.FC = () => {
     } catch (err: unknown) {
       console.error("Password change failed:", err);
       setPasswordError(
-        getErrorMessage(err, "Failed to change password. Please check your current password."),
+        getErrorMessage(
+          err,
+          "Failed to change password. Please check your current password.",
+        ),
       );
     } finally {
       setPasswordLoading(false);
@@ -370,7 +373,10 @@ export const UserSettingsPage: React.FC = () => {
     } catch (err: unknown) {
       console.error("Passkey registration failed:", err);
       setPasskeyError(
-        getErrorMessage(err, "Failed to register passkey. Make sure your browser supports passkeys and you have a compatible authenticator."),
+        getErrorMessage(
+          err,
+          "Failed to register passkey. Make sure your browser supports passkeys and you have a compatible authenticator.",
+        ),
       );
     } finally {
       setPasskeyLoading(false);
@@ -488,7 +494,9 @@ export const UserSettingsPage: React.FC = () => {
         );
       }
     } catch (err: unknown) {
-      setEmailUpdateError(getErrorMessage(err, "Failed to request email update"));
+      setEmailUpdateError(
+        getErrorMessage(err, "Failed to request email update"),
+      );
     } finally {
       setEmailUpdateLoading(false);
     }

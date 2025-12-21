@@ -4,7 +4,11 @@
 
 import React, { useState, useEffect } from "react";
 import { useAuth } from "../contexts/AuthContext";
-import { useLazyQuery, useMutation, useApolloClient } from "@apollo/client/react";
+import {
+  useLazyQuery,
+  useMutation,
+  useApolloClient,
+} from "@apollo/client/react";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
   Typography,
@@ -75,7 +79,7 @@ export const ProfilesPage: React.FC = () => {
     if (returnPath && !createDialogOpen) {
       setCreateDialogOpen(true);
     }
-  }, [returnPath]);
+  }, [returnPath, createDialogOpen]);
 
   // Fetch account preferences
   const [loadAccount, { data: accountData, loading: accountLoading }] =
@@ -134,11 +138,14 @@ export const ProfilesPage: React.FC = () => {
   };
 
   // Fetch owned profiles
-  const [loadMyProfiles, {
-    data: myProfilesData,
-    loading: myProfilesLoading,
-    error: myProfilesError,
-  }] = useLazyQuery<{ listMyProfiles: Profile[] }>(LIST_MY_PROFILES, {
+  const [
+    loadMyProfiles,
+    {
+      data: myProfilesData,
+      loading: myProfilesLoading,
+      error: myProfilesError,
+    },
+  ] = useLazyQuery<{ listMyProfiles: Profile[] }>(LIST_MY_PROFILES, {
     fetchPolicy: "network-only",
     notifyOnNetworkStatusChange: true,
   });
@@ -147,29 +154,35 @@ export const ProfilesPage: React.FC = () => {
   const apolloClient = useApolloClient();
   const [sharedProfiles, setSharedProfiles] = useState<Profile[]>([]);
   const [sharedProfilesLoading, setSharedProfilesLoading] = useState(false);
-  const [sharedProfilesError, setSharedProfilesError] = useState<Error | null>(null);
+  const [sharedProfilesError, setSharedProfilesError] = useState<Error | null>(
+    null,
+  );
   const [sharedProfilesLoaded, setSharedProfilesLoaded] = useState(false);
 
   // Function to load shared profiles - now returns full profile data in a single query
   const loadSharedProfiles = React.useCallback(async () => {
     setSharedProfilesLoading(true);
     setSharedProfilesError(null);
-    
+
     try {
       // Single query returns full profile data with permissions
       const result = await apolloClient.query<{
-        listMyShares: Profile[]
+        listMyShares: Profile[];
       }>({
         query: LIST_MY_SHARES,
         fetchPolicy: "network-only",
       });
-      
+
       const profiles = result.data?.listMyShares || [];
       setSharedProfiles(profiles);
       setSharedProfilesLoaded(true);
     } catch (err) {
       console.error("Failed to load shared profiles:", err);
-      setSharedProfilesError(err instanceof Error ? err : new Error("Failed to load shared profiles"));
+      setSharedProfilesError(
+        err instanceof Error
+          ? err
+          : new Error("Failed to load shared profiles"),
+      );
     } finally {
       setSharedProfilesLoading(false);
     }
@@ -178,7 +191,7 @@ export const ProfilesPage: React.FC = () => {
   // When auth becomes ready, trigger queries explicitly to avoid race conditions
   // Note: We use a ref to track if we've already triggered the queries to prevent double-firing
   const queriesTriggeredRef = React.useRef(false);
-  
+
   useEffect(() => {
     if (!authLoading && isAuthenticated && !queriesTriggeredRef.current) {
       queriesTriggeredRef.current = true;
@@ -187,16 +200,31 @@ export const ProfilesPage: React.FC = () => {
       loadMyProfiles();
       loadSharedProfiles();
     }
-  }, [authLoading, isAuthenticated, loadAccount, loadMyProfiles, loadSharedProfiles]);
-
+  }, [
+    authLoading,
+    isAuthenticated,
+    loadAccount,
+    loadMyProfiles,
+    loadSharedProfiles,
+  ]);
 
   // Create profile mutation
   const [createProfile] = useMutation(CREATE_SELLER_PROFILE, {
-    onCompleted: () => {
-      loadMyProfiles();
+    refetchQueries: [{ query: LIST_MY_PROFILES }],
+    awaitRefetchQueries: true,
+    onCompleted: async () => {
+      // Reload profiles and wait for the result
+      await loadMyProfiles();
       // If we came from a campaign prefill flow, return to it
       if (returnPath) {
-        navigate(returnPath, { replace: true });
+        // Longer delay to ensure DynamoDB GSI consistency
+        // The backend queries profileId-index GSI which has eventual consistency
+        setTimeout(() => {
+          navigate(returnPath, {
+            replace: true,
+            state: { fromProfileCreation: true },
+          });
+        }, 1500);
       }
     },
   });
@@ -234,7 +262,7 @@ export const ProfilesPage: React.FC = () => {
   };
 
   const myProfiles: Profile[] = myProfilesData?.listMyProfiles || [];
-  
+
   // Filter shared profiles based on read-only preference
   const filteredSharedProfiles = sharedProfiles.filter((profile) => {
     const hasWrite = profile.permissions.includes("WRITE");
@@ -246,7 +274,8 @@ export const ProfilesPage: React.FC = () => {
   // Wait for BOTH profile queries to complete before showing any profiles
   // This prevents the jarring UX of owned profiles appearing before shared profiles
   const profilesLoading = myProfilesLoading || sharedProfilesLoading;
-  const bothProfilesLoaded = myProfilesData !== undefined && sharedProfilesLoaded;
+  const bothProfilesLoaded =
+    myProfilesData !== undefined && sharedProfilesLoaded;
   const loading = profilesLoading || accountLoading;
   const error = myProfilesError || sharedProfilesError;
 
@@ -367,12 +396,14 @@ export const ProfilesPage: React.FC = () => {
       )}
 
       {/* Empty State */}
-      {myProfiles.length === 0 && filteredSharedProfiles.length === 0 && !loading && (
-        <Alert severity="info">
-          You don't have any seller profiles yet. Click "Create Seller" to get
-          started!
-        </Alert>
-      )}
+      {myProfiles.length === 0 &&
+        filteredSharedProfiles.length === 0 &&
+        !loading && (
+          <Alert severity="info">
+            You don't have any seller profiles yet. Click "Create Seller" to get
+            started!
+          </Alert>
+        )}
 
       {/* Dialogs */}
       <CreateProfileDialog

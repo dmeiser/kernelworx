@@ -43,7 +43,7 @@ def _build_unit_season_key(
 def _get_prefill(prefill_code: str) -> Optional[Dict[str, Any]]:
     """Retrieve a campaign prefill by code."""
     try:
-        response = prefills_table.get_item(Key={"prefillCode": prefill_code})
+        response = prefills_table.get_item(Key={"prefillCode": prefill_code, "SK": "METADATA"})
         return response.get("Item")
     except Exception as e:
         logger.error(f"Error fetching prefill {prefill_code}: {str(e)}")
@@ -51,10 +51,16 @@ def _get_prefill(prefill_code: str) -> Optional[Dict[str, Any]]:
 
 
 def _get_profile(profile_id: str) -> Optional[Dict[str, Any]]:
-    """Retrieve a profile by ID."""
+    """Retrieve a profile by ID using the profileId-index GSI."""
     try:
-        response = profiles_table.get_item(Key={"profileId": profile_id})
-        return response.get("Item")
+        response = profiles_table.query(
+            IndexName="profileId-index",
+            KeyConditionExpression="profileId = :profileId",
+            ExpressionAttributeValues={":profileId": profile_id},
+            Limit=1,
+        )
+        items = response.get("Items", [])
+        return items[0] if items else None
     except Exception as e:
         logger.error(f"Error fetching profile {profile_id}: {str(e)}")
         return None
@@ -156,8 +162,6 @@ def create_season(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             raise ValueError("seasonYear is required")
         if not catalog_id:
             raise ValueError("catalogId is required")
-        if not start_date:
-            raise ValueError("startDate is required")
 
         # Validate unit fields consistency
         if unit_type:

@@ -82,6 +82,7 @@ interface Catalog {
   catalogId: string;
   catalogName: string;
   catalogType: string;
+  isDeleted?: boolean;
 }
 
 const UNIT_TYPES = [
@@ -189,18 +190,32 @@ export const CreateSeasonPage: React.FC = () => {
     {
       variables: { prefillCode: effectivePrefillCode },
       skip: !effectivePrefillCode,
-    }
+    },
   );
 
   const prefill = prefillData?.getCampaignPrefill;
   const isPrefillMode = !!effectivePrefillCode && !!prefill && prefill.isActive;
 
   // Query for user's profiles
-  const { data: profilesData, loading: profilesLoading } = useQuery<{
+  const {
+    data: profilesData,
+    loading: profilesLoading,
+    refetch: refetchProfiles,
+  } = useQuery<{
     listMyProfiles: SellerProfile[];
   }>(LIST_MY_PROFILES);
 
-  const profiles = profilesData?.listMyProfiles || [];
+  const profiles = useMemo(
+    () => profilesData?.listMyProfiles || [],
+    [profilesData],
+  );
+
+  // Refetch profiles when returning from profile creation
+  useEffect(() => {
+    if (location.state?.fromProfileCreation) {
+      refetchProfiles();
+    }
+  }, [location.state, refetchProfiles]);
 
   // Query for catalogs (only in manual mode)
   const { data: publicCatalogsData, loading: publicLoading } = useQuery<{
@@ -214,11 +229,12 @@ export const CreateSeasonPage: React.FC = () => {
   const publicCatalogs = publicCatalogsData?.listPublicCatalogs || [];
   const myCatalogs = myCatalogsData?.listMyCatalogs || [];
 
-  // Deduplicate catalogs
+  // Deduplicate and filter deleted catalogs
   const myIdSet = new Set(myCatalogs.map((c) => c.catalogId));
   const filteredPublicCatalogs = publicCatalogs.filter(
-    (c) => !myIdSet.has(c.catalogId)
+    (c) => !myIdSet.has(c.catalogId) && c.isDeleted !== true,
   );
+  const filteredMyCatalogs = myCatalogs.filter((c) => c.isDeleted !== true);
 
   const catalogsLoading = publicLoading || myLoading;
 
@@ -252,7 +268,12 @@ export const CreateSeasonPage: React.FC = () => {
 
   // Redirect to profile creation if user has no profiles in prefill mode
   useEffect(() => {
-    if (isPrefillMode && !profilesLoading && profiles.length === 0 && effectivePrefillCode) {
+    if (
+      isPrefillMode &&
+      !profilesLoading &&
+      profiles.length === 0 &&
+      effectivePrefillCode
+    ) {
       // User needs to create a profile first
       navigate("/profiles", {
         state: {
@@ -263,7 +284,13 @@ export const CreateSeasonPage: React.FC = () => {
         replace: true,
       });
     }
-  }, [isPrefillMode, profilesLoading, profiles.length, effectivePrefillCode, navigate]);
+  }, [
+    isPrefillMode,
+    profilesLoading,
+    profiles.length,
+    effectivePrefillCode,
+    navigate,
+  ]);
 
   // Set form values from prefill when loaded
   useEffect(() => {
@@ -343,12 +370,15 @@ export const CreateSeasonPage: React.FC = () => {
     (code: string) => {
       navigate(`/c/${code}`);
     },
-    [navigate]
+    [navigate],
   );
 
   const handleSubmit = async () => {
     if (!profileId) {
-      setToastMessage({ message: "Please select a profile", severity: "error" });
+      setToastMessage({
+        message: "Please select a profile",
+        severity: "error",
+      });
       return;
     }
 
@@ -356,7 +386,8 @@ export const CreateSeasonPage: React.FC = () => {
     if (!isPrefillMode && unitType) {
       if (!unitNumber || !city || !state) {
         setToastMessage({
-          message: "When specifying a unit, all fields (unit number, city, state) are required",
+          message:
+            "When specifying a unit, all fields (unit number, city, state) are required",
           severity: "error",
         });
         return;
@@ -408,7 +439,7 @@ export const CreateSeasonPage: React.FC = () => {
           });
         }
         navigate(
-          `/profiles/${encodeURIComponent(profileId)}/seasons/${encodeURIComponent(createdSeason.seasonId)}`
+          `/profiles/${encodeURIComponent(profileId)}/seasons/${encodeURIComponent(createdSeason.seasonId)}`,
         );
       }
     } catch (error) {
@@ -496,7 +527,10 @@ export const CreateSeasonPage: React.FC = () => {
                   Campaign by {prefill.createdByName}
                 </Typography>
                 {prefill.creatorMessage && (
-                  <Typography variant="body1" sx={{ mt: 1, fontStyle: "italic" }}>
+                  <Typography
+                    variant="body1"
+                    sx={{ mt: 1, fontStyle: "italic" }}
+                  >
                     "{prefill.creatorMessage}"
                   </Typography>
                 )}
@@ -523,7 +557,9 @@ export const CreateSeasonPage: React.FC = () => {
             <Button
               color="inherit"
               size="small"
-              onClick={() => handleUsePrefill(discoveredPrefills[0].prefillCode)}
+              onClick={() =>
+                handleUsePrefill(discoveredPrefills[0].prefillCode)
+              }
             >
               Use Campaign
             </Button>
@@ -678,12 +714,12 @@ export const CreateSeasonPage: React.FC = () => {
                     </MenuItem>
                   )}
                   {!catalogsLoading &&
-                    myCatalogs.length === 0 &&
+                    filteredMyCatalogs.length === 0 &&
                     filteredPublicCatalogs.length === 0 && (
                       <MenuItem disabled>No catalogs available</MenuItem>
                     )}
 
-                  {myCatalogs.length > 0 && [
+                  {filteredMyCatalogs.length > 0 && [
                     <MenuItem
                       key="my-header"
                       disabled
@@ -695,13 +731,14 @@ export const CreateSeasonPage: React.FC = () => {
                     >
                       My Catalogs
                     </MenuItem>,
-                    ...myCatalogs.map((catalog) => (
+                    ...filteredMyCatalogs.map((catalog) => (
                       <MenuItem
                         key={catalog.catalogId}
                         value={catalog.catalogId}
                       >
                         {catalog.catalogName}
-                        {catalog.catalogType === "ADMIN_MANAGED" && " (Official)"}
+                        {catalog.catalogType === "ADMIN_MANAGED" &&
+                          " (Official)"}
                       </MenuItem>
                     )),
                   ]}
@@ -724,7 +761,8 @@ export const CreateSeasonPage: React.FC = () => {
                         value={catalog.catalogId}
                       >
                         {catalog.catalogName}
-                        {catalog.catalogType === "ADMIN_MANAGED" && " (Official)"}
+                        {catalog.catalogType === "ADMIN_MANAGED" &&
+                          " (Official)"}
                       </MenuItem>
                     )),
                   ]}
@@ -775,7 +813,9 @@ export const CreateSeasonPage: React.FC = () => {
                         onChange={(e) => setUnitNumber(e.target.value)}
                         disabled={submitting || !unitType}
                         inputProps={{ min: 1, step: 1 }}
-                        helperText={unitType ? "Required" : "Select unit type first"}
+                        helperText={
+                          unitType ? "Required" : "Select unit type first"
+                        }
                       />
                     </Stack>
                     <Stack direction="row" spacing={2}>
@@ -785,7 +825,9 @@ export const CreateSeasonPage: React.FC = () => {
                         value={city}
                         onChange={(e) => setCity(e.target.value)}
                         disabled={submitting || !unitType}
-                        helperText={unitType ? "Required for unit identification" : ""}
+                        helperText={
+                          unitType ? "Required for unit identification" : ""
+                        }
                       />
                       <FormControl fullWidth disabled={submitting || !unitType}>
                         <InputLabel>State</InputLabel>
@@ -817,8 +859,9 @@ export const CreateSeasonPage: React.FC = () => {
               type="date"
               value={startDate}
               onChange={(e) => setStartDate(e.target.value)}
-              disabled={submitting}
+              disabled={submitting || isPrefillMode}
               InputLabelProps={{ shrink: true }}
+              helperText={isPrefillMode ? "Set by campaign creator" : ""}
             />
             <TextField
               fullWidth
@@ -826,8 +869,9 @@ export const CreateSeasonPage: React.FC = () => {
               type="date"
               value={endDate}
               onChange={(e) => setEndDate(e.target.value)}
-              disabled={submitting}
+              disabled={submitting || isPrefillMode}
               InputLabelProps={{ shrink: true }}
+              helperText={isPrefillMode ? "Set by campaign creator" : ""}
             />
           </Stack>
 

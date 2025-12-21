@@ -45,8 +45,14 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   // Redirect to login if not authenticated
   if (!isAuthenticated) {
     // Save the intended destination for after login
-    sessionStorage.setItem('oauth_redirect', location.pathname);
-    return <Navigate to="/login" state={{ from: { pathname: location.pathname } }} replace />;
+    sessionStorage.setItem("oauth_redirect", location.pathname);
+    return (
+      <Navigate
+        to="/login"
+        state={{ from: { pathname: location.pathname } }}
+        replace
+      />
+    );
   }
 
   // Show access denied if admin required but user is not admin

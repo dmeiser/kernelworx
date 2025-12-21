@@ -59,6 +59,7 @@ interface Catalog {
   products: Product[];
   createdAt: string;
   updatedAt: string;
+  isDeleted?: boolean;
 }
 
 export const CatalogsPage: React.FC = () => {
@@ -174,11 +175,14 @@ export const CatalogsPage: React.FC = () => {
   const publicCatalogs = publicData?.listPublicCatalogs || [];
   const myPrivateCatalogs = myData?.listMyCatalogs || [];
 
-  // Combine private catalogs with public catalogs I own
+  // Combine private catalogs with public catalogs I own, excluding deleted catalogs
   const myCatalogs = [
-    ...myPrivateCatalogs,
-    ...publicCatalogs.filter((catalog) =>
-      myPrivateCatalogs.every((myCat) => myCat.catalogId !== catalog.catalogId),
+    ...myPrivateCatalogs.filter((c) => c.isDeleted !== true),
+    ...publicCatalogs.filter(
+      (catalog) =>
+        myPrivateCatalogs.every(
+          (myCat) => myCat.catalogId !== catalog.catalogId,
+        ) && catalog.isDeleted !== true,
     ),
   ];
 

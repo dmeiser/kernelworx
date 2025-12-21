@@ -151,31 +151,32 @@ export const AdminPage: React.FC = () => {
                       ownerAccountId: string;
                       isOwner: boolean;
                     }) => (
-                    <TableRow key={profile.profileId} hover>
-                      <TableCell>
-                        <Typography variant="body2" fontFamily="monospace">
-                          {profile.profileId.substring(0, 12)}...
-                        </Typography>
-                      </TableCell>
-                      <TableCell>
-                        <Typography variant="body2" fontWeight="medium">
-                          {profile.sellerName}
-                        </Typography>
-                      </TableCell>
-                      <TableCell>
-                        <Typography variant="body2" color="text.secondary">
-                          {profile.ownerAccountId.substring(0, 12)}...
-                        </Typography>
-                      </TableCell>
-                      <TableCell>
-                        {profile.isOwner ? (
-                          <Chip label="Owner" color="primary" size="small" />
-                        ) : (
-                          <Chip label="Shared" color="default" size="small" />
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                      <TableRow key={profile.profileId} hover>
+                        <TableCell>
+                          <Typography variant="body2" fontFamily="monospace">
+                            {profile.profileId.substring(0, 12)}...
+                          </Typography>
+                        </TableCell>
+                        <TableCell>
+                          <Typography variant="body2" fontWeight="medium">
+                            {profile.sellerName}
+                          </Typography>
+                        </TableCell>
+                        <TableCell>
+                          <Typography variant="body2" color="text.secondary">
+                            {profile.ownerAccountId.substring(0, 12)}...
+                          </Typography>
+                        </TableCell>
+                        <TableCell>
+                          {profile.isOwner ? (
+                            <Chip label="Owner" color="primary" size="small" />
+                          ) : (
+                            <Chip label="Shared" color="default" size="small" />
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ),
+                  )}
                 </TableBody>
               </Table>
             </TableContainer>
@@ -218,28 +219,33 @@ export const AdminPage: React.FC = () => {
                   description: string;
                   isActive: boolean;
                 }) => (
-                <Paper key={catalog.catalogId} variant="outlined" sx={{ p: 2 }}>
-                  <Stack
-                    direction="row"
-                    justifyContent="space-between"
-                    alignItems="start"
+                  <Paper
+                    key={catalog.catalogId}
+                    variant="outlined"
+                    sx={{ p: 2 }}
                   >
-                    <Box>
-                      <Typography variant="subtitle1" fontWeight="medium">
-                        {catalog.name}
-                      </Typography>
-                      <Typography variant="body2" color="text.secondary">
-                        {catalog.description}
-                      </Typography>
-                    </Box>
-                    <Chip
-                      label={catalog.isActive ? "Active" : "Inactive"}
-                      color={catalog.isActive ? "success" : "default"}
-                      size="small"
-                    />
-                  </Stack>
-                </Paper>
-              ))}
+                    <Stack
+                      direction="row"
+                      justifyContent="space-between"
+                      alignItems="start"
+                    >
+                      <Box>
+                        <Typography variant="subtitle1" fontWeight="medium">
+                          {catalog.name}
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          {catalog.description}
+                        </Typography>
+                      </Box>
+                      <Chip
+                        label={catalog.isActive ? "Active" : "Inactive"}
+                        color={catalog.isActive ? "success" : "default"}
+                        size="small"
+                      />
+                    </Stack>
+                  </Paper>
+                ),
+              )}
             </Stack>
           )}
 

@@ -87,6 +87,8 @@ export const ProfileSeasonsPage: React.FC = () => {
     seasonName: string,
     seasonYear: number,
     catalogId: string,
+    startDate?: string,
+    endDate?: string,
   ) => {
     if (!profileId) return;
 
@@ -97,6 +99,8 @@ export const ProfileSeasonsPage: React.FC = () => {
           seasonName,
           seasonYear,
           catalogId,
+          ...(startDate && { startDate: new Date(startDate).toISOString() }),
+          ...(endDate && { endDate: new Date(endDate).toISOString() }),
         },
       },
     });

@@ -125,10 +125,13 @@ export const OrderEditorPage: React.FC = () => {
   });
 
   // Fetch profile for permissions
-  const { data: profileData } = useQuery<{ getProfile: ProfileData }>(GET_PROFILE, {
-    variables: { profileId },
-    skip: !profileId,
-  });
+  const { data: profileData } = useQuery<{ getProfile: ProfileData }>(
+    GET_PROFILE,
+    {
+      variables: { profileId },
+      skip: !profileId,
+    },
+  );
 
   // Fetch existing order if editing
   const { data: orderData, loading: orderLoading } = useQuery<{

@@ -35,6 +35,7 @@ interface Catalog {
   catalogId: string;
   catalogName: string;
   catalogType: string;
+  isDeleted?: boolean;
 }
 
 interface CampaignPrefill {
@@ -44,11 +45,56 @@ interface CampaignPrefill {
 
 const UNIT_TYPES = ["Pack", "Troop", "Crew", "Ship", "Post"];
 const US_STATES = [
-  "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA",
-  "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD",
-  "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ",
-  "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC",
-  "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY",
+  "AL",
+  "AK",
+  "AZ",
+  "AR",
+  "CA",
+  "CO",
+  "CT",
+  "DE",
+  "FL",
+  "GA",
+  "HI",
+  "ID",
+  "IL",
+  "IN",
+  "IA",
+  "KS",
+  "KY",
+  "LA",
+  "ME",
+  "MD",
+  "MA",
+  "MI",
+  "MN",
+  "MS",
+  "MO",
+  "MT",
+  "NE",
+  "NV",
+  "NH",
+  "NJ",
+  "NM",
+  "NY",
+  "NC",
+  "ND",
+  "OH",
+  "OK",
+  "OR",
+  "PA",
+  "RI",
+  "SC",
+  "SD",
+  "TN",
+  "TX",
+  "UT",
+  "VT",
+  "VA",
+  "WA",
+  "WV",
+  "WI",
+  "WY",
 ];
 
 const BASE_URL = window.location.origin;
@@ -74,10 +120,9 @@ export const CreateCampaignPrefillPage: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Fetch active prefill count
-  const { data: prefillsData } = useQuery<{ listMyCampaignPrefills: CampaignPrefill[] }>(
-    LIST_MY_CAMPAIGN_PREFILLS,
-    { fetchPolicy: "network-only" }
-  );
+  const { data: prefillsData } = useQuery<{
+    listMyCampaignPrefills: CampaignPrefill[];
+  }>(LIST_MY_CAMPAIGN_PREFILLS, { fetchPolicy: "network-only" });
   const prefills = prefillsData?.listMyCampaignPrefills || [];
   const activePrefillCount = prefills.filter((p) => p.isActive).length;
   const canCreate = activePrefillCount < MAX_ACTIVE_PREFILLS;
@@ -95,9 +140,11 @@ export const CreateCampaignPrefillPage: React.FC = () => {
   const myCatalogs = myCatalogsData?.listMyCatalogs || [];
 
   // Deduplicate: remove catalogs from public list that are also in my list
+  // NOTE: Intentionally NOT filtering deleted catalogs here - campaign prefill creation
+  // should allow selection of deleted catalogs for existing prefills that use them
   const myIdSet = new Set(myCatalogs.map((c) => c.catalogId));
   const filteredPublicCatalogs = publicCatalogs.filter(
-    (c) => !myIdSet.has(c.catalogId)
+    (c) => !myIdSet.has(c.catalogId),
   );
 
   const catalogsLoading = publicLoading || myLoading;
@@ -152,7 +199,9 @@ export const CreateCampaignPrefillPage: React.FC = () => {
       navigate("/campaign-prefills");
     } catch (err) {
       const errorMessage =
-        err instanceof Error ? err.message : "Failed to create campaign prefill";
+        err instanceof Error
+          ? err.message
+          : "Failed to create campaign prefill";
       setError(errorMessage);
       window.scrollTo({ top: 0, behavior: "smooth" });
     } finally {
@@ -165,12 +214,7 @@ export const CreateCampaignPrefillPage: React.FC = () => {
   return (
     <Container maxWidth="md" sx={{ py: 3 }}>
       {/* Header */}
-      <Stack
-        direction="row"
-        alignItems="center"
-        spacing={2}
-        sx={{ mb: 3 }}
-      >
+      <Stack direction="row" alignItems="center" spacing={2} sx={{ mb: 3 }}>
         <Button
           startIcon={<BackIcon />}
           onClick={() => navigate("/campaign-prefills")}
@@ -194,8 +238,9 @@ export const CreateCampaignPrefillPage: React.FC = () => {
 
           {!canCreate && (
             <Alert severity="error">
-              You have reached the maximum of {MAX_ACTIVE_PREFILLS} active campaign prefills.
-              Please deactivate an existing prefill before creating a new one.
+              You have reached the maximum of {MAX_ACTIVE_PREFILLS} active
+              campaign prefills. Please deactivate an existing prefill before
+              creating a new one.
             </Alert>
           )}
 
@@ -295,7 +340,9 @@ export const CreateCampaignPrefillPage: React.FC = () => {
                   label="Season Year"
                   type="number"
                   value={seasonYear}
-                  onChange={(e) => setSeasonYear(parseInt(e.target.value, 10) || 0)}
+                  onChange={(e) =>
+                    setSeasonYear(parseInt(e.target.value, 10) || 0)
+                  }
                   required
                   sx={{ minWidth: { xs: "100%", sm: 150 } }}
                   inputProps={{ min: 2020, max: 2100 }}

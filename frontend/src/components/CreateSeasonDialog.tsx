@@ -28,6 +28,8 @@ interface CreateSeasonDialogProps {
     seasonName: string,
     seasonYear: number,
     catalogId: string,
+    startDate?: string,
+    endDate?: string,
   ) => Promise<void>;
 }
 
@@ -35,6 +37,7 @@ interface Catalog {
   catalogId: string;
   catalogName: string;
   catalogType: string;
+  isDeleted?: boolean;
 }
 
 const SEASON_OPTIONS = ["Fall", "Spring", "Summer", "Winter"];
@@ -47,6 +50,8 @@ export const CreateSeasonDialog: React.FC<CreateSeasonDialogProps> = ({
   const [seasonName, setSeasonName] = useState("Fall");
   const [seasonYear, setSeasonYear] = useState(new Date().getFullYear());
   const [catalogId, setCatalogId] = useState("");
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
   const [loading, setLoading] = useState(false);
 
   // Fetch catalogs
@@ -61,12 +66,13 @@ export const CreateSeasonDialog: React.FC<CreateSeasonDialogProps> = ({
   const publicCatalogs = publicCatalogsData?.listPublicCatalogs || [];
   const myCatalogs = myCatalogsData?.listMyCatalogs || [];
 
-  // Deduplicate by catalogId and separate into sections
+  // Deduplicate by catalogId and separate into sections, filter deleted catalogs
   // Catalogs that appear in both lists (user owns a public catalog) go to "My Catalogs"
   const myIdSet = new Set(myCatalogs.map((c) => c.catalogId));
   const filteredPublicCatalogs = publicCatalogs.filter(
-    (c) => !myIdSet.has(c.catalogId),
+    (c) => !myIdSet.has(c.catalogId) && c.isDeleted !== true,
   );
+  const filteredMyCatalogs = myCatalogs.filter((c) => c.isDeleted !== true);
 
   const catalogsLoading = publicLoading || myLoading;
 
@@ -75,11 +81,19 @@ export const CreateSeasonDialog: React.FC<CreateSeasonDialogProps> = ({
 
     setLoading(true);
     try {
-      await onSubmit(seasonName.trim(), seasonYear, catalogId);
+      await onSubmit(
+        seasonName.trim(),
+        seasonYear,
+        catalogId,
+        startDate || undefined,
+        endDate || undefined,
+      );
       // Reset form
       setSeasonName("Fall");
       setSeasonYear(new Date().getFullYear());
       setCatalogId("");
+      setStartDate("");
+      setEndDate("");
       onClose();
     } catch (error) {
       console.error("Failed to create season:", error);
@@ -93,6 +107,8 @@ export const CreateSeasonDialog: React.FC<CreateSeasonDialogProps> = ({
       setSeasonName("Fall");
       setSeasonYear(new Date().getFullYear());
       setCatalogId("");
+      setStartDate("");
+      setEndDate("");
       onClose();
     }
   };
@@ -128,8 +144,54 @@ export const CreateSeasonDialog: React.FC<CreateSeasonDialogProps> = ({
             value={seasonYear}
             onChange={(e) => setSeasonYear(parseInt(e.target.value, 10))}
             disabled={loading}
-            inputProps={{ min: 2020, max: new Date().getFullYear() + 5, step: 1 }}
+            inputProps={{
+              min: 2020,
+              max: new Date().getFullYear() + 5,
+              step: 1,
+            }}
             helperText="Year of this sales season"
+          />
+
+          {/* Start Date */}
+          <TextField
+            fullWidth
+            label="Start Date (Optional)"
+            type="date"
+            value={startDate}
+            onChange={(e) => setStartDate(e.target.value)}
+            disabled={loading}
+            InputLabelProps={{
+              shrink: true,
+            }}
+            slotProps={{
+              input: {
+                inputProps: {
+                  max: endDate || undefined,
+                },
+              },
+            }}
+            helperText="When sales season begins"
+          />
+
+          {/* End Date */}
+          <TextField
+            fullWidth
+            label="End Date (Optional)"
+            type="date"
+            value={endDate}
+            onChange={(e) => setEndDate(e.target.value)}
+            disabled={loading}
+            InputLabelProps={{
+              shrink: true,
+            }}
+            slotProps={{
+              input: {
+                inputProps: {
+                  min: startDate || undefined,
+                },
+              },
+            }}
+            helperText="When sales season ends"
           />
 
           {/* Catalog Selection */}
@@ -156,13 +218,13 @@ export const CreateSeasonDialog: React.FC<CreateSeasonDialogProps> = ({
                 </MenuItem>
               )}
               {!catalogsLoading &&
-                myCatalogs.length === 0 &&
+                filteredMyCatalogs.length === 0 &&
                 filteredPublicCatalogs.length === 0 && (
                   <MenuItem disabled>No catalogs available</MenuItem>
                 )}
 
               {/* My Catalogs Section */}
-              {myCatalogs.length > 0 && [
+              {filteredMyCatalogs.length > 0 && [
                 <MenuItem
                   key="my-header"
                   disabled
@@ -174,7 +236,7 @@ export const CreateSeasonDialog: React.FC<CreateSeasonDialogProps> = ({
                 >
                   My Catalogs
                 </MenuItem>,
-                ...myCatalogs.map((catalog) => (
+                ...filteredMyCatalogs.map((catalog) => (
                   <MenuItem key={catalog.catalogId} value={catalog.catalogId}>
                     {catalog.catalogName}
                     {catalog.catalogType === "ADMIN_MANAGED" && " (Official)"}
@@ -205,7 +267,7 @@ export const CreateSeasonDialog: React.FC<CreateSeasonDialogProps> = ({
             </Select>
           </FormControl>
 
-          {myCatalogs.length === 0 &&
+          {filteredMyCatalogs.length === 0 &&
             filteredPublicCatalogs.length === 0 &&
             !catalogsLoading && (
               <Alert severity="warning">

@@ -5765,13 +5765,12 @@ export function response(ctx) {
             ),
         )
 
-        # deleteCampaignPrefill - Pipeline resolver: Get → Authorize → Soft Delete
-        # Reuse get_prefill_for_update_fn for authorization
-        # Step 2: Soft delete (set isActive = false)
-        soft_delete_prefill_fn = appsync.AppsyncFunction(
+        # deleteCampaignPrefill - Pipeline resolver: Get → Authorize → Hard Delete
+        # Step 2: Hard delete (completely remove from table)
+        delete_prefill_fn = appsync.AppsyncFunction(
             self,
-            "SoftDeletePrefillFn",
-            name=f"SoftDeletePrefillFn_{env_name}",
+            "DeletePrefillFn",
+            name=f"DeletePrefillFn_{env_name}",
             api=self.api,
             data_source=self.prefills_datasource,
             runtime=appsync.FunctionRuntime.JS_1_0_0,
@@ -5781,13 +5780,8 @@ import { util } from '@aws-appsync/utils';
 
 export function request(ctx) {
     return {
-        operation: 'UpdateItem',
-        key: util.dynamodb.toMapValues({ prefillCode: ctx.args.prefillCode, SK: 'METADATA' }),
-        update: {
-            expression: 'SET #isActive = :isActive',
-            expressionNames: { '#isActive': 'isActive' },
-            expressionValues: util.dynamodb.toMapValues({ ':isActive': false })
-        }
+        operation: 'DeleteItem',
+        key: util.dynamodb.toMapValues({ prefillCode: ctx.args.prefillCode, SK: 'METADATA' })
     };
 }
 
@@ -5843,7 +5837,7 @@ export function response(ctx) {
             type_name="Mutation",
             field_name="deleteCampaignPrefill",
             runtime=appsync.FunctionRuntime.JS_1_0_0,
-            pipeline_config=[get_prefill_for_delete_fn, soft_delete_prefill_fn],
+            pipeline_config=[get_prefill_for_delete_fn, delete_prefill_fn],
             code=appsync.Code.from_inline(
                 """
 export function request(ctx) {
@@ -6704,7 +6698,7 @@ export function response(ctx) {
             ),
         )
 
-        # Step 4: Delete the catalog - uses catalogs table
+        # Step 4: Soft delete the catalog (mark as deleted, don't hard delete)
         delete_catalog_fn = appsync.AppsyncFunction(
             self,
             "DeleteCatalogFn",
@@ -6722,12 +6716,18 @@ export function request(ctx) {
     }
     
     const catalogId = ctx.args.catalogId;
-    // Delete catalog using catalogId as primary key
+    // Soft delete: mark isDeleted = true, keep record in table for orphan detection
     return {
-        operation: 'DeleteItem',
+        operation: 'UpdateItem',
         key: util.dynamodb.toMapValues({
-        catalogId: catalogId
-        })
+            catalogId: catalogId
+        }),
+        update: {
+            expression: 'SET isDeleted = :true',
+            expressionValues: util.dynamodb.toMapValues({
+                ':true': true
+            })
+        }
     };
 }
 

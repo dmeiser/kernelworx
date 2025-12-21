@@ -44,8 +44,8 @@ const mockSeasonWithoutPrefill = {
 };
 
 const mockCatalogs = [
-  { catalogId: "catalog-1", catalogName: "Official Popcorn 2025", catalogType: "ADMIN_MANAGED" },
-  { catalogId: "catalog-2", catalogName: "My Custom Catalog", catalogType: "USER_CREATED" },
+  { catalogId: "catalog-1", catalogName: "Official Popcorn 2025", catalogType: "ADMIN_MANAGED", isDeleted: false },
+  { catalogId: "catalog-2", catalogName: "My Custom Catalog", catalogType: "USER_CREATED", isDeleted: false },
 ];
 
 const createMocks = (season: typeof mockSeasonWithPrefill | typeof mockSeasonWithoutPrefill): any[] => [
