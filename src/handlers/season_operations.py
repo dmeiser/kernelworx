@@ -226,7 +226,13 @@ def create_season(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         share_item: Optional[Dict[str, Any]] = None
         if share_with_creator and prefill:
             creator_account_id = prefill.get("createdBy")
-            if creator_account_id and creator_account_id != profile.get("ownerAccountId"):
+            # Get the profile owner's account ID (stored with ACCOUNT# prefix, but compare without it)
+            owner_account_id = profile.get("ownerAccountId", "")
+            # Normalize: remove ACCOUNT# prefix if present for comparison
+            owner_account_id_normalized = (
+                owner_account_id.replace("ACCOUNT#", "") if owner_account_id else ""
+            )
+            if creator_account_id and creator_account_id != owner_account_id_normalized:
                 # Don't create share if creator is the profile owner
                 share_id = f"SHARE#{uuid.uuid4()}"
                 share_item = {
@@ -234,6 +240,7 @@ def create_season(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     "shareId": share_id,
                     "targetAccountId": creator_account_id,
                     "permissions": ["READ"],
+                    "ownerAccountId": owner_account_id,  # Store owner account ID for BatchGetItem lookup
                     "createdAt": now,
                     "createdByAccountId": caller_account_id,
                     # GSI1 key for listing shares by target account
