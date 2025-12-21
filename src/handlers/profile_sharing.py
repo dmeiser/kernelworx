@@ -194,6 +194,9 @@ def list_my_shares(event: Dict[str, Any], context: Any) -> List[Dict[str, Any]]:
                     if owner_account_id_raw.startswith("ACCOUNT#")
                     else owner_account_id_raw
                 )
+                # Convert permissions from set (DynamoDB SS type) to list for JSON serialization
+                permissions = share.get("permissions", [])
+                permissions_list = list(permissions) if isinstance(permissions, set) else permissions
                 result.append(
                     {
                         "profileId": profile_id_str,  # Keep PROFILE# prefix
@@ -204,7 +207,7 @@ def list_my_shares(event: Dict[str, Any], context: Any) -> List[Dict[str, Any]]:
                         "createdAt": profile.get("createdAt"),
                         "updatedAt": profile.get("updatedAt"),
                         "isOwner": profile.get("ownerAccountId") == caller_account_id_with_prefix,
-                        "permissions": share.get("permissions", []),
+                        "permissions": permissions_list,
                     }
                 )
 
