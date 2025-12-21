@@ -5,8 +5,8 @@ const dynamoClient = new DynamoDBClient({ region: 'us-east-1' });
 
 // Multi-table configuration for the new schema design
 // Profiles table V2 uses: PK=ownerAccountId, SK=profileId, GSI=profileId-index
-// Seasons table V2 uses: PK=profileId, SK=seasonId, GSI=seasonId-index
-// Orders table V2 uses: PK=seasonId, SK=orderId, GSI=orderId-index
+// Seasons table V2 uses: PK=profileId, SK=campaignId, GSI=campaignId-index
+// Orders table V2 uses: PK=campaignId, SK=orderId, GSI=orderId-index
 // Shares and Invites are now in separate dedicated tables
 export const TABLE_NAMES = {
   profiles: process.env.PROFILES_TABLE_NAME || 'kernelworx-profiles-ue1-dev',
@@ -21,7 +21,7 @@ export const TABLE_NAMES = {
 interface TestResource {
   profileId?: string;
   ownerAccountId?: string; // Required for profile cleanup with new schema
-  seasonId?: string;
+  campaignId?: string;
   orderId?: string;
   shareAccountId?: string;
   catalogIds?: string[];
@@ -34,13 +34,13 @@ interface TestResource {
  * 
  * NEW SCHEMA (V2):
  * - Profiles: PK=ownerAccountId, SK=profileId
- * - Seasons: PK=profileId, SK=seasonId (separate table with seasonId-index GSI)
- * - Orders: PK=seasonId, SK=orderId (separate table with orderId-index GSI)
+ * - Seasons: PK=profileId, SK=campaignId (separate table with campaignId-index GSI)
+ * - Orders: PK=campaignId, SK=orderId (separate table with orderId-index GSI)
  * - Shares: PK=profileId, SK=targetAccountId (separate table)
  * - Invites: PK=inviteCode (separate table with profileId-index GSI)
  */
 export async function cleanupTestData(resources: TestResource): Promise<void> {
-  const { profileId, ownerAccountId, seasonId, orderId, shareAccountId, catalogIds } = resources;
+  const { profileId, ownerAccountId, campaignId, orderId, shareAccountId, catalogIds } = resources;
 
   try {
     // Delete orders from orders table V2 (query by orderId-index, delete with composite key)
@@ -48,9 +48,9 @@ export async function cleanupTestData(resources: TestResource): Promise<void> {
       await deleteOrderById(orderId);
     }
 
-    // Delete seasons from seasons table V2 (query by seasonId-index, delete with composite key)
-    if (seasonId) {
-      await deleteSeasonById(seasonId);
+    // Delete campaigns from campaigns table V2 (query by campaignId-index, delete with composite key)
+    if (campaignId) {
+      await deleteCampaignById(campaignId);
     }
 
     // Delete shares from shares table (NEW: separate table)
@@ -164,11 +164,11 @@ async function deleteFromTable(tableName: string, keyName: string, keyValue: str
 
 /**
  * Delete an order from the orders table V2.
- * Orders table V2: PK=seasonId, SK=orderId, GSI=orderId-index
- * Must query by orderId-index first to get seasonId, then delete with composite key.
+ * Orders table V2: PK=campaignId, SK=orderId, GSI=orderId-index
+ * Must query by orderId-index first to get campaignId, then delete with composite key.
  */
 async function deleteOrderById(orderId: string): Promise<void> {
-  // Query orderId-index to get the seasonId (needed for composite key)
+  // Query orderId-index to get the campaignId (needed for composite key)
   const queryCommand = new QueryCommand({
     TableName: TABLE_NAMES.orders,
     IndexName: 'orderId-index',
@@ -181,11 +181,11 @@ async function deleteOrderById(orderId: string): Promise<void> {
   const result = await dynamoClient.send(queryCommand);
   
   if (result.Items && result.Items.length > 0) {
-    const seasonId = result.Items[0].seasonId.S!;
+    const campaignId = result.Items[0].campaignId.S!;
     const deleteCommand = new DeleteItemCommand({
       TableName: TABLE_NAMES.orders,
       Key: {
-        seasonId: { S: seasonId },
+        campaignId: { S: campaignId },
         orderId: { S: orderId },
       },
     });
@@ -194,18 +194,18 @@ async function deleteOrderById(orderId: string): Promise<void> {
 }
 
 /**
- * Delete a season from the seasons table V2.
- * Seasons table V2: PK=profileId, SK=seasonId, GSI=seasonId-index
- * Must query by seasonId-index first to get profileId, then delete with composite key.
+ * Delete a campaign from the campaigns table V2.
+ * Campaigns table V2: PK=profileId, SK=campaignId, GSI=campaignId-index
+ * Must query by campaignId-index first to get profileId, then delete with composite key.
  */
-async function deleteSeasonById(seasonId: string): Promise<void> {
-  // Query seasonId-index to get the profileId (needed for composite key)
+async function deleteCampaignById(campaignId: string): Promise<void> {
+  // Query campaignId-index to get the profileId (needed for composite key)
   const queryCommand = new QueryCommand({
     TableName: TABLE_NAMES.seasons,
-    IndexName: 'seasonId-index',
-    KeyConditionExpression: 'seasonId = :sid',
+    IndexName: 'campaignId-index',
+    KeyConditionExpression: 'campaignId = :sid',
     ExpressionAttributeValues: {
-      ':sid': { S: seasonId },
+      ':sid': { S: campaignId },
     },
   });
 
@@ -217,7 +217,12 @@ async function deleteSeasonById(seasonId: string): Promise<void> {
       TableName: TABLE_NAMES.seasons,
       Key: {
         profileId: { S: profileId },
-        seasonId: { S: seasonId },
+        campaignId: { S: campaignId },
+      },
+    });
+    await dynamoClient.send(deleteCommand);
+  }
+}
       },
     });
     await dynamoClient.send(deleteCommand);

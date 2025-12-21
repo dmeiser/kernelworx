@@ -1,6 +1,6 @@
 import '../setup.ts';
 /**
- * Integration tests for createSeason VTL resolver
+ * Integration tests for createCampaign VTL resolver
  * 
  * Tests cover:
  * - Happy paths (season creation with required/optional fields)
@@ -51,13 +51,13 @@ const CREATE_CATALOG = gql`
   }
 `;
 
-const CREATE_SEASON = gql`
-  mutation CreateSeason($input: CreateSeasonInput!) {
-    createSeason(input: $input) {
-      seasonId
+const CREATE_CAMPAIGN = gql`
+  mutation CreateCampaign($input: CreateCampaignInput!) {
+    createCampaign(input: $input) {
+      campaignId
       profileId
-      seasonName
-      seasonYear
+      campaignName
+      campaignYear
       startDate
       endDate
       catalogId
@@ -67,13 +67,13 @@ const CREATE_SEASON = gql`
   }
 `;
 
-const GET_SEASON = gql`
-  query GetSeason($seasonId: ID!) {
-    getSeason(seasonId: $seasonId) {
-      seasonId
+const GET_CAMPAIGN = gql`
+  query GetCampaign($campaignId: ID!) {
+    getCampaign(campaignId: $campaignId) {
+      campaignId
       profileId
-      seasonName
-      seasonYear
+      campaignName
+      campaignYear
       startDate
       endDate
       catalogId
@@ -83,9 +83,9 @@ const GET_SEASON = gql`
   }
 `;
 
-const DELETE_SEASON = gql`
-  mutation DeleteSeason($seasonId: ID!) {
-    deleteSeason(seasonId: $seasonId)
+const DELETE_CAMPAIGN = gql`
+  mutation DeleteCampaign($campaignId: ID!) {
+    deleteCampaign(campaignId: $campaignId)
   }
 `;
 
@@ -107,7 +107,7 @@ const REVOKE_SHARE = gql`
   }
 `;
 
-describe('createSeason Integration Tests', () => {
+describe('createCampaign Integration Tests', () => {
   let ownerClient: ApolloClient<any>;
   let contributorClient: ApolloClient<any>;
   let readonlyClient: ApolloClient<any>;
@@ -162,12 +162,12 @@ describe('createSeason Integration Tests', () => {
 
       // Act: Create season
       const { data } = await ownerClient.mutate({
-        mutation: CREATE_SEASON,
+        mutation: CREATE_CAMPAIGN,
         variables: {
           input: {
             profileId: testProfileId,
-            seasonName: `${getTestPrefix()}-Season`,
-            seasonYear: 2025,
+            campaignName: `${getTestPrefix()}-Season`,
+            campaignYear: 2025,
             startDate: '2025-01-01T00:00:00Z',
             catalogId: testCatalogId,
           },
@@ -175,22 +175,22 @@ describe('createSeason Integration Tests', () => {
       });
 
       // Assert
-      expect(data.createSeason).toBeDefined();
-      expect(data.createSeason.seasonId).toBeDefined();
-      expect(data.createSeason.profileId).toBe(testProfileId);
-      expect(data.createSeason.seasonName).toContain('Season');
-      expect(data.createSeason.catalogId).toBe(testCatalogId);
-      expect(data.createSeason.startDate).toBe('2025-01-01T00:00:00Z');
+      expect(data.createCampaign).toBeDefined();
+      expect(data.createCampaign.campaignId).toBeDefined();
+      expect(data.createCampaign.profileId).toBe(testProfileId);
+      expect(data.createCampaign.campaignName).toContain('Season');
+      expect(data.createCampaign.catalogId).toBe(testCatalogId);
+      expect(data.createCampaign.startDate).toBe('2025-01-01T00:00:00Z');
       
-      const testSeasonId = data.createSeason.seasonId;
+      const testSeasonId = data.createCampaign.campaignId;
 
       // Cleanup
-      await ownerClient.mutate({ mutation: DELETE_SEASON, variables: { seasonId: testSeasonId } });
+      await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId: testSeasonId } });
       await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId: testCatalogId } });
       await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId: testProfileId } });
     });
 
-    it('auto-generates unique seasonId', async () => {
+    it('auto-generates unique campaignId', async () => {
       // Arrange
       const { data: profileData } = await ownerClient.mutate({
         mutation: CREATE_PROFILE,
@@ -212,12 +212,12 @@ describe('createSeason Integration Tests', () => {
 
       // Act: Create two seasons
       const { data: season1 } = await ownerClient.mutate({
-        mutation: CREATE_SEASON,
+        mutation: CREATE_CAMPAIGN,
         variables: {
           input: {
             profileId: testProfileId,
-            seasonName: `${getTestPrefix()}-Season1`,
-            seasonYear: 2025,
+            campaignName: `${getTestPrefix()}-Season1`,
+            campaignYear: 2025,
             startDate: '2025-01-01T00:00:00Z',
             catalogId: testCatalogId,
           },
@@ -225,26 +225,26 @@ describe('createSeason Integration Tests', () => {
       });
 
       const { data: season2 } = await ownerClient.mutate({
-        mutation: CREATE_SEASON,
+        mutation: CREATE_CAMPAIGN,
         variables: {
           input: {
             profileId: testProfileId,
-            seasonName: `${getTestPrefix()}-Season2`,
-            seasonYear: 2025,
+            campaignName: `${getTestPrefix()}-Season2`,
+            campaignYear: 2025,
             startDate: '2025-02-01T00:00:00Z',
             catalogId: testCatalogId,
           },
         },
       });
 
-      // Assert: Different seasonIds
-      expect(season1.createSeason.seasonId).toBeDefined();
-      expect(season2.createSeason.seasonId).toBeDefined();
-      expect(season1.createSeason.seasonId).not.toBe(season2.createSeason.seasonId);
+      // Assert: Different campaignIds
+      expect(season1.createCampaign.campaignId).toBeDefined();
+      expect(season2.createCampaign.campaignId).toBeDefined();
+      expect(season1.createCampaign.campaignId).not.toBe(season2.createCampaign.campaignId);
 
       // Cleanup
-      await ownerClient.mutate({ mutation: DELETE_SEASON, variables: { seasonId: season1.createSeason.seasonId } });
-      await ownerClient.mutate({ mutation: DELETE_SEASON, variables: { seasonId: season2.createSeason.seasonId } });
+      await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId: season1.createCampaign.campaignId } });
+      await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId: season2.createCampaign.campaignId } });
       await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId: testCatalogId } });
       await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId: testProfileId } });
     });
@@ -271,12 +271,12 @@ describe('createSeason Integration Tests', () => {
 
       // Act
       const { data } = await ownerClient.mutate({
-        mutation: CREATE_SEASON,
+        mutation: CREATE_CAMPAIGN,
         variables: {
           input: {
             profileId: testProfileId,
-            seasonName: `${getTestPrefix()}-Season`,
-            seasonYear: 2025,
+            campaignName: `${getTestPrefix()}-Season`,
+            campaignYear: 2025,
             startDate: '2025-01-01T00:00:00Z',
             catalogId: testCatalogId,
           },
@@ -284,15 +284,15 @@ describe('createSeason Integration Tests', () => {
       });
 
       // Assert: Timestamps exist and are valid ISO8601
-      expect(data.createSeason.createdAt).toBeDefined();
-      expect(data.createSeason.updatedAt).toBeDefined();
-      expect(new Date(data.createSeason.createdAt).toISOString()).toBe(data.createSeason.createdAt);
-      expect(new Date(data.createSeason.updatedAt).toISOString()).toBe(data.createSeason.updatedAt);
+      expect(data.createCampaign.createdAt).toBeDefined();
+      expect(data.createCampaign.updatedAt).toBeDefined();
+      expect(new Date(data.createCampaign.createdAt).toISOString()).toBe(data.createCampaign.createdAt);
+      expect(new Date(data.createCampaign.updatedAt).toISOString()).toBe(data.createCampaign.updatedAt);
       
-      const testSeasonId = data.createSeason.seasonId;
+      const testSeasonId = data.createCampaign.campaignId;
 
       // Cleanup
-      await ownerClient.mutate({ mutation: DELETE_SEASON, variables: { seasonId: testSeasonId } });
+      await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId: testSeasonId } });
       await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId: testCatalogId } });
       await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId: testProfileId } });
     });
@@ -319,12 +319,12 @@ describe('createSeason Integration Tests', () => {
 
       // Act: Create with endDate
       const { data } = await ownerClient.mutate({
-        mutation: CREATE_SEASON,
+        mutation: CREATE_CAMPAIGN,
         variables: {
           input: {
             profileId: testProfileId,
-            seasonName: `${getTestPrefix()}-Season`,
-            seasonYear: 2025,
+            campaignName: `${getTestPrefix()}-Season`,
+            campaignYear: 2025,
             startDate: '2025-01-01T00:00:00Z',
             endDate: '2025-12-31T23:59:59Z',
             catalogId: testCatalogId,
@@ -333,12 +333,12 @@ describe('createSeason Integration Tests', () => {
       });
 
       // Assert
-      expect(data.createSeason.endDate).toBe('2025-12-31T23:59:59Z');
+      expect(data.createCampaign.endDate).toBe('2025-12-31T23:59:59Z');
       
-      const testSeasonId = data.createSeason.seasonId;
+      const testSeasonId = data.createCampaign.campaignId;
 
       // Cleanup
-      await ownerClient.mutate({ mutation: DELETE_SEASON, variables: { seasonId: testSeasonId } });
+      await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId: testSeasonId } });
       await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId: testCatalogId } });
       await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId: testProfileId } });
     });
@@ -367,12 +367,12 @@ describe('createSeason Integration Tests', () => {
 
       // Act: Owner creates season
       const { data } = await ownerClient.mutate({
-        mutation: CREATE_SEASON,
+        mutation: CREATE_CAMPAIGN,
         variables: {
           input: {
             profileId: testProfileId,
-            seasonName: `${getTestPrefix()}-Season`,
-            seasonYear: 2025,
+            campaignName: `${getTestPrefix()}-Season`,
+            campaignYear: 2025,
             startDate: '2025-01-01T00:00:00Z',
             catalogId: testCatalogId,
           },
@@ -380,13 +380,13 @@ describe('createSeason Integration Tests', () => {
       });
 
       // Assert
-      expect(data.createSeason).toBeDefined();
-      expect(data.createSeason.profileId).toBe(testProfileId);
+      expect(data.createCampaign).toBeDefined();
+      expect(data.createCampaign.profileId).toBe(testProfileId);
       
-      const testSeasonId = data.createSeason.seasonId;
+      const testSeasonId = data.createCampaign.campaignId;
 
       // Cleanup
-      await ownerClient.mutate({ mutation: DELETE_SEASON, variables: { seasonId: testSeasonId } });
+      await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId: testSeasonId } });
       await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId: testCatalogId } });
       await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId: testProfileId } });
     });
@@ -424,12 +424,12 @@ describe('createSeason Integration Tests', () => {
 
       // Act: Contributor creates season
       const { data } = await contributorClient.mutate({
-        mutation: CREATE_SEASON,
+        mutation: CREATE_CAMPAIGN,
         variables: {
           input: {
             profileId: testProfileId,
-            seasonName: `${getTestPrefix()}-Season`,
-            seasonYear: 2025,
+            campaignName: `${getTestPrefix()}-Season`,
+            campaignYear: 2025,
             startDate: '2025-01-01T00:00:00Z',
             catalogId: testCatalogId,
           },
@@ -437,13 +437,13 @@ describe('createSeason Integration Tests', () => {
       });
 
       // Assert
-      expect(data.createSeason).toBeDefined();
-      expect(data.createSeason.profileId).toBe(testProfileId);
+      expect(data.createCampaign).toBeDefined();
+      expect(data.createCampaign.profileId).toBe(testProfileId);
       
-      const testSeasonId = data.createSeason.seasonId;
+      const testSeasonId = data.createCampaign.campaignId;
 
       // Cleanup
-      await ownerClient.mutate({ mutation: DELETE_SEASON, variables: { seasonId: testSeasonId } });
+      await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId: testSeasonId } });
       await ownerClient.mutate({ mutation: REVOKE_SHARE, variables: { input: { profileId: testProfileId, targetAccountId: shareData.shareProfileDirect.targetAccountId } } });
       await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId: testCatalogId } });
       await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId: testProfileId } });
@@ -483,12 +483,12 @@ describe('createSeason Integration Tests', () => {
       // Act & Assert: Readonly user tries to create season (should fail, no season to track)
       await expect(
         readonlyClient.mutate({
-          mutation: CREATE_SEASON,
+          mutation: CREATE_CAMPAIGN,
           variables: {
             input: {
               profileId: testProfileId,
-              seasonName: `${getTestPrefix()}-Season`,
-            seasonYear: 2025,
+              campaignName: `${getTestPrefix()}-Season`,
+            campaignYear: 2025,
               startDate: '2025-01-01T00:00:00Z',
               catalogId: testCatalogId,
             },
@@ -525,12 +525,12 @@ describe('createSeason Integration Tests', () => {
       // Act & Assert: Non-shared user tries to create season (should fail, no season to track)
       await expect(
         contributorClient.mutate({
-          mutation: CREATE_SEASON,
+          mutation: CREATE_CAMPAIGN,
           variables: {
             input: {
               profileId: testProfileId,
-              seasonName: `${getTestPrefix()}-Season`,
-            seasonYear: 2025,
+              campaignName: `${getTestPrefix()}-Season`,
+            campaignYear: 2025,
               startDate: '2025-01-01T00:00:00Z',
               catalogId: testCatalogId,
             },
@@ -562,12 +562,12 @@ describe('createSeason Integration Tests', () => {
       // Act & Assert (should fail, no season to track)
       await expect(
         ownerClient.mutate({
-          mutation: CREATE_SEASON,
+          mutation: CREATE_CAMPAIGN,
           variables: {
             input: {
               // profileId missing
-              seasonName: `${getTestPrefix()}-Season`,
-            seasonYear: 2025,
+              campaignName: `${getTestPrefix()}-Season`,
+            campaignYear: 2025,
               startDate: '2025-01-01T00:00:00Z',
               catalogId: testCatalogId,
             },
@@ -579,7 +579,7 @@ describe('createSeason Integration Tests', () => {
       await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId: testCatalogId } });
     });
 
-    it('rejects missing seasonName', async () => {
+    it('rejects missing campaignName', async () => {
       // Arrange
       const { data: profileData } = await ownerClient.mutate({
         mutation: CREATE_PROFILE,
@@ -602,11 +602,11 @@ describe('createSeason Integration Tests', () => {
       // Act & Assert (should fail, no season to track)
       await expect(
         ownerClient.mutate({
-          mutation: CREATE_SEASON,
+          mutation: CREATE_CAMPAIGN,
           variables: {
             input: {
               profileId: testProfileId,
-              // seasonName missing
+              // campaignName missing
               startDate: '2025-01-01T00:00:00Z',
               catalogId: testCatalogId,
             },
@@ -640,17 +640,17 @@ describe('createSeason Integration Tests', () => {
       const testCatalogId = catalogData.createCatalog.catalogId;
 
       // Act & Assert
-      // Note: startDate is optional in CreateSeasonInput but required in Season type
+      // Note: startDate is optional in CreateCampaignInput but required in Season type
       // This causes the mutation to potentially succeed in DynamoDB but fail on GraphQL response
       let creationFailed = false;
       try {
         await ownerClient.mutate({
-          mutation: CREATE_SEASON,
+          mutation: CREATE_CAMPAIGN,
           variables: {
             input: {
               profileId: testProfileId,
-              seasonName: `${getTestPrefix()}-Season`,
-              seasonYear: 2025,
+              campaignName: `${getTestPrefix()}-Season`,
+              campaignYear: 2025,
               // startDate missing - may succeed if schema allows optional
               catalogId: testCatalogId,
             },
@@ -680,12 +680,12 @@ describe('createSeason Integration Tests', () => {
       // Act & Assert (should fail, no season to track)
       await expect(
         ownerClient.mutate({
-          mutation: CREATE_SEASON,
+          mutation: CREATE_CAMPAIGN,
           variables: {
             input: {
               profileId: testProfileId,
-              seasonName: `${getTestPrefix()}-Season`,
-            seasonYear: 2025,
+              campaignName: `${getTestPrefix()}-Season`,
+            campaignYear: 2025,
               startDate: '2025-01-01T00:00:00Z',
               // catalogId missing
             },
@@ -723,12 +723,12 @@ describe('createSeason Integration Tests', () => {
 
       // Act: Create first season
       const { data: season1 } = await ownerClient.mutate({
-        mutation: CREATE_SEASON,
+        mutation: CREATE_CAMPAIGN,
         variables: {
           input: {
             profileId: testProfileId,
-            seasonName: duplicateName,
-            seasonYear: 2025,
+            campaignName: duplicateName,
+            campaignYear: 2025,
             startDate: '2025-01-01T00:00:00Z',
             catalogId: testCatalogId,
           },
@@ -737,12 +737,12 @@ describe('createSeason Integration Tests', () => {
 
       // Act: Create second season with same name
       const { data: season2 } = await ownerClient.mutate({
-        mutation: CREATE_SEASON,
+        mutation: CREATE_CAMPAIGN,
         variables: {
           input: {
             profileId: testProfileId,
-            seasonName: duplicateName,
-            seasonYear: 2025,
+            campaignName: duplicateName,
+            campaignYear: 2025,
             startDate: '2025-06-01T00:00:00Z',
             catalogId: testCatalogId,
           },
@@ -750,13 +750,13 @@ describe('createSeason Integration Tests', () => {
       });
 
       // Assert: Both seasons exist with same name but different IDs
-      expect(season1.createSeason.seasonName).toBe(duplicateName);
-      expect(season2.createSeason.seasonName).toBe(duplicateName);
-      expect(season1.createSeason.seasonId).not.toBe(season2.createSeason.seasonId);
+      expect(season1.createCampaign.campaignName).toBe(duplicateName);
+      expect(season2.createCampaign.campaignName).toBe(duplicateName);
+      expect(season1.createCampaign.campaignId).not.toBe(season2.createCampaign.campaignId);
 
       // Cleanup
-      await ownerClient.mutate({ mutation: DELETE_SEASON, variables: { seasonId: season1.createSeason.seasonId } });
-      await ownerClient.mutate({ mutation: DELETE_SEASON, variables: { seasonId: season2.createSeason.seasonId } });
+      await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId: season1.createCampaign.campaignId } });
+      await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId: season2.createCampaign.campaignId } });
       await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId: testCatalogId } });
       await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId: testProfileId } });
     });
@@ -783,12 +783,12 @@ describe('createSeason Integration Tests', () => {
 
       // Act: Create season without endDate
       const { data } = await ownerClient.mutate({
-        mutation: CREATE_SEASON,
+        mutation: CREATE_CAMPAIGN,
         variables: {
           input: {
             profileId: testProfileId,
-            seasonName: `${getTestPrefix()}-OpenSeason`,
-            seasonYear: 2025,
+            campaignName: `${getTestPrefix()}-OpenSeason`,
+            campaignYear: 2025,
             startDate: '2025-01-01T00:00:00Z',
             catalogId: testCatalogId,
             // No endDate provided
@@ -797,11 +797,11 @@ describe('createSeason Integration Tests', () => {
       });
 
       // Assert: Season created with null endDate
-      expect(data.createSeason.seasonId).toBeDefined();
-      expect(data.createSeason.endDate).toBeNull();
+      expect(data.createCampaign.campaignId).toBeDefined();
+      expect(data.createCampaign.endDate).toBeNull();
 
       // Cleanup
-      await ownerClient.mutate({ mutation: DELETE_SEASON, variables: { seasonId: data.createSeason.seasonId } });
+      await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId: data.createCampaign.campaignId } });
       await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId: testCatalogId } });
       await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId: testProfileId } });
     });
@@ -829,12 +829,12 @@ describe('createSeason Integration Tests', () => {
       // Act: Create season with startDate in the past (should be allowed)
       const pastDate = new Date('2020-01-01T00:00:00Z').toISOString();
       const { data } = await ownerClient.mutate({
-        mutation: CREATE_SEASON,
+        mutation: CREATE_CAMPAIGN,
         variables: {
           input: {
             profileId: testProfileId,
-            seasonName: `${getTestPrefix()}-PastSeason`,
-            seasonYear: 2024,
+            campaignName: `${getTestPrefix()}-PastSeason`,
+            campaignYear: 2024,
             startDate: pastDate,
             catalogId: testCatalogId,
           },
@@ -842,11 +842,11 @@ describe('createSeason Integration Tests', () => {
       });
 
       // Assert: Season created with past startDate
-      expect(data.createSeason.seasonId).toBeDefined();
-      expect(data.createSeason.startDate).toBe(pastDate);
+      expect(data.createCampaign.campaignId).toBeDefined();
+      expect(data.createCampaign.startDate).toBe(pastDate);
 
       // Cleanup
-      await ownerClient.mutate({ mutation: DELETE_SEASON, variables: { seasonId: data.createSeason.seasonId } });
+      await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId: data.createCampaign.campaignId } });
       await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId: testCatalogId } });
       await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId: testProfileId } });
     });
@@ -874,12 +874,12 @@ describe('createSeason Integration Tests', () => {
       // Act: Create season with startDate far in the future
       const futureDate = new Date('2099-01-01T00:00:00Z').toISOString();
       const { data } = await ownerClient.mutate({
-        mutation: CREATE_SEASON,
+        mutation: CREATE_CAMPAIGN,
         variables: {
           input: {
             profileId: testProfileId,
-            seasonName: `${getTestPrefix()}-FutureSeason`,
-            seasonYear: 2030,
+            campaignName: `${getTestPrefix()}-FutureSeason`,
+            campaignYear: 2030,
             startDate: futureDate,
             catalogId: testCatalogId,
           },
@@ -887,11 +887,11 @@ describe('createSeason Integration Tests', () => {
       });
 
       // Assert: Season created with future startDate
-      expect(data.createSeason.seasonId).toBeDefined();
-      expect(data.createSeason.startDate).toBe(futureDate);
+      expect(data.createCampaign.campaignId).toBeDefined();
+      expect(data.createCampaign.startDate).toBe(futureDate);
 
       // Cleanup
-      await ownerClient.mutate({ mutation: DELETE_SEASON, variables: { seasonId: data.createSeason.seasonId } });
+      await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId: data.createCampaign.campaignId } });
       await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId: testCatalogId } });
       await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId: testProfileId } });
     });
@@ -917,15 +917,15 @@ describe('createSeason Integration Tests', () => {
       const testCatalogId = catalogData.createCatalog.catalogId;
 
       // Act & Assert: Try to create season with endDate before startDate
-      let seasonId: string | undefined;
+      let campaignId: string | undefined;
       try {
         const { data } = await ownerClient.mutate({
-          mutation: CREATE_SEASON,
+          mutation: CREATE_CAMPAIGN,
           variables: {
             input: {
               profileId: testProfileId,
-              seasonName: `${getTestPrefix()}-InvalidDates`,
-              seasonYear: 2025,
+              campaignName: `${getTestPrefix()}-InvalidDates`,
+              campaignYear: 2025,
               startDate: '2025-12-31T00:00:00Z',
               endDate: '2025-01-01T00:00:00Z', // Before startDate
               catalogId: testCatalogId,
@@ -933,15 +933,15 @@ describe('createSeason Integration Tests', () => {
           },
         });
         // If it succeeds, the validation might not be implemented
-        seasonId = data.createSeason.seasonId;
+        campaignId = data.createCampaign.campaignId;
       } catch (error) {
         // Expected: Should reject invalid date range
         expect((error as Error).message).toMatch(/date|invalid|before/i);
       }
 
       // Cleanup
-      if (seasonId) {
-        await ownerClient.mutate({ mutation: DELETE_SEASON, variables: { seasonId } });
+      if (campaignId) {
+        await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId } });
       }
       await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId: testCatalogId } });
       await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId: testProfileId } });

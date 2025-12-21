@@ -48,8 +48,8 @@ const CREATE_CAMPAIGN_PREFILL = gql`
     createCampaignPrefill(input: $input) {
       prefillCode
       catalogId
-      seasonName
-      seasonYear
+      campaignName
+      campaignYear
       startDate
       endDate
       unitType
@@ -71,8 +71,8 @@ const UPDATE_CAMPAIGN_PREFILL = gql`
     updateCampaignPrefill(input: $input) {
       prefillCode
       catalogId
-      seasonName
-      seasonYear
+      campaignName
+      campaignYear
       startDate
       endDate
       unitType
@@ -94,8 +94,8 @@ const GET_CAMPAIGN_PREFILL = gql`
     getCampaignPrefill(prefillCode: $prefillCode) {
       prefillCode
       catalogId
-      seasonName
-      seasonYear
+      campaignName
+      campaignYear
       startDate
       endDate
       unitType
@@ -117,8 +117,8 @@ const LIST_MY_CAMPAIGN_PREFILLS = gql`
     listMyCampaignPrefills {
       prefillCode
       catalogId
-      seasonName
-      seasonYear
+      campaignName
+      campaignYear
       startDate
       endDate
       unitType
@@ -252,8 +252,8 @@ describe('Campaign Prefill CRUD Operations', () => {
       const unitNumber = getUniqueUnitNumber();
       const result = await createAndTrackPrefill({
             catalogId,
-            seasonName: 'Spring',
-            seasonYear: 2025,
+            campaignName: 'Spring',
+            campaignYear: 2025,
             startDate: '2025-03-01',
             endDate: '2025-04-30',
             unitType: 'pack',
@@ -267,8 +267,8 @@ describe('Campaign Prefill CRUD Operations', () => {
       expect(result.data.createCampaignPrefill).toBeDefined();
       expect(result.data.createCampaignPrefill.prefillCode).toBeTruthy();
       expect(result.data.createCampaignPrefill.catalogId).toBe(catalogId);
-      expect(result.data.createCampaignPrefill.seasonName).toBe('Spring');
-      expect(result.data.createCampaignPrefill.seasonYear).toBe(2025);
+      expect(result.data.createCampaignPrefill.campaignName).toBe('Spring');
+      expect(result.data.createCampaignPrefill.campaignYear).toBe(2025);
       expect(result.data.createCampaignPrefill.unitType).toBe('pack');
       expect(result.data.createCampaignPrefill.unitNumber).toBe(unitNumber);
       expect(result.data.createCampaignPrefill.city).toBe('Chicago');
@@ -286,7 +286,7 @@ describe('Campaign Prefill CRUD Operations', () => {
           variables: {
             input: {
               catalogId,
-              // Missing seasonName, seasonYear, startDate, endDate, etc.
+              // Missing campaignName, campaignYear, startDate, endDate, etc.
             },
           },
         });
@@ -311,8 +311,8 @@ describe('Campaign Prefill CRUD Operations', () => {
     beforeAll(async () => {
       const result = await createAndTrackPrefill({
             catalogId,
-            seasonName: 'Summer',
-            seasonYear: 2025,
+            campaignName: 'Summer',
+            campaignYear: 2025,
             startDate: '2025-06-01',
             endDate: '2025-08-31',
             unitType: 'troop',
@@ -335,7 +335,7 @@ describe('Campaign Prefill CRUD Operations', () => {
 
       expect(result.data.getCampaignPrefill).toBeDefined();
       expect(result.data.getCampaignPrefill.prefillCode).toBe(prefillCode);
-      expect(result.data.getCampaignPrefill.seasonName).toBe('Summer');
+      expect(result.data.getCampaignPrefill.campaignName).toBe('Summer');
       expect(result.data.getCampaignPrefill.unitType).toBe('troop');
       // Unit number is randomly generated, just check it exists
       expect(result.data.getCampaignPrefill.unitNumber).toBeGreaterThan(0);
@@ -357,8 +357,8 @@ describe('Campaign Prefill CRUD Operations', () => {
       for (let i = 0; i < 3; i++) {
         await createAndTrackPrefill({
               catalogId,
-              seasonName: 'Fall',
-              seasonYear: 2025,
+              campaignName: 'Fall',
+              campaignYear: 2025,
               startDate: '2025-09-01',
               endDate: '2025-10-31',
               unitType: 'pack',
@@ -389,7 +389,7 @@ describe('Campaign Prefill CRUD Operations', () => {
       
       // At least 3 should be Fall season (the ones we just created)
       const fallPrefills = result.data.listMyCampaignPrefills.filter(
-        (p: any) => p.seasonName === 'Fall'
+        (p: any) => p.campaignName === 'Fall'
       );
       expect(fallPrefills.length).toBeGreaterThanOrEqual(3);
     });
@@ -401,8 +401,8 @@ describe('Campaign Prefill CRUD Operations', () => {
     beforeAll(async () => {
       const result = await createAndTrackPrefill({
             catalogId,
-            seasonName: 'Winter',
-            seasonYear: 2025,
+            campaignName: 'Winter',
+            campaignYear: 2025,
             startDate: '2025-12-01',
             endDate: '2025-12-31',
             unitType: 'crew',
@@ -466,8 +466,8 @@ describe('Campaign Prefill CRUD Operations', () => {
       // Create a prefill - track it even though we delete, in case test fails mid-way
       const createResult = await createAndTrackPrefill({
             catalogId,
-            seasonName: 'Spring',
-            seasonYear: 2026,
+            campaignName: 'Spring',
+            campaignYear: 2026,
             startDate: '2026-03-01',
             endDate: '2026-04-30',
             unitType: 'pack',
@@ -504,8 +504,8 @@ describe('Campaign Prefill CRUD Operations', () => {
       // Create a prefill - tracked for cleanup
       const createResult = await createAndTrackPrefill({
             catalogId,
-            seasonName: 'Spring',
-            seasonYear: 2026,
+            campaignName: 'Spring',
+            campaignYear: 2026,
             startDate: '2026-03-01',
             endDate: '2026-04-30',
             unitType: 'pack',

@@ -142,8 +142,8 @@ async function deleteResource(resource: TrackedResource): Promise<void> {
 
     case 'season':
       await client.mutate({
-        mutation: DELETE_SEASON,
-        variables: { seasonId: resource.id },
+        mutation: DELETE_CAMPAIGN,
+        variables: { campaignId: resource.id },
       });
       break;
 
@@ -225,9 +225,9 @@ const DELETE_PROFILE = gql`
   }
 `;
 
-const DELETE_SEASON = gql`
-  mutation DeleteSeason($seasonId: ID!) {
-    deleteSeason(seasonId: $seasonId)
+const DELETE_CAMPAIGN = gql`
+  mutation DeleteCampaign($campaignId: ID!) {
+    deleteCampaign(campaignId: $campaignId)
   }
 `;
 

@@ -16,7 +16,7 @@ import { deleteTestAccounts } from '../setup/testData';
  * 
  * VTL Resolvers Under Test:
  * - getOrder: Queries GSI6 (orderId index)
- * - listOrdersBySeason: Queries main table (PK=seasonId, SK begins_with "ORDER#")
+ * - listOrdersBySeason: Queries main table (PK=campaignId, SK begins_with "ORDER#")
  * - listOrdersByProfile: Queries GSI2 (GSI2PK=profileId)
  */
 
@@ -45,12 +45,12 @@ const CREATE_CATALOG = gql`
   }
 `;
 
-const CREATE_SEASON = gql`
-  mutation CreateSeason($input: CreateSeasonInput!) {
-    createSeason(input: $input) {
-      seasonId
-      seasonName
-      seasonYear
+const CREATE_CAMPAIGN = gql`
+  mutation CreateCampaign($input: CreateCampaignInput!) {
+    createCampaign(input: $input) {
+      campaignId
+      campaignName
+      campaignYear
       catalogId
       startDate
       endDate
@@ -58,12 +58,12 @@ const CREATE_SEASON = gql`
   }
 `;
 
-const GET_SEASON = gql`
-  query GetSeason($seasonId: ID!) {
-    getSeason(seasonId: $seasonId) {
-      seasonId
+const GET_CAMPAIGN = gql`
+  query GetCampaign($campaignId: ID!) {
+    getCampaign(campaignId: $campaignId) {
+      campaignId
       catalogId
-      seasonName
+      campaignName
     }
   }
 `;
@@ -84,7 +84,7 @@ const CREATE_ORDER = gql`
     createOrder(input: $input) {
       orderId
       profileId
-      seasonId
+      campaignId
       customerName
       customerPhone
       orderDate
@@ -108,7 +108,7 @@ const GET_ORDER = gql`
     getOrder(orderId: $orderId) {
       orderId
       profileId
-      seasonId
+      campaignId
       customerName
       customerPhone
       orderDate
@@ -128,11 +128,11 @@ const GET_ORDER = gql`
 `;
 
 const LIST_ORDERS_BY_SEASON = gql`
-  query ListOrdersBySeason($seasonId: ID!) {
-    listOrdersBySeason(seasonId: $seasonId) {
+  query ListOrdersBySeason($campaignId: ID!) {
+    listOrdersBySeason(campaignId: $campaignId) {
       orderId
       profileId
-      seasonId
+      campaignId
       customerName
       totalAmount
       paymentMethod
@@ -156,9 +156,9 @@ const DELETE_ORDER = gql`
   }
 `;
 
-const DELETE_SEASON = gql`
-  mutation DeleteSeason($seasonId: ID!) {
-    deleteSeason(seasonId: $seasonId)
+const DELETE_CAMPAIGN = gql`
+  mutation DeleteCampaign($campaignId: ID!) {
+    deleteCampaign(campaignId: $campaignId)
   }
 `;
 
@@ -185,7 +185,7 @@ const LIST_ORDERS_BY_PROFILE = gql`
     listOrdersByProfile(profileId: $profileId) {
       orderId
       profileId
-      seasonId
+      campaignId
       customerName
       customerPhone
       orderDate
@@ -289,19 +289,19 @@ describe('Order Query Operations Integration Tests', () => {
       // 3. Create season
       console.log('Step 4: Creating season...');
       const { data: seasonData }: any = await ownerClient.mutate({
-        mutation: CREATE_SEASON,
+        mutation: CREATE_CAMPAIGN,
         variables: {
           input: {
             profileId: testProfileId,
-            seasonName: 'Order Query Test Season',
-            seasonYear: 2025,
+            campaignName: 'Order Query Test Season',
+            campaignYear: 2025,
             startDate: new Date('2025-01-01T00:00:00Z').toISOString(),
             endDate: new Date('2025-12-31T23:59:59Z').toISOString(),
             catalogId: testCatalogId,
           },
         },
       });
-      testSeasonId = seasonData.createSeason.seasonId;
+      testSeasonId = seasonData.createCampaign.campaignId;
       console.log(`Created season: ${testSeasonId}`);
 
       // Verify season has catalogId before proceeding (GSI5 propagation)
@@ -310,11 +310,11 @@ describe('Order Query Operations Integration Tests', () => {
       while (retries < 5) {
         try {
           const { data: seasonVerify }: any = await ownerClient.query({
-            query: GET_SEASON,
-            variables: { seasonId: testSeasonId },
+            query: GET_CAMPAIGN,
+            variables: { campaignId: testSeasonId },
             fetchPolicy: 'network-only',
           });
-          if (seasonVerify?.getSeason?.catalogId) {
+          if (seasonVerify?.getCampaign?.catalogId) {
             break;
           }
         } catch (e) {
@@ -359,7 +359,7 @@ describe('Order Query Operations Integration Tests', () => {
         variables: {
           input: {
             profileId: testProfileId,
-            seasonId: testSeasonId,
+            campaignId: testSeasonId,
             customerName: 'Test Customer 1',
             customerPhone: '555-0001',
             orderDate: new Date('2025-02-01T10:00:00Z').toISOString(),
@@ -381,7 +381,7 @@ describe('Order Query Operations Integration Tests', () => {
         variables: {
           input: {
             profileId: testProfileId,
-            seasonId: testSeasonId,
+            campaignId: testSeasonId,
             customerName: 'Test Customer 2',
             customerPhone: '555-0002',
             orderDate: new Date('2025-02-15T14:00:00Z').toISOString(),
@@ -417,19 +417,19 @@ describe('Order Query Operations Integration Tests', () => {
 
       console.log('Step 11: Creating unshared season...');
       const { data: unsharedSeasonData }: any = await ownerClient.mutate({
-        mutation: CREATE_SEASON,
+        mutation: CREATE_CAMPAIGN,
         variables: {
           input: {
             profileId: unsharedProfileId,
-            seasonName: 'Unshared Season',
-            seasonYear: 2025,
+            campaignName: 'Unshared Season',
+            campaignYear: 2025,
             startDate: new Date('2025-01-01T00:00:00Z').toISOString(),
             endDate: new Date('2025-12-31T23:59:59Z').toISOString(),
             catalogId: testCatalogId,
           },
         },
       });
-      unsharedSeasonId = unsharedSeasonData.createSeason.seasonId;
+      unsharedSeasonId = unsharedSeasonData.createCampaign.campaignId;
       console.log(`Created unshared season: ${unsharedSeasonId}`);
 
       console.log('Step 12: Creating unshared order...');
@@ -438,7 +438,7 @@ describe('Order Query Operations Integration Tests', () => {
         variables: {
           input: {
             profileId: unsharedProfileId,
-            seasonId: unsharedSeasonId,
+            campaignId: unsharedSeasonId,
             customerName: 'Unshared Order Customer',
             customerPhone: '555-9999',
             orderDate: new Date('2025-03-01T10:00:00Z').toISOString(),
@@ -457,19 +457,19 @@ describe('Order Query Operations Integration Tests', () => {
 
       console.log('Step 13: Creating empty season (no orders)...');
       const { data: emptySeasonData }: any = await ownerClient.mutate({
-        mutation: CREATE_SEASON,
+        mutation: CREATE_CAMPAIGN,
         variables: {
           input: {
             profileId: testProfileId,  // Use shared profile so owner can query it
-            seasonName: 'Empty Season',
-            seasonYear: 2025,
+            campaignName: 'Empty Season',
+            campaignYear: 2025,
             startDate: new Date('2026-01-01T00:00:00Z').toISOString(),
             endDate: new Date('2026-12-31T23:59:59Z').toISOString(),
             catalogId: testCatalogId,
           },
         },
       });
-      emptySeasonId = emptySeasonData.createSeason.seasonId;
+      emptySeasonId = emptySeasonData.createCampaign.campaignId;
       console.log(`Created empty season: ${emptySeasonId}`);
 
       console.log('Step 14: Creating empty profile (no orders)...');
@@ -517,11 +517,11 @@ describe('Order Query Operations Integration Tests', () => {
       }
       
       // 3. Delete seasons
-      for (const seasonId of [testSeasonId, emptySeasonId, unsharedSeasonId]) {
-        if (seasonId) {
+      for (const campaignId of [testSeasonId, emptySeasonId, unsharedSeasonId]) {
+        if (campaignId) {
           await ownerClient.mutate({
-            mutation: DELETE_SEASON,
-            variables: { seasonId },
+            mutation: DELETE_CAMPAIGN,
+            variables: { campaignId },
           });
         }
       }
@@ -572,7 +572,7 @@ describe('Order Query Operations Integration Tests', () => {
       expect(data.getOrder.customerName).toBe('Test Customer 1');
       expect(data.getOrder.customerPhone).toBe('555-0001');
       expect(data.getOrder.profileId).toBe(testProfileId);
-      expect(data.getOrder.seasonId).toBe(testSeasonId);
+      expect(data.getOrder.campaignId).toBe(testSeasonId);
     });
 
     test('Happy Path: Includes all order fields', async () => {
@@ -584,7 +584,7 @@ describe('Order Query Operations Integration Tests', () => {
 
       expect(data.getOrder).toHaveProperty('orderId');
       expect(data.getOrder).toHaveProperty('profileId');
-      expect(data.getOrder).toHaveProperty('seasonId');
+      expect(data.getOrder).toHaveProperty('campaignId');
       expect(data.getOrder).toHaveProperty('customerName');
       expect(data.getOrder).toHaveProperty('customerPhone');
       expect(data.getOrder).toHaveProperty('orderDate');
@@ -668,10 +668,10 @@ describe('Order Query Operations Integration Tests', () => {
 
   describe('5.12.2: listOrdersBySeason', () => {
     test('Happy Path: Returns all orders for a season', async () => {
-      // ✅ FIXED BUG #25: Now queries GSI5 (seasonId index) with filter
+      // ✅ FIXED BUG #25: Now queries GSI5 (campaignId index) with filter
       const { data }: any = await ownerClient.query({
         query: LIST_ORDERS_BY_SEASON,
-        variables: { seasonId: testSeasonId },
+        variables: { campaignId: testSeasonId },
         fetchPolicy: 'network-only',
       });
 
@@ -686,7 +686,7 @@ describe('Order Query Operations Integration Tests', () => {
     test('Happy Path: Returns empty array if no orders', async () => {
       const { data }: any = await ownerClient.query({
         query: LIST_ORDERS_BY_SEASON,
-        variables: { seasonId: emptySeasonId },
+        variables: { campaignId: emptySeasonId },
         fetchPolicy: 'network-only',
       });
 
@@ -698,14 +698,14 @@ describe('Order Query Operations Integration Tests', () => {
       // ✅ FIXED: Bug #25 resolved
       const { data }: any = await ownerClient.query({
         query: LIST_ORDERS_BY_SEASON,
-        variables: { seasonId: testSeasonId },
+        variables: { campaignId: testSeasonId },
         fetchPolicy: 'network-only',
       });
 
       const order = data.listOrdersBySeason[0];
       expect(order).toHaveProperty('orderId');
       expect(order).toHaveProperty('profileId');
-      expect(order).toHaveProperty('seasonId');
+      expect(order).toHaveProperty('campaignId');
       expect(order).toHaveProperty('customerName');
       expect(order).toHaveProperty('paymentMethod');
       expect(order).toHaveProperty('lineItems');
@@ -716,7 +716,7 @@ describe('Order Query Operations Integration Tests', () => {
       // ✅ FIXED Bug #23: listOrdersBySeason now includes authorization via pipeline resolver
       const { data }: any = await ownerClient.query({
         query: LIST_ORDERS_BY_SEASON,
-        variables: { seasonId: testSeasonId },
+        variables: { campaignId: testSeasonId },
         fetchPolicy: 'network-only',
       });
 
@@ -728,7 +728,7 @@ describe('Order Query Operations Integration Tests', () => {
       // ✅ FIXED Bug #23: listOrdersBySeason now includes authorization via pipeline resolver
       const { data }: any = await contributorClient.query({
         query: LIST_ORDERS_BY_SEASON,
-        variables: { seasonId: testSeasonId },
+        variables: { campaignId: testSeasonId },
         fetchPolicy: 'network-only',
       });
 
@@ -743,17 +743,17 @@ describe('Order Query Operations Integration Tests', () => {
       
       const { data }: any = await contributorClient.query({
         query: LIST_ORDERS_BY_SEASON,
-        variables: { seasonId: unsharedSeasonId },
+        variables: { campaignId: unsharedSeasonId },
         fetchPolicy: 'network-only',
       });
       
       expect(data.listOrdersBySeason).toEqual([]);
     });
 
-    test('Input Validation: Returns empty array for non-existent seasonId', async () => {
+    test('Input Validation: Returns empty array for non-existent campaignId', async () => {
       const { data }: any = await ownerClient.query({
         query: LIST_ORDERS_BY_SEASON,
-        variables: { seasonId: 'SEASON#nonexistent' },
+        variables: { campaignId: 'SEASON#nonexistent' },
         fetchPolicy: 'network-only',
       });
 
@@ -804,7 +804,7 @@ describe('Order Query Operations Integration Tests', () => {
       const order = data.listOrdersByProfile[0];
       expect(order).toHaveProperty('orderId');
       expect(order).toHaveProperty('profileId');
-      expect(order).toHaveProperty('seasonId');
+      expect(order).toHaveProperty('campaignId');
       expect(order).toHaveProperty('customerName');
       expect(order).toHaveProperty('paymentMethod');
       expect(order).toHaveProperty('lineItems');
@@ -872,7 +872,7 @@ describe('Order Query Operations Integration Tests', () => {
         variables: {
           input: {
             profileId: testProfileId,
-            seasonId: testSeasonId,
+            campaignId: testSeasonId,
             customerName: 'Cash Customer',
             orderDate: new Date().toISOString(),
             paymentMethod: 'CASH',
@@ -904,7 +904,7 @@ describe('Order Query Operations Integration Tests', () => {
         variables: {
           input: {
             profileId: testProfileId,
-            seasonId: testSeasonId,
+            campaignId: testSeasonId,
             customerName: 'Check Customer',
             orderDate: new Date().toISOString(),
             paymentMethod: 'CHECK',
@@ -934,7 +934,7 @@ describe('Order Query Operations Integration Tests', () => {
         variables: {
           input: {
             profileId: testProfileId,
-            seasonId: testSeasonId,
+            campaignId: testSeasonId,
             customerName: 'Credit Card Customer',
             orderDate: new Date().toISOString(),
             paymentMethod: 'CREDIT_CARD',
@@ -964,7 +964,7 @@ describe('Order Query Operations Integration Tests', () => {
         variables: {
           input: {
             profileId: testProfileId,
-            seasonId: testSeasonId,
+            campaignId: testSeasonId,
             customerName: 'Other Payment Customer',
             orderDate: new Date().toISOString(),
             paymentMethod: 'OTHER',
@@ -995,7 +995,7 @@ describe('Order Query Operations Integration Tests', () => {
         variables: {
           input: {
             profileId: testProfileId,
-            seasonId: testSeasonId,
+            campaignId: testSeasonId,
             customerName: 'Total Calculation Customer',
             orderDate: new Date().toISOString(),
             paymentMethod: 'CASH',
@@ -1036,7 +1036,7 @@ describe('Order Query Operations Integration Tests', () => {
         variables: {
           input: {
             profileId: testProfileId,
-            seasonId: testSeasonId,
+            campaignId: testSeasonId,
             customerName: 'No Phone Customer',
             orderDate: new Date().toISOString(),
             paymentMethod: 'CASH',
@@ -1068,7 +1068,7 @@ describe('Order Query Operations Integration Tests', () => {
         variables: {
           input: {
             profileId: testProfileId,
-            seasonId: testSeasonId,
+            campaignId: testSeasonId,
             customerName: 'Phone Customer',
             customerPhone: '555-123-4567',
             orderDate: new Date().toISOString(),
@@ -1117,19 +1117,19 @@ describe('Order Query Operations Integration Tests', () => {
 
       // Create season with this catalog
       const { data: seasonData }: any = await ownerClient.mutate({
-        mutation: CREATE_SEASON,
+        mutation: CREATE_CAMPAIGN,
         variables: {
           input: {
             profileId: testProfileId,
-            seasonId: undefined,
-            seasonName: 'Many Line Items Season',
-            seasonYear: 2025,
+            campaignId: undefined,
+            campaignName: 'Many Line Items Season',
+            campaignYear: 2025,
             catalogId,
             startDate: new Date().toISOString(),
           },
         },
       });
-      const seasonId = seasonData.createSeason.seasonId;
+      const campaignId = seasonData.createCampaign.campaignId;
 
       // Create order with 5 line items
       const { data: orderData }: any = await ownerClient.mutate({
@@ -1137,7 +1137,7 @@ describe('Order Query Operations Integration Tests', () => {
         variables: {
           input: {
             profileId: testProfileId,
-            seasonId,
+            campaignId,
             customerName: 'Many Items Customer',
             orderDate: new Date().toISOString(),
             paymentMethod: 'CASH',
@@ -1171,7 +1171,7 @@ describe('Order Query Operations Integration Tests', () => {
 
       // Cleanup
       await ownerClient.mutate({ mutation: DELETE_ORDER, variables: { orderId } });
-      await ownerClient.mutate({ mutation: DELETE_SEASON, variables: { seasonId } });
+      await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId } });
       await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId } });
     }, 15000);
 
@@ -1185,7 +1185,7 @@ describe('Order Query Operations Integration Tests', () => {
           variables: {
             input: {
               profileId: testProfileId,
-              seasonId: testSeasonId,
+              campaignId: testSeasonId,
               customerName: `Many Orders Customer ${i}`,
               orderDate: new Date().toISOString(),
               paymentMethod: 'CASH',
@@ -1199,7 +1199,7 @@ describe('Order Query Operations Integration Tests', () => {
       // Query all orders for season
       const { data }: any = await ownerClient.query({
         query: LIST_ORDERS_BY_SEASON,
-        variables: { seasonId: testSeasonId },
+        variables: { campaignId: testSeasonId },
         fetchPolicy: 'network-only',
       });
 
@@ -1218,18 +1218,18 @@ describe('Order Query Operations Integration Tests', () => {
     test('Listing orders across multiple seasons', async () => {
       // Create a second season
       const { data: season2Data }: any = await ownerClient.mutate({
-        mutation: CREATE_SEASON,
+        mutation: CREATE_CAMPAIGN,
         variables: {
           input: {
             profileId: testProfileId,
-            seasonName: 'Second Season For Orders',
-            seasonYear: 2025,
+            campaignName: 'Second Season For Orders',
+            campaignYear: 2025,
             catalogId: testCatalogId,
             startDate: new Date().toISOString(),
           },
         },
       });
-      const season2Id = season2Data.createSeason.seasonId;
+      const season2Id = season2Data.createCampaign.campaignId;
 
       // Create orders in both seasons
       const { data: order1Data }: any = await ownerClient.mutate({
@@ -1237,7 +1237,7 @@ describe('Order Query Operations Integration Tests', () => {
         variables: {
           input: {
             profileId: testProfileId,
-            seasonId: testSeasonId,
+            campaignId: testSeasonId,
             customerName: 'Season 1 Customer',
             orderDate: new Date().toISOString(),
             paymentMethod: 'CASH',
@@ -1252,7 +1252,7 @@ describe('Order Query Operations Integration Tests', () => {
         variables: {
           input: {
             profileId: testProfileId,
-            seasonId: season2Id,
+            campaignId: season2Id,
             customerName: 'Season 2 Customer',
             orderDate: new Date().toISOString(),
             paymentMethod: 'CHECK',
@@ -1274,14 +1274,14 @@ describe('Order Query Operations Integration Tests', () => {
       expect(orderIds).toContain(order2Id);
 
       // Verify both seasons are represented
-      const seasonIds = data.listOrdersByProfile.map((o: any) => o.seasonId);
-      expect(seasonIds).toContain(testSeasonId);
-      expect(seasonIds).toContain(season2Id);
+      const campaignIds = data.listOrdersByProfile.map((o: any) => o.campaignId);
+      expect(campaignIds).toContain(testSeasonId);
+      expect(campaignIds).toContain(season2Id);
 
       // Cleanup
       await ownerClient.mutate({ mutation: DELETE_ORDER, variables: { orderId: order1Id } });
       await ownerClient.mutate({ mutation: DELETE_ORDER, variables: { orderId: order2Id } });
-      await ownerClient.mutate({ mutation: DELETE_SEASON, variables: { seasonId: season2Id } });
+      await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId: season2Id } });
     }, 15000);
 
     test('Performance: Listing orders for profile with many orders', async () => {
@@ -1295,7 +1295,7 @@ describe('Order Query Operations Integration Tests', () => {
           variables: {
             input: {
               profileId: testProfileId,
-              seasonId: testSeasonId,
+              campaignId: testSeasonId,
               customerName: `Performance Customer ${i}`,
               orderDate: new Date(Date.now() - i * 86400000).toISOString(), // Different dates
               paymentMethod: i % 3 === 0 ? 'CASH' : i % 3 === 1 ? 'CHECK' : 'CREDIT_CARD',
@@ -1325,7 +1325,7 @@ describe('Order Query Operations Integration Tests', () => {
       const startTimeSeason = Date.now();
       const { data: seasonData }: any = await ownerClient.query({
         query: LIST_ORDERS_BY_SEASON,
-        variables: { seasonId: testSeasonId },
+        variables: { campaignId: testSeasonId },
         fetchPolicy: 'network-only',
       });
       const seasonQueryTime = Date.now() - startTimeSeason;
@@ -1358,7 +1358,7 @@ describe('Order Query Operations Integration Tests', () => {
           variables: {
             input: {
               profileId: testProfileId,
-              seasonId: testSeasonId,
+              campaignId: testSeasonId,
               customerName: `Order Date Test Customer ${i}`,
               orderDate: orderDates[i],
               paymentMethod: 'CASH',
@@ -1372,7 +1372,7 @@ describe('Order Query Operations Integration Tests', () => {
       // Query orders
       const { data }: any = await ownerClient.query({
         query: LIST_ORDERS_BY_SEASON,
-        variables: { seasonId: testSeasonId },
+        variables: { campaignId: testSeasonId },
         fetchPolicy: 'network-only',
       });
 

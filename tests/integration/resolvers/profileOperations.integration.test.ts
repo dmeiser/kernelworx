@@ -1051,34 +1051,34 @@ describe('Profile Operations Integration Tests', () => {
       });
       const catalogId = catalogData.createCatalog.catalogId;
 
-      const CREATE_SEASON = gql`
-        mutation CreateSeason($input: CreateSeasonInput!) {
-          createSeason(input: $input) {
-            seasonId
-            seasonName
-            seasonYear
+      const CREATE_CAMPAIGN = gql`
+        mutation CreateCampaign($input: CreateCampaignInput!) {
+          createCampaign(input: $input) {
+            campaignId
+            campaignName
+            campaignYear
           }
         }
       `;
       const { data: seasonData } = await ownerClient.mutate({
-        mutation: CREATE_SEASON,
+        mutation: CREATE_CAMPAIGN,
         variables: {
           input: {
             profileId: testProfileId,
-            seasonName: 'Test Season for Cleanup',
-            seasonYear: 2025,
+            campaignName: 'Test Season for Cleanup',
+            campaignYear: 2025,
             startDate: new Date().toISOString(),
             catalogId: catalogId,
           },
         },
       });
-      const seasonId = seasonData.createSeason.seasonId;
+      const campaignId = seasonData.createCampaign.campaignId;
 
-      // Verify season exists via listSeasonsByProfile
+      // Verify campaign exists via listCampaignsByProfile
       const LIST_SEASONS = gql`
-        query ListSeasonsByProfile($profileId: ID!) {
-          listSeasonsByProfile(profileId: $profileId) {
-            seasonId
+        query ListCampaignsByProfile($profileId: ID!) {
+          listCampaignsByProfile(profileId: $profileId) {
+            campaignId
           }
         }
       `;
@@ -1087,8 +1087,8 @@ describe('Profile Operations Integration Tests', () => {
         variables: { profileId: testProfileId },
         fetchPolicy: 'network-only',
       });
-      const beforeSeasonIds = beforeDelete.listSeasonsByProfile.map((s: any) => s.seasonId);
-      expect(beforeSeasonIds).toContain(seasonId);
+      const beforeSeasonIds = beforeDelete.listCampaignsByProfile.map((s: any) => s.campaignId);
+      expect(beforeSeasonIds).toContain(campaignId);
 
       // Act: Delete the profile
       const { data } = await ownerClient.mutate({
@@ -1098,15 +1098,15 @@ describe('Profile Operations Integration Tests', () => {
       expect(data.deleteSellerProfile).toBe(true);
 
       // Assert: Seasons should be cleaned up (no orphaned records)
-      // V2 schema: Query seasonId-index GSI to check if season still exists
+      // V2 schema: Query campaignId-index GSI to check if season still exists
       const { DynamoDBClient, QueryCommand, DeleteItemCommand } = await import('@aws-sdk/client-dynamodb');
       const dynamoClient = new DynamoDBClient({ region: 'us-east-1' });
       const result = await dynamoClient.send(new QueryCommand({
         TableName: TABLE_NAMES.seasons,
-        IndexName: 'seasonId-index',
-        KeyConditionExpression: 'seasonId = :sid',
+        IndexName: 'campaignId-index',
+        KeyConditionExpression: 'campaignId = :sid',
         ExpressionAttributeValues: {
-          ':sid': { S: seasonId },
+          ':sid': { S: campaignId },
         },
       }));
       expect(result.Items?.length || 0).toBe(0);
