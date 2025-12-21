@@ -2403,9 +2403,9 @@ export function request(ctx) {
     const exprValues = {};
     const exprNames = {};
     
-    if (input.seasonName !== undefined) {
-        updates.push('seasonName = :seasonName');
-        exprValues[':seasonName'] = input.seasonName;
+    if (input.campaignName !== undefined) {
+        updates.push('campaignName = :campaignName');
+        exprValues[':campaignName'] = input.campaignName;
     }
     if (input.startDate !== undefined) {
         updates.push('startDate = :startDate');
@@ -2454,7 +2454,7 @@ export function response(ctx) {
     const result = {
         seasonId: season.seasonId,
         profileId: season.profileId,
-        seasonName: input.seasonName !== undefined ? input.seasonName : season.seasonName,
+        campaignName: input.campaignName !== undefined ? input.campaignName : campaign.campaignName,
         startDate: input.startDate !== undefined ? input.startDate : season.startDate,
         endDate: input.endDate !== undefined ? input.endDate : season.endDate,
         catalogId: input.catalogId !== undefined ? input.catalogId : season.catalogId,
@@ -5545,14 +5545,14 @@ export function request(ctx) {
     
     // Generate prefill code: UNITTYPE + UNITNUMBER + SEASON + YEAR
     // Convert numbers to strings using template literal (String() not available in APPSYNC_JS)
-    const seasonYearStr = '' + input.seasonYear;
+    const seasonYearStr = '' + input.campaignYear;
     const unitNumStr = '' + input.unitNumber;
-    const seasonAbbrev = input.seasonName.substring(0, 4).toUpperCase();
+    const seasonAbbrev = input.campaignName.substring(0, 4).toUpperCase();
     const yearAbbrev = seasonYearStr.substring(2);
     const prefillCode = input.unitType.toUpperCase() + unitNumStr + '-' + seasonAbbrev + '-' + input.state.toUpperCase() + '-' + yearAbbrev;
     
     // Build unit+season composite key for GSI2
-    const unitSeasonKey = input.unitType + '#' + unitNumStr + '#' + input.city + '#' + input.state + '#' + input.seasonName + '#' + seasonYearStr;
+    const unitSeasonKey = input.unitType + '#' + unitNumStr + '#' + input.city + '#' + input.state + '#' + input.campaignName + '#' + seasonYearStr;
     
     // Build display name from account
     let createdByName = 'Unknown';
@@ -5565,8 +5565,8 @@ export function request(ctx) {
     const item = {
         prefillCode: prefillCode,
         catalogId: input.catalogId,
-        seasonName: input.seasonName,
-        seasonYear: input.seasonYear,
+        campaignName: input.campaignName,
+        campaignYear: input.campaignYear,
         unitType: input.unitType,
         unitNumber: input.unitNumber,
         city: input.city,
