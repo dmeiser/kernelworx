@@ -903,7 +903,7 @@ export const CreateSeasonPage: React.FC = () => {
           <Stack direction="row" spacing={2} justifyContent="flex-end">
             <Button
               variant="outlined"
-              onClick={() => navigate(-1)}
+              onClick={() => navigate("/profiles")}
               disabled={submitting}
             >
               Cancel

@@ -255,10 +255,10 @@ export const CampaignPrefillsPage: React.FC = () => {
             <Button
               variant="contained"
               startIcon={<AddIcon />}
-              onClick={() => navigate("/campaign-prefills/create")}
+              onClick={() => navigate("/shared-campaigns/create")}
               disabled={!canCreateMore}
             >
-              Create Campaign Prefill
+              Create Shared Campaign
             </Button>
           </span>
         </Tooltip>
@@ -267,10 +267,10 @@ export const CampaignPrefillsPage: React.FC = () => {
       {prefills.length === 0 ? (
         <Paper sx={{ p: 4, textAlign: "center" }}>
           <Typography variant="h6" color="text.secondary" gutterBottom>
-            No Campaign Prefills Yet
+            No Shared Campaigns Yet
           </Typography>
           <Typography color="text.secondary" sx={{ mb: 3 }}>
-            Create a campaign prefill to generate shareable links for your unit
+            Create a shared campaign to generate shareable links for your unit
             members.
           </Typography>
           <Button
@@ -278,7 +278,7 @@ export const CampaignPrefillsPage: React.FC = () => {
             startIcon={<AddIcon />}
             onClick={() => navigate("/campaign-prefills/create")}
           >
-            Create Your First Campaign Prefill
+            Create Your First Shared Campaign
           </Button>
         </Paper>
       ) : (

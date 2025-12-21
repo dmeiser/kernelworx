@@ -1,10 +1,10 @@
 /**
- * UnitReportsPage - Generate and view unit-level popcorn sales reports
+ * UnitReportsPage - Generate and view shared campaign sales reports
  *
  * Provides three report views:
- * 1. Seller Summary - Totals by seller
- * 2. Detailed Seller Report - Each seller with all their orders
- * 3. Unit Summary - Overall unit totals
+ * 1. Campaign Summary - Overall campaign totals
+ * 2. Seller Report - Totals by seller with product breakdown
+ * 3. Order Details - Each seller with all their orders
  */
 
 import React, { useState } from "react";
@@ -37,19 +37,26 @@ import {
 } from "@mui/icons-material";
 import {
   GET_UNIT_REPORT,
-  GET_MY_ACCOUNT,
-  LIST_UNIT_CATALOGS,
+  LIST_MY_CAMPAIGN_PREFILLS,
 } from "../lib/graphql";
 import * as XLSX from "xlsx";
 
-const UNIT_TYPES = [
-  { value: "Pack", label: "Pack (Cub Scouts)" },
-  { value: "Troop", label: "Troop (Scouts BSA)" },
-  { value: "Crew", label: "Crew (Venturing)" },
-  { value: "Ship", label: "Ship (Sea Scouts)" },
-  { value: "Post", label: "Post (Exploring)" },
-  { value: "Club", label: "Club (Exploring)" },
-];
+interface CampaignPrefill {
+  prefillCode: string;
+  catalogId: string;
+  catalog: {
+    catalogId: string;
+    catalogName: string;
+  };
+  seasonName: string;
+  seasonYear: number;
+  unitType: string;
+  unitNumber: number;
+  city: string;
+  state: string;
+  description?: string;
+  isActive: boolean;
+}
 
 interface LineItem {
   productId: string;
@@ -87,65 +94,35 @@ interface UnitReport {
 
 type ReportView = "summary" | "detailed" | "unit";
 
-const SEASON_NAMES = ["Fall", "Spring", "Summer", "Winter", "Annual"];
-
 export const UnitReportsPage: React.FC = () => {
-  const currentYear = new Date().getFullYear();
-
-  const [unitType, setUnitType] = useState<string>("");
-  const [unitNumber, setUnitNumber] = useState<string>("");
-  const [seasonName, setSeasonName] = useState<string>("Fall");
-  const [seasonYear, setSeasonYear] = useState<number>(currentYear);
-  const [catalogId, setCatalogId] = useState<string>("");
+  const [selectedPrefillCode, setSelectedPrefillCode] = useState<string>("");
   const [reportView, setReportView] = useState<ReportView>("unit");
 
-  // Get user's account to pre-populate their unit
-  const { data: accountData } = useQuery<{
-    getMyAccount: {
-      unitType?: string;
-      unitNumber?: number;
-    };
-  }>(GET_MY_ACCOUNT);
+  // Fetch user's shared campaigns
+  const { data: prefillsData, loading: prefillsLoading } = useQuery<{
+    listMyCampaignPrefills: CampaignPrefill[];
+  }>(LIST_MY_CAMPAIGN_PREFILLS);
 
-  // Get catalogs used in this unit
-  const canFetchCatalogs = unitType && unitNumber && seasonName && seasonYear;
-  const { data: unitCatalogsData } = useQuery<{
-    listUnitCatalogs: Array<{ catalogId: string; catalogName: string }>;
-  }>(LIST_UNIT_CATALOGS, {
-    variables: {
-      unitType,
-      unitNumber: unitNumber ? parseInt(unitNumber, 10) : 0,
-      seasonName,
-      seasonYear,
-    },
-    skip: !canFetchCatalogs,
-  });
+  const campaigns = prefillsData?.listMyCampaignPrefills?.filter(
+    (p) => p.isActive
+  ) || [];
+  const selectedCampaign = campaigns.find(
+    (c) => c.prefillCode === selectedPrefillCode
+  );
 
-  const availableCatalogs = unitCatalogsData?.listUnitCatalogs || [];
-
-  React.useEffect(() => {
-    if (accountData?.getMyAccount) {
-      if (accountData.getMyAccount.unitType) {
-        setUnitType(accountData.getMyAccount.unitType);
-      }
-      if (accountData.getMyAccount.unitNumber) {
-        setUnitNumber(accountData.getMyAccount.unitNumber.toString());
-      }
-    }
-  }, [accountData]);
-
-  const canGenerateReport =
-    unitType && unitNumber && seasonName && seasonYear && catalogId;
+  const canGenerateReport = !!selectedCampaign;
 
   const { data, loading, error, refetch } = useQuery<{
     getUnitReport: UnitReport;
   }>(GET_UNIT_REPORT, {
     variables: {
-      unitType,
-      unitNumber: unitNumber ? parseInt(unitNumber, 10) : 0,
-      seasonName,
-      seasonYear,
-      catalogId,
+      unitType: selectedCampaign?.unitType,
+      unitNumber: selectedCampaign?.unitNumber,
+      city: selectedCampaign?.city,
+      state: selectedCampaign?.state,
+      seasonName: selectedCampaign?.seasonName,
+      seasonYear: selectedCampaign?.seasonYear,
+      catalogId: selectedCampaign?.catalogId,
     },
     skip: !canGenerateReport,
   });
@@ -238,101 +215,86 @@ export const UnitReportsPage: React.FC = () => {
         <Box>
           <Typography variant="h4" component="h1" gutterBottom>
             <ReportIcon sx={{ mr: 1, verticalAlign: "bottom" }} />
-            Unit Reports
+            Shared Campaign Reports
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            View aggregated sales data for all sellers in your unit
+            View aggregated sales data for all sellers in your shared campaigns
           </Typography>
         </Box>
 
-        {/* Report Parameters */}
+        {/* Campaign Selector */}
         <Paper sx={{ p: 3 }}>
           <Stack spacing={2}>
-            <Typography variant="h6">Report Parameters</Typography>
+            <Typography variant="h6">Select Shared Campaign</Typography>
 
-            <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
-              <TextField
-                select
-                label="Unit Type"
-                value={unitType}
-                onChange={(e) => setUnitType(e.target.value)}
-                fullWidth
-              >
-                {UNIT_TYPES.map((type) => (
-                  <MenuItem key={type.value} value={type.value}>
-                    {type.label}
-                  </MenuItem>
-                ))}
-              </TextField>
+            {prefillsLoading ? (
+              <CircularProgress />
+            ) : campaigns.length === 0 ? (
+              <Alert severity="info">
+                You don't have any active shared campaigns yet. Create one to
+                start generating reports.
+              </Alert>
+            ) : (
+              <>
+                <TextField
+                  select
+                  label="Shared Campaign"
+                  value={selectedPrefillCode}
+                  onChange={(e) => setSelectedPrefillCode(e.target.value)}
+                  fullWidth
+                  helperText="Select a shared campaign to view its sales report"
+                >
+                  {campaigns.map((campaign) => (
+                    <MenuItem
+                      key={campaign.prefillCode}
+                      value={campaign.prefillCode}
+                    >
+                      {campaign.unitType} {campaign.unitNumber} -{" "}
+                      {campaign.seasonName} {campaign.seasonYear} (
+                      {campaign.catalog.catalogName})
+                      {campaign.description && ` - ${campaign.description}`}
+                    </MenuItem>
+                  ))}
+                </TextField>
 
-              <TextField
-                label="Unit Number"
-                type="number"
-                value={unitNumber}
-                onChange={(e) => setUnitNumber(e.target.value)}
-                fullWidth
-                inputProps={{ min: 1, step: 1 }}
-              />
-            </Stack>
+                {selectedCampaign && (
+                  <Paper variant="outlined" sx={{ p: 2, bgcolor: "grey.50" }}>
+                    <Typography variant="subtitle2" gutterBottom>
+                      Campaign Details:
+                    </Typography>
+                    <Stack spacing={0.5}>
+                      <Typography variant="body2">
+                        <strong>Unit:</strong> {selectedCampaign.unitType}{" "}
+                        {selectedCampaign.unitNumber}
+                      </Typography>
+                      <Typography variant="body2">
+                        <strong>Location:</strong> {selectedCampaign.city},{" "}
+                        {selectedCampaign.state}
+                      </Typography>
+                      <Typography variant="body2">
+                        <strong>Season:</strong> {selectedCampaign.seasonName}{" "}
+                        {selectedCampaign.seasonYear}
+                      </Typography>
+                      <Typography variant="body2">
+                        <strong>Catalog:</strong>{" "}
+                        {selectedCampaign.catalog.catalogName}
+                      </Typography>
+                    </Stack>
+                  </Paper>
+                )}
 
-            <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
-              <TextField
-                select
-                label="Season"
-                value={seasonName}
-                onChange={(e) => setSeasonName(e.target.value)}
-                fullWidth
-              >
-                {SEASON_NAMES.map((name) => (
-                  <MenuItem key={name} value={name}>
-                    {name}
-                  </MenuItem>
-                ))}
-              </TextField>
-
-              <TextField
-                label="Year"
-                type="number"
-                value={seasonYear}
-                onChange={(e) => setSeasonYear(parseInt(e.target.value, 10))}
-                fullWidth
-                inputProps={{ min: 2020, max: currentYear + 1, step: 1 }}
-              />
-
-              <TextField
-                select
-                label="Catalog"
-                value={catalogId}
-                onChange={(e) => setCatalogId(e.target.value)}
-                fullWidth
-                required
-                disabled={!canFetchCatalogs || availableCatalogs.length === 0}
-                helperText={
-                  !canFetchCatalogs
-                    ? "Select unit and season first"
-                    : availableCatalogs.length === 0
-                      ? "No catalogs found for this unit/season"
-                      : "Select catalog to compare scouts using same products"
-                }
-              >
-                {availableCatalogs.map((catalog) => (
-                  <MenuItem key={catalog.catalogId} value={catalog.catalogId}>
-                    {catalog.catalogName}
-                  </MenuItem>
-                ))}
-              </TextField>
-            </Stack>
-
-            <Button
-              variant="contained"
-              onClick={handleGenerateReport}
-              disabled={!canGenerateReport || loading}
-              startIcon={
-                loading ? <CircularProgress size={20} /> : <ReportIcon />
-              }
-            >
-              {loading ? "Generating..." : "Generate Report"}
-            </Button>
+                <Button
+                  variant="contained"
+                  onClick={handleGenerateReport}
+                  disabled={!canGenerateReport || loading}
+                  startIcon={
+                    loading ? <CircularProgress size={20} /> : <ReportIcon />
+                  }
+                >
+                  {loading ? "Generating..." : "Generate Report"}
+                </Button>
+              </>
+            )}
           </Stack>
         </Paper>
 

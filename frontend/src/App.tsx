@@ -168,7 +168,7 @@ function App() {
               />
 
               <Route
-                path="/campaign-prefills"
+                path="/shared-campaigns"
                 element={
                   <ProtectedRoute>
                     <AppLayout>
@@ -179,7 +179,7 @@ function App() {
               />
 
               <Route
-                path="/campaign-prefills/create"
+                path="/shared-campaigns/create"
                 element={
                   <ProtectedRoute>
                     <AppLayout>

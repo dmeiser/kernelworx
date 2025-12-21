@@ -447,6 +447,8 @@ export const GET_UNIT_REPORT = gql`
   query GetUnitReport(
     $unitType: String!
     $unitNumber: Int!
+    $city: String
+    $state: String
     $seasonName: String!
     $seasonYear: Int!
     $catalogId: ID!
@@ -454,6 +456,8 @@ export const GET_UNIT_REPORT = gql`
     getUnitReport(
       unitType: $unitType
       unitNumber: $unitNumber
+      city: $city
+      state: $state
       seasonName: $seasonName
       seasonYear: $seasonYear
       catalogId: $catalogId

@@ -195,8 +195,8 @@ export const CreateCampaignPrefillPage: React.FC = () => {
         },
       });
 
-      // Navigate back to campaign prefills page
-      navigate("/campaign-prefills");
+      // Navigate back to shared campaigns page
+      navigate("/shared-campaigns");
     } catch (err) {
       const errorMessage =
         err instanceof Error
@@ -217,7 +217,7 @@ export const CreateCampaignPrefillPage: React.FC = () => {
       <Stack direction="row" alignItems="center" spacing={2} sx={{ mb: 3 }}>
         <Button
           startIcon={<BackIcon />}
-          onClick={() => navigate("/campaign-prefills")}
+          onClick={() => navigate("/shared-campaigns")}
           disabled={isSubmitting}
         >
           Back
@@ -489,7 +489,7 @@ export const CreateCampaignPrefillPage: React.FC = () => {
             justifyContent="flex-end"
           >
             <Button
-              onClick={() => navigate("/campaign-prefills")}
+              onClick={() => navigate("/shared-campaigns")}
               disabled={isSubmitting}
               fullWidth={false}
               sx={{ minWidth: { xs: "100%", sm: 120 } }}
