@@ -6,6 +6,7 @@ from aws_cdk import (
     Duration,
     RemovalPolicy,
     Stack,
+    custom_resources as cr,
 )
 from aws_cdk import aws_appsync as appsync
 from aws_cdk import aws_certificatemanager as acm
@@ -907,6 +908,23 @@ class CdkStack(Stack):
             environment=lambda_env,
         )
 
+        # Pre-Signup Lambda (Cognito Trigger)
+        # Links federated identities (Google, Facebook, Apple) to existing users
+        # with the same email to prevent duplicate accounts
+        self.pre_signup_fn = lambda_.Function(
+            self,
+            "PreSignupFn",
+            function_name=rn("kernelworx-pre-signup"),
+            runtime=lambda_.Runtime.PYTHON_3_13,
+            handler="handlers.pre_signup.lambda_handler",
+            code=lambda_code,
+            layers=[self.shared_layer],
+            timeout=Duration.seconds(10),
+            memory_size=256,
+            role=self.lambda_execution_role,
+            environment=lambda_env,
+        )
+
         # ====================================================================
         # Cognito User Pool - Authentication (Essentials tier)
         # ====================================================================
@@ -991,6 +1009,82 @@ class CdkStack(Stack):
             cfn_client = self.user_pool_client.node.default_child
             assert cfn_client is not None
             cfn_client.apply_removal_policy(RemovalPolicy.RETAIN)  # type: ignore
+
+            # Attach post-authentication Lambda trigger to imported pool
+            # CDK doesn't support adding triggers to imported pools natively,
+            # so we use AwsCustomResource to call UpdateUserPool
+            self.post_auth_fn.add_permission(
+                "CognitoInvokePermission",
+                principal=iam.ServicePrincipal("cognito-idp.amazonaws.com"),
+                source_arn=f"arn:aws:cognito-idp:{Stack.of(self).region}:{Stack.of(self).account}:userpool/{existing_user_pool_id}",
+            )
+
+            # Pre-signup Lambda also needs Cognito invoke permission
+            self.pre_signup_fn.add_permission(
+                "CognitoInvokePermission",
+                principal=iam.ServicePrincipal("cognito-idp.amazonaws.com"),
+                source_arn=f"arn:aws:cognito-idp:{Stack.of(self).region}:{Stack.of(self).account}:userpool/{existing_user_pool_id}",
+            )
+
+            # Pre-signup Lambda needs permission to link identities and list users
+            self.pre_signup_fn.add_to_role_policy(
+                iam.PolicyStatement(
+                    actions=[
+                        "cognito-idp:AdminLinkProviderForUser",
+                        "cognito-idp:ListUsers",
+                    ],
+                    resources=[
+                        f"arn:aws:cognito-idp:{Stack.of(self).region}:{Stack.of(self).account}:userpool/{existing_user_pool_id}"
+                    ],
+                )
+            )
+
+            # Note: UpdateUserPool requires all related settings to be included
+            # We must include AutoVerifiedAttributes because UserAttributeUpdateSettings
+            # depends on it (error: "All attributes in AttributesRequireVerificationBeforeUpdate
+            # must exist in AutoVerifiedAttributes")
+            update_params = {
+                "UserPoolId": existing_user_pool_id,
+                "AutoVerifiedAttributes": ["email"],
+                "UserAttributeUpdateSettings": {
+                    "AttributesRequireVerificationBeforeUpdate": ["email"]
+                },
+                "LambdaConfig": {
+                    "PreSignUp": self.pre_signup_fn.function_arn,
+                    "PostAuthentication": self.post_auth_fn.function_arn,
+                },
+            }
+
+            cr.AwsCustomResource(
+                self,
+                "AttachPostAuthTrigger",
+                on_create=cr.AwsSdkCall(
+                    service="CognitoIdentityServiceProvider",
+                    action="updateUserPool",
+                    parameters=update_params,
+                    physical_resource_id=cr.PhysicalResourceId.of(
+                        f"{existing_user_pool_id}-post-auth-trigger"
+                    ),
+                ),
+                on_update=cr.AwsSdkCall(
+                    service="CognitoIdentityServiceProvider",
+                    action="updateUserPool",
+                    parameters=update_params,
+                    physical_resource_id=cr.PhysicalResourceId.of(
+                        f"{existing_user_pool_id}-post-auth-trigger"
+                    ),
+                ),
+                policy=cr.AwsCustomResourcePolicy.from_statements(
+                    [
+                        iam.PolicyStatement(
+                            actions=["cognito-idp:UpdateUserPool"],
+                            resources=[
+                                f"arn:aws:cognito-idp:{Stack.of(self).region}:{Stack.of(self).account}:userpool/{existing_user_pool_id}"
+                            ],
+                        )
+                    ]
+                ),
+            )
         else:
             self.user_pool = cognito.UserPool(
                 self,
@@ -1032,10 +1126,22 @@ class CdkStack(Stack):
                 removal_policy=RemovalPolicy.RETAIN,
                 # Lambda triggers
                 lambda_triggers=cognito.UserPoolTriggers(
+                    pre_sign_up=self.pre_signup_fn,
                     post_authentication=self.post_auth_fn,
                 ),
                 # Note: Advanced security mode not compatible with Essentials tier
                 # UI customization (logo, CSS) is available without advanced_security_mode
+            )
+
+            # Pre-signup Lambda needs permission to link identities and list users
+            self.pre_signup_fn.add_to_role_policy(
+                iam.PolicyStatement(
+                    actions=[
+                        "cognito-idp:AdminLinkProviderForUser",
+                        "cognito-idp:ListUsers",
+                    ],
+                    resources=[self.user_pool.user_pool_arn],
+                )
             )
 
             # Configure user attribute update settings to require verification for email changes
