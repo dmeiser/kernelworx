@@ -6771,7 +6771,34 @@ export function response(ctx) {
         self.origin_access_identity.node.default_child.apply_removal_policy(RemovalPolicy.RETAIN)  # type: ignore
 
         # Grant CloudFront read access to static assets bucket
+        # Note: grant_read() doesn't work on imported buckets, so we add an explicit policy
         self.static_assets_bucket.grant_read(self.origin_access_identity)
+
+        # Explicit bucket policy for CloudFront OAI access (required for imported buckets)
+        # When a bucket is imported via from_bucket_name(), grant_read() is a no-op
+        # Note: Bucket policies are singleton per bucket - no import needed, just overwrite
+        static_bucket_policy = s3.CfnBucketPolicy(
+            self,
+            "StaticBucketPolicy",
+            bucket=self.static_assets_bucket.bucket_name,
+            policy_document={
+                "Version": "2012-10-17",
+                "Statement": [
+                    {
+                        "Sid": "AllowCloudFrontOAI",
+                        "Effect": "Allow",
+                        "Principal": {
+                            "AWS": f"arn:aws:iam::cloudfront:user/CloudFront Origin Access Identity {self.origin_access_identity.origin_access_identity_id}"
+                        },
+                        "Action": "s3:GetObject",
+                        "Resource": f"arn:aws:s3:::{self.static_assets_bucket.bucket_name}/*",
+                    }
+                ],
+            },
+        )
+        static_bucket_policy.apply_removal_policy(RemovalPolicy.RETAIN)
+        # Ensure OAI is created before the bucket policy
+        static_bucket_policy.node.add_dependency(self.origin_access_identity)
 
         # CloudFront distribution with custom domain
         self.distribution = cloudfront.Distribution(
