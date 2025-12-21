@@ -201,7 +201,7 @@ export const CreateCampaignPrefillPage: React.FC = () => {
       const errorMessage =
         err instanceof Error
           ? err.message
-          : "Failed to create campaign prefill";
+          : "Failed to create shared campaign";
       setError(errorMessage);
       window.scrollTo({ top: 0, behavior: "smooth" });
     } finally {
@@ -223,7 +223,7 @@ export const CreateCampaignPrefillPage: React.FC = () => {
           Back
         </Button>
         <Typography variant="h4" component="h1">
-          Create Campaign Prefill
+          Create Shared Campaign
         </Typography>
       </Stack>
 
@@ -239,7 +239,7 @@ export const CreateCampaignPrefillPage: React.FC = () => {
           {!canCreate && (
             <Alert severity="error">
               You have reached the maximum of {MAX_ACTIVE_PREFILLS} active
-              campaign prefills. Please deactivate an existing prefill before
+              shared campaigns. Please deactivate an existing shared campaign before
               creating a new one.
             </Alert>
           )}
@@ -457,7 +457,7 @@ export const CreateCampaignPrefillPage: React.FC = () => {
                 label="Description (For Your Reference)"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                placeholder="Internal description to help you manage your campaign prefills"
+                placeholder="Internal description to help you manage your shared campaigns"
                 fullWidth
               />
             </Stack>
@@ -478,7 +478,7 @@ export const CreateCampaignPrefillPage: React.FC = () => {
               {previewLink}
             </Typography>
             <Typography variant="caption" color="text.secondary">
-              The actual code will be generated when you create the prefill
+              The actual code will be generated when you create the shared campaign
             </Typography>
           </Box>
 
@@ -506,7 +506,7 @@ export const CreateCampaignPrefillPage: React.FC = () => {
               fullWidth={false}
               sx={{ minWidth: { xs: "100%", sm: 200 } }}
             >
-              {isSubmitting ? "Creating..." : "Create Campaign Prefill"}
+              {isSubmitting ? "Creating..." : "Create Shared Campaign"}
             </Button>
           </Stack>
         </Stack>

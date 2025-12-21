@@ -221,8 +221,8 @@ export const SeasonSettingsPage: React.FC = () => {
         {/* Warning for prefill-created seasons */}
         {season?.prefillCode && (
           <Alert severity="warning" icon={<WarningIcon />} sx={{ mb: 3 }}>
-            <AlertTitle>Campaign Season</AlertTitle>
-            This season was created from a campaign link. Changing the catalog,
+            <AlertTitle>Shared Campaign Season</AlertTitle>
+            This season was created from a shared campaign link. Changing the catalog,
             season name, or unit information may cause this season to no longer
             appear correctly in unit reports for your unit.
           </Alert>

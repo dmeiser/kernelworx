@@ -40,14 +40,12 @@ interface Catalog {
   isDeleted?: boolean;
 }
 
-const SEASON_OPTIONS = ["Fall", "Spring", "Summer", "Winter"];
-
 export const CreateSeasonDialog: React.FC<CreateSeasonDialogProps> = ({
   open,
   onClose,
   onSubmit,
 }) => {
-  const [seasonName, setSeasonName] = useState("Fall");
+  const [seasonName, setSeasonName] = useState("");
   const [seasonYear, setSeasonYear] = useState(new Date().getFullYear());
   const [catalogId, setCatalogId] = useState("");
   const [startDate, setStartDate] = useState("");
@@ -89,7 +87,7 @@ export const CreateSeasonDialog: React.FC<CreateSeasonDialogProps> = ({
         endDate || undefined,
       );
       // Reset form
-      setSeasonName("Fall");
+      setSeasonName("");
       setSeasonYear(new Date().getFullYear());
       setCatalogId("");
       setStartDate("");
@@ -104,7 +102,7 @@ export const CreateSeasonDialog: React.FC<CreateSeasonDialogProps> = ({
 
   const handleClose = () => {
     if (!loading) {
-      setSeasonName("Fall");
+      setSeasonName("");
       setSeasonYear(new Date().getFullYear());
       setCatalogId("");
       setStartDate("");
@@ -121,20 +119,14 @@ export const CreateSeasonDialog: React.FC<CreateSeasonDialogProps> = ({
       <DialogContent>
         <Stack spacing={3} pt={1}>
           {/* Season Name */}
-          <FormControl fullWidth disabled={loading}>
-            <InputLabel>Season Name</InputLabel>
-            <Select
-              value={seasonName}
-              onChange={(e) => setSeasonName(e.target.value)}
-              label="Season Name"
-            >
-              {SEASON_OPTIONS.map((season) => (
-                <MenuItem key={season} value={season}>
-                  {season}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
+          <TextField
+            fullWidth
+            label="Season Name"
+            value={seasonName}
+            onChange={(e) => setSeasonName(e.target.value)}
+            disabled={loading}
+            helperText="Name for this sales season (e.g., Fall 2025, Spring Fundraiser)"
+          />
 
           {/* Season Year */}
           <TextField

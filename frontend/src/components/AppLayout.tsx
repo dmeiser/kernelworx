@@ -122,7 +122,7 @@ export const AppLayout: React.FC<{ children?: React.ReactNode }> = ({
           <ListItemIcon>
             <CampaignIcon />
           </ListItemIcon>
-          <ListItemText primary="Campaign Prefills" />
+          <ListItemText primary="Shared Campaigns" />
         </ListItemButton>
         <ListItemButton
           onClick={() => handleNavigation("/settings")}

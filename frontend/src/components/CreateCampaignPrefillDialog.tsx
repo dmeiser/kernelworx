@@ -214,7 +214,7 @@ export const CreateCampaignPrefillDialog: React.FC<
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
-      <DialogTitle>Create Campaign Prefill</DialogTitle>
+      <DialogTitle>Create Shared Campaign</DialogTitle>
       <DialogContent>
         <Stack spacing={3} sx={{ mt: 1 }}>
           {/* Warning Banner */}
@@ -226,8 +226,8 @@ export const CreateCampaignPrefillDialog: React.FC<
 
           {!canCreate && (
             <Alert severity="error">
-              You have reached the maximum of 50 active campaign prefills.
-              Please deactivate an existing prefill before creating a new one.
+              You have reached the maximum of 50 active shared campaigns.
+              Please deactivate an existing shared campaign before creating a new one.
             </Alert>
           )}
 
@@ -412,7 +412,7 @@ export const CreateCampaignPrefillDialog: React.FC<
             label="Description (For Your Reference)"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            placeholder="Internal description to help you manage your campaign prefills"
+            placeholder="Internal description to help you manage your shared campaigns"
             fullWidth
           />
 
@@ -429,7 +429,7 @@ export const CreateCampaignPrefillDialog: React.FC<
               {previewLink}
             </Typography>
             <Typography variant="caption" color="text.secondary">
-              (The actual code will be generated when you create the prefill)
+              (The actual code will be generated when you create the shared campaign)
             </Typography>
           </Box>
         </Stack>
@@ -444,7 +444,7 @@ export const CreateCampaignPrefillDialog: React.FC<
           disabled={!isFormValid() || isSubmitting || !canCreate}
           startIcon={isSubmitting ? <CircularProgress size={16} /> : undefined}
         >
-          {isSubmitting ? "Creating..." : "Create Campaign Prefill"}
+          {isSubmitting ? "Creating..." : "Create Shared Campaign"}
         </Button>
       </DialogActions>
     </Dialog>

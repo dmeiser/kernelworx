@@ -221,7 +221,7 @@ export const CampaignPrefillsPage: React.FC = () => {
     return (
       <Box p={3}>
         <Alert severity="error">
-          Failed to load campaign prefills: {error.message}
+          Failed to load shared campaigns: {error.message}
         </Alert>
       </Box>
     );
@@ -237,7 +237,7 @@ export const CampaignPrefillsPage: React.FC = () => {
       >
         <Box>
           <Typography variant="h4" component="h1" gutterBottom>
-            My Campaign Prefills
+            My Shared Campaigns
           </Typography>
           <Typography variant="body2" color="text.secondary">
             Create shareable links that pre-fill season creation for your unit
@@ -247,7 +247,7 @@ export const CampaignPrefillsPage: React.FC = () => {
         <Tooltip
           title={
             !canCreateMore
-              ? `You have reached the maximum of ${MAX_PREFILLS} active prefills`
+              ? `You have reached the maximum of ${MAX_PREFILLS} active shared campaigns`
               : ""
           }
         >
