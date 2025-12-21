@@ -1,13 +1,13 @@
 /**
- * SellerProfileManagementPage - Seller profile-level settings and sharing
+ * ScoutProfileManagementPage - Scout profile-level settings and sharing
  *
- * Manages seller profile-specific functionality:
- * - Seller profile name and metadata
+ * Manages scout profile-specific functionality:
+ * - Scout profile name and metadata
  * - Invite codes for sharing
  * - Share management (view who has access)
- * - Delete seller profile (with season cleanup)
+ * - Delete scout profile (with season cleanup)
  *
- * Separated from SeasonSettingsPage to clarify that invites are seller profile-level,
+ * Separated from SeasonSettingsPage to clarify that invites are scout profile-level,
  * not season-level.
  */
 
@@ -85,7 +85,7 @@ interface Share {
   createdByAccountId: string;
 }
 
-export const SellerProfileManagementPage: React.FC = () => {
+export const ScoutManagementPage: React.FC = () => {
   const { profileId: encodedProfileId } = useParams<{
     profileId: string;
   }>();
@@ -265,14 +265,14 @@ export const SellerProfileManagementPage: React.FC = () => {
   return (
     <Box sx={{ p: 3 }}>
       <Typography variant="h4" gutterBottom>
-        Seller Profile Management: {profile.sellerName}
+        Scout Management: {profile.sellerName}
       </Typography>
 
       <Stack spacing={4}>
         {/* Profile Settings Section */}
         <Paper sx={{ p: 3 }}>
           <Typography variant="h6" gutterBottom>
-            Seller Profile Information
+            Scout Information
           </Typography>
           <Stack spacing={2}>
             <TextField
@@ -518,7 +518,7 @@ export const SellerProfileManagementPage: React.FC = () => {
             Danger Zone
           </Typography>
           <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
-            Permanently delete this seller profile and all associated seasons
+            Permanently delete this scout and all associated campaigns
             and orders. This action cannot be undone.
           </Typography>
           <Button
@@ -526,7 +526,7 @@ export const SellerProfileManagementPage: React.FC = () => {
             color="error"
             onClick={() => setDeleteConfirmOpen(true)}
           >
-            Delete Seller Profile
+            Delete Scout
           </Button>
         </Paper>
       </Stack>
@@ -582,7 +582,7 @@ export const SellerProfileManagementPage: React.FC = () => {
             This will permanently delete:
           </Typography>
           <ul>
-            <li>The seller profile and all metadata</li>
+            <li>The scout and all metadata</li>
             <li>All seasons and associated data</li>
             <li>All orders and order items</li>
             <li>All active invite codes and shares</li>

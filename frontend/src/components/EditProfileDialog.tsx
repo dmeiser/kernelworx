@@ -1,5 +1,5 @@
 /**
- * EditProfileDialog component - Dialog for editing a seller profile name
+ * EditProfileDialog component - Dialog for editing a scout profile name
  *
  * Note: Unit fields (unitType, unitNumber) have been moved to Season level
  * as part of the Campaign Prefill refactor. Unit information is now attached
@@ -66,7 +66,7 @@ export const EditProfileDialog: React.FC<EditProfileDialogProps> = ({
 
   return (
     <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth>
-      <DialogTitle>Edit Seller Profile</DialogTitle>
+      <DialogTitle>Edit Scout</DialogTitle>
       <DialogContent>
         <Box pt={1} display="flex" flexDirection="column" gap={2}>
           <TextField

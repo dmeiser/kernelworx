@@ -1,12 +1,12 @@
 /**
- * CampaignPrefillsPage Tests
+ * SharedCampaignsPage Tests
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { MockedProvider } from "@apollo/client/testing/react";
 import { MemoryRouter } from "react-router-dom";
-import { CampaignPrefillsPage } from "../src/pages/CampaignPrefillsPage";
+import { SharedCampaignsPage } from "../src/pages/SharedCampaignsPage";
 import {
   LIST_MY_CAMPAIGN_PREFILLS,
   LIST_PUBLIC_CATALOGS,
@@ -141,18 +141,18 @@ const createCatalogMocks = () => [
 ];
 
 const renderWithProviders = (mocks: any[]) => {
-  // Always include base mocks for catalog queries triggered by CreateCampaignPrefillDialog
+  // Always include base mocks for catalog queries triggered by CreateSharedCampaignDialog
   const allMocks = [...baseMocks(), ...mocks];
   return render(
     <MockedProvider mocks={allMocks}>
       <MemoryRouter>
-        <CampaignPrefillsPage />
+        <SharedCampaignsPage />
       </MemoryRouter>
     </MockedProvider>
   );
 };
 
-describe("CampaignPrefillsPage", () => {
+describe("SharedCampaignsPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -195,11 +195,11 @@ describe("CampaignPrefillsPage", () => {
       renderWithProviders([createListMock([])]);
 
       await waitFor(() => {
-        expect(screen.getByText("No Campaign Prefills Yet")).toBeInTheDocument();
+        expect(screen.getByText("No Shared Campaigns Yet")).toBeInTheDocument();
       });
 
       expect(
-        screen.getByText(/Create a campaign prefill to generate shareable links/)
+        screen.getByText(/Create a shared campaign to generate shareable links/)
       ).toBeInTheDocument();
     });
 
@@ -281,7 +281,7 @@ describe("CampaignPrefillsPage", () => {
       });
 
       const createButton = screen.getByRole("button", {
-        name: /Create Campaign Prefill/i,
+        name: /Create Shared Campaign/i,
       });
       fireEvent.click(createButton);
 
@@ -307,7 +307,7 @@ describe("CampaignPrefillsPage", () => {
       });
 
       const createButtons = screen.getAllByRole("button", {
-        name: /Create Campaign Prefill/i,
+        name: /Create Shared Campaign/i,
       });
       // The button in the header should be disabled
       expect(createButtons[0]).toBeDisabled();
@@ -327,7 +327,7 @@ describe("CampaignPrefillsPage", () => {
 
       await waitFor(() => {
         expect(
-          screen.getByText("Deactivate Campaign Prefill?")
+          screen.getByText("Deactivate Shared Campaign?")
         ).toBeInTheDocument();
       });
 
@@ -348,7 +348,7 @@ describe("CampaignPrefillsPage", () => {
 
       await waitFor(() => {
         expect(
-          screen.getByText("Deactivate Campaign Prefill?")
+          screen.getByText("Deactivate Shared Campaign?")
         ).toBeInTheDocument();
       });
 
@@ -357,7 +357,7 @@ describe("CampaignPrefillsPage", () => {
 
       await waitFor(() => {
         expect(
-          screen.queryByText("Deactivate Campaign Prefill?")
+          screen.queryByText("Deactivate Shared Campaign?")
         ).not.toBeInTheDocument();
       });
     });
@@ -387,7 +387,7 @@ describe("CampaignPrefillsPage", () => {
       fireEvent.click(editButtons[0]);
 
       await waitFor(() => {
-        expect(screen.getByText("Edit Campaign Prefill")).toBeInTheDocument();
+        expect(screen.getByText("Edit Shared Campaign")).toBeInTheDocument();
       });
 
       // Should show read-only info
@@ -407,7 +407,7 @@ describe("CampaignPrefillsPage", () => {
       renderWithProviders([errorMock]);
 
       await waitFor(() => {
-        expect(screen.getByText(/Failed to load campaign prefills/)).toBeInTheDocument();
+        expect(screen.getByText(/Failed to load shared campaigns/)).toBeInTheDocument();
       });
     });
   });

@@ -13,19 +13,19 @@ import { DevFooter } from "./components/DevFooter";
 import { LandingPage } from "./pages/LandingPage";
 import { LoginPage } from "./pages/LoginPage";
 import { SignupPage } from "./pages/SignupPage";
-import { ProfilesPage } from "./pages/ProfilesPage";
-import { ProfileSeasonsPage } from "./pages/ProfileSeasonsPage";
-import { SellerProfileManagementPage } from "./pages/SellerProfileManagementPage";
+import { ScoutsPage } from "./pages/ScoutsPage";
+import { ScoutSeasonsPage } from "./pages/ScoutSeasonsPage";
+import { ScoutManagementPage } from "./pages/ScoutManagementPage";
 import { SeasonLayout } from "./pages/SeasonLayout";
 import { SettingsPage } from "./pages/SettingsPage";
 import { UserSettingsPage } from "./pages/UserSettingsPage";
 import { AcceptInvitePage } from "./pages/AcceptInvitePage";
 import { AdminPage } from "./pages/AdminPage";
 import { CatalogsPage } from "./pages/CatalogsPage";
-import { UnitReportsPage } from "./pages/UnitReportsPage";
+import { CampaignReportsPage } from "./pages/CampaignReportsPage";
 import { CreateSeasonPage } from "./pages/CreateSeasonPage";
-import { CampaignPrefillsPage } from "./pages/CampaignPrefillsPage";
-import { CreateCampaignPrefillPage } from "./pages/CreateCampaignPrefillPage";
+import { SharedCampaignsPage } from "./pages/SharedCampaignsPage";
+import { CreateSharedCampaignPage } from "./pages/CreateSharedCampaignPage";
 import { apolloClient } from "./lib/apollo";
 import { theme } from "./lib/theme";
 import { AppLayout } from "./components/AppLayout";
@@ -80,40 +80,40 @@ function App() {
 
               {/* Protected routes */}
               <Route
-                path="/profiles"
+                path="/scouts"
                 element={
                   <ProtectedRoute>
                     <AppLayout>
-                      <ProfilesPage />
+                      <ScoutsPage />
                     </AppLayout>
                   </ProtectedRoute>
                 }
               />
 
               <Route
-                path="/profiles/:profileId/seasons"
+                path="/scouts/:scoutId/campaigns"
                 element={
                   <ProtectedRoute>
                     <AppLayout>
-                      <ProfileSeasonsPage />
+                      <ScoutSeasonsPage />
                     </AppLayout>
                   </ProtectedRoute>
                 }
               />
 
               <Route
-                path="/profiles/:profileId/manage"
+                path="/scouts/:scoutId/manage"
                 element={
                   <ProtectedRoute>
                     <AppLayout>
-                      <SellerProfileManagementPage />
+                      <ScoutManagementPage />
                     </AppLayout>
                   </ProtectedRoute>
                 }
               />
 
               <Route
-                path="/profiles/:profileId/seasons/:seasonId/*"
+                path="/scouts/:scoutId/campaigns/:campaignId/*"
                 element={
                   <ProtectedRoute>
                     <AppLayout>
@@ -161,7 +161,7 @@ function App() {
                 element={
                   <ProtectedRoute>
                     <AppLayout>
-                      <UnitReportsPage />
+                      <CampaignReportsPage />
                     </AppLayout>
                   </ProtectedRoute>
                 }
@@ -172,7 +172,7 @@ function App() {
                 element={
                   <ProtectedRoute>
                     <AppLayout>
-                      <CampaignPrefillsPage />
+                      <SharedCampaignsPage />
                     </AppLayout>
                   </ProtectedRoute>
                 }
@@ -183,7 +183,7 @@ function App() {
                 element={
                   <ProtectedRoute>
                     <AppLayout>
-                      <CreateCampaignPrefillPage />
+                      <CreateSharedCampaignPage />
                     </AppLayout>
                   </ProtectedRoute>
                 }

@@ -1,4 +1,4 @@
-"""Lambda resolver for unit-level reporting using season-based queries."""
+"""Lambda resolver for campaign-level reporting using season-based queries."""
 
 import os
 from typing import Any, Dict, List, cast

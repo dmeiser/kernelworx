@@ -113,10 +113,10 @@ export const AdminPage: React.FC = () => {
       <TabPanel value={currentTab} index={0}>
         <Paper sx={{ p: 3 }}>
           <Typography variant="h6" gutterBottom>
-            All Seller Profiles
+            All Scouts
           </Typography>
           <Typography variant="body2" color="text.secondary" paragraph>
-            View all seller profiles in the system. Full CRUD operations coming
+            View all scouts in the system. Full CRUD operations coming
             in future updates.
           </Typography>
 

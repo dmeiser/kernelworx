@@ -125,7 +125,7 @@ describe.skip('AdminPage', () => {
       </MockedProvider>
     );
 
-    expect(screen.getByRole('tab', { name: /profiles/i })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /scouts/i })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: /catalogs/i })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: /system info/i })).toBeInTheDocument();
   });
@@ -163,7 +163,7 @@ describe.skip('AdminPage', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText('All Seller Profiles')).toBeInTheDocument();
+      expect(screen.getByText('All Scouts')).toBeInTheDocument();
       expect(screen.getByText('Scout Alpha')).toBeInTheDocument();
       expect(screen.getByText('Scout Beta')).toBeInTheDocument();
     });

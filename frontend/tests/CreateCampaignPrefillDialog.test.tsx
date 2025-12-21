@@ -1,11 +1,11 @@
 /**
- * CreateCampaignPrefillDialog Tests
+ * CreateSharedCampaignDialog Tests
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { MockedProvider } from "@apollo/client/testing/react";
-import { CreateCampaignPrefillDialog } from "../src/components/CreateCampaignPrefillDialog";
+import { CreateSharedCampaignDialog } from "../src/components/CreateSharedCampaignDialog";
 import {
   LIST_PUBLIC_CATALOGS,
   LIST_MY_CATALOGS,
@@ -54,12 +54,12 @@ const renderWithProviders = (
 ) => {
   return render(
     <MockedProvider mocks={mocks}>
-      <CreateCampaignPrefillDialog {...props} />
+      <CreateSharedCampaignDialog {...props} />
     </MockedProvider>
   );
 };
 
-describe("CreateCampaignPrefillDialog", () => {
+describe("CreateSharedCampaignDialog", () => {
   const defaultProps = {
     open: true,
     onClose: vi.fn(),
@@ -78,7 +78,7 @@ describe("CreateCampaignPrefillDialog", () => {
       // Check dialog is present using role
       expect(screen.getByRole("dialog")).toBeInTheDocument();
       // Check title using heading role
-      expect(screen.getByRole("heading", { name: "Create Campaign Prefill" })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Create Shared Campaign" })).toBeInTheDocument();
     });
 
     it("shows warning banner about sharing", async () => {
@@ -96,7 +96,7 @@ describe("CreateCampaignPrefillDialog", () => {
       });
 
       expect(
-        screen.getByText(/You have reached the maximum of 50 active campaign prefills/)
+        screen.getByText(/You have reached the maximum of 50 active shared campaigns/)
       ).toBeInTheDocument();
     });
 
@@ -164,7 +164,7 @@ describe("CreateCampaignPrefillDialog", () => {
       renderWithProviders(createCatalogMocks(), defaultProps);
 
       const submitButton = screen.getByRole("button", {
-        name: /Create Campaign Prefill/i,
+        name: /Create Shared Campaign/i,
       });
       expect(submitButton).toBeDisabled();
     });
@@ -176,7 +176,7 @@ describe("CreateCampaignPrefillDialog", () => {
       });
 
       const submitButton = screen.getByRole("button", {
-        name: /Create Campaign Prefill/i,
+        name: /Create Shared Campaign/i,
       });
       expect(submitButton).toBeDisabled();
     });

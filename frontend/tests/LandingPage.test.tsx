@@ -178,7 +178,7 @@ describe('LandingPage', () => {
     await user.click(button);
 
     await waitFor(() => {
-      expect(mockNavigate).toHaveBeenCalledWith('/profiles');
+      expect(mockNavigate).toHaveBeenCalledWith('/scouts');
     });
   });
 

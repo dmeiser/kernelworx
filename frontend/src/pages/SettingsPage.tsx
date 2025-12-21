@@ -55,7 +55,7 @@ export const SettingsPage: React.FC = () => {
             fullWidth
             sx={{ justifyContent: "flex-start" }}
           >
-            Manage Seller Profiles
+            Manage My Scouts
           </Button>
           {account?.isAdmin && (
             <Button

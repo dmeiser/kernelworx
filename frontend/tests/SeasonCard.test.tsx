@@ -225,6 +225,6 @@ describe('SeasonCard', () => {
     const viewButton = screen.getByRole('button', { name: /view orders/i });
     await user.click(viewButton);
 
-    expect(mockNavigate).toHaveBeenCalledWith('/profiles/profile-789/seasons/season-123');
+    expect(mockNavigate).toHaveBeenCalledWith('/scouts/profile-789/campaigns/season-123');
   });
 });

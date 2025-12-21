@@ -46,7 +46,7 @@ interface CampaignPrefill {
   createdAt: string;
 }
 
-interface EditCampaignPrefillDialogProps {
+interface EditSharedCampaignDialogProps {
   open: boolean;
   prefill: CampaignPrefill;
   onClose: () => void;
@@ -63,8 +63,8 @@ interface EditCampaignPrefillDialogProps {
 const MAX_CREATOR_MESSAGE_LENGTH = 300;
 const BASE_URL = window.location.origin;
 
-export const EditCampaignPrefillDialog: React.FC<
-  EditCampaignPrefillDialogProps
+export const EditSharedCampaignDialog: React.FC<
+  EditSharedCampaignDialogProps
 > = ({ open, prefill, onClose, onSave }) => {
   const [description, setDescription] = useState(prefill.description || "");
   const [creatorMessage, setCreatorMessage] = useState(

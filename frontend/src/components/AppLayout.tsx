@@ -90,13 +90,13 @@ export const AppLayout: React.FC<{ children?: React.ReactNode }> = ({
       <Divider />
       <List sx={{ flexGrow: 1 }}>
         <ListItemButton
-          onClick={() => handleNavigation("/profiles")}
-          selected={isActive("/profiles")}
+          onClick={() => handleNavigation("/scouts")}
+          selected={isActive("/scouts")}
         >
           <ListItemIcon>
             <PersonIcon />
           </ListItemIcon>
-          <ListItemText primary="Seller Profiles" />
+          <ListItemText primary="My Scouts" />
         </ListItemButton>
         <ListItemButton
           onClick={() => handleNavigation("/accept-invite")}

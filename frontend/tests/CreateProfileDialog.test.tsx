@@ -13,7 +13,7 @@ describe('CreateProfileDialog', () => {
       <CreateProfileDialog open={true} onClose={vi.fn()} onSubmit={vi.fn()} />
     );
 
-    expect(screen.getByText('Create New Seller Profile')).toBeInTheDocument();
+    expect(screen.getByText('Create New Scout')).toBeInTheDocument();
     expect(screen.getByLabelText(/Seller Name/i)).toBeInTheDocument();
   });
 
@@ -22,7 +22,7 @@ describe('CreateProfileDialog', () => {
       <CreateProfileDialog open={false} onClose={vi.fn()} onSubmit={vi.fn()} />
     );
 
-    expect(screen.queryByText('Create New Seller Profile')).not.toBeInTheDocument();
+    expect(screen.queryByText('Create New Scout')).not.toBeInTheDocument();
   });
 
   test('calls onClose when Cancel button clicked', async () => {

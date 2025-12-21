@@ -94,7 +94,7 @@ interface UnitReport {
 
 type ReportView = "summary" | "detailed" | "unit";
 
-export const UnitReportsPage: React.FC = () => {
+export const CampaignReportsPage: React.FC = () => {
   const [selectedPrefillCode, setSelectedPrefillCode] = useState<string>("");
   const [reportView, setReportView] = useState<ReportView>("unit");
 

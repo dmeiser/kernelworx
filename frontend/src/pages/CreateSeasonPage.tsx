@@ -279,7 +279,7 @@ export const CreateSeasonPage: React.FC = () => {
         state: {
           returnTo: `/c/${effectivePrefillCode}`,
           prefillCode: effectivePrefillCode,
-          message: "Create a seller profile to use this campaign link",
+          message: "Create a scout to use this campaign link",
         },
         replace: true,
       });

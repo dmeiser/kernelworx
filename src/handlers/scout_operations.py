@@ -1,4 +1,4 @@
-"""Lambda resolvers for SellerProfile operations."""
+"""Lambda resolvers for Scout operations."""
 
 import os
 import uuid

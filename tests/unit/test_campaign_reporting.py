@@ -1,4 +1,4 @@
-"""Unit tests for unit reporting Lambda handler (GSI3-based implementation)."""
+"""Unit tests for campaign reporting Lambda handler (GSI3-based implementation)."""
 
 from decimal import Decimal
 from typing import Any, Dict
@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.handlers.unit_reporting import get_unit_report
+from src.handlers.campaign_reporting import get_unit_report
 
 
 class TestGetUnitReport:
@@ -122,10 +122,10 @@ class TestGetUnitReport:
             ],
         }
 
-    @patch("src.handlers.unit_reporting.check_profile_access")
-    @patch("src.handlers.unit_reporting.orders_table")
-    @patch("src.handlers.unit_reporting.seasons_table")
-    @patch("src.handlers.unit_reporting.profiles_table")
+    @patch("src.handlers.campaign_reporting.check_profile_access")
+    @patch("src.handlers.campaign_reporting.orders_table")
+    @patch("src.handlers.campaign_reporting.seasons_table")
+    @patch("src.handlers.campaign_reporting.profiles_table")
     def test_get_unit_report_success(
         self,
         mock_profiles_table: MagicMock,
@@ -169,7 +169,7 @@ class TestGetUnitReport:
         call_kwargs = mock_seasons_table.query.call_args.kwargs
         assert call_kwargs["IndexName"] == "GSI3"
 
-    @patch("src.handlers.unit_reporting.seasons_table")
+    @patch("src.handlers.campaign_reporting.seasons_table")
     def test_get_unit_report_no_seasons_found(
         self,
         mock_seasons_table: MagicMock,
@@ -192,8 +192,8 @@ class TestGetUnitReport:
         assert result["totalSales"] == 0.0
         assert result["totalOrders"] == 0
 
-    @patch("src.handlers.unit_reporting.check_profile_access")
-    @patch("src.handlers.unit_reporting.seasons_table")
+    @patch("src.handlers.campaign_reporting.check_profile_access")
+    @patch("src.handlers.campaign_reporting.seasons_table")
     def test_get_unit_report_no_access(
         self,
         mock_seasons_table: MagicMock,
@@ -215,10 +215,10 @@ class TestGetUnitReport:
         assert result["totalSales"] == 0.0
         assert result["totalOrders"] == 0
 
-    @patch("src.handlers.unit_reporting.check_profile_access")
-    @patch("src.handlers.unit_reporting.orders_table")
-    @patch("src.handlers.unit_reporting.seasons_table")
-    @patch("src.handlers.unit_reporting.profiles_table")
+    @patch("src.handlers.campaign_reporting.check_profile_access")
+    @patch("src.handlers.campaign_reporting.orders_table")
+    @patch("src.handlers.campaign_reporting.seasons_table")
+    @patch("src.handlers.campaign_reporting.profiles_table")
     def test_get_unit_report_partial_access(
         self,
         mock_profiles_table: MagicMock,
@@ -255,10 +255,10 @@ class TestGetUnitReport:
         assert result["totalSales"] == 100.0
         assert result["totalOrders"] == 1
 
-    @patch("src.handlers.unit_reporting.check_profile_access")
-    @patch("src.handlers.unit_reporting.orders_table")
-    @patch("src.handlers.unit_reporting.seasons_table")
-    @patch("src.handlers.unit_reporting.profiles_table")
+    @patch("src.handlers.campaign_reporting.check_profile_access")
+    @patch("src.handlers.campaign_reporting.orders_table")
+    @patch("src.handlers.campaign_reporting.seasons_table")
+    @patch("src.handlers.campaign_reporting.profiles_table")
     def test_get_unit_report_no_orders(
         self,
         mock_profiles_table: MagicMock,
@@ -287,10 +287,10 @@ class TestGetUnitReport:
         assert result["totalSales"] == 0.0
         assert result["totalOrders"] == 0
 
-    @patch("src.handlers.unit_reporting.check_profile_access")
-    @patch("src.handlers.unit_reporting.orders_table")
-    @patch("src.handlers.unit_reporting.seasons_table")
-    @patch("src.handlers.unit_reporting.profiles_table")
+    @patch("src.handlers.campaign_reporting.check_profile_access")
+    @patch("src.handlers.campaign_reporting.orders_table")
+    @patch("src.handlers.campaign_reporting.seasons_table")
+    @patch("src.handlers.campaign_reporting.profiles_table")
     def test_get_unit_report_seller_sorting(
         self,
         mock_profiles_table: MagicMock,
@@ -328,7 +328,7 @@ class TestGetUnitReport:
         assert result["sellers"][0]["totalSales"] == 200.0  # Scout 2
         assert result["sellers"][1]["totalSales"] == 100.0  # Scout 1
 
-    @patch("src.handlers.unit_reporting.seasons_table")
+    @patch("src.handlers.campaign_reporting.seasons_table")
     def test_get_unit_report_error_handling(
         self,
         mock_seasons_table: MagicMock,
@@ -345,7 +345,7 @@ class TestGetUnitReport:
 
         assert "DynamoDB error" in str(exc_info.value)
 
-    @patch("src.handlers.unit_reporting.seasons_table")
+    @patch("src.handlers.campaign_reporting.seasons_table")
     def test_get_unit_report_different_season_year(
         self,
         mock_seasons_table: MagicMock,
@@ -378,10 +378,10 @@ class TestGetUnitReport:
         assert result["sellers"] == []
         assert result["totalSales"] == 0.0
 
-    @patch("src.handlers.unit_reporting.check_profile_access")
-    @patch("src.handlers.unit_reporting.orders_table")
-    @patch("src.handlers.unit_reporting.seasons_table")
-    @patch("src.handlers.unit_reporting.profiles_table")
+    @patch("src.handlers.campaign_reporting.check_profile_access")
+    @patch("src.handlers.campaign_reporting.orders_table")
+    @patch("src.handlers.campaign_reporting.seasons_table")
+    @patch("src.handlers.campaign_reporting.profiles_table")
     def test_get_unit_report_multiple_seasons_same_profile(
         self,
         mock_profiles_table: MagicMock,
@@ -442,10 +442,10 @@ class TestGetUnitReport:
         assert result["totalOrders"] == 2
         assert result["totalSales"] == 100.0  # 50.00 * 2 seasons
 
-    @patch("src.handlers.unit_reporting.check_profile_access")
-    @patch("src.handlers.unit_reporting.orders_table")
-    @patch("src.handlers.unit_reporting.seasons_table")
-    @patch("src.handlers.unit_reporting.profiles_table")
+    @patch("src.handlers.campaign_reporting.check_profile_access")
+    @patch("src.handlers.campaign_reporting.orders_table")
+    @patch("src.handlers.campaign_reporting.seasons_table")
+    @patch("src.handlers.campaign_reporting.profiles_table")
     def test_get_unit_report_multiple_orders_per_seller(
         self,
         mock_profiles_table: MagicMock,
@@ -529,10 +529,10 @@ class TestGetUnitReport:
         assert result["totalSales"] == 250.0
         assert result["totalOrders"] == 2
 
-    @patch("src.handlers.unit_reporting.check_profile_access")
-    @patch("src.handlers.unit_reporting.orders_table")
-    @patch("src.handlers.unit_reporting.seasons_table")
-    @patch("src.handlers.unit_reporting.profiles_table")
+    @patch("src.handlers.campaign_reporting.check_profile_access")
+    @patch("src.handlers.campaign_reporting.orders_table")
+    @patch("src.handlers.campaign_reporting.seasons_table")
+    @patch("src.handlers.campaign_reporting.profiles_table")
     def test_get_unit_report_without_city_state(
         self,
         mock_profiles_table: MagicMock,
@@ -580,9 +580,9 @@ class TestGetUnitReport:
         assert result["unitType"] == "Pack"
         assert result["unitNumber"] == 158
 
-    @patch("src.handlers.unit_reporting.check_profile_access")
-    @patch("src.handlers.unit_reporting.seasons_table")
-    @patch("src.handlers.unit_reporting.profiles_table")
+    @patch("src.handlers.campaign_reporting.check_profile_access")
+    @patch("src.handlers.campaign_reporting.seasons_table")
+    @patch("src.handlers.campaign_reporting.profiles_table")
     def test_get_unit_report_profile_not_found(
         self,
         mock_profiles_table: MagicMock,

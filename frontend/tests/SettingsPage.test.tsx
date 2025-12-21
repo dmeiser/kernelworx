@@ -16,7 +16,7 @@
  * Components that fail:
  * - SettingsPage (uses Stack, List, Paper, Button, etc. from MUI)
  * - AdminPage (uses Stack, Tabs, Table, etc. from MUI)
- * - ProfilesPage (uses Grid from MUI)
+ * - ScoutsPage (uses Grid from MUI)
  * 
  * Components that work:
  * - LandingPage (uses Stack, Container, Paper - but no GraphQL queries)
@@ -234,7 +234,7 @@ describe.skip('SettingsPage', () => {
     const profilesButton = screen.getByRole('button', { name: /my profiles/i });
     await user.click(profilesButton);
 
-    expect(mockNavigate).toHaveBeenCalledWith('/profiles');
+    expect(mockNavigate).toHaveBeenCalledWith('/scouts');
   });
 
   test('displays formatted dates', async () => {

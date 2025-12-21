@@ -1,5 +1,5 @@
 /**
- * ProfileSeasonsPage - List all seasons for a specific seller profile
+ * ScoutSeasonsPage - List all campaigns for a specific scout profile
  */
 
 import React, { useState } from "react";
@@ -47,7 +47,7 @@ interface Profile {
   permissions: string[];
 }
 
-export const ProfileSeasonsPage: React.FC = () => {
+export const ScoutSeasonsPage: React.FC = () => {
   const { profileId: encodedProfileId } = useParams<{ profileId: string }>();
   const profileId = encodedProfileId
     ? decodeURIComponent(encodedProfileId)

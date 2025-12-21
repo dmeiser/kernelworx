@@ -1,5 +1,5 @@
 /**
- * CreateProfileDialog component - Dialog for creating a new seller profile
+ * CreateProfileDialog component - Dialog for creating a new scout profile
  *
  * Note: Unit fields (unitType, unitNumber) have been moved to Season level
  * as part of the Campaign Prefill refactor. Unit information is now attached
@@ -55,7 +55,7 @@ export const CreateProfileDialog: React.FC<CreateProfileDialogProps> = ({
 
   return (
     <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth>
-      <DialogTitle>Create New Seller Profile</DialogTitle>
+      <DialogTitle>Create New Scout</DialogTitle>
       <DialogContent>
         <Box pt={1} display="flex" flexDirection="column" gap={2}>
           <TextField
@@ -84,7 +84,7 @@ export const CreateProfileDialog: React.FC<CreateProfileDialogProps> = ({
           variant="contained"
           disabled={!sellerName.trim() || loading}
         >
-          {loading ? "Creating..." : "Create Seller"}
+          {loading ? "Creating..." : "Create Scout"}
         </Button>
       </DialogActions>
     </Dialog>

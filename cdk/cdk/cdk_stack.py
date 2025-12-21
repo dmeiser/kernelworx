@@ -797,7 +797,7 @@ class CdkStack(Stack):
             "CreateProfileFnV2",
             function_name=rn("kernelworx-create-profile"),
             runtime=lambda_.Runtime.PYTHON_3_13,
-            handler="handlers.profile_operations.create_seller_profile",
+            handler="handlers.scout_operations.create_seller_profile",
             code=lambda_code,
             layers=[self.shared_layer],
             timeout=Duration.seconds(30),
@@ -825,7 +825,7 @@ class CdkStack(Stack):
             "UnitReportingFnV2",
             function_name=rn("kernelworx-unit-reporting"),
             runtime=lambda_.Runtime.PYTHON_3_13,
-            handler="handlers.unit_reporting.get_unit_report",
+            handler="handlers.campaign_reporting.get_unit_report",
             code=lambda_code,
             layers=[self.shared_layer],
             timeout=Duration.seconds(60),  # May need time for large units

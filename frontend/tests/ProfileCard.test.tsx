@@ -147,10 +147,10 @@ describe('ProfileCard', () => {
     const button = screen.getByText('View All Seasons');
     await user.click(button);
 
-    expect(mockNavigate).toHaveBeenCalledWith('/profiles/profile-123/seasons');
+    expect(mockNavigate).toHaveBeenCalledWith('/scouts/profile-123/campaigns');
   });
 
-  test('navigates to seller profile management when Manage Seller Profile clicked for owners', async () => {
+  test('navigates to scout management when Manage Scout clicked for owners', async () => {
     const user = userEvent.setup();
 
     render(
@@ -166,13 +166,13 @@ describe('ProfileCard', () => {
       </MockedProvider>
     );
 
-    const button = screen.getByText('Manage Seller Profile');
+    const button = screen.getByText('Manage Scout');
     await user.click(button);
 
-    expect(mockNavigate).toHaveBeenCalledWith('/profiles/profile-123/manage');
+    expect(mockNavigate).toHaveBeenCalledWith('/scouts/profile-123/manage');
   });
 
-  test('does not show Manage Seller Profile button for non-owners', () => {
+  test('does not show Manage Scout button for non-owners', () => {
     render(
       <MockedProvider mocks={[]}>
         <BrowserRouter>
@@ -186,7 +186,7 @@ describe('ProfileCard', () => {
       </MockedProvider>
     );
 
-    expect(screen.queryByText('Manage Seller Profile')).not.toBeInTheDocument();
+    expect(screen.queryByText('Manage Scout')).not.toBeInTheDocument();
   });
 
   test('does not show View Latest Season button when no seasons', () => {

@@ -5,14 +5,14 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.handlers.profile_operations import create_seller_profile
+from src.handlers.scout_operations import create_seller_profile
 
 
 class TestCreateSellerProfile:
     """Tests for create_seller_profile Lambda handler."""
 
-    @patch("src.handlers.profile_operations.boto3.client")
-    @patch("src.handlers.profile_operations.uuid.uuid4")
+    @patch("src.handlers.scout_operations.boto3.client")
+    @patch("src.handlers.scout_operations.uuid.uuid4")
     def test_create_seller_profile_success(
         self,
         mock_uuid: MagicMock,
@@ -50,7 +50,7 @@ class TestCreateSellerProfile:
         # Multi-table design: only 1 item (profile metadata in profiles table)
         assert len(call_args.kwargs["TransactItems"]) == 1
 
-    @patch("src.handlers.profile_operations.boto3.client")
+    @patch("src.handlers.scout_operations.boto3.client")
     def test_create_seller_profile_with_special_characters(
         self,
         mock_client: MagicMock,
@@ -74,7 +74,7 @@ class TestCreateSellerProfile:
         assert result["sellerName"] == "José's Popcorn & Sales"
         mock_dynamodb.transact_write_items.assert_called_once()
 
-    @patch("src.handlers.profile_operations.boto3.client")
+    @patch("src.handlers.scout_operations.boto3.client")
     def test_create_seller_profile_has_metadata_item_with_correct_keys(
         self,
         mock_client: MagicMock,
@@ -107,7 +107,7 @@ class TestCreateSellerProfile:
         assert profile_item["ownerAccountId"]["S"] == expected_owner
         assert profile_item["profileId"]["S"].startswith("PROFILE#")
 
-    @patch("src.handlers.profile_operations.boto3.client")
+    @patch("src.handlers.scout_operations.boto3.client")
     def test_create_seller_profile_has_owner_with_prefix(
         self,
         mock_client: MagicMock,
@@ -137,7 +137,7 @@ class TestCreateSellerProfile:
         expected_owner = f"ACCOUNT#{event['identity']['sub']}"
         assert profile_item["ownerAccountId"]["S"] == expected_owner
 
-    @patch("src.handlers.profile_operations.boto3.client")
+    @patch("src.handlers.scout_operations.boto3.client")
     def test_create_seller_profile_error_handling(
         self,
         mock_client: MagicMock,
@@ -161,7 +161,7 @@ class TestCreateSellerProfile:
 
         assert "Failed to create seller profile" in str(exc_info.value)
 
-    @patch("src.handlers.profile_operations.boto3.client")
+    @patch("src.handlers.scout_operations.boto3.client")
     def test_create_seller_profile_with_unit_type_and_number(
         self,
         mock_client: MagicMock,

@@ -101,7 +101,7 @@ const BASE_URL = window.location.origin;
 const MAX_CREATOR_MESSAGE_LENGTH = 300;
 const MAX_ACTIVE_PREFILLS = 50;
 
-export const CreateCampaignPrefillPage: React.FC = () => {
+export const CreateSharedCampaignPage: React.FC = () => {
   const navigate = useNavigate();
 
   // Form state

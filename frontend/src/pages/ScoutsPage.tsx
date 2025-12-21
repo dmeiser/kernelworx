@@ -1,5 +1,5 @@
 /**
- * Profiles page - List of owned and shared seller profiles
+ * Scouts page - List of owned and shared scout profiles
  */
 
 import React, { useState, useEffect } from "react";
@@ -52,7 +52,7 @@ interface EditingProfile {
   sellerName: string;
 }
 
-export const ProfilesPage: React.FC = () => {
+export const ScoutsPage: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { isAuthenticated, loading: authLoading } = useAuth();
@@ -305,7 +305,7 @@ export const ProfilesPage: React.FC = () => {
       >
         <Stack direction="row" alignItems="center" spacing={2}>
           <Typography variant="h4" component="h1">
-            My Seller Profiles
+            My Scouts
           </Typography>
           <FormControlLabel
             control={
@@ -335,7 +335,7 @@ export const ProfilesPage: React.FC = () => {
             startIcon={<AddIcon />}
             onClick={() => setCreateDialogOpen(true)}
           >
-            Create Seller
+            Create Scout
           </Button>
         </Stack>
       </Stack>
@@ -356,7 +356,7 @@ export const ProfilesPage: React.FC = () => {
       {myProfiles.length > 0 && (
         <Box mb={4}>
           <Typography variant="h6" gutterBottom>
-            Seller Profiles I Own
+            Scouts I Own
           </Typography>
           <Grid container spacing={2}>
             {myProfiles.map((profile) => (
@@ -378,7 +378,7 @@ export const ProfilesPage: React.FC = () => {
         <Box>
           {myProfiles.length > 0 && <Divider sx={{ my: 4 }} />}
           <Typography variant="h6" gutterBottom>
-            Seller Profiles Shared With Me
+            Scouts Shared With Me
           </Typography>
           <Grid container spacing={2}>
             {filteredSharedProfiles.map((profile) => (
@@ -400,7 +400,7 @@ export const ProfilesPage: React.FC = () => {
         filteredSharedProfiles.length === 0 &&
         !loading && (
           <Alert severity="info">
-            You don't have any seller profiles yet. Click "Create Seller" to get
+            You don't have any scouts yet. Click "Create Scout" to get
             started!
           </Alert>
         )}

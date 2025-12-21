@@ -19,7 +19,7 @@ describe('EditProfileDialog', () => {
       />
     );
 
-    expect(screen.getByText('Edit Seller Profile')).toBeInTheDocument();
+    expect(screen.getByText('Edit Scout')).toBeInTheDocument();
     const nameInput = screen.getByLabelText(/Seller Name/i) as HTMLInputElement;
     expect(nameInput.value).toBe('Scout Alpha');
   });
@@ -35,7 +35,7 @@ describe('EditProfileDialog', () => {
       />
     );
 
-    expect(screen.queryByText('Edit Seller Profile')).not.toBeInTheDocument();
+    expect(screen.queryByText('Edit Scout')).not.toBeInTheDocument();
   });
 
   test('calls onClose when Cancel button clicked', async () => {

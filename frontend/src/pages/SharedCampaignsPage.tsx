@@ -45,7 +45,7 @@ import {
   UPDATE_CAMPAIGN_PREFILL,
   DELETE_CAMPAIGN_PREFILL,
 } from "../lib/graphql";
-import { EditCampaignPrefillDialog } from "../components/EditCampaignPrefillDialog";
+import { EditSharedCampaignDialog } from "../components/EditSharedCampaignDialog";
 
 interface CampaignPrefill {
   prefillCode: string;
@@ -73,7 +73,7 @@ interface CampaignPrefill {
 const MAX_PREFILLS = 50;
 const BASE_URL = window.location.origin;
 
-export const CampaignPrefillsPage: React.FC = () => {
+export const SharedCampaignsPage: React.FC = () => {
   const navigate = useNavigate();
   const [editingPrefill, setEditingPrefill] = useState<CampaignPrefill | null>(
     null,
@@ -405,7 +405,7 @@ export const CampaignPrefillsPage: React.FC = () => {
 
       {/* Edit Dialog */}
       {editingPrefill && (
-        <EditCampaignPrefillDialog
+        <EditSharedCampaignDialog
           open={!!editingPrefill}
           prefill={editingPrefill}
           onClose={() => setEditingPrefill(null)}

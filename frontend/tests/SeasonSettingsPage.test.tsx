@@ -85,10 +85,10 @@ const createMocks = (season: typeof mockSeasonWithPrefill | typeof mockSeasonWit
 const renderWithProviders = (mocks: any[], seasonId: string, profileId: string) => {
   return render(
     <MockedProvider mocks={mocks}>
-      <MemoryRouter initialEntries={[`/profiles/${profileId}/seasons/${seasonId}/settings`]}>
+      <MemoryRouter initialEntries={[`/scouts/${profileId}/campaigns/${seasonId}/settings`]}>
         <Routes>
           <Route
-            path="/profiles/:profileId/seasons/:seasonId/settings"
+            path="/scouts/:profileId/campaigns/:seasonId/settings"
             element={<SeasonSettingsPage />}
           />
         </Routes>
@@ -108,7 +108,7 @@ describe("SeasonSettingsPage", () => {
       renderWithProviders(mocks, mockSeasonWithPrefill.seasonId, mockSeasonWithPrefill.profileId);
 
       await waitFor(() => {
-        expect(screen.getByText("Campaign Season")).toBeInTheDocument();
+        expect(screen.getByText("Shared Campaign")).toBeInTheDocument();
       });
 
       expect(
@@ -124,7 +124,7 @@ describe("SeasonSettingsPage", () => {
         expect(screen.getByText("Season Settings")).toBeInTheDocument();
       });
 
-      expect(screen.queryByText("Campaign Season")).not.toBeInTheDocument();
+        expect(screen.queryByText("Shared Campaign")).not.toBeInTheDocument();
     });
   });
 
@@ -148,7 +148,7 @@ describe("SeasonSettingsPage", () => {
 
       // Confirmation dialog should appear
       await waitFor(() => {
-        expect(screen.getByText("Confirm Changes to Campaign Season")).toBeInTheDocument();
+        expect(screen.getByText("Confirm Changes to Shared Campaign")).toBeInTheDocument();
       });
 
       expect(
@@ -200,7 +200,7 @@ describe("SeasonSettingsPage", () => {
 
       // Confirmation dialog should NOT appear (dates don't require confirmation)
       await waitFor(() => {
-        expect(screen.queryByText("Confirm Changes to Campaign Season")).not.toBeInTheDocument();
+        expect(screen.queryByText("Confirm Changes to Shared Campaign")).not.toBeInTheDocument();
       });
     });
 
@@ -243,7 +243,7 @@ describe("SeasonSettingsPage", () => {
 
       // Confirmation dialog should NOT appear for regular seasons
       await waitFor(() => {
-        expect(screen.queryByText("Confirm Changes to Campaign Season")).not.toBeInTheDocument();
+        expect(screen.queryByText("Confirm Changes to Shared Campaign")).not.toBeInTheDocument();
       });
     });
 
@@ -266,7 +266,7 @@ describe("SeasonSettingsPage", () => {
 
       // Confirmation dialog should appear
       await waitFor(() => {
-        expect(screen.getByText("Confirm Changes to Campaign Season")).toBeInTheDocument();
+        expect(screen.getByText("Confirm Changes to Shared Campaign")).toBeInTheDocument();
       });
 
       // Click Cancel
@@ -275,7 +275,7 @@ describe("SeasonSettingsPage", () => {
 
       // Dialog should close
       await waitFor(() => {
-        expect(screen.queryByText("Confirm Changes to Campaign Season")).not.toBeInTheDocument();
+        expect(screen.queryByText("Confirm Changes to Shared Campaign")).not.toBeInTheDocument();
       });
     });
   });

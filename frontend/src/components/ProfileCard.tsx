@@ -1,5 +1,5 @@
 /**
- * ProfileCard component - Display a single seller profile with latest season stats
+ * ProfileCard component - Display a single scout profile with latest season stats
  *
  * Note: Unit fields have been moved to Season level as part of the Campaign Prefill
  * refactor. Unit information is now displayed on seasons, not profiles.
@@ -219,7 +219,7 @@ export const ProfileCard: React.FC<ProfileCardProps> = ({
               navigate(`/profiles/${encodeURIComponent(profileId)}/manage`)
             }
           >
-            Manage Seller Profile
+            Manage Scout
           </Button>
         )}
       </CardActions>

@@ -123,7 +123,7 @@ export const SeasonSettingsPage: React.FC = () => {
   // Delete season mutation
   const [deleteSeason] = useMutation(DELETE_SEASON, {
     onCompleted: () => {
-      navigate(`/profiles/${encodeURIComponent(profileId || "")}/seasons`);
+      navigate(`/scouts/${encodeURIComponent(profileId || "")}/campaigns`);
     },
   });
 
@@ -205,10 +205,10 @@ export const SeasonSettingsPage: React.FC = () => {
           variant="text"
           color="primary"
           onClick={() =>
-            navigate(`/profiles/${encodeURIComponent(profileId)}/manage`)
+            navigate(`/scouts/${encodeURIComponent(profileId)}/manage`)
           }
         >
-          Manage Seller Profile
+          Manage Scout
         </Button>
       </Stack>
 
@@ -221,10 +221,10 @@ export const SeasonSettingsPage: React.FC = () => {
         {/* Warning for prefill-created seasons */}
         {season?.prefillCode && (
           <Alert severity="warning" icon={<WarningIcon />} sx={{ mb: 3 }}>
-            <AlertTitle>Shared Campaign Season</AlertTitle>
+            <AlertTitle>Shared Campaign</AlertTitle>
             This season was created from a shared campaign link. Changing the catalog,
             season name, or unit information may cause this season to no longer
-            appear correctly in unit reports for your unit.
+            appear correctly in campaign reports for your unit.
           </Alert>
         )}
 
@@ -334,7 +334,7 @@ export const SeasonSettingsPage: React.FC = () => {
         open={unitChangeConfirmOpen}
         onClose={() => setUnitChangeConfirmOpen(false)}
       >
-        <DialogTitle>Confirm Changes to Campaign Season</DialogTitle>
+        <DialogTitle>Confirm Changes to Shared Campaign</DialogTitle>
         <DialogContent>
           <Alert severity="warning" sx={{ mb: 2 }}>
             <AlertTitle>This may affect unit reports</AlertTitle>
