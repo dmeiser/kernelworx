@@ -941,6 +941,15 @@ class CdkStack(Stack):
                 self, "UserPool", existing_user_pool_id
             )
 
+            # Check for existing identity providers on the imported pool
+            imported_pool_providers = [cognito.UserPoolClientIdentityProvider.COGNITO]
+            if resource_lookup.lookup_identity_provider(existing_user_pool_id, "Google"):
+                imported_pool_providers.append(cognito.UserPoolClientIdentityProvider.GOOGLE)
+            if resource_lookup.lookup_identity_provider(existing_user_pool_id, "Facebook"):
+                imported_pool_providers.append(cognito.UserPoolClientIdentityProvider.FACEBOOK)
+            if resource_lookup.lookup_identity_provider(existing_user_pool_id, "SignInWithApple"):
+                imported_pool_providers.append(cognito.UserPoolClientIdentityProvider.APPLE)
+
             # For imported pools, we need to keep managing the client in CloudFormation
             # to prevent CDK from trying to delete the existing resource.
             # The existing stack has UserPoolAppClientDD0407EC, so we must create
@@ -975,7 +984,7 @@ class CdkStack(Stack):
                         "https://local.dev.appworx.app:5173",
                     ],
                 ),
-                supported_identity_providers=[cognito.UserPoolClientIdentityProvider.COGNITO],
+                supported_identity_providers=imported_pool_providers,
                 prevent_user_existence_errors=True,
             )
             # Set RETAIN policy so the client survives stack deletion
@@ -1052,11 +1061,19 @@ class CdkStack(Stack):
                 description="Administrator users with elevated privileges",
             )
 
-            # Configure social identity providers (optional - only create if credentials provided)
+            # Configure social identity providers
+            # For each provider: use existing if found, create if credentials provided
             supported_providers = [cognito.UserPoolClientIdentityProvider.COGNITO]
 
-            # Google OAuth (only if credentials provided)
-            if os.environ.get("GOOGLE_CLIENT_ID") and os.environ.get("GOOGLE_CLIENT_SECRET"):
+            # Google OAuth - check if already configured, or create if credentials provided
+            existing_google = resource_lookup.lookup_identity_provider(
+                self.user_pool.user_pool_id, "Google"
+            )
+            if existing_google:
+                # Provider exists - just add to supported providers list
+                supported_providers.append(cognito.UserPoolClientIdentityProvider.GOOGLE)
+            elif os.environ.get("GOOGLE_CLIENT_ID") and os.environ.get("GOOGLE_CLIENT_SECRET"):
+                # Create new provider
                 google_provider = cognito.UserPoolIdentityProviderGoogle(
                     self,
                     "GoogleProvider",
@@ -1072,8 +1089,13 @@ class CdkStack(Stack):
                 )
                 supported_providers.append(cognito.UserPoolClientIdentityProvider.GOOGLE)
 
-            # Facebook OAuth (only if credentials provided)
-            if os.environ.get("FACEBOOK_APP_ID") and os.environ.get("FACEBOOK_APP_SECRET"):
+            # Facebook OAuth - check if already configured, or create if credentials provided
+            existing_facebook = resource_lookup.lookup_identity_provider(
+                self.user_pool.user_pool_id, "Facebook"
+            )
+            if existing_facebook:
+                supported_providers.append(cognito.UserPoolClientIdentityProvider.FACEBOOK)
+            elif os.environ.get("FACEBOOK_APP_ID") and os.environ.get("FACEBOOK_APP_SECRET"):
                 facebook_provider = cognito.UserPoolIdentityProviderFacebook(
                     self,
                     "FacebookProvider",
@@ -1089,8 +1111,13 @@ class CdkStack(Stack):
                 )
                 supported_providers.append(cognito.UserPoolClientIdentityProvider.FACEBOOK)
 
-            # Apple Sign In (only if credentials provided)
-            if (
+            # Apple Sign In - check if already configured, or create if credentials provided
+            existing_apple = resource_lookup.lookup_identity_provider(
+                self.user_pool.user_pool_id, "SignInWithApple"
+            )
+            if existing_apple:
+                supported_providers.append(cognito.UserPoolClientIdentityProvider.APPLE)
+            elif (
                 os.environ.get("APPLE_SERVICES_ID")
                 and os.environ.get("APPLE_TEAM_ID")
                 and os.environ.get("APPLE_KEY_ID")

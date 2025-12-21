@@ -223,7 +223,8 @@ export const LoginPage: React.FC = () => {
       const redirectUri = encodeURIComponent(
         import.meta.env.VITE_OAUTH_REDIRECT_SIGNIN || window.location.origin,
       );
-      const identityProvider = provider.toLowerCase();
+      // Cognito identity_provider is case-sensitive - must match provider name exactly
+      const identityProvider = provider;
 
       window.location.href = `https://${domain}/oauth2/authorize?client_id=${clientId}&response_type=code&redirect_uri=${redirectUri}&identity_provider=${identityProvider}&scope=openid+email+profile`;
     } catch (err: unknown) {

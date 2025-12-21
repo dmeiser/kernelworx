@@ -328,3 +328,35 @@ def lookup_route53_record(
     except Exception:
         pass
     return None
+
+
+@functools.lru_cache(maxsize=128)
+def lookup_identity_provider(
+    user_pool_id: str, provider_name: str
+) -> Optional[dict[str, Any]]:
+    """Check if a Cognito identity provider exists.
+
+    Args:
+        user_pool_id: The Cognito User Pool ID
+        provider_name: The provider name (e.g., "Google", "Facebook", "SignInWithApple")
+
+    Returns:
+        Dict with provider info if found, None otherwise
+    """
+    client = get_client("cognito-idp")
+    try:
+        response = client.describe_identity_provider(
+            UserPoolId=user_pool_id,
+            ProviderName=provider_name,
+        )
+        provider = response.get("IdentityProvider", {})
+        return {
+            "provider_name": provider.get("ProviderName"),
+            "provider_type": provider.get("ProviderType"),
+            "creation_date": provider.get("CreationDate"),
+            "last_modified_date": provider.get("LastModifiedDate"),
+        }
+    except client.exceptions.ResourceNotFoundException:
+        return None
+    except Exception:
+        return None
