@@ -275,7 +275,7 @@ export const CreateSeasonPage: React.FC = () => {
       effectivePrefillCode
     ) {
       // User needs to create a profile first
-      navigate("/profiles", {
+      navigate("/scouts", {
         state: {
           returnTo: `/c/${effectivePrefillCode}`,
           prefillCode: effectivePrefillCode,
@@ -439,7 +439,7 @@ export const CreateSeasonPage: React.FC = () => {
           });
         }
         navigate(
-          `/profiles/${encodeURIComponent(profileId)}/seasons/${encodeURIComponent(createdSeason.seasonId)}`,
+          `/scouts/${encodeURIComponent(profileId)}/campaigns/${encodeURIComponent(createdSeason.seasonId)}`,
         );
       }
     } catch (error) {
@@ -478,7 +478,7 @@ export const CreateSeasonPage: React.FC = () => {
         </Alert>
         <Button
           variant="contained"
-          onClick={() => navigate("/profiles")}
+          onClick={() => navigate("/scouts")}
           sx={{ mt: 2 }}
         >
           Go to Profiles
@@ -497,7 +497,7 @@ export const CreateSeasonPage: React.FC = () => {
         </Alert>
         <Button
           variant="contained"
-          onClick={() => navigate("/profiles")}
+          onClick={() => navigate("/scouts")}
           sx={{ mt: 2 }}
         >
           Go to Profiles
@@ -903,7 +903,7 @@ export const CreateSeasonPage: React.FC = () => {
           <Stack direction="row" spacing={2} justifyContent="flex-end">
             <Button
               variant="outlined"
-              onClick={() => navigate("/profiles")}
+              onClick={() => navigate("/scouts")}
               disabled={submitting}
             >
               Cancel

@@ -270,7 +270,7 @@ export const OrderEditorPage: React.FC = () => {
 
       // Navigate back to orders page
       navigate(
-        `/profiles/${encodeURIComponent(profileId)}/seasons/${encodeURIComponent(seasonId)}/orders`,
+        `/scouts/${encodeURIComponent(profileId)}/campaigns/${encodeURIComponent(seasonId)}/orders`,
       );
     } catch (err: unknown) {
       const error = err as { message?: string };
@@ -281,7 +281,7 @@ export const OrderEditorPage: React.FC = () => {
 
   const handleCancel = () => {
     navigate(
-      `/profiles/${encodeURIComponent(profileId)}/seasons/${encodeURIComponent(seasonId)}/orders`,
+      `/scouts/${encodeURIComponent(profileId)}/campaigns/${encodeURIComponent(seasonId)}/orders`,
     );
   };
 
@@ -331,7 +331,7 @@ export const OrderEditorPage: React.FC = () => {
         <Link
           component="button"
           variant="body2"
-          onClick={() => navigate("/profiles")}
+          onClick={() => navigate("/scouts")}
           sx={{ textDecoration: "none", cursor: "pointer" }}
         >
           Profiles
@@ -339,7 +339,7 @@ export const OrderEditorPage: React.FC = () => {
         <Link
           component="button"
           variant="body2"
-          onClick={() => navigate(`/profiles/${encodeURIComponent(profileId)}`)}
+          onClick={() => navigate(`/scouts/${encodeURIComponent(profileId)}`)}
           sx={{ textDecoration: "none", cursor: "pointer" }}
         >
           Seasons

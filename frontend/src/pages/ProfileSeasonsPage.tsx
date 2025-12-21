@@ -47,7 +47,7 @@ interface Profile {
   permissions: string[];
 }
 
-export const ScoutSeasonsPage: React.FC = () => {
+export const ProfileSeasonsPage: React.FC = () => {
   const { profileId: encodedProfileId } = useParams<{ profileId: string }>();
   const profileId = encodedProfileId
     ? decodeURIComponent(encodedProfileId)

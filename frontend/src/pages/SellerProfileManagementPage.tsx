@@ -85,7 +85,7 @@ interface Share {
   createdByAccountId: string;
 }
 
-export const ScoutManagementPage: React.FC = () => {
+export const SellerProfileManagementPage: React.FC = () => {
   const { profileId: encodedProfileId } = useParams<{
     profileId: string;
   }>();

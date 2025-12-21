@@ -36,7 +36,7 @@ export const AcceptInvitePage: React.FC = () => {
       setInviteCode("");
       // Redirect to profiles page after 2 seconds
       setTimeout(() => {
-        navigate("/profiles");
+        navigate("/scouts");
       }, 2000);
     },
     onError: (err) => {

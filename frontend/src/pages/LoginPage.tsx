@@ -46,7 +46,7 @@ export const LoginPage: React.FC = () => {
   // Get the redirect path from location state (defaults to /profiles)
   const from =
     (location.state as { from?: { pathname?: string } } | undefined)?.from
-      ?.pathname || "/profiles";
+      ?.pathname || "/scouts";
 
   // If already logged in, redirect to intended destination
   useEffect(() => {
@@ -218,7 +218,7 @@ export const LoginPage: React.FC = () => {
 
     try {
       // Save redirect path to sessionStorage for OAuth callback
-      if (from !== "/profiles") {
+      if (from !== "/scouts") {
         sessionStorage.setItem("oauth_redirect", from);
       }
 

@@ -72,13 +72,13 @@ export const ProfileCard: React.FC<ProfileCardProps> = ({
       : null;
 
   const handleViewSeasons = () => {
-    navigate(`/profiles/${encodeURIComponent(profileId)}/seasons`);
+    navigate(`/scouts/${encodeURIComponent(profileId)}/seasons`);
   };
 
   const handleViewLatestSeason = () => {
     if (latestSeason) {
       navigate(
-        `/profiles/${encodeURIComponent(profileId)}/seasons/${encodeURIComponent(
+        `/scouts/${encodeURIComponent(profileId)}/campaigns/${encodeURIComponent(
           latestSeason.seasonId,
         )}`,
       );
@@ -216,7 +216,7 @@ export const ProfileCard: React.FC<ProfileCardProps> = ({
             color="primary"
             startIcon={<SettingsIcon />}
             onClick={() =>
-              navigate(`/profiles/${encodeURIComponent(profileId)}/manage`)
+              navigate(`/scouts/${encodeURIComponent(profileId)}/manage`)
             }
           >
             Manage Scout

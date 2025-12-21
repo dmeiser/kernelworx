@@ -202,7 +202,7 @@ export const SignupPage: React.FC = () => {
 
           // Auto sign-in successful, refresh auth context and redirect
           await refreshSession();
-          navigate("/profiles");
+          navigate("/scouts");
         } catch (autoSignInError) {
           // Auto sign-in API call failed, but user might still be authenticated
           // Check actual auth state instead of assuming
@@ -217,7 +217,7 @@ export const SignupPage: React.FC = () => {
             // User is authenticated, refresh context and proceed to profiles
             console.log("User is authenticated despite autoSignIn failure");
             await refreshSession();
-            navigate("/profiles");
+            navigate("/scouts");
           } catch {
             // User is not authenticated, redirect to login
             console.log("User is not authenticated, redirecting to login");

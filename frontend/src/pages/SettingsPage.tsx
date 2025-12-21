@@ -51,7 +51,7 @@ export const SettingsPage: React.FC = () => {
           </Button>
           <Button
             variant="outlined"
-            onClick={() => navigate("/profiles")}
+            onClick={() => navigate("/scouts")}
             fullWidth
             sx={{ justifyContent: "flex-start" }}
           >

@@ -119,13 +119,13 @@ export const OrdersPage: React.FC = () => {
 
   const handleCreateOrder = () => {
     navigate(
-      `/profiles/${encodeURIComponent(profileId)}/seasons/${encodeURIComponent(seasonId)}/orders/new`,
+      `/scouts/${encodeURIComponent(profileId)}/campaigns/${encodeURIComponent(seasonId)}/orders/new`,
     );
   };
 
   const handleEditOrder = (orderId: string) => {
     navigate(
-      `/profiles/${encodeURIComponent(profileId)}/seasons/${encodeURIComponent(seasonId)}/orders/${encodeURIComponent(orderId)}/edit`,
+      `/scouts/${encodeURIComponent(profileId)}/campaigns/${encodeURIComponent(seasonId)}/orders/${encodeURIComponent(orderId)}/edit`,
     );
   };
 

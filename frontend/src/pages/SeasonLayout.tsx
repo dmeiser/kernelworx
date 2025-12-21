@@ -117,7 +117,7 @@ export const SeasonLayout: React.FC = () => {
 
   const handleTabChange = (_event: React.SyntheticEvent, newValue: string) => {
     navigate(
-      `/profiles/${encodeURIComponent(profileId)}/seasons/${encodeURIComponent(seasonId)}/${newValue}`,
+      `/scouts/${encodeURIComponent(profileId)}/campaigns/${encodeURIComponent(seasonId)}/${newValue}`,
     );
   };
 
@@ -149,7 +149,7 @@ export const SeasonLayout: React.FC = () => {
         <Link
           component="button"
           variant="body1"
-          onClick={() => navigate("/profiles")}
+          onClick={() => navigate("/scouts")}
           sx={{ textDecoration: "none", cursor: "pointer" }}
         >
           Profiles
@@ -158,7 +158,7 @@ export const SeasonLayout: React.FC = () => {
           component="button"
           variant="body1"
           onClick={() =>
-            navigate(`/profiles/${encodeURIComponent(profileId)}/seasons`)
+            navigate(`/scouts/${encodeURIComponent(profileId)}/seasons`)
           }
           sx={{ textDecoration: "none", cursor: "pointer" }}
         >
@@ -175,7 +175,7 @@ export const SeasonLayout: React.FC = () => {
           edge="start"
           color="inherit"
           onClick={() =>
-            navigate(`/profiles/${encodeURIComponent(profileId)}/seasons`)
+            navigate(`/scouts/${encodeURIComponent(profileId)}/seasons`)
           }
           sx={{ mr: 2 }}
         >
