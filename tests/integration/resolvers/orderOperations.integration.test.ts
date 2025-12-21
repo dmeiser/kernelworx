@@ -151,9 +151,9 @@ const REVOKE_SHARE = gql`
   }
 `;
 
-const LIST_ORDERS_BY_SEASON = gql`
-  query ListOrdersBySeason($campaignId: ID!) {
-    listOrdersBySeason(campaignId: $campaignId) {
+const LIST_ORDERS_BY_CAMPAIGN = gql`
+  query ListOrdersByCampaign($campaignId: ID!) {
+    listOrdersByCampaign(campaignId: $campaignId) {
       orderId
     }
   }
@@ -303,11 +303,11 @@ describe('Order Operations Integration Tests', () => {
     // 1. Delete all orders in the season
     try {
       const { data: ordersData } = await ownerClient.query({
-        query: LIST_ORDERS_BY_SEASON,
+        query: LIST_ORDERS_BY_CAMPAIGN,
         variables: { campaignId: testSeasonId },
         fetchPolicy: 'network-only',
       });
-      for (const order of ordersData.listOrdersBySeason || []) {
+      for (const order of ordersData.listOrdersByCampaign || []) {
         await ownerClient.mutate({
           mutation: DELETE_ORDER,
           variables: { orderId: order.orderId },
@@ -692,7 +692,7 @@ describe('Order Operations Integration Tests', () => {
       expect(getAfterData.getOrder).toBeNull();
     }, 15000);
 
-    test('Data Integrity: Deleted order does not appear in listOrdersBySeason', async () => {
+    test('Data Integrity: Deleted order does not appear in listOrdersByCampaign', async () => {
       // Create an order first
       const createInput = {
         profileId: testProfileId,
@@ -717,11 +717,11 @@ describe('Order Operations Integration Tests', () => {
 
       // Verify it appears in list
       const { data: listBeforeData }: any = await ownerClient.query({
-        query: LIST_ORDERS_BY_SEASON,
+        query: LIST_ORDERS_BY_CAMPAIGN,
         variables: { campaignId: testSeasonId },
         fetchPolicy: 'network-only',
       });
-      const beforeOrderIds = listBeforeData.listOrdersBySeason.map((o: any) => o.orderId);
+      const beforeOrderIds = listBeforeData.listOrdersByCampaign.map((o: any) => o.orderId);
       expect(beforeOrderIds).toContain(orderId);
 
       // Delete it
@@ -732,11 +732,11 @@ describe('Order Operations Integration Tests', () => {
 
       // Verify it no longer appears in list
       const { data: listAfterData }: any = await ownerClient.query({
-        query: LIST_ORDERS_BY_SEASON,
+        query: LIST_ORDERS_BY_CAMPAIGN,
         variables: { campaignId: testSeasonId },
         fetchPolicy: 'network-only',
       });
-      const afterOrderIds = listAfterData.listOrdersBySeason.map((o: any) => o.orderId);
+      const afterOrderIds = listAfterData.listOrdersByCampaign.map((o: any) => o.orderId);
       expect(afterOrderIds).not.toContain(orderId);
     }, 15000);
 

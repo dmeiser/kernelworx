@@ -2430,10 +2430,10 @@ export function request(ctx) {
     
     const updateExpression = 'SET ' + updates.join(', ');
     
-    // V2: Use composite key (profileId, seasonId)
+    // V2: Use composite key (profileId, campaignId)
     return {
         operation: 'UpdateItem',
-        key: util.dynamodb.toMapValues({ profileId: season.profileId, seasonId: season.seasonId }),
+        key: util.dynamodb.toMapValues({ profileId: season.profileId, campaignId: season.campaignId }),
         update: {
         expression: updateExpression,
         expressionNames: Object.keys(exprNames).length > 0 ? exprNames : undefined,
@@ -2452,9 +2452,9 @@ export function response(ctx) {
     
     // Build response object with updated values
     const result = {
-        seasonId: season.seasonId,
+        campaignId: season.campaignId,
         profileId: season.profileId,
-        campaignName: input.campaignName !== undefined ? input.campaignName : campaign.campaignName,
+        campaignName: input.campaignName !== undefined ? input.campaignName : season.campaignName,
         startDate: input.startDate !== undefined ? input.startDate : season.startDate,
         endDate: input.endDate !== undefined ? input.endDate : season.endDate,
         catalogId: input.catalogId !== undefined ? input.catalogId : season.catalogId,
@@ -2571,14 +2571,14 @@ export function request(ctx) {
         };
     }
     
-    const seasonId = season.seasonId;
+    const campaignId = season.campaignId;
     
-    // V2 schema: Direct PK query since PK=seasonId
+    // V2 schema: Direct PK query since PK=campaignId
     return {
         operation: 'Query',
         query: {
-        expression: 'seasonId = :seasonId',
-        expressionValues: util.dynamodb.toMapValues({ ':seasonId': seasonId })
+        expression: 'campaignId = :campaignId',
+        expressionValues: util.dynamodb.toMapValues({ ':campaignId': campaignId })
         }
     };
 }
@@ -2670,10 +2670,10 @@ export function request(ctx) {
         };
     }
     
-    // V2: Use composite key (profileId, seasonId)
+    // V2: Use composite key (profileId, campaignId)
     return {
         operation: 'DeleteItem',
-        key: util.dynamodb.toMapValues({ profileId: season.profileId, seasonId: season.seasonId })
+        key: util.dynamodb.toMapValues({ profileId: season.profileId, campaignId: season.campaignId })
     };
 }
 
@@ -5370,11 +5370,11 @@ import { util } from '@aws-appsync/utils';
 
 export function request(ctx) {
     // Build the composite key for GSI2
-    // Format: {unitType}#{unitNumber}#{city}#{state}#{seasonName}#{seasonYear}
+    // Format: {unitType}#{unitNumber}#{city}#{state}#{campaignName}#{campaignYear}
     // Use string concatenation (array.join() not available in APPSYNC_JS)
     const unitNumStr = '' + ctx.args.unitNumber;
-    const seasonYearStr = '' + ctx.args.seasonYear;
-    const unitSeasonKey = ctx.args.unitType + '#' + unitNumStr + '#' + ctx.args.city + '#' + ctx.args.state + '#' + ctx.args.seasonName + '#' + seasonYearStr;
+    const seasonYearStr = '' + ctx.args.campaignYear;
+    const unitSeasonKey = ctx.args.unitType + '#' + unitNumStr + '#' + ctx.args.city + '#' + ctx.args.state + '#' + ctx.args.campaignName + '#' + seasonYearStr;
     
     return {
         operation: 'Query',
@@ -6300,7 +6300,7 @@ export function request(ctx) {
                 + self.seasons_table.table_name
                 + """',
         operation: 'DeleteItem',
-        key: util.dynamodb.toMapValues({ profileId: season.profileId, seasonId: season.seasonId })
+        key: util.dynamodb.toMapValues({ profileId: season.profileId, campaignId: season.campaignId })
     }));
     
     return {

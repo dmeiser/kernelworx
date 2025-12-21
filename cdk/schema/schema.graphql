@@ -121,7 +121,7 @@ type SharedCampaign {
 type Order {
   orderId: ID!
   profileId: ID!
-  seasonId: ID!
+  campaignId: ID!
   customerName: String!
   customerPhone: String
   customerAddress: Address
@@ -190,8 +190,8 @@ type ProfileInvite {
 type UnitReport {
   unitType: String!
   unitNumber: Int!
-  seasonName: String!
-  seasonYear: Int!
+  campaignName: String!
+  campaignYear: Int!
   sellers: [UnitSellerSummary!]!
   totalSales: Float!
   totalOrders: Int!
@@ -275,7 +275,7 @@ input ProductInput {
 
 input CreateOrderInput {
   profileId: ID!
-  seasonId: ID!
+  campaignId: ID!
   customerName: String!
   customerPhone: String
   customerAddress: AddressInput
@@ -388,7 +388,7 @@ type Query {
   
   # Order queries
   getOrder(orderId: ID!): Order
-  listOrdersBySeason(seasonId: ID!): [Order!]!
+  listOrdersByCampaign(campaignId: ID!): [Order!]!
   listOrdersByProfile(profileId: ID!): [Order!]!
   
   # Share queries

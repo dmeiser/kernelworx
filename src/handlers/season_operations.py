@@ -134,8 +134,8 @@ def create_season(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
         # Step 4: Determine season values (prefer prefill over input, but input can override dates)
         if prefill:
-            season_name = prefill["seasonName"]
-            season_year = prefill["seasonYear"]
+            season_name = prefill["campaignName"]
+            season_year = prefill["campaignYear"]
             catalog_id = prefill["catalogId"]
             unit_type = prefill["unitType"]
             unit_number = prefill["unitNumber"]
@@ -145,8 +145,8 @@ def create_season(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             start_date = inp.get("startDate") or prefill.get("startDate")
             end_date = inp.get("endDate") or prefill.get("endDate")
         else:
-            season_name = inp.get("seasonName")
-            season_year = inp.get("seasonYear")
+            season_name = inp.get("campaignName")
+            season_year = inp.get("campaignYear")
             catalog_id = inp.get("catalogId")
             unit_type = inp.get("unitType")
             unit_number = inp.get("unitNumber")
@@ -157,9 +157,9 @@ def create_season(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
         # Step 5: Validate required fields
         if not season_name:
-            raise ValueError("seasonName is required")
+            raise ValueError("campaignName is required")
         if not season_year:
-            raise ValueError("seasonYear is required")
+            raise ValueError("campaignYear is required")
         if not catalog_id:
             raise ValueError("catalogId is required")
 
@@ -175,15 +175,17 @@ def create_season(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         # Step 6: Generate IDs and timestamps
         from datetime import datetime, timezone
 
-        season_id = f"CAMPAIGN#{uuid.uuid4()}"
+        campaign_id = f"CAMPAIGN#{uuid.uuid4()}"
         now = datetime.now(timezone.utc).isoformat()
 
         # Step 7: Build season item
         season_item: Dict[str, Any] = {
+            "PK": profile_id,  # DynamoDB partition key
+            "SK": campaign_id,  # DynamoDB sort key
             "profileId": profile_id,
-            "seasonId": season_id,
-            "seasonName": season_name,
-            "seasonYear": season_year,
+            "campaignId": campaign_id,
+            "campaignName": season_name,
+            "campaignYear": season_year,
             "startDate": start_date,
             "catalogId": catalog_id,
             "createdAt": now,
@@ -265,7 +267,7 @@ def create_season(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             dynamodb_client.transact_write_items(
                 TransactItems=transact_items  # type: ignore[arg-type]
             )
-            logger.info(f"Created season {season_id} for profile {profile_id}")
+            logger.info(f"Created campaign {campaign_id} for profile {profile_id}")
             if share_item:
                 logger.info(
                     f"Created share with creator {prefill.get('createdBy')}"  # type: ignore[union-attr]

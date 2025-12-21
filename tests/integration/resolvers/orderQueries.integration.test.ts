@@ -6,7 +6,7 @@ import { deleteTestAccounts } from '../setup/testData';
 
 
 /**
- * Integration tests for Order Query Operations (getOrder, listOrdersBySeason, listOrdersByProfile)
+ * Integration tests for Order Query Operations (getOrder, listOrdersByCampaign, listOrdersByProfile)
  * 
  * Test Data Setup:
  * - TEST_OWNER_EMAIL: Owner of profile/season (can query orders)
@@ -16,7 +16,7 @@ import { deleteTestAccounts } from '../setup/testData';
  * 
  * VTL Resolvers Under Test:
  * - getOrder: Queries GSI6 (orderId index)
- * - listOrdersBySeason: Queries main table (PK=campaignId, SK begins_with "ORDER#")
+ * - listOrdersByCampaign: Queries main table (PK=campaignId, SK begins_with "ORDER#")
  * - listOrdersByProfile: Queries GSI2 (GSI2PK=profileId)
  */
 
@@ -127,9 +127,9 @@ const GET_ORDER = gql`
   }
 `;
 
-const LIST_ORDERS_BY_SEASON = gql`
-  query ListOrdersBySeason($campaignId: ID!) {
-    listOrdersBySeason(campaignId: $campaignId) {
+const LIST_ORDERS_BY_CAMPAIGN = gql`
+  query ListOrdersByCampaign($campaignId: ID!) {
+    listOrdersByCampaign(campaignId: $campaignId) {
       orderId
       profileId
       campaignId
@@ -663,46 +663,46 @@ describe('Order Query Operations Integration Tests', () => {
   });
 
   // ========================================
-  // 5.12.2: listOrdersBySeason
+  // 5.12.2: listOrdersByCampaign
   // ========================================
 
-  describe('5.12.2: listOrdersBySeason', () => {
+  describe('5.12.2: listOrdersByCampaign', () => {
     test('Happy Path: Returns all orders for a season', async () => {
       // ✅ FIXED BUG #25: Now queries GSI5 (campaignId index) with filter
       const { data }: any = await ownerClient.query({
-        query: LIST_ORDERS_BY_SEASON,
+        query: LIST_ORDERS_BY_CAMPAIGN,
         variables: { campaignId: testSeasonId },
         fetchPolicy: 'network-only',
       });
 
-      expect(data.listOrdersBySeason).toBeDefined();
-      expect(data.listOrdersBySeason.length).toBeGreaterThanOrEqual(2);
+      expect(data.listOrdersByCampaign).toBeDefined();
+      expect(data.listOrdersByCampaign.length).toBeGreaterThanOrEqual(2);
       
-      const orderIds = data.listOrdersBySeason.map((o: any) => o.orderId);
+      const orderIds = data.listOrdersByCampaign.map((o: any) => o.orderId);
       expect(orderIds).toContain(testOrderId1);
       expect(orderIds).toContain(testOrderId2);
     });
 
     test('Happy Path: Returns empty array if no orders', async () => {
       const { data }: any = await ownerClient.query({
-        query: LIST_ORDERS_BY_SEASON,
+        query: LIST_ORDERS_BY_CAMPAIGN,
         variables: { campaignId: emptySeasonId },
         fetchPolicy: 'network-only',
       });
 
-      expect(data.listOrdersBySeason).toBeDefined();
-      expect(data.listOrdersBySeason).toEqual([]);
+      expect(data.listOrdersByCampaign).toBeDefined();
+      expect(data.listOrdersByCampaign).toEqual([]);
     });
 
     test('Happy Path: Includes all order fields', async () => {
       // ✅ FIXED: Bug #25 resolved
       const { data }: any = await ownerClient.query({
-        query: LIST_ORDERS_BY_SEASON,
+        query: LIST_ORDERS_BY_CAMPAIGN,
         variables: { campaignId: testSeasonId },
         fetchPolicy: 'network-only',
       });
 
-      const order = data.listOrdersBySeason[0];
+      const order = data.listOrdersByCampaign[0];
       expect(order).toHaveProperty('orderId');
       expect(order).toHaveProperty('profileId');
       expect(order).toHaveProperty('campaignId');
@@ -713,51 +713,51 @@ describe('Order Query Operations Integration Tests', () => {
     });
 
     test('Authorization: Profile owner can list orders', async () => {
-      // ✅ FIXED Bug #23: listOrdersBySeason now includes authorization via pipeline resolver
+      // ✅ FIXED Bug #23: listOrdersByCampaign now includes authorization via pipeline resolver
       const { data }: any = await ownerClient.query({
-        query: LIST_ORDERS_BY_SEASON,
+        query: LIST_ORDERS_BY_CAMPAIGN,
         variables: { campaignId: testSeasonId },
         fetchPolicy: 'network-only',
       });
 
-      expect(data.listOrdersBySeason).toBeDefined();
-      expect(data.listOrdersBySeason.length).toBeGreaterThan(0);
+      expect(data.listOrdersByCampaign).toBeDefined();
+      expect(data.listOrdersByCampaign.length).toBeGreaterThan(0);
     });
 
     test('Authorization: Shared user can list orders', async () => {
-      // ✅ FIXED Bug #23: listOrdersBySeason now includes authorization via pipeline resolver
+      // ✅ FIXED Bug #23: listOrdersByCampaign now includes authorization via pipeline resolver
       const { data }: any = await contributorClient.query({
-        query: LIST_ORDERS_BY_SEASON,
+        query: LIST_ORDERS_BY_CAMPAIGN,
         variables: { campaignId: testSeasonId },
         fetchPolicy: 'network-only',
       });
 
-      expect(data.listOrdersBySeason).toBeDefined();
-      expect(data.listOrdersBySeason.length).toBeGreaterThan(0);
+      expect(data.listOrdersByCampaign).toBeDefined();
+      expect(data.listOrdersByCampaign.length).toBeGreaterThan(0);
     });
 
     test('Authorization: Non-shared user cannot list orders', async () => {
-      // ✅ FIXED Bug #23: listOrdersBySeason now includes authorization via pipeline resolver
+      // ✅ FIXED Bug #23: listOrdersByCampaign now includes authorization via pipeline resolver
       // Test: contributor tries to list orders from unshared profile's season
       // Expected: Returns empty array (query permissions model - don't error)
       
       const { data }: any = await contributorClient.query({
-        query: LIST_ORDERS_BY_SEASON,
+        query: LIST_ORDERS_BY_CAMPAIGN,
         variables: { campaignId: unsharedSeasonId },
         fetchPolicy: 'network-only',
       });
       
-      expect(data.listOrdersBySeason).toEqual([]);
+      expect(data.listOrdersByCampaign).toEqual([]);
     });
 
     test('Input Validation: Returns empty array for non-existent campaignId', async () => {
       const { data }: any = await ownerClient.query({
-        query: LIST_ORDERS_BY_SEASON,
+        query: LIST_ORDERS_BY_CAMPAIGN,
         variables: { campaignId: 'SEASON#nonexistent' },
         fetchPolicy: 'network-only',
       });
 
-      expect(data.listOrdersBySeason).toEqual([]);
+      expect(data.listOrdersByCampaign).toEqual([]);
     });
   });
 
@@ -1198,13 +1198,13 @@ describe('Order Query Operations Integration Tests', () => {
 
       // Query all orders for season
       const { data }: any = await ownerClient.query({
-        query: LIST_ORDERS_BY_SEASON,
+        query: LIST_ORDERS_BY_CAMPAIGN,
         variables: { campaignId: testSeasonId },
         fetchPolicy: 'network-only',
       });
 
       // Assert: All created orders should be in the result
-      const returnedOrderIds = data.listOrdersBySeason.map((o: any) => o.orderId);
+      const returnedOrderIds = data.listOrdersByCampaign.map((o: any) => o.orderId);
       for (const orderId of createdOrderIds) {
         expect(returnedOrderIds).toContain(orderId);
       }
@@ -1321,20 +1321,20 @@ describe('Order Query Operations Integration Tests', () => {
       expect(profileQueryTime).toBeLessThan(5000);
       expect(profileData.listOrdersByProfile.length).toBeGreaterThanOrEqual(orderCount);
 
-      // Measure query performance for listOrdersBySeason
+      // Measure query performance for listOrdersByCampaign
       const startTimeSeason = Date.now();
       const { data: seasonData }: any = await ownerClient.query({
-        query: LIST_ORDERS_BY_SEASON,
+        query: LIST_ORDERS_BY_CAMPAIGN,
         variables: { campaignId: testSeasonId },
         fetchPolicy: 'network-only',
       });
       const seasonQueryTime = Date.now() - startTimeSeason;
 
-      console.log(`📊 Performance: listOrdersBySeason with ${orderCount} orders took ${seasonQueryTime}ms`);
+      console.log(`📊 Performance: listOrdersByCampaign with ${orderCount} orders took ${seasonQueryTime}ms`);
 
       // Assert: Query should complete in reasonable time (under 5 seconds)
       expect(seasonQueryTime).toBeLessThan(5000);
-      expect(seasonData.listOrdersBySeason.length).toBeGreaterThanOrEqual(orderCount);
+      expect(seasonData.listOrdersByCampaign.length).toBeGreaterThanOrEqual(orderCount);
 
       // Cleanup
       for (const orderId of createdOrderIds) {
@@ -1371,19 +1371,19 @@ describe('Order Query Operations Integration Tests', () => {
 
       // Query orders
       const { data }: any = await ownerClient.query({
-        query: LIST_ORDERS_BY_SEASON,
+        query: LIST_ORDERS_BY_CAMPAIGN,
         variables: { campaignId: testSeasonId },
         fetchPolicy: 'network-only',
       });
 
       // Verify all our orders are in the results
-      const returnedOrderIds = data.listOrdersBySeason.map((o: any) => o.orderId);
+      const returnedOrderIds = data.listOrdersByCampaign.map((o: any) => o.orderId);
       for (const orderId of createdOrderIds) {
         expect(returnedOrderIds).toContain(orderId);
       }
 
       // Verify order dates are present
-      const ourOrders = data.listOrdersBySeason.filter((o: any) => 
+      const ourOrders = data.listOrdersByCampaign.filter((o: any) => 
         createdOrderIds.includes(o.orderId)
       );
       expect(ourOrders.length).toBe(orderDates.length);
