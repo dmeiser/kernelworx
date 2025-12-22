@@ -58,15 +58,15 @@ Essential knowledge for GitHub Copilot when working on this volunteer-run Scouti
 **Core Entities**:
 - **Account**: Cognito user + app metadata (`isAdmin`)
 - **SellerProfile**: Individual seller (Scout), owned by Account
-- **Season**: Fundraising season for a SellerProfile
+- **Campaign**: Fundraising campaign for a SellerProfile
 - **Catalog**: Product catalog (admin-managed or user-created)
 - **Order**: Customer order with line items, payment method
 - **Share**: Per-profile access grant (READ or WRITE permissions)
 
 **Key Relationships**:
 - Account owns multiple SellerProfiles
-- SellerProfile has multiple Seasons
-- Season uses one Catalog and has multiple Orders
+- SellerProfile has multiple Campaigns
+- Campaign uses one Catalog and has multiple Orders
 - Share grants Account access to another Account's SellerProfile
 
 ## 3. Python Code Standards (Backend)
@@ -253,7 +253,7 @@ def check_profile_access(caller_account_id: str, profile_id: str, action: str) -
     "query": {
         "expression": "PK = :pk AND begins_with(SK, :sk)",
         "expressionValues": {
-            ":pk": $util.dynamodb.toDynamoDBJson($ctx.args.seasonId),
+            ":pk": $util.dynamodb.toDynamoDBJson($ctx.args.campaignId),
             ":sk": $util.dynamodb.toDynamoDBJson("ORDER#")
         }
     }
@@ -299,15 +299,15 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
 **DynamoDB Query Pattern** (single-table):
 ```python
-# Get all seasons for a profile
+# Get all campaigns for a profile
 response = table.query(
     KeyConditionExpression='PK = :pk AND begins_with(SK, :sk)',
     ExpressionAttributeValues={
         ':pk': f'PROFILE#{profile_id}',
-        ':sk': 'SEASON#'
+        ':sk': 'CAMPAIGN#'
     }
 )
-seasons = response['Items']
+campaigns = response['Items']
 ```
 
 **S3 Report Generation**:
@@ -315,7 +315,7 @@ seasons = response['Items']
 import openpyxl
 from io import BytesIO
 
-def generate_report(profile_id: str, season_id: str) -> str:
+def generate_report(profile_id: str, campaign_id: str) -> str:
     """Generate XLSX report and upload to S3. Returns download URL."""
     # Create workbook
     wb = openpyxl.Workbook()
@@ -329,7 +329,7 @@ def generate_report(profile_id: str, season_id: str) -> str:
     buffer.seek(0)
     
     # Upload to S3
-    s3_key = f'reports/{profile_id}/{season_id}/report.xlsx'
+    s3_key = f'reports/{profile_id}/{campaign_id}/report.xlsx'
     s3_client.put_object(Bucket='exports-bucket', Key=s3_key, Body=buffer.getvalue())
     
     # Return pre-signed URL

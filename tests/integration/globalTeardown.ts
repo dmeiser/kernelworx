@@ -23,7 +23,7 @@ const dynamodb = new DynamoDBClient({ region: 'us-east-1' });
 // Table names from environment or defaults
 const PREFILLS_TABLE = process.env.PREFILLS_TABLE_NAME || 'kernelworx-shared-campaigns-ue1-dev';
 const PROFILES_TABLE = process.env.PROFILES_TABLE_NAME || 'kernelworx-profiles-v2-ue1-dev';
-const SEASONS_TABLE = process.env.SEASONS_TABLE_NAME || 'kernelworx-campaigns-v2-ue1-dev';
+const CAMPAIGNS_TABLE = process.env.CAMPAIGNS_TABLE_NAME || 'kernelworx-campaigns-v2-ue1-dev';
 const ORDERS_TABLE = process.env.ORDERS_TABLE_NAME || 'kernelworx-orders-v2-ue1-dev';
 const CATALOGS_TABLE = process.env.CATALOGS_TABLE_NAME || 'kernelworx-catalogs-ue1-dev';
 const SHARES_TABLE = process.env.SHARES_TABLE_NAME || 'kernelworx-shares-v2-ue1-dev';
@@ -137,16 +137,16 @@ async function cleanupTestCatalogs(): Promise<number> {
   return deleted;
 }
 
-async function cleanupTestSeasons(): Promise<number> {
-  console.log('  Scanning seasons table for TEST- prefixed items...');
+async function cleanupTestCampaigns(): Promise<number> {
+  console.log('  Scanning campaigns table for TEST- prefixed items...');
   
   const scanResult = await dynamodb.send(new ScanCommand({
-    TableName: SEASONS_TABLE,
-    FilterExpression: 'begins_with(seasonName, :prefix)',
+    TableName: CAMPAIGNS_TABLE,
+    FilterExpression: 'begins_with(campaignName, :prefix)',
     ExpressionAttributeValues: {
       ':prefix': { S: 'TEST-' },
     },
-    ProjectionExpression: 'profileId, seasonId',
+    ProjectionExpression: 'profileId, campaignId',
   }));
   
   const items = scanResult.Items || [];
@@ -154,19 +154,19 @@ async function cleanupTestSeasons(): Promise<number> {
   
   for (const item of items) {
     const profileId = item.profileId?.S;
-    const seasonId = item.seasonId?.S;
-    if (profileId && seasonId) {
+    const campaignId = item.campaignId?.S;
+    if (profileId && campaignId) {
       try {
         await dynamodb.send(new DeleteItemCommand({
-          TableName: SEASONS_TABLE,
+          TableName: CAMPAIGNS_TABLE,
           Key: {
             profileId: { S: profileId },
-            seasonId: { S: seasonId },
+            campaignId: { S: campaignId },
           },
         }));
         deleted++;
       } catch (error) {
-        console.error(`  Failed to delete season ${seasonId}:`, error);
+        console.error(`  Failed to delete campaign ${campaignId}:`, error);
       }
     }
   }
@@ -183,21 +183,21 @@ async function cleanupTestOrders(): Promise<number> {
     ExpressionAttributeValues: {
       ':prefix': { S: 'TEST-' },
     },
-    ProjectionExpression: 'seasonId, orderId',
+    ProjectionExpression: 'campaignId, orderId',
   }));
   
   const items = scanResult.Items || [];
   let deleted = 0;
   
   for (const item of items) {
-    const seasonId = item.seasonId?.S;
+    const campaignId = item.campaignId?.S;
     const orderId = item.orderId?.S;
-    if (seasonId && orderId) {
+    if (campaignId && orderId) {
       try {
         await dynamodb.send(new DeleteItemCommand({
           TableName: ORDERS_TABLE,
           Key: {
-            seasonId: { S: seasonId },
+            campaignId: { S: campaignId },
             orderId: { S: orderId },
           },
         }));
@@ -253,7 +253,7 @@ export default async function globalTeardown(): Promise<void> {
   try {
     // Clean up in order of dependencies (child entities first)
     const ordersDeleted = await cleanupTestOrders();
-    const seasonsDeleted = await cleanupTestSeasons();
+    const campaignsDeleted = await cleanupTestCampaigns();
     const sharesDeleted = await cleanupTestShares();
     const profilesDeleted = await cleanupTestProfiles();
     const catalogsDeleted = await cleanupTestCatalogs();
@@ -261,7 +261,7 @@ export default async function globalTeardown(): Promise<void> {
     
     console.log('✅ Global cleanup complete:');
     console.log(`   - Orders: ${ordersDeleted} deleted`);
-    console.log(`   - Seasons: ${seasonsDeleted} deleted`);
+    console.log(`   - Campaigns: ${campaignsDeleted} deleted`);
     console.log(`   - Shares: ${sharesDeleted} deleted`);
     console.log(`   - Profiles: ${profilesDeleted} deleted`);
     console.log(`   - Catalogs: ${catalogsDeleted} deleted`);

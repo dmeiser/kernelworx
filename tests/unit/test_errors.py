@@ -71,7 +71,7 @@ class TestErrorCode:
         assert ErrorCode.INVALID_ADDRESS == "INVALID_ADDRESS"
         assert ErrorCode.INVITE_EXPIRED == "INVITE_EXPIRED"
         assert ErrorCode.INVITE_ALREADY_USED == "INVITE_ALREADY_USED"
-        assert ErrorCode.SEASON_READ_ONLY == "SEASON_READ_ONLY"
+        assert ErrorCode.CAMPAIGN_READ_ONLY == "CAMPAIGN_READ_ONLY"
         assert ErrorCode.INSUFFICIENT_PERMISSIONS == "INSUFFICIENT_PERMISSIONS"
         assert ErrorCode.INTERNAL_ERROR == "INTERNAL_ERROR"
         assert ErrorCode.DATABASE_ERROR == "DATABASE_ERROR"

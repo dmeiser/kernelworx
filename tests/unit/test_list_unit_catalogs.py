@@ -18,8 +18,8 @@ class TestListUnitCatalogs:
             "arguments": {
                 "unitType": "Pack",
                 "unitNumber": 158,
-                "seasonName": "Fall",
-                "seasonYear": 2024,
+                "campaignName": "Fall",
+                "campaignYear": 2024,
             },
             "identity": {"sub": "test-account-123"},
         }
@@ -55,21 +55,21 @@ class TestListUnitCatalogs:
         ]
 
     @pytest.fixture
-    def sample_seasons(self) -> list[Dict[str, Any]]:
-        """Sample seasons for profiles."""
+    def sample_campaigns(self) -> list[Dict[str, Any]]:
+        """Sample campaigns for profiles."""
         return [
             {
-                "seasonId": "CAMPAIGN#season1",
+                "campaignId": "CAMPAIGN#campaign1",
                 "profileId": "PROFILE#profile1",
-                "seasonName": "Fall",
-                "seasonYear": 2024,
+                "campaignName": "Fall",
+                "campaignYear": 2024,
                 "catalogId": "catalog-123",
             },
             {
-                "seasonId": "CAMPAIGN#season2",
+                "campaignId": "CAMPAIGN#campaign2",
                 "profileId": "PROFILE#profile2",
-                "seasonName": "Fall",
-                "seasonYear": 2024,
+                "campaignName": "Fall",
+                "campaignYear": 2024,
                 "catalogId": "catalog-456",
             },
         ]
@@ -92,12 +92,12 @@ class TestListUnitCatalogs:
 
     @patch("src.handlers.list_unit_catalogs.check_profile_access")
     @patch("src.handlers.list_unit_catalogs.catalogs_table")
-    @patch("src.handlers.list_unit_catalogs.seasons_table")
+    @patch("src.handlers.list_unit_catalogs.campaigns_table")
     @patch("src.handlers.list_unit_catalogs.profiles_table")
     def test_list_unit_catalogs_success(
         self,
         mock_profiles_table: MagicMock,
-        mock_seasons_table: MagicMock,
+        mock_campaigns_table: MagicMock,
         mock_catalogs_table: MagicMock,
         mock_check_access: MagicMock,
         event: Dict[str, Any],
@@ -119,7 +119,7 @@ class TestListUnitCatalogs:
                 return {
                     "Items": [
                         {
-                            "seasonId": "CAMPAIGN#season1",
+                            "campaignId": "CAMPAIGN#campaign1",
                             "profileId": "PROFILE#profile1",
                             "catalogId": "catalog-123",
                         }
@@ -129,14 +129,14 @@ class TestListUnitCatalogs:
                 return {
                     "Items": [
                         {
-                            "seasonId": "CAMPAIGN#season2",
+                            "campaignId": "CAMPAIGN#campaign2",
                             "profileId": "PROFILE#profile2",
                             "catalogId": "catalog-456",
                         }
                     ]
                 }
 
-        mock_seasons_table.query.side_effect = query_side_effect
+        mock_campaigns_table.query.side_effect = query_side_effect
 
         # Return catalogs
         def get_item_side_effect(**kwargs: Any) -> Dict[str, Any]:
@@ -196,22 +196,22 @@ class TestListUnitCatalogs:
         assert mock_check_access.call_count == 2  # Called for each profile
 
     @patch("src.handlers.list_unit_catalogs.check_profile_access")
-    @patch("src.handlers.list_unit_catalogs.seasons_table")
+    @patch("src.handlers.list_unit_catalogs.campaigns_table")
     @patch("src.handlers.list_unit_catalogs.profiles_table")
-    def test_list_unit_catalogs_no_seasons(
+    def test_list_unit_catalogs_no_campaigns(
         self,
         mock_profiles_table: MagicMock,
-        mock_seasons_table: MagicMock,
+        mock_campaigns_table: MagicMock,
         mock_check_access: MagicMock,
         event: Dict[str, Any],
         lambda_context: MagicMock,
         sample_profiles: list[Dict[str, Any]],
     ) -> None:
-        """Test listing when profiles exist but no matching seasons."""
+        """Test listing when profiles exist but no matching campaigns."""
         # Arrange
         mock_profiles_table.scan.return_value = {"Items": sample_profiles}
         mock_check_access.return_value = True
-        mock_seasons_table.query.return_value = {"Items": []}
+        mock_campaigns_table.query.return_value = {"Items": []}
 
         # Act
         result = list_unit_catalogs(event, lambda_context)
@@ -220,24 +220,24 @@ class TestListUnitCatalogs:
         assert result == []
 
     @patch("src.handlers.list_unit_catalogs.check_profile_access")
-    @patch("src.handlers.list_unit_catalogs.seasons_table")
+    @patch("src.handlers.list_unit_catalogs.campaigns_table")
     @patch("src.handlers.list_unit_catalogs.profiles_table")
-    def test_list_unit_catalogs_season_without_catalog(
+    def test_list_unit_catalogs_campaign_without_catalog(
         self,
         mock_profiles_table: MagicMock,
-        mock_seasons_table: MagicMock,
+        mock_campaigns_table: MagicMock,
         mock_check_access: MagicMock,
         event: Dict[str, Any],
         lambda_context: MagicMock,
         sample_profiles: list[Dict[str, Any]],
     ) -> None:
-        """Test listing when seasons exist but without catalog IDs."""
+        """Test listing when campaigns exist but without catalog IDs."""
         # Arrange
         mock_profiles_table.scan.return_value = {"Items": sample_profiles}
         mock_check_access.return_value = True
-        # Season without catalogId
-        mock_seasons_table.query.return_value = {
-            "Items": [{"seasonId": "CAMPAIGN#season1", "profileId": "PROFILE#profile1"}]
+        # Campaign without catalogId
+        mock_campaigns_table.query.return_value = {
+            "Items": [{"campaignId": "CAMPAIGN#campaign1", "profileId": "PROFILE#profile1"}]
         }
 
         # Act
@@ -248,12 +248,12 @@ class TestListUnitCatalogs:
 
     @patch("src.handlers.list_unit_catalogs.check_profile_access")
     @patch("src.handlers.list_unit_catalogs.catalogs_table")
-    @patch("src.handlers.list_unit_catalogs.seasons_table")
+    @patch("src.handlers.list_unit_catalogs.campaigns_table")
     @patch("src.handlers.list_unit_catalogs.profiles_table")
     def test_list_unit_catalogs_duplicate_catalogs(
         self,
         mock_profiles_table: MagicMock,
-        mock_seasons_table: MagicMock,
+        mock_campaigns_table: MagicMock,
         mock_catalogs_table: MagicMock,
         mock_check_access: MagicMock,
         event: Dict[str, Any],
@@ -266,8 +266,8 @@ class TestListUnitCatalogs:
         mock_profiles_table.scan.return_value = {"Items": sample_profiles}
         mock_check_access.return_value = True
         # Both profiles use the same catalog
-        mock_seasons_table.query.return_value = {
-            "Items": [{"seasonId": "CAMPAIGN#season1", "catalogId": "catalog-123"}]
+        mock_campaigns_table.query.return_value = {
+            "Items": [{"campaignId": "CAMPAIGN#campaign1", "catalogId": "catalog-123"}]
         }
         mock_catalogs_table.get_item.return_value = {"Item": sample_catalogs["catalog-123"]}
 
@@ -280,12 +280,12 @@ class TestListUnitCatalogs:
 
     @patch("src.handlers.list_unit_catalogs.check_profile_access")
     @patch("src.handlers.list_unit_catalogs.catalogs_table")
-    @patch("src.handlers.list_unit_catalogs.seasons_table")
+    @patch("src.handlers.list_unit_catalogs.campaigns_table")
     @patch("src.handlers.list_unit_catalogs.profiles_table")
     def test_list_unit_catalogs_catalog_fetch_error(
         self,
         mock_profiles_table: MagicMock,
-        mock_seasons_table: MagicMock,
+        mock_campaigns_table: MagicMock,
         mock_catalogs_table: MagicMock,
         mock_check_access: MagicMock,
         event: Dict[str, Any],
@@ -297,10 +297,10 @@ class TestListUnitCatalogs:
         # Arrange
         mock_profiles_table.scan.return_value = {"Items": sample_profiles[:1]}  # Single profile
         mock_check_access.return_value = True
-        mock_seasons_table.query.return_value = {
+        mock_campaigns_table.query.return_value = {
             "Items": [
-                {"seasonId": "CAMPAIGN#season1", "catalogId": "catalog-123"},
-                {"seasonId": "CAMPAIGN#season2", "catalogId": "catalog-fail"},
+                {"campaignId": "CAMPAIGN#campaign1", "catalogId": "catalog-123"},
+                {"campaignId": "CAMPAIGN#campaign2", "catalogId": "catalog-fail"},
             ]
         }
 
@@ -322,12 +322,12 @@ class TestListUnitCatalogs:
 
     @patch("src.handlers.list_unit_catalogs.check_profile_access")
     @patch("src.handlers.list_unit_catalogs.catalogs_table")
-    @patch("src.handlers.list_unit_catalogs.seasons_table")
+    @patch("src.handlers.list_unit_catalogs.campaigns_table")
     @patch("src.handlers.list_unit_catalogs.profiles_table")
     def test_list_unit_catalogs_catalog_not_found(
         self,
         mock_profiles_table: MagicMock,
-        mock_seasons_table: MagicMock,
+        mock_campaigns_table: MagicMock,
         mock_catalogs_table: MagicMock,
         mock_check_access: MagicMock,
         event: Dict[str, Any],
@@ -338,8 +338,8 @@ class TestListUnitCatalogs:
         # Arrange
         mock_profiles_table.scan.return_value = {"Items": sample_profiles[:1]}
         mock_check_access.return_value = True
-        mock_seasons_table.query.return_value = {
-            "Items": [{"seasonId": "CAMPAIGN#season1", "catalogId": "catalog-deleted"}]
+        mock_campaigns_table.query.return_value = {
+            "Items": [{"campaignId": "CAMPAIGN#campaign1", "catalogId": "catalog-deleted"}]
         }
         mock_catalogs_table.get_item.return_value = {}  # No Item key = not found
 
@@ -387,40 +387,40 @@ class TestListUnitCatalogs:
         mock_check_access.side_effect = check_access_side_effect
 
         # Act & Assert - Won't raise, will process only accessible profile
-        # The function will continue to query seasons for the accessible profile
-        # Since we haven't mocked seasons_table, this will raise
+        # The function will continue to query campaigns for the accessible profile
+        # Since we haven't mocked campaigns_table, this will raise
         # We verify check_access was called correctly
-        with patch("src.handlers.list_unit_catalogs.seasons_table") as mock_seasons_table:
-            mock_seasons_table.query.return_value = {"Items": []}
+        with patch("src.handlers.list_unit_catalogs.campaigns_table") as mock_campaigns_table:
+            mock_campaigns_table.query.return_value = {"Items": []}
             result = list_unit_catalogs(event, lambda_context)
 
         # Verify both profiles checked but only one accessible
         assert mock_check_access.call_count == 2
-        assert result == []  # No seasons found for accessible profile
+        assert result == []  # No campaigns found for accessible profile
 
     @patch("src.handlers.list_unit_catalogs.check_profile_access")
     @patch("src.handlers.list_unit_catalogs.catalogs_table")
-    @patch("src.handlers.list_unit_catalogs.seasons_table")
+    @patch("src.handlers.list_unit_catalogs.campaigns_table")
     @patch("src.handlers.list_unit_catalogs.profiles_table")
-    def test_list_unit_catalogs_season_with_non_string_catalog_id(
+    def test_list_unit_catalogs_campaign_with_non_string_catalog_id(
         self,
         mock_profiles_table: MagicMock,
-        mock_seasons_table: MagicMock,
+        mock_campaigns_table: MagicMock,
         mock_catalogs_table: MagicMock,
         mock_check_access: MagicMock,
         event: Dict[str, Any],
         lambda_context: MagicMock,
         sample_profiles: list[Dict[str, Any]],
     ) -> None:
-        """Test handling when season has non-string catalog ID (edge case)."""
+        """Test handling when campaign has non-string catalog ID (edge case)."""
         # Arrange
         mock_profiles_table.scan.return_value = {"Items": sample_profiles[:1]}
         mock_check_access.return_value = True
-        # Season with non-string catalogId (should be filtered out)
-        mock_seasons_table.query.return_value = {
+        # Campaign with non-string catalogId (should be filtered out)
+        mock_campaigns_table.query.return_value = {
             "Items": [
-                {"seasonId": "CAMPAIGN#season1", "catalogId": 12345},  # Non-string
-                {"seasonId": "CAMPAIGN#season2", "catalogId": None},  # None
+                {"campaignId": "CAMPAIGN#campaign1", "catalogId": 12345},  # Non-string
+                {"campaignId": "CAMPAIGN#campaign2", "catalogId": None},  # None
             ]
         }
 
@@ -433,20 +433,20 @@ class TestListUnitCatalogs:
         mock_catalogs_table.get_item.assert_not_called()
 
 
-class TestListUnitSeasonCatalogs:
-    """Tests for list_unit_season_catalogs Lambda handler using GSI3."""
+class TestListUnitCampaignCatalogs:
+    """Tests for list_unit_campaign_catalogs Lambda handler using GSI3."""
 
     @pytest.fixture
     def event(self) -> Dict[str, Any]:
-        """Sample AppSync event for list unit season catalogs request."""
+        """Sample AppSync event for list unit campaign catalogs request."""
         return {
             "arguments": {
                 "unitType": "Pack",
                 "unitNumber": 158,
                 "city": "Springfield",
                 "state": "IL",
-                "seasonName": "Fall",
-                "seasonYear": 2024,
+                "campaignName": "Fall",
+                "campaignYear": 2024,
             },
             "identity": {"sub": "test-account-123"},
         }
@@ -455,27 +455,27 @@ class TestListUnitSeasonCatalogs:
     def lambda_context(self) -> MagicMock:
         """Mock Lambda context."""
         context = MagicMock()
-        context.function_name = "list_unit_season_catalogs"
+        context.function_name = "list_unit_campaign_catalogs"
         context.memory_limit_in_mb = 128
         context.invoked_function_arn = "arn:aws:lambda:us-east-1:123456789012:function:test"
         context.aws_request_id = "test-request-id"
         return context
 
     @pytest.fixture
-    def sample_seasons(self) -> list[Dict[str, Any]]:
-        """Sample seasons from GSI3 query."""
+    def sample_campaigns(self) -> list[Dict[str, Any]]:
+        """Sample campaigns from GSI3 query."""
         return [
             {
-                "seasonId": "CAMPAIGN#season1",
+                "campaignId": "CAMPAIGN#campaign1",
                 "profileId": "PROFILE#profile1",
                 "catalogId": "catalog-123",
-                "unitSeasonKey": "Pack#158#Springfield#IL#Fall#2024",
+                "unitCampaignKey": "Pack#158#Springfield#IL#Fall#2024",
             },
             {
-                "seasonId": "CAMPAIGN#season2",
+                "campaignId": "CAMPAIGN#campaign2",
                 "profileId": "PROFILE#profile2",
                 "catalogId": "catalog-456",
-                "unitSeasonKey": "Pack#158#Springfield#IL#Fall#2024",
+                "unitCampaignKey": "Pack#158#Springfield#IL#Fall#2024",
             },
         ]
 
@@ -497,22 +497,22 @@ class TestListUnitSeasonCatalogs:
 
     @patch("src.handlers.list_unit_catalogs.check_profile_access")
     @patch("src.handlers.list_unit_catalogs.catalogs_table")
-    @patch("src.handlers.list_unit_catalogs.seasons_table")
-    def test_list_unit_season_catalogs_success(
+    @patch("src.handlers.list_unit_catalogs.campaigns_table")
+    def test_list_unit_campaign_catalogs_success(
         self,
-        mock_seasons_table: MagicMock,
+        mock_campaigns_table: MagicMock,
         mock_catalogs_table: MagicMock,
         mock_check_access: MagicMock,
         event: Dict[str, Any],
         lambda_context: MagicMock,
-        sample_seasons: list[Dict[str, Any]],
+        sample_campaigns: list[Dict[str, Any]],
         sample_catalogs: Dict[str, Dict[str, Any]],
     ) -> None:
         """Test successful catalog listing using GSI3."""
-        from src.handlers.list_unit_catalogs import list_unit_season_catalogs
+        from src.handlers.list_unit_catalogs import list_unit_campaign_catalogs
 
         # Arrange
-        mock_seasons_table.query.return_value = {"Items": sample_seasons}
+        mock_campaigns_table.query.return_value = {"Items": sample_campaigns}
         mock_check_access.return_value = True
 
         def get_item_side_effect(**kwargs: Any) -> Dict[str, Any]:
@@ -524,7 +524,7 @@ class TestListUnitSeasonCatalogs:
         mock_catalogs_table.get_item.side_effect = get_item_side_effect
 
         # Act
-        result = list_unit_season_catalogs(event, lambda_context)
+        result = list_unit_campaign_catalogs(event, lambda_context)
 
         # Assert
         assert len(result) == 2
@@ -532,48 +532,48 @@ class TestListUnitSeasonCatalogs:
         assert result[0]["catalogName"] == "Alpha Catalog"
         assert result[1]["catalogName"] == "Zebra Catalog"
         # Verify GSI3 was queried
-        mock_seasons_table.query.assert_called_once()
-        call_kwargs = mock_seasons_table.query.call_args.kwargs
+        mock_campaigns_table.query.assert_called_once()
+        call_kwargs = mock_campaigns_table.query.call_args.kwargs
         assert call_kwargs["IndexName"] == "GSI3"
 
-    @patch("src.handlers.list_unit_catalogs.seasons_table")
-    def test_list_unit_season_catalogs_no_seasons(
+    @patch("src.handlers.list_unit_catalogs.campaigns_table")
+    def test_list_unit_campaign_catalogs_no_campaigns(
         self,
-        mock_seasons_table: MagicMock,
+        mock_campaigns_table: MagicMock,
         event: Dict[str, Any],
         lambda_context: MagicMock,
     ) -> None:
-        """Test listing when no seasons found in GSI3."""
-        from src.handlers.list_unit_catalogs import list_unit_season_catalogs
+        """Test listing when no campaigns found in GSI3."""
+        from src.handlers.list_unit_catalogs import list_unit_campaign_catalogs
 
         # Arrange
-        mock_seasons_table.query.return_value = {"Items": []}
+        mock_campaigns_table.query.return_value = {"Items": []}
 
         # Act
-        result = list_unit_season_catalogs(event, lambda_context)
+        result = list_unit_campaign_catalogs(event, lambda_context)
 
         # Assert
         assert result == []
 
     @patch("src.handlers.list_unit_catalogs.check_profile_access")
-    @patch("src.handlers.list_unit_catalogs.seasons_table")
-    def test_list_unit_season_catalogs_no_access(
+    @patch("src.handlers.list_unit_catalogs.campaigns_table")
+    def test_list_unit_campaign_catalogs_no_access(
         self,
-        mock_seasons_table: MagicMock,
+        mock_campaigns_table: MagicMock,
         mock_check_access: MagicMock,
         event: Dict[str, Any],
         lambda_context: MagicMock,
-        sample_seasons: list[Dict[str, Any]],
+        sample_campaigns: list[Dict[str, Any]],
     ) -> None:
         """Test listing when caller has no access to any profiles."""
-        from src.handlers.list_unit_catalogs import list_unit_season_catalogs
+        from src.handlers.list_unit_catalogs import list_unit_campaign_catalogs
 
         # Arrange
-        mock_seasons_table.query.return_value = {"Items": sample_seasons}
+        mock_campaigns_table.query.return_value = {"Items": sample_campaigns}
         mock_check_access.return_value = False
 
         # Act
-        result = list_unit_season_catalogs(event, lambda_context)
+        result = list_unit_campaign_catalogs(event, lambda_context)
 
         # Assert
         assert result == []
@@ -581,22 +581,22 @@ class TestListUnitSeasonCatalogs:
 
     @patch("src.handlers.list_unit_catalogs.check_profile_access")
     @patch("src.handlers.list_unit_catalogs.catalogs_table")
-    @patch("src.handlers.list_unit_catalogs.seasons_table")
-    def test_list_unit_season_catalogs_partial_access(
+    @patch("src.handlers.list_unit_catalogs.campaigns_table")
+    def test_list_unit_campaign_catalogs_partial_access(
         self,
-        mock_seasons_table: MagicMock,
+        mock_campaigns_table: MagicMock,
         mock_catalogs_table: MagicMock,
         mock_check_access: MagicMock,
         event: Dict[str, Any],
         lambda_context: MagicMock,
-        sample_seasons: list[Dict[str, Any]],
+        sample_campaigns: list[Dict[str, Any]],
         sample_catalogs: Dict[str, Dict[str, Any]],
     ) -> None:
         """Test listing when caller has access to only some profiles."""
-        from src.handlers.list_unit_catalogs import list_unit_season_catalogs
+        from src.handlers.list_unit_catalogs import list_unit_campaign_catalogs
 
         # Arrange
-        mock_seasons_table.query.return_value = {"Items": sample_seasons}
+        mock_campaigns_table.query.return_value = {"Items": sample_campaigns}
 
         # Grant access only to first profile
         def check_access_side_effect(
@@ -608,7 +608,7 @@ class TestListUnitSeasonCatalogs:
         mock_catalogs_table.get_item.return_value = {"Item": sample_catalogs["catalog-123"]}
 
         # Act
-        result = list_unit_season_catalogs(event, lambda_context)
+        result = list_unit_campaign_catalogs(event, lambda_context)
 
         # Assert - Only catalog from accessible profile
         assert len(result) == 1
@@ -616,10 +616,10 @@ class TestListUnitSeasonCatalogs:
 
     @patch("src.handlers.list_unit_catalogs.check_profile_access")
     @patch("src.handlers.list_unit_catalogs.catalogs_table")
-    @patch("src.handlers.list_unit_catalogs.seasons_table")
-    def test_list_unit_season_catalogs_duplicate_catalogs(
+    @patch("src.handlers.list_unit_catalogs.campaigns_table")
+    def test_list_unit_campaign_catalogs_duplicate_catalogs(
         self,
-        mock_seasons_table: MagicMock,
+        mock_campaigns_table: MagicMock,
         mock_catalogs_table: MagicMock,
         mock_check_access: MagicMock,
         event: Dict[str, Any],
@@ -627,27 +627,27 @@ class TestListUnitSeasonCatalogs:
         sample_catalogs: Dict[str, Dict[str, Any]],
     ) -> None:
         """Test that duplicate catalog IDs are deduplicated."""
-        from src.handlers.list_unit_catalogs import list_unit_season_catalogs
+        from src.handlers.list_unit_catalogs import list_unit_campaign_catalogs
 
-        # Arrange - Both seasons use the same catalog
-        seasons = [
+        # Arrange - Both campaigns use the same catalog
+        campaigns = [
             {
-                "seasonId": "CAMPAIGN#season1",
+                "campaignId": "CAMPAIGN#campaign1",
                 "profileId": "PROFILE#profile1",
                 "catalogId": "catalog-123",
             },
             {
-                "seasonId": "CAMPAIGN#season2",
+                "campaignId": "CAMPAIGN#campaign2",
                 "profileId": "PROFILE#profile2",
                 "catalogId": "catalog-123",
             },
         ]
-        mock_seasons_table.query.return_value = {"Items": seasons}
+        mock_campaigns_table.query.return_value = {"Items": campaigns}
         mock_check_access.return_value = True
         mock_catalogs_table.get_item.return_value = {"Item": sample_catalogs["catalog-123"]}
 
         # Act
-        result = list_unit_season_catalogs(event, lambda_context)
+        result = list_unit_campaign_catalogs(event, lambda_context)
 
         # Assert
         assert len(result) == 1
@@ -655,22 +655,22 @@ class TestListUnitSeasonCatalogs:
 
     @patch("src.handlers.list_unit_catalogs.check_profile_access")
     @patch("src.handlers.list_unit_catalogs.catalogs_table")
-    @patch("src.handlers.list_unit_catalogs.seasons_table")
-    def test_list_unit_season_catalogs_catalog_fetch_error(
+    @patch("src.handlers.list_unit_catalogs.campaigns_table")
+    def test_list_unit_campaign_catalogs_catalog_fetch_error(
         self,
-        mock_seasons_table: MagicMock,
+        mock_campaigns_table: MagicMock,
         mock_catalogs_table: MagicMock,
         mock_check_access: MagicMock,
         event: Dict[str, Any],
         lambda_context: MagicMock,
-        sample_seasons: list[Dict[str, Any]],
+        sample_campaigns: list[Dict[str, Any]],
         sample_catalogs: Dict[str, Dict[str, Any]],
     ) -> None:
         """Test graceful handling when catalog fetch fails."""
-        from src.handlers.list_unit_catalogs import list_unit_season_catalogs
+        from src.handlers.list_unit_catalogs import list_unit_campaign_catalogs
 
         # Arrange
-        mock_seasons_table.query.return_value = {"Items": sample_seasons}
+        mock_campaigns_table.query.return_value = {"Items": sample_campaigns}
         mock_check_access.return_value = True
 
         # First catalog succeeds, second fails
@@ -683,79 +683,79 @@ class TestListUnitSeasonCatalogs:
         mock_catalogs_table.get_item.side_effect = get_item_side_effect
 
         # Act
-        result = list_unit_season_catalogs(event, lambda_context)
+        result = list_unit_campaign_catalogs(event, lambda_context)
 
         # Assert - Should return the successful catalog
         assert len(result) == 1
         assert result[0]["catalogId"] == "catalog-123"
 
-    @patch("src.handlers.list_unit_catalogs.seasons_table")
-    def test_list_unit_season_catalogs_error_handling(
+    @patch("src.handlers.list_unit_catalogs.campaigns_table")
+    def test_list_unit_campaign_catalogs_error_handling(
         self,
-        mock_seasons_table: MagicMock,
+        mock_campaigns_table: MagicMock,
         event: Dict[str, Any],
         lambda_context: MagicMock,
     ) -> None:
         """Test error handling when GSI3 query fails."""
-        from src.handlers.list_unit_catalogs import list_unit_season_catalogs
+        from src.handlers.list_unit_catalogs import list_unit_campaign_catalogs
 
         # Arrange
-        mock_seasons_table.query.side_effect = Exception("DynamoDB error")
+        mock_campaigns_table.query.side_effect = Exception("DynamoDB error")
 
         # Act & Assert
         with pytest.raises(Exception, match="DynamoDB error"):
-            list_unit_season_catalogs(event, lambda_context)
+            list_unit_campaign_catalogs(event, lambda_context)
 
     @patch("src.handlers.list_unit_catalogs.check_profile_access")
-    @patch("src.handlers.list_unit_catalogs.seasons_table")
-    def test_list_unit_season_catalogs_season_without_catalog(
+    @patch("src.handlers.list_unit_catalogs.campaigns_table")
+    def test_list_unit_campaign_catalogs_campaign_without_catalog(
         self,
-        mock_seasons_table: MagicMock,
+        mock_campaigns_table: MagicMock,
         mock_check_access: MagicMock,
         event: Dict[str, Any],
         lambda_context: MagicMock,
     ) -> None:
-        """Test handling when seasons don't have catalog IDs."""
-        from src.handlers.list_unit_catalogs import list_unit_season_catalogs
+        """Test handling when campaigns don't have catalog IDs."""
+        from src.handlers.list_unit_catalogs import list_unit_campaign_catalogs
 
         # Arrange
-        mock_seasons_table.query.return_value = {
+        mock_campaigns_table.query.return_value = {
             "Items": [
-                {"seasonId": "CAMPAIGN#season1", "profileId": "PROFILE#profile1"},  # No catalogId
-                {"seasonId": "CAMPAIGN#season2", "profileId": "PROFILE#profile2", "catalogId": None},
+                {"campaignId": "CAMPAIGN#campaign1", "profileId": "PROFILE#profile1"},  # No catalogId
+                {"campaignId": "CAMPAIGN#campaign2", "profileId": "PROFILE#profile2", "catalogId": None},
             ]
         }
         mock_check_access.return_value = True
 
         # Act
-        result = list_unit_season_catalogs(event, lambda_context)
+        result = list_unit_campaign_catalogs(event, lambda_context)
 
         # Assert
         assert result == []
 
     @patch("src.handlers.list_unit_catalogs.check_profile_access")
     @patch("src.handlers.list_unit_catalogs.catalogs_table")
-    @patch("src.handlers.list_unit_catalogs.seasons_table")
-    def test_list_unit_season_catalogs_catalog_not_found(
+    @patch("src.handlers.list_unit_catalogs.campaigns_table")
+    def test_list_unit_campaign_catalogs_catalog_not_found(
         self,
-        mock_seasons_table: MagicMock,
+        mock_campaigns_table: MagicMock,
         mock_catalogs_table: MagicMock,
         mock_check_access: MagicMock,
         event: Dict[str, Any],
         lambda_context: MagicMock,
-        sample_seasons: list[Dict[str, Any]],
+        sample_campaigns: list[Dict[str, Any]],
     ) -> None:
         """Test handling when catalog doesn't exist in table."""
-        from src.handlers.list_unit_catalogs import list_unit_season_catalogs
+        from src.handlers.list_unit_catalogs import list_unit_campaign_catalogs
 
         # Arrange
-        mock_seasons_table.query.return_value = {"Items": sample_seasons}
+        mock_campaigns_table.query.return_value = {"Items": sample_campaigns}
         mock_check_access.return_value = True
         # Catalog not found - empty response without Item key
         mock_catalogs_table.get_item.return_value = {}
 
         # Act
-        result = list_unit_season_catalogs(event, lambda_context)
+        result = list_unit_campaign_catalogs(event, lambda_context)
 
         # Assert - No catalogs returned since none found
         assert result == []

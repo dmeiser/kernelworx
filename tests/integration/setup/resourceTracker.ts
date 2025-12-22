@@ -5,7 +5,7 @@
  * Use this to avoid test data pollution and ensure clean state between test runs.
  * 
  * Usage:
- * 1. Call trackResource() whenever you create a resource (profile, season, order, etc.)
+ * 1. Call trackResource() whenever you create a resource (profile, campaigngn, order, etc.)
  * 2. Call cleanupAllTrackedResources() in afterAll hook
  * 3. Resources are deleted in reverse order of creation (newest first)
  * 4. Parent resources (profiles) are deleted last (after children)
@@ -15,9 +15,9 @@ import { ApolloClient, gql } from '@apollo/client';
 import { cleanupTestData } from './testData';
 
 interface TrackedResource {
-  type: 'profile' | 'season' | 'order' | 'catalog' | 'share' | 'invite';
+  type: 'profile' | 'campaigngn' | 'order' | 'catalog' | 'share' | 'invite';
   id: string; // shareId for shares, targetAccountId stored separately
-  parentId?: string; // profileId for seasons/orders/shares/invites, null for profiles/catalogs
+  parentId?: string; // profileId for campaigngns/orders/shares/invites, null for profiles/catalogs
   client?: ApolloClient; // Client with permissions to delete this resource
   targetAccountId?: string; // Only for shares - needed for revokeShare mutation
 }
@@ -85,7 +85,7 @@ export async function cleanupAllTrackedResources(suiteId: string): Promise<void>
     }
   }
 
-  // Delete child resources first (orders, seasons, shares, invites)
+  // Delete child resources first (orders, campaigngns, shares, invites)
   // Delete in reverse order (newest first)
   for (let i = childResources.length - 1; i >= 0; i--) {
     const resource = childResources[i];
@@ -140,7 +140,7 @@ async function deleteResource(resource: TrackedResource): Promise<void> {
       });
       break;
 
-    case 'season':
+    case 'campaigngn':
       await client.mutate({
         mutation: DELETE_CAMPAIGN,
         variables: { campaignId: resource.id },

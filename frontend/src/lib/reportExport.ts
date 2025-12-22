@@ -126,7 +126,7 @@ export function downloadAsCSV(orders: Order[], campaignId: string): void {
   const url = URL.createObjectURL(blob);
 
   link.setAttribute("href", url);
-  link.setAttribute("download", `season-${campaignId}.csv`);
+  link.setAttribute("download", `campaign-${campaignId}.csv`);
   link.style.visibility = "hidden";
 
   document.body.appendChild(link);
@@ -170,5 +170,5 @@ export function downloadAsXLSX(orders: Order[], campaignId: string): void {
   XLSX.utils.book_append_sheet(wb, ws, "Orders");
 
   // Download
-  XLSX.writeFile(wb, `season-${campaignId}.xlsx`);
+  XLSX.writeFile(wb, `campaign-${campaignId}.xlsx`);
 }

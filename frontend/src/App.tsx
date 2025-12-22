@@ -14,16 +14,16 @@ import { LandingPage } from "./pages/LandingPage";
 import { LoginPage } from "./pages/LoginPage";
 import { SignupPage } from "./pages/SignupPage";
 import { ScoutsPage } from "./pages/ScoutsPage";
-import { ScoutSeasonsPage } from "./pages/ScoutSeasonsPage";
+import { ScoutCampaignsPage } from "./pages/ScoutCampaignsPage";
 import { ScoutManagementPage } from "./pages/ScoutManagementPage";
-import { SeasonLayout } from "./pages/SeasonLayout";
+import { CampaignLayout } from "./pages/CampaignLayout";
 import { SettingsPage } from "./pages/SettingsPage";
 import { UserSettingsPage } from "./pages/UserSettingsPage";
 import { AcceptInvitePage } from "./pages/AcceptInvitePage";
 import { AdminPage } from "./pages/AdminPage";
 import { CatalogsPage } from "./pages/CatalogsPage";
 import { CampaignReportsPage } from "./pages/CampaignReportsPage";
-import { CreateSeasonPage } from "./pages/CreateSeasonPage";
+import { CreateCampaignPage } from "./pages/CreateCampaignPage";
 import { SharedCampaignsPage } from "./pages/SharedCampaignsPage";
 import { CreateSharedCampaignPage } from "./pages/CreateSharedCampaignPage";
 import { apolloClient } from "./lib/apollo";
@@ -49,19 +49,19 @@ function App() {
                 element={
                   <ProtectedRoute>
                     <AppLayout>
-                      <CreateSeasonPage />
+                      <CreateCampaignPage />
                     </AppLayout>
                   </ProtectedRoute>
                 }
               />
 
-              {/* Manual create season route */}
+              {/* Manual create campaign route */}
               <Route
-                path="/create-season"
+                path="/create-campaign"
                 element={
                   <ProtectedRoute>
                     <AppLayout>
-                      <CreateSeasonPage />
+                      <CreateCampaignPage />
                     </AppLayout>
                   </ProtectedRoute>
                 }
@@ -95,7 +95,7 @@ function App() {
                 element={
                   <ProtectedRoute>
                     <AppLayout>
-                      <ScoutSeasonsPage />
+                      <ScoutCampaignsPage />
                     </AppLayout>
                   </ProtectedRoute>
                 }
@@ -117,7 +117,7 @@ function App() {
                 element={
                   <ProtectedRoute>
                     <AppLayout>
-                      <SeasonLayout />
+                      <CampaignLayout />
                     </AppLayout>
                   </ProtectedRoute>
                 }

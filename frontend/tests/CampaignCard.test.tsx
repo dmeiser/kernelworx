@@ -1,12 +1,12 @@
 /**
- * SeasonCard component tests
+ * CampaignCard component tests
  */
 
 import { describe, test, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { BrowserRouter } from 'react-router-dom';
-import { SeasonCard } from '../src/components/SeasonCard';
+import { CampaignCard } from '../src/components/CampaignCard';
 
 // Mock navigate
 const mockNavigate = vi.fn();
@@ -18,16 +18,16 @@ vi.mock('react-router-dom', async () => {
   };
 });
 
-describe('SeasonCard', () => {
+describe('CampaignCard', () => {
   beforeEach(() => {
     mockNavigate.mockClear();
   });
 
-  test('renders season information correctly', () => {
+  test('renders campaign information correctly', () => {
     render(
       <BrowserRouter>
-        <SeasonCard
-          campaignId="season-123-456"
+        <CampaignCard
+          campaignId="campaign-123-456"
           profileId="profile-789"
           campaignName="Fall 2025 Popcorn Sale"
           startDate="2025-09-01T00:00:00Z"
@@ -41,11 +41,11 @@ describe('SeasonCard', () => {
     expect(screen.getByText('Fall 2025 Popcorn Sale')).toBeInTheDocument();
   });
 
-  test('displays season name with year', () => {
+  test('displays campaign name with year', () => {
     render(
       <BrowserRouter>
-        <SeasonCard
-          campaignId="season-123"
+        <CampaignCard
+          campaignId="campaign-123"
           profileId="profile-789"
           campaignName="Fall Sale"
           campaignYear={2025}
@@ -55,16 +55,16 @@ describe('SeasonCard', () => {
       </BrowserRouter>
     );
 
-    // SeasonCard displays "campaignName campaignYear" format
+    // CampaignCard displays "campaignName campaignYear" format
     expect(screen.getByText('Fall Sale 2025')).toBeInTheDocument();
   });
 
   test('renders with startDate prop even though dates are not displayed', () => {
-    // SeasonCard accepts startDate but doesn't display it (simplified card view)
+    // CampaignCard accepts startDate but doesn't display it (simplified card view)
     render(
       <BrowserRouter>
-        <SeasonCard
-          campaignId="season-123"
+        <CampaignCard
+          campaignId="campaign-123"
           profileId="profile-789"
           campaignName="Ongoing Sale"
           campaignYear={2025}
@@ -77,15 +77,15 @@ describe('SeasonCard', () => {
     expect(screen.getByText('Ongoing Sale 2025')).toBeInTheDocument();
   });
 
-  test('shows Active badge for ongoing season', () => {
+  test('shows Active badge for ongoing campaign', () => {
     // Future end date
     const futureDate = new Date();
     futureDate.setFullYear(futureDate.getFullYear() + 1);
 
     render(
       <BrowserRouter>
-        <SeasonCard
-          campaignId="season-123"
+        <CampaignCard
+          campaignId="campaign-123"
           profileId="profile-789"
           campaignName="Active Sale"
           startDate="2025-01-01T00:00:00Z"
@@ -100,8 +100,8 @@ describe('SeasonCard', () => {
   test('shows Active badge when no end date provided', () => {
     render(
       <BrowserRouter>
-        <SeasonCard
-          campaignId="season-123"
+        <CampaignCard
+          campaignId="campaign-123"
           profileId="profile-789"
           campaignName="Ongoing Sale"
           startDate="2025-01-01T00:00:00Z"
@@ -112,13 +112,13 @@ describe('SeasonCard', () => {
     expect(screen.getByText('Active')).toBeInTheDocument();
   });
 
-  test('does not show Active badge for past season', () => {
+  test('does not show Active badge for past campaign', () => {
     const pastDate = new Date('2020-01-01T00:00:00Z');
 
     render(
       <BrowserRouter>
-        <SeasonCard
-          campaignId="season-123"
+        <CampaignCard
+          campaignId="campaign-123"
           profileId="profile-789"
           campaignName="Past Sale"
           startDate="2019-09-01T00:00:00Z"
@@ -133,8 +133,8 @@ describe('SeasonCard', () => {
   test('displays order count with singular form', () => {
     render(
       <BrowserRouter>
-        <SeasonCard
-          campaignId="season-123"
+        <CampaignCard
+          campaignId="campaign-123"
           profileId="profile-789"
           campaignName="Sale"
           startDate="2025-01-01T00:00:00Z"
@@ -149,8 +149,8 @@ describe('SeasonCard', () => {
   test('displays order count with plural form', () => {
     render(
       <BrowserRouter>
-        <SeasonCard
-          campaignId="season-123"
+        <CampaignCard
+          campaignId="campaign-123"
           profileId="profile-789"
           campaignName="Sale"
           startDate="2025-01-01T00:00:00Z"
@@ -165,8 +165,8 @@ describe('SeasonCard', () => {
   test('displays zero orders when totalOrders not provided', () => {
     render(
       <BrowserRouter>
-        <SeasonCard
-          campaignId="season-123"
+        <CampaignCard
+          campaignId="campaign-123"
           profileId="profile-789"
           campaignName="Sale"
           startDate="2025-01-01T00:00:00Z"
@@ -180,8 +180,8 @@ describe('SeasonCard', () => {
   test('displays total revenue with 2 decimal places', () => {
     render(
       <BrowserRouter>
-        <SeasonCard
-          campaignId="season-123"
+        <CampaignCard
+          campaignId="campaign-123"
           profileId="profile-789"
           campaignName="Sale"
           startDate="2025-01-01T00:00:00Z"
@@ -196,8 +196,8 @@ describe('SeasonCard', () => {
   test('displays zero revenue when totalRevenue not provided', () => {
     render(
       <BrowserRouter>
-        <SeasonCard
-          campaignId="season-123"
+        <CampaignCard
+          campaignId="campaign-123"
           profileId="profile-789"
           campaignName="Sale"
           startDate="2025-01-01T00:00:00Z"
@@ -208,13 +208,13 @@ describe('SeasonCard', () => {
     expect(screen.getByText('$0.00 in sales')).toBeInTheDocument();
   });
 
-  test('navigates to season detail when View Orders clicked', async () => {
+  test('navigates to campaign detail when View Orders clicked', async () => {
     const user = userEvent.setup();
 
     render(
       <BrowserRouter>
-        <SeasonCard
-          campaignId="season-123"
+        <CampaignCard
+          campaignId="campaign-123"
           profileId="profile-789"
           campaignName="Sale"
           startDate="2025-01-01T00:00:00Z"
@@ -225,6 +225,6 @@ describe('SeasonCard', () => {
     const viewButton = screen.getByRole('button', { name: /view orders/i });
     await user.click(viewButton);
 
-    expect(mockNavigate).toHaveBeenCalledWith('/scouts/profile-789/campaigns/season-123');
+    expect(mockNavigate).toHaveBeenCalledWith('/scouts/profile-789/campaigns/campaign-123');
   });
 });

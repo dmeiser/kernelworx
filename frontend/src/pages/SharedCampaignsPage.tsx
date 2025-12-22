@@ -422,7 +422,7 @@ export const SharedCampaignsPage: React.FC = () => {
         <DialogContent>
           <DialogContentText>
             Are you sure you want to deactivate this campaign prefill? The link
-            will no longer work for new season creation, but existing seasons
+            will no longer work for new campaign creation, but existing campaigns
             created from this link will not be affected.
           </DialogContentText>
           {prefillToDeactivate && (

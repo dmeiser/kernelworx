@@ -242,7 +242,7 @@ describe("SharedCampaignsPage", () => {
       });
 
       expect(
-        screen.getByText(/The link will no longer work for new season creation/)
+        screen.getByText(/The link will no longer work for new campaign creation/)
       ).toBeInTheDocument();
     });
 

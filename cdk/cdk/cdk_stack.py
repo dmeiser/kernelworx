@@ -172,7 +172,7 @@ class CdkStack(Stack):
                 projection_type=dynamodb.ProjectionType.ALL,
             )
 
-            # GSI2: Orders by profile (for cross-season order queries)
+            # GSI2: Orders by profile (for cross-campaign order queries)
             self.table.add_global_secondary_index(
                 index_name="GSI2",
                 partition_key=dynamodb.Attribute(name="GSI2PK", type=dynamodb.AttributeType.STRING),
@@ -197,11 +197,11 @@ class CdkStack(Stack):
                 projection_type=dynamodb.ProjectionType.ALL,
             )
 
-            # GSI5: Season lookup by seasonId (for listing all items with seasonId - orders, etc)
+            # GSI5: Campaign lookup by campaignId (for listing all items with campaignId - orders, etc)
             self.table.add_global_secondary_index(
                 index_name="GSI5",
                 partition_key=dynamodb.Attribute(
-                    name="seasonId", type=dynamodb.AttributeType.STRING
+                    name="campaignId", type=dynamodb.AttributeType.STRING
                 ),
                 projection_type=dynamodb.ProjectionType.ALL,
             )
@@ -215,11 +215,11 @@ class CdkStack(Stack):
                 projection_type=dynamodb.ProjectionType.ALL,
             )
 
-            # GSI7: Season lookup by seasonId + SK (for direct getSeason queries)
+            # GSI7: Campaign lookup by campaignId + SK (for direct getCampaign queries)
             self.table.add_global_secondary_index(
                 index_name="GSI7",
                 partition_key=dynamodb.Attribute(
-                    name="seasonId", type=dynamodb.AttributeType.STRING
+                    name="campaignId", type=dynamodb.AttributeType.STRING
                 ),
                 sort_key=dynamodb.Attribute(name="SK", type=dynamodb.AttributeType.STRING),
                 projection_type=dynamodb.ProjectionType.ALL,
@@ -442,24 +442,24 @@ class CdkStack(Stack):
             )
 
         # Campaigns Table V2
-        # NEW STRUCTURE: PK=profileId, SK=seasonId (note: seasonId contains campaign data)
+        # NEW STRUCTURE: PK=profileId, SK=campaignId (note: campaignId contains campaign data)
         # This enables direct query for listCampaignsByProfile (no GSI needed)
         # CampaignsTableV2 - auto-import if exists
-        seasons_table_name = rn("kernelworx-campaigns")
-        existing_seasons_table = resource_lookup.lookup_dynamodb_table(seasons_table_name)
-        if existing_seasons_table:
-            self.seasons_table = dynamodb.Table.from_table_arn(
-                self, "SeasonsTableV2", existing_seasons_table["table_arn"]
+        campaigns_table_name = rn("kernelworx-campaigns")
+        existing_campaigns_table = resource_lookup.lookup_dynamodb_table(campaigns_table_name)
+        if existing_campaigns_table:
+            self.campaigns_table = dynamodb.Table.from_table_arn(
+                self, "CampaignsTableV2", existing_campaigns_table["table_arn"]
             )
         else:
-            self.seasons_table = dynamodb.Table(
+            self.campaigns_table = dynamodb.Table(
                 self,
-                "SeasonsTableV2",
-                table_name=seasons_table_name,
+                "CampaignsTableV2",
+                table_name=campaigns_table_name,
                 partition_key=dynamodb.Attribute(
                     name="profileId", type=dynamodb.AttributeType.STRING
                 ),
-                sort_key=dynamodb.Attribute(name="seasonId", type=dynamodb.AttributeType.STRING),
+                sort_key=dynamodb.Attribute(name="campaignId", type=dynamodb.AttributeType.STRING),
                 billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
                 point_in_time_recovery_specification=dynamodb.PointInTimeRecoverySpecification(
                     point_in_time_recovery_enabled=True
@@ -467,17 +467,17 @@ class CdkStack(Stack):
                 removal_policy=RemovalPolicy.RETAIN,
                 deletion_protection=True,
             )
-            # GSI for direct getSeason by seasonId - only for new tables
-            self.seasons_table.add_global_secondary_index(
-                index_name="seasonId-index",
+            # GSI for direct getCampaign by campaignId - only for new tables
+            self.campaigns_table.add_global_secondary_index(
+                index_name="campaignId-index",
                 partition_key=dynamodb.Attribute(
-                    name="seasonId", type=dynamodb.AttributeType.STRING
+                    name="campaignId", type=dynamodb.AttributeType.STRING
                 ),
                 projection_type=dynamodb.ProjectionType.ALL,
             )
 
-            # GSI for seasons by catalog - only for new tables
-            self.seasons_table.add_global_secondary_index(
+            # GSI for campaigns by catalog - only for new tables
+            self.campaigns_table.add_global_secondary_index(
                 index_name="catalogId-index",
                 partition_key=dynamodb.Attribute(
                     name="catalogId", type=dynamodb.AttributeType.STRING
@@ -486,7 +486,7 @@ class CdkStack(Stack):
             )
 
         # Orders Table
-        # Orders Table V2: PK=seasonId, SK=orderId for efficient season-based queries
+        # Orders Table V2: PK=campaignId, SK=orderId for efficient campaign-based queries
         # Direct order lookups use orderId-index GSI
         # OrdersTableV2 - auto-import if exists
         orders_table_name = rn("kernelworx-orders")
@@ -501,7 +501,7 @@ class CdkStack(Stack):
                 "OrdersTableV2",
                 table_name=orders_table_name,
                 partition_key=dynamodb.Attribute(
-                    name="seasonId", type=dynamodb.AttributeType.STRING
+                    name="campaignId", type=dynamodb.AttributeType.STRING
                 ),
                 sort_key=dynamodb.Attribute(name="orderId", type=dynamodb.AttributeType.STRING),
                 billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
@@ -533,7 +533,7 @@ class CdkStack(Stack):
         # Shared Campaigns Table
         # PK: prefillCode (enables direct lookup)
         # GSI1: createdBy + createdAt (for "my shared campaigns" listing)
-        # GSI2: unitSeasonKey (for unit+campaign discovery)
+        # GSI2: unitCampaignKey (for unit+campaign discovery)
         prefills_table_name = rn("kernelworx-shared-campaigns")
         existing_prefills_table = resource_lookup.lookup_dynamodb_table(prefills_table_name)
         if existing_prefills_table:
@@ -564,12 +564,12 @@ class CdkStack(Stack):
                 sort_key=dynamodb.Attribute(name="createdAt", type=dynamodb.AttributeType.STRING),
                 projection_type=dynamodb.ProjectionType.ALL,
             )
-            # GSI2: Find prefills by unit+season (for discovery during campaign creation)
-            # unitSeasonKey format: {unitType}#{unitNumber}#{city}#{state}#{seasonName}#{seasonYear}
+            # GSI2: Find prefills by unit+campaign (for discovery during campaign creation)
+            # unitCampaignKey format: {unitType}#{unitNumber}#{city}#{state}#{campaignName}#{campaignYear}
             self.prefills_table.add_global_secondary_index(
                 index_name="GSI2",
                 partition_key=dynamodb.Attribute(
-                    name="unitSeasonKey", type=dynamodb.AttributeType.STRING
+                    name="unitCampaignKey", type=dynamodb.AttributeType.STRING
                 ),
                 projection_type=dynamodb.ProjectionType.ALL,
             )
@@ -642,7 +642,7 @@ class CdkStack(Stack):
         self.accounts_table.grant_read_write_data(self.lambda_execution_role)
         self.catalogs_table.grant_read_write_data(self.lambda_execution_role)
         self.profiles_table.grant_read_write_data(self.lambda_execution_role)
-        self.seasons_table.grant_read_write_data(self.lambda_execution_role)
+        self.campaigns_table.grant_read_write_data(self.lambda_execution_role)
         self.orders_table.grant_read_write_data(self.lambda_execution_role)
         self.shares_table.grant_read_write_data(self.lambda_execution_role)
         self.invites_table.grant_read_write_data(self.lambda_execution_role)
@@ -653,7 +653,7 @@ class CdkStack(Stack):
             self.accounts_table,
             self.catalogs_table,
             self.profiles_table,
-            self.seasons_table,
+            self.campaigns_table,
             self.orders_table,
             self.shares_table,
             self.invites_table,
@@ -692,7 +692,7 @@ class CdkStack(Stack):
         self.accounts_table.grant_read_write_data(self.appsync_service_role)
         self.catalogs_table.grant_read_write_data(self.appsync_service_role)
         self.profiles_table.grant_read_write_data(self.appsync_service_role)
-        self.seasons_table.grant_read_write_data(self.appsync_service_role)
+        self.campaigns_table.grant_read_write_data(self.appsync_service_role)
         self.orders_table.grant_read_write_data(self.appsync_service_role)
         self.shares_table.grant_read_write_data(self.appsync_service_role)
         self.invites_table.grant_read_write_data(self.appsync_service_role)
@@ -703,7 +703,7 @@ class CdkStack(Stack):
             self.accounts_table,
             self.catalogs_table,
             self.profiles_table,
-            self.seasons_table,
+            self.campaigns_table,
             self.orders_table,
             self.shares_table,
             self.invites_table,
@@ -732,7 +732,7 @@ class CdkStack(Stack):
             "ACCOUNTS_TABLE_NAME": self.accounts_table.table_name,
             "CATALOGS_TABLE_NAME": self.catalogs_table.table_name,
             "PROFILES_TABLE_NAME": self.profiles_table.table_name,
-            "SEASONS_TABLE_NAME": self.seasons_table.table_name,
+            "CAMPAIGNS_TABLE_NAME": self.campaigns_table.table_name,
             "ORDERS_TABLE_NAME": self.orders_table.table_name,
             "SHARES_TABLE_NAME": self.shares_table.table_name,
             "INVITES_TABLE_NAME": self.invites_table.table_name,
@@ -772,7 +772,7 @@ class CdkStack(Stack):
         # NOTE: redeem_profile_invite Lambda REMOVED - replaced with pipeline resolver
         # NOTE: share_profile_direct Lambda REMOVED - replaced with pipeline resolver
         # NOTE: revoke_share Lambda REMOVED - replaced with VTL DynamoDB resolver
-        # NOTE: update_season, delete_season Lambdas REMOVED - replaced with JS pipeline resolvers
+        # NOTE: update_campaign, delete_campaign Lambdas REMOVED - replaced with JS pipeline resolvers
 
         # List My Shares Lambda - uses Lambda due to AppSync BatchGetItem intermittent issues
         self.list_my_shares_fn = lambda_.Function(
@@ -806,12 +806,12 @@ class CdkStack(Stack):
             environment=lambda_env,
         )
 
-        self.request_season_report_fn = lambda_.Function(
+        self.request_campaign_report_fn = lambda_.Function(
             self,
-            "RequestSeasonReportFnV2",
+            "RequestCampaignReportFnV2",
             function_name=rn("kernelworx-request-report"),
             runtime=lambda_.Runtime.PYTHON_3_13,
-            handler="handlers.report_generation.request_season_report",
+            handler="handlers.report_generation.request_campaign_report",
             code=lambda_code,
             layers=[self.shared_layer],
             timeout=Duration.seconds(60),  # Reports may take longer
@@ -848,13 +848,13 @@ class CdkStack(Stack):
             environment=lambda_env,
         )
 
-        # New list_unit_season_catalogs Lambda (uses GSI3 for season-based queries)
-        self.list_unit_season_catalogs_fn = lambda_.Function(
+        # New list_unit_campaign_catalogs Lambda (uses GSI3 for campaign-based queries)
+        self.list_unit_campaign_catalogs_fn = lambda_.Function(
             self,
-            "ListUnitSeasonCatalogsFn",
-            function_name=rn("kernelworx-list-unit-season-catalogs"),
+            "ListUnitCampaignCatalogsFn",
+            function_name=rn("kernelworx-list-unit-campaign-catalogs"),
             runtime=lambda_.Runtime.PYTHON_3_13,
-            handler="handlers.list_unit_catalogs.list_unit_season_catalogs",
+            handler="handlers.list_unit_catalogs.list_unit_campaign_catalogs",
             code=lambda_code,
             layers=[self.shared_layer],
             timeout=Duration.seconds(30),
@@ -863,13 +863,13 @@ class CdkStack(Stack):
             environment=lambda_env,
         )
 
-        # Season Operations Lambda (with transaction support for prefill + share creation)
-        self.season_operations_fn = lambda_.Function(
+        # Campaign Operations Lambda (with transaction support for prefill + share creation)
+        self.campaign_operations_fn = lambda_.Function(
             self,
-            "SeasonOperationsFn",
-            function_name=rn("kernelworx-season-operations"),
+            "CampaignOperationsFn",
+            function_name=rn("kernelworx-campaign-operations"),
             runtime=lambda_.Runtime.PYTHON_3_13,
-            handler="handlers.season_operations.create_season",
+            handler="handlers.campaign_operations.create_campaign",
             code=lambda_code,
             layers=[self.shared_layer],
             timeout=Duration.seconds(30),
@@ -1471,16 +1471,16 @@ class CdkStack(Stack):
             )
         )
 
-        # Seasons table data source
-        self.seasons_datasource = self.api.add_dynamo_db_data_source(
-            "SeasonsDataSource",
-            table=self.seasons_table,
+        # Campaigns table data source
+        self.campaigns_datasource = self.api.add_dynamo_db_data_source(
+            "CampaignsDataSource",
+            table=self.campaigns_table,
         )
-        self.seasons_datasource.node.default_child.apply_removal_policy(RemovalPolicy.RETAIN)  # type: ignore
-        self.seasons_datasource.grant_principal.add_to_principal_policy(
+        self.campaigns_datasource.node.default_child.apply_removal_policy(RemovalPolicy.RETAIN)  # type: ignore
+        self.campaigns_datasource.grant_principal.add_to_principal_policy(
             iam.PolicyStatement(
                 actions=["dynamodb:Query", "dynamodb:Scan"],
-                resources=[f"{self.seasons_table.table_arn}/index/*"],
+                resources=[f"{self.campaigns_table.table_arn}/index/*"],
             )
         )
 
@@ -1548,7 +1548,7 @@ class CdkStack(Stack):
         # NOTE: redeem_profile_invite data source REMOVED - replaced with pipeline resolver
         # NOTE: share_profile_direct data source REMOVED - replaced with pipeline resolver
         # NOTE: revoke_share Lambda data source REMOVED - replaced with VTL resolver
-        # NOTE: update_season, delete_season Lambda data sources REMOVED - replaced with pipeline resolvers
+        # NOTE: update_campaign, delete_campaign Lambda data sources REMOVED - replaced with pipeline resolvers
 
         # List My Shares Lambda data source - uses Lambda due to AppSync BatchGetItem issues
         self.list_my_shares_ds = self.api.add_lambda_data_source(
@@ -1564,12 +1564,12 @@ class CdkStack(Stack):
 
         # Lambda data sources for order operations
         # NOTE: create_order data source REMOVED - replaced with pipeline resolver
-        # NOTE: list_orders_by_season Lambda data source REMOVED - replaced with VTL resolver
+        # NOTE: list_orders_by_campaign Lambda data source REMOVED - replaced with VTL resolver
         # NOTE: update_order, delete_order Lambda data sources REMOVED - replaced with pipeline resolvers
 
-        self.request_season_report_ds = self.api.add_lambda_data_source(
-            "RequestSeasonReportDS",
-            lambda_function=self.request_season_report_fn,
+        self.request_campaign_report_ds = self.api.add_lambda_data_source(
+            "RequestCampaignReportDS",
+            lambda_function=self.request_campaign_report_fn,
         )
 
         self.unit_reporting_ds = self.api.add_lambda_data_source(
@@ -1582,16 +1582,16 @@ class CdkStack(Stack):
             lambda_function=self.list_unit_catalogs_fn,
         )
 
-        # New data source for list_unit_season_catalogs (uses GSI3)
-        self.list_unit_season_catalogs_ds = self.api.add_lambda_data_source(
-            "ListUnitSeasonCatalogsDS",
-            lambda_function=self.list_unit_season_catalogs_fn,
+        # New data source for list_unit_campaign_catalogs (uses GSI3)
+        self.list_unit_campaign_catalogs_ds = self.api.add_lambda_data_source(
+            "ListUnitCampaignCatalogsDS",
+            lambda_function=self.list_unit_campaign_catalogs_fn,
         )
 
-        # Season operations data source (with transaction support)
-        self.season_operations_ds = self.api.add_lambda_data_source(
-            "SeasonOperationsDS",
-            lambda_function=self.season_operations_fn,
+        # Campaign operations data source (with transaction support)
+        self.campaign_operations_ds = self.api.add_lambda_data_source(
+            "CampaignOperationsDS",
+            lambda_function=self.campaign_operations_fn,
         )
 
         # Lambda data sources for account operations
@@ -1958,7 +1958,7 @@ export function response(ctx) {
         # ================================================================
 
         # VerifyProfileWriteAccessFn: Checks if caller is owner OR has WRITE permission
-        # Used by: createOrder, updateOrder, deleteOrder, updateSeason, deleteSeason
+        # Used by: createOrder, updateOrder, deleteOrder, updateCampaign, deleteCampaign
         verify_profile_write_access_fn = appsync.AppsyncFunction(
             self,
             "VerifyProfileWriteAccessFn",
@@ -1974,12 +1974,12 @@ export function request(ctx) {
     // For idempotent delete operations ONLY, if item explicitly set to null by lookup function, skip auth
     // This preserves idempotent delete behavior (item already gone = success)
     // Check the correct field based on which operation
-    const isDeleteOperation = ctx.info.fieldName === 'deleteOrder' || ctx.info.fieldName === 'deleteSeason';
+    const isDeleteOperation = ctx.info.fieldName === 'deleteOrder' || ctx.info.fieldName === 'deleteCampaign' || ctx.info.fieldName === 'deleteCampaign';
     const isDeletingOrder = ctx.info.fieldName === 'deleteOrder';
-    const isDeletingSeason = ctx.info.fieldName === 'deleteSeason';
+    const isDeletingCampaign = ctx.info.fieldName === 'deleteCampaign' || ctx.info.fieldName === 'deleteCampaign';
     
     const itemNotFound = (isDeletingOrder && ctx.stash.order === null) || 
-                     (isDeletingSeason && ctx.stash.season === null);
+                     (isDeletingCampaign && ctx.stash.campaign === null);
     
     if (isDeleteOperation && itemNotFound) {
         ctx.stash.skipAuth = true;
@@ -1992,24 +1992,24 @@ export function request(ctx) {
     
     // Extract profileId from various sources
     // For createOrder/updateOrder/deleteOrder: use order.profileId from stash or input
-    // For updateSeason/deleteSeason: use season.profileId from stash  
+    // For updateCampaign/deleteCampaign: use campaign.profileId from stash  
     let profileId = null;
     
     if (ctx.args.input && ctx.args.input.profileId) {
         profileId = ctx.args.input.profileId;
     } else if (ctx.stash && ctx.stash.order) {
-        // Orders have profileId attribute - use it directly (not PK which is the season key)
+        // Orders have profileId attribute - use it directly (not PK which is the campaign key)
         profileId = ctx.stash.order.profileId;
-    } else if (ctx.stash && ctx.stash.season && ctx.stash.season.profileId) {
-        // Seasons have profileId attribute - use it directly (not PK which is composite)
-        profileId = ctx.stash.season.profileId;
+    } else if (ctx.stash && ctx.stash.campaign && ctx.stash.campaign.profileId) {
+        // Campaigns have profileId attribute - use it directly (not PK which is composite)
+        profileId = ctx.stash.campaign.profileId;
     }
     
     if (!profileId) {
         util.error('Profile ID not found in request or stash - debugging: ' + JSON.stringify({
         hasInput: !!ctx.args.input,
         hasOrder: !!(ctx.stash && ctx.stash.order),
-        hasSeason: !!(ctx.stash && ctx.stash.season),
+        hasCampaign: !!(ctx.stash && ctx.stash.campaign),
         orderKeys: ctx.stash && ctx.stash.order ? Object.keys(ctx.stash.order) : []
         }), 'BadRequest');
     }
@@ -2093,11 +2093,11 @@ export function request(ctx) {
     if (ctx.args.input && ctx.args.input.profileId) {
         profileId = ctx.args.input.profileId;
     } else if (ctx.stash && ctx.stash.order) {
-        // Orders have profileId attribute - use it directly (not PK which is the season key)
+        // Orders have profileId attribute - use it directly (not PK which is the campaign key)
         profileId = ctx.stash.order.profileId;
-    } else if (ctx.stash && ctx.stash.season && ctx.stash.season.profileId) {
-        // Seasons have profileId attribute - use it directly (not PK which is composite)
-        profileId = ctx.stash.season.profileId;
+    } else if (ctx.stash && ctx.stash.campaign && ctx.stash.campaign.profileId) {
+        // Campaigns have profileId attribute - use it directly (not PK which is composite)
+        profileId = ctx.stash.campaign.profileId;
     }
     
     if (!profileId) {
@@ -2151,7 +2151,7 @@ export function response(ctx) {
         )
 
         # VerifyProfileReadAccessFn: Checks if caller can READ profile data (owner OR has any share)
-        # Used by: getSeason, listSeasonsByProfile, getOrder
+        # Used by: getCampaign, listCampaignsByProfile, getOrder
         # Less restrictive than VerifyProfileWriteAccessFn - allows READ or WRITE shares
         verify_profile_read_access_fn = appsync.AppsyncFunction(
             self,
@@ -2165,8 +2165,8 @@ export function response(ctx) {
 import { util } from '@aws-appsync/utils';
 
 export function request(ctx) {
-    // If season not found, skip this function
-    if (ctx.stash.seasonNotFound) {
+    // If campaign not found, skip this function
+    if (ctx.stash.campaignNotFound) {
         // Return a no-op read
         return {
         operation: 'GetItem',
@@ -2188,8 +2188,8 @@ export function request(ctx) {
     
     if (ctx.args.profileId) {
         profileId = ctx.args.profileId;
-    } else if (ctx.stash && ctx.stash.season && ctx.stash.season.profileId) {
-        profileId = ctx.stash.season.profileId;
+    } else if (ctx.stash && ctx.stash.campaign && ctx.stash.campaign.profileId) {
+        profileId = ctx.stash.campaign.profileId;
     } else if (ctx.stash && ctx.stash.profileId) {
         // For orders, profileId is set directly in stash
         profileId = ctx.stash.profileId;
@@ -2214,8 +2214,8 @@ export function request(ctx) {
 }
 
 export function response(ctx) {
-    // If season not found, pass through (will return null at end)
-    if (ctx.stash.seasonNotFound) {
+    // If campaign not found, pass through (will return null at end)
+    if (ctx.stash.campaignNotFound) {
         ctx.stash.authorized = false;
         return { authorized: false };
     }
@@ -2233,8 +2233,8 @@ export function response(ctx) {
     const profile = ctx.result.items && ctx.result.items[0];
     
     if (!profile) {
-        // Profile doesn't exist - for getSeason, we'll return null later
-        // For listSeasonsByProfile, we'll return empty array
+        // Profile doesn't exist - for getCampaign, we'll return null later
+        // For listCampaignsByProfile, we'll return empty array
         ctx.stash.profileNotFound = true;
         ctx.stash.authorized = false;
         return { authorized: false };
@@ -2273,8 +2273,8 @@ export function response(ctx) {
 import { util } from '@aws-appsync/utils';
 
 export function request(ctx) {
-    // If already authorized (owner), profile not found, season not found, or order not found, skip
-    if (ctx.stash.authorized || ctx.stash.profileNotFound || ctx.stash.seasonNotFound || ctx.stash.orderNotFound) {
+    // If already authorized (owner), profile not found, campaign not found, or order not found, skip
+    if (ctx.stash.authorized || ctx.stash.profileNotFound || ctx.stash.campaignNotFound || ctx.stash.orderNotFound) {
         // Use a no-op read
         return {
         operation: 'GetItem',
@@ -2296,8 +2296,8 @@ export function request(ctx) {
 }
 
 export function response(ctx) {
-    // If already authorized, profile not found, season not found, or order not found, pass through
-    if (ctx.stash.authorized || ctx.stash.profileNotFound || ctx.stash.seasonNotFound || ctx.stash.orderNotFound) {
+    // If already authorized, profile not found, campaign not found, or order not found, pass through
+    if (ctx.stash.authorized || ctx.stash.profileNotFound || ctx.stash.campaignNotFound || ctx.stash.orderNotFound) {
         return { authorized: ctx.stash.authorized };
     }
     
@@ -2335,34 +2335,34 @@ export function response(ctx) {
         )
 
         # ================================================================
-        # Pipeline Resolvers for Season and Order Operations
+        # Pipeline Resolvers for Campaign and Order Operations
         # ================================================================
         # These replace Lambda functions with JS pipeline resolvers
         # Note: Simplified auth - relies on Cognito authentication only
         # Full share-based authorization would require additional pipeline functions
 
-        # updateSeason Pipeline: Direct GetItem → UpdateItem
-        # Now uses seasons_datasource with direct seasonId key
-        lookup_season_fn = appsync.AppsyncFunction(
+        # updateCampaign Pipeline: Direct GetItem → UpdateItem
+        # Now uses campaigns_datasource with direct campaignId key
+        lookup_campaign_fn = appsync.AppsyncFunction(
             self,
-            "LookupSeasonFn",
-            name=f"LookupSeasonFn_{env_name}",
+            "LookupCampaignFn",
+            name=f"LookupCampaignFn_{env_name}",
             api=self.api,
-            data_source=self.seasons_datasource,
+            data_source=self.campaigns_datasource,
             runtime=appsync.FunctionRuntime.JS_1_0_0,
             code=appsync.Code.from_inline(
                 """
 import { util } from '@aws-appsync/utils';
 
 export function request(ctx) {
-    const seasonId = ctx.args.seasonId || ctx.args.input.seasonId;
-    // Query seasonId-index GSI to find the season (V2: PK=profileId, SK=seasonId)
+    const campaignId = ctx.args.campaignId || ctx.args.input.campaignId;
+    // Query campaignId-index GSI to find the campaign (V2: PK=profileId, SK=campaignId)
     return {
         operation: 'Query',
-        index: 'seasonId-index',
+        index: 'campaignId-index',
         query: {
-        expression: 'seasonId = :seasonId',
-        expressionValues: util.dynamodb.toMapValues({ ':seasonId': seasonId })
+        expression: 'campaignId = :campaignId',
+        expressionValues: util.dynamodb.toMapValues({ ':campaignId': campaignId })
         },
         consistentRead: false
     };
@@ -2375,27 +2375,27 @@ export function response(ctx) {
     if (!ctx.result.items || ctx.result.items.length === 0) {
         util.error('Campaign not found', 'NotFound');
     }
-    // Store season in stash for next function
-    ctx.stash.season = ctx.result.items[0];
+    // Store campaign in stash for next function
+    ctx.stash.campaign = ctx.result.items[0];
     return ctx.result.items[0];
 }
             """
             ),
         )
 
-        update_season_fn = appsync.AppsyncFunction(
+        update_campaign_fn = appsync.AppsyncFunction(
             self,
-            "UpdateSeasonFn",
-            name=f"UpdateSeasonFn_{env_name}",
+            "UpdateCampaignFn",
+            name=f"UpdateCampaignFn_{env_name}",
             api=self.api,
-            data_source=self.seasons_datasource,
+            data_source=self.campaigns_datasource,
             runtime=appsync.FunctionRuntime.JS_1_0_0,
             code=appsync.Code.from_inline(
                 """
 import { util } from '@aws-appsync/utils';
 
 export function request(ctx) {
-    const season = ctx.stash.season;
+    const campaign = ctx.stash.campaign;
     const input = ctx.args.input || ctx.args;
     
     // Build update expression dynamically
@@ -2425,15 +2425,15 @@ export function request(ctx) {
     exprValues[':updatedAt'] = util.time.nowISO8601();
     
     if (updates.length === 0) {
-        return season; // No updates, return original
+        return campaign; // No updates, return original
     }
     
     const updateExpression = 'SET ' + updates.join(', ');
     
-    // V2: Use composite key (profileId, campaignId)
+    // V2: Use composite key (profileId, campaignId) - campaignId is the SK
     return {
         operation: 'UpdateItem',
-        key: util.dynamodb.toMapValues({ profileId: season.profileId, campaignId: season.campaignId }),
+        key: util.dynamodb.toMapValues({ profileId: campaign.profileId, campaignId: campaign.campaignId }),
         update: {
         expression: updateExpression,
         expressionNames: Object.keys(exprNames).length > 0 ? exprNames : undefined,
@@ -2447,18 +2447,18 @@ export function response(ctx) {
         util.error(ctx.error.message, ctx.error.type);
     }
     
-    const season = ctx.stash.season;
+    const campaign = ctx.stash.campaign;
     const input = ctx.args.input || ctx.args;
     
     // Build response object with updated values
     const result = {
-        campaignId: season.campaignId,
-        profileId: season.profileId,
-        campaignName: input.campaignName !== undefined ? input.campaignName : season.campaignName,
-        startDate: input.startDate !== undefined ? input.startDate : season.startDate,
-        endDate: input.endDate !== undefined ? input.endDate : season.endDate,
-        catalogId: input.catalogId !== undefined ? input.catalogId : season.catalogId,
-        createdAt: season.createdAt,
+        campaignId: campaign.campaignId,  // Map DynamoDB campaignId to GraphQL campaignId
+        profileId: campaign.profileId,
+        campaignName: input.campaignName !== undefined ? input.campaignName : campaign.campaignName,
+        startDate: input.startDate !== undefined ? input.startDate : campaign.startDate,
+        endDate: input.endDate !== undefined ? input.endDate : campaign.endDate,
+        catalogId: input.catalogId !== undefined ? input.catalogId : campaign.catalogId,
+        createdAt: campaign.createdAt,
         updatedAt: util.time.nowISO8601()
     };
     
@@ -2468,17 +2468,17 @@ export function response(ctx) {
             ),
         )
 
-        # Create updateSeason pipeline resolver (Bug #14 fix - added authorization)
+        # Create updateCampaign pipeline resolver (Bug #14 fix - added authorization)
         self.api.create_resolver(
-            "UpdateSeasonPipelineResolverV2",
+            "UpdateCampaignPipelineResolverV2",
             type_name="Mutation",
             field_name="updateCampaign",
             runtime=appsync.FunctionRuntime.JS_1_0_0,
             pipeline_config=[
-                lookup_season_fn,
+                lookup_campaign_fn,
                 verify_profile_write_access_fn,
                 check_share_permissions_fn,
-                update_season_fn,
+                update_campaign_fn,
             ],
             code=appsync.Code.from_inline(
                 """
@@ -2493,29 +2493,29 @@ export function response(ctx) {
             ),
         )
 
-        # deleteSeason Pipeline: Direct GetItem → DeleteItem
-        # Separate lookup for delete - doesn't error on missing season (idempotent)
-        # V2: Query seasonId-index GSI since PK=profileId, SK=seasonId
-        lookup_season_for_delete_fn = appsync.AppsyncFunction(
+        # deleteCampaign Pipeline: Direct GetItem → DeleteItem
+        # Separate lookup for delete - doesn't error on missing campaign (idempotent)
+        # V2: Query campaignId-index GSI since PK=profileId, SK=campaignId
+        lookup_campaign_for_delete_fn = appsync.AppsyncFunction(
             self,
-            "LookupSeasonForDeleteFn",
-            name=f"LookupSeasonForDeleteFn_{env_name}",
+            "LookupCampaignForDeleteFn",
+            name=f"LookupCampaignForDeleteFn_{env_name}",
             api=self.api,
-            data_source=self.seasons_datasource,
+            data_source=self.campaigns_datasource,
             runtime=appsync.FunctionRuntime.JS_1_0_0,
             code=appsync.Code.from_inline(
                 """
 import { util } from '@aws-appsync/utils';
 
 export function request(ctx) {
-    const seasonId = ctx.args.seasonId;
-    // Query seasonId-index GSI to find the season (V2: PK=profileId, SK=seasonId)
+    const campaignId = ctx.args.campaignId;
+    // Query campaignId-index GSI to find the campaign (V2: PK=profileId, SK=campaignId)
     return {
         operation: 'Query',
-        index: 'seasonId-index',
+        index: 'campaignId-index',
         query: {
-        expression: 'seasonId = :seasonId',
-        expressionValues: util.dynamodb.toMapValues({ ':seasonId': seasonId })
+        expression: 'campaignId = :campaignId',
+        expressionValues: util.dynamodb.toMapValues({ ':campaignId': campaignId })
         },
         consistentRead: false
     };
@@ -2526,28 +2526,28 @@ export function response(ctx) {
         util.error(ctx.error.message, ctx.error.type);
     }
     
-    // For delete, if season not found, that's OK (idempotent)
+    // For delete, if campaign not found, that's OK (idempotent)
     // Just store null in stash and let delete function handle it
     if (!ctx.result.items || ctx.result.items.length === 0) {
-        ctx.stash.season = null;
+        ctx.stash.campaign = null;
         return null;
     }
     
     // Note: Authorization is simplified - relies on Cognito authentication
     // Full share-based authorization would require additional pipeline functions
-    ctx.stash.season = ctx.result.items[0];
+    ctx.stash.campaign = ctx.result.items[0];
     return ctx.result.items[0];
 }
             """
             ),
         )
 
-        # Query orders for the season to delete (for cleanup)
-        # V2 schema: Direct PK query since PK=seasonId
-        query_season_orders_for_delete_fn = appsync.AppsyncFunction(
+        # Query orders for the campaign to delete (for cleanup)
+        # V2 schema: Direct PK query since PK=campaignId
+        query_campaign_orders_for_delete_fn = appsync.AppsyncFunction(
             self,
-            "QuerySeasonOrdersForDeleteFn",
-            name=f"QuerySeasonOrdersForDeleteFn_{env_name}",
+            "QueryCampaignOrdersForDeleteFn",
+            name=f"QueryCampaignOrdersForDeleteFn_{env_name}",
             api=self.api,
             data_source=self.orders_datasource,
             runtime=appsync.FunctionRuntime.JS_1_0_0,
@@ -2556,22 +2556,22 @@ export function response(ctx) {
 import { util } from '@aws-appsync/utils';
 
 export function request(ctx) {
-    const season = ctx.stash.season;
+    const campaign = ctx.stash.campaign;
     
-    // If season doesn't exist, skip order query
-    if (!season) {
+    // If campaign doesn't exist, skip order query
+    if (!campaign) {
         ctx.stash.ordersToDelete = [];
         ctx.stash.skipOrderQuery = true;
         return {
         operation: 'Query',
         query: {
-            expression: 'seasonId = :seasonId',
-            expressionValues: util.dynamodb.toMapValues({ ':seasonId': 'NOOP' })
+            expression: 'campaignId = :campaignId',
+            expressionValues: util.dynamodb.toMapValues({ ':campaignId': 'NOOP' })
         }
         };
     }
     
-    const campaignId = season.campaignId;
+    const campaignId = campaign.campaignId;
     
     // V2 schema: Direct PK query since PK=campaignId
     return {
@@ -2593,7 +2593,7 @@ export function response(ctx) {
         util.error(ctx.error.message, ctx.error.type);
     }
     
-    // Store orders to delete in stash (need seasonId and orderId for V2 schema)
+    // Store orders to delete in stash (need campaignId and orderId for V2 schema)
     const orders = ctx.result.items || [];
     ctx.stash.ordersToDelete = orders;
     
@@ -2603,12 +2603,12 @@ export function response(ctx) {
             ),
         )
 
-        # Delete orders associated with the season
-        # V2 schema: Uses composite key (seasonId, orderId)
-        delete_season_orders_fn = appsync.AppsyncFunction(
+        # Delete orders associated with the campaign
+        # V2 schema: Uses composite key (campaignId, orderId)
+        delete_campaign_orders_fn = appsync.AppsyncFunction(
             self,
-            "DeleteSeasonOrdersFn",
-            name=f"DeleteSeasonOrdersFn_{env_name}",
+            "DeleteCampaignOrdersFn",
+            name=f"DeleteCampaignOrdersFn_{env_name}",
             api=self.api,
             data_source=self.orders_datasource,
             runtime=appsync.FunctionRuntime.JS_1_0_0,
@@ -2627,10 +2627,10 @@ export function request(ctx) {
     // Delete first order only - simple approach for now
     const firstOrder = ordersToDelete[0];
     
-    // V2 schema: composite key (seasonId, orderId)
+    // V2 schema: composite key (campaignId, orderId)
     return {
         operation: 'DeleteItem',
-        key: util.dynamodb.toMapValues({ seasonId: firstOrder.seasonId, orderId: firstOrder.orderId })
+        key: util.dynamodb.toMapValues({ campaignId: firstOrder.campaignId, orderId: firstOrder.orderId })
     };
 }
 
@@ -2644,36 +2644,36 @@ export function response(ctx) {
             ),
         )
 
-        # Delete season from seasons table
-        delete_season_fn = appsync.AppsyncFunction(
+        # Delete campaign from campaigns table
+        delete_campaign_fn = appsync.AppsyncFunction(
             self,
-            "DeleteSeasonFn",
-            name=f"DeleteSeasonFn_{env_name}",
+            "DeleteCampaignFn",
+            name=f"DeleteCampaignFn_{env_name}",
             api=self.api,
-            data_source=self.seasons_datasource,
+            data_source=self.campaigns_datasource,
             runtime=appsync.FunctionRuntime.JS_1_0_0,
             code=appsync.Code.from_inline(
                 """
 import { util } from '@aws-appsync/utils';
 
 export function request(ctx) {
-    const season = ctx.stash.season;
+    const campaign = ctx.stash.campaign;
     
-    // If season doesn't exist (lookup failed), skip the delete operation
-    // This makes deleteSeason idempotent - deleting a non-existent season returns true
-    if (!season) {
+    // If campaign doesn't exist (lookup failed), skip the delete operation
+    // This makes deleteCampaign idempotent - deleting a non-existent campaign returns true
+    if (!campaign) {
         // Return a no-op - the response will return true anyway
         ctx.stash.skipDelete = true;
         return {
         operation: 'GetItem',
-        key: util.dynamodb.toMapValues({ profileId: 'NOOP', seasonId: 'NOOP' })
+        key: util.dynamodb.toMapValues({ profileId: 'NOOP', campaignId: 'NOOP' })
         };
     }
     
-    // V2: Use composite key (profileId, campaignId)
+    // V2: Use composite key (profileId, campaignId) - campaignId is the SK
     return {
         operation: 'DeleteItem',
-        key: util.dynamodb.toMapValues({ profileId: season.profileId, campaignId: season.campaignId })
+        key: util.dynamodb.toMapValues({ profileId: campaign.profileId, campaignId: campaign.campaignId })
     };
 }
 
@@ -2687,20 +2687,20 @@ export function response(ctx) {
             ),
         )
 
-        # Create deleteSeason pipeline resolver (uses lookup_season_for_delete_fn) (Bug #14 fix - added authorization)
-        # Pipeline: lookup → verify access → check permissions → query orders → delete orders → delete season
+        # Create deleteCampaign pipeline resolver (uses lookup_campaign_for_delete_fn) (Bug #14 fix - added authorization)
+        # Pipeline: lookup → verify access → check permissions → query orders → delete orders → delete campaign
         self.api.create_resolver(
-            "DeleteSeasonPipelineResolverV2",
+            "DeleteCampaignPipelineResolverV2",
             type_name="Mutation",
             field_name="deleteCampaign",
             runtime=appsync.FunctionRuntime.JS_1_0_0,
             pipeline_config=[
-                lookup_season_for_delete_fn,
+                lookup_campaign_for_delete_fn,
                 verify_profile_write_access_fn,
                 check_share_permissions_fn,
-                query_season_orders_for_delete_fn,
-                delete_season_orders_fn,
-                delete_season_fn,
+                query_campaign_orders_for_delete_fn,
+                delete_campaign_orders_fn,
+                delete_campaign_fn,
             ],
             code=appsync.Code.from_inline(
                 """
@@ -2716,7 +2716,7 @@ export function response(ctx) {
         )
 
         # updateOrder Pipeline: Query GSI → UpdateItem (V2 schema)
-        # Uses orderId-index GSI since V2 schema has PK=seasonId, SK=orderId
+        # Uses orderId-index GSI since V2 schema has PK=campaignId, SK=orderId
         lookup_order_fn = appsync.AppsyncFunction(
             self,
             "LookupOrderFn",
@@ -2730,7 +2730,7 @@ import { util } from '@aws-appsync/utils';
 
 export function request(ctx) {
     const orderId = ctx.args.orderId || ctx.args.input.orderId;
-    // Query orderId-index GSI (V2 schema: PK=seasonId, SK=orderId)
+    // Query orderId-index GSI (V2 schema: PK=campaignId, SK=orderId)
     return {
         operation: 'Query',
         index: 'orderId-index',
@@ -2759,13 +2759,13 @@ export function response(ctx) {
         )
 
         # Bug #16 fix: Get catalog for updateOrder when lineItems are being updated
-        # First looks up the season via GSI, then fetches the catalog
+        # First looks up the campaign via GSI, then fetches the catalog
         get_catalog_for_update_order_fn = appsync.AppsyncFunction(
             self,
             "GetCatalogForUpdateOrderFn",
             name=f"GetCatalogForUpdateOrderFn_{env_name}",
             api=self.api,
-            data_source=self.seasons_datasource,
+            data_source=self.campaigns_datasource,
             runtime=appsync.FunctionRuntime.JS_1_0_0,
             code=appsync.Code.from_inline(
                 """
@@ -2778,26 +2778,26 @@ export function request(ctx) {
         // Return no-op query (will return empty)
         return {
         operation: 'Query',
-        index: 'seasonId-index',
+        index: 'campaignId-index',
         query: {
-            expression: 'seasonId = :seasonId',
-            expressionValues: util.dynamodb.toMapValues({ ':seasonId': 'NOOP' })
+            expression: 'campaignId = :campaignId',
+            expressionValues: util.dynamodb.toMapValues({ ':campaignId': 'NOOP' })
         },
         limit: 1
         };
     }
     
-    // Get the season's catalogId from the order
+    // Get the campaign's catalogId from the order
     const order = ctx.stash.order;
-    const seasonId = order.seasonId;
+    const campaignId = order.campaignId;
     
-    // Query seasonId-index GSI to find season (V2 schema)
+    // Query campaignId-index GSI to find campaign (V2 schema)
     return {
         operation: 'Query',
-        index: 'seasonId-index',
+        index: 'campaignId-index',
         query: {
-        expression: 'seasonId = :seasonId',
-        expressionValues: util.dynamodb.toMapValues({ ':seasonId': seasonId })
+        expression: 'campaignId = :campaignId',
+        expressionValues: util.dynamodb.toMapValues({ ':campaignId': campaignId })
         },
         limit: 1
     };
@@ -2817,16 +2817,16 @@ export function response(ctx) {
         util.error('Campaign not found', 'NotFound');
     }
     
-    const season = items[0];
-    const catalogId = season.catalogId;
+    const campaign = items[0];
+    const catalogId = campaign.catalogId;
     
     if (!catalogId) {
-        util.error('Season does not have a catalog assigned', 'BadRequest');
+        util.error('Campaign does not have a catalog assigned', 'BadRequest');
     }
     
     // Store catalogId in stash for next request
     ctx.stash.catalogId = catalogId;
-    return season;
+    return campaign;
 }
             """
             ),
@@ -2994,10 +2994,10 @@ export function request(ctx) {
     
     const updateExpression = 'SET ' + updates.join(', ');
     
-    // V2 schema: composite key (seasonId, orderId)
+    // V2 schema: composite key (campaignId, orderId)
     return {
         operation: 'UpdateItem',
-        key: util.dynamodb.toMapValues({ seasonId: order.seasonId, orderId: order.orderId }),
+        key: util.dynamodb.toMapValues({ campaignId: order.campaignId, orderId: order.orderId }),
         update: {
         expression: updateExpression,
         expressionNames: Object.keys(exprNames).length > 0 ? exprNames : undefined,
@@ -3010,7 +3010,12 @@ export function response(ctx) {
     if (ctx.error) {
         util.error(ctx.error.message, ctx.error.type);
     }
-    return ctx.result;
+    // Map DynamoDB field campaignId to GraphQL field campaignId
+    const order = ctx.result;
+    if (order && order.campaignId) {
+        order.campaignId = order.campaignId;
+    }
+    return order;
 }
             """
             ),
@@ -3045,7 +3050,7 @@ export function response(ctx) {
 
         # deleteOrder Pipeline: Query GSI → DeleteItem (V2 schema)
         # Separate lookup for delete - doesn't error on missing order (idempotent)
-        # Uses orderId-index GSI since V2 schema has PK=seasonId, SK=orderId
+        # Uses orderId-index GSI since V2 schema has PK=campaignId, SK=orderId
         lookup_order_for_delete_fn = appsync.AppsyncFunction(
             self,
             "LookupOrderForDeleteFn",
@@ -3059,7 +3064,7 @@ import { util } from '@aws-appsync/utils';
 
 export function request(ctx) {
     const orderId = ctx.args.orderId;
-    // Query orderId-index GSI (V2 schema: PK=seasonId, SK=orderId)
+    // Query orderId-index GSI (V2 schema: PK=campaignId, SK=orderId)
     return {
         operation: 'Query',
         index: 'orderId-index',
@@ -3122,10 +3127,10 @@ export function request(ctx) {
         };
     }
     
-    // V2 schema: composite key (seasonId, orderId)
+    // V2 schema: composite key (campaignId, orderId)
     return {
         operation: 'DeleteItem',
-        key: util.dynamodb.toMapValues({ seasonId: order.seasonId, orderId: order.orderId })
+        key: util.dynamodb.toMapValues({ campaignId: order.campaignId, orderId: order.orderId })
     };
 }
 
@@ -3169,30 +3174,30 @@ export function response(ctx) {
         # PHASE 3 PIPELINE RESOLVERS - Complex business logic
         # ================================================================
 
-        # createOrder Pipeline: Verify access → Query season → GetItem catalog → PutItem order
-        # Step 1: Get season to find catalogId
-        # Uses seasonId-index GSI to look up season (V2 schema: PK=profileId, SK=seasonId)
-        get_season_for_order_fn = appsync.AppsyncFunction(
+        # createOrder Pipeline: Verify access → Query campaign → GetItem catalog → PutItem order
+        # Step 1: Get campaign to find catalogId
+        # Uses campaignId-index GSI to look up campaign (V2 schema: PK=profileId, SK=campaignId)
+        get_campaign_for_order_fn = appsync.AppsyncFunction(
             self,
-            "GetSeasonForOrderFn",
-            name=f"GetSeasonForOrderFn_{env_name}",
+            "GetCampaignForOrderFn",
+            name=f"GetCampaignForOrderFn_{env_name}",
             api=self.api,
-            data_source=self.seasons_datasource,
+            data_source=self.campaigns_datasource,
             runtime=appsync.FunctionRuntime.JS_1_0_0,
             code=appsync.Code.from_inline(
                 """
 import { util } from '@aws-appsync/utils';
 
 export function request(ctx) {
-    const seasonId = ctx.args.input.seasonId;
+    const campaignId = ctx.args.input.campaignId;
     
-    // Query seasonId-index GSI to find season (V2 schema)
+    // Query campaignId-index GSI to find campaign (V2 schema)
     return {
         operation: 'Query',
-        index: 'seasonId-index',
+        index: 'campaignId-index',
         query: {
-        expression: 'seasonId = :seasonId',
-        expressionValues: util.dynamodb.toMapValues({ ':seasonId': seasonId })
+        expression: 'campaignId = :campaignId',
+        expressionValues: util.dynamodb.toMapValues({ ':campaignId': campaignId })
         },
         limit: 1
     };
@@ -3208,16 +3213,16 @@ export function response(ctx) {
         util.error('Campaign not found', 'NotFound');
     }
     
-    const season = items[0];
-    if (!season.catalogId) {
-        util.error('Season has no catalog assigned', 'BadRequest');
+    const campaign = items[0];
+    if (!campaign.catalogId) {
+        util.error('Campaign has no catalog assigned', 'BadRequest');
     }
     
-    // Store season and catalogId in stash for next function
-    ctx.stash.season = season;
-    ctx.stash.catalogId = season.catalogId;
+    // Store campaign and catalogId in stash for next function
+    ctx.stash.campaign = campaign;
+    ctx.stash.catalogId = campaign.catalogId;
     
-    return season;
+    return campaign;
 }
             """
             ),
@@ -3277,7 +3282,7 @@ import { util } from '@aws-appsync/utils';
 
 export function request(ctx) {
     const input = ctx.args.input;
-    const season = ctx.stash.season;
+    const campaign = ctx.stash.campaign;
     const catalog = ctx.stash.catalog;
     
     if (!catalog) {
@@ -3334,7 +3339,7 @@ export function request(ctx) {
     const orderItem = {
         orderId: orderId,
         profileId: input.profileId,
-        seasonId: input.seasonId,
+        campaignId: input.campaignId,
         customerName: input.customerName,
         orderDate: input.orderDate,
         paymentMethod: input.paymentMethod,
@@ -3355,10 +3360,10 @@ export function request(ctx) {
         orderItem.notes = input.notes;
     }
     
-    // V2 schema: composite key (seasonId, orderId)
+    // V2 schema: composite key (campaignId, orderId)
     return {
         operation: 'PutItem',
-        key: util.dynamodb.toMapValues({ seasonId: input.seasonId, orderId: orderId }),
+        key: util.dynamodb.toMapValues({ campaignId: input.campaignId, orderId: orderId }),
         attributeValues: util.dynamodb.toMapValues(orderItem)
     };
 }
@@ -3367,7 +3372,12 @@ export function response(ctx) {
     if (ctx.error) {
         util.error(ctx.error.message, ctx.error.type);
     }
-    return ctx.result;
+    // Map DynamoDB field campaignId to GraphQL field campaignId
+    const order = ctx.result;
+    if (order && order.campaignId) {
+        order.campaignId = order.campaignId;
+    }
+    return order;
 }
             """
             ),
@@ -3382,7 +3392,7 @@ export function response(ctx) {
             pipeline_config=[
                 verify_profile_write_access_fn,
                 check_share_permissions_fn,
-                get_season_for_order_fn,
+                get_campaign_for_order_fn,
                 get_catalog_fn,
                 create_order_fn,
             ],
@@ -3995,31 +4005,31 @@ export function response(ctx) {
             field_name="listMyShares",
         )
 
-        # getSeason - Get a specific season by ID with authorization
-        # Pipeline: QuerySeasonFn → VerifyProfileReadAccessFn → CheckShareReadPermissionsFn → ReturnSeasonFn
+        # getCampaign - Get a specific campaign by ID with authorization
+        # Pipeline: QueryCampaignFn → VerifyProfileReadAccessFn → CheckShareReadPermissionsFn → ReturnCampaignFn
 
-        # Step 1: Get season from seasons table using seasonId-index GSI
-        # V2 STRUCTURE: PK=profileId, SK=seasonId, GSI=seasonId-index
-        query_season_fn = appsync.AppsyncFunction(
+        # Step 1: Get campaign from campaigns table using campaignId-index GSI
+        # V2 STRUCTURE: PK=profileId, SK=campaignId, GSI=campaignId-index
+        query_campaign_fn = appsync.AppsyncFunction(
             self,
-            "QuerySeasonFn",
-            name=f"QuerySeasonFn_{env_name}",
+            "QueryCampaignFn",
+            name=f"QueryCampaignFn_{env_name}",
             api=self.api,
-            data_source=self.seasons_datasource,
+            data_source=self.campaigns_datasource,
             runtime=appsync.FunctionRuntime.JS_1_0_0,
             code=appsync.Code.from_inline(
                 """
 import { util } from '@aws-appsync/utils';
 
 export function request(ctx) {
-    const seasonId = ctx.args.seasonId;
-    // V2: Query seasonId-index GSI since PK is now profileId
+    const campaignId = ctx.args.campaignId;
+    // V2: Query campaignId-index GSI since PK is now profileId
     return {
         operation: 'Query',
-        index: 'seasonId-index',
+        index: 'campaignId-index',
         query: {
-        expression: 'seasonId = :seasonId',
-        expressionValues: util.dynamodb.toMapValues({ ':seasonId': seasonId })
+        expression: 'campaignId = :campaignId',
+        expressionValues: util.dynamodb.toMapValues({ ':campaignId': campaignId })
         },
         limit: 1
     };
@@ -4032,24 +4042,24 @@ export function response(ctx) {
     
     if (!ctx.result || !ctx.result.items || ctx.result.items.length === 0) {
         // Campaign not found - return null (auth check will be skipped)
-        ctx.stash.seasonNotFound = true;
+        ctx.stash.campaignNotFound = true;
         return null;
     }
     
-    const season = ctx.result.items[0];
-    ctx.stash.season = season;
+    const campaign = ctx.result.items[0];
+    ctx.stash.campaign = campaign;
     
-    return season;
+    return campaign;
 }
             """
             ),
         )
 
-        # Step 4: Return season if authorized, null otherwise
-        return_season_fn = appsync.AppsyncFunction(
+        # Step 4: Return campaign if authorized, null otherwise
+        return_campaign_fn = appsync.AppsyncFunction(
             self,
-            "ReturnSeasonFn",
-            name=f"ReturnSeasonFn_{env_name}",
+            "ReturnCampaignFn",
+            name=f"ReturnCampaignFn_{env_name}",
             api=self.api,
             data_source=self.none_datasource,
             runtime=appsync.FunctionRuntime.JS_1_0_0,
@@ -4067,8 +4077,8 @@ export function response(ctx) {
         util.error(ctx.error.message, ctx.error.type);
     }
     
-    // If season not found, return null
-    if (ctx.stash.seasonNotFound) {
+    // If campaign not found, return null
+    if (ctx.stash.campaignNotFound) {
         return null;
     }
     
@@ -4077,24 +4087,27 @@ export function response(ctx) {
         return null;
     }
     
-    // Authorized - return the season
-    return ctx.stash.season;
+    // Authorized - return the campaign with field mapping
+    const campaign = ctx.stash.campaign;
+    // Map DynamoDB field campaignId to GraphQL field campaignId
+    campaign.campaignId = campaign.campaignId;
+    return campaign;
 }
             """
             ),
         )
 
-        # getSeason Pipeline Resolver
+        # getCampaign Pipeline Resolver
         self.api.create_resolver(
-            "GetSeasonResolver",
+            "GetCampaignResolver",
             type_name="Query",
             field_name="getCampaign",
             runtime=appsync.FunctionRuntime.JS_1_0_0,
             pipeline_config=[
-                query_season_fn,
+                query_campaign_fn,
                 verify_profile_read_access_fn,
                 check_share_read_permissions_fn,
-                return_season_fn,
+                return_campaign_fn,
             ],
             code=appsync.Code.from_inline(
                 """
@@ -4109,17 +4122,17 @@ export function response(ctx) {
             ),
         )
 
-        # listSeasonsByProfile - List all seasons for a profile with authorization
-        # Pipeline: VerifyProfileReadAccessFn → CheckShareReadPermissionsFn → QuerySeasonsFn
+        # listCampaignsByProfile - List all campaigns for a profile with authorization
+        # Pipeline: VerifyProfileReadAccessFn → CheckShareReadPermissionsFn → QueryCampaignsFn
 
-        # Step 3: Query seasons from seasons table (only if authorized)
-        # V2 STRUCTURE: PK=profileId, SK=seasonId - direct query, no GSI needed
-        query_seasons_fn = appsync.AppsyncFunction(
+        # Step 3: Query campaigns from campaigns table (only if authorized)
+        # V2 STRUCTURE: PK=profileId, SK=campaignId - direct query, no GSI needed
+        query_campaigns_fn = appsync.AppsyncFunction(
             self,
-            "QuerySeasonsFn",
-            name=f"QuerySeasonsFn_{env_name}",
+            "QueryCampaignsFn",
+            name=f"QueryCampaignsFn_{env_name}",
             api=self.api,
-            data_source=self.seasons_datasource,
+            data_source=self.campaigns_datasource,
             runtime=appsync.FunctionRuntime.JS_1_0_0,
             code=appsync.Code.from_inline(
                 """
@@ -4131,8 +4144,8 @@ export function request(ctx) {
         return {
         operation: 'Query',
         query: {
-            expression: 'profileId = :profileId AND seasonId = :seasonId',
-            expressionValues: util.dynamodb.toMapValues({ ':profileId': 'NOOP', ':seasonId': 'NOOP' })
+            expression: 'profileId = :profileId AND campaignId = :campaignId',
+            expressionValues: util.dynamodb.toMapValues({ ':profileId': 'NOOP', ':campaignId': 'NOOP' })
         },
         limit: 1
         };
@@ -4165,16 +4178,16 @@ export function response(ctx) {
             ),
         )
 
-        # listSeasonsByProfile Pipeline Resolver
+        # listCampaignsByProfile Pipeline Resolver
         self.api.create_resolver(
-            "ListSeasonsByProfileResolver",
+            "ListCampaignsByProfileResolver",
             type_name="Query",
             field_name="listCampaignsByProfile",
             runtime=appsync.FunctionRuntime.JS_1_0_0,
             pipeline_config=[
                 verify_profile_read_access_fn,
                 check_share_read_permissions_fn,
-                query_seasons_fn,
+                query_campaigns_fn,
             ],
             code=appsync.Code.from_inline(
                 """
@@ -4189,11 +4202,11 @@ export function response(ctx) {
             ),
         )
 
-        # Season.catalog - Resolve catalog field for Season
+        # Campaign.catalog - Resolve catalog field for Campaign
         # Uses catalogs table directly
         self.catalogs_datasource.create_resolver(
-            "SeasonCatalogResolver",
-            type_name="Season",
+            "CampaignCatalogResolver",
+            type_name="Campaign",
             field_name="catalog",
             request_mapping_template=appsync.MappingTemplate.from_string(
                 """
@@ -4216,11 +4229,11 @@ $util.toJson($ctx.result)
             ),
         )
 
-        # Season.totalOrders - Count orders for this season
-        # V2 schema: Direct PK query since PK=seasonId
+        # Campaign.totalOrders - Count orders for this campaign
+        # V2 schema: Direct PK query since PK=campaignId
         self.orders_datasource.create_resolver(
-            "SeasonTotalOrdersResolver",
-            type_name="Season",
+            "CampaignTotalOrdersResolver",
+            type_name="Campaign",
             field_name="totalOrders",
             request_mapping_template=appsync.MappingTemplate.from_string(
                 """
@@ -4228,9 +4241,9 @@ $util.toJson($ctx.result)
     "version": "2017-02-28",
     "operation": "Query",
     "query": {
-        "expression": "seasonId = :seasonId",
+        "expression": "campaignId = :campaignId",
         "expressionValues": {
-        ":seasonId": $util.dynamodb.toDynamoDBJson($ctx.source.seasonId)
+        ":campaignId": $util.dynamodb.toDynamoDBJson($ctx.source.campaignId)
         }
     }
 }
@@ -4246,11 +4259,11 @@ $ctx.result.items.size()
             ),
         )
 
-        # Season.totalRevenue - Sum order totals for this season
-        # V2 schema: Direct PK query since PK=seasonId
+        # Campaign.totalRevenue - Sum order totals for this campaign
+        # V2 schema: Direct PK query since PK=campaignId
         self.orders_datasource.create_resolver(
-            "SeasonTotalRevenueResolver",
-            type_name="Season",
+            "CampaignTotalRevenueResolver",
+            type_name="Campaign",
             field_name="totalRevenue",
             request_mapping_template=appsync.MappingTemplate.from_string(
                 """
@@ -4258,9 +4271,100 @@ $ctx.result.items.size()
     "version": "2017-02-28",
     "operation": "Query",
     "query": {
-        "expression": "seasonId = :seasonId",
+        "expression": "campaignId = :campaignId",
         "expressionValues": {
-        ":seasonId": $util.dynamodb.toDynamoDBJson($ctx.source.seasonId)
+        ":campaignId": $util.dynamodb.toDynamoDBJson($ctx.source.campaignId)
+        }
+    }
+}
+            """
+            ),
+            response_mapping_template=appsync.MappingTemplate.from_string(
+                """
+#if($ctx.error)
+    $util.error($ctx.error.message, $ctx.error.type)
+#end
+#set($total = 0.0)
+#foreach($order in $ctx.result.items)
+    #set($total = $total + $order.totalAmount)
+#end
+$total
+            """
+            ),
+        )
+
+        # Campaign.catalog - Resolve catalog field for Campaign
+        # Uses catalogs table directly (Campaign has same catalogId as Campaign)
+        self.catalogs_datasource.create_resolver(
+            "CampaignCatalogResolver",
+            type_name="Campaign",
+            field_name="catalog",
+            request_mapping_template=appsync.MappingTemplate.from_string(
+                """
+{
+    "version": "2017-02-28",
+    "operation": "GetItem",
+    "key": {
+        "catalogId": $util.dynamodb.toDynamoDBJson($ctx.source.catalogId)
+    }
+}
+            """
+            ),
+            response_mapping_template=appsync.MappingTemplate.from_string(
+                """
+#if($ctx.error)
+    $util.error($ctx.error.message, $ctx.error.type)
+#end
+$util.toJson($ctx.result)
+            """
+            ),
+        )
+
+        # Campaign.totalOrders - Count orders for this campaign
+        # V2 schema: Direct PK query since PK=campaignId (Campaign's backend is stored as Campaign in Orders table)
+        self.orders_datasource.create_resolver(
+            "CampaignTotalOrdersResolver",
+            type_name="Campaign",
+            field_name="totalOrders",
+            request_mapping_template=appsync.MappingTemplate.from_string(
+                """
+{
+    "version": "2017-02-28",
+    "operation": "Query",
+    "query": {
+        "expression": "campaignId = :campaignId",
+        "expressionValues": {
+        ":campaignId": $util.dynamodb.toDynamoDBJson($ctx.source.campaignId)
+        }
+    }
+}
+            """
+            ),
+            response_mapping_template=appsync.MappingTemplate.from_string(
+                """
+#if($ctx.error)
+    $util.error($ctx.error.message, $ctx.error.type)
+#end
+$ctx.result.items.size()
+            """
+            ),
+        )
+
+        # Campaign.totalRevenue - Sum order totals for this campaign
+        # V2 schema: Direct PK query since PK=campaignId (Campaign's backend is stored as Campaign in Orders table)
+        self.orders_datasource.create_resolver(
+            "CampaignTotalRevenueResolver",
+            type_name="Campaign",
+            field_name="totalRevenue",
+            request_mapping_template=appsync.MappingTemplate.from_string(
+                """
+{
+    "version": "2017-02-28",
+    "operation": "Query",
+    "query": {
+        "expression": "campaignId = :campaignId",
+        "expressionValues": {
+        ":campaignId": $util.dynamodb.toDynamoDBJson($ctx.source.campaignId)
         }
     }
 }
@@ -4416,7 +4520,7 @@ import { util } from '@aws-appsync/utils';
 
 export function request(ctx) {
     const orderId = ctx.args.orderId;
-    // Query orderId-index GSI (V2 schema: PK=seasonId, SK=orderId)
+    // Query orderId-index GSI (V2 schema: PK=campaignId, SK=orderId)
     return {
         operation: 'Query',
         index: 'orderId-index',
@@ -4484,8 +4588,14 @@ export function response(ctx) {
         return null;
     }
     
+    // Map DynamoDB field campaignId to GraphQL field campaignId
+    const order = ctx.stash.order;
+    if (order && order.campaignId) {
+        order.campaignId = order.campaignId;
+    }
+    
     // Return the order
-    return ctx.stash.order;
+    return order;
 }
             """
             ),
@@ -4516,33 +4626,33 @@ export function response(ctx) {
             ),
         )
 
-        # listOrdersBySeason - List all orders for a season with authorization (Pipeline Resolver)
+        # listOrdersByCampaign - List all orders for a campaign with authorization (Pipeline Resolver)
         # NOTE: Replaced Lambda with direct DynamoDB query for better performance
         # FIXED Bug #25: Now uses GSI5 with filter for ORDER# items
         # FIXED Bug #23: Added authorization check
-        # Pipeline: LookupSeasonForOrdersFn → VerifyProfileReadAccessFn → CheckShareReadPermissionsFn → QueryOrdersBySeasonFn
+        # Pipeline: LookupCampaignForOrdersFn → VerifyProfileReadAccessFn → CheckShareReadPermissionsFn → QueryOrdersByCampaignFn
 
-        # Step 1: Lookup season to get profileId (uses seasonId-index GSI, V2 schema)
-        lookup_season_for_orders_fn = appsync.AppsyncFunction(
+        # Step 1: Lookup campaign to get profileId (uses campaignId-index GSI, V2 schema)
+        lookup_campaign_for_orders_fn = appsync.AppsyncFunction(
             self,
-            "LookupSeasonForOrdersFn",
-            name=f"LookupSeasonForOrdersFn_{env_name}",
+            "LookupCampaignForOrdersFn",
+            name=f"LookupCampaignForOrdersFn_{env_name}",
             api=self.api,
-            data_source=self.seasons_datasource,
+            data_source=self.campaigns_datasource,
             runtime=appsync.FunctionRuntime.JS_1_0_0,
             code=appsync.Code.from_inline(
                 """
 import { util } from '@aws-appsync/utils';
 
 export function request(ctx) {
-    const seasonId = ctx.args.seasonId;
-    // Query seasonId-index GSI to find season (V2 schema: PK=profileId, SK=seasonId)
+    const campaignId = ctx.args.campaignId;
+    // Query campaignId-index GSI to find campaign (V2 schema: PK=profileId, SK=campaignId)
     return {
         operation: 'Query',
-        index: 'seasonId-index',
+        index: 'campaignId-index',
         query: {
-        expression: 'seasonId = :seasonId',
-        expressionValues: util.dynamodb.toMapValues({ ':seasonId': seasonId })
+        expression: 'campaignId = :campaignId',
+        expressionValues: util.dynamodb.toMapValues({ ':campaignId': campaignId })
         },
         limit: 1
     };
@@ -4556,26 +4666,26 @@ export function response(ctx) {
     const items = ctx.result.items || [];
     if (items.length === 0) {
         // Campaign not found - return empty, skip auth (will return empty array)
-        ctx.stash.seasonNotFound = true;
+        ctx.stash.campaignNotFound = true;
         ctx.stash.authorized = false;
         return null;
     }
     
-    const season = items[0];
-    ctx.stash.season = season;
-    ctx.stash.profileId = season.profileId;
+    const campaign = items[0];
+    ctx.stash.campaign = campaign;
+    ctx.stash.profileId = campaign.profileId;
     
-    return season;
+    return campaign;
 }
             """
             ),
         )
 
         # Step 4: Query orders (only if authorized) - direct PK query (V2 schema)
-        query_orders_by_season_fn = appsync.AppsyncFunction(
+        query_orders_by_campaign_fn = appsync.AppsyncFunction(
             self,
-            "QueryOrdersBySeasonFn",
-            name=f"QueryOrdersBySeasonFn_{env_name}",
+            "QueryOrdersByCampaignFn",
+            name=f"QueryOrdersByCampaignFn_{env_name}",
             api=self.api,
             data_source=self.orders_datasource,
             runtime=appsync.FunctionRuntime.JS_1_0_0,
@@ -4584,27 +4694,27 @@ export function response(ctx) {
 import { util } from '@aws-appsync/utils';
 
 export function request(ctx) {
-    // If season not found or not authorized, return empty query (will return empty array)
-    if (ctx.stash.seasonNotFound || !ctx.stash.authorized) {
+    // If campaign not found or not authorized, return empty query (will return empty array)
+    if (ctx.stash.campaignNotFound || !ctx.stash.authorized) {
         return {
         operation: 'Query',
         query: {
-            expression: 'seasonId = :seasonId',
+            expression: 'campaignId = :campaignId',
             expressionValues: util.dynamodb.toMapValues({ 
-                ':seasonId': 'NONEXISTENT'
+                ':campaignId': 'NONEXISTENT'
             })
         }
         };
     }
     
-    const seasonId = ctx.args.seasonId;
-    // Direct PK query on orders table (V2 schema: PK=seasonId)
+    const campaignId = ctx.args.campaignId;
+    // Direct PK query on orders table (V2 schema: PK=campaignId)
     return {
         operation: 'Query',
         query: {
-        expression: 'seasonId = :seasonId',
+        expression: 'campaignId = :campaignId',
         expressionValues: util.dynamodb.toMapValues({ 
-            ':seasonId': seasonId
+            ':campaignId': campaignId
         })
         }
     };
@@ -4615,23 +4725,30 @@ export function response(ctx) {
         util.error(ctx.error.message, ctx.error.type);
     }
     
-    return ctx.result.items || [];
+    const orders = ctx.result.items || [];
+    // Map DynamoDB field campaignId to GraphQL field campaignId for each order
+    return orders.map(order => {
+        if (order && order.campaignId) {
+            order.campaignId = order.campaignId;
+        }
+        return order;
+    });
 }
             """
             ),
         )
 
-        # listOrdersBySeason Pipeline Resolver
+        # listOrdersByCampaign Pipeline Resolver
         self.api.create_resolver(
-            "ListOrdersBySeasonResolver",
+            "ListOrdersByCampaignResolver",
             type_name="Query",
-            field_name="listOrdersBySeason",
+            field_name="listOrdersByCampaign",
             runtime=appsync.FunctionRuntime.JS_1_0_0,
             pipeline_config=[
-                lookup_season_for_orders_fn,
+                lookup_campaign_for_orders_fn,
                 verify_profile_read_access_fn,
                 check_share_read_permissions_fn,
-                query_orders_by_season_fn,
+                query_orders_by_campaign_fn,
             ],
             code=appsync.Code.from_inline(
                 """
@@ -4697,7 +4814,14 @@ export function response(ctx) {
         util.error(ctx.error.message, ctx.error.type);
     }
     
-    return ctx.result.items || [];
+    const orders = ctx.result.items || [];
+    // Map DynamoDB field campaignId to GraphQL field campaignId for each order
+    return orders.map(order => {
+        if (order && order.campaignId) {
+            order.campaignId = order.campaignId;
+        }
+        return order;
+    });
 }
             """
             ),
@@ -5357,7 +5481,7 @@ export function response(ctx) {
             ),
         )
 
-        # findCampaignPrefills - Find prefills by unit+season (GSI2)
+        # findCampaignPrefills - Find prefills by unit+campaign (GSI2)
         self.api.create_resolver(
             "FindCampaignPrefillsResolver",
             type_name="Query",
@@ -5373,15 +5497,15 @@ export function request(ctx) {
     // Format: {unitType}#{unitNumber}#{city}#{state}#{campaignName}#{campaignYear}
     // Use string concatenation (array.join() not available in APPSYNC_JS)
     const unitNumStr = '' + ctx.args.unitNumber;
-    const seasonYearStr = '' + ctx.args.campaignYear;
-    const unitSeasonKey = ctx.args.unitType + '#' + unitNumStr + '#' + ctx.args.city + '#' + ctx.args.state + '#' + ctx.args.campaignName + '#' + seasonYearStr;
+    const campaignYearStr = '' + ctx.args.campaignYear;
+    const unitCampaignKey = ctx.args.unitType + '#' + unitNumStr + '#' + ctx.args.city + '#' + ctx.args.state + '#' + ctx.args.campaignName + '#' + campaignYearStr;
     
     return {
         operation: 'Query',
         index: 'GSI2',
         query: {
-            expression: 'unitSeasonKey = :unitSeasonKey',
-            expressionValues: util.dynamodb.toMapValues({ ':unitSeasonKey': unitSeasonKey })
+            expression: 'unitCampaignKey = :unitCampaignKey',
+            expressionValues: util.dynamodb.toMapValues({ ':unitCampaignKey': unitCampaignKey })
         }
     };
 }
@@ -5543,16 +5667,16 @@ export function request(ctx) {
     const account = ctx.stash.account;
     const now = util.time.nowISO8601();
     
-    // Generate prefill code: UNITTYPE + UNITNUMBER + SEASON + YEAR
+    // Generate prefill code: UNITTYPE + UNITNUMBER + CAMPAIGN + YEAR
     // Convert numbers to strings using template literal (String() not available in APPSYNC_JS)
-    const seasonYearStr = '' + input.campaignYear;
+    const campaignYearStr = '' + input.campaignYear;
     const unitNumStr = '' + input.unitNumber;
-    const seasonAbbrev = input.campaignName.substring(0, 4).toUpperCase();
-    const yearAbbrev = seasonYearStr.substring(2);
-    const prefillCode = input.unitType.toUpperCase() + unitNumStr + '-' + seasonAbbrev + '-' + input.state.toUpperCase() + '-' + yearAbbrev;
+    const campaignAbbrev = input.campaignName.substring(0, 4).toUpperCase();
+    const yearAbbrev = campaignYearStr.substring(2);
+    const prefillCode = input.unitType.toUpperCase() + unitNumStr + '-' + campaignAbbrev + '-' + input.state.toUpperCase() + '-' + yearAbbrev;
     
-    // Build unit+season composite key for GSI2
-    const unitSeasonKey = input.unitType + '#' + unitNumStr + '#' + input.city + '#' + input.state + '#' + input.campaignName + '#' + seasonYearStr;
+    // Build unit+campaign composite key for GSI2
+    const unitCampaignKey = input.unitType + '#' + unitNumStr + '#' + input.city + '#' + input.state + '#' + input.campaignName + '#' + campaignYearStr;
     
     // Build display name from account
     let createdByName = 'Unknown';
@@ -5576,7 +5700,7 @@ export function request(ctx) {
         creatorMessage: input.creatorMessage,
         isActive: true,
         createdAt: now,
-        unitSeasonKey: unitSeasonKey
+        unitCampaignKey: unitCampaignKey
     };
     
     // Add optional fields
@@ -6025,8 +6149,8 @@ export function response(ctx) {
         # 3. Query all invites for this profile from invites table
         # 4. Delete all shares (TransactWriteItems)
         # 5. Delete all invites (TransactWriteItems)
-        # 6. Query all SEASON# records for this profile
-        # 7. Delete all seasons (TransactWriteItems)
+        # 6. Query all CAMPAIGN# records for this profile
+        # 7. Delete all campaigns (TransactWriteItems)
         # 8. Delete the ownership record (ACCOUNT#{userId}|{profileId})
         # 9. Delete the metadata record (PROFILE#{profileId}|METADATA)
 
@@ -6237,13 +6361,13 @@ export function response(ctx) {
             ),
         )
 
-        # Step 6: Query all seasons for this profile - uses seasons table with profileId-index GSI
-        query_profile_seasons_fn = appsync.AppsyncFunction(
+        # Step 6: Query all campaigns for this profile - uses campaigns table with profileId-index GSI
+        query_profile_campaigns_fn = appsync.AppsyncFunction(
             self,
-            "QueryProfileSeasonsForDeleteFn",
-            name=f"QueryProfileSeasonsForDeleteFn_{env_name}",
+            "QueryProfileCampaignsForDeleteFn",
+            name=f"QueryProfileCampaignsForDeleteFn_{env_name}",
             api=self.api,
-            data_source=self.seasons_datasource,
+            data_source=self.campaigns_datasource,
             runtime=appsync.FunctionRuntime.JS_1_0_0,
             code=appsync.Code.from_inline(
                 """
@@ -6267,40 +6391,40 @@ export function response(ctx) {
     if (ctx.error) {
         util.error(ctx.error.message, ctx.error.type);
     }
-    ctx.stash.seasonsToDelete = ctx.result.items || [];
+    ctx.stash.campaignsToDelete = ctx.result.items || [];
     return ctx.result.items;
 }
         """
             ),
         )
 
-        # Step 7: Delete all seasons using TransactWriteItems - uses seasons table
-        delete_profile_seasons_fn = appsync.AppsyncFunction(
+        # Step 7: Delete all campaigns using TransactWriteItems - uses campaigns table
+        delete_profile_campaigns_fn = appsync.AppsyncFunction(
             self,
-            "DeleteProfileSeasonsFn",
-            name=f"DeleteProfileSeasonsFn_{env_name}",
+            "DeleteProfileCampaignsFn",
+            name=f"DeleteProfileCampaignsFn_{env_name}",
             api=self.api,
-            data_source=self.seasons_datasource,
+            data_source=self.campaigns_datasource,
             runtime=appsync.FunctionRuntime.JS_1_0_0,
             code=appsync.Code.from_inline(
                 """
 import { util } from '@aws-appsync/utils';
 
 export function request(ctx) {
-    const seasons = ctx.stash.seasonsToDelete || [];
+    const campaigns = ctx.stash.campaignsToDelete || [];
     
-    // If no seasons to delete, skip
-    if (seasons.length === 0) {
-        return { operation: 'Query', query: { expression: 'profileId = :pk AND seasonId = :sk', expressionValues: util.dynamodb.toMapValues({ ':pk': 'SKIP', ':sk': 'SKIP' }) }, limit: 1 };
+    // If no campaigns to delete, skip
+    if (campaigns.length === 0) {
+        return { operation: 'Query', query: { expression: 'profileId = :pk AND campaignId = :sk', expressionValues: util.dynamodb.toMapValues({ ':pk': 'SKIP', ':sk': 'SKIP' }) }, limit: 1 };
     }
     
-    // V2: Build delete requests (max 100 items per TransactWriteItems) using composite key (profileId, seasonId)
-    const transactItems = seasons.slice(0, 100).map(season => ({
+    // V2: Build delete requests (max 100 items per TransactWriteItems) using composite key (profileId, campaignId)
+    const transactItems = campaigns.slice(0, 100).map(campaign => ({
         table: '"""
-                + self.seasons_table.table_name
+                + self.campaigns_table.table_name
                 + """',
         operation: 'DeleteItem',
-        key: util.dynamodb.toMapValues({ profileId: season.profileId, campaignId: season.campaignId })
+        key: util.dynamodb.toMapValues({ profileId: campaign.profileId, campaignId: campaign.campaignId })
     }));
     
     return {
@@ -6397,8 +6521,8 @@ export function response(ctx) {
                 query_profile_invites_fn,
                 delete_profile_shares_fn,
                 delete_profile_invites_fn,
-                query_profile_seasons_fn,
-                delete_profile_seasons_fn,
+                query_profile_campaigns_fn,
+                delete_profile_campaigns_fn,
                 delete_profile_ownership_fn,
                 delete_profile_metadata_fn,
             ],
@@ -6581,7 +6705,7 @@ $util.toJson($ctx.result)
         # deleteCatalog - Delete a catalog (owner or admin for ADMIN_MANAGED)
         # Pipeline resolver with 3 steps:
         # 1. Get Catalog to check catalogType and ownerAccountId
-        # 2. Check if catalog is in use by any seasons
+        # 2. Check if catalog is in use by any campaigns
         # 3. Delete if authorized
         # Note: Admin check uses JWT cognito:groups claim, not DynamoDB
 
@@ -6651,13 +6775,13 @@ export function response(ctx) {
             ),
         )
 
-        # Step 3: Check if catalog is in use by any seasons - uses seasons table GSI
+        # Step 3: Check if catalog is in use by any campaigns - uses campaigns table GSI
         check_catalog_usage_fn = appsync.AppsyncFunction(
             self,
             "CheckCatalogUsageFn",
             name=f"CheckCatalogUsageFn_{env_name}",
             api=self.api,
-            data_source=self.seasons_datasource,
+            data_source=self.campaigns_datasource,
             runtime=appsync.FunctionRuntime.JS_1_0_0,
             code=appsync.Code.from_inline(
                 """
@@ -6684,11 +6808,11 @@ export function response(ctx) {
         util.error(ctx.error.message, ctx.error.type);
     }
     
-    const seasons = ctx.result.items || [];
+    const campaigns = ctx.result.items || [];
     
-    if (seasons.length > 0) {
+    if (campaigns.length > 0) {
         // Catalog is in use - return error
-        const message = 'Cannot delete catalog: ' + seasons.length + ' season(s) are using it. Please update or delete those seasons first.';
+        const message = 'Cannot delete catalog: ' + campaigns.length + ' campaign(s) are using it. Please update or delete those campaigns first.';
         util.error(message, 'CatalogInUse');
     }
     
@@ -6770,23 +6894,23 @@ export function response(ctx) {
             ),
         )
 
-        # createSeason - Create a new season for a profile (Lambda resolver with transaction support)
+        # createCampaign - Create a new campaign for a profile (Lambda resolver with transaction support)
         # Supports: prefillCode, shareWithCreator, unit fields (unitType, unitNumber, city, state)
-        # Uses DynamoDB transactions to atomically create season + optional share
+        # Uses DynamoDB transactions to atomically create campaign + optional share
         # NOTE: Previous JS pipeline resolver replaced with Lambda for transaction support
-        self.season_operations_ds.create_resolver(
-            "CreateSeasonResolver",  # Keep same logical ID to replace old resolver
+        self.campaign_operations_ds.create_resolver(
+            "CreateCampaignResolver",  # Keep same logical ID to replace old resolver
             type_name="Mutation",
             field_name="createCampaign",
         )
 
-        # NOTE: updateSeason Lambda resolver REMOVED - replaced with pipeline resolver above
+        # NOTE: updateCampaign Lambda resolver REMOVED - replaced with pipeline resolver above
         # NOTE: createOrder Lambda resolver REMOVED - replaced with pipeline resolver above
         # NOTE: updateOrder, deleteOrder Lambda resolvers REMOVED - replaced with pipeline resolvers above
 
-        # requestSeasonReport - Generate and download season report (Lambda resolver)
-        self.request_season_report_ds.create_resolver(
-            "RequestSeasonReportResolver",
+        # requestCampaignReport - Generate and download campaign report (Lambda resolver)
+        self.request_campaign_report_ds.create_resolver(
+            "RequestCampaignReportResolver",
             type_name="Mutation",
             field_name="requestCampaignReport",
         )
@@ -6798,16 +6922,16 @@ export function response(ctx) {
             field_name="getUnitReport",
         )
 
-        # listUnitCatalogs - List catalogs used in unit (Lambda resolver) - DEPRECATED, use listUnitSeasonCatalogs
+        # listUnitCatalogs - List catalogs used in unit (Lambda resolver) - DEPRECATED, use listUnitCampaignCatalogs
         self.list_unit_catalogs_ds.create_resolver(
             "ListUnitCatalogsResolver",
             type_name="Query",
             field_name="listUnitCatalogs",
         )
 
-        # listUnitSeasonCatalogs - List catalogs used in unit+season using GSI3 (Lambda resolver)
-        self.list_unit_season_catalogs_ds.create_resolver(
-            "ListUnitSeasonCatalogsResolver",
+        # listUnitCampaignCatalogs - List catalogs used in unit+campaign using GSI3 (Lambda resolver)
+        self.list_unit_campaign_catalogs_ds.create_resolver(
+            "ListUnitCampaignCatalogsResolver",
             type_name="Query",
             field_name="listUnitCampaignCatalogs",
         )

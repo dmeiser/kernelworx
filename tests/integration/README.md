@@ -74,7 +74,7 @@ tests/integration/
 ├── resolvers/
 │   ├── profileSharing.integration.test.ts    # Share/invite/revoke tests
 │   ├── orderOperations.integration.test.ts   # Create/update/delete order
-│   ├── seasonOperations.integration.test.ts  # Update/delete season
+│   ├── campaignOperations.integration.test.ts  # Update/delete campaigngn
 │   └── queries.integration.test.ts           # List queries (VTL resolvers)
 └── workflows/
     └── completeWorkflow.integration.test.ts  # End-to-end scenarios
@@ -131,7 +131,7 @@ describe('ShareProfileDirect Pipeline Resolver', () => {
 All tests MUST clean up after themselves to prevent pollution:
 
 1. **Track created resources** in test context
-2. **Delete in reverse order** of creation (shares → orders → seasons → profiles)
+2. **Delete in reverse order** of creation (shares → orders → campaigngns → profiles)
 3. **Use try/finally** to ensure cleanup even on test failure
 
 ## CI/CD Integration

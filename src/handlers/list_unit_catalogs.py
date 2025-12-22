@@ -21,11 +21,11 @@ dynamodb = boto3.resource("dynamodb")
 
 # Multi-table design V2
 profiles_table_name = os.environ.get("PROFILES_TABLE_NAME", "kernelworx-profiles-v2-ue1-dev")
-seasons_table_name = os.environ.get("SEASONS_TABLE_NAME", "kernelworx-campaigns-v2-ue1-dev")
+campaigns_table_name = os.environ.get("CAMPAIGNS_TABLE_NAME", "kernelworx-campaigns-v2-ue1-dev")
 catalogs_table_name = os.environ.get("CATALOGS_TABLE_NAME", "kernelworx-catalogs-ue1-dev")
 
 profiles_table = dynamodb.Table(profiles_table_name)
-seasons_table = dynamodb.Table(seasons_table_name)
+campaigns_table = dynamodb.Table(campaigns_table_name)
 catalogs_table = dynamodb.Table(catalogs_table_name)
 
 
@@ -37,8 +37,8 @@ def list_unit_catalogs(event: Dict[str, Any], context: Any) -> List[Dict[str, An
         event: AppSync resolver event with arguments:
             - unitType: String (e.g., "Pack", "Troop")
             - unitNumber: Int (e.g., 158)
-            - seasonName: String (e.g., "Fall", "Spring")
-            - seasonYear: Int (e.g., 2024)
+            - campaignName: String (e.g., "Fall", "Spring")
+            - campaignYear: Int (e.g., 2024)
         context: Lambda context (unused)
 
     Returns:
@@ -48,13 +48,13 @@ def list_unit_catalogs(event: Dict[str, Any], context: Any) -> List[Dict[str, An
         # Extract parameters
         unit_type = event["arguments"]["unitType"]
         unit_number = int(event["arguments"]["unitNumber"])
-        season_name = event["arguments"]["seasonName"]
-        season_year = int(event["arguments"]["seasonYear"])
+        campaign_name = event["arguments"]["campaignName"]
+        campaign_year = int(event["arguments"]["campaignYear"])
         caller_account_id = event["identity"]["sub"]
 
         logger.info(
             f"Listing catalogs for {unit_type} {unit_number}, "
-            f"season {season_name} {season_year}, caller {caller_account_id}"
+            f"campaign {campaign_name} {campaign_year}, caller {caller_account_id}"
         )
 
         # Step 1: Find all profiles in this unit
@@ -91,24 +91,24 @@ def list_unit_catalogs(event: Dict[str, Any], context: Any) -> List[Dict[str, An
         if not accessible_profiles:
             return []
 
-        # Step 3: Get all seasons for accessible profiles and collect unique catalog IDs
+        # Step 3: Get all campaigns for accessible profiles and collect unique catalog IDs
         catalog_ids: Set[str] = set()
 
         for profile in accessible_profiles:
             profile_id = profile["profileId"]
 
-            # Get seasons for this profile matching the season name/year
-            seasons_response = seasons_table.query(
+            # Get campaigns for this profile matching the campaign name/year
+            campaigns_response = campaigns_table.query(
                 KeyConditionExpression=Key("profileId").eq(profile_id),
-                FilterExpression="seasonName = :name AND seasonYear = :year",
-                ExpressionAttributeValues={":name": season_name, ":year": season_year},
+                FilterExpression="campaignName = :name AND campaignYear = :year",
+                ExpressionAttributeValues={":name": campaign_name, ":year": campaign_year},
             )
 
-            seasons = seasons_response.get("Items", [])
+            campaigns = campaigns_response.get("Items", [])
 
             # Collect catalog IDs
-            for season in seasons:
-                catalog_id = season.get("catalogId")
+            for campaign in campaigns:
+                catalog_id = campaign.get("catalogId")
                 if catalog_id is not None and isinstance(catalog_id, str):
                     catalog_ids.add(catalog_id)
 
@@ -139,18 +139,18 @@ def list_unit_catalogs(event: Dict[str, Any], context: Any) -> List[Dict[str, An
         raise
 
 
-def _build_unit_season_key(
-    unit_type: str, unit_number: int, city: str, state: str, season_name: str, season_year: int
+def _build_unit_campaign_key(
+    unit_type: str, unit_number: int, city: str, state: str, campaign_name: str, campaign_year: int
 ) -> str:
-    """Build the GSI3 partition key for unit+season queries."""
-    return f"{unit_type}#{unit_number}#{city}#{state}#{season_name}#{season_year}"
+    """Build the GSI3 partition key for unit+campaign queries."""
+    return f"{unit_type}#{unit_number}#{city}#{state}#{campaign_name}#{campaign_year}"
 
 
-def list_unit_season_catalogs(event: Dict[str, Any], context: Any) -> List[Dict[str, Any]]:
+def list_unit_campaign_catalogs(event: Dict[str, Any], context: Any) -> List[Dict[str, Any]]:
     """
-    List all catalogs used by scouts in a unit+season using GSI3.
+    List all catalogs used by scouts in a unit+campaign using GSI3.
 
-    This is the new season-based version that uses city+state for unit uniqueness.
+    This is the new campaign-based version that uses city+state for unit uniqueness.
 
     Args:
         event: AppSync resolver event with arguments:
@@ -158,8 +158,8 @@ def list_unit_season_catalogs(event: Dict[str, Any], context: Any) -> List[Dict[
             - unitNumber: Int (e.g., 158)
             - city: String (e.g., "Springfield") - Required for unit uniqueness
             - state: String (e.g., "IL") - Required for unit uniqueness
-            - seasonName: String (e.g., "Fall", "Spring")
-            - seasonYear: Int (e.g., 2024)
+            - campaignName: String (e.g., "Fall", "Spring")
+            - campaignYear: Int (e.g., 2024)
         context: Lambda context (unused)
 
     Returns:
@@ -171,47 +171,47 @@ def list_unit_season_catalogs(event: Dict[str, Any], context: Any) -> List[Dict[
         unit_number = int(event["arguments"]["unitNumber"])
         city = event["arguments"]["city"]
         state = event["arguments"]["state"]
-        season_name = event["arguments"]["seasonName"]
-        season_year = int(event["arguments"]["seasonYear"])
+        campaign_name = event["arguments"]["campaignName"]
+        campaign_year = int(event["arguments"]["campaignYear"])
         caller_account_id = event["identity"]["sub"]
 
         logger.info(
             f"Listing catalogs for {unit_type} {unit_number} in {city}, {state}, "
-            f"season {season_name} {season_year}, caller {caller_account_id}"
+            f"campaign {campaign_name} {campaign_year}, caller {caller_account_id}"
         )
 
-        # Step 1: Query GSI3 to find all seasons matching unit+season criteria
-        unit_season_key = _build_unit_season_key(
-            unit_type, unit_number, city, state, season_name, season_year
+        # Step 1: Query GSI3 to find all campaigns matching unit+campaign criteria
+        unit_campaign_key = _build_unit_campaign_key(
+            unit_type, unit_number, city, state, campaign_name, campaign_year
         )
 
-        seasons_response = seasons_table.query(
+        campaigns_response = campaigns_table.query(
             IndexName="GSI3",
-            KeyConditionExpression=Key("unitSeasonKey").eq(unit_season_key),
+            KeyConditionExpression=Key("unitCampaignKey").eq(unit_campaign_key),
         )
 
-        unit_seasons = seasons_response.get("Items", [])
-        logger.info(f"Found {len(unit_seasons)} seasons for unit+season")
+        unit_campaigns = campaigns_response.get("Items", [])
+        logger.info(f"Found {len(unit_campaigns)} campaigns for unit+campaign")
 
-        if not unit_seasons:
+        if not unit_campaigns:
             return []
 
-        # Step 2: Filter seasons by caller's access to profile and collect catalog IDs
+        # Step 2: Filter campaigns by caller's access to profile and collect catalog IDs
         catalog_ids: Set[str] = set()
 
-        for season in unit_seasons:
-            profile_id = season["profileId"]
+        for campaign in unit_campaigns:
+            profile_id = campaign["profileId"]
             has_access = check_profile_access(
                 caller_account_id=caller_account_id,
                 profile_id=profile_id,
                 required_permission="READ",
             )
             if has_access:
-                catalog_id = season.get("catalogId")
+                catalog_id = campaign.get("catalogId")
                 if catalog_id is not None and isinstance(catalog_id, str):
                     catalog_ids.add(catalog_id)
 
-        logger.info(f"Found {len(catalog_ids)} unique catalogs in accessible seasons")
+        logger.info(f"Found {len(catalog_ids)} unique catalogs in accessible campaigns")
 
         if not catalog_ids:
             return []
@@ -234,5 +234,5 @@ def list_unit_season_catalogs(event: Dict[str, Any], context: Any) -> List[Dict[
         return catalogs
 
     except Exception as e:
-        logger.error(f"Error listing unit season catalogs: {str(e)}", exc_info=True)
+        logger.error(f"Error listing unit campaign catalogs: {str(e)}", exc_info=True)
         raise

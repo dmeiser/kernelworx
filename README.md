@@ -9,7 +9,7 @@ Popcorn Sales Manager is an open-source, serverless application designed for Sco
 ## Features
 
 - **Seller Profile Management**: Create and manage multiple seller profiles (for families with multiple Scouts)
-- **Season Tracking**: Organize sales by yearly seasons with automatic metadata inheritance
+- **Campaign Tracking**: Organize sales by yearly campaigns with automatic metadata inheritance
 - **Order Management**: Track customer orders with payment methods, delivery status, and line items
 - **Catalog Support**: Use admin-managed catalogs or create custom product catalogs
 - **Sharing & Collaboration**: Share profiles with trusted adults (READ or WRITE permissions)
@@ -179,4 +179,4 @@ Built for the Scouting America community by volunteers who understand the challe
 
 ---
 
-**Note**: This project is in active development. The initial release (v1) is targeted for fall 2025 popcorn sales season.
+**Note**: This project is in active development. The initial release (v1) is targeted for fall 2025 popcorn sales campaign.

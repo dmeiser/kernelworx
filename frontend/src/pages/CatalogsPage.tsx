@@ -108,32 +108,32 @@ export const CatalogsPage: React.FC = () => {
   // State to track catalogs in use
   const [catalogsInUse, setCatalogsInUse] = useState<Set<string>>(new Set());
 
-  // Lazy query for fetching seasons
-  const [fetchSeasons] = useLazyQuery<{
+  // Lazy query for fetching campaigns
+  const [fetchCampaigns] = useLazyQuery<{
     listCampaignsByProfile: Array<{ catalogId: string }>;
   }>(LIST_CAMPAIGNS_BY_PROFILE);
 
-  // Fetch seasons for all profiles and determine catalog usage
+  // Fetch campaigns for all profiles and determine catalog usage
   useEffect(() => {
-    const fetchAllSeasons = async () => {
+    const fetchAllCampaigns = async () => {
       const catalogIds = new Set<string>();
 
-      // Fetch seasons for each profile sequentially to respect Hooks rules
+      // Fetch campaigns for each profile sequentially to respect Hooks rules
       for (const profile of allUserProfiles) {
         if (profile.profileId) {
           try {
-            const { data } = await fetchSeasons({
+            const { data } = await fetchCampaigns({
               variables: { profileId: profile.profileId },
             });
 
-            data?.listCampaignsByProfile.forEach((season) => {
-              if (season.catalogId) {
-                catalogIds.add(season.catalogId);
+            data?.listCampaignsByProfile.forEach((campaign) => {
+              if (campaign.catalogId) {
+                catalogIds.add(campaign.catalogId);
               }
             });
           } catch (error) {
             console.error(
-              `Failed to fetch seasons for profile ${profile.profileId}:`,
+              `Failed to fetch campaigns for profile ${profile.profileId}:`,
               error,
             );
           }
@@ -144,9 +144,9 @@ export const CatalogsPage: React.FC = () => {
     };
 
     if (allUserProfiles.length > 0) {
-      fetchAllSeasons();
+      fetchAllCampaigns();
     }
-  }, [allUserProfiles, fetchSeasons]);
+  }, [allUserProfiles, fetchCampaigns]);
 
   // Create catalog
   const [createCatalog] = useMutation(CREATE_CATALOG, {
@@ -393,7 +393,7 @@ export const CatalogsPage: React.FC = () => {
       <Alert severity="info" sx={{ mb: 3 }}>
         <Typography variant="body2">
           <strong>Public catalogs</strong> are visible to all users and can be
-          used by anyone when creating seasons.
+          used by anyone when creating campaigns.
           <strong> Private catalogs</strong> are only visible to you and can be
           used for your own tracking.
         </Typography>

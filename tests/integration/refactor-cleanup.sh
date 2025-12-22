@@ -5,15 +5,15 @@ set -e
 
 FILES=(
   "catalogQueries.integration.test.ts"
-  "createSeason.integration.test.ts"
+  "createCampaign.integration.test.ts"
   "orderOperations.integration.test.ts"
   "orderQueries.integration.test.ts"
   "profileOperations.integration.test.ts"
   "profileQueries.integration.test.ts"
   "profileSharing.integration.test.ts"
-  "requestSeasonReport.integration.test.ts"
-  "seasonOperations.integration.test.ts"
-  "seasonQueries.integration.test.ts"
+  "requestCampaignReport.integration.test.ts"
+  "campaignOperations.integration.test.ts"
+  "campaignQueries.integration.test.ts"
   "shareQueries.integration.test.ts"
 )
 
@@ -40,9 +40,9 @@ for file in "${FILES[@]}"; do
   sed -i "s/trackResource(SUITE_ID, 'profile', \(profileId[0-9]*\));/await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId: \1 } });/g" "$file"
   sed -i "s/trackResource(SUITE_ID, 'profile', profileId);/await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });/g" "$file"
   
-  # Season
-  sed -i "s/trackResource(SUITE_ID, 'season', \(seasonId[0-9]*\));/await ownerClient.mutate({ mutation: DELETE_SEASON, variables: { seasonId: \1 } });/g" "$file"
-  sed -i "s/trackResource(SUITE_ID, 'season', seasonId);/await ownerClient.mutate({ mutation: DELETE_SEASON, variables: { seasonId } });/g" "$file"
+  # Campaign
+  sed -i "s/trackResource(SUITE_ID, 'campaign', \(campaignId[0-9]*\));/await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId: \1 } });/g" "$file"
+  sed -i "s/trackResource(SUITE_ID, 'campaign', campaignId);/await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId } });/g" "$file"
   
   # Order
   sed -i "s/trackResource(SUITE_ID, 'order', \(orderId[0-9]*\));/await ownerClient.mutate({ mutation: DELETE_ORDER, variables: { orderId: \1 } });/g" "$file"

@@ -5,10 +5,10 @@
  * - Scout profile name and metadata
  * - Invite codes for sharing
  * - Share management (view who has access)
- * - Delete scout profile (with season cleanup)
+ * - Delete scout profile (with campaign cleanup)
  *
- * Separated from SeasonSettingsPage to clarify that invites are scout profile-level,
- * not season-level.
+ * Separated from CampaignSettingsPage to clarify that invites are scout profile-level,
+ * not campaign-level.
  */
 
 import React, { useState } from "react";
@@ -342,7 +342,7 @@ export const ScoutManagementPage: React.FC = () => {
                     }}
                   />
                 }
-                label="Read (view seasons and orders)"
+                label="Read (view campaigns and orders)"
               />
               <FormControlLabel
                 control={
@@ -361,7 +361,7 @@ export const ScoutManagementPage: React.FC = () => {
                     }}
                   />
                 }
-                label="Write (edit seasons and orders)"
+                label="Write (edit campaigns and orders)"
               />
             </Stack>
           </Stack>
@@ -583,7 +583,7 @@ export const ScoutManagementPage: React.FC = () => {
           </Typography>
           <ul>
             <li>The scout and all metadata</li>
-            <li>All seasons and associated data</li>
+            <li>All campaigns and associated data</li>
             <li>All orders and order items</li>
             <li>All active invite codes and shares</li>
           </ul>

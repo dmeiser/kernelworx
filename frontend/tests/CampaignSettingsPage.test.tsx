@@ -1,14 +1,14 @@
 /**
- * SeasonSettingsPage tests
+ * CampaignSettingsPage tests
  *
- * Tests for prefill-created season warnings and confirmation dialogs.
+ * Tests for prefill-created campaign warnings and confirmation dialogs.
  */
 
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { MockedProvider } from "@apollo/client/testing/react";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { SeasonSettingsPage } from "../src/pages/SeasonSettingsPage";
+import { CampaignSettingsPage } from "../src/pages/CampaignSettingsPage";
 import {
   GET_CAMPAIGN,
   UPDATE_CAMPAIGN,
@@ -16,9 +16,9 @@ import {
   LIST_MY_CATALOGS,
 } from "../src/lib/graphql";
 
-// Mock season data
-const mockSeasonWithPrefill = {
-  campaignId: "season-123",
+// Mock campaign data
+const mockCampaignWithPrefill = {
+  campaignId: "campaign-123",
   campaignName: "Fall",
   campaignYear: 2025,
   startDate: "2025-09-01T00:00:00.000Z",
@@ -32,8 +32,8 @@ const mockSeasonWithPrefill = {
   state: "IL",
 };
 
-const mockSeasonWithoutPrefill = {
-  campaignId: "season-456",
+const mockCampaignWithoutPrefill = {
+  campaignId: "campaign-456",
   campaignName: "Spring",
   campaignYear: 2025,
   startDate: "2025-03-01T00:00:00.000Z",
@@ -48,15 +48,15 @@ const mockCatalogs = [
   { catalogId: "catalog-2", catalogName: "My Custom Catalog", catalogType: "USER_CREATED", isDeleted: false },
 ];
 
-const createMocks = (season: typeof mockSeasonWithPrefill | typeof mockSeasonWithoutPrefill): any[] => [
+const createMocks = (campaign: typeof mockCampaignWithPrefill | typeof mockCampaignWithoutPrefill): any[] => [
   {
     request: {
       query: GET_CAMPAIGN,
-      variables: { campaignId: season.campaignId },
+      variables: { campaignId: campaign.campaignId },
     },
     result: {
       data: {
-        getCampaign: season,
+        getCampaign: campaign,
       },
     },
   },
@@ -89,7 +89,7 @@ const renderWithProviders = (mocks: any[], campaignId: string, profileId: string
         <Routes>
           <Route
             path="/scouts/:profileId/campaigns/:campaignId/settings"
-            element={<SeasonSettingsPage />}
+            element={<CampaignSettingsPage />}
           />
         </Routes>
       </MemoryRouter>
@@ -97,31 +97,31 @@ const renderWithProviders = (mocks: any[], campaignId: string, profileId: string
   );
 };
 
-describe("SeasonSettingsPage", () => {
+describe("CampaignSettingsPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
   describe("Prefill warning display", () => {
-    it("displays warning for prefill-created seasons", async () => {
-      const mocks = createMocks(mockSeasonWithPrefill);
-      renderWithProviders(mocks, mockSeasonWithPrefill.campaignId, mockSeasonWithPrefill.profileId);
+    it("displays warning for prefill-created campaigns", async () => {
+      const mocks = createMocks(mockCampaignWithPrefill);
+      renderWithProviders(mocks, mockCampaignWithPrefill.campaignId, mockCampaignWithPrefill.profileId);
 
       await waitFor(() => {
         expect(screen.getByText("Shared Campaign")).toBeInTheDocument();
       });
 
       expect(
-        screen.getByText(/This season was created from a shared campaign link/)
+        screen.getByText(/This campaign was created from a shared campaign link/)
       ).toBeInTheDocument();
     });
 
-    it("does not display warning for regular seasons", async () => {
-      const mocks = createMocks(mockSeasonWithoutPrefill);
-      renderWithProviders(mocks, mockSeasonWithoutPrefill.campaignId, mockSeasonWithoutPrefill.profileId);
+    it("does not display warning for regular campaigns", async () => {
+      const mocks = createMocks(mockCampaignWithoutPrefill);
+      renderWithProviders(mocks, mockCampaignWithoutPrefill.campaignId, mockCampaignWithoutPrefill.profileId);
 
       await waitFor(() => {
-        expect(screen.getByText("Season Settings")).toBeInTheDocument();
+        expect(screen.getByText("Campaign Settings")).toBeInTheDocument();
       });
 
         expect(screen.queryByText("Shared Campaign")).not.toBeInTheDocument();
@@ -129,18 +129,18 @@ describe("SeasonSettingsPage", () => {
   });
 
   describe("Confirmation dialog for unit-related changes", () => {
-    it("shows confirmation dialog when changing season name on prefill season", async () => {
-      const mocks = createMocks(mockSeasonWithPrefill);
-      renderWithProviders(mocks, mockSeasonWithPrefill.campaignId, mockSeasonWithPrefill.profileId);
+    it("shows confirmation dialog when changing campaign name on prefill campaign", async () => {
+      const mocks = createMocks(mockCampaignWithPrefill);
+      renderWithProviders(mocks, mockCampaignWithPrefill.campaignId, mockCampaignWithPrefill.profileId);
 
       // Wait for form to load
       await waitFor(() => {
-        expect(screen.getByLabelText("Season Name")).toBeInTheDocument();
+        expect(screen.getByLabelText("Campaign Name")).toBeInTheDocument();
       });
 
-      // Change the season name
-      const seasonNameInput = screen.getByLabelText("Season Name");
-      fireEvent.change(seasonNameInput, { target: { value: "Winter" } });
+      // Change the campaign name
+      const campaignNameInput = screen.getByLabelText("Campaign Name");
+      fireEvent.change(campaignNameInput, { target: { value: "Winter" } });
 
       // Click save
       const saveButton = screen.getByRole("button", { name: /save changes/i });
@@ -152,38 +152,38 @@ describe("SeasonSettingsPage", () => {
       });
 
       expect(
-        screen.getByText(/You are changing the season name or catalog/)
+        screen.getByText(/You are changing the campaign name or catalog/)
       ).toBeInTheDocument();
     });
 
-    // Note: Catalog change confirmation is covered by the season name test above.
-    // Both season name and catalog changes trigger the same hasUnitRelatedChanges logic.
+    // Note: Catalog change confirmation is covered by the campaign name test above.
+    // Both campaign name and catalog changes trigger the same hasUnitRelatedChanges logic.
     // MUI Select components are difficult to test with getByLabelText due to how
-    // FormControl/InputLabel renders, so we test the confirmation flow via season name only.
+    // FormControl/InputLabel renders, so we test the confirmation flow via campaign name only.
 
-    it("does not show confirmation for date changes on prefill season", async () => {
+    it("does not show confirmation for date changes on prefill campaign", async () => {
       const updateMock = {
         request: {
           query: UPDATE_CAMPAIGN,
           variables: {
             input: {
-              campaignId: mockSeasonWithPrefill.campaignId,
-              campaignName: mockSeasonWithPrefill.campaignName,
+              campaignId: mockCampaignWithPrefill.campaignId,
+              campaignName: mockCampaignWithPrefill.campaignName,
               startDate: "2025-09-15T00:00:00.000Z",
               endDate: "2025-12-01T23:59:59.999Z",
-              catalogId: mockSeasonWithPrefill.catalogId,
+              catalogId: mockCampaignWithPrefill.catalogId,
             },
           },
         },
         result: {
           data: {
-            updateSeason: { ...mockSeasonWithPrefill, startDate: "2025-09-15T00:00:00.000Z" },
+            updateCampaign: { ...mockCampaignWithPrefill, startDate: "2025-09-15T00:00:00.000Z" },
           },
         },
       };
 
-      const mocks = [...createMocks(mockSeasonWithPrefill), updateMock];
-      renderWithProviders(mocks, mockSeasonWithPrefill.campaignId, mockSeasonWithPrefill.profileId);
+      const mocks = [...createMocks(mockCampaignWithPrefill), updateMock];
+      renderWithProviders(mocks, mockCampaignWithPrefill.campaignId, mockCampaignWithPrefill.profileId);
 
       // Wait for form to load
       await waitFor(() => {
@@ -204,61 +204,61 @@ describe("SeasonSettingsPage", () => {
       });
     });
 
-    it("does not show confirmation for regular seasons", async () => {
+    it("does not show confirmation for regular campaigns", async () => {
       const updateMock = {
         request: {
           query: UPDATE_CAMPAIGN,
           variables: {
             input: {
-              campaignId: mockSeasonWithoutPrefill.campaignId,
+              campaignId: mockCampaignWithoutPrefill.campaignId,
               campaignName: "Winter",
               startDate: "2025-03-01T00:00:00.000Z",
               endDate: "2025-06-01T23:59:59.999Z",
-              catalogId: mockSeasonWithoutPrefill.catalogId,
+              catalogId: mockCampaignWithoutPrefill.catalogId,
             },
           },
         },
         result: {
           data: {
-            updateSeason: { ...mockSeasonWithoutPrefill, campaignName: "Winter" },
+            updateCampaign: { ...mockCampaignWithoutPrefill, campaignName: "Winter" },
           },
         },
       };
 
-      const mocks = [...createMocks(mockSeasonWithoutPrefill), updateMock];
-      renderWithProviders(mocks, mockSeasonWithoutPrefill.campaignId, mockSeasonWithoutPrefill.profileId);
+      const mocks = [...createMocks(mockCampaignWithoutPrefill), updateMock];
+      renderWithProviders(mocks, mockCampaignWithoutPrefill.campaignId, mockCampaignWithoutPrefill.profileId);
 
       // Wait for form to load
       await waitFor(() => {
-        expect(screen.getByLabelText("Season Name")).toBeInTheDocument();
+        expect(screen.getByLabelText("Campaign Name")).toBeInTheDocument();
       });
 
-      // Change the season name
-      const seasonNameInput = screen.getByLabelText("Season Name");
-      fireEvent.change(seasonNameInput, { target: { value: "Winter" } });
+      // Change the campaign name
+      const campaignNameInput = screen.getByLabelText("Campaign Name");
+      fireEvent.change(campaignNameInput, { target: { value: "Winter" } });
 
       // Click save
       const saveButton = screen.getByRole("button", { name: /save changes/i });
       fireEvent.click(saveButton);
 
-      // Confirmation dialog should NOT appear for regular seasons
+      // Confirmation dialog should NOT appear for regular campaigns
       await waitFor(() => {
         expect(screen.queryByText("Confirm Changes to Shared Campaign")).not.toBeInTheDocument();
       });
     });
 
     it("cancels save when Cancel is clicked in confirmation dialog", async () => {
-      const mocks = createMocks(mockSeasonWithPrefill);
-      renderWithProviders(mocks, mockSeasonWithPrefill.campaignId, mockSeasonWithPrefill.profileId);
+      const mocks = createMocks(mockCampaignWithPrefill);
+      renderWithProviders(mocks, mockCampaignWithPrefill.campaignId, mockCampaignWithPrefill.profileId);
 
       // Wait for form to load
       await waitFor(() => {
-        expect(screen.getByLabelText("Season Name")).toBeInTheDocument();
+        expect(screen.getByLabelText("Campaign Name")).toBeInTheDocument();
       });
 
-      // Change the season name
-      const seasonNameInput = screen.getByLabelText("Season Name");
-      fireEvent.change(seasonNameInput, { target: { value: "Winter" } });
+      // Change the campaign name
+      const campaignNameInput = screen.getByLabelText("Campaign Name");
+      fireEvent.change(campaignNameInput, { target: { value: "Winter" } });
 
       // Click save
       const saveButton = screen.getByRole("button", { name: /save changes/i });

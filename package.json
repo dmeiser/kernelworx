@@ -1,6 +1,7 @@
 {
   "devDependencies": {
     "@aws-sdk/client-appsync": "^3.955.0",
-    "@aws-sdk/client-cloudformation": "^3.955.0"
+    "@aws-sdk/client-cloudformation": "^3.955.0",
+    "jsdom": "^27.3.0"
   }
 }

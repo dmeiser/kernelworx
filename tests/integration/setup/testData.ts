@@ -5,14 +5,14 @@ const dynamoClient = new DynamoDBClient({ region: 'us-east-1' });
 
 // Multi-table configuration for the new schema design
 // Profiles table V2 uses: PK=ownerAccountId, SK=profileId, GSI=profileId-index
-// Seasons table V2 uses: PK=profileId, SK=campaignId, GSI=campaignId-index
+// Campaigns table V2 uses: PK=profileId, SK=campaignId, GSI=campaignId-index
 // Orders table V2 uses: PK=campaignId, SK=orderId, GSI=orderId-index
 // Shares and Invites are now in separate dedicated tables
 export const TABLE_NAMES = {
   profiles: process.env.PROFILES_TABLE_NAME || 'kernelworx-profiles-ue1-dev',
   shares: process.env.SHARES_TABLE_NAME || 'kernelworx-shares-ue1-dev',
   invites: process.env.INVITES_TABLE_NAME || 'kernelworx-invites-ue1-dev',
-  seasons: process.env.SEASONS_TABLE_NAME || 'kernelworx-seasons-ue1-dev',
+  campaigns: process.env.CAMPAIGNS_TABLE_NAME || 'kernelworx-campaigns-ue1-dev',
   orders: process.env.ORDERS_TABLE_NAME || 'kernelworx-orders-ue1-dev',
   catalogs: process.env.CATALOGS_TABLE_NAME || 'kernelworx-catalogs-ue1-dev',
   accounts: process.env.ACCOUNTS_TABLE_NAME || 'kernelworx-accounts-ue1-dev',
@@ -34,7 +34,7 @@ interface TestResource {
  * 
  * NEW SCHEMA (V2):
  * - Profiles: PK=ownerAccountId, SK=profileId
- * - Seasons: PK=profileId, SK=campaignId (separate table with campaignId-index GSI)
+ * - Campaigns: PK=profileId, SK=campaignId (separate table with campaignId-index GSI)
  * - Orders: PK=campaignId, SK=orderId (separate table with orderId-index GSI)
  * - Shares: PK=profileId, SK=targetAccountId (separate table)
  * - Invites: PK=inviteCode (separate table with profileId-index GSI)
@@ -201,7 +201,7 @@ async function deleteOrderById(orderId: string): Promise<void> {
 async function deleteCampaignById(campaignId: string): Promise<void> {
   // Query campaignId-index to get the profileId (needed for composite key)
   const queryCommand = new QueryCommand({
-    TableName: TABLE_NAMES.seasons,
+    TableName: TABLE_NAMES.campaigns,
     IndexName: 'campaignId-index',
     KeyConditionExpression: 'campaignId = :sid',
     ExpressionAttributeValues: {
@@ -214,15 +214,10 @@ async function deleteCampaignById(campaignId: string): Promise<void> {
   if (result.Items && result.Items.length > 0) {
     const profileId = result.Items[0].profileId.S!;
     const deleteCommand = new DeleteItemCommand({
-      TableName: TABLE_NAMES.seasons,
+      TableName: TABLE_NAMES.campaigns,
       Key: {
         profileId: { S: profileId },
         campaignId: { S: campaignId },
-      },
-    });
-    await dynamoClient.send(deleteCommand);
-  }
-}
       },
     });
     await dynamoClient.send(deleteCommand);

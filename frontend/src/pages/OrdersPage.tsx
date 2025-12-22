@@ -1,5 +1,5 @@
 /**
- * OrdersPage - List and manage orders for a season
+ * OrdersPage - List and manage orders for a campaign
  */
 
 import React from "react";
@@ -32,7 +32,7 @@ import {
   ExpandMore as ExpandMoreIcon,
   ExpandLess as ExpandLessIcon,
 } from "@mui/icons-material";
-import { SeasonSummaryTiles } from "../components/SeasonSummaryTiles";
+import { CampaignSummaryTiles } from "../components/CampaignSummaryTiles";
 import {
   LIST_ORDERS_BY_CAMPAIGN,
   DELETE_ORDER,
@@ -65,14 +65,14 @@ interface ProfilePermissions {
 }
 
 export const OrdersPage: React.FC = () => {
-  const { profileId: encodedProfileId, campaignId: encodedSeasonId } = useParams<{
+  const { profileId: encodedProfileId, campaignId: encodedCampaignId } = useParams<{
     profileId: string;
     campaignId: string;
   }>();
   const profileId = encodedProfileId
     ? decodeURIComponent(encodedProfileId)
     : "";
-  const campaignId = encodedSeasonId ? decodeURIComponent(encodedSeasonId) : "";
+  const campaignId = encodedCampaignId ? decodeURIComponent(encodedCampaignId) : "";
   const navigate = useNavigate();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("md"));
@@ -100,7 +100,7 @@ export const OrdersPage: React.FC = () => {
     loading: ordersLoading,
     error: ordersError,
     refetch: refetchOrders,
-  } = useQuery<{ listOrdersBySeason: Order[] }>(LIST_ORDERS_BY_CAMPAIGN, {
+  } = useQuery<{ listOrdersByCampaign: Order[] }>(LIST_ORDERS_BY_CAMPAIGN, {
     variables: { campaignId },
     skip: !campaignId,
   });
@@ -112,7 +112,7 @@ export const OrdersPage: React.FC = () => {
     },
   });
 
-  const orders = ordersData?.listOrdersBySeason || [];
+  const orders = ordersData?.listOrdersByCampaign || [];
   const profile = profileData?.getProfile;
   const hasWritePermission =
     profile?.isOwner || profile?.permissions?.includes("WRITE");
@@ -207,7 +207,7 @@ export const OrdersPage: React.FC = () => {
         </Button>
         <Collapse in={summaryExpanded}>
           <Box mb={2}>
-            <SeasonSummaryTiles campaignId={campaignId} />
+            <CampaignSummaryTiles campaignId={campaignId} />
           </Box>
         </Collapse>
       </Box>

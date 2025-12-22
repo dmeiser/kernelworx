@@ -585,7 +585,7 @@ export const FIND_SHARED_CAMPAIGNS = gql`
 `;
 
 // ============================================================================
-// Unit Season Catalogs Query (replacement for listUnitCatalogs)
+// Unit Campaign Catalogs Query (replacement for listUnitCatalogs)
 // ============================================================================
 
 export const LIST_UNIT_CAMPAIGN_CATALOGS = gql`

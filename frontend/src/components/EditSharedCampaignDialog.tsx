@@ -158,7 +158,7 @@ export const EditSharedCampaignDialog: React.FC<
               </Box>
               <Box display="flex" alignItems="center" gap={1}>
                 <Typography variant="body2" fontWeight="medium">
-                  Season:
+                  Campaign:
                 </Typography>
                 <Typography variant="body2">
                   {prefill.campaignName} {prefill.campaignYear}
@@ -203,7 +203,7 @@ export const EditSharedCampaignDialog: React.FC<
               <Stack>
                 <Typography>Active</Typography>
                 <Typography variant="caption" color="text.secondary">
-                  When inactive, the link will no longer work for new season
+                  When inactive, the link will no longer work for new campaign
                   creation
                 </Typography>
               </Stack>

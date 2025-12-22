@@ -56,7 +56,7 @@ interface Catalog {
   products: Product[];
 }
 
-interface SeasonData {
+interface CampaignData {
   campaignId: string;
   catalog?: Catalog;
 }
@@ -92,13 +92,13 @@ interface OrderData {
 export const OrderEditorPage: React.FC = () => {
   const {
     profileId: encodedProfileId,
-    campaignId: encodedSeasonId,
+    campaignId: encodedCampaignId,
     orderId: encodedOrderId,
   } = useParams<{ profileId: string; campaignId: string; orderId?: string }>();
   const profileId = encodedProfileId
     ? decodeURIComponent(encodedProfileId)
     : "";
-  const campaignId = encodedSeasonId ? decodeURIComponent(encodedSeasonId) : "";
+  const campaignId = encodedCampaignId ? decodeURIComponent(encodedCampaignId) : "";
   const orderId = encodedOrderId ? decodeURIComponent(encodedOrderId) : null;
   const navigate = useNavigate();
   const isEditing = !!orderId;
@@ -118,8 +118,8 @@ export const OrderEditorPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Fetch season data for products
-  const { data: seasonData } = useQuery<{ getCampaign: SeasonData }>(GET_CAMPAIGN, {
+  // Fetch campaign data for products
+  const { data: campaignData } = useQuery<{ getCampaign: CampaignData }>(GET_CAMPAIGN, {
     variables: { campaignId },
     skip: !campaignId,
   });
@@ -141,7 +141,7 @@ export const OrderEditorPage: React.FC = () => {
     skip: !orderId,
   });
 
-  const products: Product[] = seasonData?.getCampaign?.catalog?.products || [];
+  const products: Product[] = campaignData?.getCampaign?.catalog?.products || [];
   const profile = profileData?.getProfile;
   const hasWritePermission =
     profile?.isOwner || profile?.permissions?.includes("WRITE");
@@ -342,7 +342,7 @@ export const OrderEditorPage: React.FC = () => {
           onClick={() => navigate(`/scouts/${encodeURIComponent(profileId)}`)}
           sx={{ textDecoration: "none", cursor: "pointer" }}
         >
-          Seasons
+          Campaigns
         </Link>
         <Link
           component="button"

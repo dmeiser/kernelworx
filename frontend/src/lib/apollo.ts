@@ -113,7 +113,7 @@ function mapErrorCodeToMessage(
     // Not found errors
     NOT_FOUND: "The requested resource was not found.",
     PROFILE_NOT_FOUND: "Profile not found.",
-    SEASON_NOT_FOUND: "Campaign not found.",
+    CAMPAIGN_NOT_FOUND: "Campaign not found.",
     ORDER_NOT_FOUND: "Order not found.",
 
     // Conflict errors
@@ -125,8 +125,8 @@ function mapErrorCodeToMessage(
     INVITE_NOT_FOUND: "Invalid invite code.",
     ALREADY_SHARED: "This profile is already shared with this user.",
 
-    // Season/order errors
-    SEASON_LOCKED: "This season is locked and cannot be modified.",
+    // Campaign/order errors
+    CAMPAIGN_LOCKED: "This campaign is locked and cannot be modified.",
     ORDER_ALREADY_DELETED: "This order has already been deleted.",
 
     // Generic errors
@@ -163,7 +163,7 @@ export const apolloClient = new ApolloClient({
               return incoming;
             },
           },
-          listOrdersBySeason: {
+          listOrdersByCampaign: {
             merge(_existing, incoming) {
               return incoming;
             },

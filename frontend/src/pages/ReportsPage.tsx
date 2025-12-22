@@ -1,5 +1,5 @@
 /**
- * ReportsPage - Generate and download season reports
+ * ReportsPage - Generate and download campaign reports
  */
 
 import React from "react";
@@ -53,8 +53,8 @@ interface Order {
 }
 
 export const ReportsPage: React.FC = () => {
-  const { campaignId: encodedSeasonId } = useParams<{ campaignId: string }>();
-  const campaignId = encodedSeasonId ? decodeURIComponent(encodedSeasonId) : "";
+  const { campaignId: encodedCampaignId } = useParams<{ campaignId: string }>();
+  const campaignId = encodedCampaignId ? decodeURIComponent(encodedCampaignId) : "";
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("md"));
 
@@ -71,13 +71,13 @@ export const ReportsPage: React.FC = () => {
   void reportFormat; // Used for future report format selection
 
   const { data: ordersData, loading: ordersLoading } = useQuery<{
-    listOrdersBySeason: Order[];
+    listOrdersByCampaign: Order[];
   }>(LIST_ORDERS_BY_CAMPAIGN, {
     variables: { campaignId },
     skip: !campaignId,
   });
 
-  const orders = ordersData?.listOrdersBySeason || [];
+  const orders = ordersData?.listOrdersByCampaign || [];
 
   const formatCurrency = (amount: number) =>
     new Intl.NumberFormat("en-US", {
@@ -207,7 +207,7 @@ export const ReportsPage: React.FC = () => {
                 </Box>
               ) : orders.length === 0 ? (
                 <Typography variant="body2" color="text.secondary">
-                  No orders found for this season.
+                  No orders found for this campaign.
                 </Typography>
               ) : (
                 (() => {

@@ -142,15 +142,15 @@
 - ✅ Code Quality: Black formatting, isort, mypy strict (0 errors)
 - ✅ Lambda Functions: **8 functions deployed** (3 sharing + 4 CRUD + 1 report + LogRetention helper)
   - Profile sharing: createProfileInvite, redeemProfileInvite, shareProfileDirect
-  - Season/Order CRUD: updateSeason, deleteSeason, updateOrder, deleteOrder
-  - Report generation: requestSeasonReport (Excel/CSV exports)
-  - **Migrated to VTL**: revokeShare, listOrdersBySeason (see TODO_SIMPLIFY_LAMBDA.md)
+  - Campaigngn/Order CRUD: updaCampaignon, deleCampaignon, updateOrder, deleteOrder
+  - Report generation: requestCampaignReport (Excel/CSV exports)
+  - **Migrated to VTL**: revokeShare, listOrdersByCampaign (see TODO_SIMPLIFY_LAMBDA.md)
 - ✅ DynamoDB Resolvers: **13/13 query resolvers** + **15/15 mutation resolvers** deployed
-  - All query operations: getMyAccount, getProfile, getSeason, getOrder, list operations
+  - All query operations: getMyAccount, getProfile, getCampaign, getOrder, list operations
   - Catalog queries: getCatalog, listPublicCatalogs, listMyCatalogs
-  - All CRUD mutations: create/update/delete for Profiles, Seasons, Orders, Catalogs
+  - All CRUD mutations: create/update/delete for Profiles, Campaigngns, Orders, Catalogs
   - All sharing mutations: createInvite, redeemInvite, shareDirect, revokeShare
-  - Report generation: requestSeasonReport
+  - Report generation: requestCampaignReport
 - ✅ **Catalog Operations**: Full CRUD for public and private catalogs (GSI3) - **DEPLOYED ✅**
 - ✅ **Report Generation**: Excel/CSV exports with S3 upload and pre-signed URLs - **DEPLOYED ✅**
 - ✅ **GSI Fix Implemented**: Added GSI4/GSI5/GSI6 for direct ID lookups
@@ -164,7 +164,7 @@
 - 📋 Unit tests for catalog VTL resolvers (best tested via integration tests against AppSync)
 - 📋 Integration testing for catalog CRUD via GraphQL API
 - 📋 Integration testing for report generation via GraphQL API
-- 📋 Season auto-archive (90 days inactivity)
+- 📋 Campaigngn auto-archive (90 days inactivity)
 - 📋 Advanced audit logging (Kinesis Firehose)
 - 📋 Email notifications (SES/SNS)
 - 📋 CI/CD pipeline
@@ -182,7 +182,7 @@
 - [x] Implement GSI3 (Catalog Ownership) ✅
 - [x] **Implement GSI4/GSI5/GSI6 (Direct ID Lookups)** ✅ (Added Dec 6, 2025)
   - [x] GSI4: profileId lookup ✅
-  - [x] GSI5: seasonId lookup ✅
+  - [x] GSI5: campaignId lookup ✅
   - [x] GSI6: orderId lookup ✅
 - [x] Add TTL configuration for ProfileInvite and CatalogShareInvite items ✅ (Added Dec 6, 2025)
 - [x] Test key access patterns with sample data ✅ (All 8 queries tested Dec 6, 2025)
@@ -200,10 +200,10 @@
   - [x] `listMyProfiles` ✅ (working)
   - [x] `listSharedProfiles` (GSI1) ✅ (working)
   - [x] `getProfile` ✅ (working with GSI4)
-  - [x] `getSeason` ✅ (working with GSI5)
+  - [x] `getCampaign` ✅ (working with GSI5)
   - [x] `getOrder` ✅ (working with GSI6)
-  - [x] `listSeasonsByProfile` ✅ (working)
-  - [x] `listOrdersBySeason` ✅ (working)
+  - [x] `listCampaignsByProfile` ✅ (working)
+  - [x] `listOrdersByCampaign` ✅ (working)
   - [x] `listOrdersByProfile` ✅ (working with GSI2 - added Dec 6, 2025)
   - [x] `listSharesByProfile` ✅ (working - added Dec 6, 2025)
   - [x] `listInvitesByProfile` ✅ (working - added Dec 6, 2025)
@@ -214,9 +214,9 @@
   - [x] `createSellerProfile` ✅ (VTL - tested, working)
   - [x] `updateSellerProfile` ✅ (VTL - tested, working with ownership check)
   - [x] `deleteSellerProfile` ✅ (VTL - added Dec 6, 2025)
-  - [x] `createSeason` ✅ (VTL - tested, working)
-  - [x] `updateSeason` ✅ (Lambda - deployed Dec 6, 2025)
-  - [x] `deleteSeason` ✅ (Lambda - deployed Dec 6, 2025)
+  - [x] `createCampaign` ✅ (VTL - tested, working)
+  - [x] `updateCampaign` ✅ (Lambda - deployed Dec 6, 2025)
+  - [x] `deleteCampaign` ✅ (Lambda - deployed Dec 6, 2025)
   - [x] `createOrder` ✅ (VTL - tested, working with total calculation)
   - [x] `updateOrder` ✅ (Lambda - deployed Dec 6, 2025)
   - [x] `deleteOrder` ✅ (Lambda - deployed Dec 6, 2025)
@@ -224,7 +224,7 @@
   - [x] `updateCatalog` ✅ (VTL - added Dec 6, 2025)
   - [x] `deleteCatalog` ✅ (VTL - added Dec 6, 2025)
   - [x] All 4 sharing mutations (Lambda - createProfileInvite, redeemProfileInvite, shareProfileDirect, revokeShare) ✅
-  - [x] `requestSeasonReport` ✅ (Lambda - added Dec 6, 2025)
+  - [x] `requestCampaignReport` ✅ (Lambda - added Dec 6, 2025)
 - [x] **Catalog operations** ✅ (Added Dec 6, 2025 - all 6 resolvers deployed)
 - [x] Implement authorization checks in Lambda resolvers ✅ (Profile sharing done)
   - [x] Owner-based access (ownerAccountId) ✅
@@ -238,7 +238,7 @@
   - Authorization TODOs documented for getProfile
 - [x] **Added GSI4/GSI5/GSI6 for direct ID lookups** ✅ (Dec 6, 2025)
   - GSI4: profileId → enables getProfile by ID
-  - GSI5: seasonId → enables getSeason by ID
+  - GSI5: campaignId → enables getCampaign by ID
   - GSI6: orderId → enables getOrder by ID
   - Updated resolvers to use Query operations on GSIs
   - All 3 GSIs deployed sequentially (DynamoDB limitation)
@@ -260,7 +260,7 @@
   - [x] `shareProfileDirect` - Direct sharing without invites ✅
   - [x] `revokeShare` - Revokes profile access ✅
 - [x] Implement report generation Lambda function: ✅ (Dec 6, 2025)
-  - [x] `requestSeasonReport` - CSV/XLSX export with S3 upload and pre-signed URLs ✅
+  - [x] `requestCampaignReport` - CSV/XLSX export with S3 upload and pre-signed URLs ✅
 - [ ] Implement catalog sharing Lambda functions: (deferred to post-v1)
   - [ ] `createCatalogShareInvite`
   - [ ] `redeemCatalogShareInvite`
@@ -275,8 +275,8 @@
   - [x] Address validation (all fields required if address provided) ✅
 - [x] Define report CSV/XLSX layout ✅ (Implemented in report_generation.py - Excel with formatting, CSV)
 - [x] Set default invite expiration: 14 days for both profile and catalog invites (single-use) ✅
-- [ ] Add `lastActivityAt` to Season schema
-- [ ] Implement background job (EventBridge + Lambda) to mark seasons READ_ONLY after 90 days of inactivity
+- [ ] Add `lastActivityAt` to Campaigngn schema
+- [ ] Implement background job (EventBridge + Lambda) to mark campaigngns READ_ONLY after 90 days of inactivity
 
 ### Lambda Testing & Quality
 - [x] **Target: 100% unit test coverage for all Lambda functions** ✅ (100% achieved - Dec 6, 2025)
@@ -306,7 +306,7 @@
 - [x] Create comprehensive test fixtures for: ✅
   - [x] Mock DynamoDB tables with test data ✅
   - [ ] Mock S3 buckets and objects (for report generation)
-  - [x] Sample accounts, profiles, seasons, orders ✅
+  - [x] Sample accounts, profiles, campaigngns, orders ✅
   - [x] Auth contexts (owner, contributor, admin) ✅
 - [ ] Add coverage reports to CI/CD (when implemented)
 - [ ] Note: Unit tests use moto; integration tests use AWS dev account
@@ -319,8 +319,8 @@
   - [x] Address validation (all fields required if address provided) ✅
 - [x] Set default invite expiration: 14 days for both profile and catalog invites (single-use) ✅
 - [ ] Define report CSV/XLSX layout using `Popcorn 2025 - anonymized.xlsx` as reference format
-- [ ] Add `lastActivityAt` to Season schema
-- [ ] Implement background job (EventBridge + Lambda) to mark seasons READ_ONLY after 90 days of inactivity
+- [ ] Add `lastActivityAt` to Campaigngn schema
+- [ ] Implement background job (EventBridge + Lambda) to mark campaigngns READ_ONLY after 90 days of inactivity
 
 ### CDK Infrastructure Updates (Dec 6, 2025)
 - [x] Add TTL configuration to DynamoDB table ✅
@@ -331,7 +331,7 @@
 - [x] Deploy all changes to AWS dev environment ✅
 - [x] Fix deprecation warning: `pointInTimeRecovery` → `pointInTimeRecoverySpecification` ✅
 - [x] Add DynamoDB resolvers for basic queries (getMyAccount, getProfile, listMyProfiles, listSharedProfiles) ✅
-- [x] Add all essential DynamoDB resolvers (seasons, orders, sharing) ✅ (Dec 6, 2025 - 10 query + 12 mutation resolvers)
+- [x] Add all essential DynamoDB resolvers (campaigngns, orders, sharing) ✅ (Dec 6, 2025 - 10 query + 12 mutation resolvers)
 - [ ] Add catalog resolvers (deferred to post-v1 - requires schema design)
 - [ ] Test deployed mutations end-to-end via AppSync console (optional - integration testing)
 
@@ -468,17 +468,17 @@
   - [x] ProfileCard component ✅
   - [x] CreateProfileDialog ✅
   - [x] EditProfileDialog ✅
-- [x] **ProfileSeasonsPage** - List seasons for a profile ✅
-  - [x] SeasonCard component ✅
-  - [x] CreateSeasonDialog ✅
-- [x] **SeasonLayout** - Tabbed layout for season views ✅
+- [x] **ProfileCampaignsPage** - List campaigngns for a profile ✅
+  - [x] CampaignCard component ✅
+  - [x] CreateCampaignDialog ✅
+- [x] **CampaignLayout** - Tabbed layout for campaigngn views ✅
   - [x] OrdersPage - List and manage orders ✅
     - [x] Orders table with edit/delete actions ✅
     - [x] OrderEditorDialog (add/edit orders with full validation) ✅
     - [x] Payment method selector ✅
     - [x] Product selection with quantities and automatic totals ✅
     - [x] Customer info (name, phone, address) ✅
-  - [x] SeasonSummaryPage - High-level summary and totals ✅
+  - [x] CampaignSummaryPage - High-level summary and totals ✅
     - [x] Key metrics cards (total orders, revenue, avg order, customers) ✅
     - [x] Payment method breakdown ✅
     - [x] Top products list ✅
@@ -486,10 +486,10 @@
     - [x] Format selector (XLSX/CSV) ✅
     - [x] Export button with status tracking ✅
     - [x] Download links with expiration info ✅
-  - [x] SeasonSettingsPage - Season metadata, sharing ✅
-    - [x] Edit season name and dates ✅
+  - [x] CampaignSettingsPage - Campaigngn metadata, sharing ✅
+    - [x] Edit campaign name and dates ✅
     - [x] Profile invite code generation ✅
-    - [x] Delete season with confirmation ✅
+    - [x] Delete campaigngn with confirmation ✅
 - [x] **SettingsPage** - User account settings ✅
   - [x] Display account information (email, username, isAdmin) ✅
   - [x] Privacy and data handling section ✅
@@ -512,10 +512,10 @@
   - [x] Admin Console link (conditional on isAdmin) ✅
 
 **Progress Summary:**
-- ✅ All 11 core pages complete (LandingPage, LoginPage, ProfilesPage, ProfileSeasonsPage, SeasonLayout with 4 tabs, SettingsPage, AdminPage, CatalogsPage)
-- ✅ Full CRUD operations for Profiles, Seasons, Orders, and Catalogs
+- ✅ All 11 core pages complete (LandingPage, LoginPage, ProfilesPage, ProfileCampaignsPage, CampaignLayout with 4 tabs, SettingsPage, AdminPage, CatalogsPage)
+- ✅ Full CRUD operations for Profiles, Campaigngns, Orders, and Catalogs
 - ✅ Order management with line items, customer info, and automatic calculations
-- ✅ Season analytics and reporting (Summary + Reports pages with status tracking)
+- ✅ Campaigngn analytics and reporting (Summary + Reports pages with status tracking)
 - ✅ Profile sharing with invite codes
 - ✅ Catalog management (public/private, product lists, full CRUD)
 - ✅ User settings with account info and logout
@@ -574,14 +574,14 @@
   - [x] ProfileCard component ✅ (10 tests passing)
   - [x] CreateProfileDialog ✅ (12 tests passing)
   - [x] EditProfileDialog ✅ (13 tests passing)
-  - [x] SeasonCard component ✅ (12 tests passing)
-  - [x] CreateSeasonDialog ⚠️ (13 tests written, all skipped - MUI/Apollo/Vitest compatibility issue)
+  - [x] CampaignCard component ✅ (12 tests passing)
+  - [x] CreateCampaignDialog ⚠️ (13 tests written, all skipped - MUI/Apollo/Vitest compatibility issue)
   - [x] ProfilesPage ⚠️ (10 tests written, all skipped - MUI/Apollo/Vitest compatibility issue)
   - [x] SettingsPage ⚠️ (9 tests written, all skipped - MUI/Apollo/Vitest compatibility issue)
   - [x] AdminPage ⚠️ (9 tests written, all skipped - MUI/Apollo/Vitest compatibility issue)
   - [ ] Remaining pages and dialogs that would require MockedProvider (will likely be skipped):
-    - [ ] ProfileSeasonsPage (GraphQL queries for seasons)
-    - [ ] OrdersPage, ReportsPage, SeasonSettingsPage, SeasonSummaryPage (SeasonLayout tabs)
+    - [ ] ProfileCampaignsPage (GraphQL queries for campaigngns)
+    - [ ] OrdersPage, ReportsPage, CampaignSettingsPage, CampaignSummaryPage (CampaignLayout tabs)
     - [ ] OrderEditorDialog (complex form with GraphQL mutations)
     - [ ] CatalogEditorDialog (would need MockedProvider if tested with GraphQL)
 - [x] Configure Vitest coverage reporting (100% threshold) ✅
@@ -747,7 +747,7 @@
 - [ ] Implement structured council/district/unit directory (if data source available)
 - [ ] Add client-side CSV/XLSX export (browser-based)
 - [ ] Add PDF report generation
-- [ ] Implement automated reminders (undelivered orders, season ending soon)
+- [ ] Implement automated reminders (undelivered orders, campaigngn ending soon)
 - [ ] Add SMS notifications (if budget allows)
 - [ ] Explore multi-region active failover (if donations support it)
 - [ ] Add analytics and aggregated reporting across profiles (global reporting)

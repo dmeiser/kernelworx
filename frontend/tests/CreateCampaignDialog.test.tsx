@@ -1,5 +1,5 @@
 /**
- * CreateSeasonDialog component tests
+ * CreateCampaignDialog component tests
  * 
  * ⚠️  ALL TESTS CURRENTLY SKIPPED
  * 
@@ -7,7 +7,7 @@
  * Error: "Element type is invalid: expected a string (for built-in components) or 
  * a class/function (for composite components) but got: undefined."
  * 
- * This is a test environment issue, NOT a runtime issue. The CreateSeasonDialog component
+ * This is a test environment issue, NOT a runtime issue. The CreateCampaignDialog component
  * works correctly in the actual application.
  * 
  * Root cause: Vitest + @apollo/client@4.0.9 + @mui/material@7.3.6 ESM resolution conflict
@@ -24,7 +24,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MockedProvider } from '@apollo/client/testing';
-import { CreateSeasonDialog } from '../src/components/CreateSeasonDialog';
+import { CreateCampaignDialog } from '../src/components/CreateCampaignDialog';
 import { LIST_PUBLIC_CATALOGS, LIST_MY_CATALOGS } from '../src/lib/graphql';
 
 const mockPublicCatalogs = [
@@ -51,7 +51,7 @@ const mockMyCatalogs = [
   },
 ];
 
-describe.skip('CreateSeasonDialog', () => {
+describe.skip('CreateCampaignDialog', () => {
   let mockOnClose: ReturnType<typeof vi.fn>;
   let mockOnSubmit: ReturnType<typeof vi.fn>;
 
@@ -86,18 +86,18 @@ describe.skip('CreateSeasonDialog', () => {
   it('renders when open', async () => {
     render(
       <MockedProvider mocks={mocks} addTypename={false}>
-        <CreateSeasonDialog open={true} onClose={mockOnClose} onSubmit={mockOnSubmit} />
+        <CreateCampaignDialog open={true} onClose={mockOnClose} onSubmit={mockOnSubmit} />
       </MockedProvider>
     );
 
     expect(screen.getByRole('dialog')).toBeInTheDocument();
-    expect(screen.getByText('Create New Season')).toBeInTheDocument();
+    expect(screen.getByText('Create New Campaign')).toBeInTheDocument();
   });
 
   it('does not render when closed', () => {
     render(
       <MockedProvider mocks={mocks} addTypename={false}>
-        <CreateSeasonDialog open={false} onClose={mockOnClose} onSubmit={mockOnSubmit} />
+        <CreateCampaignDialog open={false} onClose={mockOnClose} onSubmit={mockOnSubmit} />
       </MockedProvider>
     );
 
@@ -107,11 +107,11 @@ describe.skip('CreateSeasonDialog', () => {
   it('displays form fields', async () => {
     render(
       <MockedProvider mocks={mocks} addTypename={false}>
-        <CreateSeasonDialog open={true} onClose={mockOnClose} onSubmit={mockOnSubmit} />
+        <CreateCampaignDialog open={true} onClose={mockOnClose} onSubmit={mockOnSubmit} />
       </MockedProvider>
     );
 
-    expect(screen.getByLabelText(/season name/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/campaign name/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/start date/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/end date/i)).toBeInTheDocument();
     
@@ -124,7 +124,7 @@ describe.skip('CreateSeasonDialog', () => {
   it('sets default start date to today', async () => {
     render(
       <MockedProvider mocks={mocks} addTypename={false}>
-        <CreateSeasonDialog open={true} onClose={mockOnClose} onSubmit={mockOnSubmit} />
+        <CreateCampaignDialog open={true} onClose={mockOnClose} onSubmit={mockOnSubmit} />
       </MockedProvider>
     );
 
@@ -139,7 +139,7 @@ describe.skip('CreateSeasonDialog', () => {
   it('loads and displays catalogs', async () => {
     render(
       <MockedProvider mocks={mocks} addTypename={false}>
-        <CreateSeasonDialog open={true} onClose={mockOnClose} onSubmit={mockOnSubmit} />
+        <CreateCampaignDialog open={true} onClose={mockOnClose} onSubmit={mockOnSubmit} />
       </MockedProvider>
     );
 
@@ -165,7 +165,7 @@ describe.skip('CreateSeasonDialog', () => {
   it('disables create button when required fields are missing', async () => {
     render(
       <MockedProvider mocks={mocks} addTypename={false}>
-        <CreateSeasonDialog open={true} onClose={mockOnClose} onSubmit={mockOnSubmit} />
+        <CreateCampaignDialog open={true} onClose={mockOnClose} onSubmit={mockOnSubmit} />
       </MockedProvider>
     );
 
@@ -180,7 +180,7 @@ describe.skip('CreateSeasonDialog', () => {
   it('enables create button when all required fields are filled', async () => {
     render(
       <MockedProvider mocks={mocks} addTypename={false}>
-        <CreateSeasonDialog open={true} onClose={mockOnClose} onSubmit={mockOnSubmit} />
+        <CreateCampaignDialog open={true} onClose={mockOnClose} onSubmit={mockOnSubmit} />
       </MockedProvider>
     );
 
@@ -191,8 +191,8 @@ describe.skip('CreateSeasonDialog', () => {
       expect(screen.getByLabelText(/catalog/i)).toBeInTheDocument();
     });
 
-    // Fill in season name
-    const nameInput = screen.getByLabelText(/season name/i);
+    // Fill in campaign name
+    const nameInput = screen.getByLabelText(/campaign name/i);
     await user.clear(nameInput);
     await user.type(nameInput, 'Fall 2025 Fundraiser');
 
@@ -214,7 +214,7 @@ describe.skip('CreateSeasonDialog', () => {
   it('calls onSubmit with correct data when form is submitted', async () => {
     render(
       <MockedProvider mocks={mocks} addTypename={false}>
-        <CreateSeasonDialog open={true} onClose={mockOnClose} onSubmit={mockOnSubmit} />
+        <CreateCampaignDialog open={true} onClose={mockOnClose} onSubmit={mockOnSubmit} />
       </MockedProvider>
     );
 
@@ -225,8 +225,8 @@ describe.skip('CreateSeasonDialog', () => {
       expect(screen.getByLabelText(/catalog/i)).toBeInTheDocument();
     });
 
-    // Fill in season name
-    const nameInput = screen.getByLabelText(/season name/i);
+    // Fill in campaign name
+    const nameInput = screen.getByLabelText(/campaign name/i);
     await user.clear(nameInput);
     await user.type(nameInput, 'Fall 2025 Fundraiser');
 
@@ -257,7 +257,7 @@ describe.skip('CreateSeasonDialog', () => {
   it('includes end date in submission when provided', async () => {
     render(
       <MockedProvider mocks={mocks} addTypename={false}>
-        <CreateSeasonDialog open={true} onClose={mockOnClose} onSubmit={mockOnSubmit} />
+        <CreateCampaignDialog open={true} onClose={mockOnClose} onSubmit={mockOnSubmit} />
       </MockedProvider>
     );
 
@@ -269,7 +269,7 @@ describe.skip('CreateSeasonDialog', () => {
     });
 
     // Fill in all fields including end date
-    const nameInput = screen.getByLabelText(/season name/i);
+    const nameInput = screen.getByLabelText(/campaign name/i);
     await user.clear(nameInput);
     await user.type(nameInput, 'Fall 2025 Fundraiser');
 
@@ -303,7 +303,7 @@ describe.skip('CreateSeasonDialog', () => {
   it('resets form after successful submission', async () => {
     render(
       <MockedProvider mocks={mocks} addTypename={false}>
-        <CreateSeasonDialog open={true} onClose={mockOnClose} onSubmit={mockOnSubmit} />
+        <CreateCampaignDialog open={true} onClose={mockOnClose} onSubmit={mockOnSubmit} />
       </MockedProvider>
     );
 
@@ -314,7 +314,7 @@ describe.skip('CreateSeasonDialog', () => {
       expect(screen.getByLabelText(/catalog/i)).toBeInTheDocument();
     });
 
-    const nameInput = screen.getByLabelText(/season name/i) as HTMLInputElement;
+    const nameInput = screen.getByLabelText(/campaign name/i) as HTMLInputElement;
     await user.type(nameInput, 'Fall 2025');
 
     const catalogSelect = screen.getByLabelText(/catalog/i);
@@ -335,7 +335,7 @@ describe.skip('CreateSeasonDialog', () => {
   it('calls onClose when cancel button is clicked', async () => {
     render(
       <MockedProvider mocks={mocks} addTypename={false}>
-        <CreateSeasonDialog open={true} onClose={mockOnClose} onSubmit={mockOnSubmit} />
+        <CreateCampaignDialog open={true} onClose={mockOnClose} onSubmit={mockOnSubmit} />
       </MockedProvider>
     );
 
@@ -374,7 +374,7 @@ describe.skip('CreateSeasonDialog', () => {
 
     render(
       <MockedProvider mocks={loadingMocks} addTypename={false}>
-        <CreateSeasonDialog open={true} onClose={mockOnClose} onSubmit={mockOnSubmit} />
+        <CreateCampaignDialog open={true} onClose={mockOnClose} onSubmit={mockOnSubmit} />
       </MockedProvider>
     );
 
@@ -386,7 +386,7 @@ describe.skip('CreateSeasonDialog', () => {
 
     render(
       <MockedProvider mocks={mocks} addTypename={false}>
-        <CreateSeasonDialog open={true} onClose={mockOnClose} onSubmit={errorSubmit} />
+        <CreateCampaignDialog open={true} onClose={mockOnClose} onSubmit={errorSubmit} />
       </MockedProvider>
     );
 
@@ -397,7 +397,7 @@ describe.skip('CreateSeasonDialog', () => {
       expect(screen.getByLabelText(/catalog/i)).toBeInTheDocument();
     });
 
-    const nameInput = screen.getByLabelText(/season name/i);
+    const nameInput = screen.getByLabelText(/campaign name/i);
     await user.type(nameInput, 'Fall 2025');
 
     const catalogSelect = screen.getByLabelText(/catalog/i);

@@ -301,7 +301,7 @@ export const CreateSharedCampaignDialog: React.FC<
             </Select>
           </FormControl>
 
-          {/* Season Information */}
+          {/* Campaign Information */}
           <Stack direction="row" spacing={2}>
             <TextField
               label="Campaign Name"

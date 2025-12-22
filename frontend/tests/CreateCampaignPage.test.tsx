@@ -1,7 +1,7 @@
 /**
- * CreateSeasonPage component tests
+ * CreateCampaignPage component tests
  *
- * Tests for the season creation page supporting both prefill and manual modes.
+ * Tests for the campaign creation page supporting both prefill and manual modes.
  *
  * NOTE: These tests are currently skipped due to:
  * 1. Complex routing setup requirements with react-router-dom
@@ -21,7 +21,7 @@ import { describe, test, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { MockedProvider } from "@apollo/client/testing/react";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
-import { CreateSeasonPage } from "../src/pages/CreateSeasonPage";
+import { CreateCampaignPage } from "../src/pages/CreateCampaignPage";
 import { LIST_MY_PROFILES, LIST_PUBLIC_CATALOGS, LIST_MY_CATALOGS } from "../src/lib/graphql";
 
 // Mock AuthContext
@@ -98,28 +98,28 @@ const baseMocks = [
   },
 ];
 
-describe.skip("CreateSeasonPage", () => {
+describe.skip("CreateCampaignPage", () => {
   test("renders manual mode with page title", async () => {
     render(
       <MockedProvider mocks={baseMocks}>
-        <MemoryRouter initialEntries={["/create-season"]}>
+        <MemoryRouter initialEntries={["/create-campaign"]}>
           <Routes>
-            <Route path="/create-season" element={<CreateSeasonPage />} />
+            <Route path="/create-campaign" element={<CreateCampaignPage />} />
           </Routes>
         </MemoryRouter>
       </MockedProvider>
     );
 
-    // Should show the Create Season title
-    expect(await screen.findByText("Create New Season")).toBeInTheDocument();
+    // Should show the Create Campaign title
+    expect(await screen.findByText("Create New Campaign")).toBeInTheDocument();
   });
 
   test("displays profile selection dropdown", async () => {
     render(
       <MockedProvider mocks={baseMocks}>
-        <MemoryRouter initialEntries={["/create-season"]}>
+        <MemoryRouter initialEntries={["/create-campaign"]}>
           <Routes>
-            <Route path="/create-season" element={<CreateSeasonPage />} />
+            <Route path="/create-campaign" element={<CreateCampaignPage />} />
           </Routes>
         </MemoryRouter>
       </MockedProvider>
@@ -128,27 +128,27 @@ describe.skip("CreateSeasonPage", () => {
     expect(await screen.findByLabelText(/Select Profile/i)).toBeInTheDocument();
   });
 
-  test("displays season name and year fields in manual mode", async () => {
+  test("displays campaign name and year fields in manual mode", async () => {
     render(
       <MockedProvider mocks={baseMocks}>
-        <MemoryRouter initialEntries={["/create-season"]}>
+        <MemoryRouter initialEntries={["/create-campaign"]}>
           <Routes>
-            <Route path="/create-season" element={<CreateSeasonPage />} />
+            <Route path="/create-campaign" element={<CreateCampaignPage />} />
           </Routes>
         </MemoryRouter>
       </MockedProvider>
     );
 
-    expect(await screen.findByLabelText(/Season Name/i)).toBeInTheDocument();
+    expect(await screen.findByLabelText(/Campaign Name/i)).toBeInTheDocument();
     expect(await screen.findByLabelText(/Year/i)).toBeInTheDocument();
   });
 
   test("displays catalog selection dropdown", async () => {
     render(
       <MockedProvider mocks={baseMocks}>
-        <MemoryRouter initialEntries={["/create-season"]}>
+        <MemoryRouter initialEntries={["/create-campaign"]}>
           <Routes>
-            <Route path="/create-season" element={<CreateSeasonPage />} />
+            <Route path="/create-campaign" element={<CreateCampaignPage />} />
           </Routes>
         </MemoryRouter>
       </MockedProvider>
@@ -160,9 +160,9 @@ describe.skip("CreateSeasonPage", () => {
   test("displays unit information accordion in manual mode", async () => {
     render(
       <MockedProvider mocks={baseMocks}>
-        <MemoryRouter initialEntries={["/create-season"]}>
+        <MemoryRouter initialEntries={["/create-campaign"]}>
           <Routes>
-            <Route path="/create-season" element={<CreateSeasonPage />} />
+            <Route path="/create-campaign" element={<CreateCampaignPage />} />
           </Routes>
         </MemoryRouter>
       </MockedProvider>
@@ -174,24 +174,24 @@ describe.skip("CreateSeasonPage", () => {
   test("submit button is disabled when required fields are empty", async () => {
     render(
       <MockedProvider mocks={baseMocks}>
-        <MemoryRouter initialEntries={["/create-season"]}>
+        <MemoryRouter initialEntries={["/create-campaign"]}>
           <Routes>
-            <Route path="/create-season" element={<CreateSeasonPage />} />
+            <Route path="/create-campaign" element={<CreateCampaignPage />} />
           </Routes>
         </MemoryRouter>
       </MockedProvider>
     );
 
-    const submitButton = await screen.findByRole("button", { name: /Create Season/i });
+    const submitButton = await screen.findByRole("button", { name: /Create Campaign/i });
     expect(submitButton).toBeDisabled();
   });
 
   test("cancel button navigates back", async () => {
     render(
       <MockedProvider mocks={baseMocks}>
-        <MemoryRouter initialEntries={["/create-season"]}>
+        <MemoryRouter initialEntries={["/create-campaign"]}>
           <Routes>
-            <Route path="/create-season" element={<CreateSeasonPage />} />
+            <Route path="/create-campaign" element={<CreateCampaignPage />} />
           </Routes>
         </MemoryRouter>
       </MockedProvider>
@@ -201,7 +201,7 @@ describe.skip("CreateSeasonPage", () => {
   });
 });
 
-describe.skip("CreateSeasonPage - Prefill Mode", () => {
+describe.skip("CreateCampaignPage - Prefill Mode", () => {
   // These tests would require mocking GET_SHARED_CAMPAIGN with a valid prefill response
   test("shows locked fields when prefill code is provided", async () => {
     // TODO: Add GET_SHARED_CAMPAIGN mock
@@ -224,7 +224,7 @@ describe.skip("CreateSeasonPage - Prefill Mode", () => {
   });
 });
 
-describe.skip("CreateSeasonPage - Unauthenticated Redirect", () => {
+describe.skip("CreateCampaignPage - Unauthenticated Redirect", () => {
   test("redirects unauthenticated user to login with return URL", async () => {
     // TODO: Mock useAuth to return isAuthenticated: false
     expect(true).toBe(true);

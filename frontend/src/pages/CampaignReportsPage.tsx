@@ -280,7 +280,7 @@ export const CampaignReportsPage: React.FC = () => {
                         {selectedCampaign.state}
                       </Typography>
                       <Typography variant="body2">
-                        <strong>Season:</strong> {selectedCampaign.campaignName}{" "}
+                        <strong>Campaign:</strong> {selectedCampaign.campaignName}{" "}
                         {selectedCampaign.campaignYear}
                       </Typography>
                       <Typography variant="body2">

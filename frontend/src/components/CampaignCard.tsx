@@ -1,5 +1,5 @@
 /**
- * SeasonCard component - Display a single sales season
+ * CampaignCard component - Display a single sales campaign
  */
 
 import React from "react";
@@ -19,7 +19,7 @@ import {
   AttachMoney as SalesIcon,
 } from "@mui/icons-material";
 
-interface SeasonCardProps {
+interface CampaignCardProps {
   campaignId: string;
   profileId: string;
   campaignName: string;
@@ -30,7 +30,7 @@ interface SeasonCardProps {
   totalRevenue?: number;
 }
 
-export const SeasonCard: React.FC<SeasonCardProps> = ({
+export const CampaignCard: React.FC<CampaignCardProps> = ({
   campaignId,
   profileId,
   campaignName,
@@ -41,7 +41,7 @@ export const SeasonCard: React.FC<SeasonCardProps> = ({
 }) => {
   const navigate = useNavigate();
 
-  const handleViewSeason = () => {
+  const handleViewCampaign = () => {
     navigate(
       `/scouts/${encodeURIComponent(profileId)}/campaigns/${encodeURIComponent(campaignId)}`,
     );
@@ -53,7 +53,7 @@ export const SeasonCard: React.FC<SeasonCardProps> = ({
     <Card elevation={2}>
       <CardContent>
         <Stack spacing={2}>
-          {/* Season Name & Status */}
+          {/* Campaign Name & Status */}
           <Box>
             <Stack
               direction="row"
@@ -89,7 +89,7 @@ export const SeasonCard: React.FC<SeasonCardProps> = ({
         <Button
           size="small"
           variant="outlined"
-          onClick={handleViewSeason}
+          onClick={handleViewCampaign}
           fullWidth
         >
           View Orders

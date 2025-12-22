@@ -1,5 +1,5 @@
 /**
- * ScoutSeasonsPage - List all campaigns for a specific scout profile
+ * ScoutCampaignsPage - List all campaigns for a specific scout profile
  */
 
 import React, { useState } from "react";
@@ -21,8 +21,8 @@ import {
   Add as AddIcon,
   ArrowBack as ArrowBackIcon,
 } from "@mui/icons-material";
-import { SeasonCard } from "../components/SeasonCard";
-import { CreateSeasonDialog } from "../components/CreateSeasonDialog";
+import { CampaignCard } from "../components/CampaignCard";
+import { CreateCampaignDialog } from "../components/CreateCampaignDialog";
 import {
   GET_PROFILE,
   LIST_CAMPAIGNS_BY_PROFILE,
@@ -47,7 +47,7 @@ interface Profile {
   permissions: string[];
 }
 
-export const ScoutSeasonsPage: React.FC = () => {
+export const ScoutCampaignsPage: React.FC = () => {
   const { profileId: encodedProfileId } = useParams<{ profileId: string }>();
   const profileId = encodedProfileId
     ? decodeURIComponent(encodedProfileId)
@@ -65,25 +65,25 @@ export const ScoutSeasonsPage: React.FC = () => {
     skip: !profileId,
   });
 
-  // Fetch seasons
+  // Fetch campaigns
   const {
-    data: seasonsData,
-    loading: seasonsLoading,
-    error: seasonsError,
-    refetch: refetchSeasons,
+    data: campaignsData,
+    loading: campaignsLoading,
+    error: campaignsError,
+    refetch: refetchCampaigns,
   } = useQuery<{ listCampaignsByProfile: Campaign[] }>(LIST_CAMPAIGNS_BY_PROFILE, {
     variables: { profileId },
     skip: !profileId,
   });
 
-  // Create season mutation
-  const [createSeason] = useMutation(CREATE_CAMPAIGN, {
+  // Create campaign mutation
+  const [createCampaign] = useMutation(CREATE_CAMPAIGN, {
     onCompleted: () => {
-      refetchSeasons();
+      refetchCampaigns();
     },
   });
 
-  const handleCreateSeason = async (
+  const handleCreateCampaign = async (
     campaignName: string,
     campaignYear: number,
     catalogId: string,
@@ -92,7 +92,7 @@ export const ScoutSeasonsPage: React.FC = () => {
   ) => {
     if (!profileId) return;
 
-    await createSeason({
+    await createCampaign({
       variables: {
         input: {
           profileId,
@@ -107,9 +107,9 @@ export const ScoutSeasonsPage: React.FC = () => {
   };
 
   const profile = profileData?.getProfile;
-  const seasons = seasonsData?.listCampaignsByProfile || [];
-  const loading = profileLoading || seasonsLoading;
-  const error = profileError || seasonsError;
+  const campaigns = campaignsData?.listCampaignsByProfile || [];
+  const loading = profileLoading || campaignsLoading;
+  const error = profileError || campaignsError;
 
   const canEdit = profile?.isOwner || profile?.permissions?.includes("WRITE");
 
@@ -167,7 +167,7 @@ export const ScoutSeasonsPage: React.FC = () => {
               {profile?.sellerName}
             </Typography>
             <Typography variant="body2" color="text.secondary">
-              Sales Seasons
+              Sales Campaigns
             </Typography>
           </Box>
         </Stack>
@@ -177,28 +177,28 @@ export const ScoutSeasonsPage: React.FC = () => {
             startIcon={<AddIcon />}
             onClick={() => setCreateDialogOpen(true)}
           >
-            New Season
+            New Campaign
           </Button>
         )}
       </Stack>
 
       {error && (
         <Alert severity="error" sx={{ mb: 3 }}>
-          Failed to load seasons: {error.message}
+          Failed to load campaigns: {error.message}
         </Alert>
       )}
 
-      {/* Seasons Grid */}
-      {seasons.length > 0 && (
+      {/* Campaigns Grid */}
+      {campaigns.length > 0 && (
         <Grid container spacing={2}>
-          {seasons.map((season) => (
-            <Grid key={season.campaignId} size={{ xs: 12, sm: 6, md: 4 }}>
-              <SeasonCard
-                campaignId={season.campaignId}
-                campaignName={season.campaignName}
-                campaignYear={season.campaignYear}
-                totalOrders={season.totalOrders}
-                totalRevenue={season.totalRevenue}
+          {campaigns.map((campaign) => (
+            <Grid key={campaign.campaignId} size={{ xs: 12, sm: 6, md: 4 }}>
+              <CampaignCard
+                campaignId={campaign.campaignId}
+                campaignName={campaign.campaignName}
+                campaignYear={campaign.campaignYear}
+                totalOrders={campaign.totalOrders}
+                totalRevenue={campaign.totalRevenue}
                 profileId={profileId}
               />
             </Grid>
@@ -207,19 +207,19 @@ export const ScoutSeasonsPage: React.FC = () => {
       )}
 
       {/* Empty State */}
-      {seasons.length === 0 && !loading && (
+      {campaigns.length === 0 && !loading && (
         <Alert severity="info">
           {canEdit
-            ? 'No sales seasons yet. Click "New Season" to get started!'
-            : "No sales seasons have been created for this profile yet."}
+            ? 'No sales campaigns yet. Click "New Campaign" to get started!'
+            : "No sales campaigns have been created for this profile yet."}
         </Alert>
       )}
 
-      {/* Create Season Dialog */}
-      <CreateSeasonDialog
+      {/* Create Campaign Dialog */}
+      <CreateCampaignDialog
         open={createDialogOpen}
         onClose={() => setCreateDialogOpen(false)}
-        onSubmit={handleCreateSeason}
+        onSubmit={handleCreateCampaign}
       />
     </Box>
   );

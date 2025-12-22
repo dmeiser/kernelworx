@@ -141,9 +141,9 @@ def validate_invite_code(invite_code: str) -> str:
     return code
 
 
-def validate_season_update(updates: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def validate_campaign_update(updates: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """
-    Validate season update parameters.
+    Validate campaigngn update parameters.
 
     Args:
         updates: Dictionary of fields to update
@@ -156,7 +156,7 @@ def validate_season_update(updates: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     # Validate name if provided
     if "name" in updates:
         if not updates["name"] or not updates["name"].strip():
-            return create_error_response("INVALID_INPUT", "Season name cannot be empty")
+            return create_error_response("INVALID_INPUT", "Campaign name cannot be empty")
 
     # Validate dates if provided
     if "startDate" in updates:

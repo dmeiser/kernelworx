@@ -11,7 +11,7 @@ from src.utils.validation import (
     validate_customer_input,
     validate_invite_code,
     validate_order_update,
-    validate_season_update,
+    validate_campaign_update,
 )
 
 
@@ -247,63 +247,63 @@ class TestValidateInviteCode:
         assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
 
 
-class TestValidateSeasonUpdate:
-    """Tests for validate_season_update function."""
+class TestValidateCampaigngnUpdate:
+    """Tests for validate_campaign_update function."""
 
-    def test_validate_season_update_valid(self) -> None:
-        """Test valid season update."""
+    def test_validate_campaign_update_valid(self) -> None:
+        """Test valid campaigngn update."""
         updates = {"name": "Fall 2025"}
 
-        result = validate_season_update(updates)
+        result = validate_campaign_update(updates)
 
         assert result is None
 
-    def test_validate_season_update_empty_name(self) -> None:
+    def test_validate_campaign_update_empty_name(self) -> None:
         """Test that empty name returns error."""
         updates = {"name": ""}
 
-        result = validate_season_update(updates)
+        result = validate_campaign_update(updates)
 
         assert result is not None
         assert result["errorCode"] == "INVALID_INPUT"
 
-    def test_validate_season_update_dates(self) -> None:
+    def test_validate_campaign_update_dates(self) -> None:
         """Test valid date update."""
         updates = {"startDate": "2025-09-01", "endDate": "2025-11-30"}
 
-        result = validate_season_update(updates)
+        result = validate_campaign_update(updates)
 
         assert result is None
 
-    def test_validate_season_update_invalid_date_order(self) -> None:
+    def test_validate_campaign_update_invalid_date_order(self) -> None:
         """Test that endDate before startDate returns error."""
         updates = {"startDate": "2025-11-30", "endDate": "2025-09-01"}
 
-        result = validate_season_update(updates)
+        result = validate_campaign_update(updates)
 
         assert result is not None
         assert result["errorCode"] == "INVALID_INPUT"
 
-    def test_validate_season_update_empty_start_date(self) -> None:
+    def test_validate_campaign_update_empty_start_date(self) -> None:
         """Test that empty startDate returns error."""
         updates = {"startDate": ""}
 
-        result = validate_season_update(updates)
+        result = validate_campaign_update(updates)
 
         assert result is not None
         assert result["errorCode"] == "INVALID_INPUT"
 
-    def test_validate_season_update_empty_end_date(self) -> None:
-        """Test that empty endDate is allowed (open-ended season)."""
+    def test_validate_campaign_update_empty_end_date(self) -> None:
+        """Test that empty endDate is allowed (open-ended campaigngn)."""
         updates = {"startDate": "2025-09-01", "endDate": ""}
 
-        result = validate_season_update(updates)
+        result = validate_campaign_update(updates)
 
         assert result is None
 
-    def test_validate_season_update_no_updates(self) -> None:
+    def test_validate_campaign_update_no_updates(self) -> None:
         """Test that empty updates dict returns None."""
-        result = validate_season_update({})
+        result = validate_campaign_update({})
 
         assert result is None
 

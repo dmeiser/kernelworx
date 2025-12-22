@@ -1,5 +1,5 @@
 /**
- * CreateSeasonDialog component - Dialog for creating a new sales season
+ * CreateCampaignDialog component - Dialog for creating a new sales campaign
  */
 
 import React, { useState } from "react";
@@ -21,7 +21,7 @@ import {
 } from "@mui/material";
 import { LIST_PUBLIC_CATALOGS, LIST_MY_CATALOGS } from "../lib/graphql";
 
-interface CreateSeasonDialogProps {
+interface CreateCampaignDialogProps {
   open: boolean;
   onClose: () => void;
   onSubmit: (
@@ -40,13 +40,13 @@ interface Catalog {
   isDeleted?: boolean;
 }
 
-export const CreateSeasonDialog: React.FC<CreateSeasonDialogProps> = ({
+export const CreateCampaignDialog: React.FC<CreateCampaignDialogProps> = ({
   open,
   onClose,
   onSubmit,
 }) => {
-  const [campaignName, setSeasonName] = useState("");
-  const [campaignYear, setSeasonYear] = useState(new Date().getFullYear());
+  const [campaignName, setCampaignName] = useState("");
+  const [campaignYear, setCampaignYear] = useState(new Date().getFullYear());
   const [catalogId, setCatalogId] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
@@ -87,14 +87,14 @@ export const CreateSeasonDialog: React.FC<CreateSeasonDialogProps> = ({
         endDate || undefined,
       );
       // Reset form
-      setSeasonName("");
-      setSeasonYear(new Date().getFullYear());
+      setCampaignName("");
+      setCampaignYear(new Date().getFullYear());
       setCatalogId("");
       setStartDate("");
       setEndDate("");
       onClose();
     } catch (error) {
-      console.error("Failed to create season:", error);
+      console.error("Failed to create campaign:", error);
     } finally {
       setLoading(false);
     }
@@ -102,8 +102,8 @@ export const CreateSeasonDialog: React.FC<CreateSeasonDialogProps> = ({
 
   const handleClose = () => {
     if (!loading) {
-      setSeasonName("");
-      setSeasonYear(new Date().getFullYear());
+      setCampaignName("");
+      setCampaignYear(new Date().getFullYear());
       setCatalogId("");
       setStartDate("");
       setEndDate("");
@@ -115,33 +115,33 @@ export const CreateSeasonDialog: React.FC<CreateSeasonDialogProps> = ({
 
   return (
     <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth>
-      <DialogTitle>Create New Sales Season</DialogTitle>
+      <DialogTitle>Create New Sales Campaign</DialogTitle>
       <DialogContent>
         <Stack spacing={3} pt={1}>
-          {/* Season Name */}
+          {/* Campaign Name */}
           <TextField
             fullWidth
-            label="Season Name"
+            label="Campaign Name"
             value={campaignName}
-            onChange={(e) => setSeasonName(e.target.value)}
+            onChange={(e) => setCampaignName(e.target.value)}
             disabled={loading}
-            helperText="Name for this sales season (e.g., Fall 2025, Spring Fundraiser)"
+            helperText="Name for this sales campaign (e.g., Fall 2025, Spring Fundraiser)"
           />
 
-          {/* Season Year */}
+          {/* Campaign Year */}
           <TextField
             fullWidth
             label="Year"
             type="number"
             value={campaignYear}
-            onChange={(e) => setSeasonYear(parseInt(e.target.value, 10))}
+            onChange={(e) => setCampaignYear(parseInt(e.target.value, 10))}
             disabled={loading}
             inputProps={{
               min: 2020,
               max: new Date().getFullYear() + 5,
               step: 1,
             }}
-            helperText="Year of this sales season"
+            helperText="Year of this sales campaign"
           />
 
           {/* Start Date */}
@@ -162,7 +162,7 @@ export const CreateSeasonDialog: React.FC<CreateSeasonDialogProps> = ({
                 },
               },
             }}
-            helperText="When sales season begins"
+            helperText="When sales campaign begins"
           />
 
           {/* End Date */}
@@ -183,7 +183,7 @@ export const CreateSeasonDialog: React.FC<CreateSeasonDialogProps> = ({
                 },
               },
             }}
-            helperText="When sales season ends"
+            helperText="When sales campaign ends"
           />
 
           {/* Catalog Selection */}
@@ -264,7 +264,7 @@ export const CreateSeasonDialog: React.FC<CreateSeasonDialogProps> = ({
             !catalogsLoading && (
               <Alert severity="warning">
                 No product catalogs are available. You'll need a catalog to
-                create a season.
+                create a campaign.
               </Alert>
             )}
         </Stack>
@@ -278,7 +278,7 @@ export const CreateSeasonDialog: React.FC<CreateSeasonDialogProps> = ({
           variant="contained"
           disabled={!isFormValid || loading}
         >
-          {loading ? "Creating..." : "Create Season"}
+          {loading ? "Creating..." : "Create Campaign"}
         </Button>
       </DialogActions>
     </Dialog>

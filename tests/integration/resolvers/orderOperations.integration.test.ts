@@ -9,11 +9,11 @@ import { deleteTestAccounts } from '../setup/testData';
  * Integration tests for Order Operations (createOrder, updateOrder, deleteOrder)
  * 
  * Test Data Setup:
- * - TEST_OWNER_EMAIL: Owner of profile/season (can create/update/delete orders)
+ * - TEST_OWNER_EMAIL: Owner of profile/campaign (can create/update/delete orders)
  * - TEST_CONTRIBUTOR_EMAIL: Has WRITE access (can create/update/delete orders)
  * - TEST_READONLY_EMAIL: Has READ access (cannot modify orders)
  * 
- * Note: These tests create their own test data (profile, season, catalog)
+ * Note: These tests create their own test data (profile, campaign, catalog)
  * and clean up after themselves.
  */
 
@@ -179,7 +179,7 @@ describe('Order Operations Integration Tests', () => {
 
   // Test data IDs (created during setup)
   let testProfileId: string;
-  let testSeasonId: string;
+  let testCampaignId: string;
   let testCatalogId: string;
   let testProductId: string;
   let ownerAccountId: string;
@@ -197,8 +197,13 @@ describe('Order Operations Integration Tests', () => {
     readonlyClient = readonlyAuth.client;
     ownerAccountId = ownerAuth.accountId;
 
+    // Clear Apollo caches to avoid state pollution from other tests
+    await ownerClient.cache.reset();
+    await contributorClient.cache.reset();
+    await readonlyClient.cache.reset();
+
     // Create test data
-    console.log('Creating test profile, catalog, and season...');
+    console.log('Creating test profile, catalog, and campaign...');
     
     // 1. Create profile
     const { data: profileData } = await ownerClient.mutate({
@@ -232,13 +237,13 @@ describe('Order Operations Integration Tests', () => {
     testCatalogId = catalogData.createCatalog.catalogId;
     testProductId = catalogData.createCatalog.products[0].productId;
 
-    // 3. Create season
-    const { data: seasonData } = await ownerClient.mutate({
+    // 3. Create campaign
+    const { data: campaignData } = await ownerClient.mutate({
       mutation: CREATE_CAMPAIGN,
       variables: {
         input: {
           profileId: testProfileId,
-          campaignName: 'Order Test Season',
+          campaignName: 'Order Test Campaign',
           campaignYear: 2025,
           startDate: new Date('2025-01-01T00:00:00Z').toISOString(),
           endDate: new Date('2025-12-31T23:59:59Z').toISOString(),
@@ -246,19 +251,19 @@ describe('Order Operations Integration Tests', () => {
         },
       },
     });
-    testSeasonId = seasonData.createCampaign.campaignId;
+    testCampaignId = campaignData.createCampaign.campaignId;
 
-    // Verify season has catalogId before proceeding (GSI5 propagation)
+    // Verify campaign has catalogId before proceeding (GSI5 propagation)
     let retries = 0;
     while (retries < 5) {
       try {
-        const { data: seasonVerify } = await ownerClient.query({
+        const { data: campaignVerify } = await ownerClient.query({
           query: GET_CAMPAIGN,
-          variables: { campaignId: testSeasonId },
+          variables: { campaignId: testCampaignId },
           fetchPolicy: 'network-only', // Bypass cache
         });
-        if (seasonVerify?.getCampaign?.catalogId) {
-          break; // Season has catalogId, proceed
+        if (campaignVerify?.getCampaign?.catalogId) {
+          break; // Campaign has catalogId, proceed
         }
       } catch (e) {
         // Campaign not found yet in GSI, retry
@@ -293,18 +298,18 @@ describe('Order Operations Integration Tests', () => {
     });
     readonlyAccountId = share2Data.shareProfileDirect.targetAccountId;
 
-    console.log(`Test data created: Profile=${testProfileId}, Season=${testSeasonId}, Product=${testProductId}`);
+    console.log(`Test data created: Profile=${testProfileId}, Campaign=${testCampaignId}, Product=${testProductId}`);
   }, 30000);
 
   afterAll(async () => {
     // Clean up all test data in reverse order
     console.log('Cleaning up test data...');
     
-    // 1. Delete all orders in the season
+    // 1. Delete all orders in the campaign
     try {
       const { data: ordersData } = await ownerClient.query({
         query: LIST_ORDERS_BY_CAMPAIGN,
-        variables: { campaignId: testSeasonId },
+        variables: { campaignId: testCampaignId },
         fetchPolicy: 'network-only',
       });
       for (const order of ordersData.listOrdersByCampaign || []) {
@@ -331,14 +336,14 @@ describe('Order Operations Integration Tests', () => {
       console.log('Error revoking shares:', e);
     }
     
-    // 3. Delete season
+    // 3. Delete campaign
     try {
       await ownerClient.mutate({
         mutation: DELETE_CAMPAIGN,
-        variables: { campaignId: testSeasonId },
+        variables: { campaignId: testCampaignId },
       });
     } catch (e) {
-      console.log('Error deleting season:', e);
+      console.log('Error deleting campaign:', e);
     }
     
     // 4. Delete catalog
@@ -373,7 +378,7 @@ describe('Order Operations Integration Tests', () => {
     test('creates order with valid line items', async () => {
       const input = {
         profileId: testProfileId,
-        campaignId: testSeasonId,
+        campaignId: testCampaignId,
         customerName: 'John Doe',
         customerPhone: '+15551234567',
         orderDate: new Date().toISOString(),
@@ -408,7 +413,7 @@ describe('Order Operations Integration Tests', () => {
     test('contributor with WRITE access can create order', async () => {
       const input = {
         profileId: testProfileId,
-        campaignId: testSeasonId,
+        campaignId: testCampaignId,
         customerName: 'Jane Smith',
         orderDate: new Date().toISOString(),
         paymentMethod: 'CHECK',
@@ -434,7 +439,7 @@ describe('Order Operations Integration Tests', () => {
     test('rejects order with non-existent product', async () => {
       const input = {
         profileId: testProfileId,
-        campaignId: testSeasonId,
+        campaignId: testCampaignId,
         customerName: 'Test Customer',
         orderDate: new Date().toISOString(),
         paymentMethod: 'CASH',
@@ -454,10 +459,10 @@ describe('Order Operations Integration Tests', () => {
       ).rejects.toThrow(/not found|does not exist/i);
     }, 10000);
 
-    test('rejects order with invalid season', async () => {
+    test('rejects order with invalid campaign', async () => {
       const input = {
         profileId: testProfileId,
-        campaignId: 'SEASON#non-existent-season',
+        campaignId: 'CAMPAIGN#non-existent-campaign',
         customerName: 'Test Customer',
         orderDate: new Date().toISOString(),
         paymentMethod: 'CASH',
@@ -483,7 +488,7 @@ describe('Order Operations Integration Tests', () => {
       // First create an order
       const createInput = {
         profileId: testProfileId,
-        campaignId: testSeasonId,
+        campaignId: testCampaignId,
         customerName: 'Original Name',
         orderDate: new Date().toISOString(),
         paymentMethod: 'CASH',
@@ -521,7 +526,7 @@ describe('Order Operations Integration Tests', () => {
       // Owner creates order
       const createInput = {
         profileId: testProfileId,
-        campaignId: testSeasonId,
+        campaignId: testCampaignId,
         customerName: 'Original Name',
         orderDate: new Date().toISOString(),
         paymentMethod: 'CASH',
@@ -574,7 +579,7 @@ describe('Order Operations Integration Tests', () => {
       // Create an order first
       const createInput = {
         profileId: testProfileId,
-        campaignId: testSeasonId,
+        campaignId: testCampaignId,
         customerName: 'To Be Deleted',
         orderDate: new Date().toISOString(),
         paymentMethod: 'CASH',
@@ -608,7 +613,7 @@ describe('Order Operations Integration Tests', () => {
       // Owner creates order
       const createInput = {
         profileId: testProfileId,
-        campaignId: testSeasonId,
+        campaignId: testCampaignId,
         customerName: 'To Be Deleted by Contributor',
         orderDate: new Date().toISOString(),
         paymentMethod: 'CASH',
@@ -649,7 +654,7 @@ describe('Order Operations Integration Tests', () => {
       // Create an order first
       const createInput = {
         profileId: testProfileId,
-        campaignId: testSeasonId,
+        campaignId: testCampaignId,
         customerName: 'Get After Delete Test',
         orderDate: new Date().toISOString(),
         paymentMethod: 'CASH',
@@ -696,7 +701,7 @@ describe('Order Operations Integration Tests', () => {
       // Create an order first
       const createInput = {
         profileId: testProfileId,
-        campaignId: testSeasonId,
+        campaignId: testCampaignId,
         customerName: 'List After Delete Test',
         orderDate: new Date().toISOString(),
         paymentMethod: 'CHECK',
@@ -718,7 +723,7 @@ describe('Order Operations Integration Tests', () => {
       // Verify it appears in list
       const { data: listBeforeData }: any = await ownerClient.query({
         query: LIST_ORDERS_BY_CAMPAIGN,
-        variables: { campaignId: testSeasonId },
+        variables: { campaignId: testCampaignId },
         fetchPolicy: 'network-only',
       });
       const beforeOrderIds = listBeforeData.listOrdersByCampaign.map((o: any) => o.orderId);
@@ -733,7 +738,7 @@ describe('Order Operations Integration Tests', () => {
       // Verify it no longer appears in list
       const { data: listAfterData }: any = await ownerClient.query({
         query: LIST_ORDERS_BY_CAMPAIGN,
-        variables: { campaignId: testSeasonId },
+        variables: { campaignId: testCampaignId },
         fetchPolicy: 'network-only',
       });
       const afterOrderIds = listAfterData.listOrdersByCampaign.map((o: any) => o.orderId);
@@ -744,7 +749,7 @@ describe('Order Operations Integration Tests', () => {
       // Create an order first
       const createInput = {
         profileId: testProfileId,
-        campaignId: testSeasonId,
+        campaignId: testCampaignId,
         customerName: 'Concurrent Delete Test',
         orderDate: new Date().toISOString(),
         paymentMethod: 'CASH',
@@ -798,7 +803,7 @@ describe('Order Operations Integration Tests', () => {
     test('readonly user cannot create order', async () => {
       const input = {
         profileId: testProfileId,
-        campaignId: testSeasonId,
+        campaignId: testCampaignId,
         customerName: 'Read Only Test',
         orderDate: new Date().toISOString(),
         paymentMethod: 'CASH',
@@ -826,20 +831,20 @@ describe('Order Operations Integration Tests', () => {
       });
       const noShareProfileId = newProfile.createSellerProfile.profileId;
 
-      // Create a season for the new profile
-      const { data: newSeason } = await ownerClient.mutate({
+      // Create a campaign for the new profile
+      const { data: newCampaign } = await ownerClient.mutate({
         mutation: CREATE_CAMPAIGN,
         variables: {
           input: {
             profileId: noShareProfileId,
-            campaignName: 'No Share Season',
+            campaignName: 'No Share Campaign',
             campaignYear: 2025,
             startDate: new Date('2025-01-01').toISOString(),
             catalogId: testCatalogId,
           },
         },
       });
-      const noShareSeasonId = newSeason.createCampaign.campaignId;
+      const noShareCampaignId = newCampaign.createCampaign.campaignId;
 
       // Wait for GSI propagation
       await new Promise(resolve => setTimeout(resolve, 500));
@@ -848,7 +853,7 @@ describe('Order Operations Integration Tests', () => {
         // Act: Contributor (who has NO share on this new profile) tries to create order
         const input = {
           profileId: noShareProfileId,
-          campaignId: noShareSeasonId,
+          campaignId: noShareCampaignId,
           customerName: 'Unauthorized Order',
           orderDate: new Date().toISOString(),
           paymentMethod: 'CASH',
@@ -863,7 +868,7 @@ describe('Order Operations Integration Tests', () => {
         ).rejects.toThrow(/forbidden|not authorized|unauthorized/i);
       } finally {
         // Cleanup
-        await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId: noShareSeasonId } });
+        await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId: noShareCampaignId } });
         await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId: noShareProfileId } });
       }
     }, 20000);
@@ -874,7 +879,7 @@ describe('Order Operations Integration Tests', () => {
       // Owner creates order
       const createInput = {
         profileId: testProfileId,
-        campaignId: testSeasonId,
+        campaignId: testCampaignId,
         customerName: 'Original Name',
         orderDate: new Date().toISOString(),
         paymentMethod: 'CASH',
@@ -915,20 +920,20 @@ describe('Order Operations Integration Tests', () => {
       });
       const noShareProfileId = newProfile.createSellerProfile.profileId;
 
-      // Create a season for the new profile
-      const { data: newSeason } = await ownerClient.mutate({
+      // Create a campaign for the new profile
+      const { data: newCampaign } = await ownerClient.mutate({
         mutation: CREATE_CAMPAIGN,
         variables: {
           input: {
             profileId: noShareProfileId,
-            campaignName: 'No Share Update Season',
+            campaignName: 'No Share Update Campaign',
             campaignYear: 2025,
             startDate: new Date('2025-01-01').toISOString(),
             catalogId: testCatalogId,
           },
         },
       });
-      const noShareSeasonId = newSeason.createCampaign.campaignId;
+      const noShareCampaignId = newCampaign.createCampaign.campaignId;
 
       // Wait for GSI propagation
       await new Promise(resolve => setTimeout(resolve, 500));
@@ -939,7 +944,7 @@ describe('Order Operations Integration Tests', () => {
         variables: {
           input: {
             profileId: noShareProfileId,
-            campaignId: noShareSeasonId,
+            campaignId: noShareCampaignId,
             customerName: 'Protected Order',
             orderDate: new Date().toISOString(),
             paymentMethod: 'CASH',
@@ -965,7 +970,7 @@ describe('Order Operations Integration Tests', () => {
       } finally {
         // Cleanup
         await ownerClient.mutate({ mutation: DELETE_ORDER, variables: { orderId } });
-        await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId: noShareSeasonId } });
+        await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId: noShareCampaignId } });
         await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId: noShareProfileId } });
       }
     }, 25000);
@@ -976,7 +981,7 @@ describe('Order Operations Integration Tests', () => {
       // Owner creates order
       const createInput = {
         profileId: testProfileId,
-        campaignId: testSeasonId,
+        campaignId: testCampaignId,
         customerName: 'To Be Protected',
         orderDate: new Date().toISOString(),
         paymentMethod: 'CASH',
@@ -1012,20 +1017,20 @@ describe('Order Operations Integration Tests', () => {
       });
       const noShareProfileId = newProfile.createSellerProfile.profileId;
 
-      // Create a season for the new profile
-      const { data: newSeason } = await ownerClient.mutate({
+      // Create a campaign for the new profile
+      const { data: newCampaign } = await ownerClient.mutate({
         mutation: CREATE_CAMPAIGN,
         variables: {
           input: {
             profileId: noShareProfileId,
-            campaignName: 'No Share Delete Season',
+            campaignName: 'No Share Delete Campaign',
             campaignYear: 2025,
             startDate: new Date('2025-01-01').toISOString(),
             catalogId: testCatalogId,
           },
         },
       });
-      const noShareSeasonId = newSeason.createCampaign.campaignId;
+      const noShareCampaignId = newCampaign.createCampaign.campaignId;
 
       // Wait for GSI propagation
       await new Promise(resolve => setTimeout(resolve, 500));
@@ -1036,7 +1041,7 @@ describe('Order Operations Integration Tests', () => {
         variables: {
           input: {
             profileId: noShareProfileId,
-            campaignId: noShareSeasonId,
+            campaignId: noShareCampaignId,
             customerName: 'Protected Order Delete',
             orderDate: new Date().toISOString(),
             paymentMethod: 'CASH',
@@ -1057,7 +1062,7 @@ describe('Order Operations Integration Tests', () => {
       } finally {
         // Cleanup
         await ownerClient.mutate({ mutation: DELETE_ORDER, variables: { orderId } });
-        await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId: noShareSeasonId } });
+        await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId: noShareCampaignId } });
         await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId: noShareProfileId } });
       }
     }, 25000);
@@ -1075,7 +1080,7 @@ describe('Order Operations Integration Tests', () => {
     test('rejects order with empty line items', async () => {
       const input = {
         profileId: testProfileId,
-        campaignId: testSeasonId,
+        campaignId: testCampaignId,
         customerName: 'Test Customer',
         orderDate: new Date().toISOString(),
         paymentMethod: 'CASH',
@@ -1093,7 +1098,7 @@ describe('Order Operations Integration Tests', () => {
     test('rejects order with zero quantity', async () => {
       const input = {
         profileId: testProfileId,
-        campaignId: testSeasonId,
+        campaignId: testCampaignId,
         customerName: 'Test Customer',
         orderDate: new Date().toISOString(),
         paymentMethod: 'CASH',
@@ -1116,7 +1121,7 @@ describe('Order Operations Integration Tests', () => {
     test('rejects order with negative quantity', async () => {
       const input = {
         profileId: testProfileId,
-        campaignId: testSeasonId,
+        campaignId: testCampaignId,
         customerName: 'Test Customer',
         orderDate: new Date().toISOString(),
         paymentMethod: 'CASH',
@@ -1147,7 +1152,7 @@ describe('Order Operations Integration Tests', () => {
       // Create an order first
       const createInput = {
         profileId: testProfileId,
-        campaignId: testSeasonId,
+        campaignId: testCampaignId,
         customerName: 'Original Customer',
         orderDate: new Date().toISOString(),
         paymentMethod: 'CASH',
@@ -1190,7 +1195,7 @@ describe('Order Operations Integration Tests', () => {
       // Create an order first
       const createInput = {
         profileId: testProfileId,
-        campaignId: testSeasonId,
+        campaignId: testCampaignId,
         customerName: 'Payment Test',
         orderDate: new Date().toISOString(),
         paymentMethod: 'CASH',
@@ -1228,7 +1233,7 @@ describe('Order Operations Integration Tests', () => {
     test('creates order with CASH payment method', async () => {
       const input = {
         profileId: testProfileId,
-        campaignId: testSeasonId,
+        campaignId: testCampaignId,
         customerName: 'Cash Customer',
         orderDate: new Date().toISOString(),
         paymentMethod: 'CASH',
@@ -1246,7 +1251,7 @@ describe('Order Operations Integration Tests', () => {
     test('creates order with CHECK payment method', async () => {
       const input = {
         profileId: testProfileId,
-        campaignId: testSeasonId,
+        campaignId: testCampaignId,
         customerName: 'Check Customer',
         orderDate: new Date().toISOString(),
         paymentMethod: 'CHECK',
@@ -1264,7 +1269,7 @@ describe('Order Operations Integration Tests', () => {
     test('creates order with CREDIT_CARD payment method', async () => {
       const input = {
         profileId: testProfileId,
-        campaignId: testSeasonId,
+        campaignId: testCampaignId,
         customerName: 'Credit Card Customer',
         orderDate: new Date().toISOString(),
         paymentMethod: 'CREDIT_CARD',
@@ -1282,7 +1287,7 @@ describe('Order Operations Integration Tests', () => {
     test('creates order with OTHER payment method', async () => {
       const input = {
         profileId: testProfileId,
-        campaignId: testSeasonId,
+        campaignId: testCampaignId,
         customerName: 'Other Payment Customer',
         orderDate: new Date().toISOString(),
         paymentMethod: 'OTHER',
@@ -1302,7 +1307,7 @@ describe('Order Operations Integration Tests', () => {
     test('creates order with all optional fields provided', async () => {
       const input = {
         profileId: testProfileId,
-        campaignId: testSeasonId,
+        campaignId: testCampaignId,
         customerName: 'Full Details Customer',
         customerPhone: '+15551234567',
         orderDate: new Date().toISOString(),
@@ -1323,7 +1328,7 @@ describe('Order Operations Integration Tests', () => {
     test('creates order with optional fields missing', async () => {
       const input = {
         profileId: testProfileId,
-        campaignId: testSeasonId,
+        campaignId: testCampaignId,
         customerName: 'Minimal Customer',
         orderDate: new Date().toISOString(),
         paymentMethod: 'CASH',
@@ -1346,7 +1351,7 @@ describe('Order Operations Integration Tests', () => {
       // Create an order first
       const createInput = {
         profileId: testProfileId,
-        campaignId: testSeasonId,
+        campaignId: testCampaignId,
         customerName: 'No Change Customer',
         customerPhone: '+15559876543',
         orderDate: new Date().toISOString(),
@@ -1384,7 +1389,7 @@ describe('Order Operations Integration Tests', () => {
       // Create an order first
       const createInput = {
         profileId: testProfileId,
-        campaignId: testSeasonId,
+        campaignId: testCampaignId,
         customerName: 'Partial Update Customer',
         customerPhone: '+15551112222',
         orderDate: new Date().toISOString(),
@@ -1444,20 +1449,20 @@ describe('Order Operations Integration Tests', () => {
       const catalogId = catalogData.createCatalog.catalogId;
       const productIds = catalogData.createCatalog.products.map((p: { productId: string }) => p.productId);
 
-      // Create a season with this catalog
-      const { data: seasonData } = await ownerClient.mutate({
+      // Create a campaign with this catalog
+      const { data: campaignData } = await ownerClient.mutate({
         mutation: CREATE_CAMPAIGN,
         variables: {
           input: {
             profileId: testProfileId,
-            campaignName: 'Many Items Season',
+            campaignName: 'Many Items Campaign',
             campaignYear: 2025,
             startDate: new Date('2025-06-01T00:00:00Z').toISOString(),
             catalogId: catalogId,
           },
         },
       });
-      const campaignId = seasonData.createCampaign.campaignId;
+      const campaignId = campaignData.createCampaign.campaignId;
 
       // Wait a moment for GSI propagation
       await new Promise(resolve => setTimeout(resolve, 500));
@@ -1514,7 +1519,7 @@ describe('Order Operations Integration Tests', () => {
         variables: {
           input: {
             profileId: testProfileId,
-            campaignId: testSeasonId,
+            campaignId: testCampaignId,
             customerName: 'Large Quantity Customer',
             orderDate: new Date().toISOString(),
             paymentMethod: 'CHECK',
@@ -1550,20 +1555,20 @@ describe('Order Operations Integration Tests', () => {
       const catalogId = catalogData.createCatalog.catalogId;
       const productId = catalogData.createCatalog.products[0].productId;
 
-      // Create a season with this catalog
-      const { data: seasonData } = await ownerClient.mutate({
+      // Create a campaign with this catalog
+      const { data: campaignData } = await ownerClient.mutate({
         mutation: CREATE_CAMPAIGN,
         variables: {
           input: {
             profileId: testProfileId,
-            campaignName: 'Precision Season',
+            campaignName: 'Precision Campaign',
             campaignYear: 2025,
             startDate: new Date('2025-07-01T00:00:00Z').toISOString(),
             catalogId: catalogId,
           },
         },
       });
-      const campaignId = seasonData.createCampaign.campaignId;
+      const campaignId = campaignData.createCampaign.campaignId;
 
       // Wait for GSI propagation
       await new Promise(resolve => setTimeout(resolve, 500));
@@ -1596,7 +1601,7 @@ describe('Order Operations Integration Tests', () => {
       await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId: catalogId } });
     }, 15000);
 
-    test('concurrent order creation for same season', async () => {
+    test('concurrent order creation for same campaign', async () => {
       // Test that multiple orders can be created concurrently without conflicts
       const orderPromises = Array.from({ length: 5 }, (_, i) =>
         ownerClient.mutate({
@@ -1604,7 +1609,7 @@ describe('Order Operations Integration Tests', () => {
           variables: {
             input: {
               profileId: testProfileId,
-              campaignId: testSeasonId,
+              campaignId: testCampaignId,
               customerName: `Concurrent Customer ${i + 1}`,
               orderDate: new Date().toISOString(),
               paymentMethod: 'CASH',
@@ -1638,7 +1643,7 @@ describe('Order Operations Integration Tests', () => {
         variables: {
           input: {
             profileId: testProfileId,
-            campaignId: testSeasonId,
+            campaignId: testCampaignId,
             customerName: 'Invalid Product Test',
             orderDate: new Date().toISOString(),
             paymentMethod: 'CASH',
@@ -1682,7 +1687,7 @@ describe('Order Operations Integration Tests', () => {
         variables: {
           input: {
             profileId: testProfileId,
-            campaignId: testSeasonId,
+            campaignId: testCampaignId,
             customerName: 'Optional Fields Test',
             customerPhone: '555-1234',
             orderDate: new Date().toISOString(),
@@ -1718,7 +1723,7 @@ describe('Order Operations Integration Tests', () => {
         variables: {
           input: {
             profileId: testProfileId,
-            campaignId: testSeasonId,
+            campaignId: testCampaignId,
             customerName: 'Concurrent Update Test',
             orderDate: new Date().toISOString(),
             paymentMethod: 'CASH',

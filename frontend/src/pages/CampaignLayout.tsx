@@ -1,5 +1,5 @@
 /**
- * SeasonLayout - Tabbed layout for season views
+ * CampaignLayout - Tabbed layout for campaign views
  *
  * Provides navigation between:
  * - Orders (default)
@@ -39,7 +39,7 @@ import {
 import { OrdersPage } from "./OrdersPage";
 import { OrderEditorPage } from "./OrderEditorPage";
 import { ReportsPage } from "./ReportsPage";
-import { SeasonSettingsPage } from "./SeasonSettingsPage";
+import { CampaignSettingsPage } from "./CampaignSettingsPage";
 import { GET_CAMPAIGN, GET_PROFILE } from "../lib/graphql";
 
 interface Campaign {
@@ -59,15 +59,15 @@ interface Profile {
   permissions: string[];
 }
 
-export const SeasonLayout: React.FC = () => {
-  const { profileId: encodedProfileId, campaignId: encodedSeasonId } = useParams<{
+export const CampaignLayout: React.FC = () => {
+  const { profileId: encodedProfileId, campaignId: encodedCampaignId } = useParams<{
     profileId: string;
     campaignId: string;
   }>();
   const profileId = encodedProfileId
     ? decodeURIComponent(encodedProfileId)
     : "";
-  const campaignId = encodedSeasonId ? decodeURIComponent(encodedSeasonId) : "";
+  const campaignId = encodedCampaignId ? decodeURIComponent(encodedCampaignId) : "";
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -236,7 +236,7 @@ export const SeasonLayout: React.FC = () => {
         <Route path="orders/:orderId/edit" element={<OrderEditorPage />} />
         <Route path="orders" element={<OrdersPage />} />
         <Route path="reports" element={<ReportsPage />} />
-        <Route path="settings" element={<SeasonSettingsPage />} />
+        <Route path="settings" element={<CampaignSettingsPage />} />
         <Route path="/" element={<Navigate to="orders" replace />} />
         <Route path="*" element={<Navigate to="orders" replace />} />
       </Routes>

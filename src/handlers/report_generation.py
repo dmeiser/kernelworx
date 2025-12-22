@@ -2,7 +2,7 @@
 Report generation Lambda handler.
 
 Implements:
-- requestSeasonReport: Generate Excel/CSV report for season data
+- requestCampaignReport: Generate Excel/CSV report for campaign data
 """
 
 import os
@@ -29,9 +29,9 @@ dynamodb = boto3.resource("dynamodb", endpoint_url=os.getenv("DYNAMODB_ENDPOINT"
 s3_client = boto3.client("s3", endpoint_url=os.getenv("S3_ENDPOINT"))
 
 
-def get_seasons_table() -> Any:
-    """Get DynamoDB seasons table instance (multi-table design)."""
-    table_name = os.getenv("SEASONS_TABLE_NAME", "kernelworx-seasons-ue1-dev")
+def get_campaigns_table() -> Any:
+    """Get DynamoDB campaigns table instance (multi-table design)."""
+    table_name = os.getenv("CAMPAIGNS_TABLE_NAME", "kernelworx-campaigns-ue1-dev")
     return dynamodb.Table(table_name)
 
 
@@ -41,16 +41,16 @@ def get_orders_table() -> Any:
     return dynamodb.Table(table_name)
 
 
-def request_season_report(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+def request_campaign_report(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
-    Generate a season report and upload to S3.
+    Generate a campaign report and upload to S3.
 
-    GraphQL mutation: requestSeasonReport(seasonId: ID!, format: String)
+    GraphQL mutation: requestCampaignReport(input: RequestCampaignReportInput!)
 
     Returns:
         {
           reportId: String!
-          seasonId: String!
+          campaignId: String!
           profileId: String!
           reportUrl: String
           status: String!
@@ -61,50 +61,51 @@ def request_season_report(event: Dict[str, Any], context: Any) -> Dict[str, Any]
     logger = get_logger(__name__, event.get("requestId", "unknown"))
 
     try:
-        # Extract arguments
+        # Extract arguments - GraphQL passes campaignId, but we store as campaignId in DynamoDB
         args = event["arguments"]["input"]
-        season_id = args["seasonId"]
+        campaign_id = args["campaignId"]  # GraphQL uses campaignId
+        campaign_id = campaign_id  # Map to internal campaignId for DynamoDB queries
         report_format = args.get("format", "xlsx")  # xlsx or csv
         caller_account_id = event["identity"]["sub"]
 
         logger.info(
-            "Generating season report",
-            season_id=season_id,
+            "Generating campaign report",
+            campaign_id=campaign_id,
             format=report_format,
             caller_account_id=caller_account_id,
         )
 
-        # Get season and verify authorization (multi-table design)
-        seasons_table = get_seasons_table()
-        season = _get_season(seasons_table, season_id)
+        # Get campaign and verify authorization (multi-table design)
+        campaigns_table = get_campaigns_table()
+        campaign = _get_campaign(campaigns_table, campaign_id)
 
-        if not season:
-            raise AppError(ErrorCode.NOT_FOUND, f"Campaign {season_id} not found")
+        if not campaign:
+            raise AppError(ErrorCode.NOT_FOUND, f"Campaign {campaign_id} not found")
 
-        profile_id = season["profileId"]
+        profile_id = campaign["profileId"]
 
         # Check authorization (must have read access to profile)
         if not check_profile_access(caller_account_id, profile_id, "read"):
-            raise AppError(ErrorCode.FORBIDDEN, "You don't have access to this season")
+            raise AppError(ErrorCode.FORBIDDEN, "You don't have access to this campaign")
 
-        # Get all orders for the season (multi-table design)
+        # Get all orders for the campaign (multi-table design)
         orders_table = get_orders_table()
-        orders = _get_season_orders(orders_table, season_id)
+        orders = _get_campaign_orders(orders_table, campaign_id)
 
         # Generate report
         if report_format.lower() == "csv":
-            report_content = _generate_csv_report(season, orders)
+            report_content = _generate_csv_report(campaign, orders)
             content_type = "text/csv"
             file_extension = "csv"
         else:
-            report_content = _generate_excel_report(season, orders)
+            report_content = _generate_excel_report(campaign, orders)
             content_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             file_extension = "xlsx"
 
         # Upload to S3
         report_id = f"REPORT#{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
         exports_bucket = os.getenv("EXPORTS_BUCKET", "kernelworx-exports-dev")
-        s3_key = f"reports/{profile_id}/{season_id}/{report_id}.{file_extension}"
+        s3_key = f"reports/{profile_id}/{campaign_id}/{report_id}.{file_extension}"
 
         s3_client.put_object(
             Bucket=exports_bucket,
@@ -126,7 +127,7 @@ def request_season_report(event: Dict[str, Any], context: Any) -> Dict[str, Any]
 
         result = {
             "reportId": report_id,
-            "seasonId": season_id,
+            "campaignId": campaign_id,  # Return campaignId for GraphQL API
             "profileId": profile_id,
             "reportUrl": report_url,
             "status": "COMPLETED",
@@ -145,15 +146,15 @@ def request_season_report(event: Dict[str, Any], context: Any) -> Dict[str, Any]
         return error.to_dict()  # type: ignore[no-any-return]
 
 
-def _get_season(table: Any, season_id: str) -> Dict[str, Any] | None:
-    """Get season by ID (V2: Query seasonId-index GSI since PK=profileId, SK=seasonId)."""
+def _get_campaign(table: Any, campaign_id: str) -> Dict[str, Any] | None:
+    """Get campaign by ID (V2: Query campaignId-index GSI since PK=profileId, SK=campaignId)."""
     # Campaign ID format: CAMPAIGN#uuid
-    # V2: Seasons are stored with PK=profileId, SK=seasonId
-    # Use seasonId-index GSI for lookup by seasonId
+    # V2: Campaigns are stored with PK=profileId, SK=campaignId
+    # Use campaignId-index GSI for lookup by campaignId
     response = table.query(
-        IndexName="seasonId-index",
-        KeyConditionExpression="seasonId = :seasonId",
-        ExpressionAttributeValues={":seasonId": season_id},
+        IndexName="campaignId-index",
+        KeyConditionExpression="campaignId = :campaignId",
+        ExpressionAttributeValues={":campaignId": campaign_id},
         Limit=1,
     )
     items = response.get("Items", [])
@@ -161,14 +162,14 @@ def _get_season(table: Any, season_id: str) -> Dict[str, Any] | None:
     return item
 
 
-def _get_season_orders(table: Any, season_id: str) -> list[Dict[str, Any]]:
-    """Get all orders for a season (V2: Direct PK query since PK=seasonId)."""
-    # V2 schema: Orders table has PK=seasonId, SK=orderId
+def _get_campaign_orders(table: Any, campaign_id: str) -> list[Dict[str, Any]]:
+    """Get all orders for a campaign (V2: Direct PK query since PK=campaignId)."""
+    # V2 schema: Orders table has PK=campaignId, SK=orderId
     # No GSI needed - direct query on the partition key
     response = table.query(
-        KeyConditionExpression="seasonId = :season_id",
+        KeyConditionExpression="campaignId = :campaign_id",
         ExpressionAttributeValues={
-            ":season_id": season_id,
+            ":campaign_id": campaign_id,
         },
     )
 
@@ -195,7 +196,7 @@ def _format_address(address: Dict[str, Any] | None) -> str:
     return ", ".join(parts)
 
 
-def _generate_csv_report(season: Dict[str, Any], orders: list[Dict[str, Any]]) -> bytes:
+def _generate_csv_report(campaign: Dict[str, Any], orders: list[Dict[str, Any]]) -> bytes:
     """Generate CSV report with product columns."""
     import csv
     from io import StringIO
@@ -244,7 +245,7 @@ def _generate_csv_report(season: Dict[str, Any], orders: list[Dict[str, Any]]) -
     return output.getvalue().encode("utf-8")
 
 
-def _generate_excel_report(season: Dict[str, Any], orders: list[Dict[str, Any]]) -> bytes:
+def _generate_excel_report(campaign: Dict[str, Any], orders: list[Dict[str, Any]]) -> bytes:
     """Generate Excel report with product columns."""
     wb = Workbook()
     ws = wb.active

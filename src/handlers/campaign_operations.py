@@ -1,4 +1,4 @@
-"""Lambda resolver for season operations with prefill and share support."""
+"""Lambda resolver for campaign operations with prefill and share support."""
 
 import os
 import uuid
@@ -22,22 +22,22 @@ dynamodb = boto3.resource("dynamodb")
 dynamodb_client = boto3.client("dynamodb")
 
 # Multi-table design V2
-seasons_table_name = os.environ.get("SEASONS_TABLE_NAME", "kernelworx-campaigns-v2-ue1-dev")
+campaigns_table_name = os.environ.get("CAMPAIGNS_TABLE_NAME", "kernelworx-campaigns-v2-ue1-dev")
 prefills_table_name = os.environ.get("PREFILLS_TABLE_NAME", "kernelworx-campaign-prefills-ue1-dev")
 shares_table_name = os.environ.get("SHARES_TABLE_NAME", "kernelworx-shares-v2-ue1-dev")
 profiles_table_name = os.environ.get("PROFILES_TABLE_NAME", "kernelworx-profiles-v2-ue1-dev")
 
-seasons_table = dynamodb.Table(seasons_table_name)
+campaigns_table = dynamodb.Table(campaigns_table_name)
 prefills_table = dynamodb.Table(prefills_table_name)
 shares_table = dynamodb.Table(shares_table_name)
 profiles_table = dynamodb.Table(profiles_table_name)
 
 
-def _build_unit_season_key(
-    unit_type: str, unit_number: int, city: str, state: str, season_name: str, season_year: int
+def _build_unit_campaign_key(
+    unit_type: str, unit_number: int, city: str, state: str, campaign_name: str, campaign_year: int
 ) -> str:
-    """Build the GSI3 partition key for unit+season queries."""
-    return f"{unit_type}#{unit_number}#{city}#{state}#{season_name}#{season_year}"
+    """Build the GSI3 partition key for unit+campaign queries."""
+    return f"{unit_type}#{unit_number}#{city}#{state}#{campaign_name}#{campaign_year}"
 
 
 def _get_prefill(prefill_code: str) -> Optional[Dict[str, Any]]:
@@ -66,25 +66,25 @@ def _get_profile(profile_id: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-def create_season(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+def create_campaign(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
-    Create a new season with optional prefill support and share creation.
+    Create a new campaign with optional prefill support and share creation.
 
     This handler supports:
-    1. Creating a season with explicitly provided unit fields
-    2. Creating a season from a campaign prefill (prefillCode)
+    1. Creating a campaign with explicitly provided unit fields
+    2. Creating a campaign from a campaign prefill (prefillCode)
     3. Optionally creating a READ share with the prefill creator (shareWithCreator)
 
     When unit fields (unitType, unitNumber, city, state) are provided,
-    the season is indexed in GSI3 for unit-based queries.
+    the campaign is indexed in GSI3 for unit-based queries.
 
     Args:
         event: AppSync resolver event with arguments:
-            - profileId: ID! - The profile to create the season for
-            - seasonName: String - Season name (from input or prefill)
-            - seasonYear: Int - Season year (from input or prefill)
-            - startDate: AWSDateTime - Season start date
-            - endDate: AWSDateTime - Optional season end date
+            - profileId: ID! - The profile to create the campaign for
+            - campaignName: String - Campaign name (from input or prefill)
+            - campaignYear: Int - Campaign year (from input or prefill)
+            - startDate: AWSDateTime - Campaign start date
+            - endDate: AWSDateTime - Optional campaign end date
             - catalogId: ID - Catalog to use (from input or prefill)
             - unitType: String - Optional unit type
             - unitNumber: Int - Optional unit number
@@ -95,7 +95,7 @@ def create_season(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         context: Lambda context (unused)
 
     Returns:
-        Created Season object
+        Created Campaign object
     """
     try:
         # Extract input
@@ -103,7 +103,7 @@ def create_season(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         caller_account_id = event["identity"]["sub"]
         profile_id = inp["profileId"]
 
-        logger.info(f"Creating season for profile {profile_id}, caller {caller_account_id}")
+        logger.info(f"Creating campaign for profile {profile_id}, caller {caller_account_id}")
 
         # Step 1: Verify caller has write access to the profile
         if not check_profile_access(
@@ -112,7 +112,7 @@ def create_season(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             required_permission="WRITE",
         ):
             logger.warning(f"Access denied for {caller_account_id} to profile {profile_id}")
-            raise PermissionError("You do not have permission to create a season for this profile")
+            raise PermissionError("You do not have permission to create a campaign for this profile")
 
         # Step 2: Get the profile to verify it exists
         profile = _get_profile(profile_id)
@@ -132,10 +132,10 @@ def create_season(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 raise ValueError(f"Campaign prefill {prefill_code} is no longer active")
             logger.info(f"Using prefill {prefill_code} from creator {prefill.get('createdBy')}")
 
-        # Step 4: Determine season values (prefer prefill over input, but input can override dates)
+        # Step 4: Determine campaign values (prefer prefill over input, but input can override dates)
         if prefill:
-            season_name = prefill["campaignName"]
-            season_year = prefill["campaignYear"]
+            campaign_name = prefill["campaignName"]
+            campaign_year = prefill["campaignYear"]
             catalog_id = prefill["catalogId"]
             unit_type = prefill["unitType"]
             unit_number = prefill["unitNumber"]
@@ -145,8 +145,8 @@ def create_season(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             start_date = inp.get("startDate") or prefill.get("startDate")
             end_date = inp.get("endDate") or prefill.get("endDate")
         else:
-            season_name = inp.get("campaignName")
-            season_year = inp.get("campaignYear")
+            campaign_name = inp.get("campaignName")
+            campaign_year = inp.get("campaignYear")
             catalog_id = inp.get("catalogId")
             unit_type = inp.get("unitType")
             unit_number = inp.get("unitNumber")
@@ -156,9 +156,9 @@ def create_season(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             end_date = inp.get("endDate")
 
         # Step 5: Validate required fields
-        if not season_name:
+        if not campaign_name:
             raise ValueError("campaignName is required")
-        if not season_year:
+        if not campaign_year:
             raise ValueError("campaignYear is required")
         if not catalog_id:
             raise ValueError("catalogId is required")
@@ -178,14 +178,13 @@ def create_season(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         campaign_id = f"CAMPAIGN#{uuid.uuid4()}"
         now = datetime.now(timezone.utc).isoformat()
 
-        # Step 7: Build season item
-        season_item: Dict[str, Any] = {
-            "PK": profile_id,  # DynamoDB partition key
-            "SK": campaign_id,  # DynamoDB sort key
-            "profileId": profile_id,
-            "campaignId": campaign_id,
-            "campaignName": season_name,
-            "campaignYear": season_year,
+        # Step 7: Build campaign item
+        campaign_item: Dict[str, Any] = {
+            "profileId": profile_id,  # DynamoDB partition key (named "profileId" in table)
+            "campaignId": campaign_id,  # DynamoDB sort key (named "campaignId" in table, contains campaign data)
+            "campaignId": campaign_id,  # Application field for campaign ID
+            "campaignName": campaign_name,
+            "campaignYear": campaign_year,
             "startDate": start_date,
             "catalogId": catalog_id,
             "createdAt": now,
@@ -193,33 +192,33 @@ def create_season(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         }
 
         if end_date:
-            season_item["endDate"] = end_date
+            campaign_item["endDate"] = end_date
 
         # Add unit fields if present
         if unit_type:
-            season_item["unitType"] = unit_type
-            season_item["unitNumber"] = unit_number
-            season_item["city"] = city
-            season_item["state"] = state
+            campaign_item["unitType"] = unit_type
+            campaign_item["unitNumber"] = unit_number
+            campaign_item["city"] = city
+            campaign_item["state"] = state
             # Build GSI3 key for unit-based queries
-            season_item["unitSeasonKey"] = _build_unit_season_key(
-                unit_type, unit_number, city, state, season_name, season_year
+            campaign_item["unitCampaignKey"] = _build_unit_campaign_key(
+                unit_type, unit_number, city, state, campaign_name, campaign_year
             )
 
         # Store prefillCode reference if used
         if prefill_code:
-            season_item["prefillCode"] = prefill_code
+            campaign_item["prefillCode"] = prefill_code
 
         # Step 8: Build transaction items
         transact_items: List[Dict[str, Any]] = []
 
-        # Convert season item to DynamoDB format
-        season_dynamo = {k: _to_dynamo_value(v) for k, v in season_item.items()}
+        # Convert campaign item to DynamoDB format
+        campaign_dynamo = {k: _to_dynamo_value(v) for k, v in campaign_item.items()}
         transact_items.append(
             {
                 "Put": {
-                    "TableName": seasons_table_name,
-                    "Item": season_dynamo,
+                    "TableName": campaigns_table_name,
+                    "Item": campaign_dynamo,
                 }
             }
         )
@@ -286,8 +285,8 @@ def create_season(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             else:
                 raise
 
-        # Return the created season
-        return season_item
+        # Return the created campaign
+        return campaign_item
 
     except PermissionError as e:
         logger.warning(f"Permission error: {str(e)}")
@@ -296,7 +295,7 @@ def create_season(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         logger.warning(f"Validation error: {str(e)}")
         raise
     except Exception as e:
-        logger.error(f"Error creating season: {str(e)}", exc_info=True)
+        logger.error(f"Error creating campaign: {str(e)}", exc_info=True)
         raise
 
 

@@ -1,5 +1,5 @@
 /**
- * SeasonSummaryTiles - Summary statistics tiles for a season
+ * CampaignSummaryTiles - Summary statistics tiles for a campaign
  *
  * Displays key metrics:
  * - Total Orders
@@ -42,23 +42,23 @@ interface Order {
   totalAmount: number;
 }
 
-interface SeasonSummaryTilesProps {
+interface CampaignSummaryTilesProps {
   campaignId: string;
 }
 
-export const SeasonSummaryTiles: React.FC<SeasonSummaryTilesProps> = ({
+export const CampaignSummaryTiles: React.FC<CampaignSummaryTilesProps> = ({
   campaignId,
 }) => {
   const {
     data: ordersData,
     loading,
     error,
-  } = useQuery<{ listOrdersBySeason: Order[] }>(LIST_ORDERS_BY_CAMPAIGN, {
+  } = useQuery<{ listOrdersByCampaign: Order[] }>(LIST_ORDERS_BY_CAMPAIGN, {
     variables: { campaignId },
     skip: !campaignId,
   });
 
-  const orders = ordersData?.listOrdersBySeason || [];
+  const orders = ordersData?.listOrdersByCampaign || [];
 
   // Calculate statistics
   const totalOrders = orders.length;

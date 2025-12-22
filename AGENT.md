@@ -110,7 +110,7 @@ open htmlcov/index.html
 - Use `moto` for mocking AWS services (DynamoDB, S3, SNS/SES, EventBridge)
 - Use `pytest` fixtures for common test data
 - Mock external API calls (AppSync, Cognito)
-- Create comprehensive test fixtures for accounts, profiles, seasons, orders
+- Create comprehensive test fixtures for accounts, profiles, campaigns, orders
 
 ### 3. TypeScript/React Testing Requirements
 
@@ -182,8 +182,8 @@ Before claiming work is complete:
 
 **Unit/Component Tests** (`src/**/__tests__/`):
 - Test all pages (LoginPage, ProfilesPage, OrdersPage, etc.)
-- Test all form components (OrderEditorDialog, profile/season dialogs)
-- Test all list components (ProfileList, SeasonList, OrderList)
+- Test all form components (OrderEditorDialog, profile/campaign dialogs)
+- Test all list components (ProfileList, CampaignList, OrderList)
 - Test AuthProvider and authentication flows
 - Test Apollo Client error handling
 - Test authorization-based UI rendering (owner vs shared permissions)
@@ -241,14 +241,14 @@ The project initially had 15 Lambda functions. After Phase 1 and Phase 2 impleme
 Replace with VTL/JS/Pipeline resolvers. See `TODO_SIMPLIFY_LAMBDA.md` for detailed migration plan.
 
 **Quick Wins (VTL/JS)** - ✅ COMPLETED:
-- ✅ `list-orders-by-season` → VTL Query (DEPLOYED)
+- ✅ `list-orders-by-campaign` → VTL Query (DEPLOYED)
 - ✅ `revoke-share` → VTL DeleteItem (DEPLOYED)
 - ⏸️ `create-invite` → JS resolver (DEFERRED - kept as Lambda due to AppSync JS issues)
 
 **Pipeline Resolvers** - ✅ COMPLETED:
-- ✅ `update-season` → Query GSI7 → UpdateItem (DEPLOYED)
+- ✅ `update-campaign` → Query GSI7 → UpdateItem (DEPLOYED)
 - ✅ `update-order` → Query GSI6 → UpdateItem (DEPLOYED)
-- ✅ `delete-season` → Query GSI7 → DeleteItem (DEPLOYED)
+- ✅ `delete-campaign` → Query GSI7 → DeleteItem (DEPLOYED)
 - ✅ `delete-order` → Query GSI6 → DeleteItem (DEPLOYED)
 - `delete-order` → Query GSI6 → DeleteItem
 - `create-order` → GetItem catalog → PutItem order (with JS for line item enrichment)
@@ -263,7 +263,7 @@ Replace with VTL/JS/Pipeline resolvers. See `TODO_SIMPLIFY_LAMBDA.md` for detail
     "query": {
         "expression": "PK = :pk AND begins_with(SK, :sk)",
         "expressionValues": {
-            ":pk": $util.dynamodb.toDynamoDBJson($ctx.args.seasonId),
+            ":pk": $util.dynamodb.toDynamoDBJson($ctx.args.campaignId),
             ":sk": $util.dynamodb.toDynamoDBJson("ORDER#")
         }
     }
@@ -295,9 +295,9 @@ export function response(ctx) {
 ```python
 # In CDK - create pipeline with two functions
 pipeline = api.create_resolver(
-    "UpdateSeasonPipeline",
+    "UpdateCampaignPipeline",
     type_name="Mutation",
-    field_name="updateSeason",
+    field_name="updateCampaign",
     pipeline_config=[lookup_function, update_function],
     # request/response templates pass data between functions
 )

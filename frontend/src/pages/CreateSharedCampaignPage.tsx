@@ -321,10 +321,10 @@ export const CreateSharedCampaignPage: React.FC = () => {
 
           <Divider />
 
-          {/* Season Information */}
+          {/* Campaign Information */}
           <Box>
             <Typography variant="h6" gutterBottom>
-              Season Information
+              Campaign Information
             </Typography>
             <Stack spacing={2}>
               <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>

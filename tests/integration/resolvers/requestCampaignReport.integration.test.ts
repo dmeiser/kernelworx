@@ -9,7 +9,7 @@ import { deleteTestAccounts } from '../setup/testData';
  * Integration tests for requestCampaignReport mutation (Lambda resolver)
  * 
  * Test Data Setup:
- * - TEST_OWNER_EMAIL: Owner of profile/season (can request reports)
+ * - TEST_OWNER_EMAIL: Owner of profile/campaigngn (can request reports)
  * - TEST_CONTRIBUTOR_EMAIL: Has WRITE access (can request reports)
  * - TEST_READONLY_EMAIL: Has READ access (can request reports)
  * 
@@ -17,9 +17,9 @@ import { deleteTestAccounts } from '../setup/testData';
  * - Report generation for different users with different access levels
  * - Report URL generation and format
  * - Authorization (owner, contributors, and READ users can all request reports)
- * - Error handling (invalid season, unauthorized access)
+ * - Error handling (invalid campaigngn, unauthorized access)
  * 
- * Note: These tests create their own test data (profile, season, catalog, orders)
+ * Note: These tests create their own test data (profile, campaigngn, catalog, orders)
  * and clean up after themselves.
  */
 
@@ -133,7 +133,7 @@ const REVOKE_SHARE = gql`
 `;
 
 describe('requestCampaignReport Integration Tests', () => {
-  const SUITE_ID = 'request-season-report';
+  const SUITE_ID = 'request-campaigngn-report';
   
   let ownerClient: any;
   let contributorClient: any;
@@ -141,7 +141,7 @@ describe('requestCampaignReport Integration Tests', () => {
 
   let testProfileId: string;
   let testCatalogId: string;
-  let testSeasonId: string;
+  let testCampaignId: string;
   let testOrderId1: string;
   let testOrderId2: string;
   let contributorShareId: string;
@@ -204,13 +204,13 @@ describe('requestCampaignReport Integration Tests', () => {
     productId1 = catalogResponse.data.createCatalog.products[0].productId;
     productId2 = catalogResponse.data.createCatalog.products[1].productId;
 
-    // Create test season
-    const seasonResponse = await ownerClient.mutate({
+    // Create test campaigngn
+    const campaignResponse = await ownerClient.mutate({
       mutation: CREATE_CAMPAIGN,
       variables: {
         input: {
           profileId: testProfileId,
-          campaignName: 'Report Test Season 2024',
+          campaignName: 'Report Test Campaigngn 2024',
           campaignYear: 2025,
           catalogId: testCatalogId,
           startDate: '2024-01-01T00:00:00.000Z',
@@ -218,7 +218,7 @@ describe('requestCampaignReport Integration Tests', () => {
         },
       },
     });
-    testSeasonId = seasonResponse.data.createCampaign.campaignId;
+    testCampaignId = campaignResponse.data.createCampaign.campaignId;
 
     // Create test orders
     const order1Response = await ownerClient.mutate({
@@ -226,7 +226,7 @@ describe('requestCampaignReport Integration Tests', () => {
       variables: {
         input: {
           profileId: testProfileId,
-          campaignId: testSeasonId,
+          campaignId: testCampaignId,
           customerName: 'Test Customer 1',
           customerPhone: '555-0101',
           orderDate: '2024-06-01T12:00:00.000Z',
@@ -247,7 +247,7 @@ describe('requestCampaignReport Integration Tests', () => {
       variables: {
         input: {
           profileId: testProfileId,
-          campaignId: testSeasonId,
+          campaignId: testCampaignId,
           customerName: 'Test Customer 2',
           customerPhone: '555-0102',
           orderDate: '2024-06-15T14:30:00.000Z',
@@ -317,11 +317,11 @@ describe('requestCampaignReport Integration Tests', () => {
         });
       }
       
-      // 3. Delete season
-      if (testSeasonId) {
+      // 3. Delete campaigngn
+      if (testCampaignId) {
         await ownerClient.mutate({
           mutation: DELETE_CAMPAIGN,
-          variables: { campaignId: testSeasonId },
+          variables: { campaignId: testCampaignId },
         });
       }
       
@@ -353,19 +353,19 @@ describe('requestCampaignReport Integration Tests', () => {
 
 
   describe('Owner Authorization', () => {
-    test('should allow owner to request season report with default format (xlsx)', async () => {
+    test('should allow owner to request campaign report with default format (xlsx)', async () => {
       const result = await ownerClient.mutate({
         mutation: REQUEST_CAMPAIGN_REPORT,
         variables: {
           input: {
-            campaignId: testSeasonId,
+            campaignId: testCampaignId,
           },
         },
       });
 
       expect(result.data.requestCampaignReport).toBeDefined();
       expect(result.data.requestCampaignReport.reportId).toBeDefined();
-      expect(result.data.requestCampaignReport.campaignId).toBe(testSeasonId);
+      expect(result.data.requestCampaignReport.campaignId).toBe(testCampaignId);
       expect(result.data.requestCampaignReport.profileId).toBe(testProfileId);
       expect(result.data.requestCampaignReport.reportUrl).toBeDefined();
       expect(result.data.requestCampaignReport.reportUrl).toMatch(/^https?:\/\//);
@@ -382,12 +382,12 @@ describe('requestCampaignReport Integration Tests', () => {
       expect(diffDays).toBeLessThan(7.1);
     });
 
-    test('should allow owner to request season report with explicit xlsx format', async () => {
+    test('should allow owner to request campaign report with explicit xlsx format', async () => {
       const result = await ownerClient.mutate({
         mutation: REQUEST_CAMPAIGN_REPORT,
         variables: {
           input: {
-            campaignId: testSeasonId,
+            campaignId: testCampaignId,
             format: 'xlsx',
           },
         },
@@ -398,12 +398,12 @@ describe('requestCampaignReport Integration Tests', () => {
       expect(result.data.requestCampaignReport.status).toBe('COMPLETED');
     });
 
-    test('should allow owner to request season report with csv format', async () => {
+    test('should allow owner to request campaign report with csv format', async () => {
       const result = await ownerClient.mutate({
         mutation: REQUEST_CAMPAIGN_REPORT,
         variables: {
           input: {
-            campaignId: testSeasonId,
+            campaignId: testCampaignId,
             format: 'csv',
           },
         },
@@ -416,19 +416,19 @@ describe('requestCampaignReport Integration Tests', () => {
   });
 
   describe('Contributor Authorization (WRITE access)', () => {
-    test('should allow contributor with WRITE access to request season report', async () => {
+    test('should allow contributor with WRITE access to request campaign report', async () => {
       const result = await contributorClient.mutate({
         mutation: REQUEST_CAMPAIGN_REPORT,
         variables: {
           input: {
-            campaignId: testSeasonId,
+            campaignId: testCampaignId,
           },
         },
       });
 
       expect(result.data.requestCampaignReport).toBeDefined();
       expect(result.data.requestCampaignReport.reportId).toBeDefined();
-      expect(result.data.requestCampaignReport.campaignId).toBe(testSeasonId);
+      expect(result.data.requestCampaignReport.campaignId).toBe(testCampaignId);
       expect(result.data.requestCampaignReport.profileId).toBe(testProfileId);
       expect(result.data.requestCampaignReport.reportUrl).toBeDefined();
       expect(result.data.requestCampaignReport.status).toBe('COMPLETED');
@@ -436,19 +436,19 @@ describe('requestCampaignReport Integration Tests', () => {
   });
 
   describe('Read-Only User Authorization (READ access)', () => {
-    test('should allow read-only user with READ access to request season report', async () => {
+    test('should allow read-only user with READ access to request campaign report', async () => {
       const result = await readonlyClient.mutate({
         mutation: REQUEST_CAMPAIGN_REPORT,
         variables: {
           input: {
-            campaignId: testSeasonId,
+            campaignId: testCampaignId,
           },
         },
       });
 
       expect(result.data.requestCampaignReport).toBeDefined();
       expect(result.data.requestCampaignReport.reportId).toBeDefined();
-      expect(result.data.requestCampaignReport.campaignId).toBe(testSeasonId);
+      expect(result.data.requestCampaignReport.campaignId).toBe(testCampaignId);
       expect(result.data.requestCampaignReport.profileId).toBe(testProfileId);
       expect(result.data.requestCampaignReport.reportUrl).toBeDefined();
       expect(result.data.requestCampaignReport.status).toBe('COMPLETED');
@@ -456,13 +456,13 @@ describe('requestCampaignReport Integration Tests', () => {
   });
 
   describe('Unauthorized Access', () => {
-    test('should reject request for season that does not exist', async () => {
+    test('should reject request for campaign that does not exist', async () => {
       await expect(
         ownerClient.mutate({
           mutation: REQUEST_CAMPAIGN_REPORT,
           variables: {
             input: {
-              campaignId: 'SEASON#nonexistent',
+              campaignId: 'CAMPAIGNGN#nonexistent',
             },
           },
         })
@@ -480,7 +480,7 @@ describe('requestCampaignReport Integration Tests', () => {
         mutation: REQUEST_CAMPAIGN_REPORT,
         variables: {
           input: {
-            campaignId: testSeasonId,
+            campaignId: testCampaignId,
           },
         },
       });
@@ -492,7 +492,7 @@ describe('requestCampaignReport Integration Tests', () => {
         mutation: REQUEST_CAMPAIGN_REPORT,
         variables: {
           input: {
-            campaignId: testSeasonId,
+            campaignId: testCampaignId,
           },
         },
       });
@@ -509,7 +509,7 @@ describe('requestCampaignReport Integration Tests', () => {
         mutation: REQUEST_CAMPAIGN_REPORT,
         variables: {
           input: {
-            campaignId: testSeasonId,
+            campaignId: testCampaignId,
           },
         },
       });
@@ -522,12 +522,12 @@ describe('requestCampaignReport Integration Tests', () => {
         mutation: REQUEST_CAMPAIGN_REPORT,
         variables: {
           input: {
-            campaignId: testSeasonId,
+            campaignId: testCampaignId,
           },
         },
       });
 
-      expect(result.data.requestCampaignReport.campaignId).toBe(testSeasonId);
+      expect(result.data.requestCampaignReport.campaignId).toBe(testCampaignId);
     });
   });
 
@@ -537,7 +537,7 @@ describe('requestCampaignReport Integration Tests', () => {
         mutation: REQUEST_CAMPAIGN_REPORT,
         variables: {
           input: {
-            campaignId: testSeasonId,
+            campaignId: testCampaignId,
           },
         },
       });
@@ -555,7 +555,7 @@ describe('requestCampaignReport Integration Tests', () => {
         mutation: REQUEST_CAMPAIGN_REPORT,
         variables: {
           input: {
-            campaignId: testSeasonId,
+            campaignId: testCampaignId,
           },
         },
       });
@@ -563,8 +563,8 @@ describe('requestCampaignReport Integration Tests', () => {
       const reportUrl = result.data.requestCampaignReport.reportUrl;
       // URL will have # encoded as %23
       const encodedProfileId = encodeURIComponent(testProfileId);
-      const encodedSeasonId = encodeURIComponent(testSeasonId);
-      expect(reportUrl).toContain(`reports/${encodedProfileId}/${encodedSeasonId}/`);
+      const encodedCampaignId = encodeURIComponent(testCampaignId);
+      expect(reportUrl).toContain(`reports/${encodedProfileId}/${encodedCampaignId}/`);
     });
   });
 
@@ -574,7 +574,7 @@ describe('requestCampaignReport Integration Tests', () => {
         mutation: REQUEST_CAMPAIGN_REPORT,
         variables: {
           input: {
-            campaignId: testSeasonId,
+            campaignId: testCampaignId,
             format: 'CSV',
           },
         },
@@ -589,7 +589,7 @@ describe('requestCampaignReport Integration Tests', () => {
         mutation: REQUEST_CAMPAIGN_REPORT,
         variables: {
           input: {
-            campaignId: testSeasonId,
+            campaignId: testCampaignId,
             format: 'XLSX',
           },
         },
@@ -604,7 +604,7 @@ describe('requestCampaignReport Integration Tests', () => {
         mutation: REQUEST_CAMPAIGN_REPORT,
         variables: {
           input: {
-            campaignId: testSeasonId,
+            campaignId: testCampaignId,
             format: 'pdf', // Invalid format
           },
         },
@@ -617,14 +617,14 @@ describe('requestCampaignReport Integration Tests', () => {
   });
 
   describe('Performance', () => {
-    test('Performance: Requesting report for season with many orders', async () => {
-      // Arrange: Create a season with many orders
-      const performanceSeasonResponse = await ownerClient.mutate({
+    test('Performance: Requesting report for campaign with many orders', async () => {
+      // Arrange: Create a campaign with many orders
+      const performanceCampaignResponse = await ownerClient.mutate({
         mutation: CREATE_CAMPAIGN,
         variables: {
           input: {
             profileId: testProfileId,
-            campaignName: 'Performance Test Season',
+            campaignName: 'Performance Test Campaigngn',
             campaignYear: 2025,
             catalogId: testCatalogId,
             startDate: '2024-01-01T00:00:00.000Z',
@@ -632,7 +632,7 @@ describe('requestCampaignReport Integration Tests', () => {
           },
         },
       });
-      const performanceSeasonId = performanceSeasonResponse.data.createCampaign.campaignId;
+      const performanceCampaignId = performanceCampaignResponse.data.createCampaign.campaignId;
       const orderIds: string[] = [];
 
       try {
@@ -644,7 +644,7 @@ describe('requestCampaignReport Integration Tests', () => {
             variables: {
               input: {
                 profileId: testProfileId,
-                campaignId: performanceSeasonId,
+                campaignId: performanceCampaignId,
                 customerName: `Performance Customer ${i + 1}`,
                 customerPhone: `555-${String(i).padStart(4, '0')}`,
                 orderDate: `2024-0${Math.floor(i / 10) + 1}-${String((i % 28) + 1).padStart(2, '0')}T12:00:00.000Z`,
@@ -667,7 +667,7 @@ describe('requestCampaignReport Integration Tests', () => {
           mutation: REQUEST_CAMPAIGN_REPORT,
           variables: {
             input: {
-              campaignId: performanceSeasonId,
+              campaignId: performanceCampaignId,
             },
           },
         });
@@ -686,7 +686,7 @@ describe('requestCampaignReport Integration Tests', () => {
         console.log(`Report generation for ${orderCount} orders took ${reportGenerationTime}ms`);
 
       } finally {
-        // Cleanup: Delete orders and season
+        // Cleanup: Delete orders and campaigngn
         for (const orderId of orderIds) {
           await ownerClient.mutate({
             mutation: DELETE_ORDER,
@@ -695,23 +695,23 @@ describe('requestCampaignReport Integration Tests', () => {
         }
         await ownerClient.mutate({
           mutation: DELETE_CAMPAIGN,
-          variables: { campaignId: performanceSeasonId },
+          variables: { campaignId: performanceCampaignId },
         });
       }
     }, 120000); // 2 minute timeout for this performance test (includes 25 order creations)
   });
 
   describe('Edge Cases', () => {
-    let emptySeasonId: string;
+    let emptyCampaignId: string;
 
     beforeAll(async () => {
-      // Create a season with no orders for empty report testing
-      const emptySeasonResponse = await ownerClient.mutate({
+      // Create a campaign with no orders for empty report testing
+      const emptyCampaignResponse = await ownerClient.mutate({
         mutation: CREATE_CAMPAIGN,
         variables: {
           input: {
             profileId: testProfileId,
-            campaignName: 'Empty Season - No Orders',
+            campaignName: 'Empty Campaigngn - No Orders',
             campaignYear: 2025,
             catalogId: testCatalogId,
             startDate: '2024-01-01T00:00:00.000Z',
@@ -719,32 +719,32 @@ describe('requestCampaignReport Integration Tests', () => {
           },
         },
       });
-      emptySeasonId = emptySeasonResponse.data.createCampaign.campaignId;
+      emptyCampaignId = emptyCampaignResponse.data.createCampaign.campaignId;
     });
 
     afterAll(async () => {
-      // Clean up empty season
-      if (emptySeasonId) {
+      // Clean up empty campaigngn
+      if (emptyCampaignId) {
         await ownerClient.mutate({
           mutation: DELETE_CAMPAIGN,
-          variables: { campaignId: emptySeasonId },
+          variables: { campaignId: emptyCampaignId },
         });
       }
     });
 
-    test('should generate report for season with no orders', async () => {
+    test('should generate report for campaign with no orders', async () => {
       const result = await ownerClient.mutate({
         mutation: REQUEST_CAMPAIGN_REPORT,
         variables: {
           input: {
-            campaignId: emptySeasonId,
+            campaignId: emptyCampaignId,
           },
         },
       });
 
       expect(result.data.requestCampaignReport).toBeDefined();
       expect(result.data.requestCampaignReport.reportId).toBeDefined();
-      expect(result.data.requestCampaignReport.campaignId).toBe(emptySeasonId);
+      expect(result.data.requestCampaignReport.campaignId).toBe(emptyCampaignId);
       expect(result.data.requestCampaignReport.profileId).toBe(testProfileId);
       expect(result.data.requestCampaignReport.reportUrl).toBeDefined();
       expect(result.data.requestCampaignReport.status).toBe('COMPLETED');
@@ -752,12 +752,12 @@ describe('requestCampaignReport Integration Tests', () => {
       expect(result.data.requestCampaignReport.reportUrl).toMatch(/^https:\/\/.*\.s3(\..*)?\.amazonaws\.com/);
     });
 
-    test('should generate CSV report for season with no orders', async () => {
+    test('should generate CSV report for campaign with no orders', async () => {
       const result = await ownerClient.mutate({
         mutation: REQUEST_CAMPAIGN_REPORT,
         variables: {
           input: {
-            campaignId: emptySeasonId,
+            campaignId: emptyCampaignId,
             format: 'csv',
           },
         },
@@ -767,16 +767,16 @@ describe('requestCampaignReport Integration Tests', () => {
       expect(result.data.requestCampaignReport.reportUrl).toContain('.csv');
     });
 
-    test('should handle concurrent report requests for same season', async () => {
+    test('should handle concurrent report requests for same campaigngn', async () => {
       // Fire off multiple concurrent requests - use different formats to ensure unique S3 keys
       const concurrentRequests = [
         ownerClient.mutate({
           mutation: REQUEST_CAMPAIGN_REPORT,
-          variables: { input: { campaignId: testSeasonId, format: 'xlsx' } },
+          variables: { input: { campaignId: testCampaignId, format: 'xlsx' } },
         }),
         ownerClient.mutate({
           mutation: REQUEST_CAMPAIGN_REPORT,
-          variables: { input: { campaignId: testSeasonId, format: 'csv' } },
+          variables: { input: { campaignId: testCampaignId, format: 'csv' } },
         }),
       ];
 
@@ -806,14 +806,14 @@ describe('requestCampaignReport Integration Tests', () => {
         mutation: REQUEST_CAMPAIGN_REPORT,
         variables: {
           input: {
-            campaignId: testSeasonId,
+            campaignId: testCampaignId,
           },
         },
       });
 
       // Verify report metadata is correct
       expect(result.data.requestCampaignReport).toBeDefined();
-      expect(result.data.requestCampaignReport.campaignId).toBe(testSeasonId);
+      expect(result.data.requestCampaignReport.campaignId).toBe(testCampaignId);
       expect(result.data.requestCampaignReport.profileId).toBe(testProfileId);
       expect(result.data.requestCampaignReport.createdAt).toBeDefined();
       expect(result.data.requestCampaignReport.expiresAt).toBeDefined();

@@ -1,8 +1,8 @@
 /**
- * ProfileCard component - Display a single scout profile with latest season stats
+ * ProfileCard component - Display a single scout profile with latest campaign stats
  *
- * Note: Unit fields have been moved to Season level as part of the Campaign Prefill
- * refactor. Unit information is now displayed on seasons, not profiles.
+ * Note: Unit fields have been moved to Campaign level as part of the Campaign Prefill
+ * refactor. Unit information is now displayed on campaigns, not profiles.
  */
 
 import React from "react";
@@ -71,7 +71,7 @@ export const ProfileCard: React.FC<ProfileCardProps> = ({
         })[0]
       : null;
 
-  const handleViewSeasons = () => {
+  const handleViewCampaigns = () => {
     navigate(`/scouts/${encodeURIComponent(profileId)}/campaigns`);
   };
 
@@ -204,7 +204,7 @@ export const ProfileCard: React.FC<ProfileCardProps> = ({
           size="small"
           variant="outlined"
           startIcon={<ViewIcon />}
-          onClick={handleViewSeasons}
+          onClick={handleViewCampaigns}
         >
           View All Campaigns
         </Button>

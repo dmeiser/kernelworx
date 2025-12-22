@@ -4,6 +4,7 @@
  * Tests toast notifications from GraphQL error events
  */
 
+import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import { Toast } from '../src/components/Toast';

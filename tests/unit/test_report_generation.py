@@ -1,6 +1,6 @@
 """Unit tests for report generation Lambda handler.
 
-Updated for multi-table design (seasons, orders tables).
+Updated for multi-table design (campaigns, orders tables).
 """
 
 import os
@@ -13,7 +13,7 @@ import boto3
 import openpyxl
 import pytest
 
-from src.handlers.report_generation import request_season_report
+from src.handlers.report_generation import request_campaign_report
 
 
 def get_orders_table() -> Any:
@@ -24,13 +24,13 @@ def get_orders_table() -> Any:
 
 @pytest.fixture
 def sample_orders(
-    dynamodb_table: Any, sample_profile_id: str, sample_season_id: str
+    dynamodb_table: Any, sample_profile_id: str, sample_campaign_id: str
 ) -> list[Dict[str, Any]]:
     """Sample order data for testing (multi-table design)."""
     orders = [
         {
             "orderId": "ORDER#order-1",
-            "seasonId": sample_season_id,
+            "campaignId": sample_campaign_id,  # DynamoDB schema uses campaignId as PK
             "profileId": sample_profile_id,
             "customerName": "John Doe",
             "customerPhone": "555-123-4567",
@@ -50,7 +50,7 @@ def sample_orders(
         },
         {
             "orderId": "ORDER#order-2",
-            "seasonId": sample_season_id,
+            "campaignId": sample_campaign_id,  # DynamoDB schema uses campaignId as PK
             "profileId": sample_profile_id,
             "customerName": "Jane Smith",
             "customerEmail": "jane@example.com",
@@ -71,18 +71,18 @@ def sample_orders(
     return orders
 
 
-class TestRequestSeasonReport:
-    """Tests for requestSeasonReport Lambda handler."""
+class TestRequestCampaignReport:
+    """Tests for requestCampaignReport Lambda handler."""
 
     def test_owner_can_generate_excel_report(
         self,
         dynamodb_table: Any,
         s3_bucket: Any,
         sample_profile: Dict[str, Any],
-        sample_season: Dict[str, Any],
+        sample_campaign: Dict[str, Any],
         sample_orders: list[Dict[str, Any]],
         sample_account_id: str,
-        sample_season_id: str,
+        sample_campaign_id: str,
         appsync_event: Dict[str, Any],
         lambda_context: Any,
     ) -> None:
@@ -90,11 +90,11 @@ class TestRequestSeasonReport:
         # Arrange
         event = {
             **appsync_event,
-            "arguments": {"input": {"seasonId": sample_season_id, "format": "xlsx"}},
+            "arguments": {"input": {"campaignId": sample_campaign_id, "format": "xlsx"}},
         }
 
         # Act
-        result = request_season_report(event, lambda_context)
+        result = request_campaign_report(event, lambda_context)
 
         # Assert
         assert "reportId" in result
@@ -128,9 +128,9 @@ class TestRequestSeasonReport:
         dynamodb_table: Any,
         s3_bucket: Any,
         sample_profile: Dict[str, Any],
-        sample_season: Dict[str, Any],
+        sample_campaign: Dict[str, Any],
         sample_orders: list[Dict[str, Any]],
-        sample_season_id: str,
+        sample_campaign_id: str,
         appsync_event: Dict[str, Any],
         lambda_context: Any,
     ) -> None:
@@ -138,11 +138,11 @@ class TestRequestSeasonReport:
         # Arrange
         event = {
             **appsync_event,
-            "arguments": {"input": {"seasonId": sample_season_id, "format": "csv"}},
+            "arguments": {"input": {"campaignId": sample_campaign_id, "format": "csv"}},
         }
 
         # Act
-        result = request_season_report(event, lambda_context)
+        result = request_campaign_report(event, lambda_context)
 
         # Assert
         assert result["status"] == "COMPLETED"
@@ -169,9 +169,9 @@ class TestRequestSeasonReport:
         s3_bucket: Any,
         sample_profile: Dict[str, Any],
         sample_profile_id: str,
-        sample_season: Dict[str, Any],
+        sample_campaign: Dict[str, Any],
         sample_orders: list[Dict[str, Any]],
-        sample_season_id: str,
+        sample_campaign_id: str,
         appsync_event: Dict[str, Any],
         lambda_context: Any,
         another_account_id: str,
@@ -191,11 +191,11 @@ class TestRequestSeasonReport:
         event = {
             **appsync_event,
             "identity": {"sub": another_account_id},
-            "arguments": {"input": {"seasonId": sample_season_id, "format": "xlsx"}},
+            "arguments": {"input": {"campaignId": sample_campaign_id, "format": "xlsx"}},
         }
 
         # Act
-        result = request_season_report(event, lambda_context)
+        result = request_campaign_report(event, lambda_context)
 
         # Assert
         assert result["status"] == "COMPLETED"
@@ -205,8 +205,8 @@ class TestRequestSeasonReport:
         dynamodb_table: Any,
         s3_bucket: Any,
         sample_profile: Dict[str, Any],
-        sample_season: Dict[str, Any],
-        sample_season_id: str,
+        sample_campaign: Dict[str, Any],
+        sample_campaign_id: str,
         appsync_event: Dict[str, Any],
         lambda_context: Any,
         another_account_id: str,
@@ -215,31 +215,31 @@ class TestRequestSeasonReport:
         event = {
             **appsync_event,
             "identity": {"sub": another_account_id},
-            "arguments": {"input": {"seasonId": sample_season_id, "format": "xlsx"}},
+            "arguments": {"input": {"campaignId": sample_campaign_id, "format": "xlsx"}},
         }
 
         # Act
-        result = request_season_report(event, lambda_context)
+        result = request_campaign_report(event, lambda_context)
 
         # Assert
         assert "errorCode" in result
         assert result["errorCode"] == "FORBIDDEN"
 
-    def test_nonexistent_season_returns_error(
+    def test_nonexistent_campaign_returns_error(
         self,
         dynamodb_table: Any,
         s3_bucket: Any,
         appsync_event: Dict[str, Any],
         lambda_context: Any,
     ) -> None:
-        """Test that requesting report for non-existent season returns error."""
+        """Test that requesting report for non-existent campaign returns error."""
         event = {
             **appsync_event,
-            "arguments": {"input": {"seasonId": "CAMPAIGN#nonexistent", "format": "xlsx"}},
+            "arguments": {"input": {"campaignId": "CAMPAIGN#nonexistent", "format": "xlsx"}},
         }
 
         # Act
-        result = request_season_report(event, lambda_context)
+        result = request_campaign_report(event, lambda_context)
 
         # Assert
         assert "errorCode" in result
@@ -250,20 +250,20 @@ class TestRequestSeasonReport:
         dynamodb_table: Any,
         s3_bucket: Any,
         sample_profile: Dict[str, Any],
-        sample_season: Dict[str, Any],
+        sample_campaign: Dict[str, Any],
         sample_orders: list[Dict[str, Any]],
-        sample_season_id: str,
+        sample_campaign_id: str,
         appsync_event: Dict[str, Any],
         lambda_context: Any,
     ) -> None:
         """Test that default format is xlsx when not specified."""
         event = {
             **appsync_event,
-            "arguments": {"input": {"seasonId": sample_season_id}},  # No format specified
+            "arguments": {"input": {"campaignId": sample_campaign_id}},  # No format specified
         }
 
         # Act
-        result = request_season_report(event, lambda_context)
+        result = request_campaign_report(event, lambda_context)
 
         # Assert
         assert result["status"] == "COMPLETED"
@@ -273,24 +273,24 @@ class TestRequestSeasonReport:
         objects = s3_bucket.list_objects_v2(Bucket=bucket_name)
         assert objects["Contents"][0]["Key"].endswith(".xlsx")
 
-    def test_empty_season_generates_report_with_no_orders(
+    def test_empty_campaign_generates_report_with_no_orders(
         self,
         dynamodb_table: Any,
         s3_bucket: Any,
         sample_profile: Dict[str, Any],
-        sample_season: Dict[str, Any],
-        sample_season_id: str,
+        sample_campaign: Dict[str, Any],
+        sample_campaign_id: str,
         appsync_event: Dict[str, Any],
         lambda_context: Any,
     ) -> None:
-        """Test that empty season (no orders) generates valid report."""
+        """Test that empty campaign (no orders) generates valid report."""
         event = {
             **appsync_event,
-            "arguments": {"input": {"seasonId": sample_season_id, "format": "csv"}},
+            "arguments": {"input": {"campaignId": sample_campaign_id, "format": "csv"}},
         }
 
         # Act
-        result = request_season_report(event, lambda_context)
+        result = request_campaign_report(event, lambda_context)
 
         # Assert
         assert result["status"] == "COMPLETED"
@@ -311,20 +311,20 @@ class TestRequestSeasonReport:
         dynamodb_table: Any,
         s3_bucket: Any,
         sample_profile: Dict[str, Any],
-        sample_season: Dict[str, Any],
+        sample_campaign: Dict[str, Any],
         sample_orders: list[Dict[str, Any]],
-        sample_season_id: str,
+        sample_campaign_id: str,
         appsync_event: Dict[str, Any],
         lambda_context: Any,
     ) -> None:
         """Test that pre-signed URL expires in 7 days."""
         event = {
             **appsync_event,
-            "arguments": {"input": {"seasonId": sample_season_id, "format": "xlsx"}},
+            "arguments": {"input": {"campaignId": sample_campaign_id, "format": "xlsx"}},
         }
 
         # Act
-        result = request_season_report(event, lambda_context)
+        result = request_campaign_report(event, lambda_context)
 
         # Assert - verify expiresAt is approximately 7 days from now
         expires_at = datetime.fromisoformat(result["expiresAt"].replace("Z", "+00:00"))
@@ -340,8 +340,8 @@ class TestRequestSeasonReport:
         dynamodb_table: Any,
         s3_bucket: Any,
         sample_profile: Dict[str, Any],
-        sample_season: Dict[str, Any],
-        sample_season_id: str,
+        sample_campaign: Dict[str, Any],
+        sample_campaign_id: str,
         appsync_event: Dict[str, Any],
         lambda_context: Any,
         monkeypatch: Any,
@@ -351,15 +351,15 @@ class TestRequestSeasonReport:
 
         event = {
             **appsync_event,
-            "arguments": {"input": {"seasonId": sample_season_id, "format": "xlsx"}},
+            "arguments": {"input": {"campaignId": sample_campaign_id, "format": "xlsx"}},
         }
 
-        # Mock get_seasons_table to raise an unexpected exception
+        # Mock get_campaigns_table to raise an unexpected exception
         with patch(
-            "src.handlers.report_generation.get_seasons_table",
+            "src.handlers.report_generation.get_campaigns_table",
             side_effect=ValueError("Unexpected error"),
         ):
-            result = request_season_report(event, lambda_context)
+            result = request_campaign_report(event, lambda_context)
 
         # Assert
         assert "errorCode" in result
@@ -371,22 +371,22 @@ class TestRequestSeasonReport:
         dynamodb_table: Any,
         s3_bucket: Any,
         sample_profile: Dict[str, Any],
-        sample_season: Dict[str, Any],
+        sample_campaign: Dict[str, Any],
         sample_orders: list[Dict[str, Any]],
-        sample_season_id: str,
+        sample_campaign_id: str,
         appsync_event: Dict[str, Any],
         lambda_context: Any,
     ) -> None:
         """Test Excel generation handles cells with problematic values gracefully."""
         event = {
             **appsync_event,
-            "arguments": {"input": {"seasonId": sample_season_id, "format": "xlsx"}},
+            "arguments": {"input": {"campaignId": sample_campaign_id, "format": "xlsx"}},
         }
 
         # This test indirectly exercises the except clause at line 290
         # by ensuring Excel generation completes successfully even with
         # various cell value types and edge cases in the actual data
-        result = request_season_report(event, lambda_context)
+        result = request_campaign_report(event, lambda_context)
 
         assert "reportId" in result
         assert result["status"] == "COMPLETED"
@@ -396,21 +396,21 @@ class TestRequestSeasonReport:
         dynamodb_table: Any,
         s3_bucket: Any,
         sample_profile: Dict[str, Any],
-        sample_season: Dict[str, Any],
+        sample_campaign: Dict[str, Any],
         sample_orders: list[Dict[str, Any]],
-        sample_season_id: str,
+        sample_campaign_id: str,
         appsync_event: Dict[str, Any],
         lambda_context: Any,
     ) -> None:
         """Test Excel generation handles merged cells that may lack column_letter attribute."""
         event = {
             **appsync_event,
-            "arguments": {"input": {"seasonId": sample_season_id, "format": "xlsx"}},
+            "arguments": {"input": {"campaignId": sample_campaign_id, "format": "xlsx"}},
         }
 
         # This test exercises the column_letter is None branch (line 285 continue)
         # in the auto-sizing columns logic for handling edge cases like MergedCells
-        result = request_season_report(event, lambda_context)
+        result = request_campaign_report(event, lambda_context)
 
         assert "reportId" in result
         assert result["status"] == "COMPLETED"

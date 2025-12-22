@@ -1,5 +1,5 @@
 /**
- * SeasonSummaryPage - High-level statistics and summary for a season
+ * CampaignSummaryPage - High-level statistics and summary for a campaign
  */
 
 import React from "react";
@@ -33,20 +33,20 @@ interface Order {
   totalAmount: number;
 }
 
-export const SeasonSummaryPage: React.FC = () => {
-  const { campaignId: encodedSeasonId } = useParams<{ campaignId: string }>();
-  const campaignId = encodedSeasonId ? decodeURIComponent(encodedSeasonId) : "";
+export const CampaignSummaryPage: React.FC = () => {
+  const { campaignId: encodedCampaignId } = useParams<{ campaignId: string }>();
+  const campaignId = encodedCampaignId ? decodeURIComponent(encodedCampaignId) : "";
 
   const {
     data: ordersData,
     loading,
     error,
-  } = useQuery<{ listOrdersBySeason: Order[] }>(LIST_ORDERS_BY_CAMPAIGN, {
+  } = useQuery<{ listOrdersByCampaign: Order[] }>(LIST_ORDERS_BY_CAMPAIGN, {
     variables: { campaignId },
     skip: !campaignId,
   });
 
-  const orders = ordersData?.listOrdersBySeason || [];
+  const orders = ordersData?.listOrdersByCampaign || [];
 
   // Calculate statistics
   const totalOrders = orders.length;
@@ -113,7 +113,7 @@ export const SeasonSummaryPage: React.FC = () => {
   return (
     <Box>
       <Typography variant="h5" gutterBottom>
-        Season Summary
+        Campaign Summary
       </Typography>
 
       {/* Key Metrics */}

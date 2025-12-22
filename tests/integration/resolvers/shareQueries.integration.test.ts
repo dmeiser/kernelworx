@@ -143,6 +143,11 @@ describe('Share Query Operations Integration Tests', () => {
     contributorAccountId = contributorAuth.accountId;
     readonlyAccountId = readonlyAuth.accountId;
 
+    // Clear Apollo caches to avoid state pollution from other tests
+    await ownerClient.cache.reset();
+    await contributorClient.cache.reset();
+    await readonlyClient.cache.reset();
+
     // Create test profile
     const { data: profileData }: any = await ownerClient.mutate({
       mutation: CREATE_SELLER_PROFILE,

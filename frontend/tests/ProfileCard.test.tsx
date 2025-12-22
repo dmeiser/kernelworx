@@ -92,7 +92,7 @@ describe('ProfileCard', () => {
     expect(screen.getByText('Read-only')).toBeInTheDocument();
   });
 
-  test('shows loading or empty state when no seasons loaded', () => {
+  test('shows loading or empty state when no campaigns loaded', () => {
     render(
       <MockedProvider mocks={[]}>
         <BrowserRouter>
@@ -106,7 +106,7 @@ describe('ProfileCard', () => {
       </MockedProvider>
     );
 
-    // Either loading spinner or "No seasons yet" should appear eventually
+    // Either loading spinner or "No campaigns yet" should appear eventually
     // For now, just verify the card renders without crashing
     expect(screen.getByText('Scout Epsilon')).toBeInTheDocument();
   });
@@ -128,7 +128,7 @@ describe('ProfileCard', () => {
     expect(screen.getByText('View All Campaigns')).toBeInTheDocument();
   });
 
-  test('navigates to all seasons page when View All Campaigns clicked', async () => {
+  test('navigates to all campaigns page when View All Campaigns clicked', async () => {
     const user = userEvent.setup();
 
     render(
@@ -189,7 +189,7 @@ describe('ProfileCard', () => {
     expect(screen.queryByText('Manage Scout')).not.toBeInTheDocument();
   });
 
-  test('does not show View Latest Season button when no seasons', () => {
+  test('does not show View Latest Campaign button when no campaigns', () => {
     render(
       <MockedProvider mocks={[]}>
         <BrowserRouter>
@@ -203,7 +203,7 @@ describe('ProfileCard', () => {
       </MockedProvider>
     );
 
-    // View Latest Season button should not exist when there are no seasons
-    expect(screen.queryByText('View Latest Season')).not.toBeInTheDocument();
+    // View Latest Campaign button should not exist when there are no campaigns
+    expect(screen.queryByText('View Latest Campaign')).not.toBeInTheDocument();
   });
 });

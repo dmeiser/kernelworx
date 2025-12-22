@@ -1,9 +1,9 @@
 /**
- * CreateSeasonPage component - Page for creating a new sales season
+ * CreateCampaignPage component - Page for creating a new sales campaign
  *
  * Supports two modes:
  * 1. Prefill mode: Accessed via /c/:prefillCode - all fields locked except profile selection
- * 2. Manual mode: Accessed via /create-season - all fields editable with optional unit info
+ * 2. Manual mode: Accessed via /create-campaign - all fields editable with optional unit info
  */
 
 import React, { useState, useEffect, useMemo, useCallback } from "react";
@@ -149,9 +149,9 @@ const US_STATES = [
   "DC",
 ];
 
-const SEASON_OPTIONS = ["Fall", "Spring", "Summer", "Winter"];
+const CAMPAIGN_OPTIONS = ["Fall", "Spring", "Summer", "Winter"];
 
-export const CreateSeasonPage: React.FC = () => {
+export const CreateCampaignPage: React.FC = () => {
   const { prefillCode } = useParams<{ prefillCode: string }>();
   const navigate = useNavigate();
   const location = useLocation();
@@ -162,8 +162,8 @@ export const CreateSeasonPage: React.FC = () => {
 
   // Form state
   const [profileId, setProfileId] = useState("");
-  const [campaignName, setSeasonName] = useState("Fall");
-  const [campaignYear, setSeasonYear] = useState(new Date().getFullYear());
+  const [campaignName, setCampaignName] = useState("Fall");
+  const [campaignYear, setCampaignYear] = useState(new Date().getFullYear());
   const [catalogId, setCatalogId] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
@@ -245,9 +245,9 @@ export const CreateSeasonPage: React.FC = () => {
 
   const discoveredPrefills = discoveredPrefillsData?.findCampaignPrefills || [];
 
-  // Create season mutation
-  const [createSeason] = useMutation<{
-    createSeason: {
+  // Create campaign mutation
+  const [createCampaign] = useMutation<{
+    createCampaign: {
       campaignId: string;
       campaignName: string;
       campaignYear: number;
@@ -295,8 +295,8 @@ export const CreateSeasonPage: React.FC = () => {
   // Set form values from prefill when loaded
   useEffect(() => {
     if (prefill && prefill.isActive) {
-      setSeasonName(prefill.campaignName);
-      setSeasonYear(prefill.campaignYear);
+      setCampaignName(prefill.campaignName);
+      setCampaignYear(prefill.campaignYear);
       setCatalogId(prefill.catalogId);
       setStartDate(prefill.startDate || "");
       setEndDate(prefill.endDate || "");
@@ -343,7 +343,7 @@ export const CreateSeasonPage: React.FC = () => {
     };
   }, [findPrefills]);
 
-  // Trigger prefill discovery when unit+season fields change in manual mode
+  // Trigger prefill discovery when unit+campaign fields change in manual mode
   useEffect(() => {
     if (!isPrefillMode && unitType && unitNumber && city && state) {
       debouncedFindPrefills({
@@ -421,31 +421,31 @@ export const CreateSeasonPage: React.FC = () => {
         }
       }
 
-      const { data } = await createSeason({
+      const { data } = await createCampaign({
         variables: { input },
       });
 
-      const createdSeason = data?.createSeason;
-      if (createdSeason) {
+      const createdCampaign = data?.createCampaign;
+      if (createdCampaign) {
         if (isPrefillMode && shareWithCreator) {
           setToastMessage({
-            message: `Season created and shared with ${prefill?.createdByName}!`,
+            message: `Campaign created and shared with ${prefill?.createdByName}!`,
             severity: "success",
           });
         } else {
           setToastMessage({
-            message: "Season created successfully!",
+            message: "Campaign created successfully!",
             severity: "success",
           });
         }
         navigate(
-          `/scouts/${encodeURIComponent(profileId)}/campaigns/${encodeURIComponent(createdSeason.campaignId)}`,
+          `/scouts/${encodeURIComponent(profileId)}/campaigns/${encodeURIComponent(createdCampaign.campaignId)}`,
         );
       }
     } catch (error) {
-      console.error("Failed to create season:", error);
+        console.error("Failed to create campaign:", error);
       setToastMessage({
-        message: "Failed to create season. Please try again.",
+        message: "Failed to create campaign. Please try again.",
         severity: "error",
       });
     } finally {
@@ -513,7 +513,7 @@ export const CreateSeasonPage: React.FC = () => {
   return (
     <Box maxWidth="md" mx="auto" p={3}>
       <Typography variant="h4" gutterBottom>
-        Create New Season
+        Create New Campaign
       </Typography>
 
       {/* Prefill Banner */}
@@ -616,7 +616,7 @@ export const CreateSeasonPage: React.FC = () => {
               <Stack direction="row" spacing={2}>
                 <TextField
                   fullWidth
-                  label="Season"
+                  label="Campaign"
                   value={prefill.campaignName}
                   disabled
                 />
@@ -661,18 +661,18 @@ export const CreateSeasonPage: React.FC = () => {
           {/* Editable fields in manual mode */}
           {!isPrefillMode && (
             <>
-              {/* Season Name and Year */}
+              {/* Campaign Name and Year */}
               <Stack direction="row" spacing={2}>
                 <FormControl fullWidth disabled={submitting}>
-                  <InputLabel>Season Name *</InputLabel>
+                  <InputLabel>Campaign Name *</InputLabel>
                   <Select
                     value={campaignName}
-                    onChange={(e) => setSeasonName(e.target.value)}
-                    label="Season Name *"
+                    onChange={(e) => setCampaignName(e.target.value)}
+                    label="Campaign Name *"
                   >
-                    {SEASON_OPTIONS.map((season) => (
-                      <MenuItem key={season} value={season}>
-                        {season}
+                    {CAMPAIGN_OPTIONS.map((campaign) => (
+                      <MenuItem key={campaign} value={campaign}>
+                        {campaign}
                       </MenuItem>
                     ))}
                   </Select>
@@ -682,7 +682,7 @@ export const CreateSeasonPage: React.FC = () => {
                   label="Year *"
                   type="number"
                   value={campaignYear}
-                  onChange={(e) => setSeasonYear(parseInt(e.target.value, 10))}
+                  onChange={(e) => setCampaignYear(parseInt(e.target.value, 10))}
                   disabled={submitting}
                   inputProps={{
                     min: 2020,
@@ -891,7 +891,7 @@ export const CreateSeasonPage: React.FC = () => {
               <Alert severity="warning" sx={{ mt: 1 }}>
                 <AlertTitle>Important</AlertTitle>
                 Sharing gives {prefill.createdByName} read access to ALL current
-                and future seasons for this profile. You can revoke this access
+                and future campaigns for this profile. You can revoke this access
                 at any time from your profile settings.
               </Alert>
             </Box>
@@ -913,7 +913,7 @@ export const CreateSeasonPage: React.FC = () => {
               onClick={handleSubmit}
               disabled={!isFormValid || submitting}
             >
-              {submitting ? "Creating..." : "Create Season"}
+              {submitting ? "Creating..." : "Create Campaign"}
             </Button>
           </Stack>
         </Stack>

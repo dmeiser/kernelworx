@@ -1,9 +1,9 @@
 /**
  * EditProfileDialog component - Dialog for editing a scout profile name
  *
- * Note: Unit fields (unitType, unitNumber) have been moved to Season level
+ * Note: Unit fields (unitType, unitNumber) have been moved to Campaign level
  * as part of the Campaign Prefill refactor. Unit information is now attached
- * to individual seasons rather than profiles.
+ * to individual campaigns rather than profiles.
  */
 
 import React, { useState, useEffect } from "react";

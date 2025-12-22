@@ -27,7 +27,7 @@ def aws_credentials() -> None:
     os.environ["ACCOUNTS_TABLE_NAME"] = "kernelworx-accounts-ue1-dev"
     os.environ["CATALOGS_TABLE_NAME"] = "kernelworx-catalogs-ue1-dev"
     os.environ["PROFILES_TABLE_NAME"] = "kernelworx-profiles-v2-ue1-dev"
-    os.environ["SEASONS_TABLE_NAME"] = "kernelworx-campaigns-v2-ue1-dev"
+    os.environ["CAMPAIGNS_TABLE_NAME"] = "kernelworx-campaigns-v2-ue1-dev"
     os.environ["ORDERS_TABLE_NAME"] = "kernelworx-orders-v2-ue1-dev"
     os.environ["SHARES_TABLE_NAME"] = "kernelworx-shares-ue1-dev"
     os.environ["INVITES_TABLE_NAME"] = "kernelworx-invites-ue1-dev"
@@ -126,24 +126,24 @@ def dynamodb_table(aws_credentials: None) -> Generator[Any, None, None]:
         )
 
         # ================================================================
-        # Campaigns Table V2 (PK=profileId, SK=seasonId)
+        # Campaigns Table V2 (PK=profileId, SK=campaignId)
         # ================================================================
-        seasons_table = dynamodb.create_table(
+        campaigns_table = dynamodb.create_table(
             TableName="kernelworx-campaigns-v2-ue1-dev",
             KeySchema=[
                 {"AttributeName": "profileId", "KeyType": "HASH"},
-                {"AttributeName": "seasonId", "KeyType": "RANGE"},
+                {"AttributeName": "campaignId", "KeyType": "RANGE"},
             ],
             AttributeDefinitions=[
                 {"AttributeName": "profileId", "AttributeType": "S"},
-                {"AttributeName": "seasonId", "AttributeType": "S"},
+                {"AttributeName": "campaignId", "AttributeType": "S"},
                 {"AttributeName": "catalogId", "AttributeType": "S"},
             ],
             GlobalSecondaryIndexes=[
                 {
-                    "IndexName": "seasonId-index",
+                    "IndexName": "campaignId-index",
                     "KeySchema": [
-                        {"AttributeName": "seasonId", "KeyType": "HASH"},
+                        {"AttributeName": "campaignId", "KeyType": "HASH"},
                     ],
                     "Projection": {"ProjectionType": "ALL"},
                 },
@@ -159,16 +159,16 @@ def dynamodb_table(aws_credentials: None) -> Generator[Any, None, None]:
         )
 
         # ================================================================
-        # Orders Table V2: PK=seasonId, SK=orderId
+        # Orders Table V2: PK=campaignId, SK=orderId
         # ================================================================
         orders_table = dynamodb.create_table(
             TableName="kernelworx-orders-v2-ue1-dev",
             KeySchema=[
-                {"AttributeName": "seasonId", "KeyType": "HASH"},
+                {"AttributeName": "campaignId", "KeyType": "HASH"},
                 {"AttributeName": "orderId", "KeyType": "RANGE"},
             ],
             AttributeDefinitions=[
-                {"AttributeName": "seasonId", "AttributeType": "S"},
+                {"AttributeName": "campaignId", "AttributeType": "S"},
                 {"AttributeName": "orderId", "AttributeType": "S"},
                 {"AttributeName": "profileId", "AttributeType": "S"},
             ],
@@ -244,7 +244,7 @@ def dynamodb_table(aws_credentials: None) -> Generator[Any, None, None]:
         # Campaign Prefills Table (NEW - Phase 1)
         # PK: prefillCode, SK: METADATA
         # GSI1: createdBy + createdAt (list by creator)
-        # GSI2: unitSeasonKey + prefillCode (discover by unit+season)
+        # GSI2: unitCampaignKey + prefillCode (discover by unit+campaign)
         # ================================================================
         campaign_prefills_table = dynamodb.create_table(
             TableName="kernelworx-campaign-prefills-ue1-dev",
@@ -257,7 +257,7 @@ def dynamodb_table(aws_credentials: None) -> Generator[Any, None, None]:
                 {"AttributeName": "SK", "AttributeType": "S"},
                 {"AttributeName": "createdBy", "AttributeType": "S"},
                 {"AttributeName": "createdAt", "AttributeType": "S"},
-                {"AttributeName": "unitSeasonKey", "AttributeType": "S"},
+                {"AttributeName": "unitCampaignKey", "AttributeType": "S"},
             ],
             GlobalSecondaryIndexes=[
                 {
@@ -271,7 +271,7 @@ def dynamodb_table(aws_credentials: None) -> Generator[Any, None, None]:
                 {
                     "IndexName": "GSI2",
                     "KeySchema": [
-                        {"AttributeName": "unitSeasonKey", "KeyType": "HASH"},
+                        {"AttributeName": "unitCampaignKey", "KeyType": "HASH"},
                         {"AttributeName": "prefillCode", "KeyType": "RANGE"},
                     ],
                     "Projection": {"ProjectionType": "ALL"},
@@ -280,8 +280,8 @@ def dynamodb_table(aws_credentials: None) -> Generator[Any, None, None]:
             BillingMode="PAY_PER_REQUEST",
         )
 
-        # Add GSI3 to Seasons table for unit-based queries
-        # GSI3: unitSeasonKey + seasonId
+        # Add GSI3 to Campaigns table for unit-based queries
+        # GSI3: unitCampaignKey + campaignId
         # (In real deployment, this would be added via CDK update, but in tests we configure it here)
 
         # Return profiles table as primary (most commonly used)
@@ -392,31 +392,31 @@ def appsync_event(sample_account_id: str) -> Dict[str, Any]:
 
 
 @pytest.fixture
-def sample_season_id() -> str:
-    """Sample season ID."""
-    return "CAMPAIGN#season-123-abc"
+def sample_campaign_id() -> str:
+    """Sample campaign ID."""
+    return "CAMPAIGN#campaign-123-abc"
 
 
 @pytest.fixture
-def sample_season(
-    dynamodb_table: Any, sample_profile_id: str, sample_season_id: str
+def sample_campaign(
+    dynamodb_table: Any, sample_profile_id: str, sample_campaign_id: str
 ) -> Dict[str, Any]:
-    """Create sample season in DynamoDB (V2: PK=profileId, SK=seasonId)."""
-    # Multi-table design: need to access seasons table directly
+    """Create sample campaign in DynamoDB (V2: PK=profileId, SK=campaignId)."""
+    # Multi-table design: need to access campaigns table directly
     dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
-    seasons_table = dynamodb.Table("kernelworx-campaigns-v2-ue1-dev")
+    campaigns_table = dynamodb.Table("kernelworx-campaigns-v2-ue1-dev")
 
-    season = {
+    campaign = {
         "profileId": sample_profile_id,  # PK
-        "seasonId": sample_season_id,  # SK
-        "seasonName": "Fall 2025",
+        "campaignId": sample_campaign_id,  # SK - DynamoDB schema uses campaignId
+        "campaignName": "Fall 2025",
         "startDate": "2025-09-01",
         "catalogId": "CATALOG#default",
         "createdAt": datetime.now(timezone.utc).isoformat(),
     }
 
-    seasons_table.put_item(Item=season)
-    return season
+    campaigns_table.put_item(Item=campaign)
+    return campaign
 
 
 @pytest.fixture
@@ -427,16 +427,16 @@ def sample_order_id() -> str:  # pragma: no cover
 
 @pytest.fixture
 def sample_order(  # pragma: no cover
-    dynamodb_table: Any, sample_profile_id: str, sample_season_id: str, sample_order_id: str
+    dynamodb_table: Any, sample_profile_id: str, sample_campaign_id: str, sample_order_id: str
 ) -> Dict[str, Any]:
-    """Create sample order in DynamoDB (multi-table design V2: PK=seasonId, SK=orderId)."""
+    """Create sample order in DynamoDB (multi-table design V2: PK=campaignId, SK=orderId)."""
     # Multi-table design: need to access orders table directly
     dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
     orders_table = dynamodb.Table("kernelworx-orders-v2-ue1-dev")
 
     order = {
         "orderId": sample_order_id,
-        "seasonId": sample_season_id,
+        "campaignId": sample_campaign_id,  # PK - DynamoDB schema uses campaignId
         "profileId": sample_profile_id,
         "customerName": "John Doe",
         "customerPhone": "+15551234567",

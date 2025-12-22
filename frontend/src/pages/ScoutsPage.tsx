@@ -430,7 +430,7 @@ export const ScoutsPage: React.FC = () => {
         <DialogTitle>Delete Profile?</DialogTitle>
         <DialogContent>
           <Typography>
-            Are you sure you want to delete this profile? All seasons and orders
+            Are you sure you want to delete this profile? All campaigns and orders
             will be permanently deleted. This action cannot be undone.
           </Typography>
         </DialogContent>

@@ -1,8 +1,8 @@
 /**
- * SeasonSettingsPage - Season-specific settings only
+ * CampaignSettingsPage - Campaign-specific settings only
  *
  * Note: Profile-level settings (invites, shares, profile deletion) have been moved
- * to ProfileManagementPage to clarify that invites belong to profiles, not seasons.
+ * to ProfileManagementPage to clarify that invites belong to profiles, not campaigns.
  */
 
 import React, { useState } from "react";
@@ -61,15 +61,15 @@ interface Catalog {
   isDeleted?: boolean;
 }
 
-export const SeasonSettingsPage: React.FC = () => {
-  const { profileId: encodedProfileId, campaignId: encodedSeasonId } = useParams<{
+export const CampaignSettingsPage: React.FC = () => {
+  const { profileId: encodedProfileId, campaignId: encodedCampaignId } = useParams<{
     profileId: string;
     campaignId: string;
   }>();
   const profileId = encodedProfileId
     ? decodeURIComponent(encodedProfileId)
     : "";
-  const campaignId = encodedSeasonId ? decodeURIComponent(encodedSeasonId) : "";
+  const campaignId = encodedCampaignId ? decodeURIComponent(encodedCampaignId) : "";
   const navigate = useNavigate();
   const [campaignName, setCampaignName] = useState("");
   const [startDate, setStartDate] = useState("");
@@ -103,7 +103,7 @@ export const SeasonSettingsPage: React.FC = () => {
     (c) => c.isDeleted !== true,
   );
 
-  // Initialize form when season loads
+  // Initialize form when campaign loads
   React.useEffect(() => {
     if (campaignData?.getCampaign) {
       setCampaignName(campaignData.getCampaign.campaignName);
@@ -200,7 +200,7 @@ export const SeasonSettingsPage: React.FC = () => {
         alignItems="center"
         sx={{ mb: 3 }}
       >
-        <Typography variant="h5">Season Settings</Typography>
+        <Typography variant="h5">Campaign Settings</Typography>
         <Button
           variant="text"
           color="primary"
@@ -222,8 +222,8 @@ export const SeasonSettingsPage: React.FC = () => {
         {campaign?.prefillCode && (
           <Alert severity="warning" icon={<WarningIcon />} sx={{ mb: 3 }}>
             <AlertTitle>Shared Campaign</AlertTitle>
-            This season was created from a shared campaign link. Changing the catalog,
-            season name, or unit information may cause this season to no longer
+            This campaign was created from a shared campaign link. Changing the catalog,
+            campaign name, or unit information may cause this campaign to no longer
             appear correctly in campaign reports for your unit.
           </Alert>
         )}
@@ -231,7 +231,7 @@ export const SeasonSettingsPage: React.FC = () => {
         <Stack spacing={3}>
           <TextField
             fullWidth
-            label="Season Name"
+            label="Campaign Name"
             value={campaignName}
             onChange={(e) => setCampaignName(e.target.value)}
             disabled={updating}
@@ -292,7 +292,7 @@ export const SeasonSettingsPage: React.FC = () => {
           Danger Zone
         </Typography>
         <Typography variant="body2" color="text.secondary" paragraph>
-          Deleting this season will permanently remove all orders and data. This
+          Deleting this campaign will permanently remove all orders and data. This
           action cannot be undone.
         </Typography>
         <Button
@@ -301,11 +301,11 @@ export const SeasonSettingsPage: React.FC = () => {
           startIcon={<DeleteIcon />}
           onClick={() => setDeleteConfirmOpen(true)}
         >
-          Delete Season
+          Delete Campaign
         </Button>
       </Paper>
 
-      {/* Delete Season Confirmation Dialog */}
+      {/* Delete Campaign Confirmation Dialog */}
       <Dialog
         open={deleteConfirmOpen}
         onClose={() => setDeleteConfirmOpen(false)}
@@ -338,11 +338,11 @@ export const SeasonSettingsPage: React.FC = () => {
         <DialogContent>
           <Alert severity="warning" sx={{ mb: 2 }}>
             <AlertTitle>This may affect unit reports</AlertTitle>
-            You are changing the season name or catalog of a season that was
+            You are changing the campaign name or catalog of a campaign that was
             created from a campaign link.
           </Alert>
           <Typography>
-            These changes may cause this season to no longer appear correctly in
+            These changes may cause this campaign to no longer appear correctly in
             unit reports for your unit. Are you sure you want to continue?
           </Typography>
         </DialogContent>

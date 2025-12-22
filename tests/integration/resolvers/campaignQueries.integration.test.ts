@@ -1,6 +1,6 @@
 import '../setup.ts';
 /**
- * Integration tests for Season query resolvers
+ * Integration tests for Campaign query resolvers
  * Tests: getCampaign, listCampaignsByProfile
  */
 
@@ -116,7 +116,7 @@ const LIST_CAMPAIGNS_BY_PROFILE = gql`
   }
 `;
 
-describe('Season Query Resolvers Integration Tests', () => {
+describe('Campaign Query Resolvers Integration Tests', () => {
   let ownerClient: ApolloClient;
   let contributorClient: ApolloClient;
   let readonlyClient: ApolloClient;
@@ -149,8 +149,8 @@ describe('Season Query Resolvers Integration Tests', () => {
 
   describe('getCampaign', () => {
     describe('Happy Path', () => {
-      it('should return season by campaignId with all fields', async () => {
-        // Arrange: Create profile, catalog, and season
+      it('should return campaign by campaignId with all fields', async () => {
+        // Arrange: Create profile, catalog, and campaign
         const { data: profileData } = await ownerClient.mutate({
           mutation: CREATE_PROFILE,
           variables: { input: { sellerName: `${getTestPrefix()}-Profile` } },
@@ -169,12 +169,12 @@ describe('Season Query Resolvers Integration Tests', () => {
         });
         const catalogId = catalogData.createCatalog.catalogId;
 
-        const { data: seasonData } = await ownerClient.mutate({
+        const { data: campaignData } = await ownerClient.mutate({
           mutation: CREATE_CAMPAIGN,
           variables: {
             input: {
               profileId: profileId,
-              campaignName: `${getTestPrefix()}-Season`,
+              campaignName: `${getTestPrefix()}-Campaign`,
               campaignYear: 2025,
               startDate: '2025-01-01T00:00:00Z',
               endDate: '2025-12-31T23:59:59Z',
@@ -182,9 +182,9 @@ describe('Season Query Resolvers Integration Tests', () => {
             },
           },
         });
-        const campaignId = seasonData.createCampaign.campaignId;
+        const campaignId = campaignData.createCampaign.campaignId;
 
-        // Act: Query season
+        // Act: Query campaign
         const { data } = await ownerClient.query({
           query: GET_CAMPAIGN,
           variables: { campaignId: campaignId },
@@ -195,7 +195,7 @@ describe('Season Query Resolvers Integration Tests', () => {
         expect(data.getCampaign).toBeDefined();
         expect(data.getCampaign.campaignId).toBe(campaignId);
         expect(data.getCampaign.profileId).toBe(profileId);
-        expect(data.getCampaign.campaignName).toContain('Season');
+        expect(data.getCampaign.campaignName).toContain('Campaign');
         expect(data.getCampaign.startDate).toBe('2025-01-01T00:00:00Z');
         expect(data.getCampaign.endDate).toBe('2025-12-31T23:59:59Z');
         expect(data.getCampaign.catalogId).toBe(catalogId);
@@ -209,10 +209,10 @@ describe('Season Query Resolvers Integration Tests', () => {
       }, 15000); // Extended timeout for GSI consistency
 
       it('should return null for non-existent campaignId', async () => {
-        // Act: Query non-existent season
+        // Act: Query non-existent campaign
         const { data } = await ownerClient.query({
           query: GET_CAMPAIGN,
-          variables: { campaignId: 'SEASON#nonexistent' },
+          variables: { campaignId: 'CAMPAIGN#nonexistent' },
           fetchPolicy: 'network-only',
         });
 
@@ -222,7 +222,7 @@ describe('Season Query Resolvers Integration Tests', () => {
     });
 
     describe('Authorization', () => {
-      it('should allow profile owner to get season', async () => {
+      it('should allow profile owner to get campaign', async () => {
         // Arrange
         const { data: profileData } = await ownerClient.mutate({
           mutation: CREATE_PROFILE,
@@ -242,19 +242,19 @@ describe('Season Query Resolvers Integration Tests', () => {
         });
         const catalogId = catalogData.createCatalog.catalogId;
 
-        const { data: seasonData } = await ownerClient.mutate({
+        const { data: campaignData } = await ownerClient.mutate({
           mutation: CREATE_CAMPAIGN,
           variables: {
             input: {
               profileId: profileId,
-              campaignName: `${getTestPrefix()}-Season`,
+              campaignName: `${getTestPrefix()}-Campaign`,
               campaignYear: 2025,
               startDate: '2025-01-01T00:00:00Z',
               catalogId: catalogId,
             },
           },
         });
-        const campaignId = seasonData.createCampaign.campaignId;
+        const campaignId = campaignData.createCampaign.campaignId;
 
         // Act
         const { data } = await ownerClient.query({
@@ -273,7 +273,7 @@ describe('Season Query Resolvers Integration Tests', () => {
         await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
       });
 
-      it('should allow shared user (READ) to get season', async () => {
+      it('should allow shared user (READ) to get campaign', async () => {
         // Arrange
         const { data: profileData } = await ownerClient.mutate({
           mutation: CREATE_PROFILE,
@@ -293,19 +293,19 @@ describe('Season Query Resolvers Integration Tests', () => {
         });
         const catalogId = catalogData.createCatalog.catalogId;
 
-        const { data: seasonData } = await ownerClient.mutate({
+        const { data: campaignData } = await ownerClient.mutate({
           mutation: CREATE_CAMPAIGN,
           variables: {
             input: {
               profileId: profileId,
-              campaignName: `${getTestPrefix()}-Season`,
+              campaignName: `${getTestPrefix()}-Campaign`,
               campaignYear: 2025,
               startDate: '2025-01-01T00:00:00Z',
               catalogId: catalogId,
             },
           },
         });
-        const campaignId = seasonData.createCampaign.campaignId;
+        const campaignId = campaignData.createCampaign.campaignId;
 
         // Share profile with readonly user (READ permission)
         const { data: shareData }: any = await ownerClient.mutate({
@@ -319,7 +319,7 @@ describe('Season Query Resolvers Integration Tests', () => {
           },
         });
 
-        // Act: Readonly user queries season
+        // Act: Readonly user queries campaign
         const { data } = await readonlyClient.query({
           query: GET_CAMPAIGN,
           variables: { campaignId: campaignId },
@@ -337,7 +337,7 @@ describe('Season Query Resolvers Integration Tests', () => {
         await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
       });
 
-      it('should NOT allow non-shared user to get season', async () => {
+      it('should NOT allow non-shared user to get campaign', async () => {
         // Arrange
         const { data: profileData } = await ownerClient.mutate({
           mutation: CREATE_PROFILE,
@@ -357,21 +357,21 @@ describe('Season Query Resolvers Integration Tests', () => {
         });
         const catalogId = catalogData.createCatalog.catalogId;
 
-        const { data: seasonData } = await ownerClient.mutate({
+        const { data: campaignData } = await ownerClient.mutate({
           mutation: CREATE_CAMPAIGN,
           variables: {
             input: {
               profileId: profileId,
-              campaignName: `${getTestPrefix()}-Season`,
+              campaignName: `${getTestPrefix()}-Campaign`,
               campaignYear: 2025,
               startDate: '2025-01-01T00:00:00Z',
               catalogId: catalogId,
             },
           },
         });
-        const campaignId = seasonData.createCampaign.campaignId;
+        const campaignId = campaignData.createCampaign.campaignId;
 
-        // Act: Contributor (not shared) queries season
+        // Act: Contributor (not shared) queries campaign
         const { data } = await contributorClient.query({
           query: GET_CAMPAIGN,
           variables: { campaignId: campaignId },
@@ -391,7 +391,7 @@ describe('Season Query Resolvers Integration Tests', () => {
 
   describe('listCampaignsByProfile', () => {
     describe('Happy Path', () => {
-      it('should return all seasons for a profile', async () => {
+      it('should return all campaigns for a profile', async () => {
         // Arrange: Create profile and catalog
         const { data: profileData } = await ownerClient.mutate({
           mutation: CREATE_PROFILE,
@@ -411,36 +411,36 @@ describe('Season Query Resolvers Integration Tests', () => {
         });
         const catalogId = catalogData.createCatalog.catalogId;
 
-        // Create multiple seasons
-        const { data: season1Data } = await ownerClient.mutate({
+        // Create multiple campaigns
+        const { data: campaign1Data } = await ownerClient.mutate({
           mutation: CREATE_CAMPAIGN,
           variables: {
             input: {
               profileId: profileId,
-              campaignName: `${getTestPrefix()}-Season1`,
+              campaignName: `${getTestPrefix()}-Campaign1`,
               campaignYear: 2025,
               startDate: '2025-01-01T00:00:00Z',
               catalogId: catalogId,
             },
           },
         });
-        const campaignId1 = season1Data.createCampaign.campaignId;
+        const campaignId1 = campaign1Data.createCampaign.campaignId;
 
-        const { data: season2Data } = await ownerClient.mutate({
+        const { data: campaign2Data } = await ownerClient.mutate({
           mutation: CREATE_CAMPAIGN,
           variables: {
             input: {
               profileId: profileId,
-              campaignName: `${getTestPrefix()}-Season2`,
+              campaignName: `${getTestPrefix()}-Campaign2`,
               campaignYear: 2025,
               startDate: '2025-06-01T00:00:00Z',
               catalogId: catalogId,
             },
           },
         });
-        const campaignId2 = season2Data.createCampaign.campaignId;
+        const campaignId2 = campaign2Data.createCampaign.campaignId;
 
-        // Act: List seasons
+        // Act: List campaigns
         const { data } = await ownerClient.query({
           query: LIST_CAMPAIGNS_BY_PROFILE,
           variables: { profileId: profileId },
@@ -451,7 +451,7 @@ describe('Season Query Resolvers Integration Tests', () => {
         expect(data.listCampaignsByProfile).toBeDefined();
         expect(data.listCampaignsByProfile.length).toBe(2);
         expect(data.listCampaignsByProfile[0].campaignId).toBeDefined();
-        expect(data.listCampaignsByProfile[0].campaignName).toContain('Season');
+        expect(data.listCampaignsByProfile[0].campaignName).toContain('Campaign');
         expect(data.listCampaignsByProfile[1].campaignId).toBeDefined();
         
         // Cleanup
@@ -461,8 +461,8 @@ describe('Season Query Resolvers Integration Tests', () => {
         await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
       });
 
-      it('should return empty array for profile with no seasons', async () => {
-        // Arrange: Create profile without seasons
+      it('should return empty array for profile with no campaigns', async () => {
+        // Arrange: Create profile without campaigns
         const { data: profileData } = await ownerClient.mutate({
           mutation: CREATE_PROFILE,
           variables: { input: { sellerName: `${getTestPrefix()}-Profile` } },
@@ -497,8 +497,8 @@ describe('Season Query Resolvers Integration Tests', () => {
         expect(data.listCampaignsByProfile).toEqual([]);
       });
 
-      it('should not include deleted season in list', async () => {
-        // Arrange: Create profile, catalog, and seasons
+      it('should not include deleted campaign in list', async () => {
+        // Arrange: Create profile, catalog, and campaigns
         const { data: profileData } = await ownerClient.mutate({
           mutation: CREATE_PROFILE,
           variables: { input: { sellerName: `${getTestPrefix()}-Profile` } },
@@ -517,34 +517,34 @@ describe('Season Query Resolvers Integration Tests', () => {
         });
         const catalogId = catalogData.createCatalog.catalogId;
 
-        // Create two seasons
-        const { data: season1Data } = await ownerClient.mutate({
+        // Create two campaigns
+        const { data: campaign1Data } = await ownerClient.mutate({
           mutation: CREATE_CAMPAIGN,
           variables: {
             input: {
               profileId: profileId,
-              campaignName: `${getTestPrefix()}-SeasonToKeep`,
+              campaignName: `${getTestPrefix()}-CampaignToKeep`,
               campaignYear: 2025,
               startDate: '2025-01-01T00:00:00Z',
               catalogId: catalogId,
             },
           },
         });
-        const campaignIdToKeep = season1Data.createCampaign.campaignId;
+        const campaignIdToKeep = campaign1Data.createCampaign.campaignId;
 
-        const { data: season2Data } = await ownerClient.mutate({
+        const { data: campaign2Data } = await ownerClient.mutate({
           mutation: CREATE_CAMPAIGN,
           variables: {
             input: {
               profileId: profileId,
-              campaignName: `${getTestPrefix()}-SeasonToDelete`,
+              campaignName: `${getTestPrefix()}-CampaignToDelete`,
               campaignYear: 2025,
               startDate: '2025-06-01T00:00:00Z',
               catalogId: catalogId,
             },
           },
         });
-        const campaignIdToDelete = season2Data.createCampaign.campaignId;
+        const campaignIdToDelete = campaign2Data.createCampaign.campaignId;
 
         // Verify both appear in list
         const { data: beforeDelete } = await ownerClient.query({
@@ -553,28 +553,28 @@ describe('Season Query Resolvers Integration Tests', () => {
           fetchPolicy: 'network-only',
         });
         expect(beforeDelete.listCampaignsByProfile.length).toBe(2);
-        const beforeSeasonIds = beforeDelete.listCampaignsByProfile.map((s: any) => s.campaignId);
-        expect(beforeSeasonIds).toContain(campaignIdToKeep);
-        expect(beforeSeasonIds).toContain(campaignIdToDelete);
+        const beforeCampaignIds = beforeDelete.listCampaignsByProfile.map((s: any) => s.campaignId);
+        expect(beforeCampaignIds).toContain(campaignIdToKeep);
+        expect(beforeCampaignIds).toContain(campaignIdToDelete);
 
-        // Delete one season
+        // Delete one campaign
         await ownerClient.mutate({
           mutation: DELETE_CAMPAIGN,
           variables: { campaignId: campaignIdToDelete },
         });
 
-        // Act: List seasons again
+        // Act: List campaigns again
         const { data: afterDelete } = await ownerClient.query({
           query: LIST_CAMPAIGNS_BY_PROFILE,
           variables: { profileId: profileId },
           fetchPolicy: 'network-only',
         });
 
-        // Assert: Only the kept season should appear
+        // Assert: Only the kept campaign should appear
         expect(afterDelete.listCampaignsByProfile.length).toBe(1);
-        const afterSeasonIds = afterDelete.listCampaignsByProfile.map((s: any) => s.campaignId);
-        expect(afterSeasonIds).toContain(campaignIdToKeep);
-        expect(afterSeasonIds).not.toContain(campaignIdToDelete);
+        const afterCampaignIds = afterDelete.listCampaignsByProfile.map((s: any) => s.campaignId);
+        expect(afterCampaignIds).toContain(campaignIdToKeep);
+        expect(afterCampaignIds).not.toContain(campaignIdToDelete);
 
         // Cleanup
         await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId: campaignIdToKeep } });
@@ -584,7 +584,7 @@ describe('Season Query Resolvers Integration Tests', () => {
     });
 
     describe('Authorization', () => {
-      it('should allow profile owner to list seasons', async () => {
+      it('should allow profile owner to list campaigns', async () => {
         // Arrange
         const { data: profileData } = await ownerClient.mutate({
           mutation: CREATE_PROFILE,
@@ -604,19 +604,19 @@ describe('Season Query Resolvers Integration Tests', () => {
         });
         const catalogId = catalogData.createCatalog.catalogId;
 
-        const { data: seasonData } = await ownerClient.mutate({
+        const { data: campaignData } = await ownerClient.mutate({
           mutation: CREATE_CAMPAIGN,
           variables: {
             input: {
               profileId: profileId,
-              campaignName: `${getTestPrefix()}-Season`,
+              campaignName: `${getTestPrefix()}-Campaign`,
               campaignYear: 2025,
               startDate: '2025-01-01T00:00:00Z',
               catalogId: catalogId,
             },
           },
         });
-        const campaignId = seasonData.createCampaign.campaignId;
+        const campaignId = campaignData.createCampaign.campaignId;
 
         // Act
         const { data } = await ownerClient.query({
@@ -635,7 +635,7 @@ describe('Season Query Resolvers Integration Tests', () => {
         await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
       });
 
-      it('should allow shared user (READ) to list seasons', async () => {
+      it('should allow shared user (READ) to list campaigns', async () => {
         // Arrange
         const { data: profileData } = await ownerClient.mutate({
           mutation: CREATE_PROFILE,
@@ -655,19 +655,19 @@ describe('Season Query Resolvers Integration Tests', () => {
         });
         const catalogId = catalogData.createCatalog.catalogId;
 
-        const { data: seasonData } = await ownerClient.mutate({
+        const { data: campaignData } = await ownerClient.mutate({
           mutation: CREATE_CAMPAIGN,
           variables: {
             input: {
               profileId: profileId,
-              campaignName: `${getTestPrefix()}-Season`,
+              campaignName: `${getTestPrefix()}-Campaign`,
               campaignYear: 2025,
               startDate: '2025-01-01T00:00:00Z',
               catalogId: catalogId,
             },
           },
         });
-        const campaignId = seasonData.createCampaign.campaignId;
+        const campaignId = campaignData.createCampaign.campaignId;
 
         // Share profile with readonly user
         const { data: shareData }: any = await ownerClient.mutate({
@@ -681,7 +681,7 @@ describe('Season Query Resolvers Integration Tests', () => {
           },
         });
 
-        // Act: Readonly user lists seasons
+        // Act: Readonly user lists campaigns
         const { data } = await readonlyClient.query({
           query: LIST_CAMPAIGNS_BY_PROFILE,
           variables: { profileId: profileId },
@@ -699,7 +699,7 @@ describe('Season Query Resolvers Integration Tests', () => {
         await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
       });
 
-      it('should NOT allow non-shared user to list seasons', async () => {
+      it('should NOT allow non-shared user to list campaigns', async () => {
         // Arrange
         const { data: profileData } = await ownerClient.mutate({
           mutation: CREATE_PROFILE,
@@ -719,21 +719,21 @@ describe('Season Query Resolvers Integration Tests', () => {
         });
         const catalogId = catalogData.createCatalog.catalogId;
 
-        const { data: seasonData } = await ownerClient.mutate({
+        const { data: campaignData } = await ownerClient.mutate({
           mutation: CREATE_CAMPAIGN,
           variables: {
             input: {
               profileId: profileId,
-              campaignName: `${getTestPrefix()}-Season`,
+              campaignName: `${getTestPrefix()}-Campaign`,
               campaignYear: 2025,
               startDate: '2025-01-01T00:00:00Z',
               catalogId: catalogId,
             },
           },
         });
-        const campaignId = seasonData.createCampaign.campaignId;
+        const campaignId = campaignData.createCampaign.campaignId;
 
-        // Act: Contributor (not shared) lists seasons
+        // Act: Contributor (not shared) lists campaigns
         const { data } = await contributorClient.query({
           query: LIST_CAMPAIGNS_BY_PROFILE,
           variables: { profileId: profileId },
@@ -751,8 +751,8 @@ describe('Season Query Resolvers Integration Tests', () => {
     });
   });
 
-  describe('Season with optional endDate', () => {
-    it('should return season without endDate (open-ended season)', async () => {
+  describe('Campaign with optional endDate', () => {
+    it('should return campaign without endDate (open-ended campaign)', async () => {
       // Arrange
       const { data: profileData } = await ownerClient.mutate({
         mutation: CREATE_PROFILE,
@@ -772,13 +772,13 @@ describe('Season Query Resolvers Integration Tests', () => {
       });
       const catalogId = catalogData.createCatalog.catalogId;
 
-      // Create season without endDate
-      const { data: seasonData } = await ownerClient.mutate({
+      // Create campaign without endDate
+      const { data: campaignData } = await ownerClient.mutate({
         mutation: CREATE_CAMPAIGN,
         variables: {
           input: {
             profileId: profileId,
-            campaignName: `${getTestPrefix()}-OpenSeason`,
+            campaignName: `${getTestPrefix()}-OpenCampaign`,
             campaignYear: 2025,
             startDate: '2025-01-01T00:00:00Z',
             // No endDate specified
@@ -786,7 +786,7 @@ describe('Season Query Resolvers Integration Tests', () => {
           },
         },
       });
-      const campaignId = seasonData.createCampaign.campaignId;
+      const campaignId = campaignData.createCampaign.campaignId;
 
       // Act
       const { data } = await ownerClient.query({
@@ -805,7 +805,7 @@ describe('Season Query Resolvers Integration Tests', () => {
       await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
     });
 
-    it('should return season with both startDate and endDate', async () => {
+    it('should return campaign with both startDate and endDate', async () => {
       // Arrange
       const { data: profileData } = await ownerClient.mutate({
         mutation: CREATE_PROFILE,
@@ -825,12 +825,12 @@ describe('Season Query Resolvers Integration Tests', () => {
       });
       const catalogId = catalogData.createCatalog.catalogId;
 
-      const { data: seasonData } = await ownerClient.mutate({
+      const { data: campaignData } = await ownerClient.mutate({
         mutation: CREATE_CAMPAIGN,
         variables: {
           input: {
             profileId: profileId,
-            campaignName: `${getTestPrefix()}-ClosedSeason`,
+            campaignName: `${getTestPrefix()}-ClosedCampaign`,
             campaignYear: 2025,
             startDate: '2025-01-01T00:00:00Z',
             endDate: '2025-06-30T23:59:59Z',
@@ -838,7 +838,7 @@ describe('Season Query Resolvers Integration Tests', () => {
           },
         },
       });
-      const campaignId = seasonData.createCampaign.campaignId;
+      const campaignId = campaignData.createCampaign.campaignId;
 
       // Act
       const { data } = await ownerClient.query({
@@ -859,7 +859,7 @@ describe('Season Query Resolvers Integration Tests', () => {
   });
 
   describe('listCampaignsByProfile after delete', () => {
-    it('should not show deleted season in list', async () => {
+    it('should not show deleted campaign in list', async () => {
       // Arrange
       const { data: profileData } = await ownerClient.mutate({
         mutation: CREATE_PROFILE,
@@ -879,35 +879,35 @@ describe('Season Query Resolvers Integration Tests', () => {
       });
       const catalogId = catalogData.createCatalog.catalogId;
 
-      const { data: season1Data } = await ownerClient.mutate({
+      const { data: campaign1Data } = await ownerClient.mutate({
         mutation: CREATE_CAMPAIGN,
         variables: {
           input: {
             profileId: profileId,
-            campaignName: `${getTestPrefix()}-Season1`,
+            campaignName: `${getTestPrefix()}-Campaign1`,
             campaignYear: 2025,
             startDate: '2025-01-01T00:00:00Z',
             catalogId: catalogId,
           },
         },
       });
-      const campaignId1 = season1Data.createCampaign.campaignId;
+      const campaignId1 = campaign1Data.createCampaign.campaignId;
 
-      const { data: season2Data } = await ownerClient.mutate({
+      const { data: campaign2Data } = await ownerClient.mutate({
         mutation: CREATE_CAMPAIGN,
         variables: {
           input: {
             profileId: profileId,
-            campaignName: `${getTestPrefix()}-Season2`,
+            campaignName: `${getTestPrefix()}-Campaign2`,
             campaignYear: 2025,
             startDate: '2025-06-01T00:00:00Z',
             catalogId: catalogId,
           },
         },
       });
-      const campaignId2 = season2Data.createCampaign.campaignId;
+      const campaignId2 = campaign2Data.createCampaign.campaignId;
 
-      // Delete one season
+      // Delete one campaign
       await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId: campaignId1 } });
 
       // Act
@@ -917,7 +917,7 @@ describe('Season Query Resolvers Integration Tests', () => {
         fetchPolicy: 'network-only',
       });
 
-      // Assert: Only one season should remain
+      // Assert: Only one campaign should remain
       expect(data.listCampaignsByProfile.length).toBe(1);
       expect(data.listCampaignsByProfile[0].campaignId).toBe(campaignId2);
 
@@ -982,7 +982,7 @@ describe('Season Query Resolvers Integration Tests', () => {
     `;
 
     it('should return totalOrders and totalRevenue fields', async () => {
-      // Arrange: Create profile, catalog with a product, season, and orders
+      // Arrange: Create profile, catalog with a product, campaign, and orders
       const { data: profileData } = await ownerClient.mutate({
         mutation: CREATE_PROFILE,
         variables: { input: { sellerName: `${getTestPrefix()}-ComputedFieldsProfile` } },
@@ -1006,19 +1006,19 @@ describe('Season Query Resolvers Integration Tests', () => {
       const product1Id = catalogData.createCatalog.products[0].productId;
       const product2Id = catalogData.createCatalog.products[1].productId;
 
-      const { data: seasonData } = await ownerClient.mutate({
+      const { data: campaignData } = await ownerClient.mutate({
         mutation: CREATE_CAMPAIGN,
         variables: {
           input: {
             profileId: profileId,
-            campaignName: `${getTestPrefix()}-ComputedSeason`,
+            campaignName: `${getTestPrefix()}-ComputedCampaign`,
             campaignYear: 2025,
             startDate: '2025-01-01T00:00:00Z',
             catalogId: catalogId,
           },
         },
       });
-      const campaignId = seasonData.createCampaign.campaignId;
+      const campaignId = campaignData.createCampaign.campaignId;
 
       // Create 2 orders with specific amounts
       const { data: order1Data } = await ownerClient.mutate({
@@ -1056,9 +1056,9 @@ describe('Season Query Resolvers Integration Tests', () => {
       });
       const orderId2 = order2Data.createOrder.orderId;
 
-      // Act: Get season with computed fields
+      // Act: Get campaign with computed fields
       const { data } = await ownerClient.query({
-        query: GET_SEASON_WITH_COMPUTED,
+        query: GET_CAMPAIGN_WITH_COMPUTED,
         variables: { campaignId: campaignId },
         fetchPolicy: 'network-only',
       });
@@ -1081,7 +1081,7 @@ describe('Season Query Resolvers Integration Tests', () => {
     });
 
     it('should return catalog data via field resolver', async () => {
-      // Arrange: Create profile, catalog, and season
+      // Arrange: Create profile, catalog, and campaign
       const { data: profileData } = await ownerClient.mutate({
         mutation: CREATE_PROFILE,
         variables: { input: { sellerName: `${getTestPrefix()}-CatalogResolverProfile` } },
@@ -1103,23 +1103,23 @@ describe('Season Query Resolvers Integration Tests', () => {
       });
       const catalogId = catalogData.createCatalog.catalogId;
 
-      const { data: seasonData } = await ownerClient.mutate({
+      const { data: campaignData } = await ownerClient.mutate({
         mutation: CREATE_CAMPAIGN,
         variables: {
           input: {
             profileId: profileId,
-            campaignName: `${getTestPrefix()}-CatalogResolverSeason`,
+            campaignName: `${getTestPrefix()}-CatalogResolverCampaign`,
             campaignYear: 2025,
             startDate: '2025-03-01T00:00:00Z',
             catalogId: catalogId,
           },
         },
       });
-      const campaignId = seasonData.createCampaign.campaignId;
+      const campaignId = campaignData.createCampaign.campaignId;
 
-      // Act: Get season with catalog field
+      // Act: Get campaign with catalog field
       const { data } = await ownerClient.query({
-        query: GET_SEASON_WITH_COMPUTED,
+        query: GET_CAMPAIGN_WITH_COMPUTED,
         variables: { campaignId: campaignId },
         fetchPolicy: 'network-only',
       });
@@ -1137,8 +1137,8 @@ describe('Season Query Resolvers Integration Tests', () => {
       await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
     });
 
-    it('should return zero for totalOrders and totalRevenue when season has no orders', async () => {
-      // Arrange: Create profile, catalog, and season (no orders)
+    it('should return zero for totalOrders and totalRevenue when campaign has no orders', async () => {
+      // Arrange: Create profile, catalog, and campaign (no orders)
       const { data: profileData } = await ownerClient.mutate({
         mutation: CREATE_PROFILE,
         variables: { input: { sellerName: `${getTestPrefix()}-NoOrdersProfile` } },
@@ -1157,23 +1157,23 @@ describe('Season Query Resolvers Integration Tests', () => {
       });
       const catalogId = catalogData.createCatalog.catalogId;
 
-      const { data: seasonData } = await ownerClient.mutate({
+      const { data: campaignData } = await ownerClient.mutate({
         mutation: CREATE_CAMPAIGN,
         variables: {
           input: {
             profileId: profileId,
-            campaignName: `${getTestPrefix()}-NoOrdersSeason`,
+            campaignName: `${getTestPrefix()}-NoOrdersCampaign`,
             campaignYear: 2025,
             startDate: '2025-04-01T00:00:00Z',
             catalogId: catalogId,
           },
         },
       });
-      const campaignId = seasonData.createCampaign.campaignId;
+      const campaignId = campaignData.createCampaign.campaignId;
 
-      // Act: Get season with computed fields
+      // Act: Get campaign with computed fields
       const { data } = await ownerClient.query({
-        query: GET_SEASON_WITH_COMPUTED,
+        query: GET_CAMPAIGN_WITH_COMPUTED,
         variables: { campaignId: campaignId },
         fetchPolicy: 'network-only',
       });
@@ -1190,11 +1190,11 @@ describe('Season Query Resolvers Integration Tests', () => {
   });
 
   describe('Performance', () => {
-    it('Performance: Listing seasons ordered by startDate', async () => {
-      // Arrange: Create profile, catalog, and multiple seasons with different start dates
+    it('Performance: Listing campaigns ordered by startDate', async () => {
+      // Arrange: Create profile, catalog, and multiple campaigns with different start dates
       const { data: profileData }: any = await ownerClient.mutate({
         mutation: CREATE_PROFILE,
-        variables: { input: { sellerName: `${getTestPrefix()}-SeasonOrderProfile` } },
+        variables: { input: { sellerName: `${getTestPrefix()}-CampaignOrderProfile` } },
       });
       const profileId = profileData.createSellerProfile.profileId;
 
@@ -1202,7 +1202,7 @@ describe('Season Query Resolvers Integration Tests', () => {
         mutation: CREATE_CATALOG,
         variables: {
           input: {
-            catalogName: `${getTestPrefix()}-SeasonOrderCatalog`,
+            catalogName: `${getTestPrefix()}-CampaignOrderCatalog`,
             isPublic: true,
             products: [{ productName: 'Product', price: 15.0, sortOrder: 1 }],
           },
@@ -1210,7 +1210,7 @@ describe('Season Query Resolvers Integration Tests', () => {
       });
       const catalogId = catalogData.createCatalog.catalogId;
 
-      // Create seasons with different start dates (oldest to newest)
+      // Create campaigns with different start dates (oldest to newest)
       const campaignIds: string[] = [];
       const startDates = [
         '2022-01-01T00:00:00Z',
@@ -1220,33 +1220,33 @@ describe('Season Query Resolvers Integration Tests', () => {
       ];
       
       for (let i = 0; i < startDates.length; i++) {
-        const { data: seasonData }: any = await ownerClient.mutate({
+        const { data: campaignData }: any = await ownerClient.mutate({
           mutation: CREATE_CAMPAIGN,
           variables: {
             input: {
               profileId: profileId,
-              campaignName: `${getTestPrefix()}-Season-${i + 1}`,
+              campaignName: `${getTestPrefix()}-Campaign-${i + 1}`,
               campaignYear: 2025,
               startDate: startDates[i],
               catalogId: catalogId,
             },
           },
         });
-        campaignIds.push(seasonData.createCampaign.campaignId);
+        campaignIds.push(campaignData.createCampaign.campaignId);
       }
 
-      // Act: List seasons
+      // Act: List campaigns
       const { data }: any = await ownerClient.query({
         query: LIST_CAMPAIGNS_BY_PROFILE,
         variables: { profileId },
         fetchPolicy: 'network-only',
       });
 
-      // Assert: Seasons are returned with startDate for ordering
+      // Assert: Campaigns are returned with startDate for ordering
       expect(data.listCampaignsByProfile.length).toBe(startDates.length);
       
-      for (const season of data.listCampaignsByProfile) {
-        expect(season.startDate).toBeDefined();
+      for (const campaign of data.listCampaignsByProfile) {
+        expect(campaign.startDate).toBeDefined();
       }
       
       // Check ordering (may be ascending or descending by implementation)
@@ -1257,7 +1257,7 @@ describe('Season Query Resolvers Integration Tests', () => {
       const isAscending = JSON.stringify(dates) === JSON.stringify(sortedAsc);
       const isDescending = JSON.stringify(dates) === JSON.stringify(sortedDesc);
       
-      console.log(`Seasons are ordered by startDate: ascending=${isAscending}, descending=${isDescending}`);
+      console.log(`Campaigns are ordered by startDate: ascending=${isAscending}, descending=${isDescending}`);
 
       // Cleanup
       for (const campaignId of campaignIds) {
@@ -1267,11 +1267,11 @@ describe('Season Query Resolvers Integration Tests', () => {
       await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
     }, 60000);
 
-    it('Performance: Listing seasons with filters (active vs past vs future)', async () => {
-      // Arrange: Create profile, catalog, and seasons with different date ranges
+    it('Performance: Listing campaigns with filters (active vs past vs future)', async () => {
+      // Arrange: Create profile, catalog, and campaigns with different date ranges
       const { data: profileData }: any = await ownerClient.mutate({
         mutation: CREATE_PROFILE,
-        variables: { input: { sellerName: `${getTestPrefix()}-SeasonFilterProfile` } },
+        variables: { input: { sellerName: `${getTestPrefix()}-CampaignFilterProfile` } },
       });
       const profileId = profileData.createSellerProfile.profileId;
 
@@ -1279,7 +1279,7 @@ describe('Season Query Resolvers Integration Tests', () => {
         mutation: CREATE_CATALOG,
         variables: {
           input: {
-            catalogName: `${getTestPrefix()}-SeasonFilterCatalog`,
+            catalogName: `${getTestPrefix()}-CampaignFilterCatalog`,
             isPublic: true,
             products: [{ productName: 'Product', price: 15.0, sortOrder: 1 }],
           },
@@ -1294,13 +1294,13 @@ describe('Season Query Resolvers Integration Tests', () => {
       const activeEnd = new Date(now.getFullYear(), 11, 31).toISOString();
       const futureStart = new Date(now.getFullYear() + 1, 0, 1).toISOString();
 
-      // Create past season
-      const { data: pastSeasonData }: any = await ownerClient.mutate({
+      // Create past campaign
+      const { data: pastCampaignData }: any = await ownerClient.mutate({
         mutation: CREATE_CAMPAIGN,
         variables: {
           input: {
             profileId: profileId,
-            campaignName: `${getTestPrefix()}-PastSeason`,
+            campaignName: `${getTestPrefix()}-PastCampaign`,
             campaignYear: 2025,
             startDate: pastStart,
             endDate: pastEnd,
@@ -1308,15 +1308,15 @@ describe('Season Query Resolvers Integration Tests', () => {
           },
         },
       });
-      const pastSeasonId = pastSeasonData.createCampaign.campaignId;
+      const pastCampaignId = pastCampaignData.createCampaign.campaignId;
 
-      // Create active season
-      const { data: activeSeasonData }: any = await ownerClient.mutate({
+      // Create active campaign
+      const { data: activeCampaignData }: any = await ownerClient.mutate({
         mutation: CREATE_CAMPAIGN,
         variables: {
           input: {
             profileId: profileId,
-            campaignName: `${getTestPrefix()}-ActiveSeason`,
+            campaignName: `${getTestPrefix()}-ActiveCampaign`,
             campaignYear: 2025,
             startDate: activeStart,
             endDate: activeEnd,
@@ -1324,62 +1324,62 @@ describe('Season Query Resolvers Integration Tests', () => {
           },
         },
       });
-      const activeSeasonId = activeSeasonData.createCampaign.campaignId;
+      const activeCampaignId = activeCampaignData.createCampaign.campaignId;
 
-      // Create future season
-      const { data: futureSeasonData }: any = await ownerClient.mutate({
+      // Create future campaign
+      const { data: futureCampaignData }: any = await ownerClient.mutate({
         mutation: CREATE_CAMPAIGN,
         variables: {
           input: {
             profileId: profileId,
-            campaignName: `${getTestPrefix()}-FutureSeason`,
+            campaignName: `${getTestPrefix()}-FutureCampaign`,
             campaignYear: 2025,
             startDate: futureStart,
             catalogId: catalogId,
           },
         },
       });
-      const futureSeasonId = futureSeasonData.createCampaign.campaignId;
+      const futureCampaignId = futureCampaignData.createCampaign.campaignId;
 
-      // Act: List all seasons
+      // Act: List all campaigns
       const { data }: any = await ownerClient.query({
         query: LIST_CAMPAIGNS_BY_PROFILE,
         variables: { profileId },
         fetchPolicy: 'network-only',
       });
 
-      // Assert: All seasons are returned with date information for filtering
+      // Assert: All campaigns are returned with date information for filtering
       expect(data.listCampaignsByProfile.length).toBe(3);
       
-      // Verify each season has dates that allow client-side filtering
-      const seasons = data.listCampaignsByProfile;
-      for (const season of seasons) {
-        expect(season.startDate).toBeDefined();
-        // endDate may be null for ongoing seasons
+      // Verify each campaign has dates that allow client-side filtering
+      const campaigns = data.listCampaignsByProfile;
+      for (const campaign of campaigns) {
+        expect(campaign.startDate).toBeDefined();
+        // endDate may be null for ongoing campaigns
       }
       
-      // Categorize seasons by date range
-      const pastSeasons = seasons.filter((s: any) => {
+      // Categorize campaigns by date range
+      const pastCampaigns = campaigns.filter((s: any) => {
         const end = s.endDate ? new Date(s.endDate) : null;
         return end && end < now;
       });
-      const activeSeasons = seasons.filter((s: any) => {
+      const activeCampaigns = campaigns.filter((s: any) => {
         const start = new Date(s.startDate);
         const end = s.endDate ? new Date(s.endDate) : null;
         return start <= now && (!end || end >= now);
       });
-      const futureSeasons = seasons.filter((s: any) => {
+      const futureCampaigns = campaigns.filter((s: any) => {
         const start = new Date(s.startDate);
         return start > now;
       });
       
-      console.log(`Seasons: past=${pastSeasons.length}, active=${activeSeasons.length}, future=${futureSeasons.length}`);
-      expect(pastSeasons.length + activeSeasons.length + futureSeasons.length).toBe(3);
+      console.log(`Campaigns: past=${pastCampaigns.length}, active=${activeCampaigns.length}, future=${futureCampaigns.length}`);
+      expect(pastCampaigns.length + activeCampaigns.length + futureCampaigns.length).toBe(3);
 
       // Cleanup
-      await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId: pastSeasonId } });
-      await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId: activeSeasonId } });
-      await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId: futureSeasonId } });
+      await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId: pastCampaignId } });
+      await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId: activeCampaignId } });
+      await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId: futureCampaignId } });
       await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId } });
       await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
     }, 60000);

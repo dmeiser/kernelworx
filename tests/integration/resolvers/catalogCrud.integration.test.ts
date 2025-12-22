@@ -1108,7 +1108,7 @@ describe('Catalog CRUD Integration Tests', () => {
         expect(data.deleteCatalog).toBe(true);
       });
 
-      it('SECURITY: Cannot delete catalog that is in use by seasons', async () => {
+      it('SECURITY: Cannot delete catalog that is in use by campaigngns', async () => {
         // Arrange: Create a public catalog that multiple users can use
         const createCatalogInput = {
           catalogName: 'Shared Public Catalog',
@@ -1121,7 +1121,7 @@ describe('Catalog CRUD Integration Tests', () => {
         });
         const catalogId = catalogData.createCatalog.catalogId;
 
-        // Create profiles and seasons for multiple users using this catalog
+        // Create profiles and campaigns for multiple users using this catalog
         const CREATE_PROFILE = gql`
           mutation CreateSellerProfile($input: CreateSellerProfileInput!) {
             createSellerProfile(input: $input) {
@@ -1161,75 +1161,75 @@ describe('Catalog CRUD Integration Tests', () => {
           }
         `;
 
-        // Owner creates a profile and season using the public catalog
+        // Owner creates a profile and campaign using the public catalog
         const { data: ownerProfileData }: any = await ownerClient.mutate({
           mutation: CREATE_PROFILE,
           variables: { input: { sellerName: 'Owner Using Public Catalog' } },
         });
         const ownerProfileId = ownerProfileData.createSellerProfile.profileId;
 
-        const { data: ownerSeasonData }: any = await ownerClient.mutate({
+        const { data: ownerCampaignData }: any = await ownerClient.mutate({
           mutation: CREATE_CAMPAIGN,
           variables: {
             input: {
               profileId: ownerProfileId,
               catalogId: catalogId,
-              campaignName: 'Owner Season',
+              campaignName: 'Owner Campaigngn',
               campaignYear: 2025,
               startDate: new Date().toISOString(),
             },
           },
         });
-        const ownerSeasonId = ownerSeasonData.createCampaign.campaignId;
+        const ownerCampaignId = ownerCampaignData.createCampaign.campaignId;
 
-        // Contributor creates a profile and season using the same public catalog
+        // Contributor creates a profile and campaign using the same public catalog
         const { data: contributorProfileData }: any = await contributorClient.mutate({
           mutation: CREATE_PROFILE,
           variables: { input: { sellerName: 'Contributor Using Public Catalog' } },
         });
         const contributorProfileId = contributorProfileData.createSellerProfile.profileId;
 
-        const { data: contributorSeasonData }: any = await contributorClient.mutate({
+        const { data: contributorCampaignData }: any = await contributorClient.mutate({
           mutation: CREATE_CAMPAIGN,
           variables: {
             input: {
               profileId: contributorProfileId,
               catalogId: catalogId,
-              campaignName: 'Contributor Season',
+              campaignName: 'Contributor Campaigngn',
               campaignYear: 2025,
               startDate: new Date().toISOString(),
             },
           },
         });
-        const contributorSeasonId = contributorSeasonData.createCampaign.campaignId;
+        const contributorCampaignId = contributorCampaignData.createCampaign.campaignId;
 
-        // Verify both seasons were created with the catalog reference
-        const { data: ownerSeasonCheck }: any = await ownerClient.query({
+        // Verify both campaigns were created with the catalog reference
+        const { data: ownerCampaignCheck }: any = await ownerClient.query({
           query: GET_CAMPAIGN,
-          variables: { campaignId: ownerSeasonId },
+          variables: { campaignId: ownerCampaignId },
           fetchPolicy: 'network-only',
         });
-        expect(ownerSeasonCheck.getCampaign.catalogId).toBe(catalogId);
+        expect(ownerCampaignCheck.getCampaign.catalogId).toBe(catalogId);
         
-        const { data: contributorSeasonCheck }: any = await contributorClient.query({
+        const { data: contributorCampaignCheck }: any = await contributorClient.query({
           query: GET_CAMPAIGN,
-          variables: { campaignId: contributorSeasonId },
+          variables: { campaignId: contributorCampaignId },
           fetchPolicy: 'network-only',
         });
-        expect(contributorSeasonCheck.getCampaign.catalogId).toBe(catalogId);
+        expect(contributorCampaignCheck.getCampaign.catalogId).toBe(catalogId);
 
-        // Wait 1 second to ensure DynamoDB has fully replicated the season writes
+        // Wait 1 second to ensure DynamoDB has fully replicated the campaign writes
         // (consistentRead doesn't fully solve eventual consistency for Scan operations)
         await new Promise(resolve => setTimeout(resolve, 1000));
 
         // Act & Assert: Owner tries to delete the public catalog but should fail
-        // because 2 seasons are using it
+        // because 2 campaigns are using it
         await expect(
           ownerClient.mutate({
             mutation: DELETE_CATALOG,
             variables: { catalogId: catalogId },
           })
-        ).rejects.toThrow(/cannot delete catalog.*season.*using it/i);
+        ).rejects.toThrow(/cannot delete catalog.*campaigngn.*using it/i);
 
         // Verify catalog still exists
         const { data: catalogCheck }: any = await ownerClient.query({
@@ -1240,9 +1240,9 @@ describe('Catalog CRUD Integration Tests', () => {
         expect(catalogCheck.getCatalog).toBeDefined();
         expect(catalogCheck.getCatalog.catalogName).toBe('Shared Public Catalog');
 
-        // Cleanup: Delete seasons first, then catalog, then profiles
-        await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId: ownerSeasonId } });
-        await contributorClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId: contributorSeasonId } });
+        // Cleanup: Delete campaigns first, then catalog, then profiles
+        await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId: ownerCampaignId } });
+        await contributorClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId: contributorCampaignId } });
         await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId } }); // Now deletion should succeed
         await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId: ownerProfileId } });
         await contributorClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId: contributorProfileId } });
@@ -1262,10 +1262,10 @@ describe('Catalog CRUD Integration Tests', () => {
     });
 
     describe('Data Integrity', () => {
-      it('Data Integrity: Deleting catalog used by active season', async () => {
-        // Arrange: Create a catalog and use it for a season
+      it('Data Integrity: Deleting catalog used by active campaigngn', async () => {
+        // Arrange: Create a catalog and use it for a campaigngn
         const createCatalogInput = {
-          catalogName: 'Catalog Used By Season',
+          catalogName: 'Catalog Used By Campaigngn',
           isPublic: false,
           products: [{ productName: 'Popcorn', price: 25.0, sortOrder: 1 }],
         };
@@ -1275,7 +1275,7 @@ describe('Catalog CRUD Integration Tests', () => {
         });
         const catalogId = catalogData.createCatalog.catalogId;
 
-        // Create a profile and season using this catalog
+        // Create a profile and campaign using this catalog
         const CREATE_PROFILE = gql`
           mutation CreateSellerProfile($input: CreateSellerProfileInput!) {
             createSellerProfile(input: $input) {
@@ -1309,24 +1309,24 @@ describe('Catalog CRUD Integration Tests', () => {
         });
         const profileId = profileData.createSellerProfile.profileId;
 
-        const { data: seasonData }: any = await ownerClient.mutate({
+        const { data: campaignData }: any = await ownerClient.mutate({
           mutation: CREATE_CAMPAIGN,
           variables: {
             input: {
               profileId: profileId,
               catalogId: catalogId,
-              campaignName: 'Season Using Catalog',
+              campaignName: 'Campaigngn Using Catalog',
               campaignYear: 2025,
               startDate: new Date().toISOString(),
             },
           },
         });
-        const campaignId = seasonData.createCampaign.campaignId;
+        const campaignId = campaignData.createCampaign.campaignId;
 
-        // Act: Try to delete the catalog while it's in use by a season
+        // Act: Try to delete the catalog while it's in use by a campaigngn
         // The system should either:
         // - Prevent deletion (throw error)
-        // - Allow deletion (orphan the season's catalogId reference)
+        // - Allow deletion (orphan the campaigngn's catalogId reference)
         try {
           const { data: deleteData }: any = await ownerClient.mutate({
             mutation: DELETE_CATALOG,
@@ -1337,7 +1337,7 @@ describe('Catalog CRUD Integration Tests', () => {
           // This means the system allows deletion (orphaning the reference)
           expect(deleteData.deleteCatalog).toBe(true);
           
-          // Season's catalogId is now orphaned - verify the season still exists
+          // Campaigngn's catalogId is now orphaned - verify the campaign still exists
           const GET_CAMPAIGN = gql`
             query GetCampaign($campaignId: ID!) {
               getCampaign(campaignId: $campaignId) {
@@ -1346,19 +1346,19 @@ describe('Catalog CRUD Integration Tests', () => {
               }
             }
           `;
-          const { data: seasonCheck }: any = await ownerClient.query({
+          const { data: campaignCheck }: any = await ownerClient.query({
             query: GET_CAMPAIGN,
             variables: { campaignId: campaignId },
             fetchPolicy: 'network-only',
           });
-          expect(seasonCheck.getCampaign).toBeDefined();
-          expect(seasonCheck.getCampaign.catalogId).toBe(catalogId); // Reference is orphaned
+          expect(campaignCheck.getCampaign).toBeDefined();
+          expect(campaignCheck.getCampaign.catalogId).toBe(catalogId); // Reference is orphaned
         } catch (error: any) {
           // If deletion fails, the system prevents deletion of in-use catalogs
           // This is also valid behavior
           expect(error.message).toMatch(/in use|referenced|cannot delete/i);
         } finally {
-          // Cleanup: Delete season and profile
+          // Cleanup: Delete campaign and profile
           await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId } });
           await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
           
@@ -1500,7 +1500,7 @@ describe('Catalog CRUD Integration Tests', () => {
         });
         const catalogId = catalogData.createCatalog.catalogId;
 
-        // Create a profile for creating seasons
+        // Create a profile for creating campaigngns
         const CREATE_PROFILE = gql`
           mutation CreateSellerProfile($input: CreateSellerProfileInput!) {
             createSellerProfile(input: $input) {
@@ -1534,8 +1534,8 @@ describe('Catalog CRUD Integration Tests', () => {
         });
         const profileId = profileData.createSellerProfile.profileId;
 
-        // Act: Concurrent catalog deletion and season creation (using that catalog)
-        const [deleteResult, createSeasonResult] = await Promise.allSettled([
+        // Act: Concurrent catalog deletion and campaign creation (using that catalog)
+        const [deleteResult, createCampaignResult] = await Promise.allSettled([
           ownerClient.mutate({
             mutation: DELETE_CATALOG,
             variables: { catalogId: catalogId },
@@ -1546,7 +1546,7 @@ describe('Catalog CRUD Integration Tests', () => {
               input: {
                 profileId: profileId,
                 catalogId: catalogId,
-                campaignName: 'Concurrent Season',
+                campaignName: 'Concurrent Campaigngn',
                 campaignYear: 2025,
                 startDate: new Date().toISOString(),
               },
@@ -1558,13 +1558,13 @@ describe('Catalog CRUD Integration Tests', () => {
         // Delete should always be attempted
         expect(['fulfilled', 'rejected']).toContain(deleteResult.status);
         
-        // Season creation may succeed (if it happens before deletion)
+        // Campaigngn creation may succeed (if it happens before deletion)
         // or it may succeed with an orphaned catalog reference (if deletion happens first)
-        expect(['fulfilled', 'rejected']).toContain(createSeasonResult.status);
+        expect(['fulfilled', 'rejected']).toContain(createCampaignResult.status);
 
         // Cleanup
-        if (createSeasonResult.status === 'fulfilled') {
-          const campaignId = (createSeasonResult as PromiseFulfilledResult<any>).value.data.createCampaign.campaignId;
+        if (createCampaignResult.status === 'fulfilled') {
+          const campaignId = (createCampaignResult as PromiseFulfilledResult<any>).value.data.createCampaign.campaignId;
           await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId } });
         }
         await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });

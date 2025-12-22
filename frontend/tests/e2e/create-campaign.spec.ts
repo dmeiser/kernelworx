@@ -1,5 +1,5 @@
 /**
- * E2E Tests for CreateSeasonPage - Campaign Prefill Flow
+ * E2E Tests for CreateCampaignPage - Campaign Prefill Flow
  *
  * Tests the unauthenticated redirect, prefill code entry, and campaign discovery flows.
  *
@@ -14,7 +14,7 @@
 
 import { test, expect } from "@playwright/test";
 
-test.describe("CreateSeasonPage - Unauthenticated Redirect", () => {
+test.describe("CreateCampaignPage - Unauthenticated Redirect", () => {
   test.skip("redirects unauthenticated user to login when accessing /c/:prefillCode", async ({
     page,
   }) => {
@@ -42,13 +42,13 @@ test.describe("CreateSeasonPage - Unauthenticated Redirect", () => {
   });
 });
 
-test.describe("CreateSeasonPage - Manual Mode", () => {
-  test.skip("displays create season form at /create-season", async ({ page }) => {
+test.describe("CreateCampaignPage - Manual Mode", () => {
+  test.skip("displays create campaign form at /create-campaign", async ({ page }) => {
     // Would need to be logged in first
-    await page.goto("/create-season");
+    await page.goto("/create-campaign");
 
     // Should show the form title
-    await expect(page.getByText("Create New Season")).toBeVisible();
+    await expect(page.getByText("Create New Campaign")).toBeVisible();
 
     // Should show profile selection
     await expect(page.getByLabel(/Select Profile/i)).toBeVisible();
@@ -61,7 +61,7 @@ test.describe("CreateSeasonPage - Manual Mode", () => {
   });
 
   test.skip("unit fields are optional but validated together", async ({ page }) => {
-    await page.goto("/create-season");
+    await page.goto("/create-campaign");
 
     // Expand unit accordion
     await page.getByText("Unit Information").click();
@@ -76,7 +76,7 @@ test.describe("CreateSeasonPage - Manual Mode", () => {
   });
 });
 
-test.describe("CreateSeasonPage - Prefill Mode", () => {
+test.describe("CreateCampaignPage - Prefill Mode", () => {
   test.skip("displays locked fields when valid prefill code provided", async ({ page }) => {
     // Would need a valid prefill code in the database
     await page.goto("/c/VALID123");
@@ -85,8 +85,8 @@ test.describe("CreateSeasonPage - Prefill Mode", () => {
     await expect(page.getByText(/Campaign prefill/i)).toBeVisible();
 
     // Fields should be disabled
-    const seasonNameInput = page.getByLabel(/Season Name/i);
-    await expect(seasonNameInput).toBeDisabled();
+    const campaignNameInput = page.getByLabel(/Campaign Name/i);
+    await expect(campaignNameInput).toBeDisabled();
   });
 
   test.skip("shows creator message when provided in prefill", async ({ page }) => {
@@ -109,20 +109,20 @@ test.describe("CreateSeasonPage - Prefill Mode", () => {
 
     // Should show the warning text
     await expect(
-      page.getByText(/read access to ALL current and future seasons/i)
+      page.getByText(/read access to ALL current and future campaigns/i)
     ).toBeVisible();
   });
 });
 
-test.describe("CreateSeasonPage - Campaign Discovery", () => {
+test.describe("CreateCampaignPage - Campaign Discovery", () => {
   test.skip("detects matching prefill when unit fields match", async ({ page }) => {
-    await page.goto("/create-season");
+    await page.goto("/create-campaign");
 
     // Fill in all required fields that match a prefill
     await page.getByLabel(/Select Profile/i).click();
     await page.getByRole("option").first().click();
 
-    await page.getByLabel(/Season Name/i).fill("Fall 2024");
+    await page.getByLabel(/Campaign Name/i).fill("Fall 2024");
     await page.getByLabel(/Year/i).fill("2024");
 
     // Expand and fill unit info
@@ -142,7 +142,7 @@ test.describe("CreateSeasonPage - Campaign Discovery", () => {
 
   test.skip("allows user to use discovered prefill", async ({ page }) => {
     // After discovery alert appears
-    await page.goto("/create-season");
+    await page.goto("/create-campaign");
     // ... fill fields to trigger discovery ...
 
     // Click to use the prefill
@@ -153,28 +153,28 @@ test.describe("CreateSeasonPage - Campaign Discovery", () => {
   });
 });
 
-test.describe("CreateSeasonPage - Form Submission", () => {
-  test.skip("successfully creates season in manual mode", async ({ page }) => {
-    await page.goto("/create-season");
+test.describe("CreateCampaignPage - Form Submission", () => {
+  test.skip("successfully creates campaign in manual mode", async ({ page }) => {
+    await page.goto("/create-campaign");
 
     // Fill required fields
     await page.getByLabel(/Select Profile/i).click();
     await page.getByRole("option").first().click();
 
-    await page.getByLabel(/Season Name/i).fill("Test Season");
+    await page.getByLabel(/Campaign Name/i).fill("Test Campaign");
     await page.getByLabel(/Year/i).fill("2024");
 
     await page.getByLabel(/Select Catalog/i).click();
     await page.getByRole("option").first().click();
 
     // Submit
-    await page.getByRole("button", { name: /Create Season/i }).click();
+    await page.getByRole("button", { name: /Create Campaign/i }).click();
 
     // Should show success and redirect
-    await expect(page.getByText(/Season created/i)).toBeVisible();
+    await expect(page.getByText(/Campaign created/i)).toBeVisible();
   });
 
-  test.skip("successfully creates season in prefill mode", async ({ page }) => {
+  test.skip("successfully creates campaign in prefill mode", async ({ page }) => {
     await page.goto("/c/VALID123");
 
     // Just select a profile (other fields pre-filled)
@@ -182,9 +182,9 @@ test.describe("CreateSeasonPage - Form Submission", () => {
     await page.getByRole("option").first().click();
 
     // Submit
-    await page.getByRole("button", { name: /Create Season/i }).click();
+    await page.getByRole("button", { name: /Create Campaign/i }).click();
 
     // Should show success
-    await expect(page.getByText(/Season created/i)).toBeVisible();
+    await expect(page.getByText(/Campaign created/i)).toBeVisible();
   });
 });
