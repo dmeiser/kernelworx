@@ -71,7 +71,7 @@ type Campaign {
   unitNumber: Int           # NEW: Required when unitType provided
   city: String              # NEW: Required when unitType provided (for unit uniqueness)
   state: String             # NEW: Required when unitType provided (for unit uniqueness)
-  prefillCode: String       # NEW: If campaign was created from shared campaign
+  sharedCampaignCode: String       # NEW: If campaign was created from shared campaign
   createdAt: AWSDateTime!
   updatedAt: AWSDateTime!
   catalog: Catalog
@@ -99,7 +99,7 @@ type Product @aws_cognito_user_pools {
 }
 
 type SharedCampaign {
-  prefillCode: String!
+  sharedCampaignCode: String!
   catalogId: ID!
   catalog: Catalog!
   campaignName: String!
@@ -247,7 +247,7 @@ input CreateCampaignInput {
   unitNumber: Int
   city: String
   state: String
-  prefillCode: String
+  sharedCampaignCode: String
   shareWithCreator: Boolean
 }
 
@@ -323,7 +323,7 @@ input CreateSharedCampaignInput {
 }
 
 input UpdateSharedCampaignInput {
-  prefillCode: String!
+  sharedCampaignCode: String!
   creatorMessage: String
   description: String
   isActive: Boolean
@@ -396,7 +396,7 @@ type Query {
   listInvitesByProfile(profileId: ID!): [ProfileInvite!]!
   
   # Shared campaign queries
-  getSharedCampaign(prefillCode: String!): SharedCampaign
+  getSharedCampaign(sharedCampaignCode: String!): SharedCampaign
   listMySharedCampaigns: [SharedCampaign!]!
   findSharedCampaigns(unitType: String!, unitNumber: Int!, city: String!, state: String!, campaignName: String!, campaignYear: Int!): [SharedCampaign!]!
   
@@ -440,7 +440,7 @@ type Mutation {
   
   updateSharedCampaign(input: UpdateSharedCampaignInput!): SharedCampaign!
   
-  deleteSharedCampaign(prefillCode: String!): Boolean!
+  deleteSharedCampaign(sharedCampaignCode: String!): Boolean!
   
   # Sharing mutations
   createProfileInvite(input: CreateProfileInviteInput!): ProfileInvite!

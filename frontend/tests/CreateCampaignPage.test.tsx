@@ -1,7 +1,7 @@
 /**
  * CreateCampaignPage component tests
  *
- * Tests for the campaign creation page supporting both prefill and manual modes.
+ * Tests for the campaign creation page supporting both shared campaign and manual modes.
  *
  * NOTE: These tests are currently skipped due to:
  * 1. Complex routing setup requirements with react-router-dom
@@ -202,8 +202,8 @@ describe.skip("CreateCampaignPage", () => {
 });
 
 describe.skip("CreateCampaignPage - Prefill Mode", () => {
-  // These tests would require mocking GET_SHARED_CAMPAIGN with a valid prefill response
-  test("shows locked fields when prefill code is provided", async () => {
+  // These tests would require mocking GET_SHARED_CAMPAIGN with a valid shared campaign response
+  test("shows locked fields when shared campaign code is provided", async () => {
     // TODO: Add GET_SHARED_CAMPAIGN mock
     expect(true).toBe(true);
   });

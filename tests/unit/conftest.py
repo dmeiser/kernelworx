@@ -241,19 +241,19 @@ def dynamodb_table(aws_credentials: None) -> Generator[Any, None, None]:
         )
 
         # ================================================================
-        # Campaign Prefills Table (NEW - Phase 1)
-        # PK: prefillCode, SK: METADATA
+        # Campaign shared campaigns Table (NEW - Phase 1)
+        # PK: sharedCampaignCode, SK: METADATA
         # GSI1: createdBy + createdAt (list by creator)
-        # GSI2: unitCampaignKey + prefillCode (discover by unit+campaign)
+        # GSI2: unitCampaignKey + sharedCampaignCode (discover by unit+campaign)
         # ================================================================
-        campaign_prefills_table = dynamodb.create_table(
-            TableName="kernelworx-campaign-prefills-ue1-dev",
+        campaign_shared_campaigns_table = dynamodb.create_table(
+            TableName="kernelworx-shared-campaigns-ue1-dev",
             KeySchema=[
-                {"AttributeName": "prefillCode", "KeyType": "HASH"},
+                {"AttributeName": "sharedCampaignCode", "KeyType": "HASH"},
                 {"AttributeName": "SK", "KeyType": "RANGE"},
             ],
             AttributeDefinitions=[
-                {"AttributeName": "prefillCode", "AttributeType": "S"},
+                {"AttributeName": "sharedCampaignCode", "AttributeType": "S"},
                 {"AttributeName": "SK", "AttributeType": "S"},
                 {"AttributeName": "createdBy", "AttributeType": "S"},
                 {"AttributeName": "createdAt", "AttributeType": "S"},
@@ -272,7 +272,7 @@ def dynamodb_table(aws_credentials: None) -> Generator[Any, None, None]:
                     "IndexName": "GSI2",
                     "KeySchema": [
                         {"AttributeName": "unitCampaignKey", "KeyType": "HASH"},
-                        {"AttributeName": "prefillCode", "KeyType": "RANGE"},
+                        {"AttributeName": "sharedCampaignCode", "KeyType": "RANGE"},
                     ],
                     "Projection": {"ProjectionType": "ALL"},
                 },

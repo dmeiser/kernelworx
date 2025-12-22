@@ -1,7 +1,7 @@
 /**
  * CampaignSettingsPage tests
  *
- * Tests for prefill-created campaign warnings and confirmation dialogs.
+ * Tests for sharedCampaign-created campaign warnings and confirmation dialogs.
  */
 
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
@@ -17,7 +17,7 @@ import {
 } from "../src/lib/graphql";
 
 // Mock campaign data
-const mockCampaignWithPrefill = {
+const mockCampaignWithSharedCampaign = {
   campaignId: "campaign-123",
   campaignName: "Fall",
   campaignYear: 2025,
@@ -25,14 +25,14 @@ const mockCampaignWithPrefill = {
   endDate: "2025-12-01T23:59:59.999Z",
   catalogId: "catalog-1",
   profileId: "profile-123",
-  prefillCode: "PACK123F25",
+  sharedCampaignCode: "PACK123F25",
   unitType: "Pack",
   unitNumber: 123,
   city: "Springfield",
   state: "IL",
 };
 
-const mockCampaignWithoutPrefill = {
+const mockCampaignWithoutSharedCampaign = {
   campaignId: "campaign-456",
   campaignName: "Spring",
   campaignYear: 2025,
@@ -40,7 +40,7 @@ const mockCampaignWithoutPrefill = {
   endDate: "2025-06-01T23:59:59.999Z",
   catalogId: "catalog-1",
   profileId: "profile-123",
-  prefillCode: null,
+  sharedCampaignCode: null,
 };
 
 const mockCatalogs = [
@@ -48,7 +48,7 @@ const mockCatalogs = [
   { catalogId: "catalog-2", catalogName: "My Custom Catalog", catalogType: "USER_CREATED", isDeleted: false },
 ];
 
-const createMocks = (campaign: typeof mockCampaignWithPrefill | typeof mockCampaignWithoutPrefill): any[] => [
+const createMocks = (campaign: typeof mockCampaignWithSharedCampaign | typeof mockCampaignWithoutSharedCampaign): any[] => [
   {
     request: {
       query: GET_CAMPAIGN,
@@ -102,10 +102,10 @@ describe("CampaignSettingsPage", () => {
     vi.clearAllMocks();
   });
 
-  describe("Prefill warning display", () => {
-    it("displays warning for prefill-created campaigns", async () => {
-      const mocks = createMocks(mockCampaignWithPrefill);
-      renderWithProviders(mocks, mockCampaignWithPrefill.campaignId, mockCampaignWithPrefill.profileId);
+  describe("SharedCampaign warning display", () => {
+    it("displays warning for sharedCampaign-created campaigns", async () => {
+      const mocks = createMocks(mockCampaignWithSharedCampaign);
+      renderWithProviders(mocks, mockCampaignWithSharedCampaign.campaignId, mockCampaignWithSharedCampaign.profileId);
 
       await waitFor(() => {
         expect(screen.getByText("Shared Campaign")).toBeInTheDocument();
@@ -117,8 +117,8 @@ describe("CampaignSettingsPage", () => {
     });
 
     it("does not display warning for regular campaigns", async () => {
-      const mocks = createMocks(mockCampaignWithoutPrefill);
-      renderWithProviders(mocks, mockCampaignWithoutPrefill.campaignId, mockCampaignWithoutPrefill.profileId);
+      const mocks = createMocks(mockCampaignWithoutSharedCampaign);
+      renderWithProviders(mocks, mockCampaignWithoutSharedCampaign.campaignId, mockCampaignWithoutSharedCampaign.profileId);
 
       await waitFor(() => {
         expect(screen.getByText("Campaign Settings")).toBeInTheDocument();
@@ -129,9 +129,9 @@ describe("CampaignSettingsPage", () => {
   });
 
   describe("Confirmation dialog for unit-related changes", () => {
-    it("shows confirmation dialog when changing campaign name on prefill campaign", async () => {
-      const mocks = createMocks(mockCampaignWithPrefill);
-      renderWithProviders(mocks, mockCampaignWithPrefill.campaignId, mockCampaignWithPrefill.profileId);
+    it("shows confirmation dialog when changing campaign name on shared campaign", async () => {
+      const mocks = createMocks(mockCampaignWithSharedCampaign);
+      renderWithProviders(mocks, mockCampaignWithSharedCampaign.campaignId, mockCampaignWithSharedCampaign.profileId);
 
       // Wait for form to load
       await waitFor(() => {
@@ -161,29 +161,29 @@ describe("CampaignSettingsPage", () => {
     // MUI Select components are difficult to test with getByLabelText due to how
     // FormControl/InputLabel renders, so we test the confirmation flow via campaign name only.
 
-    it("does not show confirmation for date changes on prefill campaign", async () => {
+    it("does not show confirmation for date changes on shared campaign", async () => {
       const updateMock = {
         request: {
           query: UPDATE_CAMPAIGN,
           variables: {
             input: {
-              campaignId: mockCampaignWithPrefill.campaignId,
-              campaignName: mockCampaignWithPrefill.campaignName,
+              campaignId: mockCampaignWithSharedCampaign.campaignId,
+              campaignName: mockCampaignWithSharedCampaign.campaignName,
               startDate: "2025-09-15T00:00:00.000Z",
               endDate: "2025-12-01T23:59:59.999Z",
-              catalogId: mockCampaignWithPrefill.catalogId,
+              catalogId: mockCampaignWithSharedCampaign.catalogId,
             },
           },
         },
         result: {
           data: {
-            updateCampaign: { ...mockCampaignWithPrefill, startDate: "2025-09-15T00:00:00.000Z" },
+            updateCampaign: { ...mockCampaignWithSharedCampaign, startDate: "2025-09-15T00:00:00.000Z" },
           },
         },
       };
 
-      const mocks = [...createMocks(mockCampaignWithPrefill), updateMock];
-      renderWithProviders(mocks, mockCampaignWithPrefill.campaignId, mockCampaignWithPrefill.profileId);
+      const mocks = [...createMocks(mockCampaignWithSharedCampaign), updateMock];
+      renderWithProviders(mocks, mockCampaignWithSharedCampaign.campaignId, mockCampaignWithSharedCampaign.profileId);
 
       // Wait for form to load
       await waitFor(() => {
@@ -210,23 +210,23 @@ describe("CampaignSettingsPage", () => {
           query: UPDATE_CAMPAIGN,
           variables: {
             input: {
-              campaignId: mockCampaignWithoutPrefill.campaignId,
+              campaignId: mockCampaignWithoutSharedCampaign.campaignId,
               campaignName: "Winter",
               startDate: "2025-03-01T00:00:00.000Z",
               endDate: "2025-06-01T23:59:59.999Z",
-              catalogId: mockCampaignWithoutPrefill.catalogId,
+              catalogId: mockCampaignWithoutSharedCampaign.catalogId,
             },
           },
         },
         result: {
           data: {
-            updateCampaign: { ...mockCampaignWithoutPrefill, campaignName: "Winter" },
+            updateCampaign: { ...mockCampaignWithoutSharedCampaign, campaignName: "Winter" },
           },
         },
       };
 
-      const mocks = [...createMocks(mockCampaignWithoutPrefill), updateMock];
-      renderWithProviders(mocks, mockCampaignWithoutPrefill.campaignId, mockCampaignWithoutPrefill.profileId);
+      const mocks = [...createMocks(mockCampaignWithoutSharedCampaign), updateMock];
+      renderWithProviders(mocks, mockCampaignWithoutSharedCampaign.campaignId, mockCampaignWithoutSharedCampaign.profileId);
 
       // Wait for form to load
       await waitFor(() => {
@@ -248,8 +248,8 @@ describe("CampaignSettingsPage", () => {
     });
 
     it("cancels save when Cancel is clicked in confirmation dialog", async () => {
-      const mocks = createMocks(mockCampaignWithPrefill);
-      renderWithProviders(mocks, mockCampaignWithPrefill.campaignId, mockCampaignWithPrefill.profileId);
+      const mocks = createMocks(mockCampaignWithSharedCampaign);
+      renderWithProviders(mocks, mockCampaignWithSharedCampaign.campaignId, mockCampaignWithSharedCampaign.profileId);
 
       // Wait for form to load
       await waitFor(() => {

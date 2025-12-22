@@ -1,5 +1,5 @@
 /**
- * CampaignPrefillsPage - Manage campaign prefills (shareable campaign links)
+ * SharedCampaignsPage - Manage campaign shared campaigns (shareable campaign links)
  */
 
 import React, { useState } from "react";
@@ -48,7 +48,7 @@ import {
 import { EditSharedCampaignDialog } from "../components/EditSharedCampaignDialog";
 
 interface SharedCampaign {
-  prefillCode: string;
+  sharedCampaignCode: string;
   catalogId: string;
   catalog?: {
     catalogId: string;
@@ -70,62 +70,62 @@ interface SharedCampaign {
   createdAt: string;
 }
 
-const MAX_PREFILLS = 50;
+const MAX_SHARED_CAMPAIGNS = 50;
 const BASE_URL = window.location.origin;
 
 export const SharedCampaignsPage: React.FC = () => {
   const navigate = useNavigate();
-  const [editingPrefill, setEditingPrefill] = useState<SharedCampaign | null>(
+  const [editingSharedCampaign, setEditingSharedCampaign] = useState<SharedCampaign | null>(
     null,
   );
   const [deactivateDialogOpen, setDeactivateDialogOpen] = useState(false);
-  const [prefillToDeactivate, setPrefillToDeactivate] =
+  const [sharedCampaignToDeactivate, setSharedCampaignToDeactivate] =
     useState<SharedCampaign | null>(null);
   const [qrDialogOpen, setQrDialogOpen] = useState(false);
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string | null>(null);
-  const [qrPrefill, setQrPrefill] = useState<SharedCampaign | null>(null);
+  const [qrSharedCampaign, setQrSharedCampaign] = useState<SharedCampaign | null>(null);
   const [snackbarOpen, setSnackbarOpen] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState("");
 
-  // Fetch user's campaign prefills
+  // Fetch user's campaign  shared campaigns
   const { data, loading, error, refetch } = useQuery<{
-    listMyCampaignPrefills: SharedCampaign[];
+    listMySharedCampaigns: SharedCampaign[];
   }>(LIST_MY_SHARED_CAMPAIGNS);
 
   // Update mutation (for editing)
-  const [updatePrefill] = useMutation(UPDATE_SHARED_CAMPAIGN, {
+  const [updateSharedCampaign] = useMutation(UPDATE_SHARED_CAMPAIGN, {
     onCompleted: () => {
       refetch();
-      setEditingPrefill(null);
-      showSnackbar("Campaign prefill updated successfully");
+      setEditingSharedCampaign(null);
+      showSnackbar("Shared Campaign updated successfully");
     },
   });
 
   // Delete mutation (soft delete / deactivate)
-  const [deletePrefill] = useMutation(DELETE_SHARED_CAMPAIGN, {
+  const [deleteSharedCampaign] = useMutation(DELETE_SHARED_CAMPAIGN, {
     onCompleted: () => {
       refetch();
       setDeactivateDialogOpen(false);
-      setPrefillToDeactivate(null);
-      showSnackbar("Campaign prefill deactivated");
+      setSharedCampaignToDeactivate(null);
+      showSnackbar("Shared Campaign deactivated");
     },
   });
 
-  const prefills = data?.listMyCampaignPrefills || [];
-  const activePrefillCount = prefills.filter((p) => p.isActive).length;
-  const canCreateMore = activePrefillCount < MAX_PREFILLS;
+  const sharedCampaigns = data?.listMySharedCampaigns || [];
+  const activeSharedCampaignCount = sharedCampaigns.filter((p) => p.isActive).length;
+  const canCreateMore = activeSharedCampaignCount < MAX_SHARED_CAMPAIGNS;
 
   const showSnackbar = (message: string) => {
     setSnackbarMessage(message);
     setSnackbarOpen(true);
   };
 
-  const getShortLink = (prefillCode: string) => {
-    return `${BASE_URL}/c/${prefillCode}`;
+  const getShortLink = (sharedCampaignCode: string) => {
+    return `${BASE_URL}/c/${sharedCampaignCode}`;
   };
 
-  const handleCopyLink = async (prefillCode: string) => {
-    const link = getShortLink(prefillCode);
+  const handleCopyLink = async (sharedCampaignCode: string) => {
+    const link = getShortLink(sharedCampaignCode);
     try {
       await navigator.clipboard.writeText(link);
       showSnackbar("Link copied to clipboard!");
@@ -135,8 +135,8 @@ export const SharedCampaignsPage: React.FC = () => {
     }
   };
 
-  const handleShowQRCode = async (prefill: SharedCampaign) => {
-    const link = getShortLink(prefill.prefillCode);
+  const handleShowQRCode = async (sharedCampaign: SharedCampaign) => {
+    const link = getShortLink(sharedCampaign.sharedCampaignCode);
     try {
       const qrDataUrl = await QRCode.toDataURL(link, {
         width: 400,
@@ -148,7 +148,7 @@ export const SharedCampaignsPage: React.FC = () => {
       });
 
       setQrCodeDataUrl(qrDataUrl);
-      setQrPrefill(prefill);
+      setQrSharedCampaign(sharedCampaign);
       setQrDialogOpen(true);
     } catch (err) {
       console.error("Failed to generate QR code:", err);
@@ -157,11 +157,11 @@ export const SharedCampaignsPage: React.FC = () => {
   };
 
   const handleDownloadQRCode = () => {
-    if (!qrCodeDataUrl || !qrPrefill) return;
+    if (!qrCodeDataUrl || !qrSharedCampaign) return;
 
     const downloadLink = document.createElement("a");
     downloadLink.href = qrCodeDataUrl;
-    downloadLink.download = `campaign-${qrPrefill.prefillCode}-qr.png`;
+    downloadLink.download = `campaign-${qrSharedCampaign.sharedCampaignCode}-qr.png`;
     document.body.appendChild(downloadLink);
     downloadLink.click();
     document.body.removeChild(downloadLink);
@@ -169,35 +169,35 @@ export const SharedCampaignsPage: React.FC = () => {
     showSnackbar("QR code downloaded!");
   };
 
-  const handleEdit = (prefill: SharedCampaign) => {
-    setEditingPrefill(prefill);
+  const handleEdit = (sharedCampaign: SharedCampaign) => {
+    setEditingSharedCampaign(sharedCampaign);
   };
 
-  const handleDeactivate = (prefill: SharedCampaign) => {
-    setPrefillToDeactivate(prefill);
+  const handleDeactivate = (sharedCampaign: SharedCampaign) => {
+    setSharedCampaignToDeactivate(sharedCampaign);
     setDeactivateDialogOpen(true);
   };
 
   const confirmDeactivate = async () => {
-    if (prefillToDeactivate) {
-      await deletePrefill({
-        variables: { prefillCode: prefillToDeactivate.prefillCode },
+    if (sharedCampaignToDeactivate) {
+      await deleteSharedCampaign({
+        variables: { sharedCampaignCode: sharedCampaignToDeactivate.sharedCampaignCode },
       });
     }
   };
 
   const handleSaveEdit = async (
-    prefillCode: string,
+    sharedCampaignCode: string,
     updates: {
       description?: string;
       creatorMessage?: string;
       isActive?: boolean;
     },
   ) => {
-    await updatePrefill({
+    await updateSharedCampaign({
       variables: {
         input: {
-          prefillCode,
+          sharedCampaignCode,
           ...updates,
         },
       },
@@ -241,13 +241,13 @@ export const SharedCampaignsPage: React.FC = () => {
           </Typography>
           <Typography variant="body2" color="text.secondary">
             Create shareable links that let your unit members create campaigns quickly with preset information for your unit.
-            members. ({activePrefillCount}/{MAX_PREFILLS} active)
+            members. ({activeSharedCampaignCount}/{MAX_SHARED_CAMPAIGNS} active)
           </Typography>
         </Box>
         <Tooltip
           title={
             !canCreateMore
-              ? `You have reached the maximum of ${MAX_PREFILLS} active shared campaigns`
+              ? `You have reached the maximum of ${MAX_SHARED_CAMPAIGNS} active shared campaigns`
               : ""
           }
         >
@@ -264,7 +264,7 @@ export const SharedCampaignsPage: React.FC = () => {
         </Tooltip>
       </Stack>
 
-      {prefills.length === 0 ? (
+      {sharedCampaigns.length === 0 ? (
         <Paper sx={{ p: 4, textAlign: "center" }}>
           <Typography variant="h6" color="text.secondary" gutterBottom>
             No Shared Campaigns Yet
@@ -276,7 +276,7 @@ export const SharedCampaignsPage: React.FC = () => {
           <Button
             variant="contained"
             startIcon={<AddIcon />}
-            onClick={() => navigate("/campaign-prefills/create")}
+            onClick={() => navigate("/shared-campaigns/create")}
           >
             Create Your First Shared Campaign
           </Button>
@@ -296,11 +296,11 @@ export const SharedCampaignsPage: React.FC = () => {
               </TableRow>
             </TableHead>
             <TableBody>
-              {prefills.map((prefill) => (
-                <TableRow key={prefill.prefillCode}>
+              {sharedCampaigns.map((sharedCampaign) => (
+                <TableRow key={sharedCampaign.sharedCampaignCode}>
                   <TableCell>
                     <Typography variant="body2" fontFamily="monospace">
-                      {prefill.prefillCode}
+                      {sharedCampaign.sharedCampaignCode}
                     </Typography>
                   </TableCell>
                   <TableCell>
@@ -313,27 +313,27 @@ export const SharedCampaignsPage: React.FC = () => {
                         whiteSpace: "nowrap",
                       }}
                     >
-                      {prefill.description || "-"}
+                      {sharedCampaign.description || "-"}
                     </Typography>
                   </TableCell>
                   <TableCell>
-                    {prefill.catalog?.catalogName || "Unknown Catalog"}
+                    {sharedCampaign.catalog?.catalogName || "Unknown Catalog"}
                   </TableCell>
                   <TableCell>
-                    {prefill.campaignName} {prefill.campaignYear}
+                    {sharedCampaign.campaignName} {sharedCampaign.campaignYear}
                   </TableCell>
                   <TableCell>
-                    {prefill.unitType} {prefill.unitNumber}
+                    {sharedCampaign.unitType} {sharedCampaign.unitNumber}
                     <Typography
                       variant="caption"
                       display="block"
                       color="text.secondary"
                     >
-                      {prefill.city}, {prefill.state}
+                      {sharedCampaign.city}, {sharedCampaign.state}
                     </Typography>
                   </TableCell>
                   <TableCell>
-                    {prefill.isActive ? (
+                    {sharedCampaign.isActive ? (
                       <Chip
                         icon={<ActiveIcon />}
                         label="Active"
@@ -358,7 +358,7 @@ export const SharedCampaignsPage: React.FC = () => {
                       <Tooltip title="Copy Link">
                         <IconButton
                           size="small"
-                          onClick={() => handleCopyLink(prefill.prefillCode)}
+                          onClick={() => handleCopyLink(sharedCampaign.sharedCampaignCode)}
                           aria-label="Copy link"
                         >
                           <CopyIcon fontSize="small" />
@@ -367,7 +367,7 @@ export const SharedCampaignsPage: React.FC = () => {
                       <Tooltip title="View QR Code">
                         <IconButton
                           size="small"
-                          onClick={() => handleShowQRCode(prefill)}
+                          onClick={() => handleShowQRCode(sharedCampaign)}
                           aria-label="View QR code"
                         >
                           <QrCodeIcon fontSize="small" />
@@ -376,17 +376,17 @@ export const SharedCampaignsPage: React.FC = () => {
                       <Tooltip title="Edit">
                         <IconButton
                           size="small"
-                          onClick={() => handleEdit(prefill)}
+                          onClick={() => handleEdit(sharedCampaign)}
                           aria-label="Edit"
                         >
                           <EditIcon fontSize="small" />
                         </IconButton>
                       </Tooltip>
-                      {prefill.isActive && (
+                      {sharedCampaign.isActive && (
                         <Tooltip title="Deactivate">
                           <IconButton
                             size="small"
-                            onClick={() => handleDeactivate(prefill)}
+                            onClick={() => handleDeactivate(sharedCampaign)}
                             aria-label="Deactivate"
                             color="error"
                           >
@@ -404,11 +404,11 @@ export const SharedCampaignsPage: React.FC = () => {
       )}
 
       {/* Edit Dialog */}
-      {editingPrefill && (
+      {editingSharedCampaign && (
         <EditSharedCampaignDialog
-          open={!!editingPrefill}
-          prefill={editingPrefill}
-          onClose={() => setEditingPrefill(null)}
+          open={!!editingSharedCampaign}
+          sharedCampaign={editingSharedCampaign}
+          onClose={() => setEditingSharedCampaign(null)}
           onSave={handleSaveEdit}
         />
       )}
@@ -418,21 +418,21 @@ export const SharedCampaignsPage: React.FC = () => {
         open={deactivateDialogOpen}
         onClose={() => setDeactivateDialogOpen(false)}
       >
-        <DialogTitle>Deactivate Campaign Prefill?</DialogTitle>
+        <DialogTitle>Deactivate Campaign SharedCampaign?</DialogTitle>
         <DialogContent>
           <DialogContentText>
-            Are you sure you want to deactivate this campaign prefill? The link
+            Are you sure you want to deactivate this campaign sharedCampaign? The link
             will no longer work for new campaign creation, but existing campaigns
             created from this link will not be affected.
           </DialogContentText>
-          {prefillToDeactivate && (
+          {sharedCampaignToDeactivate && (
             <Box mt={2}>
               <Typography variant="body2" color="text.secondary">
-                <strong>Code:</strong> {prefillToDeactivate.prefillCode}
+                <strong>Code:</strong> {sharedCampaignToDeactivate.sharedCampaignCode}
               </Typography>
               <Typography variant="body2" color="text.secondary">
-                <strong>Unit:</strong> {prefillToDeactivate.unitType}{" "}
-                {prefillToDeactivate.unitNumber}
+                <strong>Unit:</strong> {sharedCampaignToDeactivate.unitType}{" "}
+                {sharedCampaignToDeactivate.unitNumber}
               </Typography>
             </Box>
           )}
@@ -454,7 +454,7 @@ export const SharedCampaignsPage: React.FC = () => {
       >
         <DialogTitle>
           Campaign QR Code
-          {qrPrefill && ` - ${qrPrefill.prefillCode}`}
+          {qrSharedCampaign && ` - ${qrSharedCampaign.sharedCampaignCode}`}
         </DialogTitle>
         <DialogContent>
           <Stack spacing={2} alignItems="center">
@@ -474,7 +474,7 @@ export const SharedCampaignsPage: React.FC = () => {
                 }}
               />
             )}
-            {qrPrefill && (
+            {qrSharedCampaign && (
               <Box sx={{ textAlign: "center", width: "100%" }}>
                 <Typography variant="body2" color="text.secondary" gutterBottom>
                   Link:
@@ -484,7 +484,7 @@ export const SharedCampaignsPage: React.FC = () => {
                   fontFamily="monospace"
                   sx={{ wordBreak: "break-all" }}
                 >
-                  {getShortLink(qrPrefill.prefillCode)}
+                  {getShortLink(qrSharedCampaign.sharedCampaignCode)}
                 </Typography>
               </Box>
             )}

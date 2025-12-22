@@ -1,11 +1,11 @@
 /**
- * E2E Tests for CreateCampaignPage - Campaign Prefill Flow
+ * E2E Tests for CreateCampaignPage - Shared Campaign Flow
  *
- * Tests the unauthenticated redirect, prefill code entry, and campaign discovery flows.
+ * Tests the unauthenticated redirect, shared campaign code entry, and campaign discovery flows.
  *
  * NOTE: These tests require:
  * 1. A running backend (CDK deployed to dev)
- * 2. Valid test data (campaign prefills, catalogs)
+ * 2. Valid test data (shared campaigns, catalogs)
  * 3. Test user accounts for authentication flows
  *
  * For now, tests are marked as skipped until the backend is fully deployed
@@ -15,10 +15,10 @@
 import { test, expect } from "@playwright/test";
 
 test.describe("CreateCampaignPage - Unauthenticated Redirect", () => {
-  test.skip("redirects unauthenticated user to login when accessing /c/:prefillCode", async ({
+  test.skip("redirects unauthenticated user to login when accessing /c/:sharedCampaignCode", async ({
     page,
   }) => {
-    // Navigate to a prefill code URL without being logged in
+    // Navigate to a shared campaign code URL without being logged in
     await page.goto("/c/TEST1234");
 
     // Should redirect to login page
@@ -29,8 +29,8 @@ test.describe("CreateCampaignPage - Unauthenticated Redirect", () => {
     expect(url).toContain("returnTo");
   });
 
-  test.skip("preserves prefill code in session after login redirect", async ({ page }) => {
-    // Navigate to prefill URL
+  test.skip("preserves shared campaign code in session after login redirect", async ({ page }) => {
+    // Navigate to shared campaign URL
     await page.goto("/c/TEST1234");
 
     // Complete login flow (would need test credentials)
@@ -77,19 +77,19 @@ test.describe("CreateCampaignPage - Manual Mode", () => {
 });
 
 test.describe("CreateCampaignPage - Prefill Mode", () => {
-  test.skip("displays locked fields when valid prefill code provided", async ({ page }) => {
-    // Would need a valid prefill code in the database
+  test.skip("displays locked fields when valid shared campaign code provided", async ({ page }) => {
+    // Would need a valid shared campaign code in the database
     await page.goto("/c/VALID123");
 
-    // Should show prefill mode banner
-    await expect(page.getByText(/Campaign prefill/i)).toBeVisible();
+    // Should show shared campaign mode banner
+    await expect(page.getByText(/Campaign sharedCampaign/i)).toBeVisible();
 
     // Fields should be disabled
     const campaignNameInput = page.getByLabel(/Campaign Name/i);
     await expect(campaignNameInput).toBeDisabled();
   });
 
-  test.skip("shows creator message when provided in prefill", async ({ page }) => {
+  test.skip("shows creator message when provided in sharedCampaign", async ({ page }) => {
     await page.goto("/c/VALID123");
 
     // Should display the creator's message
@@ -115,10 +115,10 @@ test.describe("CreateCampaignPage - Prefill Mode", () => {
 });
 
 test.describe("CreateCampaignPage - Campaign Discovery", () => {
-  test.skip("detects matching prefill when unit fields match", async ({ page }) => {
+  test.skip("detects matching shared campaign when unit fields match", async ({ page }) => {
     await page.goto("/create-campaign");
 
-    // Fill in all required fields that match a prefill
+    // Fill in all required fields that match a shared campaign
     await page.getByLabel(/Select Profile/i).click();
     await page.getByRole("option").first().click();
 
@@ -134,21 +134,21 @@ test.describe("CreateCampaignPage - Campaign Discovery", () => {
     await page.getByLabel(/State/i).click();
     await page.getByRole("option", { name: /Colorado/i }).click();
 
-    // Should detect matching prefill after debounce
-    await expect(page.getByText(/matching campaign prefill found/i)).toBeVisible({
+    // Should detect matching shared campaign after debounce
+    await expect(page.getByText(/matching shared campaign found/i)).toBeVisible({
       timeout: 2000,
     });
   });
 
-  test.skip("allows user to use discovered prefill", async ({ page }) => {
+  test.skip("allows user to use discovered sharedCampaign", async ({ page }) => {
     // After discovery alert appears
     await page.goto("/create-campaign");
     // ... fill fields to trigger discovery ...
 
-    // Click to use the prefill
-    await page.getByRole("button", { name: /use this prefill/i }).click();
+    // Click to use the shared campaign
+    await page.getByRole("button", { name: /use this sharedCampaign/i }).click();
 
-    // Should redirect to prefill URL
+    // Should redirect to shared campaign URL
     await expect(page).toHaveURL(/\/c\//);
   });
 });
@@ -174,7 +174,7 @@ test.describe("CreateCampaignPage - Form Submission", () => {
     await expect(page.getByText(/Campaign created/i)).toBeVisible();
   });
 
-  test.skip("successfully creates campaign in prefill mode", async ({ page }) => {
+  test.skip("successfully creates campaign in shared campaign mode", async ({ page }) => {
     await page.goto("/c/VALID123");
 
     // Just select a profile (other fields pre-filled)

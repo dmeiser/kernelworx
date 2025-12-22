@@ -1,5 +1,5 @@
 /**
- * CreateCampaignPrefillDialog - Dialog for creating a new campaign prefill
+ * CreateSharedCampaignDialog - Dialog for creating a new shared campaign
  */
 
 import React, { useState, useEffect } from "react";
@@ -137,7 +137,7 @@ export const CreateSharedCampaignDialog: React.FC<
   const catalogsLoading = publicLoading || myLoading;
 
   // Create mutation
-  const [createPrefill] = useMutation(CREATE_SHARED_CAMPAIGN);
+  const [createSharedCampaign] = useMutation(CREATE_SHARED_CAMPAIGN);
 
   // Reset form when dialog opens/closes
   useEffect(() => {
@@ -180,7 +180,7 @@ export const CreateSharedCampaignDialog: React.FC<
     setError(null);
 
     try {
-      await createPrefill({
+      await createSharedCampaign({
         variables: {
           input: {
             catalogId,
@@ -203,7 +203,7 @@ export const CreateSharedCampaignDialog: React.FC<
       const errorMessage =
         err instanceof Error
           ? err.message
-          : "Failed to create campaign prefill";
+          : "Failed to create campaign sharedCampaign";
       setError(errorMessage);
     } finally {
       setIsSubmitting(false);

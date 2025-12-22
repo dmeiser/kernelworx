@@ -1,7 +1,7 @@
 /**
  * ProfileCard component - Display a single scout profile with latest campaign stats
  *
- * Note: Unit fields have been moved to Campaign level as part of the Campaign Prefill
+ * Note: Unit fields have been moved to Campaign level as part of the Shared Campaign
  * refactor. Unit information is now displayed on campaigns, not profiles.
  */
 

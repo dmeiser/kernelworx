@@ -27,10 +27,10 @@ Object.assign(navigator, {
   },
 });
 
-const mockPrefills = [
+const mockSharedCampaigns = [
   {
-    __typename: "CampaignPrefill",
-    prefillCode: "PACK123F25",
+    __typename: "SharedCampaign",
+    sharedCampaignCode: "PACK123F25",
     catalogId: "catalog-1",
     catalog: {
       __typename: "Catalog",
@@ -53,8 +53,8 @@ const mockPrefills = [
     createdAt: "2025-01-15T00:00:00.000Z",
   },
   {
-    __typename: "CampaignPrefill",
-    prefillCode: "TROOP456S25",
+    __typename: "SharedCampaign",
+    sharedCampaignCode: "TROOP456S25",
     catalogId: "catalog-1",
     catalog: {
       __typename: "Catalog",
@@ -104,13 +104,13 @@ const baseMocks = () => [
   },
 ];
 
-const createListMock = (prefills = mockPrefills) => ({
+const createListMock = (sharedCampaigns = mockSharedCampaigns) => ({
   request: {
     query: LIST_MY_SHARED_CAMPAIGNS,
   },
   result: {
     data: {
-      listMyCampaignPrefills: prefills,
+      listMySharedCampaigns: sharedCampaigns,
     },
   },
 });
@@ -142,7 +142,7 @@ describe("SharedCampaignsPage", () => {
       expect(screen.getByRole("progressbar")).toBeInTheDocument();
     });
 
-    it("displays prefills in table after loading", async () => {
+    it("displays shared campaigns in table after loading", async () => {
       renderWithProviders([createListMock()]);
 
       await waitFor(() => {
@@ -151,7 +151,7 @@ describe("SharedCampaignsPage", () => {
 
       expect(screen.getByText("Fall 2025")).toBeInTheDocument();
       expect(screen.getByText("Pack 123")).toBeInTheDocument();
-      // Both prefills use the same catalog, so there are multiple elements
+      // Both shared campaigns use the same catalog, so there are multiple elements
       expect(screen.getAllByText("Official Popcorn 2025")).toHaveLength(2);
     });
 
@@ -166,7 +166,7 @@ describe("SharedCampaignsPage", () => {
       expect(screen.getByText("Inactive")).toBeInTheDocument();
     });
 
-    it("shows empty state when no prefills exist", async () => {
+    it("shows empty state when no shared campaigns exist", async () => {
       renderWithProviders([createListMock([])]);
 
       await waitFor(() => {
@@ -178,7 +178,7 @@ describe("SharedCampaignsPage", () => {
       ).toBeInTheDocument();
     });
 
-    it("shows prefill count in header", async () => {
+    it("shows shared campaign count in header", async () => {
       renderWithProviders([createListMock()]);
 
       await waitFor(() => {
@@ -219,8 +219,8 @@ describe("SharedCampaignsPage", () => {
       // This test needs to check that the button navigates, not that a dialog opens
     });
 
-    it.skip("disables create button when at 50 prefills", async () => {
-      // TODO: Test that button is disabled when at max prefills
+    it.skip("disables create button when at 50 shared campaigns", async () => {
+      // TODO: Test that button is disabled when at max  shared campaigns
     });
   });
 
@@ -237,7 +237,7 @@ describe("SharedCampaignsPage", () => {
 
       await waitFor(() => {
         expect(
-          screen.getByText("Deactivate Campaign Prefill?")
+          screen.getByText("Deactivate Campaign SharedCampaign?")
         ).toBeInTheDocument();
       });
 
@@ -258,7 +258,7 @@ describe("SharedCampaignsPage", () => {
 
       await waitFor(() => {
         expect(
-          screen.getByText("Deactivate Campaign Prefill?")
+          screen.getByText("Deactivate Campaign SharedCampaign?")
         ).toBeInTheDocument();
       });
 
@@ -267,19 +267,19 @@ describe("SharedCampaignsPage", () => {
 
       await waitFor(() => {
         expect(
-          screen.queryByText("Deactivate Campaign Prefill?")
+          screen.queryByText("Deactivate Campaign SharedCampaign?")
         ).not.toBeInTheDocument();
       });
     });
 
-    it("does not show deactivate button for inactive prefills", async () => {
+    it("does not show deactivate button for inactive shared campaigns", async () => {
       renderWithProviders([createListMock()]);
 
       await waitFor(() => {
         expect(screen.getByText("TROOP456S25")).toBeInTheDocument();
       });
 
-      // There should only be one deactivate button (for the active prefill)
+      // There should only be one deactivate button (for the active sharedCampaign)
       const deactivateButtons = screen.getAllByLabelText("Deactivate");
       expect(deactivateButtons).toHaveLength(1);
     });
@@ -297,7 +297,7 @@ describe("SharedCampaignsPage", () => {
       fireEvent.click(editButtons[0]);
 
       await waitFor(() => {
-        expect(screen.getByText("Edit Campaign Prefill")).toBeInTheDocument();
+        expect(screen.getByText("Edit Campaign SharedCampaign")).toBeInTheDocument();
       });
 
       // Should show read-only info

@@ -1,5 +1,5 @@
 /**
- * EditCampaignPrefillDialog - Dialog for editing an existing campaign prefill
+ * EditSharedCampaignDialog - Dialog for editing an existing shared campaign
  *
  * Only allows editing: description, creatorMessage, isActive
  * Cannot modify: catalogId, campaignName, campaignYear, unit info (locked after creation)
@@ -24,7 +24,7 @@ import {
 } from "@mui/material";
 
 interface SharedCampaign {
-  prefillCode: string;
+  sharedCampaignCode: string;
   catalogId: string;
   catalog?: {
     catalogId: string;
@@ -48,10 +48,10 @@ interface SharedCampaign {
 
 interface EditSharedCampaignDialogProps {
   open: boolean;
-  prefill: SharedCampaign;
+  sharedCampaign: SharedCampaign;
   onClose: () => void;
   onSave: (
-    prefillCode: string,
+    sharedCampaignCode: string,
     updates: {
       description?: string;
       creatorMessage?: string;
@@ -65,27 +65,27 @@ const BASE_URL = window.location.origin;
 
 export const EditSharedCampaignDialog: React.FC<
   EditSharedCampaignDialogProps
-> = ({ open, prefill, onClose, onSave }) => {
-  const [description, setDescription] = useState(prefill.description || "");
+> = ({ open, sharedCampaign, onClose, onSave }) => {
+  const [description, setDescription] = useState(sharedCampaign.description || "");
   const [creatorMessage, setCreatorMessage] = useState(
-    prefill.creatorMessage || "",
+    sharedCampaign.creatorMessage || "",
   );
-  const [isActive, setIsActive] = useState(prefill.isActive);
+  const [isActive, setIsActive] = useState(sharedCampaign.isActive);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Reset form when prefill changes
+  // Reset form when shared campaign changes
   useEffect(() => {
-    setDescription(prefill.description || "");
-    setCreatorMessage(prefill.creatorMessage || "");
-    setIsActive(prefill.isActive);
+    setDescription(sharedCampaign.description || "");
+    setCreatorMessage(sharedCampaign.creatorMessage || "");
+    setIsActive(sharedCampaign.isActive);
     setError(null);
-  }, [prefill]);
+  }, [sharedCampaign]);
 
   const hasChanges =
-    description !== (prefill.description || "") ||
-    creatorMessage !== (prefill.creatorMessage || "") ||
-    isActive !== prefill.isActive;
+    description !== (sharedCampaign.description || "") ||
+    creatorMessage !== (sharedCampaign.creatorMessage || "") ||
+    isActive !== sharedCampaign.isActive;
 
   const handleSubmit = async () => {
     if (creatorMessage.length > MAX_CREATOR_MESSAGE_LENGTH) {
@@ -99,7 +99,7 @@ export const EditSharedCampaignDialog: React.FC<
     setError(null);
 
     try {
-      await onSave(prefill.prefillCode, {
+      await onSave(sharedCampaign.sharedCampaignCode, {
         description: description.trim() || undefined,
         creatorMessage: creatorMessage.trim() || undefined,
         isActive,
@@ -108,7 +108,7 @@ export const EditSharedCampaignDialog: React.FC<
       const errorMessage =
         err instanceof Error
           ? err.message
-          : "Failed to update campaign prefill";
+          : "Failed to update campaign sharedCampaign";
       setError(errorMessage);
     } finally {
       setIsSubmitting(false);
@@ -117,7 +117,7 @@ export const EditSharedCampaignDialog: React.FC<
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
-      <DialogTitle>Edit Campaign Prefill</DialogTitle>
+      <DialogTitle>Edit Campaign SharedCampaign</DialogTitle>
       <DialogContent>
         <Stack spacing={3} sx={{ mt: 1 }}>
           {error && <Alert severity="error">{error}</Alert>}
@@ -133,7 +133,7 @@ export const EditSharedCampaignDialog: React.FC<
                   Code:
                 </Typography>
                 <Typography variant="body2" fontFamily="monospace">
-                  {prefill.prefillCode}
+                  {sharedCampaign.sharedCampaignCode}
                 </Typography>
               </Box>
               <Box display="flex" alignItems="center" gap={1}>
@@ -145,7 +145,7 @@ export const EditSharedCampaignDialog: React.FC<
                   fontFamily="monospace"
                   sx={{ wordBreak: "break-all" }}
                 >
-                  {`${BASE_URL}/c/${prefill.prefillCode}`}
+                  {`${BASE_URL}/c/${sharedCampaign.sharedCampaignCode}`}
                 </Typography>
               </Box>
               <Box display="flex" alignItems="center" gap={1}>
@@ -153,7 +153,7 @@ export const EditSharedCampaignDialog: React.FC<
                   Catalog:
                 </Typography>
                 <Typography variant="body2">
-                  {prefill.catalog?.catalogName || "Unknown Catalog"}
+                  {sharedCampaign.catalog?.catalogName || "Unknown Catalog"}
                 </Typography>
               </Box>
               <Box display="flex" alignItems="center" gap={1}>
@@ -161,7 +161,7 @@ export const EditSharedCampaignDialog: React.FC<
                   Campaign:
                 </Typography>
                 <Typography variant="body2">
-                  {prefill.campaignName} {prefill.campaignYear}
+                  {sharedCampaign.campaignName} {sharedCampaign.campaignYear}
                 </Typography>
               </Box>
               <Box display="flex" alignItems="center" gap={1}>
@@ -169,8 +169,8 @@ export const EditSharedCampaignDialog: React.FC<
                   Unit:
                 </Typography>
                 <Typography variant="body2">
-                  {prefill.unitType} {prefill.unitNumber}, {prefill.city},{" "}
-                  {prefill.state}
+                  {sharedCampaign.unitType} {sharedCampaign.unitNumber}, {sharedCampaign.city},{" "}
+                  {sharedCampaign.state}
                 </Typography>
               </Box>
               <Box display="flex" alignItems="center" gap={1}>
@@ -178,8 +178,8 @@ export const EditSharedCampaignDialog: React.FC<
                   Status:
                 </Typography>
                 <Chip
-                  label={prefill.isActive ? "Active" : "Inactive"}
-                  color={prefill.isActive ? "success" : "default"}
+                  label={sharedCampaign.isActive ? "Active" : "Inactive"}
+                  color={sharedCampaign.isActive ? "success" : "default"}
                   size="small"
                 />
               </Box>
@@ -229,7 +229,7 @@ export const EditSharedCampaignDialog: React.FC<
             label="Description (For Your Reference)"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            placeholder="Internal description to help you manage your campaign prefills"
+            placeholder="Internal description to help you manage your campaign shared campaigns"
             fullWidth
           />
         </Stack>

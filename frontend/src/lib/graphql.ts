@@ -33,7 +33,7 @@ export const CAMPAIGN_FRAGMENT = gql`
     unitNumber
     city
     state
-    prefillCode
+    sharedCampaignCode
     createdAt
     updatedAt
     totalOrders
@@ -511,12 +511,12 @@ export const LIST_UNIT_CATALOGS = gql`
 `;
 
 // ============================================================================
-// Campaign Prefill Fragment
+// Campaign shared campaign Fragment
 // ============================================================================
 
 export const SHARED_CAMPAIGN_FRAGMENT = gql`
   fragment SharedCampaignFields on SharedCampaign {
-    prefillCode
+    sharedCampaignCode
     catalogId
     catalog {
       catalogId
@@ -540,13 +540,13 @@ export const SHARED_CAMPAIGN_FRAGMENT = gql`
 `;
 
 // ============================================================================
-// Campaign Prefill Queries
+// Campaign shared campaign Queries
 // ============================================================================
 
 export const GET_SHARED_CAMPAIGN = gql`
   ${SHARED_CAMPAIGN_FRAGMENT}
-  query GetSharedCampaign($prefillCode: String!) {
-    getSharedCampaign(prefillCode: $prefillCode) {
+  query GetSharedCampaign($sharedCampaignCode: String!) {
+    getSharedCampaign(sharedCampaignCode: $sharedCampaignCode) {
       ...SharedCampaignFields
     }
   }
@@ -612,7 +612,7 @@ export const LIST_UNIT_CAMPAIGN_CATALOGS = gql`
 `;
 
 // ============================================================================
-// Campaign Prefill Mutations
+// Campaign shared campaign Mutations
 // ============================================================================
 
 export const CREATE_SHARED_CAMPAIGN = gql`
@@ -634,7 +634,7 @@ export const UPDATE_SHARED_CAMPAIGN = gql`
 `;
 
 export const DELETE_SHARED_CAMPAIGN = gql`
-  mutation DeleteSharedCampaign($prefillCode: String!) {
-    deleteSharedCampaign(prefillCode: $prefillCode)
+  mutation DeleteSharedCampaign($sharedCampaignCode: String!) {
+    deleteSharedCampaign(sharedCampaignCode: $sharedCampaignCode)
   }
 `;

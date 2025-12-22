@@ -1,9 +1,9 @@
 import '../setup.ts';
 /**
- * Integration tests for Campaign Prefill CRUD resolvers
+ * Integration tests for Shared Campaign CRUD resolvers
  * 
  * Tests cover:
- * - Happy paths (prefill creation with required/optional fields)
+ * - Happy paths (sharedCampaign creation with required/optional fields)
  * - Authorization (owner, WRITE contributor, READ contributor, non-shared, unauthenticated)
  * - Input validation (missing fields, invalid references)
  * - Data integrity (field presence, GSI attributes)
@@ -43,10 +43,10 @@ const CREATE_CATALOG = gql`
   }
 `;
 
-const CREATE_CAMPAIGN_PREFILL = gql`
+const CREATE_CAMPAIGN_SHARED_CAMPAIGN = gql`
   mutation CreateSharedCampaign($input: CreateSharedCampaignInput!) {
     createSharedCampaign(input: $input) {
-      prefillCode
+      sharedCampaignCode
       catalogId
       campaignName
       campaignYear
@@ -66,10 +66,10 @@ const CREATE_CAMPAIGN_PREFILL = gql`
   }
 `;
 
-const UPDATE_CAMPAIGN_PREFILL = gql`
+const UPDATE_CAMPAIGN_SHARED_CAMPAIGN = gql`
   mutation UpdateSharedCampaign($input: UpdateSharedCampaignInput!) {
     updateSharedCampaign(input: $input) {
-      prefillCode
+      sharedCampaignCode
       catalogId
       campaignName
       campaignYear
@@ -89,10 +89,10 @@ const UPDATE_CAMPAIGN_PREFILL = gql`
   }
 `;
 
-const GET_CAMPAIGN_PREFILL = gql`
-  query GetSharedCampaign($prefillCode: String!) {
-    getSharedCampaign(prefillCode: $prefillCode) {
-      prefillCode
+const GET_CAMPAIGN_SHARED_CAMPAIGN = gql`
+  query GetSharedCampaign($sharedCampaignCode: String!) {
+    getSharedCampaign(sharedCampaignCode: $sharedCampaignCode) {
+      sharedCampaignCode
       catalogId
       campaignName
       campaignYear
@@ -112,10 +112,10 @@ const GET_CAMPAIGN_PREFILL = gql`
   }
 `;
 
-const LIST_MY_CAMPAIGN_PREFILLS = gql`
+const LIST_MY_CAMPAIGN_SHARED_CAMPAIGNS = gql`
   query ListMySharedCampaigns {
     listMySharedCampaigns {
-      prefillCode
+      sharedCampaignCode
       catalogId
       campaignName
       campaignYear
@@ -135,9 +135,9 @@ const LIST_MY_CAMPAIGN_PREFILLS = gql`
   }
 `;
 
-const DELETE_CAMPAIGN_PREFILL = gql`
-  mutation DeleteSharedCampaign($prefillCode: String!) {
-    deleteSharedCampaign(prefillCode: $prefillCode)
+const DELETE_CAMPAIGN_SHARED_CAMPAIGN = gql`
+  mutation DeleteSharedCampaign($sharedCampaignCode: String!) {
+    deleteSharedCampaign(sharedCampaignCode: $sharedCampaignCode)
   }
 `;
 
@@ -153,15 +153,15 @@ const DELETE_PROFILE = gql`
   }
 `;
 
-describe.skip('Campaign Prefill CRUD Operations', () => {
+describe.skip('Shared Campaign CRUD Operations', () => {
   let testPrefix: string;
   let ownerClient: ApolloClient<any>;
   let ownerAccountId: string;
   let profileId: string;
   let catalogId: string;
   
-  // Track all created prefills for cleanup
-  const createdPrefillCodes: string[] = [];
+  // Track all created shared campaigns for cleanup
+  const createdSharedCampaignCodes: string[] = [];
 
   beforeAll(async () => {
     testPrefix = getTestPrefix();
@@ -171,31 +171,31 @@ describe.skip('Campaign Prefill CRUD Operations', () => {
     ownerClient = ownerResult.client;
     ownerAccountId = ownerResult.accountId;
 
-    // Clean up existing prefills to avoid rate limit errors from previous test runs
-    // Note: Only clean new prefills (with correct schema), skip old ones that may fail
+    // Clean up existing shared campaigns to avoid rate limit errors from previous test runs
+    // Note: Only clean new shared campaigns (with correct schema), skip old ones that may fail
     try {
-      const existingPrefillsResult = await ownerClient.query({
-        query: LIST_MY_CAMPAIGN_PREFILLS,
+      const existingSharedCampaignsResult = await ownerClient.query({
+        query: LIST_MY_CAMPAIGN_SHARED_CAMPAIGNS,
       });
       
-      const existingPrefills = existingPrefillsResult.data.listMySharedCampaigns || [];
-      console.log(`Found ${existingPrefills.length} existing prefills. Cleaning up...`);
+      const existingSharedCampaigns = existingSharedCampaignsResult.data.listMySharedCampaigns || [];
+      console.log(`Found ${existingSharedCampaigns.length} existing shared campaigns. Cleaning up...`);
       
       // Only process first 5 for speed
-      for (const prefill of existingPrefills.slice(0, 5)) {
+      for (const sharedCampaign of existingSharedCampaigns.slice(0, 5)) {
         try {
           await ownerClient.mutate({
-            mutation: DELETE_CAMPAIGN_PREFILL,
-            variables: { prefillCode: prefill.prefillCode },
+            mutation: DELETE_CAMPAIGN_SHARED_CAMPAIGN,
+            variables: { sharedCampaignCode: sharedCampaign.sharedCampaignCode },
           });
-          console.log(`Deleted prefill: ${prefill.prefillCode}`);
+          console.log(`Deleted sharedCampaign: ${sharedCampaign.sharedCampaignCode}`);
         } catch (deleteError) {
           // Silently ignore - schema may have changed
-          console.log(`Skipped deletion of ${prefill.prefillCode} (schema mismatch)`);
+          console.log(`Skipped deletion of ${sharedCampaign.sharedCampaignCode} (schema mismatch)`);
         }
       }
     } catch (listError) {
-      console.warn(`Failed to list existing prefills for cleanup:`, listError);
+      console.warn(`Failed to list existing shared campaigns for cleanup:`, listError);
     }
 
     // Create a test profile
@@ -219,7 +219,7 @@ describe.skip('Campaign Prefill CRUD Operations', () => {
           products: [
             {
               productName: 'Test Product',
-              description: 'Test product for campaign prefill tests',
+              description: 'Test product for Shared Campaign tests',
               price: 10.0,
               sortOrder: 1,
             },
@@ -231,15 +231,15 @@ describe.skip('Campaign Prefill CRUD Operations', () => {
   }, 60000);
 
   afterAll(async () => {
-    // Clean up ALL tracked prefills first (handles failed tests)
-    for (const prefillCode of createdPrefillCodes) {
+    // Clean up ALL tracked shared campaigns first (handles failed tests)
+    for (const sharedCampaignCode of createdSharedCampaignCodes) {
       try {
         await ownerClient.mutate({
-          mutation: DELETE_CAMPAIGN_PREFILL,
-          variables: { prefillCode },
+          mutation: DELETE_CAMPAIGN_SHARED_CAMPAIGN,
+          variables: { sharedCampaignCode },
         });
       } catch {
-        // Ignore errors - prefill may already be deleted
+        // Ignore errors - shared campaign may already be deleted
       }
     }
 
@@ -271,21 +271,21 @@ describe.skip('Campaign Prefill CRUD Operations', () => {
     // await deleteTestAccounts([ownerAccountId]);
   });
   
-  // Helper to create a prefill and track it for cleanup
-  const createAndTrackPrefill = async (input: any) => {
+  // Helper to create a shared campaign and track it for cleanup
+  const createAndTrackSharedCampaign = async (input: any) => {
     const result = await ownerClient.mutate({
-      mutation: CREATE_CAMPAIGN_PREFILL,
+      mutation: CREATE_CAMPAIGN_SHARED_CAMPAIGN,
       variables: { input },
     });
-    const prefillCode = result.data.createSharedCampaign.prefillCode;
-    createdPrefillCodes.push(prefillCode);
+    const sharedCampaignCode = result.data.createSharedCampaign.sharedCampaignCode;
+    createdSharedCampaignCodes.push(sharedCampaignCode);
     return result;
   };
 
-  describe('CreateCampaignPrefill', () => {
-    it('should create a campaign prefill with all required fields', async () => {
+  describe('CreateSharedCampaign', () => {
+    it('should create a shared campaign with all required fields', async () => {
       const unitNumber = getUniqueUnitNumber();
-      const result = await createAndTrackPrefill({
+      const result = await createAndTrackSharedCampaign({
             catalogId,
             campaignName: 'Spring',
             campaignYear: 2025,
@@ -300,7 +300,7 @@ describe.skip('Campaign Prefill CRUD Operations', () => {
       });
 
       expect(result.data.createSharedCampaign).toBeDefined();
-      expect(result.data.createSharedCampaign.prefillCode).toBeTruthy();
+      expect(result.data.createSharedCampaign.sharedCampaignCode).toBeTruthy();
       expect(result.data.createSharedCampaign.catalogId).toBe(catalogId);
       expect(result.data.createSharedCampaign.campaignName).toBe('Spring');
       expect(result.data.createSharedCampaign.campaignYear).toBe(2025);
@@ -311,13 +311,13 @@ describe.skip('Campaign Prefill CRUD Operations', () => {
       expect(result.data.createSharedCampaign.isActive).toBe(true);
       expect(result.data.createSharedCampaign.createdBy).toBe(ownerAccountId);
 
-      // Cleanup handled by afterAll via createdPrefillCodes tracking
+      // Cleanup handled by afterAll via createdSharedCampaignCodes tracking
     });
 
     it('should reject creation without required fields', async () => {
       try {
         await ownerClient.mutate({
-          mutation: CREATE_CAMPAIGN_PREFILL,
+          mutation: CREATE_CAMPAIGN_SHARED_CAMPAIGN,
           variables: {
             input: {
               catalogId,
@@ -332,7 +332,7 @@ describe.skip('Campaign Prefill CRUD Operations', () => {
       }
     });
 
-    it('should enforce rate limit of 50 prefills per user', async () => {
+    it('should enforce rate limit of 50 shared campaigns per user', async () => {
       // This test would need to be skipped in normal runs or mocked
       // because hitting the actual limit is expensive
       // Placeholder for documentation purposes
@@ -340,11 +340,11 @@ describe.skip('Campaign Prefill CRUD Operations', () => {
     });
   });
 
-  describe('GetCampaignPrefill', () => {
-    let prefillCode: string;
+  describe('GetSharedCampaign', () => {
+    let sharedCampaignCode: string;
 
     beforeAll(async () => {
-      const result = await createAndTrackPrefill({
+      const result = await createAndTrackSharedCampaign({
             catalogId,
             campaignName: 'Summer',
             campaignYear: 2025,
@@ -357,40 +357,40 @@ describe.skip('Campaign Prefill CRUD Operations', () => {
             creatorMessage: 'Help fund summer activities!',
             description: 'Summer sale for troop 456',
       });
-      prefillCode = result.data.createSharedCampaign.prefillCode;
+      sharedCampaignCode = result.data.createSharedCampaign.sharedCampaignCode;
     });
 
-    // Cleanup handled by top-level afterAll via createdPrefillCodes tracking
+    // Cleanup handled by top-level afterAll via createdSharedCampaignCodes tracking
 
-    it('should retrieve campaign prefill by prefillCode', async () => {
+    it('should retrieve shared campaign by sharedCampaignCode', async () => {
       const result = await ownerClient.query({
-        query: GET_CAMPAIGN_PREFILL,
-        variables: { prefillCode },
+        query: GET_CAMPAIGN_SHARED_CAMPAIGN,
+        variables: { sharedCampaignCode },
       });
 
-      expect(result.data.getCampaignPrefill).toBeDefined();
-      expect(result.data.getCampaignPrefill.prefillCode).toBe(prefillCode);
-      expect(result.data.getCampaignPrefill.campaignName).toBe('Summer');
-      expect(result.data.getCampaignPrefill.unitType).toBe('troop');
+      expect(result.data.getSharedCampaign).toBeDefined();
+      expect(result.data.getSharedCampaign.sharedCampaignCode).toBe(sharedCampaignCode);
+      expect(result.data.getSharedCampaign.campaignName).toBe('Summer');
+      expect(result.data.getSharedCampaign.unitType).toBe('troop');
       // Unit number is randomly generated, just check it exists
-      expect(result.data.getCampaignPrefill.unitNumber).toBeGreaterThan(0);
+      expect(result.data.getSharedCampaign.unitNumber).toBeGreaterThan(0);
     });
 
-    it('should return null for non-existent prefillCode', async () => {
+    it('should return null for non-existent sharedCampaignCode', async () => {
       const result = await ownerClient.query({
-        query: GET_CAMPAIGN_PREFILL,
-        variables: { prefillCode: 'nonexistent-code' },
+        query: GET_CAMPAIGN_SHARED_CAMPAIGN,
+        variables: { sharedCampaignCode: 'nonexistent-code' },
       });
 
-      expect(result.data.getCampaignPrefill).toBeNull();
+      expect(result.data.getSharedCampaign).toBeNull();
     });
   });
 
-  describe('ListMyCampaignPrefills', () => {
+  describe('ListMySharedCampaigns', () => {
     beforeAll(async () => {
-      // Create a few prefills for the owner - tracked for cleanup
+      // Create a few shared campaigns for the owner - tracked for cleanup
       for (let i = 0; i < 3; i++) {
-        await createAndTrackPrefill({
+        await createAndTrackSharedCampaign({
               catalogId,
               campaignName: 'Fall',
               campaignYear: 2025,
@@ -406,35 +406,35 @@ describe.skip('Campaign Prefill CRUD Operations', () => {
       }
     });
 
-    // Cleanup handled by top-level afterAll via createdPrefillCodes tracking
+    // Cleanup handled by top-level afterAll via createdSharedCampaignCodes tracking
 
-    it('should list all campaign prefills created by the current user', async () => {
+    it('should list all campaign shared campaigns created by the current user', async () => {
       const result = await ownerClient.query({
-        query: LIST_MY_CAMPAIGN_PREFILLS,
+        query: LIST_MY_CAMPAIGN_SHARED_CAMPAIGNS,
       });
 
-      expect(result.data.listMyCampaignPrefills).toBeDefined();
-      expect(Array.isArray(result.data.listMyCampaignPrefills)).toBe(true);
-      expect(result.data.listMyCampaignPrefills.length).toBeGreaterThanOrEqual(3);
+      expect(result.data.listMySharedCampaigns).toBeDefined();
+      expect(Array.isArray(result.data.listMySharedCampaigns)).toBe(true);
+      expect(result.data.listMySharedCampaigns.length).toBeGreaterThanOrEqual(3);
 
       // All should be created by the owner
-      result.data.listMyCampaignPrefills.forEach((prefill: any) => {
-        expect(prefill.createdBy).toBe(ownerAccountId);
+      result.data.listMySharedCampaigns.forEach((sharedCampaign: any) => {
+        expect(sharedCampaign.createdBy).toBe(ownerAccountId);
       });
       
       // At least 3 should be Fall campaign (the ones we just created)
-      const fallPrefills = result.data.listMyCampaignPrefills.filter(
+      const fallSharedCampaigns = result.data.listMySharedCampaigns.filter(
         (p: any) => p.campaignName === 'Fall'
       );
-      expect(fallPrefills.length).toBeGreaterThanOrEqual(3);
+      expect(fallSharedCampaigns.length).toBeGreaterThanOrEqual(3);
     });
   });
 
-  describe('UpdateCampaignPrefill', () => {
-    let prefillCode: string;
+  describe('UpdateSharedCampaign', () => {
+    let sharedCampaignCode: string;
 
     beforeAll(async () => {
-      const result = await createAndTrackPrefill({
+      const result = await createAndTrackSharedCampaign({
             catalogId,
             campaignName: 'Winter',
             campaignYear: 2025,
@@ -447,17 +447,17 @@ describe.skip('Campaign Prefill CRUD Operations', () => {
             creatorMessage: 'Winter fundraiser',
             description: 'Holiday campaign sale',
       });
-      prefillCode = result.data.createSharedCampaign.prefillCode;
+      sharedCampaignCode = result.data.createSharedCampaign.sharedCampaignCode;
     });
 
-    // Cleanup handled by top-level afterAll via createdPrefillCodes tracking
+    // Cleanup handled by top-level afterAll via createdSharedCampaignCodes tracking
 
-    it('should update campaign prefill fields', async () => {
+    it('should update shared campaign fields', async () => {
       const result = await ownerClient.mutate({
-        mutation: UPDATE_CAMPAIGN_PREFILL,
+        mutation: UPDATE_CAMPAIGN_SHARED_CAMPAIGN,
         variables: {
           input: {
-            prefillCode,
+            sharedCampaignCode,
             creatorMessage: 'Updated winter fundraiser message',
             description: 'Updated holiday campaign sale',
             isActive: false,
@@ -465,10 +465,10 @@ describe.skip('Campaign Prefill CRUD Operations', () => {
         },
       });
 
-      expect(result.data.updateCampaignPrefill.prefillCode).toBe(prefillCode);
-      expect(result.data.updateCampaignPrefill.creatorMessage).toBe('Updated winter fundraiser message');
-      expect(result.data.updateCampaignPrefill.description).toBe('Updated holiday campaign sale');
-      expect(result.data.updateCampaignPrefill.isActive).toBe(false);
+      expect(result.data.updateSharedCampaign.sharedCampaignCode).toBe(sharedCampaignCode);
+      expect(result.data.updateSharedCampaign.creatorMessage).toBe('Updated winter fundraiser message');
+      expect(result.data.updateSharedCampaign.description).toBe('Updated holiday campaign sale');
+      expect(result.data.updateSharedCampaign.isActive).toBe(false);
     });
 
     it('should reject update by non-creator', async () => {
@@ -477,17 +477,17 @@ describe.skip('Campaign Prefill CRUD Operations', () => {
 
       try {
         await otherResult.client.mutate({
-          mutation: UPDATE_CAMPAIGN_PREFILL,
+          mutation: UPDATE_CAMPAIGN_SHARED_CAMPAIGN,
           variables: {
             input: {
-              prefillCode,
+              sharedCampaignCode,
               description: 'Hacked description',
             },
           },
         });
         expect.fail('Should have thrown authorization error');
       } catch (error: any) {
-        // Resolver returns "Only the creator can update this campaign prefill"
+        // Resolver returns "Only the creator can update this campaign sharedCampaign"
         expect(error.message).toContain('creator');
       }
 
@@ -496,10 +496,10 @@ describe.skip('Campaign Prefill CRUD Operations', () => {
     });
   });
 
-  describe('DeleteCampaignPrefill', () => {
-    it('should delete campaign prefill', async () => {
-      // Create a prefill - track it even though we delete, in case test fails mid-way
-      const createResult = await createAndTrackPrefill({
+  describe('DeleteSharedCampaign', () => {
+    it('should delete campaign sharedCampaign', async () => {
+      // Create a shared campaign - track it even though we delete, in case test fails mid-way
+      const createResult = await createAndTrackSharedCampaign({
             catalogId,
             campaignName: 'Spring',
             campaignYear: 2026,
@@ -509,35 +509,35 @@ describe.skip('Campaign Prefill CRUD Operations', () => {
             unitNumber: getUniqueUnitNumber(),
             city: 'Boston',
             state: 'MA',
-            creatorMessage: 'Temporary prefill',
+            creatorMessage: 'Temporary sharedCampaign',
             description: 'To be deleted',
       });
-      const prefillCode = createResult.data.createSharedCampaign.prefillCode;
+      const sharedCampaignCode = createResult.data.createSharedCampaign.sharedCampaignCode;
 
       // Delete it
       const deleteResult = await ownerClient.mutate({
-        mutation: DELETE_CAMPAIGN_PREFILL,
-        variables: { prefillCode },
+        mutation: DELETE_CAMPAIGN_SHARED_CAMPAIGN,
+        variables: { sharedCampaignCode },
       });
 
-      expect(deleteResult.data.deleteCampaignPrefill).toBe(true);
+      expect(deleteResult.data.deleteSharedCampaign).toBe(true);
 
       // Verify it was soft-deleted (isActive=false)
-      // The getCampaignPrefill resolver returns null for inactive items by design,
+      // The getSharedCampaign resolver returns null for inactive items by design,
       // so we verify the delete worked by checking that the item is no longer accessible
       const getResult = await ownerClient.query({
-        query: GET_CAMPAIGN_PREFILL,
-        variables: { prefillCode },
+        query: GET_CAMPAIGN_SHARED_CAMPAIGN,
+        variables: { sharedCampaignCode },
         fetchPolicy: 'network-only', // Skip cache to get fresh result
       });
 
-      // Soft-deleted items return null from getCampaignPrefill
-      expect(getResult.data.getCampaignPrefill).toBeNull();
+      // Soft-deleted items return null from getSharedCampaign
+      expect(getResult.data.getSharedCampaign).toBeNull();
     });
 
     it('should reject deletion by non-creator', async () => {
-      // Create a prefill - tracked for cleanup
-      const createResult = await createAndTrackPrefill({
+      // Create a shared campaign - tracked for cleanup
+      const createResult = await createAndTrackSharedCampaign({
             catalogId,
             campaignName: 'Spring',
             campaignYear: 2026,
@@ -547,29 +547,29 @@ describe.skip('Campaign Prefill CRUD Operations', () => {
             unitNumber: getUniqueUnitNumber(),
             city: 'Portland',
             state: 'OR',
-            creatorMessage: 'Protected prefill',
+            creatorMessage: 'Protected sharedCampaign',
             description: 'Should not be deletable',
       });
-      const prefillCode = createResult.data.createSharedCampaign.prefillCode;
+      const sharedCampaignCode = createResult.data.createSharedCampaign.sharedCampaignCode;
 
       // Try to delete as different user
       const otherResult = await createAuthenticatedClient('contributor');
 
       try {
         await otherResult.client.mutate({
-          mutation: DELETE_CAMPAIGN_PREFILL,
-          variables: { prefillCode },
+          mutation: DELETE_CAMPAIGN_SHARED_CAMPAIGN,
+          variables: { sharedCampaignCode },
         });
         expect.fail('Should have thrown authorization error');
       } catch (error: any) {
-        // Resolver returns "Only the creator can delete this campaign prefill"
+        // Resolver returns "Only the creator can delete this campaign sharedCampaign"
         expect(error.message).toContain('creator');
       }
 
       // NOTE: Do NOT delete test accounts - they are shared across test runs
       // await deleteTestAccounts([otherResult.accountId]);
       
-      // Cleanup handled by top-level afterAll via createdPrefillCodes tracking
+      // Cleanup handled by top-level afterAll via createdSharedCampaignCodes tracking
     });
   });
 });

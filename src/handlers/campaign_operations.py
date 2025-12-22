@@ -1,4 +1,4 @@
-"""Lambda resolver for campaign operations with prefill and share support."""
+"""Lambda resolver for campaign operations with shared campaign and share support."""
 
 import os
 import uuid
@@ -23,12 +23,12 @@ dynamodb_client = boto3.client("dynamodb")
 
 # Multi-table design V2
 campaigns_table_name = os.environ.get("CAMPAIGNS_TABLE_NAME", "kernelworx-campaigns-v2-ue1-dev")
-prefills_table_name = os.environ.get("PREFILLS_TABLE_NAME", "kernelworx-campaign-prefills-ue1-dev")
+shared_campaigns_table_name = os.environ.get("SHARED_CAMPAIGNS_TABLE_NAME", "kernelworx-shared-campaigns-ue1-dev")
 shares_table_name = os.environ.get("SHARES_TABLE_NAME", "kernelworx-shares-v2-ue1-dev")
 profiles_table_name = os.environ.get("PROFILES_TABLE_NAME", "kernelworx-profiles-v2-ue1-dev")
 
 campaigns_table = dynamodb.Table(campaigns_table_name)
-prefills_table = dynamodb.Table(prefills_table_name)
+shared_campaigns_table = dynamodb.Table(shared_campaigns_table_name)
 shares_table = dynamodb.Table(shares_table_name)
 profiles_table = dynamodb.Table(profiles_table_name)
 
@@ -40,13 +40,13 @@ def _build_unit_campaign_key(
     return f"{unit_type}#{unit_number}#{city}#{state}#{campaign_name}#{campaign_year}"
 
 
-def _get_prefill(prefill_code: str) -> Optional[Dict[str, Any]]:
-    """Retrieve a campaign prefill by code."""
+def _get_shared_campaign(shared_campaign_code: str) -> Optional[Dict[str, Any]]:
+    """Retrieve a shared campaign by code."""
     try:
-        response = prefills_table.get_item(Key={"prefillCode": prefill_code, "SK": "METADATA"})
+        response = shared_campaigns_table.get_item(Key={"shared_campaignCode": shared_campaign_code, "SK": "METADATA"})
         return response.get("Item")
     except Exception as e:
-        logger.error(f"Error fetching prefill {prefill_code}: {str(e)}")
+        logger.error(f"Error fetching shared campaign {shared_campaign_code}: {str(e)}")
         return None
 
 
@@ -68,12 +68,12 @@ def _get_profile(profile_id: str) -> Optional[Dict[str, Any]]:
 
 def create_campaign(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
-    Create a new campaign with optional prefill support and share creation.
+    Create a new campaign with optional shared campaign support and share creation.
 
     This handler supports:
     1. Creating a campaign with explicitly provided unit fields
-    2. Creating a campaign from a campaign prefill (prefillCode)
-    3. Optionally creating a READ share with the prefill creator (shareWithCreator)
+    2. Creating a campaign from a shared campaign (shared_campaignCode)
+    3. Optionally creating a READ share with the shared campaign creator (shareWithCreator)
 
     When unit fields (unitType, unitNumber, city, state) are provided,
     the campaign is indexed in GSI3 for unit-based queries.
@@ -81,17 +81,17 @@ def create_campaign(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     Args:
         event: AppSync resolver event with arguments:
             - profileId: ID! - The profile to create the campaign for
-            - campaignName: String - Campaign name (from input or prefill)
-            - campaignYear: Int - Campaign year (from input or prefill)
+            - campaignName: String - Campaign name (from input or shared_campaign)
+            - campaignYear: Int - Campaign year (from input or shared_campaign)
             - startDate: AWSDateTime - Campaign start date
             - endDate: AWSDateTime - Optional campaign end date
-            - catalogId: ID - Catalog to use (from input or prefill)
+            - catalogId: ID - Catalog to use (from input or shared_campaign)
             - unitType: String - Optional unit type
             - unitNumber: Int - Optional unit number
             - city: String - Required if unitType provided
             - state: String - Required if unitType provided
-            - prefillCode: String - Optional prefill code to use
-            - shareWithCreator: Boolean - If true, create READ share with prefill creator
+            - shared_campaignCode: String - Optional shared campaign code to use
+            - shareWithCreator: Boolean - If true, create READ share with shared campaign creator
         context: Lambda context (unused)
 
     Returns:
@@ -119,31 +119,31 @@ def create_campaign(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         if not profile:
             raise ValueError(f"Profile {profile_id} not found")
 
-        # Step 3: If prefillCode provided, load prefill data
-        prefill: Optional[Dict[str, Any]] = None
-        prefill_code = inp.get("prefillCode")
+        # Step 3: If sharedCampaignCode provided, load Shared Campaign data
+        shared_campaign: Optional[Dict[str, Any]] = None
+        shared_campaign_code = inp.get("sharedCampaignCode")
         share_with_creator = inp.get("shareWithCreator", False)
 
-        if prefill_code:
-            prefill = _get_prefill(prefill_code)
-            if not prefill:
-                raise ValueError(f"Campaign prefill {prefill_code} not found")
-            if not prefill.get("isActive", True):
-                raise ValueError(f"Campaign prefill {prefill_code} is no longer active")
-            logger.info(f"Using prefill {prefill_code} from creator {prefill.get('createdBy')}")
+        if shared_campaign_code:
+            shared_campaign = _get_shared_campaign(shared_campaign_code)
+            if not shared_campaign:
+                raise ValueError(f"Shared Campaign {shared_campaign_code} not found")
+            if not shared_campaign.get("isActive", True):
+                raise ValueError(f"Shared Campaign {shared_campaign_code} is no longer active")
+            logger.info(f"Using shared campaign {shared_campaign_code} from creator {shared_campaign.get('createdBy')}")
 
-        # Step 4: Determine campaign values (prefer prefill over input, but input can override dates)
-        if prefill:
-            campaign_name = prefill["campaignName"]
-            campaign_year = prefill["campaignYear"]
-            catalog_id = prefill["catalogId"]
-            unit_type = prefill["unitType"]
-            unit_number = prefill["unitNumber"]
-            city = prefill["city"]
-            state = prefill["state"]
-            # Dates can come from input or fall back to prefill
-            start_date = inp.get("startDate") or prefill.get("startDate")
-            end_date = inp.get("endDate") or prefill.get("endDate")
+        # Step 4: Determine campaign values (prefer Shared Campaign over input, but input can override dates)
+        if shared_campaign:
+            campaign_name = shared_campaign["campaignName"]
+            campaign_year = shared_campaign["campaignYear"]
+            catalog_id = shared_campaign["catalogId"]
+            unit_type = shared_campaign["unitType"]
+            unit_number = shared_campaign["unitNumber"]
+            city = shared_campaign["city"]
+            state = shared_campaign["state"]
+            # Dates can come from input or fall back to Shared Campaign
+            start_date = inp.get("startDate") or shared_campaign.get("startDate")
+            end_date = inp.get("endDate") or shared_campaign.get("endDate")
         else:
             campaign_name = inp.get("campaignName")
             campaign_year = inp.get("campaignYear")
@@ -205,9 +205,9 @@ def create_campaign(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 unit_type, unit_number, city, state, campaign_name, campaign_year
             )
 
-        # Store prefillCode reference if used
-        if prefill_code:
-            campaign_item["prefillCode"] = prefill_code
+        # Store sharedCampaignCode reference if used
+        if shared_campaign_code:
+            campaign_item["sharedCampaignCode"] = shared_campaign_code
 
         # Step 8: Build transaction items
         transact_items: List[Dict[str, Any]] = []
@@ -223,10 +223,10 @@ def create_campaign(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             }
         )
 
-        # If shareWithCreator is true and we have a prefill, create the share
+        # If shareWithCreator is true and we have a shared_campaign, create the share
         share_item: Optional[Dict[str, Any]] = None
-        if share_with_creator and prefill:
-            creator_account_id = prefill.get("createdBy")
+        if share_with_creator and shared_campaign:
+            creator_account_id = shared_campaign.get("createdBy")
             # Get the profile owner's account ID (stored with ACCOUNT# prefix, but compare without it)
             owner_account_id = profile.get("ownerAccountId", "")
             # Normalize: remove ACCOUNT# prefix if present for comparison
@@ -269,7 +269,7 @@ def create_campaign(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             logger.info(f"Created campaign {campaign_id} for profile {profile_id}")
             if share_item:
                 logger.info(
-                    f"Created share with creator {prefill.get('createdBy')}"  # type: ignore[union-attr]
+                    f"Created share with creator {shared_campaign.get('createdBy')}"  # type: ignore[union-attr]
                 )
         except dynamodb_client.exceptions.TransactionCanceledException as e:
             # Check for conditional check failures

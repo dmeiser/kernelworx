@@ -1,5 +1,5 @@
 /**
- * CreateCampaignPrefillPage - Dedicated page for creating campaign prefills
+ * CreateSharedCampaignPage - Dedicated page for creating campaign shared campaigns
  * Mobile-friendly full-page form
  */
 
@@ -39,7 +39,7 @@ interface Catalog {
 }
 
 interface SharedCampaign {
-  prefillCode: string;
+  sharedCampaignCode: string;
   isActive: boolean;
 }
 
@@ -99,7 +99,7 @@ const US_STATES = [
 
 const BASE_URL = window.location.origin;
 const MAX_CREATOR_MESSAGE_LENGTH = 300;
-const MAX_ACTIVE_PREFILLS = 50;
+const MAX_ACTIVE_SHARED_CAMPAIGNS = 50;
 
 export const CreateSharedCampaignPage: React.FC = () => {
   const navigate = useNavigate();
@@ -119,13 +119,13 @@ export const CreateSharedCampaignPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Fetch active prefill count
-  const { data: prefillsData } = useQuery<{
-    listMyCampaignPrefills: SharedCampaign[];
+  // Fetch active shared campaign count
+  const { data: sharedCampaignsData } = useQuery<{
+    listMySharedCampaigns: SharedCampaign[];
   }>(LIST_MY_SHARED_CAMPAIGNS, { fetchPolicy: "network-only" });
-  const prefills = prefillsData?.listMyCampaignPrefills || [];
-  const activePrefillCount = prefills.filter((p) => p.isActive).length;
-  const canCreate = activePrefillCount < MAX_ACTIVE_PREFILLS;
+  const shared campaigns = sharedCampaignsData?.listMySharedCampaigns || [];
+  const activeSharedCampaignCount = sharedCampaigns.filter((p) => p.isActive).length;
+  const canCreate = activeSharedCampaignCount < MAX_ACTIVE_SHARED_CAMPAIGNS;
 
   // Fetch catalogs
   const { data: publicCatalogsData, loading: publicLoading } = useQuery<{
@@ -140,8 +140,8 @@ export const CreateSharedCampaignPage: React.FC = () => {
   const myCatalogs = myCatalogsData?.listMyCatalogs || [];
 
   // Deduplicate: remove catalogs from public list that are also in my list
-  // NOTE: Intentionally NOT filtering deleted catalogs here - campaign prefill creation
-  // should allow selection of deleted catalogs for existing prefills that use them
+  // NOTE: Intentionally NOT filtering deleted catalogs here - campaign shared campaign creation
+  // should allow selection of deleted catalogs for existing shared campaigns that use them
   const myIdSet = new Set(myCatalogs.map((c) => c.catalogId));
   const filteredPublicCatalogs = publicCatalogs.filter(
     (c) => !myIdSet.has(c.catalogId),
@@ -150,7 +150,7 @@ export const CreateSharedCampaignPage: React.FC = () => {
   const catalogsLoading = publicLoading || myLoading;
 
   // Create mutation
-  const [createPrefill] = useMutation(CREATE_SHARED_CAMPAIGN);
+  const [createSharedCampaign] = useMutation(CREATE_SHARED_CAMPAIGN);
 
   const isFormValid = () => {
     return (
@@ -176,7 +176,7 @@ export const CreateSharedCampaignPage: React.FC = () => {
     setError(null);
 
     try {
-      await createPrefill({
+      await createSharedCampaign({
         variables: {
           input: {
             catalogId,
@@ -238,7 +238,7 @@ export const CreateSharedCampaignPage: React.FC = () => {
 
           {!canCreate && (
             <Alert severity="error">
-              You have reached the maximum of {MAX_ACTIVE_PREFILLS} active
+              You have reached the maximum of {MAX_ACTIVE_SHARED_CAMPAIGNS} active
               shared campaigns. Please deactivate an existing shared campaign before
               creating a new one.
             </Alert>

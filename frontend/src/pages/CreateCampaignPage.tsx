@@ -2,7 +2,7 @@
  * CreateCampaignPage component - Page for creating a new sales campaign
  *
  * Supports two modes:
- * 1. Prefill mode: Accessed via /c/:prefillCode - all fields locked except profile selection
+ * 1. Shared Campaign mode: Accessed via /c/:sharedCampaignCode - all fields locked except profile selection
  * 2. Manual mode: Accessed via /create-campaign - all fields editable with optional unit info
  */
 
@@ -50,7 +50,7 @@ import {
 
 // Types
 interface SharedCampaign {
-  prefillCode: string;
+  sharedCampaignCode: string;
   catalogId: string;
   catalog: {
     catalogId: string;
@@ -152,13 +152,13 @@ const US_STATES = [
 const CAMPAIGN_OPTIONS = ["Fall", "Spring", "Summer", "Winter"];
 
 export const CreateCampaignPage: React.FC = () => {
-  const { prefillCode } = useParams<{ prefillCode: string }>();
+  const { sharedCampaignCode } = useParams<{ sharedCampaignCode: string }>();
   const navigate = useNavigate();
   const location = useLocation();
 
   // Redirect state from login
-  const savedPrefillCode = location.state?.prefillCode;
-  const effectivePrefillCode = prefillCode || savedPrefillCode;
+  const savedSharedCampaignCode = location.state?.sharedCampaignCode;
+  const effectiveSharedCampaignCode = sharedCampaignCode || savedSharedCampaignCode;
 
   // Form state
   const [profileId, setProfileId] = useState("");
@@ -180,21 +180,21 @@ export const CreateCampaignPage: React.FC = () => {
     severity: "success" | "error";
   } | null>(null);
 
-  // Query for prefill data if prefillCode provided
+  // Query for shared campaign data if sharedCampaignCode provided
   const {
-    data: prefillData,
-    loading: prefillLoading,
-    error: prefillError,
-  } = useQuery<{ getCampaignPrefill: SharedCampaign | null }>(
+    data: sharedCampaignData,
+    loading: sharedCampaignLoading,
+    error: sharedCampaignError,
+  } = useQuery<{ getSharedCampaign: SharedCampaign | null }>(
     GET_SHARED_CAMPAIGN,
     {
-      variables: { prefillCode: effectivePrefillCode },
-      skip: !effectivePrefillCode,
+      variables: { sharedCampaignCode: effectiveSharedCampaignCode },
+      skip: !effectiveSharedCampaignCode,
     },
   );
 
-  const prefill = prefillData?.getCampaignPrefill;
-  const isPrefillMode = !!effectivePrefillCode && !!prefill && prefill.isActive;
+  const sharedCampaign = sharedCampaignData?.getSharedCampaign;
+  const isSharedCampaignMode = !!effectiveSharedCampaignCode && !!sharedCampaign && sharedCampaign.isActive;
 
   // Query for user's profiles
   const {
@@ -220,11 +220,11 @@ export const CreateCampaignPage: React.FC = () => {
   // Query for catalogs (only in manual mode)
   const { data: publicCatalogsData, loading: publicLoading } = useQuery<{
     listPublicCatalogs: Catalog[];
-  }>(LIST_PUBLIC_CATALOGS, { skip: isPrefillMode });
+  }>(LIST_PUBLIC_CATALOGS, { skip: isSharedCampaignMode });
 
   const { data: myCatalogsData, loading: myLoading } = useQuery<{
     listMyCatalogs: Catalog[];
-  }>(LIST_MY_CATALOGS, { skip: isPrefillMode });
+  }>(LIST_MY_CATALOGS, { skip: isSharedCampaignMode });
 
   const publicCatalogs = publicCatalogsData?.listPublicCatalogs || [];
   const myCatalogs = myCatalogsData?.listMyCatalogs || [];
@@ -238,12 +238,12 @@ export const CreateCampaignPage: React.FC = () => {
 
   const catalogsLoading = publicLoading || myLoading;
 
-  // Lazy query for prefill discovery in manual mode
-  const [findPrefills, { data: discoveredPrefillsData }] = useLazyQuery<{
-    findCampaignPrefills: SharedCampaign[];
+  // Lazy query for shared campaign discovery in manual mode
+  const [findSharedCampaigns, { data: discoveredSharedCampaignsData }] = useLazyQuery<{
+    findSharedCampaigns: SharedCampaign[];
   }>(FIND_SHARED_CAMPAIGNS);
 
-  const discoveredPrefills = discoveredPrefillsData?.findCampaignPrefills || [];
+  const discoveredSharedCampaigns = discoveredSharedCampaignsData?.findSharedCampaigns || [];
 
   // Create campaign mutation
   const [createCampaign] = useMutation<{
@@ -266,49 +266,49 @@ export const CreateCampaignPage: React.FC = () => {
     }
   }, [profilesLoading, profiles, profileId]);
 
-  // Redirect to profile creation if user has no profiles in prefill mode
+  // Redirect to profile creation if user has no profiles in shared campaign mode
   useEffect(() => {
     if (
-      isPrefillMode &&
+      isSharedCampaignMode &&
       !profilesLoading &&
       profiles.length === 0 &&
-      effectivePrefillCode
+      effectiveSharedCampaignCode
     ) {
       // User needs to create a profile first
       navigate("/scouts", {
         state: {
-          returnTo: `/c/${effectivePrefillCode}`,
-          prefillCode: effectivePrefillCode,
+          returnTo: `/c/${effectiveSharedCampaignCode}`,
+          sharedCampaignCode: effectiveSharedCampaignCode,
           message: "Create a scout to use this campaign link",
         },
         replace: true,
       });
     }
   }, [
-    isPrefillMode,
+    isSharedCampaignMode,
     profilesLoading,
     profiles.length,
-    effectivePrefillCode,
+    effectiveSharedCampaignCode,
     navigate,
   ]);
 
-  // Set form values from prefill when loaded
+  // Set form values from shared campaign when loaded
   useEffect(() => {
-    if (prefill && prefill.isActive) {
-      setCampaignName(prefill.campaignName);
-      setCampaignYear(prefill.campaignYear);
-      setCatalogId(prefill.catalogId);
-      setStartDate(prefill.startDate || "");
-      setEndDate(prefill.endDate || "");
-      setUnitType(prefill.unitType);
-      setUnitNumber(String(prefill.unitNumber));
-      setCity(prefill.city);
-      setState(prefill.state);
+    if (sharedCampaign && sharedCampaign.isActive) {
+      setCampaignName(sharedCampaign.campaignName);
+      setCampaignYear(sharedCampaign.campaignYear);
+      setCatalogId(sharedCampaign.catalogId);
+      setStartDate(sharedCampaign.startDate || "");
+      setEndDate(sharedCampaign.endDate || "");
+      setUnitType(sharedCampaign.unitType);
+      setUnitNumber(String(sharedCampaign.unitNumber));
+      setCity(sharedCampaign.city);
+      setState(sharedCampaign.state);
     }
-  }, [prefill]);
+  }, [sharedCampaign]);
 
-  // Debounced prefill discovery in manual mode
-  const debouncedFindPrefills = useMemo(() => {
+  // Debounced shared campaign discovery in manual mode
+  const debouncedFindSharedCampaigns = useMemo(() => {
     let timeoutId: NodeJS.Timeout;
     return (params: {
       unitType: string;
@@ -328,7 +328,7 @@ export const CreateCampaignPage: React.FC = () => {
           params.campaignName &&
           params.campaignYear
         ) {
-          findPrefills({
+          findSharedCampaigns({
             variables: {
               unitType: params.unitType,
               unitNumber: parseInt(params.unitNumber, 10),
@@ -341,12 +341,12 @@ export const CreateCampaignPage: React.FC = () => {
         }
       }, 500);
     };
-  }, [findPrefills]);
+  }, [findSharedCampaigns]);
 
-  // Trigger prefill discovery when unit+campaign fields change in manual mode
+  // Trigger shared campaign discovery when unit+campaign fields change in manual mode
   useEffect(() => {
-    if (!isPrefillMode && unitType && unitNumber && city && state) {
-      debouncedFindPrefills({
+    if (!isSharedCampaignMode && unitType && unitNumber && city && state) {
+      debouncedFindSharedCampaigns({
         unitType,
         unitNumber,
         city,
@@ -356,17 +356,17 @@ export const CreateCampaignPage: React.FC = () => {
       });
     }
   }, [
-    isPrefillMode,
+    isSharedCampaignMode,
     unitType,
     unitNumber,
     city,
     state,
     campaignName,
     campaignYear,
-    debouncedFindPrefills,
+    debouncedFindSharedCampaigns,
   ]);
 
-  const handleUsePrefill = useCallback(
+  const handleUseSharedCampaign = useCallback(
     (code: string) => {
       navigate(`/c/${code}`);
     },
@@ -383,7 +383,7 @@ export const CreateCampaignPage: React.FC = () => {
     }
 
     // Validate unit fields if any are provided (in manual mode)
-    if (!isPrefillMode && unitType) {
+    if (!isSharedCampaignMode && unitType) {
       if (!unitNumber || !city || !state) {
         setToastMessage({
           message:
@@ -403,9 +403,9 @@ export const CreateCampaignPage: React.FC = () => {
         ...(endDate && { endDate: new Date(endDate).toISOString() }),
       };
 
-      if (isPrefillMode && effectivePrefillCode) {
-        // Prefill mode - use prefillCode
-        input.prefillCode = effectivePrefillCode;
+      if (isSharedCampaignMode && effectiveSharedCampaignCode) {
+        // shared campaign mode - use sharedCampaignCode
+        input.sharedCampaignCode = effectiveSharedCampaignCode;
         input.shareWithCreator = shareWithCreator;
       } else {
         // Manual mode - include all fields
@@ -427,9 +427,9 @@ export const CreateCampaignPage: React.FC = () => {
 
       const createdCampaign = data?.createCampaign;
       if (createdCampaign) {
-        if (isPrefillMode && shareWithCreator) {
+        if (isSharedCampaignMode && shareWithCreator) {
           setToastMessage({
-            message: `Campaign created and shared with ${prefill?.createdByName}!`,
+            message: `Campaign created and shared with ${sharedCampaign?.createdByName}!`,
             severity: "success",
           });
         } else {
@@ -454,7 +454,7 @@ export const CreateCampaignPage: React.FC = () => {
   };
 
   // Loading states
-  if (effectivePrefillCode && prefillLoading) {
+  if (effectiveSharedCampaignCode && sharedCampaignLoading) {
     return (
       <Box
         display="flex"
@@ -467,8 +467,8 @@ export const CreateCampaignPage: React.FC = () => {
     );
   }
 
-  // Prefill not found or inactive
-  if (effectivePrefillCode && (!prefill || !prefill.isActive)) {
+  // shared campaign not found or inactive
+  if (effectiveSharedCampaignCode && (!sharedCampaign || !sharedCampaign.isActive)) {
     return (
       <Box maxWidth="md" mx="auto" p={3}>
         <Alert severity="error">
@@ -487,13 +487,13 @@ export const CreateCampaignPage: React.FC = () => {
     );
   }
 
-  // Prefill error
-  if (prefillError) {
+  // shared campaign error
+  if (sharedCampaignError) {
     return (
       <Box maxWidth="md" mx="auto" p={3}>
         <Alert severity="error">
           <AlertTitle>Error Loading Campaign</AlertTitle>
-          {prefillError.message}
+          {sharedCampaignError.message}
         </Alert>
         <Button
           variant="contained"
@@ -506,7 +506,7 @@ export const CreateCampaignPage: React.FC = () => {
     );
   }
 
-  const isFormValid = isPrefillMode
+  const isFormValid = isSharedCampaignMode
     ? !!profileId
     : !!profileId && !!campaignName && !!catalogId;
 
@@ -516,22 +516,22 @@ export const CreateCampaignPage: React.FC = () => {
         Create New Campaign
       </Typography>
 
-      {/* Prefill Banner */}
-      {isPrefillMode && prefill && (
+      {/* Shared Campaign Banner */}
+      {isSharedCampaignMode && sharedCampaign && (
         <Card sx={{ mb: 3, bgcolor: "info.light" }}>
           <CardContent>
             <Stack direction="row" spacing={2} alignItems="flex-start">
               <CampaignIcon sx={{ fontSize: 40, color: "info.dark" }} />
               <Box>
                 <Typography variant="h6" color="info.dark">
-                  Campaign by {prefill.createdByName}
+                  Campaign by {sharedCampaign.createdByName}
                 </Typography>
-                {prefill.creatorMessage && (
+                {sharedCampaign.creatorMessage && (
                   <Typography
                     variant="body1"
                     sx={{ mt: 1, fontStyle: "italic" }}
                   >
-                    "{prefill.creatorMessage}"
+                    "{sharedCampaign.creatorMessage}"
                   </Typography>
                 )}
                 <Typography
@@ -539,8 +539,8 @@ export const CreateCampaignPage: React.FC = () => {
                   color="text.secondary"
                   sx={{ mt: 1 }}
                 >
-                  {prefill.unitType} {prefill.unitNumber} • {prefill.city},{" "}
-                  {prefill.state} • {prefill.campaignName} {prefill.campaignYear}
+                  {sharedCampaign.unitType} {sharedCampaign.unitNumber} • {sharedCampaign.city},{" "}
+                  {sharedCampaign.state} • {sharedCampaign.campaignName} {sharedCampaign.campaignYear}
                 </Typography>
               </Box>
             </Stack>
@@ -548,8 +548,8 @@ export const CreateCampaignPage: React.FC = () => {
         </Card>
       )}
 
-      {/* Discovered Prefills Alert (manual mode) */}
-      {!isPrefillMode && discoveredPrefills.length > 0 && (
+      {/* Discovered shared campaigns Alert (manual mode) */}
+      {!isSharedCampaignMode && discoveredSharedCampaigns.length > 0 && (
         <Alert
           severity="info"
           sx={{ mb: 3 }}
@@ -558,7 +558,7 @@ export const CreateCampaignPage: React.FC = () => {
               color="inherit"
               size="small"
               onClick={() =>
-                handleUsePrefill(discoveredPrefills[0].prefillCode)
+                handleUseSharedCampaign(discoveredSharedCampaigns[0].sharedCampaignCode)
               }
             >
               Use Campaign
@@ -568,7 +568,7 @@ export const CreateCampaignPage: React.FC = () => {
           <AlertTitle>Existing Campaign Found!</AlertTitle>
           We found an existing {campaignName} {campaignYear} campaign for {unitType}{" "}
           {unitNumber} in {city}, {state} created by{" "}
-          {discoveredPrefills[0].createdByName}. Would you like to use their
+          {discoveredSharedCampaigns[0].createdByName}. Would you like to use their
           settings?
         </Alert>
       )}
@@ -603,13 +603,13 @@ export const CreateCampaignPage: React.FC = () => {
 
           <Divider />
 
-          {/* Locked fields in prefill mode */}
-          {isPrefillMode && prefill && (
+          {/* Locked fields in shared campaign mode */}
+          {isSharedCampaignMode && sharedCampaign && (
             <>
               <TextField
                 fullWidth
                 label="Catalog"
-                value={prefill.catalog.catalogName}
+                value={sharedCampaign.catalog.catalogName}
                 disabled
                 helperText="Set by campaign creator"
               />
@@ -617,13 +617,13 @@ export const CreateCampaignPage: React.FC = () => {
                 <TextField
                   fullWidth
                   label="Campaign"
-                  value={prefill.campaignName}
+                  value={sharedCampaign.campaignName}
                   disabled
                 />
                 <TextField
                   fullWidth
                   label="Year"
-                  value={prefill.campaignYear}
+                  value={sharedCampaign.campaignYear}
                   disabled
                 />
               </Stack>
@@ -631,13 +631,13 @@ export const CreateCampaignPage: React.FC = () => {
                 <TextField
                   fullWidth
                   label="Unit Type"
-                  value={prefill.unitType}
+                  value={sharedCampaign.unitType}
                   disabled
                 />
                 <TextField
                   fullWidth
                   label="Unit Number"
-                  value={prefill.unitNumber}
+                  value={sharedCampaign.unitNumber}
                   disabled
                 />
               </Stack>
@@ -645,13 +645,13 @@ export const CreateCampaignPage: React.FC = () => {
                 <TextField
                   fullWidth
                   label="City"
-                  value={prefill.city}
+                  value={sharedCampaign.city}
                   disabled
                 />
                 <TextField
                   fullWidth
                   label="State"
-                  value={prefill.state}
+                  value={sharedCampaign.state}
                   disabled
                 />
               </Stack>
@@ -659,7 +659,7 @@ export const CreateCampaignPage: React.FC = () => {
           )}
 
           {/* Editable fields in manual mode */}
-          {!isPrefillMode && (
+          {!isSharedCampaignMode && (
             <>
               {/* Campaign Name and Year */}
               <Stack direction="row" spacing={2}>
@@ -859,9 +859,9 @@ export const CreateCampaignPage: React.FC = () => {
               type="date"
               value={startDate}
               onChange={(e) => setStartDate(e.target.value)}
-              disabled={submitting || isPrefillMode}
+              disabled={submitting || isSharedCampaignMode}
               InputLabelProps={{ shrink: true }}
-              helperText={isPrefillMode ? "Set by campaign creator" : ""}
+              helperText={isSharedCampaignMode ? "Set by campaign creator" : ""}
             />
             <TextField
               fullWidth
@@ -869,14 +869,14 @@ export const CreateCampaignPage: React.FC = () => {
               type="date"
               value={endDate}
               onChange={(e) => setEndDate(e.target.value)}
-              disabled={submitting || isPrefillMode}
+              disabled={submitting || isSharedCampaignMode}
               InputLabelProps={{ shrink: true }}
-              helperText={isPrefillMode ? "Set by campaign creator" : ""}
+              helperText={isSharedCampaignMode ? "Set by campaign creator" : ""}
             />
           </Stack>
 
-          {/* Share with creator checkbox (prefill mode only) */}
-          {isPrefillMode && prefill && (
+          {/* Share with creator checkbox (sharedCampaign mode only) */}
+          {isSharedCampaignMode && sharedCampaign && (
             <Box sx={{ bgcolor: "warning.light", p: 2, borderRadius: 1 }}>
               <FormControlLabel
                 control={
@@ -886,11 +886,11 @@ export const CreateCampaignPage: React.FC = () => {
                     disabled={submitting}
                   />
                 }
-                label={`Share this profile with ${prefill.createdByName}`}
+                label={`Share this profile with ${sharedCampaign.createdByName}`}
               />
               <Alert severity="warning" sx={{ mt: 1 }}>
                 <AlertTitle>Important</AlertTitle>
-                Sharing gives {prefill.createdByName} read access to ALL current
+                Sharing gives {sharedCampaign.createdByName} read access to ALL current
                 and future campaigns for this profile. You can revoke this access
                 at any time from your profile settings.
               </Alert>

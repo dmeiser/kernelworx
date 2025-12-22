@@ -43,9 +43,9 @@ function App() {
               <Route path="/login" element={<LoginPage />} />
               <Route path="/signup" element={<SignupPage />} />
 
-              {/* Campaign prefill short-link route */}
+              {/* Shared Campaign short-link route */}
               <Route
-                path="/c/:prefillCode"
+                path="/c/:sharedCampaignCode"
                 element={
                   <ProtectedRoute>
                     <AppLayout>

@@ -42,7 +42,7 @@ import {
 import * as XLSX from "xlsx";
 
 interface SharedCampaign {
-  prefillCode: string;
+  sharedCampaignCode: string;
   catalogId: string;
   catalog: {
     catalogId: string;
@@ -95,27 +95,27 @@ interface UnitReport {
 type ReportView = "summary" | "detailed" | "unit";
 
 export const CampaignReportsPage: React.FC = () => {
-  const [selectedPrefillCode, setSelectedPrefillCode] = useState<string>("");
+  const [selectedSharedCampaignCode, setSelectedSharedCampaignCode] = useState<string>("");
   const [reportView, setReportView] = useState<ReportView>("unit");
 
   // Fetch user's shared campaigns
-  const { data: prefillsData, loading: prefillsLoading } = useQuery<{
-    listMyCampaignPrefills: SharedCampaign[];
+  const { data: sharedCampaignsData, loading: sharedCampaignsLoading } = useQuery<{
+    listMySharedCampaigns: SharedCampaign[];
   }>(LIST_MY_SHARED_CAMPAIGNS);
 
-  const campaigns = prefillsData?.listMyCampaignPrefills?.filter(
+  const campaigns = sharedCampaignsData?.listMySharedCampaigns?.filter(
     (p) => p.isActive
   ) || [];
 
   // Auto-select campaign if only 1 exists
   React.useEffect(() => {
-    if (campaigns.length === 1 && !selectedPrefillCode) {
-      setSelectedPrefillCode(campaigns[0].prefillCode);
+    if (campaigns.length === 1 && !selectedSharedCampaignCode) {
+      setSelectedSharedCampaignCode(campaigns[0].sharedCampaignCode);
     }
-  }, [campaigns, selectedPrefillCode]);
+  }, [campaigns, selectedSharedCampaignCode]);
 
   const selectedCampaign = campaigns.find(
-    (c) => c.prefillCode === selectedPrefillCode
+    (c) => c.sharedCampaignCode === selectedSharedCampaignCode
   );
 
   const canGenerateReport = !!selectedCampaign;
@@ -235,7 +235,7 @@ export const CampaignReportsPage: React.FC = () => {
           <Stack spacing={2}>
             <Typography variant="h6">Select Shared Campaign</Typography>
 
-            {prefillsLoading ? (
+            {sharedCampaignsLoading ? (
               <CircularProgress />
             ) : campaigns.length === 0 ? (
               <Alert severity="info">
@@ -247,15 +247,15 @@ export const CampaignReportsPage: React.FC = () => {
                 <TextField
                   select
                   label="Shared Campaign"
-                  value={selectedPrefillCode}
-                  onChange={(e) => setSelectedPrefillCode(e.target.value)}
+                  value={selectedSharedCampaignCode}
+                  onChange={(e) => setSelectedSharedCampaignCode(e.target.value)}
                   fullWidth
                   helperText="Select a shared campaign to view its sales report"
                 >
                   {campaigns.map((campaign) => (
                     <MenuItem
-                      key={campaign.prefillCode}
-                      value={campaign.prefillCode}
+                      key={campaign.sharedCampaignCode}
+                      value={campaign.sharedCampaignCode}
                     >
                       {campaign.unitType} {campaign.unitNumber} -{" "}
                       {campaign.campaignName} {campaign.campaignYear} (

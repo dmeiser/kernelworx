@@ -1108,7 +1108,7 @@ describe('Catalog CRUD Integration Tests', () => {
         expect(data.deleteCatalog).toBe(true);
       });
 
-      it('SECURITY: Cannot delete catalog that is in use by campaigngns', async () => {
+      it('SECURITY: Cannot delete catalog that is in use by campaigns', async () => {
         // Arrange: Create a public catalog that multiple users can use
         const createCatalogInput = {
           catalogName: 'Shared Public Catalog',
@@ -1229,7 +1229,7 @@ describe('Catalog CRUD Integration Tests', () => {
             mutation: DELETE_CATALOG,
             variables: { catalogId: catalogId },
           })
-        ).rejects.toThrow(/cannot delete catalog.*campaigngn.*using it/i);
+        ).rejects.toThrow(/cannot delete catalog.*(campaign|season).*using it/i);
 
         // Verify catalog still exists
         const { data: catalogCheck }: any = await ownerClient.query({

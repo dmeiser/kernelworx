@@ -7,7 +7,7 @@
  * Why this exists:
  * - When tests fail, their afterAll cleanup code may not run
  * - When tests are interrupted (Ctrl+C), cleanup doesn't happen
- * - Rate limits (e.g., 50 prefills max) can block future test runs
+ * - Rate limits (e.g., 50 shared campaigns max) can block future test runs
  */
 
 import { DynamoDBClient, ScanCommand, DeleteItemCommand } from '@aws-sdk/client-dynamodb';
@@ -21,7 +21,7 @@ dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 const dynamodb = new DynamoDBClient({ region: 'us-east-1' });
 
 // Table names from environment or defaults
-const PREFILLS_TABLE = process.env.PREFILLS_TABLE_NAME || 'kernelworx-shared-campaigns-ue1-dev';
+const SHARED_CAMPAIGNS_TABLE = process.env.SHARED_CAMPAIGNS_TABLE_NAME || 'kernelworx-shared-campaigns-ue1-dev';
 const PROFILES_TABLE = process.env.PROFILES_TABLE_NAME || 'kernelworx-profiles-v2-ue1-dev';
 const CAMPAIGNS_TABLE = process.env.CAMPAIGNS_TABLE_NAME || 'kernelworx-campaigns-v2-ue1-dev';
 const ORDERS_TABLE = process.env.ORDERS_TABLE_NAME || 'kernelworx-orders-v2-ue1-dev';
@@ -35,35 +35,35 @@ const TEST_ACCOUNT_IDS = [
   process.env.TEST_READONLY_ACCOUNT_ID,
 ].filter(Boolean) as string[];
 
-async function cleanupCampaignPrefills(): Promise<number> {
-  console.log('  Scanning campaign prefills table...');
+async function cleanupSharedCampaigns(): Promise<number> {
+  console.log('  Scanning campaign shared campaigns table...');
   
   const scanResult = await dynamodb.send(new ScanCommand({
-    TableName: PREFILLS_TABLE,
-    ProjectionExpression: 'prefillCode, SK, createdBy',
+    TableName: SHARED_CAMPAIGNS_TABLE,
+    ProjectionExpression: 'sharedCampaignCode, SK, createdBy',
   }));
   
   const items = scanResult.Items || [];
   let deleted = 0;
   
   for (const item of items) {
-    const prefillCode = item.prefillCode?.S;
+    const sharedCampaignCode = item.sharedCampaignCode?.S;
     const sk = item.SK?.S;
     const createdBy = item.createdBy?.S;
     
     // Only delete items created by test accounts
-    if (prefillCode && sk && TEST_ACCOUNT_IDS.includes(createdBy || '')) {
+    if (sharedCampaignCode && sk && TEST_ACCOUNT_IDS.includes(createdBy || '')) {
       try {
         await dynamodb.send(new DeleteItemCommand({
-          TableName: PREFILLS_TABLE,
+          TableName: SHARED_CAMPAIGNS_TABLE,
           Key: {
-            prefillCode: { S: prefillCode },
+            sharedCampaignCode: { S: sharedCampaignCode },
             SK: { S: sk },
           },
         }));
         deleted++;
       } catch (error) {
-        console.error(`  Failed to delete prefill ${prefillCode}:`, error);
+        console.error(`  Failed to delete shared campaign ${sharedCampaignCode}:`, error);
       }
     }
   }
@@ -257,7 +257,7 @@ export default async function globalTeardown(): Promise<void> {
     const sharesDeleted = await cleanupTestShares();
     const profilesDeleted = await cleanupTestProfiles();
     const catalogsDeleted = await cleanupTestCatalogs();
-    const prefillsDeleted = await cleanupCampaignPrefills();
+    const sharedCampaignsDeleted = await cleanupSharedCampaigns();
     
     console.log('✅ Global cleanup complete:');
     console.log(`   - Orders: ${ordersDeleted} deleted`);
@@ -265,7 +265,7 @@ export default async function globalTeardown(): Promise<void> {
     console.log(`   - Shares: ${sharesDeleted} deleted`);
     console.log(`   - Profiles: ${profilesDeleted} deleted`);
     console.log(`   - Catalogs: ${catalogsDeleted} deleted`);
-    console.log(`   - Campaign Prefills: ${prefillsDeleted} deleted`);
+    console.log(`   - Shared Campaigns: ${sharedCampaignsDeleted} deleted`);
   } catch (error) {
     console.error('❌ Global cleanup failed:', error);
     // Don't throw - we don't want cleanup failures to break CI

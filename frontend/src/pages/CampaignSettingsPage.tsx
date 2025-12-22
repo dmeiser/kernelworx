@@ -47,7 +47,7 @@ interface Campaign {
   endDate?: string;
   catalogId: string;
   profileId: string;
-  prefillCode?: string;
+  sharedCampaignCode?: string;
   unitType?: string;
   unitNumber?: number;
   city?: string;
@@ -131,7 +131,7 @@ export const CampaignSettingsPage: React.FC = () => {
 
   // Check if unit-related fields have changed (campaignName, catalogId)
   const hasUnitRelatedChanges =
-    campaign?.prefillCode &&
+    campaign?.sharedCampaignCode &&
     (campaignName !== campaign.campaignName || catalogId !== campaign.catalogId);
 
   const handleSaveClick = () => {
@@ -218,8 +218,8 @@ export const CampaignSettingsPage: React.FC = () => {
           Basic Information
         </Typography>
 
-        {/* Warning for prefill-created campaigns */}
-        {campaign?.prefillCode && (
+        {/* Warning for sharedCampaign-created campaigns */}
+        {campaign?.sharedCampaignCode && (
           <Alert severity="warning" icon={<WarningIcon />} sx={{ mb: 3 }}>
             <AlertTitle>Shared Campaign</AlertTitle>
             This campaign was created from a shared campaign link. Changing the catalog,

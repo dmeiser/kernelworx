@@ -65,16 +65,16 @@ export const ScoutsPage: React.FC = () => {
     null,
   );
 
-  // Check for return navigation from campaign prefill flow
+  // Check for return navigation from campaign shared campaign flow
   const locationState = location.state as {
     returnTo?: string;
-    prefillCode?: string;
+    sharedCampaignCode?: string;
     message?: string;
   } | null;
   const returnPath = locationState?.returnTo;
   const infoMessage = locationState?.message;
 
-  // Auto-open create dialog when arriving from prefill flow
+  // Auto-open create dialog when arriving from shared campaign flow
   React.useEffect(() => {
     if (returnPath && !createDialogOpen) {
       setCreateDialogOpen(true);
@@ -215,7 +215,7 @@ export const ScoutsPage: React.FC = () => {
     onCompleted: async () => {
       // Reload profiles and wait for the result
       await loadMyProfiles();
-      // If we came from a campaign prefill flow, return to it
+      // If we came from a campaign shared campaign flow, return to it
       if (returnPath) {
         // Longer delay to ensure DynamoDB GSI consistency
         // The backend queries profileId-index GSI which has eventual consistency

@@ -218,7 +218,7 @@ describe('Campaigngn Operations Integration Tests', () => {
       },
     });
 
-    console.log(`Test data created: Profile=${testProfileId}, Campaigngn=${teCampaignonId}, Catalog=${testCatalogId}`);
+    console.log(`Test data created: Profile=${testProfileId}, Campaign=${testCampaignId}, Catalog=${testCatalogId}`);
   }, 30000);
 
   afterAll(async () => {

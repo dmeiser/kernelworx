@@ -2,7 +2,7 @@
  * CreateProfileDialog component - Dialog for creating a new scout profile
  *
  * Note: Unit fields (unitType, unitNumber) have been moved to Campaign level
- * as part of the Campaign Prefill refactor. Unit information is now attached
+ * as part of the Shared Campaign refactor. Unit information is now attached
  * to individual campaigns rather than profiles.
  */
 

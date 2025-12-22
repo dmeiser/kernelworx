@@ -531,22 +531,22 @@ class CdkStack(Stack):
             )
 
         # Shared Campaigns Table
-        # PK: prefillCode (enables direct lookup)
+        # PK: sharedCampaignCode (enables direct lookup)
         # GSI1: createdBy + createdAt (for "my shared campaigns" listing)
         # GSI2: unitCampaignKey (for unit+campaign discovery)
-        prefills_table_name = rn("kernelworx-shared-campaigns")
-        existing_prefills_table = resource_lookup.lookup_dynamodb_table(prefills_table_name)
-        if existing_prefills_table:
-            self.prefills_table = dynamodb.Table.from_table_arn(
-                self, "CampaignPrefillsTable", existing_prefills_table["table_arn"]
+        shared_campaigns_table_name = rn("kernelworx-shared-campaigns")
+        existing_shared_campaigns_table = resource_lookup.lookup_dynamodb_table(shared_campaigns_table_name)
+        if existing_shared_campaigns_table:
+            self.shared_campaigns_table = dynamodb.Table.from_table_arn(
+                self, "SharedCampaignsTable", existing_shared_campaigns_table["table_arn"]
             )
         else:
-            self.prefills_table = dynamodb.Table(
+            self.shared_campaigns_table = dynamodb.Table(
                 self,
-                "CampaignPrefillsTable",
-                table_name=prefills_table_name,
+                "SharedCampaignsTable",
+                table_name=shared_campaigns_table_name,
                 partition_key=dynamodb.Attribute(
-                    name="prefillCode", type=dynamodb.AttributeType.STRING
+                    name="sharedCampaignCode", type=dynamodb.AttributeType.STRING
                 ),
                 billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
                 point_in_time_recovery_specification=dynamodb.PointInTimeRecoverySpecification(
@@ -555,8 +555,8 @@ class CdkStack(Stack):
                 removal_policy=RemovalPolicy.RETAIN,
                 deletion_protection=True,
             )
-            # GSI1: List prefills by creator (for "my prefills" view)
-            self.prefills_table.add_global_secondary_index(
+            # GSI1: List shared campaigns by creator (for "my shared campaigns" view)
+            self.shared_campaigns_table.add_global_secondary_index(
                 index_name="GSI1",
                 partition_key=dynamodb.Attribute(
                     name="createdBy", type=dynamodb.AttributeType.STRING
@@ -564,9 +564,9 @@ class CdkStack(Stack):
                 sort_key=dynamodb.Attribute(name="createdAt", type=dynamodb.AttributeType.STRING),
                 projection_type=dynamodb.ProjectionType.ALL,
             )
-            # GSI2: Find prefills by unit+campaign (for discovery during campaign creation)
+            # GSI2: Find shared campaigns by unit+campaign (for discovery during campaign creation)
             # unitCampaignKey format: {unitType}#{unitNumber}#{city}#{state}#{campaignName}#{campaignYear}
-            self.prefills_table.add_global_secondary_index(
+            self.shared_campaigns_table.add_global_secondary_index(
                 index_name="GSI2",
                 partition_key=dynamodb.Attribute(
                     name="unitCampaignKey", type=dynamodb.AttributeType.STRING
@@ -646,7 +646,7 @@ class CdkStack(Stack):
         self.orders_table.grant_read_write_data(self.lambda_execution_role)
         self.shares_table.grant_read_write_data(self.lambda_execution_role)
         self.invites_table.grant_read_write_data(self.lambda_execution_role)
-        self.prefills_table.grant_read_write_data(self.lambda_execution_role)
+        self.shared_campaigns_table.grant_read_write_data(self.lambda_execution_role)
 
         # Grant Lambda role access to new table GSI indexes
         for table in [
@@ -657,7 +657,7 @@ class CdkStack(Stack):
             self.orders_table,
             self.shares_table,
             self.invites_table,
-            self.prefills_table,
+            self.shared_campaigns_table,
         ]:
             self.lambda_execution_role.add_to_policy(
                 iam.PolicyStatement(
@@ -696,7 +696,7 @@ class CdkStack(Stack):
         self.orders_table.grant_read_write_data(self.appsync_service_role)
         self.shares_table.grant_read_write_data(self.appsync_service_role)
         self.invites_table.grant_read_write_data(self.appsync_service_role)
-        self.prefills_table.grant_read_write_data(self.appsync_service_role)
+        self.shared_campaigns_table.grant_read_write_data(self.appsync_service_role)
 
         # Grant AppSync role access to new table GSI indexes
         for table in [
@@ -863,7 +863,7 @@ class CdkStack(Stack):
             environment=lambda_env,
         )
 
-        # Campaign Operations Lambda (with transaction support for prefill + share creation)
+        # Campaign Operations Lambda (with transaction support for Shared Campaign + share creation)
         self.campaign_operations_fn = lambda_.Function(
             self,
             "CampaignOperationsFn",
@@ -1523,16 +1523,16 @@ class CdkStack(Stack):
             )
         )
 
-        # Campaign Prefills table data source
-        self.prefills_datasource = self.api.add_dynamo_db_data_source(
-            "CampaignPrefillsDataSource",
-            table=self.prefills_table,
+        # Campaign shared campaigns table data source
+        self.shared_campaigns_datasource = self.api.add_dynamo_db_data_source(
+            "SharedCampaignsDataSource",
+            table=self.shared_campaigns_table,
         )
-        self.prefills_datasource.node.default_child.apply_removal_policy(RemovalPolicy.RETAIN)  # type: ignore
-        self.prefills_datasource.grant_principal.add_to_principal_policy(
+        self.shared_campaigns_datasource.node.default_child.apply_removal_policy(RemovalPolicy.RETAIN)  # type: ignore
+        self.shared_campaigns_datasource.grant_principal.add_to_principal_policy(
             iam.PolicyStatement(
                 actions=["dynamodb:Query", "dynamodb:Scan"],
-                resources=[f"{self.prefills_table.table_arn}/index/*"],
+                resources=[f"{self.shared_campaigns_table.table_arn}/index/*"],
             )
         )
 
@@ -5400,12 +5400,12 @@ export function response(ctx) {
         )
 
         # ================================================================
-        # Campaign Prefill Query Resolvers
+        # Campaign Shared Campaign Query Resolvers
         # ================================================================
 
-        # getCampaignPrefill - Get a specific prefill by code (public read)
-        self.prefills_datasource.create_resolver(
-            "GetCampaignPrefillResolver",
+        # getSharedCampaign - Get a specific Shared Campaign by code (public read)
+        self.shared_campaigns_datasource.create_resolver(
+            "GetSharedCampaignResolver",
             type_name="Query",
             field_name="getSharedCampaign",
             request_mapping_template=appsync.MappingTemplate.from_string(
@@ -5414,7 +5414,7 @@ export function response(ctx) {
     "version": "2017-02-28",
     "operation": "GetItem",
     "key": {
-        "prefillCode": $util.dynamodb.toDynamoDBJson($ctx.args.prefillCode),
+        "sharedCampaignCode": $util.dynamodb.toDynamoDBJson($ctx.args.sharedCampaignCode),
         "SK": $util.dynamodb.toDynamoDBJson("METADATA")
     }
 }
@@ -5439,12 +5439,12 @@ export function response(ctx) {
             ),
         )
 
-        # listMyCampaignPrefills - List prefills created by current user (GSI1)
+        # listMySharedCampaigns - List shared campaigns created by current user (GSI1)
         self.api.create_resolver(
-            "ListMyCampaignPrefillsResolver",
+            "ListMySharedCampaignsResolver",
             type_name="Query",
             field_name="listMySharedCampaigns",
-            data_source=self.prefills_datasource,
+            data_source=self.shared_campaigns_datasource,
             runtime=appsync.FunctionRuntime.JS_1_0_0,
             code=appsync.Code.from_inline(
                 """
@@ -5467,7 +5467,7 @@ export function response(ctx) {
     if (ctx.error) {
         util.error(ctx.error.message, ctx.error.type);
     }
-    // Filter out inactive prefills (for loop instead of filter())
+    // Filter out inactive shared campaigns (for loop instead of filter())
     const items = ctx.result.items || [];
     const activeItems = [];
     for (const item of items) {
@@ -5481,12 +5481,12 @@ export function response(ctx) {
             ),
         )
 
-        # findCampaignPrefills - Find prefills by unit+campaign (GSI2)
+        # findSharedCampaigns - Find shared campaigns by unit+campaign (GSI2)
         self.api.create_resolver(
-            "FindCampaignPrefillsResolver",
+            "FindSharedCampaignsResolver",
             type_name="Query",
             field_name="findSharedCampaigns",
-            data_source=self.prefills_datasource,
+            data_source=self.shared_campaigns_datasource,
             runtime=appsync.FunctionRuntime.JS_1_0_0,
             code=appsync.Code.from_inline(
                 """
@@ -5514,7 +5514,7 @@ export function response(ctx) {
     if (ctx.error) {
         util.error(ctx.error.message, ctx.error.type);
     }
-    // Filter out inactive prefills
+    // Filter out inactive  shared campaigns
     const items = ctx.result.items || [];
     const activeItems = [];
     for (const item of items) {
@@ -5529,17 +5529,17 @@ export function response(ctx) {
         )
 
         # ================================================================
-        # Campaign Prefill Mutation Resolvers
+        # Campaign Shared Campaign Mutation Resolvers
         # ================================================================
 
-        # createCampaignPrefill - Pipeline resolver: Count existing → Create with rate limit
-        # Step 1: Count existing prefills for rate limiting
-        count_user_prefills_fn = appsync.AppsyncFunction(
+        # createSharedCampaign - Pipeline resolver: Count existing → Create with rate limit
+        # Step 1: Count existing shared campaigns for rate limiting
+        count_user_shared_campaigns_fn = appsync.AppsyncFunction(
             self,
-            "CountUserPrefillsFn",
-            name=f"CountUserPrefillsFn_{env_name}",
+            "CountUserSharedCampaignsFn",
+            name=f"CountUserSharedCampaignsFn_{env_name}",
             api=self.api,
-            data_source=self.prefills_datasource,
+            data_source=self.shared_campaigns_datasource,
             runtime=appsync.FunctionRuntime.JS_1_0_0,
             code=appsync.Code.from_inline(
                 """
@@ -5563,11 +5563,11 @@ export function response(ctx) {
         util.error(ctx.error.message, ctx.error.type);
     }
     const count = ctx.result.scannedCount || 0;
-    // Rate limit: 50 prefills per user
+    // Rate limit: 50 shared campaigns per user
     if (count >= 50) {
-        util.error('Rate limit exceeded: Maximum 50 campaign prefills per user', 'RateLimitExceeded');
+        util.error('Rate limit exceeded: Maximum 50 campaign shared campaigns per user', 'RateLimitExceeded');
     }
-    ctx.stash.prefillCount = count;
+    ctx.stash.sharedCampaignCount = count;
     return count;
 }
                 """
@@ -5575,10 +5575,10 @@ export function response(ctx) {
         )
 
         # Step 2: Get catalog info (for validation and display name)
-        get_catalog_for_prefill_fn = appsync.AppsyncFunction(
+        get_catalog_for_shared_campaign_fn = appsync.AppsyncFunction(
             self,
-            "GetCatalogForPrefillFn",
-            name=f"GetCatalogForPrefillFn_{env_name}",
+            "GetCatalogForSharedCampaignFn",
+            name=f"GetCatalogForSharedCampaignFn_{env_name}",
             api=self.api,
             data_source=self.catalogs_datasource,
             runtime=appsync.FunctionRuntime.JS_1_0_0,
@@ -5616,10 +5616,10 @@ export function response(ctx) {
         )
 
         # Step 3: Get account info (for createdByName)
-        get_account_for_prefill_fn = appsync.AppsyncFunction(
+        get_account_for_shared_campaign_fn = appsync.AppsyncFunction(
             self,
-            "GetAccountForPrefillFn",
-            name=f"GetAccountForPrefillFn_{env_name}",
+            "GetAccountForSharedCampaignFn",
+            name=f"GetAccountForSharedCampaignFn_{env_name}",
             api=self.api,
             data_source=self.accounts_datasource,
             runtime=appsync.FunctionRuntime.JS_1_0_0,
@@ -5650,13 +5650,13 @@ export function response(ctx) {
             ),
         )
 
-        # Step 4: Create the prefill
-        create_prefill_fn = appsync.AppsyncFunction(
+        # Step 4: Create the Shared Campaign
+        create_shared_campaign_fn = appsync.AppsyncFunction(
             self,
-            "CreatePrefillFn",
-            name=f"CreatePrefillFn_{env_name}",
+            "CreateSharedCampaignFn",
+            name=f"CreateSharedCampaignFn_{env_name}",
             api=self.api,
-            data_source=self.prefills_datasource,
+            data_source=self.shared_campaigns_datasource,
             runtime=appsync.FunctionRuntime.JS_1_0_0,
             code=appsync.Code.from_inline(
                 """
@@ -5667,13 +5667,13 @@ export function request(ctx) {
     const account = ctx.stash.account;
     const now = util.time.nowISO8601();
     
-    // Generate prefill code: UNITTYPE + UNITNUMBER + CAMPAIGN + YEAR
+    // Generate shared campaign code: UNITTYPE + UNITNUMBER + CAMPAIGN + YEAR
     // Convert numbers to strings using template literal (String() not available in APPSYNC_JS)
     const campaignYearStr = '' + input.campaignYear;
     const unitNumStr = '' + input.unitNumber;
     const campaignAbbrev = input.campaignName.substring(0, 4).toUpperCase();
     const yearAbbrev = campaignYearStr.substring(2);
-    const prefillCode = input.unitType.toUpperCase() + unitNumStr + '-' + campaignAbbrev + '-' + input.state.toUpperCase() + '-' + yearAbbrev;
+    const sharedCampaignCode = input.unitType.toUpperCase() + unitNumStr + '-' + campaignAbbrev + '-' + input.state.toUpperCase() + '-' + yearAbbrev;
     
     // Build unit+campaign composite key for GSI2
     const unitCampaignKey = input.unitType + '#' + unitNumStr + '#' + input.city + '#' + input.state + '#' + input.campaignName + '#' + campaignYearStr;
@@ -5687,7 +5687,7 @@ export function request(ctx) {
     }
     
     const item = {
-        prefillCode: prefillCode,
+        sharedCampaignCode: sharedCampaignCode,
         catalogId: input.catalogId,
         campaignName: input.campaignName,
         campaignYear: input.campaignYear,
@@ -5719,10 +5719,10 @@ export function request(ctx) {
     
     return {
         operation: 'PutItem',
-        key: util.dynamodb.toMapValues({ prefillCode: prefillCode, SK: 'METADATA' }),
+        key: util.dynamodb.toMapValues({ sharedCampaignCode: sharedCampaignCode, SK: 'METADATA' }),
         attributeValues: util.dynamodb.toMapValues(item),
         condition: {
-            expression: 'attribute_not_exists(prefillCode)'
+            expression: 'attribute_not_exists(sharedCampaignCode)'
         }
     };
 }
@@ -5730,7 +5730,7 @@ export function request(ctx) {
 export function response(ctx) {
     if (ctx.error) {
         if (ctx.error.type === 'DynamoDB:ConditionalCheckFailedException') {
-            util.error('A campaign prefill with this code already exists. Please try again.', 'ConflictException');
+            util.error('A Shared Campaign with this code already exists. Please try again.', 'ConflictException');
         }
         util.error(ctx.error.message, ctx.error.type);
     }
@@ -5741,15 +5741,15 @@ export function response(ctx) {
         )
 
         self.api.create_resolver(
-            "CreateCampaignPrefillPipelineResolver",
+            "CreateSharedCampaignPipelineResolver",
             type_name="Mutation",
             field_name="createSharedCampaign",
             runtime=appsync.FunctionRuntime.JS_1_0_0,
             pipeline_config=[
-                count_user_prefills_fn,
-                get_catalog_for_prefill_fn,
-                get_account_for_prefill_fn,
-                create_prefill_fn,
+                count_user_shared_campaigns_fn,
+                get_catalog_for_shared_campaign_fn,
+                get_account_for_shared_campaign_fn,
+                create_shared_campaign_fn,
             ],
             code=appsync.Code.from_inline(
                 """
@@ -5764,14 +5764,14 @@ export function response(ctx) {
             ),
         )
 
-        # updateCampaignPrefill - Pipeline resolver: Get → Authorize → Update
-        # Step 1: Get existing prefill
-        get_prefill_for_update_fn = appsync.AppsyncFunction(
+        # updateSharedCampaign - Pipeline resolver: Get → Authorize → Update
+        # Step 1: Get existing Shared Campaign
+        get_shared_campaign_for_update_fn = appsync.AppsyncFunction(
             self,
-            "GetPrefillForUpdateFn",
-            name=f"GetPrefillForUpdateFn_{env_name}",
+            "GetSharedCampaignForUpdateFn",
+            name=f"GetSharedCampaignForUpdateFn_{env_name}",
             api=self.api,
-            data_source=self.prefills_datasource,
+            data_source=self.shared_campaigns_datasource,
             runtime=appsync.FunctionRuntime.JS_1_0_0,
             code=appsync.Code.from_inline(
                 """
@@ -5780,7 +5780,7 @@ import { util } from '@aws-appsync/utils';
 export function request(ctx) {
     return {
         operation: 'GetItem',
-        key: util.dynamodb.toMapValues({ prefillCode: ctx.args.input.prefillCode, SK: 'METADATA' })
+        key: util.dynamodb.toMapValues({ sharedCampaignCode: ctx.args.input.sharedCampaignCode, SK: 'METADATA' })
     };
 }
 
@@ -5789,26 +5789,26 @@ export function response(ctx) {
         util.error(ctx.error.message, ctx.error.type);
     }
     if (!ctx.result) {
-        util.error('Campaign prefill not found', 'NotFound');
+        util.error('Shared Campaign not found', 'NotFound');
     }
     // Check ownership
     if (ctx.result.createdBy !== ctx.identity.sub) {
-        util.error('Only the creator can update this campaign prefill', 'Forbidden');
+        util.error('Only the creator can update this campaign sharedCampaign', 'Forbidden');
     }
-    ctx.stash.prefill = ctx.result;
+    ctx.stash.sharedCampaign = ctx.result;
     return ctx.result;
 }
                 """
             ),
         )
 
-        # Step 2: Update the prefill
-        update_prefill_fn = appsync.AppsyncFunction(
+        # Step 2: Update the Shared Campaign
+        update_shared_campaign_fn = appsync.AppsyncFunction(
             self,
-            "UpdatePrefillFn",
-            name=f"UpdatePrefillFn_{env_name}",
+            "UpdateSharedCampaignFn",
+            name=f"UpdateSharedCampaignFn_{env_name}",
             api=self.api,
-            data_source=self.prefills_datasource,
+            data_source=self.shared_campaigns_datasource,
             runtime=appsync.FunctionRuntime.JS_1_0_0,
             code=appsync.Code.from_inline(
                 """
@@ -5816,7 +5816,7 @@ import { util } from '@aws-appsync/utils';
 
 export function request(ctx) {
     const input = ctx.args.input;
-    const prefill = ctx.stash.prefill;
+    const sharedCampaign = ctx.stash.sharedCampaign;
     
     // Build update expression for allowed fields only
     const expressionNames = {};
@@ -5842,16 +5842,16 @@ export function request(ctx) {
     }
     
     if (updateParts.length === 0) {
-        // No updates provided, just return existing prefill
+        // No updates provided, just return existing shared campaign
         return {
             operation: 'GetItem',
-            key: util.dynamodb.toMapValues({ prefillCode: input.prefillCode, SK: 'METADATA' })
+            key: util.dynamodb.toMapValues({ sharedCampaignCode: input.sharedCampaignCode, SK: 'METADATA' })
         };
     }
     
     return {
         operation: 'UpdateItem',
-        key: util.dynamodb.toMapValues({ prefillCode: input.prefillCode, SK: 'METADATA' }),
+        key: util.dynamodb.toMapValues({ sharedCampaignCode: input.sharedCampaignCode, SK: 'METADATA' }),
         update: {
             expression: 'SET ' + updateParts.join(', '),
             expressionNames: expressionNames,
@@ -5871,11 +5871,11 @@ export function response(ctx) {
         )
 
         self.api.create_resolver(
-            "UpdateCampaignPrefillPipelineResolver",
+            "UpdateSharedCampaignPipelineResolver",
             type_name="Mutation",
             field_name="updateSharedCampaign",
             runtime=appsync.FunctionRuntime.JS_1_0_0,
-            pipeline_config=[get_prefill_for_update_fn, update_prefill_fn],
+            pipeline_config=[get_shared_campaign_for_update_fn, update_shared_campaign_fn],
             code=appsync.Code.from_inline(
                 """
 export function request(ctx) {
@@ -5889,14 +5889,14 @@ export function response(ctx) {
             ),
         )
 
-        # deleteCampaignPrefill - Pipeline resolver: Get → Authorize → Hard Delete
+        # deleteSharedCampaign - Pipeline resolver: Get → Authorize → Hard Delete
         # Step 2: Hard delete (completely remove from table)
-        delete_prefill_fn = appsync.AppsyncFunction(
+        delete_shared_campaign_fn = appsync.AppsyncFunction(
             self,
-            "DeletePrefillFn",
-            name=f"DeletePrefillFn_{env_name}",
+            "DeleteSharedCampaignFn",
+            name=f"DeleteSharedCampaignFn_{env_name}",
             api=self.api,
-            data_source=self.prefills_datasource,
+            data_source=self.shared_campaigns_datasource,
             runtime=appsync.FunctionRuntime.JS_1_0_0,
             code=appsync.Code.from_inline(
                 """
@@ -5905,7 +5905,7 @@ import { util } from '@aws-appsync/utils';
 export function request(ctx) {
     return {
         operation: 'DeleteItem',
-        key: util.dynamodb.toMapValues({ prefillCode: ctx.args.prefillCode, SK: 'METADATA' })
+        key: util.dynamodb.toMapValues({ sharedCampaignCode: ctx.args.sharedCampaignCode, SK: 'METADATA' })
     };
 }
 
@@ -5919,13 +5919,13 @@ export function response(ctx) {
             ),
         )
 
-        # Need a version of get_prefill that works with prefillCode as direct argument
-        get_prefill_for_delete_fn = appsync.AppsyncFunction(
+        # Need a version of get_shared_campaign that works with sharedCampaignCode as direct argument
+        get_shared_campaign_for_delete_fn = appsync.AppsyncFunction(
             self,
-            "GetPrefillForDeleteFn",
-            name=f"GetPrefillForDeleteFn_{env_name}",
+            "GetSharedCampaignForDeleteFn",
+            name=f"GetSharedCampaignForDeleteFn_{env_name}",
             api=self.api,
-            data_source=self.prefills_datasource,
+            data_source=self.shared_campaigns_datasource,
             runtime=appsync.FunctionRuntime.JS_1_0_0,
             code=appsync.Code.from_inline(
                 """
@@ -5934,7 +5934,7 @@ import { util } from '@aws-appsync/utils';
 export function request(ctx) {
     return {
         operation: 'GetItem',
-        key: util.dynamodb.toMapValues({ prefillCode: ctx.args.prefillCode, SK: 'METADATA' })
+        key: util.dynamodb.toMapValues({ sharedCampaignCode: ctx.args.sharedCampaignCode, SK: 'METADATA' })
     };
 }
 
@@ -5943,13 +5943,13 @@ export function response(ctx) {
         util.error(ctx.error.message, ctx.error.type);
     }
     if (!ctx.result) {
-        util.error('Campaign prefill not found', 'NotFound');
+        util.error('Shared Campaign not found', 'NotFound');
     }
     // Check ownership
     if (ctx.result.createdBy !== ctx.identity.sub) {
-        util.error('Only the creator can delete this campaign prefill', 'Forbidden');
+        util.error('Only the creator can delete this campaign sharedCampaign', 'Forbidden');
     }
-    ctx.stash.prefill = ctx.result;
+    ctx.stash.sharedCampaign = ctx.result;
     return ctx.result;
 }
                 """
@@ -5957,11 +5957,11 @@ export function response(ctx) {
         )
 
         self.api.create_resolver(
-            "DeleteCampaignPrefillPipelineResolver",
+            "DeleteSharedCampaignPipelineResolver",
             type_name="Mutation",
             field_name="deleteSharedCampaign",
             runtime=appsync.FunctionRuntime.JS_1_0_0,
-            pipeline_config=[get_prefill_for_delete_fn, delete_prefill_fn],
+            pipeline_config=[get_shared_campaign_for_delete_fn, delete_shared_campaign_fn],
             code=appsync.Code.from_inline(
                 """
 export function request(ctx) {
@@ -5976,13 +5976,13 @@ export function response(ctx) {
         )
 
         # ================================================================
-        # CampaignPrefill Field Resolvers
+        # SharedCampaign Field Resolvers
         # ================================================================
 
-        # catalog - Resolve catalog for CampaignPrefill
+        # catalog - Resolve catalog for SharedCampaign
         self.catalogs_datasource.create_resolver(
-            "CampaignPrefillCatalogResolver",
-            type_name="CampaignPrefill",
+            "SharedCampaignCatalogResolver",
+            type_name="SharedCampaign",
             field_name="catalog",
             request_mapping_template=appsync.MappingTemplate.from_string(
                 """
@@ -6895,7 +6895,7 @@ export function response(ctx) {
         )
 
         # createCampaign - Create a new campaign for a profile (Lambda resolver with transaction support)
-        # Supports: prefillCode, shareWithCreator, unit fields (unitType, unitNumber, city, state)
+        # Supports: sharedCampaignCode, shareWithCreator, unit fields (unitType, unitNumber, city, state)
         # Uses DynamoDB transactions to atomically create campaign + optional share
         # NOTE: Previous JS pipeline resolver replaced with Lambda for transaction support
         self.campaign_operations_ds.create_resolver(

@@ -47,11 +47,11 @@ export const AppLayout: React.FC<{ children?: React.ReactNode }> = ({
 
   // Check if user has any shared campaigns
   const { data: campaignsData } = useQuery<{
-    listMyCampaignPrefills: { prefillCode: string; isActive: boolean }[];
+    listMySharedCampaigns: { sharedCampaignCode: string; isActive: boolean }[];
   }>(LIST_MY_SHARED_CAMPAIGNS);
 
   const hasSharedCampaigns = 
-    (campaignsData?.listMyCampaignPrefills?.filter((c: { isActive: boolean }) => c.isActive)?.length ?? 0) > 0;
+    (campaignsData?.listMySharedCampaigns?.filter((c: { isActive: boolean }) => c.isActive)?.length ?? 0) > 0;
 
   const toggleMobileDrawer = () => setMobileDrawerOpen(!mobileDrawerOpen);
 
