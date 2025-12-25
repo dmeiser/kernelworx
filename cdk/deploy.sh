@@ -47,15 +47,70 @@ if [ -n "$CREATE_COGNITO_DOMAIN" ]; then
     CONTEXT_ARGS="$CONTEXT_ARGS -c create_cognito_domain=$CREATE_COGNITO_DOMAIN"
 fi
 
-# Run deployment
-echo "Running: npx cdk deploy $CONTEXT_ARGS --require-approval never"
-echo ""
+# Generate import file for resources that need to be imported
+# TWO-STAGE IMPORT: First import SMS role (if needed), then everything else
+echo "🔍 Checking for resources to import..."
 
-# Add import file if it exists (for ACM certificates and other resources)
-if [ -f import-certificates.json ]; then
-    npx cdk deploy $CONTEXT_ARGS --require-approval never --resources-to-import "$(cat import-certificates.json)"
+# Stage 1: Try to import SMS role first (if it exists)
+SMS_ROLE_IMPORT=$(uv run python generate_sms_role_import.py 2>/dev/null || echo "")
+if [ -n "$SMS_ROLE_IMPORT" ] && [ -f "$SMS_ROLE_IMPORT" ]; then
+    echo "📦 Stage 1: Importing SMS role first..."
+    echo "Running: npx cdk import $CONTEXT_ARGS -c skip_user_pool_domain=true --resource-mapping $SMS_ROLE_IMPORT --force"
+    echo ""
+    
+    npx cdk import $CONTEXT_ARGS -c skip_user_pool_domain=true --resource-mapping "$SMS_ROLE_IMPORT" --force
+    SMS_IMPORT_EXIT_CODE=$?
+    rm -f "$SMS_ROLE_IMPORT"
+    
+    if [ $SMS_IMPORT_EXIT_CODE -ne 0 ]; then
+        echo ""
+        echo "❌ SMS role import failed!"
+        exit $SMS_IMPORT_EXIT_CODE
+    fi
+    
+    echo ""
+    echo "✅ SMS role imported! Continuing with remaining resources..."
+    echo ""
+fi
+
+# Stage 2: Import all other resources (including UserPool)
+IMPORT_FILE=$(uv run python generate_import_file.py)
+
+# Run deployment
+if [ -n "$IMPORT_FILE" ] && [ -f "$IMPORT_FILE" ]; then
+    echo "📦 Stage 2: Importing remaining resources from: $IMPORT_FILE"
+    echo "Running: npx cdk import $CONTEXT_ARGS -c skip_user_pool_domain=true --resource-mapping $IMPORT_FILE --force"
+    echo ""
+    
+    # Run import operation with mapping file, skipping UserPoolDomain creation
+    npx cdk import $CONTEXT_ARGS -c skip_user_pool_domain=true --resource-mapping "$IMPORT_FILE" --force
+    IMPORT_EXIT_CODE=$?
+    
+    if [ $IMPORT_EXIT_CODE -ne 0 ]; then
+        echo ""
+        echo "❌ Import failed!"
+        rm -f "$IMPORT_FILE"
+        exit $IMPORT_EXIT_CODE
+    fi
+    
+    echo ""
+    echo "✅ Import complete! Now deploying normally..."
+    echo ""
+    
+    # Clean up import file after successful import
+    rm -f "$IMPORT_FILE"
+    
+    # Run normal deployment after import
+    # Keep UserPoolDomain skipped until we fix the orphaned domain/certificate issue
+    echo "⚠️  Deploying with UserPoolDomain still skipped (to enable: remove orphaned domain and certificates first)"
+    npx cdk deploy $CONTEXT_ARGS -c skip_user_pool_domain=true --require-approval never
+    exit $?
 else
-    npx cdk deploy $CONTEXT_ARGS --require-approval never
+    echo "Running: npx cdk deploy $CONTEXT_ARGS -c skip_user_pool_domain=true --require-approval never"
+    echo "⚠️  UserPoolDomain creation skipped (to enable: remove orphaned domain and certificates first)"
+    echo ""
+    
+    npx cdk deploy $CONTEXT_ARGS -c skip_user_pool_domain=true --require-approval never
 fi
 
 echo ""

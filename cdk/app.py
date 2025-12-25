@@ -7,7 +7,6 @@ import aws_cdk as cdk
 
 from cdk.cdk_stack import REGION_ABBREVIATIONS, CdkStack
 from cdk.cleanup_hook import cleanup_before_deploy
-from cdk.cleanup_hook import cleanup_before_deploy
 
 # Load environment variables from .env file if it exists
 env_file = Path(__file__).parent / ".env"
@@ -53,16 +52,30 @@ env = cdk.Environment(
 # Environment-specific stack name with region: kernelworx-{region}-{env}
 stack_name = f"kernelworx-{region_abbrev}-{env_name}"
 
-# Clean up only API certificate (login one is in use by cross-account CloudFront, can't be deleted)
+# Clean up orphaned ACM certificates and AppSync API before deployment
+# (ACM certificates and AppSync APIs cannot be imported into CloudFormation, must be deleted first)
 base_domain = os.getenv("BASE_DOMAIN", "kernelworx.app")
+
+# Calculate site domain (same logic as in CdkStack)
+if env_name == "prod":
+    site_domain = base_domain
+else:
+    site_domain = f"{env_name}.{base_domain}"
+
 domain_names = [
-    f"api.{env_name}.{base_domain}",
+    f"api.{env_name}.{base_domain}" if env_name != "prod" else f"api.{base_domain}",
+    f"auth.{env_name}.{base_domain}" if env_name != "prod" else f"auth.{base_domain}",
 ]
+
 cleanup_before_deploy(
     domain_names=domain_names,
     environment_name=env_name,
+    site_domain=site_domain,  # Pass the site domain for CloudFront cleanup
 )
 
+# NOTE: Import file generation moved to generate_import_file.py
+# Called by deploy.sh BEFORE cdk deploy, not during synth
+# This ensures the bash script can access the file path
 
 stack = CdkStack(
     app,
