@@ -1363,7 +1363,24 @@ def create_resolvers(
 #if($ctx.result.isEmpty())
     $util.error("Account not found", "NotFound")
 #end
-$util.toJson($ctx.result)
+#set($account = $ctx.result)
+{
+  "accountId": $util.toJson($account.accountId),
+  "email": $util.toJson($account.email),
+  "givenName": $util.toJson($account.givenName),
+  "familyName": $util.toJson($account.familyName),
+  "city": $util.toJson($account.city),
+  "state": $util.toJson($account.state),
+  "unitType": $util.toJson($account.unitType),
+  #if($account.unitNumber && $account.unitNumber != "")
+  "unitNumber": $util.parseJson($account.unitNumber),
+  #else
+  "unitNumber": null,
+  #end
+  "preferences": $util.toJson($account.preferences),
+  "createdAt": $util.toJson($account.createdAt),
+  "updatedAt": $util.toJson($account.updatedAt)
+}
             """
         ),
     )

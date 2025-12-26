@@ -101,7 +101,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 "familyName": user_attributes.get("family_name", ""),  # Optional metadata
                 "city": "",  # Will be set via updateMyAccount if provided
                 "state": "",  # Will be set via updateMyAccount if provided
-                "unitNumber": "",  # Will be set via updateMyAccount if provided
+                "unitType": "",  # Will be set via updateMyAccount if provided
                 "createdAt": timestamp,
                 "updatedAt": timestamp,
             }

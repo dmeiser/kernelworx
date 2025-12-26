@@ -94,9 +94,22 @@ def update_my_account(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         expression_attribute_values[":unitType"] = unit_type
 
     if unit_number is not None:
-        update_expressions.append("#unitNumber = :unitNumber")
-        expression_attribute_names["#unitNumber"] = "unitNumber"
-        expression_attribute_values[":unitNumber"] = unit_number
+        # Convert to int if provided and not empty
+        if unit_number:
+            try:
+                unit_number = int(unit_number)
+            except (ValueError, TypeError):
+                raise AppError(
+                    ErrorCode.INVALID_INPUT,
+                    "unitNumber must be a valid integer",
+                )
+        else:
+            unit_number = None  # Don't store empty strings
+
+        if unit_number is not None:
+            update_expressions.append("#unitNumber = :unitNumber")
+            expression_attribute_names["#unitNumber"] = "unitNumber"
+            expression_attribute_values[":unitNumber"] = unit_number
 
     # Always update updatedAt
     update_expressions.append("#updatedAt = :updatedAt")

@@ -1,19 +1,18 @@
 import { util } from '@aws-appsync/utils';
 
 export function request(ctx) {
-    const createdBy = ctx.identity.sub;
+    const ownerAccountId = ctx.identity.sub;
     
-    // Query shared campaigns created by this user using GSI1 (createdBy + createdAt)
+    // Query catalogs created by this user using the ownerAccountId-index
     return {
         operation: 'Query',
-        index: 'GSI1',
+        index: 'ownerAccountId-index',
         query: {
-            expression: 'createdBy = :createdBy',
+            expression: 'ownerAccountId = :ownerAccountId',
             expressionValues: util.dynamodb.toMapValues({
-                ':createdBy': createdBy
+                ':ownerAccountId': ownerAccountId
             })
-        },
-        scanIndexForward: false  // Sort by createdAt descending (newest first)
+        }
     };
 }
 

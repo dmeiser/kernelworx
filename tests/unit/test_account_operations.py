@@ -223,3 +223,81 @@ class TestUpdateMyAccount:
         # Verify unitType was stored in DynamoDB even though it's not returned
         stored_item = accounts_table.get_item(Key={"accountId": account_id_key})
         assert stored_item["Item"]["unitType"] == "PACK"
+
+    def test_update_with_invalid_unit_number(
+        self,
+        dynamodb_table: Any,
+        sample_account_id: str,
+        appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """Test update with invalid unitNumber raises error."""
+        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
+
+        # Create existing account
+        accounts_table = get_accounts_table()
+        account_id_key = f"ACCOUNT#{sample_account_id}"
+        accounts_table.put_item(
+            Item={
+                "accountId": account_id_key,
+                "email": "test@example.com",
+                "createdAt": datetime.now(timezone.utc).isoformat(),
+                "updatedAt": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+
+        event = {
+            **appsync_event,
+            "arguments": {
+                "input": {
+                    "unitNumber": "not-a-number",
+                }
+            },
+        }
+
+        with pytest.raises(AppError) as exc_info:
+            update_my_account(event, lambda_context)
+
+        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+        assert "unitNumber must be a valid integer" in str(exc_info.value)
+
+    def test_update_with_empty_unit_number(
+        self,
+        dynamodb_table: Any,
+        sample_account_id: str,
+        appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """Test update with empty unitNumber (skips update)."""
+        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
+
+        # Create existing account
+        accounts_table = get_accounts_table()
+        account_id_key = f"ACCOUNT#{sample_account_id}"
+        accounts_table.put_item(
+            Item={
+                "accountId": account_id_key,
+                "email": "test@example.com",
+                "createdAt": datetime.now(timezone.utc).isoformat(),
+                "updatedAt": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+
+        event = {
+            **appsync_event,
+            "arguments": {
+                "input": {
+                    "givenName": "Scout",
+                    "unitNumber": "",  # Empty string should be skipped
+                }
+            },
+        }
+
+        result = update_my_account(event, lambda_context)
+
+        assert result["givenName"] == "Scout"
+        # Verify unitNumber was not set
+        stored_item = accounts_table.get_item(Key={"accountId": account_id_key})
+        assert "unitNumber" not in stored_item["Item"]

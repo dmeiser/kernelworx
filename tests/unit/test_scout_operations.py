@@ -189,5 +189,37 @@ class TestCreateSellerProfile:
         # Assert
         assert result["sellerName"] == "Pack 42 Scout"
         assert result["unitType"] == "PACK"
-        assert result["unitNumber"] == "42"
+        assert result["unitNumber"] == 42  # Should be converted to int
+        mock_dynamodb.transact_write_items.assert_called_once()
+
+    @patch("src.handlers.scout_operations.boto3.client")
+    def test_create_seller_profile_with_invalid_unit_number(
+        self,
+        mock_client: MagicMock,
+        appsync_event: Dict[str, Any],
+        lambda_context: Any,
+    ) -> None:
+        """Test profile creation with invalid (non-numeric) unit number logs warning and skips field."""
+        # Arrange
+        mock_dynamodb = MagicMock()
+        mock_client.return_value = mock_dynamodb
+
+        event = {
+            **appsync_event,
+            "arguments": {
+                "input": {
+                    "sellerName": "Pack Invalid Scout",
+                    "unitType": "PACK",
+                    "unitNumber": "not-a-number",
+                }
+            },
+        }
+
+        # Act
+        result = create_seller_profile(event, lambda_context)
+
+        # Assert - unitNumber should be skipped when invalid
+        assert result["sellerName"] == "Pack Invalid Scout"
+        assert result["unitType"] == "PACK"
+        assert "unitNumber" not in result
         mock_dynamodb.transact_write_items.assert_called_once()

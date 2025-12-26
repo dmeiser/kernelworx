@@ -3,6 +3,11 @@ import { util } from '@aws-appsync/utils';
 export function request(ctx) {
     const profile = ctx.stash.profile;
     
+    // Safety check - profile should be set by fetch_profile_fn.js
+    if (!profile) {
+        util.error('Profile not found in stash', 'InternalServerError');
+    }
+    
     // Check if caller is owner first (ownerAccountId uses ACCOUNT# prefix)
     const expectedOwner = 'ACCOUNT#' + ctx.identity.sub;
     if (profile.ownerAccountId === expectedOwner) {
@@ -32,7 +37,10 @@ export function request(ctx) {
 export function response(ctx) {
     // If already authorized (owner), return the profile
     if (ctx.stash.authorized) {
-        return ctx.stash.profile;
+        const profile = ctx.stash.profile;
+        profile.isOwner = true;
+        profile.permissions = ["READ", "WRITE"];
+        return profile;
     }
     
     if (ctx.error) {
@@ -53,7 +61,10 @@ export function response(ctx) {
     
     // Has READ or WRITE permission - authorized
     if (share.permissions.includes('READ') || share.permissions.includes('WRITE')) {
-        return ctx.stash.profile;
+        const profile = ctx.stash.profile;
+        profile.isOwner = false;
+        profile.permissions = share.permissions;
+        return profile;
     }
     
     // Share exists but no valid permissions

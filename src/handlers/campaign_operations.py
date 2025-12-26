@@ -166,6 +166,11 @@ def create_campaign(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         if unit_type:
             if not unit_number:
                 raise ValueError("unitNumber is required when unitType is provided")
+            # Convert unitNumber to int
+            try:
+                unit_number = int(unit_number)
+            except (ValueError, TypeError):
+                raise ValueError("unitNumber must be a valid integer")
             if not city:
                 raise ValueError("city is required when unitType is provided")
             if not state:

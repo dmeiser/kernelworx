@@ -1,16 +1,17 @@
 import { util } from '@aws-appsync/utils';
 
 export function request(ctx) {
-    const createdBy = ctx.identity.sub;
+    const isPublic = ctx.args.isPublic !== undefined ? ctx.args.isPublic : true;
+    const isPublicStr = isPublic ? 'true' : 'false';
     
-    // Query shared campaigns created by this user using GSI1 (createdBy + createdAt)
+    // Query catalogs by isPublic + createdAt using the isPublic-createdAt-index
     return {
         operation: 'Query',
-        index: 'GSI1',
+        index: 'isPublic-createdAt-index',
         query: {
-            expression: 'createdBy = :createdBy',
+            expression: 'isPublicStr = :isPublic',
             expressionValues: util.dynamodb.toMapValues({
-                ':createdBy': createdBy
+                ':isPublic': isPublicStr
             })
         },
         scanIndexForward: false  // Sort by createdAt descending (newest first)

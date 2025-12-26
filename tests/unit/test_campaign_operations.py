@@ -515,6 +515,43 @@ class TestCreateCampaign:
         with pytest.raises(ValueError, match="state is required"):
             create_campaign(base_event, lambda_context)
 
+    @patch("src.handlers.campaign_operations.dynamodb_client")
+    @patch("src.handlers.campaign_operations.check_profile_access")
+    @patch("src.handlers.campaign_operations._get_profile")
+    def test_create_campaign_with_invalid_unit_number_format(
+        self,
+        mock_get_profile: MagicMock,
+        mock_check_access: MagicMock,
+        mock_dynamodb_client: MagicMock,
+        lambda_context: MagicMock,
+        sample_profile: Dict[str, Any],
+    ) -> None:
+        """Test validation when unitNumber is not a valid integer."""
+        # Arrange
+        mock_check_access.return_value = True
+        mock_get_profile.return_value = sample_profile
+
+        event = {
+            "arguments": {
+                "input": {
+                    "profileId": "PROFILE#123",
+                    "campaignName": "Fall",
+                    "campaignYear": 2024,
+                    "catalogId": "catalog-123",
+                    "startDate": "2024-09-01T00:00:00Z",
+                    "unitType": "Pack",
+                    "unitNumber": "not-a-number",
+                    "city": "Springfield",
+                    "state": "IL",
+                }
+            },
+            "identity": {"sub": "test-account-123"},
+        }
+
+        # Act & Assert
+        with pytest.raises(ValueError, match="unitNumber must be a valid integer"):
+            create_campaign(event, lambda_context)
+
     @pytest.mark.skip(reason="TODO: Fix mock setup for shared_campaigns_table - mocking not working as expected")
     @patch("src.handlers.campaign_operations.dynamodb_client")
     @patch("src.handlers.campaign_operations.check_profile_access")

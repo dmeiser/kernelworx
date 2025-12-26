@@ -76,7 +76,12 @@ def create_seller_profile(event: Dict[str, Any], context: Any) -> Dict[str, Any]
         if unit_type:
             profile_data["unitType"] = unit_type
         if unit_number:
-            profile_data["unitNumber"] = unit_number
+            # Convert to int for GraphQL schema compatibility
+            try:
+                profile_data["unitNumber"] = int(unit_number)
+            except (ValueError, TypeError):
+                logger.warning(f"Invalid unitNumber: {unit_number}, skipping")
+                pass
 
         # In multi-table design V2, profiles table uses:
         # - PK: ownerAccountId (ACCOUNT#sub) - enables listMyProfiles via PK query
