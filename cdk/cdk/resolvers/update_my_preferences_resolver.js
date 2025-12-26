@@ -10,14 +10,14 @@ export function request(ctx) {
         operation: 'UpdateItem',
         key: util.dynamodb.toMapValues({ accountId: accountId }),
         update: {
-        expression: 'SET preferences = :preferences, updatedAt = :updatedAt',
-        expressionValues: util.dynamodb.toMapValues({
-            ':preferences': preferences,
-            ':updatedAt': now
-        })
+            expression: 'SET preferences = :preferences, updatedAt = :updatedAt',
+            expressionValues: util.dynamodb.toMapValues({
+                ':preferences': preferences,
+                ':updatedAt': now
+            })
         },
         condition: {
-        expression: 'attribute_exists(accountId)'
+            expression: 'attribute_exists(accountId)'
         }
     };
 }

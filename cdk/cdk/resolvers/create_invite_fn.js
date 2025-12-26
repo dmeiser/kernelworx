@@ -35,12 +35,20 @@ export function request(ctx) {
         used: false
     };
     
+    // Store values in stash for response function
+    ctx.stash.inviteCode = inviteCode;
+    ctx.stash.profileId = profileId;
+    ctx.stash.permissions = permissions;
+    ctx.stash.createdBy = callerAccountId;
+    ctx.stash.createdAt = now;
+    ctx.stash.expiresAtISO = expiresAtISO;
+    
     return {
         operation: 'PutItem',
         key: util.dynamodb.toMapValues(key),
         attributeValues: util.dynamodb.toMapValues(attributes),
         condition: {
-        expression: 'attribute_not_exists(inviteCode)'
+            expression: 'attribute_not_exists(inviteCode)'
         }
     };
 }
@@ -48,20 +56,18 @@ export function request(ctx) {
 export function response(ctx) {
     if (ctx.error) {
         if (ctx.error.type === 'DynamoDB:ConditionalCheckFailedException') {
-        util.error('Invite code collision, please retry', 'ConflictException');
+            util.error('Invite code collision, please retry', 'ConflictException');
         }
         util.error(ctx.error.message, ctx.error.type);
     }
     
-    // Convert expiresAt epoch back to ISO string for API response
-    const expiresAtISO = util.time.epochMilliSecondsToISO8601(ctx.result.expiresAt * 1000);
-    
+    // Use values from stash since PutItem doesn't return the item
     return {
-        inviteCode: ctx.result.inviteCode,
-        profileId: ctx.result.profileId,
-        permissions: ctx.result.permissions,
-        expiresAt: expiresAtISO,
-        createdByAccountId: ctx.result.createdBy,
-        createdAt: ctx.result.createdAt
+        inviteCode: ctx.stash.inviteCode,
+        profileId: ctx.stash.profileId,
+        permissions: ctx.stash.permissions,
+        expiresAt: ctx.stash.expiresAtISO,
+        createdByAccountId: ctx.stash.createdBy,
+        createdAt: ctx.stash.createdAt
     };
 }

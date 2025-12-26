@@ -38,6 +38,17 @@ export function response(ctx) {
     // ownerAccountId now has 'ACCOUNT#' prefix
     const isOwner = catalog.ownerAccountId === 'ACCOUNT#' + callerId;
     
+    // Debug logging
+    console.log('Delete catalog authorization check:', {
+        catalogId: catalog.catalogId,
+        ownerAccountId: catalog.ownerAccountId,
+        callerId: callerId,
+        expectedOwner: 'ACCOUNT#' + callerId,
+        isOwner: isOwner,
+        isAdmin: isAdmin,
+        groups: groups
+    });
+    
     // Authorization logic:
     // - Owner can delete their own catalogs
     // - Admin can delete ANY catalog (both USER_CREATED and ADMIN_MANAGED)

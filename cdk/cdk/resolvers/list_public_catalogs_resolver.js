@@ -5,8 +5,12 @@ export function request(ctx) {
         operation: 'Query',
         index: 'isPublic-createdAt-index',
         query: {
-        expression: 'isPublicStr = :isPublicStr',
-        expressionValues: util.dynamodb.toMapValues({ ':isPublicStr': 'true' })
+            expression: 'isPublicStr = :isPublicStr',
+            expressionValues: util.dynamodb.toMapValues({ ':isPublicStr': 'true' })
+        },
+        filter: {
+            expression: 'attribute_not_exists(isDeleted) OR isDeleted = :false',
+            expressionValues: util.dynamodb.toMapValues({ ':false': false })
         },
         scanIndexForward: false
     };

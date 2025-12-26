@@ -6,8 +6,12 @@ export function request(ctx) {
         operation: 'Query',
         index: 'ownerAccountId-index',
         query: {
-        expression: 'ownerAccountId = :ownerAccountId',
-        expressionValues: util.dynamodb.toMapValues({ ':ownerAccountId': ownerAccountId })
+            expression: 'ownerAccountId = :ownerAccountId',
+            expressionValues: util.dynamodb.toMapValues({ ':ownerAccountId': ownerAccountId })
+        },
+        filter: {
+            expression: 'attribute_not_exists(isDeleted) OR isDeleted = :false',
+            expressionValues: util.dynamodb.toMapValues({ ':false': false })
         }
     };
 }

@@ -11,8 +11,8 @@ export function request(ctx) {
         ctx.stash.isOwner = true;
         // Return a no-op query
         return {
-        operation: 'GetItem',
-        key: util.dynamodb.toMapValues({ profileId: 'NOOP', targetAccountId: 'NOOP' })
+            operation: 'GetItem',
+            key: util.dynamodb.toMapValues({ profileId: 'NOOP', targetAccountId: 'NOOP' })
         };
     }
     
@@ -20,8 +20,8 @@ export function request(ctx) {
     return {
         operation: 'GetItem',
         key: util.dynamodb.toMapValues({ 
-        profileId: profileId, 
-        targetAccountId: callerAccountId 
+            profileId: profileId, 
+            targetAccountId: callerAccountId 
         }),
         consistentRead: true
     };

@@ -28,12 +28,12 @@ export function request(ctx) {
     return {
         operation: 'UpdateItem',
         key: util.dynamodb.toMapValues({ 
-        ownerAccountId: profile.ownerAccountId, 
-        profileId: input.profileId 
+            ownerAccountId: profile.ownerAccountId, 
+            profileId: profile.profileId  // Use profile.profileId which has PROFILE# prefix
         }),
         update: {
-        expression: 'SET ' + expressionParts.join(', '),
-        expressionValues: util.dynamodb.toMapValues(expressionValues)
+            expression: 'SET ' + expressionParts.join(', '),
+            expressionValues: util.dynamodb.toMapValues(expressionValues)
         }
     };
 }
@@ -42,5 +42,17 @@ export function response(ctx) {
     if (ctx.error) {
         util.error(ctx.error.message, ctx.error.type);
     }
-    return ctx.result;
+    // UpdateItem doesn't return the full item by default, so merge with profile from stash
+    const profile = ctx.stash.profile;
+    const input = ctx.args.input;
+    const now = util.time.nowISO8601();
+    
+    // Return the updated profile with merged fields
+    return {
+        ...profile,
+        sellerName: input.sellerName,
+        unitType: input.unitType !== undefined ? input.unitType : profile.unitType,
+        unitNumber: input.unitNumber !== undefined ? input.unitNumber : profile.unitNumber,
+        updatedAt: now
+    };
 }

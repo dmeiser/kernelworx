@@ -3,19 +3,22 @@ import { util } from '@aws-appsync/utils';
 export function request(ctx) {
     const profileId = ctx.args.profileId;
     
-    // Validate profileId format - must start with 'PROFILE#' and have a UUID
-    if (!profileId || !profileId.startsWith('PROFILE#')) {
-        // Invalid format - set flags to deny and skip Query
+    // Add PROFILE# prefix if not present (frontend sends clean UUIDs)
+    const dbProfileId = profileId && profileId.startsWith('PROFILE#') ? profileId : `PROFILE#${profileId}`;
+    
+    // Validate profileId exists
+    if (!profileId) {
+        // Invalid - set flags to deny and skip Query
         ctx.stash.isOwner = false;
         ctx.stash.hasWritePermission = false;
         ctx.stash.skipGetItem = true;
         return {
-        operation: 'Query',
-        index: 'profileId-index',
-        query: {
-            expression: 'profileId = :profileId',
-            expressionValues: util.dynamodb.toMapValues({ ':profileId': 'NOOP' })
-        }
+            operation: 'Query',
+            index: 'profileId-index',
+            query: {
+                expression: 'profileId = :profileId',
+                expressionValues: util.dynamodb.toMapValues({ ':profileId': 'NOOP' })
+            }
         };
     }
     
@@ -24,8 +27,8 @@ export function request(ctx) {
         operation: 'Query',
         index: 'profileId-index',
         query: {
-        expression: 'profileId = :profileId',
-        expressionValues: util.dynamodb.toMapValues({ ':profileId': profileId })
+            expression: 'profileId = :profileId',
+            expressionValues: util.dynamodb.toMapValues({ ':profileId': dbProfileId })
         }
     };
 }

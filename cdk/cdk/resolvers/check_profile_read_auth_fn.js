@@ -12,24 +12,30 @@ export function request(ctx) {
     const expectedOwner = 'ACCOUNT#' + ctx.identity.sub;
     if (profile.ownerAccountId === expectedOwner) {
         ctx.stash.authorized = true;
-        // No DB operation needed, return no-op
+        // No DB operation needed for owner - return a no-op that won't query the database
         return {
-        operation: 'GetItem',
-        key: util.dynamodb.toMapValues({ profileId: 'NOOP', targetAccountId: 'NOOP' })
+            version: '2017-02-28',
+            operation: 'GetItem',
+            key: {
+                profileId: { S: 'NOOP' },
+                targetAccountId: { S: 'NOOP' }
+            }
         };
     }
     
     // Not owner - check for share
     ctx.stash.authorized = false;
-    const profileId = ctx.stash.profileId;
+    const profileId = profile.profileId;  // Use profile.profileId which has PROFILE# prefix
+    const targetAccountId = ctx.identity.sub;
     
     // Check for share in shares table: profileId + targetAccountId
     return {
+        version: '2017-02-28',
         operation: 'GetItem',
-        key: util.dynamodb.toMapValues({ 
-        profileId: profileId, 
-        targetAccountId: ctx.identity.sub 
-        }),
+        key: {
+            profileId: { S: profileId },
+            targetAccountId: { S: targetAccountId }
+        },
         consistentRead: true
     };
 }

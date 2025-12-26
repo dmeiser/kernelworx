@@ -14,12 +14,14 @@ export function request(ctx) {
     }
     
     const profileId = ctx.args.profileId;
+    // Add PROFILE# prefix for DynamoDB query
+    const dbProfileId = profileId.startsWith('PROFILE#') ? profileId : `PROFILE#${profileId}`;
     // V2: Direct PK query on profileId (no GSI needed)
     return {
         operation: 'Query',
         query: {
-        expression: 'profileId = :profileId',
-        expressionValues: util.dynamodb.toMapValues({ ':profileId': profileId })
+            expression: 'profileId = :profileId',
+            expressionValues: util.dynamodb.toMapValues({ ':profileId': dbProfileId })
         }
     };
 }
