@@ -85,18 +85,18 @@ Essential knowledge for GitHub Copilot when working on this volunteer-run Scouti
 1. Write code
 2. Write tests (100% coverage)
 3. Run: `uv run isort src/ tests/`
-4. Run: `uv run black src/ tests/`
+4. Run: `uv run ruff format src/ tests/`
 5. Run: `uv run mypy src/` (0 errors)
 6. Run: `uv run pytest tests/unit --cov=src --cov-fail-under=100` (100% coverage, all pass)
 
 **Configuration** (`pyproject.toml`):
 ```toml
-[tool.black]
-line-length = 100
-target-version = ["py313"]
+[tool.ruff]
+line-length = 120
 
 [tool.isort]
 profile = "black"
+line_length = 120
 
 [tool.mypy]
 strict = true
@@ -403,7 +403,7 @@ def generate_report(profile_id: str, campaign_id: str) -> str:
 uv sync
 
 # Format code
-uv run isort src/ tests/ && uv run black src/ tests/
+uv run isort src/ tests/ && uv run ruff format src/ tests/ 
 
 # Type check
 uv run mypy src/

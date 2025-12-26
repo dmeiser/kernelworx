@@ -387,9 +387,7 @@ def lookup_route53_record(
 
 
 @functools.lru_cache(maxsize=128)
-def lookup_identity_provider(
-    user_pool_id: str, provider_name: str
-) -> Optional[dict[str, Any]]:
+def lookup_identity_provider(user_pool_id: str, provider_name: str) -> Optional[dict[str, Any]]:
     """Check if a Cognito identity provider exists.
 
     Args:

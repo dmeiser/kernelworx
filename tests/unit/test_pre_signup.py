@@ -8,7 +8,6 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 from src.handlers.pre_signup import lambda_handler
 
 
@@ -151,9 +150,7 @@ class TestFederatedSignupExistingUser:
             }
             # Set up the exceptions attribute with proper exception class
             mock_cognito.exceptions = MagicMock()
-            mock_cognito.exceptions.InvalidParameterException = type(
-                "InvalidParameterException", (Exception,), {}
-            )
+            mock_cognito.exceptions.InvalidParameterException = type("InvalidParameterException", (Exception,), {})
             mock_client.return_value = mock_cognito
 
             with pytest.raises(Exception) as exc_info:
@@ -198,9 +195,7 @@ class TestFederatedSignupExistingUser:
             }
             # Set up the exceptions attribute with proper exception class
             mock_cognito.exceptions = MagicMock()
-            mock_cognito.exceptions.InvalidParameterException = type(
-                "InvalidParameterException", (Exception,), {}
-            )
+            mock_cognito.exceptions.InvalidParameterException = type("InvalidParameterException", (Exception,), {})
             mock_client.return_value = mock_cognito
 
             with pytest.raises(Exception) as exc_info:
@@ -232,9 +227,7 @@ class TestFederatedSignupExistingUser:
             }
             # Set up the exceptions attribute with proper exception class
             mock_cognito.exceptions = MagicMock()
-            mock_cognito.exceptions.InvalidParameterException = type(
-                "InvalidParameterException", (Exception,), {}
-            )
+            mock_cognito.exceptions.InvalidParameterException = type("InvalidParameterException", (Exception,), {})
             mock_client.return_value = mock_cognito
 
             with pytest.raises(Exception) as exc_info:
@@ -261,11 +254,9 @@ class TestErrorHandling:
             mock_cognito.list_users.return_value = {"Users": [{"Username": "existing-user-uuid"}]}
             # Simulate link already exists error
             mock_cognito.exceptions = MagicMock()
-            mock_cognito.exceptions.InvalidParameterException = type(
-                "InvalidParameterException", (Exception,), {}
-            )
-            mock_cognito.admin_link_provider_for_user.side_effect = (
-                mock_cognito.exceptions.InvalidParameterException("Link already exists")
+            mock_cognito.exceptions.InvalidParameterException = type("InvalidParameterException", (Exception,), {})
+            mock_cognito.admin_link_provider_for_user.side_effect = mock_cognito.exceptions.InvalidParameterException(
+                "Link already exists"
             )
             mock_client.return_value = mock_cognito
 
@@ -285,9 +276,7 @@ class TestErrorHandling:
             mock_cognito = MagicMock()
             mock_cognito.list_users.side_effect = Exception("Network error")
             mock_cognito.exceptions = MagicMock()
-            mock_cognito.exceptions.InvalidParameterException = type(
-                "InvalidParameterException", (Exception,), {}
-            )
+            mock_cognito.exceptions.InvalidParameterException = type("InvalidParameterException", (Exception,), {})
             mock_client.return_value = mock_cognito
 
             result = lambda_handler(federated_signup_event, lambda_context)

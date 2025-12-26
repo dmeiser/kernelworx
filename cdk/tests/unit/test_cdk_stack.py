@@ -1,6 +1,3 @@
-import aws_cdk as core
-import aws_cdk.assertions as assertions
-import pytest
 
 
 # The CdkStack requires AWS credentials and network access to perform

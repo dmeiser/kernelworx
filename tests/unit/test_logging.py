@@ -2,7 +2,6 @@
 
 import json
 from typing import Any, Dict
-from unittest.mock import patch
 
 from src.utils.logging import StructuredLogger, get_correlation_id
 

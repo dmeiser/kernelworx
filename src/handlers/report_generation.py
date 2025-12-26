@@ -17,11 +17,11 @@ from openpyxl.styles import Font, PatternFill
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
     from utils.auth import check_profile_access  # type: ignore[import-not-found]
-    from utils.errors import AppError, ErrorCode, handle_error  # type: ignore[import-not-found]
+    from utils.errors import AppError, ErrorCode  # type: ignore[import-not-found]
     from utils.logging import get_logger  # type: ignore[import-not-found]
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.auth import check_profile_access
-    from ..utils.errors import AppError, ErrorCode, handle_error
+    from ..utils.errors import AppError, ErrorCode
     from ..utils.logging import get_logger
 
 # Initialize AWS clients
@@ -231,9 +231,7 @@ def _generate_csv_report(campaign: Dict[str, Any], orders: list[Dict[str, Any]])
         for item in order.get("lineItems", []):
             product_name = item.get("productName", "")
             quantity = item.get("quantity", 0)
-            line_items_by_product[product_name] = (
-                line_items_by_product.get(product_name, 0) + quantity
-            )
+            line_items_by_product[product_name] = line_items_by_product.get(product_name, 0) + quantity
 
         for product in all_products:
             row.append(line_items_by_product.get(product, ""))
@@ -284,9 +282,7 @@ def _generate_excel_report(campaign: Dict[str, Any], orders: list[Dict[str, Any]
         for item in order.get("lineItems", []):
             product_name = item.get("productName", "")
             quantity = item.get("quantity", 0)
-            line_items_by_product[product_name] = (
-                line_items_by_product.get(product_name, 0) + quantity
-            )
+            line_items_by_product[product_name] = line_items_by_product.get(product_name, 0) + quantity
 
         for col_idx, product in enumerate(all_products, start=4):
             ws.cell(row=row_idx, column=col_idx, value=line_items_by_product.get(product, ""))

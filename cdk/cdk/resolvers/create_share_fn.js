@@ -1,0 +1,59 @@
+import { util } from '@aws-appsync/utils';
+
+export function request(ctx) {
+    const input = ctx.args.input;
+    var targetAccountId = ctx.stash.targetAccountId;
+    const profileId = input.profileId || ctx.stash.invite.profileId;
+    const permissions = input.permissions || ctx.stash.invite.permissions;
+    const now = util.time.nowISO8601();
+    
+    // Get ownerAccountId from stash - check profile (shareProfileDirect) or invite (redeemProfileInvite)
+    var ownerAccountId = null;
+    if (ctx.stash.profile && ctx.stash.profile.ownerAccountId) {
+        ownerAccountId = ctx.stash.profile.ownerAccountId;
+    } else if (ctx.stash.invite && ctx.stash.invite.ownerAccountId) {
+        ownerAccountId = ctx.stash.invite.ownerAccountId;
+    }
+    
+    // Validate that ownerAccountId was found
+    if (!ownerAccountId) {
+        util.error('Failed to determine profile owner', 'InternalServerError');
+    }
+    
+    // Strip ACCOUNT# prefix if present - store clean ID
+    if (targetAccountId && targetAccountId.startsWith('ACCOUNT#')) {
+        targetAccountId = targetAccountId.substring(8);
+    }
+    
+    // Generate shareId for backward compatibility with tests
+    // Format: SHARE#ACCOUNT#{targetAccountId} to match old expectations
+    const shareId = 'SHARE#ACCOUNT#' + targetAccountId;
+    
+    const shareItem = {
+        profileId: profileId,
+        targetAccountId: targetAccountId,
+        shareId: shareId,
+        permissions: permissions,
+        ownerAccountId: ownerAccountId,  // Store for BatchGetItem lookup
+        createdByAccountId: ctx.identity.sub,
+        createdAt: now
+    };
+    
+    // Store full share item in stash for response
+    ctx.stash.shareItem = shareItem;
+    
+    // Use PutItem without condition to support both create and update (upsert)
+    return {
+        operation: 'PutItem',
+        key: util.dynamodb.toMapValues({ profileId: profileId, targetAccountId: targetAccountId }),
+        attributeValues: util.dynamodb.toMapValues(shareItem)
+    };
+}
+
+export function response(ctx) {
+    if (ctx.error) {
+        util.error(ctx.error.message, ctx.error.type);
+    }
+    // Return the full share item from stash since PutItem doesn't return attributes by default
+    return ctx.stash.shareItem;
+}

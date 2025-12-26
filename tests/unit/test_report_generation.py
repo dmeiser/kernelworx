@@ -12,7 +12,6 @@ from typing import Any, Dict
 import boto3
 import openpyxl
 import pytest
-
 from src.handlers.report_generation import request_campaign_report
 
 
@@ -23,9 +22,7 @@ def get_orders_table() -> Any:
 
 
 @pytest.fixture
-def sample_orders(
-    dynamodb_table: Any, sample_profile_id: str, sample_campaign_id: str
-) -> list[Dict[str, Any]]:
+def sample_orders(dynamodb_table: Any, sample_profile_id: str, sample_campaign_id: str) -> list[Dict[str, Any]]:
     """Sample order data for testing (multi-table design)."""
     orders = [
         {

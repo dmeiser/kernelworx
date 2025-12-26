@@ -6,7 +6,9 @@ This allows importing the SMS role first, then other resources in a second pass.
 import json
 import os
 import sys
+
 import boto3
+
 
 def main():
     environment = os.getenv("ENVIRONMENT", "dev")
@@ -74,7 +76,7 @@ def main():
             pass
     
     if role_exists and sms_role_name not in managed_resources:
-        print(f"DEBUG: Role exists and not in CFN, generating import file", file=sys.stderr)
+        print("DEBUG: Role exists and not in CFN, generating import file", file=sys.stderr)
         # Generate import file for SMS role only
         import_file_path = os.path.join(os.path.dirname(__file__), ".cdk-import-sms-role.json")
         import_data = {

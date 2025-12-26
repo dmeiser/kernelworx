@@ -1,12 +1,9 @@
 """Tests for edge cases in authorization utilities."""
 
-from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 from src.utils.auth import check_profile_access
-from src.utils.errors import AppError, ErrorCode
 
 
 class TestAuthEdgeCases:

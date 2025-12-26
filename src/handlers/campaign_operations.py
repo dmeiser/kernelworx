@@ -5,7 +5,6 @@ import uuid
 from typing import Any, Dict, List, Optional
 
 import boto3
-from boto3.dynamodb.conditions import Key
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
@@ -182,7 +181,6 @@ def create_campaign(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         campaign_item: Dict[str, Any] = {
             "profileId": profile_id,  # DynamoDB partition key (named "profileId" in table)
             "campaignId": campaign_id,  # DynamoDB sort key (named "campaignId" in table, contains campaign data)
-            "campaignId": campaign_id,  # Application field for campaign ID
             "campaignName": campaign_name,
             "campaignYear": campaign_year,
             "startDate": start_date,
@@ -230,9 +228,7 @@ def create_campaign(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             # Get the profile owner's account ID (stored with ACCOUNT# prefix, but compare without it)
             owner_account_id = profile.get("ownerAccountId", "")
             # Normalize: remove ACCOUNT# prefix if present for comparison
-            owner_account_id_normalized = (
-                owner_account_id.replace("ACCOUNT#", "") if owner_account_id else ""
-            )
+            owner_account_id_normalized = owner_account_id.replace("ACCOUNT#", "") if owner_account_id else ""
             if creator_account_id and creator_account_id != owner_account_id_normalized:
                 # Don't create share if creator is the profile owner
                 share_id = f"SHARE#{uuid.uuid4()}"

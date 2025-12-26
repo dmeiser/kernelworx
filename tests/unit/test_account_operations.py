@@ -9,7 +9,6 @@ from unittest.mock import MagicMock, patch
 
 import boto3
 import pytest
-
 from src.handlers.account_operations import update_my_account
 from src.utils.errors import AppError, ErrorCode
 

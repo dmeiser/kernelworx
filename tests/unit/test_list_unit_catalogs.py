@@ -4,7 +4,6 @@ from typing import Any, Dict
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 from src.handlers.list_unit_catalogs import list_unit_catalogs
 
 
@@ -379,9 +378,7 @@ class TestListUnitCatalogs:
         mock_profiles_table.scan.return_value = {"Items": sample_profiles}
 
         # Grant access only to first profile
-        def check_access_side_effect(
-            caller_account_id: str, profile_id: str, required_permission: str
-        ) -> bool:
+        def check_access_side_effect(caller_account_id: str, profile_id: str, required_permission: str) -> bool:
             return profile_id == "PROFILE#profile1"
 
         mock_check_access.side_effect = check_access_side_effect
@@ -599,9 +596,7 @@ class TestListUnitCampaignCatalogs:
         mock_campaigns_table.query.return_value = {"Items": sample_campaigns}
 
         # Grant access only to first profile
-        def check_access_side_effect(
-            caller_account_id: str, profile_id: str, required_permission: str
-        ) -> bool:
+        def check_access_side_effect(caller_account_id: str, profile_id: str, required_permission: str) -> bool:
             return profile_id == "PROFILE#profile1"
 
         mock_check_access.side_effect = check_access_side_effect

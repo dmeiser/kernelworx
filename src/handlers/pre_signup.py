@@ -18,7 +18,6 @@ How it works:
 """
 
 import logging
-import os
 from typing import Any, Dict
 
 import boto3

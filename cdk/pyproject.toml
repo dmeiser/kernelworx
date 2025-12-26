@@ -12,7 +12,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "black>=25.11.0",
+    "ruff>=0.14.10",
     "boto3-stubs[essential]>=1.41.5",
     "isort>=7.0.0",
     "moto>=5.1.17",
@@ -21,13 +21,12 @@ dev = [
     "pytest-cov>=7.0.0",
 ]
 
-[tool.black]
-line-length = 100
-target-version = ["py314"]
+[tool.ruff]
+line-length = 120
 
 [tool.isort]
 profile = "black"
-line_length = 100
+line_length = 120
 
 [tool.mypy]
 python_version = "3.14"
@@ -47,4 +46,18 @@ addopts = [
 markers = [
     "integration: integration tests",
     "unit: unit tests",
+]
+
+[tool.coverage.run]
+omit = [
+    # cdk_stack.py requires AWS credentials for Route53 lookups during synthesis
+    # It cannot be unit tested; it requires integration tests with real AWS
+    "cdk/cdk_stack.py",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
 ]

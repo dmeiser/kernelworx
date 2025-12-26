@@ -4,7 +4,6 @@ from typing import Any, Dict
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 from src.handlers.campaign_operations import (
     _build_unit_campaign_key,
     _to_dynamo_value,
@@ -309,7 +308,7 @@ class TestCreateCampaign:
         mock_get_shared_campaign.return_value = sample_shared_campaign
 
         # Act
-        result = create_campaign(event_with_shared_campaign, lambda_context)
+        _ = create_campaign(event_with_shared_campaign, lambda_context)
 
         # Assert - Transaction only includes campaign, no share
         call_args = mock_dynamodb_client.transact_write_items.call_args
@@ -387,15 +386,15 @@ class TestCreateCampaign:
         # Create a real-like exception
         mock_exception = Exception("TransactionCanceledException")
         mock_exception.response = {"CancellationReasons": [{"Code": "ConditionalCheckFailed"}]}
-        
+
         # Create a proper exception type mock
         exception_type = type("TransactionCanceledException", (Exception,), {})
         mock_dynamodb_client.exceptions.TransactionCanceledException = exception_type
-        
+
         # Create instance that looks like the exception
         instance = exception_type("Transaction cancelled")
         instance.response = {"CancellationReasons": [{"Code": "ConditionalCheckFailed"}]}
-        
+
         # First call raises exception, second call succeeds
         mock_dynamodb_client.transact_write_items.side_effect = [instance, None]
 
@@ -562,15 +561,13 @@ class TestCreateCampaign:
         mock_dynamodb_client.exceptions.TransactionCanceledException = ClientError
 
         # Act
-        result = create_campaign(event_with_shared_campaign, lambda_context)
+        _ = create_campaign(event_with_shared_campaign, lambda_context)
 
         # Assert - Transaction was retried
         assert mock_dynamodb_client.transact_write_items.call_count == 2
         # Second call should have only 1 item (campaign only)
         second_call = mock_dynamodb_client.transact_write_items.call_args_list[1]
-        transact_items = second_call.kwargs.get("TransactItems") or second_call[1].get(
-            "TransactItems"
-        )
+        transact_items = second_call.kwargs.get("TransactItems") or second_call[1].get("TransactItems")
         assert len(transact_items) == 1
 
     @patch("src.handlers.campaign_operations.dynamodb_client")
@@ -739,9 +736,7 @@ class TestGetProfile:
         """Test successful profile retrieval."""
         from src.handlers.campaign_operations import _get_profile
 
-        mock_profiles_table.query.return_value = {
-            "Items": [{"profileId": "PROFILE#123", "sellerName": "Test"}]
-        }
+        mock_profiles_table.query.return_value = {"Items": [{"profileId": "PROFILE#123", "sellerName": "Test"}]}
 
         result = _get_profile("PROFILE#123")
 

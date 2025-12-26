@@ -5,7 +5,6 @@ from typing import Any, Dict
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 from src.handlers.campaign_reporting import get_unit_report
 
 
@@ -16,6 +15,7 @@ class TestGetUnitReport:
         self, mock_profiles_table: MagicMock, sample_profiles: Dict[str, Dict[str, Any]]
     ) -> None:
         """Helper to mock profiles_table.query for profileId-index lookups."""
+
         def query_side_effect(*args: Any, **kwargs: Any) -> Dict[str, Any]:
             # Extract profileId from ExpressionAttributeValues
             expr_values = kwargs.get("ExpressionAttributeValues", {})
@@ -23,7 +23,7 @@ class TestGetUnitReport:
             if profile_id and profile_id in sample_profiles:
                 return {"Items": [sample_profiles[profile_id]]}
             return {"Items": []}
-        
+
         mock_profiles_table.query.side_effect = query_side_effect
 
     @pytest.fixture

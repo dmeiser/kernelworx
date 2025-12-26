@@ -214,14 +214,14 @@ uv run pytest tests/unit --cov=src --cov-report=html
 ```bash
 # Format code
 uv run isort src/ tests/
-uv run black src/ tests/
+uv run ruff format src/ tests/
 
 # Type checking
 uv run mypy src/
 
 # Run all checks
 uv run isort src/ tests/ && \
-uv run black src/ tests/ && \
+uv run ruff format src/ tests/ && \
 uv run mypy src/ && \
 uv run pytest tests/unit --cov=src --cov-fail-under=100
 ```

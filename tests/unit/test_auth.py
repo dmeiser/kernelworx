@@ -1,9 +1,8 @@
 """Tests for authorization utilities."""
 
-from typing import Any
+from typing import Any, Dict
 
 import pytest
-
 from src.utils.auth import (
     check_profile_access,
     get_account,
@@ -41,9 +40,7 @@ class TestIsProfileOwner:
 
         assert result is False
 
-    def test_nonexistent_profile_raises_error(
-        self, dynamodb_table: Any, sample_account_id: str
-    ) -> None:
+    def test_nonexistent_profile_raises_error(self, dynamodb_table: Any, sample_account_id: str) -> None:
         """Test that nonexistent profile raises NOT_FOUND."""
         with pytest.raises(AppError) as exc_info:
             is_profile_owner(sample_account_id, "PROFILE#nonexistent")
@@ -209,9 +206,7 @@ class TestCheckProfileAccess:
 
         assert result is False
 
-    def test_nonexistent_profile_raises_not_found(
-        self, dynamodb_table: Any, sample_account_id: str
-    ) -> None:
+    def test_nonexistent_profile_raises_not_found(self, dynamodb_table: Any, sample_account_id: str) -> None:
         """Test that nonexistent profile raises NOT_FOUND."""
         with pytest.raises(AppError) as exc_info:
             check_profile_access(sample_account_id, "PROFILE#nonexistent", "READ")

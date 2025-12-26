@@ -40,9 +40,7 @@ def get_accounts_table() -> "Table":
     return dynamodb.Table(table_name)
 
 
-def check_profile_access(
-    caller_account_id: str, profile_id: str, required_permission: str = "READ"
-) -> bool:
+def check_profile_access(caller_account_id: str, profile_id: str, required_permission: str = "READ") -> bool:
     """
     Check if caller has access to profile.
 
@@ -65,14 +63,12 @@ def check_profile_access(
     # OPTIMIZATION: Try direct get_item first (strongly consistent, handles newly created profiles)
     # This is faster and avoids GSI eventual consistency issues for owner checks
     # Profile table uses ACCOUNT# prefix for ownerAccountId
-    profile = None
     direct_response = profiles_table.get_item(
         Key={"ownerAccountId": f"ACCOUNT#{caller_account_id}", "profileId": profile_id}
     )
 
     if "Item" in direct_response:
         # Found via direct lookup - caller is the owner
-        profile = direct_response["Item"]
         return True  # Owner has full access
 
     # Not the owner, query GSI to find the actual owner
@@ -89,15 +85,11 @@ def check_profile_access(
     if not items:
         raise AppError(ErrorCode.NOT_FOUND, f"Profile {profile_id} not found")
 
-    profile = items[0]
-
     # At this point, caller is not the owner (we already checked that above)
     # Check if caller has appropriate share (NOW USES SHARES TABLE)
     # Shares table: PK=profileId, SK=targetAccountId
     shares_table = get_shares_table()
-    share_response = shares_table.get_item(
-        Key={"profileId": profile_id, "targetAccountId": caller_account_id}
-    )
+    share_response = shares_table.get_item(Key={"profileId": profile_id, "targetAccountId": caller_account_id})
 
     if "Item" in share_response:
         share = share_response["Item"]
@@ -125,9 +117,7 @@ def check_profile_access(
     return False
 
 
-def require_profile_access(
-    caller_account_id: str, profile_id: str, required_permission: str = "READ"
-) -> None:
+def require_profile_access(caller_account_id: str, profile_id: str, required_permission: str = "READ") -> None:
     """
     Require caller to have profile access or raise FORBIDDEN error.
 

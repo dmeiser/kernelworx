@@ -18,7 +18,6 @@ from datetime import datetime, timezone
 from typing import Any, Dict
 
 import pytest
-
 from src.handlers.profile_sharing import create_profile_invite
 from src.utils.errors import AppError, ErrorCode
 
@@ -282,7 +281,7 @@ class TestListMyShares:
 
         # Create two profiles with different owners
         owner1 = f"ACCOUNT#{sample_account_id}"
-        owner2 = f"ACCOUNT#owner-two"
+        owner2 = "ACCOUNT#owner-two"
         profile1 = "PROFILE#shared-p1"
         profile2 = "PROFILE#shared-p2"
 
@@ -766,7 +765,7 @@ class TestListMyShares:
         event = {**appsync_event, "identity": {"sub": another_account_id}}
 
         # Mock batch_get_item to return a profile with non-string ownerAccountId
-        mock_response = {
+        _ = {
             "Responses": {
                 "kernelworx-profiles-v2-ue1-dev": [
                     {

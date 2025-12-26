@@ -9,7 +9,6 @@ from unittest.mock import MagicMock, patch
 
 import boto3
 import pytest
-
 from src.handlers.post_authentication import lambda_handler
 
 
@@ -74,9 +73,7 @@ def test_create_new_account_admin_user(
 
     # Check Account was created in DynamoDB (multi-table design)
     accounts_table = get_accounts_table()
-    response = accounts_table.get_item(
-        Key={"accountId": "ACCOUNT#a1b2c3d4-e5f6-7890-abcd-ef1234567890"}
-    )
+    response = accounts_table.get_item(Key={"accountId": "ACCOUNT#a1b2c3d4-e5f6-7890-abcd-ef1234567890"})
 
     assert "Item" in response
     account = response["Item"]
@@ -106,9 +103,7 @@ def test_create_new_account_regular_user(
 
     # Check Account was created (multi-table design)
     accounts_table = get_accounts_table()
-    response = accounts_table.get_item(
-        Key={"accountId": "ACCOUNT#a1b2c3d4-e5f6-7890-abcd-ef1234567890"}
-    )
+    response = accounts_table.get_item(Key={"accountId": "ACCOUNT#a1b2c3d4-e5f6-7890-abcd-ef1234567890"})
 
     assert "Item" in response
     account = response["Item"]
@@ -146,9 +141,7 @@ def test_update_existing_account(
     assert result == cognito_event
 
     # Check Account was updated
-    response = accounts_table.get_item(
-        Key={"accountId": "ACCOUNT#a1b2c3d4-e5f6-7890-abcd-ef1234567890"}
-    )
+    response = accounts_table.get_item(Key={"accountId": "ACCOUNT#a1b2c3d4-e5f6-7890-abcd-ef1234567890"})
 
     account = response["Item"]
     assert account["email"] == "user@example.com"  # Updated email
@@ -156,9 +149,7 @@ def test_update_existing_account(
     assert account["createdAt"] == original_timestamp  # Created unchanged
 
 
-def test_missing_sub_in_event(
-    lambda_context: MagicMock, dynamodb_table: Any, monkeypatch: Any
-) -> None:
+def test_missing_sub_in_event(lambda_context: MagicMock, dynamodb_table: Any, monkeypatch: Any) -> None:
     """Test graceful handling of malformed event"""
     monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
     bad_event: dict[str, Any] = {
@@ -179,9 +170,7 @@ def test_missing_sub_in_event(
     assert response["Count"] == 0
 
 
-def test_dynamodb_error_does_not_block_auth(
-    cognito_event: dict[str, Any], lambda_context: MagicMock
-) -> None:
+def test_dynamodb_error_does_not_block_auth(cognito_event: dict[str, Any], lambda_context: MagicMock) -> None:
     """Test that DynamoDB errors don't prevent authentication"""
     # Mock boto3.resource to simulate DynamoDB error
     with patch("boto3.resource") as mock_resource:

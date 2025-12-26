@@ -1,17 +1,14 @@
 """Tests for validation utilities."""
 
-from typing import Any, Dict
-
 import pytest
-
 from src.utils.errors import AppError, ErrorCode
 from src.utils.validation import (
     normalize_phone,
     validate_address,
+    validate_campaign_update,
     validate_customer_input,
     validate_invite_code,
     validate_order_update,
-    validate_campaign_update,
 )
 
 

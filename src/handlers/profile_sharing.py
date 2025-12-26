@@ -124,8 +124,7 @@ def list_my_shares(event: Dict[str, Any], context: Any) -> List[Dict[str, Any]]:
         # DynamoDB BatchGetItem supports up to 100 keys
         profiles_table = get_profiles_table()
         profile_keys = [
-            {"ownerAccountId": s["ownerAccountId"], "profileId": s["profileId"]}
-            for s in shares_by_profile.values()
+            {"ownerAccountId": s["ownerAccountId"], "profileId": s["profileId"]} for s in shares_by_profile.values()
         ]
 
         # Process in batches of 100
@@ -145,9 +144,7 @@ def list_my_shares(event: Dict[str, Any], context: Any) -> List[Dict[str, Any]]:
                             }
                         }
                     )
-                    batch_profiles = batch_response.get("Responses", {}).get(
-                        profiles_table.name, []
-                    )
+                    batch_profiles = batch_response.get("Responses", {}).get(profiles_table.name, [])
                     all_profiles.extend(batch_profiles)
 
                     # Handle unprocessed keys (unlikely but possible)
@@ -190,9 +187,7 @@ def list_my_shares(event: Dict[str, Any], context: Any) -> List[Dict[str, Any]]:
                     owner_account_id_raw = ""
                 # Strip ACCOUNT# prefix for API response
                 owner_id_clean = (
-                    owner_account_id_raw[8:]
-                    if owner_account_id_raw.startswith("ACCOUNT#")
-                    else owner_account_id_raw
+                    owner_account_id_raw[8:] if owner_account_id_raw.startswith("ACCOUNT#") else owner_account_id_raw
                 )
                 # Convert permissions from set (DynamoDB SS type) to list for JSON serialization
                 permissions = share.get("permissions", [])
@@ -262,9 +257,7 @@ def create_profile_invite(event: Dict[str, Any], context: Any) -> Dict[str, Any]
         # Validate permissions
         valid_permissions = {"READ", "WRITE"}
         if not set(permissions).issubset(valid_permissions):
-            raise AppError(
-                ErrorCode.INVALID_INPUT, f"Invalid permissions. Must be one of: {valid_permissions}"
-            )
+            raise AppError(ErrorCode.INVALID_INPUT, f"Invalid permissions. Must be one of: {valid_permissions}")
 
         # Generate invite code
         invite_code = generate_invite_code()
@@ -287,9 +280,7 @@ def create_profile_invite(event: Dict[str, Any], context: Any) -> Dict[str, Any]
 
         table.put_item(Item=invite_item)
 
-        logger.info(
-            "Profile invite created", invite_code=invite_code, expires_at=expires_at.isoformat()
-        )
+        logger.info("Profile invite created", invite_code=invite_code, expires_at=expires_at.isoformat())
 
         return {
             "inviteCode": invite_code,

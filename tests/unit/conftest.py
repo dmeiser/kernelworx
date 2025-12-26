@@ -42,7 +42,7 @@ def dynamodb_table(aws_credentials: None) -> Generator[Any, None, None]:
         # ================================================================
         # Accounts Table
         # ================================================================
-        accounts_table = dynamodb.create_table(
+        _ = dynamodb.create_table(
             TableName="kernelworx-accounts-ue1-dev",
             KeySchema=[
                 {"AttributeName": "accountId", "KeyType": "HASH"},
@@ -66,7 +66,7 @@ def dynamodb_table(aws_credentials: None) -> Generator[Any, None, None]:
         # ================================================================
         # Catalogs Table
         # ================================================================
-        catalogs_table = dynamodb.create_table(
+        _ = dynamodb.create_table(
             TableName="kernelworx-catalogs-ue1-dev",
             KeySchema=[
                 {"AttributeName": "catalogId", "KeyType": "HASH"},
@@ -128,7 +128,7 @@ def dynamodb_table(aws_credentials: None) -> Generator[Any, None, None]:
         # ================================================================
         # Campaigns Table V2 (PK=profileId, SK=campaignId)
         # ================================================================
-        campaigns_table = dynamodb.create_table(
+        _ = dynamodb.create_table(
             TableName="kernelworx-campaigns-v2-ue1-dev",
             KeySchema=[
                 {"AttributeName": "profileId", "KeyType": "HASH"},
@@ -159,9 +159,9 @@ def dynamodb_table(aws_credentials: None) -> Generator[Any, None, None]:
         )
 
         # ================================================================
-        # Orders Table V2: PK=campaignId, SK=orderId
+        # Orders Table V2: PK=campaignId, SK=orderId)
         # ================================================================
-        orders_table = dynamodb.create_table(
+        _ = dynamodb.create_table(
             TableName="kernelworx-orders-v2-ue1-dev",
             KeySchema=[
                 {"AttributeName": "campaignId", "KeyType": "HASH"},
@@ -194,7 +194,7 @@ def dynamodb_table(aws_credentials: None) -> Generator[Any, None, None]:
         # ================================================================
         # Shares Table (NEW - dedicated table for profile shares)
         # ================================================================
-        shares_table = dynamodb.create_table(
+        _ = dynamodb.create_table(
             TableName="kernelworx-shares-ue1-dev",
             KeySchema=[
                 {"AttributeName": "profileId", "KeyType": "HASH"},
@@ -219,7 +219,7 @@ def dynamodb_table(aws_credentials: None) -> Generator[Any, None, None]:
         # ================================================================
         # Invites Table (NEW - dedicated table for profile invites)
         # ================================================================
-        invites_table = dynamodb.create_table(
+        _ = dynamodb.create_table(
             TableName="kernelworx-invites-ue1-dev",
             KeySchema=[
                 {"AttributeName": "inviteCode", "KeyType": "HASH"},
@@ -246,7 +246,7 @@ def dynamodb_table(aws_credentials: None) -> Generator[Any, None, None]:
         # GSI1: createdBy + createdAt (list by creator)
         # GSI2: unitCampaignKey + sharedCampaignCode (discover by unit+campaign)
         # ================================================================
-        campaign_shared_campaigns_table = dynamodb.create_table(
+        _ = dynamodb.create_table(
             TableName="kernelworx-shared-campaigns-ue1-dev",
             KeySchema=[
                 {"AttributeName": "sharedCampaignCode", "KeyType": "HASH"},
@@ -331,9 +331,7 @@ def sample_profile_id() -> str:
 
 
 @pytest.fixture
-def sample_profile(
-    dynamodb_table: Any, sample_account_id: str, sample_profile_id: str
-) -> Dict[str, Any]:
+def sample_profile(dynamodb_table: Any, sample_account_id: str, sample_profile_id: str) -> Dict[str, Any]:
     """Create sample profile in DynamoDB (multi-table design V2).
 
     V2 schema: PK=ownerAccountId, SK=profileId
@@ -398,9 +396,7 @@ def sample_campaign_id() -> str:
 
 
 @pytest.fixture
-def sample_campaign(
-    dynamodb_table: Any, sample_profile_id: str, sample_campaign_id: str
-) -> Dict[str, Any]:
+def sample_campaign(dynamodb_table: Any, sample_profile_id: str, sample_campaign_id: str) -> Dict[str, Any]:
     """Create sample campaign in DynamoDB (V2: PK=profileId, SK=campaignId)."""
     # Multi-table design: need to access campaigns table directly
     dynamodb = boto3.resource("dynamodb", region_name="us-east-1")

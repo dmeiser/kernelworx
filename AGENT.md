@@ -48,7 +48,7 @@ All code changes must meet the following quality metrics before work is consider
 **Workflow Order**:
 1. Make code changes
 2. Write/update tests
-3. Run formatters: `isort` → `black`
+3. Run formatters: `isort` → `ruff format`
 4. Run type checker: `mypy` (fix any errors)
 5. Run tests and validation
 6. **If any code changes are needed after validation, repeat the formatting steps**
@@ -59,14 +59,14 @@ All code changes must meet the following quality metrics before work is consider
 uv run isort src/ tests/
 
 # 2. Format code
-uv run black src/ tests/
+uv run ruff format src/ tests/
 
 # 3. Type checking
 uv run mypy src/
 ```
 
 **Configuration** (in `pyproject.toml`):
-- **black**: line-length = 100, target-version = py313
+- **ruff**: line-length = 120
 - **isort**: profile = "black" (compatibility)
 - **mypy**: strict mode, ignore missing imports where necessary
 
@@ -141,7 +141,7 @@ npm run test -- --watch
 Before claiming work is complete:
 
 - [ ] Run `uv run isort src/ tests/`
-- [ ] Run `uv run black src/ tests/`
+- [ ] Run `uv run ruff format src/ tests/`
 - [ ] Run `uv run mypy src/` (0 errors)
 - [ ] Run `uv run pytest tests/unit --cov=src --cov-fail-under=100` (100% coverage, ALL tests pass)
 - [ ] Review HTML coverage report: all files 100%
@@ -335,7 +335,7 @@ pipeline = api.create_resolver(
 1. Create function in `src/lambdas/`
 2. Add to CDK stack with appropriate IAM permissions
 3. Create unit tests with 100% coverage using `moto` mocks
-4. Run formatters: `isort` → `black` → `mypy`
+4. Run formatters: `isort` → `ruff format` → `mypy`
 5. Deploy to dev environment and test
 
 **Add new GraphQL mutation/query**:

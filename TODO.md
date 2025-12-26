@@ -139,7 +139,7 @@
 ### Phase 1 Summary
 
 **Completed ✅:**
-- ✅ Code Quality: Black formatting, isort, mypy strict (0 errors)
+- ✅ Code Quality: Ruff formatting, isort, mypy strict (0 errors)
 - ✅ Lambda Functions: **8 functions deployed** (3 sharing + 4 CRUD + 1 report + LogRetention helper)
   - Profile sharing: createProfileInvite, redeemProfileInvite, shareProfileDirect
   - Campaigngn/Order CRUD: updaCampaignon, deleCampaignon, updateOrder, deleteOrder
@@ -280,7 +280,7 @@
 
 ### Lambda Testing & Quality
 - [x] **Target: 100% unit test coverage for all Lambda functions** ✅ (100% achieved - Dec 6, 2025)
-- [x] Black code formatting ✅ (Dec 6, 2025 - 7 files reformatted)
+- [x] Ruff code formatting ✅ (Dec 26, 2025 - migrated from Black, formatted files) 
 - [x] isort import sorting ✅ (Dec 6, 2025 - already compliant)
 - [x] mypy strict type checking ✅ (Dec 6, 2025 - 19 type errors fixed, 0 remaining)
 - [x] Write comprehensive unit tests with pytest for profile sharing: ✅ (85 tests, 100% coverage)
@@ -301,7 +301,7 @@
 - [x] Set up coverage requirements in pytest configuration (100% threshold) ✅
 - [ ] Write tests for catalog sharing, corrections, and reports (when implemented)
 - [x] Run mypy for type checking on all Lambda code (strict mode) ✅ (Dec 6, 2025)
-- [x] Run Black for code formatting ✅ (Dec 6, 2025 - 7 files reformatted)
+- [x] Run Ruff for code formatting ✅ (Dec 26, 2025 - migrated from Black)
 - [x] Run isort for import sorting ✅ (Dec 6, 2025 - already sorted)
 - [x] Create comprehensive test fixtures for: ✅
   - [x] Mock DynamoDB tables with test data ✅

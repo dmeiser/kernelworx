@@ -4,7 +4,6 @@ from typing import Any, Dict
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 from src.handlers.scout_operations import create_seller_profile
 
 

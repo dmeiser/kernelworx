@@ -84,9 +84,7 @@ def list_unit_catalogs(event: Dict[str, Any], context: Any) -> List[Dict[str, An
             if has_access:
                 accessible_profiles.append(profile)
 
-        logger.info(
-            f"Caller has access to {len(accessible_profiles)} of {len(unit_profiles)} profiles"
-        )
+        logger.info(f"Caller has access to {len(accessible_profiles)} of {len(unit_profiles)} profiles")
 
         if not accessible_profiles:
             return []
@@ -181,9 +179,7 @@ def list_unit_campaign_catalogs(event: Dict[str, Any], context: Any) -> List[Dic
         )
 
         # Step 1: Query GSI3 to find all campaigns matching unit+campaign criteria
-        unit_campaign_key = _build_unit_campaign_key(
-            unit_type, unit_number, city, state, campaign_name, campaign_year
-        )
+        unit_campaign_key = _build_unit_campaign_key(unit_type, unit_number, city, state, campaign_name, campaign_year)
 
         campaigns_response = campaigns_table.query(
             IndexName="GSI3",

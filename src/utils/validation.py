@@ -63,9 +63,7 @@ def validate_address(address: Dict[str, Any]) -> None:
     # Validate zip code (5 or 9 digits)
     zip_code = str(address.get("zip", "")).strip()
     if not re.match(r"^\d{5}(-\d{4})?$", zip_code):
-        raise AppError(
-            ErrorCode.INVALID_ADDRESS, "ZIP code must be 5 or 9 digits", {"zip": zip_code}
-        )
+        raise AppError(ErrorCode.INVALID_ADDRESS, "ZIP code must be 5 or 9 digits", {"zip": zip_code})
 
 
 def validate_customer_input(customer: Dict[str, Any]) -> Dict[str, Any]:
@@ -215,18 +213,10 @@ def validate_order_update(updates: Dict[str, Any]) -> Optional[Dict[str, Any]]:
                 return create_error_response("INVALID_INPUT", "Each line item must be an object")
 
             if "productId" not in item or not item["productId"]:
-                return create_error_response(
-                    "INVALID_INPUT", "Each line item must have a productId"
-                )
+                return create_error_response("INVALID_INPUT", "Each line item must have a productId")
 
-            if (
-                "quantity" not in item
-                or not isinstance(item["quantity"], (int, float))
-                or item["quantity"] <= 0
-            ):
-                return create_error_response(
-                    "INVALID_INPUT", "Each line item must have a positive quantity"
-                )
+            if "quantity" not in item or not isinstance(item["quantity"], (int, float)) or item["quantity"] <= 0:
+                return create_error_response("INVALID_INPUT", "Each line item must have a positive quantity")
 
             if "pricePerUnit" in item and not isinstance(item["pricePerUnit"], (int, float)):
                 return create_error_response("INVALID_INPUT", "Price per unit must be a number")
@@ -235,8 +225,6 @@ def validate_order_update(updates: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     if "paymentMethod" in updates:
         valid_methods = ["CASH", "CHECK", "CREDIT_CARD", "ONLINE"]
         if updates["paymentMethod"] not in valid_methods:
-            return create_error_response(
-                "INVALID_INPUT", f"Payment method must be one of: {', '.join(valid_methods)}"
-            )
+            return create_error_response("INVALID_INPUT", f"Payment method must be one of: {', '.join(valid_methods)}")
 
     return None
