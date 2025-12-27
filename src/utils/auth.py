@@ -60,11 +60,14 @@ def check_profile_access(caller_account_id: str, profile_id: str, required_permi
 
     profiles_table = get_profiles_table()
 
+    # Normalize profileId for DynamoDB queries (profiles are stored with PROFILE# prefix)
+    db_profile_id = profile_id if profile_id.startswith("PROFILE#") else f"PROFILE#{profile_id}"
+
     # OPTIMIZATION: Try direct get_item first (strongly consistent, handles newly created profiles)
     # This is faster and avoids GSI eventual consistency issues for owner checks
     # Profile table uses ACCOUNT# prefix for ownerAccountId
     direct_response = profiles_table.get_item(
-        Key={"ownerAccountId": f"ACCOUNT#{caller_account_id}", "profileId": profile_id}
+        Key={"ownerAccountId": f"ACCOUNT#{caller_account_id}", "profileId": db_profile_id}
     )
 
     if "Item" in direct_response:
@@ -77,7 +80,7 @@ def check_profile_access(caller_account_id: str, profile_id: str, required_permi
     response = profiles_table.query(
         IndexName="profileId-index",
         KeyConditionExpression="profileId = :profileId",
-        ExpressionAttributeValues={":profileId": profile_id},
+        ExpressionAttributeValues={":profileId": db_profile_id},
         Limit=1,
     )
 
@@ -89,7 +92,7 @@ def check_profile_access(caller_account_id: str, profile_id: str, required_permi
     # Check if caller has appropriate share (NOW USES SHARES TABLE)
     # Shares table: PK=profileId, SK=targetAccountId
     shares_table = get_shares_table()
-    share_response = shares_table.get_item(Key={"profileId": profile_id, "targetAccountId": caller_account_id})
+    share_response = shares_table.get_item(Key={"profileId": db_profile_id, "targetAccountId": caller_account_id})
 
     if "Item" in share_response:
         share = share_response["Item"]
@@ -152,12 +155,15 @@ def is_profile_owner(caller_account_id: str, profile_id: str) -> bool:
     """
     table = get_profiles_table()
 
+    # Normalize profile_id to PROFILE# prefix for queries
+    db_profile_id = profile_id if profile_id.startswith("PROFILE#") else f"PROFILE#{profile_id}"
+
     # Multi-table design V2: Query profileId-index GSI
     # Profile table structure: PK=ownerAccountId, SK=profileId, GSI=profileId-index
     response = table.query(
         IndexName="profileId-index",
         KeyConditionExpression="profileId = :profileId",
-        ExpressionAttributeValues={":profileId": profile_id},
+        ExpressionAttributeValues={":profileId": db_profile_id},
         Limit=1,
     )
 

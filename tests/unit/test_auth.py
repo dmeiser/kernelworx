@@ -213,6 +213,21 @@ class TestCheckProfileAccess:
 
         assert exc_info.value.error_code == ErrorCode.NOT_FOUND
 
+    def test_check_profile_access_accepts_raw_profile_id(
+        self,
+        dynamodb_table: Any,
+        sample_profile: Any,
+        sample_account_id: str,
+        sample_profile_id: str,
+    ) -> None:
+        """Test that check_profile_access accepts a raw (non-prefixed) profileId input."""
+        # Use the raw form of the sample_profile_id (remove PROFILE#)
+        raw_profile_id = sample_profile_id.replace("PROFILE#", "")
+
+        # Caller is the owner, should return True even when given raw profile_id
+        result = check_profile_access(sample_account_id, raw_profile_id, "READ")
+        assert result is True
+
     def test_profile_with_different_owner_denies_access(
         self,
         dynamodb_table: Any,

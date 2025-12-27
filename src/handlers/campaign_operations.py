@@ -50,12 +50,19 @@ def _get_shared_campaign(shared_campaign_code: str) -> Optional[Dict[str, Any]]:
 
 
 def _get_profile(profile_id: str) -> Optional[Dict[str, Any]]:
-    """Retrieve a profile by ID using the profileId-index GSI."""
+    """Retrieve a profile by ID using the profileId-index GSI.
+
+    Accepts either a raw UUID or a PROFILE# prefixed id and normalizes to the
+    DynamoDB-stored prefix when querying the profile table.
+    """
     try:
+        # Ensure we query the profile GSI with the PROFILE# prefix
+        db_profile_id = profile_id if profile_id.startswith("PROFILE#") else f"PROFILE#{profile_id}"
+
         response = profiles_table.query(
             IndexName="profileId-index",
             KeyConditionExpression="profileId = :profileId",
-            ExpressionAttributeValues={":profileId": profile_id},
+            ExpressionAttributeValues={":profileId": db_profile_id},
             Limit=1,
         )
         items = response.get("Items", [])
@@ -182,9 +189,12 @@ def create_campaign(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         campaign_id = f"CAMPAIGN#{uuid.uuid4()}"
         now = datetime.now(timezone.utc).isoformat()
 
+        # Use the DB-stored profileId (PROFILE#prefixed) for consistency when writing
+        db_profile_id = profile.get("profileId") if profile and profile.get("profileId") else ("PROFILE#" + profile_id if not profile_id.startswith("PROFILE#") else profile_id)
+
         # Step 7: Build campaign item
         campaign_item: Dict[str, Any] = {
-            "profileId": profile_id,  # DynamoDB partition key (named "profileId" in table)
+            "profileId": db_profile_id,  # DynamoDB partition key (named "profileId" in table) - ALWAYS prefixed
             "campaignId": campaign_id,  # DynamoDB sort key (named "campaignId" in table, contains campaign data)
             "campaignName": campaign_name,
             "campaignYear": campaign_year,
@@ -237,8 +247,9 @@ def create_campaign(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             if creator_account_id and creator_account_id != owner_account_id_normalized:
                 # Don't create share if creator is the profile owner
                 share_id = f"SHARE#{uuid.uuid4()}"
+                # Use the stored profile.profileId (which is PROFILE#prefixed) for shares table consistency
                 share_item = {
-                    "profileId": profile_id,
+                    "profileId": profile.get("profileId"),
                     "shareId": share_id,
                     "targetAccountId": creator_account_id,
                     "permissions": ["READ"],

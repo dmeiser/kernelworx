@@ -249,6 +249,43 @@ class TestCreateCampaign:
 
     @patch("src.handlers.campaign_operations.dynamodb_client")
     @patch("src.handlers.campaign_operations.check_profile_access")
+    @patch("src.handlers.campaign_operations._get_profile")
+    def test_create_campaign_accepts_raw_profile_id(
+        self,
+        mock_get_profile: MagicMock,
+        mock_check_access: MagicMock,
+        mock_dynamodb_client: MagicMock,
+        lambda_context: MagicMock,
+        sample_profile: Dict[str, Any],
+    ) -> None:
+        """Test that create_campaign works when input profileId is a raw UUID (no PROFILE# prefix)."""
+        # Arrange: event with raw profileId
+        event = {
+            "arguments": {
+                "input": {
+                    "profileId": "profile-123",
+                    "campaignName": "Fall",
+                    "campaignYear": 2024,
+                    "startDate": "2024-09-01T00:00:00Z",
+                    "catalogId": "catalog-abc",
+                }
+            },
+            "identity": {"sub": "test-account-123"},
+        }
+
+        mock_check_access.return_value = True
+        # _get_profile should be capable of finding profile even when input is raw
+        mock_get_profile.return_value = sample_profile
+
+        # Act
+        result = create_campaign(event, lambda_context)
+
+        # Assert: campaign stored with the PROFILE# prefixed profileId in campaigns table
+        assert result["profileId"] == sample_profile["profileId"]
+        assert result["campaignName"] == "Fall"
+        mock_dynamodb_client.transact_write_items.assert_called_once()
+    @patch("src.handlers.campaign_operations.dynamodb_client")
+    @patch("src.handlers.campaign_operations.check_profile_access")
     @patch("src.handlers.campaign_operations._get_shared_campaign")
     @patch("src.handlers.campaign_operations._get_profile")
     def test_create_campaign_with_shared_campaign_success(
@@ -282,6 +319,12 @@ class TestCreateCampaign:
         call_args = mock_dynamodb_client.transact_write_items.call_args
         transact_items = call_args.kwargs.get("TransactItems") or call_args[1].get("TransactItems")
         assert len(transact_items) == 2  # Campaign + Share
+
+        # Assert - The share uses the PROFILE# prefixed profileId in the shares table
+        share_put = transact_items[1].get("Put")
+        assert share_put is not None
+        # DynamoDB item format uses {'S': '...'} for string attributes
+        assert share_put["Item"]["profileId"]["S"] == sample_profile["profileId"]
 
     @patch("src.handlers.campaign_operations.dynamodb_client")
     @patch("src.handlers.campaign_operations.check_profile_access")

@@ -91,7 +91,7 @@ function App() {
               />
 
               <Route
-                path="/scouts/:scoutId/campaigns"
+                path="/scouts/:profileId/campaigns"
                 element={
                   <ProtectedRoute>
                     <AppLayout>
@@ -102,7 +102,7 @@ function App() {
               />
 
               <Route
-                path="/scouts/:scoutId/manage"
+                path="/scouts/:profileId/manage"
                 element={
                   <ProtectedRoute>
                     <AppLayout>
@@ -113,7 +113,7 @@ function App() {
               />
 
               <Route
-                path="/scouts/:scoutId/campaigns/:campaignId/*"
+                path="/scouts/:profileId/campaigns/:campaignId/*"
                 element={
                   <ProtectedRoute>
                     <AppLayout>

@@ -86,10 +86,16 @@ export function response(ctx) {
     if (profileOwner === callerAccountId) {
         ctx.stash.isOwner = true;
         ctx.stash.authorized = true;
+        // Store profile in stash for downstream functions (ensure PROFILE# prefix is used)
+        ctx.stash.profile = profile;
+        ctx.stash.profileId = profile.profileId;
         return { authorized: true };
     }
     
     // Not owner - need to check for share (READ or WRITE)
     ctx.stash.isOwner = false;
+    // Store profile in stash so subsequent functions use the DB-prefixed profileId
+    ctx.stash.profile = profile;
+    ctx.stash.profileId = profile.profileId;
     return profile;
 }

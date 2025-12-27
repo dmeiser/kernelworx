@@ -266,11 +266,14 @@ def create_profile_invite(event: Dict[str, Any], context: Any) -> Dict[str, Any]
         expires_at = datetime.now(timezone.utc) + timedelta(days=14)
         expires_at_epoch = int(expires_at.timestamp())
 
+        # Ensure profileId is stored with PROFILE# prefix
+        db_profile_id = profile_id if profile_id.startswith("PROFILE#") else f"PROFILE#{profile_id}"
+
         # Store invite in DynamoDB (V2 design: invites table with inviteCode as PK)
         table = get_invites_table()
         invite_item = {
             "inviteCode": invite_code,  # PK
-            "profileId": profile_id,
+            "profileId": db_profile_id,
             "permissions": permissions,
             "createdBy": caller_account_id,
             "createdAt": datetime.now(timezone.utc).isoformat(),
@@ -284,7 +287,7 @@ def create_profile_invite(event: Dict[str, Any], context: Any) -> Dict[str, Any]
 
         return {
             "inviteCode": invite_code,
-            "profileId": profile_id,
+            "profileId": db_profile_id,
             "expiresAt": expires_at.isoformat(),
             "permissions": permissions,
         }

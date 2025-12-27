@@ -29,8 +29,11 @@ export function request(ctx) {
     // Format: SHARE#ACCOUNT#{targetAccountId} to match old expectations
     const shareId = 'SHARE#ACCOUNT#' + targetAccountId;
     
+    // Normalize profileId to ensure PROFILE# prefix is used when storing shares
+    const dbProfileId = profileId && profileId.startsWith('PROFILE#') ? profileId : `PROFILE#${profileId}`;
+
     const shareItem = {
-        profileId: profileId,
+        profileId: dbProfileId,
         targetAccountId: targetAccountId,
         shareId: shareId,
         permissions: permissions,
