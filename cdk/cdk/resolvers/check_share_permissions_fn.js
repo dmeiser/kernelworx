@@ -27,11 +27,14 @@ export function request(ctx) {
         util.error('Profile ID not found for share check', 'BadRequest');
     }
     
+    // Normalize profileId to ensure PROFILE# prefix for share lookup
+    const dbProfileId = profileId && profileId.startsWith('PROFILE#') ? profileId : `PROFILE#${profileId}`;
+
     // Look up share in shares table: profileId + targetAccountId
     return {
         operation: 'GetItem',
         key: util.dynamodb.toMapValues({ 
-        profileId: profileId, 
+        profileId: dbProfileId, 
         targetAccountId: ctx.identity.sub 
         }),
         consistentRead: true

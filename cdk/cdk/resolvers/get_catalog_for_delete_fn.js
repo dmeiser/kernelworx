@@ -2,13 +2,15 @@ import { util } from '@aws-appsync/utils';
 
 export function request(ctx) {
     const catalogId = ctx.args.catalogId;
+    // Normalize catalogId for direct GetItem
+    const dbCatalogId = catalogId && catalogId.startsWith('CATALOG#') ? catalogId : `CATALOG#${catalogId}`;
     // Store caller ID for authorization check
     ctx.stash.callerId = ctx.identity.sub;
     // Get catalog using catalogId as primary key
     return {
         operation: 'GetItem',
         key: util.dynamodb.toMapValues({
-        catalogId: catalogId
+        catalogId: dbCatalogId
         })
     };
 }

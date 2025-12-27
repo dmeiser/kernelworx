@@ -2,6 +2,8 @@ import { util } from '@aws-appsync/utils';
 
 export function request(ctx) {
     const profileId = ctx.args.profileId;
+    // Normalize profileId before querying
+    const dbProfileId = profileId && profileId.startsWith('PROFILE#') ? profileId : `PROFILE#${profileId}`;
     
     // NEW STRUCTURE: Query profileId-index GSI to find profile
     return {
@@ -9,7 +11,7 @@ export function request(ctx) {
         index: 'profileId-index',
         query: {
         expression: 'profileId = :profileId',
-        expressionValues: util.dynamodb.toMapValues({ ':profileId': profileId })
+        expressionValues: util.dynamodb.toMapValues({ ':profileId': dbProfileId })
         }
     };
 }

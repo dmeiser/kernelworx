@@ -2,6 +2,8 @@ import { util } from '@aws-appsync/utils';
 
 export function request(ctx) {
     const catalogId = ctx.args.catalogId;
+    // Normalize catalogId to ensure CATALOG# prefix
+    const dbCatalogId = catalogId && catalogId.startsWith('CATALOG#') ? catalogId : `CATALOG#${catalogId}`;
     // Use GSI query instead of Scan for efficiency and consistency
     return {
         operation: 'Query',
@@ -9,7 +11,7 @@ export function request(ctx) {
         query: {
         expression: 'catalogId = :catalogId',
         expressionValues: util.dynamodb.toMapValues({
-            ':catalogId': catalogId
+            ':catalogId': dbCatalogId
         })
         },
         limit: 5  // Only need a few to confirm usage

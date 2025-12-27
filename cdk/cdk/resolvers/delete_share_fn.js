@@ -17,10 +17,13 @@ export function request(ctx) {
         targetAccountId = targetAccountId.substring(6);
     }
     
+    // Normalize profileId to ensure PROFILE# prefix is used in delete key
+    const dbProfileId = profileId && profileId.startsWith('PROFILE#') ? profileId : `PROFILE#${profileId}`;
+
     return {
         operation: 'DeleteItem',
         key: util.dynamodb.toMapValues({ 
-        profileId: profileId, 
+        profileId: dbProfileId, 
         targetAccountId: targetAccountId 
         })
     };

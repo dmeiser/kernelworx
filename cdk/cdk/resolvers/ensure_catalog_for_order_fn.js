@@ -36,7 +36,10 @@ export function response(ctx) {
         if (!campaign.catalogId) {
             util.error('Campaign has no catalog assigned', 'BadRequest');
         }
-        ctx.stash.catalogId = campaign.catalogId;
+        // Normalize stored campaign.catalogId to DB format (CATALOG#...)
+        const rawCatalogId = campaign.catalogId;
+        const normalizedCatalogId = (typeof rawCatalogId === 'string' && rawCatalogId.startsWith('CATALOG#')) ? rawCatalogId : 'CATALOG#' + rawCatalogId;
+        ctx.stash.catalogId = normalizedCatalogId;
         console.log('EnsureCatalogForOrder: Set stash.catalogId to', ctx.stash.catalogId);
     } else {
         console.log('EnsureCatalogForOrder: stash.catalogId already present:', ctx.stash.catalogId);

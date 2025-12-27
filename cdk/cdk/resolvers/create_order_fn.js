@@ -51,15 +51,21 @@ export function request(ctx) {
         });
     }
     
-    // Generate order ID (without prefix since orderId is now the primary key)
-    const orderId = util.autoId();
+    // Generate order ID (prefixed)
+    const orderId = `ORDER#${util.autoId()}`;
     const now = util.time.nowISO8601();
     
-    // Build order item for orders table
+    // Normalize profileId and campaignId to DB format and build order item for orders table
+    const profileIdRaw = input.profileId || ctx.stash.profileId;
+    const profileId = (typeof profileIdRaw === 'string' && profileIdRaw.startsWith('PROFILE#')) ? profileIdRaw : `PROFILE#${profileIdRaw}`;
+
+    const campaignIdRaw = input.campaignId || ctx.stash.campaignId;
+    const campaignId = (typeof campaignIdRaw === 'string' && campaignIdRaw.startsWith('CAMPAIGN#')) ? campaignIdRaw : `CAMPAIGN#${campaignIdRaw}`;
+
     const orderItem = {
         orderId: orderId,
-        profileId: input.profileId,
-        campaignId: input.campaignId,
+        profileId: profileId,
+        campaignId: campaignId,
         customerName: input.customerName,
         orderDate: input.orderDate,
         paymentMethod: input.paymentMethod,
@@ -80,10 +86,10 @@ export function request(ctx) {
         orderItem.notes = input.notes;
     }
     
-    // V2 schema: composite key (campaignId, orderId)
+    // V2 schema: composite key (campaignId, orderId) - use normalized campaignId
     return {
         operation: 'PutItem',
-        key: util.dynamodb.toMapValues({ campaignId: input.campaignId, orderId: orderId }),
+        key: util.dynamodb.toMapValues({ campaignId: campaignId, orderId: orderId }),
         attributeValues: util.dynamodb.toMapValues(orderItem)
     };
 }

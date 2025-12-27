@@ -7,6 +7,8 @@ import { util } from '@aws-appsync/utils';
  */
 export function request(ctx) {
     const catalogId = ctx.args.catalogId;
+    // Normalize catalogId to ensure CATALOG# prefix
+    const dbCatalogId = catalogId && catalogId.startsWith('CATALOG#') ? catalogId : `CATALOG#${catalogId}`;
     const input = ctx.args.input;
     const now = util.time.nowISO8601();
     
@@ -36,7 +38,7 @@ export function request(ctx) {
     return {
         operation: 'UpdateItem',
         key: util.dynamodb.toMapValues({
-            catalogId: catalogId
+            catalogId: dbCatalogId
         }),
         update: {
             expression: "SET catalogName = :catalogName, isPublic = :isPublic, isPublicStr = :isPublicStr, products = :products, updatedAt = :updatedAt",

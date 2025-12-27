@@ -15,13 +15,15 @@ export function request(ctx) {
     }
     
     const profileId = ctx.args.profileId;
+    // Normalize profileId to ensure PROFILE# prefix
+    const dbProfileId = profileId && profileId.startsWith('PROFILE#') ? profileId : `PROFILE#${profileId}`;
     // Query shares table directly by PK (profileId)
     return {
         operation: 'Query',
         query: {
         expression: 'profileId = :profileId',
         expressionValues: util.dynamodb.toMapValues({ 
-            ':profileId': profileId
+            ':profileId': dbProfileId
         })
         }
     };

@@ -11,12 +11,14 @@ export function request(ctx) {
     }
     
     const profileId = ctx.stash.profileId;
+    // Normalize profileId to ensure PROFILE# prefix
+    const dbProfileId = profileId && profileId.startsWith('PROFILE#') ? profileId : `PROFILE#${profileId}`;
     
     // Look up share in shares table: profileId + targetAccountId
     return {
         operation: 'GetItem',
         key: util.dynamodb.toMapValues({ 
-        profileId: profileId, 
+        profileId: dbProfileId, 
         targetAccountId: ctx.identity.sub 
         }),
         consistentRead: true

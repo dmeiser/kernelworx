@@ -588,6 +588,28 @@ def create_appsync_functions(
         code=appsync.Code.from_asset(str(RESOLVERS_DIR / "get_catalog_fn.js")),
     )
 
+    # GetCatalogTryRawFn - try raw catalogId before prefixed lookup
+    functions["get_catalog_try_raw"] = appsync.AppsyncFunction(
+        scope,
+        "GetCatalogTryRawFn",
+        name=f"GetCatalogTryRawFn_{env_name}",
+        api=api,
+        data_source=datasources["catalogs"],
+        runtime=appsync.FunctionRuntime.JS_1_0_0,
+        code=appsync.Code.from_asset(str(RESOLVERS_DIR / "get_catalog_try_raw_fn.js")),
+    )
+
+    # GetCatalogTryPrefixedFn - fallback prefixed lookup
+    functions["get_catalog_try_prefixed"] = appsync.AppsyncFunction(
+        scope,
+        "GetCatalogTryPrefixedFn",
+        name=f"GetCatalogTryPrefixedFn_{env_name}",
+        api=api,
+        data_source=datasources["catalogs"],
+        runtime=appsync.FunctionRuntime.JS_1_0_0,
+        code=appsync.Code.from_asset(str(RESOLVERS_DIR / "get_catalog_try_prefixed_fn.js")),
+    )
+
 
 
     # CreateOrderFn
@@ -1300,7 +1322,8 @@ def create_resolvers(
             functions["check_share_permissions"],
             functions["get_campaign_for_order"],
             functions["ensure_catalog_for_order"],
-            functions["get_catalog"],
+            functions["get_catalog_try_raw"],
+            functions["get_catalog_try_prefixed"],
             functions["create_order"],
         ],
         code=appsync.Code.from_asset(str(RESOLVERS_DIR / "create_order_fn.js")),

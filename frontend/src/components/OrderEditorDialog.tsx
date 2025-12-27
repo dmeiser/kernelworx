@@ -316,12 +316,16 @@ export const OrderEditorDialog: React.FC<OrderEditorDialogProps> = ({
           ),
         );
 
+        // Ensure backend expects prefixed IDs
+        const dbProfileId = profileId && profileId.startsWith('PROFILE#') ? profileId : `PROFILE#${profileId}`;
+        const dbCampaignId = campaignId && campaignId.startsWith('CAMPAIGN#') ? campaignId : `CAMPAIGN#${campaignId}`;
+
         await createOrder({
           variables: {
             input: {
               ...input,
-              profileId,
-              campaignId,
+              profileId: dbProfileId,
+              campaignId: dbCampaignId,
             },
           },
         });

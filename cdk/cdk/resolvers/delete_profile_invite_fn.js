@@ -3,13 +3,16 @@ import { util } from '@aws-appsync/utils';
 export function request(ctx) {
     // NEW STRUCTURE: Query profileId-index GSI to find profile
     const profileId = ctx.args.profileId;
-    
+    const dbProfileId = profileId && profileId.startsWith('PROFILE#') ? profileId : `PROFILE#${profileId}`;
+    // Save normalized profileId to stash for downstream steps
+    ctx.stash.profileId = dbProfileId;
+
     return {
         operation: 'Query',
         index: 'profileId-index',
         query: {
         expression: 'profileId = :profileId',
-        expressionValues: util.dynamodb.toMapValues({ ':profileId': profileId })
+        expressionValues: util.dynamodb.toMapValues({ ':profileId': dbProfileId })
         }
     };
 }
@@ -27,8 +30,7 @@ export function response(ctx) {
         util.error('Forbidden: Only profile owner can delete invites', 'Unauthorized');
     }
     
-    // Store profile info for next function
-    ctx.stash.profileId = ctx.args.profileId;
+    // Store profile info for next function (profileId already normalized in stash)
     ctx.stash.inviteCode = ctx.args.inviteCode;
     ctx.stash.authorized = true;
     

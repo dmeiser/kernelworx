@@ -12,11 +12,14 @@ export function request(ctx) {
     // Store clean ID for later use by CreateShareFn
     ctx.stash.cleanTargetAccountId = targetAccountId;
     
+    // Normalize profileId to ensure PROFILE# prefix is used when querying shares
+    const dbProfileId = profileId && profileId.startsWith('PROFILE#') ? profileId : `PROFILE#${profileId}`;
+
     // Query shares table directly by PK+SK
     return {
         operation: 'GetItem',
         key: util.dynamodb.toMapValues({ 
-        profileId: profileId, 
+        profileId: dbProfileId, 
         targetAccountId: targetAccountId 
         }),
         consistentRead: true

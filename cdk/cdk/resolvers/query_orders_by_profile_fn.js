@@ -16,6 +16,8 @@ export function request(ctx) {
     }
     
     const profileId = ctx.args.profileId;
+    // Normalize profileId to PROFILE# for query
+    const dbProfileId = profileId && profileId.startsWith('PROFILE#') ? profileId : `PROFILE#${profileId}`;
     // Query orders table using profileId-index GSI
     return {
         operation: 'Query',
@@ -23,7 +25,7 @@ export function request(ctx) {
         query: {
         expression: 'profileId = :profileId',
         expressionValues: util.dynamodb.toMapValues({ 
-            ':profileId': profileId
+            ':profileId': dbProfileId
         })
         }
     };

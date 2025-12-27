@@ -48,7 +48,7 @@ export function request(ctx) {
     // Use PutItem without condition to support both create and update (upsert)
     return {
         operation: 'PutItem',
-        key: util.dynamodb.toMapValues({ profileId: profileId, targetAccountId: targetAccountId }),
+        key: util.dynamodb.toMapValues({ profileId: dbProfileId, targetAccountId: targetAccountId }),
         attributeValues: util.dynamodb.toMapValues(shareItem)
     };
 }

@@ -30,9 +30,13 @@ export function response(ctx) {
         util.error('Campaign has no catalog assigned', 'BadRequest');
     }
 
-    // Store campaign and catalogId in stash for next function
+    // Normalize catalogId to DB format (ensure CATALOG# prefix) and store
+    const rawCatalogId = campaign.catalogId;
+    const normalizedCatalogId = (typeof rawCatalogId === 'string' && rawCatalogId.startsWith('CATALOG#')) ? rawCatalogId : 'CATALOG#' + rawCatalogId;
+
+    // Store campaign and normalized catalogId in stash for next function
     ctx.stash.campaign = campaign;
-    ctx.stash.catalogId = campaign.catalogId;
+    ctx.stash.catalogId = normalizedCatalogId;
     
     return campaign;
 }
