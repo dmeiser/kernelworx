@@ -32,10 +32,18 @@ export function response(ctx) {
     if (ctx.error) {
         util.error(ctx.error.message, ctx.error.type);
     }
+
+    // If this function didn't find an item, but a previous function did, use the previous result
     if (!ctx.result) {
         console.log('GetCatalogTryPrefixed: No catalog found for id:', ctx.stash.catalogId);
+        if (ctx.prev && ctx.prev.result) {
+            console.log('GetCatalogTryPrefixed: previous function returned a catalog, using that result');
+            ctx.stash.catalog = ctx.prev.result;
+            return ctx.prev.result;
+        }
         util.error('Catalog not found for id: ' + ctx.stash.catalogId, 'NotFound');
     }
+
     console.log('GetCatalogTryPrefixed: Found catalog with', ctx.result.products ? ctx.result.products.length : 0, 'products');
     // Store catalog in stash for CreateOrderFn
     ctx.stash.catalog = ctx.result;
