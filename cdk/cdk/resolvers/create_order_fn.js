@@ -112,6 +112,23 @@ export function request(ctx) {
     }
     
     // V2 schema: composite key (campaignId, orderId) - use normalized campaignId
+    // Validate key attributes and sanitize line items to avoid malformed attribute shapes
+    if (!campaignId || typeof campaignId !== 'string') {
+        util.error('Invalid campaignId for PutItem: ' + JSON.stringify(campaignId), 'BadRequest');
+    }
+    if (!orderId || typeof orderId !== 'string') {
+        util.error('Invalid orderId for PutItem: ' + JSON.stringify(orderId), 'BadRequest');
+    }
+
+    // Sanitize any empty object productName values (these can cause weird attribute shapes)
+    for (const li of enrichedLineItems) {
+        if (li.productName && typeof li.productName === 'object' && Object.keys(li.productName).length === 0) {
+            li.productName = null;
+        }
+    }
+
+    console.log('CreateOrder: PutItem keys', { campaignId, orderId });
+
     return {
         operation: 'PutItem',
         key: util.dynamodb.toMapValues({ campaignId: campaignId, orderId: orderId }),
