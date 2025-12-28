@@ -1,8 +1,8 @@
 import { util } from '@aws-appsync/utils';
 
 export function request(ctx) {
-    // No-op request for None data source: return null to avoid producing an empty operation object
-    return null;
+    // No-op request (using None data source)
+    return {};
 }
 
 export function response(ctx) {
