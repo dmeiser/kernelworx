@@ -118,11 +118,35 @@ export function request(ctx) {
         util.error('Invalid orderId for PutItem: ' + JSON.stringify(orderId), 'BadRequest');
     }
 
-    // Sanitize productName to ensure it's either a string or null. Non-string values (including empty objects)
-    // can produce invalid DynamoDB attribute shapes when marshalled by AppSync.
+    // Sanitize productName and other line item fields to ensure safe DynamoDB attributes.
+    // Keep code minimal/portable for AppSync JS runtime (avoid complex globals or JSON.stringify on arbitrary data).
+    function isPlainObject(v) {
+        return v && typeof v === 'object' && !Array.isArray(v);
+    }
+
     for (const li of enrichedLineItems) {
+        // productName must be string or null
         if (typeof li.productName !== 'string') {
             li.productName = null;
+        }
+
+        // Coerce numeric-like quantities to numbers (simple check)
+        if (typeof li.quantity !== 'number') {
+            const n = Number(li.quantity);
+            li.quantity = (n === n && Math.abs(n) !== Infinity) ? n : 0;
+        }
+
+        // Ensure productId is string or null
+        if (typeof li.productId !== 'string') {
+            li.productId = null;
+        }
+
+        // Remove unexpected nested plain objects (replace with null)
+        for (const key of Object.keys(li)) {
+            const val = li[key];
+            if (isPlainObject(val)) {
+                li[key] = null;
+            }
         }
     }
 
