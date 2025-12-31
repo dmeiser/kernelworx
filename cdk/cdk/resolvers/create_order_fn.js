@@ -120,50 +120,14 @@ export function request(ctx) {
 
     // Sanitize productName to ensure it's either a string or null. Non-string values (including empty objects)
     // can produce invalid DynamoDB attribute shapes when marshalled by AppSync.
-    function isPlainObject(v) {
-        return v && typeof v === 'object' && !Array.isArray(v);
-    }
-
     for (const li of enrichedLineItems) {
         if (typeof li.productName !== 'string') {
             li.productName = null;
-        }
-        // Defensive: convert numeric-like quantities to numbers
-        if (typeof li.quantity !== 'number') {
-            const n = Number(li.quantity);
-            li.quantity = isFinite(n) ? n : 0;
-        }
-        // Ensure productId is a string or null
-        if (typeof li.productId !== 'string') {
-            li.productId = null;
-        }
-        // Remove any unexpected nested plain objects in the line item to avoid malformed DynamoDB attribute shapes
-        for (const key of Object.keys(li)) {
-            const val = li[key];
-            if (isPlainObject(val)) {
-                // Replace with null (safer) and log for diagnostics (avoid stringifying arbitrarily nested objects)
-                console.log('CreateOrder: sanitizing unexpected object in lineItem', key);
-                li[key] = null;
-            }
         }
     }
 
     // Orders table schema (V2): partition_key = campaignId, sort_key = orderId
     // Validate and log keys clearly
-    if (typeof campaignId !== 'string' || campaignId.length === 0) {
-        util.error('Invalid campaignId for PutItem: ' + JSON.stringify(campaignId), 'BadRequest');
-    }
-    if (typeof orderId !== 'string' || orderId.length === 0) {
-        util.error('Invalid orderId for PutItem: ' + JSON.stringify(orderId), 'BadRequest');
-    }
-
-    // Log the exact attributeValues we will send (dev diagnostic) so we can trace malformed shapes
-    try {
-        console.log('CreateOrder: PutItem attributeValues (pre-marshall)', JSON.stringify(orderItem));
-    } catch (e) {
-        console.log('CreateOrder: PutItem attributeValues (pre-marshall) - unable to stringify', e && e.message);
-    }
-
     console.log('CreateOrder: PutItem keys', { campaignId: campaignId, orderId: orderId });
 
 
