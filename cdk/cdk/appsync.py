@@ -1371,7 +1371,7 @@ def create_resolvers(
             functions["create_order"],
             functions["log_create_order_state"],  # Dev-only logging: captures prev.result after create
         ],
-        code=appsync.Code.from_asset(str(RESOLVERS_DIR / "create_order_fn.js")),
+        code=appsync.Code.from_asset(str(RESOLVERS_DIR / "create_order_pipeline_resolver.js")),
     )
 
     # shareProfileDirect Pipeline
