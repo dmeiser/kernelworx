@@ -654,6 +654,17 @@ def create_appsync_functions(
         code=appsync.Code.from_asset(str(RESOLVERS_DIR / "create_order_fn.js")),
     )
 
+    # Dev-only: Inspect prepared PutItem (diagnostic) - None data source so it only logs ctx.prev.result
+    functions["inspect_put_item"] = appsync.AppsyncFunction(
+        scope,
+        "InspectPutItemFn",
+        name=f"InspectPutItemFn_{env_name}",
+        api=api,
+        data_source=datasources["none"],
+        runtime=appsync.FunctionRuntime.JS_1_0_0,
+        code=appsync.Code.from_asset(str(RESOLVERS_DIR / "inspect_put_item_fn.js")),
+    )
+
     # === PROFILE SHARING (DIRECT) FUNCTIONS ===
 
     # VerifyProfileOwnerForShareFn
@@ -1357,8 +1368,8 @@ def create_resolvers(
             functions["get_catalog_try_prefixed"],
             functions["ensure_catalog_final"],
             functions["get_catalog"],
-            functions["log_create_order_state"],  # Dev-only logging: captures final stash before create
             functions["create_order"],
+            functions["log_create_order_state"],  # Dev-only logging: captures prev.result after create
         ],
         code=appsync.Code.from_asset(str(RESOLVERS_DIR / "create_order_fn.js")),
     )
