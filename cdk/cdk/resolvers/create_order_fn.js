@@ -131,7 +131,7 @@ export function request(ctx) {
         // Defensive: convert numeric-like quantities to numbers
         if (typeof li.quantity !== 'number') {
             const n = Number(li.quantity);
-            li.quantity = Number.isFinite(n) ? n : 0;
+            li.quantity = isFinite(n) ? n : 0;
         }
         // Ensure productId is a string or null
         if (typeof li.productId !== 'string') {
