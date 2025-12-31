@@ -128,12 +128,18 @@ export function request(ctx) {
 
     // Orders table schema (V2): partition_key = campaignId, sort_key = orderId
     // Validate and log keys clearly
-    console.log('CreateOrder: PutItem keys', { campaignId: campaignId, orderId: orderId });
+    // Defensive: coerce campaignId/orderId to strings to avoid DynamoDB key type errors
+    const campaignIdSafe = (typeof campaignId === 'string') ? campaignId : String(campaignId);
+    const orderIdSafe = (typeof orderId === 'string') ? orderId : String(orderId);
+
+    // Diagnostic: log types of productName fields to capture any non-string values that escape sanitization
+    console.log('CreateOrder: lineItems productName types', (enrichedLineItems || []).map(li => typeof li.productName));
+    console.log('CreateOrder: PutItem keys', { campaignId: campaignIdSafe, orderId: orderIdSafe });
 
 
     return {
         operation: 'PutItem',
-        key: util.dynamodb.toMapValues({ campaignId: campaignId, orderId: orderId }),
+        key: util.dynamodb.toMapValues({ campaignId: campaignIdSafe, orderId: orderIdSafe }),
         attributeValues: util.dynamodb.toMapValues(orderItem)
     };
 }
