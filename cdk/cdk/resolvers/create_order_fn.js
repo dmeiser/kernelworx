@@ -83,10 +83,8 @@ export function request(ctx) {
     // Normalize profileId and campaignId to DB format and build order item for orders table
     const profileIdRaw = input.profileId || ctx.stash.profileId;
     const profileId = (typeof profileIdRaw === 'string' && profileIdRaw.startsWith('PROFILE#')) ? profileIdRaw : `PROFILE#${profileIdRaw}`;
-
     const campaignIdRaw = input.campaignId || ctx.stash.campaignId;
-    const campaignId = (typeof campaignIdRaw === 'string' && campaignIdRaw.startsWith('CAMPAIGN#')) ? campaignIdRaw : `CAMPAIGN#${campaignIdRaw}`;
-
+    const campaignId = (typeof campaignIdRaw === 'string' && campaignIdRaw.startsWith('CAMPAIGN#')) ? campaignIdRaw : `CAMPAIGN#${campaignIdRaw}`;                                                                                         
     const orderItem = {
         orderId: orderId,
         profileId: profileId,
@@ -120,14 +118,18 @@ export function request(ctx) {
         util.error('Invalid orderId for PutItem: ' + JSON.stringify(orderId), 'BadRequest');
     }
 
-    // Sanitize any empty object productName values (these can cause weird attribute shapes)
+    // Sanitize productName to ensure it's either a string or null. Non-string values (including empty objects)
+    // can produce invalid DynamoDB attribute shapes when marshalled by AppSync.
     for (const li of enrichedLineItems) {
-        if (li.productName && typeof li.productName === 'object' && Object.keys(li.productName).length === 0) {
+        if (typeof li.productName !== 'string') {
             li.productName = null;
         }
     }
 
-    console.log('CreateOrder: PutItem keys', { campaignId, orderId });
+    // Orders table schema (V2): partition_key = campaignId, sort_key = orderId
+    // Validate and log keys clearly
+    console.log('CreateOrder: PutItem keys', { campaignId: campaignId, orderId: orderId });
+
 
     return {
         operation: 'PutItem',
