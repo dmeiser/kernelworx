@@ -12,7 +12,7 @@ export function request(ctx) {
         // Coerce quantity to a number
         if (typeof li.quantity !== 'number') {
             const n = Number(li.quantity);
-            li.quantity = isFinite(n) ? n : 0;
+            li.quantity = (n === n && Math.abs(n) !== Infinity) ? n : 0;
         }
         // Ensure productId is a string
         if (typeof li.productId !== 'string') {
