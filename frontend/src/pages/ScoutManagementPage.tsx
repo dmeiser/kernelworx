@@ -52,6 +52,7 @@ import {
   LIST_INVITES_BY_PROFILE,
   LIST_SHARES_BY_PROFILE,
   REVOKE_SHARE,
+  TRANSFER_PROFILE_OWNERSHIP,
 } from "../lib/graphql";
 import { ensureProfileId } from "../lib/ids";
 
@@ -187,6 +188,14 @@ export const ScoutManagementPage: React.FC = () => {
     refetchQueries: [{ query: LIST_SHARES_BY_PROFILE, variables: { profileId: dbProfileId } }],
   });
 
+  // Transfer ownership
+  const [transferOwnership] = useMutation(TRANSFER_PROFILE_OWNERSHIP, {
+    refetchQueries: [{ query: GET_PROFILE, variables: { profileId: dbProfileId } }],
+    onCompleted: () => {
+      navigate("/scouts");
+    },
+  });
+
   const profile = profileData?.getProfile;
   const invites = invitesData?.listInvitesByProfile || [];
   const shares = sharesData?.listSharesByProfile || [];
@@ -245,6 +254,29 @@ export const ScoutManagementPage: React.FC = () => {
     } catch (err) {
       console.error("Error revoking share:", err);
       alert("Failed to revoke access");
+    }
+  };
+
+  const handleTransferOwnership = async (targetAccountId: string, email?: string) => {
+    const userName = email || `User ${targetAccountId.substring(0, 8)}...`;
+    const confirmMessage = `Are you sure you want to transfer ownership to ${userName}?\n\nThis action cannot be undone. You will lose ownership of this profile and all associated campaigns.`;
+    
+    if (!window.confirm(confirmMessage)) {
+      return;
+    }
+
+    try {
+      await transferOwnership({
+        variables: {
+          input: {
+            profileId: dbProfileId,
+            newOwnerAccountId: targetAccountId,
+          },
+        },
+      });
+    } catch (err) {
+      console.error("Error transferring ownership:", err);
+      alert("Failed to transfer ownership");
     }
   };
 
@@ -535,14 +567,24 @@ export const ScoutManagementPage: React.FC = () => {
                       </TableCell>
                       <TableCell>{formatDate(share.createdAt)}</TableCell>
                       <TableCell align="right">
-                        <IconButton
-                          size="small"
-                          color="error"
-                          onClick={() => handleRevokeShare(share.targetAccountId, share.targetAccount?.email)}
-                          title="Revoke access"
-                        >
-                          <DeleteIcon fontSize="small" />
-                        </IconButton>
+                        <Stack direction="row" spacing={1} justifyContent="flex-end">
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            onClick={() => handleTransferOwnership(share.targetAccountId, share.targetAccount?.email)}
+                            title="Transfer ownership to this user"
+                          >
+                            Transfer Ownership
+                          </Button>
+                          <IconButton
+                            size="small"
+                            color="error"
+                            onClick={() => handleRevokeShare(share.targetAccountId, share.targetAccount?.email)}
+                            title="Revoke access"
+                          >
+                            <DeleteIcon fontSize="small" />
+                          </IconButton>
+                        </Stack>
                       </TableCell>
                     </TableRow>
                   ))}

@@ -350,6 +350,11 @@ input RevokeShareInput {
   targetAccountId: ID!
 }
 
+input TransferProfileOwnershipInput {
+  profileId: ID!
+  newOwnerAccountId: ID!
+}
+
 input UpdateMyAccountInput {
   givenName: String
   familyName: String
@@ -448,6 +453,7 @@ type Mutation {
   redeemProfileInvite(input: RedeemProfileInviteInput!): Share!
   shareProfileDirect(input: ShareProfileDirectInput!): Share!
   revokeShare(input: RevokeShareInput!): Boolean!
+  transferProfileOwnership(input: TransferProfileOwnershipInput!): SellerProfile!
   
   # Report generation
   requestCampaignReport(input: RequestCampaignReportInput!): CampaignReport!

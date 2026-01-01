@@ -413,6 +413,15 @@ export const REVOKE_SHARE = gql`
   }
 `;
 
+export const TRANSFER_PROFILE_OWNERSHIP = gql`
+  ${SELLER_PROFILE_FRAGMENT}
+  mutation TransferProfileOwnership($input: TransferProfileOwnershipInput!) {
+    transferProfileOwnership(input: $input) {
+      ...SellerProfileFields
+    }
+  }
+`;
+
 export const CREATE_CATALOG = gql`
   ${CATALOG_FRAGMENT}
   mutation CreateCatalog($input: CreateCatalogInput!) {

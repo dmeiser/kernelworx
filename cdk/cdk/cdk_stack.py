@@ -666,6 +666,21 @@ class CdkStack(Stack):
             environment=lambda_env,
         )
 
+        # Transfer Profile Ownership Lambda
+        self.transfer_ownership_fn = lambda_.Function(
+            self,
+            "TransferProfileOwnershipFn",
+            function_name=rn("kernelworx-transfer-ownership"),
+            runtime=lambda_.Runtime.PYTHON_3_13,
+            handler="handlers.transfer_profile_ownership.lambda_handler",
+            code=lambda_code,
+            layers=[self.shared_layer],
+            timeout=Duration.seconds(10),
+            memory_size=256,
+            role=self.lambda_execution_role,
+            environment=lambda_env,
+        )
+
         # Post-Authentication Lambda (Cognito Trigger)
         self.post_auth_fn = lambda_.Function(
             self,
@@ -1115,6 +1130,7 @@ class CdkStack(Stack):
                 "list_unit_campaign_catalogs": self.list_unit_campaign_catalogs_fn,
                 "campaign_operations": self.campaign_operations_fn,
                 "update_my_account": self.update_my_account_fn,
+                "transfer_ownership": self.transfer_ownership_fn,
             },
         )
         self.api = appsync_resources.api

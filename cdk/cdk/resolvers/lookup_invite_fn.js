@@ -32,7 +32,7 @@ export function response(ctx) {
     }
     
     ctx.stash.invite = invite;
-    ctx.stash.targetAccountId = ctx.identity.sub;
+    ctx.stash.targetAccountId = ctx.identity.sub.startsWith('ACCOUNT#') ? ctx.identity.sub : `ACCOUNT#${ctx.identity.sub}`;
     
     return invite;
 }

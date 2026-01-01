@@ -29,13 +29,14 @@ export function request(ctx) {
     
     // Normalize profileId to ensure PROFILE# prefix for share lookup
     const dbProfileId = profileId && profileId.startsWith('PROFILE#') ? profileId : `PROFILE#${profileId}`;
+    const targetAccountId = ctx.identity.sub.startsWith('ACCOUNT#') ? ctx.identity.sub : `ACCOUNT#${ctx.identity.sub}`;
 
     // Look up share in shares table: profileId + targetAccountId
     return {
         operation: 'GetItem',
         key: util.dynamodb.toMapValues({ 
         profileId: dbProfileId, 
-        targetAccountId: ctx.identity.sub 
+        targetAccountId: targetAccountId 
         }),
         consistentRead: true
     };

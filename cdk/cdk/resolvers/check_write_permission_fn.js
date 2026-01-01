@@ -21,11 +21,13 @@ export function request(ctx) {
     }
     
     // Get share from shares table using profileId + targetAccountId (caller's sub)
+    const targetAccountId = ctx.identity.sub.startsWith('ACCOUNT#') ? ctx.identity.sub : `ACCOUNT#${ctx.identity.sub}`;
+    
     return {
         operation: 'GetItem',
         key: util.dynamodb.toMapValues({ 
         profileId: profileId, 
-        targetAccountId: ctx.identity.sub 
+        targetAccountId: targetAccountId 
         }),
         consistentRead: true
     };

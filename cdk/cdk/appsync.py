@@ -266,7 +266,6 @@ def create_lambda_datasources(
     datasources: dict[str, appsync.LambdaDataSource] = {}
 
     lambda_ds_configs = [
-        ("list_my_shares", "ListMySharesDS"),
         ("create_profile", "CreateProfileDS"),
         ("request_campaign_report", "RequestCampaignReportDS"),
         ("unit_reporting", "UnitReportingDS"),
@@ -274,6 +273,7 @@ def create_lambda_datasources(
         ("list_unit_campaign_catalogs", "ListUnitCampaignCatalogsDS"),
         ("campaign_operations", "CampaignOperationsDS"),
         ("update_my_account", "UpdateMyAccountDS"),
+        ("transfer_ownership", "TransferOwnershipDS"),
     ]
 
     for fn_key, ds_name in lambda_ds_configs:
@@ -1489,11 +1489,14 @@ $util.toJson($ctx.result)
         code=appsync.Code.from_asset(str(RESOLVERS_DIR / "list_my_profiles_fn.js")),
     )
 
-    # listMyShares (Lambda)
-    lambda_datasources["list_my_shares"].create_resolver(
-        "ListMySharesResolver",
+    # listMyShares - Just query shares, use field resolvers for profile data
+    api.create_resolver(
+        "ListMySharesResolverV2",  # Changed ID to force replacement
         type_name="Query",
         field_name="listMyShares",
+        data_source=datasources["shares"],
+        runtime=appsync.FunctionRuntime.JS_1_0_0,
+        code=appsync.Code.from_asset(str(RESOLVERS_DIR / "list_my_shares_resolver.js")),
     )
 
     # getCampaign Pipeline
@@ -1920,6 +1923,24 @@ $util.toJson($ctx.result)
         code=appsync.Code.from_asset(str(RESOLVERS_DIR / "share_target_account_resolver.js")),
     )
 
+    # SharedProfile field resolvers - fetch profile data from profiles table
+    shared_profile_fields = [
+        ("sellerName", "SellerName"),
+        ("ownerAccountId", "OwnerAccountId"),
+        ("unitType", "UnitType"),
+        ("unitNumber", "UnitNumber"),
+        ("createdAt", "CreatedAt"),
+        ("updatedAt", "UpdatedAt"),
+    ]
+    for field_name, construct_suffix in shared_profile_fields:
+        datasources["profiles"].create_resolver(
+            f"SharedProfile{construct_suffix}Resolver",
+            type_name="SharedProfile",
+            field_name=field_name,
+            runtime=appsync.FunctionRuntime.JS_1_0_0,
+            code=appsync.Code.from_asset(str(RESOLVERS_DIR / "shared_profile_field_resolver.js")),
+        )
+
     # Account.accountId (JS) - Strip "ACCOUNT#" prefix
     datasources["none"].create_resolver(
         "AccountIdResolver",
@@ -2173,6 +2194,13 @@ $util.toJson($ctx.result)
         "UpdateMyAccountResolver",
         type_name="Mutation",
         field_name="updateMyAccount",
+    )
+
+    # transferProfileOwnership (Lambda)
+    lambda_datasources["transfer_ownership"].create_resolver(
+        "TransferProfileOwnershipResolver",
+        type_name="Mutation",
+        field_name="transferProfileOwnership",
     )
 
     # updateMyPreferences (JS)

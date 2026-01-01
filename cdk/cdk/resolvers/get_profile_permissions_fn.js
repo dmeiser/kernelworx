@@ -2,7 +2,7 @@ import { util } from '@aws-appsync/utils';
 
 export function request(ctx) {
     const profileId = ctx.source.profileId;
-    const targetAccountId = ctx.identity.sub;
+    const targetAccountId = ctx.identity.sub.startsWith('ACCOUNT#') ? ctx.identity.sub : `ACCOUNT#${ctx.identity.sub}`;
     
     // Query for share record: PK=profileId, SK=targetAccountId
     return {

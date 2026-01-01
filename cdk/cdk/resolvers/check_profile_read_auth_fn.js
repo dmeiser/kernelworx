@@ -26,7 +26,7 @@ export function request(ctx) {
     // Not owner - check for share
     ctx.stash.authorized = false;
     const profileId = profile.profileId;  // Use profile.profileId which has PROFILE# prefix
-    const targetAccountId = ctx.identity.sub;
+    const targetAccountId = ctx.identity.sub.startsWith('ACCOUNT#') ? ctx.identity.sub : `ACCOUNT#${ctx.identity.sub}`;
     
     // Check for share in shares table: profileId + targetAccountId
     return {

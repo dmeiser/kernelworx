@@ -20,14 +20,14 @@ export function request(ctx) {
         util.error('Failed to determine profile owner', 'InternalServerError');
     }
     
-    // Strip ACCOUNT# prefix if present - store clean ID
-    if (targetAccountId && targetAccountId.startsWith('ACCOUNT#')) {
-        targetAccountId = targetAccountId.substring(8);
+    // Ensure targetAccountId has ACCOUNT# prefix
+    if (targetAccountId && !targetAccountId.startsWith('ACCOUNT#')) {
+        targetAccountId = `ACCOUNT#${targetAccountId}`;
     }
     
     // Generate shareId for backward compatibility with tests
-    // Format: SHARE#ACCOUNT#{targetAccountId} to match old expectations
-    const shareId = 'SHARE#ACCOUNT#' + targetAccountId;
+    // Format: SHARE#{targetAccountId} (targetAccountId already has ACCOUNT# prefix)
+    const shareId = `SHARE#${targetAccountId}`;
     
     // Normalize profileId to ensure PROFILE# prefix is used when storing shares
     const dbProfileId = profileId && profileId.startsWith('PROFILE#') ? profileId : `PROFILE#${profileId}`;
