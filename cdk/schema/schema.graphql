@@ -318,7 +318,7 @@ input CreateSharedCampaignInput {
   unitNumber: Int!
   city: String!
   state: String!
-  creatorMessage: String!
+  creatorMessage: String
   description: String
 }
 

@@ -188,7 +188,7 @@ export const CreateSharedCampaignPage: React.FC = () => {
             unitNumber: parseInt(unitNumber, 10),
             city: city.trim(),
             state,
-            creatorMessage: creatorMessage.trim(),
+            creatorMessage: creatorMessage.trim() || undefined,
             description: description.trim() || undefined,
           },
         },
