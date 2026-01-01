@@ -58,17 +58,27 @@ export function response(ctx) {
     const campaign = ctx.stash.campaign;
     const input = ctx.args.input || ctx.args;
     
-    // Build response object with updated values
-    const result = {
-        campaignId: campaign.campaignId,  // Map DynamoDB campaignId to GraphQL campaignId
-        profileId: campaign.profileId,
-        campaignName: input.campaignName !== undefined ? input.campaignName : campaign.campaignName,
-        startDate: input.startDate !== undefined ? input.startDate : campaign.startDate,
-        endDate: input.endDate !== undefined ? input.endDate : campaign.endDate,
-        catalogId: input.catalogId !== undefined ? ((typeof input.catalogId === 'string' && input.catalogId.startsWith('CATALOG#')) ? input.catalogId : 'CATALOG#' + input.catalogId) : campaign.catalogId,
-        createdAt: campaign.createdAt,
-        updatedAt: util.time.nowISO8601()
-    };
+    // Start with existing campaign data to preserve all fields
+    const result = { ...campaign };
+    
+    // Apply updates
+    if (input.campaignName !== undefined) {
+        result.campaignName = input.campaignName;
+    }
+    if (input.startDate !== undefined) {
+        result.startDate = input.startDate;
+    }
+    if (input.endDate !== undefined) {
+        result.endDate = input.endDate;
+    }
+    if (input.catalogId !== undefined) {
+        result.catalogId = (typeof input.catalogId === 'string' && input.catalogId.startsWith('CATALOG#')) 
+            ? input.catalogId 
+            : 'CATALOG#' + input.catalogId;
+    }
+    
+    // Always update updatedAt
+    result.updatedAt = util.time.nowISO8601();
     
     return result;
 }

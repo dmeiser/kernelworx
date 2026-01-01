@@ -252,6 +252,7 @@ export default async function globalTeardown(): Promise<void> {
   
   try {
     // Clean up in order of dependencies (child entities first)
+    // NOTE: We delete SellerProfiles (Scouts) but NOT Account records or Cognito users
     const ordersDeleted = await cleanupTestOrders();
     const campaignsDeleted = await cleanupTestCampaigns();
     const sharesDeleted = await cleanupTestShares();
@@ -263,9 +264,11 @@ export default async function globalTeardown(): Promise<void> {
     console.log(`   - Orders: ${ordersDeleted} deleted`);
     console.log(`   - Campaigns: ${campaignsDeleted} deleted`);
     console.log(`   - Shares: ${sharesDeleted} deleted`);
-    console.log(`   - Profiles: ${profilesDeleted} deleted`);
+    console.log(`   - SellerProfiles: ${profilesDeleted} deleted`);
     console.log(`   - Catalogs: ${catalogsDeleted} deleted`);
     console.log(`   - Shared Campaigns: ${sharedCampaignsDeleted} deleted`);
+    console.log('   - Account records: preserved (not deleted)');
+    console.log('   - Cognito users: preserved (not deleted)');
   } catch (error) {
     console.error('❌ Global cleanup failed:', error);
     // Don't throw - we don't want cleanup failures to break CI

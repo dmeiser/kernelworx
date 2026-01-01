@@ -87,11 +87,11 @@ interface Share {
 }
 
 export const ScoutManagementPage: React.FC = () => {
-  const { scoutId: encodedScoutId } = useParams<{
-    scoutId: string;
+  const { profileId: encodedProfileId } = useParams<{
+    profileId: string;
   }>();
-  const profileId = encodedScoutId
-    ? decodeURIComponent(encodedScoutId)
+  const profileId = encodedProfileId
+    ? decodeURIComponent(encodedProfileId)
     : "";
   const dbProfileId = ensureProfileId(profileId);
   const navigate = useNavigate();

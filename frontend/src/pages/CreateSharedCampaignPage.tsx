@@ -182,9 +182,8 @@ export const CreateSharedCampaignPage: React.FC = () => {
             catalogId,
             campaignName: campaignName.trim(),
             campaignYear,
-            // Convert date strings to ISO datetime format for AWSDateTime
-            ...(startDate && { startDate: new Date(startDate).toISOString() }),
-            ...(endDate && { endDate: new Date(endDate).toISOString() }),
+            startDate: startDate || undefined,
+            endDate: endDate || undefined,
             unitType,
             unitNumber: parseInt(unitNumber, 10),
             city: city.trim(),

@@ -26,7 +26,7 @@ export default defineConfig({
         singleThread: true,
       },
     },
-    // NOTE: No global teardown - each test is responsible for cleaning up its own data
-    // Account records created by Cognito login are exempt (infrastructure, not test data)
+    // Global teardown cleans up any orphaned test data
+    globalTeardown: path.resolve(__dirname, 'globalTeardown.ts'),
   },
 });

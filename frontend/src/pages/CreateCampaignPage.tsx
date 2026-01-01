@@ -405,9 +405,8 @@ const debouncedFindSharedCampaigns = useMemo(() => {
     try {
       const input: Record<string, unknown> = {
         profileId,
-        // Convert date strings to ISO datetime format for AWSDateTime
-        ...(startDate && { startDate: new Date(startDate).toISOString() }),
-        ...(endDate && { endDate: new Date(endDate).toISOString() }),
+        startDate: startDate || undefined,
+        endDate: endDate || undefined,
       };
 
       if (isSharedCampaignMode && effectiveSharedCampaignCode) {

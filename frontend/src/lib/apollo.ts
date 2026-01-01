@@ -29,7 +29,7 @@ const httpLink = createHttpLink({
  * If no token is available, it throws an error to prevent unauthenticated
  * requests from reaching AppSync with empty ctx.identity.sub values.
  */
-export const getAuthContext = async (_: any, { headers }: { headers?: any }) => {
+export const getAuthContext = async (_: any, prevContext: any) => {
   const session = await fetchAuthSession();
   const token = session.tokens?.idToken?.toString();
 
@@ -41,7 +41,7 @@ export const getAuthContext = async (_: any, { headers }: { headers?: any }) => 
 
   return {
     headers: {
-      ...headers,
+      ...prevContext.headers,
       Authorization: `Bearer ${token}`,
     },
   };

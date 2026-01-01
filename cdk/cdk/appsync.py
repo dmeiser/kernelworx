@@ -1302,7 +1302,7 @@ def create_resolvers(
             functions["check_share_permissions"],
             functions["update_campaign"],
         ],
-        code=appsync.Code.from_asset(str(RESOLVERS_DIR / "update_campaign_fn.js")),
+        code=appsync.Code.from_asset(str(RESOLVERS_DIR / "update_campaign_pipeline_resolver_v2.js")),
     )
 
     # deleteCampaign Pipeline
@@ -1336,7 +1336,7 @@ def create_resolvers(
             functions["fetch_catalog_for_update"],
             functions["update_order"],
         ],
-        code=appsync.Code.from_asset(str(RESOLVERS_DIR / "update_order_fn.js")),
+        code=appsync.Code.from_asset(str(RESOLVERS_DIR / "update_order_pipeline_resolver_v2.js")),
     )
 
     # deleteOrder Pipeline
@@ -1351,7 +1351,7 @@ def create_resolvers(
             functions["check_share_permissions"],
             functions["delete_order"],
         ],
-        code=appsync.Code.from_asset(str(RESOLVERS_DIR / "delete_order_fn.js")),
+        code=appsync.Code.from_asset(str(RESOLVERS_DIR / "delete_order_pipeline_resolver_v2.js")),
     )
 
     # createOrder Pipeline
@@ -1402,7 +1402,7 @@ def create_resolvers(
             functions["create_share"],
             functions["mark_invite_used"],
         ],
-        code=appsync.Code.from_asset(str(RESOLVERS_DIR / "mark_invite_used_fn.js")),
+        code=appsync.Code.from_asset(str(RESOLVERS_DIR / "redeem_profile_invite_pipeline_resolver.js")),
     )
 
     # === QUERY RESOLVERS ===
@@ -1552,7 +1552,7 @@ $util.toJson($ctx.result)
             functions["check_share_read_permissions"],
             functions["query_orders_by_campaign"],
         ],
-        code=appsync.Code.from_asset(str(RESOLVERS_DIR / "query_orders_by_campaign_fn.js")),
+        code=appsync.Code.from_asset(str(RESOLVERS_DIR / "list_orders_by_campaign_resolver.js")),
     )
 
     # listOrdersByProfile Pipeline
@@ -1566,7 +1566,7 @@ $util.toJson($ctx.result)
             functions["check_share_read_permissions"],
             functions["query_orders_by_profile"],
         ],
-        code=appsync.Code.from_asset(str(RESOLVERS_DIR / "query_orders_by_profile_fn.js")),
+        code=appsync.Code.from_asset(str(RESOLVERS_DIR / "list_orders_by_profile_resolver.js")),
     )
 
     # listSharesByProfile Pipeline
@@ -1731,7 +1731,7 @@ $util.toJson($ctx.result)
             functions["get_account_for_shared_campaign"],
             functions["create_shared_campaign"],
         ],
-        code=appsync.Code.from_asset(str(RESOLVERS_DIR / "create_shared_campaign_fn.js")),
+        code=appsync.Code.from_asset(str(RESOLVERS_DIR / "create_shared_campaign_pipeline_resolver.js")),
     )
 
     # updateSharedCampaign Pipeline

@@ -3,10 +3,10 @@ import { util } from '@aws-appsync/utils';
 export function request(ctx) {
     // If catalog already in stash, nothing to do — avoid returning null (AppSync requires a valid request for data-source-bound functions)
     if (ctx.stash && ctx.stash.catalog) {
-        // Return a harmless GetItem that will not match any real item
+        // Return a harmless GetItem that will not match any real item (campaigns table uses profileId + campaignId as keys)
         return {
             operation: 'GetItem',
-            key: util.dynamodb.toMapValues({ campaignId: 'NOOP' }),
+            key: util.dynamodb.toMapValues({ profileId: 'NOOP', campaignId: 'NOOP' }),
             consistentRead: true
         };
     }
@@ -15,7 +15,7 @@ export function request(ctx) {
     if (ctx.stash && ctx.stash.catalogId) {
         return {
             operation: 'GetItem',
-            key: util.dynamodb.toMapValues({ campaignId: 'NOOP' }),
+            key: util.dynamodb.toMapValues({ profileId: 'NOOP', campaignId: 'NOOP' }),
             consistentRead: true
         };
     }
@@ -26,7 +26,7 @@ export function request(ctx) {
         // Return harmless NOOP GetItem to satisfy data-source request contract
         return {
             operation: 'GetItem',
-            key: util.dynamodb.toMapValues({ campaignId: 'NOOP' }),
+            key: util.dynamodb.toMapValues({ profileId: 'NOOP', campaignId: 'NOOP' }),
             consistentRead: true
         };
     }
