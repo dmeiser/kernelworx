@@ -1674,8 +1674,7 @@ $util.toJson($ctx.result)
     "version": "2017-02-28",
     "operation": "GetItem",
     "key": {
-        "sharedCampaignCode": $util.dynamodb.toDynamoDBJson($ctx.args.sharedCampaignCode),
-        "SK": $util.dynamodb.toDynamoDBJson("METADATA")
+        "sharedCampaignCode": $util.dynamodb.toDynamoDBJson($ctx.args.sharedCampaignCode)
     }
 }
             """

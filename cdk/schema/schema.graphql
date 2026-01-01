@@ -112,7 +112,7 @@ type SharedCampaign {
   state: String!
   createdBy: ID!
   createdByName: String!
-  creatorMessage: String!
+  creatorMessage: String
   description: String
   isActive: Boolean!
   createdAt: AWSDateTime!

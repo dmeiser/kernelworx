@@ -405,8 +405,8 @@ const debouncedFindSharedCampaigns = useMemo(() => {
     try {
       const input: Record<string, unknown> = {
         profileId,
-        startDate: startDate || undefined,
-        endDate: endDate || undefined,
+        startDate: startDate ? new Date(startDate).toISOString() : undefined,
+        endDate: endDate ? new Date(endDate).toISOString() : undefined,
       };
 
       if (isSharedCampaignMode && effectiveSharedCampaignCode) {
