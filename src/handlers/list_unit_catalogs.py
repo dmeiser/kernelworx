@@ -163,13 +163,13 @@ def list_unit_catalogs(event: Dict[str, Any], context: Any) -> List[Dict[str, An
 def _build_unit_campaign_key(
     unit_type: str, unit_number: int, city: str, state: str, campaign_name: str, campaign_year: int
 ) -> str:
-    """Build the GSI3 partition key for unit+campaign queries."""
+    """Build the unitCampaignKey for unit+campaign queries."""
     return f"{unit_type}#{unit_number}#{city}#{state}#{campaign_name}#{campaign_year}"
 
 
 def list_unit_campaign_catalogs(event: Dict[str, Any], context: Any) -> List[Dict[str, Any]]:
     """
-    List all catalogs used by scouts in a unit+campaign using GSI3.
+    List all catalogs used by scouts in a unit+campaign using unitCampaignKey-index.
 
     This is the new campaign-based version that uses city+state for unit uniqueness.
 
@@ -201,11 +201,11 @@ def list_unit_campaign_catalogs(event: Dict[str, Any], context: Any) -> List[Dic
             f"campaign {campaign_name} {campaign_year}, caller {caller_account_id}"
         )
 
-        # Step 1: Query GSI3 to find all campaigns matching unit+campaign criteria
+        # Step 1: Query unitCampaignKey-index to find all campaigns matching unit+campaign criteria
         unit_campaign_key = _build_unit_campaign_key(unit_type, unit_number, city, state, campaign_name, campaign_year)
 
         campaigns_response = _get_campaigns_table().query(
-            IndexName="GSI3",
+            IndexName="unitCampaignKey-index",
             KeyConditionExpression=Key("unitCampaignKey").eq(unit_campaign_key),
         )
 

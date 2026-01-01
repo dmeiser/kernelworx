@@ -99,10 +99,11 @@ def check_profile_access(caller_account_id: str, profile_id: str, required_permi
         share = share_response["Item"]
         permissions = share.get("permissions", [])
 
-        # Type assertion: permissions is a list of strings
-        if isinstance(permissions, list):
+        # Type assertion: permissions can be a list, set, or None
+        # Handle both list (from boto3 high-level) and set (from DynamoDB StringSet SS type)
+        if isinstance(permissions, (list, set)):
             # Normalize permissions to uppercase for case-insensitive comparison
-            # Handle both native Python lists ["READ"] and raw DynamoDB format [{"S": "READ"}]
+            # Handle both native Python lists/sets ["READ"] and raw DynamoDB format [{"S": "READ"}]
             normalized_permissions = []
             for perm in permissions:
                 if isinstance(perm, str):

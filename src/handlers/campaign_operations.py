@@ -80,14 +80,14 @@ def _get_profiles_table():
 def _build_unit_campaign_key(
     unit_type: str, unit_number: int, city: str, state: str, campaign_name: str, campaign_year: int
 ) -> str:
-    """Build the GSI3 partition key for unit+campaign queries."""
+    """Build the unitCampaignKey for unit+campaign queries."""
     return f"{unit_type}#{unit_number}#{city}#{state}#{campaign_name}#{campaign_year}"
 
 
 def _get_shared_campaign(shared_campaign_code: str) -> Optional[Dict[str, Any]]:
     """Retrieve a shared campaign by code."""
     try:
-        response = _get_shared_campaigns_table().get_item(Key={"shared_campaignCode": shared_campaign_code, "SK": "METADATA"})
+        response = _get_shared_campaigns_table().get_item(Key={"sharedCampaignCode": shared_campaign_code})
         return response.get("Item")
     except Exception as e:
         logger.error(f"Error fetching shared campaign {shared_campaign_code}: {str(e)}")
@@ -127,7 +127,7 @@ def create_campaign(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     3. Optionally creating a READ share with the shared campaign creator (shareWithCreator)
 
     When unit fields (unitType, unitNumber, city, state) are provided,
-    the campaign is indexed in GSI3 for unit-based queries.
+    the campaign is indexed by unitCampaignKey for unit-based queries.
 
     Args:
         event: AppSync resolver event with arguments:
@@ -263,7 +263,7 @@ def create_campaign(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             campaign_item["unitNumber"] = unit_number
             campaign_item["city"] = city
             campaign_item["state"] = state
-            # Build GSI3 key for unit-based queries
+            # Build unitCampaignKey for unit-based queries
             campaign_item["unitCampaignKey"] = _build_unit_campaign_key(
                 unit_type, unit_number, city, state, campaign_name, campaign_year
             )
@@ -376,7 +376,7 @@ def _to_dynamo_value(value: Any) -> Dict[str, Any]:
     elif isinstance(value, (list, set)):
         value_list = list(value) if isinstance(value, set) else value
         if all(isinstance(item, str) for item in value_list):
-            return {"SS": set(value_list)}  # boto3 expects a set for SS type
+            return {"SS": value_list}  # boto3 expects a list for SS type
         else:
             return {"L": [_to_dynamo_value(item) for item in value_list]}
     elif isinstance(value, dict):

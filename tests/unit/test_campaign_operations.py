@@ -223,7 +223,7 @@ class TestCreateCampaign:
     @patch("src.handlers.campaign_operations.dynamodb_client")
     @patch("src.handlers.campaign_operations.check_profile_access")
     @patch("src.handlers.campaign_operations._get_profile")
-    def test_create_campaign_with_unit_fields_creates_gsi3_key(
+    def test_create_campaign_with_unit_fields_creates_unit_campaign_key(
         self,
         mock_get_profile: MagicMock,
         mock_check_access: MagicMock,
@@ -232,7 +232,7 @@ class TestCreateCampaign:
         lambda_context: MagicMock,
         sample_profile: Dict[str, Any],
     ) -> None:
-        """Test campaign creation with unit fields populates GSI3 key."""
+        """Test campaign creation with unit fields populates unitCampaignKey."""
         # Arrange
         mock_check_access.return_value = True
         mock_get_profile.return_value = sample_profile

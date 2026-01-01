@@ -280,8 +280,8 @@ def dynamodb_table(aws_credentials: None) -> Generator[Any, None, None]:
             BillingMode="PAY_PER_REQUEST",
         )
 
-        # Add GSI3 to Campaigns table for unit-based queries
-        # GSI3: unitCampaignKey + campaignId
+        # Add unitCampaignKey-index to Campaigns table for unit-based queries
+        # unitCampaignKey-index: unitCampaignKey (partition key)
         # (In real deployment, this would be added via CDK update, but in tests we configure it here)
 
         # Return profiles table as primary (most commonly used)

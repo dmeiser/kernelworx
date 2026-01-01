@@ -24,14 +24,10 @@ import {
   TableRow,
   TextField,
   MenuItem,
-  Accordion,
-  AccordionSummary,
-  AccordionDetails,
   Alert,
   Chip,
 } from "@mui/material";
 import {
-  ExpandMore as ExpandMoreIcon,
   Download as DownloadIcon,
   Assessment as ReportIcon,
 } from "@mui/icons-material";
@@ -149,70 +145,139 @@ export const CampaignReportsPage: React.FC = () => {
       currency: "USD",
     }).format(amount);
 
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString("en-US", {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-    });
-  };
-
-  const exportToExcel = () => {
+  const exportSellerReport = () => {
     if (!report) return;
 
     const wb = XLSX.utils.book_new();
 
-    // Sheet 1: Seller Summary
-    const summaryData = [
-      ["Seller Name", "Total Sales", "Order Count"],
-      ...report.sellers.map((seller) => [
-        seller.sellerName,
-        seller.totalSales,
-        seller.orderCount,
-      ]),
-      [],
-      ["Unit Total", report.totalSales, report.totalOrders],
-    ];
-    const summarySheet = XLSX.utils.aoa_to_sheet(summaryData);
-    XLSX.utils.book_append_sheet(wb, summarySheet, "Seller Summary");
-
-    // Sheet 2: Detailed Orders
-    const detailedData: (string | number)[][] = [
-      [
-        "Seller",
-        "Customer",
-        "Order Date",
-        "Product",
-        "Quantity",
-        "Price",
-        "Subtotal",
-        "Order Total",
-      ],
-    ];
-
+    // Get all unique products
+    const allProducts = new Set<string>();
     report.sellers.forEach((seller) => {
       seller.orders.forEach((order) => {
-        order.lineItems.forEach((item, idx) => {
-          detailedData.push([
-            idx === 0 ? seller.sellerName : "",
-            idx === 0 ? order.customerName : "",
-            idx === 0 ? formatDate(order.orderDate) : "",
-            item.productName,
-            item.quantity,
-            item.pricePerUnit,
-            item.subtotal,
-            idx === 0 ? order.totalAmount : "",
-          ]);
+        order.lineItems.forEach((item) => {
+          allProducts.add(item.productName);
+        });
+      });
+    });
+    const productList = Array.from(allProducts).sort();
+
+    // Build header row
+    const headerRow = ["Scout Name", ...productList, "Total Items", "Total Sales"];
+
+    // Build data rows
+    const dataRows = report.sellers.map((seller) => {
+      // Calculate product totals for this seller
+      const productTotals: Record<string, number> = {};
+      let sellerTotalItems = 0;
+      seller.orders.forEach((order) => {
+        order.lineItems.forEach((item) => {
+          productTotals[item.productName] = (productTotals[item.productName] || 0) + item.quantity;
+          sellerTotalItems += item.quantity;
+        });
+      });
+
+      return [
+        seller.sellerName,
+        ...productList.map((product) => productTotals[product] || 0),
+        sellerTotalItems,
+        seller.totalSales,
+      ];
+    });
+
+    // Build totals row
+    const grandTotals: Record<string, number> = {};
+    let grandTotalItems = 0;
+    report.sellers.forEach((seller) => {
+      seller.orders.forEach((order) => {
+        order.lineItems.forEach((item) => {
+          grandTotals[item.productName] = (grandTotals[item.productName] || 0) + item.quantity;
+          grandTotalItems += item.quantity;
         });
       });
     });
 
-    const detailedSheet = XLSX.utils.aoa_to_sheet(detailedData);
-    XLSX.utils.book_append_sheet(wb, detailedSheet, "Detailed Orders");
+    const totalsRow = [
+      "Total",
+      ...productList.map((product) => grandTotals[product] || 0),
+      grandTotalItems,
+      report.totalSales,
+    ];
+
+    // Combine all rows
+    const sheetData = [headerRow, ...dataRows, totalsRow];
+    const sheet = XLSX.utils.aoa_to_sheet(sheetData);
+    XLSX.utils.book_append_sheet(wb, sheet, "Seller Report");
 
     // Download
-    const fileName = `${report.unitType}_${report.unitNumber}_${report.campaignName}_${report.campaignYear}_Report.xlsx`;
+    const fileName = `${report.unitType}_${report.unitNumber}_${report.campaignName}_${report.campaignYear}_Seller_Report.xlsx`;
+    XLSX.writeFile(wb, fileName);
+  };
+
+  const exportOrderDetails = () => {
+    if (!report) return;
+
+    const wb = XLSX.utils.book_new();
+
+    // Flatten all orders from all sellers
+    const allOrders = report.sellers.flatMap((seller) =>
+      seller.orders.map((order) => ({
+        ...order,
+        sellerName: seller.sellerName,
+      }))
+    );
+
+    // Get all unique products
+    const allProducts = Array.from(
+      new Set(
+        allOrders.flatMap((order) =>
+          order.lineItems.map((item) => item.productName)
+        )
+      )
+    ).sort();
+
+    // Build header row
+    const headerRow = ["Scout", "Customer", ...allProducts, "Total"];
+
+    // Build data rows
+    const dataRows = allOrders.map((order) => {
+      const productQuantities = allProducts.map((product) => {
+        const totalQuantity = order.lineItems
+          .filter((li) => li.productName === product)
+          .reduce((sum, item) => sum + item.quantity, 0);
+        return totalQuantity || "";
+      });
+
+      return [
+        order.sellerName,
+        order.customerName,
+        ...productQuantities,
+        order.totalAmount,
+      ];
+    });
+
+    // Build totals row
+    const productTotals: Record<string, number> = {};
+    allOrders.forEach((order) => {
+      order.lineItems.forEach((item) => {
+        productTotals[item.productName] =
+          (productTotals[item.productName] || 0) + item.quantity;
+      });
+    });
+
+    const totalsRow = [
+      "Total",
+      "",
+      ...allProducts.map((product) => productTotals[product] || 0),
+      report.totalSales,
+    ];
+
+    // Combine all rows
+    const sheetData = [headerRow, ...dataRows, totalsRow];
+    const sheet = XLSX.utils.aoa_to_sheet(sheetData);
+    XLSX.utils.book_append_sheet(wb, sheet, "Order Details");
+
+    // Download
+    const fileName = `${report.unitType}_${report.unitNumber}_${report.campaignName}_${report.campaignYear}_Order_Details.xlsx`;
     XLSX.writeFile(wb, fileName);
   };
 
@@ -317,23 +382,10 @@ export const CampaignReportsPage: React.FC = () => {
             {/* Report Header */}
             <Paper sx={{ p: 3 }}>
               <Stack spacing={2}>
-                <Box
-                  display="flex"
-                  justifyContent="space-between"
-                  alignItems="center"
-                >
-                  <Typography variant="h5">
-                    {report.unitType} {report.unitNumber} - {report.campaignName}{" "}
-                    {report.campaignYear}
-                  </Typography>
-                  <Button
-                    variant="outlined"
-                    startIcon={<DownloadIcon />}
-                    onClick={exportToExcel}
-                  >
-                    Export to Excel
-                  </Button>
-                </Box>
+                <Typography variant="h5">
+                  {report.unitType} {report.unitNumber} - {report.campaignName}{" "}
+                  {report.campaignYear}
+                </Typography>
 
                 <Stack direction="row" spacing={2}>
                   <Chip
@@ -389,13 +441,24 @@ export const CampaignReportsPage: React.FC = () => {
 
             {/* Seller Report View - Products by Seller */}
             {reportView === "summary" && report.sellers.length > 0 && (
-              <Paper>
-                <TableContainer>
-                  <Table>
+              <Paper sx={{ p: { xs: 1.5, sm: 3 } }}>
+                <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 2 }}>
+                  <Typography variant="h6">Seller Report</Typography>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    startIcon={<DownloadIcon />}
+                    onClick={exportSellerReport}
+                  >
+                    Export to Excel
+                  </Button>
+                </Box>
+                <TableContainer sx={{ overflowX: "auto" }}>
+                  <Table size="small">
                     <TableHead>
-                      <TableRow>
+                      <TableRow sx={{ bgcolor: "action.hover" }}>
                         <TableCell>
-                          <strong>Scout Name</strong>
+                          <strong>Scout</strong>
                         </TableCell>
                         {(() => {
                           // Get all unique product names across all sellers
@@ -412,10 +475,13 @@ export const CampaignReportsPage: React.FC = () => {
                           return (
                             <>
                               {productList.map((productName) => (
-                                <TableCell key={productName} align="right">
+                                <TableCell key={productName} align="center">
                                   <strong>{productName}</strong>
                                 </TableCell>
                               ))}
+                              <TableCell align="center">
+                                <strong>Total Items</strong>
+                              </TableCell>
                               <TableCell align="right">
                                 <strong>Total Sales</strong>
                               </TableCell>
@@ -439,11 +505,13 @@ export const CampaignReportsPage: React.FC = () => {
 
                         // Aggregate quantities by product for this seller
                         const productTotals: Record<string, number> = {};
+                        let sellerTotalItems = 0;
                         seller.orders.forEach((order) => {
                           order.lineItems.forEach((item) => {
                             productTotals[item.productName] =
                               (productTotals[item.productName] || 0) +
                               item.quantity;
+                            sellerTotalItems += item.quantity;
                           });
                         });
 
@@ -451,10 +519,13 @@ export const CampaignReportsPage: React.FC = () => {
                           <TableRow key={seller.profileId}>
                             <TableCell>{seller.sellerName}</TableCell>
                             {productList.map((productName) => (
-                              <TableCell key={productName} align="right">
+                              <TableCell key={productName} align="center">
                                 {productTotals[productName] || 0}
                               </TableCell>
                             ))}
+                            <TableCell align="center">
+                              <strong>{sellerTotalItems}</strong>
+                            </TableCell>
                             <TableCell align="right">
                               {formatCurrency(seller.totalSales)}
                             </TableCell>
@@ -462,7 +533,7 @@ export const CampaignReportsPage: React.FC = () => {
                         );
                       })}
                       {/* Totals Row */}
-                      <TableRow>
+                      <TableRow sx={{ bgcolor: "action.hover" }}>
                         <TableCell>
                           <strong>Total</strong>
                         </TableCell>
@@ -480,12 +551,14 @@ export const CampaignReportsPage: React.FC = () => {
 
                           // Calculate totals for each product
                           const grandTotals: Record<string, number> = {};
+                          let grandTotalItems = 0;
                           report.sellers.forEach((seller) => {
                             seller.orders.forEach((order) => {
                               order.lineItems.forEach((item) => {
                                 grandTotals[item.productName] =
                                   (grandTotals[item.productName] || 0) +
                                   item.quantity;
+                                grandTotalItems += item.quantity;
                               });
                             });
                           });
@@ -493,12 +566,15 @@ export const CampaignReportsPage: React.FC = () => {
                           return (
                             <>
                               {productList.map((productName) => (
-                                <TableCell key={productName} align="right">
+                                <TableCell key={productName} align="center">
                                   <strong>
                                     {grandTotals[productName] || 0}
                                   </strong>
                                 </TableCell>
                               ))}
+                              <TableCell align="center">
+                                <strong>{grandTotalItems}</strong>
+                              </TableCell>
                               <TableCell align="right">
                                 <strong>
                                   {formatCurrency(report.totalSales)}
@@ -514,69 +590,116 @@ export const CampaignReportsPage: React.FC = () => {
               </Paper>
             )}
 
-            {/* Detailed Seller View */}
+            {/* Order Details View - All Orders Table (like individual campaign report) */}
             {reportView === "detailed" && report.sellers.length > 0 && (
-              <Stack spacing={2}>
-                {report.sellers.map((seller) => (
-                  <Accordion
-                    key={seller.profileId}
-                    defaultExpanded={report.sellers.length === 1}
+              <Paper sx={{ p: { xs: 1.5, sm: 3 } }}>
+                <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 2 }}>
+                  <Typography variant="h6">
+                    All Orders
+                  </Typography>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    startIcon={<DownloadIcon />}
+                    onClick={exportOrderDetails}
                   >
-                    <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                      <Box
-                        sx={{
-                          width: "100%",
-                          display: "flex",
-                          justifyContent: "space-between",
-                          pr: 2,
-                        }}
-                      >
-                        <Typography>
-                          <strong>{seller.sellerName}</strong>
-                        </Typography>
-                        <Typography color="text.secondary">
-                          {seller.orderCount} orders •{" "}
-                          {formatCurrency(seller.totalSales)}
-                        </Typography>
-                      </Box>
-                    </AccordionSummary>
-                    <AccordionDetails>
-                      <TableContainer>
-                        <Table size="small">
-                          <TableHead>
-                            <TableRow>
-                              <TableCell>Customer</TableCell>
-                              <TableCell>Date</TableCell>
-                              <TableCell>Products</TableCell>
-                              <TableCell align="right">Total</TableCell>
-                            </TableRow>
-                          </TableHead>
-                          <TableBody>
-                            {seller.orders.map((order) => (
-                              <TableRow key={order.orderId}>
-                                <TableCell>{order.customerName}</TableCell>
-                                <TableCell>
-                                  {formatDate(order.orderDate)}
-                                </TableCell>
-                                <TableCell>
-                                  {order.lineItems.map((item, idx) => (
-                                    <div key={idx}>
-                                      {item.quantity}x {item.productName}
-                                    </div>
-                                  ))}
-                                </TableCell>
-                                <TableCell align="right">
-                                  {formatCurrency(order.totalAmount)}
-                                </TableCell>
-                              </TableRow>
+                    Export to Excel
+                  </Button>
+                </Box>
+                {(() => {
+                  // Flatten all orders from all sellers into a single list
+                  const allOrders = report.sellers.flatMap((seller) =>
+                    seller.orders.map((order) => ({
+                      ...order,
+                      sellerName: seller.sellerName,
+                    }))
+                  );
+
+                  // Get all unique products
+                  const allProducts = Array.from(
+                    new Set(
+                      allOrders.flatMap((order) =>
+                        order.lineItems.map((item) => item.productName)
+                      )
+                    )
+                  ).sort();
+
+                  return (
+                    <TableContainer sx={{ overflowX: "auto" }}>
+                      <Table size="small">
+                        <TableHead>
+                          <TableRow sx={{ bgcolor: "action.hover" }}>
+                            <TableCell>
+                              <strong>Scout</strong>
+                            </TableCell>
+                            <TableCell>
+                              <strong>Customer</strong>
+                            </TableCell>
+                            {allProducts.map((product) => (
+                              <TableCell key={product} align="center">
+                                <strong>{product}</strong>
+                              </TableCell>
                             ))}
-                          </TableBody>
-                        </Table>
-                      </TableContainer>
-                    </AccordionDetails>
-                  </Accordion>
-                ))}
-              </Stack>
+                            <TableCell align="right">
+                              <strong>Total</strong>
+                            </TableCell>
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {allOrders.map((order) => (
+                            <TableRow key={order.orderId}>
+                              <TableCell>{order.sellerName}</TableCell>
+                              <TableCell>{order.customerName}</TableCell>
+                              {allProducts.map((product) => {
+                                const totalQuantity = order.lineItems
+                                  .filter((li) => li.productName === product)
+                                  .reduce((sum, item) => sum + item.quantity, 0);
+                                return (
+                                  <TableCell key={product} align="center">
+                                    {totalQuantity > 0 ? totalQuantity : "-"}
+                                  </TableCell>
+                                );
+                              })}
+                              <TableCell align="right" sx={{ fontWeight: "bold" }}>
+                                {formatCurrency(order.totalAmount)}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                          {/* Totals Row */}
+                          <TableRow sx={{ bgcolor: "action.hover" }}>
+                            <TableCell colSpan={2}>
+                              <strong>Total</strong>
+                            </TableCell>
+                            {(() => {
+                              // Calculate totals for each product
+                              const productTotals: Record<string, number> = {};
+                              allOrders.forEach((order) => {
+                                order.lineItems.forEach((item) => {
+                                  productTotals[item.productName] =
+                                    (productTotals[item.productName] || 0) + item.quantity;
+                                });
+                              });
+
+                              return (
+                                <>
+                                  {allProducts.map((product) => (
+                                    <TableCell key={product} align="center">
+                                      <strong>{productTotals[product] || 0}</strong>
+                                    </TableCell>
+                                  ))}
+                                  <TableCell align="right">
+                                    <strong>{formatCurrency(report.totalSales)}</strong>
+                                  </TableCell>
+                                </>
+                              );
+                            })()}
+                          </TableRow>
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
+                  );
+                })()}
+              </Paper>
             )}
 
             {/* Unit Summary View */}
@@ -585,40 +708,58 @@ export const CampaignReportsPage: React.FC = () => {
                 <Stack spacing={3}>
                   <Typography variant="h6">Unit Overview</Typography>
 
-                  <Stack direction={{ xs: "column", sm: "row" }} spacing={3}>
-                    <Box flex={1}>
-                      <Typography variant="body2" color="text.secondary">
-                        Total Sellers
-                      </Typography>
-                      <Typography variant="h4">
-                        {report.sellers.length}
-                      </Typography>
-                    </Box>
-                    <Box flex={1}>
-                      <Typography variant="body2" color="text.secondary">
-                        Total Orders
-                      </Typography>
-                      <Typography variant="h4">{report.totalOrders}</Typography>
-                    </Box>
-                    <Box flex={1}>
-                      <Typography variant="body2" color="text.secondary">
-                        Total Sales
-                      </Typography>
-                      <Typography variant="h4" color="success.main">
-                        {formatCurrency(report.totalSales)}
-                      </Typography>
-                    </Box>
-                    <Box flex={1}>
-                      <Typography variant="body2" color="text.secondary">
-                        Avg per Seller
-                      </Typography>
-                      <Typography variant="h4">
-                        {formatCurrency(
-                          report.totalSales / report.sellers.length,
-                        )}
-                      </Typography>
-                    </Box>
-                  </Stack>
+                  {(() => {
+                    // Calculate total items across all sellers
+                    const totalItems = report.sellers.reduce((sum, seller) => {
+                      const sellerItems = seller.orders.reduce((orderSum, order) => {
+                        return orderSum + order.lineItems.reduce((itemSum, item) => itemSum + item.quantity, 0);
+                      }, 0);
+                      return sum + sellerItems;
+                    }, 0);
+
+                    return (
+                      <Stack direction={{ xs: "column", sm: "row" }} spacing={3}>
+                        <Box flex={1}>
+                          <Typography variant="body2" color="text.secondary">
+                            Total Sellers
+                          </Typography>
+                          <Typography variant="h4">
+                            {report.sellers.length}
+                          </Typography>
+                        </Box>
+                        <Box flex={1}>
+                          <Typography variant="body2" color="text.secondary">
+                            Total Orders
+                          </Typography>
+                          <Typography variant="h4">{report.totalOrders}</Typography>
+                        </Box>
+                        <Box flex={1}>
+                          <Typography variant="body2" color="text.secondary">
+                            Total Items
+                          </Typography>
+                          <Typography variant="h4">{totalItems}</Typography>
+                        </Box>
+                        <Box flex={1}>
+                          <Typography variant="body2" color="text.secondary">
+                            Total Sales
+                          </Typography>
+                          <Typography variant="h4" color="success.main">
+                            {formatCurrency(report.totalSales)}
+                          </Typography>
+                        </Box>
+                        <Box flex={1}>
+                          <Typography variant="body2" color="text.secondary">
+                            Avg per Seller
+                          </Typography>
+                          <Typography variant="h4">
+                            {formatCurrency(
+                              report.totalSales / report.sellers.length,
+                            )}
+                          </Typography>
+                        </Box>
+                      </Stack>
+                    );
+                  })()}
 
                   <Typography variant="h6" sx={{ mt: 2 }}>
                     Top Sellers
@@ -629,27 +770,37 @@ export const CampaignReportsPage: React.FC = () => {
                         <TableRow>
                           <TableCell>Rank</TableCell>
                           <TableCell>Seller</TableCell>
+                          <TableCell align="right">Items</TableCell>
                           <TableCell align="right">Sales</TableCell>
                           <TableCell align="right">% of Total</TableCell>
                         </TableRow>
                       </TableHead>
                       <TableBody>
-                        {report.sellers.slice(0, 5).map((seller, idx) => (
-                          <TableRow key={seller.profileId}>
-                            <TableCell>{idx + 1}</TableCell>
-                            <TableCell>{seller.sellerName}</TableCell>
-                            <TableCell align="right">
-                              {formatCurrency(seller.totalSales)}
-                            </TableCell>
-                            <TableCell align="right">
-                              {(
-                                (seller.totalSales / report.totalSales) *
-                                100
-                              ).toFixed(1)}
-                              %
-                            </TableCell>
-                          </TableRow>
-                        ))}
+                        {report.sellers.slice(0, 5).map((seller, idx) => {
+                          // Calculate total items for this seller
+                          const sellerItems = seller.orders.reduce((orderSum, order) => {
+                            return orderSum + order.lineItems.reduce((itemSum, item) => itemSum + item.quantity, 0);
+                          }, 0);
+
+                          return (
+                            <TableRow key={seller.profileId}>
+                              <TableCell>{idx + 1}</TableCell>
+                              <TableCell>{seller.sellerName}</TableCell>
+                              <TableCell align="right">{sellerItems}</TableCell>
+                              <TableCell align="right">
+                                {formatCurrency(seller.totalSales)}
+                              </TableCell>
+                              <TableCell align="right">
+                                {
+                                  (
+                                  (seller.totalSales / report.totalSales) *
+                                  100
+                                ).toFixed(1)
+                                }%
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
                       </TableBody>
                     </Table>
                   </TableContainer>

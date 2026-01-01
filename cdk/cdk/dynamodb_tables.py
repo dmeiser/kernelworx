@@ -145,6 +145,11 @@ def create_dynamodb_tables(stack: Construct, rn: Callable[[str], str]) -> Dict[s
         partition_key=ddb.Attribute(name="catalogId", type=ddb.AttributeType.STRING),
         projection_type=ddb.ProjectionType.KEYS_ONLY,
     )
+    campaigns_table.add_global_secondary_index(
+        index_name="unitCampaignKey-index",
+        partition_key=ddb.Attribute(name="unitCampaignKey", type=ddb.AttributeType.STRING),
+        projection_type=ddb.ProjectionType.ALL,
+    )
 
     orders_table = ddb.Table(
         stack,

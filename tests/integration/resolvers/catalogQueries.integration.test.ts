@@ -459,7 +459,7 @@ describe('Catalog Query Resolvers Integration Tests', () => {
         
         // BUG #21: listMyCatalogs may have timing/consistency issues
         // Catalogs created in beforeAll not appearing in query results
-        // Possible eventual consistency issue with GSI3
+        // Possible eventual consistency issue with unitCampaignKey-index
         expect(catalogIds.length).toBeGreaterThanOrEqual(0); // Relaxed - document bug
         // expect(catalogIds).toContain(publicCatalogId); // Should work but may fail
         // expect(catalogIds).toContain(privateCatalogId); // Should work but may fail

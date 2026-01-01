@@ -181,7 +181,7 @@ def create_lambda_functions(
         environment=lambda_env,
     )
 
-    # New list_unit_campaign_catalogs Lambda (uses GSI3 for campaign-based queries)
+    # New list_unit_campaign_catalogs Lambda (uses unitCampaignKey-index for campaign-based queries)
     list_unit_campaign_catalogs_fn = lambda_.Function(
         scope,
         "ListUnitCampaignCatalogsFn",

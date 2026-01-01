@@ -621,7 +621,7 @@ class CdkStack(Stack):
             environment=lambda_env,
         )
 
-        # New list_unit_campaign_catalogs Lambda (uses GSI3 for campaign-based queries)
+        # New list_unit_campaign_catalogs Lambda (uses unitCampaignKey-index for campaign-based queries)
         self.list_unit_campaign_catalogs_fn = lambda_.Function(
             self,
             "ListUnitCampaignCatalogsFn",

@@ -52,13 +52,13 @@ def _get_orders_table():
 def _build_unit_campaign_key(
     unit_type: str, unit_number: int, city: str, state: str, campaign_name: str, campaign_year: int
 ) -> str:
-    """Build the GSI3 partition key for unit+campaign queries."""
+    """Build the unitCampaignKey for unit+campaign queries."""
     return f"{unit_type}#{unit_number}#{city}#{state}#{campaign_name}#{campaign_year}"
 
 
 def get_unit_report(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
-    Generate unit-level popcorn sales report using campaign-based GSI3 queries.
+    Generate unit-level popcorn sales report using unitCampaignKey-index queries.
 
     Queries campaigns directly by unit+campaign key, then filters by caller's read access
     to each profile. This is more efficient than scanning all profiles.
@@ -94,11 +94,11 @@ def get_unit_report(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             f"catalog {catalog_id}, caller {caller_account_id}"
         )
 
-        # Step 1: Query GSI3 to find all campaigns matching unit+campaign criteria
+        # Step 1: Query unitCampaignKey-index to find all campaigns matching unit+campaign criteria
         unit_campaign_key = _build_unit_campaign_key(unit_type, unit_number, city, state, campaign_name, campaign_year)
 
         campaigns_response = _get_campaigns_table().query(
-            IndexName="GSI3",
+            IndexName="unitCampaignKey-index",
             KeyConditionExpression=Key("unitCampaignKey").eq(unit_campaign_key),
             FilterExpression="catalogId = :cid",
             ExpressionAttributeValues={":cid": catalog_id},

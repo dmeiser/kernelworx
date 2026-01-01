@@ -1,4 +1,4 @@
-"""Unit tests for campaign reporting Lambda handler (GSI3-based implementation)."""
+"""Unit tests for campaign reporting Lambda handler (unitCampaignKey-index-based implementation)."""
 
 from decimal import Decimal
 from typing import Any, Dict
@@ -9,7 +9,7 @@ from src.handlers.campaign_reporting import get_unit_report
 
 
 class TestGetUnitReport:
-    """Tests for get_unit_report Lambda handler using GSI3 campaign queries."""
+    """Tests for get_unit_report Lambda handler using unitCampaignKey-index campaign queries."""
 
     def _setup_profile_query_mock(
         self, mock_profiles_table: MagicMock, sample_profiles: Dict[str, Dict[str, Any]]
@@ -60,7 +60,7 @@ class TestGetUnitReport:
 
     @pytest.fixture
     def sample_campaigns(self) -> list[Dict[str, Any]]:
-        """Sample campaigns returned from GSI3 query."""
+        """Sample campaigns returned from unitCampaignKey-index query."""
         return [
             {
                 "campaignId": "CAMPAIGN#campaign1",
@@ -138,8 +138,8 @@ class TestGetUnitReport:
         sample_orders: Dict[str, list[Dict[str, Any]]],
         lambda_context: Any,
     ) -> None:
-        """Test successful unit report generation using GSI3."""
-        # Arrange - GSI3 query returns campaigns directly
+        """Test successful unit report generation using unitCampaignKey-index."""
+        # Arrange - unitCampaignKey-index query returns campaigns directly
         mock_campaigns_table.query.return_value = {"Items": sample_campaigns}
         mock_check_access.return_value = True
 
@@ -164,10 +164,10 @@ class TestGetUnitReport:
         assert result["totalSales"] == 300.0
         assert result["totalOrders"] == 2
 
-        # Verify GSI3 query was called correctly
+        # Verify unitCampaignKey-index query was called correctly
         mock_campaigns_table.query.assert_called_once()
         call_kwargs = mock_campaigns_table.query.call_args.kwargs
-        assert call_kwargs["IndexName"] == "GSI3"
+        assert call_kwargs["IndexName"] == "unitCampaignKey-index"
 
     @patch("src.handlers.campaign_reporting.campaigns_table")
     def test_get_unit_report_no_campaigns_found(
@@ -177,7 +177,7 @@ class TestGetUnitReport:
         lambda_context: Any,
     ) -> None:
         """Test report when no campaigns exist for unit+campaign."""
-        # Arrange - GSI3 query returns no campaigns
+        # Arrange - unitCampaignKey-index query returns no campaigns
         mock_campaigns_table.query.return_value = {"Items": []}
 
         # Act
@@ -351,7 +351,7 @@ class TestGetUnitReport:
         mock_campaigns_table: MagicMock,
         lambda_context: Any,
     ) -> None:
-        """Test report filters by campaign year correctly via GSI3 key."""
+        """Test report filters by campaign year correctly via unitCampaignKey."""
         # Arrange - Different campaign
         event = {
             "arguments": {
@@ -366,7 +366,7 @@ class TestGetUnitReport:
             "identity": {"sub": "test-account-123"},
         }
 
-        # GSI3 query returns no campaigns for Spring 2023
+        # unitCampaignKey-index query returns no campaigns for Spring 2023
         mock_campaigns_table.query.return_value = {"Items": []}
 
         # Act

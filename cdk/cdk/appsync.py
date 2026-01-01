@@ -1911,6 +1911,15 @@ $util.toJson($ctx.result)
         ),
     )
 
+    # Share.targetAccount (JS)
+    datasources["accounts"].create_resolver(
+        "ShareTargetAccountResolver",
+        type_name="Share",
+        field_name="targetAccount",
+        runtime=appsync.FunctionRuntime.JS_1_0_0,
+        code=appsync.Code.from_asset(str(RESOLVERS_DIR / "share_target_account_resolver.js")),
+    )
+
     # Account.accountId (JS) - Strip "ACCOUNT#" prefix
     datasources["none"].create_resolver(
         "AccountIdResolver",

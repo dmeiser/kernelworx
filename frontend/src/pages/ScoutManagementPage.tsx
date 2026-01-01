@@ -51,6 +51,7 @@ import {
   DELETE_PROFILE_INVITE,
   LIST_INVITES_BY_PROFILE,
   LIST_SHARES_BY_PROFILE,
+  REVOKE_SHARE,
 } from "../lib/graphql";
 import { ensureProfileId } from "../lib/ids";
 
@@ -181,6 +182,11 @@ export const ScoutManagementPage: React.FC = () => {
     },
   );
 
+  // Revoke share
+  const [revokeShare] = useMutation(REVOKE_SHARE, {
+    refetchQueries: [{ query: LIST_SHARES_BY_PROFILE, variables: { profileId: dbProfileId } }],
+  });
+
   const profile = profileData?.getProfile;
   const invites = invitesData?.listInvitesByProfile || [];
   const shares = sharesData?.listSharesByProfile || [];
@@ -219,6 +225,27 @@ export const ScoutManagementPage: React.FC = () => {
     await deleteInvite({
       variables: { profileId: dbProfileId, inviteCode: deletingInviteCode },
     });
+  };
+
+  const handleRevokeShare = async (targetAccountId: string, email?: string) => {
+    const userName = email || `User ${targetAccountId.substring(0, 8)}...`;
+    if (!window.confirm(`Are you sure you want to revoke access for ${userName}?`)) {
+      return;
+    }
+
+    try {
+      await revokeShare({
+        variables: { 
+          input: {
+            profileId: dbProfileId, 
+            targetAccountId 
+          }
+        },
+      });
+    } catch (err) {
+      console.error("Error revoking share:", err);
+      alert("Failed to revoke access");
+    }
   };
 
   const handleDeleteProfile = async () => {
@@ -476,6 +503,7 @@ export const ScoutManagementPage: React.FC = () => {
                     <TableCell>User</TableCell>
                     <TableCell>Permissions</TableCell>
                     <TableCell>Shared</TableCell>
+                    <TableCell align="right">Actions</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
@@ -506,6 +534,16 @@ export const ScoutManagementPage: React.FC = () => {
                         />
                       </TableCell>
                       <TableCell>{formatDate(share.createdAt)}</TableCell>
+                      <TableCell align="right">
+                        <IconButton
+                          size="small"
+                          color="error"
+                          onClick={() => handleRevokeShare(share.targetAccountId, share.targetAccount?.email)}
+                          title="Revoke access"
+                        >
+                          <DeleteIcon fontSize="small" />
+                        </IconButton>
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>

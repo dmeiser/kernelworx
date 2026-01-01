@@ -431,7 +431,7 @@ class TestListUnitCatalogs:
 
 
 class TestListUnitCampaignCatalogs:
-    """Tests for list_unit_campaign_catalogs Lambda handler using GSI3."""
+    """Tests for list_unit_campaign_catalogs Lambda handler using unitCampaignKey-index."""
 
     @pytest.fixture
     def event(self) -> Dict[str, Any]:
@@ -460,7 +460,7 @@ class TestListUnitCampaignCatalogs:
 
     @pytest.fixture
     def sample_campaigns(self) -> list[Dict[str, Any]]:
-        """Sample campaigns from GSI3 query."""
+        """Sample campaigns from unitCampaignKey-index query."""
         return [
             {
                 "campaignId": "CAMPAIGN#campaign1",
@@ -505,7 +505,7 @@ class TestListUnitCampaignCatalogs:
         sample_campaigns: list[Dict[str, Any]],
         sample_catalogs: Dict[str, Dict[str, Any]],
     ) -> None:
-        """Test successful catalog listing using GSI3."""
+        """Test successful catalog listing using unitCampaignKey-index."""
         from src.handlers.list_unit_catalogs import list_unit_campaign_catalogs
 
         # Arrange
@@ -528,10 +528,10 @@ class TestListUnitCampaignCatalogs:
         # Sorted by catalog name
         assert result[0]["catalogName"] == "Alpha Catalog"
         assert result[1]["catalogName"] == "Zebra Catalog"
-        # Verify GSI3 was queried
+        # Verify unitCampaignKey-index was queried
         mock_campaigns_table.query.assert_called_once()
         call_kwargs = mock_campaigns_table.query.call_args.kwargs
-        assert call_kwargs["IndexName"] == "GSI3"
+        assert call_kwargs["IndexName"] == "unitCampaignKey-index"
 
     @patch("src.handlers.list_unit_catalogs.campaigns_table")
     def test_list_unit_campaign_catalogs_no_campaigns(
@@ -540,7 +540,7 @@ class TestListUnitCampaignCatalogs:
         event: Dict[str, Any],
         lambda_context: MagicMock,
     ) -> None:
-        """Test listing when no campaigns found in GSI3."""
+        """Test listing when no campaigns found in unitCampaignKey-index."""
         from src.handlers.list_unit_catalogs import list_unit_campaign_catalogs
 
         # Arrange
@@ -691,7 +691,7 @@ class TestListUnitCampaignCatalogs:
         event: Dict[str, Any],
         lambda_context: MagicMock,
     ) -> None:
-        """Test error handling when GSI3 query fails."""
+        """Test error handling when unitCampaignKey-index query fails."""
         from src.handlers.list_unit_catalogs import list_unit_campaign_catalogs
 
         # Arrange
