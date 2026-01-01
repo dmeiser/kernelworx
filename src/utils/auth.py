@@ -93,7 +93,10 @@ def check_profile_access(caller_account_id: str, profile_id: str, required_permi
     # Check if caller has appropriate share (NOW USES SHARES TABLE)
     # Shares table: PK=profileId, SK=targetAccountId
     shares_table = get_shares_table()
-    share_response = shares_table.get_item(Key={"profileId": db_profile_id, "targetAccountId": caller_account_id})
+    
+    # Normalize caller_account_id with ACCOUNT# prefix for shares table lookup
+    db_caller_id = caller_account_id if caller_account_id.startswith("ACCOUNT#") else f"ACCOUNT#{caller_account_id}"
+    share_response = shares_table.get_item(Key={"profileId": db_profile_id, "targetAccountId": db_caller_id})
 
     if "Item" in share_response:
         share = share_response["Item"]

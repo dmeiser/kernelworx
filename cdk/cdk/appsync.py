@@ -2209,5 +2209,5 @@ $util.toJson($ctx.result)
         type_name="Mutation",
         field_name="updateMyPreferences",
         runtime=appsync.FunctionRuntime.JS_1_0_0,
-        code=appsync.Code.from_asset(str(RESOLVERS_DIR / "delete_catalog_fn.js")),
+        code=appsync.Code.from_asset(str(RESOLVERS_DIR / "update_my_preferences_resolver.js")),
     )
