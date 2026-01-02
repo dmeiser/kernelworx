@@ -8,6 +8,7 @@ import os
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
 import boto3
+from mypy_boto3_dynamodb import DynamoDBServiceResource
 
 if TYPE_CHECKING:
     from mypy_boto3_dynamodb.service_resource import Table
@@ -19,7 +20,7 @@ from .logging import get_logger
 logger = get_logger(__name__)
 
 
-def _get_dynamodb():
+def _get_dynamodb() -> DynamoDBServiceResource:
     """Return a fresh boto3 DynamoDB resource (lazy for tests)."""
     return boto3.resource("dynamodb", endpoint_url=os.getenv("DYNAMODB_ENDPOINT"))
 

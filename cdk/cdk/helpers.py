@@ -8,7 +8,7 @@ This module provides:
 """
 
 import os
-from typing import Optional
+from typing import Callable, Optional
 
 # Region abbreviation mapping for resource naming
 # Pattern: {name}-{region_abbrev}-{env} e.g. kernelworx-ue1-dev
@@ -52,7 +52,7 @@ def get_region_abbrev(region: Optional[str] = None) -> str:
     return REGION_ABBREVIATIONS.get(region, region[:3])
 
 
-def make_resource_namer(region_abbrev: str, env_name: str):
+def make_resource_namer(region_abbrev: str, env_name: str) -> Callable[[str], str]:
     """Create a resource naming function.
 
     Args:

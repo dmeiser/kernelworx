@@ -10,12 +10,14 @@ from datetime import datetime, timezone
 from typing import Any, Dict
 
 import boto3
+from mypy_boto3_dynamodb import DynamoDBServiceResource
+from mypy_boto3_dynamodb.service_resource import Table
 from botocore.exceptions import ClientError
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
-    from utils.errors import AppError, ErrorCode  # type: ignore[import-not-found]
-    from utils.logging import get_logger  # type: ignore[import-not-found]
+    from utils.errors import AppError, ErrorCode
+    from utils.logging import get_logger
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.errors import AppError, ErrorCode
     from ..utils.logging import get_logger
@@ -23,12 +25,12 @@ except ModuleNotFoundError:  # pragma: no cover
 logger = get_logger(__name__)
 
 
-def _get_dynamodb():
+def _get_dynamodb() -> DynamoDBServiceResource:
     """Return a fresh boto3 DynamoDB resource (lazy for tests)."""
     return boto3.resource("dynamodb", endpoint_url=os.getenv("DYNAMODB_ENDPOINT"))
 
 
-def get_accounts_table() -> Any:
+def get_accounts_table() -> Table:
     """Get DynamoDB accounts table instance (multi-table design)."""
     table_name = os.environ.get("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
     return _get_dynamodb().Table(table_name)

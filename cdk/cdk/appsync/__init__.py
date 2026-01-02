@@ -12,10 +12,12 @@ The implementation is split across multiple modules for better organization:
   - orders.py: Order operation functions
   - catalogs.py: Catalog operation functions
   - profiles.py: Profile operation functions
-- resolvers/: Resolver definitions organized by type
+- resolvers/: Python resolver wiring organized by type
   - mutations.py: Mutation resolvers
   - queries.py: Query resolvers
   - fields.py: Field resolvers
+- js-resolvers/: AppSync JS/JS pipeline/function code assets
+- mapping-templates/: VTL request/response templates
 """
 
 from dataclasses import dataclass
@@ -100,7 +102,7 @@ def setup_appsync(
 
     # Create NONE data source for computed fields
     none_datasource = create_none_datasource(api)
-    dynamodb_datasources["none"] = none_datasource  # type: ignore
+    dynamodb_datasources["none"] = none_datasource
 
     # Create Lambda data sources
     lambda_datasources = create_lambda_datasources(api, lambda_functions)

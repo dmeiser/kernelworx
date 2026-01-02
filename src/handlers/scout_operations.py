@@ -6,17 +6,19 @@ from datetime import datetime, timezone
 from typing import Any, Dict
 
 import boto3
+from mypy_boto3_dynamodb import DynamoDBServiceResource
+from mypy_boto3_dynamodb.service_resource import Table
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:
-    from utils.logging import get_logger  # type: ignore[import-not-found]
+    from utils.logging import get_logger
 except ModuleNotFoundError:
     from ..utils.logging import get_logger
 
 logger = get_logger(__name__)
 
 
-def _get_dynamodb():
+def _get_dynamodb() -> DynamoDBServiceResource:
     return boto3.resource("dynamodb")
 
 
@@ -24,10 +26,10 @@ def _get_dynamodb():
 profiles_table_name = os.environ.get("PROFILES_TABLE_NAME", "kernelworx-profiles-v2-ue1-dev")
 
 # Module-level override for tests
-profiles_table: Any | None = None
+profiles_table: Table | None = None
 
 
-def _get_profiles_table():
+def _get_profiles_table() -> Table:
     if profiles_table is not None:
         return profiles_table
     return _get_dynamodb().Table(profiles_table_name)

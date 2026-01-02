@@ -5,11 +5,13 @@ from typing import Any, Dict, List, Set
 
 import boto3
 from boto3.dynamodb.conditions import Key
+from mypy_boto3_dynamodb import DynamoDBServiceResource
+from mypy_boto3_dynamodb.service_resource import Table
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
-    from utils.auth import check_profile_access  # type: ignore[import-not-found]
-    from utils.logging import get_logger  # type: ignore[import-not-found]
+    from utils.auth import check_profile_access
+    from utils.logging import get_logger
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.auth import check_profile_access
     from ..utils.logging import get_logger
@@ -17,7 +19,7 @@ except ModuleNotFoundError:  # pragma: no cover
 logger = get_logger(__name__)
 
 
-def _get_dynamodb():
+def _get_dynamodb() -> DynamoDBServiceResource:
     """Return a fresh DynamoDB resource (lazy for tests)."""
     return boto3.resource("dynamodb")
 
@@ -29,25 +31,25 @@ catalogs_table_name = os.environ.get("CATALOGS_TABLE_NAME", "kernelworx-catalogs
 
 
 # Module-level variables intended to be monkeypatched in unit tests
-profiles_table: Any | None = None
-campaigns_table: Any | None = None
-catalogs_table: Any | None = None
+profiles_table: Table | None = None
+campaigns_table: Table | None = None
+catalogs_table: Table | None = None
 
 
-def _get_profiles_table():
+def _get_profiles_table() -> Table:
     # If a test has monkeypatched the module-level `profiles_table`, use it
     if profiles_table is not None:
         return profiles_table
     return _get_dynamodb().Table(profiles_table_name)
 
 
-def _get_campaigns_table():
+def _get_campaigns_table() -> Table:
     if campaigns_table is not None:
         return campaigns_table
     return _get_dynamodb().Table(campaigns_table_name)
 
 
-def _get_catalogs_table():
+def _get_catalogs_table() -> Table:
     if catalogs_table is not None:
         return catalogs_table
     return _get_dynamodb().Table(catalogs_table_name)

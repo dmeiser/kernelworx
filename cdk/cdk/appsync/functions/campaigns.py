@@ -6,14 +6,12 @@ This module contains all AppSync functions related to:
 - Shared campaigns
 """
 
-from pathlib import Path
 from typing import Any
 
 from aws_cdk import aws_appsync as appsync
 from constructs import Construct
 
-# Path to resolvers directory
-RESOLVERS_DIR = Path(__file__).parent.parent.parent / "resolvers"
+from ..api import RESOLVERS_DIR
 
 
 def create_campaign_functions(

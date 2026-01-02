@@ -5,11 +5,13 @@ from typing import Any, Dict, List, cast
 
 import boto3
 from boto3.dynamodb.conditions import Key
+from mypy_boto3_dynamodb import DynamoDBServiceResource
+from mypy_boto3_dynamodb.service_resource import Table
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
-    from utils.auth import check_profile_access  # type: ignore[import-not-found]
-    from utils.logging import get_logger  # type: ignore[import-not-found]
+    from utils.auth import check_profile_access
+    from utils.logging import get_logger
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.auth import check_profile_access
     from ..utils.logging import get_logger
@@ -17,7 +19,7 @@ except ModuleNotFoundError:  # pragma: no cover
 logger = get_logger(__name__)
 
 
-def _get_dynamodb():
+def _get_dynamodb() -> DynamoDBServiceResource:
     return boto3.resource("dynamodb")
 
 
@@ -28,24 +30,24 @@ orders_table_name = os.environ.get("ORDERS_TABLE_NAME", "kernelworx-orders-v2-ue
 
 
 # Module-level variables for test monkeypatching
-profiles_table: Any | None = None
-campaigns_table: Any | None = None
-orders_table: Any | None = None
+profiles_table: Table | None = None
+campaigns_table: Table | None = None
+orders_table: Table | None = None
 
 
-def _get_profiles_table():
+def _get_profiles_table() -> Table:
     if profiles_table is not None:
         return profiles_table
     return _get_dynamodb().Table(profiles_table_name)
 
 
-def _get_campaigns_table():
+def _get_campaigns_table() -> Table:
     if campaigns_table is not None:
         return campaigns_table
     return _get_dynamodb().Table(campaigns_table_name)
 
 
-def _get_orders_table():
+def _get_orders_table() -> Table:
     if orders_table is not None:
         return orders_table
     return _get_dynamodb().Table(orders_table_name)

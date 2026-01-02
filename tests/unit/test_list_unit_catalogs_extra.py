@@ -1,8 +1,5 @@
 from typing import Any
 
-import boto3
-from moto import mock_aws
-
 from src.handlers import list_unit_catalogs as lul
 
 

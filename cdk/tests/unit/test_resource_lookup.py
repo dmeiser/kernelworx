@@ -728,7 +728,7 @@ class TestLookupDynamodbTableEdgeCases:
         assert result is None
 
 
-class TestLookupUserPoolClientEdgeCases:
+class TestLookupUserPoolClientEdgeCasesPrimary:
     """Edge case tests for lookup_user_pool_client function."""
 
     def test_returns_client_with_matching_prefix(self):
@@ -820,7 +820,7 @@ class TestLookupCertificateEdgeCases:
         assert result is None
 
 
-class TestLookupAppsyncApiEdgeCases:
+class TestLookupAppsyncApiEdgeCasesPrimary:
     """Edge case tests for lookup_appsync_api function."""
 
     def test_returns_none_on_not_found_exception(self):
@@ -974,7 +974,7 @@ class TestLookupLambdaFunctionEdgeCases:
         assert result is None
 
 
-class TestLookupRoute53RecordEdgeCases:
+class TestLookupRoute53RecordEdgeCasesPrimary:
     """Edge case tests for lookup_route53_record function."""
 
     def test_returns_none_on_exception(self):
@@ -1050,7 +1050,7 @@ class TestLookupS3BucketPolicyEdgeCases:
                 resource_lookup.lookup_s3_bucket_policy("test-bucket")
 
 
-class TestLookupOaiEdgeCases:
+class TestLookupOaiEdgeCasesPrimary:
     """Edge case tests for lookup_oai function."""
 
     def test_returns_oai_when_found(self):
@@ -1141,7 +1141,7 @@ class TestLookupCertificateMoreEdgeCases:
         assert result is None
 
 
-class TestLookupAppsyncDatasourceEdgeCases:
+class TestLookupAppsyncDatasourceEdgeCasesPrimary:
     """Edge case tests for lookup_appsync_datasource function."""
 
     def test_returns_datasource_when_found(self):

@@ -1,6 +1,5 @@
 """Mutation resolvers for AppSync GraphQL API."""
 
-from pathlib import Path
 from typing import Any
 
 from aws_cdk import aws_appsync as appsync

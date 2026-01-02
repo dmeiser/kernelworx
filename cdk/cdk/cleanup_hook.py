@@ -20,7 +20,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional, cast
 
 import boto3
 
@@ -237,8 +237,8 @@ def _find_certificate_arn(client: Any, domain_name: str) -> str | None:
         paginator = client.get_paginator("list_certificates")
         for page in paginator.paginate(CertificateStatuses=["ISSUED", "PENDING_VALIDATION"]):
             for cert in page.get("CertificateSummaryList", []):
-                cert_arn = cert.get("CertificateArn")
-                cert_domain = cert.get("DomainName")
+                cert_arn = cast(Optional[str], cert.get("CertificateArn"))
+                cert_domain = cast(Optional[str], cert.get("DomainName"))
 
                 # Check main domain and SANs
                 if cert_domain == domain_name:
@@ -1183,7 +1183,7 @@ def generate_import_file(
             print(f"   ⚠️  Could not list stack resources: {e}", file=sys.stderr)
 
     # Resources to import
-    resources_to_import = []
+    resources_to_import: list[dict[str, Any]] = []
 
     # Check DynamoDB tables
     _check_dynamodb_tables(
@@ -1213,7 +1213,7 @@ def generate_import_file(
     # CDK import expects: { "LogicalId": { "IdentifierKey": "PhysicalId" }, ... }
     import_file_path = Path(__file__).parent.parent / ".cdk-import-resources.json"
 
-    cdk_import_mapping = {}
+    cdk_import_mapping: dict[str, dict[str, Any]] = {}
     for resource in resources_to_import:
         logical_id = resource["LogicalResourceId"]
         # Keep the ResourceIdentifier structure (e.g., {"TableName": "..."})

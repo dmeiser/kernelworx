@@ -1,9 +1,4 @@
-import builtins
-from datetime import datetime, timezone
 from types import SimpleNamespace
-from unittest.mock import MagicMock
-
-import pytest
 
 from src.handlers.report_generation import request_campaign_report
 

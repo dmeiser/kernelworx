@@ -13,9 +13,9 @@ if TYPE_CHECKING:
     from aws_cdk import aws_cognito as cognito
 
 
-# Path to resolvers and templates (relative to parent directory since we're in appsync/ subfolder)
-RESOLVERS_DIR = Path(__file__).parent.parent / "resolvers"
-MAPPING_TEMPLATES_DIR = Path(__file__).parent.parent / "mapping-templates"
+# Asset locations: keep JS resolver code and VTL templates under the appsync/ folder
+RESOLVERS_DIR = Path(__file__).parent / "js-resolvers"
+MAPPING_TEMPLATES_DIR = Path(__file__).parent / "mapping-templates"
 
 
 def create_appsync_api(
@@ -132,6 +132,6 @@ def create_appsync_custom_domain(
         record_name=api_domain,
         domain_name=domain_name.attr_app_sync_domain_name,
     )
-    dns_record.node.default_child.apply_removal_policy(RemovalPolicy.RETAIN)  # type: ignore
+    dns_record.node.default_child.apply_removal_policy(RemovalPolicy.RETAIN)
 
     return domain_name, domain_association, dns_record

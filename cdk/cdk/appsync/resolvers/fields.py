@@ -1,6 +1,5 @@
 """Field resolvers for AppSync GraphQL API types."""
 
-from pathlib import Path
 from typing import Any
 
 from aws_cdk import aws_appsync as appsync

@@ -45,7 +45,7 @@ REGION_ABBREVIATIONS = {
 }
 
 
-class CdkStack(Stack):
+class CdkStack(Stack):  # type: ignore[misc]
     """
     Popcorn Sales Manager - Core Infrastructure Stack
 
@@ -363,7 +363,7 @@ class CdkStack(Stack):
         # TTL for invites (automatic expiration)
         cfn_invites_table = self.invites_table.node.default_child
         assert cfn_invites_table is not None
-        cfn_invites_table.time_to_live_specification = (  # type: ignore
+        cfn_invites_table.time_to_live_specification = (
             dynamodb.CfnTable.TimeToLiveSpecificationProperty(
                 attribute_name="expiresAt",
                 enabled=True,
@@ -583,9 +583,6 @@ class CdkStack(Stack):
         # ====================================================================
         # Lambda Functions
         # ====================================================================
-
-        # Path to Lambda source code (parent directory)
-        lambda_src_path = os.path.join(os.path.dirname(__file__), "..", "..")
 
         # Common Lambda environment variables
         lambda_env = {
@@ -917,7 +914,7 @@ class CdkStack(Stack):
                 ],
                 prevent_user_existence_errors=True,
             )
-            self.user_pool_client.node.default_child.apply_removal_policy(RemovalPolicy.RETAIN)  # type: ignore
+            self.user_pool_client.node.default_child.apply_removal_policy(RemovalPolicy.RETAIN)
 
         else:
             # No existing pool - create a new one
@@ -982,7 +979,7 @@ class CdkStack(Stack):
             # Configure user attribute update settings to require verification for email changes
             cfn_user_pool = self.user_pool.node.default_child
             assert cfn_user_pool is not None
-            cfn_user_pool.user_attribute_update_settings = (  # type: ignore
+            cfn_user_pool.user_attribute_update_settings = (
                 cognito.CfnUserPool.UserAttributeUpdateSettingsProperty(
                     attributes_require_verification_before_update=["email"]
                 )
@@ -1163,7 +1160,7 @@ class CdkStack(Stack):
         self.origin_access_identity = cloudfront.OriginAccessIdentity(
             self, "OAI", comment="OAI for Popcorn Sales Manager SPA"
         )
-        self.origin_access_identity.node.default_child.apply_removal_policy(RemovalPolicy.RETAIN)  # type: ignore
+        self.origin_access_identity.node.default_child.apply_removal_policy(RemovalPolicy.RETAIN)
 
         # Grant CloudFront read access to static assets bucket
         self.static_assets_bucket.grant_read(self.origin_access_identity)
@@ -1211,7 +1208,7 @@ class CdkStack(Stack):
             record_name=self.site_domain,
             target=route53.RecordTarget.from_alias(targets.CloudFrontTarget(self.distribution)),
         )
-        self.site_domain_record.node.default_child.apply_removal_policy(RemovalPolicy.RETAIN)  # type: ignore
+        self.site_domain_record.node.default_child.apply_removal_policy(RemovalPolicy.RETAIN)
 
         # Add dependency: UserPoolDomain requires the parent domain A record to exist
         if hasattr(self, "user_pool_domain") and hasattr(self.user_pool_domain, "node"):

@@ -1,8 +1,6 @@
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import MagicMock
-
-import pytest
 
 from src.handlers import profile_sharing
 
@@ -88,7 +86,7 @@ def test_list_my_shares_strips_account_prefix(monkeypatch):
     assert isinstance(res, list)
     assert len(res) == 1
     item = res[0]
-    # ownerAccountId should be stripped of ACCOUNT# prefix
-    assert item["ownerAccountId"] == "acct-1"
+    # ownerAccountId is normalized with ACCOUNT# prefix
+    assert item["ownerAccountId"] == "ACCOUNT#acct-1"
     # profileId should remain prefixed
     assert item["profileId"].startswith("PROFILE#")

@@ -253,7 +253,7 @@ class TestIsUnmanagedCertificate:
         assert result is False
 
 
-class TestDeleteAcmCertificate:
+class TestDeleteAcmCertificatePrimary:
     """Tests for _delete_acm_certificate function."""
 
     def test_deletes_certificate(self):
@@ -427,7 +427,7 @@ class TestDeleteRoute53Record:
         cleanup_hook._delete_route53_record(mock_client, "Z123", record)
 
 
-class TestDeleteAppsyncApi:
+class TestDeleteAppsyncApiPrimary:
     """Tests for delete_appsync_api function."""
 
     @patch("boto3.client")
@@ -460,7 +460,7 @@ class TestDeleteAppsyncApi:
         mock_client.delete_graphql_api.assert_not_called()
 
 
-class TestCleanupOrphanedAppsyncApi:
+class TestCleanupOrphanedAppsyncApiPrimary:
     """Tests for _cleanup_orphaned_appsync_api function."""
 
     @patch("boto3.client")
@@ -516,7 +516,7 @@ class TestCleanupOrphanedAppsyncApi:
         mock_delete.assert_not_called()
 
 
-class TestCleanupOrphanedSmsRole:
+class TestCleanupOrphanedSmsRolePrimary:
     """Tests for _cleanup_orphaned_sms_role function."""
 
     @patch("boto3.client")
@@ -1485,7 +1485,7 @@ class TestGenerateImportFile:
 
         with patch.dict(os.environ, {"AWS_REGION": "us-east-1"}):
             # The function handles exceptions gracefully
-            result = cleanup_hook.generate_import_file("test-stack", "dev", "ue1")
+            cleanup_hook.generate_import_file("test-stack", "dev", "ue1")
 
         # Result could be None or a path depending on whether resources were found
         # The main test is that it doesn't crash
@@ -2167,7 +2167,7 @@ class TestGenerateImportFileEdgeCases:
 
         with patch.dict(os.environ, {"AWS_REGION": "us-east-1"}):
             # Should not raise
-            result = cleanup_hook.generate_import_file("test-stack", "dev", "ue1")
+            cleanup_hook.generate_import_file("test-stack", "dev", "ue1")
 
 
 class TestFindCertificateArnExceptionPaths:

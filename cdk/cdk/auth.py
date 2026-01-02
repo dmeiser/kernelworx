@@ -214,7 +214,7 @@ def _import_existing_user_pool(
         supported_identity_providers=[cognito.UserPoolClientIdentityProvider.COGNITO],
         prevent_user_existence_errors=True,
     )
-    user_pool_client.node.default_child.apply_removal_policy(RemovalPolicy.RETAIN)  # type: ignore
+    user_pool_client.node.default_child.apply_removal_policy(RemovalPolicy.RETAIN)
 
     result["user_pool_sms_role"] = user_pool_sms_role
     result["user_pool"] = user_pool
@@ -270,7 +270,7 @@ def _create_new_user_pool(
     # Configure user attribute update settings
     cfn_user_pool = user_pool.node.default_child
     assert cfn_user_pool is not None
-    cfn_user_pool.user_attribute_update_settings = cognito.CfnUserPool.UserAttributeUpdateSettingsProperty(  # type: ignore
+    cfn_user_pool.user_attribute_update_settings = cognito.CfnUserPool.UserAttributeUpdateSettingsProperty(
         attributes_require_verification_before_update=["email"]
     )
 

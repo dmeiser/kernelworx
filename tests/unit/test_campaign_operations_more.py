@@ -1,5 +1,3 @@
-from types import SimpleNamespace
-
 from src.handlers import campaign_operations as co
 
 

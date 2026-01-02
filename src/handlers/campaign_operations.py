@@ -5,11 +5,15 @@ import uuid
 from typing import Any, Dict, List, Optional
 
 import boto3
+from mypy_boto3_dynamodb import DynamoDBServiceResource
+from mypy_boto3_dynamodb.client import DynamoDBClient
+from mypy_boto3_dynamodb.service_resource import Table
+from mypy_boto3_dynamodb.type_defs import TransactWriteItemsOutputTypeDef
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
-    from utils.auth import check_profile_access  # type: ignore[import-not-found]
-    from utils.logging import get_logger  # type: ignore[import-not-found]
+    from utils.auth import check_profile_access
+    from utils.logging import get_logger
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.auth import check_profile_access
     from ..utils.logging import get_logger
@@ -17,22 +21,22 @@ except ModuleNotFoundError:  # pragma: no cover
 logger = get_logger(__name__)
 
 
-def _get_dynamodb():
+def _get_dynamodb() -> DynamoDBServiceResource:
     return boto3.resource("dynamodb")
 
 
-def _get_dynamodb_client():
+def _get_dynamodb_client() -> DynamoDBClient:
     return boto3.client("dynamodb")
 
 
 # Expose a module-level client proxy so unit tests can patch methods like transact_write_items
 class _DynamoClientProxy:
-    def __init__(self):
+    def __init__(self) -> None:
         self._client = _get_dynamodb_client()
         # Expose the client's exceptions so tests can set exception types
         self.exceptions = self._client.exceptions
 
-    def transact_write_items(self, *args, **kwargs):
+    def transact_write_items(self, *args: Any, **kwargs: Any) -> TransactWriteItemsOutputTypeDef:
         return self._client.transact_write_items(*args, **kwargs)
 
 
@@ -47,31 +51,31 @@ profiles_table_name = os.environ.get("PROFILES_TABLE_NAME", "kernelworx-profiles
 
 
 # Module-level variables for test monkeypatching
-campaigns_table: Any | None = None
-shared_campaigns_table: Any | None = None
-shares_table: Any | None = None
-profiles_table: Any | None = None
+campaigns_table: Table | None = None
+shared_campaigns_table: Table | None = None
+shares_table: Table | None = None
+profiles_table: Table | None = None
 
 
-def _get_campaigns_table():
+def _get_campaigns_table() -> Table:
     if campaigns_table is not None:
         return campaigns_table
     return _get_dynamodb().Table(campaigns_table_name)
 
 
-def _get_shared_campaigns_table():
+def _get_shared_campaigns_table() -> Table:
     if shared_campaigns_table is not None:
         return shared_campaigns_table
     return _get_dynamodb().Table(shared_campaigns_table_name)
 
 
-def _get_shares_table():
+def _get_shares_table() -> Table:
     if shares_table is not None:
         return shares_table
     return _get_dynamodb().Table(shares_table_name)
 
 
-def _get_profiles_table():
+def _get_profiles_table() -> Table:
     if profiles_table is not None:
         return profiles_table
     return _get_dynamodb().Table(profiles_table_name)
@@ -295,7 +299,7 @@ def _handle_transaction_failure(e: Any, transact_items: List[Dict[str, Any]]) ->
     for reason in cancellation_reasons:
         if reason.get("Code") == "ConditionalCheckFailed":
             logger.warning("Share already exists, skipping share creation")
-            dynamodb_client.transact_write_items(TransactItems=transact_items[:1])  # type: ignore[arg-type]
+            dynamodb_client.transact_write_items(TransactItems=transact_items[:1])
             return
     raise e
 
@@ -311,7 +315,7 @@ def _execute_campaign_transaction(
         transact_items.append(_build_share_transact_item(share_item))
 
     try:
-        dynamodb_client.transact_write_items(TransactItems=transact_items)  # type: ignore[arg-type]
+        dynamodb_client.transact_write_items(TransactItems=transact_items)
         logger.info(f"Created campaign {campaign_item['campaignId']} for profile {profile_id}")
         if share_item:
             logger.info(f"Created share with creator {share_item.get('targetAccountId')}")
@@ -420,7 +424,7 @@ def create_campaign(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         raise
 
 
-def _dynamo_value_for_list(value: list) -> Dict[str, Any]:
+def _dynamo_value_for_list(value: list[Any]) -> Dict[str, Any]:
     """Convert list to DynamoDB format."""
     if all(isinstance(item, str) for item in value):
         return {"SS": value}

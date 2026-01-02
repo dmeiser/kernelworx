@@ -10,7 +10,7 @@ class DummyDynamoClient:
 
 def test_create_seller_profile_invalid_unit_number(monkeypatch):
     # Patch boto3.client to avoid real AWS calls
-    monkeypatch.setattr("boto3.client", lambda service: DummyDynamoClient())
+    monkeypatch.setattr(boto3, "client", lambda service: DummyDynamoClient())
 
     event = {"arguments": {"input": {"sellerName": "Joe", "unitNumber": "not-an-int"}}, "identity": {"sub": "acct-1"}}
     result = so.create_seller_profile(event, None)

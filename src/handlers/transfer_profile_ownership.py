@@ -53,8 +53,6 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     if "Item" not in share_response:
         raise ValueError("New owner must have existing access to the profile")
 
-    share = share_response["Item"]
-
     # 3. Transfer ownership by deleting and recreating the profile with new owner
     # Cannot update partition key, so we delete and put
     old_key = {"ownerAccountId": profile["ownerAccountId"], "profileId": db_profile_id}

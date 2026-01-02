@@ -15,32 +15,34 @@ See cdk_stack.py for the actual implementations.
 import os
 import secrets
 from datetime import datetime, timedelta, timezone
-from typing import TYPE_CHECKING, Any, Dict, List
+from typing import TYPE_CHECKING, Any, Dict, List, cast
 
 import boto3
+from mypy_boto3_dynamodb import DynamoDBServiceResource
+from mypy_boto3_dynamodb.type_defs import BatchGetItemOutputServiceResourceTypeDef
 
 if TYPE_CHECKING:
     from mypy_boto3_dynamodb.service_resource import Table
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
-    from utils.auth import is_profile_owner  # type: ignore[import-not-found]
-    from utils.errors import AppError, ErrorCode  # type: ignore[import-not-found]
-    from utils.logging import StructuredLogger, get_correlation_id  # type: ignore[import-not-found]
+    from utils.auth import is_profile_owner
+    from utils.errors import AppError, ErrorCode
+    from utils.logging import StructuredLogger, get_correlation_id
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.auth import is_profile_owner
     from ..utils.errors import AppError, ErrorCode
     from ..utils.logging import StructuredLogger, get_correlation_id
 
 
-def _get_dynamodb():
+def _get_dynamodb() -> DynamoDBServiceResource:
     """Return a fresh boto3 DynamoDB resource (created lazily so moto mocks work in tests)."""
     return boto3.resource("dynamodb", endpoint_url=os.getenv("DYNAMODB_ENDPOINT"))
 
 
 # Expose a module-level proxy for test monkeypatching (tests patch ``profile_sharing.dynamodb.batch_get_item``)
 class _DynamoProxy:
-    def batch_get_item(self, RequestItems: dict) -> dict:
+    def batch_get_item(self, RequestItems: Dict[str, Any]) -> BatchGetItemOutputServiceResourceTypeDef:
         return _get_dynamodb().batch_get_item(RequestItems=RequestItems)
 
 
@@ -91,11 +93,13 @@ def _deduplicate_shares(shares: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any
     return shares_by_profile
 
 
-def _extract_batch_profiles(batch_response: Dict[str, Any], table_name: str) -> List[Dict[str, Any]]:
+def _extract_batch_profiles(
+    batch_response: BatchGetItemOutputServiceResourceTypeDef, table_name: str
+) -> List[Dict[str, Any]]:
     """Extract profiles from a BatchGetItem response."""
     responses = batch_response.get("Responses", {})
     if table_name in responses:
-        return responses.get(table_name, [])
+        return cast(List[Dict[str, Any]], responses.get(table_name, []))
     # Fallback: aggregate all responses across keys (best-effort for test shapes)
     batch_profiles: List[Dict[str, Any]] = []
     for items in responses.values():
@@ -148,10 +152,12 @@ def _fetch_batch_with_retry(
     return []  # Should never reach here due to raise above
 
 
-def _log_unprocessed_keys(batch_response: Dict[str, Any], table_name: str, logger: StructuredLogger) -> None:
+def _log_unprocessed_keys(
+    batch_response: BatchGetItemOutputServiceResourceTypeDef, table_name: str, logger: StructuredLogger
+) -> None:
     """Log any unprocessed keys from BatchGetItem."""
     unprocessed_keys = batch_response.get("UnprocessedKeys", {})
-    unprocessed_table: Dict[str, Any] = unprocessed_keys.get(table_name, {})
+    unprocessed_table: Any = unprocessed_keys.get(table_name, {})
     if not unprocessed_table and isinstance(unprocessed_keys, dict):
         for v in unprocessed_keys.values():
             unprocessed_table = v

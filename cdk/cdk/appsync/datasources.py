@@ -1,6 +1,6 @@
 """AppSync data source creation."""
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from aws_cdk import aws_appsync as appsync
 from aws_cdk import aws_iam as iam

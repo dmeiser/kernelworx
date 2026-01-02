@@ -11,30 +11,33 @@ from io import BytesIO
 from typing import Any, Dict
 
 import boto3
+from mypy_boto3_dynamodb import DynamoDBServiceResource
+from mypy_boto3_dynamodb.service_resource import Table
+from mypy_boto3_s3.client import S3Client
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
-    from utils.auth import check_profile_access  # type: ignore[import-not-found]
-    from utils.errors import AppError, ErrorCode  # type: ignore[import-not-found]
-    from utils.logging import get_logger  # type: ignore[import-not-found]
+    from utils.auth import check_profile_access
+    from utils.errors import AppError, ErrorCode
+    from utils.logging import get_logger
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.auth import check_profile_access
     from ..utils.errors import AppError, ErrorCode
     from ..utils.logging import get_logger
 
 
-def _get_dynamodb():
+def _get_dynamodb() -> DynamoDBServiceResource:
     """Return a fresh boto3 DynamoDB resource (created lazily so tests and moto work)."""
     return boto3.resource("dynamodb", endpoint_url=os.getenv("DYNAMODB_ENDPOINT"))
 
 
 # Module-level proxy that tests can monkeypatch
-s3_client: object | None = None
+s3_client: S3Client | None = None
 
 
-def _get_s3_client():
+def _get_s3_client() -> S3Client:
     """Return the S3 client (module-level override for tests, otherwise a fresh boto3 client)."""
     global s3_client
     if s3_client is not None:
@@ -42,13 +45,13 @@ def _get_s3_client():
     return boto3.client("s3", endpoint_url=os.getenv("S3_ENDPOINT"))
 
 
-def get_campaigns_table() -> Any:
+def get_campaigns_table() -> Table:
     """Get DynamoDB campaigns table instance (multi-table design)."""
     table_name = os.getenv("CAMPAIGNS_TABLE_NAME", "kernelworx-campaigns-v2-ue1-dev")
     return _get_dynamodb().Table(table_name)
 
 
-def get_orders_table() -> Any:
+def get_orders_table() -> Table:
     """Get DynamoDB orders table instance (multi-table design)."""
     table_name = os.getenv("ORDERS_TABLE_NAME", "kernelworx-orders-v2-ue1-dev")
     return _get_dynamodb().Table(table_name)

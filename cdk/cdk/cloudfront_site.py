@@ -46,7 +46,7 @@ def create_cloudfront_distribution(
         "OAI",
         comment="OAI for Popcorn Sales Manager SPA",
     )
-    origin_access_identity.node.default_child.apply_removal_policy(RemovalPolicy.RETAIN)  # type: ignore
+    origin_access_identity.node.default_child.apply_removal_policy(RemovalPolicy.RETAIN)
 
     # Grant CloudFront read access to static assets bucket
     static_assets_bucket.grant_read(origin_access_identity)
@@ -94,7 +94,7 @@ def create_cloudfront_distribution(
         record_name=site_domain,
         target=route53.RecordTarget.from_alias(targets.CloudFrontTarget(distribution)),
     )
-    site_domain_record.node.default_child.apply_removal_policy(RemovalPolicy.RETAIN)  # type: ignore
+    site_domain_record.node.default_child.apply_removal_policy(RemovalPolicy.RETAIN)
 
     return {
         "origin_access_identity": origin_access_identity,
