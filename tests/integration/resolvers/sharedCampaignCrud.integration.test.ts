@@ -10,9 +10,19 @@ import '../setup.ts';
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { ApolloClient, gql } from '@apollo/client';
+import { ApolloClient, gql, HttpLink, InMemoryCache } from '@apollo/client';
 import { createAuthenticatedClient, AuthenticatedClientResult } from '../setup/apolloClient';
 import { deleteTestAccounts } from '../setup/testData';
+
+// Helper to create unauthenticated client
+const createUnauthenticatedClient = () => {
+  return new ApolloClient({
+    link: new HttpLink({
+      uri: process.env.VITE_APPSYNC_ENDPOINT,
+    }),
+    cache: new InMemoryCache(),
+  });
+};
 
 
 // Helper to generate unique test prefix
@@ -153,7 +163,7 @@ const DELETE_PROFILE = gql`
   }
 `;
 
-describe.skip('Shared Campaign CRUD Operations', () => {
+describe('Shared Campaign CRUD Operations', () => {
   let testPrefix: string;
   let ownerClient: ApolloClient<any>;
   let ownerAccountId: string;
@@ -338,6 +348,31 @@ describe.skip('Shared Campaign CRUD Operations', () => {
       // Placeholder for documentation purposes
       expect(true).toBe(true);
     });
+
+    it('should reject creation by unauthenticated user', async () => {
+      const unauthClient = createUnauthenticatedClient();
+
+      await expect(
+        unauthClient.mutate({
+          mutation: CREATE_CAMPAIGN_SHARED_CAMPAIGN,
+          variables: {
+            input: {
+              catalogId,
+              campaignName: 'Unauthorized Campaign',
+              campaignYear: 2025,
+              startDate: '2025-01-01',
+              endDate: '2025-02-28',
+              unitType: 'pack',
+              unitNumber: getUniqueUnitNumber(),
+              city: 'Nowhere',
+              state: 'XX',
+              creatorMessage: 'Should fail',
+              description: 'Unauthenticated attempt',
+            },
+          },
+        })
+      ).rejects.toThrow();
+    });
   });
 
   describe('GetSharedCampaign', () => {
@@ -494,6 +529,22 @@ describe.skip('Shared Campaign CRUD Operations', () => {
       // NOTE: Do NOT delete test accounts - they are shared across test runs
       // await deleteTestAccounts([otherResult.accountId]);
     });
+
+    it('should reject update by unauthenticated user', async () => {
+      const unauthClient = createUnauthenticatedClient();
+
+      await expect(
+        unauthClient.mutate({
+          mutation: UPDATE_CAMPAIGN_SHARED_CAMPAIGN,
+          variables: {
+            input: {
+              sharedCampaignCode,
+              description: 'Unauthorized update attempt',
+            },
+          },
+        })
+      ).rejects.toThrow();
+    });
   });
 
   describe('DeleteSharedCampaign', () => {
@@ -569,6 +620,36 @@ describe.skip('Shared Campaign CRUD Operations', () => {
       // NOTE: Do NOT delete test accounts - they are shared across test runs
       // await deleteTestAccounts([otherResult.accountId]);
       
+      // Cleanup handled by top-level afterAll via createdSharedCampaignCodes tracking
+    });
+
+    it('should reject deletion by unauthenticated user', async () => {
+      // Create a shared campaign - tracked for cleanup
+      const createResult = await createAndTrackSharedCampaign({
+            catalogId,
+            campaignName: 'Spring',
+            campaignYear: 2026,
+            startDate: '2026-03-01',
+            endDate: '2026-04-30',
+            unitType: 'pack',
+            unitNumber: getUniqueUnitNumber(),
+            city: 'Miami',
+            state: 'FL',
+            creatorMessage: 'Protected from unauth delete',
+            description: 'Should not be deletable by unauthenticated user',
+      });
+      const sharedCampaignCode = createResult.data.createSharedCampaign.sharedCampaignCode;
+
+      // Try to delete as unauthenticated user
+      const unauthClient = createUnauthenticatedClient();
+
+      await expect(
+        unauthClient.mutate({
+          mutation: DELETE_CAMPAIGN_SHARED_CAMPAIGN,
+          variables: { sharedCampaignCode },
+        })
+      ).rejects.toThrow();
+
       // Cleanup handled by top-level afterAll via createdSharedCampaignCodes tracking
     });
   });

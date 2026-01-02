@@ -1,9 +1,18 @@
 import '../setup.ts';
 import { describe, test, expect, beforeAll, afterAll, it } from 'vitest';
-import { ApolloClient, NormalizedCacheObject, gql } from '@apollo/client';
+import { ApolloClient, NormalizedCacheObject, gql, HttpLink, InMemoryCache } from '@apollo/client';
 import { createAuthenticatedClient } from '../setup/apolloClient';
 import { deleteTestAccounts, TABLE_NAMES } from '../setup/testData';
 
+// Helper to create unauthenticated client
+const createUnauthenticatedClient = () => {
+  return new ApolloClient({
+    link: new HttpLink({
+      uri: process.env.VITE_APPSYNC_ENDPOINT,
+    }),
+    cache: new InMemoryCache(),
+  });
+};
 
 /**
  * Integration tests for Campaigngn Operations (updateCampaign, deleteCampaign)
@@ -601,6 +610,43 @@ describe('Campaigngn Operations Integration Tests', () => {
       // Cleanup: Owner deletes the campaigngn
       await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId } });
     }, 10000);
+
+    test('unauthenticated user cannot update campaign', async () => {
+      // First create a campaign as owner
+      const createInput = {
+        profileId: testProfileId,
+        catalogId: testCatalogId,
+        campaignName: 'Unauth Update Test',
+        campaignYear: 2025,
+        startDate: new Date().toISOString(),
+        endDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+      };
+
+      const { data: createData } = await ownerClient.mutate({
+        mutation: CREATE_CAMPAIGN,
+        variables: { input: createInput },
+      });
+
+      const campaignId = createData.createCampaign.campaignId;
+
+      // Unauthenticated client tries to update
+      const unauthClient = createUnauthenticatedClient();
+      await expect(
+        unauthClient.mutate({
+          mutation: UPDATE_CAMPAIGN,
+          variables: {
+            input: {
+              campaignId,
+              campaignName: 'Unauth Update Attempt',
+              campaignYear: 2025,
+            },
+          },
+        })
+      ).rejects.toThrow();
+
+      // Cleanup: Owner deletes the campaign
+      await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId } });
+    }, 10000);
   });
 
   describe('deleteCampaign authorization', () => {
@@ -631,6 +677,37 @@ describe('Campaigngn Operations Integration Tests', () => {
       ).rejects.toThrow(/forbidden|not authorized|unauthorized/i);
       
       // Cleanup: Owner deletes the campaigngn
+      await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId } });
+    }, 10000);
+
+    test('unauthenticated user cannot delete campaign', async () => {
+      // First create a campaign as owner
+      const createInput = {
+        profileId: testProfileId,
+        catalogId: testCatalogId,
+        campaignName: 'Unauth Delete Test',
+        campaignYear: 2025,
+        startDate: new Date().toISOString(),
+        endDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+      };
+
+      const { data: createData } = await ownerClient.mutate({
+        mutation: CREATE_CAMPAIGN,
+        variables: { input: createInput },
+      });
+
+      const campaignId = createData.createCampaign.campaignId;
+
+      // Unauthenticated client tries to delete
+      const unauthClient = createUnauthenticatedClient();
+      await expect(
+        unauthClient.mutate({
+          mutation: DELETE_CAMPAIGN,
+          variables: { campaignId },
+        })
+      ).rejects.toThrow();
+
+      // Cleanup: Owner deletes the campaign
       await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId } });
     }, 10000);
   });

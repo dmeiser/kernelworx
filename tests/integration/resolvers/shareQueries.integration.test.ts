@@ -1,9 +1,18 @@
 import '../setup.ts';
 import { describe, test, expect, beforeAll, afterAll } from 'vitest';
-import { ApolloClient, gql, NormalizedCacheObject } from '@apollo/client';
+import { ApolloClient, gql, NormalizedCacheObject, HttpLink, InMemoryCache } from '@apollo/client';
 import { createAuthenticatedClient } from '../setup/apolloClient';
 import { deleteTestAccounts, TABLE_NAMES } from '../setup/testData';
 
+// Helper to create unauthenticated client
+const createUnauthenticatedClient = () => {
+  return new ApolloClient({
+    link: new HttpLink({
+      uri: process.env.VITE_APPSYNC_ENDPOINT,
+    }),
+    cache: new InMemoryCache(),
+  });
+};
 
 /**
  * Integration tests for Share Query Operations (listSharesByProfile, listInvitesByProfile)
@@ -368,6 +377,19 @@ describe('Share Query Operations Integration Tests', () => {
       expect(data.listSharesByProfile).toEqual([]);
     });
 
+    test('Authorization: Unauthenticated user cannot list shares', async () => {
+      // Unauthenticated user should be rejected
+      const unauthClient = createUnauthenticatedClient();
+      
+      await expect(
+        unauthClient.query({
+          query: LIST_SHARES_BY_PROFILE,
+          variables: { profileId: testProfileId },
+          fetchPolicy: 'network-only',
+        })
+      ).rejects.toThrow();
+    });
+
     test('Input Validation: Returns empty array for non-existent profileId', async () => {
       const { data }: any = await ownerClient.query({
         query: LIST_SHARES_BY_PROFILE,
@@ -537,6 +559,19 @@ describe('Share Query Operations Integration Tests', () => {
       });
 
       expect(data.listInvitesByProfile).toEqual([]);
+    });
+
+    test('Authorization: Unauthenticated user cannot list invites', async () => {
+      // Unauthenticated user should be rejected
+      const unauthClient = createUnauthenticatedClient();
+      
+      await expect(
+        unauthClient.query({
+          query: LIST_INVITES_BY_PROFILE,
+          variables: { profileId: testProfileId },
+          fetchPolicy: 'network-only',
+        })
+      ).rejects.toThrow();
     });
 
     test('Input Validation: Returns empty array for non-existent profileId', async () => {

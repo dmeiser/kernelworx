@@ -1,9 +1,18 @@
 import '../setup.ts';
 import { describe, test, expect, beforeAll, afterAll } from 'vitest';
-import { gql } from '@apollo/client';
+import { gql, ApolloClient, HttpLink, InMemoryCache } from '@apollo/client';
 import { createAuthenticatedClient, AuthenticatedClientResult } from '../setup/apolloClient';
 import { deleteTestAccounts } from '../setup/testData';
 
+// Helper to create unauthenticated client
+const createUnauthenticatedClient = () => {
+  return new ApolloClient({
+    link: new HttpLink({
+      uri: process.env.VITE_APPSYNC_ENDPOINT,
+    }),
+    cache: new InMemoryCache(),
+  });
+};
 
 /**
  * Integration tests for requestCampaignReport mutation (Lambda resolver)
@@ -469,9 +478,88 @@ describe('requestCampaignReport Integration Tests', () => {
       ).rejects.toThrow();
     });
 
-    // Note: Testing unauthorized user requires creating a 4th test user
-    // which is beyond the scope of this test suite. The authorization logic
-    // is tested through the check_profile_access function in the Lambda handler.
+    test('should reject unauthenticated user requesting report', async () => {
+      // Unauthenticated user should be rejected
+      const unauthClient = createUnauthenticatedClient();
+      
+      await expect(
+        unauthClient.mutate({
+          mutation: REQUEST_CAMPAIGN_REPORT,
+          variables: {
+            input: {
+              campaignId: testCampaignId,
+            },
+          },
+        })
+      ).rejects.toThrow();
+    });
+
+    test('should reject non-shared user requesting report for unshared campaign', async () => {
+      // Create a new profile and campaign that is NOT shared with contributor
+      const unsharedProfileResponse = await ownerClient.mutate({
+        mutation: CREATE_SELLER_PROFILE,
+        variables: {
+          input: {
+            sellerName: 'Unshared Report Test Profile',
+          },
+        },
+      });
+      const unsharedProfileId = unsharedProfileResponse.data.createSellerProfile.profileId;
+
+      const unsharedCatalogResponse = await ownerClient.mutate({
+        mutation: CREATE_CATALOG,
+        variables: {
+          input: {
+            catalogName: 'Unshared Report Catalog',
+            isPublic: false,
+            products: [
+              { productName: 'Product', price: 10.0, sortOrder: 1 },
+            ],
+          },
+        },
+      });
+      const unsharedCatalogId = unsharedCatalogResponse.data.createCatalog.catalogId;
+
+      const unsharedCampaignResponse = await ownerClient.mutate({
+        mutation: CREATE_CAMPAIGN,
+        variables: {
+          input: {
+            profileId: unsharedProfileId,
+            campaignName: 'Unshared Report Campaign',
+            campaignYear: 2025,
+            catalogId: unsharedCatalogId,
+            startDate: '2025-01-01T00:00:00.000Z',
+          },
+        },
+      });
+      const unsharedCampaignId = unsharedCampaignResponse.data.createCampaign.campaignId;
+
+      // Contributor tries to request report for unshared campaign - should fail
+      await expect(
+        contributorClient.mutate({
+          mutation: REQUEST_CAMPAIGN_REPORT,
+          variables: {
+            input: {
+              campaignId: unsharedCampaignId,
+            },
+          },
+        })
+      ).rejects.toThrow();
+
+      // Cleanup
+      await ownerClient.mutate({
+        mutation: DELETE_CAMPAIGN,
+        variables: { campaignId: unsharedCampaignId },
+      });
+      await ownerClient.mutate({
+        mutation: DELETE_CATALOG,
+        variables: { catalogId: unsharedCatalogId },
+      });
+      await ownerClient.mutate({
+        mutation: DELETE_SELLER_PROFILE,
+        variables: { profileId: unsharedProfileId },
+      });
+    }, 30000);
   });
 
   describe('Report Content Verification', () => {

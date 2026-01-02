@@ -10,10 +10,19 @@ import '../setup.ts';
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { ApolloClient, gql } from '@apollo/client';
+import { ApolloClient, gql, HttpLink, InMemoryCache } from '@apollo/client';
 import { createAuthenticatedClient, AuthenticatedClientResult } from '../setup/apolloClient';
 import { deleteTestAccounts } from '../setup/testData';
 
+// Helper to create unauthenticated client
+const createUnauthenticatedClient = () => {
+  return new ApolloClient({
+    link: new HttpLink({
+      uri: process.env.VITE_APPSYNC_ENDPOINT,
+    }),
+    cache: new InMemoryCache(),
+  });
+};
 
 // Helper to generate unique test prefix
 const getTestPrefix = () => `TEST-${Date.now()}`;
@@ -532,6 +541,48 @@ describe('createCampaign Integration Tests', () => {
               profileId: testProfileId,
               campaignName: `${getTestPrefix()}-Campaigngn`,
             campaignYear: 2025,
+              startDate: '2025-01-01T00:00:00Z',
+              catalogId: testCatalogId,
+            },
+          },
+        })
+      ).rejects.toThrow();
+
+      // Cleanup (no campaign was created)
+      await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId: testCatalogId } });
+      await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId: testProfileId } });
+    });
+
+    it('unauthenticated user cannot create campaigns', async () => {
+      // Arrange: Owner creates profile and catalog
+      const { data: profileData } = await ownerClient.mutate({
+        mutation: CREATE_PROFILE,
+        variables: { input: { sellerName: `${getTestPrefix()}-Profile` } },
+      });
+      const testProfileId = profileData.createSellerProfile.profileId;
+
+      const { data: catalogData } = await ownerClient.mutate({
+        mutation: CREATE_CATALOG,
+        variables: {
+          input: {
+            catalogName: `${getTestPrefix()}-Catalog`,
+            isPublic: true,
+            products: [{ productName: 'Product 1', price: 10.0, sortOrder: 1 }],
+          },
+        },
+      });
+      const testCatalogId = catalogData.createCatalog.catalogId;
+
+      // Act & Assert: Unauthenticated user tries to create campaign
+      const unauthClient = createUnauthenticatedClient();
+      await expect(
+        unauthClient.mutate({
+          mutation: CREATE_CAMPAIGN,
+          variables: {
+            input: {
+              profileId: testProfileId,
+              campaignName: `${getTestPrefix()}-Campaigngn`,
+              campaignYear: 2025,
               startDate: '2025-01-01T00:00:00Z',
               catalogId: testCatalogId,
             },

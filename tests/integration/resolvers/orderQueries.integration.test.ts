@@ -1,8 +1,18 @@
 import '../setup.ts';
 import { describe, test, expect, beforeAll, afterAll } from 'vitest';
-import { ApolloClient, NormalizedCacheObject, gql } from '@apollo/client';
+import { ApolloClient, NormalizedCacheObject, gql, HttpLink, InMemoryCache } from '@apollo/client';
 import { createAuthenticatedClient } from '../setup/apolloClient';
 import { deleteTestAccounts } from '../setup/testData';
+
+// Helper to create unauthenticated client
+const createUnauthenticatedClient = () => {
+  return new ApolloClient({
+    link: new HttpLink({
+      uri: process.env.VITE_APPSYNC_ENDPOINT,
+    }),
+    cache: new InMemoryCache(),
+  });
+};
 
 
 /**
@@ -651,6 +661,21 @@ describe('Order Query Operations Integration Tests', () => {
       expect(data.getOrder).toBeNull();
     });
 
+    test('Authorization: Unauthenticated user cannot get order', async () => {
+      // Test: unauthenticated user tries to access order
+      // Expected: Returns error (no auth token)
+      
+      const unauthClient = createUnauthenticatedClient();
+      
+      await expect(
+        unauthClient.query({
+          query: GET_ORDER,
+          variables: { orderId: testOrderId1 },
+          fetchPolicy: 'network-only',
+        })
+      ).rejects.toThrow();
+    });
+
     test('Input Validation: Returns null for non-existent orderId', async () => {
       const { data }: any = await ownerClient.query({
         query: GET_ORDER,
@@ -750,6 +775,21 @@ describe('Order Query Operations Integration Tests', () => {
       expect(data.listOrdersByCampaign).toEqual([]);
     });
 
+    test('Authorization: Unauthenticated user cannot list orders by campaign', async () => {
+      // Test: unauthenticated user tries to list orders
+      // Expected: Returns error (no auth token)
+      
+      const unauthClient = createUnauthenticatedClient();
+      
+      await expect(
+        unauthClient.query({
+          query: LIST_ORDERS_BY_CAMPAIGN,
+          variables: { campaignId: testCampaignId },
+          fetchPolicy: 'network-only',
+        })
+      ).rejects.toThrow();
+    });
+
     test('Input Validation: Returns empty array for non-existent campaignId', async () => {
       const { data }: any = await ownerClient.query({
         query: LIST_ORDERS_BY_CAMPAIGN,
@@ -847,6 +887,21 @@ describe('Order Query Operations Integration Tests', () => {
       });
       
       expect(data.listOrdersByProfile).toEqual([]);
+    });
+
+    test('Authorization: Unauthenticated user cannot list orders by profile', async () => {
+      // Test: unauthenticated user tries to list orders
+      // Expected: Returns error (no auth token)
+      
+      const unauthClient = createUnauthenticatedClient();
+      
+      await expect(
+        unauthClient.query({
+          query: LIST_ORDERS_BY_PROFILE,
+          variables: { profileId: testProfileId },
+          fetchPolicy: 'network-only',
+        })
+      ).rejects.toThrow();
     });
 
     test('Input Validation: Returns empty array for non-existent profileId', async () => {

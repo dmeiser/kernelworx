@@ -15,10 +15,19 @@ import '../setup.ts';
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { ApolloClient, gql } from '@apollo/client';
+import { ApolloClient, gql, HttpLink, InMemoryCache } from '@apollo/client';
 import { createAuthenticatedClient, AuthenticatedClientResult } from '../setup/apolloClient';
 import { waitForGSIConsistency, deleteTestAccounts } from '../setup/testData';
 
+// Helper to create unauthenticated client
+const createUnauthenticatedClient = () => {
+  return new ApolloClient({
+    link: new HttpLink({
+      uri: process.env.VITE_APPSYNC_ENDPOINT,
+    }),
+    cache: new InMemoryCache(),
+  });
+};
 
 // GraphQL Queries
 const GET_CATALOG = gql`
@@ -337,6 +346,19 @@ describe('Catalog Query Resolvers Integration Tests', () => {
         // Non-owner accessing private catalog should get null
         expect(data.getCatalog).toBeNull(); // Expected behavior (FIXED)
       });
+
+      it('should reject unauthenticated user accessing catalog', async () => {
+        // Unauthenticated user should be rejected when trying to access any catalog
+        const unauthClient = createUnauthenticatedClient();
+        
+        await expect(
+          unauthClient.query({
+            query: GET_CATALOG,
+            variables: { catalogId: publicCatalogId },
+            fetchPolicy: 'network-only',
+          })
+        ).rejects.toThrow();
+      });
     });
 
     describe('Input Validation', () => {
@@ -412,6 +434,18 @@ describe('Catalog Query Resolvers Integration Tests', () => {
 
         expect(data.listPublicCatalogs).toBeInstanceOf(Array);
         expect(data.listPublicCatalogs.length).toBeGreaterThan(0);
+      });
+
+      it('should reject unauthenticated user listing public catalogs', async () => {
+        // Unauthenticated user should be rejected even for public catalogs
+        const unauthClient = createUnauthenticatedClient();
+        
+        await expect(
+          unauthClient.query({
+            query: LIST_PUBLIC_CATALOGS,
+            fetchPolicy: 'network-only',
+          })
+        ).rejects.toThrow();
       });
     });
 
@@ -506,6 +540,18 @@ describe('Catalog Query Resolvers Integration Tests', () => {
         // expect(catalogIds).toContain(contributorPublicCatalogId);
         // expect(catalogIds).toContain(contributorPrivateCatalogId);
       });
+
+      it('should reject unauthenticated user listing their catalogs', async () => {
+        // Unauthenticated user should be rejected
+        const unauthClient = createUnauthenticatedClient();
+        
+        await expect(
+          unauthClient.query({
+            query: LIST_MY_CATALOGS,
+            fetchPolicy: 'network-only',
+          })
+        ).rejects.toThrow();
+      });
     });
 
     describe('Data Integrity', () => {
@@ -525,6 +571,27 @@ describe('Catalog Query Resolvers Integration Tests', () => {
         // Should NOT include contributor's catalogs (this part likely works)
         expect(catalogIds).not.toContain(contributorPublicCatalogId);
         expect(catalogIds).not.toContain(contributorPrivateCatalogId);
+      });
+
+      it('should NOT include other users private catalogs (cross-account leakage check)', async () => {
+        // This test verifies that listMyCatalogs for owner does not expose contributor's private catalogs
+        const { data: ownerData }: any = await ownerClient.query({
+          query: LIST_MY_CATALOGS,
+          fetchPolicy: 'network-only',
+        });
+        const ownerCatalogIds = ownerData.listMyCatalogs.map((c: any) => c.catalogId);
+        
+        // Owner should NOT see contributor's private catalog
+        expect(ownerCatalogIds).not.toContain(contributorPrivateCatalogId);
+        
+        // Similarly, contributor should NOT see owner's private catalog
+        const { data: contribData }: any = await contributorClient.query({
+          query: LIST_MY_CATALOGS,
+          fetchPolicy: 'network-only',
+        });
+        const contribCatalogIds = contribData.listMyCatalogs.map((c: any) => c.catalogId);
+        
+        expect(contribCatalogIds).not.toContain(privateCatalogId);
       });
 
       it('should include both public and private owned catalogs', async () => {
