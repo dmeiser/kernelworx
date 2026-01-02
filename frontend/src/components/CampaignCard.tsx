@@ -43,9 +43,7 @@ export const CampaignCard: React.FC<CampaignCardProps> = ({
   const navigate = useNavigate();
 
   const handleViewCampaign = () => {
-    navigate(
-      `/scouts/${toUrlId(profileId)}/campaigns/${toUrlId(campaignId)}`,
-    );
+    navigate(`/scouts/${toUrlId(profileId)}/campaigns/${toUrlId(campaignId)}`);
   };
 
   const isActive = !endDate || new Date(endDate) >= new Date();

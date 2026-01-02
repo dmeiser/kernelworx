@@ -1,5 +1,6 @@
-from src.handlers import campaign_operations as co
 from types import SimpleNamespace
+
+from src.handlers import campaign_operations as co
 
 
 def test_dynamo_client_proxy_delegation(monkeypatch):

@@ -1,7 +1,9 @@
-from src.handlers import list_unit_catalogs as lul
 from typing import Any
+
 import boto3
 from moto import mock_aws
+
+from src.handlers import list_unit_catalogs as lul
 
 
 def test_get_profiles_table_uses_monkeypatch(monkeypatch: Any) -> None:

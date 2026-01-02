@@ -63,14 +63,17 @@ interface Catalog {
 }
 
 export const CampaignSettingsPage: React.FC = () => {
-  const { profileId: encodedProfileId, campaignId: encodedCampaignId } = useParams<{
-    profileId: string;
-    campaignId: string;
-  }>();
+  const { profileId: encodedProfileId, campaignId: encodedCampaignId } =
+    useParams<{
+      profileId: string;
+      campaignId: string;
+    }>();
   const profileId = encodedProfileId
     ? decodeURIComponent(encodedProfileId)
     : "";
-  const campaignId = encodedCampaignId ? decodeURIComponent(encodedCampaignId) : "";
+  const campaignId = encodedCampaignId
+    ? decodeURIComponent(encodedCampaignId)
+    : "";
   const dbCampaignId = ensureCampaignId(campaignId);
   const navigate = useNavigate();
   const [campaignName, setCampaignName] = useState("");
@@ -134,7 +137,8 @@ export const CampaignSettingsPage: React.FC = () => {
   // Check if unit-related fields have changed (campaignName, catalogId)
   const hasUnitRelatedChanges =
     campaign?.sharedCampaignCode &&
-    (campaignName !== campaign.campaignName || catalogId !== campaign.catalogId);
+    (campaignName !== campaign.campaignName ||
+      catalogId !== campaign.catalogId);
 
   const handleSaveClick = () => {
     if (hasUnitRelatedChanges) {
@@ -198,9 +202,7 @@ export const CampaignSettingsPage: React.FC = () => {
         <Button
           variant="text"
           color="primary"
-          onClick={() =>
-            navigate(`/scouts/${toUrlId(profileId)}/manage`)
-          }
+          onClick={() => navigate(`/scouts/${toUrlId(profileId)}/manage`)}
         >
           Manage Scout
         </Button>
@@ -216,9 +218,9 @@ export const CampaignSettingsPage: React.FC = () => {
         {campaign?.sharedCampaignCode && (
           <Alert severity="warning" icon={<WarningIcon />} sx={{ mb: 3 }}>
             <AlertTitle>Shared Campaign</AlertTitle>
-            This campaign was created from a shared campaign link. Changing the catalog,
-            campaign name, or unit information may cause this campaign to no longer
-            appear correctly in campaign reports for your unit.
+            This campaign was created from a shared campaign link. Changing the
+            catalog, campaign name, or unit information may cause this campaign
+            to no longer appear correctly in campaign reports for your unit.
           </Alert>
         )}
 
@@ -286,8 +288,8 @@ export const CampaignSettingsPage: React.FC = () => {
           Danger Zone
         </Typography>
         <Typography variant="body2" color="text.secondary" paragraph>
-          Deleting this campaign will permanently remove all orders and data. This
-          action cannot be undone.
+          Deleting this campaign will permanently remove all orders and data.
+          This action cannot be undone.
         </Typography>
         <Button
           variant="outlined"
@@ -307,8 +309,9 @@ export const CampaignSettingsPage: React.FC = () => {
         <DialogTitle>Delete Campaign?</DialogTitle>
         <DialogContent>
           <Typography>
-            Are you sure you want to delete "{campaign?.campaignName}"? All orders
-            and data will be permanently deleted. This action cannot be undone.
+            Are you sure you want to delete "{campaign?.campaignName}"? All
+            orders and data will be permanently deleted. This action cannot be
+            undone.
           </Typography>
         </DialogContent>
         <DialogActions>
@@ -336,8 +339,8 @@ export const CampaignSettingsPage: React.FC = () => {
             created from a campaign link.
           </Alert>
           <Typography>
-            These changes may cause this campaign to no longer appear correctly in
-            unit reports for your unit. Are you sure you want to continue?
+            These changes may cause this campaign to no longer appear correctly
+            in unit reports for your unit. Are you sure you want to continue?
           </Typography>
         </DialogContent>
         <DialogActions>

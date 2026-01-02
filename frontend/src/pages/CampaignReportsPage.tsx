@@ -31,10 +31,7 @@ import {
   Download as DownloadIcon,
   Assessment as ReportIcon,
 } from "@mui/icons-material";
-import {
-  GET_UNIT_REPORT,
-  LIST_MY_SHARED_CAMPAIGNS,
-} from "../lib/graphql";
+import { GET_UNIT_REPORT, LIST_MY_SHARED_CAMPAIGNS } from "../lib/graphql";
 import * as XLSX from "xlsx";
 
 interface SharedCampaign {
@@ -91,17 +88,18 @@ interface UnitReport {
 type ReportView = "summary" | "detailed" | "unit";
 
 export const CampaignReportsPage: React.FC = () => {
-  const [selectedSharedCampaignCode, setSelectedSharedCampaignCode] = useState<string>("");
+  const [selectedSharedCampaignCode, setSelectedSharedCampaignCode] =
+    useState<string>("");
   const [reportView, setReportView] = useState<ReportView>("unit");
 
   // Fetch user's shared campaigns
-  const { data: sharedCampaignsData, loading: sharedCampaignsLoading } = useQuery<{
-    listMySharedCampaigns: SharedCampaign[];
-  }>(LIST_MY_SHARED_CAMPAIGNS);
+  const { data: sharedCampaignsData, loading: sharedCampaignsLoading } =
+    useQuery<{
+      listMySharedCampaigns: SharedCampaign[];
+    }>(LIST_MY_SHARED_CAMPAIGNS);
 
-  const campaigns = sharedCampaignsData?.listMySharedCampaigns?.filter(
-    (p) => p.isActive
-  ) || [];
+  const campaigns =
+    sharedCampaignsData?.listMySharedCampaigns?.filter((p) => p.isActive) || [];
 
   // Auto-select campaign if only 1 exists
   React.useEffect(() => {
@@ -111,7 +109,7 @@ export const CampaignReportsPage: React.FC = () => {
   }, [campaigns, selectedSharedCampaignCode]);
 
   const selectedCampaign = campaigns.find(
-    (c) => c.sharedCampaignCode === selectedSharedCampaignCode
+    (c) => c.sharedCampaignCode === selectedSharedCampaignCode,
   );
 
   const canGenerateReport = !!selectedCampaign;
@@ -162,7 +160,12 @@ export const CampaignReportsPage: React.FC = () => {
     const productList = Array.from(allProducts).sort();
 
     // Build header row
-    const headerRow = ["Scout Name", ...productList, "Total Items", "Total Sales"];
+    const headerRow = [
+      "Scout Name",
+      ...productList,
+      "Total Items",
+      "Total Sales",
+    ];
 
     // Build data rows
     const dataRows = report.sellers.map((seller) => {
@@ -171,7 +174,8 @@ export const CampaignReportsPage: React.FC = () => {
       let sellerTotalItems = 0;
       seller.orders.forEach((order) => {
         order.lineItems.forEach((item) => {
-          productTotals[item.productName] = (productTotals[item.productName] || 0) + item.quantity;
+          productTotals[item.productName] =
+            (productTotals[item.productName] || 0) + item.quantity;
           sellerTotalItems += item.quantity;
         });
       });
@@ -190,7 +194,8 @@ export const CampaignReportsPage: React.FC = () => {
     report.sellers.forEach((seller) => {
       seller.orders.forEach((order) => {
         order.lineItems.forEach((item) => {
-          grandTotals[item.productName] = (grandTotals[item.productName] || 0) + item.quantity;
+          grandTotals[item.productName] =
+            (grandTotals[item.productName] || 0) + item.quantity;
           grandTotalItems += item.quantity;
         });
       });
@@ -223,16 +228,16 @@ export const CampaignReportsPage: React.FC = () => {
       seller.orders.map((order) => ({
         ...order,
         sellerName: seller.sellerName,
-      }))
+      })),
     );
 
     // Get all unique products
     const allProducts = Array.from(
       new Set(
         allOrders.flatMap((order) =>
-          order.lineItems.map((item) => item.productName)
-        )
-      )
+          order.lineItems.map((item) => item.productName),
+        ),
+      ),
     ).sort();
 
     // Build header row
@@ -313,7 +318,9 @@ export const CampaignReportsPage: React.FC = () => {
                   select
                   label="Shared Campaign"
                   value={selectedSharedCampaignCode}
-                  onChange={(e) => setSelectedSharedCampaignCode(e.target.value)}
+                  onChange={(e) =>
+                    setSelectedSharedCampaignCode(e.target.value)
+                  }
                   fullWidth
                   helperText="Select a shared campaign to view its sales report"
                 >
@@ -345,7 +352,8 @@ export const CampaignReportsPage: React.FC = () => {
                         {selectedCampaign.state}
                       </Typography>
                       <Typography variant="body2">
-                        <strong>Campaign:</strong> {selectedCampaign.campaignName}{" "}
+                        <strong>Campaign:</strong>{" "}
+                        {selectedCampaign.campaignName}{" "}
                         {selectedCampaign.campaignYear}
                       </Typography>
                       <Typography variant="body2">
@@ -442,7 +450,14 @@ export const CampaignReportsPage: React.FC = () => {
             {/* Seller Report View - Products by Seller */}
             {reportView === "summary" && report.sellers.length > 0 && (
               <Paper sx={{ p: { xs: 1.5, sm: 3 } }}>
-                <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 2 }}>
+                <Box
+                  sx={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    mb: 2,
+                  }}
+                >
                   <Typography variant="h6">Seller Report</Typography>
                   <Button
                     size="small"
@@ -593,10 +608,15 @@ export const CampaignReportsPage: React.FC = () => {
             {/* Order Details View - All Orders Table (like individual campaign report) */}
             {reportView === "detailed" && report.sellers.length > 0 && (
               <Paper sx={{ p: { xs: 1.5, sm: 3 } }}>
-                <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 2 }}>
-                  <Typography variant="h6">
-                    All Orders
-                  </Typography>
+                <Box
+                  sx={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    mb: 2,
+                  }}
+                >
+                  <Typography variant="h6">All Orders</Typography>
                   <Button
                     size="small"
                     variant="outlined"
@@ -612,16 +632,16 @@ export const CampaignReportsPage: React.FC = () => {
                     seller.orders.map((order) => ({
                       ...order,
                       sellerName: seller.sellerName,
-                    }))
+                    })),
                   );
 
                   // Get all unique products
                   const allProducts = Array.from(
                     new Set(
                       allOrders.flatMap((order) =>
-                        order.lineItems.map((item) => item.productName)
-                      )
-                    )
+                        order.lineItems.map((item) => item.productName),
+                      ),
+                    ),
                   ).sort();
 
                   return (
@@ -653,14 +673,20 @@ export const CampaignReportsPage: React.FC = () => {
                               {allProducts.map((product) => {
                                 const totalQuantity = order.lineItems
                                   .filter((li) => li.productName === product)
-                                  .reduce((sum, item) => sum + item.quantity, 0);
+                                  .reduce(
+                                    (sum, item) => sum + item.quantity,
+                                    0,
+                                  );
                                 return (
                                   <TableCell key={product} align="center">
                                     {totalQuantity > 0 ? totalQuantity : "-"}
                                   </TableCell>
                                 );
                               })}
-                              <TableCell align="right" sx={{ fontWeight: "bold" }}>
+                              <TableCell
+                                align="right"
+                                sx={{ fontWeight: "bold" }}
+                              >
                                 {formatCurrency(order.totalAmount)}
                               </TableCell>
                             </TableRow>
@@ -676,7 +702,8 @@ export const CampaignReportsPage: React.FC = () => {
                               allOrders.forEach((order) => {
                                 order.lineItems.forEach((item) => {
                                   productTotals[item.productName] =
-                                    (productTotals[item.productName] || 0) + item.quantity;
+                                    (productTotals[item.productName] || 0) +
+                                    item.quantity;
                                 });
                               });
 
@@ -684,11 +711,15 @@ export const CampaignReportsPage: React.FC = () => {
                                 <>
                                   {allProducts.map((product) => (
                                     <TableCell key={product} align="center">
-                                      <strong>{productTotals[product] || 0}</strong>
+                                      <strong>
+                                        {productTotals[product] || 0}
+                                      </strong>
                                     </TableCell>
                                   ))}
                                   <TableCell align="right">
-                                    <strong>{formatCurrency(report.totalSales)}</strong>
+                                    <strong>
+                                      {formatCurrency(report.totalSales)}
+                                    </strong>
                                   </TableCell>
                                 </>
                               );
@@ -711,14 +742,26 @@ export const CampaignReportsPage: React.FC = () => {
                   {(() => {
                     // Calculate total items across all sellers
                     const totalItems = report.sellers.reduce((sum, seller) => {
-                      const sellerItems = seller.orders.reduce((orderSum, order) => {
-                        return orderSum + order.lineItems.reduce((itemSum, item) => itemSum + item.quantity, 0);
-                      }, 0);
+                      const sellerItems = seller.orders.reduce(
+                        (orderSum, order) => {
+                          return (
+                            orderSum +
+                            order.lineItems.reduce(
+                              (itemSum, item) => itemSum + item.quantity,
+                              0,
+                            )
+                          );
+                        },
+                        0,
+                      );
                       return sum + sellerItems;
                     }, 0);
 
                     return (
-                      <Stack direction={{ xs: "column", sm: "row" }} spacing={3}>
+                      <Stack
+                        direction={{ xs: "column", sm: "row" }}
+                        spacing={3}
+                      >
                         <Box flex={1}>
                           <Typography variant="body2" color="text.secondary">
                             Total Sellers
@@ -731,7 +774,9 @@ export const CampaignReportsPage: React.FC = () => {
                           <Typography variant="body2" color="text.secondary">
                             Total Orders
                           </Typography>
-                          <Typography variant="h4">{report.totalOrders}</Typography>
+                          <Typography variant="h4">
+                            {report.totalOrders}
+                          </Typography>
                         </Box>
                         <Box flex={1}>
                           <Typography variant="body2" color="text.secondary">
@@ -778,9 +823,18 @@ export const CampaignReportsPage: React.FC = () => {
                       <TableBody>
                         {report.sellers.slice(0, 5).map((seller, idx) => {
                           // Calculate total items for this seller
-                          const sellerItems = seller.orders.reduce((orderSum, order) => {
-                            return orderSum + order.lineItems.reduce((itemSum, item) => itemSum + item.quantity, 0);
-                          }, 0);
+                          const sellerItems = seller.orders.reduce(
+                            (orderSum, order) => {
+                              return (
+                                orderSum +
+                                order.lineItems.reduce(
+                                  (itemSum, item) => itemSum + item.quantity,
+                                  0,
+                                )
+                              );
+                            },
+                            0,
+                          );
 
                           return (
                             <TableRow key={seller.profileId}>
@@ -791,12 +845,11 @@ export const CampaignReportsPage: React.FC = () => {
                                 {formatCurrency(seller.totalSales)}
                               </TableCell>
                               <TableCell align="right">
-                                {
-                                  (
+                                {(
                                   (seller.totalSales / report.totalSales) *
                                   100
-                                ).toFixed(1)
-                                }%
+                                ).toFixed(1)}
+                                %
                               </TableCell>
                             </TableRow>
                           );

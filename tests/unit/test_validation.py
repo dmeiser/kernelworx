@@ -1,6 +1,7 @@
 """Tests for validation utilities."""
 
 import pytest
+
 from src.utils.errors import AppError, ErrorCode
 from src.utils.validation import (
     normalize_phone,
@@ -438,6 +439,21 @@ class TestValidateOrderUpdate:
 
         assert result is not None
         assert result["errorCode"] == "INVALID_INPUT"
+
+    def test_validate_order_update_valid_address(self) -> None:
+        """Test that valid address returns None."""
+        updates = {
+            "customerAddress": {
+                "street": "123 Main St",
+                "city": "Anytown",
+                "state": "CA",
+                "zip": "12345",
+            }
+        }
+
+        result = validate_order_update(updates)
+
+        assert result is None
 
     def test_validate_order_update_no_updates(self) -> None:
         """Test that empty updates dict returns None."""

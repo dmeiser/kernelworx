@@ -32,6 +32,7 @@ except ModuleNotFoundError:  # pragma: no cover
     from ..utils.errors import AppError, ErrorCode
     from ..utils.logging import StructuredLogger, get_correlation_id
 
+
 def _get_dynamodb():
     """Return a fresh boto3 DynamoDB resource (created lazily so moto mocks work in tests)."""
     return boto3.resource("dynamodb", endpoint_url=os.getenv("DYNAMODB_ENDPOINT"))
@@ -68,6 +69,130 @@ def get_profiles_table() -> "Table":
 def generate_invite_code() -> str:
     """Generate random 10-character alphanumeric invite code."""
     return secrets.token_urlsafe(8)[:10].upper().replace("-", "X").replace("_", "Y")
+
+
+def _deduplicate_shares(shares: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    """Deduplicate shares by profileId and extract key fields."""
+    shares_by_profile: Dict[str, Dict[str, Any]] = {}
+    for share in shares:
+        profile_id_val = share.get("profileId")
+        owner_account_id_val = share.get("ownerAccountId")
+        if not (profile_id_val and owner_account_id_val):
+            continue
+        if not (isinstance(profile_id_val, str) and isinstance(owner_account_id_val, str)):
+            continue
+        if profile_id_val in shares_by_profile:
+            continue
+        shares_by_profile[profile_id_val] = {
+            "profileId": profile_id_val,
+            "ownerAccountId": owner_account_id_val,
+            "permissions": share.get("permissions", []),
+        }
+    return shares_by_profile
+
+
+def _extract_batch_profiles(batch_response: Dict[str, Any], table_name: str) -> List[Dict[str, Any]]:
+    """Extract profiles from a BatchGetItem response."""
+    responses = batch_response.get("Responses", {})
+    if table_name in responses:
+        return responses.get(table_name, [])
+    # Fallback: aggregate all responses across keys (best-effort for test shapes)
+    batch_profiles: List[Dict[str, Any]] = []
+    for items in responses.values():
+        batch_profiles.extend(items)
+    return batch_profiles
+
+
+def _batch_get_profiles(
+    profile_keys: List[Dict[str, str]],
+    profiles_table: "Table",
+    logger: StructuredLogger,
+) -> List[Dict[str, Any]]:
+    """Batch get profiles with retry logic, processing in batches of 100."""
+    all_profiles: List[Dict[str, Any]] = []
+    for i in range(0, len(profile_keys), 100):  # pragma: no branch
+        batch_keys = profile_keys[i : i + 100]
+        batch_profiles = _fetch_batch_with_retry(batch_keys, profiles_table, logger)
+        all_profiles.extend(batch_profiles)
+    return all_profiles
+
+
+def _fetch_batch_with_retry(
+    batch_keys: List[Dict[str, str]],
+    profiles_table: "Table",
+    logger: StructuredLogger,
+    retries: int = 3,
+) -> List[Dict[str, Any]]:
+    """Fetch a single batch of profiles with retry logic."""
+    for attempt in range(retries):
+        try:
+            batch_response = dynamodb.batch_get_item(
+                RequestItems={
+                    profiles_table.name: {
+                        "Keys": batch_keys,
+                        "ConsistentRead": True,
+                    }
+                }
+            )
+            batch_profiles = _extract_batch_profiles(batch_response, profiles_table.name)
+            _log_unprocessed_keys(batch_response, profiles_table.name, logger)
+            return batch_profiles
+        except AppError:
+            raise
+        except Exception as e:
+            if attempt < retries - 1:
+                logger.warning("BatchGetItem failed, retrying", attempt=attempt + 1, error=str(e))
+                continue
+            logger.error("BatchGetItem failed after retries", error=str(e))
+            raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to list shared profiles")
+    return []  # Should never reach here due to raise above
+
+
+def _log_unprocessed_keys(batch_response: Dict[str, Any], table_name: str, logger: StructuredLogger) -> None:
+    """Log any unprocessed keys from BatchGetItem."""
+    unprocessed_keys = batch_response.get("UnprocessedKeys", {})
+    unprocessed_table: Dict[str, Any] = unprocessed_keys.get(table_name, {})
+    if not unprocessed_table and isinstance(unprocessed_keys, dict):
+        for v in unprocessed_keys.values():
+            unprocessed_table = v
+            break
+    if unprocessed_table:
+        unprocessed_key_list = unprocessed_table.get("Keys", [])
+        if unprocessed_key_list:
+            logger.warning("Unprocessed keys in batch", count=len(unprocessed_key_list))
+
+
+def _build_shared_profile_result(
+    profile: Dict[str, Any],
+    shares_by_profile: Dict[str, Dict[str, Any]],
+    caller_account_id_with_prefix: str,
+) -> Dict[str, Any] | None:
+    """Build a single shared profile result item."""
+    profile_id_str = profile.get("profileId")
+    if not isinstance(profile_id_str, str):
+        return None
+    share = shares_by_profile.get(profile_id_str)
+    if not share:
+        return None
+    owner_account_id_raw = profile.get("ownerAccountId", "")
+    if not isinstance(owner_account_id_raw, str):
+        owner_account_id_raw = ""
+    owner_account_id = (
+        owner_account_id_raw if owner_account_id_raw.startswith("ACCOUNT#") else f"ACCOUNT#{owner_account_id_raw}"
+    )
+    permissions = share.get("permissions", [])
+    permissions_list = list(permissions) if isinstance(permissions, set) else permissions
+    return {
+        "profileId": profile_id_str,
+        "ownerAccountId": owner_account_id,
+        "sellerName": profile.get("sellerName"),
+        "unitType": profile.get("unitType"),
+        "unitNumber": profile.get("unitNumber"),
+        "createdAt": profile.get("createdAt"),
+        "updatedAt": profile.get("updatedAt"),
+        "isOwner": profile.get("ownerAccountId") == caller_account_id_with_prefix,
+        "permissions": permissions_list,
+    }
 
 
 def list_my_shares(event: Dict[str, Any], context: Any) -> List[Dict[str, Any]]:
@@ -112,92 +237,16 @@ def list_my_shares(event: Dict[str, Any], context: Any) -> List[Dict[str, Any]]:
             return []
 
         # Deduplicate by profileId (in case of duplicate shares)
-        shares_by_profile: Dict[str, Dict[str, Any]] = {}
-        for share in shares:
-            profile_id_val = share.get("profileId")
-            owner_account_id_val = share.get("ownerAccountId")
-            if (
-                profile_id_val
-                and owner_account_id_val
-                and isinstance(profile_id_val, str)
-                and isinstance(owner_account_id_val, str)
-                and profile_id_val not in shares_by_profile
-            ):
-                shares_by_profile[profile_id_val] = {
-                    "profileId": profile_id_val,
-                    "ownerAccountId": owner_account_id_val,
-                    "permissions": share.get("permissions", []),
-                }
+        shares_by_profile = _deduplicate_shares(shares)
 
         logger.info("Found shares", count=len(shares_by_profile))
 
         # Step 2: BatchGetItem to get full profile data
-        # DynamoDB BatchGetItem supports up to 100 keys
         profiles_table = get_profiles_table()
         profile_keys = [
             {"ownerAccountId": s["ownerAccountId"], "profileId": s["profileId"]} for s in shares_by_profile.values()
         ]
-
-        # Process in batches of 100
-        all_profiles: List[Dict[str, Any]] = []
-        for i in range(0, len(profile_keys), 100):  # pragma: no branch
-            batch_keys = profile_keys[i : i + 100]
-
-            # Use batch_get_item with retry logic
-            retries = 3
-            for attempt in range(retries):
-                try:
-                    # Use module-level dynamodb proxy so unit tests can monkeypatch batch_get_item
-                    batch_response = dynamodb.batch_get_item(
-                        RequestItems={
-                            profiles_table.name: {
-                                "Keys": batch_keys,
-                                "ConsistentRead": True,
-                            }
-                        }
-                    )
-                    # Responses may be keyed by the actual table name or by a dummy name provided by tests.
-                    responses = batch_response.get("Responses", {})
-                    if profiles_table.name in responses:
-                        batch_profiles = responses.get(profiles_table.name, [])
-                    else:
-                        # Fallback: aggregate all responses across keys (best-effort for test shapes)
-                        batch_profiles = []
-                        for items in responses.values():
-                            batch_profiles.extend(items)
-
-                    all_profiles.extend(batch_profiles)
-
-                    # Handle unprocessed keys (unlikely but possible)
-                    unprocessed_keys = batch_response.get("UnprocessedKeys", {})
-                    unprocessed_table: Dict[str, Any] = unprocessed_keys.get(profiles_table.name, {})
-                    # If the mock uses a different key, pick any keys present
-                    if not unprocessed_table and isinstance(unprocessed_keys, dict):
-                        for v in unprocessed_keys.values():
-                            unprocessed_table = v
-                            break
-                    if unprocessed_table:
-                        unprocessed_key_list = unprocessed_table.get("Keys", [])
-                        if unprocessed_key_list:
-                            logger.warning(
-                                "Unprocessed keys in batch",
-                                count=len(unprocessed_key_list),
-                            )
-                    break  # Success, exit retry loop
-                except AppError:
-                    # Explicitly allow AppError to bubble up unchanged (tests assert this behavior)
-                    raise
-                except Exception as e:
-                    if attempt < retries - 1:
-                        logger.warning(
-                            "BatchGetItem failed, retrying",
-                            attempt=attempt + 1,
-                            error=str(e),
-                        )
-                        continue
-                    logger.error("BatchGetItem failed after retries", error=str(e))
-                    # Wrap generic exceptions in AppError with a consistent message expected by callers/tests
-                    raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to list shared profiles")
+        all_profiles = _batch_get_profiles(profile_keys, profiles_table, logger)
 
         logger.info("Retrieved profiles", count=len(all_profiles))
 
@@ -205,34 +254,9 @@ def list_my_shares(event: Dict[str, Any], context: Any) -> List[Dict[str, Any]]:
         caller_account_id_with_prefix = f"ACCOUNT#{caller_account_id}"
         result: List[Dict[str, Any]] = []
         for profile in all_profiles:  # pragma: no branch
-            profile_id_str = profile.get("profileId")
-            if not isinstance(profile_id_str, str):
-                continue
-            share = shares_by_profile.get(profile_id_str)  # type: ignore[assignment]
-            if share:
-                owner_account_id_raw = profile.get("ownerAccountId", "")
-                if not isinstance(owner_account_id_raw, str):
-                    owner_account_id_raw = ""
-                # Keep ACCOUNT# prefix per normalization rules (add if missing)
-                owner_account_id = (
-                    owner_account_id_raw if owner_account_id_raw.startswith("ACCOUNT#") else f"ACCOUNT#{owner_account_id_raw}"
-                )
-                # Convert permissions from set (DynamoDB SS type) to list for JSON serialization
-                permissions = share.get("permissions", [])
-                permissions_list = list(permissions) if isinstance(permissions, set) else permissions
-                result.append(
-                    {
-                        "profileId": profile_id_str,  # Keep PROFILE# prefix
-                        "ownerAccountId": owner_account_id,  # Keep ACCOUNT# prefix per normalization rules
-                        "sellerName": profile.get("sellerName"),
-                        "unitType": profile.get("unitType"),
-                        "unitNumber": profile.get("unitNumber"),
-                        "createdAt": profile.get("createdAt"),
-                        "updatedAt": profile.get("updatedAt"),
-                        "isOwner": profile.get("ownerAccountId") == caller_account_id_with_prefix,
-                        "permissions": permissions_list,
-                    }
-                )
+            profile_result = _build_shared_profile_result(profile, shares_by_profile, caller_account_id_with_prefix)
+            if profile_result:
+                result.append(profile_result)
 
         logger.info("Returning shared profiles", count=len(result))
         return result

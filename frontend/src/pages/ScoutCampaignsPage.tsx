@@ -73,10 +73,13 @@ export const ScoutCampaignsPage: React.FC = () => {
     loading: campaignsLoading,
     error: campaignsError,
     refetch: refetchCampaigns,
-  } = useQuery<{ listCampaignsByProfile: Campaign[] }>(LIST_CAMPAIGNS_BY_PROFILE, {
-    variables: { profileId: dbProfileId },
-    skip: !dbProfileId,
-  });
+  } = useQuery<{ listCampaignsByProfile: Campaign[] }>(
+    LIST_CAMPAIGNS_BY_PROFILE,
+    {
+      variables: { profileId: dbProfileId },
+      skip: !dbProfileId,
+    },
+  );
 
   // Create campaign mutation
   const [createCampaign] = useMutation(CREATE_CAMPAIGN, {

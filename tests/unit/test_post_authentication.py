@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import boto3
 import pytest
+
 from src.handlers.post_authentication import lambda_handler
 
 

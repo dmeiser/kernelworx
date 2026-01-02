@@ -1,5 +1,6 @@
-from src.handlers import campaign_reporting as cr
 from types import SimpleNamespace
+
+from src.handlers import campaign_reporting as cr
 
 
 def test_build_unit_campaign_key():

@@ -55,7 +55,9 @@ interface Order {
 
 export const ReportsPage: React.FC = () => {
   const { campaignId: encodedCampaignId } = useParams<{ campaignId: string }>();
-  const campaignId = encodedCampaignId ? decodeURIComponent(encodedCampaignId) : "";
+  const campaignId = encodedCampaignId
+    ? decodeURIComponent(encodedCampaignId)
+    : "";
   const dbCampaignId = ensureCampaignId(campaignId);
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("md"));

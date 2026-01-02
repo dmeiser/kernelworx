@@ -16,7 +16,11 @@ class DummyTable:
 
 
 def make_event_create_invite(profile_id, permissions, caller_sub="acct-1"):
-    return {"arguments": {"profileId": profile_id, "permissions": permissions}, "identity": {"sub": caller_sub}, "requestId": "req-1"}
+    return {
+        "arguments": {"profileId": profile_id, "permissions": permissions},
+        "identity": {"sub": caller_sub},
+        "requestId": "req-1",
+    }
 
 
 def test_create_profile_invite_prefixing(monkeypatch):
@@ -41,13 +45,21 @@ def test_create_profile_invite_prefixing(monkeypatch):
 
 def test_list_my_shares_strips_account_prefix(monkeypatch):
     # Prepare shares GSI response
-    shares_response = {"Items": [{"profileId": "PROFILE#p1", "ownerAccountId": "ACCOUNT#acct-1", "permissions": ["READ"]}]}
+    shares_response = {
+        "Items": [{"profileId": "PROFILE#p1", "ownerAccountId": "ACCOUNT#acct-1", "permissions": ["READ"]}]
+    }
     dummy_shares_table = MagicMock()
     dummy_shares_table.query.return_value = shares_response
     monkeypatch.setattr("src.handlers.profile_sharing.get_shares_table", lambda: dummy_shares_table)
 
     # Prepare profiles batch response
-    profile_item = {"profileId": "PROFILE#p1", "ownerAccountId": "ACCOUNT#acct-1", "sellerName": "Sam", "createdAt": datetime.now(timezone.utc).isoformat(), "updatedAt": datetime.now(timezone.utc).isoformat()}
+    profile_item = {
+        "profileId": "PROFILE#p1",
+        "ownerAccountId": "ACCOUNT#acct-1",
+        "sellerName": "Sam",
+        "createdAt": datetime.now(timezone.utc).isoformat(),
+        "updatedAt": datetime.now(timezone.utc).isoformat(),
+    }
 
     # Patch dynamodb.batch_get_item via monkeypatch on boto3.resource().batch_get_item not used here, instead monkeypatch directly
     dummy_profiles_table = MagicMock()
@@ -58,11 +70,16 @@ def test_list_my_shares_strips_account_prefix(monkeypatch):
 
     # Patch dynamodb.batch_get_item function in module's dynamodb resource
     def fake_batch_get_item(RequestItems):
-        return {dummy_profiles_table.name: {"Responses": {dummy_profiles_table.name: [profile_item]}}}  # not real shape, but not used directly
+        return {
+            dummy_profiles_table.name: {"Responses": {dummy_profiles_table.name: [profile_item]}}
+        }  # not real shape, but not used directly
 
     # Instead of patching DynamoDB internals, monkeypatch the loop that calls batch_get_item by overriding the function body
     # Simpler: patch profile_sharing.dynamodb.batch_get_item to return a structure with Responses
-    monkeypatch.setattr("src.handlers.profile_sharing.dynamodb.batch_get_item", lambda RequestItems: {"Responses": {dummy_profiles_table.name: [profile_item]}})
+    monkeypatch.setattr(
+        "src.handlers.profile_sharing.dynamodb.batch_get_item",
+        lambda RequestItems: {"Responses": {dummy_profiles_table.name: [profile_item]}},
+    )
 
     # Call list_my_shares
     event = {"identity": {"sub": "acct-1"}}

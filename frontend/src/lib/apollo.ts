@@ -52,7 +52,13 @@ const authLink = setContext(getAuthContext);
 /**
  * Error handler used by the ErrorLink (extracted for testability)
  */
-export const handleApolloError = ({ error, operation }: { error: any; operation: any }) => {
+export const handleApolloError = ({
+  error,
+  operation,
+}: {
+  error: any;
+  operation: any;
+}) => {
   if (CombinedGraphQLErrors.is(error)) {
     error.errors.forEach((err: any) => {
       const { message, locations, path, extensions } = err;

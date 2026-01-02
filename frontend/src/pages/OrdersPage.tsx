@@ -38,7 +38,12 @@ import {
   DELETE_ORDER,
   GET_PROFILE,
 } from "../lib/graphql";
-import { ensureProfileId, ensureCampaignId, ensureOrderId, toUrlId } from "../lib/ids";
+import {
+  ensureProfileId,
+  ensureCampaignId,
+  ensureOrderId,
+  toUrlId,
+} from "../lib/ids";
 
 interface LineItem {
   productId: string;
@@ -66,14 +71,17 @@ interface ProfilePermissions {
 }
 
 export const OrdersPage: React.FC = () => {
-  const { profileId: encodedProfileId, campaignId: encodedCampaignId } = useParams<{
-    profileId: string;
-    campaignId: string;
-  }>();
+  const { profileId: encodedProfileId, campaignId: encodedCampaignId } =
+    useParams<{
+      profileId: string;
+      campaignId: string;
+    }>();
   const profileId = encodedProfileId
     ? decodeURIComponent(encodedProfileId)
     : "";
-  const campaignId = encodedCampaignId ? decodeURIComponent(encodedCampaignId) : "";
+  const campaignId = encodedCampaignId
+    ? decodeURIComponent(encodedCampaignId)
+    : "";
   const dbProfileId = ensureProfileId(profileId);
   const dbCampaignId = ensureCampaignId(campaignId);
   const navigate = useNavigate();

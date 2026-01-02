@@ -18,6 +18,7 @@ dev = [
     "pytest>=9.0.1",
     "pytest-cov>=7.0.0",
     "types-openpyxl>=3.1.5.20250919",
+    "radon>=6.0.1",
 ]
 
 [tool.ruff]
@@ -64,3 +65,20 @@ exclude_lines = [
     "@abstractmethod",
 ]
 precision = 2
+
+[tool.radon]
+# Cyclomatic complexity thresholds:
+# A (1-5): Low - simple block ✓ REQUIRED
+# B (6-10): Low - well-structured block  
+# C (11-20): Moderate - slightly complex block
+# D (21-30): More than moderate - more complex block
+# E (31-40): High - complex block, alarming
+# F (41+): Very high - error-prone, unstable block
+#
+# POLICY: All functions must be Grade A (complexity <= 5)
+# Run: uv run radon cc src/ cdk/cdk/ -a -s --total-average
+# Check for violations: uv run radon cc src/ cdk/cdk/ -a -nb (shows B or worse)
+# CI check: uv run radon cc src/ cdk/cdk/ --total-average -nb --json | jq 'to_entries | map(select(.value | length > 0)) | length' (should be 0)
+cc_min = "A"
+show_complexity = true
+average = true

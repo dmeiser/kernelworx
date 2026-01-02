@@ -34,6 +34,51 @@ def get_accounts_table() -> Any:
     return _get_dynamodb().Table(table_name)
 
 
+# Fields that can be updated directly (no transformation needed)
+SIMPLE_UPDATE_FIELDS = ["givenName", "familyName", "city", "state", "unitType"]
+
+
+def _validate_unit_number(value: Any) -> int | None:
+    """Validate and convert unitNumber to int, or return None."""
+    if not value:
+        return None
+    try:
+        return int(value)
+    except (ValueError, TypeError):
+        raise AppError(ErrorCode.INVALID_INPUT, "unitNumber must be a valid integer")
+
+
+def _build_update_expressions(
+    input_data: Dict[str, Any],
+) -> tuple[list[str], dict[str, str], dict[str, Any]]:
+    """Build DynamoDB update expressions from input data."""
+    update_expressions: list[str] = []
+    expression_attribute_names: dict[str, str] = {}
+    expression_attribute_values: dict[str, Any] = {}
+
+    # Handle simple fields
+    for field in SIMPLE_UPDATE_FIELDS:
+        if input_data.get(field) is not None:
+            update_expressions.append(f"#{field} = :{field}")
+            expression_attribute_names[f"#{field}"] = field
+            expression_attribute_values[f":{field}"] = input_data[field]
+
+    # Handle unitNumber specially (needs validation/conversion)
+    if "unitNumber" in input_data:
+        unit_number = _validate_unit_number(input_data["unitNumber"])
+        if unit_number is not None:
+            update_expressions.append("#unitNumber = :unitNumber")
+            expression_attribute_names["#unitNumber"] = "unitNumber"
+            expression_attribute_values[":unitNumber"] = unit_number
+
+    # Always update updatedAt
+    update_expressions.append("#updatedAt = :updatedAt")
+    expression_attribute_names["#updatedAt"] = "updatedAt"
+    expression_attribute_values[":updatedAt"] = datetime.now(timezone.utc).isoformat()
+
+    return update_expressions, expression_attribute_names, expression_attribute_values
+
+
 def update_my_account(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
     Update the authenticated user's account metadata in DynamoDB.
@@ -53,80 +98,19 @@ def update_my_account(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
     logger.info("update_my_account handler invoked")
 
-    # Get caller's accountId from Cognito claims (AppSync identity)
     account_id = event["identity"]["sub"]
     logger.info(f"Updating account for: {account_id}")
 
-    # Extract input
     input_data = event.get("arguments", {}).get("input", {})
-    given_name = input_data.get("givenName")
-    family_name = input_data.get("familyName")
-    city = input_data.get("city")
-    state = input_data.get("state")
-    unit_type = input_data.get("unitType")
-    unit_number = input_data.get("unitNumber")
+    update_expressions, expression_attribute_names, expression_attribute_values = _build_update_expressions(input_data)
 
-    # Build DynamoDB update expression
-    update_expressions = []
-    expression_attribute_names = {}
-    expression_attribute_values = {}
-
-    if given_name is not None:
-        update_expressions.append("#givenName = :givenName")
-        expression_attribute_names["#givenName"] = "givenName"
-        expression_attribute_values[":givenName"] = given_name
-
-    if family_name is not None:
-        update_expressions.append("#familyName = :familyName")
-        expression_attribute_names["#familyName"] = "familyName"
-        expression_attribute_values[":familyName"] = family_name
-
-    if city is not None:
-        update_expressions.append("#city = :city")
-        expression_attribute_names["#city"] = "city"
-        expression_attribute_values[":city"] = city
-
-    if state is not None:
-        update_expressions.append("#state = :state")
-        expression_attribute_names["#state"] = "state"
-        expression_attribute_values[":state"] = state
-
-    if unit_type is not None:
-        update_expressions.append("#unitType = :unitType")
-        expression_attribute_names["#unitType"] = "unitType"
-        expression_attribute_values[":unitType"] = unit_type
-
-    if unit_number is not None:
-        # Convert to int if provided and not empty
-        if unit_number:
-            try:
-                unit_number = int(unit_number)
-            except (ValueError, TypeError):
-                raise AppError(
-                    ErrorCode.INVALID_INPUT,
-                    "unitNumber must be a valid integer",
-                )
-        else:
-            unit_number = None  # Don't store empty strings
-
-        if unit_number is not None:
-            update_expressions.append("#unitNumber = :unitNumber")
-            expression_attribute_names["#unitNumber"] = "unitNumber"
-            expression_attribute_values[":unitNumber"] = unit_number
-
-    # Always update updatedAt
-    update_expressions.append("#updatedAt = :updatedAt")
-    expression_attribute_names["#updatedAt"] = "updatedAt"
-    expression_attribute_values[":updatedAt"] = datetime.now(timezone.utc).isoformat()
-
-    # If no user-provided attributes, return error
-    if len(update_expressions) == 1:  # Only updatedAt
+    # If no user-provided attributes, return error (only updatedAt was added)
+    if len(update_expressions) == 1:
         raise AppError(
             ErrorCode.INVALID_INPUT,
             "At least one field must be provided (givenName, familyName, city, state, unitType, or unitNumber)",
         )
 
-    # Update DynamoDB account record (multi-table design: accountId is the only key)
     account_id_key = f"ACCOUNT#{account_id}"
     table = get_accounts_table()
 
@@ -136,15 +120,14 @@ def update_my_account(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             UpdateExpression="SET " + ", ".join(update_expressions),
             ExpressionAttributeNames=expression_attribute_names,
             ExpressionAttributeValues=expression_attribute_values,
-            ConditionExpression="attribute_exists(accountId)",  # Ensure account exists
+            ConditionExpression="attribute_exists(accountId)",
             ReturnValues="ALL_NEW",
         )
 
         updated_item = response["Attributes"]
         logger.info(f"Updated account: {json.dumps(updated_item, default=str)}")
 
-        # Return Account object
-        account = {
+        return {
             "accountId": updated_item.get("accountId"),
             "email": updated_item.get("email"),
             "givenName": updated_item.get("givenName"),
@@ -153,8 +136,6 @@ def update_my_account(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             "createdAt": updated_item.get("createdAt"),
             "updatedAt": updated_item.get("updatedAt"),
         }
-
-        return account
 
     except ClientError as e:
         if e.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":

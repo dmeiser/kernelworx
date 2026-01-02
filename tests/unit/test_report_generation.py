@@ -12,6 +12,7 @@ from typing import Any, Dict
 import boto3
 import openpyxl
 import pytest
+
 from src.handlers.report_generation import request_campaign_report
 
 
@@ -176,10 +177,11 @@ class TestRequestCampaignReport:
     ) -> None:
         """Test that contributor with READ permission can generate report."""
         # Create share with READ permission (now in dedicated shares table)
+        # targetAccountId must have ACCOUNT# prefix to match auth.py lookup
         shares_table.put_item(
             Item={
                 "profileId": sample_profile_id,
-                "targetAccountId": another_account_id,
+                "targetAccountId": f"ACCOUNT#{another_account_id}",
                 "permissions": ["READ"],
                 "grantedAt": datetime.now(timezone.utc).isoformat(),
             }

@@ -176,7 +176,6 @@ export const CatalogsPage: React.FC = () => {
   const publicCatalogs = publicData?.listPublicCatalogs || [];
   const myPrivateCatalogs = myData?.listMyCatalogs || [];
 
-
   // Combine private catalogs with public catalogs I own, excluding deleted catalogs
   const myCatalogs = [
     ...myPrivateCatalogs.filter((c) => c.isDeleted !== true),

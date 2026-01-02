@@ -24,6 +24,7 @@ except ModuleNotFoundError:  # pragma: no cover
     from ..utils.errors import AppError, ErrorCode
     from ..utils.logging import get_logger
 
+
 def _get_dynamodb():
     """Return a fresh boto3 DynamoDB resource (created lazily so tests and moto work)."""
     return boto3.resource("dynamodb", endpoint_url=os.getenv("DYNAMODB_ENDPOINT"))
@@ -209,16 +210,9 @@ def _format_address(address: Dict[str, Any] | None) -> str:
     return ", ".join(parts)
 
 
-def _generate_csv_report(campaign: Dict[str, Any], orders: list[Dict[str, Any]]) -> bytes:
-    """Generate CSV report with product columns."""
-    import csv
-    from io import StringIO
-
-    output = StringIO()
-    writer = csv.writer(output)
-
-    # Get all unique products
-    all_products = sorted(
+def _get_unique_products(orders: list[Dict[str, Any]]) -> list[str]:
+    """Get sorted list of unique product names from orders."""
+    return sorted(
         set(
             item.get("productName", "")
             for order in orders
@@ -227,33 +221,77 @@ def _generate_csv_report(campaign: Dict[str, Any], orders: list[Dict[str, Any]])
         )
     )
 
-    # Headers: Name, Phone, Address, Product 1, Product 2, ..., Total
+
+def _get_product_quantities(order: Dict[str, Any]) -> dict[str, int]:
+    """Get product quantities for an order, summing duplicates."""
+    quantities: dict[str, int] = {}
+    for item in order.get("lineItems", []):
+        product_name = item.get("productName", "")
+        quantity = item.get("quantity", 0)
+        quantities[product_name] = quantities.get(product_name, 0) + quantity
+    return quantities
+
+
+def _generate_csv_report(campaign: Dict[str, Any], orders: list[Dict[str, Any]]) -> bytes:
+    """Generate CSV report with product columns."""
+    import csv
+    from io import StringIO
+
+    output = StringIO()
+    writer = csv.writer(output)
+
+    all_products = _get_unique_products(orders)
     headers = ["Name", "Phone", "Address"] + all_products + ["Total"]
     writer.writerow(headers)
 
-    # Orders
     for order in orders:
         row = [
             order.get("customerName", ""),
             order.get("customerPhone", ""),
             _format_address(order.get("customerAddress", {})),
         ]
-
-        # Add product quantities (sum duplicates)
-        line_items_by_product: dict[str, int] = {}
-        for item in order.get("lineItems", []):
-            product_name = item.get("productName", "")
-            quantity = item.get("quantity", 0)
-            line_items_by_product[product_name] = line_items_by_product.get(product_name, 0) + quantity
-
+        quantities = _get_product_quantities(order)
         for product in all_products:
-            row.append(line_items_by_product.get(product, ""))
-
-        # Add total
+            row.append(quantities.get(product, ""))
         row.append(order.get("totalAmount", 0))
         writer.writerow(row)
 
     return output.getvalue().encode("utf-8")
+
+
+def _write_excel_headers(ws: Any, headers: list[str]) -> None:
+    """Write styled headers to Excel worksheet."""
+    header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+    header_font = Font(bold=True, color="FFFFFF")
+    for col, header in enumerate(headers, start=1):
+        cell = ws.cell(row=1, column=col, value=header)
+        cell.fill = header_fill
+        cell.font = header_font
+
+
+def _write_excel_order_row(
+    ws: Any, row_idx: int, order: Dict[str, Any], all_products: list[str], headers: list[str]
+) -> None:
+    """Write a single order row to Excel worksheet."""
+    ws.cell(row=row_idx, column=1, value=order.get("customerName", ""))
+    ws.cell(row=row_idx, column=2, value=order.get("customerPhone", ""))
+    ws.cell(row=row_idx, column=3, value=_format_address(order.get("customerAddress", {})))
+
+    quantities = _get_product_quantities(order)
+    for col_idx, product in enumerate(all_products, start=4):
+        ws.cell(row=row_idx, column=col_idx, value=quantities.get(product, ""))
+    ws.cell(row=row_idx, column=len(headers), value=float(order.get("totalAmount", 0)))
+
+
+def _autosize_excel_columns(ws: Any) -> None:
+    """Auto-size columns in Excel worksheet."""
+    for column in ws.columns:
+        first_cell = column[0]
+        column_letter = getattr(first_cell, "column_letter", None)
+        if column_letter is None:  # pragma: no cover
+            continue  # pragma: no cover
+        max_length = max((len(str(cell.value)) for cell in column if cell.value), default=0)
+        ws.column_dimensions[column_letter].width = min(max_length + 2, 50)
 
 
 def _generate_excel_report(campaign: Dict[str, Any], orders: list[Dict[str, Any]]) -> bytes:
@@ -263,64 +301,14 @@ def _generate_excel_report(campaign: Dict[str, Any], orders: list[Dict[str, Any]
     assert ws is not None, "Workbook must have an active worksheet"
     ws.title = "Orders"
 
-    # Header styling
-    header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
-    header_font = Font(bold=True, color="FFFFFF")
-
-    # Get all unique products
-    all_products = sorted(
-        set(
-            item.get("productName", "")
-            for order in orders
-            for item in order.get("lineItems", [])
-            if item.get("productName")
-        )
-    )
-
-    # Headers: Name, Phone, Address, Product 1, Product 2, ..., Total
+    all_products = _get_unique_products(orders)
     headers = ["Name", "Phone", "Address"] + all_products + ["Total"]
-    for col, header in enumerate(headers, start=1):
-        cell = ws.cell(row=1, column=col, value=header)
-        cell.fill = header_fill
-        cell.font = header_font
 
-    # Orders data
+    _write_excel_headers(ws, headers)
     for row_idx, order in enumerate(orders, start=2):
-        ws.cell(row=row_idx, column=1, value=order.get("customerName", ""))
-        ws.cell(row=row_idx, column=2, value=order.get("customerPhone", ""))
-        ws.cell(row=row_idx, column=3, value=_format_address(order.get("customerAddress", {})))
+        _write_excel_order_row(ws, row_idx, order, all_products, headers)
+    _autosize_excel_columns(ws)
 
-        # Add product quantities (sum duplicates)
-        line_items_by_product: dict[str, int] = {}
-        for item in order.get("lineItems", []):
-            product_name = item.get("productName", "")
-            quantity = item.get("quantity", 0)
-            line_items_by_product[product_name] = line_items_by_product.get(product_name, 0) + quantity
-
-        for col_idx, product in enumerate(all_products, start=4):
-            ws.cell(row=row_idx, column=col_idx, value=line_items_by_product.get(product, ""))
-
-        # Add total
-        ws.cell(row=row_idx, column=len(headers), value=float(order.get("totalAmount", 0)))
-
-    # Auto-size columns
-    for column in ws.columns:
-        max_length = 0
-        first_cell = column[0]
-        # Get column letter safely (MergedCell doesn't have column_letter)
-        column_letter = getattr(first_cell, "column_letter", None)
-        if column_letter is None:  # pragma: no cover
-            continue  # pragma: no cover
-        for cell in column:
-            try:
-                if len(str(cell.value)) > max_length:
-                    max_length = len(str(cell.value))
-            except Exception:  # pragma: no cover
-                pass
-        adjusted_width = min(max_length + 2, 50)
-        ws.column_dimensions[column_letter].width = adjusted_width
-
-    # Save to BytesIO
     buffer = BytesIO()
     wb.save(buffer)
     buffer.seek(0)

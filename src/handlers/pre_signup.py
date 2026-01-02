@@ -27,6 +27,58 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 
+def _auto_confirm_event(event: Dict[str, Any]) -> Dict[str, Any]:
+    """Auto-confirm and auto-verify email for new federated sign-ups."""
+    event["response"]["autoConfirmUser"] = True
+    event["response"]["autoVerifyEmail"] = True
+    return event
+
+
+def _link_federated_identity(
+    cognito: Any, user_pool_id: str, existing_username: str, username: str
+) -> None:
+    """Link federated identity to existing user."""
+    if "_" not in username:
+        logger.error(f"Unexpected federated username format: {username}")
+        return
+    provider_name, provider_user_id = username.split("_", 1)
+    cognito.admin_link_provider_for_user(
+        UserPoolId=user_pool_id,
+        DestinationUser={"ProviderName": "Cognito", "ProviderAttributeValue": existing_username},
+        SourceUser={
+            "ProviderName": provider_name,
+            "ProviderAttributeName": "Cognito_Subject",
+            "ProviderAttributeValue": provider_user_id,
+        },
+    )
+    logger.info(f"Successfully linked {provider_name} identity to user {existing_username}")
+    raise Exception(
+        f"Account with email already exists. "
+        f"Your {provider_name} account has been linked. Please sign in again."
+    )
+
+
+def _handle_existing_user(
+    cognito: Any, user_pool_id: str, email: str, username: str, existing_user: Dict[str, Any]
+) -> None:
+    """Handle linking when an existing user is found."""
+    existing_username = existing_user["Username"]
+    logger.info(f"Found existing user {existing_username} for email {email}, linking identity")
+    _link_federated_identity(cognito, user_pool_id, existing_username, username)
+
+
+def _handle_signup_exception(e: Exception, email: str, event: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle exceptions during federated signup processing."""
+    error_msg = str(e)
+    if "already exists" in error_msg or "has been linked" in error_msg:
+        raise
+    if "InvalidParameterException" in type(e).__name__:
+        logger.warning(f"Link may already exist: {e}")
+        raise Exception(f"Account with email {email} already exists. Please sign in again.")
+    logger.exception(f"Error in pre-signup trigger: {error_msg}")
+    return event
+
+
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
     Pre-Sign-Up Lambda Trigger Handler
@@ -79,82 +131,30 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
     # Only process federated sign-ups (external providers)
     if trigger_source != "PreSignUp_ExternalProvider":
-        # For native sign-ups, just return the event
-        # Could add validation here (e.g., email domain restrictions)
         return event
 
-    # For federated sign-ups, check if a user with this email already exists
     if not email:
         logger.warning("No email in federated sign-up, cannot check for duplicates")
         return event
 
+    return _process_federated_signup(event, user_pool_id, username, email)
+
+
+def _process_federated_signup(
+    event: Dict[str, Any], user_pool_id: str, username: str, email: str
+) -> Dict[str, Any]:
+    """Process federated sign-up, linking to existing user if found."""
     try:
         cognito = boto3.client("cognito-idp")
-
-        # Search for existing user with this email
-        response = cognito.list_users(
-            UserPoolId=user_pool_id,
-            Filter=f'email = "{email}"',
-            Limit=1,
-        )
-
+        response = cognito.list_users(UserPoolId=user_pool_id, Filter=f'email = "{email}"', Limit=1)
         existing_users = response.get("Users", [])
 
         if not existing_users:
-            # No existing user, allow the federated sign-up to proceed
-            # Auto-confirm and auto-verify since the email is verified by the provider
-            event["response"]["autoConfirmUser"] = True
-            event["response"]["autoVerifyEmail"] = True
             logger.info(f"No existing user for {email}, allowing federated sign-up")
-            return event
+            return _auto_confirm_event(event)
 
-        # Found an existing user with this email
-        existing_user = existing_users[0]
-        existing_username = existing_user["Username"]
-
-        logger.info(f"Found existing user {existing_username} for email {email}, linking identity")
-
-        # Parse the federated username to get provider info
-        # Format: "Google_123456789" or "Facebook_123456789"
-        if "_" not in username:
-            logger.error(f"Unexpected federated username format: {username}")
-            return event
-
-        provider_name, provider_user_id = username.split("_", 1)
-
-        # Link the federated identity to the existing user
-        cognito.admin_link_provider_for_user(
-            UserPoolId=user_pool_id,
-            DestinationUser={
-                "ProviderName": "Cognito",
-                "ProviderAttributeValue": existing_username,
-            },
-            SourceUser={
-                "ProviderName": provider_name,
-                "ProviderAttributeName": "Cognito_Subject",
-                "ProviderAttributeValue": provider_user_id,
-            },
-        )
-
-        logger.info(f"Successfully linked {provider_name} identity to user {existing_username}")
-
-        # Raise an exception to prevent duplicate user creation
-        # The federated identity is now linked to the existing user
-        # Cognito will use the existing user for authentication
-        raise Exception(
-            f"Account with email {email} already exists. "
-            f"Your {provider_name} account has been linked. Please sign in again."
-        )
-
-    except cognito.exceptions.InvalidParameterException as e:
-        # Link may already exist, which is fine
-        logger.warning(f"Link may already exist: {e}")
-        raise Exception(f"Account with email {email} already exists. Please sign in again.")
+        _handle_existing_user(cognito, user_pool_id, email, username, existing_users[0])
+        return event  # Should not reach here due to exception
 
     except Exception as e:
-        if "already exists" in str(e) or "has been linked" in str(e):
-            # Re-raise our own exception
-            raise
-        logger.exception(f"Error in pre-signup trigger: {str(e)}")
-        # For other errors, allow sign-up to proceed to avoid blocking users
-        return event
+        return _handle_signup_exception(e, email, event)

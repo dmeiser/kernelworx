@@ -165,7 +165,8 @@ export const CreateCampaignPage: React.FC = () => {
 
   // Redirect state from login
   const savedSharedCampaignCode = location.state?.sharedCampaignCode;
-  const effectiveSharedCampaignCode = sharedCampaignCode || savedSharedCampaignCode;
+  const effectiveSharedCampaignCode =
+    sharedCampaignCode || savedSharedCampaignCode;
 
   // Form state
   const [profileId, setProfileId] = useState("");
@@ -201,7 +202,10 @@ export const CreateCampaignPage: React.FC = () => {
   );
 
   const sharedCampaign = sharedCampaignData?.getSharedCampaign;
-  const isSharedCampaignMode = !!effectiveSharedCampaignCode && !!sharedCampaign && sharedCampaign.isActive;
+  const isSharedCampaignMode =
+    !!effectiveSharedCampaignCode &&
+    !!sharedCampaign &&
+    sharedCampaign.isActive;
 
   // Query for user's profiles
   const {
@@ -246,11 +250,13 @@ export const CreateCampaignPage: React.FC = () => {
   const catalogsLoading = publicLoading || myLoading;
 
   // Lazy query for shared campaign discovery in manual mode
-  const [findSharedCampaigns, { data: discoveredSharedCampaignsData }] = useLazyQuery<{
-    findSharedCampaigns: SharedCampaign[];
-  }>(FIND_SHARED_CAMPAIGNS);
+  const [findSharedCampaigns, { data: discoveredSharedCampaignsData }] =
+    useLazyQuery<{
+      findSharedCampaigns: SharedCampaign[];
+    }>(FIND_SHARED_CAMPAIGNS);
 
-  const discoveredSharedCampaigns = discoveredSharedCampaignsData?.findSharedCampaigns || [];
+  const discoveredSharedCampaigns =
+    discoveredSharedCampaignsData?.findSharedCampaigns || [];
 
   // Create campaign mutation
   const [createCampaign] = useMutation<{
@@ -262,7 +268,10 @@ export const CreateCampaignPage: React.FC = () => {
   }>(CREATE_CAMPAIGN, {
     refetchQueries: [
       { query: LIST_MY_PROFILES },
-      { query: LIST_CAMPAIGNS_BY_PROFILE, variables: { profileId: ensureProfileId(profileId) } },
+      {
+        query: LIST_CAMPAIGNS_BY_PROFILE,
+        variables: { profileId: ensureProfileId(profileId) },
+      },
     ],
   });
 
@@ -314,39 +323,39 @@ export const CreateCampaignPage: React.FC = () => {
     }
   }, [sharedCampaign]);
 
-// Debounced shared campaign discovery in manual mode
-const debouncedFindSharedCampaigns = useMemo(() => {
-  let timeoutId: NodeJS.Timeout;
-  return (params: {
-    unitType: string;
-    unitNumber: string;
-    city: string;
-    state: string;
-    campaignName: string;
-    campaignYear: number;
-  }) => {
-    clearTimeout(timeoutId);
-    timeoutId = setTimeout(() => {
-      if (
-        params.unitType &&
-        params.unitNumber &&
-        params.city &&
-        params.state &&
-        params.campaignName &&
-        params.campaignYear
-      ) {
-        findSharedCampaigns({
-          variables: {
-            unitType: params.unitType,
-            unitNumber: parseInt(params.unitNumber, 10),
-            city: params.city,
-            state: params.state,
-            campaignName: params.campaignName,
-            campaignYear: params.campaignYear,
-          },
-        });
-      }
-    }, SHARED_DISCOVERY_DEBOUNCE_MS);
+  // Debounced shared campaign discovery in manual mode
+  const debouncedFindSharedCampaigns = useMemo(() => {
+    let timeoutId: NodeJS.Timeout;
+    return (params: {
+      unitType: string;
+      unitNumber: string;
+      city: string;
+      state: string;
+      campaignName: string;
+      campaignYear: number;
+    }) => {
+      clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => {
+        if (
+          params.unitType &&
+          params.unitNumber &&
+          params.city &&
+          params.state &&
+          params.campaignName &&
+          params.campaignYear
+        ) {
+          findSharedCampaigns({
+            variables: {
+              unitType: params.unitType,
+              unitNumber: parseInt(params.unitNumber, 10),
+              city: params.city,
+              state: params.state,
+              campaignName: params.campaignName,
+              campaignYear: params.campaignYear,
+            },
+          });
+        }
+      }, SHARED_DISCOVERY_DEBOUNCE_MS);
     };
   }, [findSharedCampaigns]);
 
@@ -449,7 +458,7 @@ const debouncedFindSharedCampaigns = useMemo(() => {
         );
       }
     } catch (error) {
-        console.error("Failed to create campaign:", error);
+      console.error("Failed to create campaign:", error);
       setToastMessage({
         message: "Failed to create campaign. Please try again.",
         severity: "error",
@@ -474,7 +483,10 @@ const debouncedFindSharedCampaigns = useMemo(() => {
   }
 
   // shared campaign not found or inactive
-  if (effectiveSharedCampaignCode && (!sharedCampaign || !sharedCampaign.isActive)) {
+  if (
+    effectiveSharedCampaignCode &&
+    (!sharedCampaign || !sharedCampaign.isActive)
+  ) {
     return (
       <Box maxWidth="md" mx="auto" p={3}>
         <Alert severity="error">
@@ -545,8 +557,9 @@ const debouncedFindSharedCampaigns = useMemo(() => {
                   color="text.secondary"
                   sx={{ mt: 1 }}
                 >
-                  {sharedCampaign.unitType} {sharedCampaign.unitNumber} • {sharedCampaign.city},{" "}
-                  {sharedCampaign.state} • {sharedCampaign.campaignName} {sharedCampaign.campaignYear}
+                  {sharedCampaign.unitType} {sharedCampaign.unitNumber} •{" "}
+                  {sharedCampaign.city}, {sharedCampaign.state} •{" "}
+                  {sharedCampaign.campaignName} {sharedCampaign.campaignYear}
                 </Typography>
               </Box>
             </Stack>
@@ -564,7 +577,9 @@ const debouncedFindSharedCampaigns = useMemo(() => {
               color="inherit"
               size="small"
               onClick={() =>
-                handleUseSharedCampaign(discoveredSharedCampaigns[0].sharedCampaignCode)
+                handleUseSharedCampaign(
+                  discoveredSharedCampaigns[0].sharedCampaignCode,
+                )
               }
             >
               Use Campaign
@@ -572,10 +587,10 @@ const debouncedFindSharedCampaigns = useMemo(() => {
           }
         >
           <AlertTitle>Existing Campaign Found!</AlertTitle>
-          We found an existing {campaignName} {campaignYear} campaign for {unitType}{" "}
-          {unitNumber} in {city}, {state} created by{" "}
-          {discoveredSharedCampaigns[0].createdByName}. Would you like to use their
-          settings?
+          We found an existing {campaignName} {campaignYear} campaign for{" "}
+          {unitType} {unitNumber} in {city}, {state} created by{" "}
+          {discoveredSharedCampaigns[0].createdByName}. Would you like to use
+          their settings?
         </Alert>
       )}
 
@@ -688,7 +703,9 @@ const debouncedFindSharedCampaigns = useMemo(() => {
                   label="Year *"
                   type="number"
                   value={campaignYear}
-                  onChange={(e) => setCampaignYear(parseInt(e.target.value, 10))}
+                  onChange={(e) =>
+                    setCampaignYear(parseInt(e.target.value, 10))
+                  }
                   disabled={submitting}
                   inputProps={{
                     min: 2020,
@@ -896,9 +913,9 @@ const debouncedFindSharedCampaigns = useMemo(() => {
               />
               <Alert severity="warning" sx={{ mt: 1 }}>
                 <AlertTitle>Important</AlertTitle>
-                Sharing gives {sharedCampaign.createdByName} read access to ALL current
-                and future campaigns for this profile. You can revoke this access
-                at any time from your profile settings.
+                Sharing gives {sharedCampaign.createdByName} read access to ALL
+                current and future campaigns for this profile. You can revoke
+                this access at any time from your profile settings.
               </Alert>
             </Box>
           )}

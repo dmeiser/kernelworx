@@ -50,8 +50,10 @@ export const AppLayout: React.FC<{ children?: React.ReactNode }> = ({
     listMySharedCampaigns: { sharedCampaignCode: string; isActive: boolean }[];
   }>(LIST_MY_SHARED_CAMPAIGNS);
 
-  const hasSharedCampaigns = 
-    (campaignsData?.listMySharedCampaigns?.filter((c: { isActive: boolean }) => c.isActive)?.length ?? 0) > 0;
+  const hasSharedCampaigns =
+    (campaignsData?.listMySharedCampaigns?.filter(
+      (c: { isActive: boolean }) => c.isActive,
+    )?.length ?? 0) > 0;
 
   const toggleMobileDrawer = () => setMobileDrawerOpen(!mobileDrawerOpen);
 

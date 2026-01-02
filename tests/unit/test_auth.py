@@ -3,6 +3,7 @@
 from typing import Any, Dict
 
 import pytest
+
 from src.utils.auth import (
     check_profile_access,
     get_account,
@@ -85,10 +86,11 @@ class TestCheckProfileAccess:
     ) -> None:
         """Test that user with READ share has read access."""
         # Create share with READ permission (now in shares table)
+        # targetAccountId must have ACCOUNT# prefix to match auth.py lookup
         shares_table.put_item(
             Item={
                 "profileId": sample_profile_id,
-                "targetAccountId": another_account_id,
+                "targetAccountId": f"ACCOUNT#{another_account_id}",
                 "permissions": ["READ"],
             }
         )
@@ -107,10 +109,11 @@ class TestCheckProfileAccess:
     ) -> None:
         """Test that user with only READ is denied WRITE access."""
         # Create share with READ only (now in shares table)
+        # targetAccountId must have ACCOUNT# prefix to match auth.py lookup
         shares_table.put_item(
             Item={
                 "profileId": sample_profile_id,
-                "targetAccountId": another_account_id,
+                "targetAccountId": f"ACCOUNT#{another_account_id}",
                 "permissions": ["READ"],
             }
         )
@@ -129,10 +132,11 @@ class TestCheckProfileAccess:
     ) -> None:
         """Test that user with only WRITE permission also has READ access."""
         # Create share with WRITE only (no READ) - now in shares table
+        # targetAccountId must have ACCOUNT# prefix to match auth.py lookup
         shares_table.put_item(
             Item={
                 "profileId": sample_profile_id,
-                "targetAccountId": another_account_id,
+                "targetAccountId": f"ACCOUNT#{another_account_id}",
                 "permissions": ["WRITE"],
             }
         )
@@ -152,10 +156,11 @@ class TestCheckProfileAccess:
     ) -> None:
         """Test that user with WRITE share has write access."""
         # Create share with WRITE permission (now in shares table)
+        # targetAccountId must have ACCOUNT# prefix to match auth.py lookup
         shares_table.put_item(
             Item={
                 "profileId": sample_profile_id,
-                "targetAccountId": another_account_id,
+                "targetAccountId": f"ACCOUNT#{another_account_id}",
                 "permissions": ["READ", "WRITE"],
             }
         )
@@ -174,10 +179,11 @@ class TestCheckProfileAccess:
     ) -> None:
         """Test that permission checks are case-insensitive."""
         # Create share with READ permission (now in shares table)
+        # targetAccountId must have ACCOUNT# prefix to match auth.py lookup
         shares_table.put_item(
             Item={
                 "profileId": sample_profile_id,
-                "targetAccountId": another_account_id,
+                "targetAccountId": f"ACCOUNT#{another_account_id}",
                 "permissions": ["READ"],
             }
         )
@@ -261,10 +267,11 @@ class TestCheckProfileAccess:
     ) -> None:
         """Test that user with dict-format permissions is recognized."""
         # Create share with dict-format permissions (raw DynamoDB format) - now in shares table
+        # targetAccountId must have ACCOUNT# prefix to match auth.py lookup
         shares_table.put_item(
             Item={
                 "profileId": sample_profile_id,
-                "targetAccountId": another_account_id,
+                "targetAccountId": f"ACCOUNT#{another_account_id}",
                 "permissions": [{"S": "READ"}],  # Dict format instead of list of strings
             }
         )
@@ -283,10 +290,11 @@ class TestCheckProfileAccess:
     ) -> None:
         """Test that user with non-list permissions is denied access."""
         # Create share with non-list permissions (now in shares table)
+        # targetAccountId must have ACCOUNT# prefix to match auth.py lookup
         shares_table.put_item(
             Item={
                 "profileId": sample_profile_id,
-                "targetAccountId": another_account_id,
+                "targetAccountId": f"ACCOUNT#{another_account_id}",
                 "permissions": {"READ": True},  # Dict instead of list
             }
         )
@@ -305,10 +313,11 @@ class TestCheckProfileAccess:
     ) -> None:
         """Test that user with mixed permission formats is recognized."""
         # Create share with mixed permission formats (now in shares table)
+        # targetAccountId must have ACCOUNT# prefix to match auth.py lookup
         shares_table.put_item(
             Item={
                 "profileId": sample_profile_id,
-                "targetAccountId": another_account_id,
+                "targetAccountId": f"ACCOUNT#{another_account_id}",
                 "permissions": ["WRITE", {"S": "READ"}],  # Mix of string and dict
             }
         )
@@ -327,10 +336,11 @@ class TestCheckProfileAccess:
     ) -> None:
         """Test that user with WRITE permission gets WRITE access."""
         # Create share with WRITE permission only (now in shares table)
+        # targetAccountId must have ACCOUNT# prefix to match auth.py lookup
         shares_table.put_item(
             Item={
                 "profileId": sample_profile_id,
-                "targetAccountId": another_account_id,
+                "targetAccountId": f"ACCOUNT#{another_account_id}",
                 "permissions": ["WRITE"],
             }
         )
@@ -349,10 +359,11 @@ class TestCheckProfileAccess:
     ) -> None:
         """Test that user with READ-only permission is denied WRITE."""
         # Create share with READ permission only (now in shares table)
+        # targetAccountId must have ACCOUNT# prefix to match auth.py lookup
         shares_table.put_item(
             Item={
                 "profileId": sample_profile_id,
-                "targetAccountId": another_account_id,
+                "targetAccountId": f"ACCOUNT#{another_account_id}",
                 "permissions": ["READ"],
             }
         )
@@ -371,10 +382,11 @@ class TestCheckProfileAccess:
     ) -> None:
         """Test that user with empty permissions list is denied access."""
         # Create share with empty permissions (now in shares table)
+        # targetAccountId must have ACCOUNT# prefix to match auth.py lookup
         shares_table.put_item(
             Item={
                 "profileId": sample_profile_id,
-                "targetAccountId": another_account_id,
+                "targetAccountId": f"ACCOUNT#{another_account_id}",
                 "permissions": [],
             }
         )
@@ -393,10 +405,11 @@ class TestCheckProfileAccess:
     ) -> None:
         """Test that user with dict permission without 'S' key is denied access."""
         # Create share with dict permission that doesn't have "S" key (now in shares table)
+        # targetAccountId must have ACCOUNT# prefix to match auth.py lookup
         shares_table.put_item(
             Item={
                 "profileId": sample_profile_id,
-                "targetAccountId": another_account_id,
+                "targetAccountId": f"ACCOUNT#{another_account_id}",
                 "permissions": [{"N": "123"}],  # Dict with N key instead of S
             }
         )
@@ -430,10 +443,11 @@ class TestRequireProfileAccess:
     ) -> None:
         """Test that shared user is allowed."""
         # Create share (now in shares table)
+        # targetAccountId must have ACCOUNT# prefix to match auth.py lookup
         shares_table.put_item(
             Item={
                 "profileId": sample_profile_id,
-                "targetAccountId": another_account_id,
+                "targetAccountId": f"ACCOUNT#{another_account_id}",
                 "permissions": ["READ"],
             }
         )

@@ -19,6 +19,7 @@ logger = get_logger(__name__)
 def _get_dynamodb():
     return boto3.resource("dynamodb")
 
+
 # Multi-table design V2: profiles table for profile records
 profiles_table_name = os.environ.get("PROFILES_TABLE_NAME", "kernelworx-profiles-v2-ue1-dev")
 

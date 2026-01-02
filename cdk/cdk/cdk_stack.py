@@ -58,28 +58,126 @@ class CdkStack(Stack):
     - CloudFront distribution for SPA
     """
 
+    def _get_region_abbrev(self) -> str:
+        """Get region abbreviation for resource naming."""
+        region = os.getenv("AWS_REGION") or os.getenv("CDK_DEFAULT_REGION") or "us-east-1"
+        return REGION_ABBREVIATIONS.get(region, region[:3])
+
+    def _rn(self, name: str) -> str:
+        """Generate resource name with region and environment suffix."""
+        return f"{name}-{self.region_abbrev}-{self.env_name}"
+
+    def _configure_domains(self, base_domain: str) -> None:
+        """Configure domain names based on environment."""
+        if self.env_name == "prod":
+            self.site_domain = base_domain
+            self.api_domain = f"api.{base_domain}"
+            self.cognito_domain = f"login.{base_domain}"
+        else:
+            self.site_domain = f"{self.env_name}.{base_domain}"
+            self.api_domain = f"api.{self.env_name}.{base_domain}"
+            self.cognito_domain = f"login.{self.env_name}.{base_domain}"
+
+    def _get_context_bool(self, key: str, default: bool = True) -> bool:
+        """Get a boolean value from CDK context, handling string values."""
+        value = self.node.try_get_context(key)
+        if value is None:
+            return default
+        if isinstance(value, bool):
+            return value
+        return str(value).lower() != "false"
+
+    def _setup_google_provider(
+        self, supported_providers: list[cognito.UserPoolClientIdentityProvider]
+    ) -> None:
+        """Configure Google OAuth provider if credentials are available."""
+        if os.environ.get("GOOGLE_CLIENT_ID") and os.environ.get("GOOGLE_CLIENT_SECRET"):
+            cognito.UserPoolIdentityProviderGoogle(
+                self,
+                "GoogleProvider",
+                user_pool=self.user_pool,
+                client_id=os.environ["GOOGLE_CLIENT_ID"],
+                client_secret=os.environ["GOOGLE_CLIENT_SECRET"],
+                scopes=["email", "profile", "openid"],
+                attribute_mapping=cognito.AttributeMapping(
+                    email=cognito.ProviderAttribute.GOOGLE_EMAIL,
+                    given_name=cognito.ProviderAttribute.GOOGLE_GIVEN_NAME,
+                    family_name=cognito.ProviderAttribute.GOOGLE_FAMILY_NAME,
+                ),
+            )
+            supported_providers.append(cognito.UserPoolClientIdentityProvider.GOOGLE)
+
+    def _setup_facebook_provider(
+        self, supported_providers: list[cognito.UserPoolClientIdentityProvider]
+    ) -> None:
+        """Configure Facebook OAuth provider if credentials are available."""
+        if os.environ.get("FACEBOOK_APP_ID") and os.environ.get("FACEBOOK_APP_SECRET"):
+            cognito.UserPoolIdentityProviderFacebook(
+                self,
+                "FacebookProvider",
+                user_pool=self.user_pool,
+                client_id=os.environ["FACEBOOK_APP_ID"],
+                client_secret=os.environ["FACEBOOK_APP_SECRET"],
+                scopes=["email", "public_profile"],
+                attribute_mapping=cognito.AttributeMapping(
+                    email=cognito.ProviderAttribute.FACEBOOK_EMAIL,
+                    given_name=cognito.ProviderAttribute.FACEBOOK_FIRST_NAME,
+                    family_name=cognito.ProviderAttribute.FACEBOOK_LAST_NAME,
+                ),
+            )
+            supported_providers.append(cognito.UserPoolClientIdentityProvider.FACEBOOK)
+
+    def _setup_apple_provider(
+        self, supported_providers: list[cognito.UserPoolClientIdentityProvider]
+    ) -> None:
+        """Configure Apple Sign In provider if credentials are available."""
+        has_apple_creds = (
+            os.environ.get("APPLE_SERVICES_ID")
+            and os.environ.get("APPLE_TEAM_ID")
+            and os.environ.get("APPLE_KEY_ID")
+            and os.environ.get("APPLE_PRIVATE_KEY")
+        )
+        if has_apple_creds:
+            cognito.UserPoolIdentityProviderApple(
+                self,
+                "AppleProvider",
+                user_pool=self.user_pool,
+                client_id=os.environ["APPLE_SERVICES_ID"],
+                team_id=os.environ["APPLE_TEAM_ID"],
+                key_id=os.environ["APPLE_KEY_ID"],
+                private_key=os.environ["APPLE_PRIVATE_KEY"],
+                scopes=["email", "name"],
+                attribute_mapping=cognito.AttributeMapping(
+                    email=cognito.ProviderAttribute.APPLE_EMAIL,
+                    given_name=cognito.ProviderAttribute.APPLE_FIRST_NAME,
+                    family_name=cognito.ProviderAttribute.APPLE_LAST_NAME,
+                ),
+            )
+            supported_providers.append(cognito.UserPoolClientIdentityProvider.APPLE)
+
+    def _setup_social_identity_providers(
+        self,
+    ) -> list[cognito.UserPoolClientIdentityProvider]:
+        """Configure social identity providers (Google, Facebook, Apple)."""
+        supported_providers: list[cognito.UserPoolClientIdentityProvider] = [
+            cognito.UserPoolClientIdentityProvider.COGNITO
+        ]
+        self._setup_google_provider(supported_providers)
+        self._setup_facebook_provider(supported_providers)
+        self._setup_apple_provider(supported_providers)
+        return supported_providers
+
     def __init__(
         self, scope: Construct, construct_id: str, env_name: str = "dev", **kwargs: Any
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
         self.env_name = env_name
+        self.region_abbrev = self._get_region_abbrev()
 
         # Apply standard tags to all resources in the stack
         Tags.of(self).add("Application", "kernelworx")
         Tags.of(self).add("Environment", env_name)
-
-        # Get region abbreviation for resource naming
-        # Uses CDK_DEFAULT_REGION or falls back to us-east-1
-        region = os.getenv("AWS_REGION") or os.getenv("CDK_DEFAULT_REGION") or "us-east-1"
-        self.region_abbrev = REGION_ABBREVIATIONS.get(region, region[:3])
-
-        # Helper for consistent resource naming: {name}-{region}-{env}
-        def rn(name: str, abbrev: str = self.region_abbrev, env: str = env_name) -> str:
-            """Generate resource name with region and environment suffix."""
-            return f"{name}-{abbrev}-{env}"
-
-        self.resource_name = rn  # Make available to instance methods
 
         # Load configuration from environment variables
         base_domain = os.getenv("BASE_DOMAIN", "kernelworx.app")
@@ -96,14 +194,7 @@ class CdkStack(Stack):
         )
 
         # Define domain names based on environment
-        if env_name == "prod":
-            self.site_domain = base_domain
-            self.api_domain = f"api.{base_domain}"
-            self.cognito_domain = f"login.{base_domain}"
-        else:
-            self.site_domain = f"{env_name}.{base_domain}"
-            self.api_domain = f"api.{env_name}.{base_domain}"
-            self.cognito_domain = f"login.{env_name}.{base_domain}"
+        self._configure_domains(base_domain)
 
         # ACM Certificate for AppSync API
         # Create new managed certificate (orphaned one cleaned up before deploy)
@@ -142,7 +233,7 @@ class CdkStack(Stack):
         # ====================================================================
 
         # Accounts Table
-        accounts_table_name = rn("kernelworx-accounts")
+        accounts_table_name = self._rn("kernelworx-accounts")
         self.accounts_table = dynamodb.Table(
             self,
             "AccountsTable",
@@ -163,7 +254,7 @@ class CdkStack(Stack):
         )
 
         # Catalogs Table
-        catalogs_table_name = rn("kernelworx-catalogs")
+        catalogs_table_name = self._rn("kernelworx-catalogs")
         self.catalogs_table = dynamodb.Table(
             self,
             "CatalogsTable",
@@ -197,7 +288,7 @@ class CdkStack(Stack):
         # NEW STRUCTURE (V2): PK=ownerAccountId, SK=profileId
         # This enables direct query for listMyProfiles (no GSI needed)
         # Shares and invites are in separate tables now
-        profiles_table_name = rn("kernelworx-profiles")
+        profiles_table_name = self._rn("kernelworx-profiles")
         self.profiles_table = dynamodb.Table(
             self,
             "ProfilesTableV2",
@@ -223,7 +314,7 @@ class CdkStack(Stack):
         # Shares Table (NEW - separated from profiles for cleaner design)
         # PK: profileId, SK: targetAccountId
         # Enables direct query for "all shares for this profile"
-        shares_table_name = rn("kernelworx-shares")
+        shares_table_name = self._rn("kernelworx-shares")
         self.shares_table = dynamodb.Table(
             self,
             "SharesTable",
@@ -249,7 +340,7 @@ class CdkStack(Stack):
         # Invites Table (NEW - separated from profiles for cleaner design)
         # PK: inviteCode (enables direct lookup)
         # TTL: expiresAt (automatic cleanup of expired invites)
-        invites_table_name = rn("kernelworx-invites")
+        invites_table_name = self._rn("kernelworx-invites")
         self.invites_table = dynamodb.Table(
             self,
             "InvitesTable",
@@ -282,7 +373,7 @@ class CdkStack(Stack):
         # Campaigns Table V2
         # NEW STRUCTURE: PK=profileId, SK=campaignId (note: campaignId contains campaign data)
         # This enables direct query for listCampaignsByProfile (no GSI needed)
-        campaigns_table_name = rn("kernelworx-campaigns")
+        campaigns_table_name = self._rn("kernelworx-campaigns")
         self.campaigns_table = dynamodb.Table(
             self,
             "CampaignsTableV2",
@@ -313,7 +404,7 @@ class CdkStack(Stack):
         # Orders Table
         # Orders Table V2: PK=campaignId, SK=orderId for efficient campaign-based queries
         # Direct order lookups use orderId-index GSI
-        orders_table_name = rn("kernelworx-orders")
+        orders_table_name = self._rn("kernelworx-orders")
         self.orders_table = dynamodb.Table(
             self,
             "OrdersTableV2",
@@ -346,7 +437,7 @@ class CdkStack(Stack):
         # PK: sharedCampaignCode (enables direct lookup)
         # GSI1: createdBy + createdAt (for "my shared campaigns" listing)
         # GSI2: unitCampaignKey (for unit+campaign discovery)
-        shared_campaigns_table_name = rn("kernelworx-shared-campaigns")
+        shared_campaigns_table_name = self._rn("kernelworx-shared-campaigns")
         self.shared_campaigns_table = dynamodb.Table(
             self,
             "SharedCampaignsTable",
@@ -383,7 +474,7 @@ class CdkStack(Stack):
         # ====================================================================
 
         # Static assets bucket (for SPA hosting)
-        static_bucket_name = rn("kernelworx-static")
+        static_bucket_name = self._rn("kernelworx-static")
         self.static_assets_bucket = s3.Bucket(
             self,
             "StaticAssets",
@@ -395,7 +486,7 @@ class CdkStack(Stack):
         )
 
         # Exports bucket (for generated reports)
-        exports_bucket_name = rn("kernelworx-exports")
+        exports_bucket_name = self._rn("kernelworx-exports")
         self.exports_bucket = s3.Bucket(
             self,
             "Exports",
@@ -414,7 +505,7 @@ class CdkStack(Stack):
         self.lambda_execution_role = iam.Role(
             self,
             "LambdaExecutionRole",
-            role_name=rn("kernelworx-lambda-exec"),
+            role_name=self._rn("kernelworx-lambda-exec"),
             assumed_by=iam.ServicePrincipal("lambda.amazonaws.com"),
             managed_policies=[
                 iam.ManagedPolicy.from_aws_managed_policy_name(
@@ -458,7 +549,7 @@ class CdkStack(Stack):
         self.appsync_service_role = iam.Role(
             self,
             "AppSyncServiceRole",
-            role_name=rn("kernelworx-appsync"),
+            role_name=self._rn("kernelworx-appsync"),
             assumed_by=iam.ServicePrincipal("appsync.amazonaws.com"),
         )
 
@@ -522,7 +613,7 @@ class CdkStack(Stack):
         self.shared_layer = lambda_.LayerVersion(
             self,
             "SharedDependenciesLayer",
-            layer_version_name=rn("kernelworx-deps"),
+            layer_version_name=self._rn("kernelworx-deps"),
             code=lambda_.Code.from_asset(lambda_layer_path),
             compatible_runtimes=[lambda_.Runtime.PYTHON_3_13],
             description="Shared Python dependencies for Lambda functions",
@@ -551,7 +642,7 @@ class CdkStack(Stack):
         self.list_my_shares_fn = lambda_.Function(
             self,
             "ListMySharesFn",
-            function_name=rn("kernelworx-list-my-shares"),
+            function_name=self._rn("kernelworx-list-my-shares"),
             runtime=lambda_.Runtime.PYTHON_3_13,
             handler="handlers.profile_sharing.list_my_shares",
             code=lambda_code,
@@ -568,7 +659,7 @@ class CdkStack(Stack):
         self.create_profile_fn = lambda_.Function(
             self,
             "CreateProfileFnV2",
-            function_name=rn("kernelworx-create-profile"),
+            function_name=self._rn("kernelworx-create-profile"),
             runtime=lambda_.Runtime.PYTHON_3_13,
             handler="handlers.scout_operations.create_seller_profile",
             code=lambda_code,
@@ -582,7 +673,7 @@ class CdkStack(Stack):
         self.request_campaign_report_fn = lambda_.Function(
             self,
             "RequestCampaignReportFnV2",
-            function_name=rn("kernelworx-request-report"),
+            function_name=self._rn("kernelworx-request-report"),
             runtime=lambda_.Runtime.PYTHON_3_13,
             handler="handlers.report_generation.request_campaign_report",
             code=lambda_code,
@@ -596,7 +687,7 @@ class CdkStack(Stack):
         self.unit_reporting_fn = lambda_.Function(
             self,
             "UnitReportingFnV2",
-            function_name=rn("kernelworx-unit-reporting"),
+            function_name=self._rn("kernelworx-unit-reporting"),
             runtime=lambda_.Runtime.PYTHON_3_13,
             handler="handlers.campaign_reporting.get_unit_report",
             code=lambda_code,
@@ -610,7 +701,7 @@ class CdkStack(Stack):
         self.list_unit_catalogs_fn = lambda_.Function(
             self,
             "ListUnitCatalogsFn",
-            function_name=rn("kernelworx-list-unit-catalogs"),
+            function_name=self._rn("kernelworx-list-unit-catalogs"),
             runtime=lambda_.Runtime.PYTHON_3_13,
             handler="handlers.list_unit_catalogs.list_unit_catalogs",
             code=lambda_code,
@@ -625,7 +716,7 @@ class CdkStack(Stack):
         self.list_unit_campaign_catalogs_fn = lambda_.Function(
             self,
             "ListUnitCampaignCatalogsFn",
-            function_name=rn("kernelworx-list-unit-campaign-catalogs"),
+            function_name=self._rn("kernelworx-list-unit-campaign-catalogs"),
             runtime=lambda_.Runtime.PYTHON_3_13,
             handler="handlers.list_unit_catalogs.list_unit_campaign_catalogs",
             code=lambda_code,
@@ -640,7 +731,7 @@ class CdkStack(Stack):
         self.campaign_operations_fn = lambda_.Function(
             self,
             "CampaignOperationsFn",
-            function_name=rn("kernelworx-campaign-operations"),
+            function_name=self._rn("kernelworx-campaign-operations"),
             runtime=lambda_.Runtime.PYTHON_3_13,
             handler="handlers.campaign_operations.create_campaign",
             code=lambda_code,
@@ -655,7 +746,7 @@ class CdkStack(Stack):
         self.update_my_account_fn = lambda_.Function(
             self,
             "UpdateMyAccountFnV2",
-            function_name=rn("kernelworx-update-account"),
+            function_name=self._rn("kernelworx-update-account"),
             runtime=lambda_.Runtime.PYTHON_3_13,
             handler="handlers.account_operations.update_my_account",
             code=lambda_code,
@@ -670,7 +761,7 @@ class CdkStack(Stack):
         self.transfer_ownership_fn = lambda_.Function(
             self,
             "TransferProfileOwnershipFn",
-            function_name=rn("kernelworx-transfer-ownership"),
+            function_name=self._rn("kernelworx-transfer-ownership"),
             runtime=lambda_.Runtime.PYTHON_3_13,
             handler="handlers.transfer_profile_ownership.lambda_handler",
             code=lambda_code,
@@ -685,7 +776,7 @@ class CdkStack(Stack):
         self.post_auth_fn = lambda_.Function(
             self,
             "PostAuthenticationFnV2",
-            function_name=rn("kernelworx-post-auth"),
+            function_name=self._rn("kernelworx-post-auth"),
             runtime=lambda_.Runtime.PYTHON_3_13,
             handler="handlers.post_authentication.lambda_handler",
             code=lambda_code,
@@ -702,7 +793,7 @@ class CdkStack(Stack):
         self.pre_signup_fn = lambda_.Function(
             self,
             "PreSignupFn",
-            function_name=rn("kernelworx-pre-signup"),
+            function_name=self._rn("kernelworx-pre-signup"),
             runtime=lambda_.Runtime.PYTHON_3_13,
             handler="handlers.pre_signup.lambda_handler",
             code=lambda_code,
@@ -756,7 +847,7 @@ class CdkStack(Stack):
             self.user_pool = cognito.UserPool(
                 self,
                 "UserPool",
-                user_pool_name=rn("kernelworx-users"),
+                user_pool_name=self._rn("kernelworx-users"),
                 sign_in_aliases=cognito.SignInAliases(email=True, username=False),
                 self_sign_up_enabled=True,
                 auto_verify=cognito.AutoVerifiedAttrs(email=True),
@@ -833,7 +924,7 @@ class CdkStack(Stack):
             self.user_pool = cognito.UserPool(
                 self,
                 "UserPool",
-                user_pool_name=rn("kernelworx-users"),
+                user_pool_name=self._rn("kernelworx-users"),
                 sign_in_aliases=cognito.SignInAliases(email=True, username=False),
                 self_sign_up_enabled=True,
                 auto_verify=cognito.AutoVerifiedAttrs(email=True),
@@ -911,71 +1002,8 @@ class CdkStack(Stack):
                 description="Administrator users with elevated privileges",
             )
 
-            # Configure social identity providers
-            # Create providers if credentials are provided (CloudFormation will import existing)
-
-            # Initialize list to track which identity providers are enabled
-            supported_providers: list[cognito.UserPoolClientIdentityProvider] = [
-                cognito.UserPoolClientIdentityProvider.COGNITO
-            ]
-
-            # Google OAuth
-            if os.environ.get("GOOGLE_CLIENT_ID") and os.environ.get("GOOGLE_CLIENT_SECRET"):
-                cognito.UserPoolIdentityProviderGoogle(
-                    self,
-                    "GoogleProvider",
-                    user_pool=self.user_pool,
-                    client_id=os.environ["GOOGLE_CLIENT_ID"],
-                    client_secret=os.environ["GOOGLE_CLIENT_SECRET"],
-                    scopes=["email", "profile", "openid"],
-                    attribute_mapping=cognito.AttributeMapping(
-                        email=cognito.ProviderAttribute.GOOGLE_EMAIL,
-                        given_name=cognito.ProviderAttribute.GOOGLE_GIVEN_NAME,
-                        family_name=cognito.ProviderAttribute.GOOGLE_FAMILY_NAME,
-                    ),
-                )
-                supported_providers.append(cognito.UserPoolClientIdentityProvider.GOOGLE)
-
-            # Facebook OAuth
-            if os.environ.get("FACEBOOK_APP_ID") and os.environ.get("FACEBOOK_APP_SECRET"):
-                cognito.UserPoolIdentityProviderFacebook(
-                    self,
-                    "FacebookProvider",
-                    user_pool=self.user_pool,
-                    client_id=os.environ["FACEBOOK_APP_ID"],
-                    client_secret=os.environ["FACEBOOK_APP_SECRET"],
-                    scopes=["email", "public_profile"],
-                    attribute_mapping=cognito.AttributeMapping(
-                        email=cognito.ProviderAttribute.FACEBOOK_EMAIL,
-                        given_name=cognito.ProviderAttribute.FACEBOOK_FIRST_NAME,
-                        family_name=cognito.ProviderAttribute.FACEBOOK_LAST_NAME,
-                    ),
-                )
-                supported_providers.append(cognito.UserPoolClientIdentityProvider.FACEBOOK)
-
-            # Apple Sign In
-            if (
-                os.environ.get("APPLE_SERVICES_ID")
-                and os.environ.get("APPLE_TEAM_ID")
-                and os.environ.get("APPLE_KEY_ID")
-                and os.environ.get("APPLE_PRIVATE_KEY")
-            ):
-                cognito.UserPoolIdentityProviderApple(
-                    self,
-                    "AppleProvider",
-                    user_pool=self.user_pool,
-                    client_id=os.environ["APPLE_SERVICES_ID"],
-                    team_id=os.environ["APPLE_TEAM_ID"],
-                    key_id=os.environ["APPLE_KEY_ID"],
-                    private_key=os.environ["APPLE_PRIVATE_KEY"],
-                    scopes=["email", "name"],
-                    attribute_mapping=cognito.AttributeMapping(
-                        email=cognito.ProviderAttribute.APPLE_EMAIL,
-                        given_name=cognito.ProviderAttribute.APPLE_FIRST_NAME,
-                        family_name=cognito.ProviderAttribute.APPLE_LAST_NAME,
-                    ),
-                )
-                supported_providers.append(cognito.UserPoolClientIdentityProvider.APPLE)
+            # Configure social identity providers and get list of supported providers
+            supported_providers = self._setup_social_identity_providers()
 
             # App client for SPA
             self.user_pool_client = self.user_pool.add_client(
@@ -1016,14 +1044,7 @@ class CdkStack(Stack):
             # site distribution and DNS first, then creating the Cognito
             # custom domain after DNS has propagated. Control this behaviour
             # with the context key `create_cognito_domain` (default: True).
-            create_cognito_domain_ctx = self.node.try_get_context("create_cognito_domain")
-            # Handle string values from CLI (e.g., -c create_cognito_domain=false)
-            if create_cognito_domain_ctx is None:
-                create_cognito_domain = True
-            elif isinstance(create_cognito_domain_ctx, bool):
-                create_cognito_domain = create_cognito_domain_ctx
-            else:
-                create_cognito_domain = str(create_cognito_domain_ctx).lower() != "false"
+            create_cognito_domain = self._get_context_bool("create_cognito_domain", default=True)
 
             # Custom domain configuration (login.{env}.kernelworx.app or login.kernelworx.app)
             if create_cognito_domain:
@@ -1047,11 +1068,7 @@ class CdkStack(Stack):
 
         # Check if we should skip UserPoolDomain creation (during import)
         # Skip domain creation if explicitly disabled via context
-        skip_user_pool_domain = self.node.try_get_context("skip_user_pool_domain")
-        if skip_user_pool_domain is None:
-            skip_user_pool_domain = False
-        elif isinstance(skip_user_pool_domain, str):
-            skip_user_pool_domain = skip_user_pool_domain.lower() == "true"
+        skip_user_pool_domain = self._get_context_bool("skip_user_pool_domain", default=False)
 
         if existing_user_pool_id and not skip_user_pool_domain:
             print(f"Defining User Pool Domain: {self.cognito_domain}")
@@ -1106,7 +1123,7 @@ class CdkStack(Stack):
         appsync_resources = setup_appsync(
             scope=self,
             env_name=env_name,
-            resource_name=rn,
+            resource_name=self._rn,
             user_pool=self.user_pool,
             api_domain=self.api_domain,
             api_certificate=self.api_certificate,

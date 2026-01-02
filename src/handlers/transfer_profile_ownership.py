@@ -28,9 +28,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     # Normalize IDs
     db_profile_id = profile_id if profile_id.startswith("PROFILE#") else f"PROFILE#{profile_id}"
     db_new_owner_id = (
-        new_owner_account_id
-        if new_owner_account_id.startswith("ACCOUNT#")
-        else f"ACCOUNT#{new_owner_account_id}"
+        new_owner_account_id if new_owner_account_id.startswith("ACCOUNT#") else f"ACCOUNT#{new_owner_account_id}"
     )
     db_caller_id = caller_account_id if caller_account_id.startswith("ACCOUNT#") else f"ACCOUNT#{caller_account_id}"
 
@@ -38,8 +36,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     # Profiles table uses ownerAccountId (PK) + profileId (SK)
     # We need to query by profileId using GSI or scan
     profile_response = profiles_table.query(
-        IndexName="profileId-index",
-        KeyConditionExpression=Key("profileId").eq(db_profile_id)
+        IndexName="profileId-index", KeyConditionExpression=Key("profileId").eq(db_profile_id)
     )
 
     if not profile_response.get("Items"):
@@ -51,9 +48,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         raise PermissionError("Only the profile owner can transfer ownership")
 
     # 2. Verify new owner has existing share
-    share_response = shares_table.get_item(
-        Key={"profileId": db_profile_id, "targetAccountId": db_new_owner_id}
-    )
+    share_response = shares_table.get_item(Key={"profileId": db_profile_id, "targetAccountId": db_new_owner_id})
 
     if "Item" not in share_response:
         raise ValueError("New owner must have existing access to the profile")
@@ -63,10 +58,10 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     # 3. Transfer ownership by deleting and recreating the profile with new owner
     # Cannot update partition key, so we delete and put
     old_key = {"ownerAccountId": profile["ownerAccountId"], "profileId": db_profile_id}
-    
+
     # Delete old profile
     profiles_table.delete_item(Key=old_key)
-    
+
     # Create new profile with updated owner
     profile["ownerAccountId"] = db_new_owner_id
     profiles_table.put_item(Item=profile)

@@ -226,8 +226,8 @@ export const CreateSharedCampaignDialog: React.FC<
 
           {!canCreate && (
             <Alert severity="error">
-              You have reached the maximum of 50 active shared campaigns.
-              Please deactivate an existing shared campaign before creating a new one.
+              You have reached the maximum of 50 active shared campaigns. Please
+              deactivate an existing shared campaign before creating a new one.
             </Alert>
           )}
 
@@ -315,7 +315,9 @@ export const CreateSharedCampaignDialog: React.FC<
               label="Campaign Year"
               type="number"
               value={campaignYear}
-              onChange={(e) => setCampaignYear(parseInt(e.target.value, 10) || 0)}
+              onChange={(e) =>
+                setCampaignYear(parseInt(e.target.value, 10) || 0)
+              }
               required
               sx={{ width: 150 }}
               inputProps={{ min: 2020, max: 2100 }}
@@ -429,7 +431,8 @@ export const CreateSharedCampaignDialog: React.FC<
               {previewLink}
             </Typography>
             <Typography variant="caption" color="text.secondary">
-              (The actual code will be generated when you create the shared campaign)
+              (The actual code will be generated when you create the shared
+              campaign)
             </Typography>
           </Box>
         </Stack>

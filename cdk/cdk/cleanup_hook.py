@@ -69,6 +69,94 @@ def _is_cf_managed_resource(resource_type: str, physical_id: str, environment_na
     return False
 
 
+def _init_cleanup_clients(region: str) -> tuple[Any, Any, Any]:
+    """Initialize AWS clients for cleanup operations."""
+    return (
+        boto3.client("acm", region_name=region),
+        boto3.client("cognito-idp", region_name=region),
+        boto3.client("route53", region_name=region),
+    )
+
+
+def _cleanup_appsync_resources(
+    domain_names: list[str], environment_name: str, dry_run: bool
+) -> list[str]:
+    """Clean up orphaned AppSync domains and APIs. Returns cleaned API domains."""
+    print("\n🧹 Checking AppSync custom domains...")
+    api_domains_cleaned: list[str] = []
+    for domain in domain_names:
+        if "api." in domain:
+            _delete_orphaned_appsync_domain(domain, environment_name, dry_run=dry_run)
+            api_domains_cleaned.append(domain)
+
+    print("\n🧹 Checking AppSync API...")
+    _cleanup_orphaned_appsync_api(environment_name, dry_run=dry_run)
+    return api_domains_cleaned
+
+
+def _cleanup_cognito_domains(
+    cognito_client: Any, domain_names: list[str], environment_name: str, dry_run: bool
+) -> None:
+    """Disconnect orphaned Cognito custom domains."""
+    print("\n🧹 Checking Cognito custom domains...")
+    for domain in domain_names:
+        if "login" in domain or "auth" in domain:
+            _disconnect_cognito_domain(cognito_client, domain, environment_name, dry_run=dry_run)
+
+
+def _cleanup_cloudfront_resources(
+    site_domain: str | None, environment_name: str, dry_run: bool
+) -> None:
+    """Clean up CloudFront certificate bindings and orphaned distributions."""
+    if not site_domain:
+        return
+    print("\n🧹 Checking CloudFront certificate binding...")
+    _disconnect_cloudfront_from_certificate(site_domain, environment_name, dry_run=dry_run)
+    print("\n🧹 Checking for orphaned CloudFront distribution...")
+    _delete_orphaned_cloudfront_distribution(site_domain, environment_name, dry_run=dry_run)
+
+
+def _build_certificates_to_check(
+    domain_names: list[str], site_domain: str | None
+) -> list[tuple[str, str]]:
+    """Build list of (cert_type, domain) tuples to check for cleanup."""
+    certificates: list[tuple[str, str]] = []
+    for domain in domain_names:
+        if "api." in domain:
+            certificates.append(("api", domain))
+    if site_domain:
+        certificates.append(("site", site_domain))
+    for domain in domain_names:
+        if "auth." in domain or "login." in domain:
+            certificates.append(("cognito", domain))
+    return certificates
+
+
+def _cleanup_certificates(
+    acm_client: Any, certificates_to_check: list[tuple[str, str]], environment_name: str, dry_run: bool
+) -> None:
+    """Delete unmanaged ACM certificates."""
+    print("\n🧹 Checking ACM certificates...")
+    deleted_cert_arns: set[str] = set()
+
+    for cert_type, domain in certificates_to_check:
+        cert_arn = _find_certificate_arn(acm_client, domain)
+        if not cert_arn:
+            print(f"   ℹ️  No {cert_type} certificate found for: {domain}")
+            continue
+        if cert_arn in deleted_cert_arns:
+            print(f"   ℹ️  Certificate for {domain} already handled")
+            continue
+        if _is_unmanaged_certificate(cert_arn, environment_name):
+            print(f"   🗑️  Found unmanaged {cert_type} certificate for {domain}")
+            _delete_acm_certificate(acm_client, cert_arn, dry_run=dry_run)
+            deleted_cert_arns.add(cert_arn)
+            msg = f"Would delete orphaned {cert_type} certificate" if dry_run else f"Deleted orphaned {cert_type} certificate"
+            print(f"   {'[DRY RUN] ' if dry_run else '✅ '}{msg}")
+        else:
+            print(f"   ℹ️  {cert_type.title()} certificate exists and is CloudFormation-managed: {domain}")
+
+
 def cleanup_before_deploy(
     domain_names: list[str],
     site_domain: str | None = None,
@@ -96,98 +184,29 @@ def cleanup_before_deploy(
         print("=" * 70)
 
     region = os.getenv("AWS_REGION") or "us-east-1"
-
-    # Initialize AWS clients
-    acm_client = boto3.client("acm", region_name=region)
-    cognito_client = boto3.client("cognito-idp", region_name=region)
-    route53_client = boto3.client("route53", region_name=region)
+    acm_client, cognito_client, route53_client = _init_cleanup_clients(region)
 
     try:
         # IMPORTANT: Delete resources that USE certificates BEFORE deleting certificates
-        # Order matters: AppSync Domain → AppSync API → Cognito Domain → CloudFront → Certificates
+        # Order: AppSync Domain → AppSync API → Cognito Domain → CloudFront → Certificates
 
-        # 0. Clean up orphaned AppSync custom domain (must be deleted before cert)
-        print("\n🧹 Checking AppSync custom domains...")
-        api_domains_cleaned: list[str] = []
-        for domain in domain_names:
-            if "api." in domain:
-                _delete_orphaned_appsync_domain(domain, environment_name, dry_run=dry_run)
-                api_domains_cleaned.append(domain)
+        # 0-1. Clean up orphaned AppSync resources
+        api_domains_cleaned = _cleanup_appsync_resources(domain_names, environment_name, dry_run)
 
         # 0.5. Clean up orphaned Route53 CNAME records for API domains
         print("\n🧹 Checking Route53 CNAME records for API domains...")
         for domain in api_domains_cleaned:
-            _delete_api_domain_cname_record(
-                route53_client, domain, environment_name, dry_run=dry_run
-            )
-
-        # 1. Clean up orphaned AppSync API (may be using api certificate)
-        print("\n🧹 Checking AppSync API...")
-        _cleanup_orphaned_appsync_api(environment_name, dry_run=dry_run)
+            _delete_api_domain_cname_record(route53_client, domain, environment_name, dry_run=dry_run)
 
         # 2. Disconnect Cognito domains (may be using auth certificate)
-        print("\n🧹 Checking Cognito custom domains...")
-        for domain in domain_names:
-            if "login" in domain or "auth" in domain:
-                _disconnect_cognito_domain(
-                    cognito_client, domain, environment_name, dry_run=dry_run
-                )
+        _cleanup_cognito_domains(cognito_client, domain_names, environment_name, dry_run)
 
-        # 3. Disconnect CloudFront from certificate/domain (allows cert deletion without deleting CF)
-        if site_domain:
-            print("\n🧹 Checking CloudFront certificate binding...")
-            _disconnect_cloudfront_from_certificate(site_domain, environment_name, dry_run=dry_run)
-
-            # 3b. Delete orphaned CloudFront distribution so CDK can create a new one
-            print("\n🧹 Checking for orphaned CloudFront distribution...")
-            _delete_orphaned_cloudfront_distribution(site_domain, environment_name, dry_run=dry_run)
+        # 3. Disconnect CloudFront from certificate/domain
+        _cleanup_cloudfront_resources(site_domain, environment_name, dry_run)
 
         # 4. NOW we can safely delete certificates
-        print("\n🧹 Checking ACM certificates...")
-
-        # Check for unmanaged certificates that this stack will create
-        # Stack creates 3 certificates: api, site, and cognito
-        certificates_to_check = []
-
-        # Add API domain certificate
-        for domain in domain_names:
-            if "api." in domain:
-                certificates_to_check.append(("api", domain))
-
-        # Add site domain certificate
-        if site_domain:
-            certificates_to_check.append(("site", site_domain))
-
-        # Add Cognito domain certificate
-        for domain in domain_names:
-            if "auth." in domain or "login." in domain:
-                certificates_to_check.append(("cognito", domain))
-
-        # Track certificates we've already deleted to avoid duplicate attempts
-        deleted_cert_arns = set()
-
-        for cert_type, domain in certificates_to_check:
-            cert_arn = _find_certificate_arn(acm_client, domain)
-            if cert_arn:
-                # Skip if we already deleted this certificate
-                if cert_arn in deleted_cert_arns:
-                    print(f"   ℹ️  Certificate for {domain} already handled")
-                    continue
-
-                if _is_unmanaged_certificate(cert_arn, environment_name):
-                    print(f"   🗑️  Found unmanaged {cert_type} certificate for {domain}")
-                    _delete_acm_certificate(acm_client, cert_arn, dry_run=dry_run)
-                    deleted_cert_arns.add(cert_arn)
-                    if dry_run:
-                        print(f"   [DRY RUN] Would delete orphaned {cert_type} certificate")
-                    else:
-                        print(f"   ✅ Deleted orphaned {cert_type} certificate")
-                else:
-                    print(
-                        f"   ℹ️  {cert_type.title()} certificate exists and is CloudFormation-managed: {domain}"
-                    )
-            else:
-                print(f"   ℹ️  No {cert_type} certificate found for: {domain}")
+        certificates_to_check = _build_certificates_to_check(domain_names, site_domain)
+        _cleanup_certificates(acm_client, certificates_to_check, environment_name, dry_run)
 
         # 5. Clean up orphaned Route53 validation records
         print("\n🧹 Checking Route53 validation records...")
@@ -983,6 +1002,84 @@ def _disconnect_cloudfront_from_certificate(
         print(f"      ⚠️  Could not disconnect CloudFront: {e}", file=sys.stderr)
 
 
+def _get_managed_distribution_ids(cfn_client: Any, stack_name: str | None) -> set[str]:
+    """Get set of CloudFormation-managed CloudFront distribution IDs."""
+    managed_ids: set[str] = set()
+    if not stack_name:
+        return managed_ids
+    try:
+        paginator = cfn_client.get_paginator("list_stack_resources")
+        for page in paginator.paginate(StackName=stack_name):
+            for resource in page.get("StackResourceSummaries", []):
+                if resource.get("ResourceType") == "AWS::CloudFront::Distribution":
+                    managed_ids.add(resource.get("PhysicalResourceId", ""))
+    except Exception:
+        pass  # Stack doesn't exist
+    return managed_ids
+
+
+def _check_distribution_uses_bucket(dist: dict[str, Any], s3_origin_patterns: list[str]) -> tuple[bool, list[str]]:
+    """Check if distribution uses our S3 bucket. Returns (uses_bucket, oai_ids)."""
+    oais: list[str] = []
+    origins = dist.get("Origins", {}).get("Items", [])
+    for origin in origins:
+        origin_domain = origin.get("DomainName", "")
+        if any(pattern in origin_domain for pattern in s3_origin_patterns):
+            oai_path = origin.get("S3OriginConfig", {}).get("OriginAccessIdentity", "")
+            if oai_path:
+                oai_id = oai_path.split("/")[-1]
+                if oai_id:
+                    oais.append(oai_id)
+            return True, oais
+    return False, oais
+
+
+def _disable_and_delete_distribution(
+    cloudfront_client: Any, dist_id: str, dry_run: bool
+) -> bool:
+    """Disable and delete a CloudFront distribution. Returns True if deleted."""
+    if dry_run:
+        print(f"      [DRY RUN] Would delete CloudFront distribution: {dist_id}")
+        return False
+
+    response = cloudfront_client.get_distribution_config(Id=dist_id)
+    config = response["DistributionConfig"]
+    etag = response["ETag"]
+
+    if config.get("Enabled"):
+        print(f"      ⏳ Disabling CloudFront distribution {dist_id}...")
+        config["Enabled"] = False
+        if config.get("Aliases", {}).get("Items"):
+            config["Aliases"] = {"Quantity": 0, "Items": []}
+        if config.get("ViewerCertificate", {}).get("ACMCertificateArn"):
+            config["ViewerCertificate"] = {"CloudFrontDefaultCertificate": True, "MinimumProtocolVersion": "TLSv1"}
+        update_response = cloudfront_client.update_distribution(Id=dist_id, DistributionConfig=config, IfMatch=etag)
+        etag = update_response["ETag"]
+        print(f"      ⏳ Waiting for distribution {dist_id} to be disabled...")
+        waiter = cloudfront_client.get_waiter("distribution_deployed")
+        waiter.wait(Id=dist_id, WaiterConfig={"Delay": 30, "MaxAttempts": 60})
+
+    print(f"      🗑️  Deleting orphaned CloudFront distribution {dist_id}...")
+    cloudfront_client.delete_distribution(Id=dist_id, IfMatch=etag)
+    print(f"      ✅ Deleted orphaned CloudFront distribution {dist_id}")
+    return True
+
+
+def _delete_oai(cloudfront_client: Any, oai_id: str, dry_run: bool) -> None:
+    """Delete a CloudFront Origin Access Identity."""
+    if dry_run:
+        print(f"      [DRY RUN] Would delete OAI: {oai_id}")
+        return
+    try:
+        oai_response = cloudfront_client.get_cloud_front_origin_access_identity(Id=oai_id)
+        cloudfront_client.delete_cloud_front_origin_access_identity(Id=oai_id, IfMatch=oai_response["ETag"])
+        print(f"      ✅ Deleted orphaned OAI: {oai_id}")
+    except Exception as e:
+        if "NoSuchCloudFrontOriginAccessIdentity" not in str(type(e).__name__):
+            if "in use" not in str(e).lower() and "CloudFrontOriginAccessIdentityInUse" not in str(e):
+                print(f"      ⚠️  Could not delete OAI {oai_id}: {e}")
+
+
 def _delete_orphaned_cloudfront_distribution(
     site_domain: str, environment_name: str | None = None, dry_run: bool = False
 ) -> None:
@@ -992,9 +1089,6 @@ def _delete_orphaned_cloudfront_distribution(
     This is necessary because CloudFront aliases must be unique - a new CDK-managed
     distribution cannot use the same alias as an existing orphaned distribution.
 
-    This function finds distributions by S3 bucket origin (not by alias, since
-    orphaned distributions may have had their aliases removed already).
-
     Args:
         site_domain: The domain alias to find (e.g., "dev.kernelworx.app")
         environment_name: Environment name for stack lookup (dev, prod)
@@ -1003,124 +1097,34 @@ def _delete_orphaned_cloudfront_distribution(
     cloudfront_client = boto3.client("cloudfront", region_name=region)
     cfn_client = boto3.client("cloudformation", region_name=region)
 
-    # Build the expected S3 bucket origin domain
-    # e.g., kernelworx-static-ue1-dev.s3.us-east-1.amazonaws.com
     s3_bucket_name = f"kernelworx-static-ue1-{environment_name}"
-    s3_origin_patterns = [
-        f"{s3_bucket_name}.s3.{region}.amazonaws.com",
-        f"{s3_bucket_name}.s3.amazonaws.com",
-    ]
-
+    s3_origin_patterns = [f"{s3_bucket_name}.s3.{region}.amazonaws.com", f"{s3_bucket_name}.s3.amazonaws.com"]
     stack_name = f"kernelworx-ue1-{environment_name}" if environment_name else None
 
-    # Get list of CloudFormation-managed distribution IDs
-    managed_dist_ids: set[str] = set()
-    if stack_name:
-        try:
-            stack_paginator = cfn_client.get_paginator("list_stack_resources")
-            for stack_page in stack_paginator.paginate(StackName=stack_name):
-                for resource in stack_page.get("StackResourceSummaries", []):
-                    if resource.get("ResourceType") == "AWS::CloudFront::Distribution":
-                        managed_dist_ids.add(resource.get("PhysicalResourceId", ""))
-        except cfn_client.exceptions.ClientError:
-            pass  # Stack doesn't exist
-
+    managed_dist_ids = _get_managed_distribution_ids(cfn_client, stack_name)
     deleted_count = 0
     oais_to_delete: list[str] = []
 
     try:
-        # Find all CloudFront distributions using our S3 bucket
         paginator = cloudfront_client.get_paginator("list_distributions")
         for page in paginator.paginate():
-            items = page.get("DistributionList", {}).get("Items", [])
-            for dist in items:
+            for dist in page.get("DistributionList", {}).get("Items", []):
                 dist_id = dist["Id"]
-
-                # Check if this distribution uses our S3 bucket
-                origins = dist.get("Origins", {}).get("Items", [])
-                uses_our_bucket = False
-                for origin in origins:
-                    origin_domain = origin.get("DomainName", "")
-                    if any(pattern in origin_domain for pattern in s3_origin_patterns):
-                        uses_our_bucket = True
-                        # Collect OAI for cleanup
-                        oai_path = origin.get("S3OriginConfig", {}).get("OriginAccessIdentity", "")
-                        if oai_path:
-                            oai_id = oai_path.split("/")[-1]
-                            if oai_id:
-                                oais_to_delete.append(oai_id)
-                        break
-
-                if not uses_our_bucket:
+                uses_bucket, oais = _check_distribution_uses_bucket(dist, s3_origin_patterns)
+                if not uses_bucket:
                     continue
+                oais_to_delete.extend(oais)
 
-                # Skip if managed by CloudFormation
                 if dist_id in managed_dist_ids:
-                    print(
-                        f"      ℹ️  CloudFront distribution {dist_id} is CloudFormation-managed, skipping"
-                    )
+                    print(f"      ℹ️  CloudFront distribution {dist_id} is CloudFormation-managed, skipping")
                     continue
 
                 print(f"      🔍 Found orphaned CloudFront distribution: {dist_id}")
+                if _disable_and_delete_distribution(cloudfront_client, dist_id, dry_run):
+                    deleted_count += 1
 
-                if dry_run:
-                    print(f"      [DRY RUN] Would delete CloudFront distribution: {dist_id}")
-                    continue
-
-                # Get current config
-                response = cloudfront_client.get_distribution_config(Id=dist_id)
-                config = response["DistributionConfig"]
-                etag = response["ETag"]
-
-                # Disable if enabled
-                if config.get("Enabled"):
-                    print(f"      ⏳ Disabling CloudFront distribution {dist_id}...")
-                    config["Enabled"] = False
-                    # Also remove aliases so CDK can use them
-                    if config.get("Aliases", {}).get("Items"):
-                        config["Aliases"] = {"Quantity": 0, "Items": []}
-                    # Remove custom certificate
-                    if config.get("ViewerCertificate", {}).get("ACMCertificateArn"):
-                        config["ViewerCertificate"] = {
-                            "CloudFrontDefaultCertificate": True,
-                            "MinimumProtocolVersion": "TLSv1",
-                        }
-                    update_response = cloudfront_client.update_distribution(
-                        Id=dist_id,
-                        DistributionConfig=config,
-                        IfMatch=etag,
-                    )
-                    etag = update_response["ETag"]
-                    print(f"      ⏳ Waiting for distribution {dist_id} to be disabled...")
-                    waiter = cloudfront_client.get_waiter("distribution_deployed")
-                    waiter.wait(Id=dist_id, WaiterConfig={"Delay": 30, "MaxAttempts": 60})
-
-                # Delete the distribution
-                print(f"      🗑️  Deleting orphaned CloudFront distribution {dist_id}...")
-                cloudfront_client.delete_distribution(Id=dist_id, IfMatch=etag)
-                print(f"      ✅ Deleted orphaned CloudFront distribution {dist_id}")
-                deleted_count += 1
-
-        # Delete collected OAIs (after distributions are deleted)
         for oai_id in oais_to_delete:
-            if dry_run:
-                print(f"      [DRY RUN] Would delete OAI: {oai_id}")
-                continue
-            try:
-                oai_response = cloudfront_client.get_cloud_front_origin_access_identity(Id=oai_id)
-                oai_etag = oai_response["ETag"]
-                cloudfront_client.delete_cloud_front_origin_access_identity(
-                    Id=oai_id, IfMatch=oai_etag
-                )
-                print(f"      ✅ Deleted orphaned OAI: {oai_id}")
-            except cloudfront_client.exceptions.NoSuchCloudFrontOriginAccessIdentity:
-                pass  # OAI doesn't exist
-            except Exception as e:
-                # May still be in use by another distribution - ignore
-                if "in use" not in str(
-                    e
-                ).lower() and "CloudFrontOriginAccessIdentityInUse" not in str(e):
-                    print(f"      ⚠️  Could not delete OAI {oai_id}: {e}")
+            _delete_oai(cloudfront_client, oai_id, dry_run)
 
         if deleted_count == 0:
             print(f"      ℹ️  No orphaned CloudFront distribution found for {site_domain}")

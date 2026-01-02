@@ -8,6 +8,7 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
+
 from src.handlers.pre_signup import lambda_handler
 
 

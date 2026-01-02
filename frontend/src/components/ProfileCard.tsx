@@ -214,9 +214,7 @@ export const ProfileCard: React.FC<ProfileCardProps> = ({
             variant="outlined"
             color="primary"
             startIcon={<SettingsIcon />}
-            onClick={() =>
-              navigate(`/scouts/${toUrlId(profileId)}/manage`)
-            }
+            onClick={() => navigate(`/scouts/${toUrlId(profileId)}/manage`)}
           >
             Manage Scout
           </Button>

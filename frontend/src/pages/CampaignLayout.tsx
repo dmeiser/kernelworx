@@ -61,14 +61,17 @@ interface Profile {
 }
 
 export const CampaignLayout: React.FC = () => {
-  const { profileId: encodedProfileId, campaignId: encodedCampaignId } = useParams<{
-    profileId: string;
-    campaignId: string;
-  }>();
+  const { profileId: encodedProfileId, campaignId: encodedCampaignId } =
+    useParams<{
+      profileId: string;
+      campaignId: string;
+    }>();
   const profileId = encodedProfileId
     ? decodeURIComponent(encodedProfileId)
     : "";
-  const campaignId = encodedCampaignId ? decodeURIComponent(encodedCampaignId) : "";
+  const campaignId = encodedCampaignId
+    ? decodeURIComponent(encodedCampaignId)
+    : "";
   const dbProfileId = ensureProfileId(profileId);
   const dbCampaignId = ensureCampaignId(campaignId);
   const navigate = useNavigate();
@@ -160,9 +163,7 @@ export const CampaignLayout: React.FC = () => {
         <Link
           component="button"
           variant="body1"
-          onClick={() =>
-            navigate(`/scouts/${toUrlId(profileId)}/campaigns`)
-          }
+          onClick={() => navigate(`/scouts/${toUrlId(profileId)}/campaigns`)}
           sx={{ textDecoration: "none", cursor: "pointer" }}
         >
           {profile?.sellerName || "Loading..."}
@@ -177,9 +178,7 @@ export const CampaignLayout: React.FC = () => {
         <IconButton
           edge="start"
           color="inherit"
-          onClick={() =>
-            navigate(`/scouts/${toUrlId(profileId)}/campaigns`)
-          }
+          onClick={() => navigate(`/scouts/${toUrlId(profileId)}/campaigns`)}
           sx={{ mr: 2 }}
         >
           <ArrowBackIcon />

@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict
 
 import pytest
+
 from src.handlers.profile_sharing import create_profile_invite
 from src.utils.errors import AppError, ErrorCode
 

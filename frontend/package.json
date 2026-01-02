@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
+    "lint:complexity": "eslint . --rule 'complexity: [error, 5]' --rule 'max-depth: [error, 3]'",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "format": "prettier --write \"src/**/*.{ts,tsx}\"",

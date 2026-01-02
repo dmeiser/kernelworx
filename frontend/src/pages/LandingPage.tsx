@@ -124,8 +124,8 @@ export const LandingPage: React.FC = () => {
                   🍿 Organize Your Sales
                 </Typography>
                 <Typography variant="body1" color="text.secondary">
-                  Create scouts, track multiple campaigns, and manage all
-                  your popcorn orders in one place.
+                  Create scouts, track multiple campaigns, and manage all your
+                  popcorn orders in one place.
                 </Typography>
               </Box>
 
@@ -134,8 +134,8 @@ export const LandingPage: React.FC = () => {
                   🤝 Collaborate with Others
                 </Typography>
                 <Typography variant="body1" color="text.secondary">
-                  Share scouts with parents, den leaders, or unit
-                  volunteers. Set read-only or write permissions.
+                  Share scouts with parents, den leaders, or unit volunteers.
+                  Set read-only or write permissions.
                 </Typography>
               </Box>
 

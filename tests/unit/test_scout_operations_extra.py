@@ -1,5 +1,6 @@
-from src.handlers import scout_operations as so
 import boto3
+
+from src.handlers import scout_operations as so
 
 
 class DummyDynamoClient:

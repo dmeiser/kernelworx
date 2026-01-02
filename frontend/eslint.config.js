@@ -20,6 +20,10 @@ export default defineConfig([
       globals: globals.browser,
     },
     rules: {
+      // Cyclomatic complexity limit - Grade A equivalent (radon: 1-5)
+      'complexity': ['error', { max: 5 }],
+      // Maximum depth of nested blocks
+      'max-depth': ['error', { max: 3 }],
       // Allow setState in useEffect for fetch-on-mount patterns
       'react-hooks/set-state-in-effect': 'off',
       // Allow any in test files (mocking requires flexibility)

@@ -5,6 +5,7 @@ from typing import Any, Dict
 from unittest.mock import MagicMock, patch
 
 import pytest
+
 from src.handlers.campaign_reporting import get_unit_report
 
 

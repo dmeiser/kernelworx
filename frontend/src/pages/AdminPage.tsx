@@ -116,8 +116,8 @@ export const AdminPage: React.FC = () => {
             All Scouts
           </Typography>
           <Typography variant="body2" color="text.secondary" paragraph>
-            View all scouts in the system. Full CRUD operations coming
-            in future updates.
+            View all scouts in the system. Full CRUD operations coming in future
+            updates.
           </Typography>
 
           {profilesLoading && (

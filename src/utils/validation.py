@@ -139,9 +139,44 @@ def validate_invite_code(invite_code: str) -> str:
     return code
 
 
+def _validate_campaign_name(updates: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Validate campaign name if provided."""
+    from .errors import create_error_response
+
+    if "name" not in updates:
+        return None
+    if not updates["name"] or not updates["name"].strip():
+        return create_error_response("INVALID_INPUT", "Campaign name cannot be empty")
+    return None
+
+
+def _validate_campaign_start_date(updates: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Validate start date if provided."""
+    from .errors import create_error_response
+
+    if "startDate" not in updates:
+        return None
+    if not updates["startDate"]:
+        return create_error_response("INVALID_INPUT", "Start date cannot be empty")
+    return None
+
+
+def _validate_campaign_date_order(updates: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Validate endDate is after startDate if both provided."""
+    from .errors import create_error_response
+
+    if "startDate" not in updates or "endDate" not in updates:
+        return None
+    if not updates["endDate"]:
+        return None
+    if updates["endDate"] < updates["startDate"]:
+        return create_error_response("INVALID_INPUT", "End date must be after start date")
+    return None
+
+
 def validate_campaign_update(updates: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """
-    Validate campaigngn update parameters.
+    Validate campaign update parameters.
 
     Args:
         updates: Dictionary of fields to update
@@ -149,23 +184,106 @@ def validate_campaign_update(updates: Dict[str, Any]) -> Optional[Dict[str, Any]
     Returns:
         Error response if validation fails, None if valid
     """
+    validators = [
+        _validate_campaign_name,
+        _validate_campaign_start_date,
+        _validate_campaign_date_order,
+    ]
+    for validator in validators:
+        error = validator(updates)
+        if error:
+            return error
+    return None
+
+
+def _validate_order_customer_name(updates: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Validate customer name if provided."""
     from .errors import create_error_response
 
-    # Validate name if provided
-    if "name" in updates:
-        if not updates["name"] or not updates["name"].strip():
-            return create_error_response("INVALID_INPUT", "Campaign name cannot be empty")
+    if "customerName" not in updates:
+        return None
+    if not updates["customerName"] or not updates["customerName"].strip():
+        return create_error_response("INVALID_INPUT", "Customer name cannot be empty")
+    return None
 
-    # Validate dates if provided
-    if "startDate" in updates:
-        if not updates["startDate"]:
-            return create_error_response("INVALID_INPUT", "Start date cannot be empty")
 
-    # Validate endDate is after startDate if both provided
-    if "startDate" in updates and "endDate" in updates and updates["endDate"]:
-        if updates["endDate"] < updates["startDate"]:
-            return create_error_response("INVALID_INPUT", "End date must be after start date")
+def _validate_order_customer_phone(updates: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Validate phone format if provided."""
+    from .errors import create_error_response
 
+    if "customerPhone" not in updates or not updates["customerPhone"]:
+        return None
+    try:
+        normalize_phone(updates["customerPhone"])
+    except AppError as e:
+        return create_error_response("INVALID_INPUT", str(e))
+    return None
+
+
+def _validate_order_customer_address(updates: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Validate address if provided."""
+    from .errors import create_error_response
+
+    if "customerAddress" not in updates or not updates["customerAddress"]:
+        return None
+    try:
+        validate_address(updates["customerAddress"])
+    except AppError as e:
+        return create_error_response("INVALID_INPUT", str(e))
+    return None
+
+
+def _is_valid_quantity(item: Dict[str, Any]) -> bool:
+    """Check if line item has a valid positive quantity."""
+    if "quantity" not in item:
+        return False
+    quantity = item["quantity"]
+    if not isinstance(quantity, (int, float)):
+        return False
+    return quantity > 0
+
+
+def _validate_single_line_item(item: Any) -> Optional[Dict[str, Any]]:
+    """Validate a single line item."""
+    from .errors import create_error_response
+
+    if not isinstance(item, dict):
+        return create_error_response("INVALID_INPUT", "Each line item must be an object")
+    if "productId" not in item or not item["productId"]:
+        return create_error_response("INVALID_INPUT", "Each line item must have a productId")
+    if not _is_valid_quantity(item):
+        return create_error_response("INVALID_INPUT", "Each line item must have a positive quantity")
+    if "pricePerUnit" in item and not isinstance(item["pricePerUnit"], (int, float)):
+        return create_error_response("INVALID_INPUT", "Price per unit must be a number")
+    return None
+
+
+def _validate_order_line_items(updates: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Validate lineItems if provided."""
+    from .errors import create_error_response
+
+    if "lineItems" not in updates:
+        return None
+    if not isinstance(updates["lineItems"], list):
+        return create_error_response("INVALID_INPUT", "Line items must be an array")
+    if not updates["lineItems"]:
+        return create_error_response("INVALID_INPUT", "Order must have at least one line item")
+    for item in updates["lineItems"]:
+        error = _validate_single_line_item(item)
+        if error:
+            return error
+    return None
+
+
+def _validate_order_payment_method(updates: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Validate payment method if provided."""
+    from .errors import create_error_response
+
+    if "paymentMethod" not in updates:
+        return None
+    valid_methods = ["CASH", "CHECK", "CREDIT_CARD", "ONLINE"]
+    if updates["paymentMethod"] not in valid_methods:
+        return create_error_response("INVALID_INPUT", f"Payment method must be one of: {', '.join(valid_methods)}")
     return None
 
 
@@ -179,52 +297,15 @@ def validate_order_update(updates: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     Returns:
         Error response if validation fails, None if valid
     """
-    from .errors import create_error_response
-
-    # Validate customer name if provided
-    if "customerName" in updates:
-        if not updates["customerName"] or not updates["customerName"].strip():
-            return create_error_response("INVALID_INPUT", "Customer name cannot be empty")
-
-    # Validate phone format if provided
-    if "customerPhone" in updates and updates["customerPhone"]:
-        try:
-            normalize_phone(updates["customerPhone"])
-        except AppError as e:
-            return create_error_response("INVALID_INPUT", str(e))
-
-    # Validate address if provided
-    if "customerAddress" in updates and updates["customerAddress"]:
-        try:
-            validate_address(updates["customerAddress"])
-        except AppError as e:
-            return create_error_response("INVALID_INPUT", str(e))
-
-    # Validate lineItems if provided
-    if "lineItems" in updates:
-        if not isinstance(updates["lineItems"], list):
-            return create_error_response("INVALID_INPUT", "Line items must be an array")
-
-        if not updates["lineItems"]:
-            return create_error_response("INVALID_INPUT", "Order must have at least one line item")
-
-        for item in updates["lineItems"]:
-            if not isinstance(item, dict):
-                return create_error_response("INVALID_INPUT", "Each line item must be an object")
-
-            if "productId" not in item or not item["productId"]:
-                return create_error_response("INVALID_INPUT", "Each line item must have a productId")
-
-            if "quantity" not in item or not isinstance(item["quantity"], (int, float)) or item["quantity"] <= 0:
-                return create_error_response("INVALID_INPUT", "Each line item must have a positive quantity")
-
-            if "pricePerUnit" in item and not isinstance(item["pricePerUnit"], (int, float)):
-                return create_error_response("INVALID_INPUT", "Price per unit must be a number")
-
-    # Validate payment method if provided
-    if "paymentMethod" in updates:
-        valid_methods = ["CASH", "CHECK", "CREDIT_CARD", "ONLINE"]
-        if updates["paymentMethod"] not in valid_methods:
-            return create_error_response("INVALID_INPUT", f"Payment method must be one of: {', '.join(valid_methods)}")
-
+    validators = [
+        _validate_order_customer_name,
+        _validate_order_customer_phone,
+        _validate_order_customer_address,
+        _validate_order_line_items,
+        _validate_order_payment_method,
+    ]
+    for validator in validators:
+        error = validator(updates)
+        if error:
+            return error
     return None

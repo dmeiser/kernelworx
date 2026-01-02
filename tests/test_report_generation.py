@@ -45,9 +45,7 @@ def test_request_campaign_report_happy_path(monkeypatch):
     campaign_id = "CAMPAIGN#c-123"
     profile_id = "PROFILE#p-1"
     campaign_item = {"campaignId": campaign_id, "profileId": profile_id, "campaignName": "FALL"}
-    orders = [
-        {"orderId": "ORDER#o1", "campaignId": campaign_id, "customerName": "Alice", "lineItems": []}
-    ]
+    orders = [{"orderId": "ORDER#o1", "campaignId": campaign_id, "customerName": "Alice", "lineItems": []}]
 
     # Patch the tables
     monkeypatch.setattr("src.handlers.report_generation.get_campaigns_table", lambda: DummyTable([campaign_item]))

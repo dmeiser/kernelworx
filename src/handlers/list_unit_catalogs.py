@@ -21,6 +21,7 @@ def _get_dynamodb():
     """Return a fresh DynamoDB resource (lazy for tests)."""
     return boto3.resource("dynamodb")
 
+
 # Multi-table design V2
 profiles_table_name = os.environ.get("PROFILES_TABLE_NAME", "kernelworx-profiles-v2-ue1-dev")
 campaigns_table_name = os.environ.get("CAMPAIGNS_TABLE_NAME", "kernelworx-campaigns-v2-ue1-dev")
@@ -52,6 +53,47 @@ def _get_catalogs_table():
     return _get_dynamodb().Table(catalogs_table_name)
 
 
+def _filter_accessible_profiles(profiles: List[Dict[str, Any]], caller_account_id: str) -> List[Dict[str, Any]]:
+    """Filter profiles to those the caller has READ access to."""
+    accessible = []
+    for profile in profiles:
+        profile_id = profile["profileId"]
+        if check_profile_access(caller_account_id=caller_account_id, profile_id=profile_id, required_permission="READ"):
+            accessible.append(profile)
+    return accessible
+
+
+def _collect_catalog_ids(profiles: List[Dict[str, Any]], campaign_name: str, campaign_year: int) -> Set[str]:
+    """Collect unique catalog IDs from campaigns matching criteria."""
+    catalog_ids: Set[str] = set()
+    for profile in profiles:
+        profile_id = profile["profileId"]
+        campaigns_response = _get_campaigns_table().query(
+            KeyConditionExpression=Key("profileId").eq(profile_id),
+            FilterExpression="campaignName = :name AND campaignYear = :year",
+            ExpressionAttributeValues={":name": campaign_name, ":year": campaign_year},
+        )
+        for campaign in campaigns_response.get("Items", []):
+            catalog_id = campaign.get("catalogId")
+            if catalog_id is not None and isinstance(catalog_id, str):
+                catalog_ids.add(catalog_id)
+    return catalog_ids
+
+
+def _fetch_catalogs(catalog_ids: Set[str]) -> List[Dict[str, Any]]:
+    """Fetch catalog details for given catalog IDs."""
+    catalogs: List[Dict[str, Any]] = []
+    for catalog_id in catalog_ids:
+        try:
+            catalog_response = _get_catalogs_table().get_item(Key={"catalogId": catalog_id})
+            if "Item" in catalog_response:
+                catalogs.append(catalog_response["Item"])
+        except Exception as e:
+            logger.warning(f"Failed to fetch catalog {catalog_id}: {str(e)}")
+    catalogs.sort(key=lambda c: c.get("catalogName", ""))
+    return catalogs
+
+
 def list_unit_catalogs(event: Dict[str, Any], context: Any) -> List[Dict[str, Any]]:
     """
     List all catalogs used by scouts in a unit (that the caller has access to).
@@ -68,90 +110,41 @@ def list_unit_catalogs(event: Dict[str, Any], context: Any) -> List[Dict[str, An
         List of Catalog objects
     """
     try:
-        # Extract parameters
         unit_type = event["arguments"]["unitType"]
         unit_number = int(event["arguments"]["unitNumber"])
         campaign_name = event["arguments"]["campaignName"]
         campaign_year = int(event["arguments"]["campaignYear"])
         caller_account_id = event["identity"]["sub"]
 
-        logger.info(
-            f"Listing catalogs for {unit_type} {unit_number}, "
-            f"campaign {campaign_name} {campaign_year}, caller {caller_account_id}"
-        )
+        logger.info(f"Listing catalogs for {unit_type} {unit_number}, campaign {campaign_name} {campaign_year}")
 
         # Step 1: Find all profiles in this unit
         profiles_response = _get_profiles_table().scan(
             FilterExpression="unitType = :ut AND unitNumber = :un",
-            ExpressionAttributeValues={
-                ":ut": unit_type,
-                ":un": unit_number,
-            },
+            ExpressionAttributeValues={":ut": unit_type, ":un": unit_number},
         )
-
         unit_profiles = profiles_response.get("Items", [])
-        logger.info(f"Found {len(unit_profiles)} profiles in {unit_type} {unit_number}")
+        logger.info(f"Found {len(unit_profiles)} profiles")
 
         if not unit_profiles:
             return []
 
-        # Step 2: Filter to only profiles the caller can access
-        accessible_profiles: List[Dict[str, Any]] = []
-        for profile in unit_profiles:
-            profile_id = profile["profileId"]
-            has_access = check_profile_access(
-                caller_account_id=caller_account_id,
-                profile_id=profile_id,
-                required_permission="READ",
-            )
-            if has_access:
-                accessible_profiles.append(profile)
-
+        # Step 2: Filter to accessible profiles
+        accessible_profiles = _filter_accessible_profiles(unit_profiles, caller_account_id)
         logger.info(f"Caller has access to {len(accessible_profiles)} of {len(unit_profiles)} profiles")
 
         if not accessible_profiles:
             return []
 
-        # Step 3: Get all campaigns for accessible profiles and collect unique catalog IDs
-        catalog_ids: Set[str] = set()
-
-        for profile in accessible_profiles:
-            profile_id = profile["profileId"]
-
-            # Get campaigns for this profile matching the campaign name/year
-            campaigns_response = _get_campaigns_table().query(
-                KeyConditionExpression=Key("profileId").eq(profile_id),
-                FilterExpression="campaignName = :name AND campaignYear = :year",
-                ExpressionAttributeValues={":name": campaign_name, ":year": campaign_year},
-            )
-
-            campaigns = campaigns_response.get("Items", [])
-
-            # Collect catalog IDs
-            for campaign in campaigns:
-                catalog_id = campaign.get("catalogId")
-                if catalog_id is not None and isinstance(catalog_id, str):
-                    catalog_ids.add(catalog_id)
-
-        logger.info(f"Found {len(catalog_ids)} unique catalogs in use")
+        # Step 3: Collect catalog IDs from matching campaigns
+        catalog_ids = _collect_catalog_ids(accessible_profiles, campaign_name, campaign_year)
+        logger.info(f"Found {len(catalog_ids)} unique catalogs")
 
         if not catalog_ids:
             return []
 
-        # Step 4: Fetch catalog details for all unique catalog IDs
-        catalogs: List[Dict[str, Any]] = []
-
-        for catalog_id in catalog_ids:
-            try:
-                catalog_response = _get_catalogs_table().get_item(Key={"catalogId": catalog_id})
-                if "Item" in catalog_response:
-                    catalogs.append(catalog_response["Item"])
-            except Exception as e:
-                logger.warning(f"Failed to fetch catalog {catalog_id}: {str(e)}")
-
-        # Sort by catalog name
-        catalogs.sort(key=lambda c: c.get("catalogName", ""))
-
+        # Step 4: Fetch and return catalog details
+        catalogs = _fetch_catalogs(catalog_ids)
         logger.info(f"Returning {len(catalogs)} catalogs")
         return catalogs
 
@@ -165,6 +158,18 @@ def _build_unit_campaign_key(
 ) -> str:
     """Build the unitCampaignKey for unit+campaign queries."""
     return f"{unit_type}#{unit_number}#{city}#{state}#{campaign_name}#{campaign_year}"
+
+
+def _collect_catalog_ids_from_campaigns(campaigns: List[Dict[str, Any]], caller_account_id: str) -> Set[str]:
+    """Collect catalog IDs from campaigns the caller has access to."""
+    catalog_ids: Set[str] = set()
+    for campaign in campaigns:
+        profile_id = campaign["profileId"]
+        if check_profile_access(caller_account_id=caller_account_id, profile_id=profile_id, required_permission="READ"):
+            catalog_id = campaign.get("catalogId")
+            if catalog_id is not None and isinstance(catalog_id, str):
+                catalog_ids.add(catalog_id)
+    return catalog_ids
 
 
 def list_unit_campaign_catalogs(event: Dict[str, Any], context: Any) -> List[Dict[str, Any]]:
@@ -187,7 +192,6 @@ def list_unit_campaign_catalogs(event: Dict[str, Any], context: Any) -> List[Dic
         List of Catalog objects
     """
     try:
-        # Extract parameters
         unit_type = event["arguments"]["unitType"]
         unit_number = int(event["arguments"]["unitNumber"])
         city = event["arguments"]["city"]
@@ -196,59 +200,29 @@ def list_unit_campaign_catalogs(event: Dict[str, Any], context: Any) -> List[Dic
         campaign_year = int(event["arguments"]["campaignYear"])
         caller_account_id = event["identity"]["sub"]
 
-        logger.info(
-            f"Listing catalogs for {unit_type} {unit_number} in {city}, {state}, "
-            f"campaign {campaign_name} {campaign_year}, caller {caller_account_id}"
-        )
+        logger.info(f"Listing catalogs for {unit_type} {unit_number} in {city}, {state}, campaign {campaign_name}")
 
-        # Step 1: Query unitCampaignKey-index to find all campaigns matching unit+campaign criteria
+        # Step 1: Query unitCampaignKey-index
         unit_campaign_key = _build_unit_campaign_key(unit_type, unit_number, city, state, campaign_name, campaign_year)
-
         campaigns_response = _get_campaigns_table().query(
             IndexName="unitCampaignKey-index",
             KeyConditionExpression=Key("unitCampaignKey").eq(unit_campaign_key),
         )
-
         unit_campaigns = campaigns_response.get("Items", [])
-        logger.info(f"Found {len(unit_campaigns)} campaigns for unit+campaign")
+        logger.info(f"Found {len(unit_campaigns)} campaigns")
 
         if not unit_campaigns:
             return []
 
-        # Step 2: Filter campaigns by caller's access to profile and collect catalog IDs
-        catalog_ids: Set[str] = set()
-
-        for campaign in unit_campaigns:
-            profile_id = campaign["profileId"]
-            has_access = check_profile_access(
-                caller_account_id=caller_account_id,
-                profile_id=profile_id,
-                required_permission="READ",
-            )
-            if has_access:
-                catalog_id = campaign.get("catalogId")
-                if catalog_id is not None and isinstance(catalog_id, str):
-                    catalog_ids.add(catalog_id)
-
+        # Step 2: Collect catalog IDs from accessible campaigns
+        catalog_ids = _collect_catalog_ids_from_campaigns(unit_campaigns, caller_account_id)
         logger.info(f"Found {len(catalog_ids)} unique catalogs in accessible campaigns")
 
         if not catalog_ids:
             return []
 
-        # Step 3: Fetch catalog details for all unique catalog IDs
-        catalogs: List[Dict[str, Any]] = []
-
-        for catalog_id in catalog_ids:
-            try:
-                catalog_response = catalogs_table.get_item(Key={"catalogId": catalog_id})
-                if "Item" in catalog_response:
-                    catalogs.append(catalog_response["Item"])
-            except Exception as e:
-                logger.warning(f"Failed to fetch catalog {catalog_id}: {str(e)}")
-
-        # Sort by catalog name
-        catalogs.sort(key=lambda c: c.get("catalogName", ""))
-
+        # Step 3: Fetch and return catalog details
+        catalogs = _fetch_catalogs(catalog_ids)
         logger.info(f"Returning {len(catalogs)} catalogs")
         return catalogs
 

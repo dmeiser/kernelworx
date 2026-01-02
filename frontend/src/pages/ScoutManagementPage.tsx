@@ -185,12 +185,16 @@ export const ScoutManagementPage: React.FC = () => {
 
   // Revoke share
   const [revokeShare] = useMutation(REVOKE_SHARE, {
-    refetchQueries: [{ query: LIST_SHARES_BY_PROFILE, variables: { profileId: dbProfileId } }],
+    refetchQueries: [
+      { query: LIST_SHARES_BY_PROFILE, variables: { profileId: dbProfileId } },
+    ],
   });
 
   // Transfer ownership
   const [transferOwnership] = useMutation(TRANSFER_PROFILE_OWNERSHIP, {
-    refetchQueries: [{ query: GET_PROFILE, variables: { profileId: dbProfileId } }],
+    refetchQueries: [
+      { query: GET_PROFILE, variables: { profileId: dbProfileId } },
+    ],
     onCompleted: () => {
       navigate("/scouts");
     },
@@ -238,17 +242,19 @@ export const ScoutManagementPage: React.FC = () => {
 
   const handleRevokeShare = async (targetAccountId: string, email?: string) => {
     const userName = email || `User ${targetAccountId.substring(0, 8)}...`;
-    if (!window.confirm(`Are you sure you want to revoke access for ${userName}?`)) {
+    if (
+      !window.confirm(`Are you sure you want to revoke access for ${userName}?`)
+    ) {
       return;
     }
 
     try {
       await revokeShare({
-        variables: { 
+        variables: {
           input: {
-            profileId: dbProfileId, 
-            targetAccountId 
-          }
+            profileId: dbProfileId,
+            targetAccountId,
+          },
         },
       });
     } catch (err) {
@@ -257,10 +263,13 @@ export const ScoutManagementPage: React.FC = () => {
     }
   };
 
-  const handleTransferOwnership = async (targetAccountId: string, email?: string) => {
+  const handleTransferOwnership = async (
+    targetAccountId: string,
+    email?: string,
+  ) => {
     const userName = email || `User ${targetAccountId.substring(0, 8)}...`;
     const confirmMessage = `Are you sure you want to transfer ownership to ${userName}?\n\nThis action cannot be undone. You will lose ownership of this profile and all associated campaigns.`;
-    
+
     if (!window.confirm(confirmMessage)) {
       return;
     }
@@ -567,11 +576,20 @@ export const ScoutManagementPage: React.FC = () => {
                       </TableCell>
                       <TableCell>{formatDate(share.createdAt)}</TableCell>
                       <TableCell align="right">
-                        <Stack direction="row" spacing={1} justifyContent="flex-end">
+                        <Stack
+                          direction="row"
+                          spacing={1}
+                          justifyContent="flex-end"
+                        >
                           <Button
                             size="small"
                             variant="outlined"
-                            onClick={() => handleTransferOwnership(share.targetAccountId, share.targetAccount?.email)}
+                            onClick={() =>
+                              handleTransferOwnership(
+                                share.targetAccountId,
+                                share.targetAccount?.email,
+                              )
+                            }
                             title="Transfer ownership to this user"
                           >
                             Transfer Ownership
@@ -579,7 +597,12 @@ export const ScoutManagementPage: React.FC = () => {
                           <IconButton
                             size="small"
                             color="error"
-                            onClick={() => handleRevokeShare(share.targetAccountId, share.targetAccount?.email)}
+                            onClick={() =>
+                              handleRevokeShare(
+                                share.targetAccountId,
+                                share.targetAccount?.email,
+                              )
+                            }
                             title="Revoke access"
                           >
                             <DeleteIcon fontSize="small" />
@@ -600,8 +623,8 @@ export const ScoutManagementPage: React.FC = () => {
             Danger Zone
           </Typography>
           <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
-            Permanently delete this scout and all associated campaigns
-            and orders. This action cannot be undone.
+            Permanently delete this scout and all associated campaigns and
+            orders. This action cannot be undone.
           </Typography>
           <Button
             variant="contained"

@@ -40,7 +40,12 @@ import {
   GET_CAMPAIGN,
   GET_PROFILE,
 } from "../lib/graphql";
-import { ensureProfileId, ensureCampaignId, ensureOrderId, toUrlId } from "../lib/ids";
+import {
+  ensureProfileId,
+  ensureCampaignId,
+  ensureOrderId,
+  toUrlId,
+} from "../lib/ids";
 
 interface LineItemInput {
   productId: string;
@@ -99,7 +104,9 @@ export const OrderEditorPage: React.FC = () => {
   const profileId = encodedProfileId
     ? decodeURIComponent(encodedProfileId)
     : "";
-  const campaignId = encodedCampaignId ? decodeURIComponent(encodedCampaignId) : "";
+  const campaignId = encodedCampaignId
+    ? decodeURIComponent(encodedCampaignId)
+    : "";
   const orderId = encodedOrderId ? decodeURIComponent(encodedOrderId) : null;
   const dbProfileId = ensureProfileId(profileId);
   const dbCampaignId = ensureCampaignId(campaignId);
@@ -123,10 +130,13 @@ export const OrderEditorPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
 
   // Fetch campaign data for products
-  const { data: campaignData } = useQuery<{ getCampaign: CampaignData }>(GET_CAMPAIGN, {
-    variables: { campaignId: dbCampaignId },
-    skip: !dbCampaignId,
-  });
+  const { data: campaignData } = useQuery<{ getCampaign: CampaignData }>(
+    GET_CAMPAIGN,
+    {
+      variables: { campaignId: dbCampaignId },
+      skip: !dbCampaignId,
+    },
+  );
 
   // Fetch profile for permissions
   const { data: profileData } = useQuery<{ getProfile: ProfileData }>(
@@ -145,7 +155,8 @@ export const OrderEditorPage: React.FC = () => {
     skip: !dbOrderId,
   });
 
-  const products: Product[] = campaignData?.getCampaign?.catalog?.products || [];
+  const products: Product[] =
+    campaignData?.getCampaign?.catalog?.products || [];
   const profile = profileData?.getProfile;
   const hasWritePermission =
     profile?.isOwner || profile?.permissions?.includes("WRITE");

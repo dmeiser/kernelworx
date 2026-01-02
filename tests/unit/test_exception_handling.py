@@ -10,6 +10,7 @@ from typing import Any, Dict
 from unittest.mock import MagicMock, patch
 
 import pytest
+
 from src.handlers.profile_sharing import create_profile_invite
 from src.utils.errors import AppError, ErrorCode
 

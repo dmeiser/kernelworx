@@ -66,7 +66,9 @@ const BASE_URL = window.location.origin;
 export const EditSharedCampaignDialog: React.FC<
   EditSharedCampaignDialogProps
 > = ({ open, sharedCampaign, onClose, onSave }) => {
-  const [description, setDescription] = useState(sharedCampaign.description || "");
+  const [description, setDescription] = useState(
+    sharedCampaign.description || "",
+  );
   const [creatorMessage, setCreatorMessage] = useState(
     sharedCampaign.creatorMessage || "",
   );
@@ -169,8 +171,8 @@ export const EditSharedCampaignDialog: React.FC<
                   Unit:
                 </Typography>
                 <Typography variant="body2">
-                  {sharedCampaign.unitType} {sharedCampaign.unitNumber}, {sharedCampaign.city},{" "}
-                  {sharedCampaign.state}
+                  {sharedCampaign.unitType} {sharedCampaign.unitNumber},{" "}
+                  {sharedCampaign.city}, {sharedCampaign.state}
                 </Typography>
               </Box>
               <Box display="flex" alignItems="center" gap={1}>

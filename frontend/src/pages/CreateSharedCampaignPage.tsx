@@ -124,7 +124,9 @@ export const CreateSharedCampaignPage: React.FC = () => {
     listMySharedCampaigns: SharedCampaign[];
   }>(LIST_MY_SHARED_CAMPAIGNS, { fetchPolicy: "network-only" });
   const sharedCampaigns = sharedCampaignsData?.listMySharedCampaigns || [];
-  const activeSharedCampaignCount = sharedCampaigns.filter((p) => p.isActive).length;
+  const activeSharedCampaignCount = sharedCampaigns.filter(
+    (p) => p.isActive,
+  ).length;
   const canCreate = activeSharedCampaignCount < MAX_ACTIVE_SHARED_CAMPAIGNS;
 
   // Fetch catalogs
@@ -198,9 +200,7 @@ export const CreateSharedCampaignPage: React.FC = () => {
       navigate("/shared-campaigns");
     } catch (err) {
       const errorMessage =
-        err instanceof Error
-          ? err.message
-          : "Failed to create shared campaign";
+        err instanceof Error ? err.message : "Failed to create shared campaign";
       setError(errorMessage);
       window.scrollTo({ top: 0, behavior: "smooth" });
     } finally {
@@ -237,9 +237,9 @@ export const CreateSharedCampaignPage: React.FC = () => {
 
           {!canCreate && (
             <Alert severity="error">
-              You have reached the maximum of {MAX_ACTIVE_SHARED_CAMPAIGNS} active
-              shared campaigns. Please deactivate an existing shared campaign before
-              creating a new one.
+              You have reached the maximum of {MAX_ACTIVE_SHARED_CAMPAIGNS}{" "}
+              active shared campaigns. Please deactivate an existing shared
+              campaign before creating a new one.
             </Alert>
           )}
 
@@ -477,7 +477,8 @@ export const CreateSharedCampaignPage: React.FC = () => {
               {previewLink}
             </Typography>
             <Typography variant="caption" color="text.secondary">
-              The actual code will be generated when you create the shared campaign
+              The actual code will be generated when you create the shared
+              campaign
             </Typography>
           </Box>
 

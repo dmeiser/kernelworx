@@ -259,7 +259,9 @@ export const ScoutsPage: React.FC = () => {
 
   const handleDeleteProfile = async () => {
     if (!deletingProfileId) return;
-    await deleteProfile({ variables: { profileId: ensureProfileId(deletingProfileId) } });
+    await deleteProfile({
+      variables: { profileId: ensureProfileId(deletingProfileId) },
+    });
   };
 
   const myProfiles: Profile[] = myProfilesData?.listMyProfiles || [];
@@ -401,8 +403,7 @@ export const ScoutsPage: React.FC = () => {
         filteredSharedProfiles.length === 0 &&
         !loading && (
           <Alert severity="info">
-            You don't have any scouts yet. Click "Create Scout" to get
-            started!
+            You don't have any scouts yet. Click "Create Scout" to get started!
           </Alert>
         )}
 
@@ -431,8 +432,8 @@ export const ScoutsPage: React.FC = () => {
         <DialogTitle>Delete Profile?</DialogTitle>
         <DialogContent>
           <Typography>
-            Are you sure you want to delete this profile? All campaigns and orders
-            will be permanently deleted. This action cannot be undone.
+            Are you sure you want to delete this profile? All campaigns and
+            orders will be permanently deleted. This action cannot be undone.
           </Typography>
         </DialogContent>
         <DialogActions>

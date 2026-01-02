@@ -4,6 +4,7 @@ from typing import Any, Dict
 from unittest.mock import MagicMock, patch
 
 import pytest
+
 from src.handlers.list_unit_catalogs import list_unit_catalogs
 
 

@@ -75,15 +75,15 @@ const BASE_URL = window.location.origin;
 
 export const SharedCampaignsPage: React.FC = () => {
   const navigate = useNavigate();
-  const [editingSharedCampaign, setEditingSharedCampaign] = useState<SharedCampaign | null>(
-    null,
-  );
+  const [editingSharedCampaign, setEditingSharedCampaign] =
+    useState<SharedCampaign | null>(null);
   const [deactivateDialogOpen, setDeactivateDialogOpen] = useState(false);
   const [sharedCampaignToDeactivate, setSharedCampaignToDeactivate] =
     useState<SharedCampaign | null>(null);
   const [qrDialogOpen, setQrDialogOpen] = useState(false);
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string | null>(null);
-  const [qrSharedCampaign, setQrSharedCampaign] = useState<SharedCampaign | null>(null);
+  const [qrSharedCampaign, setQrSharedCampaign] =
+    useState<SharedCampaign | null>(null);
   const [snackbarOpen, setSnackbarOpen] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState("");
 
@@ -112,7 +112,9 @@ export const SharedCampaignsPage: React.FC = () => {
   });
 
   const sharedCampaigns = data?.listMySharedCampaigns || [];
-  const activeSharedCampaignCount = sharedCampaigns.filter((p) => p.isActive).length;
+  const activeSharedCampaignCount = sharedCampaigns.filter(
+    (p) => p.isActive,
+  ).length;
   const canCreateMore = activeSharedCampaignCount < MAX_SHARED_CAMPAIGNS;
 
   const showSnackbar = (message: string) => {
@@ -181,7 +183,9 @@ export const SharedCampaignsPage: React.FC = () => {
   const confirmDeactivate = async () => {
     if (sharedCampaignToDeactivate) {
       await deleteSharedCampaign({
-        variables: { sharedCampaignCode: sharedCampaignToDeactivate.sharedCampaignCode },
+        variables: {
+          sharedCampaignCode: sharedCampaignToDeactivate.sharedCampaignCode,
+        },
       });
     }
   };
@@ -240,8 +244,9 @@ export const SharedCampaignsPage: React.FC = () => {
             My Shared Campaigns
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            Create shareable links that let your unit members create campaigns quickly with preset information for your unit.
-            members. ({activeSharedCampaignCount}/{MAX_SHARED_CAMPAIGNS} active)
+            Create shareable links that let your unit members create campaigns
+            quickly with preset information for your unit. members. (
+            {activeSharedCampaignCount}/{MAX_SHARED_CAMPAIGNS} active)
           </Typography>
         </Box>
         <Tooltip
@@ -270,8 +275,8 @@ export const SharedCampaignsPage: React.FC = () => {
             No Shared Campaigns Yet
           </Typography>
           <Typography color="text.secondary" sx={{ mb: 3 }}>
-            Create a shared campaign to generate shareable links that simplify campaign creation for your unit members.
-            members.
+            Create a shared campaign to generate shareable links that simplify
+            campaign creation for your unit members. members.
           </Typography>
           <Button
             variant="contained"
@@ -358,7 +363,9 @@ export const SharedCampaignsPage: React.FC = () => {
                       <Tooltip title="Copy Link">
                         <IconButton
                           size="small"
-                          onClick={() => handleCopyLink(sharedCampaign.sharedCampaignCode)}
+                          onClick={() =>
+                            handleCopyLink(sharedCampaign.sharedCampaignCode)
+                          }
                           aria-label="Copy link"
                         >
                           <CopyIcon fontSize="small" />
@@ -421,14 +428,15 @@ export const SharedCampaignsPage: React.FC = () => {
         <DialogTitle>Deactivate Campaign SharedCampaign?</DialogTitle>
         <DialogContent>
           <DialogContentText>
-            Are you sure you want to deactivate this campaign sharedCampaign? The link
-            will no longer work for new campaign creation, but existing campaigns
-            created from this link will not be affected.
+            Are you sure you want to deactivate this campaign sharedCampaign?
+            The link will no longer work for new campaign creation, but existing
+            campaigns created from this link will not be affected.
           </DialogContentText>
           {sharedCampaignToDeactivate && (
             <Box mt={2}>
               <Typography variant="body2" color="text.secondary">
-                <strong>Code:</strong> {sharedCampaignToDeactivate.sharedCampaignCode}
+                <strong>Code:</strong>{" "}
+                {sharedCampaignToDeactivate.sharedCampaignCode}
               </Typography>
               <Typography variant="body2" color="text.secondary">
                 <strong>Unit:</strong> {sharedCampaignToDeactivate.unitType}{" "}

@@ -4,6 +4,7 @@ from typing import Any, Dict
 from unittest.mock import MagicMock, patch
 
 import pytest
+
 from src.handlers.campaign_operations import (
     _build_unit_campaign_key,
     _to_dynamo_value,
@@ -73,10 +74,10 @@ class TestToDynamoValue:
         assert result == {"NULL": True}
 
     def test_to_dynamo_value_string_list(self) -> None:
-        """Test converting a list of strings (converted to set for DynamoDB SS type)."""
+        """Test converting a list of strings to DynamoDB SS type."""
         result = _to_dynamo_value(["a", "b", "c"])
-        # boto3 expects a set for the SS (String Set) DynamoDB type
-        assert result == {"SS": {"a", "b", "c"}}
+        # DynamoDB accepts lists for SS (String Set) type
+        assert result == {"SS": ["a", "b", "c"]}
 
     def test_to_dynamo_value_mixed_list(self) -> None:
         """Test converting a list of mixed types."""
@@ -284,6 +285,7 @@ class TestCreateCampaign:
         assert result["profileId"] == sample_profile["profileId"]
         assert result["campaignName"] == "Fall"
         mock_dynamodb_client.transact_write_items.assert_called_once()
+
     @patch("src.handlers.campaign_operations.dynamodb_client")
     @patch("src.handlers.campaign_operations.check_profile_access")
     @patch("src.handlers.campaign_operations._get_shared_campaign")
