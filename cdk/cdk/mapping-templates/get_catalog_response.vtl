@@ -1,0 +1,19 @@
+#if($ctx.error)
+    $util.error($ctx.error.message, $ctx.error.type)
+#end
+#if(!$ctx.result || $ctx.result.isEmpty())
+    $util.toJson(null)
+#else
+    ## Check authorization: Allow if catalog is public OR caller is owner
+    #set($catalog = $ctx.result)
+    #set($callerAccountId = $util.defaultIfNull($ctx.identity.sub, ""))
+    #set($isPublic = $catalog.isPublic == "true")
+    #set($isOwner = $catalog.ownerAccountId == "ACCOUNT#${callerAccountId}")
+    
+    #if($isPublic || $isOwner)
+        $util.toJson($catalog)
+    #else
+        ## Non-owner accessing private catalog: return null
+        $util.toJson(null)
+    #end
+#end
