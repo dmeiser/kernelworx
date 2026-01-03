@@ -2,8 +2,8 @@
  * CreateSharedCampaignDialog - Dialog for creating a new shared campaign
  */
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { useMutation, useQuery } from "@apollo/client/react";
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useMutation, useQuery } from '@apollo/client/react';
 import {
   Dialog,
   DialogTitle,
@@ -21,12 +21,8 @@ import {
   Typography,
   Box,
   CircularProgress,
-} from "@mui/material";
-import {
-  LIST_PUBLIC_CATALOGS,
-  LIST_MY_CATALOGS,
-  CREATE_SHARED_CAMPAIGN,
-} from "../lib/graphql";
+} from '@mui/material';
+import { LIST_PUBLIC_CATALOGS, LIST_MY_CATALOGS, CREATE_SHARED_CAMPAIGN } from '../lib/graphql';
 
 interface Catalog {
   catalogId: string;
@@ -41,58 +37,58 @@ interface CreateSharedCampaignDialogProps {
   canCreate: boolean;
 }
 
-const UNIT_TYPES = ["Pack", "Troop", "Crew", "Ship", "Post"];
+const UNIT_TYPES = ['Pack', 'Troop', 'Crew', 'Ship', 'Post'];
 const US_STATES = [
-  "AL",
-  "AK",
-  "AZ",
-  "AR",
-  "CA",
-  "CO",
-  "CT",
-  "DE",
-  "FL",
-  "GA",
-  "HI",
-  "ID",
-  "IL",
-  "IN",
-  "IA",
-  "KS",
-  "KY",
-  "LA",
-  "ME",
-  "MD",
-  "MA",
-  "MI",
-  "MN",
-  "MS",
-  "MO",
-  "MT",
-  "NE",
-  "NV",
-  "NH",
-  "NJ",
-  "NM",
-  "NY",
-  "NC",
-  "ND",
-  "OH",
-  "OK",
-  "OR",
-  "PA",
-  "RI",
-  "SC",
-  "SD",
-  "TN",
-  "TX",
-  "UT",
-  "VT",
-  "VA",
-  "WA",
-  "WV",
-  "WI",
-  "WY",
+  'AL',
+  'AK',
+  'AZ',
+  'AR',
+  'CA',
+  'CO',
+  'CT',
+  'DE',
+  'FL',
+  'GA',
+  'HI',
+  'ID',
+  'IL',
+  'IN',
+  'IA',
+  'KS',
+  'KY',
+  'LA',
+  'ME',
+  'MD',
+  'MA',
+  'MI',
+  'MN',
+  'MS',
+  'MO',
+  'MT',
+  'NE',
+  'NV',
+  'NH',
+  'NJ',
+  'NM',
+  'NY',
+  'NC',
+  'ND',
+  'OH',
+  'OK',
+  'OR',
+  'PA',
+  'RI',
+  'SC',
+  'SD',
+  'TN',
+  'TX',
+  'UT',
+  'VT',
+  'VA',
+  'WA',
+  'WV',
+  'WI',
+  'WY',
 ];
 
 const BASE_URL = window.location.origin;
@@ -113,40 +109,22 @@ interface FormState {
 }
 
 const hasCatalogAndCampaign = (formState: FormState): boolean =>
-  Boolean(
-    formState.catalogId &&
-    formState.campaignName.trim() &&
-    formState.campaignYear,
-  );
+  Boolean(formState.catalogId && formState.campaignName.trim() && formState.campaignYear);
 
 const hasUnitInfo = (formState: FormState): boolean =>
-  Boolean(
-    formState.unitType &&
-    formState.unitNumber &&
-    formState.city.trim() &&
-    formState.state,
-  );
+  Boolean(formState.unitType && formState.unitNumber && formState.city.trim() && formState.state);
 
-const hasRequiredFields = (formState: FormState): boolean =>
-  hasCatalogAndCampaign(formState) && hasUnitInfo(formState);
+const hasRequiredFields = (formState: FormState): boolean => hasCatalogAndCampaign(formState) && hasUnitInfo(formState);
 
-const isMessageValid = (creatorMessage: string): boolean =>
-  creatorMessage.length <= MAX_CREATOR_MESSAGE_LENGTH;
+const isMessageValid = (creatorMessage: string): boolean => creatorMessage.length <= MAX_CREATOR_MESSAGE_LENGTH;
 
 const validateForm = (formState: FormState): boolean =>
   hasRequiredFields(formState) && isMessageValid(formState.creatorMessage);
 
-const renderCatalogGroup = (
-  title: string,
-  catalogs: Catalog[],
-): React.ReactNode[] => {
+const renderCatalogGroup = (title: string, catalogs: Catalog[]): React.ReactNode[] => {
   if (!catalogs.length) return [];
   return [
-    <MenuItem
-      key={`${title}-header`}
-      disabled
-      sx={{ fontWeight: 600, backgroundColor: "#f5f5f5", opacity: 1 }}
-    >
+    <MenuItem key={`${title}-header`} disabled sx={{ fontWeight: 600, backgroundColor: '#f5f5f5', opacity: 1 }}>
       {title}
     </MenuItem>,
     ...catalogs.map((catalog) => (
@@ -172,8 +150,8 @@ const CatalogOptions: React.FC<{
 
   return (
     <>
-      {renderCatalogGroup("Public Catalogs", filteredPublicCatalogs)}
-      {renderCatalogGroup("My Catalogs", myCatalogs)}
+      {renderCatalogGroup('Public Catalogs', filteredPublicCatalogs)}
+      {renderCatalogGroup('My Catalogs', myCatalogs)}
     </>
   );
 };
@@ -187,21 +165,13 @@ const useCatalogLists = (open: boolean) => {
     listMyCatalogs: Catalog[];
   }>(LIST_MY_CATALOGS, { skip: !open });
 
-  const publicCatalogs = useMemo(
-    () => publicCatalogsData?.listPublicCatalogs || [],
-    [publicCatalogsData],
-  );
+  const publicCatalogs = useMemo(() => publicCatalogsData?.listPublicCatalogs || [], [publicCatalogsData]);
 
-  const ownedCatalogs = useMemo(
-    () => myCatalogsData?.listMyCatalogs || [],
-    [myCatalogsData],
-  );
+  const ownedCatalogs = useMemo(() => myCatalogsData?.listMyCatalogs || [], [myCatalogsData]);
 
   const catalogLists = useMemo(() => {
     const myIdSet = new Set(ownedCatalogs.map((c) => c.catalogId));
-    const filteredPublicCatalogs = publicCatalogs.filter(
-      (catalog) => !myIdSet.has(catalog.catalogId),
-    );
+    const filteredPublicCatalogs = publicCatalogs.filter((catalog) => !myIdSet.has(catalog.catalogId));
 
     return { filteredPublicCatalogs, ownedCatalogs };
   }, [ownedCatalogs, publicCatalogs]);
@@ -236,30 +206,30 @@ interface FormSetters {
 }
 
 const useSharedCampaignForm = (open: boolean) => {
-  const [catalogId, setCatalogId] = useState("");
-  const [campaignName, setCampaignName] = useState("");
+  const [catalogId, setCatalogId] = useState('');
+  const [campaignName, setCampaignName] = useState('');
   const [campaignYear, setCampaignYear] = useState(new Date().getFullYear());
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
-  const [unitType, setUnitType] = useState("");
-  const [unitNumber, setUnitNumber] = useState("");
-  const [city, setCity] = useState("");
-  const [state, setFormState] = useState("");
-  const [creatorMessage, setCreatorMessage] = useState("");
-  const [description, setDescription] = useState("");
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+  const [unitType, setUnitType] = useState('');
+  const [unitNumber, setUnitNumber] = useState('');
+  const [city, setCity] = useState('');
+  const [state, setFormState] = useState('');
+  const [creatorMessage, setCreatorMessage] = useState('');
+  const [description, setDescription] = useState('');
 
   const resetForm = useCallback(() => {
-    setCatalogId("");
-    setCampaignName("");
+    setCatalogId('');
+    setCampaignName('');
     setCampaignYear(new Date().getFullYear());
-    setStartDate("");
-    setEndDate("");
-    setUnitType("");
-    setUnitNumber("");
-    setCity("");
-    setFormState("");
-    setCreatorMessage("");
-    setDescription("");
+    setStartDate('');
+    setEndDate('');
+    setUnitType('');
+    setUnitNumber('');
+    setCity('');
+    setFormState('');
+    setCreatorMessage('');
+    setDescription('');
   }, []);
 
   useFormReset(open, resetForm);
@@ -377,9 +347,7 @@ const CampaignFormFields: React.FC<CampaignFormFieldsProps> = ({
         label="Campaign Year"
         type="number"
         value={formState.campaignYear}
-        onChange={(e) =>
-          formSetters.setCampaignYear(parseInt(e.target.value, 10) || 0)
-        }
+        onChange={(e) => formSetters.setCampaignYear(parseInt(e.target.value, 10) || 0)}
         required
         sx={{ width: 150 }}
         inputProps={{ min: 2020, max: 2100 }}
@@ -413,11 +381,7 @@ const CampaignFormFields: React.FC<CampaignFormFieldsProps> = ({
     <Stack direction="row" spacing={2}>
       <FormControl required sx={{ minWidth: 150 }}>
         <InputLabel>Unit Type</InputLabel>
-        <Select
-          value={formState.unitType}
-          onChange={(e) => formSetters.setUnitType(e.target.value)}
-          label="Unit Type"
-        >
+        <Select value={formState.unitType} onChange={(e) => formSetters.setUnitType(e.target.value)} label="Unit Type">
           {UNIT_TYPES.map((type) => (
             <MenuItem key={type} value={type}>
               {type}
@@ -443,11 +407,7 @@ const CampaignFormFields: React.FC<CampaignFormFieldsProps> = ({
       />
       <FormControl required sx={{ minWidth: 100 }}>
         <InputLabel>State</InputLabel>
-        <Select
-          value={formState.state}
-          onChange={(e) => formSetters.setState(e.target.value)}
-          label="State"
-        >
+        <Select value={formState.state} onChange={(e) => formSetters.setState(e.target.value)} label="State">
           {US_STATES.map((s) => (
             <MenuItem key={s} value={s}>
               {s}
@@ -483,15 +443,11 @@ const CampaignFormFields: React.FC<CampaignFormFieldsProps> = ({
 );
 
 const LinkPreview: React.FC = () => (
-  <Box sx={{ bgcolor: "grey.100", p: 2, borderRadius: 1 }}>
+  <Box sx={{ bgcolor: 'grey.100', p: 2, borderRadius: 1 }}>
     <Typography variant="caption" color="text.secondary">
       Shareable Link Preview:
     </Typography>
-    <Typography
-      variant="body2"
-      fontFamily="monospace"
-      sx={{ wordBreak: "break-all" }}
-    >
+    <Typography variant="body2" fontFamily="monospace" sx={{ wordBreak: 'break-all' }}>
       {`${BASE_URL}/c/[generated-code]`}
     </Typography>
     <Typography variant="caption" color="text.secondary">
@@ -503,23 +459,25 @@ const LinkPreview: React.FC = () => (
 const LimitWarning: React.FC<{ canCreate: boolean }> = ({ canCreate }) =>
   canCreate ? null : (
     <Alert severity="error">
-      You have reached the maximum of 50 active shared campaigns. Please
-      deactivate an existing shared campaign before creating a new one.
+      You have reached the maximum of 50 active shared campaigns. Please deactivate an existing shared campaign before
+      creating a new one.
     </Alert>
   );
 
 const ErrorAlert: React.FC<{ error: string | null }> = ({ error }) =>
   error ? <Alert severity="error">{error}</Alert> : null;
 
-export const CreateSharedCampaignDialog: React.FC<
-  CreateSharedCampaignDialogProps
-> = ({ open, onClose, onSuccess, canCreate }) => {
+export const CreateSharedCampaignDialog: React.FC<CreateSharedCampaignDialogProps> = ({
+  open,
+  onClose,
+  onSuccess,
+  canCreate,
+}) => {
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const { formState, formSetters, isFormValid } = useSharedCampaignForm(open);
-  const { filteredPublicCatalogs, myCatalogs, catalogsLoading } =
-    useCatalogLists(open);
+  const { filteredPublicCatalogs, myCatalogs, catalogsLoading } = useCatalogLists(open);
   const [createSharedCampaign] = useMutation(CREATE_SHARED_CAMPAIGN);
 
   const handleSubmit = async () => {
@@ -532,10 +490,7 @@ export const CreateSharedCampaignDialog: React.FC<
       });
       onSuccess();
     } catch (err) {
-      const errorMessage =
-        err instanceof Error
-          ? err.message
-          : "Failed to create campaign sharedCampaign";
+      const errorMessage = err instanceof Error ? err.message : 'Failed to create campaign sharedCampaign';
       setError(errorMessage);
     } finally {
       setIsSubmitting(false);
@@ -549,8 +504,8 @@ export const CreateSharedCampaignDialog: React.FC<
         <Stack spacing={3} sx={{ mt: 1 }}>
           <Alert severity="warning">
             <AlertTitle>Important</AlertTitle>
-            If someone stops sharing their profile with you, you will lose
-            access to their data. The share is controlled by the profile owner.
+            If someone stops sharing their profile with you, you will lose access to their data. The share is controlled
+            by the profile owner.
           </Alert>
 
           <LimitWarning canCreate={canCreate} />
@@ -577,7 +532,7 @@ export const CreateSharedCampaignDialog: React.FC<
           disabled={!isFormValid || isSubmitting || !canCreate}
           startIcon={isSubmitting ? <CircularProgress size={16} /> : undefined}
         >
-          {isSubmitting ? "Creating..." : "Create Shared Campaign"}
+          {isSubmitting ? 'Creating...' : 'Create Shared Campaign'}
         </Button>
       </DialogActions>
     </Dialog>

@@ -7,25 +7,12 @@
  * - Unique Customers
  */
 
-import React from "react";
-import { useQuery } from "@apollo/client/react";
-import {
-  Box,
-  Grid,
-  Paper,
-  Typography,
-  Stack,
-  CircularProgress,
-  Alert,
-} from "@mui/material";
-import {
-  ShoppingCart,
-  AttachMoney,
-  People,
-  Inventory2,
-} from "@mui/icons-material";
-import { LIST_ORDERS_BY_CAMPAIGN } from "../lib/graphql";
-import { ensureCampaignId } from "../lib/ids";
+import React from 'react';
+import { useQuery } from '@apollo/client/react';
+import { Box, Grid, Paper, Typography, Stack, CircularProgress, Alert } from '@mui/material';
+import { ShoppingCart, AttachMoney, People, Inventory2 } from '@mui/icons-material';
+import { LIST_ORDERS_BY_CAMPAIGN } from '../lib/graphql';
+import { ensureCampaignId } from '../lib/ids';
 
 interface LineItem {
   productId: string;
@@ -47,9 +34,7 @@ interface CampaignSummaryTilesProps {
   campaignId: string;
 }
 
-export const CampaignSummaryTiles: React.FC<CampaignSummaryTilesProps> = ({
-  campaignId,
-}) => {
+export const CampaignSummaryTiles: React.FC<CampaignSummaryTilesProps> = ({ campaignId }) => {
   const dbCampaignId = ensureCampaignId(campaignId);
 
   const {
@@ -65,44 +50,29 @@ export const CampaignSummaryTiles: React.FC<CampaignSummaryTilesProps> = ({
 
   // Calculate statistics
   const totalOrders = orders.length;
-  const totalRevenue = orders.reduce(
-    (sum, order) => sum + order.totalAmount,
-    0,
-  );
-  const uniqueCustomers = new Set(orders.map((order) => order.customerName))
-    .size;
+  const totalRevenue = orders.reduce((sum, order) => sum + order.totalAmount, 0);
+  const uniqueCustomers = new Set(orders.map((order) => order.customerName)).size;
   const totalItemsSold = orders.reduce(
-    (sum, order) =>
-      sum +
-      order.lineItems.reduce((itemSum, item) => itemSum + item.quantity, 0),
+    (sum, order) => sum + order.lineItems.reduce((itemSum, item) => itemSum + item.quantity, 0),
     0,
   );
 
   const formatCurrency = (amount: number) =>
-    new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency: "USD",
+    new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
     }).format(amount);
 
   if (loading) {
     return (
-      <Box
-        display="flex"
-        justifyContent="center"
-        alignItems="center"
-        minHeight="100px"
-      >
+      <Box display="flex" justifyContent="center" alignItems="center" minHeight="100px">
         <CircularProgress size={40} />
       </Box>
     );
   }
 
   if (error) {
-    return (
-      <Alert severity="error">
-        Failed to load summary statistics: {error.message}
-      </Alert>
-    );
+    return <Alert severity="error">Failed to load summary statistics: {error.message}</Alert>;
   }
 
   return (
@@ -126,9 +96,7 @@ export const CampaignSummaryTiles: React.FC<CampaignSummaryTilesProps> = ({
           <Stack direction="row" spacing={2} alignItems="center">
             <AttachMoney color="success" sx={{ fontSize: 40 }} />
             <Box>
-              <Typography variant="h4">
-                {formatCurrency(totalRevenue)}
-              </Typography>
+              <Typography variant="h4">{formatCurrency(totalRevenue)}</Typography>
               <Typography variant="body2" color="text.secondary">
                 Total Sales
               </Typography>

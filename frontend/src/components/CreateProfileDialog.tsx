@@ -6,16 +6,8 @@
  * to individual campaigns rather than profiles.
  */
 
-import React, { useState } from "react";
-import {
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  Button,
-  TextField,
-  Box,
-} from "@mui/material";
+import React, { useState } from 'react';
+import { Dialog, DialogTitle, DialogContent, DialogActions, Button, TextField, Box } from '@mui/material';
 
 interface CreateProfileDialogProps {
   open: boolean;
@@ -23,12 +15,8 @@ interface CreateProfileDialogProps {
   onSubmit: (sellerName: string) => Promise<void>;
 }
 
-export const CreateProfileDialog: React.FC<CreateProfileDialogProps> = ({
-  open,
-  onClose,
-  onSubmit,
-}) => {
-  const [sellerName, setSellerName] = useState("");
+export const CreateProfileDialog: React.FC<CreateProfileDialogProps> = ({ open, onClose, onSubmit }) => {
+  const [sellerName, setSellerName] = useState('');
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async () => {
@@ -37,10 +25,10 @@ export const CreateProfileDialog: React.FC<CreateProfileDialogProps> = ({
     setLoading(true);
     try {
       await onSubmit(sellerName.trim());
-      setSellerName("");
+      setSellerName('');
       onClose();
     } catch (error) {
-      console.error("Failed to create profile:", error);
+      console.error('Failed to create profile:', error);
     } finally {
       setLoading(false);
     }
@@ -48,7 +36,7 @@ export const CreateProfileDialog: React.FC<CreateProfileDialogProps> = ({
 
   const handleClose = () => {
     if (!loading) {
-      setSellerName("");
+      setSellerName('');
       onClose();
     }
   };
@@ -66,7 +54,7 @@ export const CreateProfileDialog: React.FC<CreateProfileDialogProps> = ({
             value={sellerName}
             onChange={(e) => setSellerName(e.target.value)}
             onKeyPress={(e) => {
-              if (e.key === "Enter" && sellerName.trim()) {
+              if (e.key === 'Enter' && sellerName.trim()) {
                 handleSubmit();
               }
             }}
@@ -79,12 +67,8 @@ export const CreateProfileDialog: React.FC<CreateProfileDialogProps> = ({
         <Button onClick={handleClose} disabled={loading}>
           Cancel
         </Button>
-        <Button
-          onClick={handleSubmit}
-          variant="contained"
-          disabled={!sellerName.trim() || loading}
-        >
-          {loading ? "Creating..." : "Create Scout"}
+        <Button onClick={handleSubmit} variant="contained" disabled={!sellerName.trim() || loading}>
+          {loading ? 'Creating...' : 'Create Scout'}
         </Button>
       </DialogActions>
     </Dialog>

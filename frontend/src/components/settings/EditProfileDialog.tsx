@@ -1,17 +1,8 @@
 /**
  * Edit Profile Dialog component for User Settings
  */
-import {
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  Button,
-  TextField,
-  Stack,
-  MenuItem,
-} from "@mui/material";
-import type { UseProfileEditReturn } from "../../hooks/useProfileEdit";
+import { Dialog, DialogTitle, DialogContent, DialogActions, Button, TextField, Stack, MenuItem } from '@mui/material';
+import type { UseProfileEditReturn } from '../../hooks/useProfileEdit';
 
 interface EditProfileDialogProps {
   profileHook: UseProfileEditReturn;
@@ -19,11 +10,7 @@ interface EditProfileDialogProps {
   onSave: () => void;
 }
 
-export const EditProfileDialog: React.FC<EditProfileDialogProps> = ({
-  profileHook,
-  updating,
-  onSave,
-}) => {
+export const EditProfileDialog: React.FC<EditProfileDialogProps> = ({ profileHook, updating, onSave }) => {
   return (
     <Dialog
       open={profileHook.editDialogOpen}
@@ -91,14 +78,11 @@ export const EditProfileDialog: React.FC<EditProfileDialogProps> = ({
         </Stack>
       </DialogContent>
       <DialogActions>
-        <Button
-          onClick={() => profileHook.setEditDialogOpen(false)}
-          disabled={updating}
-        >
+        <Button onClick={() => profileHook.setEditDialogOpen(false)} disabled={updating}>
           Cancel
         </Button>
         <Button onClick={onSave} variant="contained" disabled={updating}>
-          {updating ? "Saving..." : "Save Changes"}
+          {updating ? 'Saving...' : 'Save Changes'}
         </Button>
       </DialogActions>
     </Dialog>

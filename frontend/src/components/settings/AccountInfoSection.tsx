@@ -1,7 +1,7 @@
 /**
  * Account Information section for User Settings
  */
-import React from "react";
+import React from 'react';
 import {
   Paper,
   Stack,
@@ -13,14 +13,14 @@ import {
   ListItemIcon,
   Divider,
   Chip,
-} from "@mui/material";
+} from '@mui/material';
 import {
   Email as EmailIcon,
   Person as PersonIcon,
   Edit as EditIcon,
   AdminPanelSettings as AdminIcon,
   Info as InfoIcon,
-} from "@mui/icons-material";
+} from '@mui/icons-material';
 
 interface Account {
   accountId: string;
@@ -52,11 +52,7 @@ const renderRow = (
   <React.Fragment key={key}>
     <ListItem secondaryAction={action}>
       <ListItemIcon>{icon}</ListItemIcon>
-      <ListItemText
-        primary={label}
-        secondary={secondary}
-        secondaryTypographyProps={{ component: "span" }}
-      />
+      <ListItemText primary={label} secondary={secondary} secondaryTypographyProps={{ component: 'span' }} />
     </ListItem>
     <Divider component="li" />
   </React.Fragment>
@@ -70,13 +66,10 @@ type DetailRow = {
   action?: React.ReactNode;
 };
 
-const createEmailRow = (
-  account: Account | undefined,
-  onChangeEmail: () => void,
-): DetailRow => ({
-  key: "email",
+const createEmailRow = (account: Account | undefined, onChangeEmail: () => void): DetailRow => ({
+  key: 'email',
   icon: <EmailIcon color="primary" />,
-  label: "Email Address",
+  label: 'Email Address',
   value: account?.email,
   action: (
     <Button size="small" startIcon={<EditIcon />} onClick={onChangeEmail}>
@@ -87,91 +80,80 @@ const createEmailRow = (
 
 const createNameRows = (account: Account | undefined): DetailRow[] => [
   {
-    key: "givenName",
+    key: 'givenName',
     icon: <PersonIcon color="primary" />,
-    label: "First Name",
+    label: 'First Name',
     value: account?.givenName,
   },
   {
-    key: "familyName",
+    key: 'familyName',
     icon: <PersonIcon color="primary" />,
-    label: "Last Name",
+    label: 'Last Name',
     value: account?.familyName,
   },
 ];
 
 const createLocationRows = (account: Account | undefined): DetailRow[] => [
   {
-    key: "city",
+    key: 'city',
     icon: <PersonIcon color="primary" />,
-    label: "City",
+    label: 'City',
     value: account?.city,
   },
   {
-    key: "state",
+    key: 'state',
     icon: <PersonIcon color="primary" />,
-    label: "State",
+    label: 'State',
     value: account?.state,
   },
 ];
 
 const createUnitRow = (account: Account | undefined): DetailRow => ({
-  key: "unit",
+  key: 'unit',
   icon: <PersonIcon color="primary" />,
-  label: "Scouting Unit",
-  value:
-    account?.unitType && account?.unitNumber
-      ? `${account.unitType} ${account.unitNumber}`
-      : undefined,
+  label: 'Scouting Unit',
+  value: account?.unitType && account?.unitNumber ? `${account.unitType} ${account.unitNumber}` : undefined,
 });
 
 const createAccountTypeRow = (account: Account | undefined): DetailRow => ({
-  key: "account-type",
+  key: 'account-type',
   icon: <AdminIcon color="primary" />,
-  label: "Account Type",
+  label: 'Account Type',
   value: (
-    <Stack
-      direction="row"
-      spacing={1}
-      alignItems="center"
-      component="span"
-      sx={{ display: "inline-flex" }}
-    >
-      <span>{account?.isAdmin ? "Administrator" : "Standard User"}</span>
-      {account?.isAdmin ? (
-        <Chip label="Admin" color="error" size="small" />
-      ) : null}
+    <Stack direction="row" spacing={1} alignItems="center" component="span" sx={{ display: 'inline-flex' }}>
+      <span>{account?.isAdmin ? 'Administrator' : 'Standard User'}</span>
+      {account?.isAdmin ? <Chip label="Admin" color="error" size="small" /> : null}
     </Stack>
   ),
 });
 
 const createTimestampRows = (account: Account | undefined): DetailRow[] => [
   {
-    key: "created",
+    key: 'created',
     icon: <InfoIcon color="primary" />,
-    label: "Account Created",
-    value: account?.createdAt ? formatDate(account.createdAt) : "Unknown",
+    label: 'Account Created',
+    value: account?.createdAt ? formatDate(account.createdAt) : 'Unknown',
   },
   {
-    key: "updated",
+    key: 'updated',
     icon: <InfoIcon color="primary" />,
-    label: "Last Updated",
-    value: account?.updatedAt ? formatDate(account.updatedAt) : "Unknown",
+    label: 'Last Updated',
+    value: account?.updatedAt ? formatDate(account.updatedAt) : 'Unknown',
   },
 ];
 
 const createAccountIdRow = (account: Account | undefined): DetailRow => ({
-  key: "account-id",
+  key: 'account-id',
   icon: <PersonIcon color="primary" />,
-  label: "Account ID",
+  label: 'Account ID',
   value: account?.accountId ? (
     <Typography
       variant="body2"
       component="span"
       sx={{
-        wordBreak: "break-all",
-        fontFamily: "monospace",
-        fontSize: "0.875rem",
+        wordBreak: 'break-all',
+        fontFamily: 'monospace',
+        fontSize: '0.875rem',
       }}
     >
       {account.accountId}
@@ -179,10 +161,7 @@ const createAccountIdRow = (account: Account | undefined): DetailRow => ({
   ) : undefined,
 });
 
-const buildDetailRows = (
-  account: Account | undefined,
-  onChangeEmail: () => void,
-): React.ReactNode[] => {
+const buildDetailRows = (account: Account | undefined, onChangeEmail: () => void): React.ReactNode[] => {
   const rows: DetailRow[] = [
     createEmailRow(account, onChangeEmail),
     ...createNameRows(account),
@@ -194,55 +173,30 @@ const buildDetailRows = (
   ];
 
   return rows
-    .filter(
-      (row) =>
-        row.value !== undefined && row.value !== null && row.value !== "",
-    )
-    .map((row) =>
-      renderRow(
-        row.key,
-        row.icon,
-        row.label,
-        row.value as React.ReactNode,
-        row.action,
-      ),
-    );
+    .filter((row) => row.value !== undefined && row.value !== null && row.value !== '')
+    .map((row) => renderRow(row.key, row.icon, row.label, row.value as React.ReactNode, row.action));
 };
 
 const formatDate = (dateString: string): string => {
-  return new Date(dateString).toLocaleDateString("en-US", {
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
+  return new Date(dateString).toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
   });
 };
 
-const AccountHeader: React.FC<{ onEditProfile: () => void }> = ({
-  onEditProfile,
-}) => (
-  <Stack
-    direction="row"
-    justifyContent="space-between"
-    alignItems="center"
-    mb={2}
-  >
+const AccountHeader: React.FC<{ onEditProfile: () => void }> = ({ onEditProfile }) => (
+  <Stack direction="row" justifyContent="space-between" alignItems="center" mb={2}>
     <Typography variant="h6">Account Information</Typography>
-    <Button
-      variant="outlined"
-      size="small"
-      startIcon={<EditIcon />}
-      onClick={onEditProfile}
-    >
+    <Button variant="outlined" size="small" startIcon={<EditIcon />} onClick={onEditProfile}>
       Edit Profile
     </Button>
   </Stack>
 );
 
-const AccountDetailsList: React.FC<{ rows: React.ReactNode[] }> = ({
-  rows,
-}) => (
+const AccountDetailsList: React.FC<{ rows: React.ReactNode[] }> = ({ rows }) => (
   <List>
     {rows.map((row, idx) => (
       <React.Fragment key={`row-${idx}`}>{row}</React.Fragment>
@@ -250,15 +204,8 @@ const AccountDetailsList: React.FC<{ rows: React.ReactNode[] }> = ({
   </List>
 );
 
-export const AccountInfoSection: React.FC<AccountInfoSectionProps> = ({
-  account,
-  onEditProfile,
-  onChangeEmail,
-}) => {
-  const detailRows = React.useMemo(
-    () => buildDetailRows(account, onChangeEmail),
-    [account, onChangeEmail],
-  );
+export const AccountInfoSection: React.FC<AccountInfoSectionProps> = ({ account, onEditProfile, onChangeEmail }) => {
+  const detailRows = React.useMemo(() => buildDetailRows(account, onChangeEmail), [account, onChangeEmail]);
 
   return (
     <Paper sx={{ p: 3, mb: 3 }}>

@@ -2,7 +2,7 @@
  * Custom hook for managing order form state
  */
 
-import { useState, useCallback } from "react";
+import { useState, useCallback } from 'react';
 
 export interface LineItemInput {
   productId: string;
@@ -38,11 +38,11 @@ interface OrderData {
 function updateLineItemInArray(
   items: LineItemInput[],
   index: number,
-  field: "productId" | "quantity",
+  field: 'productId' | 'quantity',
   value: string,
 ): LineItemInput[] {
   const newItems = [...items];
-  if (field === "quantity") {
+  if (field === 'quantity') {
     const parsed = parseInt(value) || 1;
     newItems[index][field] = Math.min(Math.max(1, parsed), 99999);
   } else {
@@ -56,12 +56,12 @@ function loadCustomerInfo(
   setCustomerName: (v: string) => void,
   setCustomerPhone: (v: string) => void,
 ): void {
-  setCustomerName(order.customerName ?? "");
-  setCustomerPhone(order.customerPhone ?? "");
+  setCustomerName(order.customerName ?? '');
+  setCustomerPhone(order.customerPhone ?? '');
 }
 
 function getOrDefault(value: string | undefined): string {
-  return value ?? "";
+  return value ?? '';
 }
 
 function loadAddressInfo(
@@ -116,11 +116,7 @@ export interface OrderFormState {
   lineItems: LineItemInput[];
   addLineItem: () => void;
   removeLineItem: (index: number) => void;
-  updateLineItem: (
-    index: number,
-    field: "productId" | "quantity",
-    value: string,
-  ) => void;
+  updateLineItem: (index: number, field: 'productId' | 'quantity', value: string) => void;
 
   // Status
   loading: boolean;
@@ -134,54 +130,43 @@ export interface OrderFormState {
 
 export function useOrderForm(): OrderFormState {
   // Customer info
-  const [customerName, setCustomerName] = useState("");
-  const [customerPhone, setCustomerPhone] = useState("");
+  const [customerName, setCustomerName] = useState('');
+  const [customerPhone, setCustomerPhone] = useState('');
 
   // Address
-  const [street, setStreet] = useState("");
-  const [city, setCity] = useState("");
-  const [state, setState] = useState("");
-  const [zipCode, setZipCode] = useState("");
+  const [street, setStreet] = useState('');
+  const [city, setCity] = useState('');
+  const [state, setState] = useState('');
+  const [zipCode, setZipCode] = useState('');
 
   // Payment
-  const [paymentMethod, setPaymentMethod] = useState("CASH");
-  const [notes, setNotes] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState('CASH');
+  const [notes, setNotes] = useState('');
 
   // Line items
-  const [lineItems, setLineItems] = useState<LineItemInput[]>([
-    { productId: "", quantity: 1 },
-  ]);
+  const [lineItems, setLineItems] = useState<LineItemInput[]>([{ productId: '', quantity: 1 }]);
 
   // Status
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const addLineItem = useCallback(() => {
-    setLineItems((prev) => [...prev, { productId: "", quantity: 1 }]);
+    setLineItems((prev) => [...prev, { productId: '', quantity: 1 }]);
   }, []);
 
   const removeLineItem = useCallback((index: number) => {
     setLineItems((prev) => prev.filter((_, i) => i !== index));
   }, []);
 
-  const updateLineItem = useCallback(
-    (index: number, field: "productId" | "quantity", value: string) => {
-      setLineItems((prev) => updateLineItemInArray(prev, index, field, value));
-    },
-    [],
-  );
+  const updateLineItem = useCallback((index: number, field: 'productId' | 'quantity', value: string) => {
+    setLineItems((prev) => updateLineItemInArray(prev, index, field, value));
+  }, []);
 
   const loadFromOrder = useCallback((order: OrderData) => {
     loadCustomerInfo(order, setCustomerName, setCustomerPhone);
-    loadAddressInfo(
-      order.customerAddress,
-      setStreet,
-      setCity,
-      setState,
-      setZipCode,
-    );
-    setPaymentMethod(order.paymentMethod || "CASH");
-    setNotes(order.notes || "");
+    loadAddressInfo(order.customerAddress, setStreet, setCity, setState, setZipCode);
+    setPaymentMethod(order.paymentMethod || 'CASH');
+    setNotes(order.notes || '');
     setLineItems(mapLineItems(order.lineItems));
   }, []);
 

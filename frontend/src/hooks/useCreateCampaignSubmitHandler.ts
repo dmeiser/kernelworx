@@ -1,9 +1,9 @@
 /**
  * Custom hook that combines all submission logic
  */
-import { useCallback } from "react";
-import { useCreateCampaignSubmit } from "./useCreateCampaignSubmit";
-import { useCreateCampaignValidation } from "./useCreateCampaignValidation";
+import { useCallback } from 'react';
+import { useCreateCampaignSubmit } from './useCreateCampaignSubmit';
+import { useCreateCampaignValidation } from './useCreateCampaignValidation';
 
 interface FormState {
   profileId: string;
@@ -20,7 +20,7 @@ interface FormState {
   submitting: boolean;
   toastMessage: {
     message: string;
-    severity: "success" | "error";
+    severity: 'success' | 'error';
   } | null;
   setProfileId: (id: string) => void;
   setCampaignName: (name: string) => void;
@@ -37,7 +37,7 @@ interface FormState {
   setToastMessage: (
     message: {
       message: string;
-      severity: "success" | "error";
+      severity: 'success' | 'error';
     } | null,
   ) => void;
 }
@@ -49,17 +49,16 @@ interface SubmitParams {
 }
 
 export const useCreateCampaignSubmitHandler = (formState: FormState) => {
-  const { isFormValid, validateProfileSelection, validateUnitFields } =
-    useCreateCampaignValidation(
-      formState.profileId,
-      formState.campaignName,
-      formState.catalogId,
-      formState.submitting === false, // placeholder, will override in validation
-      formState.unitType,
-      formState.unitNumber,
-      formState.city,
-      formState.state,
-    );
+  const { isFormValid, validateProfileSelection, validateUnitFields } = useCreateCampaignValidation(
+    formState.profileId,
+    formState.campaignName,
+    formState.catalogId,
+    formState.submitting === false, // placeholder, will override in validation
+    formState.unitType,
+    formState.unitNumber,
+    formState.city,
+    formState.state,
+  );
 
   const { handleSubmit: submitCampaign } = useCreateCampaignSubmit();
 
@@ -67,7 +66,7 @@ export const useCreateCampaignSubmitHandler = (formState: FormState) => {
     (error: string) => {
       formState.setToastMessage({
         message: error,
-        severity: "error",
+        severity: 'error',
       });
     },
     [formState],
@@ -77,13 +76,13 @@ export const useCreateCampaignSubmitHandler = (formState: FormState) => {
     async (params: SubmitParams) => {
       const profileValidation = validateProfileSelection();
       if (!profileValidation.isValid) {
-        handleValidationError(profileValidation.error || "Validation failed");
+        handleValidationError(profileValidation.error || 'Validation failed');
         return;
       }
 
       const unitValidation = validateUnitFields();
       if (!unitValidation.isValid) {
-        handleValidationError(unitValidation.error || "Validation failed");
+        handleValidationError(unitValidation.error || 'Validation failed');
         return;
       }
 
@@ -107,13 +106,13 @@ export const useCreateCampaignSubmitHandler = (formState: FormState) => {
           onSuccess: (message: string) => {
             formState.setToastMessage({
               message,
-              severity: "success",
+              severity: 'success',
             });
           },
           onError: (message: string) => {
             formState.setToastMessage({
               message,
-              severity: "error",
+              severity: 'error',
             });
           },
         });
@@ -121,13 +120,7 @@ export const useCreateCampaignSubmitHandler = (formState: FormState) => {
         formState.setSubmitting(false);
       }
     },
-    [
-      validateProfileSelection,
-      validateUnitFields,
-      submitCampaign,
-      formState,
-      handleValidationError,
-    ],
+    [validateProfileSelection, validateUnitFields, submitCampaign, formState, handleValidationError],
   );
 
   return { handleSubmit, isFormValid };

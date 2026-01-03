@@ -2,7 +2,7 @@
  * CatalogEditorDialog - Create or edit a product catalog
  */
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect } from 'react';
 import {
   Dialog,
   DialogTitle,
@@ -18,8 +18,8 @@ import {
   Typography,
   Divider,
   Alert,
-} from "@mui/material";
-import { Add as AddIcon, Delete as DeleteIcon } from "@mui/icons-material";
+} from '@mui/material';
+import { Add as AddIcon, Delete as DeleteIcon } from '@mui/icons-material';
 
 interface Product {
   productName: string;
@@ -38,26 +38,21 @@ interface Catalog {
 interface CatalogEditorDialogProps {
   open: boolean;
   onClose: () => void;
-  onSave: (catalog: Omit<Catalog, "catalogId">) => Promise<void>;
+  onSave: (catalog: Omit<Catalog, 'catalogId'>) => Promise<void>;
   initialCatalog?: Catalog | null;
 }
 
-export const CatalogEditorDialog: React.FC<CatalogEditorDialogProps> = ({
-  open,
-  onClose,
-  onSave,
-  initialCatalog,
-}) => {
-  const [catalogName, setCatalogName] = useState("");
+export const CatalogEditorDialog: React.FC<CatalogEditorDialogProps> = ({ open, onClose, onSave, initialCatalog }) => {
+  const [catalogName, setCatalogName] = useState('');
   const [isPublic, setIsPublic] = useState(false);
   const [products, setProducts] = useState<Product[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const resetForm = () => {
-    setCatalogName("");
+    setCatalogName('');
     setIsPublic(false);
-    setProducts([{ productName: "", description: "", price: 0 }]);
+    setProducts([{ productName: '', description: '', price: 0 }]);
     setError(null);
   };
 
@@ -79,7 +74,7 @@ export const CatalogEditorDialog: React.FC<CatalogEditorDialogProps> = ({
   }, [open, initialCatalog]);
 
   const handleAddProduct = () => {
-    setProducts([...products, { productName: "", description: "", price: 0 }]);
+    setProducts([...products, { productName: '', description: '', price: 0 }]);
   };
 
   const handleRemoveProduct = (index: number) => {
@@ -88,11 +83,7 @@ export const CatalogEditorDialog: React.FC<CatalogEditorDialogProps> = ({
     }
   };
 
-  const handleProductChange = (
-    index: number,
-    field: keyof Product,
-    value: string | number,
-  ) => {
+  const handleProductChange = (index: number, field: keyof Product, value: string | number) => {
     const updated = [...products];
     updated[index] = { ...updated[index], [field]: value };
     setProducts(updated);
@@ -100,7 +91,7 @@ export const CatalogEditorDialog: React.FC<CatalogEditorDialogProps> = ({
 
   const validateProducts = (): string | null => {
     if (products.length === 0) {
-      return "At least one product is required";
+      return 'At least one product is required';
     }
     for (let i = 0; i < products.length; i++) {
       if (!products[i].productName.trim()) {
@@ -114,7 +105,7 @@ export const CatalogEditorDialog: React.FC<CatalogEditorDialogProps> = ({
   };
 
   const validate = (): string | null => {
-    if (!catalogName.trim()) return "Catalog name is required";
+    if (!catalogName.trim()) return 'Catalog name is required';
     return validateProducts();
   };
 
@@ -143,8 +134,7 @@ export const CatalogEditorDialog: React.FC<CatalogEditorDialogProps> = ({
       await onSave(buildCatalogPayload());
       onClose();
     } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : "Failed to save catalog";
+      const message = err instanceof Error ? err.message : 'Failed to save catalog';
       setError(message);
     } finally {
       setSaving(false);
@@ -157,9 +147,7 @@ export const CatalogEditorDialog: React.FC<CatalogEditorDialogProps> = ({
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
-      <DialogTitle>
-        {initialCatalog ? "Edit Catalog" : "Create Catalog"}
-      </DialogTitle>
+      <DialogTitle>{initialCatalog ? 'Edit Catalog' : 'Create Catalog'}</DialogTitle>
       <DialogContent>
         <Stack spacing={3} sx={{ mt: 1 }}>
           {/* Catalog Name */}
@@ -174,12 +162,7 @@ export const CatalogEditorDialog: React.FC<CatalogEditorDialogProps> = ({
 
           {/* Public Checkbox */}
           <FormControlLabel
-            control={
-              <Checkbox
-                checked={isPublic}
-                onChange={(e) => setIsPublic(e.target.checked)}
-              />
-            }
+            control={<Checkbox checked={isPublic} onChange={(e) => setIsPublic(e.target.checked)} />}
             label="Make this catalog public (visible to all users)"
           />
 
@@ -187,19 +170,9 @@ export const CatalogEditorDialog: React.FC<CatalogEditorDialogProps> = ({
 
           {/* Products */}
           <Box>
-            <Stack
-              direction="row"
-              justifyContent="space-between"
-              alignItems="center"
-              mb={2}
-            >
+            <Stack direction="row" justifyContent="space-between" alignItems="center" mb={2}>
               <Typography variant="h6">Products</Typography>
-              <Button
-                startIcon={<AddIcon />}
-                onClick={handleAddProduct}
-                size="small"
-                variant="outlined"
-              >
+              <Button startIcon={<AddIcon />} onClick={handleAddProduct} size="small" variant="outlined">
                 Add Product
               </Button>
             </Stack>
@@ -210,26 +183,18 @@ export const CatalogEditorDialog: React.FC<CatalogEditorDialogProps> = ({
                   key={index}
                   sx={{
                     p: 2,
-                    border: "1px solid",
-                    borderColor: "divider",
+                    border: '1px solid',
+                    borderColor: 'divider',
                     borderRadius: 1,
                   }}
                 >
                   <Stack spacing={2}>
-                    <Stack
-                      direction="row"
-                      justifyContent="space-between"
-                      alignItems="center"
-                    >
+                    <Stack direction="row" justifyContent="space-between" alignItems="center">
                       <Typography variant="subtitle2" color="text.secondary">
                         Product {index + 1}
                       </Typography>
                       {products.length > 1 && (
-                        <IconButton
-                          size="small"
-                          onClick={() => handleRemoveProduct(index)}
-                          color="error"
-                        >
+                        <IconButton size="small" onClick={() => handleRemoveProduct(index)} color="error">
                           <DeleteIcon fontSize="small" />
                         </IconButton>
                       )}
@@ -238,13 +203,7 @@ export const CatalogEditorDialog: React.FC<CatalogEditorDialogProps> = ({
                     <TextField
                       label="Product Name"
                       value={product.productName}
-                      onChange={(e) =>
-                        handleProductChange(
-                          index,
-                          "productName",
-                          e.target.value,
-                        )
-                      }
+                      onChange={(e) => handleProductChange(index, 'productName', e.target.value)}
                       fullWidth
                       required
                       size="small"
@@ -253,14 +212,8 @@ export const CatalogEditorDialog: React.FC<CatalogEditorDialogProps> = ({
 
                     <TextField
                       label="Description (optional)"
-                      value={product.description || ""}
-                      onChange={(e) =>
-                        handleProductChange(
-                          index,
-                          "description",
-                          e.target.value,
-                        )
-                      }
+                      value={product.description || ''}
+                      onChange={(e) => handleProductChange(index, 'description', e.target.value)}
                       fullWidth
                       size="small"
                       multiline
@@ -272,13 +225,7 @@ export const CatalogEditorDialog: React.FC<CatalogEditorDialogProps> = ({
                       label="Price"
                       type="number"
                       value={product.price}
-                      onChange={(e) =>
-                        handleProductChange(
-                          index,
-                          "price",
-                          parseFloat(e.target.value) || 0,
-                        )
-                      }
+                      onChange={(e) => handleProductChange(index, 'price', parseFloat(e.target.value) || 0)}
                       fullWidth
                       required
                       size="small"
@@ -298,7 +245,7 @@ export const CatalogEditorDialog: React.FC<CatalogEditorDialogProps> = ({
           Cancel
         </Button>
         <Button onClick={handleSave} variant="contained" disabled={saving}>
-          {saving ? "Saving..." : "Save Catalog"}
+          {saving ? 'Saving...' : 'Save Catalog'}
         </Button>
       </DialogActions>
     </Dialog>

@@ -8,7 +8,7 @@
  * - Link to signup page
  */
 
-import { useState, useEffect } from "react";
+import { useState, useEffect } from 'react';
 import {
   Box,
   Button,
@@ -20,16 +20,12 @@ import {
   Alert,
   CircularProgress,
   Link as MuiLink,
-} from "@mui/material";
-import {
-  Google as GoogleIcon,
-  Facebook as FacebookIcon,
-  Fingerprint as FingerprintIcon,
-} from "@mui/icons-material";
-import { useNavigate, useLocation } from "react-router-dom";
-import { useAuth } from "../contexts/AuthContext";
-import { confirmSignIn, signIn, signInWithRedirect } from "aws-amplify/auth";
-import type { SignInOutput } from "aws-amplify/auth";
+} from '@mui/material';
+import { Google as GoogleIcon, Facebook as FacebookIcon, Fingerprint as FingerprintIcon } from '@mui/icons-material';
+import { useNavigate, useLocation } from 'react-router-dom';
+import { useAuth } from '../contexts/AuthContext';
+import { confirmSignIn, signIn, signInWithRedirect } from 'aws-amplify/auth';
+import type { SignInOutput } from 'aws-amplify/auth';
 
 // Get error message from unknown error
 function getErrorMessage(err: unknown, fallback: string): string {
@@ -40,7 +36,7 @@ function getErrorMessage(err: unknown, fallback: string): string {
 
 // Check if step contains WebAuthn
 function isWebAuthnStep(step: string | undefined): boolean {
-  return Boolean(step?.includes("WEBAUTHN"));
+  return Boolean(step?.includes('WEBAUTHN'));
 }
 
 // Delayed redirect helper
@@ -67,14 +63,13 @@ const STEP_ACTIONS: Record<string, LoginStepResult> = {
     needsFirstFactorSelection: true,
   },
   CONFIRM_SIGN_IN_WITH_PASSWORD: {
-    error:
-      "No passkey found for this account. Please register a passkey first or use password login.",
+    error: 'No passkey found for this account. Please register a passkey first or use password login.',
   },
 };
 
 function getLoginStepAction(stepName: string | undefined): LoginStepResult {
   if (!stepName) {
-    return { error: "Authentication failed. Please try again." };
+    return { error: 'Authentication failed. Please try again.' };
   }
   if (STEP_ACTIONS[stepName]) {
     return STEP_ACTIONS[stepName];
@@ -98,13 +93,7 @@ interface MfaFormProps extends FormProps {
   onBack: () => void;
 }
 
-const MfaForm: React.FC<MfaFormProps> = ({
-  loading,
-  onSubmit,
-  mfaCode,
-  setMfaCode,
-  onBack,
-}) => (
+const MfaForm: React.FC<MfaFormProps> = ({ loading, onSubmit, mfaCode, setMfaCode, onBack }) => (
   <form onSubmit={onSubmit}>
     <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
       Enter the 6-digit code from your authenticator app
@@ -119,7 +108,7 @@ const MfaForm: React.FC<MfaFormProps> = ({
         fullWidth
         autoComplete="one-time-code"
         disabled={loading}
-        inputProps={{ maxLength: 6, pattern: "[0-9]*" }}
+        inputProps={{ maxLength: 6, pattern: '[0-9]*' }}
         autoFocus
       />
     </Stack>
@@ -132,7 +121,7 @@ const MfaForm: React.FC<MfaFormProps> = ({
       disabled={loading || mfaCode.length !== 6}
       sx={{ mb: 2 }}
     >
-      {loading ? <CircularProgress size={24} /> : "Verify"}
+      {loading ? <CircularProgress size={24} /> : 'Verify'}
     </Button>
 
     <Button variant="text" fullWidth onClick={onBack} disabled={loading}>
@@ -185,27 +174,14 @@ const CredentialsForm: React.FC<CredentialsFormProps> = ({
       />
     </Stack>
 
-    <Box sx={{ textAlign: "right", mb: 2 }}>
-      <MuiLink
-        component="button"
-        type="button"
-        variant="body2"
-        onClick={onForgotPassword}
-        sx={{ cursor: "pointer" }}
-      >
+    <Box sx={{ textAlign: 'right', mb: 2 }}>
+      <MuiLink component="button" type="button" variant="body2" onClick={onForgotPassword} sx={{ cursor: 'pointer' }}>
         Forgot password?
       </MuiLink>
     </Box>
 
-    <Button
-      type="submit"
-      variant="contained"
-      fullWidth
-      size="large"
-      disabled={loading}
-      sx={{ mb: 2 }}
-    >
-      {loading ? <CircularProgress size={24} /> : "Sign In"}
+    <Button type="submit" variant="contained" fullWidth size="large" disabled={loading} sx={{ mb: 2 }}>
+      {loading ? <CircularProgress size={24} /> : 'Sign In'}
     </Button>
 
     <Button
@@ -225,15 +201,11 @@ const CredentialsForm: React.FC<CredentialsFormProps> = ({
 // Social Login Section
 interface SocialSectionProps {
   loading: boolean;
-  onSocialLogin: (provider: "Google" | "Facebook") => void;
+  onSocialLogin: (provider: 'Google' | 'Facebook') => void;
   onSignup: () => void;
 }
 
-const SocialSection: React.FC<SocialSectionProps> = ({
-  loading,
-  onSocialLogin,
-  onSignup,
-}) => (
+const SocialSection: React.FC<SocialSectionProps> = ({ loading, onSocialLogin, onSignup }) => (
   <>
     <Divider sx={{ my: 3 }}>
       <Typography variant="body2" color="text.secondary">
@@ -247,7 +219,7 @@ const SocialSection: React.FC<SocialSectionProps> = ({
         fullWidth
         size="large"
         startIcon={<GoogleIcon />}
-        onClick={() => onSocialLogin("Google")}
+        onClick={() => onSocialLogin('Google')}
         disabled={loading}
       >
         Continue with Google
@@ -257,22 +229,22 @@ const SocialSection: React.FC<SocialSectionProps> = ({
         fullWidth
         size="large"
         startIcon={<FacebookIcon />}
-        onClick={() => onSocialLogin("Facebook")}
+        onClick={() => onSocialLogin('Facebook')}
         disabled={loading}
       >
         Continue with Facebook
       </Button>
     </Stack>
 
-    <Box sx={{ textAlign: "center", mt: 3 }}>
+    <Box sx={{ textAlign: 'center', mt: 3 }}>
       <Typography variant="body2" color="text.secondary">
-        Don't have an account?{" "}
+        Don't have an account?{' '}
         <MuiLink
           component="button"
           type="button"
           variant="body2"
           onClick={onSignup}
-          sx={{ cursor: "pointer", fontWeight: 600 }}
+          sx={{ cursor: 'pointer', fontWeight: 600 }}
         >
           Sign up
         </MuiLink>
@@ -284,14 +256,13 @@ const SocialSection: React.FC<SocialSectionProps> = ({
       sx={{
         mt: 3,
         mb: 4,
-        backgroundColor: "#fff3e0",
-        borderLeft: "4px solid #f57c00",
-        "& .MuiAlert-icon": { color: "#e65100" },
+        backgroundColor: '#fff3e0',
+        borderLeft: '4px solid #f57c00',
+        '& .MuiAlert-icon': { color: '#e65100' },
       }}
     >
-      <Typography variant="caption" sx={{ color: "#e65100" }}>
-        <strong>⚠️ Age Requirement:</strong> You must be at least 13 years old
-        to create an account (COPPA compliance).
+      <Typography variant="caption" sx={{ color: '#e65100' }}>
+        <strong>⚠️ Age Requirement:</strong> You must be at least 13 years old to create an account (COPPA compliance).
       </Typography>
     </Alert>
   </>
@@ -303,18 +274,18 @@ function useLoginState(
   navigate: ReturnType<typeof useNavigate>,
   from: string,
 ) {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [mfaCode, setMfaCode] = useState("");
+  const [mfaCode, setMfaCode] = useState('');
   const [showMfa, setShowMfa] = useState(false);
   const [showPasskeyPrompt, setShowPasskeyPrompt] = useState(false);
 
   const applyLoginAction = (action: LoginStepResult) => {
     if (action.showMfa) {
       setShowMfa(true);
-      setMfaCode("");
+      setMfaCode('');
     } else if (action.showPasskeyPrompt) {
       setShowPasskeyPrompt(true);
     } else if (action.error) {
@@ -336,18 +307,16 @@ function useLoginState(
       }
       applyLoginAction(getLoginStepAction(result.nextStep?.signInStep));
     } catch (err: unknown) {
-      console.error("Login failed:", err);
-      setError(
-        getErrorMessage(err, "Login failed. Please check your credentials."),
-      );
+      console.error('Login failed:', err);
+      setError(getErrorMessage(err, 'Login failed. Please check your credentials.'));
       setLoading(false);
     }
   };
 
   const handleMfaSuccess = () => {
     setShowMfa(false);
-    setMfaCode("");
-    setPassword("");
+    setMfaCode('');
+    setPassword('');
     setTimeout(() => navigate(from, { replace: true }), 500);
   };
 
@@ -362,18 +331,18 @@ function useLoginState(
         handleMfaSuccess();
         return;
       }
-      setError("MFA verification failed");
+      setError('MFA verification failed');
       setLoading(false);
     } catch (err: unknown) {
-      console.error("MFA failed:", err);
-      setError(getErrorMessage(err, "Invalid MFA code"));
+      console.error('MFA failed:', err);
+      setError(getErrorMessage(err, 'Invalid MFA code'));
       setLoading(false);
     }
   };
 
   const handleFirstFactorSelection = async () => {
     const confirmResult = await confirmSignIn({
-      challengeResponse: "WEB_AUTHN",
+      challengeResponse: 'WEB_AUTHN',
     });
     if (confirmResult.isSignedIn) {
       delayedRedirect(from);
@@ -400,7 +369,7 @@ function useLoginState(
 
   const handlePasskeyLogin = async () => {
     if (!email) {
-      setError("Please enter your email address");
+      setError('Please enter your email address');
       return;
     }
 
@@ -410,31 +379,26 @@ function useLoginState(
     try {
       const result = await signIn({
         username: email,
-        options: { authFlowType: "USER_AUTH" },
+        options: { authFlowType: 'USER_AUTH' },
       });
       await processPasskeyResult(result);
     } catch (err: unknown) {
-      console.error("Passkey login failed:", err);
-      setError(
-        getErrorMessage(
-          err,
-          "Passkey authentication failed. Make sure you have a passkey registered.",
-        ),
-      );
+      console.error('Passkey login failed:', err);
+      setError(getErrorMessage(err, 'Passkey authentication failed. Make sure you have a passkey registered.'));
       setLoading(false);
     }
   };
 
-  const handleSocialLogin = async (provider: "Google" | "Facebook") => {
+  const handleSocialLogin = async (provider: 'Google' | 'Facebook') => {
     setError(null);
     setLoading(true);
     try {
-      if (from !== "/scouts") {
-        sessionStorage.setItem("oauth_redirect", from);
+      if (from !== '/scouts') {
+        sessionStorage.setItem('oauth_redirect', from);
       }
       await signInWithRedirect({ provider });
     } catch (err: unknown) {
-      console.error("Social login failed:", err);
+      console.error('Social login failed:', err);
       setError(`${provider} login failed. Please try again.`);
       setLoading(false);
     }
@@ -442,8 +406,8 @@ function useLoginState(
 
   const handleBack = () => {
     setShowMfa(false);
-    setMfaCode("");
-    setPassword("");
+    setMfaCode('');
+    setPassword('');
   };
 
   return {
@@ -497,10 +461,7 @@ interface LoginFormContainerProps {
   onForgotPassword: () => void;
 }
 
-const LoginFormContainer: React.FC<LoginFormContainerProps> = ({
-  state,
-  onForgotPassword,
-}) => {
+const LoginFormContainer: React.FC<LoginFormContainerProps> = ({ state, onForgotPassword }) => {
   if (state.showMfa) {
     return (
       <MfaForm
@@ -530,24 +491,13 @@ const LoginFormContainer: React.FC<LoginFormContainerProps> = ({
 interface OptionalSocialSectionProps {
   showMfa: boolean;
   loading: boolean;
-  onSocialLogin: (provider: "Google" | "Facebook") => void;
+  onSocialLogin: (provider: 'Google' | 'Facebook') => void;
   onSignup: () => void;
 }
 
-const OptionalSocialSection: React.FC<OptionalSocialSectionProps> = ({
-  showMfa,
-  loading,
-  onSocialLogin,
-  onSignup,
-}) => {
+const OptionalSocialSection: React.FC<OptionalSocialSectionProps> = ({ showMfa, loading, onSocialLogin, onSignup }) => {
   if (showMfa) return null;
-  return (
-    <SocialSection
-      loading={loading}
-      onSocialLogin={onSocialLogin}
-      onSignup={onSignup}
-    />
-  );
+  return <SocialSection loading={loading} onSocialLogin={onSocialLogin} onSignup={onSignup} />;
 };
 
 export const LoginPage: React.FC = () => {
@@ -555,9 +505,7 @@ export const LoginPage: React.FC = () => {
   const location = useLocation();
   const { isAuthenticated, loginWithPassword } = useAuth();
 
-  const from =
-    (location.state as { from?: { pathname?: string } } | undefined)?.from
-      ?.pathname || "/scouts";
+  const from = (location.state as { from?: { pathname?: string } } | undefined)?.from?.pathname || '/scouts';
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -567,29 +515,24 @@ export const LoginPage: React.FC = () => {
 
   const state = useLoginState(loginWithPassword, navigate, from);
 
-  const handleForgotPassword = () => navigate("/forgot-password");
-  const handleSignup = () => navigate("/signup");
+  const handleForgotPassword = () => navigate('/forgot-password');
+  const handleSignup = () => navigate('/signup');
   const clearError = () => state.setError(null);
 
   return (
     <Box
       sx={{
-        minHeight: "100vh",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        background: "linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%)",
+        minHeight: '100vh',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: 'linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%)',
         p: 2,
       }}
     >
-      <Paper elevation={6} sx={{ p: 4, width: "100%", maxWidth: 450 }}>
-        <Box sx={{ textAlign: "center", mb: 4 }}>
-          <Typography
-            variant="h4"
-            component="h1"
-            gutterBottom
-            sx={{ fontFamily: "Kaushan Script, cursive" }}
-          >
+      <Paper elevation={6} sx={{ p: 4, width: '100%', maxWidth: 450 }}>
+        <Box sx={{ textAlign: 'center', mb: 4 }}>
+          <Typography variant="h4" component="h1" gutterBottom sx={{ fontFamily: 'Kaushan Script, cursive' }}>
             Welcome Back
           </Typography>
           <Typography variant="body2" color="text.secondary">
@@ -599,10 +542,7 @@ export const LoginPage: React.FC = () => {
 
         <ErrorAlert error={state.error} onClose={clearError} />
         <PasskeyPrompt show={state.showPasskeyPrompt} />
-        <LoginFormContainer
-          state={state}
-          onForgotPassword={handleForgotPassword}
-        />
+        <LoginFormContainer state={state} onForgotPassword={handleForgotPassword} />
         <OptionalSocialSection
           showMfa={state.showMfa}
           loading={state.loading}

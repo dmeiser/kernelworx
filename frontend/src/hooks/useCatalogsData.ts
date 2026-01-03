@@ -1,9 +1,9 @@
 /**
  * Custom hook for managing catalog queries and filtering
  */
-import { useMemo } from "react";
-import { useQuery } from "@apollo/client/react";
-import { LIST_PUBLIC_CATALOGS, LIST_MY_CATALOGS } from "../lib/graphql";
+import { useMemo } from 'react';
+import { useQuery } from '@apollo/client/react';
+import { LIST_PUBLIC_CATALOGS, LIST_MY_CATALOGS } from '../lib/graphql';
 
 interface Catalog {
   catalogId: string;
@@ -26,9 +26,7 @@ export const useCatalogsData = (isSharedCampaignMode: boolean) => {
     const myCatalogs = myCatalogsData?.listMyCatalogs || [];
     const myIdSet = new Set(myCatalogs.map((c) => c.catalogId));
     return {
-      filteredPublicCatalogs: publicCatalogs.filter(
-        (c) => !myIdSet.has(c.catalogId) && c.isDeleted !== true,
-      ),
+      filteredPublicCatalogs: publicCatalogs.filter((c) => !myIdSet.has(c.catalogId) && c.isDeleted !== true),
       filteredMyCatalogs: myCatalogs.filter((c) => c.isDeleted !== true),
     };
   }, [myCatalogsData, publicCatalogsData]);

@@ -1,7 +1,7 @@
 /**
  * Custom hook for form validation logic
  */
-import { useCallback } from "react";
+import { useCallback } from 'react';
 
 interface ValidationResult {
   isValid: boolean;
@@ -22,7 +22,7 @@ export const useCreateCampaignValidation = (
     if (!profileId) {
       return {
         isValid: false,
-        error: "Please select a profile",
+        error: 'Please select a profile',
       };
     }
     return { isValid: true, error: null };
@@ -37,17 +37,14 @@ export const useCreateCampaignValidation = (
     if (!hasAllUnitDetails) {
       return {
         isValid: false,
-        error:
-          "When specifying a unit, all fields (unit number, city, state) are required",
+        error: 'When specifying a unit, all fields (unit number, city, state) are required',
       };
     }
 
     return { isValid: true, error: null };
   }, [isSharedCampaignMode, unitType, unitNumber, city, state]);
 
-  const isFormValid = isSharedCampaignMode
-    ? !!profileId
-    : !!profileId && !!campaignName && !!catalogId;
+  const isFormValid = isSharedCampaignMode ? !!profileId : !!profileId && !!campaignName && !!catalogId;
 
   return {
     isFormValid,

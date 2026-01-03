@@ -1,17 +1,9 @@
 /**
  * Password change section for User Settings
  */
-import {
-  Paper,
-  Stack,
-  Typography,
-  TextField,
-  Button,
-  Alert,
-  CircularProgress,
-} from "@mui/material";
-import { VpnKey as PasswordIcon } from "@mui/icons-material";
-import type { UsePasswordChangeReturn } from "../../hooks/usePasswordChange";
+import { Paper, Stack, Typography, TextField, Button, Alert, CircularProgress } from '@mui/material';
+import { VpnKey as PasswordIcon } from '@mui/icons-material';
+import type { UsePasswordChangeReturn } from '../../hooks/usePasswordChange';
 
 interface PasswordSectionProps {
   hook: UsePasswordChangeReturn;
@@ -26,26 +18,17 @@ export const PasswordSection: React.FC<PasswordSectionProps> = ({ hook }) => {
       </Stack>
 
       <Typography variant="body2" color="text.secondary" paragraph>
-        Update your password to keep your account secure. Use a strong password
-        with at least 8 characters.
+        Update your password to keep your account secure. Use a strong password with at least 8 characters.
       </Typography>
 
       {hook.passwordSuccess && (
-        <Alert
-          severity="success"
-          sx={{ mb: 2 }}
-          onClose={() => hook.setPasswordSuccess(false)}
-        >
+        <Alert severity="success" sx={{ mb: 2 }} onClose={() => hook.setPasswordSuccess(false)}>
           Password changed successfully!
         </Alert>
       )}
 
       {hook.passwordError && (
-        <Alert
-          severity="error"
-          sx={{ mb: 2 }}
-          onClose={() => hook.setPasswordError(null)}
-        >
+        <Alert severity="error" sx={{ mb: 2 }} onClose={() => hook.setPasswordError(null)}>
           {hook.passwordError}
         </Alert>
       )}
@@ -83,17 +66,8 @@ export const PasswordSection: React.FC<PasswordSectionProps> = ({ hook }) => {
             disabled={hook.passwordLoading}
             autoComplete="new-password"
           />
-          <Button
-            type="submit"
-            variant="contained"
-            disabled={hook.passwordLoading}
-            sx={{ alignSelf: "flex-start" }}
-          >
-            {hook.passwordLoading ? (
-              <CircularProgress size={24} />
-            ) : (
-              "Change Password"
-            )}
+          <Button type="submit" variant="contained" disabled={hook.passwordLoading} sx={{ alignSelf: 'flex-start' }}>
+            {hook.passwordLoading ? <CircularProgress size={24} /> : 'Change Password'}
           </Button>
         </Stack>
       </form>

@@ -5,25 +5,13 @@
  * Integrates with AppSync GraphQL API to fetch Account metadata.
  */
 
-import React, {
-  createContext,
-  useContext,
-  useEffect,
-  useState,
-  useCallback,
-} from "react";
-import {
-  fetchAuthSession,
-  signInWithRedirect,
-  signIn,
-  signOut,
-  getCurrentUser,
-} from "aws-amplify/auth";
-import { Hub } from "aws-amplify/utils";
-import { apolloClient } from "../lib/apollo";
-import { GET_MY_ACCOUNT } from "../lib/graphql";
-import type { Account, AuthContextValue } from "../types/auth";
-import type { AuthSession } from "aws-amplify/auth";
+import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import { fetchAuthSession, signInWithRedirect, signIn, signOut, getCurrentUser } from 'aws-amplify/auth';
+import { Hub } from 'aws-amplify/utils';
+import { apolloClient } from '../lib/apollo';
+import { GET_MY_ACCOUNT } from '../lib/graphql';
+import type { Account, AuthContextValue } from '../types/auth';
+import type { AuthSession } from 'aws-amplify/auth';
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
@@ -38,25 +26,21 @@ const hasValidSession = (session: AuthSession): boolean => {
 
 // Extract admin status from JWT token claims
 const getAdminStatusFromSession = (session: AuthSession): boolean => {
-  const groups =
-    (session.tokens?.idToken?.payload["cognito:groups"] as string[]) || [];
-  return groups.includes("ADMIN");
+  const groups = (session.tokens?.idToken?.payload['cognito:groups'] as string[]) || [];
+  return groups.includes('ADMIN');
 };
 
 // Merge account data with admin status from token
-const mergeAccountWithAdminStatus = (
-  accountData: Account,
-  isAdmin: boolean,
-): Account => ({
+const mergeAccountWithAdminStatus = (accountData: Account, isAdmin: boolean): Account => ({
   ...accountData,
   isAdmin,
 });
 
 // Handle redirect after OAuth login
 const handleOAuthRedirect = () => {
-  const savedRedirect = sessionStorage.getItem("oauth_redirect");
+  const savedRedirect = sessionStorage.getItem('oauth_redirect');
   if (savedRedirect) {
-    sessionStorage.removeItem("oauth_redirect");
+    sessionStorage.removeItem('oauth_redirect');
     window.location.href = savedRedirect;
   }
 };
@@ -72,11 +56,8 @@ const handleSignInWithRedirect = (checkAuthSession: () => Promise<void>) => {
   checkAuthSession().then(handleOAuthRedirect);
 };
 
-const handleSignInFailure = (
-  eventData: unknown,
-  setLoading: (loading: boolean) => void,
-) => {
-  console.error("Sign in failed:", eventData);
+const handleSignInFailure = (eventData: unknown, setLoading: (loading: boolean) => void) => {
+  console.error('Sign in failed:', eventData);
   setLoading(false);
 };
 
@@ -84,11 +65,8 @@ const handleTokenRefresh = (checkAuthSession: () => Promise<void>) => {
   checkAuthSession();
 };
 
-const handleTokenRefreshFailure = (
-  eventData: unknown,
-  handlers: AuthEventHandlers,
-) => {
-  console.error("Token refresh failed:", eventData);
+const handleTokenRefreshFailure = (eventData: unknown, handlers: AuthEventHandlers) => {
+  console.error('Token refresh failed:', eventData);
   handlers.onTokenRefreshFailure();
 };
 
@@ -124,11 +102,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     try {
       const { data } = await apolloClient.query<{ getMyAccount: Account }>({
         query: GET_MY_ACCOUNT,
-        fetchPolicy: "network-only", // Always fetch fresh data
+        fetchPolicy: 'network-only', // Always fetch fresh data
       });
       return data?.getMyAccount ?? null;
     } catch (error) {
-      console.error("Failed to fetch account data:", error);
+      console.error('Failed to fetch account data:', error);
       return null;
     }
   }, []);
@@ -156,11 +134,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         setAccount(mergeAccountWithAdminStatus(accountData, isAdminFromToken));
       } else {
         // User is authenticated but account record doesn't exist yet
-        console.warn("User has valid tokens but no account record yet");
+        console.warn('User has valid tokens but no account record yet');
         setAccount(null);
       }
     } catch (error) {
-      console.error("Auth session check failed:", error);
+      console.error('Auth session check failed:', error);
       setHasValidTokens(false);
       setAccount(null);
     } finally {
@@ -186,7 +164,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       },
     });
 
-    const unsubscribe = Hub.listen("auth", ({ payload }) => {
+    const unsubscribe = Hub.listen('auth', ({ payload }) => {
       handleEvent(payload.event, payload.data);
     });
 
@@ -212,7 +190,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       // Redirect to Cognito Hosted UI (shows all login options)
       await signInWithRedirect();
     } catch (error) {
-      console.error("Login failed:", error);
+      console.error('Login failed:', error);
       throw error;
     }
   }, []);
@@ -241,7 +219,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
         return result;
       } catch (error) {
-        console.error("Email/password login failed:", error);
+        console.error('Email/password login failed:', error);
         throw error;
       }
     },
@@ -256,7 +234,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
    */
   const logout = useCallback(async () => {
     try {
-      console.log("Starting logout...");
+      console.log('Starting logout...');
       setAccount(null);
       setHasValidTokens(false);
       // signOut with global:true will redirect to Cognito's /logout endpoint
@@ -264,15 +242,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       await signOut({ global: true });
       // Note: The redirect happens automatically, we won't reach this line
     } catch (error) {
-      console.error("Logout failed:", error);
+      console.error('Logout failed:', error);
       // If signOut fails, clear local state and do manual redirect
       setAccount(null);
       // Build the Cognito logout URL manually as fallback
       const domain = import.meta.env.VITE_COGNITO_DOMAIN;
       const clientId = import.meta.env.VITE_COGNITO_USER_POOL_CLIENT_ID;
-      const logoutUri = encodeURIComponent(
-        import.meta.env.VITE_OAUTH_REDIRECT_SIGNOUT,
-      );
+      const logoutUri = encodeURIComponent(import.meta.env.VITE_OAUTH_REDIRECT_SIGNOUT);
       window.location.href = `https://${domain}/logout?client_id=${clientId}&logout_uri=${logoutUri}`;
     }
   }, []);
@@ -307,7 +283,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 export const useAuth = (): AuthContextValue => {
   const context = useContext(AuthContext);
   if (!context) {
-    throw new Error("useAuth must be used within AuthProvider");
+    throw new Error('useAuth must be used within AuthProvider');
   }
   return context;
 };

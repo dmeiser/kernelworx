@@ -1,7 +1,7 @@
 /**
  * Custom hook for shared campaign discovery trigger effect
  */
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo } from 'react';
 
 export const useSharedCampaignDiscoveryTrigger = (
   isSharedCampaignMode: boolean,
@@ -21,8 +21,7 @@ export const useSharedCampaignDiscoveryTrigger = (
   }) => void,
 ) => {
   const shouldTriggerDiscovery = useMemo(
-    () =>
-      !isSharedCampaignMode && Boolean(unitType && unitNumber && city && state),
+    () => !isSharedCampaignMode && Boolean(unitType && unitNumber && city && state),
     [isSharedCampaignMode, unitType, unitNumber, city, state],
   );
 

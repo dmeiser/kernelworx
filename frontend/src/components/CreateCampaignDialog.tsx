@@ -2,7 +2,7 @@
  * CreateCampaignDialog component - Dialog for creating a new sales campaign
  */
 
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useState } from 'react';
 import {
   Dialog,
   DialogTitle,
@@ -17,8 +17,8 @@ import {
   MenuItem,
   Alert,
   CircularProgress,
-} from "@mui/material";
-import { useCatalogsData } from "../hooks/useCatalogsData";
+} from '@mui/material';
+import { useCatalogsData } from '../hooks/useCatalogsData';
 
 interface CreateCampaignDialogProps {
   open: boolean;
@@ -39,51 +39,29 @@ interface Catalog {
   isDeleted?: boolean;
 }
 
-const CatalogGroup: React.FC<{ title: string; catalogs: Catalog[] }> = ({
-  title,
-  catalogs,
-}) => (
+const CatalogGroup: React.FC<{ title: string; catalogs: Catalog[] }> = ({ title, catalogs }) => (
   <>
-    <MenuItem
-      key={`${title}-header`}
-      disabled
-      sx={{ fontWeight: 600, backgroundColor: "#f5f5f5", opacity: 1 }}
-    >
+    <MenuItem key={`${title}-header`} disabled sx={{ fontWeight: 600, backgroundColor: '#f5f5f5', opacity: 1 }}>
       {title}
     </MenuItem>
     {catalogs.map((catalog) => (
       <MenuItem key={catalog.catalogId} value={catalog.catalogId}>
         {catalog.catalogName}
-        {catalog.catalogType === "ADMIN_MANAGED" && " (Official)"}
+        {catalog.catalogType === 'ADMIN_MANAGED' && ' (Official)'}
       </MenuItem>
     ))}
   </>
 );
 
-const buildCatalogGroups = (
-  filteredMyCatalogs: Catalog[],
-  filteredPublicCatalogs: Catalog[],
-) => {
+const buildCatalogGroups = (filteredMyCatalogs: Catalog[], filteredPublicCatalogs: Catalog[]) => {
   const groups: React.ReactNode[] = [];
 
   if (filteredMyCatalogs.length) {
-    groups.push(
-      <CatalogGroup
-        key="my-catalogs"
-        title="My Catalogs"
-        catalogs={filteredMyCatalogs}
-      />,
-    );
+    groups.push(<CatalogGroup key="my-catalogs" title="My Catalogs" catalogs={filteredMyCatalogs} />);
   }
 
   if (filteredPublicCatalogs.length) {
-    groups.push(
-      <CatalogGroup
-        key="public-catalogs"
-        title="Public Catalogs"
-        catalogs={filteredPublicCatalogs}
-      />,
-    );
+    groups.push(<CatalogGroup key="public-catalogs" title="Public Catalogs" catalogs={filteredPublicCatalogs} />);
   }
 
   return groups;
@@ -103,10 +81,7 @@ const CatalogMenuItems: React.FC<{
     );
   }
 
-  const catalogGroups = buildCatalogGroups(
-    filteredMyCatalogs,
-    filteredPublicCatalogs,
-  );
+  const catalogGroups = buildCatalogGroups(filteredMyCatalogs, filteredPublicCatalogs);
 
   if (!catalogGroups.length) {
     return <MenuItem disabled>No catalogs available</MenuItem>;
@@ -122,18 +97,9 @@ const CatalogSelector: React.FC<{
   filteredMyCatalogs: Catalog[];
   filteredPublicCatalogs: Catalog[];
   catalogsLoading: boolean;
-}> = ({
-  catalogId,
-  onChange,
-  disabled,
-  filteredMyCatalogs,
-  filteredPublicCatalogs,
-  catalogsLoading,
-}) => {
+}> = ({ catalogId, onChange, disabled, filteredMyCatalogs, filteredPublicCatalogs, catalogsLoading }) => {
   const noCatalogsAvailable =
-    !catalogsLoading &&
-    filteredMyCatalogs.length === 0 &&
-    filteredPublicCatalogs.length === 0;
+    !catalogsLoading && filteredMyCatalogs.length === 0 && filteredPublicCatalogs.length === 0;
 
   return (
     <>
@@ -162,10 +128,7 @@ const CatalogSelector: React.FC<{
       </FormControl>
 
       {noCatalogsAvailable && (
-        <Alert severity="warning">
-          No product catalogs are available. You'll need a catalog to create a
-          campaign.
-        </Alert>
+        <Alert severity="warning">No product catalogs are available. You'll need a catalog to create a campaign.</Alert>
       )}
     </>
   );
@@ -328,37 +291,28 @@ const CreateCampaignDialogView: React.FC<{
       <Button onClick={onClose} disabled={loading}>
         Cancel
       </Button>
-      <Button
-        onClick={onSubmit}
-        variant="contained"
-        disabled={!isFormValid || loading}
-      >
-        {loading ? "Creating..." : "Create Campaign"}
+      <Button onClick={onSubmit} variant="contained" disabled={!isFormValid || loading}>
+        {loading ? 'Creating...' : 'Create Campaign'}
       </Button>
     </DialogActions>
   </Dialog>
 );
 
-export const CreateCampaignDialog: React.FC<CreateCampaignDialogProps> = ({
-  open,
-  onClose,
-  onSubmit,
-}) => {
-  const [campaignName, setCampaignName] = useState("");
+export const CreateCampaignDialog: React.FC<CreateCampaignDialogProps> = ({ open, onClose, onSubmit }) => {
+  const [campaignName, setCampaignName] = useState('');
   const [campaignYear, setCampaignYear] = useState(new Date().getFullYear());
-  const [catalogId, setCatalogId] = useState("");
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
+  const [catalogId, setCatalogId] = useState('');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
   const [loading, setLoading] = useState(false);
-  const { filteredMyCatalogs, filteredPublicCatalogs, catalogsLoading } =
-    useCatalogsData(false);
+  const { filteredMyCatalogs, filteredPublicCatalogs, catalogsLoading } = useCatalogsData(false);
 
   const resetForm = useCallback(() => {
-    setCampaignName("");
+    setCampaignName('');
     setCampaignYear(new Date().getFullYear());
-    setCatalogId("");
-    setStartDate("");
-    setEndDate("");
+    setCatalogId('');
+    setStartDate('');
+    setEndDate('');
   }, []);
 
   const submitCampaign = async (name: string, start?: string, end?: string) => {
@@ -372,7 +326,7 @@ export const CreateCampaignDialog: React.FC<CreateCampaignDialogProps> = ({
     try {
       await action();
     } catch (error) {
-      console.error("Failed to create campaign:", error);
+      console.error('Failed to create campaign:', error);
     } finally {
       setLoading(false);
     }
@@ -382,9 +336,7 @@ export const CreateCampaignDialog: React.FC<CreateCampaignDialogProps> = ({
     const trimmedName = campaignName.trim();
     if (!trimmedName || !catalogId) return;
 
-    await withLoading(() =>
-      submitCampaign(trimmedName, startDate || undefined, endDate || undefined),
-    );
+    await withLoading(() => submitCampaign(trimmedName, startDate || undefined, endDate || undefined));
   };
 
   const handleClose = () => {

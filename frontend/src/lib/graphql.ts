@@ -2,7 +2,7 @@
  * GraphQL queries and mutations for the app
  */
 
-import { gql } from "@apollo/client";
+import { gql } from '@apollo/client';
 
 // ============================================================================
 // Fragments
@@ -292,9 +292,7 @@ export const CREATE_SELLER_PROFILE = gql`
 export const UPDATE_SELLER_PROFILE = gql`
   ${SELLER_PROFILE_FRAGMENT}
   mutation UpdateSellerProfile($profileId: ID!, $sellerName: String!) {
-    updateSellerProfile(
-      input: { profileId: $profileId, sellerName: $sellerName }
-    ) {
+    updateSellerProfile(input: { profileId: $profileId, sellerName: $sellerName }) {
       ...SellerProfileFields
     }
   }
@@ -502,12 +500,7 @@ export const GET_UNIT_REPORT = gql`
 
 export const LIST_UNIT_CATALOGS = gql`
   ${CATALOG_FRAGMENT}
-  query ListUnitCatalogs(
-    $unitType: String!
-    $unitNumber: Int!
-    $campaignName: String!
-    $campaignYear: Int!
-  ) {
+  query ListUnitCatalogs($unitType: String!, $unitNumber: Int!, $campaignName: String!, $campaignYear: Int!) {
     listUnitCatalogs(
       unitType: $unitType
       unitNumber: $unitNumber

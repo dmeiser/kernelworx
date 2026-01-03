@@ -15,14 +15,13 @@ export const buildInfo = {
  */
 export const isDevelopment = (): boolean => {
   // Always check hostname at runtime - this works regardless of build mode
-  if (typeof window === "undefined") {
+  if (typeof window === 'undefined') {
     return false;
   }
 
   const hostname = window.location.hostname;
-  const isLocalHost = hostname === "localhost" || hostname === "127.0.0.1";
-  const isDevSubdomain =
-    hostname.startsWith("dev.") || hostname.includes(".dev.");
+  const isLocalHost = hostname === 'localhost' || hostname === '127.0.0.1';
+  const isDevSubdomain = hostname.startsWith('dev.') || hostname.includes('.dev.');
 
   return isLocalHost || isDevSubdomain;
 };
@@ -34,8 +33,8 @@ export const getBuildTimeUTC = (): string => {
   const buildDate = new Date(buildInfo.buildTime);
   return buildDate
     .toISOString()
-    .replace("T", " ")
-    .replace(/\.\d{3}Z$/, " UTC");
+    .replace('T', ' ')
+    .replace(/\.\d{3}Z$/, ' UTC');
 };
 
 /**
@@ -43,7 +42,7 @@ export const getBuildTimeUTC = (): string => {
  */
 export const getShortBuildTime = (): string => {
   const buildDate = new Date(buildInfo.buildTime);
-  return buildDate.toISOString().slice(0, 16).replace("T", " ") + " UTC";
+  return buildDate.toISOString().slice(0, 16).replace('T', ' ') + ' UTC';
 };
 
 /**

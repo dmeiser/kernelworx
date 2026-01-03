@@ -2,7 +2,7 @@
  * Report export utilities for generating CSV/XLSX files from order data
  */
 
-import * as XLSX from "xlsx";
+import * as XLSX from 'xlsx';
 
 interface LineItem {
   productId: string;
@@ -30,9 +30,9 @@ interface Order {
 }
 
 function formatPhone(phone?: string): string {
-  if (!phone) return "";
+  if (!phone) return '';
   // Remove all non-digit characters
-  const digits = phone.replace(/\D/g, "");
+  const digits = phone.replace(/\D/g, '');
   // Format as (XXX) XXX-XXXX for 10 digits (US format)
   if (digits.length === 10) {
     return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
@@ -47,32 +47,18 @@ function formatPhone(phone?: string): string {
 }
 
 function formatAddress(address?: Address): string {
-  if (!address) return "";
-  const cityStateZip = [address.city, address.state, address.zipCode]
-    .filter(Boolean)
-    .join(" ");
-  return [address.street, cityStateZip].filter(Boolean).join(", ");
+  if (!address) return '';
+  const cityStateZip = [address.city, address.state, address.zipCode].filter(Boolean).join(' ');
+  return [address.street, cityStateZip].filter(Boolean).join(', ');
 }
 
 function getUniqueProducts(orders: Order[]): string[] {
-  return Array.from(
-    new Set(
-      orders.flatMap((order) =>
-        order.lineItems.map((item) => item.productName),
-      ),
-    ),
-  ).sort();
+  return Array.from(new Set(orders.flatMap((order) => order.lineItems.map((item) => item.productName)))).sort();
 }
 
 function prepareReportData(orders: Order[]) {
   const allProducts = getUniqueProducts(orders);
-  const headers: (string | number)[] = [
-    "Name",
-    "Phone",
-    "Address",
-    ...allProducts,
-    "Total",
-  ];
+  const headers: (string | number)[] = ['Name', 'Phone', 'Address', ...allProducts, 'Total'];
 
   const rows = [
     headers,
@@ -85,9 +71,7 @@ function prepareReportData(orders: Order[]) {
         {},
       );
 
-      const productCounts = allProducts.map(
-        (product) => quantities[product] || "",
-      );
+      const productCounts = allProducts.map((product) => quantities[product] || '');
 
       return [
         order.customerName,
@@ -106,18 +90,16 @@ export function downloadAsCSV(orders: Order[], campaignId: string): void {
   const { rows } = prepareReportData(orders);
 
   // Convert to CSV
-  const csv = rows
-    .map((row) => row.map((cell) => `"${cell}"`).join(","))
-    .join("\n");
+  const csv = rows.map((row) => row.map((cell) => `"${cell}"`).join(',')).join('\n');
 
   // Create blob and download
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-  const link = document.createElement("a");
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const link = document.createElement('a');
   const url = URL.createObjectURL(blob);
 
-  link.setAttribute("href", url);
-  link.setAttribute("download", `campaign-${campaignId}.csv`);
-  link.style.visibility = "hidden";
+  link.setAttribute('href', url);
+  link.setAttribute('download', `campaign-${campaignId}.csv`);
+  link.style.visibility = 'hidden';
 
   document.body.appendChild(link);
   link.click();
@@ -132,9 +114,9 @@ export function downloadAsXLSX(orders: Order[], campaignId: string): void {
 
   // Style header row
   const headerStyle = {
-    fill: { fgColor: { rgb: "4472C4" } },
-    font: { bold: true, color: { rgb: "FFFFFF" } },
-    alignment: { horizontal: "center", vertical: "center" },
+    fill: { fgColor: { rgb: '4472C4' } },
+    font: { bold: true, color: { rgb: 'FFFFFF' } },
+    alignment: { horizontal: 'center', vertical: 'center' },
   };
 
   for (let i = 0; i < rows[0].length; i++) {
@@ -146,18 +128,18 @@ export function downloadAsXLSX(orders: Order[], campaignId: string): void {
 
   // Auto-size columns
   const colWidths = rows[0].map((_value: string | number, idx: number) => {
-    let maxLength = String(rows[0][idx] || "").length;
+    let maxLength = String(rows[0][idx] || '').length;
     for (let i = 1; i < rows.length; i++) {
-      const cellValue = String(rows[i][idx] || "");
+      const cellValue = String(rows[i][idx] || '');
       maxLength = Math.max(maxLength, cellValue.length);
     }
     return { wch: Math.min(maxLength + 2, 50) };
   });
-  ws["!cols"] = colWidths;
+  ws['!cols'] = colWidths;
 
   // Create workbook and add sheet
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, "Orders");
+  XLSX.utils.book_append_sheet(wb, ws, 'Orders');
 
   // Download
   XLSX.writeFile(wb, `campaign-${campaignId}.xlsx`);

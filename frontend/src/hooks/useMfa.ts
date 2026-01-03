@@ -1,7 +1,7 @@
 /**
  * Custom hook for MFA (TOTP) functionality
  */
-import { useState, useCallback } from "react";
+import { useState, useCallback } from 'react';
 import {
   setUpTOTP,
   verifyTOTPSetup,
@@ -9,8 +9,8 @@ import {
   fetchMFAPreference,
   deleteWebAuthnCredential,
   type AuthWebAuthnCredential,
-} from "aws-amplify/auth";
-import QRCode from "qrcode";
+} from 'aws-amplify/auth';
+import QRCode from 'qrcode';
 
 export interface UseMfaReturn {
   mfaSetupCode: string | null;
@@ -23,10 +23,7 @@ export interface UseMfaReturn {
   setMfaSuccess: (value: boolean) => void;
   mfaLoading: boolean;
   mfaEnabled: boolean;
-  handleSetupMFA: (
-    passkeys: AuthWebAuthnCredential[],
-    loadPasskeys: () => Promise<void>,
-  ) => Promise<void>;
+  handleSetupMFA: (passkeys: AuthWebAuthnCredential[], loadPasskeys: () => Promise<void>) => Promise<void>;
   handleVerifyMFA: (e: React.FormEvent) => Promise<void>;
   handleDisableMFA: () => Promise<void>;
   checkMfaStatus: () => Promise<void>;
@@ -36,7 +33,7 @@ export interface UseMfaReturn {
 
 const getErrorMessage = (err: unknown, fallback: string): string => {
   if (err instanceof Error) return err.message;
-  if (typeof err === "object" && err !== null && "message" in err) {
+  if (typeof err === 'object' && err !== null && 'message' in err) {
     return String((err as { message: unknown }).message);
   }
   return fallback;
@@ -44,13 +41,11 @@ const getErrorMessage = (err: unknown, fallback: string): string => {
 
 const confirmMfaDisable = () =>
   window.confirm(
-    "Are you sure you want to disable multi-factor authentication? This will make your account less secure.",
+    'Are you sure you want to disable multi-factor authentication? This will make your account less secure.',
   );
 
 const confirmPasskeyRemoval = () =>
-  window.confirm(
-    "TOTP MFA and Passkeys cannot be used together. Do you want to delete all passkeys and enable MFA?",
-  );
+  window.confirm('TOTP MFA and Passkeys cannot be used together. Do you want to delete all passkeys and enable MFA?');
 
 // Helper to remove passkeys before MFA setup
 const removePasskeysIfNeeded = async (
@@ -69,16 +64,14 @@ const removePasskeysIfNeeded = async (
     await Promise.all(
       passkeys
         .filter((passkey) => passkey.credentialId)
-        .map((passkey) =>
-          deleteWebAuthnCredential({ credentialId: passkey.credentialId! }),
-        ),
+        .map((passkey) => deleteWebAuthnCredential({ credentialId: passkey.credentialId! })),
     );
     await loadPasskeys();
     return { cancelled: false, error: null };
   } catch (err: unknown) {
     return {
       cancelled: false,
-      error: getErrorMessage(err, "Failed to remove passkeys"),
+      error: getErrorMessage(err, 'Failed to remove passkeys'),
     };
   }
 };
@@ -86,7 +79,7 @@ const removePasskeysIfNeeded = async (
 export const useMfa = (): UseMfaReturn => {
   const [mfaSetupCode, setMfaSetupCode] = useState<string | null>(null);
   const [qrCodeUrl, setQrCodeUrl] = useState<string | null>(null);
-  const [mfaVerificationCode, setMfaVerificationCode] = useState("");
+  const [mfaVerificationCode, setMfaVerificationCode] = useState('');
   const [mfaError, setMfaError] = useState<string | null>(null);
   const [mfaSuccess, setMfaSuccess] = useState(false);
   const [mfaLoading, setMfaLoading] = useState(false);
@@ -95,20 +88,14 @@ export const useMfa = (): UseMfaReturn => {
   const checkMfaStatus = useCallback(async () => {
     try {
       const mfaPreference = await fetchMFAPreference();
-      setMfaEnabled(mfaPreference.preferred === "TOTP");
+      setMfaEnabled(mfaPreference.preferred === 'TOTP');
     } catch (err) {
-      console.error("Failed to fetch MFA preference:", err);
+      console.error('Failed to fetch MFA preference:', err);
     }
   }, []);
 
-  const handleSetupMFA = async (
-    passkeys: AuthWebAuthnCredential[],
-    loadPasskeys: () => Promise<void>,
-  ) => {
-    const { cancelled, error } = await removePasskeysIfNeeded(
-      passkeys,
-      loadPasskeys,
-    );
+  const handleSetupMFA = async (passkeys: AuthWebAuthnCredential[], loadPasskeys: () => Promise<void>) => {
+    const { cancelled, error } = await removePasskeysIfNeeded(passkeys, loadPasskeys);
     if (cancelled) return;
     if (error) {
       setMfaError(error);
@@ -120,14 +107,14 @@ export const useMfa = (): UseMfaReturn => {
 
     try {
       const totpSetupDetails = await setUpTOTP();
-      const setupUri = totpSetupDetails.getSetupUri("PopcornManager");
+      const setupUri = totpSetupDetails.getSetupUri('PopcornManager');
       const qrDataUrl = await QRCode.toDataURL(setupUri.href);
 
       setMfaSetupCode(totpSetupDetails.sharedSecret);
       setQrCodeUrl(qrDataUrl);
     } catch (err: unknown) {
-      console.error("MFA setup failed:", err);
-      setMfaError(getErrorMessage(err, "Failed to set up MFA"));
+      console.error('MFA setup failed:', err);
+      setMfaError(getErrorMessage(err, 'Failed to set up MFA'));
     } finally {
       setMfaLoading(false);
     }
@@ -140,18 +127,16 @@ export const useMfa = (): UseMfaReturn => {
 
     try {
       await verifyTOTPSetup({ code: mfaVerificationCode });
-      await updateMFAPreference({ totp: "PREFERRED" });
+      await updateMFAPreference({ totp: 'PREFERRED' });
 
       setMfaSuccess(true);
       setMfaEnabled(true);
       setMfaSetupCode(null);
       setQrCodeUrl(null);
-      setMfaVerificationCode("");
+      setMfaVerificationCode('');
     } catch (err: unknown) {
-      console.error("MFA verification failed:", err);
-      setMfaError(
-        getErrorMessage(err, "Invalid verification code. Please try again."),
-      );
+      console.error('MFA verification failed:', err);
+      setMfaError(getErrorMessage(err, 'Invalid verification code. Please try again.'));
     } finally {
       setMfaLoading(false);
     }
@@ -166,12 +151,12 @@ export const useMfa = (): UseMfaReturn => {
     setMfaLoading(true);
 
     try {
-      await updateMFAPreference({ totp: "DISABLED" });
+      await updateMFAPreference({ totp: 'DISABLED' });
       setMfaEnabled(false);
       setMfaSuccess(false);
     } catch (err: unknown) {
-      console.error("Disable MFA failed:", err);
-      setMfaError(getErrorMessage(err, "Failed to disable MFA"));
+      console.error('Disable MFA failed:', err);
+      setMfaError(getErrorMessage(err, 'Failed to disable MFA'));
     } finally {
       setMfaLoading(false);
     }
@@ -180,7 +165,7 @@ export const useMfa = (): UseMfaReturn => {
   const resetMfaSetup = () => {
     setMfaSetupCode(null);
     setQrCodeUrl(null);
-    setMfaVerificationCode("");
+    setMfaVerificationCode('');
   };
 
   return {

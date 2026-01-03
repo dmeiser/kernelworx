@@ -1,15 +1,11 @@
 /**
  * Custom hook for campaign creation submission
  */
-import { useCallback } from "react";
-import { useMutation } from "@apollo/client/react";
-import { useNavigate } from "react-router-dom";
-import {
-  CREATE_CAMPAIGN,
-  LIST_MY_PROFILES,
-  LIST_CAMPAIGNS_BY_PROFILE,
-} from "../lib/graphql";
-import { ensureProfileId, ensureCatalogId, toUrlId } from "../lib/ids";
+import { useCallback } from 'react';
+import { useMutation } from '@apollo/client/react';
+import { useNavigate } from 'react-router-dom';
+import { CREATE_CAMPAIGN, LIST_MY_PROFILES, LIST_CAMPAIGNS_BY_PROFILE } from '../lib/graphql';
+import { ensureProfileId, ensureCatalogId, toUrlId } from '../lib/ids';
 
 interface CreateCampaignInput {
   profileId: string;
@@ -119,16 +115,7 @@ export const useCreateCampaignSubmit = () => {
 
       return isSharedCampaignMode
         ? buildSharedInput(base, effectiveSharedCampaignCode, shareWithCreator)
-        : buildManualInput(
-            base,
-            campaignName,
-            campaignYear,
-            catalogId,
-            unitType,
-            unitNumber,
-            city,
-            state,
-          );
+        : buildManualInput(base, campaignName, campaignYear, catalogId, unitType, unitNumber, city, state);
     },
     [],
   );
@@ -155,14 +142,10 @@ export const useCreateCampaignSubmit = () => {
       } = params;
 
       const getSuccessMessage = () => {
-        if (
-          isSharedCampaignMode &&
-          shareWithCreator &&
-          sharedCampaignCreatedByName
-        ) {
+        if (isSharedCampaignMode && shareWithCreator && sharedCampaignCreatedByName) {
           return `Campaign created and shared with ${sharedCampaignCreatedByName}!`;
         }
-        return "Campaign created successfully!";
+        return 'Campaign created successfully!';
       };
 
       const refetchQueries = [
@@ -198,13 +181,11 @@ export const useCreateCampaignSubmit = () => {
         const createdCampaign = data?.createCampaign;
         if (createdCampaign) {
           onSuccess(getSuccessMessage());
-          navigate(
-            `/scouts/${toUrlId(profileId)}/campaigns/${toUrlId(createdCampaign.campaignId)}`,
-          );
+          navigate(`/scouts/${toUrlId(profileId)}/campaigns/${toUrlId(createdCampaign.campaignId)}`);
         }
       } catch (error) {
-        console.error("Failed to create campaign:", error);
-        onError("Failed to create campaign. Please try again.");
+        console.error('Failed to create campaign:', error);
+        onError('Failed to create campaign. Please try again.');
       }
     },
     [createCampaign, navigate, buildCreateInput],

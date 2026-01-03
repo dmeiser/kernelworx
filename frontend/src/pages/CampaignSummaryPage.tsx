@@ -2,30 +2,19 @@
  * CampaignSummaryPage - High-level statistics and summary for a campaign
  */
 
-import React from "react";
-import { useParams } from "react-router-dom";
-import { useQuery } from "@apollo/client/react";
-import {
-  Box,
-  Grid,
-  Paper,
-  Typography,
-  Stack,
-  CircularProgress,
-  Alert,
-} from "@mui/material";
-import { ShoppingCart, AttachMoney, People } from "@mui/icons-material";
-import { LIST_ORDERS_BY_CAMPAIGN } from "../lib/graphql";
-import { ensureCampaignId } from "../lib/ids";
+import React from 'react';
+import { useParams } from 'react-router-dom';
+import { useQuery } from '@apollo/client/react';
+import { Box, Grid, Paper, Typography, Stack, CircularProgress, Alert } from '@mui/material';
+import { ShoppingCart, AttachMoney, People } from '@mui/icons-material';
+import { LIST_ORDERS_BY_CAMPAIGN } from '../lib/graphql';
+import { ensureCampaignId } from '../lib/ids';
 
 // Helper to safely decode URL component
-const decodeUrlParam = (encoded: string | undefined): string =>
-  encoded ? decodeURIComponent(encoded) : "";
+const decodeUrlParam = (encoded: string | undefined): string => (encoded ? decodeURIComponent(encoded) : '');
 
 // Helper to get orders from query data
-const getOrders = (
-  data: { listOrdersByCampaign: Order[] } | undefined,
-): Order[] => data?.listOrdersByCampaign || [];
+const getOrders = (data: { listOrdersByCampaign: Order[] } | undefined): Order[] => data?.listOrdersByCampaign || [];
 
 // Helper to calculate payment breakdown from orders
 const calculatePaymentBreakdown = (orders: Order[]): Record<string, number> =>
@@ -38,9 +27,7 @@ const calculatePaymentBreakdown = (orders: Order[]): Record<string, number> =>
   );
 
 // Helper to calculate product breakdown from orders
-const calculateProductBreakdown = (
-  orders: Order[],
-): Record<string, { quantity: number; revenue: number }> =>
+const calculateProductBreakdown = (orders: Order[]): Record<string, { quantity: number; revenue: number }> =>
   orders.reduce(
     (acc, order) => {
       order.lineItems.forEach((item) => {
@@ -66,9 +53,9 @@ const getTopProducts = (
 
 // Helper to format currency
 const formatCurrency = (amount: number): string =>
-  new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
+  new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
   }).format(amount);
 
 interface LineItem {
@@ -105,12 +92,8 @@ export const CampaignSummaryPage: React.FC = () => {
 
   // Calculate statistics
   const totalOrders = orders.length;
-  const totalRevenue = orders.reduce(
-    (sum, order) => sum + order.totalAmount,
-    0,
-  );
-  const uniqueCustomers = new Set(orders.map((order) => order.customerName))
-    .size;
+  const totalRevenue = orders.reduce((sum, order) => sum + order.totalAmount, 0);
+  const uniqueCustomers = new Set(orders.map((order) => order.customerName)).size;
 
   // Compute breakdowns using helpers
   const paymentBreakdown = calculatePaymentBreakdown(orders);
@@ -119,21 +102,14 @@ export const CampaignSummaryPage: React.FC = () => {
 
   if (loading) {
     return (
-      <Box
-        display="flex"
-        justifyContent="center"
-        alignItems="center"
-        minHeight="200px"
-      >
+      <Box display="flex" justifyContent="center" alignItems="center" minHeight="200px">
         <CircularProgress />
       </Box>
     );
   }
 
   if (error) {
-    return (
-      <Alert severity="error">Failed to load summary: {error.message}</Alert>
-    );
+    return <Alert severity="error">Failed to load summary: {error.message}</Alert>;
   }
 
   return (
@@ -163,9 +139,7 @@ export const CampaignSummaryPage: React.FC = () => {
             <Stack direction="row" spacing={2} alignItems="center">
               <AttachMoney color="success" sx={{ fontSize: 40 }} />
               <Box>
-                <Typography variant="h4">
-                  {formatCurrency(totalRevenue)}
-                </Typography>
+                <Typography variant="h4">{formatCurrency(totalRevenue)}</Typography>
                 <Typography variant="body2" color="text.secondary">
                   Total Sales
                 </Typography>
@@ -198,9 +172,7 @@ export const CampaignSummaryPage: React.FC = () => {
           {Object.entries(paymentBreakdown).map(([method, count]) => (
             <Grid key={method} size={{ xs: 6, sm: 4, md: 3 }}>
               <Box>
-                <Typography variant="body1">
-                  {method.replace("_", " ")}
-                </Typography>
+                <Typography variant="body1">{method.replace('_', ' ')}</Typography>
                 <Typography variant="h6" color="primary">
                   {count} orders
                 </Typography>
@@ -225,11 +197,7 @@ export const CampaignSummaryPage: React.FC = () => {
         <Stack spacing={2}>
           {topProducts.map(([productName, stats]) => (
             <Box key={productName}>
-              <Stack
-                direction="row"
-                justifyContent="space-between"
-                alignItems="center"
-              >
+              <Stack direction="row" justifyContent="space-between" alignItems="center">
                 <Typography variant="body1">{productName}</Typography>
                 <Stack direction="row" spacing={3} alignItems="center">
                   <Typography variant="body2" color="text.secondary">

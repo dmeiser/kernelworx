@@ -6,43 +6,32 @@
  * 2. Manual mode: Accessed via /create-campaign - all fields editable with optional unit info
  */
 
-import React from "react";
-import { useParams } from "react-router-dom";
-import { Box, Typography } from "@mui/material";
-import { useCreateCampaignPageSetup } from "../hooks/useCreateCampaignPageSetup";
+import React from 'react';
+import { useParams } from 'react-router-dom';
+import { Box, Typography } from '@mui/material';
+import { useCreateCampaignPageSetup } from '../hooks/useCreateCampaignPageSetup';
 import {
   LoadingState,
   CampaignNotFoundError,
   CampaignErrorState,
   SharedCampaignBanner,
   DiscoveredCampaignAlert,
-} from "./CreateCampaignPageComponents";
-import { CampaignForm } from "./CampaignForm";
+} from './CreateCampaignPageComponents';
+import { CampaignForm } from './CampaignForm';
 
 const getLoadingView = (sharedCampaignLoading: boolean) => {
   if (sharedCampaignLoading) return <LoadingState />;
   return null;
 };
 
-const getInactiveView = (
-  sharedCampaignInactive: boolean,
-  navigate: (path: string) => void,
-) => {
+const getInactiveView = (sharedCampaignInactive: boolean, navigate: (path: string) => void) => {
   if (!sharedCampaignInactive) return null;
-  return <CampaignNotFoundError onReturnClick={() => navigate("/scouts")} />;
+  return <CampaignNotFoundError onReturnClick={() => navigate('/scouts')} />;
 };
 
-const getErrorView = (
-  sharedCampaignError: unknown,
-  navigate: (path: string) => void,
-) => {
+const getErrorView = (sharedCampaignError: unknown, navigate: (path: string) => void) => {
   if (!sharedCampaignError) return null;
-  return (
-    <CampaignErrorState
-      error={sharedCampaignError}
-      onReturnClick={() => navigate("/scouts")}
-    />
-  );
+  return <CampaignErrorState error={sharedCampaignError} onReturnClick={() => navigate('/scouts')} />;
 };
 
 const getGuardView = (
@@ -91,28 +80,19 @@ const DiscoveredAlertSection: React.FC<{
   );
 };
 
-const getCampaignFlags = (
-  setup: ReturnType<typeof useCreateCampaignPageSetup>,
-) => {
+const getCampaignFlags = (setup: ReturnType<typeof useCreateCampaignPageSetup>) => {
   const hasSharedCode = Boolean(setup.effectiveSharedCampaignCode);
   return {
     sharedCampaignLoading: hasSharedCode && setup.sharedCampaignLoading,
-    sharedCampaignInactive:
-      hasSharedCode &&
-      (!setup.sharedCampaign || !setup.sharedCampaign.isActive),
-    hasDiscoveredCampaigns:
-      !setup.isSharedCampaignMode && setup.discoveredSharedCampaigns.length > 0,
+    sharedCampaignInactive: hasSharedCode && (!setup.sharedCampaign || !setup.sharedCampaign.isActive),
+    hasDiscoveredCampaigns: !setup.isSharedCampaignMode && setup.discoveredSharedCampaigns.length > 0,
   };
 };
 
 const CreateCampaignPageView: React.FC<{
   setup: ReturnType<typeof useCreateCampaignPageSetup>;
 }> = ({ setup }) => {
-  const {
-    sharedCampaignLoading,
-    sharedCampaignInactive,
-    hasDiscoveredCampaigns,
-  } = getCampaignFlags(setup);
+  const { sharedCampaignLoading, sharedCampaignInactive, hasDiscoveredCampaigns } = getCampaignFlags(setup);
 
   const handleUseSharedCampaign = (code: string) => {
     setup.navigate(`/c/${code}`);
@@ -159,7 +139,7 @@ const CreateCampaignPageView: React.FC<{
         catalogsLoading={setup.catalogsLoading}
         isFormValid={setup.isFormValid}
         onSubmit={handleSubmitClick}
-        onCancel={() => setup.navigate("/scouts")}
+        onCancel={() => setup.navigate('/scouts')}
       />
     </Box>
   );

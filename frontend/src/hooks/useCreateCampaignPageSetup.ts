@@ -1,18 +1,18 @@
 /**
  * Hook that initializes all the queries for CreateCampaignPage
  */
-import { useQuery } from "@apollo/client/react";
-import { GET_SHARED_CAMPAIGN } from "../lib/graphql";
-import { useCreateCampaignFormState } from "./useCreateCampaignFormState";
-import { useSharedCampaignAndProfiles } from "./useSharedCampaignAndProfiles";
-import { useCatalogsData } from "./useCatalogsData";
-import { useProfileEffects } from "./useProfileEffects";
-import { useProfileRefetch } from "./useProfileRefetch";
-import { useSharedCampaignFormInit } from "./useSharedCampaignFormInit";
-import { useSharedCampaignDiscovery } from "./useSharedCampaignDiscovery";
-import { useSharedCampaignDiscoveryTrigger } from "./useSharedCampaignDiscoveryTrigger";
-import { useCreateCampaignSubmitHandler } from "./useCreateCampaignSubmitHandler";
-import { useNavigate } from "react-router-dom";
+import { useQuery } from '@apollo/client/react';
+import { GET_SHARED_CAMPAIGN } from '../lib/graphql';
+import { useCreateCampaignFormState } from './useCreateCampaignFormState';
+import { useSharedCampaignAndProfiles } from './useSharedCampaignAndProfiles';
+import { useCatalogsData } from './useCatalogsData';
+import { useProfileEffects } from './useProfileEffects';
+import { useProfileRefetch } from './useProfileRefetch';
+import { useSharedCampaignFormInit } from './useSharedCampaignFormInit';
+import { useSharedCampaignDiscovery } from './useSharedCampaignDiscovery';
+import { useSharedCampaignDiscoveryTrigger } from './useSharedCampaignDiscoveryTrigger';
+import { useCreateCampaignSubmitHandler } from './useCreateCampaignSubmitHandler';
+import { useNavigate } from 'react-router-dom';
 
 interface SharedCampaign {
   sharedCampaignCode: string;
@@ -36,9 +36,7 @@ interface SharedCampaign {
   isActive: boolean;
 }
 
-export const useCreateCampaignPageSetup = (
-  effectiveSharedCampaignCode: string | undefined,
-) => {
+export const useCreateCampaignPageSetup = (effectiveSharedCampaignCode: string | undefined) => {
   const navigate = useNavigate();
   const formState = useCreateCampaignFormState();
 
@@ -47,13 +45,10 @@ export const useCreateCampaignPageSetup = (
     data: sharedCampaignData,
     loading: sharedCampaignLoading,
     error: sharedCampaignError,
-  } = useQuery<{ getSharedCampaign: SharedCampaign | null }>(
-    GET_SHARED_CAMPAIGN,
-    {
-      variables: { sharedCampaignCode: effectiveSharedCampaignCode },
-      skip: !effectiveSharedCampaignCode,
-    },
-  );
+  } = useQuery<{ getSharedCampaign: SharedCampaign | null }>(GET_SHARED_CAMPAIGN, {
+    variables: { sharedCampaignCode: effectiveSharedCampaignCode },
+    skip: !effectiveSharedCampaignCode,
+  });
 
   const sharedCampaign = sharedCampaignData?.getSharedCampaign;
 
@@ -62,8 +57,7 @@ export const useCreateCampaignPageSetup = (
     useSharedCampaignAndProfiles(effectiveSharedCampaignCode);
 
   // Use custom hooks for catalogs
-  const { filteredPublicCatalogs, filteredMyCatalogs, catalogsLoading } =
-    useCatalogsData(isSharedCampaignMode);
+  const { filteredPublicCatalogs, filteredMyCatalogs, catalogsLoading } = useCatalogsData(isSharedCampaignMode);
 
   // Profile effects
   useProfileEffects(
@@ -94,8 +88,7 @@ export const useCreateCampaignPageSetup = (
   );
 
   // Shared campaign discovery
-  const { discoveredSharedCampaigns, debouncedFindSharedCampaigns } =
-    useSharedCampaignDiscovery();
+  const { discoveredSharedCampaigns, debouncedFindSharedCampaigns } = useSharedCampaignDiscovery();
 
   // Trigger shared campaign discovery
   useSharedCampaignDiscoveryTrigger(
@@ -110,8 +103,7 @@ export const useCreateCampaignPageSetup = (
   );
 
   // Submit handler
-  const { handleSubmit, isFormValid } =
-    useCreateCampaignSubmitHandler(formState);
+  const { handleSubmit, isFormValid } = useCreateCampaignSubmitHandler(formState);
 
   return {
     formState,

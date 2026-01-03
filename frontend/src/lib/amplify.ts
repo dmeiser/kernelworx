@@ -2,7 +2,7 @@
  * AWS Amplify configuration for Cognito authentication
  */
 
-import { Amplify } from "aws-amplify";
+import { Amplify } from 'aws-amplify';
 
 // Configure Amplify with Cognito settings
 Amplify.configure({
@@ -13,10 +13,10 @@ Amplify.configure({
       loginWith: {
         oauth: {
           domain: import.meta.env.VITE_COGNITO_DOMAIN,
-          scopes: ["openid", "email", "profile"],
+          scopes: ['openid', 'email', 'profile'],
           redirectSignIn: [import.meta.env.VITE_OAUTH_REDIRECT_SIGNIN],
           redirectSignOut: [import.meta.env.VITE_OAUTH_REDIRECT_SIGNOUT],
-          responseType: "code",
+          responseType: 'code',
         },
       },
     },

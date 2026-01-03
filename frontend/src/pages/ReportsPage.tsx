@@ -2,9 +2,9 @@
  * ReportsPage - Generate and download campaign reports
  */
 
-import React from "react";
-import { useParams } from "react-router-dom";
-import { useQuery } from "@apollo/client/react";
+import React from 'react';
+import { useParams } from 'react-router-dom';
+import { useQuery } from '@apollo/client/react';
 import {
   Box,
   Typography,
@@ -20,27 +20,26 @@ import {
   TableRow,
   useMediaQuery,
   useTheme,
-} from "@mui/material";
+} from '@mui/material';
 import {
   Download as DownloadIcon,
   ExpandMore as ExpandMoreIcon,
   ExpandLess as ExpandLessIcon,
-} from "@mui/icons-material";
-import { LIST_ORDERS_BY_CAMPAIGN } from "../lib/graphql";
-import { ensureCampaignId } from "../lib/ids";
-import { downloadAsCSV, downloadAsXLSX } from "../lib/reportExport";
+} from '@mui/icons-material';
+import { LIST_ORDERS_BY_CAMPAIGN } from '../lib/graphql';
+import { ensureCampaignId } from '../lib/ids';
+import { downloadAsCSV, downloadAsXLSX } from '../lib/reportExport';
 
 // Helper to format city/state/zip into a single string
-const formatCityStateZip = (address: Order["customerAddress"]): string =>
-  [address?.city, address?.state, address?.zipCode].filter(Boolean).join(" ");
+const formatCityStateZip = (address: Order['customerAddress']): string =>
+  [address?.city, address?.state, address?.zipCode].filter(Boolean).join(' ');
 
 // Helper to check if address has displayable content
-const hasAddressContent = (street: boolean, cityStateZip: string): boolean =>
-  street || Boolean(cityStateZip);
+const hasAddressContent = (street: boolean, cityStateZip: string): boolean => street || Boolean(cityStateZip);
 
 // Helper component to render customer address
 const CustomerAddressCell: React.FC<{
-  address: Order["customerAddress"];
+  address: Order['customerAddress'];
 }> = ({ address }) => {
   if (!address) return <>-</>;
 
@@ -50,7 +49,7 @@ const CustomerAddressCell: React.FC<{
   if (!hasAddressContent(hasStreet, cityStateZip)) return <>-</>;
 
   return (
-    <Box sx={{ fontSize: "0.875rem" }}>
+    <Box sx={{ fontSize: '0.875rem' }}>
       {hasStreet && <div>{address.street}</div>}
       {cityStateZip && <div>{cityStateZip}</div>}
     </Box>
@@ -58,26 +57,18 @@ const CustomerAddressCell: React.FC<{
 };
 
 // Helper to safely decode URL component
-const decodeUrlParam = (encoded: string | undefined): string =>
-  encoded ? decodeURIComponent(encoded) : "";
+const decodeUrlParam = (encoded: string | undefined): string => (encoded ? decodeURIComponent(encoded) : '');
 
 // Helper to get orders from query data
-const getOrdersFromData = (
-  data: { listOrdersByCampaign: Order[] } | undefined,
-): Order[] => data?.listOrdersByCampaign || [];
+const getOrdersFromData = (data: { listOrdersByCampaign: Order[] } | undefined): Order[] =>
+  data?.listOrdersByCampaign || [];
 
 // Helper to determine if query should be skipped
 const shouldSkipQuery = (id: string): boolean => !id;
 
 // Helper to get all unique products from orders
 const getAllProducts = (orders: Order[]): string[] =>
-  Array.from(
-    new Set(
-      orders.flatMap((order) =>
-        order.lineItems.map((item) => item.productName),
-      ),
-    ),
-  ).sort();
+  Array.from(new Set(orders.flatMap((order) => order.lineItems.map((item) => item.productName)))).sort();
 
 // Helper component for order table content
 const OrderTableContent: React.FC<{
@@ -103,10 +94,10 @@ const OrderTableContent: React.FC<{
   const allProducts = getAllProducts(orders);
 
   return (
-    <TableContainer sx={{ overflowX: "auto" }}>
+    <TableContainer sx={{ overflowX: 'auto' }}>
       <Table size="small">
         <TableHead>
-          <TableRow sx={{ bgcolor: "action.hover" }}>
+          <TableRow sx={{ bgcolor: 'action.hover' }}>
             <TableCell>
               <strong>Name</strong>
             </TableCell>
@@ -128,11 +119,7 @@ const OrderTableContent: React.FC<{
         </TableHead>
         <TableBody>
           {orders.map((order) => (
-            <OrderRow
-              key={order.orderId}
-              order={order}
-              allProducts={allProducts}
-            />
+            <OrderRow key={order.orderId} order={order} allProducts={allProducts} />
           ))}
         </TableBody>
       </Table>
@@ -141,10 +128,7 @@ const OrderTableContent: React.FC<{
 };
 
 // Helper component for single order row
-const OrderRow: React.FC<{ order: Order; allProducts: string[] }> = ({
-  order,
-  allProducts,
-}) => (
+const OrderRow: React.FC<{ order: Order; allProducts: string[] }> = ({ order, allProducts }) => (
   <TableRow>
     <TableCell>{order.customerName}</TableCell>
     <TableCell>{formatPhone(order.customerPhone)}</TableCell>
@@ -157,21 +141,18 @@ const OrderRow: React.FC<{ order: Order; allProducts: string[] }> = ({
         .reduce((sum, item) => sum + item.quantity, 0);
       return (
         <TableCell key={product} align="center">
-          {totalQuantity > 0 ? totalQuantity : "-"}
+          {totalQuantity > 0 ? totalQuantity : '-'}
         </TableCell>
       );
     })}
-    <TableCell align="right" sx={{ fontWeight: "bold" }}>
+    <TableCell align="right" sx={{ fontWeight: 'bold' }}>
       {formatCurrency(order.totalAmount)}
     </TableCell>
   </TableRow>
 );
 
 // Helper component for download buttons
-const DownloadButtons: React.FC<{ orders: Order[]; campaignId: string }> = ({
-  orders,
-  campaignId,
-}) => {
+const DownloadButtons: React.FC<{ orders: Order[]; campaignId: string }> = ({ orders, campaignId }) => {
   if (orders.length === 0) return null;
   return (
     <Stack direction="row" spacing={1}>
@@ -203,14 +184,13 @@ const MobileWarning: React.FC<{ show: boolean }> = ({ show }) => {
       mb={3}
       sx={{
         p: { xs: 1, sm: 2 },
-        bgcolor: "#e3f2fd",
+        bgcolor: '#e3f2fd',
         borderRadius: 1,
       }}
     >
-      <Typography variant="body2" sx={{ color: "#1976d2" }}>
-        💡 <strong>Note:</strong> The order table below is designed for desktop
-        viewing. For the best experience viewing and editing detailed order
-        data, please use a larger screen.
+      <Typography variant="body2" sx={{ color: '#1976d2' }}>
+        💡 <strong>Note:</strong> The order table below is designed for desktop viewing. For the best experience viewing
+        and editing detailed order data, please use a larger screen.
       </Typography>
     </Box>
   );
@@ -218,15 +198,15 @@ const MobileWarning: React.FC<{ show: boolean }> = ({ show }) => {
 
 // Helper to format currency
 const formatCurrency = (amount: number): string =>
-  new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
+  new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
   }).format(amount);
 
 // Helper to format phone number
 const formatPhone = (phone: string | undefined): string => {
-  if (!phone) return "-";
-  const digits = phone.replace(/\D/g, "");
+  if (!phone) return '-';
+  const digits = phone.replace(/\D/g, '');
   if (digits.length === 10) {
     return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
   }
@@ -265,7 +245,7 @@ export const ReportsPage: React.FC = () => {
   const campaignId = decodeUrlParam(encodedCampaignId);
   const dbCampaignId = ensureCampaignId(campaignId);
   const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down("md"));
+  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
 
   // About Reports collapse state - collapsed on mobile by default, expanded on desktop
   const [aboutExpanded, setAboutExpanded] = React.useState(!isMobile);
@@ -276,7 +256,7 @@ export const ReportsPage: React.FC = () => {
   }, [isMobile]);
 
   // Report format option (currently defaults to XLSX)
-  const reportFormat: "CSV" | "XLSX" = "XLSX";
+  const reportFormat: 'CSV' | 'XLSX' = 'XLSX';
   void reportFormat; // Used for future report format selection
 
   const { data: ordersData, loading: ordersLoading } = useQuery<{
@@ -289,7 +269,7 @@ export const ReportsPage: React.FC = () => {
   const orders = getOrdersFromData(ordersData);
 
   return (
-    <Box sx={{ width: "100%" }}>
+    <Box sx={{ width: '100%' }}>
       <Typography variant="h5" gutterBottom>
         Reports & Exports
       </Typography>
@@ -309,19 +289,18 @@ export const ReportsPage: React.FC = () => {
           sx={{
             m: 0,
             pl: { xs: 2.5, sm: 3 },
-            "& li": {
-              typography: "body2",
+            '& li': {
+              typography: 'body2',
               mb: 1,
             },
           }}
         >
           <li>
-            <strong>Excel (XLSX):</strong> Formatted spreadsheet with product
-            columns, suitable for further analysis and pivot tables.
+            <strong>Excel (XLSX):</strong> Formatted spreadsheet with product columns, suitable for further analysis and
+            pivot tables.
           </li>
           <li>
-            <strong>CSV:</strong> Plain text file, compatible with all
-            spreadsheet programs and databases.
+            <strong>CSV:</strong> Plain text file, compatible with all spreadsheet programs and databases.
           </li>
         </Box>
       </Paper>
@@ -337,26 +316,18 @@ export const ReportsPage: React.FC = () => {
           sx={{ mb: 1 }}
           size="small"
         >
-          {aboutExpanded ? "Hide Order Table" : "Show Order Table"}
+          {aboutExpanded ? 'Hide Order Table' : 'Show Order Table'}
         </Button>
         {aboutExpanded && (
-          <Box sx={{ width: "100%", overflowX: "auto" }}>
+          <Box sx={{ width: '100%', overflowX: 'auto' }}>
             {/* Complete Order Table */}
             <Paper sx={{ p: { xs: 1.5, sm: 3 }, mt: 3 }}>
-              <Stack
-                direction="row"
-                justifyContent="space-between"
-                alignItems="center"
-                mb={2}
-              >
+              <Stack direction="row" justifyContent="space-between" alignItems="center" mb={2}>
                 <Typography variant="h6">All Orders</Typography>
                 <DownloadButtons orders={orders} campaignId={campaignId} />
               </Stack>
 
-              <OrderTableContent
-                orders={orders}
-                ordersLoading={ordersLoading}
-              />
+              <OrderTableContent orders={orders} ordersLoading={ordersLoading} />
             </Paper>
           </Box>
         )}

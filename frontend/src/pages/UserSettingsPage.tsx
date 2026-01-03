@@ -8,27 +8,14 @@
  * - Register and manage passkeys (WebAuthn)
  */
 
-import { useEffect } from "react";
-import { useQuery, useMutation } from "@apollo/client/react";
-import {
-  Box,
-  Typography,
-  Stack,
-  Alert,
-  CircularProgress,
-  IconButton,
-} from "@mui/material";
-import { ArrowBack as BackIcon } from "@mui/icons-material";
-import { useNavigate } from "react-router-dom";
-import { useAuth } from "../contexts/AuthContext";
-import { GET_MY_ACCOUNT, UPDATE_MY_ACCOUNT } from "../lib/graphql";
-import {
-  usePasswordChange,
-  useMfa,
-  usePasskeys,
-  useEmailUpdate,
-  useProfileEdit,
-} from "../hooks";
+import { useEffect } from 'react';
+import { useQuery, useMutation } from '@apollo/client/react';
+import { Box, Typography, Stack, Alert, CircularProgress, IconButton } from '@mui/material';
+import { ArrowBack as BackIcon } from '@mui/icons-material';
+import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../contexts/AuthContext';
+import { GET_MY_ACCOUNT, UPDATE_MY_ACCOUNT } from '../lib/graphql';
+import { usePasswordChange, useMfa, usePasskeys, useEmailUpdate, useProfileEdit } from '../hooks';
 import {
   PasswordSection,
   MfaSection,
@@ -36,7 +23,7 @@ import {
   AccountInfoSection,
   EditProfileDialog,
   ChangeEmailDialog,
-} from "../components/settings";
+} from '../components/settings';
 
 interface Account {
   accountId: string;
@@ -53,10 +40,7 @@ interface Account {
 }
 
 // Helper to create the mutation onCompleted callback
-const createUpdateCompletedHandler = (
-  profileHook: ReturnType<typeof useProfileEdit>,
-  refetch: () => void,
-) => {
+const createUpdateCompletedHandler = (profileHook: ReturnType<typeof useProfileEdit>, refetch: () => void) => {
   return () => {
     profileHook.setUpdateSuccess(true);
     profileHook.setUpdateError(null);
@@ -67,9 +51,7 @@ const createUpdateCompletedHandler = (
 };
 
 // Helper to create the mutation onError callback
-const createUpdateErrorHandler = (
-  profileHook: ReturnType<typeof useProfileEdit>,
-) => {
+const createUpdateErrorHandler = (profileHook: ReturnType<typeof useProfileEdit>) => {
   return (err: Error) => {
     profileHook.setUpdateError(err.message);
     profileHook.setUpdateSuccess(false);
@@ -82,17 +64,14 @@ const mergeAccountData = (
   authAccount: { isAdmin: boolean } | null,
 ): Account | undefined => {
   if (!authAccount) return graphqlAccount;
-  return graphqlAccount
-    ? { ...graphqlAccount, isAdmin: authAccount.isAdmin }
-    : undefined;
+  return graphqlAccount ? { ...graphqlAccount, isAdmin: authAccount.isAdmin } : undefined;
 };
 
 // Helper to convert empty string to null
 const emptyToNull = (value: string | undefined): string | null => value || null;
 
 // Helper to parse unit number or return null
-const parseUnitNumber = (value: string | undefined): number | null =>
-  value ? parseInt(value, 10) : null;
+const parseUnitNumber = (value: string | undefined): number | null => (value ? parseInt(value, 10) : null);
 
 // Helper to build profile update input
 const buildProfileInput = (profileHook: ReturnType<typeof useProfileEdit>) => ({
@@ -105,22 +84,14 @@ const buildProfileInput = (profileHook: ReturnType<typeof useProfileEdit>) => ({
 });
 
 // Helper to get account from query data
-const getAccountFromData = (
-  data: { getMyAccount: Account } | undefined,
-): Account | undefined => data?.getMyAccount;
+const getAccountFromData = (data: { getMyAccount: Account } | undefined): Account | undefined => data?.getMyAccount;
 
 // Helper to get email from account
-const getAccountEmail = (account: Account | undefined): string | undefined =>
-  account?.email;
+const getAccountEmail = (account: Account | undefined): string | undefined => account?.email;
 
 // Loading component
 const LoadingState: React.FC = () => (
-  <Box
-    display="flex"
-    justifyContent="center"
-    alignItems="center"
-    minHeight="400px"
-  >
+  <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
     <CircularProgress />
   </Box>
 );
@@ -165,19 +136,13 @@ export const UserSettingsPage: React.FC = () => {
     refetch,
   } = useQuery<{ getMyAccount: Account }>(GET_MY_ACCOUNT);
 
-  const [updateMyAccount, { loading: updating }] = useMutation(
-    UPDATE_MY_ACCOUNT,
-    {
-      onCompleted: createUpdateCompletedHandler(profileHook, refetch),
-      onError: createUpdateErrorHandler(profileHook),
-    },
-  );
+  const [updateMyAccount, { loading: updating }] = useMutation(UPDATE_MY_ACCOUNT, {
+    onCompleted: createUpdateCompletedHandler(profileHook, refetch),
+    onError: createUpdateErrorHandler(profileHook),
+  });
 
   // Merge GraphQL account data with AuthContext account (which has isAdmin from JWT token)
-  const account = mergeAccountData(
-    getAccountFromData(accountData),
-    authAccount,
-  );
+  const account = mergeAccountData(getAccountFromData(accountData), authAccount);
 
   // Load MFA and passkey status on mount
   useEffect(() => {
@@ -187,21 +152,14 @@ export const UserSettingsPage: React.FC = () => {
   }, [mfaHook.checkMfaStatus, passkeyHook.loadPasskeys]);
 
   // Wrapper handlers for cross-feature interactions
-  const handleSetupMFA = () =>
-    mfaHook.handleSetupMFA(passkeyHook.passkeys, passkeyHook.loadPasskeys);
+  const handleSetupMFA = () => mfaHook.handleSetupMFA(passkeyHook.passkeys, passkeyHook.loadPasskeys);
 
-  const handleRegisterPasskey = () =>
-    passkeyHook.handleRegisterPasskey(
-      mfaHook.mfaEnabled,
-      mfaHook.setMfaEnabled,
-    );
+  const handleRegisterPasskey = () => passkeyHook.handleRegisterPasskey(mfaHook.mfaEnabled, mfaHook.setMfaEnabled);
 
   // Wrapper handlers for email hook (needs access to account email, logout, navigate)
-  const handleRequestEmailUpdate = () =>
-    emailHook.handleRequestEmailUpdate(getAccountEmail(account));
+  const handleRequestEmailUpdate = () => emailHook.handleRequestEmailUpdate(getAccountEmail(account));
 
-  const handleConfirmEmailUpdate = () =>
-    emailHook.handleConfirmEmailUpdate(logout, navigate);
+  const handleConfirmEmailUpdate = () => emailHook.handleConfirmEmailUpdate(logout, navigate);
 
   const handleOpenEditDialog = () => profileHook.handleOpenEditDialog(account);
 
@@ -223,7 +181,7 @@ export const UserSettingsPage: React.FC = () => {
     <Box sx={{ p: 3 }}>
       {/* Header */}
       <Stack direction="row" alignItems="center" spacing={2} sx={{ mb: 3 }}>
-        <IconButton onClick={() => navigate("/settings")} edge="start">
+        <IconButton onClick={() => navigate('/settings')} edge="start">
           <BackIcon />
         </IconButton>
         <Typography variant="h4" component="h1">
@@ -245,11 +203,7 @@ export const UserSettingsPage: React.FC = () => {
       <PasswordSection hook={passwordHook} />
 
       {/* Multi-Factor Authentication Section */}
-      <MfaSection
-        mfaHook={mfaHook}
-        passkeyCount={passkeyHook.passkeys.length}
-        onSetupMFA={handleSetupMFA}
-      />
+      <MfaSection mfaHook={mfaHook} passkeyCount={passkeyHook.passkeys.length} onSetupMFA={handleSetupMFA} />
 
       {/* Passkeys Section */}
       <PasskeySection
@@ -259,11 +213,7 @@ export const UserSettingsPage: React.FC = () => {
       />
 
       {/* Edit Profile Dialog */}
-      <EditProfileDialog
-        profileHook={profileHook}
-        updating={updating}
-        onSave={handleSaveProfile}
-      />
+      <EditProfileDialog profileHook={profileHook} updating={updating} onSave={handleSaveProfile} />
 
       {/* Change Email Dialog */}
       <ChangeEmailDialog

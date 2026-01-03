@@ -2,9 +2,9 @@
  * OrderEditorPage - Page for creating or editing an order
  */
 
-import React, { useEffect } from "react";
-import { useParams, useNavigate } from "react-router-dom";
-import { useQuery, useMutation } from "@apollo/client/react";
+import React, { useEffect } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { useQuery, useMutation } from '@apollo/client/react';
 import {
   Box,
   Button,
@@ -27,30 +27,11 @@ import {
   CircularProgress,
   Breadcrumbs,
   Link,
-} from "@mui/material";
-import {
-  Add as AddIcon,
-  Delete as DeleteIcon,
-  ArrowBack as ArrowBackIcon,
-} from "@mui/icons-material";
-import {
-  CREATE_ORDER,
-  UPDATE_ORDER,
-  GET_ORDER,
-  GET_CAMPAIGN,
-  GET_PROFILE,
-} from "../lib/graphql";
-import {
-  ensureProfileId,
-  ensureCampaignId,
-  ensureOrderId,
-  toUrlId,
-} from "../lib/ids";
-import {
-  useOrderForm,
-  OrderFormState,
-  LineItemInput,
-} from "../hooks/useOrderForm";
+} from '@mui/material';
+import { Add as AddIcon, Delete as DeleteIcon, ArrowBack as ArrowBackIcon } from '@mui/icons-material';
+import { CREATE_ORDER, UPDATE_ORDER, GET_ORDER, GET_CAMPAIGN, GET_PROFILE } from '../lib/graphql';
+import { ensureProfileId, ensureCampaignId, ensureOrderId, toUrlId } from '../lib/ids';
+import { useOrderForm, OrderFormState, LineItemInput } from '../hooks/useOrderForm';
 
 // ============================================================================
 // Types
@@ -104,15 +85,15 @@ interface OrderData {
 // ============================================================================
 
 function formatCurrency(amount: number): string {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
   }).format(amount);
 }
 
 function formatPhoneNumber(phone: string): string {
-  const digits = phone.replace(/\D/g, "");
-  if (digits.length === 11 && digits.startsWith("1")) {
+  const digits = phone.replace(/\D/g, '');
+  if (digits.length === 11 && digits.startsWith('1')) {
     return `(${digits.slice(1, 4)}) ${digits.slice(4, 7)}-${digits.slice(7, 11)}`;
   }
   if (digits.length === 10) {
@@ -121,10 +102,7 @@ function formatPhoneNumber(phone: string): string {
   return phone;
 }
 
-function calculateTotal(
-  lineItems: LineItemInput[],
-  products: Product[],
-): number {
+function calculateTotal(lineItems: LineItemInput[], products: Product[]): number {
   return lineItems.reduce((sum, item) => {
     const product = products.find((p) => p.productId === item.productId);
     return sum + (product?.price || 0) * item.quantity;
@@ -141,26 +119,21 @@ interface ValidationResult {
   validLineItems: LineItemInput[];
 }
 
-function validateOrderForm(
-  customerName: string,
-  lineItems: LineItemInput[],
-): ValidationResult {
+function validateOrderForm(customerName: string, lineItems: LineItemInput[]): ValidationResult {
   if (!customerName.trim()) {
     return {
       isValid: false,
-      error: "Customer name is required",
+      error: 'Customer name is required',
       validLineItems: [],
     };
   }
 
-  const validLineItems = lineItems.filter(
-    (item) => item.productId && item.quantity > 0,
-  );
+  const validLineItems = lineItems.filter((item) => item.productId && item.quantity > 0);
 
   if (validLineItems.length === 0) {
     return {
       isValid: false,
-      error: "At least one product is required",
+      error: 'At least one product is required',
       validLineItems: [],
     };
   }
@@ -217,11 +190,7 @@ function buildCreateOrderInput(
   };
 }
 
-function buildUpdateOrderInput(
-  formState: OrderFormState,
-  dbOrderId: string,
-  validLineItems: LineItemInput[],
-) {
+function buildUpdateOrderInput(formState: OrderFormState, dbOrderId: string, validLineItems: LineItemInput[]) {
   return {
     orderId: dbOrderId,
     customerName: formState.customerName.trim(),
@@ -244,18 +213,13 @@ interface OrderBreadcrumbsProps {
   isEditing: boolean;
 }
 
-const OrderBreadcrumbs: React.FC<OrderBreadcrumbsProps> = ({
-  profileId,
-  onNavigate,
-  onCancel,
-  isEditing,
-}) => (
+const OrderBreadcrumbs: React.FC<OrderBreadcrumbsProps> = ({ profileId, onNavigate, onCancel, isEditing }) => (
   <Breadcrumbs sx={{ mb: 2 }}>
     <Link
       component="button"
       variant="body2"
-      onClick={() => onNavigate("/scouts")}
-      sx={{ textDecoration: "none", cursor: "pointer" }}
+      onClick={() => onNavigate('/scouts')}
+      sx={{ textDecoration: 'none', cursor: 'pointer' }}
     >
       Profiles
     </Link>
@@ -263,20 +227,15 @@ const OrderBreadcrumbs: React.FC<OrderBreadcrumbsProps> = ({
       component="button"
       variant="body2"
       onClick={() => onNavigate(`/scouts/${toUrlId(profileId)}/campaigns`)}
-      sx={{ textDecoration: "none", cursor: "pointer" }}
+      sx={{ textDecoration: 'none', cursor: 'pointer' }}
     >
       Campaigns
     </Link>
-    <Link
-      component="button"
-      variant="body2"
-      onClick={onCancel}
-      sx={{ textDecoration: "none", cursor: "pointer" }}
-    >
+    <Link component="button" variant="body2" onClick={onCancel} sx={{ textDecoration: 'none', cursor: 'pointer' }}>
       Orders
     </Link>
     <Typography variant="body2" color="text.primary">
-      {isEditing ? "Edit Order" : "New Order"}
+      {isEditing ? 'Edit Order' : 'New Order'}
     </Typography>
   </Breadcrumbs>
 );
@@ -286,10 +245,7 @@ interface CustomerInfoFormProps {
   loading: boolean;
 }
 
-const CustomerInfoForm: React.FC<CustomerInfoFormProps> = ({
-  formState,
-  loading,
-}) => {
+const CustomerInfoForm: React.FC<CustomerInfoFormProps> = ({ formState, loading }) => {
   const handlePhoneBlur = (e: React.FocusEvent<HTMLInputElement>) => {
     formState.setCustomerPhone(formatPhoneNumber(e.target.value));
   };
@@ -404,17 +360,10 @@ const LineItemRow: React.FC<LineItemRowProps> = ({
           inputProps={{ min: 1, max: 99999, step: 1 }}
         />
       </TableCell>
-      <TableCell align="right">
-        {product ? formatCurrency(product.price) : "—"}
-      </TableCell>
+      <TableCell align="right">{product ? formatCurrency(product.price) : '—'}</TableCell>
       <TableCell align="right">{formatCurrency(subtotal)}</TableCell>
       <TableCell align="right">
-        <IconButton
-          size="small"
-          onClick={onRemove}
-          disabled={loading || !canRemove}
-          color="error"
-        >
+        <IconButton size="small" onClick={onRemove} disabled={loading || !canRemove} color="error">
           <DeleteIcon fontSize="small" />
         </IconButton>
       </TableCell>
@@ -428,11 +377,7 @@ interface LineItemsTableProps {
   loading: boolean;
   onAddItem: () => void;
   onRemoveItem: (index: number) => void;
-  onItemChange: (
-    index: number,
-    field: "productId" | "quantity",
-    value: string,
-  ) => void;
+  onItemChange: (index: number, field: 'productId' | 'quantity', value: string) => void;
 }
 
 const LineItemsTable: React.FC<LineItemsTableProps> = ({
@@ -448,12 +393,7 @@ const LineItemsTable: React.FC<LineItemsTableProps> = ({
 
   return (
     <Paper sx={{ p: 3, mb: 3 }}>
-      <Stack
-        direction="row"
-        justifyContent="space-between"
-        alignItems="center"
-        mb={2}
-      >
+      <Stack direction="row" justifyContent="space-between" alignItems="center" mb={2}>
         <Typography variant="h6">Products</Typography>
         <Button startIcon={<AddIcon />} onClick={onAddItem} disabled={loading}>
           Add Product
@@ -479,8 +419,8 @@ const LineItemsTable: React.FC<LineItemsTableProps> = ({
               products={products}
               loading={loading}
               canRemove={canRemoveItems}
-              onProductChange={(v) => onItemChange(index, "productId", v)}
-              onQuantityChange={(v) => onItemChange(index, "quantity", v)}
+              onProductChange={(v) => onItemChange(index, 'productId', v)}
+              onQuantityChange={(v) => onItemChange(index, 'quantity', v)}
               onRemove={() => onRemoveItem(index)}
             />
           ))}
@@ -518,11 +458,7 @@ const PaymentNotesForm: React.FC<PaymentNotesFormProps> = ({
     <Stack spacing={2}>
       <FormControl fullWidth disabled={loading}>
         <InputLabel>Payment Method</InputLabel>
-        <Select
-          value={paymentMethod}
-          onChange={(e) => setPaymentMethod(e.target.value)}
-          label="Payment Method"
-        >
+        <Select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)} label="Payment Method">
           <MenuItem value="CASH">Cash</MenuItem>
           <MenuItem value="CHECK">Check</MenuItem>
           <MenuItem value="CREDIT_CARD">Credit Card</MenuItem>
@@ -552,9 +488,7 @@ const OrderHeader: React.FC<OrderHeaderProps> = ({ isEditing, onCancel }) => (
     <IconButton onClick={onCancel} edge="start">
       <ArrowBackIcon />
     </IconButton>
-    <Typography variant="h4">
-      {isEditing ? "Edit Order" : "Create Order"}
-    </Typography>
+    <Typography variant="h4">{isEditing ? 'Edit Order' : 'Create Order'}</Typography>
   </Stack>
 );
 
@@ -563,10 +497,7 @@ interface OrderErrorAlertProps {
   onClose: () => void;
 }
 
-const OrderErrorAlert: React.FC<OrderErrorAlertProps> = ({
-  error,
-  onClose,
-}) => {
+const OrderErrorAlert: React.FC<OrderErrorAlertProps> = ({ error, onClose }) => {
   if (!error) {
     return null;
   }
@@ -585,24 +516,14 @@ interface OrderActionsProps {
   onSubmit: () => void;
 }
 
-const OrderActions: React.FC<OrderActionsProps> = ({
-  isEditing,
-  loading,
-  customerName,
-  onCancel,
-  onSubmit,
-}) => {
+const OrderActions: React.FC<OrderActionsProps> = ({ isEditing, loading, customerName, onCancel, onSubmit }) => {
   const submitLabel = getSubmitLabel(isEditing, loading);
   return (
     <Stack direction="row" spacing={2} justifyContent="flex-end">
       <Button onClick={onCancel} disabled={loading}>
         Cancel
       </Button>
-      <Button
-        variant="contained"
-        onClick={onSubmit}
-        disabled={loading || !customerName.trim()}
-      >
+      <Button variant="contained" onClick={onSubmit} disabled={loading || !customerName.trim()}>
         {submitLabel}
       </Button>
     </Stack>
@@ -611,9 +532,9 @@ const OrderActions: React.FC<OrderActionsProps> = ({
 
 function getSubmitLabel(isEditing: boolean, loading: boolean): string {
   if (loading) {
-    return isEditing ? "Updating..." : "Creating...";
+    return isEditing ? 'Updating...' : 'Creating...';
   }
-  return isEditing ? "Update Order" : "Create Order";
+  return isEditing ? 'Update Order' : 'Create Order';
 }
 
 // ============================================================================
@@ -631,17 +552,9 @@ interface ParsedOrderParams {
   ordersUrl: string;
 }
 
-function parseOrderParams(params: {
-  profileId?: string;
-  campaignId?: string;
-  orderId?: string;
-}): ParsedOrderParams {
-  const profileId = params.profileId
-    ? decodeURIComponent(params.profileId)
-    : "";
-  const campaignId = params.campaignId
-    ? decodeURIComponent(params.campaignId)
-    : "";
+function parseOrderParams(params: { profileId?: string; campaignId?: string; orderId?: string }): ParsedOrderParams {
+  const profileId = params.profileId ? decodeURIComponent(params.profileId) : '';
+  const campaignId = params.campaignId ? decodeURIComponent(params.campaignId) : '';
   const orderId = params.orderId ? decodeURIComponent(params.orderId) : null;
   return {
     profileId,
@@ -662,12 +575,8 @@ function parseOrderParams(params: {
 interface SubmitOrderParams {
   formState: OrderFormState;
   urlParams: ParsedOrderParams;
-  createOrder: (options: {
-    variables: { input: ReturnType<typeof buildCreateOrderInput> };
-  }) => Promise<unknown>;
-  updateOrder: (options: {
-    variables: { input: ReturnType<typeof buildUpdateOrderInput> };
-  }) => Promise<unknown>;
+  createOrder: (options: { variables: { input: ReturnType<typeof buildCreateOrderInput> } }) => Promise<unknown>;
+  updateOrder: (options: { variables: { input: ReturnType<typeof buildUpdateOrderInput> } }) => Promise<unknown>;
   navigate: (path: string) => void;
 }
 
@@ -680,10 +589,7 @@ async function submitOrder({
 }: SubmitOrderParams): Promise<void> {
   formState.setError(null);
 
-  const validation = validateOrderForm(
-    formState.customerName,
-    formState.lineItems,
-  );
+  const validation = validateOrderForm(formState.customerName, formState.lineItems);
   if (!validation.isValid) {
     formState.setError(validation.error!);
     return;
@@ -692,17 +598,11 @@ async function submitOrder({
   formState.setLoading(true);
 
   try {
-    await executeOrderMutation(
-      formState,
-      urlParams,
-      validation.validLineItems,
-      createOrder,
-      updateOrder,
-    );
+    await executeOrderMutation(formState, urlParams, validation.validLineItems, createOrder, updateOrder);
     navigate(urlParams.ordersUrl);
   } catch (err: unknown) {
     const error = err as { message?: string };
-    formState.setError(error.message || "Failed to save order");
+    formState.setError(error.message || 'Failed to save order');
     formState.setLoading(false);
   }
 }
@@ -711,23 +611,14 @@ async function executeOrderMutation(
   formState: OrderFormState,
   urlParams: ParsedOrderParams,
   validLineItems: LineItemInput[],
-  createOrder: SubmitOrderParams["createOrder"],
-  updateOrder: SubmitOrderParams["updateOrder"],
+  createOrder: SubmitOrderParams['createOrder'],
+  updateOrder: SubmitOrderParams['updateOrder'],
 ): Promise<void> {
   if (urlParams.isEditing) {
-    const input = buildUpdateOrderInput(
-      formState,
-      urlParams.dbOrderId,
-      validLineItems,
-    );
+    const input = buildUpdateOrderInput(formState, urlParams.dbOrderId, validLineItems);
     await updateOrder({ variables: { input } });
   } else {
-    const input = buildCreateOrderInput(
-      formState,
-      urlParams.dbProfileId,
-      urlParams.dbCampaignId,
-      validLineItems,
-    );
+    const input = buildCreateOrderInput(formState, urlParams.dbProfileId, urlParams.dbCampaignId, validLineItems);
     await createOrder({ variables: { input } });
   }
 }
@@ -745,15 +636,11 @@ interface UseOrderDataResult {
   orderData: OrderData | undefined;
 }
 
-function extractProducts(
-  campaignData: { getCampaign: CampaignData } | undefined,
-): Product[] {
+function extractProducts(campaignData: { getCampaign: CampaignData } | undefined): Product[] {
   return campaignData?.getCampaign?.catalog?.products ?? [];
 }
 
-function checkWritePermission(
-  profileData: { getProfile: ProfileData } | undefined,
-): boolean {
+function checkWritePermission(profileData: { getProfile: ProfileData } | undefined): boolean {
   const profile = profileData?.getProfile;
   if (!profile) {
     return false;
@@ -762,25 +649,19 @@ function checkWritePermission(
 }
 
 function hasWriteInPermissions(permissions: string[] | undefined): boolean {
-  return permissions?.includes("WRITE") ?? false;
+  return permissions?.includes('WRITE') ?? false;
 }
 
 function useOrderData(urlParams: ParsedOrderParams): UseOrderDataResult {
-  const { data: campaignData } = useQuery<{ getCampaign: CampaignData }>(
-    GET_CAMPAIGN,
-    {
-      variables: { campaignId: urlParams.dbCampaignId },
-      skip: !urlParams.dbCampaignId,
-    },
-  );
+  const { data: campaignData } = useQuery<{ getCampaign: CampaignData }>(GET_CAMPAIGN, {
+    variables: { campaignId: urlParams.dbCampaignId },
+    skip: !urlParams.dbCampaignId,
+  });
 
-  const { data: profileData } = useQuery<{ getProfile: ProfileData }>(
-    GET_PROFILE,
-    {
-      variables: { profileId: urlParams.dbProfileId },
-      skip: !urlParams.dbProfileId,
-    },
-  );
+  const { data: profileData } = useQuery<{ getProfile: ProfileData }>(GET_PROFILE, {
+    variables: { profileId: urlParams.dbProfileId },
+    skip: !urlParams.dbProfileId,
+  });
 
   const { data: orderData, loading: orderLoading } = useQuery<{
     getOrder: OrderData;
@@ -824,9 +705,7 @@ const PermissionError: React.FC<PermissionErrorProps> = ({ hasPermission }) => {
   if (hasPermission) {
     return null;
   }
-  return (
-    <Alert severity="error">You don't have permission to edit orders</Alert>
-  );
+  return <Alert severity="error">You don't have permission to edit orders</Alert>;
 };
 
 // ============================================================================
@@ -842,8 +721,7 @@ export const OrderEditorPage: React.FC = () => {
   const navigate = useNavigate();
   const urlParams = parseOrderParams(params);
   const formState = useOrderForm();
-  const { products, hasWritePermission, orderLoading, orderData } =
-    useOrderData(urlParams);
+  const { products, hasWritePermission, orderLoading, orderData } = useOrderData(urlParams);
 
   const [createOrder] = useMutation(CREATE_ORDER);
   const [updateOrder] = useMutation(UPDATE_ORDER);
@@ -918,10 +796,7 @@ const OrderEditorContent: React.FC<OrderEditorContentProps> = ({
 
     <OrderHeader isEditing={urlParams.isEditing} onCancel={handleCancel} />
 
-    <OrderErrorAlert
-      error={formState.error}
-      onClose={() => formState.setError(null)}
-    />
+    <OrderErrorAlert error={formState.error} onClose={() => formState.setError(null)} />
 
     <CustomerInfoForm formState={formState} loading={formState.loading} />
 

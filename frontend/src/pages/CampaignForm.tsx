@@ -1,7 +1,7 @@
 /**
  * Campaign form component for CreateCampaignPage
  */
-import React from "react";
+import React from 'react';
 import {
   Paper,
   Stack,
@@ -23,77 +23,74 @@ import {
   CircularProgress,
   Typography,
   Snackbar,
-} from "@mui/material";
-import {
-  ExpandMore as ExpandMoreIcon,
-  Info as InfoIcon,
-} from "@mui/icons-material";
+} from '@mui/material';
+import { ExpandMore as ExpandMoreIcon, Info as InfoIcon } from '@mui/icons-material';
 
 const UNIT_TYPES = [
-  { value: "", label: "None" },
-  { value: "Pack", label: "Pack (Cub Scouts)" },
-  { value: "Troop", label: "Troop (Scouts BSA)" },
-  { value: "Crew", label: "Crew (Venturing)" },
-  { value: "Ship", label: "Ship (Sea Scouts)" },
-  { value: "Post", label: "Post (Exploring)" },
-  { value: "Club", label: "Club (Exploring)" },
+  { value: '', label: 'None' },
+  { value: 'Pack', label: 'Pack (Cub Scouts)' },
+  { value: 'Troop', label: 'Troop (Scouts BSA)' },
+  { value: 'Crew', label: 'Crew (Venturing)' },
+  { value: 'Ship', label: 'Ship (Sea Scouts)' },
+  { value: 'Post', label: 'Post (Exploring)' },
+  { value: 'Club', label: 'Club (Exploring)' },
 ];
 
 const US_STATES = [
-  "AL",
-  "AK",
-  "AZ",
-  "AR",
-  "CA",
-  "CO",
-  "CT",
-  "DE",
-  "FL",
-  "GA",
-  "HI",
-  "ID",
-  "IL",
-  "IN",
-  "IA",
-  "KS",
-  "KY",
-  "LA",
-  "ME",
-  "MD",
-  "MA",
-  "MI",
-  "MN",
-  "MS",
-  "MO",
-  "MT",
-  "NE",
-  "NV",
-  "NH",
-  "NJ",
-  "NM",
-  "NY",
-  "NC",
-  "ND",
-  "OH",
-  "OK",
-  "OR",
-  "PA",
-  "RI",
-  "SC",
-  "SD",
-  "TN",
-  "TX",
-  "UT",
-  "VT",
-  "VA",
-  "WA",
-  "WV",
-  "WI",
-  "WY",
-  "DC",
+  'AL',
+  'AK',
+  'AZ',
+  'AR',
+  'CA',
+  'CO',
+  'CT',
+  'DE',
+  'FL',
+  'GA',
+  'HI',
+  'ID',
+  'IL',
+  'IN',
+  'IA',
+  'KS',
+  'KY',
+  'LA',
+  'ME',
+  'MD',
+  'MA',
+  'MI',
+  'MN',
+  'MS',
+  'MO',
+  'MT',
+  'NE',
+  'NV',
+  'NH',
+  'NJ',
+  'NM',
+  'NY',
+  'NC',
+  'ND',
+  'OH',
+  'OK',
+  'OR',
+  'PA',
+  'RI',
+  'SC',
+  'SD',
+  'TN',
+  'TX',
+  'UT',
+  'VT',
+  'VA',
+  'WA',
+  'WV',
+  'WI',
+  'WY',
+  'DC',
 ];
 
-const CAMPAIGN_OPTIONS = ["Fall", "Spring", "Summer", "Winter"];
+const CAMPAIGN_OPTIONS = ['Fall', 'Spring', 'Summer', 'Winter'];
 
 interface FormState {
   profileId: string;
@@ -111,7 +108,7 @@ interface FormState {
   submitting: boolean;
   toastMessage: {
     message: string;
-    severity: "success" | "error";
+    severity: 'success' | 'error';
   } | null;
   setProfileId: (id: string) => void;
   setCampaignName: (name: string) => void;
@@ -128,7 +125,7 @@ interface FormState {
   setToastMessage: (
     message: {
       message: string;
-      severity: "success" | "error";
+      severity: 'success' | 'error';
     } | null,
   ) => void;
 }
@@ -189,11 +186,7 @@ interface ProfileSelectionProps {
   profilesLoading: boolean;
 }
 
-const ProfileSelection: React.FC<ProfileSelectionProps> = ({
-  formState,
-  profiles,
-  profilesLoading,
-}) => (
+const ProfileSelection: React.FC<ProfileSelectionProps> = ({ formState, profiles, profilesLoading }) => (
   <FormControl fullWidth disabled={formState.submitting}>
     <InputLabel>Select Profile *</InputLabel>
     <Select
@@ -207,13 +200,11 @@ const ProfileSelection: React.FC<ProfileSelectionProps> = ({
           Loading profiles...
         </MenuItem>
       )}
-      {profiles.length === 0 && !profilesLoading && (
-        <MenuItem disabled>No profiles available</MenuItem>
-      )}
+      {profiles.length === 0 && !profilesLoading && <MenuItem disabled>No profiles available</MenuItem>}
       {profiles.map((profile) => (
         <MenuItem key={profile.profileId} value={profile.profileId}>
           {profile.sellerName}
-          {profile.isOwner ? " (Owner)" : " (Shared)"}
+          {profile.isOwner ? ' (Owner)' : ' (Shared)'}
         </MenuItem>
       ))}
     </Select>
@@ -225,9 +216,7 @@ interface SharedCampaignFieldsProps {
   sharedCampaign: SharedCampaign;
 }
 
-const SharedCampaignFields: React.FC<SharedCampaignFieldsProps> = ({
-  sharedCampaign,
-}) => (
+const SharedCampaignFields: React.FC<SharedCampaignFieldsProps> = ({ sharedCampaign }) => (
   <>
     <TextField
       fullWidth
@@ -237,41 +226,16 @@ const SharedCampaignFields: React.FC<SharedCampaignFieldsProps> = ({
       helperText="Set by campaign creator"
     />
     <Stack direction="row" spacing={2}>
-      <TextField
-        fullWidth
-        label="Campaign"
-        value={sharedCampaign.campaignName}
-        disabled
-      />
-      <TextField
-        fullWidth
-        label="Year"
-        value={sharedCampaign.campaignYear}
-        disabled
-      />
+      <TextField fullWidth label="Campaign" value={sharedCampaign.campaignName} disabled />
+      <TextField fullWidth label="Year" value={sharedCampaign.campaignYear} disabled />
     </Stack>
     <Stack direction="row" spacing={2}>
-      <TextField
-        fullWidth
-        label="Unit Type"
-        value={sharedCampaign.unitType}
-        disabled
-      />
-      <TextField
-        fullWidth
-        label="Unit Number"
-        value={sharedCampaign.unitNumber}
-        disabled
-      />
+      <TextField fullWidth label="Unit Type" value={sharedCampaign.unitType} disabled />
+      <TextField fullWidth label="Unit Number" value={sharedCampaign.unitNumber} disabled />
     </Stack>
     <Stack direction="row" spacing={2}>
       <TextField fullWidth label="City" value={sharedCampaign.city} disabled />
-      <TextField
-        fullWidth
-        label="State"
-        value={sharedCampaign.state}
-        disabled
-      />
+      <TextField fullWidth label="State" value={sharedCampaign.state} disabled />
     </Stack>
   </>
 );
@@ -281,9 +245,7 @@ interface CampaignNameYearProps {
   formState: FormState;
 }
 
-const CampaignNameYearFields: React.FC<CampaignNameYearProps> = ({
-  formState,
-}) => (
+const CampaignNameYearFields: React.FC<CampaignNameYearProps> = ({ formState }) => (
   <Stack direction="row" spacing={2}>
     <FormControl fullWidth disabled={formState.submitting}>
       <InputLabel>Campaign Name *</InputLabel>
@@ -323,16 +285,13 @@ interface CatalogMenuItemProps {
 const CatalogMenuItem: React.FC<CatalogMenuItemProps> = ({ catalog }) => (
   <MenuItem value={catalog.catalogId}>
     {catalog.catalogName}
-    {catalog.catalogType === "ADMIN_MANAGED" && " (Official)"}
+    {catalog.catalogType === 'ADMIN_MANAGED' && ' (Official)'}
   </MenuItem>
 );
 
 // Catalog group header
 const CatalogGroupHeader: React.FC<{ label: string }> = ({ label }) => (
-  <MenuItem
-    disabled
-    sx={{ fontWeight: 600, backgroundColor: "#f5f5f5", opacity: 1 }}
-  >
+  <MenuItem disabled sx={{ fontWeight: 600, backgroundColor: '#f5f5f5', opacity: 1 }}>
     {label}
   </MenuItem>
 );
@@ -346,9 +305,7 @@ const CatalogLoadingItem: React.FC = () => (
 );
 
 // Empty state for catalog dropdown
-const CatalogEmptyItem: React.FC = () => (
-  <MenuItem disabled>No catalogs available</MenuItem>
-);
+const CatalogEmptyItem: React.FC = () => <MenuItem disabled>No catalogs available</MenuItem>;
 
 // Catalog group component
 interface CatalogGroupProps {
@@ -357,11 +314,7 @@ interface CatalogGroupProps {
   headerLabel: string;
 }
 
-const CatalogGroup: React.FC<CatalogGroupProps> = ({
-  catalogs,
-  headerKey,
-  headerLabel,
-}) => {
+const CatalogGroup: React.FC<CatalogGroupProps> = ({ catalogs, headerKey, headerLabel }) => {
   if (catalogs.length === 0) return null;
   return (
     <>
@@ -382,11 +335,7 @@ interface CatalogSelectionProps {
 }
 
 // Check if there are no catalogs available
-const hasNoCatalogs = (
-  loading: boolean,
-  myCatalogs: Catalog[],
-  publicCatalogs: Catalog[],
-): boolean => {
+const hasNoCatalogs = (loading: boolean, myCatalogs: Catalog[], publicCatalogs: Catalog[]): boolean => {
   if (loading) return false;
   return myCatalogs.length === 0 && publicCatalogs.length === 0;
 };
@@ -402,11 +351,7 @@ const CatalogSelection: React.FC<CatalogSelectionProps> = ({
   filteredPublicCatalogs,
   catalogsLoading,
 }) => {
-  const noCatalogs = hasNoCatalogs(
-    catalogsLoading,
-    filteredMyCatalogs,
-    filteredPublicCatalogs,
-  );
+  const noCatalogs = hasNoCatalogs(catalogsLoading, filteredMyCatalogs, filteredPublicCatalogs);
   const disabled = isCatalogDisabled(formState.submitting, catalogsLoading);
 
   return (
@@ -426,16 +371,8 @@ const CatalogSelection: React.FC<CatalogSelectionProps> = ({
       >
         {catalogsLoading && <CatalogLoadingItem />}
         {noCatalogs && <CatalogEmptyItem />}
-        <CatalogGroup
-          catalogs={filteredMyCatalogs}
-          headerKey="my-header"
-          headerLabel="My Catalogs"
-        />
-        <CatalogGroup
-          catalogs={filteredPublicCatalogs}
-          headerKey="public-header"
-          headerLabel="Public Catalogs"
-        />
+        <CatalogGroup catalogs={filteredMyCatalogs} headerKey="my-header" headerLabel="My Catalogs" />
+        <CatalogGroup catalogs={filteredPublicCatalogs} headerKey="public-header" headerLabel="Public Catalogs" />
       </Select>
     </FormControl>
   );
@@ -447,28 +384,22 @@ interface UnitInfoAccordionProps {
 }
 
 // Helper to check if unit dependent fields are disabled
-const isUnitFieldDisabled = (
-  submitting: boolean,
-  unitType: string,
-): boolean => {
+const isUnitFieldDisabled = (submitting: boolean, unitType: string): boolean => {
   return submitting || !unitType;
 };
 
 // Helper to get unit number helper text
 const getUnitNumberHelperText = (unitType: string): string => {
-  return unitType ? "Required" : "Select unit type first";
+  return unitType ? 'Required' : 'Select unit type first';
 };
 
 // Helper to get city helper text
 const getCityHelperText = (unitType: string): string => {
-  return unitType ? "Required for unit identification" : "";
+  return unitType ? 'Required for unit identification' : '';
 };
 
 // Unit summary display
-const UnitSummary: React.FC<{ unitType: string; unitNumber: string }> = ({
-  unitType,
-  unitNumber,
-}) => {
+const UnitSummary: React.FC<{ unitType: string; unitNumber: string }> = ({ unitType, unitNumber }) => {
   if (!unitType) return null;
   return (
     <Typography component="span" color="primary">
@@ -478,10 +409,7 @@ const UnitSummary: React.FC<{ unitType: string; unitNumber: string }> = ({
 };
 
 const UnitInfoAccordion: React.FC<UnitInfoAccordionProps> = ({ formState }) => {
-  const fieldDisabled = isUnitFieldDisabled(
-    formState.submitting,
-    formState.unitType,
-  );
+  const fieldDisabled = isUnitFieldDisabled(formState.submitting, formState.unitType);
 
   return (
     <Accordion
@@ -490,18 +418,14 @@ const UnitInfoAccordion: React.FC<UnitInfoAccordionProps> = ({ formState }) => {
     >
       <AccordionSummary expandIcon={<ExpandMoreIcon />}>
         <Typography>
-          Unit Information (Optional){" "}
-          <UnitSummary
-            unitType={formState.unitType}
-            unitNumber={formState.unitNumber}
-          />
+          Unit Information (Optional) <UnitSummary unitType={formState.unitType} unitNumber={formState.unitNumber} />
         </Typography>
       </AccordionSummary>
       <AccordionDetails>
         <Stack spacing={2}>
           <Alert severity="info" icon={<InfoIcon />}>
-            Adding unit information enables participation in unit reports and
-            allows coordination with other unit members.
+            Adding unit information enables participation in unit reports and allows coordination with other unit
+            members.
           </Alert>
           <Stack direction="row" spacing={2}>
             <FormControl fullWidth disabled={formState.submitting}>
@@ -540,11 +464,7 @@ const UnitInfoAccordion: React.FC<UnitInfoAccordionProps> = ({ formState }) => {
             />
             <FormControl fullWidth disabled={fieldDisabled}>
               <InputLabel>State</InputLabel>
-              <Select
-                value={formState.state}
-                onChange={(e) => formState.setState(e.target.value)}
-                label="State"
-              >
+              <Select value={formState.state} onChange={(e) => formState.setState(e.target.value)} label="State">
                 <MenuItem value="">Select State</MenuItem>
                 {US_STATES.map((s) => (
                   <MenuItem key={s} value={s}>
@@ -566,12 +486,9 @@ interface DateRangeFieldsProps {
   isSharedCampaignMode: boolean;
 }
 
-const DateRangeFields: React.FC<DateRangeFieldsProps> = ({
-  formState,
-  isSharedCampaignMode,
-}) => {
+const DateRangeFields: React.FC<DateRangeFieldsProps> = ({ formState, isSharedCampaignMode }) => {
   const disabled = formState.submitting || isSharedCampaignMode;
-  const helperText = isSharedCampaignMode ? "Set by campaign creator" : "";
+  const helperText = isSharedCampaignMode ? 'Set by campaign creator' : '';
 
   return (
     <Stack direction="row" spacing={2}>
@@ -605,11 +522,8 @@ interface ShareWithCreatorProps {
   sharedCampaign: SharedCampaign;
 }
 
-const ShareWithCreatorSection: React.FC<ShareWithCreatorProps> = ({
-  formState,
-  sharedCampaign,
-}) => (
-  <Box sx={{ bgcolor: "warning.light", p: 2, borderRadius: 1 }}>
+const ShareWithCreatorSection: React.FC<ShareWithCreatorProps> = ({ formState, sharedCampaign }) => (
+  <Box sx={{ bgcolor: 'warning.light', p: 2, borderRadius: 1 }}>
     <FormControlLabel
       control={
         <Checkbox
@@ -622,9 +536,8 @@ const ShareWithCreatorSection: React.FC<ShareWithCreatorProps> = ({
     />
     <Alert severity="warning" sx={{ mt: 1 }}>
       <AlertTitle>Important</AlertTitle>
-      Sharing gives {sharedCampaign.createdByName} read access to ALL current
-      and future campaigns for this profile. You can revoke this access at any
-      time from your profile settings.
+      Sharing gives {sharedCampaign.createdByName} read access to ALL current and future campaigns for this profile. You
+      can revoke this access at any time from your profile settings.
     </Alert>
   </Box>
 );
@@ -637,26 +550,13 @@ interface FormActionsProps {
   onCancel: () => void;
 }
 
-const FormActions: React.FC<FormActionsProps> = ({
-  formState,
-  isFormValid,
-  onSubmit,
-  onCancel,
-}) => (
+const FormActions: React.FC<FormActionsProps> = ({ formState, isFormValid, onSubmit, onCancel }) => (
   <Stack direction="row" spacing={2} justifyContent="flex-end">
-    <Button
-      variant="outlined"
-      onClick={onCancel}
-      disabled={formState.submitting}
-    >
+    <Button variant="outlined" onClick={onCancel} disabled={formState.submitting}>
       Cancel
     </Button>
-    <Button
-      variant="contained"
-      onClick={onSubmit}
-      disabled={!isFormValid || formState.submitting}
-    >
-      {formState.submitting ? "Creating..." : "Create Campaign"}
+    <Button variant="contained" onClick={onSubmit} disabled={!isFormValid || formState.submitting}>
+      {formState.submitting ? 'Creating...' : 'Create Campaign'}
     </Button>
   </Stack>
 );
@@ -667,15 +567,11 @@ interface ToastNotificationProps {
 }
 
 const ToastNotification: React.FC<ToastNotificationProps> = ({ formState }) => (
-  <Snackbar
-    open={!!formState.toastMessage}
-    autoHideDuration={6000}
-    onClose={() => formState.setToastMessage(null)}
-  >
+  <Snackbar open={!!formState.toastMessage} autoHideDuration={6000} onClose={() => formState.setToastMessage(null)}>
     <Alert
       onClose={() => formState.setToastMessage(null)}
       severity={formState.toastMessage?.severity}
-      sx={{ width: "100%" }}
+      sx={{ width: '100%' }}
     >
       {formState.toastMessage?.message}
     </Alert>
@@ -688,18 +584,12 @@ interface SharedCampaignModeContentProps {
   formState: FormState;
 }
 
-const SharedCampaignModeContent: React.FC<SharedCampaignModeContentProps> = ({
-  sharedCampaign,
-  formState,
-}) => {
+const SharedCampaignModeContent: React.FC<SharedCampaignModeContentProps> = ({ sharedCampaign, formState }) => {
   if (!sharedCampaign) return null;
   return (
     <>
       <SharedCampaignFields sharedCampaign={sharedCampaign} />
-      <ShareWithCreatorSection
-        formState={formState}
-        sharedCampaign={sharedCampaign}
-      />
+      <ShareWithCreatorSection formState={formState} sharedCampaign={sharedCampaign} />
     </>
   );
 };
@@ -746,19 +636,12 @@ export const CampaignForm: React.FC<CampaignFormProps> = ({
   <>
     <Paper sx={{ p: 3 }}>
       <Stack spacing={3}>
-        <ProfileSelection
-          formState={formState}
-          profiles={profiles}
-          profilesLoading={profilesLoading}
-        />
+        <ProfileSelection formState={formState} profiles={profiles} profilesLoading={profilesLoading} />
 
         <Divider />
 
         {isSharedCampaignMode ? (
-          <SharedCampaignModeContent
-            sharedCampaign={sharedCampaign}
-            formState={formState}
-          />
+          <SharedCampaignModeContent sharedCampaign={sharedCampaign} formState={formState} />
         ) : (
           <ManualModeContent
             formState={formState}
@@ -768,19 +651,11 @@ export const CampaignForm: React.FC<CampaignFormProps> = ({
           />
         )}
 
-        <DateRangeFields
-          formState={formState}
-          isSharedCampaignMode={isSharedCampaignMode}
-        />
+        <DateRangeFields formState={formState} isSharedCampaignMode={isSharedCampaignMode} />
 
         <Divider />
 
-        <FormActions
-          formState={formState}
-          isFormValid={isFormValid}
-          onSubmit={onSubmit}
-          onCancel={onCancel}
-        />
+        <FormActions formState={formState} isFormValid={isFormValid} onSubmit={onSubmit} onCancel={onCancel} />
       </Stack>
     </Paper>
 

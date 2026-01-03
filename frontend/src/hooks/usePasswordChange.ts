@@ -1,8 +1,8 @@
 /**
  * Custom hook for password change functionality
  */
-import { useState } from "react";
-import { updatePassword } from "aws-amplify/auth";
+import { useState } from 'react';
+import { updatePassword } from 'aws-amplify/auth';
 
 export interface UsePasswordChangeReturn {
   currentPassword: string;
@@ -21,16 +21,16 @@ export interface UsePasswordChangeReturn {
 
 const getErrorMessage = (err: unknown, fallback: string): string => {
   if (err instanceof Error) return err.message;
-  if (typeof err === "object" && err !== null && "message" in err) {
+  if (typeof err === 'object' && err !== null && 'message' in err) {
     return String((err as { message: unknown }).message);
   }
   return fallback;
 };
 
 export const usePasswordChange = (): UsePasswordChangeReturn => {
-  const [currentPassword, setCurrentPassword] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [passwordError, setPasswordError] = useState<string | null>(null);
   const [passwordSuccess, setPasswordSuccess] = useState(false);
   const [passwordLoading, setPasswordLoading] = useState(false);
@@ -41,12 +41,12 @@ export const usePasswordChange = (): UsePasswordChangeReturn => {
     setPasswordSuccess(false);
 
     if (newPassword !== confirmPassword) {
-      setPasswordError("New passwords do not match");
+      setPasswordError('New passwords do not match');
       return;
     }
 
     if (newPassword.length < 8) {
-      setPasswordError("Password must be at least 8 characters");
+      setPasswordError('Password must be at least 8 characters');
       return;
     }
 
@@ -55,17 +55,12 @@ export const usePasswordChange = (): UsePasswordChangeReturn => {
     try {
       await updatePassword({ oldPassword: currentPassword, newPassword });
       setPasswordSuccess(true);
-      setCurrentPassword("");
-      setNewPassword("");
-      setConfirmPassword("");
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
     } catch (err: unknown) {
-      console.error("Password change failed:", err);
-      setPasswordError(
-        getErrorMessage(
-          err,
-          "Failed to change password. Please check your current password.",
-        ),
-      );
+      console.error('Password change failed:', err);
+      setPasswordError(getErrorMessage(err, 'Failed to change password. Please check your current password.'));
     } finally {
       setPasswordLoading(false);
     }

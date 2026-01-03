@@ -1,10 +1,10 @@
 /**
  * Custom hook for managing shared campaign discovery
  */
-import { useCallback, useRef } from "react";
-import { useLazyQuery } from "@apollo/client/react";
-import { FIND_SHARED_CAMPAIGNS } from "../lib/graphql";
-import { SHARED_DISCOVERY_DEBOUNCE_MS } from "../lib/sharedCampaignDiscovery";
+import { useCallback, useRef } from 'react';
+import { useLazyQuery } from '@apollo/client/react';
+import { FIND_SHARED_CAMPAIGNS } from '../lib/graphql';
+import { SHARED_DISCOVERY_DEBOUNCE_MS } from '../lib/sharedCampaignDiscovery';
 
 interface SharedCampaign {
   sharedCampaignCode: string;
@@ -38,14 +38,9 @@ type DiscoveryParams = {
 };
 
 const hasAllParams = (params: DiscoveryParams) =>
-  [
-    params.unitType,
-    params.unitNumber,
-    params.city,
-    params.state,
-    params.campaignName,
-    params.campaignYear,
-  ].every(Boolean);
+  [params.unitType, params.unitNumber, params.city, params.state, params.campaignName, params.campaignYear].every(
+    Boolean,
+  );
 
 const toVariables = (params: DiscoveryParams) => ({
   unitType: params.unitType,
@@ -57,15 +52,13 @@ const toVariables = (params: DiscoveryParams) => ({
 });
 
 export const useSharedCampaignDiscovery = () => {
-  const [findSharedCampaigns, { data: discoveredSharedCampaignsData }] =
-    useLazyQuery<{
-      findSharedCampaigns: SharedCampaign[];
-    }>(FIND_SHARED_CAMPAIGNS);
+  const [findSharedCampaigns, { data: discoveredSharedCampaignsData }] = useLazyQuery<{
+    findSharedCampaigns: SharedCampaign[];
+  }>(FIND_SHARED_CAMPAIGNS);
 
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  const discoveredSharedCampaigns =
-    discoveredSharedCampaignsData?.findSharedCampaigns || [];
+  const discoveredSharedCampaigns = discoveredSharedCampaignsData?.findSharedCampaigns || [];
 
   const debouncedFindSharedCampaigns = useCallback(
     (params: DiscoveryParams) => {

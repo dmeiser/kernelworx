@@ -1,7 +1,7 @@
 /**
  * Custom hook for profile edit dialog functionality
  */
-import { useState } from "react";
+import { useState } from 'react';
 
 interface Account {
   givenName?: string;
@@ -13,23 +13,23 @@ interface Account {
 }
 
 // Get string field with default
-const getField = (value: string | undefined): string => value ?? "";
+const getField = (value: string | undefined): string => value ?? '';
 
 // Get unit number as string with default
 const getUnitNumber = (value: string | undefined): string => {
-  return value?.toString() ?? "";
+  return value?.toString() ?? '';
 };
 
 // Extract field values from account with defaults
 const extractAccountFields = (account: Account | undefined) => {
   if (!account) {
     return {
-      givenName: "",
-      familyName: "",
-      city: "",
-      state: "",
-      unitType: "",
-      unitNumber: "",
+      givenName: '',
+      familyName: '',
+      city: '',
+      state: '',
+      unitType: '',
+      unitNumber: '',
     };
   }
   return {
@@ -66,12 +66,12 @@ export interface UseProfileEditReturn {
 
 export const useProfileEdit = (): UseProfileEditReturn => {
   const [editDialogOpen, setEditDialogOpen] = useState(false);
-  const [givenName, setGivenName] = useState("");
-  const [familyName, setFamilyName] = useState("");
-  const [city, setCity] = useState("");
-  const [state, setState] = useState("");
-  const [unitType, setUnitType] = useState("");
-  const [unitNumber, setUnitNumber] = useState("");
+  const [givenName, setGivenName] = useState('');
+  const [familyName, setFamilyName] = useState('');
+  const [city, setCity] = useState('');
+  const [state, setState] = useState('');
+  const [unitType, setUnitType] = useState('');
+  const [unitNumber, setUnitNumber] = useState('');
   const [updateSuccess, setUpdateSuccess] = useState(false);
   const [updateError, setUpdateError] = useState<string | null>(null);
 

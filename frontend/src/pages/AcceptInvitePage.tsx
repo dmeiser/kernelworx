@@ -2,34 +2,21 @@
  * AcceptInvitePage - Accept a profile invite code
  */
 
-import React, { useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { useMutation } from "@apollo/client/react";
-import {
-  Box,
-  Typography,
-  TextField,
-  Button,
-  Alert,
-  CircularProgress,
-  Card,
-  CardContent,
-  Stack,
-} from "@mui/material";
-import { Check as CheckIcon } from "@mui/icons-material";
-import { REDEEM_PROFILE_INVITE } from "../lib/graphql";
+import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useMutation } from '@apollo/client/react';
+import { Box, Typography, TextField, Button, Alert, CircularProgress, Card, CardContent, Stack } from '@mui/material';
+import { Check as CheckIcon } from '@mui/icons-material';
+import { REDEEM_PROFILE_INVITE } from '../lib/graphql';
 
 // Success message builder
 const buildSuccessMessage = (permissions: string[]): string => {
-  return `Successfully accepted! You now have ${permissions.join(" and ")} access.`;
+  return `Successfully accepted! You now have ${permissions.join(' and ')} access.`;
 };
 
 // Error message extractor
 const getRedeemErrorMessage = (err: Error): string => {
-  return (
-    err.message ||
-    "Failed to accept invite. Please check the code and try again."
-  );
+  return err.message || 'Failed to accept invite. Please check the code and try again.';
 };
 
 // Form validation helper
@@ -42,31 +29,25 @@ const isInputDisabled = (loading: boolean, hasSuccess: boolean): boolean => {
   return loading || hasSuccess;
 };
 
-const isSubmitDisabled = (
-  loading: boolean,
-  inviteCode: string,
-  hasSuccess: boolean,
-): boolean => {
+const isSubmitDisabled = (loading: boolean, inviteCode: string, hasSuccess: boolean): boolean => {
   return loading || isCodeEmpty(inviteCode) || hasSuccess;
 };
 
 const getSubmitButtonText = (loading: boolean): string => {
-  return loading ? "Accepting..." : "Accept Invite";
+  return loading ? 'Accepting...' : 'Accept Invite';
 };
 
 export const AcceptInvitePage: React.FC = () => {
   const navigate = useNavigate();
-  const [inviteCode, setInviteCode] = useState("");
-  const [successMessage, setSuccessMessage] = useState("");
-  const [error, setError] = useState("");
+  const [inviteCode, setInviteCode] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
+  const [error, setError] = useState('');
 
-  const handleSuccess = (data: {
-    redeemProfileInvite: { permissions: string[] };
-  }) => {
+  const handleSuccess = (data: { redeemProfileInvite: { permissions: string[] } }) => {
     const share = data.redeemProfileInvite;
     setSuccessMessage(buildSuccessMessage(share.permissions));
-    setInviteCode("");
-    setTimeout(() => navigate("/scouts"), 2000);
+    setInviteCode('');
+    setTimeout(() => navigate('/scouts'), 2000);
   };
 
   const handleError = (err: Error) => {
@@ -82,11 +63,11 @@ export const AcceptInvitePage: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError("");
-    setSuccessMessage("");
+    setError('');
+    setSuccessMessage('');
 
     if (isCodeEmpty(inviteCode)) {
-      setError("Please enter an invite code");
+      setError('Please enter an invite code');
       return;
     }
 
@@ -106,7 +87,7 @@ export const AcceptInvitePage: React.FC = () => {
   const buttonIcon = loading ? <CircularProgress size={20} /> : undefined;
 
   return (
-    <Box sx={{ maxWidth: 500, mx: "auto", py: 4 }}>
+    <Box sx={{ maxWidth: 500, mx: 'auto', py: 4 }}>
       <Card elevation={2}>
         <CardContent>
           <Stack spacing={3}>
@@ -115,8 +96,7 @@ export const AcceptInvitePage: React.FC = () => {
                 Accept Scout Profile Invite
               </Typography>
               <Typography variant="body2" color="text.secondary">
-                Enter the invite code you received to gain access to a Scout
-                Profile
+                Enter the invite code you received to gain access to a Scout Profile
               </Typography>
             </Box>
 
@@ -125,8 +105,8 @@ export const AcceptInvitePage: React.FC = () => {
                 severity="success"
                 icon={<CheckIcon />}
                 sx={{
-                  "& .MuiAlert-message": {
-                    width: "100%",
+                  '& .MuiAlert-message': {
+                    width: '100%',
                   },
                 }}
               >
@@ -165,14 +145,13 @@ export const AcceptInvitePage: React.FC = () => {
             <Box
               sx={{
                 p: 2,
-                bgcolor: "action.hover",
+                bgcolor: 'action.hover',
                 borderRadius: 1,
               }}
             >
               <Typography variant="caption" color="text.secondary">
-                <strong>Don't have an invite code?</strong> Ask the profile
-                owner to send you one, or ask them to share the profile directly
-                with your email address.
+                <strong>Don't have an invite code?</strong> Ask the profile owner to send you one, or ask them to share
+                the profile directly with your email address.
               </Typography>
             </Box>
           </Stack>

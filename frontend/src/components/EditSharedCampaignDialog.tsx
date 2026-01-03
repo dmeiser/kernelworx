@@ -5,7 +5,7 @@
  * Cannot modify: catalogId, campaignName, campaignYear, unit info (locked after creation)
  */
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect } from 'react';
 import {
   Dialog,
   DialogTitle,
@@ -21,7 +21,7 @@ import {
   Box,
   Chip,
   CircularProgress,
-} from "@mui/material";
+} from '@mui/material';
 
 interface SharedCampaign {
   sharedCampaignCode: string;
@@ -63,10 +63,7 @@ interface EditSharedCampaignDialogProps {
 const MAX_CREATOR_MESSAGE_LENGTH = 300;
 const BASE_URL = window.location.origin;
 
-const DetailRow: React.FC<{ label: string; children: React.ReactNode }> = ({
-  label,
-  children,
-}) => (
+const DetailRow: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
   <Box display="flex" alignItems="center" gap={1}>
     <Typography variant="body2" fontWeight="medium">
       {label}:
@@ -75,10 +72,8 @@ const DetailRow: React.FC<{ label: string; children: React.ReactNode }> = ({
   </Box>
 );
 
-const ReadOnlyInfo: React.FC<{ sharedCampaign: SharedCampaign }> = ({
-  sharedCampaign,
-}) => (
-  <Box sx={{ bgcolor: "grey.50", p: 2, borderRadius: 1 }}>
+const ReadOnlyInfo: React.FC<{ sharedCampaign: SharedCampaign }> = ({ sharedCampaign }) => (
+  <Box sx={{ bgcolor: 'grey.50', p: 2, borderRadius: 1 }}>
     <Typography variant="subtitle2" color="text.secondary" gutterBottom>
       Campaign Details (Read-Only)
     </Typography>
@@ -89,18 +84,12 @@ const ReadOnlyInfo: React.FC<{ sharedCampaign: SharedCampaign }> = ({
         </Typography>
       </DetailRow>
       <DetailRow label="Link">
-        <Typography
-          variant="body2"
-          fontFamily="monospace"
-          sx={{ wordBreak: "break-all" }}
-        >
+        <Typography variant="body2" fontFamily="monospace" sx={{ wordBreak: 'break-all' }}>
           {`${BASE_URL}/c/${sharedCampaign.sharedCampaignCode}`}
         </Typography>
       </DetailRow>
       <DetailRow label="Catalog">
-        <Typography variant="body2">
-          {sharedCampaign.catalog?.catalogName || "Unknown Catalog"}
-        </Typography>
+        <Typography variant="body2">{sharedCampaign.catalog?.catalogName || 'Unknown Catalog'}</Typography>
       </DetailRow>
       <DetailRow label="Campaign">
         <Typography variant="body2">
@@ -109,14 +98,13 @@ const ReadOnlyInfo: React.FC<{ sharedCampaign: SharedCampaign }> = ({
       </DetailRow>
       <DetailRow label="Unit">
         <Typography variant="body2">
-          {sharedCampaign.unitType} {sharedCampaign.unitNumber},{" "}
-          {sharedCampaign.city}, {sharedCampaign.state}
+          {sharedCampaign.unitType} {sharedCampaign.unitNumber}, {sharedCampaign.city}, {sharedCampaign.state}
         </Typography>
       </DetailRow>
       <DetailRow label="Status">
         <Chip
-          label={sharedCampaign.isActive ? "Active" : "Inactive"}
-          color={sharedCampaign.isActive ? "success" : "default"}
+          label={sharedCampaign.isActive ? 'Active' : 'Inactive'}
+          color={sharedCampaign.isActive ? 'success' : 'default'}
           size="small"
         />
       </DetailRow>
@@ -147,18 +135,12 @@ const EditableFields: React.FC<EditableFieldsProps> = ({
     </Typography>
 
     <FormControlLabel
-      control={
-        <Switch
-          checked={isActive}
-          onChange={(e) => setIsActive(e.target.checked)}
-        />
-      }
+      control={<Switch checked={isActive} onChange={(e) => setIsActive(e.target.checked)} />}
       label={
         <Stack>
           <Typography>Active</Typography>
           <Typography variant="caption" color="text.secondary">
-            When inactive, the link will no longer work for new campaign
-            creation
+            When inactive, the link will no longer work for new campaign creation
           </Typography>
         </Stack>
       }
@@ -198,31 +180,22 @@ const checkHasChanges = (
   isActive: boolean,
   sharedCampaign: SharedCampaign,
 ): boolean =>
-  description !== (sharedCampaign.description || "") ||
-  creatorMessage !== (sharedCampaign.creatorMessage || "") ||
+  description !== (sharedCampaign.description || '') ||
+  creatorMessage !== (sharedCampaign.creatorMessage || '') ||
   isActive !== sharedCampaign.isActive;
 
 const useEditFormState = (sharedCampaign: SharedCampaign) => {
-  const [description, setDescription] = useState(
-    sharedCampaign.description || "",
-  );
-  const [creatorMessage, setCreatorMessage] = useState(
-    sharedCampaign.creatorMessage || "",
-  );
+  const [description, setDescription] = useState(sharedCampaign.description || '');
+  const [creatorMessage, setCreatorMessage] = useState(sharedCampaign.creatorMessage || '');
   const [isActive, setIsActive] = useState(sharedCampaign.isActive);
 
   useEffect(() => {
-    setDescription(sharedCampaign.description || "");
-    setCreatorMessage(sharedCampaign.creatorMessage || "");
+    setDescription(sharedCampaign.description || '');
+    setCreatorMessage(sharedCampaign.creatorMessage || '');
     setIsActive(sharedCampaign.isActive);
   }, [sharedCampaign]);
 
-  const hasChanges = checkHasChanges(
-    description,
-    creatorMessage,
-    isActive,
-    sharedCampaign,
-  );
+  const hasChanges = checkHasChanges(description, creatorMessage, isActive, sharedCampaign);
 
   return {
     description,
@@ -240,7 +213,7 @@ const useSubmitHandler = (
   creatorMessage: string,
   description: string,
   isActive: boolean,
-  onSave: EditSharedCampaignDialogProps["onSave"],
+  onSave: EditSharedCampaignDialogProps['onSave'],
 ) => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -266,11 +239,7 @@ const useSubmitHandler = (
     try {
       await executeSave();
     } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Failed to update campaign sharedCampaign",
-      );
+      setError(err instanceof Error ? err.message : 'Failed to update campaign sharedCampaign');
     } finally {
       setIsSubmitting(false);
     }
@@ -287,20 +256,12 @@ interface DialogViewProps {
   submitState: ReturnType<typeof useSubmitHandler>;
 }
 
-const DialogView: React.FC<DialogViewProps> = ({
-  open,
-  onClose,
-  sharedCampaign,
-  formState,
-  submitState,
-}) => (
+const DialogView: React.FC<DialogViewProps> = ({ open, onClose, sharedCampaign, formState, submitState }) => (
   <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
     <DialogTitle>Edit Campaign SharedCampaign</DialogTitle>
     <DialogContent>
       <Stack spacing={3} sx={{ mt: 1 }}>
-        {submitState.error && (
-          <Alert severity="error">{submitState.error}</Alert>
-        )}
+        {submitState.error && <Alert severity="error">{submitState.error}</Alert>}
         <ReadOnlyInfo sharedCampaign={sharedCampaign} />
         <EditableFields
           isActive={formState.isActive}
@@ -320,19 +281,20 @@ const DialogView: React.FC<DialogViewProps> = ({
         onClick={submitState.handleSubmit}
         variant="contained"
         disabled={!formState.hasChanges || submitState.isSubmitting}
-        startIcon={
-          submitState.isSubmitting ? <CircularProgress size={16} /> : undefined
-        }
+        startIcon={submitState.isSubmitting ? <CircularProgress size={16} /> : undefined}
       >
-        {submitState.isSubmitting ? "Saving..." : "Save Changes"}
+        {submitState.isSubmitting ? 'Saving...' : 'Save Changes'}
       </Button>
     </DialogActions>
   </Dialog>
 );
 
-export const EditSharedCampaignDialog: React.FC<
-  EditSharedCampaignDialogProps
-> = ({ open, sharedCampaign, onClose, onSave }) => {
+export const EditSharedCampaignDialog: React.FC<EditSharedCampaignDialogProps> = ({
+  open,
+  sharedCampaign,
+  onClose,
+  onSave,
+}) => {
   const formState = useEditFormState(sharedCampaign);
   const submitState = useSubmitHandler(
     sharedCampaign,

@@ -11,10 +11,10 @@ import {
   ApolloLink,
   type DefaultContext,
   type Operation,
-} from "@apollo/client";
-import { setContext } from "@apollo/client/link/context";
-import { ErrorLink, type ErrorResponse } from "@apollo/client/link/error";
-import { fetchAuthSession } from "aws-amplify/auth";
+} from '@apollo/client';
+import { setContext } from '@apollo/client/link/context';
+import { ErrorLink, type ErrorResponse } from '@apollo/client/link/error';
+import { fetchAuthSession } from 'aws-amplify/auth';
 
 /**
  * HTTP link to AppSync endpoint
@@ -32,17 +32,14 @@ const httpLink = createHttpLink({
  */
 type AuthHeadersContext = DefaultContext & { headers?: Record<string, string> };
 
-export const getAuthContext = async (
-  _operation: Operation,
-  prevContext: AuthHeadersContext,
-) => {
+export const getAuthContext = async (_operation: Operation, prevContext: AuthHeadersContext) => {
   const session = await fetchAuthSession();
   const token = session.tokens?.idToken?.toString();
 
   if (!token) {
     // Don't send the request without a valid token
     // This prevents race conditions where queries fire before auth is ready
-    throw new Error("No valid auth token available");
+    throw new Error('No valid auth token available');
   }
 
   return {
@@ -58,19 +55,13 @@ const authLink = setContext(getAuthContext);
 /**
  * Error handler used by the ErrorLink (extracted for testability)
  */
-export const handleApolloError = ({
-  operation,
-  graphQLErrors,
-  networkError,
-}: ErrorResponse) => {
+export const handleApolloError = ({ operation, graphQLErrors, networkError }: ErrorResponse) => {
   if (graphQLErrors?.length) {
     graphQLErrors.forEach((err) => {
       const { message, locations, path, extensions } = err;
       const errorCode = extensions?.errorCode as string | undefined;
 
-      console.error(
-        `[GraphQL error]: Message: ${message}, Code: ${errorCode}, Location: ${locations}, Path: ${path}`,
-      );
+      console.error(`[GraphQL error]: Message: ${message}, Code: ${errorCode}, Location: ${locations}, Path: ${path}`);
 
       // Map errorCode to user-facing messages
       // These will be displayed via toast notifications in the UI
@@ -78,7 +69,7 @@ export const handleApolloError = ({
 
       // Emit custom event for UI to handle
       window.dispatchEvent(
-        new CustomEvent("graphql-error", {
+        new CustomEvent('graphql-error', {
           detail: {
             errorCode,
             message: userMessage,
@@ -94,10 +85,10 @@ export const handleApolloError = ({
 
     // Emit network error event
     window.dispatchEvent(
-      new CustomEvent("graphql-error", {
+      new CustomEvent('graphql-error', {
         detail: {
-          errorCode: "NETWORK_ERROR",
-          message: "Network error. Please check your connection and try again.",
+          errorCode: 'NETWORK_ERROR',
+          message: 'Network error. Please check your connection and try again.',
           operation: operation.operationName,
         },
       }),
@@ -113,44 +104,40 @@ const errorLink = new ErrorLink(handleApolloError);
 /**
  * Map GraphQL error codes to user-friendly messages
  */
-export function mapErrorCodeToMessage(
-  errorCode: string | undefined,
-  defaultMessage: string,
-): string {
+export function mapErrorCodeToMessage(errorCode: string | undefined, defaultMessage: string): string {
   if (!errorCode) return defaultMessage;
 
   const errorMessages: Record<string, string> = {
     // Authorization errors
-    FORBIDDEN: "You do not have permission to perform this action.",
-    UNAUTHORIZED: "Please sign in to continue.",
+    FORBIDDEN: 'You do not have permission to perform this action.',
+    UNAUTHORIZED: 'Please sign in to continue.',
 
     // Validation errors
-    VALIDATION_ERROR: "Please check your input and try again.",
-    INVALID_INPUT: "Invalid input provided.",
+    VALIDATION_ERROR: 'Please check your input and try again.',
+    INVALID_INPUT: 'Invalid input provided.',
 
     // Not found errors
-    NOT_FOUND: "The requested resource was not found.",
-    PROFILE_NOT_FOUND: "Profile not found.",
-    CAMPAIGN_NOT_FOUND: "Campaign not found.",
-    ORDER_NOT_FOUND: "Order not found.",
+    NOT_FOUND: 'The requested resource was not found.',
+    PROFILE_NOT_FOUND: 'Profile not found.',
+    CAMPAIGN_NOT_FOUND: 'Campaign not found.',
+    ORDER_NOT_FOUND: 'Order not found.',
 
     // Conflict errors
-    ALREADY_EXISTS: "This item already exists.",
-    DUPLICATE_ENTRY: "A duplicate entry was detected.",
+    ALREADY_EXISTS: 'This item already exists.',
+    DUPLICATE_ENTRY: 'A duplicate entry was detected.',
 
     // Invite/sharing errors
-    INVITE_EXPIRED: "This invite code has expired.",
-    INVITE_NOT_FOUND: "Invalid invite code.",
-    ALREADY_SHARED: "This profile is already shared with this user.",
+    INVITE_EXPIRED: 'This invite code has expired.',
+    INVITE_NOT_FOUND: 'Invalid invite code.',
+    ALREADY_SHARED: 'This profile is already shared with this user.',
 
     // Campaign/order errors
-    CAMPAIGN_LOCKED: "This campaign is locked and cannot be modified.",
-    ORDER_ALREADY_DELETED: "This order has already been deleted.",
+    CAMPAIGN_LOCKED: 'This campaign is locked and cannot be modified.',
+    ORDER_ALREADY_DELETED: 'This order has already been deleted.',
 
     // Generic errors
-    INTERNAL_ERROR: "An internal error occurred. Please try again.",
-    SERVICE_UNAVAILABLE:
-      "Service temporarily unavailable. Please try again later.",
+    INTERNAL_ERROR: 'An internal error occurred. Please try again.',
+    SERVICE_UNAVAILABLE: 'Service temporarily unavailable. Please try again later.',
   };
 
   return errorMessages[errorCode] || defaultMessage;
@@ -192,15 +179,15 @@ export const apolloClient = new ApolloClient({
   }),
   defaultOptions: {
     watchQuery: {
-      fetchPolicy: "cache-and-network",
-      errorPolicy: "all",
+      fetchPolicy: 'cache-and-network',
+      errorPolicy: 'all',
     },
     query: {
-      fetchPolicy: "network-only",
-      errorPolicy: "all",
+      fetchPolicy: 'network-only',
+      errorPolicy: 'all',
     },
     mutate: {
-      errorPolicy: "all",
+      errorPolicy: 'all',
     },
   },
 });

@@ -6,16 +6,8 @@
  * to individual campaigns rather than profiles.
  */
 
-import React, { useState, useEffect } from "react";
-import {
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  Button,
-  TextField,
-  Box,
-} from "@mui/material";
+import React, { useState, useEffect } from 'react';
+import { Dialog, DialogTitle, DialogContent, DialogActions, Button, TextField, Box } from '@mui/material';
 
 interface EditProfileDialogProps {
   open: boolean;
@@ -51,7 +43,7 @@ export const EditProfileDialog: React.FC<EditProfileDialogProps> = ({
       await onSubmit(profileId, sellerName.trim());
       onClose();
     } catch (error) {
-      console.error("Failed to update profile:", error);
+      console.error('Failed to update profile:', error);
     } finally {
       setLoading(false);
     }
@@ -76,7 +68,7 @@ export const EditProfileDialog: React.FC<EditProfileDialogProps> = ({
             value={sellerName}
             onChange={(e) => setSellerName(e.target.value)}
             onKeyPress={(e) => {
-              if (e.key === "Enter" && sellerName.trim() && hasChanges()) {
+              if (e.key === 'Enter' && sellerName.trim() && hasChanges()) {
                 handleSubmit();
               }
             }}
@@ -88,12 +80,8 @@ export const EditProfileDialog: React.FC<EditProfileDialogProps> = ({
         <Button onClick={handleClose} disabled={loading}>
           Cancel
         </Button>
-        <Button
-          onClick={handleSubmit}
-          variant="contained"
-          disabled={!sellerName.trim() || !hasChanges() || loading}
-        >
-          {loading ? "Saving..." : "Save Changes"}
+        <Button onClick={handleSubmit} variant="contained" disabled={!sellerName.trim() || !hasChanges() || loading}>
+          {loading ? 'Saving...' : 'Save Changes'}
         </Button>
       </DialogActions>
     </Dialog>

@@ -1,8 +1,8 @@
 /**
  * Custom hook for refetch profiles effect
  */
-import { useEffect } from "react";
-import { useLocation } from "react-router-dom";
+import { useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 
 export const useProfileRefetch = (refetchProfiles: () => void) => {
   const location = useLocation();

@@ -9,9 +9,9 @@
  * - Automatic total calculation
  */
 
-import React, { useState, useEffect } from "react";
-import { useParams } from "react-router-dom";
-import { useMutation } from "@apollo/client/react";
+import React, { useState, useEffect } from 'react';
+import { useParams } from 'react-router-dom';
+import { useMutation } from '@apollo/client/react';
 import {
   Dialog,
   DialogTitle,
@@ -34,10 +34,10 @@ import {
   IconButton,
   Divider,
   Alert,
-} from "@mui/material";
-import { Add as AddIcon, Delete as DeleteIcon } from "@mui/icons-material";
-import { CREATE_ORDER, UPDATE_ORDER } from "../lib/graphql";
-import { ensureProfileId, ensureCampaignId } from "../lib/ids";
+} from '@mui/material';
+import { Add as AddIcon, Delete as DeleteIcon } from '@mui/icons-material';
+import { CREATE_ORDER, UPDATE_ORDER } from '../lib/graphql';
+import { ensureProfileId, ensureCampaignId } from '../lib/ids';
 
 interface LineItem {
   productId: string;
@@ -86,21 +86,18 @@ interface LineItemInput {
 
 // Format phone number as user types: (123) 456-7890
 const formatPhoneNumber = (value: string) => {
-  const digits = value.replace(/\D/g, "");
+  const digits = value.replace(/\D/g, '');
   const limited = digits.slice(0, 10);
 
   if (limited.length <= 3) return limited;
-  if (limited.length <= 6)
-    return `(${limited.slice(0, 3)}) ${limited.slice(3)}`;
+  if (limited.length <= 6) return `(${limited.slice(0, 3)}) ${limited.slice(3)}`;
   return `(${limited.slice(0, 3)}) ${limited.slice(3, 6)}-${limited.slice(6)}`;
 };
 
 // Extract phone digits for E.164 format
 const extractPhoneDigits = (phone: string): string => {
-  const digits = phone.replace(/\D/g, "");
-  return digits.startsWith("1") && digits.length === 11
-    ? digits.slice(1)
-    : digits;
+  const digits = phone.replace(/\D/g, '');
+  return digits.startsWith('1') && digits.length === 11 ? digits.slice(1) : digits;
 };
 
 // Convert E.164 to display format
@@ -118,13 +115,13 @@ interface ParsedAddress {
 }
 
 const emptyAddress: ParsedAddress = {
-  street: "",
-  city: "",
-  state: "",
-  zipCode: "",
+  street: '',
+  city: '',
+  state: '',
+  zipCode: '',
 };
 
-const parseAddressField = (value: string | undefined): string => value ?? "";
+const parseAddressField = (value: string | undefined): string => value ?? '';
 
 const parseOrderAddress = (addr?: {
   street?: string;
@@ -142,12 +139,7 @@ const parseOrderAddress = (addr?: {
 };
 
 // Build customer address input
-const buildAddressInput = (
-  street: string,
-  city: string,
-  state: string,
-  zipCode: string,
-) => ({
+const buildAddressInput = (street: string, city: string, state: string, zipCode: string) => ({
   street: street.trim() || undefined,
   city: city.trim() || undefined,
   state: state.trim() || undefined,
@@ -156,12 +148,9 @@ const buildAddressInput = (
 
 // Validate phone number length
 const validatePhone = (phone: string): string | null => {
-  const digits = phone.replace(/\D/g, "");
-  const number =
-    digits.startsWith("1") && digits.length === 11 ? digits.slice(1) : digits;
-  return number.length !== 10
-    ? `Phone must be 10 digits. Got: ${number.length} digits`
-    : null;
+  const digits = phone.replace(/\D/g, '');
+  const number = digits.startsWith('1') && digits.length === 11 ? digits.slice(1) : digits;
+  return number.length !== 10 ? `Phone must be 10 digits. Got: ${number.length} digits` : null;
 };
 
 // Build phone in E.164 format
@@ -232,13 +221,7 @@ const CustomerFields: React.FC<CustomerFieldsProps> = ({
         disabled={loading}
       />
       <Stack direction="row" spacing={2}>
-        <TextField
-          fullWidth
-          label="City"
-          value={city}
-          onChange={(e) => setCity(e.target.value)}
-          disabled={loading}
-        />
+        <TextField fullWidth label="City" value={city} onChange={(e) => setCity(e.target.value)} disabled={loading} />
         <TextField
           label="State"
           value={state}
@@ -313,11 +296,7 @@ const LineItemRow: React.FC<LineItemRowProps> = ({
         <strong>${subtotal.toFixed(2)}</strong>
       </TableCell>
       <TableCell align="right">
-        <IconButton
-          size="small"
-          onClick={() => onRemove(index)}
-          disabled={loading}
-        >
+        <IconButton size="small" onClick={() => onRemove(index)} disabled={loading}>
           <DeleteIcon fontSize="small" />
         </IconButton>
       </TableCell>
@@ -347,19 +326,9 @@ const LineItemsTable: React.FC<LineItemsTableProps> = ({
   total,
 }) => (
   <Box>
-    <Stack
-      direction="row"
-      justifyContent="space-between"
-      alignItems="center"
-      mb={1}
-    >
+    <Stack direction="row" justifyContent="space-between" alignItems="center" mb={1}>
       <Typography variant="subtitle1">Products</Typography>
-      <Button
-        size="small"
-        startIcon={<AddIcon />}
-        onClick={onAdd}
-        disabled={loading || products.length === 0}
-      >
+      <Button size="small" startIcon={<AddIcon />} onClick={onAdd} disabled={loading || products.length === 0}>
         Add Product
       </Button>
     </Stack>
@@ -402,54 +371,47 @@ const LineItemsTable: React.FC<LineItemsTableProps> = ({
         </TableBody>
       </Table>
     ) : (
-      <Alert severity="info">
-        No products added yet. Click "Add Product" to start.
-      </Alert>
+      <Alert severity="info">No products added yet. Click "Add Product" to start.</Alert>
     )}
   </Box>
 );
 
 const useCustomerFormState = () => {
-  const [customerName, setCustomerName] = useState("");
-  const [customerPhone, setCustomerPhone] = useState("");
-  const [street, setStreet] = useState("");
-  const [city, setCity] = useState("");
-  const [state, setState] = useState("");
-  const [zipCode, setZipCode] = useState("");
+  const [customerName, setCustomerName] = useState('');
+  const [customerPhone, setCustomerPhone] = useState('');
+  const [street, setStreet] = useState('');
+  const [city, setCity] = useState('');
+  const [state, setState] = useState('');
+  const [zipCode, setZipCode] = useState('');
 
   const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setCustomerPhone(formatPhoneNumber(e.target.value));
   };
 
   const reset = () => {
-    setCustomerName("");
-    setCustomerPhone("");
-    setStreet("");
-    setCity("");
-    setState("");
-    setZipCode("");
+    setCustomerName('');
+    setCustomerPhone('');
+    setStreet('');
+    setCity('');
+    setState('');
+    setZipCode('');
   };
 
-  const setAddressFields = (
-    street: string,
-    city: string,
-    addrState: string,
-    zipCode: string,
-  ) => {
+  const setAddressFields = (street: string, city: string, addrState: string, zipCode: string) => {
     setStreet(street);
     setCity(city);
     setState(addrState);
     setZipCode(zipCode);
   };
 
-  const setAddressFromOrder = (addr: Order["customerAddress"]) => {
+  const setAddressFromOrder = (addr: Order['customerAddress']) => {
     const a = parseOrderAddress(addr);
     setAddressFields(a.street, a.city, a.state, a.zipCode);
   };
 
   const setFromOrder = (o: Order) => {
     setCustomerName(o.customerName);
-    setCustomerPhone(o.customerPhone ? e164ToDisplay(o.customerPhone) : "");
+    setCustomerPhone(o.customerPhone ? e164ToDisplay(o.customerPhone) : '');
     setAddressFromOrder(o.customerAddress);
   };
 
@@ -477,10 +439,7 @@ const useLineItemsState = (defaultProductId: string | undefined) => {
 
   const handleAdd = () => {
     if (defaultProductId) {
-      setLineItems([
-        ...lineItems,
-        { productId: defaultProductId, quantity: 1 },
-      ]);
+      setLineItems([...lineItems, { productId: defaultProductId, quantity: 1 }]);
     }
   };
 
@@ -512,20 +471,20 @@ const useLineItemsState = (defaultProductId: string | undefined) => {
 };
 
 const useOrderDetailsState = () => {
-  const [paymentMethod, setPaymentMethod] = useState<string>("CASH");
-  const [notes, setNotes] = useState("");
-  const [orderDate, setOrderDate] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState<string>('CASH');
+  const [notes, setNotes] = useState('');
+  const [orderDate, setOrderDate] = useState('');
 
   const reset = () => {
-    setPaymentMethod("CASH");
-    setNotes("");
-    setOrderDate(new Date().toISOString().split("T")[0]);
+    setPaymentMethod('CASH');
+    setNotes('');
+    setOrderDate(new Date().toISOString().split('T')[0]);
   };
 
   const setFromOrder = (o: Order) => {
     setPaymentMethod(o.paymentMethod);
-    setNotes(o.notes || "");
-    setOrderDate(o.orderDate.split("T")[0]);
+    setNotes(o.notes || '');
+    setOrderDate(o.orderDate.split('T')[0]);
   };
 
   return {
@@ -627,12 +586,7 @@ const addOptionalInputFields = (
   }
 
   if (customer.hasAddress) {
-    input.customerAddress = buildAddressInput(
-      customer.street,
-      customer.city,
-      customer.state,
-      customer.zipCode,
-    );
+    input.customerAddress = buildAddressInput(customer.street, customer.city, customer.state, customer.zipCode);
   }
 
   if (notes.trim()) {
@@ -649,8 +603,7 @@ const isFormComplete = (
   orderDate: string,
 ): boolean => {
   const hasName = customer.customerName.trim().length > 0;
-  const hasContact =
-    customer.customerPhone.trim().length > 0 || customer.hasAddress;
+  const hasContact = customer.customerPhone.trim().length > 0 || customer.hasAddress;
   const hasItems = lineItems.length > 0;
   const hasDate = orderDate.length > 0;
   return hasName && hasContact && hasItems && hasDate;
@@ -658,7 +611,7 @@ const isFormComplete = (
 
 // Form initialization helpers
 const initializeFromOrder = (
-  order: NonNullable<OrderEditorDialogProps["order"]>,
+  order: NonNullable<OrderEditorDialogProps['order']>,
   customer: ReturnType<typeof useCustomerFormState>,
   lineItemsState: ReturnType<typeof useLineItemsState>,
   orderDetails: ReturnType<typeof useOrderDetailsState>,
@@ -726,7 +679,7 @@ const getDefaultProductId = (products: Product[]): string | undefined => {
 // Form initialization effect handler
 const useFormInitEffect = (
   open: boolean,
-  order: OrderEditorDialogProps["order"],
+  order: OrderEditorDialogProps['order'],
   customer: ReturnType<typeof useCustomerFormState>,
   lineItemsState: ReturnType<typeof useLineItemsState>,
   orderDetails: ReturnType<typeof useOrderDetailsState>,
@@ -744,13 +697,13 @@ const useFormInitEffect = (
 
 // Submit button text helper
 const getSubmitButtonText = (loading: boolean, isUpdate: boolean): string => {
-  if (loading) return "Saving...";
-  return isUpdate ? "Save Changes" : "Create Order";
+  if (loading) return 'Saving...';
+  return isUpdate ? 'Save Changes' : 'Create Order';
 };
 
 // Dialog title helper
 const getDialogTitle = (isUpdate: boolean): string => {
-  return isUpdate ? "Edit Order" : "New Order";
+  return isUpdate ? 'Edit Order' : 'New Order';
 };
 
 // Combine loading states
@@ -769,7 +722,7 @@ const combineErrors = (
 // Error message formatter
 const formatSubmitError = (err: unknown): string => {
   if (err instanceof Error) return err.message;
-  return "Unknown error";
+  return 'Unknown error';
 };
 
 // Submit handler helper
@@ -790,15 +743,7 @@ const prepareAndSubmit = async (
     return;
   }
 
-  await executeOrderMutation(
-    isUpdate,
-    input,
-    orderId,
-    profileId,
-    campaignId,
-    createOrder,
-    updateOrder,
-  );
+  await executeOrderMutation(isUpdate, input, orderId, profileId, campaignId, createOrder, updateOrder);
 };
 
 export const OrderEditorDialog: React.FC<OrderEditorDialogProps> = ({
@@ -820,28 +765,20 @@ export const OrderEditorDialog: React.FC<OrderEditorDialogProps> = ({
 
   useFormInitEffect(open, order, customer, lineItemsState, orderDetails);
 
-  const [createOrder, { loading: creating, error: createError }] = useMutation(
-    CREATE_ORDER,
-    { onCompleted: onComplete },
-  );
-  const [updateOrder, { loading: updating, error: updateError }] = useMutation(
-    UPDATE_ORDER,
-    { onCompleted: onComplete },
-  );
+  const [createOrder, { loading: creating, error: createError }] = useMutation(CREATE_ORDER, {
+    onCompleted: onComplete,
+  });
+  const [updateOrder, { loading: updating, error: updateError }] = useMutation(UPDATE_ORDER, {
+    onCompleted: onComplete,
+  });
 
   const loading = combineLoading(creating, updating);
   const error = combineErrors(createError, updateError);
-  const isFormValid = isFormComplete(
-    customer,
-    lineItemsState.lineItems,
-    orderDetails.orderDate,
-  );
+  const isFormValid = isFormComplete(customer, lineItemsState.lineItems, orderDetails.orderDate);
 
   const buildBaseInput = () => ({
     customerName: customer.customerName.trim(),
-    orderDate: new Date(
-      orderDetails.orderDate + "T00:00:00.000Z",
-    ).toISOString(),
+    orderDate: new Date(orderDetails.orderDate + 'T00:00:00.000Z').toISOString(),
     paymentMethod: orderDetails.paymentMethod,
     lineItems: lineItemsState.lineItems.map((item) => ({
       productId: item.productId,
@@ -867,7 +804,7 @@ export const OrderEditorDialog: React.FC<OrderEditorDialogProps> = ({
         updateOrder,
       );
     } catch (err: unknown) {
-      console.error("Failed to save order:", err);
+      console.error('Failed to save order:', err);
       alert(`Error: ${formatSubmitError(err)}`);
     }
   };
@@ -914,22 +851,14 @@ export const OrderEditorDialog: React.FC<OrderEditorDialogProps> = ({
             lineItemsProps={lineItemsProps}
           />
 
-          {error && (
-            <Alert severity="error">
-              Failed to save order: {error.message}
-            </Alert>
-          )}
+          {error && <Alert severity="error">Failed to save order: {error.message}</Alert>}
         </Stack>
       </DialogContent>
       <DialogActions>
         <Button onClick={handleClose} disabled={loading}>
           Cancel
         </Button>
-        <Button
-          onClick={handleSubmit}
-          variant="contained"
-          disabled={!isFormValid || loading}
-        >
+        <Button onClick={handleSubmit} variant="contained" disabled={!isFormValid || loading}>
           {submitButtonText}
         </Button>
       </DialogActions>

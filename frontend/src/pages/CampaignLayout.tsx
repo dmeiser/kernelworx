@@ -8,16 +8,9 @@
  * - Settings
  */
 
-import React from "react";
-import {
-  Routes,
-  Route,
-  Navigate,
-  useParams,
-  useNavigate,
-  useLocation,
-} from "react-router-dom";
-import { useQuery } from "@apollo/client/react";
+import React from 'react';
+import { Routes, Route, Navigate, useParams, useNavigate, useLocation } from 'react-router-dom';
+import { useQuery } from '@apollo/client/react';
 import {
   Box,
   Tabs,
@@ -29,19 +22,19 @@ import {
   Link,
   CircularProgress,
   Alert,
-} from "@mui/material";
+} from '@mui/material';
 import {
   ArrowBack as ArrowBackIcon,
   ShoppingCart as OrdersIcon,
   Assessment as ReportsIcon,
   Settings as SettingsIcon,
-} from "@mui/icons-material";
-import { OrdersPage } from "./OrdersPage";
-import { OrderEditorPage } from "./OrderEditorPage";
-import { ReportsPage } from "./ReportsPage";
-import { CampaignSettingsPage } from "./CampaignSettingsPage";
-import { GET_CAMPAIGN, GET_PROFILE } from "../lib/graphql";
-import { ensureProfileId, ensureCampaignId, toUrlId } from "../lib/ids";
+} from '@mui/icons-material';
+import { OrdersPage } from './OrdersPage';
+import { OrderEditorPage } from './OrderEditorPage';
+import { ReportsPage } from './ReportsPage';
+import { CampaignSettingsPage } from './CampaignSettingsPage';
+import { GET_CAMPAIGN, GET_PROFILE } from '../lib/graphql';
+import { ensureProfileId, ensureCampaignId, toUrlId } from '../lib/ids';
 
 interface Campaign {
   campaignId: string;
@@ -63,37 +56,37 @@ interface Profile {
 // --- Helper Functions ---
 
 function decodeParam(encoded: string | undefined): string {
-  return encoded ? decodeURIComponent(encoded) : "";
+  return encoded ? decodeURIComponent(encoded) : '';
 }
 
 function getTabValue(pathname: string): string {
-  const currentPath = pathname.split("/").pop() || "";
-  const validTabs = ["orders", "reports", "settings"];
-  return validTabs.includes(currentPath) ? currentPath : "orders";
+  const currentPath = pathname.split('/').pop() || '';
+  const validTabs = ['orders', 'reports', 'settings'];
+  return validTabs.includes(currentPath) ? currentPath : 'orders';
 }
 
 function formatDate(dateString: string): string {
-  return new Date(dateString).toLocaleDateString("en-US", {
-    year: "numeric",
-    month: "long",
-    day: "numeric",
+  return new Date(dateString).toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
   });
 }
 
 function formatDateRange(startDate?: string, endDate?: string): string | null {
   if (!startDate && !endDate) return null;
-  const start = startDate ? formatDate(startDate) : "";
-  const end = endDate ? ` - ${formatDate(endDate)}` : "";
+  const start = startDate ? formatDate(startDate) : '';
+  const end = endDate ? ` - ${formatDate(endDate)}` : '';
   return `${start}${end}`;
 }
 
 function logCampaignError(error: Error): void {
-  console.error("Campaign query error:", error);
+  console.error('Campaign query error:', error);
   const apolloError = error as {
     graphQLErrors?: unknown;
     networkError?: unknown;
   };
-  console.log("Campaign error details:", {
+  console.log('Campaign error details:', {
     message: error.message,
     graphQLErrors: apolloError.graphQLErrors,
     networkError: apolloError.networkError,
@@ -103,20 +96,13 @@ function logCampaignError(error: Error): void {
 // --- Sub-Components ---
 
 const LoadingState: React.FC = () => (
-  <Box
-    display="flex"
-    justifyContent="center"
-    alignItems="center"
-    minHeight="400px"
-  >
+  <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
     <CircularProgress />
   </Box>
 );
 
 const ErrorState: React.FC = () => (
-  <Alert severity="error">
-    Campaign not found or you don't have access to this campaign.
-  </Alert>
+  <Alert severity="error">Campaign not found or you don't have access to this campaign.</Alert>
 );
 
 interface CampaignBreadcrumbsProps {
@@ -138,8 +124,8 @@ const CampaignBreadcrumbs: React.FC<CampaignBreadcrumbsProps> = ({
     <Link
       component="button"
       variant="body1"
-      onClick={() => onNavigate("/scouts")}
-      sx={{ textDecoration: "none", cursor: "pointer" }}
+      onClick={() => onNavigate('/scouts')}
+      sx={{ textDecoration: 'none', cursor: 'pointer' }}
     >
       Scouts
     </Link>
@@ -147,7 +133,7 @@ const CampaignBreadcrumbs: React.FC<CampaignBreadcrumbsProps> = ({
       component="button"
       variant="body1"
       onClick={() => onNavigate(`/scouts/${toUrlId(profileId)}/campaigns`)}
-      sx={{ textDecoration: "none", cursor: "pointer" }}
+      sx={{ textDecoration: 'none', cursor: 'pointer' }}
     >
       {sellerName}
     </Link>
@@ -162,10 +148,7 @@ interface CampaignHeaderProps {
   onBack: () => void;
 }
 
-const CampaignHeader: React.FC<CampaignHeaderProps> = ({
-  campaign,
-  onBack,
-}) => {
+const CampaignHeader: React.FC<CampaignHeaderProps> = ({ campaign, onBack }) => {
   const dateRange = formatDateRange(campaign.startDate, campaign.endDate);
 
   return (
@@ -193,33 +176,12 @@ interface CampaignTabsProps {
   onTabChange: (event: React.SyntheticEvent, newValue: string) => void;
 }
 
-const CampaignTabs: React.FC<CampaignTabsProps> = ({
-  tabValue,
-  hasWritePermission,
-  onTabChange,
-}) => (
-  <Box sx={{ borderBottom: 1, borderColor: "divider", mb: 3 }}>
+const CampaignTabs: React.FC<CampaignTabsProps> = ({ tabValue, hasWritePermission, onTabChange }) => (
+  <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
     <Tabs value={tabValue} onChange={onTabChange}>
-      <Tab
-        label="Orders"
-        value="orders"
-        icon={<OrdersIcon />}
-        iconPosition="start"
-      />
-      <Tab
-        label="Reports"
-        value="reports"
-        icon={<ReportsIcon />}
-        iconPosition="start"
-      />
-      {hasWritePermission && (
-        <Tab
-          label="Settings"
-          value="settings"
-          icon={<SettingsIcon />}
-          iconPosition="start"
-        />
-      )}
+      <Tab label="Orders" value="orders" icon={<OrdersIcon />} iconPosition="start" />
+      <Tab label="Reports" value="reports" icon={<ReportsIcon />} iconPosition="start" />
+      {hasWritePermission && <Tab label="Settings" value="settings" icon={<SettingsIcon />} iconPosition="start" />}
     </Tabs>
   </Box>
 );
@@ -240,7 +202,7 @@ const CampaignRoutes: React.FC = () => (
 
 function getWritePermission(profile: Profile | undefined): boolean {
   if (!profile) return false;
-  return profile.isOwner || profile.permissions?.includes("WRITE") || false;
+  return profile.isOwner || profile.permissions?.includes('WRITE') || false;
 }
 
 function useCampaignQuery(dbCampaignId: string | null) {
@@ -288,8 +250,10 @@ function useNavigationHandlers(profileId: string, campaignId: string) {
 }
 
 function useRouteParams() {
-  const { profileId: encodedProfileId, campaignId: encodedCampaignId } =
-    useParams<{ profileId: string; campaignId: string }>();
+  const { profileId: encodedProfileId, campaignId: encodedCampaignId } = useParams<{
+    profileId: string;
+    campaignId: string;
+  }>();
   const profileId = decodeParam(encodedProfileId);
   const campaignId = decodeParam(encodedCampaignId);
   return { profileId, campaignId };
@@ -305,17 +269,11 @@ interface CampaignContentProps {
   navHandlers: ReturnType<typeof useNavigationHandlers>;
 }
 
-const CampaignContent: React.FC<CampaignContentProps> = ({
-  profileId,
-  tabValue,
-  campaign,
-  profile,
-  navHandlers,
-}) => (
+const CampaignContent: React.FC<CampaignContentProps> = ({ profileId, tabValue, campaign, profile, navHandlers }) => (
   <Box>
     <CampaignBreadcrumbs
       profileId={profileId}
-      sellerName={profile?.sellerName || "Loading..."}
+      sellerName={profile?.sellerName || 'Loading...'}
       campaignName={campaign.campaignName}
       campaignYear={campaign.campaignYear}
       onNavigate={navHandlers.navigate}

@@ -2,14 +2,10 @@
  * Scouts page - List of owned and shared scout profiles
  */
 
-import React, { useState, useEffect } from "react";
-import { useAuth } from "../contexts/AuthContext";
-import {
-  useLazyQuery,
-  useMutation,
-  useApolloClient,
-} from "@apollo/client/react";
-import { useNavigate, useLocation } from "react-router-dom";
+import React, { useState, useEffect } from 'react';
+import { useAuth } from '../contexts/AuthContext';
+import { useLazyQuery, useMutation, useApolloClient } from '@apollo/client/react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import {
   Typography,
   Box,
@@ -25,11 +21,11 @@ import {
   DialogActions,
   FormControlLabel,
   Switch,
-} from "@mui/material";
-import { Add as AddIcon, CardGiftcard as GiftIcon } from "@mui/icons-material";
-import { ProfileCard } from "../components/ProfileCard";
-import { CreateProfileDialog } from "../components/CreateProfileDialog";
-import { EditProfileDialog } from "../components/EditProfileDialog";
+} from '@mui/material';
+import { Add as AddIcon, CardGiftcard as GiftIcon } from '@mui/icons-material';
+import { ProfileCard } from '../components/ProfileCard';
+import { CreateProfileDialog } from '../components/CreateProfileDialog';
+import { EditProfileDialog } from '../components/EditProfileDialog';
 import {
   LIST_MY_PROFILES,
   LIST_MY_SHARES,
@@ -38,17 +34,15 @@ import {
   DELETE_SELLER_PROFILE,
   GET_MY_ACCOUNT,
   UPDATE_MY_PREFERENCES,
-} from "../lib/graphql";
-import { ensureProfileId } from "../lib/ids";
+} from '../lib/graphql';
+import { ensureProfileId } from '../lib/ids';
 
 // Default preferences value
 const DEFAULT_PREFERENCES = { showReadOnlyProfiles: true };
 
 // Helper to safely parse preferences JSON
-const parsePreferences = (
-  prefs: string | undefined,
-): { showReadOnlyProfiles: boolean } => {
-  if (!prefs || prefs === "") {
+const parsePreferences = (prefs: string | undefined): { showReadOnlyProfiles: boolean } => {
+  if (!prefs || prefs === '') {
     return DEFAULT_PREFERENCES;
   }
   try {
@@ -60,13 +54,9 @@ const parsePreferences = (
 
 // Helper to get preferences from account data
 const getPreferencesFromAccount = (
-  accountData:
-    | { getMyAccount: { accountId: string; preferences?: string } }
-    | undefined,
+  accountData: { getMyAccount: { accountId: string; preferences?: string } } | undefined,
 ): { showReadOnlyProfiles: boolean } =>
-  accountData?.getMyAccount
-    ? parsePreferences(accountData.getMyAccount.preferences)
-    : DEFAULT_PREFERENCES;
+  accountData?.getMyAccount ? parsePreferences(accountData.getMyAccount.preferences) : DEFAULT_PREFERENCES;
 
 // Type for location state
 interface LocationState {
@@ -76,16 +66,12 @@ interface LocationState {
 }
 
 // Helper to get location state with defaults
-const getLocationState = (state: LocationState | null): LocationState =>
-  state || {};
+const getLocationState = (state: LocationState | null): LocationState => state || {};
 
 // Helper to filter shared profiles based on read-only preference
-const filterSharedProfiles = (
-  profiles: Profile[],
-  showReadOnlyProfiles: boolean,
-): Profile[] =>
+const filterSharedProfiles = (profiles: Profile[], showReadOnlyProfiles: boolean): Profile[] =>
   profiles.filter((profile) => {
-    const hasWrite = profile.permissions.includes("WRITE");
+    const hasWrite = profile.permissions.includes('WRITE');
     return showReadOnlyProfiles || hasWrite;
   });
 
@@ -96,25 +82,15 @@ const areBothProfilesLoaded = (
 ): boolean => myProfilesData !== undefined && sharedProfilesLoaded;
 
 // Helper to get my profiles from data
-const getMyProfiles = (
-  data: { listMyProfiles: Profile[] } | undefined,
-): Profile[] => data?.listMyProfiles || [];
+const getMyProfiles = (data: { listMyProfiles: Profile[] } | undefined): Profile[] => data?.listMyProfiles || [];
 
 // Helper to check if page is still loading
-const isPageLoading = (
-  profilesLoading: boolean,
-  accountLoading: boolean,
-  bothProfilesLoaded: boolean,
-): boolean => profilesLoading || accountLoading || !bothProfilesLoaded;
+const isPageLoading = (profilesLoading: boolean, accountLoading: boolean, bothProfilesLoaded: boolean): boolean =>
+  profilesLoading || accountLoading || !bothProfilesLoaded;
 
 // Loading spinner component
 const LoadingSpinner: React.FC = () => (
-  <Box
-    display="flex"
-    justifyContent="center"
-    alignItems="center"
-    minHeight="400px"
-  >
+  <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
     <CircularProgress />
   </Box>
 );
@@ -135,15 +111,11 @@ const InfoMessageAlert: React.FC<{ message: string }> = ({ message }) => (
 
 // Empty state component
 const EmptyState: React.FC = () => (
-  <Alert severity="info">
-    You don't have any scouts yet. Click "Create Scout" to get started!
-  </Alert>
+  <Alert severity="info">You don't have any scouts yet. Click "Create Scout" to get started!</Alert>
 );
 
 // Owned profiles section component
-const OwnedProfilesSection: React.FC<{ profiles: Profile[] }> = ({
-  profiles,
-}) =>
+const OwnedProfilesSection: React.FC<{ profiles: Profile[] }> = ({ profiles }) =>
   profiles.length > 0 ? (
     <Box mb={4}>
       <Typography variant="h6" gutterBottom>
@@ -191,18 +163,11 @@ const SharedProfilesSection: React.FC<{
   ) : null;
 
 // Helper to check if should show empty state
-const shouldShowEmptyState = (
-  myProfiles: Profile[],
-  filteredSharedProfiles: Profile[],
-  loading: boolean,
-): boolean =>
+const shouldShowEmptyState = (myProfiles: Profile[], filteredSharedProfiles: Profile[], loading: boolean): boolean =>
   myProfiles.length === 0 && filteredSharedProfiles.length === 0 && !loading;
 
 // Helper to build preferences update variables
-const buildPreferencesVariables = (
-  preferences: { showReadOnlyProfiles: boolean },
-  newChecked: boolean,
-) => ({
+const buildPreferencesVariables = (preferences: { showReadOnlyProfiles: boolean }, newChecked: boolean) => ({
   preferences: JSON.stringify({
     ...preferences,
     showReadOnlyProfiles: newChecked,
@@ -210,32 +175,23 @@ const buildPreferencesVariables = (
 });
 
 // Helper to check if should open dialog on return path
-const shouldAutoOpenDialog = (
-  returnPath: string | undefined,
-  createDialogOpen: boolean,
-): boolean => Boolean(returnPath && !createDialogOpen);
+const shouldAutoOpenDialog = (returnPath: string | undefined, createDialogOpen: boolean): boolean =>
+  Boolean(returnPath && !createDialogOpen);
 
 // Helper to conditionally open dialog
-const maybeOpenDialog = (
-  shouldOpen: boolean,
-  setCreateDialogOpen: (v: boolean) => void,
-): void => {
+const maybeOpenDialog = (shouldOpen: boolean, setCreateDialogOpen: (v: boolean) => void): void => {
   if (shouldOpen) {
     setCreateDialogOpen(true);
   }
 };
 
 // Helper to get initial preference value
-const getInitialPreferenceValue = (preferences: {
-  showReadOnlyProfiles: boolean;
-}): boolean => preferences.showReadOnlyProfiles ?? true;
+const getInitialPreferenceValue = (preferences: { showReadOnlyProfiles: boolean }): boolean =>
+  preferences.showReadOnlyProfiles ?? true;
 
 // Helper to check if auth is ready and should trigger queries
-const shouldTriggerQueries = (
-  authLoading: boolean,
-  isAuthenticated: boolean,
-  queriesTriggered: boolean,
-): boolean => !authLoading && isAuthenticated && !queriesTriggered;
+const shouldTriggerQueries = (authLoading: boolean, isAuthenticated: boolean, queriesTriggered: boolean): boolean =>
+  !authLoading && isAuthenticated && !queriesTriggered;
 
 // Helper to conditionally trigger queries
 const maybeTriggerQueries = (
@@ -271,16 +227,13 @@ const handleReturnNavigation = (
 };
 
 // Helper to check if can delete profile
-const canDeleteCurrentProfile = (deletingProfileId: string | null): boolean =>
-  Boolean(deletingProfileId);
+const canDeleteCurrentProfile = (deletingProfileId: string | null): boolean => Boolean(deletingProfileId);
 
 // Helper to conditionally delete profile
 const maybeDeleteProfile = async (
   canDelete: boolean,
   deletingProfileId: string | null,
-  deleteProfile: (options: {
-    variables: { profileId: string };
-  }) => Promise<unknown>,
+  deleteProfile: (options: { variables: { profileId: string } }) => Promise<unknown>,
 ): Promise<void> => {
   if (canDelete && deletingProfileId) {
     await deleteProfile({
@@ -291,9 +244,7 @@ const maybeDeleteProfile = async (
 
 // Helper to update preferences with error handling
 const updatePreferencesWithRollback = async (
-  updatePreferences: (options: {
-    variables: { preferences: string };
-  }) => Promise<unknown>,
+  updatePreferences: (options: { variables: { preferences: string } }) => Promise<unknown>,
   preferences: { showReadOnlyProfiles: boolean },
   checked: boolean,
   setShowReadOnlyProfiles: (v: boolean) => void,
@@ -304,7 +255,7 @@ const updatePreferencesWithRollback = async (
       variables: buildPreferencesVariables(preferences, checked),
     });
   } catch (error) {
-    console.error("Failed to update preferences:", error);
+    console.error('Failed to update preferences:', error);
     setShowReadOnlyProfiles(!checked);
   }
 };
@@ -325,13 +276,13 @@ const loadSharedProfilesWithErrorHandling = async (
   try {
     const result = await apolloClient.query({
       query,
-      fetchPolicy: "network-only",
+      fetchPolicy: 'network-only',
     });
     const profiles = getSharedProfilesFromResult(result);
     setSharedProfiles(profiles);
     setSharedProfilesLoaded(true);
   } catch (err) {
-    console.error("Failed to load shared profiles:", err);
+    console.error('Failed to load shared profiles:', err);
     setSharedProfilesError(handleSharedProfilesError(err));
   } finally {
     setSharedProfilesLoading(false);
@@ -340,31 +291,26 @@ const loadSharedProfilesWithErrorHandling = async (
 
 // Helper to handle shared profiles load error
 const handleSharedProfilesError = (err: unknown): Error =>
-  err instanceof Error ? err : new Error("Failed to load shared profiles");
+  err instanceof Error ? err : new Error('Failed to load shared profiles');
 
 // Helper to get profiles from shared profiles result
-const getSharedProfilesFromResult = (result: {
-  data?: { listMyShares: Profile[] };
-}): Profile[] => result.data?.listMyShares || [];
+const getSharedProfilesFromResult = (result: { data?: { listMyShares: Profile[] } }): Profile[] =>
+  result.data?.listMyShares || [];
 
 // Helper to combine loading states
-const combineLoadingStates = (loading1: boolean, loading2: boolean): boolean =>
-  loading1 || loading2;
+const combineLoadingStates = (loading1: boolean, loading2: boolean): boolean => loading1 || loading2;
 
 // Helper to combine errors
-const combineErrors = (
-  error1: Error | null | undefined,
-  error2: Error | null,
-): Error | null => (error1 || error2) ?? null;
+const combineErrors = (error1: Error | null | undefined, error2: Error | null): Error | null =>
+  (error1 || error2) ?? null;
 
 // Helper component for conditional error display
 const ConditionalErrorAlert: React.FC<{ error: Error | null }> = ({ error }) =>
   error ? <ErrorAlert error={error} /> : null;
 
 // Helper component for conditional info message
-const ConditionalInfoAlert: React.FC<{ message: string | undefined }> = ({
-  message,
-}) => (message ? <InfoMessageAlert message={message} /> : null);
+const ConditionalInfoAlert: React.FC<{ message: string | undefined }> = ({ message }) =>
+  message ? <InfoMessageAlert message={message} /> : null;
 
 // Helper component for conditional empty state
 const ConditionalEmptyState: React.FC<{
@@ -372,9 +318,7 @@ const ConditionalEmptyState: React.FC<{
   filteredSharedProfiles: Profile[];
   loading: boolean;
 }> = ({ myProfiles, filteredSharedProfiles, loading }) =>
-  shouldShowEmptyState(myProfiles, filteredSharedProfiles, loading) ? (
-    <EmptyState />
-  ) : null;
+  shouldShowEmptyState(myProfiles, filteredSharedProfiles, loading) ? <EmptyState /> : null;
 
 // Helper component for conditional editing dialog
 const ConditionalEditDialog: React.FC<{
@@ -409,18 +353,12 @@ export const ScoutsPage: React.FC = () => {
   const location = useLocation();
   const { isAuthenticated, loading: authLoading } = useAuth();
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
-  const [editingProfile, setEditingProfile] = useState<EditingProfile | null>(
-    null,
-  );
+  const [editingProfile, setEditingProfile] = useState<EditingProfile | null>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
-  const [deletingProfileId, setDeletingProfileId] = useState<string | null>(
-    null,
-  );
+  const [deletingProfileId, setDeletingProfileId] = useState<string | null>(null);
 
   // Check for return navigation from campaign shared campaign flow
-  const locationState = getLocationState(
-    location.state as LocationState | null,
-  );
+  const locationState = getLocationState(location.state as LocationState | null);
   const returnPath = locationState.returnTo;
   const infoMessage = locationState.message;
 
@@ -431,19 +369,14 @@ export const ScoutsPage: React.FC = () => {
   }, [returnPath, createDialogOpen]);
 
   // Fetch account preferences
-  const [loadAccount, { data: accountData, loading: accountLoading }] =
-    useLazyQuery<{ getMyAccount: { accountId: string; preferences?: string } }>(
-      GET_MY_ACCOUNT,
-      {
-        fetchPolicy: "network-only",
-      },
-    );
+  const [loadAccount, { data: accountData, loading: accountLoading }] = useLazyQuery<{
+    getMyAccount: { accountId: string; preferences?: string };
+  }>(GET_MY_ACCOUNT, {
+    fetchPolicy: 'network-only',
+  });
 
   // Parse preferences from account data
-  const preferences = React.useMemo(
-    () => getPreferencesFromAccount(accountData),
-    [accountData],
-  );
+  const preferences = React.useMemo(() => getPreferencesFromAccount(accountData), [accountData]);
 
   // Show read-only profiles preference
   const [showReadOnlyProfiles, setShowReadOnlyProfiles] = useState(true);
@@ -458,24 +391,14 @@ export const ScoutsPage: React.FC = () => {
 
   // Save preference to DynamoDB when it changes
   const handleToggleReadOnly = async (checked: boolean) => {
-    await updatePreferencesWithRollback(
-      updatePreferences,
-      preferences,
-      checked,
-      setShowReadOnlyProfiles,
-    );
+    await updatePreferencesWithRollback(updatePreferences, preferences, checked, setShowReadOnlyProfiles);
   };
 
   // Fetch owned profiles
-  const [
-    loadMyProfiles,
-    {
-      data: myProfilesData,
-      loading: myProfilesLoading,
-      error: myProfilesError,
-    },
-  ] = useLazyQuery<{ listMyProfiles: Profile[] }>(LIST_MY_PROFILES, {
-    fetchPolicy: "network-only",
+  const [loadMyProfiles, { data: myProfilesData, loading: myProfilesLoading, error: myProfilesError }] = useLazyQuery<{
+    listMyProfiles: Profile[];
+  }>(LIST_MY_PROFILES, {
+    fetchPolicy: 'network-only',
     notifyOnNetworkStatusChange: true,
   });
 
@@ -483,9 +406,7 @@ export const ScoutsPage: React.FC = () => {
   const apolloClient = useApolloClient();
   const [sharedProfiles, setSharedProfiles] = useState<Profile[]>([]);
   const [sharedProfilesLoading, setSharedProfilesLoading] = useState(false);
-  const [sharedProfilesError, setSharedProfilesError] = useState<Error | null>(
-    null,
-  );
+  const [sharedProfilesError, setSharedProfilesError] = useState<Error | null>(null);
   const [sharedProfilesLoaded, setSharedProfilesLoaded] = useState(false);
 
   // Function to load shared profiles - now returns full profile data in a single query
@@ -505,25 +426,9 @@ export const ScoutsPage: React.FC = () => {
   const queriesTriggeredRef = React.useRef(false);
 
   useEffect(() => {
-    const shouldTrigger = shouldTriggerQueries(
-      authLoading,
-      isAuthenticated,
-      queriesTriggeredRef.current,
-    );
-    maybeTriggerQueries(
-      shouldTrigger,
-      queriesTriggeredRef,
-      loadAccount,
-      loadMyProfiles,
-      loadSharedProfiles,
-    );
-  }, [
-    authLoading,
-    isAuthenticated,
-    loadAccount,
-    loadMyProfiles,
-    loadSharedProfiles,
-  ]);
+    const shouldTrigger = shouldTriggerQueries(authLoading, isAuthenticated, queriesTriggeredRef.current);
+    maybeTriggerQueries(shouldTrigger, queriesTriggeredRef, loadAccount, loadMyProfiles, loadSharedProfiles);
+  }, [authLoading, isAuthenticated, loadAccount, loadMyProfiles, loadSharedProfiles]);
 
   // Create profile mutation
   const [createProfile] = useMutation(CREATE_SELLER_PROFILE, {
@@ -570,23 +475,10 @@ export const ScoutsPage: React.FC = () => {
   };
 
   const myProfiles = getMyProfiles(myProfilesData);
-  const filteredSharedProfiles = filterSharedProfiles(
-    sharedProfiles,
-    showReadOnlyProfiles,
-  );
-  const profilesLoading = combineLoadingStates(
-    myProfilesLoading,
-    sharedProfilesLoading,
-  );
-  const bothProfilesLoaded = areBothProfilesLoaded(
-    myProfilesData,
-    sharedProfilesLoaded,
-  );
-  const pageLoading = isPageLoading(
-    profilesLoading,
-    accountLoading,
-    bothProfilesLoaded,
-  );
+  const filteredSharedProfiles = filterSharedProfiles(sharedProfiles, showReadOnlyProfiles);
+  const profilesLoading = combineLoadingStates(myProfilesLoading, sharedProfilesLoading);
+  const bothProfilesLoaded = areBothProfilesLoaded(myProfilesData, sharedProfilesLoaded);
+  const pageLoading = isPageLoading(profilesLoading, accountLoading, bothProfilesLoaded);
   const error = combineErrors(myProfilesError, sharedProfilesError);
 
   if (pageLoading) {
@@ -596,12 +488,7 @@ export const ScoutsPage: React.FC = () => {
   return (
     <Box>
       {/* Header */}
-      <Stack
-        direction="row"
-        justifyContent="space-between"
-        alignItems="center"
-        mb={3}
-      >
+      <Stack direction="row" justifyContent="space-between" alignItems="center" mb={3}>
         <Stack direction="row" alignItems="center" spacing={2}>
           <Typography variant="h4" component="h1">
             My Scouts
@@ -622,18 +509,10 @@ export const ScoutsPage: React.FC = () => {
           />
         </Stack>
         <Stack direction="row" spacing={2}>
-          <Button
-            variant="outlined"
-            startIcon={<GiftIcon />}
-            onClick={() => navigate("/accept-invite")}
-          >
+          <Button variant="outlined" startIcon={<GiftIcon />} onClick={() => navigate('/accept-invite')}>
             Accept Invite
           </Button>
-          <Button
-            variant="contained"
-            startIcon={<AddIcon />}
-            onClick={() => setCreateDialogOpen(true)}
-          >
+          <Button variant="contained" startIcon={<AddIcon />} onClick={() => setCreateDialogOpen(true)}>
             Create Scout
           </Button>
         </Stack>
@@ -646,10 +525,7 @@ export const ScoutsPage: React.FC = () => {
       <OwnedProfilesSection profiles={myProfiles} />
 
       {/* Shared Profiles */}
-      <SharedProfilesSection
-        profiles={filteredSharedProfiles}
-        showDivider={myProfiles.length > 0}
-      />
+      <SharedProfilesSection profiles={filteredSharedProfiles} showDivider={myProfiles.length > 0} />
 
       {/* Empty State */}
       <ConditionalEmptyState
@@ -672,24 +548,17 @@ export const ScoutsPage: React.FC = () => {
       />
 
       {/* Delete Profile Confirmation Dialog */}
-      <Dialog
-        open={deleteConfirmOpen}
-        onClose={() => setDeleteConfirmOpen(false)}
-      >
+      <Dialog open={deleteConfirmOpen} onClose={() => setDeleteConfirmOpen(false)}>
         <DialogTitle>Delete Profile?</DialogTitle>
         <DialogContent>
           <Typography>
-            Are you sure you want to delete this profile? All campaigns and
-            orders will be permanently deleted. This action cannot be undone.
+            Are you sure you want to delete this profile? All campaigns and orders will be permanently deleted. This
+            action cannot be undone.
           </Typography>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setDeleteConfirmOpen(false)}>Cancel</Button>
-          <Button
-            onClick={handleDeleteProfile}
-            color="error"
-            variant="contained"
-          >
+          <Button onClick={handleDeleteProfile} color="error" variant="contained">
             Delete Permanently
           </Button>
         </DialogActions>

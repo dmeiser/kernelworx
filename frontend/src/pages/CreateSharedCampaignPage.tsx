@@ -3,9 +3,9 @@
  * Mobile-friendly full-page form
  */
 
-import React, { useState } from "react";
-import { useMutation, useQuery } from "@apollo/client/react";
-import { useNavigate } from "react-router-dom";
+import React, { useState } from 'react';
+import { useMutation, useQuery } from '@apollo/client/react';
+import { useNavigate } from 'react-router-dom';
 import {
   Typography,
   Box,
@@ -23,14 +23,14 @@ import {
   Container,
   Divider,
   SelectChangeEvent,
-} from "@mui/material";
-import { ArrowBack as BackIcon, Save as SaveIcon } from "@mui/icons-material";
+} from '@mui/material';
+import { ArrowBack as BackIcon, Save as SaveIcon } from '@mui/icons-material';
 import {
   LIST_PUBLIC_CATALOGS,
   LIST_MY_CATALOGS,
   CREATE_SHARED_CAMPAIGN,
   LIST_MY_SHARED_CAMPAIGNS,
-} from "../lib/graphql";
+} from '../lib/graphql';
 
 interface Catalog {
   catalogId: string;
@@ -44,58 +44,58 @@ interface SharedCampaign {
   isActive: boolean;
 }
 
-const UNIT_TYPES = ["Pack", "Troop", "Crew", "Ship", "Post"];
+const UNIT_TYPES = ['Pack', 'Troop', 'Crew', 'Ship', 'Post'];
 const US_STATES = [
-  "AL",
-  "AK",
-  "AZ",
-  "AR",
-  "CA",
-  "CO",
-  "CT",
-  "DE",
-  "FL",
-  "GA",
-  "HI",
-  "ID",
-  "IL",
-  "IN",
-  "IA",
-  "KS",
-  "KY",
-  "LA",
-  "ME",
-  "MD",
-  "MA",
-  "MI",
-  "MN",
-  "MS",
-  "MO",
-  "MT",
-  "NE",
-  "NV",
-  "NH",
-  "NJ",
-  "NM",
-  "NY",
-  "NC",
-  "ND",
-  "OH",
-  "OK",
-  "OR",
-  "PA",
-  "RI",
-  "SC",
-  "SD",
-  "TN",
-  "TX",
-  "UT",
-  "VT",
-  "VA",
-  "WA",
-  "WV",
-  "WI",
-  "WY",
+  'AL',
+  'AK',
+  'AZ',
+  'AR',
+  'CA',
+  'CO',
+  'CT',
+  'DE',
+  'FL',
+  'GA',
+  'HI',
+  'ID',
+  'IL',
+  'IN',
+  'IA',
+  'KS',
+  'KY',
+  'LA',
+  'ME',
+  'MD',
+  'MA',
+  'MI',
+  'MN',
+  'MS',
+  'MO',
+  'MT',
+  'NE',
+  'NV',
+  'NH',
+  'NJ',
+  'NM',
+  'NY',
+  'NC',
+  'ND',
+  'OH',
+  'OK',
+  'OR',
+  'PA',
+  'RI',
+  'SC',
+  'SD',
+  'TN',
+  'TX',
+  'UT',
+  'VT',
+  'VA',
+  'WA',
+  'WV',
+  'WI',
+  'WY',
 ];
 
 const BASE_URL = window.location.origin;
@@ -117,20 +117,11 @@ interface FormData {
   creatorMessage: string;
 }
 
-function hasRequiredCampaignFields(
-  catalogId: string,
-  campaignName: string,
-  campaignYear: number,
-): boolean {
+function hasRequiredCampaignFields(catalogId: string, campaignName: string, campaignYear: number): boolean {
   return Boolean(catalogId && campaignName.trim() && campaignYear);
 }
 
-function hasRequiredUnitFields(
-  unitType: string,
-  unitNumber: string,
-  city: string,
-  state: string,
-): boolean {
+function hasRequiredUnitFields(unitType: string, unitNumber: string, city: string, state: string): boolean {
   return Boolean(unitType && unitNumber && city.trim() && state);
 }
 
@@ -139,32 +130,10 @@ function validateCreatorMessageLength(message: string): boolean {
 }
 
 function isFormValid(data: FormData): boolean {
-  const {
-    catalogId,
-    campaignName,
-    campaignYear,
-    unitType,
-    unitNumber,
-    city,
-    state,
-    creatorMessage,
-  } = data;
-  const hasCampaignFields = hasRequiredCampaignFields(
-    catalogId,
-    campaignName,
-    campaignYear,
-  );
-  const hasUnitFields = hasRequiredUnitFields(
-    unitType,
-    unitNumber,
-    city,
-    state,
-  );
-  return (
-    hasCampaignFields &&
-    hasUnitFields &&
-    validateCreatorMessageLength(creatorMessage)
-  );
+  const { catalogId, campaignName, campaignYear, unitType, unitNumber, city, state, creatorMessage } = data;
+  const hasCampaignFields = hasRequiredCampaignFields(catalogId, campaignName, campaignYear);
+  const hasUnitFields = hasRequiredUnitFields(unitType, unitNumber, city, state);
+  return hasCampaignFields && hasUnitFields && validateCreatorMessageLength(creatorMessage);
 }
 
 // ============================================================================
@@ -177,19 +146,11 @@ interface CatalogGroupProps {
   headerKey: string;
 }
 
-const CatalogGroup: React.FC<CatalogGroupProps> = ({
-  header,
-  catalogs,
-  headerKey,
-}) => {
+const CatalogGroup: React.FC<CatalogGroupProps> = ({ header, catalogs, headerKey }) => {
   if (catalogs.length === 0) return null;
   return (
     <>
-      <MenuItem
-        key={headerKey}
-        disabled
-        sx={{ fontWeight: 600, backgroundColor: "#f5f5f5", opacity: 1 }}
-      >
+      <MenuItem key={headerKey} disabled sx={{ fontWeight: 600, backgroundColor: '#f5f5f5', opacity: 1 }}>
         {header}
       </MenuItem>
       {catalogs.map((catalog) => (
@@ -216,12 +177,8 @@ const CatalogSection: React.FC<CatalogSectionProps> = ({
   filteredPublicCatalogs,
   myCatalogs,
 }) => {
-  const handleChange = (e: SelectChangeEvent<string>) =>
-    onCatalogChange(e.target.value);
-  const noCatalogs =
-    !catalogsLoading &&
-    filteredPublicCatalogs.length === 0 &&
-    myCatalogs.length === 0;
+  const handleChange = (e: SelectChangeEvent<string>) => onCatalogChange(e.target.value);
+  const noCatalogs = !catalogsLoading && filteredPublicCatalogs.length === 0 && myCatalogs.length === 0;
 
   return (
     <Box>
@@ -238,16 +195,8 @@ const CatalogSection: React.FC<CatalogSectionProps> = ({
         >
           {catalogsLoading && <MenuItem disabled>Loading catalogs...</MenuItem>}
           {noCatalogs && <MenuItem disabled>No catalogs available</MenuItem>}
-          <CatalogGroup
-            header="Public Catalogs"
-            catalogs={filteredPublicCatalogs}
-            headerKey="public-header"
-          />
-          <CatalogGroup
-            header="My Catalogs"
-            catalogs={myCatalogs}
-            headerKey="my-header"
-          />
+          <CatalogGroup header="Public Catalogs" catalogs={filteredPublicCatalogs} headerKey="public-header" />
+          <CatalogGroup header="My Catalogs" catalogs={myCatalogs} headerKey="my-header" />
         </Select>
       </FormControl>
     </Box>
@@ -280,7 +229,7 @@ const CampaignInfoSection: React.FC<CampaignInfoSectionProps> = ({
       Campaign Information
     </Typography>
     <Stack spacing={2}>
-      <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
+      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
         <TextField
           label="Campaign Name"
           value={campaignName}
@@ -293,15 +242,13 @@ const CampaignInfoSection: React.FC<CampaignInfoSectionProps> = ({
           label="Campaign Year"
           type="number"
           value={campaignYear}
-          onChange={(e) =>
-            onCampaignYearChange(parseInt(e.target.value, 10) || 0)
-          }
+          onChange={(e) => onCampaignYearChange(parseInt(e.target.value, 10) || 0)}
           required
-          sx={{ minWidth: { xs: "100%", sm: 150 } }}
+          sx={{ minWidth: { xs: '100%', sm: 150 } }}
           inputProps={{ min: 2020, max: 2100 }}
         />
       </Stack>
-      <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
+      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
         <TextField
           label="Start Date (Optional)"
           type="date"
@@ -352,14 +299,10 @@ const UnitInfoSection: React.FC<UnitInfoSectionProps> = ({
       All fields required
     </Typography>
     <Stack spacing={2}>
-      <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
+      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
         <FormControl required fullWidth>
           <InputLabel>Unit Type</InputLabel>
-          <Select
-            value={unitType}
-            onChange={(e) => onUnitTypeChange(e.target.value)}
-            label="Unit Type"
-          >
+          <Select value={unitType} onChange={(e) => onUnitTypeChange(e.target.value)} label="Unit Type">
             {UNIT_TYPES.map((type) => (
               <MenuItem key={type} value={type}>
                 {type}
@@ -377,21 +320,11 @@ const UnitInfoSection: React.FC<UnitInfoSectionProps> = ({
           inputProps={{ min: 1 }}
         />
       </Stack>
-      <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
-        <TextField
-          label="City"
-          value={city}
-          onChange={(e) => onCityChange(e.target.value)}
-          required
-          fullWidth
-        />
+      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+        <TextField label="City" value={city} onChange={(e) => onCityChange(e.target.value)} required fullWidth />
         <FormControl required fullWidth>
           <InputLabel>State</InputLabel>
-          <Select
-            value={state}
-            onChange={(e) => onStateChange(e.target.value)}
-            label="State"
-          >
+          <Select value={state} onChange={(e) => onStateChange(e.target.value)} label="State">
             {US_STATES.map((s) => (
               <MenuItem key={s} value={s}>
                 {s}
@@ -448,15 +381,11 @@ const AdditionalInfoSection: React.FC<AdditionalInfoSectionProps> = ({
 const LinkPreviewSection: React.FC = () => {
   const previewLink = `${BASE_URL}/c/[generated-code]`;
   return (
-    <Box sx={{ bgcolor: "grey.100", p: 2, borderRadius: 1 }}>
+    <Box sx={{ bgcolor: 'grey.100', p: 2, borderRadius: 1 }}>
       <Typography variant="subtitle2" gutterBottom>
         Shareable Link Preview:
       </Typography>
-      <Typography
-        variant="body2"
-        fontFamily="monospace"
-        sx={{ wordBreak: "break-all", mb: 1 }}
-      >
+      <Typography variant="body2" fontFamily="monospace" sx={{ wordBreak: 'break-all', mb: 1 }}>
         {previewLink}
       </Typography>
       <Typography variant="caption" color="text.secondary">
@@ -481,17 +410,8 @@ const ActionButtonsSection: React.FC<ActionButtonsSectionProps> = ({
   isValid,
   canCreate,
 }) => (
-  <Stack
-    direction={{ xs: "column-reverse", sm: "row" }}
-    spacing={2}
-    justifyContent="flex-end"
-  >
-    <Button
-      onClick={onCancel}
-      disabled={isSubmitting}
-      fullWidth={false}
-      sx={{ minWidth: { xs: "100%", sm: 120 } }}
-    >
+  <Stack direction={{ xs: 'column-reverse', sm: 'row' }} spacing={2} justifyContent="flex-end">
+    <Button onClick={onCancel} disabled={isSubmitting} fullWidth={false} sx={{ minWidth: { xs: '100%', sm: 120 } }}>
       Cancel
     </Button>
     <Button
@@ -500,9 +420,9 @@ const ActionButtonsSection: React.FC<ActionButtonsSectionProps> = ({
       disabled={!isValid || isSubmitting || !canCreate}
       startIcon={isSubmitting ? <CircularProgress size={16} /> : <SaveIcon />}
       fullWidth={false}
-      sx={{ minWidth: { xs: "100%", sm: 200 } }}
+      sx={{ minWidth: { xs: '100%', sm: 200 } }}
     >
-      {isSubmitting ? "Creating..." : "Create Shared Campaign"}
+      {isSubmitting ? 'Creating...' : 'Create Shared Campaign'}
     </Button>
   </Stack>
 );
@@ -510,16 +430,15 @@ const ActionButtonsSection: React.FC<ActionButtonsSectionProps> = ({
 const WarningAlert: React.FC = () => (
   <Alert severity="warning">
     <AlertTitle>Important</AlertTitle>
-    If someone stops sharing their profile with you, you will lose access to
-    their data. The share is controlled by the profile owner.
+    If someone stops sharing their profile with you, you will lose access to their data. The share is controlled by the
+    profile owner.
   </Alert>
 );
 
 const MaxCampaignsAlert: React.FC = () => (
   <Alert severity="error">
-    You have reached the maximum of {MAX_ACTIVE_SHARED_CAMPAIGNS} active shared
-    campaigns. Please deactivate an existing shared campaign before creating a
-    new one.
+    You have reached the maximum of {MAX_ACTIVE_SHARED_CAMPAIGNS} active shared campaigns. Please deactivate an existing
+    shared campaign before creating a new one.
   </Alert>
 );
 
@@ -544,47 +463,33 @@ function getArrayOrEmpty<T>(arr: T[] | undefined | null): T[] {
   return arr ?? [];
 }
 
-function filterDuplicateCatalogs(
-  publicCatalogs: Catalog[],
-  myCatalogs: Catalog[],
-): Catalog[] {
+function filterDuplicateCatalogs(publicCatalogs: Catalog[], myCatalogs: Catalog[]): Catalog[] {
   const myIdSet = new Set(myCatalogs.map((c) => c.catalogId));
   return publicCatalogs.filter((c) => !myIdSet.has(c.catalogId));
 }
 
 function usePublicCatalogs() {
-  const { data, loading } = useQuery<{ listPublicCatalogs: Catalog[] }>(
-    LIST_PUBLIC_CATALOGS,
-  );
+  const { data, loading } = useQuery<{ listPublicCatalogs: Catalog[] }>(LIST_PUBLIC_CATALOGS);
   return { catalogs: getArrayOrEmpty(data?.listPublicCatalogs), loading };
 }
 
 function useMyCatalogs() {
-  const { data, loading } = useQuery<{ listMyCatalogs: Catalog[] }>(
-    LIST_MY_CATALOGS,
-  );
+  const { data, loading } = useQuery<{ listMyCatalogs: Catalog[] }>(LIST_MY_CATALOGS);
   return { catalogs: getArrayOrEmpty(data?.listMyCatalogs), loading };
 }
 
 function useCatalogs() {
-  const { catalogs: publicCatalogs, loading: publicLoading } =
-    usePublicCatalogs();
+  const { catalogs: publicCatalogs, loading: publicLoading } = usePublicCatalogs();
   const { catalogs: myCatalogs, loading: myLoading } = useMyCatalogs();
-  const filteredPublicCatalogs = filterDuplicateCatalogs(
-    publicCatalogs,
-    myCatalogs,
-  );
+  const filteredPublicCatalogs = filterDuplicateCatalogs(publicCatalogs, myCatalogs);
   const catalogsLoading = publicLoading || myLoading;
   return { filteredPublicCatalogs, myCatalogs, catalogsLoading };
 }
 
 function useCanCreateSharedCampaign() {
-  const { data } = useQuery<{ listMySharedCampaigns: SharedCampaign[] }>(
-    LIST_MY_SHARED_CAMPAIGNS,
-    {
-      fetchPolicy: "network-only",
-    },
-  );
+  const { data } = useQuery<{ listMySharedCampaigns: SharedCampaign[] }>(LIST_MY_SHARED_CAMPAIGNS, {
+    fetchPolicy: 'network-only',
+  });
   const sharedCampaigns = getArrayOrEmpty(data?.listMySharedCampaigns);
   const activeCount = sharedCampaigns.filter((p) => p.isActive).length;
   return activeCount < MAX_ACTIVE_SHARED_CAMPAIGNS;
@@ -598,17 +503,17 @@ export const CreateSharedCampaignPage: React.FC = () => {
   const navigate = useNavigate();
 
   // Form state
-  const [catalogId, setCatalogId] = useState("");
-  const [campaignName, setCampaignName] = useState("");
+  const [catalogId, setCatalogId] = useState('');
+  const [campaignName, setCampaignName] = useState('');
   const [campaignYear, setCampaignYear] = useState(new Date().getFullYear());
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
-  const [unitType, setUnitType] = useState("");
-  const [unitNumber, setUnitNumber] = useState("");
-  const [city, setCity] = useState("");
-  const [state, setState] = useState("");
-  const [creatorMessage, setCreatorMessage] = useState("");
-  const [description, setDescription] = useState("");
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+  const [unitType, setUnitType] = useState('');
+  const [unitNumber, setUnitNumber] = useState('');
+  const [city, setCity] = useState('');
+  const [state, setState] = useState('');
+  const [creatorMessage, setCreatorMessage] = useState('');
+  const [description, setDescription] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -648,16 +553,15 @@ export const CreateSharedCampaignPage: React.FC = () => {
     description: description.trim() || undefined,
   });
 
-  const scrollToTop = () => window.scrollTo({ top: 0, behavior: "smooth" });
+  const scrollToTop = () => window.scrollTo({ top: 0, behavior: 'smooth' });
 
   const showValidationError = () => {
-    setError("Please fill in all required fields");
+    setError('Please fill in all required fields');
     scrollToTop();
   };
 
   const handleMutationError = (err: unknown) => {
-    const errorMessage =
-      err instanceof Error ? err.message : "Failed to create shared campaign";
+    const errorMessage = err instanceof Error ? err.message : 'Failed to create shared campaign';
     setError(errorMessage);
     scrollToTop();
   };
@@ -675,7 +579,7 @@ export const CreateSharedCampaignPage: React.FC = () => {
       await createSharedCampaign({
         variables: { input: buildMutationInput() },
       });
-      navigate("/shared-campaigns");
+      navigate('/shared-campaigns');
     } catch (err) {
       handleMutationError(err);
     } finally {
@@ -683,17 +587,13 @@ export const CreateSharedCampaignPage: React.FC = () => {
     }
   };
 
-  const handleCancel = () => navigate("/shared-campaigns");
-  const handleBack = () => navigate("/shared-campaigns");
+  const handleCancel = () => navigate('/shared-campaigns');
+  const handleBack = () => navigate('/shared-campaigns');
 
   return (
     <Container maxWidth="md" sx={{ py: 3 }}>
       <Stack direction="row" alignItems="center" spacing={2} sx={{ mb: 3 }}>
-        <Button
-          startIcon={<BackIcon />}
-          onClick={handleBack}
-          disabled={isSubmitting}
-        >
+        <Button startIcon={<BackIcon />} onClick={handleBack} disabled={isSubmitting}>
           Back
         </Button>
         <Typography variant="h4" component="h1">

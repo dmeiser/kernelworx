@@ -1,7 +1,7 @@
 /**
  * Custom hook for shared campaign form initialization
  */
-import { useEffect } from "react";
+import { useEffect } from 'react';
 
 interface SharedCampaign {
   sharedCampaignCode: string;
@@ -42,8 +42,8 @@ export const useSharedCampaignFormInit = (
       setCampaignName(sharedCampaign.campaignName);
       setCampaignYear(sharedCampaign.campaignYear);
       setCatalogId(sharedCampaign.catalogId);
-      setStartDate(sharedCampaign.startDate || "");
-      setEndDate(sharedCampaign.endDate || "");
+      setStartDate(sharedCampaign.startDate || '');
+      setEndDate(sharedCampaign.endDate || '');
       setUnitType(sharedCampaign.unitType);
       setUnitNumber(String(sharedCampaign.unitNumber));
       setCity(sharedCampaign.city);

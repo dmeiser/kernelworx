@@ -11,20 +11,16 @@ import {
   Typography,
   Alert,
   CircularProgress,
-} from "@mui/material";
-import type { UseEmailUpdateReturn } from "../../hooks/useEmailUpdate";
+} from '@mui/material';
+import type { UseEmailUpdateReturn } from '../../hooks/useEmailUpdate';
 
 const SendCodeButton: React.FC<{
   loading: boolean;
   hasNewEmail: boolean;
   onClick: () => void;
 }> = ({ loading, hasNewEmail, onClick }) => (
-  <Button
-    onClick={onClick}
-    variant="contained"
-    disabled={loading || !hasNewEmail}
-  >
-    {loading ? <CircularProgress size={24} /> : "Send Code"}
+  <Button onClick={onClick} variant="contained" disabled={loading || !hasNewEmail}>
+    {loading ? <CircularProgress size={24} /> : 'Send Code'}
   </Button>
 );
 
@@ -33,12 +29,8 @@ const VerifyButton: React.FC<{
   codeLength: number;
   onClick: () => void;
 }> = ({ loading, codeLength, onClick }) => (
-  <Button
-    onClick={onClick}
-    variant="contained"
-    disabled={loading || codeLength !== 6}
-  >
-    {loading ? <CircularProgress size={24} /> : "Verify & Update"}
+  <Button onClick={onClick} variant="contained" disabled={loading || codeLength !== 6}>
+    {loading ? <CircularProgress size={24} /> : 'Verify & Update'}
   </Button>
 );
 
@@ -48,8 +40,7 @@ const EmailEntryContent: React.FC<{
 }> = ({ emailHook, currentEmail }) => (
   <>
     <Typography variant="body2" color="text.secondary" paragraph>
-      Enter your new email address. You'll receive a verification code at the
-      new address.
+      Enter your new email address. You'll receive a verification code at the new address.
     </Typography>
     <TextField
       label="New Email Address"
@@ -64,26 +55,19 @@ const EmailEntryContent: React.FC<{
   </>
 );
 
-const VerificationContent: React.FC<{ emailHook: UseEmailUpdateReturn }> = ({
-  emailHook,
-}) => (
+const VerificationContent: React.FC<{ emailHook: UseEmailUpdateReturn }> = ({ emailHook }) => (
   <>
     <Typography variant="body2" color="text.secondary" paragraph>
-      A verification code has been sent to <strong>{emailHook.newEmail}</strong>
-      . Please enter the code below.
+      A verification code has been sent to <strong>{emailHook.newEmail}</strong>. Please enter the code below.
     </Typography>
     <TextField
       label="Verification Code"
       value={emailHook.emailVerificationCode}
-      onChange={(e) =>
-        emailHook.setEmailVerificationCode(
-          e.target.value.replace(/\D/g, "").substring(0, 6),
-        )
-      }
+      onChange={(e) => emailHook.setEmailVerificationCode(e.target.value.replace(/\D/g, '').substring(0, 6))}
       fullWidth
       autoFocus
       disabled={emailHook.emailUpdateLoading}
-      inputProps={{ maxLength: 6, pattern: "[0-9]*" }}
+      inputProps={{ maxLength: 6, pattern: '[0-9]*' }}
       helperText="Enter the 6-digit code from your email"
     />
   </>
@@ -97,14 +81,13 @@ interface ChangeEmailDialogProps {
 }
 
 const getDialogTitle = (emailHook: UseEmailUpdateReturn): string =>
-  emailHook.emailUpdatePending ? "Verify New Email" : "Change Email Address";
+  emailHook.emailUpdatePending ? 'Verify New Email' : 'Change Email Address';
 
 const renderStatusAlerts = (emailHook: UseEmailUpdateReturn) => (
   <>
     {emailHook.emailUpdateSuccess ? (
       <Alert severity="success" sx={{ mb: 2 }}>
-        Email verified! Signing you out to complete the update. Please sign back
-        in with your new email address.
+        Email verified! Signing you out to complete the update. Please sign back in with your new email address.
       </Alert>
     ) : null}
 
@@ -116,10 +99,7 @@ const renderStatusAlerts = (emailHook: UseEmailUpdateReturn) => (
   </>
 );
 
-const renderContentBody = (
-  emailHook: UseEmailUpdateReturn,
-  currentEmail: string | undefined,
-): React.ReactNode =>
+const renderContentBody = (emailHook: UseEmailUpdateReturn, currentEmail: string | undefined): React.ReactNode =>
   emailHook.emailUpdatePending ? (
     <VerificationContent emailHook={emailHook} />
   ) : (
@@ -152,22 +132,14 @@ export const ChangeEmailDialog: React.FC<ChangeEmailDialogProps> = ({
   onConfirmUpdate,
 }) => {
   return (
-    <Dialog
-      open={emailHook.emailDialogOpen}
-      onClose={emailHook.handleCloseEmailDialog}
-      maxWidth="sm"
-      fullWidth
-    >
+    <Dialog open={emailHook.emailDialogOpen} onClose={emailHook.handleCloseEmailDialog} maxWidth="sm" fullWidth>
       <DialogTitle>{getDialogTitle(emailHook)}</DialogTitle>
       <DialogContent>
         {renderStatusAlerts(emailHook)}
         {renderContentBody(emailHook, currentEmail)}
       </DialogContent>
       <DialogActions>
-        <Button
-          onClick={emailHook.handleCloseEmailDialog}
-          disabled={emailHook.emailUpdateLoading}
-        >
+        <Button onClick={emailHook.handleCloseEmailDialog} disabled={emailHook.emailUpdateLoading}>
           Cancel
         </Button>
         {renderPrimaryAction(emailHook, onConfirmUpdate, onRequestUpdate)}

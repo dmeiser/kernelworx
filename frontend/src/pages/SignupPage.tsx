@@ -8,7 +8,7 @@
  * - Email verification flow
  */
 
-import { useState } from "react";
+import { useState } from 'react';
 import {
   Box,
   Button,
@@ -22,17 +22,12 @@ import {
   Checkbox,
   FormControlLabel,
   MenuItem,
-} from "@mui/material";
-import { useNavigate, NavigateFunction } from "react-router-dom";
-import {
-  signUp,
-  confirmSignUp,
-  autoSignIn,
-  fetchAuthSession,
-} from "aws-amplify/auth";
-import { useMutation, MutationTuple } from "@apollo/client/react";
-import { UPDATE_MY_ACCOUNT } from "../lib/graphql";
-import { useAuth } from "../contexts/AuthContext";
+} from '@mui/material';
+import { useNavigate, NavigateFunction } from 'react-router-dom';
+import { signUp, confirmSignUp, autoSignIn, fetchAuthSession } from 'aws-amplify/auth';
+import { useMutation, MutationTuple } from '@apollo/client/react';
+import { UPDATE_MY_ACCOUNT } from '../lib/graphql';
+import { useAuth } from '../contexts/AuthContext';
 
 // Types for optional fields
 interface OptionalFields {
@@ -46,17 +41,16 @@ interface OptionalFields {
 
 // Dispatch table for signup error messages
 const SIGNUP_ERROR_MESSAGES: Record<string, string> = {
-  UsernameExistsException: "An account with this email already exists",
+  UsernameExistsException: 'An account with this email already exists',
   InvalidPasswordException:
-    "Password does not meet requirements: minimum 8 characters with uppercase, lowercase, numbers, and symbols",
-  InvalidParameterException: "Invalid input. Please check your information",
+    'Password does not meet requirements: minimum 8 characters with uppercase, lowercase, numbers, and symbols',
+  InvalidParameterException: 'Invalid input. Please check your information',
 };
 
 // Dispatch table for verification error messages
 const VERIFICATION_ERROR_MESSAGES: Record<string, string> = {
-  CodeMismatchException:
-    "Invalid verification code. Please check and try again",
-  ExpiredCodeException: "Verification code expired. Please request a new one",
+  CodeMismatchException: 'Invalid verification code. Please check and try again',
+  ExpiredCodeException: 'Verification code expired. Please request a new one',
 };
 
 // Helper: Get error message from dispatch table with fallback
@@ -72,20 +66,14 @@ function getErrorFromTable(
 }
 
 // Helper: Get signup error message from dispatch table
-function getSignupErrorMessage(error: {
-  name?: string;
-  message?: string;
-}): string {
-  const fallback = error.message || "Signup failed. Please try again";
+function getSignupErrorMessage(error: { name?: string; message?: string }): string {
+  const fallback = error.message || 'Signup failed. Please try again';
   return getErrorFromTable(SIGNUP_ERROR_MESSAGES, error.name, fallback);
 }
 
 // Helper: Get verification error message from dispatch table
-function getVerificationErrorMessage(error: {
-  name?: string;
-  message?: string;
-}): string {
-  const fallback = error.message || "Verification failed. Please try again";
+function getVerificationErrorMessage(error: { name?: string; message?: string }): string {
+  const fallback = error.message || 'Verification failed. Please try again';
   return getErrorFromTable(VERIFICATION_ERROR_MESSAGES, error.name, fallback);
 }
 
@@ -107,14 +95,11 @@ function validateFormFields(
   ageConfirmed: boolean,
 ): string | null {
   const rules: ValidationRule[] = [
-    [
-      !email || !password || !confirmPassword,
-      "Email and password are required",
-    ],
-    [!email.includes("@"), "Please enter a valid email address"],
-    [password.length < 8, "Password must be at least 8 characters"],
-    [password !== confirmPassword, "Passwords do not match"],
-    [!ageConfirmed, "You must be 13 years or older to create an account"],
+    [!email || !password || !confirmPassword, 'Email and password are required'],
+    [!email.includes('@'), 'Please enter a valid email address'],
+    [password.length < 8, 'Password must be at least 8 characters'],
+    [password !== confirmPassword, 'Passwords do not match'],
+    [!ageConfirmed, 'You must be 13 years or older to create an account'],
   ];
   return getValidationError(rules);
 }
@@ -133,16 +118,14 @@ function parseUnitNumber(unitNumber: string): number | undefined {
 }
 
 // Helper: Build optional fields input for mutation
-function buildOptionalFieldsInput(
-  fields: OptionalFields,
-): Record<string, string | number> {
+function buildOptionalFieldsInput(fields: OptionalFields): Record<string, string | number> {
   const result: Record<string, string | number> = {};
-  const stringFieldKeys: (keyof Omit<OptionalFields, "unitNumber">)[] = [
-    "givenName",
-    "familyName",
-    "city",
-    "state",
-    "unitType",
+  const stringFieldKeys: (keyof Omit<OptionalFields, 'unitNumber'>)[] = [
+    'givenName',
+    'familyName',
+    'city',
+    'state',
+    'unitType',
   ];
   for (const key of stringFieldKeys) {
     if (fields[key]) result[key] = fields[key];
@@ -161,9 +144,9 @@ async function saveOptionalFields(
   try {
     const input = buildOptionalFieldsInput(fields);
     await updateMyAccount({ variables: { input } });
-    console.log("Optional fields saved successfully");
+    console.log('Optional fields saved successfully');
   } catch (updateError) {
-    console.error("Failed to save optional fields:", updateError);
+    console.error('Failed to save optional fields:', updateError);
     // Don't block navigation if this fails
   }
 }
@@ -176,13 +159,13 @@ async function handlePostVerificationAuth(
 ): Promise<void> {
   try {
     await fetchAuthSession();
-    console.log("User is authenticated despite autoSignIn failure");
+    console.log('User is authenticated despite autoSignIn failure');
     await refreshSession();
-    navigate("/scouts");
+    navigate('/scouts');
   } catch {
-    console.log("User is not authenticated, redirecting to login");
-    setSuccess("Please log in with your new account");
-    setTimeout(() => navigate("/login"), 1500);
+    console.log('User is not authenticated, redirecting to login');
+    setSuccess('Please log in with your new account');
+    setTimeout(() => navigate('/login'), 1500);
   }
 }
 
@@ -198,12 +181,9 @@ async function processAutoSignIn(
     await autoSignIn();
     await saveOptionalFields(updateMyAccount, optionalFields);
     await refreshSession();
-    navigate("/scouts");
+    navigate('/scouts');
   } catch (autoSignInError) {
-    console.log(
-      "Auto sign-in failed, checking authentication state:",
-      autoSignInError,
-    );
+    console.log('Auto sign-in failed, checking authentication state:', autoSignInError);
     await handlePostVerificationAuth(refreshSession, navigate, setSuccess);
   }
 }
@@ -212,21 +192,21 @@ export const SignupPage: React.FC = () => {
   const navigate = useNavigate();
   const { refreshSession } = useAuth();
   const [updateMyAccount] = useMutation(UPDATE_MY_ACCOUNT);
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [givenName, setGivenName] = useState("");
-  const [familyName, setFamilyName] = useState("");
-  const [city, setCity] = useState("");
-  const [state, setState] = useState("");
-  const [unitType, setUnitType] = useState("");
-  const [unitNumber, setUnitNumber] = useState("");
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [givenName, setGivenName] = useState('');
+  const [familyName, setFamilyName] = useState('');
+  const [city, setCity] = useState('');
+  const [state, setState] = useState('');
+  const [unitType, setUnitType] = useState('');
+  const [unitNumber, setUnitNumber] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [ageConfirmed, setAgeConfirmed] = useState(false);
   const [showVerification, setShowVerification] = useState(false);
-  const [verificationCode, setVerificationCode] = useState("");
+  const [verificationCode, setVerificationCode] = useState('');
 
   const getOptionalFields = (): OptionalFields => ({
     givenName,
@@ -241,12 +221,7 @@ export const SignupPage: React.FC = () => {
     e.preventDefault();
     setError(null);
 
-    const validationError = validateFormFields(
-      email,
-      password,
-      confirmPassword,
-      ageConfirmed,
-    );
+    const validationError = validateFormFields(email, password, confirmPassword, ageConfirmed);
     if (validationError) {
       setError(validationError);
       return;
@@ -268,10 +243,10 @@ export const SignupPage: React.FC = () => {
         },
       });
 
-      console.log("Signup successful:", signUpResult);
+      console.log('Signup successful:', signUpResult);
       handleSignupNextStep(signUpResult.nextStep.signUpStep);
     } catch (err: unknown) {
-      console.error("Signup failed:", err);
+      console.error('Signup failed:', err);
       const typedError = err as { name?: string; message?: string };
       setError(getSignupErrorMessage(typedError));
     } finally {
@@ -280,14 +255,14 @@ export const SignupPage: React.FC = () => {
   };
 
   const handleSignupNextStep = (signUpStep: string) => {
-    if (signUpStep === "CONFIRM_SIGN_UP") {
+    if (signUpStep === 'CONFIRM_SIGN_UP') {
       setShowVerification(true);
-      setSuccess("Please check your email for a verification code");
+      setSuccess('Please check your email for a verification code');
       return;
     }
-    if (signUpStep === "DONE") {
-      setSuccess("Account created successfully!");
-      setTimeout(() => navigate("/login"), 1500);
+    if (signUpStep === 'DONE') {
+      setSuccess('Account created successfully!');
+      setTimeout(() => navigate('/login'), 1500);
     }
   };
 
@@ -302,23 +277,17 @@ export const SignupPage: React.FC = () => {
         confirmationCode: verificationCode,
       });
 
-      console.log("Email confirmed:", confirmResult);
+      console.log('Email confirmed:', confirmResult);
 
       if (!confirmResult.isSignUpComplete) {
         return;
       }
 
-      setSuccess("Email verified! Signing you in...");
+      setSuccess('Email verified! Signing you in...');
       await new Promise((resolve) => setTimeout(resolve, 1000));
-      await processAutoSignIn(
-        updateMyAccount,
-        getOptionalFields(),
-        refreshSession,
-        navigate,
-        setSuccess,
-      );
+      await processAutoSignIn(updateMyAccount, getOptionalFields(), refreshSession, navigate, setSuccess);
     } catch (err: unknown) {
-      console.error("Email verification failed:", err);
+      console.error('Email verification failed:', err);
       const typedError = err as { name?: string; message?: string };
       setError(getVerificationErrorMessage(typedError));
     } finally {
@@ -328,7 +297,7 @@ export const SignupPage: React.FC = () => {
 
   const handleResendCode = async () => {
     // TODO: Implement resend verification code
-    setSuccess("Resend code functionality coming soon");
+    setSuccess('Resend code functionality coming soon');
   };
 
   if (showVerification) {
@@ -342,7 +311,7 @@ export const SignupPage: React.FC = () => {
         loading={loading}
         onVerify={handleVerifyEmail}
         onResendCode={handleResendCode}
-        onNavigateToLogin={() => navigate("/login")}
+        onNavigateToLogin={() => navigate('/login')}
       />
     );
   }
@@ -373,7 +342,7 @@ export const SignupPage: React.FC = () => {
       success={success}
       loading={loading}
       onSignup={handleSignup}
-      onNavigateToLogin={() => navigate("/login")}
+      onNavigateToLogin={() => navigate('/login')}
     />
   );
 };
@@ -384,21 +353,18 @@ interface PageLayoutProps {
   children: React.ReactNode;
 }
 
-const PageLayout: React.FC<PageLayoutProps> = ({
-  maxWidth = 500,
-  children,
-}) => (
+const PageLayout: React.FC<PageLayoutProps> = ({ maxWidth = 500, children }) => (
   <Box
     sx={{
-      minHeight: "100vh",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      background: "linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%)",
+      minHeight: '100vh',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      background: 'linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%)',
       p: 2,
     }}
   >
-    <Paper elevation={6} sx={{ p: 4, maxWidth, width: "100%" }}>
+    <Paper elevation={6} sx={{ p: 4, maxWidth, width: '100%' }}>
       {children}
     </Paper>
   </Box>
@@ -454,14 +420,13 @@ const VerificationView: React.FC<VerificationViewProps> = ({
       variant="h4"
       component="h1"
       gutterBottom
-      sx={{ fontFamily: "Kaushan Script, cursive", textAlign: "center" }}
+      sx={{ fontFamily: 'Kaushan Script, cursive', textAlign: 'center' }}
     >
       Verify Email
     </Typography>
 
     <Typography variant="body2" color="text.secondary" paragraph>
-      We've sent a verification code to <strong>{email}</strong>. Please enter
-      it below to complete your registration.
+      We've sent a verification code to <strong>{email}</strong>. Please enter it below to complete your registration.
     </Typography>
 
     <AlertMessages error={error} success={success} />
@@ -478,23 +443,12 @@ const VerificationView: React.FC<VerificationViewProps> = ({
         placeholder="123456"
       />
 
-      <Button
-        type="submit"
-        fullWidth
-        variant="contained"
-        sx={{ mt: 3, mb: 2 }}
-        disabled={loading}
-      >
-        {loading ? <CircularProgress size={24} /> : "Verify Email"}
+      <Button type="submit" fullWidth variant="contained" sx={{ mt: 3, mb: 2 }} disabled={loading}>
+        {loading ? <CircularProgress size={24} /> : 'Verify Email'}
       </Button>
 
       <Stack spacing={1}>
-        <Button
-          fullWidth
-          variant="text"
-          onClick={onResendCode}
-          disabled={loading}
-        >
+        <Button fullWidth variant="text" onClick={onResendCode} disabled={loading}>
           Resend Code
         </Button>
         <Button fullWidth variant="text" onClick={onNavigateToLogin}>
@@ -511,29 +465,27 @@ const CoppaWarningAlert: React.FC = () => (
     severity="warning"
     sx={{
       mb: 3,
-      backgroundColor: "#fff3e0",
-      borderLeft: "4px solid #f57c00",
-      "& .MuiAlert-icon": { color: "#e65100" },
+      backgroundColor: '#fff3e0',
+      borderLeft: '4px solid #f57c00',
+      '& .MuiAlert-icon': { color: '#e65100' },
     }}
   >
-    <Typography variant="body2" sx={{ color: "#e65100" }}>
-      <strong>⚠️ Age Requirement:</strong> You must be 13 years or older to
-      create an account. By signing up, you confirm that you meet this age
-      requirement as required by COPPA (Children's Online Privacy Protection
-      Act).
+    <Typography variant="body2" sx={{ color: '#e65100' }}>
+      <strong>⚠️ Age Requirement:</strong> You must be 13 years or older to create an account. By signing up, you
+      confirm that you meet this age requirement as required by COPPA (Children's Online Privacy Protection Act).
     </Typography>
   </Alert>
 );
 
 // Sub-component: Unit type menu items
 const UNIT_TYPE_OPTIONS = [
-  { value: "", label: "None" },
-  { value: "Pack", label: "Pack (Cub Scouts)" },
-  { value: "Troop", label: "Troop (Scouts BSA)" },
-  { value: "Crew", label: "Crew (Venturing)" },
-  { value: "Ship", label: "Ship (Sea Scouts)" },
-  { value: "Post", label: "Post (Exploring)" },
-  { value: "Club", label: "Club (Exploring)" },
+  { value: '', label: 'None' },
+  { value: 'Pack', label: 'Pack (Cub Scouts)' },
+  { value: 'Troop', label: 'Troop (Scouts BSA)' },
+  { value: 'Crew', label: 'Crew (Venturing)' },
+  { value: 'Ship', label: 'Ship (Sea Scouts)' },
+  { value: 'Post', label: 'Post (Exploring)' },
+  { value: 'Club', label: 'Club (Exploring)' },
 ];
 
 // Sub-component: Signup form view
@@ -597,7 +549,7 @@ const SignupFormView: React.FC<SignupFormViewProps> = ({
       variant="h4"
       component="h1"
       gutterBottom
-      sx={{ fontFamily: "Kaushan Script, cursive", textAlign: "center" }}
+      sx={{ fontFamily: 'Kaushan Script, cursive', textAlign: 'center' }}
     >
       Create Account
     </Typography>
@@ -710,35 +662,18 @@ const SignupFormView: React.FC<SignupFormViewProps> = ({
       />
 
       <FormControlLabel
-        control={
-          <Checkbox
-            checked={ageConfirmed}
-            onChange={(e) => setAgeConfirmed(e.target.checked)}
-            required
-          />
-        }
+        control={<Checkbox checked={ageConfirmed} onChange={(e) => setAgeConfirmed(e.target.checked)} required />}
         label="I confirm that I am 13 years of age or older"
         sx={{ mt: 2 }}
       />
 
-      <Button
-        type="submit"
-        fullWidth
-        variant="contained"
-        sx={{ mt: 3, mb: 2 }}
-        disabled={loading}
-      >
-        {loading ? <CircularProgress size={24} /> : "Create Account"}
+      <Button type="submit" fullWidth variant="contained" sx={{ mt: 3, mb: 2 }} disabled={loading}>
+        {loading ? <CircularProgress size={24} /> : 'Create Account'}
       </Button>
 
       <Typography variant="body2" align="center" color="text.secondary">
-        Already have an account?{" "}
-        <MuiLink
-          component="button"
-          type="button"
-          onClick={onNavigateToLogin}
-          sx={{ cursor: "pointer" }}
-        >
+        Already have an account?{' '}
+        <MuiLink component="button" type="button" onClick={onNavigateToLogin} sx={{ cursor: 'pointer' }}>
           Sign In
         </MuiLink>
       </Typography>

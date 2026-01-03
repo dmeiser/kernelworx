@@ -1,9 +1,9 @@
 /**
  * Custom hook for managing shared campaign state and queries
  */
-import { useMemo } from "react";
-import { useQuery } from "@apollo/client/react";
-import { GET_SHARED_CAMPAIGN, LIST_MY_PROFILES } from "../lib/graphql";
+import { useMemo } from 'react';
+import { useQuery } from '@apollo/client/react';
+import { GET_SHARED_CAMPAIGN, LIST_MY_PROFILES } from '../lib/graphql';
 
 interface SharedCampaign {
   sharedCampaignCode: string;
@@ -34,20 +34,15 @@ interface SellerProfile {
   permissions: string[];
 }
 
-export const useSharedCampaignAndProfiles = (
-  effectiveSharedCampaignCode: string | undefined,
-) => {
+export const useSharedCampaignAndProfiles = (effectiveSharedCampaignCode: string | undefined) => {
   const {
     data: sharedCampaignData,
     loading: sharedCampaignLoading,
     error: sharedCampaignError,
-  } = useQuery<{ getSharedCampaign: SharedCampaign | null }>(
-    GET_SHARED_CAMPAIGN,
-    {
-      variables: { sharedCampaignCode: effectiveSharedCampaignCode },
-      skip: !effectiveSharedCampaignCode,
-    },
-  );
+  } = useQuery<{ getSharedCampaign: SharedCampaign | null }>(GET_SHARED_CAMPAIGN, {
+    variables: { sharedCampaignCode: effectiveSharedCampaignCode },
+    skip: !effectiveSharedCampaignCode,
+  });
 
   const {
     data: profilesData,
@@ -57,15 +52,9 @@ export const useSharedCampaignAndProfiles = (
     listMyProfiles: SellerProfile[];
   }>(LIST_MY_PROFILES);
 
-  const sharedCampaign = useMemo(
-    () => sharedCampaignData?.getSharedCampaign ?? null,
-    [sharedCampaignData],
-  );
+  const sharedCampaign = useMemo(() => sharedCampaignData?.getSharedCampaign ?? null, [sharedCampaignData]);
 
-  const profiles = useMemo(
-    () => profilesData?.listMyProfiles ?? [],
-    [profilesData],
-  );
+  const profiles = useMemo(() => profilesData?.listMyProfiles ?? [], [profilesData]);
 
   const isSharedCampaignMode = useMemo(
     () => Boolean(effectiveSharedCampaignCode && sharedCampaign?.isActive),

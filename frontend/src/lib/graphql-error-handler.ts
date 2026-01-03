@@ -17,17 +17,15 @@ export interface GraphQLErrorEvent {
  * @param onError Callback to display error toast
  * @returns Cleanup function to remove listener
  */
-export function setupGraphQLErrorListener(
-  onError: (error: GraphQLErrorEvent) => void,
-): () => void {
+export function setupGraphQLErrorListener(onError: (error: GraphQLErrorEvent) => void): () => void {
   const handler = (event: Event) => {
     const customEvent = event as CustomEvent<GraphQLErrorEvent>;
     onError(customEvent.detail);
   };
 
-  window.addEventListener("graphql-error", handler);
+  window.addEventListener('graphql-error', handler);
 
   return () => {
-    window.removeEventListener("graphql-error", handler);
+    window.removeEventListener('graphql-error', handler);
   };
 }

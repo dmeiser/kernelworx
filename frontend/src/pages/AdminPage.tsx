@@ -4,8 +4,8 @@
  * Only visible when user has isAdmin=true
  */
 
-import React, { useState } from "react";
-import { useQuery } from "@apollo/client/react";
+import React, { useState } from 'react';
+import { useQuery } from '@apollo/client/react';
 import {
   Box,
   Typography,
@@ -22,13 +22,9 @@ import {
   TableRow,
   Chip,
   Stack,
-} from "@mui/material";
-import {
-  People as PeopleIcon,
-  Inventory as CatalogIcon,
-  Info as InfoIcon,
-} from "@mui/icons-material";
-import { LIST_MY_PROFILES, LIST_PUBLIC_CATALOGS } from "../lib/graphql";
+} from '@mui/material';
+import { People as PeopleIcon, Inventory as CatalogIcon, Info as InfoIcon } from '@mui/icons-material';
+import { LIST_MY_PROFILES, LIST_PUBLIC_CATALOGS } from '../lib/graphql';
 
 // --- Type Definitions ---
 interface TabPanelProps {
@@ -112,11 +108,7 @@ interface ProfilesTabContentProps {
   profiles: Profile[];
 }
 
-const ProfilesTabContent: React.FC<ProfilesTabContentProps> = ({
-  loading,
-  error,
-  profiles,
-}) => {
+const ProfilesTabContent: React.FC<ProfilesTabContentProps> = ({ loading, error, profiles }) => {
   if (loading) {
     return <LoadingSpinner />;
   }
@@ -160,8 +152,8 @@ const CatalogCard: React.FC<{ catalog: Catalog }> = ({ catalog }) => (
         </Typography>
       </Box>
       <Chip
-        label={catalog.isActive ? "Active" : "Inactive"}
-        color={catalog.isActive ? "success" : "default"}
+        label={catalog.isActive ? 'Active' : 'Inactive'}
+        color={catalog.isActive ? 'success' : 'default'}
         size="small"
       />
     </Stack>
@@ -175,11 +167,7 @@ interface CatalogsTabContentProps {
   catalogs: Catalog[];
 }
 
-const CatalogsTabContent: React.FC<CatalogsTabContentProps> = ({
-  loading,
-  error,
-  catalogs,
-}) => {
+const CatalogsTabContent: React.FC<CatalogsTabContentProps> = ({ loading, error, catalogs }) => {
   if (loading) {
     return <LoadingSpinner />;
   }
@@ -187,11 +175,7 @@ const CatalogsTabContent: React.FC<CatalogsTabContentProps> = ({
     return <ErrorAlert message={error.message} />;
   }
   if (catalogs.length === 0) {
-    return (
-      <Alert severity="info">
-        No catalogs found. Create your first catalog!
-      </Alert>
-    );
+    return <Alert severity="info">No catalogs found. Create your first catalog!</Alert>;
   }
   return (
     <Stack spacing={2}>
@@ -219,9 +203,7 @@ const SystemInfoTabContent: React.FC = () => (
         <Typography variant="subtitle2" color="text.secondary">
           Backend API
         </Typography>
-        <Typography variant="body1">
-          AWS AppSync GraphQL (api.dev.psm.repeatersolutions.com)
-        </Typography>
+        <Typography variant="body1">AWS AppSync GraphQL (api.dev.psm.repeatersolutions.com)</Typography>
       </Box>
       <Box>
         <Typography variant="subtitle2" color="text.secondary">
@@ -233,9 +215,7 @@ const SystemInfoTabContent: React.FC = () => (
         <Typography variant="subtitle2" color="text.secondary">
           Authentication
         </Typography>
-        <Typography variant="body1">
-          AWS Cognito (Social Login Enabled)
-        </Typography>
+        <Typography variant="body1">AWS Cognito (Social Login Enabled)</Typography>
       </Box>
       <Box>
         <Typography variant="subtitle2" color="text.secondary">
@@ -246,17 +226,11 @@ const SystemInfoTabContent: React.FC = () => (
     </Stack>
     <Alert severity="info" sx={{ mt: 3 }}>
       <strong>Admin Features In Development:</strong>
-      <ul style={{ margin: "8px 0", paddingLeft: "20px" }}>
-        <li>
-          User management (view all users, reset passwords, disable accounts)
-        </li>
+      <ul style={{ margin: '8px 0', paddingLeft: '20px' }}>
+        <li>User management (view all users, reset passwords, disable accounts)</li>
         <li>Profile management (transfer ownership, hard delete)</li>
-        <li>
-          Order management (view all orders, restore soft-deleted, hard delete)
-        </li>
-        <li>
-          Catalog CRUD (create, edit, delete official catalogs and products)
-        </li>
+        <li>Order management (view all orders, restore soft-deleted, hard delete)</li>
+        <li>Catalog CRUD (create, edit, delete official catalogs and products)</li>
         <li>System analytics (usage stats, popular products, sales trends)</li>
         <li>Audit logs (view all admin actions and changes)</li>
       </ul>
@@ -296,8 +270,7 @@ export const AdminPage: React.FC = () => {
       </Typography>
 
       <Alert severity="warning" sx={{ mb: 3 }}>
-        <strong>Administrator Access:</strong> You have elevated privileges. Use
-        this console responsibly.
+        <strong>Administrator Access:</strong> You have elevated privileges. Use this console responsibly.
       </Alert>
 
       {/* Tabs */}
@@ -316,14 +289,9 @@ export const AdminPage: React.FC = () => {
             All Scouts
           </Typography>
           <Typography variant="body2" color="text.secondary" paragraph>
-            View all scouts in the system. Full CRUD operations coming in future
-            updates.
+            View all scouts in the system. Full CRUD operations coming in future updates.
           </Typography>
-          <ProfilesTabContent
-            loading={profilesLoading}
-            error={profilesError}
-            profiles={profiles}
-          />
+          <ProfilesTabContent loading={profilesLoading} error={profilesError} profiles={profiles} />
         </Paper>
       </TabPanel>
 
@@ -333,17 +301,12 @@ export const AdminPage: React.FC = () => {
             Product Catalogs
           </Typography>
           <Typography variant="body2" color="text.secondary" paragraph>
-            Manage official product catalogs. Create, edit, and deactivate
-            catalog items.
+            Manage official product catalogs. Create, edit, and deactivate catalog items.
           </Typography>
-          <CatalogsTabContent
-            loading={catalogsLoading}
-            error={catalogsError}
-            catalogs={catalogs}
-          />
+          <CatalogsTabContent loading={catalogsLoading} error={catalogsError} catalogs={catalogs} />
           <Alert severity="info" sx={{ mt: 3 }}>
-            <strong>Coming Soon:</strong> Full catalog management (create, edit,
-            delete items). For now, use the AWS Console or GraphQL API directly.
+            <strong>Coming Soon:</strong> Full catalog management (create, edit, delete items). For now, use the AWS
+            Console or GraphQL API directly.
           </Alert>
         </Paper>
       </TabPanel>

@@ -1,8 +1,8 @@
 /**
  * Custom hook for profile effects (auto-select, redirect on no profiles)
  */
-import { useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 
 interface SellerProfile {
   profileId: string;
@@ -29,26 +29,15 @@ export const useProfileEffects = (
 
   // Redirect to profile creation if user has no profiles in shared campaign mode
   useEffect(() => {
-    if (
-      isSharedCampaignMode &&
-      !profilesLoading &&
-      profiles.length === 0 &&
-      effectiveSharedCampaignCode
-    ) {
-      navigate("/scouts", {
+    if (isSharedCampaignMode && !profilesLoading && profiles.length === 0 && effectiveSharedCampaignCode) {
+      navigate('/scouts', {
         state: {
           returnTo: `/c/${effectiveSharedCampaignCode}`,
           sharedCampaignCode: effectiveSharedCampaignCode,
-          message: "Create a scout to use this campaign link",
+          message: 'Create a scout to use this campaign link',
         },
         replace: true,
       });
     }
-  }, [
-    isSharedCampaignMode,
-    profilesLoading,
-    profiles.length,
-    effectiveSharedCampaignCode,
-    navigate,
-  ]);
+  }, [isSharedCampaignMode, profilesLoading, profiles.length, effectiveSharedCampaignCode, navigate]);
 };

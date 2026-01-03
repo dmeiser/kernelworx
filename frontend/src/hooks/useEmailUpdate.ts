@@ -1,8 +1,8 @@
 /**
  * Custom hook for email update functionality
  */
-import { useState } from "react";
-import { updateUserAttribute, confirmUserAttribute } from "aws-amplify/auth";
+import { useState } from 'react';
+import { updateUserAttribute, confirmUserAttribute } from 'aws-amplify/auth';
 
 export interface UseEmailUpdateReturn {
   emailDialogOpen: boolean;
@@ -18,30 +18,24 @@ export interface UseEmailUpdateReturn {
   handleOpenEmailDialog: () => void;
   handleCloseEmailDialog: () => void;
   handleRequestEmailUpdate: (currentEmail: string | undefined) => Promise<void>;
-  handleConfirmEmailUpdate: (
-    logout: () => Promise<void>,
-    navigate: (path: string) => void,
-  ) => Promise<void>;
+  handleConfirmEmailUpdate: (logout: () => Promise<void>, navigate: (path: string) => void) => Promise<void>;
 }
 
 const getErrorMessage = (err: unknown, fallback: string): string => {
   if (err instanceof Error) return err.message;
-  if (typeof err === "object" && err !== null && "message" in err) {
+  if (typeof err === 'object' && err !== null && 'message' in err) {
     return String((err as { message: unknown }).message);
   }
   return fallback;
 };
 
-const validateNewEmail = (
-  newEmail: string,
-  currentEmail?: string,
-): string | null => {
-  if (!newEmail || !newEmail.includes("@")) {
-    return "Please enter a valid email address";
+const validateNewEmail = (newEmail: string, currentEmail?: string): string | null => {
+  if (!newEmail || !newEmail.includes('@')) {
+    return 'Please enter a valid email address';
   }
 
   if (newEmail.toLowerCase() === currentEmail?.toLowerCase()) {
-    return "New email must be different from current email";
+    return 'New email must be different from current email';
   }
 
   return null;
@@ -51,8 +45,8 @@ const isCodeInvalid = (code: string) => !code || code.length !== 6;
 
 export const useEmailUpdate = (): UseEmailUpdateReturn => {
   const [emailDialogOpen, setEmailDialogOpen] = useState(false);
-  const [newEmail, setNewEmail] = useState("");
-  const [emailVerificationCode, setEmailVerificationCode] = useState("");
+  const [newEmail, setNewEmail] = useState('');
+  const [emailVerificationCode, setEmailVerificationCode] = useState('');
   const [emailUpdatePending, setEmailUpdatePending] = useState(false);
   const [emailUpdateLoading, setEmailUpdateLoading] = useState(false);
   const [emailUpdateError, setEmailUpdateError] = useState<string | null>(null);
@@ -64,8 +58,8 @@ export const useEmailUpdate = (): UseEmailUpdateReturn => {
 
   const handleCloseEmailDialog = () => {
     setEmailDialogOpen(false);
-    setNewEmail("");
-    setEmailVerificationCode("");
+    setNewEmail('');
+    setEmailVerificationCode('');
     setEmailUpdatePending(false);
     setEmailUpdateError(null);
   };
@@ -83,40 +77,35 @@ export const useEmailUpdate = (): UseEmailUpdateReturn => {
     try {
       const output = await updateUserAttribute({
         userAttribute: {
-          attributeKey: "email",
+          attributeKey: 'email',
           value: newEmail,
         },
       });
 
       const nextStep = output.nextStep.updateAttributeStep;
-      if (nextStep === "CONFIRM_ATTRIBUTE_WITH_CODE") {
+      if (nextStep === 'CONFIRM_ATTRIBUTE_WITH_CODE') {
         setEmailUpdatePending(true);
         return;
       }
 
-      if (nextStep === "DONE") {
+      if (nextStep === 'DONE') {
         setEmailUpdateError(
-          "Your session was created before email verification was enabled. Please sign out, sign back in, and try updating your email again to enable verification.",
+          'Your session was created before email verification was enabled. Please sign out, sign back in, and try updating your email again to enable verification.',
         );
         return;
       }
 
       setEmailUpdateError(`Unexpected response: ${nextStep}`);
     } catch (err: unknown) {
-      setEmailUpdateError(
-        getErrorMessage(err, "Failed to request email update"),
-      );
+      setEmailUpdateError(getErrorMessage(err, 'Failed to request email update'));
     } finally {
       setEmailUpdateLoading(false);
     }
   };
 
-  const handleConfirmEmailUpdate = async (
-    logout: () => Promise<void>,
-    navigate: (path: string) => void,
-  ) => {
+  const handleConfirmEmailUpdate = async (logout: () => Promise<void>, navigate: (path: string) => void) => {
     if (isCodeInvalid(emailVerificationCode)) {
-      setEmailUpdateError("Please enter the 6-digit verification code");
+      setEmailUpdateError('Please enter the 6-digit verification code');
       return;
     }
 
@@ -125,7 +114,7 @@ export const useEmailUpdate = (): UseEmailUpdateReturn => {
 
     try {
       await confirmUserAttribute({
-        userAttributeKey: "email",
+        userAttributeKey: 'email',
         confirmationCode: emailVerificationCode,
       });
 
@@ -135,10 +124,10 @@ export const useEmailUpdate = (): UseEmailUpdateReturn => {
       setTimeout(async () => {
         handleCloseEmailDialog();
         await logout();
-        navigate("/");
+        navigate('/');
       }, 3000);
     } catch (err: unknown) {
-      setEmailUpdateError(getErrorMessage(err, "Invalid verification code"));
+      setEmailUpdateError(getErrorMessage(err, 'Invalid verification code'));
     } finally {
       setEmailUpdateLoading(false);
     }

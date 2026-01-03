@@ -1,19 +1,9 @@
 /**
  * Sub-components for CreateCampaignPage to reduce complexity
  */
-import React from "react";
-import {
-  Box,
-  Alert,
-  AlertTitle,
-  Button,
-  CircularProgress,
-  Card,
-  CardContent,
-  Stack,
-  Typography,
-} from "@mui/material";
-import { Campaign as CampaignIcon } from "@mui/icons-material";
+import React from 'react';
+import { Box, Alert, AlertTitle, Button, CircularProgress, Card, CardContent, Stack, Typography } from '@mui/material';
+import { Campaign as CampaignIcon } from '@mui/icons-material';
 
 interface SharedCampaign {
   sharedCampaignCode: string;
@@ -43,24 +33,16 @@ interface ErrorProps {
 }
 
 export const LoadingState: React.FC = () => (
-  <Box
-    display="flex"
-    justifyContent="center"
-    alignItems="center"
-    minHeight="50vh"
-  >
+  <Box display="flex" justifyContent="center" alignItems="center" minHeight="50vh">
     <CircularProgress />
   </Box>
 );
 
-export const CampaignNotFoundError: React.FC<ErrorProps> = ({
-  onReturnClick,
-}) => (
+export const CampaignNotFoundError: React.FC<ErrorProps> = ({ onReturnClick }) => (
   <Box maxWidth="md" mx="auto" p={3}>
     <Alert severity="error">
       <AlertTitle>Campaign Not Found</AlertTitle>
-      This campaign link is no longer valid. The campaign may have been
-      deactivated or the link may be incorrect.
+      This campaign link is no longer valid. The campaign may have been deactivated or the link may be incorrect.
     </Alert>
     <Button variant="contained" onClick={onReturnClick} sx={{ mt: 2 }}>
       Go to Profiles
@@ -87,25 +69,22 @@ interface SharedCampaignBannerProps {
   sharedCampaign: SharedCampaign;
 }
 
-export const SharedCampaignBanner: React.FC<SharedCampaignBannerProps> = ({
-  sharedCampaign,
-}) => (
-  <Card sx={{ mb: 3, bgcolor: "info.light" }}>
+export const SharedCampaignBanner: React.FC<SharedCampaignBannerProps> = ({ sharedCampaign }) => (
+  <Card sx={{ mb: 3, bgcolor: 'info.light' }}>
     <CardContent>
       <Stack direction="row" spacing={2} alignItems="flex-start">
-        <CampaignIcon sx={{ fontSize: 40, color: "info.dark" }} />
+        <CampaignIcon sx={{ fontSize: 40, color: 'info.dark' }} />
         <Box>
           <Typography variant="h6" color="info.dark">
             Campaign by {sharedCampaign.createdByName}
           </Typography>
           {sharedCampaign.creatorMessage && (
-            <Typography variant="body1" sx={{ mt: 1, fontStyle: "italic" }}>
+            <Typography variant="body1" sx={{ mt: 1, fontStyle: 'italic' }}>
               "{sharedCampaign.creatorMessage}"
             </Typography>
           )}
           <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-            {sharedCampaign.unitType} {sharedCampaign.unitNumber} •{" "}
-            {sharedCampaign.city}, {sharedCampaign.state} •{" "}
+            {sharedCampaign.unitType} {sharedCampaign.unitNumber} • {sharedCampaign.city}, {sharedCampaign.state} •{' '}
             {sharedCampaign.campaignName} {sharedCampaign.campaignYear}
           </Typography>
         </Box>
@@ -125,9 +104,7 @@ interface DiscoveredCampaignAlertProps {
   onUseCampaign: () => void;
 }
 
-export const DiscoveredCampaignAlert: React.FC<
-  DiscoveredCampaignAlertProps
-> = ({
+export const DiscoveredCampaignAlert: React.FC<DiscoveredCampaignAlertProps> = ({
   campaignName,
   campaignYear,
   unitType,
@@ -147,8 +124,7 @@ export const DiscoveredCampaignAlert: React.FC<
     }
   >
     <AlertTitle>Existing Campaign Found!</AlertTitle>
-    We found an existing {campaignName} {campaignYear} campaign for {unitType}{" "}
-    {unitNumber} in {city}, {state} created by {createdByName}. Would you like
-    to use their settings?
+    We found an existing {campaignName} {campaignYear} campaign for {unitType} {unitNumber} in {city}, {state} created
+    by {createdByName}. Would you like to use their settings?
   </Alert>
 );

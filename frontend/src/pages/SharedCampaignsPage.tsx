@@ -2,9 +2,9 @@
  * SharedCampaignsPage - Manage campaign shared campaigns (shareable campaign links)
  */
 
-import React, { useState } from "react";
-import { useQuery, useMutation } from "@apollo/client/react";
-import { useNavigate } from "react-router-dom";
+import React, { useState } from 'react';
+import { useQuery, useMutation } from '@apollo/client/react';
+import { useNavigate } from 'react-router-dom';
 import {
   Box,
   Button,
@@ -28,7 +28,7 @@ import {
   DialogContentText,
   DialogActions,
   Snackbar,
-} from "@mui/material";
+} from '@mui/material';
 import {
   Add as AddIcon,
   ContentCopy as CopyIcon,
@@ -38,14 +38,10 @@ import {
   CheckCircle as ActiveIcon,
   Cancel as InactiveIcon,
   Download as DownloadIcon,
-} from "@mui/icons-material";
-import QRCode from "qrcode";
-import {
-  LIST_MY_SHARED_CAMPAIGNS,
-  UPDATE_SHARED_CAMPAIGN,
-  DELETE_SHARED_CAMPAIGN,
-} from "../lib/graphql";
-import { EditSharedCampaignDialog } from "../components/EditSharedCampaignDialog";
+} from '@mui/icons-material';
+import QRCode from 'qrcode';
+import { LIST_MY_SHARED_CAMPAIGNS, UPDATE_SHARED_CAMPAIGN, DELETE_SHARED_CAMPAIGN } from '../lib/graphql';
+import { EditSharedCampaignDialog } from '../components/EditSharedCampaignDialog';
 
 interface SharedCampaign {
   sharedCampaignCode: string;
@@ -78,47 +74,32 @@ const StatusChip: React.FC<{ isActive: boolean }> = ({ isActive }) =>
   isActive ? (
     <Chip icon={<ActiveIcon />} label="Active" color="success" size="small" />
   ) : (
-    <Chip
-      icon={<InactiveIcon />}
-      label="Inactive"
-      color="default"
-      size="small"
-    />
+    <Chip icon={<InactiveIcon />} label="Inactive" color="default" size="small" />
   );
 
 // Helper to get catalog name with fallback
-const getCatalogName = (catalog: SharedCampaign["catalog"]): string =>
-  catalog?.catalogName || "Unknown Catalog";
+const getCatalogName = (catalog: SharedCampaign['catalog']): string => catalog?.catalogName || 'Unknown Catalog';
 
 // Helper to get description with fallback
-const getDescription = (description: string | undefined): string =>
-  description || "-";
+const getDescription = (description: string | undefined): string => description || '-';
 
 // Helper to get shared campaigns from query data
-const getSharedCampaigns = (
-  data: { listMySharedCampaigns: SharedCampaign[] } | undefined,
-): SharedCampaign[] => data?.listMySharedCampaigns || [];
+const getSharedCampaigns = (data: { listMySharedCampaigns: SharedCampaign[] } | undefined): SharedCampaign[] =>
+  data?.listMySharedCampaigns || [];
 
 // Helper to count active shared campaigns
-const countActiveSharedCampaigns = (campaigns: SharedCampaign[]): number =>
-  campaigns.filter((p) => p.isActive).length;
+const countActiveSharedCampaigns = (campaigns: SharedCampaign[]): number => campaigns.filter((p) => p.isActive).length;
 
 // Helper to check if can create more shared campaigns
-const canCreateMoreSharedCampaigns = (activeCount: number): boolean =>
-  activeCount < MAX_SHARED_CAMPAIGNS;
+const canCreateMoreSharedCampaigns = (activeCount: number): boolean => activeCount < MAX_SHARED_CAMPAIGNS;
 
 // Helper to check if download is available
-const canDownloadQRCode = (
-  qrCodeDataUrl: string | null,
-  qrSharedCampaign: SharedCampaign | null,
-): boolean => Boolean(qrCodeDataUrl && qrSharedCampaign);
+const canDownloadQRCode = (qrCodeDataUrl: string | null, qrSharedCampaign: SharedCampaign | null): boolean =>
+  Boolean(qrCodeDataUrl && qrSharedCampaign);
 
 // Helper to download QR code
-const downloadQRCodeImage = (
-  qrCodeDataUrl: string,
-  sharedCampaignCode: string,
-): void => {
-  const downloadLink = document.createElement("a");
+const downloadQRCodeImage = (qrCodeDataUrl: string, sharedCampaignCode: string): void => {
+  const downloadLink = document.createElement('a');
   downloadLink.href = qrCodeDataUrl;
   downloadLink.download = `campaign-${sharedCampaignCode}-qr.png`;
   document.body.appendChild(downloadLink);
@@ -136,7 +117,7 @@ const copyLinkToClipboard = async (
     await navigator.clipboard.writeText(link);
     onSuccess();
   } catch (err) {
-    console.error("Failed to copy link:", err);
+    console.error('Failed to copy link:', err);
     onError(err);
   }
 };
@@ -152,25 +133,20 @@ const generateQRCode = async (
       width: 400,
       margin: 2,
       color: {
-        dark: "#000000",
-        light: "#ffffff",
+        dark: '#000000',
+        light: '#ffffff',
       },
     });
     onSuccess(qrDataUrl);
   } catch (err) {
-    console.error("Failed to generate QR code:", err);
+    console.error('Failed to generate QR code:', err);
     onError(err);
   }
 };
 
 // Loading state component
 const LoadingState: React.FC = () => (
-  <Box
-    display="flex"
-    justifyContent="center"
-    alignItems="center"
-    minHeight="400px"
-  >
+  <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
     <CircularProgress />
   </Box>
 );
@@ -183,16 +159,14 @@ const ErrorState: React.FC<{ message: string }> = ({ message }) => (
 );
 
 // Empty state component
-const EmptyState: React.FC<{ onCreateClick: () => void }> = ({
-  onCreateClick,
-}) => (
-  <Paper sx={{ p: 4, textAlign: "center" }}>
+const EmptyState: React.FC<{ onCreateClick: () => void }> = ({ onCreateClick }) => (
+  <Paper sx={{ p: 4, textAlign: 'center' }}>
     <Typography variant="h6" color="text.secondary" gutterBottom>
       No Shared Campaigns Yet
     </Typography>
     <Typography color="text.secondary" sx={{ mb: 3 }}>
-      Create a shared campaign to generate shareable links that simplify
-      campaign creation for your unit members. members.
+      Create a shared campaign to generate shareable links that simplify campaign creation for your unit members.
+      members.
     </Typography>
     <Button variant="contained" startIcon={<AddIcon />} onClick={onCreateClick}>
       Create Your First Shared Campaign
@@ -206,36 +180,21 @@ const PageHeader: React.FC<{
   canCreate: boolean;
   onCreateClick: () => void;
 }> = ({ activeCount, canCreate, onCreateClick }) => (
-  <Stack
-    direction="row"
-    justifyContent="space-between"
-    alignItems="center"
-    mb={3}
-  >
+  <Stack direction="row" justifyContent="space-between" alignItems="center" mb={3}>
     <Box>
       <Typography variant="h4" component="h1" gutterBottom>
         My Shared Campaigns
       </Typography>
       <Typography variant="body2" color="text.secondary">
-        Create shareable links that let your unit members create campaigns
-        quickly with preset information for your unit. members. ({activeCount}/
-        {MAX_SHARED_CAMPAIGNS} active)
+        Create shareable links that let your unit members create campaigns quickly with preset information for your
+        unit. members. ({activeCount}/{MAX_SHARED_CAMPAIGNS} active)
       </Typography>
     </Box>
     <Tooltip
-      title={
-        !canCreate
-          ? `You have reached the maximum of ${MAX_SHARED_CAMPAIGNS} active shared campaigns`
-          : ""
-      }
+      title={!canCreate ? `You have reached the maximum of ${MAX_SHARED_CAMPAIGNS} active shared campaigns` : ''}
     >
       <span>
-        <Button
-          variant="contained"
-          startIcon={<AddIcon />}
-          onClick={onCreateClick}
-          disabled={!canCreate}
-        >
+        <Button variant="contained" startIcon={<AddIcon />} onClick={onCreateClick} disabled={!canCreate}>
           Create Shared Campaign
         </Button>
       </span>
@@ -244,8 +203,7 @@ const PageHeader: React.FC<{
 );
 
 // Helper to check if list has items
-const hasSharedCampaigns = (campaigns: SharedCampaign[]): boolean =>
-  campaigns.length > 0;
+const hasSharedCampaigns = (campaigns: SharedCampaign[]): boolean => campaigns.length > 0;
 
 // Helper to get short link for a shared campaign
 const getShortLinkForCode = (code: string): string => `${BASE_URL}/c/${code}`;
@@ -268,8 +226,7 @@ const DeactivateDetails: React.FC<{
 // QR dialog title suffix component
 const QRDialogTitleSuffix: React.FC<{
   campaign: SharedCampaign | null;
-}> = ({ campaign }) =>
-  campaign ? <> - {campaign.sharedCampaignCode}</> : null;
+}> = ({ campaign }) => (campaign ? <> - {campaign.sharedCampaignCode}</> : null);
 
 // QR code image component
 const QRCodeImage: React.FC<{
@@ -281,11 +238,11 @@ const QRCodeImage: React.FC<{
       src={dataUrl}
       alt="QR Code"
       sx={{
-        width: "100%",
+        width: '100%',
         maxWidth: 400,
-        height: "auto",
-        border: "1px solid",
-        borderColor: "divider",
+        height: 'auto',
+        border: '1px solid',
+        borderColor: 'divider',
         borderRadius: 1,
         p: 2,
       }}
@@ -297,15 +254,11 @@ const QRLinkDisplay: React.FC<{
   campaign: SharedCampaign | null;
 }> = ({ campaign }) =>
   campaign ? (
-    <Box sx={{ textAlign: "center", width: "100%" }}>
+    <Box sx={{ textAlign: 'center', width: '100%' }}>
       <Typography variant="body2" color="text.secondary" gutterBottom>
         Link:
       </Typography>
-      <Typography
-        variant="body2"
-        fontFamily="monospace"
-        sx={{ wordBreak: "break-all" }}
-      >
+      <Typography variant="body2" fontFamily="monospace" sx={{ wordBreak: 'break-all' }}>
         {getShortLinkForCode(campaign.sharedCampaignCode)}
       </Typography>
     </Box>
@@ -319,14 +272,7 @@ const CampaignsList: React.FC<{
   onShowQR: (campaign: SharedCampaign) => void;
   onEdit: (campaign: SharedCampaign) => void;
   onDeactivate: (campaign: SharedCampaign) => void;
-}> = ({
-  campaigns,
-  onCreateClick,
-  onCopyLink,
-  onShowQR,
-  onEdit,
-  onDeactivate,
-}) =>
+}> = ({ campaigns, onCreateClick, onCopyLink, onShowQR, onEdit, onDeactivate }) =>
   hasSharedCampaigns(campaigns) ? (
     <TableContainer component={Paper}>
       <Table>
@@ -373,12 +319,7 @@ const EditDialogWrapper: React.FC<{
   ) => Promise<void>;
 }> = ({ campaign, onClose, onSave }) =>
   campaign ? (
-    <EditSharedCampaignDialog
-      open={Boolean(campaign)}
-      sharedCampaign={campaign}
-      onClose={onClose}
-      onSave={onSave}
-    />
+    <EditSharedCampaignDialog open={Boolean(campaign)} sharedCampaign={campaign} onClose={onClose} onSave={onSave} />
   ) : null;
 
 // Shared campaign row actions component
@@ -391,40 +332,23 @@ const SharedCampaignActions: React.FC<{
 }> = ({ sharedCampaign, onCopyLink, onShowQR, onEdit, onDeactivate }) => (
   <Stack direction="row" spacing={0.5} justifyContent="flex-end">
     <Tooltip title="Copy Link">
-      <IconButton
-        size="small"
-        onClick={() => onCopyLink(sharedCampaign.sharedCampaignCode)}
-        aria-label="Copy link"
-      >
+      <IconButton size="small" onClick={() => onCopyLink(sharedCampaign.sharedCampaignCode)} aria-label="Copy link">
         <CopyIcon fontSize="small" />
       </IconButton>
     </Tooltip>
     <Tooltip title="View QR Code">
-      <IconButton
-        size="small"
-        onClick={() => onShowQR(sharedCampaign)}
-        aria-label="View QR code"
-      >
+      <IconButton size="small" onClick={() => onShowQR(sharedCampaign)} aria-label="View QR code">
         <QrCodeIcon fontSize="small" />
       </IconButton>
     </Tooltip>
     <Tooltip title="Edit">
-      <IconButton
-        size="small"
-        onClick={() => onEdit(sharedCampaign)}
-        aria-label="Edit"
-      >
+      <IconButton size="small" onClick={() => onEdit(sharedCampaign)} aria-label="Edit">
         <EditIcon fontSize="small" />
       </IconButton>
     </Tooltip>
     {sharedCampaign.isActive && (
       <Tooltip title="Deactivate">
-        <IconButton
-          size="small"
-          onClick={() => onDeactivate(sharedCampaign)}
-          aria-label="Deactivate"
-          color="error"
-        >
+        <IconButton size="small" onClick={() => onDeactivate(sharedCampaign)} aria-label="Deactivate" color="error">
           <DeactivateIcon fontSize="small" />
         </IconButton>
       </Tooltip>
@@ -451,9 +375,9 @@ const SharedCampaignRow: React.FC<{
         variant="body2"
         sx={{
           maxWidth: 200,
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          whiteSpace: "nowrap",
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
         }}
       >
         {getDescription(sharedCampaign.description)}
@@ -486,17 +410,14 @@ const SharedCampaignRow: React.FC<{
 
 export const SharedCampaignsPage: React.FC = () => {
   const navigate = useNavigate();
-  const [editingSharedCampaign, setEditingSharedCampaign] =
-    useState<SharedCampaign | null>(null);
+  const [editingSharedCampaign, setEditingSharedCampaign] = useState<SharedCampaign | null>(null);
   const [deactivateDialogOpen, setDeactivateDialogOpen] = useState(false);
-  const [sharedCampaignToDeactivate, setSharedCampaignToDeactivate] =
-    useState<SharedCampaign | null>(null);
+  const [sharedCampaignToDeactivate, setSharedCampaignToDeactivate] = useState<SharedCampaign | null>(null);
   const [qrDialogOpen, setQrDialogOpen] = useState(false);
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string | null>(null);
-  const [qrSharedCampaign, setQrSharedCampaign] =
-    useState<SharedCampaign | null>(null);
+  const [qrSharedCampaign, setQrSharedCampaign] = useState<SharedCampaign | null>(null);
   const [snackbarOpen, setSnackbarOpen] = useState(false);
-  const [snackbarMessage, setSnackbarMessage] = useState("");
+  const [snackbarMessage, setSnackbarMessage] = useState('');
 
   // Fetch user's campaign  shared campaigns
   const { data, loading, error, refetch } = useQuery<{
@@ -508,7 +429,7 @@ export const SharedCampaignsPage: React.FC = () => {
     onCompleted: () => {
       refetch();
       setEditingSharedCampaign(null);
-      showSnackbar("Shared Campaign updated successfully");
+      showSnackbar('Shared Campaign updated successfully');
     },
   });
 
@@ -518,14 +439,14 @@ export const SharedCampaignsPage: React.FC = () => {
       refetch();
       setDeactivateDialogOpen(false);
       setSharedCampaignToDeactivate(null);
-      showSnackbar("Shared Campaign deactivated");
+      showSnackbar('Shared Campaign deactivated');
     },
   });
 
   const sharedCampaigns = getSharedCampaigns(data);
   const activeSharedCampaignCount = countActiveSharedCampaigns(sharedCampaigns);
   const canCreateMore = canCreateMoreSharedCampaigns(activeSharedCampaignCount);
-  const handleCreateClick = () => navigate("/shared-campaigns/create");
+  const handleCreateClick = () => navigate('/shared-campaigns/create');
 
   const showSnackbar = (message: string) => {
     setSnackbarMessage(message);
@@ -540,8 +461,8 @@ export const SharedCampaignsPage: React.FC = () => {
     const link = getShortLink(sharedCampaignCode);
     await copyLinkToClipboard(
       link,
-      () => showSnackbar("Link copied to clipboard!"),
-      () => showSnackbar("Failed to copy link"),
+      () => showSnackbar('Link copied to clipboard!'),
+      () => showSnackbar('Failed to copy link'),
     );
   };
 
@@ -554,7 +475,7 @@ export const SharedCampaignsPage: React.FC = () => {
         setQrSharedCampaign(sharedCampaign);
         setQrDialogOpen(true);
       },
-      () => showSnackbar("Failed to generate QR code"),
+      () => showSnackbar('Failed to generate QR code'),
     );
   };
 
@@ -562,7 +483,7 @@ export const SharedCampaignsPage: React.FC = () => {
     const canDownload = canDownloadQRCode(qrCodeDataUrl, qrSharedCampaign);
     if (canDownload && qrCodeDataUrl && qrSharedCampaign) {
       downloadQRCodeImage(qrCodeDataUrl, qrSharedCampaign.sharedCampaignCode);
-      showSnackbar("QR code downloaded!");
+      showSnackbar('QR code downloaded!');
     }
   };
 
@@ -614,11 +535,7 @@ export const SharedCampaignsPage: React.FC = () => {
 
   return (
     <Box>
-      <PageHeader
-        activeCount={activeSharedCampaignCount}
-        canCreate={canCreateMore}
-        onCreateClick={handleCreateClick}
-      />
+      <PageHeader activeCount={activeSharedCampaignCount} canCreate={canCreateMore} onCreateClick={handleCreateClick} />
 
       <CampaignsList
         campaigns={sharedCampaigns}
@@ -637,16 +554,12 @@ export const SharedCampaignsPage: React.FC = () => {
       />
 
       {/* Deactivate Confirmation Dialog */}
-      <Dialog
-        open={deactivateDialogOpen}
-        onClose={() => setDeactivateDialogOpen(false)}
-      >
+      <Dialog open={deactivateDialogOpen} onClose={() => setDeactivateDialogOpen(false)}>
         <DialogTitle>Deactivate Campaign SharedCampaign?</DialogTitle>
         <DialogContent>
           <DialogContentText>
-            Are you sure you want to deactivate this campaign sharedCampaign?
-            The link will no longer work for new campaign creation, but existing
-            campaigns created from this link will not be affected.
+            Are you sure you want to deactivate this campaign sharedCampaign? The link will no longer work for new
+            campaign creation, but existing campaigns created from this link will not be affected.
           </DialogContentText>
           <DeactivateDetails campaign={sharedCampaignToDeactivate} />
         </DialogContent>
@@ -659,12 +572,7 @@ export const SharedCampaignsPage: React.FC = () => {
       </Dialog>
 
       {/* QR Code Dialog */}
-      <Dialog
-        open={qrDialogOpen}
-        onClose={() => setQrDialogOpen(false)}
-        maxWidth="sm"
-        fullWidth
-      >
+      <Dialog open={qrDialogOpen} onClose={() => setQrDialogOpen(false)} maxWidth="sm" fullWidth>
         <DialogTitle>
           Campaign QR Code
           <QRDialogTitleSuffix campaign={qrSharedCampaign} />
@@ -677,11 +585,7 @@ export const SharedCampaignsPage: React.FC = () => {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setQrDialogOpen(false)}>Close</Button>
-          <Button
-            onClick={handleDownloadQRCode}
-            variant="contained"
-            startIcon={<DownloadIcon />}
-          >
+          <Button onClick={handleDownloadQRCode} variant="contained" startIcon={<DownloadIcon />}>
             Download
           </Button>
         </DialogActions>
@@ -693,7 +597,7 @@ export const SharedCampaignsPage: React.FC = () => {
         autoHideDuration={3000}
         onClose={() => setSnackbarOpen(false)}
         message={snackbarMessage}
-        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
       />
     </Box>
   );
