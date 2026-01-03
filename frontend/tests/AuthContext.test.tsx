@@ -35,6 +35,7 @@ vi.mock('../src/lib/apollo', () => ({
 vi.mock('aws-amplify/auth', () => ({
   fetchAuthSession: vi.fn(),
   signInWithRedirect: vi.fn(),
+  signIn: vi.fn(),
   signOut: vi.fn(),
   getCurrentUser: vi.fn(),
 }));
@@ -64,7 +65,7 @@ const mockUser = {
 
 // Test component that uses the auth context
 const TestComponent = () => {
-  const { account, loading, isAuthenticated, isAdmin, login, logout } = useAuth();
+  const { account, loading, isAuthenticated, isAdmin, login, logout, refreshSession } = useAuth();
   
   return (
     <div>
@@ -79,6 +80,7 @@ const TestComponent = () => {
       )}
       <button onClick={login}>Login</button>
       <button onClick={logout}>Logout</button>
+      <button onClick={refreshSession}>Refresh</button>
     </div>
   );
 };
@@ -245,32 +247,56 @@ describe('AuthContext', () => {
     });
   });
 
-  it('handles logout failure', async () => {
+  it('handles logout failure with fallback redirect', async () => {
     const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.mocked(amplifyAuth.fetchAuthSession).mockResolvedValue(createMockSession(true) as any);
     vi.mocked(amplifyAuth.getCurrentUser).mockResolvedValue(mockUser as any);
     vi.mocked(amplifyAuth.signOut).mockRejectedValue(new Error('Logout failed'));
-    
+
+    // Mock window.location.href
+    const originalLocation = window.location;
+    const locationHrefSpy = vi.fn();
+    Object.defineProperty(window, 'location', {
+      value: { ...originalLocation, href: '' },
+      writable: true,
+    });
+    Object.defineProperty(window.location, 'href', {
+      set: locationHrefSpy,
+    });
+
     render(
       <AuthProvider>
         <TestComponent />
       </AuthProvider>
     );
-    
+
     await waitFor(() => {
       expect(screen.getByTestId('isAuthenticated')).toHaveTextContent('true');
     });
-    
+
     const logoutButton = screen.getByText('Logout');
-    
+
     // Click will trigger the promise rejection, but we catch it in the handler
     logoutButton.click();
-    
+
     // Wait for error to be logged
     await waitFor(() => {
       expect(consoleErrorSpy).toHaveBeenCalledWith('Logout failed:', expect.any(Error));
     });
-    
+
+    // Verify the fallback redirect was attempted
+    await waitFor(() => {
+      expect(locationHrefSpy).toHaveBeenCalled();
+    });
+    const redirectUrl = locationHrefSpy.mock.calls[0][0];
+    expect(redirectUrl).toContain('/logout?client_id=');
+    expect(redirectUrl).toContain('&logout_uri=');
+
+    // Restore window.location
+    Object.defineProperty(window, 'location', {
+      value: originalLocation,
+      writable: true,
+    });
     consoleErrorSpy.mockRestore();
   });
 
@@ -461,5 +487,225 @@ describe('AuthContext', () => {
     
     // Default implementation returns isAdmin: false
     expect(screen.getByTestId('isAdmin')).toHaveTextContent('false');
+  });
+
+  describe('loginWithPassword', () => {
+    it('successfully logs in and refreshes session when isSignedIn is true', async () => {
+      vi.mocked(amplifyAuth.fetchAuthSession).mockResolvedValue(createMockSession(true) as any);
+      vi.mocked(amplifyAuth.getCurrentUser).mockResolvedValue(mockUser as any);
+      vi.mocked(amplifyAuth.signIn).mockResolvedValue({ isSignedIn: true } as any);
+
+      const { result } = renderHook(() => useAuth(), {
+        wrapper: AuthProvider,
+      });
+
+      await waitFor(() => {
+        expect(result.current.loading).toBe(false);
+      });
+
+      let loginResult: any;
+      await act(async () => {
+        loginResult = await result.current.loginWithPassword('test@example.com', 'password123');
+      });
+
+      expect(amplifyAuth.signIn).toHaveBeenCalledWith({ username: 'test@example.com', password: 'password123' });
+      expect(loginResult.isSignedIn).toBe(true);
+    });
+
+    it('returns result with nextStep when MFA is required', async () => {
+      vi.mocked(amplifyAuth.fetchAuthSession).mockResolvedValue({ tokens: undefined } as any);
+      vi.mocked(amplifyAuth.signIn).mockResolvedValue({
+        isSignedIn: false,
+        nextStep: { signInStep: 'CONFIRM_SIGN_IN_WITH_TOTP_CODE' },
+      } as any);
+
+      const { result } = renderHook(() => useAuth(), {
+        wrapper: AuthProvider,
+      });
+
+      await waitFor(() => {
+        expect(result.current.loading).toBe(false);
+      });
+
+      let loginResult: any;
+      await act(async () => {
+        loginResult = await result.current.loginWithPassword('test@example.com', 'password123');
+      });
+
+      expect(loginResult.isSignedIn).toBe(false);
+      expect(loginResult.nextStep.signInStep).toBe('CONFIRM_SIGN_IN_WITH_TOTP_CODE');
+    });
+
+    it('returns result without isSignedIn or nextStep', async () => {
+      vi.mocked(amplifyAuth.fetchAuthSession).mockResolvedValue({ tokens: undefined } as any);
+      vi.mocked(amplifyAuth.signIn).mockResolvedValue({
+        isSignedIn: false,
+        nextStep: undefined,
+      } as any);
+
+      const { result } = renderHook(() => useAuth(), {
+        wrapper: AuthProvider,
+      });
+
+      await waitFor(() => {
+        expect(result.current.loading).toBe(false);
+      });
+
+      let loginResult: any;
+      await act(async () => {
+        loginResult = await result.current.loginWithPassword('test@example.com', 'password123');
+      });
+
+      expect(loginResult.isSignedIn).toBe(false);
+    });
+
+    it('throws error on login failure', async () => {
+      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      vi.mocked(amplifyAuth.fetchAuthSession).mockResolvedValue({ tokens: undefined } as any);
+      vi.mocked(amplifyAuth.signIn).mockRejectedValue(new Error('Invalid credentials'));
+
+      const { result } = renderHook(() => useAuth(), {
+        wrapper: AuthProvider,
+      });
+
+      await waitFor(() => {
+        expect(result.current.loading).toBe(false);
+      });
+
+      let caughtError: Error | undefined;
+      await act(async () => {
+        try {
+          await result.current.loginWithPassword('test@example.com', 'wrongpassword');
+        } catch (error) {
+          caughtError = error as Error;
+        }
+      });
+
+      expect(caughtError).toBeInstanceOf(Error);
+      expect(caughtError?.message).toBe('Invalid credentials');
+      expect(consoleErrorSpy).toHaveBeenCalledWith('Email/password login failed:', expect.any(Error));
+      consoleErrorSpy.mockRestore();
+    });
+  });
+
+  describe('OAuth redirect handling', () => {
+    it('redirects to saved URL on OAuth completion', async () => {
+      // Save a redirect URL before auth completes
+      sessionStorage.setItem('oauth_redirect', '/campaigns/123');
+
+      // Mock window.location.href
+      const originalLocation = window.location;
+      const locationHrefSpy = vi.fn();
+      Object.defineProperty(window, 'location', {
+        value: { ...originalLocation, href: '' },
+        writable: true,
+      });
+      Object.defineProperty(window.location, 'href', {
+        set: locationHrefSpy,
+      });
+
+      // Simulate successful auth session that triggers OAuth redirect handling
+      vi.mocked(amplifyAuth.fetchAuthSession).mockResolvedValue(createMockSession(true) as any);
+      vi.mocked(amplifyAuth.getCurrentUser).mockResolvedValue(mockUser as any);
+
+      // Manually call the redirect function by triggering Hub signInWithRedirect event
+      const hubListen = vi.mocked(amplifyUtils.Hub.listen);
+      let capturedListener: any;
+      hubListen.mockImplementation((_channel, listener) => {
+        capturedListener = listener;
+        return vi.fn();
+      });
+
+      render(
+        <AuthProvider>
+          <TestComponent />
+        </AuthProvider>
+      );
+
+      // Wait for initial load
+      await waitFor(() => {
+        expect(screen.getByTestId('loading')).toHaveTextContent('false');
+      });
+
+      // Simulate signInWithRedirect completing
+      if (capturedListener) {
+        await act(async () => {
+          capturedListener({ payload: { event: 'signInWithRedirect' } });
+        });
+      }
+
+      // The redirect should have been triggered
+      await waitFor(() => {
+        expect(locationHrefSpy).toHaveBeenCalledWith('/campaigns/123');
+      });
+
+      // sessionStorage should be cleared
+      expect(sessionStorage.getItem('oauth_redirect')).toBeNull();
+
+      // Restore
+      Object.defineProperty(window, 'location', {
+        value: originalLocation,
+        writable: true,
+      });
+    });
+  });
+
+  describe('refreshSession', () => {
+    it('calls checkAuthSession to refresh account data', async () => {
+      vi.mocked(amplifyAuth.fetchAuthSession).mockResolvedValue(createMockSession(true) as any);
+      vi.mocked(amplifyAuth.getCurrentUser).mockResolvedValue(mockUser as any);
+
+      render(
+        <AuthProvider>
+          <TestComponent />
+        </AuthProvider>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTestId('loading')).toHaveTextContent('false');
+      });
+
+      // Clear mock calls
+      vi.mocked(amplifyAuth.fetchAuthSession).mockClear();
+
+      // Click refresh button
+      const refreshButton = screen.getByText('Refresh');
+      refreshButton.click();
+
+      // fetchAuthSession should be called again
+      await waitFor(() => {
+        expect(amplifyAuth.fetchAuthSession).toHaveBeenCalled();
+      });
+    });
+  });
+
+  describe('fetchAccountData error handling', () => {
+    it('logs error and returns null when account fetch fails', async () => {
+      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      vi.mocked(amplifyAuth.fetchAuthSession).mockResolvedValue(createMockSession(true) as any);
+      vi.mocked(amplifyAuth.getCurrentUser).mockResolvedValue(mockUser as any);
+
+      // Mock Apollo client to throw an error
+      const { apolloClient } = await import('../src/lib/apollo');
+      vi.mocked(apolloClient.query).mockRejectedValueOnce(new Error('Network error'));
+
+      render(
+        <AuthProvider>
+          <TestComponent />
+        </AuthProvider>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTestId('loading')).toHaveTextContent('false');
+      });
+
+      // Error should have been logged
+      expect(consoleErrorSpy).toHaveBeenCalledWith('Failed to fetch account data:', expect.any(Error));
+
+      // Account should be null (accountId element should not exist since account is conditionally rendered)
+      expect(screen.queryByTestId('accountId')).not.toBeInTheDocument();
+
+      consoleErrorSpy.mockRestore();
+    });
   });
 });

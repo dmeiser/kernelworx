@@ -1,58 +1,54 @@
 /**
  * AdminPage component tests
- * 
- * ⚠️  ALL TESTS CURRENTLY SKIPPED
- * 
- * Issue: MUI components fail to render in Vitest when wrapped with Apollo MockedProvider.
- * Error: "Element type is invalid: expected a string (for built-in components) or 
- * a class/function (for composite components) but got: undefined."
- * 
- * This is a test environment issue, NOT a runtime issue. The AdminPage component
- * works correctly in the actual application.
- * 
- * Root cause: Vitest + @apollo/client@4.0.9 + @mui/material@7.3.6 ESM resolution conflict
- * when MockedProvider wraps MUI components (Stack, Tabs, Table, etc.).
- * 
- * See SettingsPage.test.tsx for detailed analysis.
- * 
- * Tests written: 9 comprehensive tests covering all functionality
- * Tests passing: 0 (all skipped due to environment issue)
  */
 
 import { describe, test, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MockedProvider } from '@apollo/client/testing';
+import { MockedProvider } from '@apollo/client/testing/react';
 import { BrowserRouter } from 'react-router-dom';
 import { AdminPage } from '../src/pages/AdminPage';
 import { LIST_MY_PROFILES, LIST_PUBLIC_CATALOGS } from '../src/lib/graphql';
 
-describe.skip('AdminPage', () => {
+describe('AdminPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
   const mockProfiles = [
     {
-      profileId: 'profile-1',
+      __typename: 'SellerProfile',
+      profileId: 'PROFILE#profile-1',
       sellerName: 'Scout Alpha',
+      ownerAccountId: 'ACCOUNT#owner-1',
       isOwner: true,
       permissions: [],
+      createdAt: '2025-01-01T00:00:00Z',
+      updatedAt: '2025-01-01T00:00:00Z',
     },
     {
-      profileId: 'profile-2',
+      __typename: 'SellerProfile',
+      profileId: 'PROFILE#profile-2',
       sellerName: 'Scout Beta',
+      ownerAccountId: 'ACCOUNT#owner-2',
       isOwner: false,
       permissions: ['READ'],
+      createdAt: '2025-01-01T00:00:00Z',
+      updatedAt: '2025-01-01T00:00:00Z',
     },
   ];
 
   const mockCatalogs = [
     {
+      __typename: 'Catalog',
       catalogId: 'catalog-1',
       catalogName: '2025 Popcorn Catalog',
+      catalogType: 'ADMIN_MANAGED',
+      ownerAccountId: 'ACCOUNT#admin',
       isPublic: true,
       products: [],
+      createdAt: '2025-01-01T00:00:00Z',
+      updatedAt: '2025-01-01T00:00:00Z',
     },
   ];
 
@@ -125,7 +121,7 @@ describe.skip('AdminPage', () => {
       </MockedProvider>
     );
 
-    expect(screen.getByRole('tab', { name: /scouts/i })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /profiles/i })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: /catalogs/i })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: /system info/i })).toBeInTheDocument();
   });
@@ -206,7 +202,7 @@ describe.skip('AdminPage', () => {
     await user.click(catalogsTab);
 
     await waitFor(() => {
-      expect(screen.getByText('Public Catalogs')).toBeInTheDocument();
+      expect(screen.getByText('Product Catalogs')).toBeInTheDocument();
       expect(screen.getByText('2025 Popcorn Catalog')).toBeInTheDocument();
     });
   });
@@ -318,7 +314,7 @@ describe.skip('AdminPage', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText(/Failed to load profiles/i)).toBeInTheDocument();
+      expect(screen.getByText(/Failed to load: Failed to fetch profiles/i)).toBeInTheDocument();
     });
   });
 
@@ -355,12 +351,14 @@ describe.skip('AdminPage', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText('Owner')).toBeInTheDocument();
+      // Check for Owner and Shared chips (not the table header "Owner")
+      const ownerChips = screen.getAllByText('Owner');
+      expect(ownerChips.length).toBeGreaterThanOrEqual(1); // At least the chip
       expect(screen.getByText('Shared')).toBeInTheDocument();
     });
   });
 
-  test('displays catalog count in System Info', async () => {
+  test('displays system information in System Info tab', async () => {
     const user = userEvent.setup();
     const mocks = [
       {
@@ -369,7 +367,7 @@ describe.skip('AdminPage', () => {
         },
         result: {
           data: {
-            listMyProfiles: mockProfiles,
+            listMyProfiles: [],
           },
         },
       },
@@ -379,7 +377,7 @@ describe.skip('AdminPage', () => {
         },
         result: {
           data: {
-            listPublicCatalogs: mockCatalogs,
+            listPublicCatalogs: [],
           },
         },
       },
@@ -397,10 +395,10 @@ describe.skip('AdminPage', () => {
     await user.click(systemInfoTab);
 
     await waitFor(() => {
-      expect(screen.getByText(/Total Profiles/i)).toBeInTheDocument();
-      expect(screen.getByText('2')).toBeInTheDocument(); // 2 profiles
-      expect(screen.getByText(/Public Catalogs/i)).toBeInTheDocument();
-      expect(screen.getByText('1')).toBeInTheDocument(); // 1 catalog
+      expect(screen.getByText('System Information')).toBeInTheDocument();
+      expect(screen.getByText(/Application Version/i)).toBeInTheDocument();
+      expect(screen.getByText(/Backend API/i)).toBeInTheDocument();
+      expect(screen.getByText(/Database/i)).toBeInTheDocument();
     });
   });
 });

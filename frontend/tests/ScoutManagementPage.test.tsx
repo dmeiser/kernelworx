@@ -329,6 +329,35 @@ describe('ScoutManagementPage', () => {
     expect(deleteInviteMock).not.toHaveBeenCalled();
   });
 
+  it('cancelling delete profile does not call delete mutation', async () => {
+    render(
+      <MemoryRouter initialEntries={[`/scouts/${encodeURIComponent(RAW_ID)}/manage`]}>
+        <Routes>
+          <Route path="/scouts/:profileId/manage" element={<ScoutManagementPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    const user = userEvent.setup();
+    const deleteScoutBtn = await screen.findByRole('button', { name: /Delete Scout/i });
+    await user.click(deleteScoutBtn);
+
+    // Confirm dialog is open
+    expect(await screen.findByText(/Delete Seller Profile\?/i)).toBeInTheDocument();
+
+    // Click Cancel
+    const cancelBtn = screen.getByRole('button', { name: /^Cancel$/i });
+    await user.click(cancelBtn);
+
+    // Dialog should close
+    await waitFor(() => {
+      expect(screen.queryByText(/Delete Seller Profile\?/i)).not.toBeInTheDocument();
+    });
+
+    // Delete mutation should not have been called
+    expect(deleteProfileMock).not.toHaveBeenCalled();
+  });
+
   it('shows no active invites message when there are none', async () => {
     testInvites = [];
     render(

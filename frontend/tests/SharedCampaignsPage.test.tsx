@@ -429,6 +429,52 @@ describe("SharedCampaignsPage", () => {
       // Should show read-only info
       expect(screen.getByText("Campaign Details (Read-Only)")).toBeInTheDocument();
     });
+
+    it("closes edit dialog when cancel button clicked", async () => {
+      renderWithProviders([createListMock()]);
+
+      await waitFor(() => {
+        expect(screen.getByText("PACK123F25")).toBeInTheDocument();
+      });
+
+      const editButtons = screen.getAllByLabelText("Edit");
+      fireEvent.click(editButtons[0]);
+
+      await waitFor(() => {
+        expect(screen.getByText("Edit Campaign SharedCampaign")).toBeInTheDocument();
+      });
+
+      const cancelButton = screen.getByRole("button", { name: /cancel/i });
+      fireEvent.click(cancelButton);
+
+      await waitFor(() => {
+        expect(screen.queryByText("Edit Campaign SharedCampaign")).not.toBeInTheDocument();
+      });
+    });
+  });
+
+  describe("QR dialog", () => {
+    it("closes QR dialog when close button clicked", async () => {
+      renderWithProviders([createListMock()]);
+
+      await waitFor(() => {
+        expect(screen.getByText("PACK123F25")).toBeInTheDocument();
+      });
+
+      const viewButtons = screen.getAllByLabelText("View QR code");
+      fireEvent.click(viewButtons[0]);
+
+      await waitFor(() => {
+        expect(screen.getByText(/Campaign QR Code/)).toBeInTheDocument();
+      });
+
+      const closeButton = screen.getByRole("button", { name: /close/i });
+      fireEvent.click(closeButton);
+
+      await waitFor(() => {
+        expect(screen.queryByText(/Campaign QR Code/)).not.toBeInTheDocument();
+      });
+    });
   });
 
   describe("Error handling", () => {

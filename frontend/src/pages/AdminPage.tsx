@@ -42,9 +42,9 @@ interface Profile {
 
 interface Catalog {
   catalogId: string;
-  name: string;
-  description: string;
-  isActive: boolean;
+  catalogName: string;
+  catalogType: string;
+  isPublic: boolean;
 }
 
 // --- Helper Components ---
@@ -78,17 +78,17 @@ const ProfileRow: React.FC<{ profile: Profile }> = ({ profile }) => (
   <TableRow hover>
     <TableCell>
       <Typography variant="body2" fontFamily="monospace">
-        {profile.profileId.substring(0, 12)}...
+        {profile.profileId?.substring(0, 12) ?? 'Unknown'}...
       </Typography>
     </TableCell>
     <TableCell>
       <Typography variant="body2" fontWeight="medium">
-        {profile.sellerName}
+        {profile.sellerName ?? 'Unknown'}
       </Typography>
     </TableCell>
     <TableCell>
       <Typography variant="body2" color="text.secondary">
-        {profile.ownerAccountId.substring(0, 12)}...
+        {profile.ownerAccountId?.substring(0, 12) ?? 'Unknown'}...
       </Typography>
     </TableCell>
     <TableCell>
@@ -130,8 +130,8 @@ const ProfilesTabContent: React.FC<ProfilesTabContentProps> = ({ loading, error,
           </TableRow>
         </TableHead>
         <TableBody>
-          {profiles.map((profile) => (
-            <ProfileRow key={profile.profileId} profile={profile} />
+          {profiles.map((profile, index) => (
+            <ProfileRow key={profile.profileId ?? `profile-${index}`} profile={profile} />
           ))}
         </TableBody>
       </Table>
@@ -145,15 +145,15 @@ const CatalogCard: React.FC<{ catalog: Catalog }> = ({ catalog }) => (
     <Stack direction="row" justifyContent="space-between" alignItems="start">
       <Box>
         <Typography variant="subtitle1" fontWeight="medium">
-          {catalog.name}
+          {catalog.catalogName ?? 'Unnamed Catalog'}
         </Typography>
         <Typography variant="body2" color="text.secondary">
-          {catalog.description}
+          {catalog.catalogType ?? 'Unknown Type'}
         </Typography>
       </Box>
       <Chip
-        label={catalog.isActive ? 'Active' : 'Inactive'}
-        color={catalog.isActive ? 'success' : 'default'}
+        label={catalog.isPublic ? 'Public' : 'Private'}
+        color={catalog.isPublic ? 'success' : 'default'}
         size="small"
       />
     </Stack>
@@ -179,8 +179,8 @@ const CatalogsTabContent: React.FC<CatalogsTabContentProps> = ({ loading, error,
   }
   return (
     <Stack spacing={2}>
-      {catalogs.map((catalog) => (
-        <CatalogCard key={catalog.catalogId} catalog={catalog} />
+      {catalogs.map((catalog, index) => (
+        <CatalogCard key={catalog.catalogId ?? `catalog-${index}`} catalog={catalog} />
       ))}
     </Stack>
   );

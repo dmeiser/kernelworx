@@ -764,6 +764,7 @@ export const ScoutManagementPage: React.FC = () => {
       {/* Delete Invite Confirmation Dialog */}
       <Dialog
         open={deleteInviteConfirmOpen}
+        // istanbul ignore next -- backdrop click cannot be simulated in jsdom
         onClose={() => {
           setDeleteInviteConfirmOpen(false);
           setDeletingInviteCode(null);
@@ -793,6 +794,7 @@ export const ScoutManagementPage: React.FC = () => {
       </Dialog>
 
       {/* Delete Profile Confirmation Dialog */}
+      {/* istanbul ignore next -- backdrop click cannot be simulated in jsdom */}
       <Dialog open={deleteConfirmOpen} onClose={() => setDeleteConfirmOpen(false)}>
         <DialogTitle>Delete Seller Profile?</DialogTitle>
         <DialogContent>

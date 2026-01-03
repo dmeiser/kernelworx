@@ -107,6 +107,18 @@ describe('CreateCampaignDialog', () => {
     return form?.querySelector('[role="combobox"]') as HTMLElement | null;
   };
 
+  // Helper to find the hidden native select input and set value directly
+  const setCatalogSelectValue = (value: string) => {
+    // MUI Select uses a hidden input to store the actual value
+    const form = document.querySelector('.MuiFormControl-root:has([role="combobox"])');
+    const hiddenInput = form?.querySelector('input[type="hidden"]') as HTMLInputElement | null;
+    if (hiddenInput) {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(hiddenInput, value);
+      hiddenInput.dispatchEvent(new Event('input', { bubbles: true }));
+      hiddenInput.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  };
+
   it('renders when open', async () => {
     setupUseQueryMock();
     render(<CreateCampaignDialog open={true} onClose={mockOnClose} onSubmit={mockOnSubmit} />);

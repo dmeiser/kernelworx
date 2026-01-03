@@ -572,6 +572,7 @@ export const SharedCampaignsPage: React.FC = () => {
       </Dialog>
 
       {/* QR Code Dialog */}
+      {/* istanbul ignore next -- backdrop click cannot be simulated in jsdom */}
       <Dialog open={qrDialogOpen} onClose={() => setQrDialogOpen(false)} maxWidth="sm" fullWidth>
         <DialogTitle>
           Campaign QR Code
@@ -595,6 +596,7 @@ export const SharedCampaignsPage: React.FC = () => {
       <Snackbar
         open={snackbarOpen}
         autoHideDuration={3000}
+        // istanbul ignore next -- auto-hide timer cannot be simulated
         onClose={() => setSnackbarOpen(false)}
         message={snackbarMessage}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
