@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 
@@ -21,48 +21,58 @@ const deleteInviteMock = vi.fn().mockResolvedValue({ data: {} });
 
 vi.mock('@apollo/client/react', async () => {
   const actual = await vi.importActual('@apollo/client/react');
+
+  // Helper: Create profile query result based on test state
+  const getProfileResult = () => {
+    if (testLoading) return { data: null, loading: true, refetch: vi.fn() };
+    if (!testProfileData) return { data: null, loading: false, refetch: vi.fn() };
+    return { data: { getProfile: testProfileData }, loading: false, refetch: vi.fn() };
+  };
+
+  const queryHandlers: Record<string, () => any> = {
+    GetProfile: getProfileResult,
+    ListInvitesByProfile: () => ({ data: { listInvitesByProfile: testInvites }, loading: false, refetch: vi.fn() }),
+    ListSharesByProfile: () => ({ data: { listSharesByProfile: testShares }, loading: false }),
+  };
+
+  // Helper: Extract operation name from query/mutation
+  const getOpName = (query: any): string | undefined =>
+    query?.definitions?.find((d: any) => d?.kind === 'OperationDefinition')?.name?.value;
+
+  // Default query response
+  const defaultQueryResult = () => ({ data: null, loading: false });
+
+  const useQuery = (query: any) => {
+    const handler = queryHandlers[getOpName(query) ?? ''] ?? defaultQueryResult;
+    return handler();
+  };
+
+  const createMutationHandler = (mockFn: any, onCompletedData: any = {}) => 
+    (opts: any) => [async (optsVars: any) => { 
+      const res = await mockFn(optsVars); 
+      opts?.onCompleted?.(res?.data ?? onCompletedData); 
+      return res; 
+    }, { loading: false, data: null }];
+
+  const mutationHandlers: Record<string, (opts: any) => any> = {
+    UpdateSellerProfile: (opts) => createMutationHandler(updateProfileMock, {})(opts),
+    DeleteSellerProfile: (opts) => createMutationHandler(deleteProfileMock, {})(opts),
+    CreateProfileInvite: (opts) => createMutationHandler(createInviteMock)(opts),
+    DeleteProfileInvite: (opts) => createMutationHandler(deleteInviteMock, {})(opts),
+  };
+
+  // Default mutation handler
+  const defaultMutationHandler = () => [vi.fn().mockResolvedValue({ data: {} }), { loading: false, data: null }];
+
+  const useMutation = (mutation: any, opts: any) => {
+    const handler = mutationHandlers[getOpName(mutation) ?? ''];
+    return handler ? handler(opts) : defaultMutationHandler();
+  };
+
   return {
     ...actual,
-    useQuery: (query: any, _opts: any) => {
-      const defs = query?.definitions || [];
-      const opNames = defs.map((d: any) => d?.name?.value).filter(Boolean);
-      if (opNames.includes('GetProfile')) {
-        if (testLoading) return { data: null, loading: true, refetch: vi.fn() };
-        if (!testProfileData) return { data: null, loading: false, refetch: vi.fn() };
-        return { data: { getProfile: testProfileData }, loading: false, refetch: vi.fn() };
-      }
-      if (opNames.includes('ListInvitesByProfile')) {
-        return { data: { listInvitesByProfile: testInvites }, loading: false, refetch: vi.fn() };
-      }
-      if (opNames.includes('ListSharesByProfile')) {
-        return { data: { listSharesByProfile: testShares }, loading: false };
-      }
-      // Fallback: return a safe no-op response instead of calling actual.useQuery
-      return { data: null, loading: false };
-    },
-    useMutation: (mutation: any, opts: any) => {
-      const defs = mutation?.definitions || [];
-      const opNames = defs.map((d: any) => d?.name?.value).filter(Boolean);
-      if (opNames.includes('UpdateSellerProfile')) return [
-        async (optsVars: any) => { await updateProfileMock(optsVars); if (opts?.onCompleted) opts.onCompleted({}); return { data: {} }; },
-        { loading: false, data: null },
-      ];
-      if (opNames.includes('DeleteSellerProfile')) return [
-        async (optsVars: any) => { await deleteProfileMock(optsVars); if (opts?.onCompleted) opts.onCompleted({}); return { data: {} }; },
-        { loading: false, data: null },
-      ];
-      if (opNames.includes('CreateProfileInvite')) return [
-        async (optsVars: any) => { const res = await createInviteMock(optsVars); if (opts?.onCompleted) opts.onCompleted(res.data); return res; },
-        { loading: false, data: null },
-      ];
-      if (opNames.includes('DeleteProfileInvite')) return [
-        async (optsVars: any) => { const res = await deleteInviteMock(optsVars); if (opts?.onCompleted) opts.onCompleted({}); return res; },
-        { loading: false, data: null },
-      ];
-
-      const generic = vi.fn().mockResolvedValue({ data: {} });
-      return [generic, { loading: false, data: null }];
-    },
+    useQuery,
+    useMutation,
   };
 });
 

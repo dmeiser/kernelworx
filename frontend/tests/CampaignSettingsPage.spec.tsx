@@ -1,9 +1,9 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { MockedProvider } from "@apollo/client/testing/react";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import { CampaignSettingsPage } from "../src/pages/CampaignSettingsPage";
-import { GET_CAMPAIGN, UPDATE_CAMPAIGN, LIST_PUBLIC_CATALOGS, LIST_MY_CATALOGS } from "../src/lib/graphql";
+import { GET_CAMPAIGN, LIST_PUBLIC_CATALOGS, LIST_MY_CATALOGS } from "../src/lib/graphql";
 
 const mockCampaign = {
   campaignId: "campaign-123",

@@ -20,19 +20,11 @@ export const isDevelopment = (): boolean => {
   }
 
   const hostname = window.location.hostname;
+  const isLocalHost = hostname === "localhost" || hostname === "127.0.0.1";
+  const isDevSubdomain =
+    hostname.startsWith("dev.") || hostname.includes(".dev.");
 
-  // Dev environments: localhost, dev.*, *.dev.*
-  if (hostname === "localhost" || hostname === "127.0.0.1") {
-    return true;
-  }
-  if (hostname.startsWith("dev.")) {
-    return true;
-  }
-  if (hostname.includes(".dev.")) {
-    return true;
-  }
-
-  return false;
+  return isLocalHost || isDevSubdomain;
 };
 
 /**

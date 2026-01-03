@@ -15,13 +15,10 @@ const campaignsEmptyMocks = [
   { request: { query: LIST_CAMPAIGNS_BY_PROFILE, variables: { profileId: 'PROFILE#profile-empty' } }, result: { data: { listCampaignsByProfile: [] } } },
 ];
 
-// Backwards-compatible single mock used by existing tests (matches any variables)
-const campaignsEmptyMock = { request: { query: LIST_CAMPAIGNS_BY_PROFILE }, result: { data: { listCampaignsByProfile: [] } } };
 import userEvent from '@testing-library/user-event';
 import { BrowserRouter } from 'react-router-dom';
 import { MockedProvider } from '@apollo/client/testing/react';
 import { ProfileCard } from '../src/components/ProfileCard';
-import { LIST_CAMPAIGNS_BY_PROFILE } from '../src/lib/graphql';
 
 // Mock navigate
 const mockNavigate = vi.fn();

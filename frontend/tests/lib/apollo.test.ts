@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mapErrorCodeToMessage, getAuthContext, handleApolloError } from '../../src/lib/apollo';
 import { fetchAuthSession } from 'aws-amplify/auth';
-import { CombinedGraphQLErrors } from '@apollo/client/errors';
 
 vi.mock('aws-amplify/auth', async () => ({
   fetchAuthSession: vi.fn(),
@@ -61,21 +60,20 @@ describe('lib/apollo', () => {
       const handler = vi.fn();
       window.addEventListener('graphql-error', handler as any);
 
-      const graphqlError = {
-        errors: [
-          {
-            message: 'Not allowed',
-            locations: [{ line: 1, column: 2 }],
-            path: ['some', 'path'],
-            extensions: { errorCode: 'FORBIDDEN' },
-          },
-        ],
-      } as any;
+      const graphQLErrors = [
+        {
+          message: 'Not allowed',
+          locations: [{ line: 1, column: 2 }],
+          path: ['some', 'path'],
+          extensions: { errorCode: 'FORBIDDEN' },
+        },
+      ] as any;
 
-      // Ensure the library check recognizes this as a combined GraphQL error
-      vi.spyOn(CombinedGraphQLErrors, 'is').mockReturnValue(true);
-
-      handleApolloError({ error: graphqlError, operation: { operationName: 'MyOp' } } as any);
+      handleApolloError({
+        graphQLErrors,
+        networkError: undefined,
+        operation: { operationName: 'MyOp' },
+      } as any);
 
       expect(handler).toHaveBeenCalledTimes(1);
       const ev = (handler.mock.calls[0] as any)[0];
@@ -89,9 +87,13 @@ describe('lib/apollo', () => {
       const handler = vi.fn();
       window.addEventListener('graphql-error', handler as any);
 
-      const err = new Error('Network down');
+      const networkError = new Error('Network down');
 
-      handleApolloError({ error: err, operation: { operationName: 'FetchStuff' } } as any);
+      handleApolloError({
+        graphQLErrors: undefined,
+        networkError,
+        operation: { operationName: 'FetchStuff' },
+      } as any);
 
       expect(handler).toHaveBeenCalledTimes(1);
       const ev = (handler.mock.calls[0] as any)[0];

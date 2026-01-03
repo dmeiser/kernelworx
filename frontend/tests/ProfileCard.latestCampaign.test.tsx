@@ -7,7 +7,7 @@ vi.mock('@apollo/client/react', async () => {
   const actual = await vi.importActual('@apollo/client/react')
   return {
     ...actual,
-    useQuery: (query: any, options: any) => {
+    useQuery: () => {
       // Return campaigns data for LIST_CAMPAIGNS_BY_PROFILE
       return {
         data: {

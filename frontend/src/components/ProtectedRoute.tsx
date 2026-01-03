@@ -23,8 +23,15 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   const { isAuthenticated, isAdmin, loading } = useAuth();
   const location = useLocation();
 
+  const routeState = React.useMemo(() => {
+    if (loading) return "loading" as const;
+    if (!isAuthenticated) return "login" as const;
+    if (requireAdmin && !isAdmin) return "denied" as const;
+    return "ok" as const;
+  }, [isAuthenticated, isAdmin, loading, requireAdmin]);
+
   // Show loading spinner while checking auth state
-  if (loading) {
+  if (routeState === "loading") {
     return (
       <Box
         display="flex"
@@ -43,7 +50,7 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   }
 
   // Redirect to login if not authenticated
-  if (!isAuthenticated) {
+  if (routeState === "login") {
     // Save the intended destination for after login
     sessionStorage.setItem("oauth_redirect", location.pathname);
     return (
@@ -56,7 +63,7 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   }
 
   // Show access denied if admin required but user is not admin
-  if (requireAdmin && !isAdmin) {
+  if (routeState === "denied") {
     return (
       <Box
         display="flex"

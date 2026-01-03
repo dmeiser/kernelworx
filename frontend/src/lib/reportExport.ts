@@ -48,15 +48,10 @@ function formatPhone(phone?: string): string {
 
 function formatAddress(address?: Address): string {
   if (!address) return "";
-  const parts = [];
-  if (address.street) parts.push(address.street);
-  if (address.city || address.state || address.zipCode) {
-    const cityStateZip = [address.city, address.state, address.zipCode]
-      .filter(Boolean)
-      .join(" ");
-    if (cityStateZip) parts.push(cityStateZip);
-  }
-  return parts.join(", ");
+  const cityStateZip = [address.city, address.state, address.zipCode]
+    .filter(Boolean)
+    .join(" ");
+  return [address.street, cityStateZip].filter(Boolean).join(", ");
 }
 
 function getUniqueProducts(orders: Order[]): string[] {
@@ -71,11 +66,6 @@ function getUniqueProducts(orders: Order[]): string[] {
 
 function prepareReportData(orders: Order[]) {
   const allProducts = getUniqueProducts(orders);
-
-  // Build rows for export
-  const rows: (string | number)[][] = [];
-
-  // Header row
   const headers: (string | number)[] = [
     "Name",
     "Phone",
@@ -83,31 +73,31 @@ function prepareReportData(orders: Order[]) {
     ...allProducts,
     "Total",
   ];
-  rows.push(headers);
 
-  // Data rows
-  for (const order of orders) {
-    const row: (string | number)[] = [
-      order.customerName,
-      formatPhone(order.customerPhone),
-      formatAddress(order.customerAddress),
-    ];
+  const rows = [
+    headers,
+    ...orders.map((order) => {
+      const quantities = order.lineItems.reduce<Record<string, number>>(
+        (acc, item) => ({
+          ...acc,
+          [item.productName]: (acc[item.productName] || 0) + item.quantity,
+        }),
+        {},
+      );
 
-    // Product quantities (sum duplicates)
-    const lineItemsByProduct: Record<string, number> = {};
-    for (const item of order.lineItems) {
-      lineItemsByProduct[item.productName] =
-        (lineItemsByProduct[item.productName] || 0) + item.quantity;
-    }
+      const productCounts = allProducts.map(
+        (product) => quantities[product] || "",
+      );
 
-    for (const product of allProducts) {
-      row.push(lineItemsByProduct[product] || "");
-    }
-
-    // Total
-    row.push(order.totalAmount);
-    rows.push(row);
-  }
+      return [
+        order.customerName,
+        formatPhone(order.customerPhone),
+        formatAddress(order.customerAddress),
+        ...productCounts,
+        order.totalAmount,
+      ];
+    }),
+  ];
 
   return { headers, rows, allProducts };
 }

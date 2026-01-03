@@ -35,6 +35,39 @@ const getErrorMessage = (err: unknown, fallback: string): string => {
   return fallback;
 };
 
+const confirmDisableMfa = async (mfaEnabled: boolean) => {
+  if (!mfaEnabled) return true;
+  return window.confirm(
+    "Passkeys and TOTP MFA cannot be used together. Do you want to disable MFA and register this passkey?",
+  );
+};
+
+// Helper to disable MFA before passkey registration
+const disableMfaIfNeeded = async (
+  mfaEnabled: boolean,
+  setMfaEnabled: (enabled: boolean) => void,
+): Promise<{ cancelled: boolean; error: string | null }> => {
+  if (!mfaEnabled) {
+    return { cancelled: false, error: null };
+  }
+
+  const confirmed = await confirmDisableMfa(mfaEnabled);
+  if (!confirmed) {
+    return { cancelled: true, error: null };
+  }
+
+  try {
+    await updateMFAPreference({ totp: "DISABLED" });
+    setMfaEnabled(false);
+    return { cancelled: false, error: null };
+  } catch (err: unknown) {
+    return {
+      cancelled: false,
+      error: getErrorMessage(err, "Failed to disable MFA"),
+    };
+  }
+};
+
 export const usePasskeys = (): UsePasskeysReturn => {
   const [passkeys, setPasskeys] = useState<AuthWebAuthnCredential[]>([]);
   const [passkeyName, setPasskeyName] = useState("");
@@ -60,24 +93,14 @@ export const usePasskeys = (): UsePasskeysReturn => {
       return;
     }
 
-    // Check if MFA is enabled - passkeys and TOTP MFA cannot be used together
-    if (mfaEnabled) {
-      if (
-        !window.confirm(
-          "Passkeys and TOTP MFA cannot be used together. Do you want to disable MFA and register this passkey?",
-        )
-      ) {
-        return;
-      }
-
-      // Disable MFA first
-      try {
-        await updateMFAPreference({ totp: "DISABLED" });
-        setMfaEnabled(false);
-      } catch (err: unknown) {
-        setPasskeyError(getErrorMessage(err, "Failed to disable MFA"));
-        return;
-      }
+    const { cancelled, error } = await disableMfaIfNeeded(
+      mfaEnabled,
+      setMfaEnabled,
+    );
+    if (cancelled) return;
+    if (error) {
+      setPasskeyError(error);
+      return;
     }
 
     setPasskeyError(null);

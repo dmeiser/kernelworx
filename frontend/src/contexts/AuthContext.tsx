@@ -23,12 +23,94 @@ import { Hub } from "aws-amplify/utils";
 import { apolloClient } from "../lib/apollo";
 import { GET_MY_ACCOUNT } from "../lib/graphql";
 import type { Account, AuthContextValue } from "../types/auth";
+import type { AuthSession } from "aws-amplify/auth";
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 interface AuthProviderProps {
   children: React.ReactNode;
 }
+
+// Check if session has valid tokens
+const hasValidSession = (session: AuthSession): boolean => {
+  return session.tokens?.idToken !== undefined;
+};
+
+// Extract admin status from JWT token claims
+const getAdminStatusFromSession = (session: AuthSession): boolean => {
+  const groups =
+    (session.tokens?.idToken?.payload["cognito:groups"] as string[]) || [];
+  return groups.includes("ADMIN");
+};
+
+// Merge account data with admin status from token
+const mergeAccountWithAdminStatus = (
+  accountData: Account,
+  isAdmin: boolean,
+): Account => ({
+  ...accountData,
+  isAdmin,
+});
+
+// Handle redirect after OAuth login
+const handleOAuthRedirect = () => {
+  const savedRedirect = sessionStorage.getItem("oauth_redirect");
+  if (savedRedirect) {
+    sessionStorage.removeItem("oauth_redirect");
+    window.location.href = savedRedirect;
+  }
+};
+
+// Auth event handler types
+interface AuthEventHandlers {
+  onSignedOut: () => void;
+  onTokenRefreshFailure: () => void;
+}
+
+// Individual event handlers
+const handleSignInWithRedirect = (checkAuthSession: () => Promise<void>) => {
+  checkAuthSession().then(handleOAuthRedirect);
+};
+
+const handleSignInFailure = (
+  eventData: unknown,
+  setLoading: (loading: boolean) => void,
+) => {
+  console.error("Sign in failed:", eventData);
+  setLoading(false);
+};
+
+const handleTokenRefresh = (checkAuthSession: () => Promise<void>) => {
+  checkAuthSession();
+};
+
+const handleTokenRefreshFailure = (
+  eventData: unknown,
+  handlers: AuthEventHandlers,
+) => {
+  console.error("Token refresh failed:", eventData);
+  handlers.onTokenRefreshFailure();
+};
+
+// Create auth event handler function
+const createAuthEventHandler = (
+  checkAuthSession: () => Promise<void>,
+  setLoading: (loading: boolean) => void,
+  handlers: AuthEventHandlers,
+) => {
+  const eventHandlers: Record<string, (data: unknown) => void> = {
+    signInWithRedirect: () => handleSignInWithRedirect(checkAuthSession),
+    signInWithRedirect_failure: (data) => handleSignInFailure(data, setLoading),
+    signedOut: () => handlers.onSignedOut(),
+    tokenRefresh: () => handleTokenRefresh(checkAuthSession),
+    tokenRefresh_failure: (data) => handleTokenRefreshFailure(data, handlers),
+  };
+
+  return (eventName: string, eventData: unknown) => {
+    const handler = eventHandlers[eventName];
+    if (handler) handler(eventData);
+  };
+};
 
 export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [account, setAccount] = useState<Account | null>(null);
@@ -58,36 +140,23 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     try {
       const session = await fetchAuthSession();
 
-      if (session.tokens?.idToken) {
-        // User has valid tokens
-        setHasValidTokens(true);
-
-        // Get user info and account data
-        await getCurrentUser();
-        const accountData = await fetchAccountData();
-
-        if (accountData) {
-          // Check admin status from JWT token claims, NOT from DynamoDB
-          // The cognito:groups claim is the source of truth for permissions
-          const groups =
-            (session.tokens.idToken.payload["cognito:groups"] as string[]) ||
-            [];
-          const isAdminFromToken = groups.includes("ADMIN");
-
-          // Set account with admin status from JWT token
-          setAccount({
-            ...accountData,
-            isAdmin: isAdminFromToken,
-          });
-        } else {
-          // User is authenticated but account record doesn't exist yet
-          // This can happen right after signup before post-auth Lambda runs
-          console.warn("User has valid tokens but no account record yet");
-          setAccount(null);
-        }
-      } else {
-        // No valid session
+      if (!hasValidSession(session)) {
         setHasValidTokens(false);
+        setAccount(null);
+        return;
+      }
+
+      // User has valid tokens
+      setHasValidTokens(true);
+      await getCurrentUser();
+      const accountData = await fetchAccountData();
+
+      if (accountData) {
+        const isAdminFromToken = getAdminStatusFromSession(session);
+        setAccount(mergeAccountWithAdminStatus(accountData, isAdminFromToken));
+      } else {
+        // User is authenticated but account record doesn't exist yet
+        console.warn("User has valid tokens but no account record yet");
         setAccount(null);
       }
     } catch (error) {
@@ -105,39 +174,20 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   useEffect(() => {
     checkAuthSession();
 
-    // Listen for auth events (OAuth callback, sign out, etc.)
+    const handleEvent = createAuthEventHandler(checkAuthSession, setLoading, {
+      onSignedOut: () => {
+        setAccount(null);
+        setHasValidTokens(false);
+        setLoading(false);
+      },
+      onTokenRefreshFailure: () => {
+        setAccount(null);
+        setHasValidTokens(false);
+      },
+    });
+
     const unsubscribe = Hub.listen("auth", ({ payload }) => {
-      switch (payload.event) {
-        case "signInWithRedirect":
-          // User returned from Hosted UI - refresh session
-          checkAuthSession().then(() => {
-            // Check if there's a saved redirect path from before OAuth login
-            const savedRedirect = sessionStorage.getItem("oauth_redirect");
-            if (savedRedirect) {
-              sessionStorage.removeItem("oauth_redirect");
-              window.location.href = savedRedirect;
-            }
-          });
-          break;
-        case "signInWithRedirect_failure":
-          console.error("Sign in failed:", payload.data);
-          setLoading(false);
-          break;
-        case "signedOut":
-          setAccount(null);
-          setHasValidTokens(false);
-          setLoading(false);
-          break;
-        case "tokenRefresh":
-          // Token was refreshed - update account data
-          checkAuthSession();
-          break;
-        case "tokenRefresh_failure":
-          console.error("Token refresh failed:", payload.data);
-          setAccount(null);
-          setHasValidTokens(false);
-          break;
-      }
+      handleEvent(payload.event, payload.data);
     });
 
     return unsubscribe;

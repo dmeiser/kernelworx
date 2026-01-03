@@ -56,6 +56,452 @@ import {
 } from "../lib/graphql";
 import { ensureProfileId } from "../lib/ids";
 
+// Helper to get display email for a share
+const getShareDisplayEmail = (share: Share): string =>
+  share.targetAccount?.email ||
+  `User ${share.targetAccountId.substring(0, 8)}...`;
+
+// Helper to get full name from target account if available
+const getShareFullName = (share: Share): string | null => {
+  const account = share.targetAccount;
+  if (account?.givenName && account?.familyName) {
+    return `${account.givenName} ${account.familyName}`;
+  }
+  return null;
+};
+
+// Helper to safely decode URL component
+const decodeUrlParam = (encoded: string | undefined): string =>
+  encoded ? decodeURIComponent(encoded) : "";
+
+// Helper to determine if query should be skipped
+const shouldSkipQuery = (id: string): boolean => !id;
+
+// Helper to get profile from query data
+const getProfile = (
+  data: { getProfile: Profile } | undefined,
+): Profile | undefined => data?.getProfile;
+
+// Helper to get invites from query data
+const getInvites = (
+  data: { listInvitesByProfile: ProfileInvite[] } | undefined,
+): ProfileInvite[] => data?.listInvitesByProfile || [];
+
+// Helper to get shares from query data
+const getShares = (
+  data: { listSharesByProfile: Share[] } | undefined,
+): Share[] => data?.listSharesByProfile || [];
+
+// Helper to get user display name for confirmation
+const getUserDisplayName = (
+  email: string | undefined,
+  accountId: string,
+): string => email || `User ${accountId.substring(0, 8)}...`;
+
+// Helper to validate save operation
+const canSaveProfile = (profileId: string, profileName: string): boolean =>
+  Boolean(profileId && profileName.trim());
+
+// Helper to format date string
+const formatDate = (dateString: string): string =>
+  new Date(dateString).toLocaleDateString();
+
+// Helper to check if a date has expired
+const isExpired = (expiresAt: string): boolean =>
+  new Date(expiresAt) < new Date();
+
+// Helper to copy code to clipboard
+const copyToClipboard = (code: string): void => {
+  navigator.clipboard.writeText(code);
+};
+
+// Helper to get button text for updating state
+const getSaveButtonText = (isUpdating: boolean): string =>
+  isUpdating ? "Saving..." : "Save Changes";
+
+// Helper to get copy button text
+const getCopyButtonText = (
+  copiedCode: string | null,
+  currentCode: string,
+): string => (copiedCode === currentCode ? "Copied!" : "Copy");
+
+// Helper to check if save button should be disabled
+const isSaveDisabled = (
+  updating: boolean,
+  newName: string,
+  originalName: string,
+): boolean => updating || newName === originalName;
+
+// Helper to check if create invite button should be disabled
+const isCreateInviteDisabled = (
+  creating: boolean,
+  permissions: string[],
+): boolean => creating || permissions.length === 0;
+
+// Helper to get create invite button text
+const getCreateInviteText = (isCreating: boolean): string =>
+  isCreating ? "Creating..." : "Generate New Invite";
+
+// Helper to check if invites list is empty
+const hasInvites = (invites: ProfileInvite[]): boolean => invites.length > 0;
+
+// Helper to check if shares list is empty
+const hasShares = (shares: Share[]): boolean => shares.length > 0;
+
+// Helper to get delete invite button text
+const getDeleteInviteButtonText = (isDeleting: boolean): string =>
+  isDeleting ? "Deleting..." : "Delete";
+
+// Helper to get delete profile button text
+const getDeleteProfileButtonText = (isDeleting: boolean): string =>
+  isDeleting ? "Deleting..." : "Delete Permanently";
+
+// Helper to check if create invite is allowed
+const canCreateInvite = (profileId: string): boolean => Boolean(profileId);
+
+// Helper to check if delete invite is allowed
+const canDeleteInvite = (
+  deletingInviteCode: string | null,
+  profileId: string,
+): boolean => Boolean(deletingInviteCode && profileId);
+
+// Helper to check if delete profile is allowed
+const canDeleteProfile = (profileId: string): boolean => Boolean(profileId);
+
+// Helper to confirm revoke share action
+const confirmRevokeShare = (userName: string): boolean =>
+  window.confirm(`Are you sure you want to revoke access for ${userName}?`);
+
+// Helper to confirm transfer ownership action
+const confirmTransferOwnership = (userName: string): boolean =>
+  window.confirm(
+    `Are you sure you want to transfer ownership to ${userName}?\n\nThis action cannot be undone. You will lose ownership of this profile and all associated campaigns.`,
+  );
+
+// Helper to conditionally save profile
+const maybeSaveProfile = async (
+  canSave: boolean,
+  setUpdating: (v: boolean) => void,
+  updateProfile: (options: {
+    variables: { profileId: string; sellerName: string };
+  }) => Promise<unknown>,
+  dbProfileId: string,
+  profileName: string,
+): Promise<void> => {
+  if (canSave) {
+    setUpdating(true);
+    try {
+      await updateProfile({
+        variables: {
+          profileId: dbProfileId,
+          sellerName: profileName.trim(),
+        },
+      });
+    } finally {
+      setUpdating(false);
+    }
+  }
+};
+
+// Helper to conditionally create invite
+const maybeCreateInvite = async (
+  canCreate: boolean,
+  createInvite: (options: {
+    variables: { input: { profileId: string; permissions: string[] } };
+  }) => Promise<unknown>,
+  dbProfileId: string,
+  invitePermissions: string[],
+  setInvitePermissions: (v: string[]) => void,
+): Promise<void> => {
+  if (canCreate) {
+    await createInvite({
+      variables: {
+        input: {
+          profileId: dbProfileId,
+          permissions: invitePermissions,
+        },
+      },
+    });
+    setInvitePermissions(["READ"]);
+  }
+};
+
+// Helper to conditionally delete invite
+const maybeDeleteInvite = async (
+  canDelete: boolean,
+  deleteInvite: (options: {
+    variables: { profileId: string; inviteCode: string };
+  }) => Promise<unknown>,
+  dbProfileId: string,
+  deletingInviteCode: string | null,
+): Promise<void> => {
+  if (canDelete && deletingInviteCode) {
+    await deleteInvite({
+      variables: { profileId: dbProfileId, inviteCode: deletingInviteCode },
+    });
+  }
+};
+
+// Helper to handle revoke share with confirmation
+const handleRevokeShareWithConfirmation = async (
+  userName: string,
+  revokeShare: (options: {
+    variables: { input: { profileId: string; targetAccountId: string } };
+  }) => Promise<unknown>,
+  dbProfileId: string,
+  targetAccountId: string,
+): Promise<void> => {
+  const confirmed = confirmRevokeShare(userName);
+  if (confirmed) {
+    try {
+      await revokeShare({
+        variables: {
+          input: {
+            profileId: dbProfileId,
+            targetAccountId,
+          },
+        },
+      });
+    } catch (err) {
+      console.error("Error revoking share:", err);
+      alert("Failed to revoke access");
+    }
+  }
+};
+
+// Helper to handle transfer ownership with confirmation
+const handleTransferOwnershipWithConfirmation = async (
+  userName: string,
+  transferOwnership: (options: {
+    variables: { input: { profileId: string; newOwnerAccountId: string } };
+  }) => Promise<unknown>,
+  dbProfileId: string,
+  targetAccountId: string,
+): Promise<void> => {
+  const confirmed = confirmTransferOwnership(userName);
+  if (confirmed) {
+    try {
+      await transferOwnership({
+        variables: {
+          input: {
+            profileId: dbProfileId,
+            newOwnerAccountId: targetAccountId,
+          },
+        },
+      });
+    } catch (err) {
+      console.error("Error transferring ownership:", err);
+      alert("Failed to transfer ownership");
+    }
+  }
+};
+
+// Helper to conditionally delete profile
+const maybeDeleteProfile = async (
+  canDelete: boolean,
+  setDeletingProfile: (v: boolean) => void,
+  deleteProfile: (options: {
+    variables: { profileId: string };
+  }) => Promise<unknown>,
+  dbProfileId: string,
+): Promise<void> => {
+  if (canDelete) {
+    setDeletingProfile(true);
+    try {
+      await deleteProfile({
+        variables: { profileId: dbProfileId },
+      });
+    } finally {
+      setDeletingProfile(false);
+    }
+  }
+};
+
+// Helper component for invite status chip
+const InviteStatusChip: React.FC<{ expiresAt: string }> = ({ expiresAt }) =>
+  isExpired(expiresAt) ? (
+    <Chip label="Expired" size="small" color="error" variant="outlined" />
+  ) : (
+    <Chip label="Active" size="small" color="success" variant="outlined" />
+  );
+
+// Helper to check if new invite code should be shown
+const hasNewInviteCode = (code: string | null): boolean => Boolean(code);
+
+// Helper component for loading state
+const LoadingSpinner: React.FC = () => (
+  <Box
+    display="flex"
+    justifyContent="center"
+    alignItems="center"
+    minHeight="400px"
+  >
+    <CircularProgress />
+  </Box>
+);
+
+// Helper component for profile not found error
+const ProfileNotFoundError: React.FC = () => (
+  <Alert severity="error">Profile not found</Alert>
+);
+
+// Helper component for new invite code alert
+const NewInviteCodeAlert: React.FC<{
+  inviteCode: string | null;
+  copiedCode: string | null;
+  onCopy: (code: string) => void;
+}> = ({ inviteCode, copiedCode, onCopy }) =>
+  hasNewInviteCode(inviteCode) && inviteCode ? (
+    <Alert severity="success" sx={{ mb: 2 }}>
+      <Stack direction="row" spacing={2} alignItems="center">
+        <Typography variant="body2">
+          <strong>New Invite Code:</strong> {inviteCode}
+        </Typography>
+        <Button
+          size="small"
+          startIcon={<CopyIcon />}
+          onClick={() => onCopy(inviteCode)}
+        >
+          {getCopyButtonText(copiedCode, inviteCode)}
+        </Button>
+      </Stack>
+    </Alert>
+  ) : null;
+
+// Helper to toggle permission in array
+const togglePermission = (
+  permission: string,
+  checked: boolean,
+  setPermissions: React.Dispatch<React.SetStateAction<string[]>>,
+): void => {
+  if (checked) {
+    setPermissions((prev) =>
+      prev.includes(permission) ? prev : [...prev, permission],
+    );
+  } else {
+    setPermissions((prev) => prev.filter((p) => p !== permission));
+  }
+};
+
+// Helper to initialize profile name from profile data
+const initializeProfileName = (
+  profile: Profile | undefined,
+  setProfileName: (v: string) => void,
+): void => {
+  if (profile) {
+    setProfileName(profile.sellerName);
+  }
+};
+
+// Helper to render optional full name
+const FullNameDisplay: React.FC<{ fullName: string | null }> = ({
+  fullName,
+}) =>
+  fullName ? (
+    <Typography variant="caption" color="text.secondary" display="block">
+      {fullName}
+    </Typography>
+  ) : null;
+
+// Helper component for a single share row
+const ShareRow: React.FC<{
+  share: Share;
+  onTransferOwnership: (
+    targetAccountId: string,
+    email: string | undefined,
+  ) => void;
+  onRevokeShare: (targetAccountId: string, email: string | undefined) => void;
+}> = ({ share, onTransferOwnership, onRevokeShare }) => {
+  const displayEmail = getShareDisplayEmail(share);
+  const fullName = getShareFullName(share);
+  return (
+    <TableRow key={share.shareId}>
+      <TableCell>
+        <Typography variant="body2">{displayEmail}</Typography>
+        <FullNameDisplay fullName={fullName} />
+      </TableCell>
+      <TableCell>
+        <Chip
+          label={share.permissions.join(", ")}
+          size="small"
+          variant="outlined"
+        />
+      </TableCell>
+      <TableCell>{formatDate(share.createdAt)}</TableCell>
+      <TableCell align="right">
+        <Stack direction="row" spacing={1} justifyContent="flex-end">
+          <Button
+            size="small"
+            variant="outlined"
+            onClick={() =>
+              onTransferOwnership(
+                share.targetAccountId,
+                share.targetAccount?.email,
+              )
+            }
+            title="Transfer ownership to this user"
+          >
+            Transfer Ownership
+          </Button>
+          <IconButton
+            size="small"
+            color="error"
+            onClick={() =>
+              onRevokeShare(share.targetAccountId, share.targetAccount?.email)
+            }
+            title="Revoke access"
+          >
+            <DeleteIcon fontSize="small" />
+          </IconButton>
+        </Stack>
+      </TableCell>
+    </TableRow>
+  );
+};
+
+// Helper component for shares section (only renders if shares exist)
+const SharesSection: React.FC<{
+  shares: Share[];
+  onTransferOwnership: (
+    targetAccountId: string,
+    email: string | undefined,
+  ) => void;
+  onRevokeShare: (targetAccountId: string, email: string | undefined) => void;
+}> = ({ shares, onTransferOwnership, onRevokeShare }) =>
+  hasShares(shares) ? (
+    <Paper sx={{ p: 3 }}>
+      <Typography variant="h6" gutterBottom>
+        Who Has Access
+      </Typography>
+      <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
+        Accounts with access to your profile (via share links or redeemed
+        invites).
+      </Typography>
+      <TableContainer>
+        <Table size="small">
+          <TableHead>
+            <TableRow sx={{ backgroundColor: "#f5f5f5" }}>
+              <TableCell>User</TableCell>
+              <TableCell>Permissions</TableCell>
+              <TableCell>Shared</TableCell>
+              <TableCell align="right">Actions</TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {shares.map((share) => (
+              <ShareRow
+                key={share.shareId}
+                share={share}
+                onTransferOwnership={onTransferOwnership}
+                onRevokeShare={onRevokeShare}
+              />
+            ))}
+          </TableBody>
+        </Table>
+      </TableContainer>
+    </Paper>
+  ) : null;
+
 interface Profile {
   profileId: string;
   accountId: string;
@@ -92,9 +538,7 @@ export const ScoutManagementPage: React.FC = () => {
   const { profileId: encodedProfileId } = useParams<{
     profileId: string;
   }>();
-  const profileId = encodedProfileId
-    ? decodeURIComponent(encodedProfileId)
-    : "";
+  const profileId = decodeUrlParam(encodedProfileId);
   const dbProfileId = ensureProfileId(profileId);
   const navigate = useNavigate();
 
@@ -121,7 +565,7 @@ export const ScoutManagementPage: React.FC = () => {
     getProfile: Profile;
   }>(GET_PROFILE, {
     variables: { profileId: dbProfileId },
-    skip: !dbProfileId,
+    skip: shouldSkipQuery(dbProfileId),
   });
 
   // Fetch invites
@@ -129,7 +573,7 @@ export const ScoutManagementPage: React.FC = () => {
     listInvitesByProfile: ProfileInvite[];
   }>(LIST_INVITES_BY_PROFILE, {
     variables: { profileId: dbProfileId },
-    skip: !dbProfileId,
+    skip: shouldSkipQuery(dbProfileId),
   });
 
   // Fetch shares (accounts with access to this profile)
@@ -137,14 +581,13 @@ export const ScoutManagementPage: React.FC = () => {
     listSharesByProfile: Share[];
   }>(LIST_SHARES_BY_PROFILE, {
     variables: { profileId: dbProfileId },
-    skip: !dbProfileId,
+    skip: shouldSkipQuery(dbProfileId),
   });
 
   // Initialize form when profile loads
   React.useEffect(() => {
-    if (profileData?.getProfile) {
-      setProfileName(profileData.getProfile.sellerName);
-    }
+    const p = getProfile(profileData);
+    initializeProfileName(p, setProfileName);
   }, [profileData]);
 
   // Update profile mutation
@@ -200,136 +643,87 @@ export const ScoutManagementPage: React.FC = () => {
     },
   });
 
-  const profile = profileData?.getProfile;
-  const invites = invitesData?.listInvitesByProfile || [];
-  const shares = sharesData?.listSharesByProfile || [];
+  const profile = getProfile(profileData);
+  const invites = getInvites(invitesData);
+  const shares = getShares(sharesData);
 
   const handleSaveChanges = async () => {
-    if (!profileId || !profileName.trim()) return;
-
-    setUpdating(true);
-    try {
-      await updateProfile({
-        variables: {
-          profileId: dbProfileId,
-          sellerName: profileName.trim(),
-        },
-      });
-    } finally {
-      setUpdating(false);
-    }
+    const canSave = canSaveProfile(profileId, profileName);
+    await maybeSaveProfile(
+      canSave,
+      setUpdating,
+      updateProfile,
+      dbProfileId,
+      profileName,
+    );
   };
 
   const handleCreateInvite = async () => {
-    if (!profileId) return;
-    await createInvite({
-      variables: {
-        input: {
-          profileId: dbProfileId,
-          permissions: invitePermissions,
-        },
-      },
-    });
-    setInvitePermissions(["READ"]); // Reset to default after creation
+    const canCreate = canCreateInvite(profileId);
+    await maybeCreateInvite(
+      canCreate,
+      createInvite,
+      dbProfileId,
+      invitePermissions,
+      setInvitePermissions,
+    );
   };
 
   const handleDeleteInvite = async () => {
-    if (!deletingInviteCode || !profileId) return;
-    await deleteInvite({
-      variables: { profileId: dbProfileId, inviteCode: deletingInviteCode },
-    });
+    const canDelete = canDeleteInvite(deletingInviteCode, profileId);
+    await maybeDeleteInvite(
+      canDelete,
+      deleteInvite,
+      dbProfileId,
+      deletingInviteCode,
+    );
   };
 
   const handleRevokeShare = async (targetAccountId: string, email?: string) => {
-    const userName = email || `User ${targetAccountId.substring(0, 8)}...`;
-    if (
-      !window.confirm(`Are you sure you want to revoke access for ${userName}?`)
-    ) {
-      return;
-    }
-
-    try {
-      await revokeShare({
-        variables: {
-          input: {
-            profileId: dbProfileId,
-            targetAccountId,
-          },
-        },
-      });
-    } catch (err) {
-      console.error("Error revoking share:", err);
-      alert("Failed to revoke access");
-    }
+    const userName = getUserDisplayName(email, targetAccountId);
+    await handleRevokeShareWithConfirmation(
+      userName,
+      revokeShare,
+      dbProfileId,
+      targetAccountId,
+    );
   };
 
   const handleTransferOwnership = async (
     targetAccountId: string,
     email?: string,
   ) => {
-    const userName = email || `User ${targetAccountId.substring(0, 8)}...`;
-    const confirmMessage = `Are you sure you want to transfer ownership to ${userName}?\n\nThis action cannot be undone. You will lose ownership of this profile and all associated campaigns.`;
-
-    if (!window.confirm(confirmMessage)) {
-      return;
-    }
-
-    try {
-      await transferOwnership({
-        variables: {
-          input: {
-            profileId: dbProfileId,
-            newOwnerAccountId: targetAccountId,
-          },
-        },
-      });
-    } catch (err) {
-      console.error("Error transferring ownership:", err);
-      alert("Failed to transfer ownership");
-    }
+    const userName = getUserDisplayName(email, targetAccountId);
+    await handleTransferOwnershipWithConfirmation(
+      userName,
+      transferOwnership,
+      dbProfileId,
+      targetAccountId,
+    );
   };
 
   const handleDeleteProfile = async () => {
-    if (!profileId) return;
-    setDeletingProfile(true);
-    try {
-      await deleteProfile({
-        variables: { profileId: dbProfileId },
-      });
-    } finally {
-      setDeletingProfile(false);
-    }
+    const canDelete = canDeleteProfile(profileId);
+    await maybeDeleteProfile(
+      canDelete,
+      setDeletingProfile,
+      deleteProfile,
+      dbProfileId,
+    );
   };
 
   const handleCopyCode = (code: string) => {
-    navigator.clipboard.writeText(code);
+    copyToClipboard(code);
     setCopiedCode(code);
     setTimeout(() => setCopiedCode(null), 2000);
   };
 
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString();
-  };
-
-  const isExpired = (expiresAt: string) => {
-    return new Date(expiresAt) < new Date();
-  };
-
   if (loading) {
-    return (
-      <Box
-        display="flex"
-        justifyContent="center"
-        alignItems="center"
-        minHeight="400px"
-      >
-        <CircularProgress />
-      </Box>
-    );
+    return <LoadingSpinner />;
   }
 
   if (!profile) {
-    return <Alert severity="error">Profile not found</Alert>;
+    return <ProfileNotFoundError />;
   }
 
   return (
@@ -356,9 +750,13 @@ export const ScoutManagementPage: React.FC = () => {
             <Button
               variant="contained"
               onClick={handleSaveChanges}
-              disabled={updating || profileName === profile.sellerName}
+              disabled={isSaveDisabled(
+                updating,
+                profileName,
+                profile.sellerName,
+              )}
             >
-              {updating ? "Saving..." : "Save Changes"}
+              {getSaveButtonText(updating)}
             </Button>
           </Stack>
         </Paper>
@@ -373,22 +771,11 @@ export const ScoutManagementPage: React.FC = () => {
             expire after 14 days.
           </Typography>
 
-          {inviteCode && (
-            <Alert severity="success" sx={{ mb: 2 }}>
-              <Stack direction="row" spacing={2} alignItems="center">
-                <Typography variant="body2">
-                  <strong>New Invite Code:</strong> {inviteCode}
-                </Typography>
-                <Button
-                  size="small"
-                  startIcon={<CopyIcon />}
-                  onClick={() => handleCopyCode(inviteCode)}
-                >
-                  {copiedCode === inviteCode ? "Copied!" : "Copy"}
-                </Button>
-              </Stack>
-            </Alert>
-          )}
+          <NewInviteCodeAlert
+            inviteCode={inviteCode}
+            copiedCode={copiedCode}
+            onCopy={handleCopyCode}
+          />
 
           <Stack spacing={2} sx={{ mb: 2 }}>
             <Typography variant="subtitle2">
@@ -399,17 +786,13 @@ export const ScoutManagementPage: React.FC = () => {
                 control={
                   <Checkbox
                     checked={invitePermissions.includes("READ")}
-                    onChange={(e) => {
-                      if (e.target.checked) {
-                        setInvitePermissions((prev) =>
-                          prev.includes("READ") ? prev : [...prev, "READ"],
-                        );
-                      } else {
-                        setInvitePermissions((prev) =>
-                          prev.filter((p) => p !== "READ"),
-                        );
-                      }
-                    }}
+                    onChange={(e) =>
+                      togglePermission(
+                        "READ",
+                        e.target.checked,
+                        setInvitePermissions,
+                      )
+                    }
                   />
                 }
                 label="Read (view campaigns and orders)"
@@ -418,17 +801,13 @@ export const ScoutManagementPage: React.FC = () => {
                 control={
                   <Checkbox
                     checked={invitePermissions.includes("WRITE")}
-                    onChange={(e) => {
-                      if (e.target.checked) {
-                        setInvitePermissions((prev) =>
-                          prev.includes("WRITE") ? prev : [...prev, "WRITE"],
-                        );
-                      } else {
-                        setInvitePermissions((prev) =>
-                          prev.filter((p) => p !== "WRITE"),
-                        );
-                      }
-                    }}
+                    onChange={(e) =>
+                      togglePermission(
+                        "WRITE",
+                        e.target.checked,
+                        setInvitePermissions,
+                      )
+                    }
                   />
                 }
                 label="Write (edit campaigns and orders)"
@@ -440,13 +819,13 @@ export const ScoutManagementPage: React.FC = () => {
             variant="contained"
             startIcon={<AddIcon />}
             onClick={handleCreateInvite}
-            disabled={creatingInvite || invitePermissions.length === 0}
+            disabled={isCreateInviteDisabled(creatingInvite, invitePermissions)}
             sx={{ mb: 2 }}
           >
-            {creatingInvite ? "Creating..." : "Generate New Invite"}
+            {getCreateInviteText(creatingInvite)}
           </Button>
 
-          {invites.length > 0 ? (
+          {hasInvites(invites) ? (
             <TableContainer>
               <Table size="small">
                 <TableHead>
@@ -485,21 +864,7 @@ export const ScoutManagementPage: React.FC = () => {
                       <TableCell>{formatDate(invite.createdAt)}</TableCell>
                       <TableCell>{formatDate(invite.expiresAt)}</TableCell>
                       <TableCell>
-                        {isExpired(invite.expiresAt) ? (
-                          <Chip
-                            label="Expired"
-                            size="small"
-                            color="error"
-                            variant="outlined"
-                          />
-                        ) : (
-                          <Chip
-                            label="Active"
-                            size="small"
-                            color="success"
-                            variant="outlined"
-                          />
-                        )}
+                        <InviteStatusChip expiresAt={invite.expiresAt} />
                       </TableCell>
                       <TableCell align="right">
                         <IconButton
@@ -527,95 +892,11 @@ export const ScoutManagementPage: React.FC = () => {
         </Paper>
 
         {/* Shares Section */}
-        {shares.length > 0 && (
-          <Paper sx={{ p: 3 }}>
-            <Typography variant="h6" gutterBottom>
-              Who Has Access
-            </Typography>
-            <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
-              Accounts with access to your profile (via share links or redeemed
-              invites).
-            </Typography>
-
-            <TableContainer>
-              <Table size="small">
-                <TableHead>
-                  <TableRow sx={{ backgroundColor: "#f5f5f5" }}>
-                    <TableCell>User</TableCell>
-                    <TableCell>Permissions</TableCell>
-                    <TableCell>Shared</TableCell>
-                    <TableCell align="right">Actions</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {shares.map((share) => (
-                    <TableRow key={share.shareId}>
-                      <TableCell>
-                        <Typography variant="body2">
-                          {share.targetAccount?.email ||
-                            `User ${share.targetAccountId.substring(0, 8)}...`}
-                        </Typography>
-                        {share.targetAccount?.givenName &&
-                          share.targetAccount?.familyName && (
-                            <Typography
-                              variant="caption"
-                              color="text.secondary"
-                              display="block"
-                            >
-                              {share.targetAccount.givenName}{" "}
-                              {share.targetAccount.familyName}
-                            </Typography>
-                          )}
-                      </TableCell>
-                      <TableCell>
-                        <Chip
-                          label={share.permissions.join(", ")}
-                          size="small"
-                          variant="outlined"
-                        />
-                      </TableCell>
-                      <TableCell>{formatDate(share.createdAt)}</TableCell>
-                      <TableCell align="right">
-                        <Stack
-                          direction="row"
-                          spacing={1}
-                          justifyContent="flex-end"
-                        >
-                          <Button
-                            size="small"
-                            variant="outlined"
-                            onClick={() =>
-                              handleTransferOwnership(
-                                share.targetAccountId,
-                                share.targetAccount?.email,
-                              )
-                            }
-                            title="Transfer ownership to this user"
-                          >
-                            Transfer Ownership
-                          </Button>
-                          <IconButton
-                            size="small"
-                            color="error"
-                            onClick={() =>
-                              handleRevokeShare(
-                                share.targetAccountId,
-                                share.targetAccount?.email,
-                              )
-                            }
-                            title="Revoke access"
-                          >
-                            <DeleteIcon fontSize="small" />
-                          </IconButton>
-                        </Stack>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
-          </Paper>
-        )}
+        <SharesSection
+          shares={shares}
+          onTransferOwnership={handleTransferOwnership}
+          onRevokeShare={handleRevokeShare}
+        />
 
         {/* Delete Profile Section */}
         <Paper sx={{ p: 3, backgroundColor: "#fff3cd" }}>
@@ -667,7 +948,7 @@ export const ScoutManagementPage: React.FC = () => {
             variant="contained"
             disabled={deletingInvite}
           >
-            {deletingInvite ? "Deleting..." : "Delete"}
+            {getDeleteInviteButtonText(deletingInvite)}
           </Button>
         </DialogActions>
       </Dialog>
@@ -709,7 +990,7 @@ export const ScoutManagementPage: React.FC = () => {
             variant="contained"
             disabled={deletingProfile}
           >
-            {deletingProfile ? "Deleting..." : "Delete Permanently"}
+            {getDeleteProfileButtonText(deletingProfile)}
           </Button>
         </DialogActions>
       </Dialog>

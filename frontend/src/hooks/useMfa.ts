@@ -42,6 +42,47 @@ const getErrorMessage = (err: unknown, fallback: string): string => {
   return fallback;
 };
 
+const confirmMfaDisable = () =>
+  window.confirm(
+    "Are you sure you want to disable multi-factor authentication? This will make your account less secure.",
+  );
+
+const confirmPasskeyRemoval = () =>
+  window.confirm(
+    "TOTP MFA and Passkeys cannot be used together. Do you want to delete all passkeys and enable MFA?",
+  );
+
+// Helper to remove passkeys before MFA setup
+const removePasskeysIfNeeded = async (
+  passkeys: AuthWebAuthnCredential[],
+  loadPasskeys: () => Promise<void>,
+): Promise<{ cancelled: boolean; error: string | null }> => {
+  if (passkeys.length === 0) {
+    return { cancelled: false, error: null };
+  }
+
+  if (!confirmPasskeyRemoval()) {
+    return { cancelled: true, error: null };
+  }
+
+  try {
+    await Promise.all(
+      passkeys
+        .filter((passkey) => passkey.credentialId)
+        .map((passkey) =>
+          deleteWebAuthnCredential({ credentialId: passkey.credentialId! }),
+        ),
+    );
+    await loadPasskeys();
+    return { cancelled: false, error: null };
+  } catch (err: unknown) {
+    return {
+      cancelled: false,
+      error: getErrorMessage(err, "Failed to remove passkeys"),
+    };
+  }
+};
+
 export const useMfa = (): UseMfaReturn => {
   const [mfaSetupCode, setMfaSetupCode] = useState<string | null>(null);
   const [qrCodeUrl, setQrCodeUrl] = useState<string | null>(null);
@@ -64,30 +105,14 @@ export const useMfa = (): UseMfaReturn => {
     passkeys: AuthWebAuthnCredential[],
     loadPasskeys: () => Promise<void>,
   ) => {
-    // Check if passkeys are enabled - MFA and passkeys cannot be used together
-    if (passkeys.length > 0) {
-      if (
-        !window.confirm(
-          "TOTP MFA and Passkeys cannot be used together. Do you want to delete all passkeys and enable MFA?",
-        )
-      ) {
-        return;
-      }
-
-      // Delete all passkeys first
-      try {
-        for (const passkey of passkeys) {
-          if (passkey.credentialId) {
-            await deleteWebAuthnCredential({
-              credentialId: passkey.credentialId,
-            });
-          }
-        }
-        await loadPasskeys();
-      } catch (err: unknown) {
-        setMfaError(getErrorMessage(err, "Failed to remove passkeys"));
-        return;
-      }
+    const { cancelled, error } = await removePasskeysIfNeeded(
+      passkeys,
+      loadPasskeys,
+    );
+    if (cancelled) return;
+    if (error) {
+      setMfaError(error);
+      return;
     }
 
     setMfaError(null);
@@ -133,11 +158,7 @@ export const useMfa = (): UseMfaReturn => {
   };
 
   const handleDisableMFA = async () => {
-    if (
-      !window.confirm(
-        "Are you sure you want to disable multi-factor authentication? This will make your account less secure.",
-      )
-    ) {
+    if (!confirmMfaDisable()) {
       return;
     }
 

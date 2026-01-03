@@ -30,6 +30,213 @@ import { LIST_ORDERS_BY_CAMPAIGN } from "../lib/graphql";
 import { ensureCampaignId } from "../lib/ids";
 import { downloadAsCSV, downloadAsXLSX } from "../lib/reportExport";
 
+// Helper to format city/state/zip into a single string
+const formatCityStateZip = (address: Order["customerAddress"]): string =>
+  [address?.city, address?.state, address?.zipCode].filter(Boolean).join(" ");
+
+// Helper to check if address has displayable content
+const hasAddressContent = (street: boolean, cityStateZip: string): boolean =>
+  street || Boolean(cityStateZip);
+
+// Helper component to render customer address
+const CustomerAddressCell: React.FC<{
+  address: Order["customerAddress"];
+}> = ({ address }) => {
+  if (!address) return <>-</>;
+
+  const cityStateZip = formatCityStateZip(address);
+  const hasStreet = Boolean(address.street);
+
+  if (!hasAddressContent(hasStreet, cityStateZip)) return <>-</>;
+
+  return (
+    <Box sx={{ fontSize: "0.875rem" }}>
+      {hasStreet && <div>{address.street}</div>}
+      {cityStateZip && <div>{cityStateZip}</div>}
+    </Box>
+  );
+};
+
+// Helper to safely decode URL component
+const decodeUrlParam = (encoded: string | undefined): string =>
+  encoded ? decodeURIComponent(encoded) : "";
+
+// Helper to get orders from query data
+const getOrdersFromData = (
+  data: { listOrdersByCampaign: Order[] } | undefined,
+): Order[] => data?.listOrdersByCampaign || [];
+
+// Helper to determine if query should be skipped
+const shouldSkipQuery = (id: string): boolean => !id;
+
+// Helper to get all unique products from orders
+const getAllProducts = (orders: Order[]): string[] =>
+  Array.from(
+    new Set(
+      orders.flatMap((order) =>
+        order.lineItems.map((item) => item.productName),
+      ),
+    ),
+  ).sort();
+
+// Helper component for order table content
+const OrderTableContent: React.FC<{
+  orders: Order[];
+  ordersLoading: boolean;
+}> = ({ orders, ordersLoading }) => {
+  if (ordersLoading) {
+    return (
+      <Box display="flex" justifyContent="center" py={4}>
+        <CircularProgress />
+      </Box>
+    );
+  }
+
+  if (orders.length === 0) {
+    return (
+      <Typography variant="body2" color="text.secondary">
+        No orders found for this campaign.
+      </Typography>
+    );
+  }
+
+  const allProducts = getAllProducts(orders);
+
+  return (
+    <TableContainer sx={{ overflowX: "auto" }}>
+      <Table size="small">
+        <TableHead>
+          <TableRow sx={{ bgcolor: "action.hover" }}>
+            <TableCell>
+              <strong>Name</strong>
+            </TableCell>
+            <TableCell>
+              <strong>Phone</strong>
+            </TableCell>
+            <TableCell>
+              <strong>Address</strong>
+            </TableCell>
+            {allProducts.map((product) => (
+              <TableCell key={product} align="center">
+                <strong>{product}</strong>
+              </TableCell>
+            ))}
+            <TableCell align="right">
+              <strong>Total</strong>
+            </TableCell>
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {orders.map((order) => (
+            <OrderRow
+              key={order.orderId}
+              order={order}
+              allProducts={allProducts}
+            />
+          ))}
+        </TableBody>
+      </Table>
+    </TableContainer>
+  );
+};
+
+// Helper component for single order row
+const OrderRow: React.FC<{ order: Order; allProducts: string[] }> = ({
+  order,
+  allProducts,
+}) => (
+  <TableRow>
+    <TableCell>{order.customerName}</TableCell>
+    <TableCell>{formatPhone(order.customerPhone)}</TableCell>
+    <TableCell>
+      <CustomerAddressCell address={order.customerAddress} />
+    </TableCell>
+    {allProducts.map((product) => {
+      const totalQuantity = order.lineItems
+        .filter((li) => li.productName === product)
+        .reduce((sum, item) => sum + item.quantity, 0);
+      return (
+        <TableCell key={product} align="center">
+          {totalQuantity > 0 ? totalQuantity : "-"}
+        </TableCell>
+      );
+    })}
+    <TableCell align="right" sx={{ fontWeight: "bold" }}>
+      {formatCurrency(order.totalAmount)}
+    </TableCell>
+  </TableRow>
+);
+
+// Helper component for download buttons
+const DownloadButtons: React.FC<{ orders: Order[]; campaignId: string }> = ({
+  orders,
+  campaignId,
+}) => {
+  if (orders.length === 0) return null;
+  return (
+    <Stack direction="row" spacing={1}>
+      <Button
+        size="small"
+        startIcon={<DownloadIcon />}
+        onClick={() => downloadAsCSV(orders, campaignId)}
+        variant="outlined"
+      >
+        CSV
+      </Button>
+      <Button
+        size="small"
+        startIcon={<DownloadIcon />}
+        onClick={() => downloadAsXLSX(orders, campaignId)}
+        variant="outlined"
+      >
+        XLSX
+      </Button>
+    </Stack>
+  );
+};
+
+// Helper component for mobile warning
+const MobileWarning: React.FC<{ show: boolean }> = ({ show }) => {
+  if (!show) return null;
+  return (
+    <Box
+      mb={3}
+      sx={{
+        p: { xs: 1, sm: 2 },
+        bgcolor: "#e3f2fd",
+        borderRadius: 1,
+      }}
+    >
+      <Typography variant="body2" sx={{ color: "#1976d2" }}>
+        💡 <strong>Note:</strong> The order table below is designed for desktop
+        viewing. For the best experience viewing and editing detailed order
+        data, please use a larger screen.
+      </Typography>
+    </Box>
+  );
+};
+
+// Helper to format currency
+const formatCurrency = (amount: number): string =>
+  new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+  }).format(amount);
+
+// Helper to format phone number
+const formatPhone = (phone: string | undefined): string => {
+  if (!phone) return "-";
+  const digits = phone.replace(/\D/g, "");
+  if (digits.length === 10) {
+    return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
+  }
+  if (digits.length === 11) {
+    const last10 = digits.slice(-10);
+    return `(${last10.slice(0, 3)}) ${last10.slice(3, 6)}-${last10.slice(6)}`;
+  }
+  return phone;
+};
+
 interface LineItem {
   productId: string;
   productName: string;
@@ -55,9 +262,7 @@ interface Order {
 
 export const ReportsPage: React.FC = () => {
   const { campaignId: encodedCampaignId } = useParams<{ campaignId: string }>();
-  const campaignId = encodedCampaignId
-    ? decodeURIComponent(encodedCampaignId)
-    : "";
+  const campaignId = decodeUrlParam(encodedCampaignId);
   const dbCampaignId = ensureCampaignId(campaignId);
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("md"));
@@ -78,33 +283,10 @@ export const ReportsPage: React.FC = () => {
     listOrdersByCampaign: Order[];
   }>(LIST_ORDERS_BY_CAMPAIGN, {
     variables: { campaignId: dbCampaignId },
-    skip: !dbCampaignId,
+    skip: shouldSkipQuery(dbCampaignId),
   });
 
-  const orders = ordersData?.listOrdersByCampaign || [];
-
-  const formatCurrency = (amount: number) =>
-    new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency: "USD",
-    }).format(amount);
-
-  const formatPhone = (phone?: string) => {
-    if (!phone) return "-";
-    // Remove all non-digit characters
-    const digits = phone.replace(/\D/g, "");
-    // Format as (XXX) XXX-XXXX for 10 digits (US format)
-    if (digits.length === 10) {
-      return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
-    }
-    // Format as (XXX) XXX-XXXX for 11 digits (with 1 country code, just use last 10)
-    if (digits.length === 11) {
-      const last10 = digits.slice(-10);
-      return `(${last10.slice(0, 3)}) ${last10.slice(3, 6)}-${last10.slice(6)}`;
-    }
-    // Return original if can't format standardly
-    return phone;
-  };
+  const orders = getOrdersFromData(ordersData);
 
   return (
     <Box sx={{ width: "100%" }}>
@@ -145,22 +327,7 @@ export const ReportsPage: React.FC = () => {
       </Paper>
 
       {/* Mobile Warning */}
-      {isMobile && (
-        <Box
-          mb={3}
-          sx={{
-            p: { xs: 1, sm: 2 },
-            bgcolor: "#e3f2fd",
-            borderRadius: 1,
-          }}
-        >
-          <Typography variant="body2" sx={{ color: "#1976d2" }}>
-            💡 <strong>Note:</strong> The order table below is designed for
-            desktop viewing. For the best experience viewing and editing
-            detailed order data, please use a larger screen.
-          </Typography>
-        </Box>
-      )}
+      <MobileWarning show={isMobile} />
 
       {/* Complete Order Table - Collapsible */}
       <Box mb={3}>
@@ -183,129 +350,13 @@ export const ReportsPage: React.FC = () => {
                 mb={2}
               >
                 <Typography variant="h6">All Orders</Typography>
-                {orders.length > 0 && (
-                  <Stack direction="row" spacing={1}>
-                    <Button
-                      size="small"
-                      startIcon={<DownloadIcon />}
-                      onClick={() => downloadAsCSV(orders, campaignId)}
-                      variant="outlined"
-                    >
-                      CSV
-                    </Button>
-                    <Button
-                      size="small"
-                      startIcon={<DownloadIcon />}
-                      onClick={() => downloadAsXLSX(orders, campaignId)}
-                      variant="outlined"
-                    >
-                      XLSX
-                    </Button>
-                  </Stack>
-                )}
+                <DownloadButtons orders={orders} campaignId={campaignId} />
               </Stack>
 
-              {ordersLoading ? (
-                <Box display="flex" justifyContent="center" py={4}>
-                  <CircularProgress />
-                </Box>
-              ) : orders.length === 0 ? (
-                <Typography variant="body2" color="text.secondary">
-                  No orders found for this campaign.
-                </Typography>
-              ) : (
-                (() => {
-                  // Get all unique products
-                  const allProducts = Array.from(
-                    new Set(
-                      orders.flatMap((order) =>
-                        order.lineItems.map((item) => item.productName),
-                      ),
-                    ),
-                  ).sort();
-
-                  return (
-                    <TableContainer sx={{ overflowX: "auto" }}>
-                      <Table size="small">
-                        <TableHead>
-                          <TableRow sx={{ bgcolor: "action.hover" }}>
-                            <TableCell>
-                              <strong>Name</strong>
-                            </TableCell>
-                            <TableCell>
-                              <strong>Phone</strong>
-                            </TableCell>
-                            <TableCell>
-                              <strong>Address</strong>
-                            </TableCell>
-                            {allProducts.map((product) => (
-                              <TableCell key={product} align="center">
-                                <strong>{product}</strong>
-                              </TableCell>
-                            ))}
-                            <TableCell align="right">
-                              <strong>Total</strong>
-                            </TableCell>
-                          </TableRow>
-                        </TableHead>
-                        <TableBody>
-                          {orders.map((order) => (
-                            <TableRow key={order.orderId}>
-                              <TableCell>{order.customerName}</TableCell>
-                              <TableCell>
-                                {formatPhone(order.customerPhone)}
-                              </TableCell>
-                              <TableCell>
-                                {order.customerAddress ? (
-                                  <Box sx={{ fontSize: "0.875rem" }}>
-                                    {order.customerAddress.street && (
-                                      <div>{order.customerAddress.street}</div>
-                                    )}
-                                    {(order.customerAddress.city ||
-                                      order.customerAddress.state ||
-                                      order.customerAddress.zipCode) && (
-                                      <div>
-                                        {[
-                                          order.customerAddress.city,
-                                          order.customerAddress.state,
-                                          order.customerAddress.zipCode,
-                                        ]
-                                          .filter(Boolean)
-                                          .join(" ")}
-                                      </div>
-                                    )}
-                                  </Box>
-                                ) : (
-                                  "-"
-                                )}
-                              </TableCell>
-                              {allProducts.map((product) => {
-                                const totalQuantity = order.lineItems
-                                  .filter((li) => li.productName === product)
-                                  .reduce(
-                                    (sum, item) => sum + item.quantity,
-                                    0,
-                                  );
-                                return (
-                                  <TableCell key={product} align="center">
-                                    {totalQuantity > 0 ? totalQuantity : "-"}
-                                  </TableCell>
-                                );
-                              })}
-                              <TableCell
-                                align="right"
-                                sx={{ fontWeight: "bold" }}
-                              >
-                                {formatCurrency(order.totalAmount)}
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </TableContainer>
-                  );
-                })()
-              )}
+              <OrderTableContent
+                orders={orders}
+                ordersLoading={ordersLoading}
+              />
             </Paper>
           </Box>
         )}

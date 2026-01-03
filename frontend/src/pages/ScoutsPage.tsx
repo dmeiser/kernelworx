@@ -41,6 +41,357 @@ import {
 } from "../lib/graphql";
 import { ensureProfileId } from "../lib/ids";
 
+// Default preferences value
+const DEFAULT_PREFERENCES = { showReadOnlyProfiles: true };
+
+// Helper to safely parse preferences JSON
+const parsePreferences = (
+  prefs: string | undefined,
+): { showReadOnlyProfiles: boolean } => {
+  if (!prefs || prefs === "") {
+    return DEFAULT_PREFERENCES;
+  }
+  try {
+    return JSON.parse(prefs);
+  } catch {
+    return DEFAULT_PREFERENCES;
+  }
+};
+
+// Helper to get preferences from account data
+const getPreferencesFromAccount = (
+  accountData:
+    | { getMyAccount: { accountId: string; preferences?: string } }
+    | undefined,
+): { showReadOnlyProfiles: boolean } =>
+  accountData?.getMyAccount
+    ? parsePreferences(accountData.getMyAccount.preferences)
+    : DEFAULT_PREFERENCES;
+
+// Type for location state
+interface LocationState {
+  returnTo?: string;
+  sharedCampaignCode?: string;
+  message?: string;
+}
+
+// Helper to get location state with defaults
+const getLocationState = (state: LocationState | null): LocationState =>
+  state || {};
+
+// Helper to filter shared profiles based on read-only preference
+const filterSharedProfiles = (
+  profiles: Profile[],
+  showReadOnlyProfiles: boolean,
+): Profile[] =>
+  profiles.filter((profile) => {
+    const hasWrite = profile.permissions.includes("WRITE");
+    return showReadOnlyProfiles || hasWrite;
+  });
+
+// Helper to check if both profile sets are loaded
+const areBothProfilesLoaded = (
+  myProfilesData: { listMyProfiles: Profile[] } | undefined,
+  sharedProfilesLoaded: boolean,
+): boolean => myProfilesData !== undefined && sharedProfilesLoaded;
+
+// Helper to get my profiles from data
+const getMyProfiles = (
+  data: { listMyProfiles: Profile[] } | undefined,
+): Profile[] => data?.listMyProfiles || [];
+
+// Helper to check if page is still loading
+const isPageLoading = (
+  profilesLoading: boolean,
+  accountLoading: boolean,
+  bothProfilesLoaded: boolean,
+): boolean => profilesLoading || accountLoading || !bothProfilesLoaded;
+
+// Loading spinner component
+const LoadingSpinner: React.FC = () => (
+  <Box
+    display="flex"
+    justifyContent="center"
+    alignItems="center"
+    minHeight="400px"
+  >
+    <CircularProgress />
+  </Box>
+);
+
+// Error alert component
+const ErrorAlert: React.FC<{ error: Error }> = ({ error }) => (
+  <Alert severity="error" sx={{ mb: 3 }}>
+    Failed to load profiles: {error.message}
+  </Alert>
+);
+
+// Info message alert component
+const InfoMessageAlert: React.FC<{ message: string }> = ({ message }) => (
+  <Alert severity="info" sx={{ mb: 3 }}>
+    {message}
+  </Alert>
+);
+
+// Empty state component
+const EmptyState: React.FC = () => (
+  <Alert severity="info">
+    You don't have any scouts yet. Click "Create Scout" to get started!
+  </Alert>
+);
+
+// Owned profiles section component
+const OwnedProfilesSection: React.FC<{ profiles: Profile[] }> = ({
+  profiles,
+}) =>
+  profiles.length > 0 ? (
+    <Box mb={4}>
+      <Typography variant="h6" gutterBottom>
+        Scouts I Own
+      </Typography>
+      <Grid container spacing={2}>
+        {profiles.map((profile) => (
+          <Grid key={profile.profileId} size={{ xs: 12, sm: 6, md: 4 }}>
+            <ProfileCard
+              profileId={profile.profileId}
+              sellerName={profile.sellerName}
+              isOwner={profile.isOwner}
+              permissions={profile.permissions}
+            />
+          </Grid>
+        ))}
+      </Grid>
+    </Box>
+  ) : null;
+
+// Shared profiles section component
+const SharedProfilesSection: React.FC<{
+  profiles: Profile[];
+  showDivider: boolean;
+}> = ({ profiles, showDivider }) =>
+  profiles.length > 0 ? (
+    <Box>
+      {showDivider && <Divider sx={{ my: 4 }} />}
+      <Typography variant="h6" gutterBottom>
+        Scouts Shared With Me
+      </Typography>
+      <Grid container spacing={2}>
+        {profiles.map((profile) => (
+          <Grid key={profile.profileId} size={{ xs: 12, sm: 6, md: 4 }}>
+            <ProfileCard
+              profileId={profile.profileId}
+              sellerName={profile.sellerName}
+              isOwner={profile.isOwner}
+              permissions={profile.permissions}
+            />
+          </Grid>
+        ))}
+      </Grid>
+    </Box>
+  ) : null;
+
+// Helper to check if should show empty state
+const shouldShowEmptyState = (
+  myProfiles: Profile[],
+  filteredSharedProfiles: Profile[],
+  loading: boolean,
+): boolean =>
+  myProfiles.length === 0 && filteredSharedProfiles.length === 0 && !loading;
+
+// Helper to build preferences update variables
+const buildPreferencesVariables = (
+  preferences: { showReadOnlyProfiles: boolean },
+  newChecked: boolean,
+) => ({
+  preferences: JSON.stringify({
+    ...preferences,
+    showReadOnlyProfiles: newChecked,
+  }),
+});
+
+// Helper to check if should open dialog on return path
+const shouldAutoOpenDialog = (
+  returnPath: string | undefined,
+  createDialogOpen: boolean,
+): boolean => Boolean(returnPath && !createDialogOpen);
+
+// Helper to conditionally open dialog
+const maybeOpenDialog = (
+  shouldOpen: boolean,
+  setCreateDialogOpen: (v: boolean) => void,
+): void => {
+  if (shouldOpen) {
+    setCreateDialogOpen(true);
+  }
+};
+
+// Helper to get initial preference value
+const getInitialPreferenceValue = (preferences: {
+  showReadOnlyProfiles: boolean;
+}): boolean => preferences.showReadOnlyProfiles ?? true;
+
+// Helper to check if auth is ready and should trigger queries
+const shouldTriggerQueries = (
+  authLoading: boolean,
+  isAuthenticated: boolean,
+  queriesTriggered: boolean,
+): boolean => !authLoading && isAuthenticated && !queriesTriggered;
+
+// Helper to conditionally trigger queries
+const maybeTriggerQueries = (
+  shouldTrigger: boolean,
+  queriesTriggeredRef: React.MutableRefObject<boolean>,
+  loadAccount: () => void,
+  loadMyProfiles: () => void,
+  loadSharedProfiles: () => void,
+): void => {
+  if (shouldTrigger) {
+    queriesTriggeredRef.current = true;
+    loadAccount();
+    loadMyProfiles();
+    loadSharedProfiles();
+  }
+};
+
+// Helper to handle return navigation after profile creation
+const handleReturnNavigation = (
+  returnPath: string | undefined,
+  navigate: (path: string, options?: object) => void,
+): void => {
+  if (returnPath) {
+    // Longer delay to ensure DynamoDB GSI consistency
+    // The backend queries profileId-index GSI which has eventual consistency
+    setTimeout(() => {
+      navigate(returnPath, {
+        replace: true,
+        state: { fromProfileCreation: true },
+      });
+    }, 1500);
+  }
+};
+
+// Helper to check if can delete profile
+const canDeleteCurrentProfile = (deletingProfileId: string | null): boolean =>
+  Boolean(deletingProfileId);
+
+// Helper to conditionally delete profile
+const maybeDeleteProfile = async (
+  canDelete: boolean,
+  deletingProfileId: string | null,
+  deleteProfile: (options: {
+    variables: { profileId: string };
+  }) => Promise<unknown>,
+): Promise<void> => {
+  if (canDelete && deletingProfileId) {
+    await deleteProfile({
+      variables: { profileId: ensureProfileId(deletingProfileId) },
+    });
+  }
+};
+
+// Helper to update preferences with error handling
+const updatePreferencesWithRollback = async (
+  updatePreferences: (options: {
+    variables: { preferences: string };
+  }) => Promise<unknown>,
+  preferences: { showReadOnlyProfiles: boolean },
+  checked: boolean,
+  setShowReadOnlyProfiles: (v: boolean) => void,
+): Promise<void> => {
+  setShowReadOnlyProfiles(checked);
+  try {
+    await updatePreferences({
+      variables: buildPreferencesVariables(preferences, checked),
+    });
+  } catch (error) {
+    console.error("Failed to update preferences:", error);
+    setShowReadOnlyProfiles(!checked);
+  }
+};
+
+// Helper to load shared profiles with error handling
+const loadSharedProfilesWithErrorHandling = async (
+  apolloClient: {
+    query: (options: object) => Promise<{ data?: { listMyShares: Profile[] } }>;
+  },
+  query: object,
+  setSharedProfiles: (profiles: Profile[]) => void,
+  setSharedProfilesLoaded: (loaded: boolean) => void,
+  setSharedProfilesError: (error: Error | null) => void,
+  setSharedProfilesLoading: (loading: boolean) => void,
+): Promise<void> => {
+  setSharedProfilesLoading(true);
+  setSharedProfilesError(null);
+  try {
+    const result = await apolloClient.query({
+      query,
+      fetchPolicy: "network-only",
+    });
+    const profiles = getSharedProfilesFromResult(result);
+    setSharedProfiles(profiles);
+    setSharedProfilesLoaded(true);
+  } catch (err) {
+    console.error("Failed to load shared profiles:", err);
+    setSharedProfilesError(handleSharedProfilesError(err));
+  } finally {
+    setSharedProfilesLoading(false);
+  }
+};
+
+// Helper to handle shared profiles load error
+const handleSharedProfilesError = (err: unknown): Error =>
+  err instanceof Error ? err : new Error("Failed to load shared profiles");
+
+// Helper to get profiles from shared profiles result
+const getSharedProfilesFromResult = (result: {
+  data?: { listMyShares: Profile[] };
+}): Profile[] => result.data?.listMyShares || [];
+
+// Helper to combine loading states
+const combineLoadingStates = (loading1: boolean, loading2: boolean): boolean =>
+  loading1 || loading2;
+
+// Helper to combine errors
+const combineErrors = (
+  error1: Error | null | undefined,
+  error2: Error | null,
+): Error | null => (error1 || error2) ?? null;
+
+// Helper component for conditional error display
+const ConditionalErrorAlert: React.FC<{ error: Error | null }> = ({ error }) =>
+  error ? <ErrorAlert error={error} /> : null;
+
+// Helper component for conditional info message
+const ConditionalInfoAlert: React.FC<{ message: string | undefined }> = ({
+  message,
+}) => (message ? <InfoMessageAlert message={message} /> : null);
+
+// Helper component for conditional empty state
+const ConditionalEmptyState: React.FC<{
+  myProfiles: Profile[];
+  filteredSharedProfiles: Profile[];
+  loading: boolean;
+}> = ({ myProfiles, filteredSharedProfiles, loading }) =>
+  shouldShowEmptyState(myProfiles, filteredSharedProfiles, loading) ? (
+    <EmptyState />
+  ) : null;
+
+// Helper component for conditional editing dialog
+const ConditionalEditDialog: React.FC<{
+  editingProfile: EditingProfile | null;
+  onClose: () => void;
+  onSubmit: (profileId: string, sellerName: string) => Promise<void>;
+}> = ({ editingProfile, onClose, onSubmit }) =>
+  editingProfile ? (
+    <EditProfileDialog
+      open={true}
+      profileId={editingProfile.profileId}
+      currentName={editingProfile.sellerName}
+      onClose={onClose}
+      onSubmit={onSubmit}
+    />
+  ) : null;
+
 interface Profile {
   profileId: string;
   sellerName: string;
@@ -67,19 +418,16 @@ export const ScoutsPage: React.FC = () => {
   );
 
   // Check for return navigation from campaign shared campaign flow
-  const locationState = location.state as {
-    returnTo?: string;
-    sharedCampaignCode?: string;
-    message?: string;
-  } | null;
-  const returnPath = locationState?.returnTo;
-  const infoMessage = locationState?.message;
+  const locationState = getLocationState(
+    location.state as LocationState | null,
+  );
+  const returnPath = locationState.returnTo;
+  const infoMessage = locationState.message;
 
   // Auto-open create dialog when arriving from shared campaign flow
   React.useEffect(() => {
-    if (returnPath && !createDialogOpen) {
-      setCreateDialogOpen(true);
-    }
+    const shouldOpen = shouldAutoOpenDialog(returnPath, createDialogOpen);
+    maybeOpenDialog(shouldOpen, setCreateDialogOpen);
   }, [returnPath, createDialogOpen]);
 
   // Fetch account preferences
@@ -92,28 +440,17 @@ export const ScoutsPage: React.FC = () => {
     );
 
   // Parse preferences from account data
-  const preferences = React.useMemo(() => {
-    if (!accountData?.getMyAccount) {
-      return { showReadOnlyProfiles: true };
-    }
-    try {
-      const prefs = accountData.getMyAccount.preferences;
-      if (!prefs || prefs === "") {
-        return { showReadOnlyProfiles: true };
-      }
-      return JSON.parse(prefs);
-    } catch (error) {
-      console.warn("Failed to parse preferences:", error);
-      return { showReadOnlyProfiles: true };
-    }
-  }, [accountData]);
+  const preferences = React.useMemo(
+    () => getPreferencesFromAccount(accountData),
+    [accountData],
+  );
 
   // Show read-only profiles preference
   const [showReadOnlyProfiles, setShowReadOnlyProfiles] = useState(true);
 
   // Update local state when preferences load
   useEffect(() => {
-    setShowReadOnlyProfiles(preferences.showReadOnlyProfiles ?? true);
+    setShowReadOnlyProfiles(getInitialPreferenceValue(preferences));
   }, [preferences]);
 
   // Update preferences mutation
@@ -121,21 +458,12 @@ export const ScoutsPage: React.FC = () => {
 
   // Save preference to DynamoDB when it changes
   const handleToggleReadOnly = async (checked: boolean) => {
-    setShowReadOnlyProfiles(checked);
-    try {
-      await updatePreferences({
-        variables: {
-          preferences: JSON.stringify({
-            ...preferences,
-            showReadOnlyProfiles: checked,
-          }),
-        },
-      });
-    } catch (error) {
-      console.error("Failed to update preferences:", error);
-      // Revert on error
-      setShowReadOnlyProfiles(!checked);
-    }
+    await updatePreferencesWithRollback(
+      updatePreferences,
+      preferences,
+      checked,
+      setShowReadOnlyProfiles,
+    );
   };
 
   // Fetch owned profiles
@@ -162,31 +490,14 @@ export const ScoutsPage: React.FC = () => {
 
   // Function to load shared profiles - now returns full profile data in a single query
   const loadSharedProfiles = React.useCallback(async () => {
-    setSharedProfilesLoading(true);
-    setSharedProfilesError(null);
-
-    try {
-      // Single query returns full profile data with permissions
-      const result = await apolloClient.query<{
-        listMyShares: Profile[];
-      }>({
-        query: LIST_MY_SHARES,
-        fetchPolicy: "network-only",
-      });
-
-      const profiles = result.data?.listMyShares || [];
-      setSharedProfiles(profiles);
-      setSharedProfilesLoaded(true);
-    } catch (err) {
-      console.error("Failed to load shared profiles:", err);
-      setSharedProfilesError(
-        err instanceof Error
-          ? err
-          : new Error("Failed to load shared profiles"),
-      );
-    } finally {
-      setSharedProfilesLoading(false);
-    }
+    await loadSharedProfilesWithErrorHandling(
+      apolloClient,
+      LIST_MY_SHARES,
+      setSharedProfiles,
+      setSharedProfilesLoaded,
+      setSharedProfilesError,
+      setSharedProfilesLoading,
+    );
   }, [apolloClient]);
 
   // When auth becomes ready, trigger queries explicitly to avoid race conditions
@@ -194,13 +505,18 @@ export const ScoutsPage: React.FC = () => {
   const queriesTriggeredRef = React.useRef(false);
 
   useEffect(() => {
-    if (!authLoading && isAuthenticated && !queriesTriggeredRef.current) {
-      queriesTriggeredRef.current = true;
-      // Trigger queries - auth is already confirmed ready by isAuthenticated=true
-      loadAccount();
-      loadMyProfiles();
-      loadSharedProfiles();
-    }
+    const shouldTrigger = shouldTriggerQueries(
+      authLoading,
+      isAuthenticated,
+      queriesTriggeredRef.current,
+    );
+    maybeTriggerQueries(
+      shouldTrigger,
+      queriesTriggeredRef,
+      loadAccount,
+      loadMyProfiles,
+      loadSharedProfiles,
+    );
   }, [
     authLoading,
     isAuthenticated,
@@ -217,16 +533,7 @@ export const ScoutsPage: React.FC = () => {
       // Reload profiles and wait for the result
       await loadMyProfiles();
       // If we came from a campaign shared campaign flow, return to it
-      if (returnPath) {
-        // Longer delay to ensure DynamoDB GSI consistency
-        // The backend queries profileId-index GSI which has eventual consistency
-        setTimeout(() => {
-          navigate(returnPath, {
-            replace: true,
-            state: { fromProfileCreation: true },
-          });
-        }, 1500);
-      }
+      handleReturnNavigation(returnPath, navigate);
     },
   });
 
@@ -258,43 +565,32 @@ export const ScoutsPage: React.FC = () => {
   };
 
   const handleDeleteProfile = async () => {
-    if (!deletingProfileId) return;
-    await deleteProfile({
-      variables: { profileId: ensureProfileId(deletingProfileId) },
-    });
+    const canDelete = canDeleteCurrentProfile(deletingProfileId);
+    await maybeDeleteProfile(canDelete, deletingProfileId, deleteProfile);
   };
 
-  const myProfiles: Profile[] = myProfilesData?.listMyProfiles || [];
+  const myProfiles = getMyProfiles(myProfilesData);
+  const filteredSharedProfiles = filterSharedProfiles(
+    sharedProfiles,
+    showReadOnlyProfiles,
+  );
+  const profilesLoading = combineLoadingStates(
+    myProfilesLoading,
+    sharedProfilesLoading,
+  );
+  const bothProfilesLoaded = areBothProfilesLoaded(
+    myProfilesData,
+    sharedProfilesLoaded,
+  );
+  const pageLoading = isPageLoading(
+    profilesLoading,
+    accountLoading,
+    bothProfilesLoaded,
+  );
+  const error = combineErrors(myProfilesError, sharedProfilesError);
 
-  // Filter shared profiles based on read-only preference
-  const filteredSharedProfiles = sharedProfiles.filter((profile) => {
-    const hasWrite = profile.permissions.includes("WRITE");
-    // When showReadOnlyProfiles is true: show all profiles
-    // When showReadOnlyProfiles is false: show only profiles with WRITE permission
-    return showReadOnlyProfiles || hasWrite;
-  });
-
-  // Wait for BOTH profile queries to complete before showing any profiles
-  // This prevents the jarring UX of owned profiles appearing before shared profiles
-  const profilesLoading = myProfilesLoading || sharedProfilesLoading;
-  const bothProfilesLoaded =
-    myProfilesData !== undefined && sharedProfilesLoaded;
-  const loading = profilesLoading || accountLoading;
-  const error = myProfilesError || sharedProfilesError;
-
-  // Show loading spinner until both profile queries complete
-  // This ensures owned and shared profiles appear together
-  if (loading || !bothProfilesLoaded) {
-    return (
-      <Box
-        display="flex"
-        justifyContent="center"
-        alignItems="center"
-        minHeight="400px"
-      >
-        <CircularProgress />
-      </Box>
-    );
+  if (pageLoading) {
+    return <LoadingSpinner />;
   }
 
   return (
@@ -343,69 +639,24 @@ export const ScoutsPage: React.FC = () => {
         </Stack>
       </Stack>
 
-      {error && (
-        <Alert severity="error" sx={{ mb: 3 }}>
-          Failed to load profiles: {error.message}
-        </Alert>
-      )}
-
-      {infoMessage && (
-        <Alert severity="info" sx={{ mb: 3 }}>
-          {infoMessage}
-        </Alert>
-      )}
+      <ConditionalErrorAlert error={error} />
+      <ConditionalInfoAlert message={infoMessage} />
 
       {/* Owned Profiles */}
-      {myProfiles.length > 0 && (
-        <Box mb={4}>
-          <Typography variant="h6" gutterBottom>
-            Scouts I Own
-          </Typography>
-          <Grid container spacing={2}>
-            {myProfiles.map((profile) => (
-              <Grid key={profile.profileId} size={{ xs: 12, sm: 6, md: 4 }}>
-                <ProfileCard
-                  profileId={profile.profileId}
-                  sellerName={profile.sellerName}
-                  isOwner={profile.isOwner}
-                  permissions={profile.permissions}
-                />
-              </Grid>
-            ))}
-          </Grid>
-        </Box>
-      )}
+      <OwnedProfilesSection profiles={myProfiles} />
 
       {/* Shared Profiles */}
-      {filteredSharedProfiles.length > 0 && (
-        <Box>
-          {myProfiles.length > 0 && <Divider sx={{ my: 4 }} />}
-          <Typography variant="h6" gutterBottom>
-            Scouts Shared With Me
-          </Typography>
-          <Grid container spacing={2}>
-            {filteredSharedProfiles.map((profile) => (
-              <Grid key={profile.profileId} size={{ xs: 12, sm: 6, md: 4 }}>
-                <ProfileCard
-                  profileId={profile.profileId}
-                  sellerName={profile.sellerName}
-                  isOwner={profile.isOwner}
-                  permissions={profile.permissions}
-                />
-              </Grid>
-            ))}
-          </Grid>
-        </Box>
-      )}
+      <SharedProfilesSection
+        profiles={filteredSharedProfiles}
+        showDivider={myProfiles.length > 0}
+      />
 
       {/* Empty State */}
-      {myProfiles.length === 0 &&
-        filteredSharedProfiles.length === 0 &&
-        !loading && (
-          <Alert severity="info">
-            You don't have any scouts yet. Click "Create Scout" to get started!
-          </Alert>
-        )}
+      <ConditionalEmptyState
+        myProfiles={myProfiles}
+        filteredSharedProfiles={filteredSharedProfiles}
+        loading={pageLoading}
+      />
 
       {/* Dialogs */}
       <CreateProfileDialog
@@ -414,15 +665,11 @@ export const ScoutsPage: React.FC = () => {
         onSubmit={handleCreateProfile}
       />
 
-      {editingProfile && (
-        <EditProfileDialog
-          open={true}
-          profileId={editingProfile.profileId}
-          currentName={editingProfile.sellerName}
-          onClose={() => setEditingProfile(null)}
-          onSubmit={handleUpdateProfile}
-        />
-      )}
+      <ConditionalEditDialog
+        editingProfile={editingProfile}
+        onClose={() => setEditingProfile(null)}
+        onSubmit={handleUpdateProfile}
+      />
 
       {/* Delete Profile Confirmation Dialog */}
       <Dialog

@@ -18,6 +18,59 @@ import { ShoppingCart, AttachMoney, People } from "@mui/icons-material";
 import { LIST_ORDERS_BY_CAMPAIGN } from "../lib/graphql";
 import { ensureCampaignId } from "../lib/ids";
 
+// Helper to safely decode URL component
+const decodeUrlParam = (encoded: string | undefined): string =>
+  encoded ? decodeURIComponent(encoded) : "";
+
+// Helper to get orders from query data
+const getOrders = (
+  data: { listOrdersByCampaign: Order[] } | undefined,
+): Order[] => data?.listOrdersByCampaign || [];
+
+// Helper to calculate payment breakdown from orders
+const calculatePaymentBreakdown = (orders: Order[]): Record<string, number> =>
+  orders.reduce(
+    (acc, order) => {
+      acc[order.paymentMethod] = (acc[order.paymentMethod] || 0) + 1;
+      return acc;
+    },
+    {} as Record<string, number>,
+  );
+
+// Helper to calculate product breakdown from orders
+const calculateProductBreakdown = (
+  orders: Order[],
+): Record<string, { quantity: number; revenue: number }> =>
+  orders.reduce(
+    (acc, order) => {
+      order.lineItems.forEach((item) => {
+        if (!acc[item.productName]) {
+          acc[item.productName] = { quantity: 0, revenue: 0 };
+        }
+        acc[item.productName].quantity += item.quantity;
+        acc[item.productName].revenue += item.subtotal;
+      });
+      return acc;
+    },
+    {} as Record<string, { quantity: number; revenue: number }>,
+  );
+
+// Helper to get top products sorted by revenue
+const getTopProducts = (
+  productBreakdown: Record<string, { quantity: number; revenue: number }>,
+  limit: number,
+): [string, { quantity: number; revenue: number }][] =>
+  Object.entries(productBreakdown)
+    .sort((a, b) => b[1].revenue - a[1].revenue)
+    .slice(0, limit);
+
+// Helper to format currency
+const formatCurrency = (amount: number): string =>
+  new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+  }).format(amount);
+
 interface LineItem {
   productId: string;
   productName: string;
@@ -36,9 +89,7 @@ interface Order {
 
 export const CampaignSummaryPage: React.FC = () => {
   const { campaignId: encodedCampaignId } = useParams<{ campaignId: string }>();
-  const campaignId = encodedCampaignId
-    ? decodeURIComponent(encodedCampaignId)
-    : "";
+  const campaignId = decodeUrlParam(encodedCampaignId);
   const dbCampaignId = ensureCampaignId(campaignId);
 
   const {
@@ -50,7 +101,7 @@ export const CampaignSummaryPage: React.FC = () => {
     skip: !dbCampaignId,
   });
 
-  const orders = ordersData?.listOrdersByCampaign || [];
+  const orders = getOrders(ordersData);
 
   // Calculate statistics
   const totalOrders = orders.length;
@@ -61,33 +112,10 @@ export const CampaignSummaryPage: React.FC = () => {
   const uniqueCustomers = new Set(orders.map((order) => order.customerName))
     .size;
 
-  // Payment method breakdown
-  const paymentBreakdown = orders.reduce(
-    (acc, order) => {
-      acc[order.paymentMethod] = (acc[order.paymentMethod] || 0) + 1;
-      return acc;
-    },
-    {} as Record<string, number>,
-  );
-
-  // Product breakdown
-  const productBreakdown = orders.reduce(
-    (acc, order) => {
-      order.lineItems.forEach((item) => {
-        if (!acc[item.productName]) {
-          acc[item.productName] = { quantity: 0, revenue: 0 };
-        }
-        acc[item.productName].quantity += item.quantity;
-        acc[item.productName].revenue += item.subtotal;
-      });
-      return acc;
-    },
-    {} as Record<string, { quantity: number; revenue: number }>,
-  );
-
-  const topProducts = Object.entries(productBreakdown)
-    .sort((a, b) => b[1].revenue - a[1].revenue)
-    .slice(0, 5);
+  // Compute breakdowns using helpers
+  const paymentBreakdown = calculatePaymentBreakdown(orders);
+  const productBreakdown = calculateProductBreakdown(orders);
+  const topProducts = getTopProducts(productBreakdown, 5);
 
   if (loading) {
     return (
@@ -107,12 +135,6 @@ export const CampaignSummaryPage: React.FC = () => {
       <Alert severity="error">Failed to load summary: {error.message}</Alert>
     );
   }
-
-  const formatCurrency = (amount: number) =>
-    new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency: "USD",
-    }).format(amount);
 
   return (
     <Box>

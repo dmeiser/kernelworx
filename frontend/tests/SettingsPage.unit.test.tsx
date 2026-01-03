@@ -25,7 +25,7 @@ vi.mock('@apollo/client/react', async () => {
   const actual = await vi.importActual<any>('@apollo/client/react');
   return {
     ...actual,
-    useQuery: (query: any) => ({ data: { getMyAccount: mockAccountData }, loading: false, error: undefined }),
+    useQuery: () => ({ data: { getMyAccount: mockAccountData }, loading: false, error: undefined }),
   };
 });
 

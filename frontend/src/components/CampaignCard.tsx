@@ -31,6 +31,35 @@ interface CampaignCardProps {
   totalRevenue?: number;
 }
 
+const CampaignStatus: React.FC<{ isActive: boolean }> = ({ isActive }) =>
+  isActive ? <Chip label="Active" color="success" size="small" /> : null;
+
+const CampaignStats: React.FC<{
+  totalOrders?: number;
+  totalRevenue?: number;
+}> = ({ totalOrders, totalRevenue }) => (
+  <Stack spacing={1}>
+    <StatRow
+      icon={<OrdersIcon fontSize="small" color="action" />}
+      label={`${totalOrders ?? 0} ${totalOrders === 1 ? "order" : "orders"}`}
+    />
+    <StatRow
+      icon={<SalesIcon fontSize="small" color="action" />}
+      label={`$${(totalRevenue ?? 0).toFixed(2)} in sales`}
+    />
+  </Stack>
+);
+
+const StatRow: React.FC<{ icon: React.ReactNode; label: string }> = ({
+  icon,
+  label,
+}) => (
+  <Stack direction="row" spacing={1} alignItems="center">
+    {icon}
+    <Typography variant="body2">{label}</Typography>
+  </Stack>
+);
+
 export const CampaignCard: React.FC<CampaignCardProps> = ({
   campaignId,
   profileId,
@@ -63,25 +92,15 @@ export const CampaignCard: React.FC<CampaignCardProps> = ({
               <Typography variant="h6" component="h3">
                 {campaignName} {campaignYear}
               </Typography>
-              {isActive && <Chip label="Active" color="success" size="small" />}
+              <CampaignStatus isActive={isActive} />
             </Stack>
           </Box>
 
           {/* Stats */}
-          <Stack spacing={1}>
-            <Stack direction="row" spacing={1} alignItems="center">
-              <OrdersIcon fontSize="small" color="action" />
-              <Typography variant="body2">
-                {totalOrders ?? 0} {totalOrders === 1 ? "order" : "orders"}
-              </Typography>
-            </Stack>
-            <Stack direction="row" spacing={1} alignItems="center">
-              <SalesIcon fontSize="small" color="action" />
-              <Typography variant="body2">
-                ${(totalRevenue ?? 0).toFixed(2)} in sales
-              </Typography>
-            </Stack>
-          </Stack>
+          <CampaignStats
+            totalOrders={totalOrders}
+            totalRevenue={totalRevenue}
+          />
         </Stack>
       </CardContent>
       <CardActions>

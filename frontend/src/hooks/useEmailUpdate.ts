@@ -32,6 +32,23 @@ const getErrorMessage = (err: unknown, fallback: string): string => {
   return fallback;
 };
 
+const validateNewEmail = (
+  newEmail: string,
+  currentEmail?: string,
+): string | null => {
+  if (!newEmail || !newEmail.includes("@")) {
+    return "Please enter a valid email address";
+  }
+
+  if (newEmail.toLowerCase() === currentEmail?.toLowerCase()) {
+    return "New email must be different from current email";
+  }
+
+  return null;
+};
+
+const isCodeInvalid = (code: string) => !code || code.length !== 6;
+
 export const useEmailUpdate = (): UseEmailUpdateReturn => {
   const [emailDialogOpen, setEmailDialogOpen] = useState(false);
   const [newEmail, setNewEmail] = useState("");
@@ -54,13 +71,9 @@ export const useEmailUpdate = (): UseEmailUpdateReturn => {
   };
 
   const handleRequestEmailUpdate = async (currentEmail: string | undefined) => {
-    if (!newEmail || !newEmail.includes("@")) {
-      setEmailUpdateError("Please enter a valid email address");
-      return;
-    }
-
-    if (newEmail.toLowerCase() === currentEmail?.toLowerCase()) {
-      setEmailUpdateError("New email must be different from current email");
+    const validationError = validateNewEmail(newEmail, currentEmail);
+    if (validationError) {
+      setEmailUpdateError(validationError);
       return;
     }
 
@@ -75,20 +88,20 @@ export const useEmailUpdate = (): UseEmailUpdateReturn => {
         },
       });
 
-      if (
-        output.nextStep.updateAttributeStep === "CONFIRM_ATTRIBUTE_WITH_CODE"
-      ) {
+      const nextStep = output.nextStep.updateAttributeStep;
+      if (nextStep === "CONFIRM_ATTRIBUTE_WITH_CODE") {
         setEmailUpdatePending(true);
-        setEmailUpdateError(null);
-      } else if (output.nextStep.updateAttributeStep === "DONE") {
+        return;
+      }
+
+      if (nextStep === "DONE") {
         setEmailUpdateError(
           "Your session was created before email verification was enabled. Please sign out, sign back in, and try updating your email again to enable verification.",
         );
-      } else {
-        setEmailUpdateError(
-          `Unexpected response: ${output.nextStep.updateAttributeStep}`,
-        );
+        return;
       }
+
+      setEmailUpdateError(`Unexpected response: ${nextStep}`);
     } catch (err: unknown) {
       setEmailUpdateError(
         getErrorMessage(err, "Failed to request email update"),
@@ -102,7 +115,7 @@ export const useEmailUpdate = (): UseEmailUpdateReturn => {
     logout: () => Promise<void>,
     navigate: (path: string) => void,
   ) => {
-    if (!emailVerificationCode || emailVerificationCode.length !== 6) {
+    if (isCodeInvalid(emailVerificationCode)) {
       setEmailUpdateError("Please enter the 6-digit verification code");
       return;
     }

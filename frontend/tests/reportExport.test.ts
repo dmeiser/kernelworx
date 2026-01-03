@@ -1,7 +1,6 @@
 /**
  * Tests for reportExport utility functions
  */
-/// <reference types="vitest" />
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 vi.stubGlobal("document", {

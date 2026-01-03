@@ -54,19 +54,27 @@ export const CatalogEditorDialog: React.FC<CatalogEditorDialogProps> = ({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const resetForm = () => {
+    setCatalogName("");
+    setIsPublic(false);
+    setProducts([{ productName: "", description: "", price: 0 }]);
+    setError(null);
+  };
+
+  const initFromCatalog = (catalog: Catalog) => {
+    setCatalogName(catalog.catalogName);
+    setIsPublic(catalog.isPublic);
+    setProducts([...catalog.products]);
+    setError(null);
+  };
+
   useEffect(() => {
     if (open) {
       if (initialCatalog) {
-        setCatalogName(initialCatalog.catalogName);
-        setIsPublic(initialCatalog.isPublic);
-        setProducts([...initialCatalog.products]);
+        initFromCatalog(initialCatalog);
       } else {
-        // New catalog
-        setCatalogName("");
-        setIsPublic(false);
-        setProducts([{ productName: "", description: "", price: 0 }]);
+        resetForm();
       }
-      setError(null);
     }
   }, [open, initialCatalog]);
 
@@ -90,43 +98,49 @@ export const CatalogEditorDialog: React.FC<CatalogEditorDialogProps> = ({
     setProducts(updated);
   };
 
+  const validateProducts = (): string | null => {
+    if (products.length === 0) {
+      return "At least one product is required";
+    }
+    for (let i = 0; i < products.length; i++) {
+      if (!products[i].productName.trim()) {
+        return `Product ${i + 1} name is required`;
+      }
+      if (products[i].price <= 0) {
+        return `Product ${i + 1} price must be greater than 0`;
+      }
+    }
+    return null;
+  };
+
+  const validate = (): string | null => {
+    if (!catalogName.trim()) return "Catalog name is required";
+    return validateProducts();
+  };
+
+  const buildCatalogPayload = () => ({
+    catalogName: catalogName.trim(),
+    isPublic,
+    products: products.map((p, index) => ({
+      productName: p.productName.trim(),
+      description: p.description?.trim() || undefined,
+      price: p.price,
+      sortOrder: index,
+    })),
+  });
+
   const handleSave = async () => {
     setError(null);
 
-    // Validation
-    if (!catalogName.trim()) {
-      setError("Catalog name is required");
+    const validationError = validate();
+    if (validationError) {
+      setError(validationError);
       return;
-    }
-
-    if (products.length === 0) {
-      setError("At least one product is required");
-      return;
-    }
-
-    for (let i = 0; i < products.length; i++) {
-      if (!products[i].productName.trim()) {
-        setError(`Product ${i + 1} name is required`);
-        return;
-      }
-      if (products[i].price <= 0) {
-        setError(`Product ${i + 1} price must be greater than 0`);
-        return;
-      }
     }
 
     setSaving(true);
     try {
-      await onSave({
-        catalogName: catalogName.trim(),
-        isPublic,
-        products: products.map((p, index) => ({
-          productName: p.productName.trim(),
-          description: p.description?.trim() || undefined,
-          price: p.price,
-          sortOrder: index,
-        })),
-      });
+      await onSave(buildCatalogPayload());
       onClose();
     } catch (err: unknown) {
       const message =

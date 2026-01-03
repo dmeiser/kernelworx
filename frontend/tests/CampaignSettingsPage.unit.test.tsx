@@ -1,5 +1,5 @@
 import { describe, test, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 
@@ -19,7 +19,7 @@ vi.mock('@apollo/client/react', async () => {
   const actual = await vi.importActual<any>('@apollo/client/react');
   return {
     ...actual,
-    useQuery: (q: any, opts: any) => ({ data: mockCampaignSettingsData, loading: false, error: undefined, refetch: vi.fn() }),
+    useQuery: () => ({ data: mockCampaignSettingsData, loading: false, error: undefined, refetch: vi.fn() }),
     useMutation: () => [vi.fn().mockResolvedValue({ data: {} }), { loading: false }],
   };
 });

@@ -40,6 +40,175 @@ import {
 } from "../lib/graphql";
 import { ensureCampaignId, ensureCatalogId, toUrlId } from "../lib/ids";
 
+// Helper to extract date part from ISO string
+const extractDatePart = (isoDate: string | undefined): string =>
+  isoDate?.split("T")[0] || "";
+
+// Helper to safely decode URL component
+const decodeUrlParam = (encoded: string | undefined): string =>
+  encoded ? decodeURIComponent(encoded) : "";
+
+// Helper to get catalogs with fallback
+const getPublicCatalogs = (
+  data: { listPublicCatalogs?: Catalog[] } | undefined,
+): Catalog[] => data?.listPublicCatalogs || [];
+
+const getMyCatalogs = (
+  data: { listMyCatalogs?: Catalog[] } | undefined,
+): Catalog[] => data?.listMyCatalogs || [];
+
+// Helper to get campaign from query data
+const getCampaign = (
+  data: { getCampaign: Campaign } | undefined,
+): Campaign | undefined => data?.getCampaign;
+
+// Helper to check if unit-related fields have changed
+const hasUnitFieldsChanged = (
+  campaign: Campaign | undefined,
+  formName: string,
+  formCatalog: string,
+): boolean => {
+  if (!campaign?.sharedCampaignCode) return false;
+  return (
+    formName !== campaign.campaignName || formCatalog !== campaign.catalogId
+  );
+};
+
+// Helper to validate save inputs
+const canSave = (
+  campaignId: string,
+  campaignName: string,
+  catalogId: string,
+): boolean => Boolean(campaignId && campaignName.trim() && catalogId);
+
+// Helper to build update input
+const buildUpdateInput = (
+  dbCampaignId: string,
+  campaignName: string,
+  startDate: string,
+  endDate: string,
+  catalogId: string,
+) => ({
+  campaignId: dbCampaignId,
+  campaignName: campaignName.trim(),
+  startDate: startDate || undefined,
+  endDate: endDate || undefined,
+  catalogId: ensureCatalogId(catalogId),
+});
+// Helper to determine if query should be skipped
+const shouldSkipCampaignQuery = (id: string): boolean => !id;
+
+// Helper to check if delete is allowed
+const canDeleteCampaign = (campaignId: string): boolean => Boolean(campaignId);
+
+// Helper to check if campaign has shared campaign code
+const hasSharedCampaignCode = (campaign: Campaign | undefined): boolean =>
+  Boolean(campaign?.sharedCampaignCode);
+
+// Type for save click action result
+type SaveAction = "confirm" | "save";
+
+// Helper to determine save action based on changes
+const getSaveAction = (hasUnitRelatedChanges: boolean): SaveAction =>
+  hasUnitRelatedChanges ? "confirm" : "save";
+
+// Helper component for loading state
+const LoadingState: React.FC = () => (
+  <Box
+    display="flex"
+    justifyContent="center"
+    alignItems="center"
+    minHeight="200px"
+  >
+    <CircularProgress />
+  </Box>
+);
+
+// Helper to conditionally update campaign
+const maybeUpdateCampaign = async (
+  isValid: boolean,
+  updateCampaign: (options: {
+    variables: { input: object };
+  }) => Promise<unknown>,
+  input: object,
+): Promise<void> => {
+  if (isValid) {
+    await updateCampaign({ variables: { input } });
+  }
+};
+
+// Helper to conditionally delete campaign
+const maybeDeleteCampaign = async (
+  canDelete: boolean,
+  deleteCampaign: (options: {
+    variables: { campaignId: string };
+  }) => Promise<unknown>,
+  campaignId: string,
+): Promise<void> => {
+  if (canDelete) {
+    await deleteCampaign({ variables: { campaignId } });
+  }
+};
+
+// Helper component for shared campaign warning
+const SharedCampaignWarning: React.FC<{ campaign: Campaign | undefined }> = ({
+  campaign,
+}) =>
+  hasSharedCampaignCode(campaign) ? (
+    <Alert severity="warning" icon={<WarningIcon />} sx={{ mb: 3 }}>
+      <AlertTitle>Shared Campaign</AlertTitle>
+      This campaign was created from a shared campaign link. Changing the
+      catalog, campaign name, or unit information may cause this campaign to no
+      longer appear correctly in campaign reports for your unit.
+    </Alert>
+  ) : null;
+
+// Helper to get catalog type suffix
+const getCatalogTypeSuffix = (catalogType: string): string =>
+  catalogType === "ADMIN_MANAGED" ? " (Official)" : "";
+
+// Helper to check if campaign form fields have changed
+const checkFormChanges = (
+  formName: string,
+  formStart: string,
+  formEnd: string,
+  formCatalog: string,
+  campaign: Campaign | undefined,
+): boolean => {
+  if (!campaign) return false;
+  const origStart = extractDatePart(campaign.startDate);
+  const origEnd = extractDatePart(campaign.endDate);
+  return (
+    formName !== campaign.campaignName ||
+    formStart !== origStart ||
+    formEnd !== origEnd ||
+    formCatalog !== campaign.catalogId
+  );
+};
+
+// Helper to get all non-deleted catalogs
+const getAllCatalogs = (
+  publicCatalogs: Catalog[],
+  myCatalogs: Catalog[],
+): Catalog[] =>
+  [...publicCatalogs, ...myCatalogs].filter((c) => c.isDeleted !== true);
+
+// Helper to initialize form fields from campaign
+const initializeFormFromCampaign = (
+  campaign: Campaign | undefined,
+  setCampaignName: (v: string) => void,
+  setStartDate: (v: string) => void,
+  setEndDate: (v: string) => void,
+  setCatalogId: (v: string) => void,
+): void => {
+  if (campaign) {
+    setCampaignName(campaign.campaignName);
+    setStartDate(extractDatePart(campaign.startDate));
+    setEndDate(extractDatePart(campaign.endDate));
+    setCatalogId(campaign.catalogId);
+  }
+};
+
 interface Campaign {
   campaignId: string;
   campaignName: string;
@@ -68,12 +237,8 @@ export const CampaignSettingsPage: React.FC = () => {
       profileId: string;
       campaignId: string;
     }>();
-  const profileId = encodedProfileId
-    ? decodeURIComponent(encodedProfileId)
-    : "";
-  const campaignId = encodedCampaignId
-    ? decodeURIComponent(encodedCampaignId)
-    : "";
+  const profileId = decodeUrlParam(encodedProfileId);
+  const campaignId = decodeUrlParam(encodedCampaignId);
   const dbCampaignId = ensureCampaignId(campaignId);
   const navigate = useNavigate();
   const [campaignName, setCampaignName] = useState("");
@@ -90,7 +255,7 @@ export const CampaignSettingsPage: React.FC = () => {
     refetch,
   } = useQuery<{ getCampaign: Campaign }>(GET_CAMPAIGN, {
     variables: { campaignId: dbCampaignId },
-    skip: !dbCampaignId,
+    skip: shouldSkipCampaignQuery(dbCampaignId),
   });
 
   // Fetch catalogs
@@ -102,20 +267,20 @@ export const CampaignSettingsPage: React.FC = () => {
     listMyCatalogs: Catalog[];
   }>(LIST_MY_CATALOGS);
 
-  const publicCatalogs = publicCatalogsData?.listPublicCatalogs || [];
-  const myCatalogs = myCatalogsData?.listMyCatalogs || [];
-  const allCatalogs = [...publicCatalogs, ...myCatalogs].filter(
-    (c) => c.isDeleted !== true,
-  );
+  const publicCatalogs = getPublicCatalogs(publicCatalogsData);
+  const myCatalogs = getMyCatalogs(myCatalogsData);
+  const allCatalogs = getAllCatalogs(publicCatalogs, myCatalogs);
 
   // Initialize form when campaign loads
   React.useEffect(() => {
-    if (campaignData?.getCampaign) {
-      setCampaignName(campaignData.getCampaign.campaignName);
-      setStartDate(campaignData.getCampaign.startDate?.split("T")[0] || "");
-      setEndDate(campaignData.getCampaign.endDate?.split("T")[0] || "");
-      setCatalogId(campaignData.getCampaign.catalogId);
-    }
+    const c = getCampaign(campaignData);
+    initializeFormFromCampaign(
+      c,
+      setCampaignName,
+      setStartDate,
+      setEndDate,
+      setCatalogId,
+    );
   }, [campaignData]);
 
   // Update campaign mutation
@@ -132,63 +297,53 @@ export const CampaignSettingsPage: React.FC = () => {
     },
   });
 
-  const campaign = campaignData?.getCampaign;
+  const campaign = getCampaign(campaignData);
 
   // Check if unit-related fields have changed (campaignName, catalogId)
-  const hasUnitRelatedChanges =
-    campaign?.sharedCampaignCode &&
-    (campaignName !== campaign.campaignName ||
-      catalogId !== campaign.catalogId);
+  const hasUnitRelatedChanges = hasUnitFieldsChanged(
+    campaign,
+    campaignName,
+    catalogId,
+  );
 
   const handleSaveClick = () => {
-    if (hasUnitRelatedChanges) {
-      setUnitChangeConfirmOpen(true);
-    } else {
-      handleSaveChanges();
-    }
+    const action = getSaveAction(hasUnitRelatedChanges);
+    const actions: Record<SaveAction, () => void> = {
+      confirm: () => setUnitChangeConfirmOpen(true),
+      save: handleSaveChanges,
+    };
+    actions[action]();
   };
 
   const handleSaveChanges = async () => {
     setUnitChangeConfirmOpen(false);
-    if (!campaignId || !campaignName.trim() || !catalogId) return;
-
-    await updateCampaign({
-      variables: {
-        input: {
-          campaignId: dbCampaignId,
-          campaignName: campaignName.trim(),
-          startDate: startDate || undefined,
-          endDate: endDate || undefined,
-          catalogId: ensureCatalogId(catalogId),
-        },
-      },
-    });
+    const isValid = canSave(campaignId, campaignName, catalogId);
+    const input = buildUpdateInput(
+      dbCampaignId,
+      campaignName,
+      startDate,
+      endDate,
+      catalogId,
+    );
+    await maybeUpdateCampaign(isValid, updateCampaign, input);
   };
 
   const handleDeleteCampaign = async () => {
-    if (!campaignId) return;
-    await deleteCampaign({ variables: { campaignId: dbCampaignId } });
+    const canDelete = canDeleteCampaign(campaignId);
+    await maybeDeleteCampaign(canDelete, deleteCampaign, dbCampaignId);
   };
 
   if (loading) {
-    return (
-      <Box
-        display="flex"
-        justifyContent="center"
-        alignItems="center"
-        minHeight="200px"
-      >
-        <CircularProgress />
-      </Box>
-    );
+    return <LoadingState />;
   }
 
-  const hasChanges =
-    campaign &&
-    (campaignName !== campaign.campaignName ||
-      startDate !== (campaign.startDate?.split("T")[0] || "") ||
-      endDate !== (campaign.endDate?.split("T")[0] || "") ||
-      catalogId !== campaign.catalogId);
+  const hasChanges = checkFormChanges(
+    campaignName,
+    startDate,
+    endDate,
+    catalogId,
+    campaign,
+  );
 
   return (
     <Box>
@@ -215,14 +370,7 @@ export const CampaignSettingsPage: React.FC = () => {
         </Typography>
 
         {/* Warning for sharedCampaign-created campaigns */}
-        {campaign?.sharedCampaignCode && (
-          <Alert severity="warning" icon={<WarningIcon />} sx={{ mb: 3 }}>
-            <AlertTitle>Shared Campaign</AlertTitle>
-            This campaign was created from a shared campaign link. Changing the
-            catalog, campaign name, or unit information may cause this campaign
-            to no longer appear correctly in campaign reports for your unit.
-          </Alert>
-        )}
+        <SharedCampaignWarning campaign={campaign} />
 
         <Stack spacing={3}>
           <TextField
@@ -260,7 +408,7 @@ export const CampaignSettingsPage: React.FC = () => {
               {allCatalogs.map((catalog) => (
                 <MenuItem key={catalog.catalogId} value={catalog.catalogId}>
                   {catalog.catalogName}
-                  {catalog.catalogType === "ADMIN_MANAGED" && " (Official)"}
+                  {getCatalogTypeSuffix(catalog.catalogType)}
                 </MenuItem>
               ))}
             </Select>

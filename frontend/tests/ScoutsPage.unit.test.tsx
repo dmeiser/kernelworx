@@ -29,8 +29,8 @@ vi.mock('@apollo/client/react', async () => {
   const actual = await vi.importActual<any>('@apollo/client/react');
   return {
     ...actual,
-    useQuery: (q: any, opts: any) => ({ data: mockScoutsData, loading: false, error: undefined, refetch: async () => undefined }),
-    useLazyQuery: (q: any, opts: any) => [vi.fn(), { data: undefined, loading: false }],
+    useQuery: () => ({ data: mockScoutsData, loading: false, error: undefined, refetch: async () => undefined }),
+    useLazyQuery: () => [vi.fn(), { data: undefined, loading: false }],
     useMutation: () => [vi.fn().mockResolvedValue({ data: {} }), { loading: false }],
   };
 });

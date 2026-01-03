@@ -52,6 +52,100 @@ interface Account {
   updatedAt: string;
 }
 
+// Helper to create the mutation onCompleted callback
+const createUpdateCompletedHandler = (
+  profileHook: ReturnType<typeof useProfileEdit>,
+  refetch: () => void,
+) => {
+  return () => {
+    profileHook.setUpdateSuccess(true);
+    profileHook.setUpdateError(null);
+    profileHook.setEditDialogOpen(false);
+    refetch();
+    setTimeout(() => profileHook.setUpdateSuccess(false), 3000);
+  };
+};
+
+// Helper to create the mutation onError callback
+const createUpdateErrorHandler = (
+  profileHook: ReturnType<typeof useProfileEdit>,
+) => {
+  return (err: Error) => {
+    profileHook.setUpdateError(err.message);
+    profileHook.setUpdateSuccess(false);
+  };
+};
+
+// Helper to merge account data with auth context
+const mergeAccountData = (
+  graphqlAccount: Account | undefined,
+  authAccount: { isAdmin: boolean } | null,
+): Account | undefined => {
+  if (!authAccount) return graphqlAccount;
+  return graphqlAccount
+    ? { ...graphqlAccount, isAdmin: authAccount.isAdmin }
+    : undefined;
+};
+
+// Helper to convert empty string to null
+const emptyToNull = (value: string | undefined): string | null => value || null;
+
+// Helper to parse unit number or return null
+const parseUnitNumber = (value: string | undefined): number | null =>
+  value ? parseInt(value, 10) : null;
+
+// Helper to build profile update input
+const buildProfileInput = (profileHook: ReturnType<typeof useProfileEdit>) => ({
+  givenName: emptyToNull(profileHook.givenName),
+  familyName: emptyToNull(profileHook.familyName),
+  city: emptyToNull(profileHook.city),
+  state: emptyToNull(profileHook.state),
+  unitType: emptyToNull(profileHook.unitType),
+  unitNumber: parseUnitNumber(profileHook.unitNumber),
+});
+
+// Helper to get account from query data
+const getAccountFromData = (
+  data: { getMyAccount: Account } | undefined,
+): Account | undefined => data?.getMyAccount;
+
+// Helper to get email from account
+const getAccountEmail = (account: Account | undefined): string | undefined =>
+  account?.email;
+
+// Loading component
+const LoadingState: React.FC = () => (
+  <Box
+    display="flex"
+    justifyContent="center"
+    alignItems="center"
+    minHeight="400px"
+  >
+    <CircularProgress />
+  </Box>
+);
+
+// Error component
+const ErrorState: React.FC<{ message: string }> = ({ message }) => (
+  <Alert severity="error">Failed to load account information: {message}</Alert>
+);
+
+// Conditional success alert component
+const SuccessAlert: React.FC<{ show: boolean }> = ({ show }) =>
+  show ? (
+    <Alert severity="success" sx={{ mb: 2 }}>
+      Profile updated successfully
+    </Alert>
+  ) : null;
+
+// Conditional error alert component
+const UpdateErrorAlert: React.FC<{ error: string | null }> = ({ error }) =>
+  error ? (
+    <Alert severity="error" sx={{ mb: 2 }}>
+      Failed to update profile: {error}
+    </Alert>
+  ) : null;
+
 export const UserSettingsPage: React.FC = () => {
   const navigate = useNavigate();
   const { logout, account: authAccount } = useAuth();
@@ -74,27 +168,16 @@ export const UserSettingsPage: React.FC = () => {
   const [updateMyAccount, { loading: updating }] = useMutation(
     UPDATE_MY_ACCOUNT,
     {
-      onCompleted: () => {
-        profileHook.setUpdateSuccess(true);
-        profileHook.setUpdateError(null);
-        profileHook.setEditDialogOpen(false);
-        refetch();
-        setTimeout(() => profileHook.setUpdateSuccess(false), 3000);
-      },
-      onError: (err) => {
-        profileHook.setUpdateError(err.message);
-        profileHook.setUpdateSuccess(false);
-      },
+      onCompleted: createUpdateCompletedHandler(profileHook, refetch),
+      onError: createUpdateErrorHandler(profileHook),
     },
   );
 
   // Merge GraphQL account data with AuthContext account (which has isAdmin from JWT token)
-  const account = authAccount
-    ? {
-        ...accountData?.getMyAccount,
-        isAdmin: authAccount.isAdmin, // Always use isAdmin from JWT token, not GraphQL
-      }
-    : accountData?.getMyAccount;
+  const account = mergeAccountData(
+    getAccountFromData(accountData),
+    authAccount,
+  );
 
   // Load MFA and passkey status on mount
   useEffect(() => {
@@ -115,7 +198,7 @@ export const UserSettingsPage: React.FC = () => {
 
   // Wrapper handlers for email hook (needs access to account email, logout, navigate)
   const handleRequestEmailUpdate = () =>
-    emailHook.handleRequestEmailUpdate(account?.email);
+    emailHook.handleRequestEmailUpdate(getAccountEmail(account));
 
   const handleConfirmEmailUpdate = () =>
     emailHook.handleConfirmEmailUpdate(logout, navigate);
@@ -124,40 +207,16 @@ export const UserSettingsPage: React.FC = () => {
 
   const handleSaveProfile = async () => {
     await updateMyAccount({
-      variables: {
-        input: {
-          givenName: profileHook.givenName || null,
-          familyName: profileHook.familyName || null,
-          city: profileHook.city || null,
-          state: profileHook.state || null,
-          unitType: profileHook.unitType || null,
-          unitNumber: profileHook.unitNumber
-            ? parseInt(profileHook.unitNumber, 10)
-            : null,
-        },
-      },
+      variables: { input: buildProfileInput(profileHook) },
     });
   };
 
   if (accountLoading) {
-    return (
-      <Box
-        display="flex"
-        justifyContent="center"
-        alignItems="center"
-        minHeight="400px"
-      >
-        <CircularProgress />
-      </Box>
-    );
+    return <LoadingState />;
   }
 
   if (accountError) {
-    return (
-      <Alert severity="error">
-        Failed to load account information: {accountError.message}
-      </Alert>
-    );
+    return <ErrorState message={accountError.message} />;
   }
 
   return (
@@ -172,17 +231,8 @@ export const UserSettingsPage: React.FC = () => {
         </Typography>
       </Stack>
 
-      {profileHook.updateSuccess && (
-        <Alert severity="success" sx={{ mb: 2 }}>
-          Profile updated successfully
-        </Alert>
-      )}
-
-      {profileHook.updateError && (
-        <Alert severity="error" sx={{ mb: 2 }}>
-          Failed to update profile: {profileHook.updateError}
-        </Alert>
-      )}
+      <SuccessAlert show={profileHook.updateSuccess} />
+      <UpdateErrorAlert error={profileHook.updateError} />
 
       {/* Account Information */}
       <AccountInfoSection

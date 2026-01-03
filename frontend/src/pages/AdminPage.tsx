@@ -30,12 +30,28 @@ import {
 } from "@mui/icons-material";
 import { LIST_MY_PROFILES, LIST_PUBLIC_CATALOGS } from "../lib/graphql";
 
+// --- Type Definitions ---
 interface TabPanelProps {
   children?: React.ReactNode;
   index: number;
   value: number;
 }
 
+interface Profile {
+  profileId: string;
+  sellerName: string;
+  ownerAccountId: string;
+  isOwner: boolean;
+}
+
+interface Catalog {
+  catalogId: string;
+  name: string;
+  description: string;
+  isActive: boolean;
+}
+
+// --- Helper Components ---
 function TabPanel(props: TabPanelProps) {
   const { children, value, index, ...other } = props;
   return (
@@ -51,6 +67,204 @@ function TabPanel(props: TabPanelProps) {
   );
 }
 
+const LoadingSpinner: React.FC = () => (
+  <Box display="flex" justifyContent="center" py={4}>
+    <CircularProgress />
+  </Box>
+);
+
+const ErrorAlert: React.FC<{ message: string }> = ({ message }) => (
+  <Alert severity="error">Failed to load: {message}</Alert>
+);
+
+// --- Profile Table Row ---
+const ProfileRow: React.FC<{ profile: Profile }> = ({ profile }) => (
+  <TableRow hover>
+    <TableCell>
+      <Typography variant="body2" fontFamily="monospace">
+        {profile.profileId.substring(0, 12)}...
+      </Typography>
+    </TableCell>
+    <TableCell>
+      <Typography variant="body2" fontWeight="medium">
+        {profile.sellerName}
+      </Typography>
+    </TableCell>
+    <TableCell>
+      <Typography variant="body2" color="text.secondary">
+        {profile.ownerAccountId.substring(0, 12)}...
+      </Typography>
+    </TableCell>
+    <TableCell>
+      {profile.isOwner ? (
+        <Chip label="Owner" color="primary" size="small" />
+      ) : (
+        <Chip label="Shared" color="default" size="small" />
+      )}
+    </TableCell>
+  </TableRow>
+);
+
+// --- Profiles Tab Content ---
+interface ProfilesTabContentProps {
+  loading: boolean;
+  error: Error | undefined;
+  profiles: Profile[];
+}
+
+const ProfilesTabContent: React.FC<ProfilesTabContentProps> = ({
+  loading,
+  error,
+  profiles,
+}) => {
+  if (loading) {
+    return <LoadingSpinner />;
+  }
+  if (error) {
+    return <ErrorAlert message={error.message} />;
+  }
+  if (profiles.length === 0) {
+    return <Alert severity="info">No profiles found in the system.</Alert>;
+  }
+  return (
+    <TableContainer>
+      <Table>
+        <TableHead>
+          <TableRow>
+            <TableCell>Profile ID</TableCell>
+            <TableCell>Seller Name</TableCell>
+            <TableCell>Owner</TableCell>
+            <TableCell>Status</TableCell>
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {profiles.map((profile) => (
+            <ProfileRow key={profile.profileId} profile={profile} />
+          ))}
+        </TableBody>
+      </Table>
+    </TableContainer>
+  );
+};
+
+// --- Catalog Card ---
+const CatalogCard: React.FC<{ catalog: Catalog }> = ({ catalog }) => (
+  <Paper variant="outlined" sx={{ p: 2 }}>
+    <Stack direction="row" justifyContent="space-between" alignItems="start">
+      <Box>
+        <Typography variant="subtitle1" fontWeight="medium">
+          {catalog.name}
+        </Typography>
+        <Typography variant="body2" color="text.secondary">
+          {catalog.description}
+        </Typography>
+      </Box>
+      <Chip
+        label={catalog.isActive ? "Active" : "Inactive"}
+        color={catalog.isActive ? "success" : "default"}
+        size="small"
+      />
+    </Stack>
+  </Paper>
+);
+
+// --- Catalogs Tab Content ---
+interface CatalogsTabContentProps {
+  loading: boolean;
+  error: Error | undefined;
+  catalogs: Catalog[];
+}
+
+const CatalogsTabContent: React.FC<CatalogsTabContentProps> = ({
+  loading,
+  error,
+  catalogs,
+}) => {
+  if (loading) {
+    return <LoadingSpinner />;
+  }
+  if (error) {
+    return <ErrorAlert message={error.message} />;
+  }
+  if (catalogs.length === 0) {
+    return (
+      <Alert severity="info">
+        No catalogs found. Create your first catalog!
+      </Alert>
+    );
+  }
+  return (
+    <Stack spacing={2}>
+      {catalogs.map((catalog) => (
+        <CatalogCard key={catalog.catalogId} catalog={catalog} />
+      ))}
+    </Stack>
+  );
+};
+
+// --- System Info Tab Content ---
+const SystemInfoTabContent: React.FC = () => (
+  <>
+    <Typography variant="h6" gutterBottom>
+      System Information
+    </Typography>
+    <Stack spacing={2}>
+      <Box>
+        <Typography variant="subtitle2" color="text.secondary">
+          Application Version
+        </Typography>
+        <Typography variant="body1">1.0.0-beta</Typography>
+      </Box>
+      <Box>
+        <Typography variant="subtitle2" color="text.secondary">
+          Backend API
+        </Typography>
+        <Typography variant="body1">
+          AWS AppSync GraphQL (api.dev.psm.repeatersolutions.com)
+        </Typography>
+      </Box>
+      <Box>
+        <Typography variant="subtitle2" color="text.secondary">
+          Database
+        </Typography>
+        <Typography variant="body1">Amazon DynamoDB (On-Demand)</Typography>
+      </Box>
+      <Box>
+        <Typography variant="subtitle2" color="text.secondary">
+          Authentication
+        </Typography>
+        <Typography variant="body1">
+          AWS Cognito (Social Login Enabled)
+        </Typography>
+      </Box>
+      <Box>
+        <Typography variant="subtitle2" color="text.secondary">
+          File Storage
+        </Typography>
+        <Typography variant="body1">Amazon S3 (Reports & Exports)</Typography>
+      </Box>
+    </Stack>
+    <Alert severity="info" sx={{ mt: 3 }}>
+      <strong>Admin Features In Development:</strong>
+      <ul style={{ margin: "8px 0", paddingLeft: "20px" }}>
+        <li>
+          User management (view all users, reset passwords, disable accounts)
+        </li>
+        <li>Profile management (transfer ownership, hard delete)</li>
+        <li>
+          Order management (view all orders, restore soft-deleted, hard delete)
+        </li>
+        <li>
+          Catalog CRUD (create, edit, delete official catalogs and products)
+        </li>
+        <li>System analytics (usage stats, popular products, sales trends)</li>
+        <li>Audit logs (view all admin actions and changes)</li>
+      </ul>
+    </Alert>
+  </>
+);
+
+// --- Main Component ---
 export const AdminPage: React.FC = () => {
   const [currentTab, setCurrentTab] = useState(0);
 
@@ -59,28 +273,14 @@ export const AdminPage: React.FC = () => {
     data: profilesData,
     loading: profilesLoading,
     error: profilesError,
-  } = useQuery<{
-    listMyProfiles: Array<{
-      profileId: string;
-      sellerName: string;
-      ownerAccountId: string;
-      isOwner: boolean;
-    }>;
-  }>(LIST_MY_PROFILES);
+  } = useQuery<{ listMyProfiles: Profile[] }>(LIST_MY_PROFILES);
 
   // Fetch public catalogs
   const {
     data: catalogsData,
     loading: catalogsLoading,
     error: catalogsError,
-  } = useQuery<{
-    listPublicCatalogs: Array<{
-      catalogId: string;
-      name: string;
-      description: string;
-      isActive: boolean;
-    }>;
-  }>(LIST_PUBLIC_CATALOGS);
+  } = useQuery<{ listPublicCatalogs: Catalog[] }>(LIST_PUBLIC_CATALOGS);
 
   const profiles = profilesData?.listMyProfiles || [];
   const catalogs = catalogsData?.listPublicCatalogs || [];
@@ -119,72 +319,11 @@ export const AdminPage: React.FC = () => {
             View all scouts in the system. Full CRUD operations coming in future
             updates.
           </Typography>
-
-          {profilesLoading && (
-            <Box display="flex" justifyContent="center" py={4}>
-              <CircularProgress />
-            </Box>
-          )}
-
-          {profilesError && (
-            <Alert severity="error">
-              Failed to load profiles: {profilesError.message}
-            </Alert>
-          )}
-
-          {!profilesLoading && !profilesError && profiles.length > 0 && (
-            <TableContainer>
-              <Table>
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Profile ID</TableCell>
-                    <TableCell>Seller Name</TableCell>
-                    <TableCell>Owner</TableCell>
-                    <TableCell>Status</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {profiles.map(
-                    (profile: {
-                      profileId: string;
-                      sellerName: string;
-                      ownerAccountId: string;
-                      isOwner: boolean;
-                    }) => (
-                      <TableRow key={profile.profileId} hover>
-                        <TableCell>
-                          <Typography variant="body2" fontFamily="monospace">
-                            {profile.profileId.substring(0, 12)}...
-                          </Typography>
-                        </TableCell>
-                        <TableCell>
-                          <Typography variant="body2" fontWeight="medium">
-                            {profile.sellerName}
-                          </Typography>
-                        </TableCell>
-                        <TableCell>
-                          <Typography variant="body2" color="text.secondary">
-                            {profile.ownerAccountId.substring(0, 12)}...
-                          </Typography>
-                        </TableCell>
-                        <TableCell>
-                          {profile.isOwner ? (
-                            <Chip label="Owner" color="primary" size="small" />
-                          ) : (
-                            <Chip label="Shared" color="default" size="small" />
-                          )}
-                        </TableCell>
-                      </TableRow>
-                    ),
-                  )}
-                </TableBody>
-              </Table>
-            </TableContainer>
-          )}
-
-          {!profilesLoading && !profilesError && profiles.length === 0 && (
-            <Alert severity="info">No profiles found in the system.</Alert>
-          )}
+          <ProfilesTabContent
+            loading={profilesLoading}
+            error={profilesError}
+            profiles={profiles}
+          />
         </Paper>
       </TabPanel>
 
@@ -197,64 +336,11 @@ export const AdminPage: React.FC = () => {
             Manage official product catalogs. Create, edit, and deactivate
             catalog items.
           </Typography>
-
-          {catalogsLoading && (
-            <Box display="flex" justifyContent="center" py={4}>
-              <CircularProgress />
-            </Box>
-          )}
-
-          {catalogsError && (
-            <Alert severity="error">
-              Failed to load catalogs: {catalogsError.message}
-            </Alert>
-          )}
-
-          {!catalogsLoading && !catalogsError && catalogs.length > 0 && (
-            <Stack spacing={2}>
-              {catalogs.map(
-                (catalog: {
-                  catalogId: string;
-                  name: string;
-                  description: string;
-                  isActive: boolean;
-                }) => (
-                  <Paper
-                    key={catalog.catalogId}
-                    variant="outlined"
-                    sx={{ p: 2 }}
-                  >
-                    <Stack
-                      direction="row"
-                      justifyContent="space-between"
-                      alignItems="start"
-                    >
-                      <Box>
-                        <Typography variant="subtitle1" fontWeight="medium">
-                          {catalog.name}
-                        </Typography>
-                        <Typography variant="body2" color="text.secondary">
-                          {catalog.description}
-                        </Typography>
-                      </Box>
-                      <Chip
-                        label={catalog.isActive ? "Active" : "Inactive"}
-                        color={catalog.isActive ? "success" : "default"}
-                        size="small"
-                      />
-                    </Stack>
-                  </Paper>
-                ),
-              )}
-            </Stack>
-          )}
-
-          {!catalogsLoading && !catalogsError && catalogs.length === 0 && (
-            <Alert severity="info">
-              No catalogs found. Create your first catalog!
-            </Alert>
-          )}
-
+          <CatalogsTabContent
+            loading={catalogsLoading}
+            error={catalogsError}
+            catalogs={catalogs}
+          />
           <Alert severity="info" sx={{ mt: 3 }}>
             <strong>Coming Soon:</strong> Full catalog management (create, edit,
             delete items). For now, use the AWS Console or GraphQL API directly.
@@ -264,72 +350,7 @@ export const AdminPage: React.FC = () => {
 
       <TabPanel value={currentTab} index={2}>
         <Paper sx={{ p: 3 }}>
-          <Typography variant="h6" gutterBottom>
-            System Information
-          </Typography>
-          <Stack spacing={2}>
-            <Box>
-              <Typography variant="subtitle2" color="text.secondary">
-                Application Version
-              </Typography>
-              <Typography variant="body1">1.0.0-beta</Typography>
-            </Box>
-            <Box>
-              <Typography variant="subtitle2" color="text.secondary">
-                Backend API
-              </Typography>
-              <Typography variant="body1">
-                AWS AppSync GraphQL (api.dev.psm.repeatersolutions.com)
-              </Typography>
-            </Box>
-            <Box>
-              <Typography variant="subtitle2" color="text.secondary">
-                Database
-              </Typography>
-              <Typography variant="body1">
-                Amazon DynamoDB (On-Demand)
-              </Typography>
-            </Box>
-            <Box>
-              <Typography variant="subtitle2" color="text.secondary">
-                Authentication
-              </Typography>
-              <Typography variant="body1">
-                AWS Cognito (Social Login Enabled)
-              </Typography>
-            </Box>
-            <Box>
-              <Typography variant="subtitle2" color="text.secondary">
-                File Storage
-              </Typography>
-              <Typography variant="body1">
-                Amazon S3 (Reports & Exports)
-              </Typography>
-            </Box>
-          </Stack>
-
-          <Alert severity="info" sx={{ mt: 3 }}>
-            <strong>Admin Features In Development:</strong>
-            <ul style={{ margin: "8px 0", paddingLeft: "20px" }}>
-              <li>
-                User management (view all users, reset passwords, disable
-                accounts)
-              </li>
-              <li>Profile management (transfer ownership, hard delete)</li>
-              <li>
-                Order management (view all orders, restore soft-deleted, hard
-                delete)
-              </li>
-              <li>
-                Catalog CRUD (create, edit, delete official catalogs and
-                products)
-              </li>
-              <li>
-                System analytics (usage stats, popular products, sales trends)
-              </li>
-              <li>Audit logs (view all admin actions and changes)</li>
-            </ul>
-          </Alert>
+          <SystemInfoTabContent />
         </Paper>
       </TabPanel>
     </Box>

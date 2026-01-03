@@ -23,33 +23,47 @@ vi.mock('aws-amplify/utils', () => ({
   },
 }));
 
+// Mock setup helpers to reduce complexity
+const mockLoadingState = () => {
+  vi.mocked(amplifyAuth.fetchAuthSession).mockImplementation(
+    () => new Promise(() => {}) // Never resolves - simulates loading
+  );
+};
+
+const mockAuthenticatedState = (isAdmin: boolean) => {
+  vi.mocked(amplifyAuth.fetchAuthSession).mockResolvedValue({
+    tokens: { idToken: { toString: () => 'mock-token' } },
+  } as any);
+  vi.mocked(amplifyAuth.getCurrentUser).mockResolvedValue({
+    userId: isAdmin ? 'admin-123' : 'user-123',
+    username: isAdmin ? 'admin' : 'user',
+  } as any);
+};
+
+const mockUnauthenticatedState = () => {
+  vi.mocked(amplifyAuth.fetchAuthSession).mockResolvedValue({
+    tokens: undefined,
+  } as any);
+};
+
+// Helper: Determine which mock to apply based on auth state
+type AuthParams = { isAuthenticated?: boolean; isAdmin?: boolean; loading?: boolean };
+
+const getAuthMockFn = (params: AuthParams): (() => void) => {
+  if (params.loading) return mockLoadingState;
+  if (params.isAuthenticated) return () => mockAuthenticatedState(params.isAdmin ?? false);
+  return mockUnauthenticatedState;
+};
+
+// Helper: Set up auth mock based on params
+const setupAuthMock = (params: AuthParams) => getAuthMockFn(params)();
+
 // Helper to render with routing context
 const renderWithRouter = (
   ui: React.ReactElement,
-  { isAuthenticated = false, isAdmin = false, loading = false } = {}
+  params: { isAuthenticated?: boolean; isAdmin?: boolean; loading?: boolean } = {}
 ) => {
-  // Mock auth session based on params
-  if (loading) {
-    vi.mocked(amplifyAuth.fetchAuthSession).mockImplementation(
-      () => new Promise(() => {}) // Never resolves - simulates loading
-    );
-  } else if (isAuthenticated) {
-     
-    vi.mocked(amplifyAuth.fetchAuthSession).mockResolvedValue({
-      tokens: { idToken: { toString: () => 'mock-token' } },
-    } as any);
-     
-    vi.mocked(amplifyAuth.getCurrentUser).mockResolvedValue({
-      userId: isAdmin ? 'admin-123' : 'user-123',
-      username: isAdmin ? 'admin' : 'user',
-    } as any);
-  } else {
-     
-    vi.mocked(amplifyAuth.fetchAuthSession).mockResolvedValue({
-      tokens: undefined,
-    } as any);
-  }
-
+  setupAuthMock(params);
   return render(
     <MemoryRouter initialEntries={['/protected']}>
       <AuthProvider>

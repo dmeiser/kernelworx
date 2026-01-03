@@ -2,7 +2,7 @@
  * CreateSharedCampaignDialog - Dialog for creating a new shared campaign
  */
 
-import React, { useState, useEffect } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@apollo/client/react";
 import {
   Dialog,
@@ -98,10 +98,144 @@ const US_STATES = [
 const BASE_URL = window.location.origin;
 const MAX_CREATOR_MESSAGE_LENGTH = 300;
 
-export const CreateSharedCampaignDialog: React.FC<
-  CreateSharedCampaignDialogProps
-> = ({ open, onClose, onSuccess, canCreate }) => {
-  // Form state
+interface FormState {
+  catalogId: string;
+  campaignName: string;
+  campaignYear: number;
+  startDate: string;
+  endDate: string;
+  unitType: string;
+  unitNumber: string;
+  city: string;
+  state: string;
+  creatorMessage: string;
+  description: string;
+}
+
+const hasCatalogAndCampaign = (formState: FormState): boolean =>
+  Boolean(
+    formState.catalogId &&
+    formState.campaignName.trim() &&
+    formState.campaignYear,
+  );
+
+const hasUnitInfo = (formState: FormState): boolean =>
+  Boolean(
+    formState.unitType &&
+    formState.unitNumber &&
+    formState.city.trim() &&
+    formState.state,
+  );
+
+const hasRequiredFields = (formState: FormState): boolean =>
+  hasCatalogAndCampaign(formState) && hasUnitInfo(formState);
+
+const isMessageValid = (creatorMessage: string): boolean =>
+  creatorMessage.length <= MAX_CREATOR_MESSAGE_LENGTH;
+
+const validateForm = (formState: FormState): boolean =>
+  hasRequiredFields(formState) && isMessageValid(formState.creatorMessage);
+
+const renderCatalogGroup = (
+  title: string,
+  catalogs: Catalog[],
+): React.ReactNode[] => {
+  if (!catalogs.length) return [];
+  return [
+    <MenuItem
+      key={`${title}-header`}
+      disabled
+      sx={{ fontWeight: 600, backgroundColor: "#f5f5f5", opacity: 1 }}
+    >
+      {title}
+    </MenuItem>,
+    ...catalogs.map((catalog) => (
+      <MenuItem key={catalog.catalogId} value={catalog.catalogId}>
+        {catalog.catalogName}
+      </MenuItem>
+    )),
+  ];
+};
+
+const CatalogOptions: React.FC<{
+  filteredPublicCatalogs: Catalog[];
+  myCatalogs: Catalog[];
+  catalogsLoading: boolean;
+}> = ({ filteredPublicCatalogs, myCatalogs, catalogsLoading }) => {
+  if (catalogsLoading) {
+    return <MenuItem disabled>Loading catalogs...</MenuItem>;
+  }
+
+  if (!filteredPublicCatalogs.length && !myCatalogs.length) {
+    return <MenuItem disabled>No catalogs available</MenuItem>;
+  }
+
+  return (
+    <>
+      {renderCatalogGroup("Public Catalogs", filteredPublicCatalogs)}
+      {renderCatalogGroup("My Catalogs", myCatalogs)}
+    </>
+  );
+};
+
+const useCatalogLists = (open: boolean) => {
+  const { data: publicCatalogsData, loading: publicLoading } = useQuery<{
+    listPublicCatalogs: Catalog[];
+  }>(LIST_PUBLIC_CATALOGS, { skip: !open });
+
+  const { data: myCatalogsData, loading: myLoading } = useQuery<{
+    listMyCatalogs: Catalog[];
+  }>(LIST_MY_CATALOGS, { skip: !open });
+
+  const publicCatalogs = useMemo(
+    () => publicCatalogsData?.listPublicCatalogs || [],
+    [publicCatalogsData],
+  );
+
+  const ownedCatalogs = useMemo(
+    () => myCatalogsData?.listMyCatalogs || [],
+    [myCatalogsData],
+  );
+
+  const catalogLists = useMemo(() => {
+    const myIdSet = new Set(ownedCatalogs.map((c) => c.catalogId));
+    const filteredPublicCatalogs = publicCatalogs.filter(
+      (catalog) => !myIdSet.has(catalog.catalogId),
+    );
+
+    return { filteredPublicCatalogs, ownedCatalogs };
+  }, [ownedCatalogs, publicCatalogs]);
+
+  return {
+    filteredPublicCatalogs: catalogLists.filteredPublicCatalogs,
+    myCatalogs: catalogLists.ownedCatalogs,
+    catalogsLoading: publicLoading || myLoading,
+  };
+};
+
+const useFormReset = (open: boolean, reset: () => void) => {
+  useEffect(() => {
+    if (open) {
+      reset();
+    }
+  }, [open, reset]);
+};
+
+interface FormSetters {
+  setCatalogId: (v: string) => void;
+  setCampaignName: (v: string) => void;
+  setCampaignYear: (v: number) => void;
+  setStartDate: (v: string) => void;
+  setEndDate: (v: string) => void;
+  setUnitType: (v: string) => void;
+  setUnitNumber: (v: string) => void;
+  setCity: (v: string) => void;
+  setState: (v: string) => void;
+  setCreatorMessage: (v: string) => void;
+  setDescription: (v: string) => void;
+}
+
+const useSharedCampaignForm = (open: boolean) => {
   const [catalogId, setCatalogId] = useState("");
   const [campaignName, setCampaignName] = useState("");
   const [campaignYear, setCampaignYear] = useState(new Date().getFullYear());
@@ -110,94 +244,292 @@ export const CreateSharedCampaignDialog: React.FC<
   const [unitType, setUnitType] = useState("");
   const [unitNumber, setUnitNumber] = useState("");
   const [city, setCity] = useState("");
-  const [state, setState] = useState("");
+  const [state, setFormState] = useState("");
   const [creatorMessage, setCreatorMessage] = useState("");
   const [description, setDescription] = useState("");
+
+  const resetForm = useCallback(() => {
+    setCatalogId("");
+    setCampaignName("");
+    setCampaignYear(new Date().getFullYear());
+    setStartDate("");
+    setEndDate("");
+    setUnitType("");
+    setUnitNumber("");
+    setCity("");
+    setFormState("");
+    setCreatorMessage("");
+    setDescription("");
+  }, []);
+
+  useFormReset(open, resetForm);
+
+  const formState = useMemo<FormState>(
+    () => ({
+      catalogId,
+      campaignName,
+      campaignYear,
+      startDate,
+      endDate,
+      unitType,
+      unitNumber,
+      city,
+      state,
+      creatorMessage,
+      description,
+    }),
+    [
+      catalogId,
+      campaignName,
+      campaignYear,
+      startDate,
+      endDate,
+      unitType,
+      unitNumber,
+      city,
+      state,
+      creatorMessage,
+      description,
+    ],
+  );
+
+  const formSetters: FormSetters = {
+    setCatalogId,
+    setCampaignName,
+    setCampaignYear,
+    setStartDate,
+    setEndDate,
+    setUnitType,
+    setUnitNumber,
+    setCity,
+    setState: setFormState,
+    setCreatorMessage,
+    setDescription,
+  };
+
+  const isFormValid = useMemo(() => validateForm(formState), [formState]);
+
+  return { formState, formSetters, isFormValid };
+};
+
+const buildInput = (formState: FormState) => ({
+  catalogId: formState.catalogId,
+  campaignName: formState.campaignName.trim(),
+  campaignYear: formState.campaignYear,
+  startDate: formState.startDate || undefined,
+  endDate: formState.endDate || undefined,
+  unitType: formState.unitType,
+  unitNumber: parseInt(formState.unitNumber, 10),
+  city: formState.city.trim(),
+  state: formState.state,
+  creatorMessage: formState.creatorMessage.trim() || undefined,
+  description: formState.description.trim() || undefined,
+});
+
+interface CampaignFormFieldsProps {
+  formState: FormState;
+  formSetters: FormSetters;
+  catalogsLoading: boolean;
+  filteredPublicCatalogs: Catalog[];
+  myCatalogs: Catalog[];
+}
+
+const CampaignFormFields: React.FC<CampaignFormFieldsProps> = ({
+  formState,
+  formSetters,
+  catalogsLoading,
+  filteredPublicCatalogs,
+  myCatalogs,
+}) => (
+  <>
+    {/* Catalog Selection */}
+    <FormControl fullWidth required disabled={catalogsLoading}>
+      <InputLabel>Product Catalog</InputLabel>
+      <Select
+        value={formState.catalogId}
+        onChange={(e) => formSetters.setCatalogId(e.target.value)}
+        label="Product Catalog"
+        MenuProps={{
+          slotProps: {
+            paper: { sx: { maxHeight: 300 } },
+          },
+        }}
+      >
+        <CatalogOptions
+          filteredPublicCatalogs={filteredPublicCatalogs}
+          myCatalogs={myCatalogs}
+          catalogsLoading={catalogsLoading}
+        />
+      </Select>
+    </FormControl>
+
+    {/* Campaign Information */}
+    <Stack direction="row" spacing={2}>
+      <TextField
+        label="Campaign Name"
+        value={formState.campaignName}
+        onChange={(e) => formSetters.setCampaignName(e.target.value)}
+        placeholder="e.g., Fall, Spring"
+        required
+        fullWidth
+      />
+      <TextField
+        label="Campaign Year"
+        type="number"
+        value={formState.campaignYear}
+        onChange={(e) =>
+          formSetters.setCampaignYear(parseInt(e.target.value, 10) || 0)
+        }
+        required
+        sx={{ width: 150 }}
+        inputProps={{ min: 2020, max: 2100 }}
+      />
+    </Stack>
+
+    {/* Optional Dates */}
+    <Stack direction="row" spacing={2}>
+      <TextField
+        label="Start Date (Optional)"
+        type="date"
+        value={formState.startDate}
+        onChange={(e) => formSetters.setStartDate(e.target.value)}
+        fullWidth
+        InputLabelProps={{ shrink: true }}
+      />
+      <TextField
+        label="End Date (Optional)"
+        type="date"
+        value={formState.endDate}
+        onChange={(e) => formSetters.setEndDate(e.target.value)}
+        fullWidth
+        InputLabelProps={{ shrink: true }}
+      />
+    </Stack>
+
+    {/* Unit Information */}
+    <Typography variant="subtitle2" color="text.secondary">
+      Unit Information (Required)
+    </Typography>
+    <Stack direction="row" spacing={2}>
+      <FormControl required sx={{ minWidth: 150 }}>
+        <InputLabel>Unit Type</InputLabel>
+        <Select
+          value={formState.unitType}
+          onChange={(e) => formSetters.setUnitType(e.target.value)}
+          label="Unit Type"
+        >
+          {UNIT_TYPES.map((type) => (
+            <MenuItem key={type} value={type}>
+              {type}
+            </MenuItem>
+          ))}
+        </Select>
+      </FormControl>
+      <TextField
+        label="Unit Number"
+        type="number"
+        value={formState.unitNumber}
+        onChange={(e) => formSetters.setUnitNumber(e.target.value)}
+        required
+        sx={{ width: 150 }}
+        inputProps={{ min: 1 }}
+      />
+      <TextField
+        label="City"
+        value={formState.city}
+        onChange={(e) => formSetters.setCity(e.target.value)}
+        required
+        fullWidth
+      />
+      <FormControl required sx={{ minWidth: 100 }}>
+        <InputLabel>State</InputLabel>
+        <Select
+          value={formState.state}
+          onChange={(e) => formSetters.setState(e.target.value)}
+          label="State"
+        >
+          {US_STATES.map((s) => (
+            <MenuItem key={s} value={s}>
+              {s}
+            </MenuItem>
+          ))}
+        </Select>
+      </FormControl>
+    </Stack>
+
+    {/* Creator Message */}
+    <TextField
+      label="Message to Scouts (Optional)"
+      value={formState.creatorMessage}
+      onChange={(e) => formSetters.setCreatorMessage(e.target.value)}
+      placeholder="Enter a message that will be shown to scouts when they use this link"
+      multiline
+      rows={2}
+      fullWidth
+      inputProps={{ maxLength: MAX_CREATOR_MESSAGE_LENGTH }}
+      helperText={`${formState.creatorMessage.length}/${MAX_CREATOR_MESSAGE_LENGTH} characters`}
+      error={formState.creatorMessage.length > MAX_CREATOR_MESSAGE_LENGTH}
+    />
+
+    {/* Description (for internal use) */}
+    <TextField
+      label="Description (For Your Reference)"
+      value={formState.description}
+      onChange={(e) => formSetters.setDescription(e.target.value)}
+      placeholder="Internal description to help you manage your shared campaigns"
+      fullWidth
+    />
+  </>
+);
+
+const LinkPreview: React.FC = () => (
+  <Box sx={{ bgcolor: "grey.100", p: 2, borderRadius: 1 }}>
+    <Typography variant="caption" color="text.secondary">
+      Shareable Link Preview:
+    </Typography>
+    <Typography
+      variant="body2"
+      fontFamily="monospace"
+      sx={{ wordBreak: "break-all" }}
+    >
+      {`${BASE_URL}/c/[generated-code]`}
+    </Typography>
+    <Typography variant="caption" color="text.secondary">
+      (The actual code will be generated when you create the shared campaign)
+    </Typography>
+  </Box>
+);
+
+const LimitWarning: React.FC<{ canCreate: boolean }> = ({ canCreate }) =>
+  canCreate ? null : (
+    <Alert severity="error">
+      You have reached the maximum of 50 active shared campaigns. Please
+      deactivate an existing shared campaign before creating a new one.
+    </Alert>
+  );
+
+const ErrorAlert: React.FC<{ error: string | null }> = ({ error }) =>
+  error ? <Alert severity="error">{error}</Alert> : null;
+
+export const CreateSharedCampaignDialog: React.FC<
+  CreateSharedCampaignDialogProps
+> = ({ open, onClose, onSuccess, canCreate }) => {
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Fetch catalogs
-  const { data: publicCatalogsData, loading: publicLoading } = useQuery<{
-    listPublicCatalogs: Catalog[];
-  }>(LIST_PUBLIC_CATALOGS);
-
-  const { data: myCatalogsData, loading: myLoading } = useQuery<{
-    listMyCatalogs: Catalog[];
-  }>(LIST_MY_CATALOGS);
-
-  const publicCatalogs = publicCatalogsData?.listPublicCatalogs || [];
-  const myCatalogs = myCatalogsData?.listMyCatalogs || [];
-
-  // Deduplicate: remove catalogs from public list that are also in my list
-  const myIdSet = new Set(myCatalogs.map((c) => c.catalogId));
-  const filteredPublicCatalogs = publicCatalogs.filter(
-    (c) => !myIdSet.has(c.catalogId),
-  );
-
-  const catalogsLoading = publicLoading || myLoading;
-
-  // Create mutation
+  const { formState, formSetters, isFormValid } = useSharedCampaignForm(open);
+  const { filteredPublicCatalogs, myCatalogs, catalogsLoading } =
+    useCatalogLists(open);
   const [createSharedCampaign] = useMutation(CREATE_SHARED_CAMPAIGN);
 
-  // Reset form when dialog opens/closes
-  useEffect(() => {
-    if (open) {
-      setCatalogId("");
-      setCampaignName("");
-      setCampaignYear(new Date().getFullYear());
-      setStartDate("");
-      setEndDate("");
-      setUnitType("");
-      setUnitNumber("");
-      setCity("");
-      setState("");
-      setCreatorMessage("");
-      setDescription("");
-      setError(null);
-    }
-  }, [open]);
-
-  const isFormValid = () => {
-    return (
-      catalogId &&
-      campaignName.trim() &&
-      campaignYear &&
-      unitType &&
-      unitNumber &&
-      city.trim() &&
-      state &&
-      creatorMessage.length <= MAX_CREATOR_MESSAGE_LENGTH
-    );
-  };
-
   const handleSubmit = async () => {
-    if (!isFormValid()) {
-      setError("Please fill in all required fields");
-      return;
-    }
-
     setIsSubmitting(true);
     setError(null);
 
     try {
       await createSharedCampaign({
-        variables: {
-          input: {
-            catalogId,
-            campaignName: campaignName.trim(),
-            campaignYear,
-            startDate: startDate || undefined,
-            endDate: endDate || undefined,
-            unitType,
-            unitNumber: parseInt(unitNumber, 10),
-            city: city.trim(),
-            state,
-            creatorMessage: creatorMessage.trim() || undefined,
-            description: description.trim() || undefined,
-          },
-        },
+        variables: { input: buildInput(formState) },
       });
-
       onSuccess();
     } catch (err) {
       const errorMessage =
@@ -210,231 +542,29 @@ export const CreateSharedCampaignDialog: React.FC<
     }
   };
 
-  const previewLink = `${BASE_URL}/c/[generated-code]`;
-
   return (
     <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
       <DialogTitle>Create Shared Campaign</DialogTitle>
       <DialogContent>
         <Stack spacing={3} sx={{ mt: 1 }}>
-          {/* Warning Banner */}
           <Alert severity="warning">
             <AlertTitle>Important</AlertTitle>
             If someone stops sharing their profile with you, you will lose
             access to their data. The share is controlled by the profile owner.
           </Alert>
 
-          {!canCreate && (
-            <Alert severity="error">
-              You have reached the maximum of 50 active shared campaigns. Please
-              deactivate an existing shared campaign before creating a new one.
-            </Alert>
-          )}
+          <LimitWarning canCreate={canCreate} />
+          <ErrorAlert error={error} />
 
-          {error && <Alert severity="error">{error}</Alert>}
-
-          {/* Catalog Selection */}
-          <FormControl fullWidth required disabled={catalogsLoading}>
-            <InputLabel>Product Catalog</InputLabel>
-            <Select
-              value={catalogId}
-              onChange={(e) => setCatalogId(e.target.value)}
-              label="Product Catalog"
-              MenuProps={{
-                slotProps: {
-                  paper: {
-                    sx: {
-                      maxHeight: 300,
-                    },
-                  },
-                },
-              }}
-            >
-              {catalogsLoading && (
-                <MenuItem disabled>Loading catalogs...</MenuItem>
-              )}
-              {!catalogsLoading &&
-                filteredPublicCatalogs.length === 0 &&
-                myCatalogs.length === 0 && (
-                  <MenuItem disabled>No catalogs available</MenuItem>
-                )}
-
-              {/* Public Catalogs Section */}
-              {filteredPublicCatalogs.length > 0 && [
-                <MenuItem
-                  key="public-header"
-                  disabled
-                  sx={{
-                    fontWeight: 600,
-                    backgroundColor: "#f5f5f5",
-                    opacity: 1,
-                  }}
-                >
-                  Public Catalogs
-                </MenuItem>,
-                ...filteredPublicCatalogs.map((catalog) => (
-                  <MenuItem key={catalog.catalogId} value={catalog.catalogId}>
-                    {catalog.catalogName}
-                  </MenuItem>
-                )),
-              ]}
-
-              {/* My Catalogs Section */}
-              {myCatalogs.length > 0 && [
-                <MenuItem
-                  key="my-header"
-                  disabled
-                  sx={{
-                    fontWeight: 600,
-                    backgroundColor: "#f5f5f5",
-                    opacity: 1,
-                  }}
-                >
-                  My Catalogs
-                </MenuItem>,
-                ...myCatalogs.map((catalog) => (
-                  <MenuItem key={catalog.catalogId} value={catalog.catalogId}>
-                    {catalog.catalogName}
-                  </MenuItem>
-                )),
-              ]}
-            </Select>
-          </FormControl>
-
-          {/* Campaign Information */}
-          <Stack direction="row" spacing={2}>
-            <TextField
-              label="Campaign Name"
-              value={campaignName}
-              onChange={(e) => setCampaignName(e.target.value)}
-              placeholder="e.g., Fall, Spring"
-              required
-              fullWidth
-            />
-            <TextField
-              label="Campaign Year"
-              type="number"
-              value={campaignYear}
-              onChange={(e) =>
-                setCampaignYear(parseInt(e.target.value, 10) || 0)
-              }
-              required
-              sx={{ width: 150 }}
-              inputProps={{ min: 2020, max: 2100 }}
-            />
-          </Stack>
-
-          {/* Optional Dates */}
-          <Stack direction="row" spacing={2}>
-            <TextField
-              label="Start Date (Optional)"
-              type="date"
-              value={startDate}
-              onChange={(e) => setStartDate(e.target.value)}
-              fullWidth
-              InputLabelProps={{ shrink: true }}
-            />
-            <TextField
-              label="End Date (Optional)"
-              type="date"
-              value={endDate}
-              onChange={(e) => setEndDate(e.target.value)}
-              fullWidth
-              InputLabelProps={{ shrink: true }}
-            />
-          </Stack>
-
-          {/* Unit Information */}
-          <Typography variant="subtitle2" color="text.secondary">
-            Unit Information (Required)
-          </Typography>
-          <Stack direction="row" spacing={2}>
-            <FormControl required sx={{ minWidth: 150 }}>
-              <InputLabel>Unit Type</InputLabel>
-              <Select
-                value={unitType}
-                onChange={(e) => setUnitType(e.target.value)}
-                label="Unit Type"
-              >
-                {UNIT_TYPES.map((type) => (
-                  <MenuItem key={type} value={type}>
-                    {type}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-            <TextField
-              label="Unit Number"
-              type="number"
-              value={unitNumber}
-              onChange={(e) => setUnitNumber(e.target.value)}
-              required
-              sx={{ width: 150 }}
-              inputProps={{ min: 1 }}
-            />
-            <TextField
-              label="City"
-              value={city}
-              onChange={(e) => setCity(e.target.value)}
-              required
-              fullWidth
-            />
-            <FormControl required sx={{ minWidth: 100 }}>
-              <InputLabel>State</InputLabel>
-              <Select
-                value={state}
-                onChange={(e) => setState(e.target.value)}
-                label="State"
-              >
-                {US_STATES.map((s) => (
-                  <MenuItem key={s} value={s}>
-                    {s}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          </Stack>
-
-          {/* Creator Message */}
-          <TextField
-            label="Message to Scouts (Optional)"
-            value={creatorMessage}
-            onChange={(e) => setCreatorMessage(e.target.value)}
-            placeholder="Enter a message that will be shown to scouts when they use this link"
-            multiline
-            rows={2}
-            fullWidth
-            inputProps={{ maxLength: MAX_CREATOR_MESSAGE_LENGTH }}
-            helperText={`${creatorMessage.length}/${MAX_CREATOR_MESSAGE_LENGTH} characters`}
-            error={creatorMessage.length > MAX_CREATOR_MESSAGE_LENGTH}
+          <CampaignFormFields
+            formState={formState}
+            formSetters={formSetters}
+            catalogsLoading={catalogsLoading}
+            filteredPublicCatalogs={filteredPublicCatalogs}
+            myCatalogs={myCatalogs}
           />
 
-          {/* Description (for internal use) */}
-          <TextField
-            label="Description (For Your Reference)"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder="Internal description to help you manage your shared campaigns"
-            fullWidth
-          />
-
-          {/* Link Preview */}
-          <Box sx={{ bgcolor: "grey.100", p: 2, borderRadius: 1 }}>
-            <Typography variant="caption" color="text.secondary">
-              Shareable Link Preview:
-            </Typography>
-            <Typography
-              variant="body2"
-              fontFamily="monospace"
-              sx={{ wordBreak: "break-all" }}
-            >
-              {previewLink}
-            </Typography>
-            <Typography variant="caption" color="text.secondary">
-              (The actual code will be generated when you create the shared
-              campaign)
-            </Typography>
-          </Box>
+          <LinkPreview />
         </Stack>
       </DialogContent>
       <DialogActions>
@@ -444,7 +574,7 @@ export const CreateSharedCampaignDialog: React.FC<
         <Button
           onClick={handleSubmit}
           variant="contained"
-          disabled={!isFormValid() || isSubmitting || !canCreate}
+          disabled={!isFormValid || isSubmitting || !canCreate}
           startIcon={isSubmitting ? <CircularProgress size={16} /> : undefined}
         >
           {isSubmitting ? "Creating..." : "Create Shared Campaign"}

@@ -12,6 +12,36 @@ interface Account {
   unitNumber?: string;
 }
 
+// Get string field with default
+const getField = (value: string | undefined): string => value ?? "";
+
+// Get unit number as string with default
+const getUnitNumber = (value: string | undefined): string => {
+  return value?.toString() ?? "";
+};
+
+// Extract field values from account with defaults
+const extractAccountFields = (account: Account | undefined) => {
+  if (!account) {
+    return {
+      givenName: "",
+      familyName: "",
+      city: "",
+      state: "",
+      unitType: "",
+      unitNumber: "",
+    };
+  }
+  return {
+    givenName: getField(account.givenName),
+    familyName: getField(account.familyName),
+    city: getField(account.city),
+    state: getField(account.state),
+    unitType: getField(account.unitType),
+    unitNumber: getUnitNumber(account.unitNumber),
+  };
+};
+
 export interface UseProfileEditReturn {
   editDialogOpen: boolean;
   setEditDialogOpen: (value: boolean) => void;
@@ -46,12 +76,13 @@ export const useProfileEdit = (): UseProfileEditReturn => {
   const [updateError, setUpdateError] = useState<string | null>(null);
 
   const handleOpenEditDialog = (account: Account | undefined) => {
-    setGivenName(account?.givenName || "");
-    setFamilyName(account?.familyName || "");
-    setCity(account?.city || "");
-    setState(account?.state || "");
-    setUnitType(account?.unitType || "");
-    setUnitNumber(account?.unitNumber?.toString() || "");
+    const fields = extractAccountFields(account);
+    setGivenName(fields.givenName);
+    setFamilyName(fields.familyName);
+    setCity(fields.city);
+    setState(fields.state);
+    setUnitType(fields.unitType);
+    setUnitNumber(fields.unitNumber);
     setEditDialogOpen(true);
   };
 

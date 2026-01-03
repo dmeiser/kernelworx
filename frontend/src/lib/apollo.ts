@@ -9,10 +9,11 @@ import {
   InMemoryCache,
   createHttpLink,
   ApolloLink,
+  type DefaultContext,
+  type Operation,
 } from "@apollo/client";
 import { setContext } from "@apollo/client/link/context";
-import { ErrorLink } from "@apollo/client/link/error";
-import { CombinedGraphQLErrors } from "@apollo/client/errors";
+import { ErrorLink, type ErrorResponse } from "@apollo/client/link/error";
 import { fetchAuthSession } from "aws-amplify/auth";
 
 /**
@@ -29,7 +30,12 @@ const httpLink = createHttpLink({
  * If no token is available, it throws an error to prevent unauthenticated
  * requests from reaching AppSync with empty ctx.identity.sub values.
  */
-export const getAuthContext = async (_: any, prevContext: any) => {
+type AuthHeadersContext = DefaultContext & { headers?: Record<string, string> };
+
+export const getAuthContext = async (
+  _operation: Operation,
+  prevContext: AuthHeadersContext,
+) => {
   const session = await fetchAuthSession();
   const token = session.tokens?.idToken?.toString();
 
@@ -53,14 +59,12 @@ const authLink = setContext(getAuthContext);
  * Error handler used by the ErrorLink (extracted for testability)
  */
 export const handleApolloError = ({
-  error,
   operation,
-}: {
-  error: any;
-  operation: any;
-}) => {
-  if (CombinedGraphQLErrors.is(error)) {
-    error.errors.forEach((err: any) => {
+  graphQLErrors,
+  networkError,
+}: ErrorResponse) => {
+  if (graphQLErrors?.length) {
+    graphQLErrors.forEach((err) => {
       const { message, locations, path, extensions } = err;
       const errorCode = extensions?.errorCode as string | undefined;
 
@@ -83,9 +87,10 @@ export const handleApolloError = ({
         }),
       );
     });
-  } else {
-    // Network or other error
-    console.error(`[Network/Error]: ${error.message}`);
+  }
+
+  if (networkError) {
+    console.error(`[Network/Error]: ${networkError.message}`);
 
     // Emit network error event
     window.dispatchEvent(
