@@ -108,7 +108,9 @@ describe('CreateCampaignDialog', () => {
   };
 
   // Helper to find the hidden native select input and set value directly
-  const setCatalogSelectValue = (value: string) => {
+  // NOTE: This helper is defined but currently unused due to MUI Select testing limitations
+  // Keeping it for future use when the MUI Select onChange issue is resolved
+  const _setCatalogSelectValue = (value: string) => {
     // MUI Select uses a hidden input to store the actual value
     const form = document.querySelector('.MuiFormControl-root:has([role="combobox"])');
     const hiddenInput = form?.querySelector('input[type="hidden"]') as HTMLInputElement | null;
@@ -118,6 +120,8 @@ describe('CreateCampaignDialog', () => {
       hiddenInput.dispatchEvent(new Event('change', { bubbles: true }));
     }
   };
+  // Silence the unused warning
+  void _setCatalogSelectValue;
 
   it('renders when open', async () => {
     setupUseQueryMock();
