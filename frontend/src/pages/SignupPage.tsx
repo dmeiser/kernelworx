@@ -23,9 +23,9 @@ import {
   FormControlLabel,
   MenuItem,
 } from '@mui/material';
-import { useNavigate, NavigateFunction } from 'react-router-dom';
+import { useNavigate, type NavigateFunction } from 'react-router-dom';
 import { signUp, confirmSignUp, autoSignIn, fetchAuthSession } from 'aws-amplify/auth';
-import { useMutation, MutationTuple } from '@apollo/client/react';
+import { useMutation, type MutationTuple } from '@apollo/client/react';
 import { UPDATE_MY_ACCOUNT } from '../lib/graphql';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -137,7 +137,7 @@ function buildOptionalFieldsInput(fields: OptionalFields): Record<string, string
 
 // Helper: Save optional fields via mutation
 async function saveOptionalFields(
-  updateMyAccount: MutationTuple<unknown, unknown>[0],
+  updateMyAccount: MutationTuple<unknown, any>[0],
   fields: OptionalFields,
 ): Promise<void> {
   if (!hasOptionalFields(fields)) return;
@@ -171,7 +171,7 @@ async function handlePostVerificationAuth(
 
 // Helper: Process auto sign-in and save optional fields
 async function processAutoSignIn(
-  updateMyAccount: MutationTuple<unknown, unknown>[0],
+  updateMyAccount: MutationTuple<unknown, any>[0],
   optionalFields: OptionalFields,
   refreshSession: () => Promise<void>,
   navigate: NavigateFunction,

@@ -599,11 +599,11 @@ const addOptionalInputFields = (
 // Form validation helper
 const isFormComplete = (
   customer: ReturnType<typeof useCustomerFormState>,
-  lineItems: LineItemState[],
+  lineItems: LineItemInput[],
   orderDate: string,
 ): boolean => {
   const hasName = customer.customerName.trim().length > 0;
-  const hasContact = customer.customerPhone.trim().length > 0 || customer.hasAddress;
+  const hasContact = Boolean(customer.customerPhone.trim().length > 0 || customer.hasAddress);
   const hasItems = lineItems.length > 0;
   const hasDate = orderDate.length > 0;
   return hasName && hasContact && hasItems && hasDate;
@@ -713,9 +713,9 @@ const combineLoading = (creating: boolean, updating: boolean): boolean => {
 
 // Combine error states
 const combineErrors = (
-  createError: ApolloError | undefined,
-  updateError: ApolloError | undefined,
-): ApolloError | undefined => {
+  createError: ReturnType<typeof useMutation>[1]['error'],
+  updateError: ReturnType<typeof useMutation>[1]['error'],
+): ReturnType<typeof useMutation>[1]['error'] => {
   return createError ?? updateError;
 };
 
@@ -788,7 +788,7 @@ export const OrderEditorDialog: React.FC<OrderEditorDialogProps> = ({
 
   const handleSubmit = async () => {
     if (!isFormValid) return;
-    if (!profileId) return;
+    if (!dbProfileId) return;
 
     try {
       const input: Record<string, unknown> = buildBaseInput();
@@ -799,7 +799,7 @@ export const OrderEditorDialog: React.FC<OrderEditorDialogProps> = ({
         isUpdate,
         order?.orderId,
         dbProfileId,
-        dbCampaignId,
+        dbCampaignId!,
         createOrder,
         updateOrder,
       );

@@ -493,24 +493,24 @@ export const ScoutManagementPage: React.FC = () => {
   } = useQuery<{
     getProfile: Profile;
   }>(GET_PROFILE, {
-    variables: { profileId: dbProfileId },
-    skip: shouldSkipQuery(dbProfileId),
+    variables: { profileId: dbProfileId! },
+    skip: shouldSkipQuery(dbProfileId!),
   });
 
   // Fetch invites
   const { data: invitesData, refetch: refetchInvites } = useQuery<{
     listInvitesByProfile: ProfileInvite[];
   }>(LIST_INVITES_BY_PROFILE, {
-    variables: { profileId: dbProfileId },
-    skip: shouldSkipQuery(dbProfileId),
+    variables: { profileId: dbProfileId! },
+    skip: shouldSkipQuery(dbProfileId!),
   });
 
   // Fetch shares (accounts with access to this profile)
   const { data: sharesData } = useQuery<{
     listSharesByProfile: Share[];
   }>(LIST_SHARES_BY_PROFILE, {
-    variables: { profileId: dbProfileId },
-    skip: shouldSkipQuery(dbProfileId),
+    variables: { profileId: dbProfileId! },
+    skip: shouldSkipQuery(dbProfileId!),
   });
 
   // Initialize form when profile loads
@@ -571,33 +571,39 @@ export const ScoutManagementPage: React.FC = () => {
 
   const handleSaveChanges = async () => {
     const canSave = canSaveProfile(profileId, profileName);
+    if (!dbProfileId) return;
     await maybeSaveProfile(canSave, setUpdating, updateProfile, dbProfileId, profileName);
   };
 
   const handleCreateInvite = async () => {
     const canCreate = canCreateInvite(profileId);
+    if (!dbProfileId) return;
     await maybeCreateInvite(canCreate, createInvite, dbProfileId, invitePermissions, setInvitePermissions);
   };
 
   const handleDeleteInvite = async () => {
     const canDelete = canDeleteInvite(deletingInviteCode, profileId);
+    if (!dbProfileId) return;
     await maybeDeleteInvite(canDelete, deleteInvite, dbProfileId, deletingInviteCode);
   };
 
   /* v8 ignore start -- async handlers requiring complex GraphQL mocking and confirmation dialogs */
   const handleRevokeShare = async (targetAccountId: string, email?: string) => {
     const userName = getUserDisplayName(email, targetAccountId);
+    if (!dbProfileId) return;
     await handleRevokeShareWithConfirmation(userName, revokeShare, dbProfileId, targetAccountId);
   };
 
   const handleTransferOwnership = async (targetAccountId: string, email?: string) => {
     const userName = getUserDisplayName(email, targetAccountId);
+    if (!dbProfileId) return;
     await handleTransferOwnershipWithConfirmation(userName, transferOwnership, dbProfileId, targetAccountId);
   };
   /* v8 ignore stop */
 
   const handleDeleteProfile = async () => {
     const canDelete = canDeleteProfile(profileId);
+    if (!dbProfileId) return;
     await maybeDeleteProfile(canDelete, setDeletingProfile, deleteProfile, dbProfileId);
   };
 

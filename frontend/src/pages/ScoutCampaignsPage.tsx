@@ -4,7 +4,7 @@
 
 import React, { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useQuery, useMutation, ApolloError } from '@apollo/client/react';
+import { useQuery, useMutation } from '@apollo/client/react';
 import {
   Typography,
   Box,
@@ -114,7 +114,7 @@ const PageHeader: React.FC<PageHeaderProps> = ({ sellerName, canEdit, onNavigate
 );
 
 interface ErrorAlertProps {
-  error: ApolloError | undefined;
+  error: ReturnType<typeof useQuery>['error'];
 }
 
 const ErrorAlert: React.FC<ErrorAlertProps> = ({ error }) => {
@@ -242,7 +242,7 @@ interface ScoutCampaignsContentProps {
   profileId: string;
   campaigns: Campaign[];
   loading: boolean;
-  error: ApolloError | undefined;
+  error: ReturnType<typeof useQuery>['error'];
   onCreateCampaign: (
     campaignName: string,
     campaignYear: number,
@@ -293,7 +293,7 @@ interface ScoutCampaignsPageData {
   profile: Profile | undefined;
   campaigns: Campaign[];
   loading: boolean;
-  error: ApolloError | undefined;
+  error: ReturnType<typeof useQuery>['error'];
   handleCreateCampaign: (
     campaignName: string,
     campaignYear: number,
@@ -339,7 +339,7 @@ export const ScoutCampaignsPage: React.FC = () => {
 
   const { profile, campaigns, loading, error, handleCreateCampaign } = useScoutCampaignsPageData(
     profileId,
-    dbProfileId,
+    dbProfileId ?? '',
   );
 
   if (shouldShowLoading(loading, profile)) return <LoadingState />;

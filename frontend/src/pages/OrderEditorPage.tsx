@@ -31,7 +31,7 @@ import {
 import { Add as AddIcon, Delete as DeleteIcon, ArrowBack as ArrowBackIcon } from '@mui/icons-material';
 import { CREATE_ORDER, UPDATE_ORDER, GET_ORDER, GET_CAMPAIGN, GET_PROFILE } from '../lib/graphql';
 import { ensureProfileId, ensureCampaignId, ensureOrderId, toUrlId } from '../lib/ids';
-import { useOrderForm, OrderFormState, LineItemInput } from '../hooks/useOrderForm';
+import { useOrderForm, type OrderFormState, type LineItemInput } from '../hooks/useOrderForm';
 
 // ============================================================================
 // Types
@@ -190,7 +190,10 @@ function buildCreateOrderInput(
   };
 }
 
-function buildUpdateOrderInput(formState: OrderFormState, dbOrderId: string, validLineItems: LineItemInput[]) {
+function buildUpdateOrderInput(formState: OrderFormState, dbOrderId: string | null, validLineItems: LineItemInput[]) {
+  if (!dbOrderId) {
+    throw new Error('Order ID is required for update');
+  }
   return {
     orderId: dbOrderId,
     customerName: formState.customerName.trim(),
@@ -547,7 +550,7 @@ interface ParsedOrderParams {
   orderId: string | null;
   dbProfileId: string;
   dbCampaignId: string;
-  dbOrderId: string;
+  dbOrderId: string | null;
   isEditing: boolean;
   ordersUrl: string;
 }
@@ -560,9 +563,9 @@ function parseOrderParams(params: { profileId?: string; campaignId?: string; ord
     profileId,
     campaignId,
     orderId,
-    dbProfileId: ensureProfileId(profileId),
-    dbCampaignId: ensureCampaignId(campaignId),
-    dbOrderId: ensureOrderId(orderId || undefined),
+    dbProfileId: ensureProfileId(profileId)!,
+    dbCampaignId: ensureCampaignId(campaignId)!,
+    dbOrderId: orderId ? ensureOrderId(orderId)! : null,
     isEditing: !!orderId,
     ordersUrl: `/scouts/${toUrlId(profileId)}/campaigns/${toUrlId(campaignId)}/orders`,
   };

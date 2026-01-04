@@ -211,7 +211,7 @@ export const CampaignSettingsPage: React.FC = () => {
     refetch,
   } = useQuery<{ getCampaign: Campaign }>(GET_CAMPAIGN, {
     variables: { campaignId: dbCampaignId },
-    skip: shouldSkipCampaignQuery(dbCampaignId),
+    skip: shouldSkipCampaignQuery(dbCampaignId ?? ''),
   });
 
   // Fetch catalogs
@@ -264,12 +264,14 @@ export const CampaignSettingsPage: React.FC = () => {
   const handleSaveChanges = async () => {
     setUnitChangeConfirmOpen(false);
     const isValid = canSave(campaignId, campaignName, catalogId);
+    if (!dbCampaignId) return;
     const input = buildUpdateInput(dbCampaignId, campaignName, startDate, endDate, catalogId);
     await maybeUpdateCampaign(isValid, updateCampaign, input);
   };
 
   const handleDeleteCampaign = async () => {
     const canDelete = canDeleteCampaign(campaignId);
+    if (!dbCampaignId) return;
     await maybeDeleteCampaign(canDelete, deleteCampaign, dbCampaignId);
   };
 

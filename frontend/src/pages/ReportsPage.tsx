@@ -263,7 +263,7 @@ export const ReportsPage: React.FC = () => {
     listOrdersByCampaign: Order[];
   }>(LIST_ORDERS_BY_CAMPAIGN, {
     variables: { campaignId: dbCampaignId },
-    skip: shouldSkipQuery(dbCampaignId),
+    skip: shouldSkipQuery(dbCampaignId ?? ''),
   });
 
   const orders = getOrdersFromData(ordersData);

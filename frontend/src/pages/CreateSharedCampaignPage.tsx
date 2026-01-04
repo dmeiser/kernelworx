@@ -22,8 +22,8 @@ import {
   Paper,
   Container,
   Divider,
-  SelectChangeEvent,
 } from '@mui/material';
+import type { SelectChangeEvent } from '@mui/material';
 import { ArrowBack as BackIcon, Save as SaveIcon } from '@mui/icons-material';
 import {
   LIST_PUBLIC_CATALOGS,

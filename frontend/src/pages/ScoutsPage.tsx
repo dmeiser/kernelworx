@@ -236,8 +236,10 @@ const maybeDeleteProfile = async (
   deleteProfile: (options: { variables: { profileId: string } }) => Promise<unknown>,
 ): Promise<void> => {
   if (canDelete && deletingProfileId) {
+    const profileId = ensureProfileId(deletingProfileId);
+    if (!profileId) return;
     await deleteProfile({
-      variables: { profileId: ensureProfileId(deletingProfileId) },
+      variables: { profileId },
     });
   }
 };
@@ -416,7 +418,7 @@ export const ScoutsPage: React.FC = () => {
   // Function to load shared profiles - now returns full profile data in a single query
   const loadSharedProfiles = React.useCallback(async () => {
     await loadSharedProfilesWithErrorHandling(
-      apolloClient,
+      apolloClient as any,
       LIST_MY_SHARES,
       setSharedProfiles,
       setSharedProfilesLoaded,

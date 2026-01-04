@@ -28,13 +28,16 @@ const getLoadingView = (sharedCampaignLoading: boolean) => {
 const getInactiveView = (sharedCampaignInactive: boolean, navigate: (path: string) => void) => {
   if (!sharedCampaignInactive) return null;
   /* v8 ignore next -- Inactive campaign view is tested indirectly via component integration */
-  return <CampaignNotFoundError onReturnClick={() => navigate('/scouts')} />;
+  return <CampaignNotFoundError message="Campaign not found" onReturnClick={() => navigate('/scouts')} />;
 };
 
 const getErrorView = (sharedCampaignError: unknown, navigate: (path: string) => void) => {
   if (!sharedCampaignError) return null;
   /* v8 ignore next -- Error view is tested indirectly via component integration */
-  return <CampaignErrorState error={sharedCampaignError} onReturnClick={() => navigate('/scouts')} />;
+  if (sharedCampaignError) {
+    const error = sharedCampaignError instanceof Error ? sharedCampaignError : new Error(String(sharedCampaignError));
+    return <CampaignErrorState error={error} onReturnClick={() => navigate('/scouts')} />;
+  }
 };
 
 const getGuardView = (
