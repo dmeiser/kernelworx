@@ -152,29 +152,31 @@ export const apolloClient = new ApolloClient({
     typePolicies: {
       Query: {
         fields: {
-          /* v8 ignore start -- Apollo internal cache merge callbacks */
-          // Merge strategies for list queries
+          // Merge strategies for list queries - these are invoked by Apollo internally
           listMyProfiles: {
+            /* v8 ignore next 3 -- Apollo internal merge callback */
             merge(_existing, incoming) {
               return incoming;
             },
           },
           listMyShares: {
+            /* v8 ignore next 3 -- Apollo internal merge callback */
             merge(_existing, incoming) {
               return incoming;
             },
           },
           listCampaignsByProfile: {
+            /* v8 ignore next 3 -- Apollo internal merge callback */
             merge(_existing, incoming) {
               return incoming;
             },
           },
           listOrdersByCampaign: {
+            /* v8 ignore next 3 -- Apollo internal merge callback */
             merge(_existing, incoming) {
               return incoming;
             },
           },
-          /* v8 ignore stop */
         },
       },
     },

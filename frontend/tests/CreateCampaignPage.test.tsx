@@ -4,23 +4,29 @@
  * Tests for the campaign creation page supporting both shared campaign and manual modes.
  */
 
-import { describe, test, expect, vi } from "vitest";
-import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { describe, test, expect, vi } from 'vitest';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MockedProvider } from "@apollo/client/testing/react";
+import { MockedProvider } from '@apollo/client/testing/react';
 import { InMemoryCache } from '@apollo/client';
-import { MemoryRouter, Routes, Route } from "react-router-dom";
-import { CreateCampaignPage } from "../src/pages/CreateCampaignPage";
-import { LIST_MY_PROFILES, LIST_PUBLIC_CATALOGS, LIST_MY_CATALOGS, GET_SHARED_CAMPAIGN, CREATE_CAMPAIGN } from "../src/lib/graphql";
+import { MemoryRouter, Routes, Route } from 'react-router-dom';
+import { CreateCampaignPage } from '../src/pages/CreateCampaignPage';
+import {
+  LIST_MY_PROFILES,
+  LIST_PUBLIC_CATALOGS,
+  LIST_MY_CATALOGS,
+  GET_SHARED_CAMPAIGN,
+  CREATE_CAMPAIGN,
+} from '../src/lib/graphql';
 
 // Mock AuthContext
-vi.mock("../src/contexts/AuthContext", () => ({
+vi.mock('../src/contexts/AuthContext', () => ({
   useAuth: vi.fn(() => ({
     isAuthenticated: true,
     isLoading: false,
     account: {
-      accountId: "test-account-id",
-      email: "test@example.com",
+      accountId: 'test-account-id',
+      email: 'test@example.com',
     },
   })),
 }));
@@ -36,7 +42,7 @@ vi.mock('react-router-dom', async () => {
 });
 
 // Mock Toast
-vi.mock("../src/components/Toast", () => ({
+vi.mock('../src/components/Toast', () => ({
   useToast: vi.fn(() => ({
     showSuccess: vi.fn(),
     showError: vi.fn(),
@@ -52,15 +58,15 @@ const baseMocks = [
       data: {
         listMyProfiles: [
           {
-            profileId: "profile-1",
-            sellerName: "Scout Alpha",
-            accountId: "test-account-id",
-            ownerAccountId: "test-account-id",
-            createdAt: "2024-01-01T00:00:00Z",
-            updatedAt: "2024-01-01T00:00:00Z",
+            profileId: 'profile-1',
+            sellerName: 'Scout Alpha',
+            accountId: 'test-account-id',
+            ownerAccountId: 'test-account-id',
+            createdAt: '2024-01-01T00:00:00Z',
+            updatedAt: '2024-01-01T00:00:00Z',
             isOwner: true,
             permissions: [],
-            __typename: "SellerProfile",
+            __typename: 'SellerProfile',
           },
         ],
       },
@@ -74,16 +80,16 @@ const baseMocks = [
       data: {
         listPublicCatalogs: [
           {
-            catalogId: "catalog-1",
+            catalogId: 'catalog-1',
             catalogName: "2024 Trail's End Products",
             catalogYear: 2024,
-            catalogType: "PUBLIC",
+            catalogType: 'PUBLIC',
             isPublic: true,
-            ownerAccountId: "admin-account",
+            ownerAccountId: 'admin-account',
             products: [],
-            createdAt: "2024-01-01T00:00:00Z",
-            updatedAt: "2024-01-01T00:00:00Z",
-            __typename: "Catalog",
+            createdAt: '2024-01-01T00:00:00Z',
+            updatedAt: '2024-01-01T00:00:00Z',
+            __typename: 'Catalog',
           },
         ],
       },
@@ -160,7 +166,9 @@ async function selectCatalog(catalogPattern: RegExp): Promise<void> {
 // Helper: Select unit type from the accordion
 async function selectUnitType(unitTypePattern: RegExp): Promise<void> {
   const unitHeaders = await screen.findAllByText(/Unit Information/i);
-  const accordionHeader = unitHeaders.find((el) => el.closest('.MuiAccordionSummary-root') || el.closest('.MuiAccordion-root')) || unitHeaders[0];
+  const accordionHeader =
+    unitHeaders.find((el) => el.closest('.MuiAccordionSummary-root') || el.closest('.MuiAccordion-root')) ||
+    unitHeaders[0];
   await userEvent.click(accordionHeader);
 
   const unitTypeLabels = await screen.findAllByText(/Unit Type/i);
@@ -179,11 +187,14 @@ async function ensureProfileSelected(profileId: string, pattern: RegExp): Promis
 
   // Wait for auto-selection first
   try {
-    await waitFor(() => {
-      if (!checkProfileAutoSelected(profileForm)) {
-        throw new Error('not selected yet');
-      }
-    }, { timeout: 5000 });
+    await waitFor(
+      () => {
+        if (!checkProfileAutoSelected(profileForm)) {
+          throw new Error('not selected yet');
+        }
+      },
+      { timeout: 5000 },
+    );
     return;
   } catch {
     // Fallback: try combobox selection
@@ -195,67 +206,67 @@ async function ensureProfileSelected(profileId: string, pattern: RegExp): Promis
   }
 }
 
-describe("CreateCampaignPage", () => {
-  test("renders manual mode with page title", async () => {
+describe('CreateCampaignPage', () => {
+  test('renders manual mode with page title', async () => {
     render(
       <MockedProvider mocks={baseMocks}>
-        <MemoryRouter initialEntries={["/create-campaign"]}>
+        <MemoryRouter initialEntries={['/create-campaign']}>
           <Routes>
             <Route path="/create-campaign" element={<CreateCampaignPage />} />
           </Routes>
         </MemoryRouter>
-      </MockedProvider>
+      </MockedProvider>,
     );
 
     // Should show the Create Campaign title
-    expect(await screen.findByText("Create New Campaign")).toBeInTheDocument();
+    expect(await screen.findByText('Create New Campaign')).toBeInTheDocument();
   });
 
-  test("displays profile selection dropdown", async () => {
+  test('displays profile selection dropdown', async () => {
     render(
       <MockedProvider mocks={baseMocks}>
-        <MemoryRouter initialEntries={["/create-campaign"]}>
+        <MemoryRouter initialEntries={['/create-campaign']}>
           <Routes>
             <Route path="/create-campaign" element={<CreateCampaignPage />} />
           </Routes>
         </MemoryRouter>
-      </MockedProvider>
+      </MockedProvider>,
     );
 
     const profileLabels = await screen.findAllByText(/Select Profile \*/i);
     expect(profileLabels.length).toBeGreaterThan(0);
   });
 
-  test("displays campaign name and year fields in manual mode", async () => {
+  test('displays campaign name and year fields in manual mode', async () => {
     render(
       <MockedProvider mocks={baseMocks}>
-        <MemoryRouter initialEntries={["/create-campaign"]}>
+        <MemoryRouter initialEntries={['/create-campaign']}>
           <Routes>
             <Route path="/create-campaign" element={<CreateCampaignPage />} />
           </Routes>
         </MemoryRouter>
-      </MockedProvider>
+      </MockedProvider>,
     );
 
-    const campaignNameLabels = await screen.findAllByText(/Campaign Name \*/i)
-    expect(campaignNameLabels.length).toBeGreaterThan(0)
-    const yearLabels = await screen.findAllByText(/Year \*/i)
-    expect(yearLabels.length).toBeGreaterThan(0)
+    const campaignNameLabels = await screen.findAllByText(/Campaign Name \*/i);
+    expect(campaignNameLabels.length).toBeGreaterThan(0);
+    const yearLabels = await screen.findAllByText(/Year \*/i);
+    expect(yearLabels.length).toBeGreaterThan(0);
   });
 
-  test("displays catalog selection dropdown", async () => {
+  test('displays catalog selection dropdown', async () => {
     render(
       <MockedProvider mocks={baseMocks}>
-        <MemoryRouter initialEntries={["/create-campaign"]}>
+        <MemoryRouter initialEntries={['/create-campaign']}>
           <Routes>
             <Route path="/create-campaign" element={<CreateCampaignPage />} />
           </Routes>
         </MemoryRouter>
-      </MockedProvider>
+      </MockedProvider>,
     );
 
-    const productLabels = await screen.findAllByText(/Product Catalog \*/i)
-    expect(productLabels.length).toBeGreaterThan(0)
+    const productLabels = await screen.findAllByText(/Product Catalog \*/i);
+    expect(productLabels.length).toBeGreaterThan(0);
   });
 
   test("shows '(Official)' label for admin-managed catalogs", async () => {
@@ -285,56 +296,56 @@ describe("CreateCampaignPage", () => {
 
     render(
       <MockedProvider mocks={adminCatalogMocks}>
-        <MemoryRouter initialEntries={["/create-campaign"]}>
+        <MemoryRouter initialEntries={['/create-campaign']}>
           <Routes>
             <Route path="/create-campaign" element={<CreateCampaignPage />} />
           </Routes>
         </MemoryRouter>
-      </MockedProvider>
+      </MockedProvider>,
     );
 
     // Open the Product Catalog combobox and assert the admin-managed catalog shows the "(Official)" label
-    const user = userEvent.setup()
+    const user = userEvent.setup();
     // Find the label then the nearby combobox; MUI sometimes splits labels across nodes
-    const productLabels = await screen.findAllByText(/Product Catalog \*/i)
-    const labelEl = productLabels[0]
-    const formControl = labelEl.closest('.MuiFormControl-root') || labelEl.parentElement
-    const combobox = formControl?.querySelector('[role="combobox"]') as HTMLElement | null
-    expect(combobox).toBeTruthy()
-    await user.click(combobox!)
+    const productLabels = await screen.findAllByText(/Product Catalog \*/i);
+    const labelEl = productLabels[0];
+    const formControl = labelEl.closest('.MuiFormControl-root') || labelEl.parentElement;
+    const combobox = formControl?.querySelector('[role="combobox"]') as HTMLElement | null;
+    expect(combobox).toBeTruthy();
+    await user.click(combobox!);
 
-    expect(await screen.findByText(/Official/i)).toBeInTheDocument()
-    expect(await screen.findByText(/\(Official\)/i)).toBeInTheDocument()
+    expect(await screen.findByText(/Official/i)).toBeInTheDocument();
+    expect(await screen.findByText(/\(Official\)/i)).toBeInTheDocument();
   });
 
-  test("displays unit information accordion in manual mode", async () => {
+  test('displays unit information accordion in manual mode', async () => {
     render(
       <MockedProvider mocks={baseMocks}>
-        <MemoryRouter initialEntries={["/create-campaign"]}>
+        <MemoryRouter initialEntries={['/create-campaign']}>
           <Routes>
             <Route path="/create-campaign" element={<CreateCampaignPage />} />
           </Routes>
         </MemoryRouter>
-      </MockedProvider>
+      </MockedProvider>,
     );
 
-    const unitHeaders = await screen.findAllByText(/Unit Information/i)
+    const unitHeaders = await screen.findAllByText(/Unit Information/i);
     expect(unitHeaders.length).toBeGreaterThan(0);
   });
 
-  test("displays and allows editing start and end date fields", async () => {
+  test('displays and allows editing start and end date fields', async () => {
     render(
       <MockedProvider mocks={baseMocks}>
-        <MemoryRouter initialEntries={["/create-campaign"]}>
+        <MemoryRouter initialEntries={['/create-campaign']}>
           <Routes>
             <Route path="/create-campaign" element={<CreateCampaignPage />} />
           </Routes>
         </MemoryRouter>
-      </MockedProvider>
+      </MockedProvider>,
     );
 
     // Wait for page to load
-    expect(await screen.findByText("Create New Campaign")).toBeInTheDocument();
+    expect(await screen.findByText('Create New Campaign')).toBeInTheDocument();
 
     // Find date fields
     const startDateInput = screen.getByLabelText(/Start Date/i) as HTMLInputElement;
@@ -344,42 +355,42 @@ describe("CreateCampaignPage", () => {
     expect(endDateInput).toBeInTheDocument();
 
     // Change date values
-    fireEvent.change(startDateInput, { target: { value: "2025-09-01" } });
-    fireEvent.change(endDateInput, { target: { value: "2025-12-15" } });
+    fireEvent.change(startDateInput, { target: { value: '2025-09-01' } });
+    fireEvent.change(endDateInput, { target: { value: '2025-12-15' } });
 
-    expect(startDateInput.value).toBe("2025-09-01");
-    expect(endDateInput.value).toBe("2025-12-15");
+    expect(startDateInput.value).toBe('2025-09-01');
+    expect(endDateInput.value).toBe('2025-12-15');
   });
 
   // TODO: This test is flaky - auto-selection of profile and catalog may enable the button
   // Need to investigate the state management and auto-selection logic
-  test.skip("submit button is disabled when required fields are empty", async () => {
+  test.skip('submit button is disabled when required fields are empty', async () => {
     render(
       <MockedProvider mocks={baseMocks}>
-        <MemoryRouter initialEntries={["/create-campaign"]}>
+        <MemoryRouter initialEntries={['/create-campaign']}>
           <Routes>
             <Route path="/create-campaign" element={<CreateCampaignPage />} />
           </Routes>
         </MemoryRouter>
-      </MockedProvider>
+      </MockedProvider>,
     );
 
-    const submitButton = await screen.findByRole("button", { name: /Create Campaign/i });
+    const submitButton = await screen.findByRole('button', { name: /Create Campaign/i });
     expect(submitButton).toBeDisabled();
   });
 
-  test("cancel button navigates back", async () => {
+  test('cancel button navigates back', async () => {
     render(
       <MockedProvider mocks={baseMocks}>
-        <MemoryRouter initialEntries={["/create-campaign"]}>
+        <MemoryRouter initialEntries={['/create-campaign']}>
           <Routes>
             <Route path="/create-campaign" element={<CreateCampaignPage />} />
           </Routes>
         </MemoryRouter>
-      </MockedProvider>
+      </MockedProvider>,
     );
 
-    expect(await screen.findByRole("button", { name: /Cancel/i })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /Cancel/i })).toBeInTheDocument();
   });
 
   test('shows Campaign Not Found when shared campaign is missing and navigates to profiles', async () => {
@@ -390,12 +401,12 @@ describe("CreateCampaignPage", () => {
 
     render(
       <MockedProvider mocks={[...baseMocks, missingCampaignMock]}>
-        <MemoryRouter initialEntries={["/c/NOPE"]}>
+        <MemoryRouter initialEntries={['/c/NOPE']}>
           <Routes>
             <Route path="/c/:sharedCampaignCode" element={<CreateCampaignPage />} />
           </Routes>
         </MemoryRouter>
-      </MockedProvider>
+      </MockedProvider>,
     );
 
     expect(await screen.findByText(/Campaign Not Found/i)).toBeInTheDocument();
@@ -411,12 +422,12 @@ describe("CreateCampaignPage", () => {
   test.skip('shows validation when unit incomplete', async () => {
     render(
       <MockedProvider mocks={baseMocks}>
-        <MemoryRouter initialEntries={["/create-campaign"]}>
+        <MemoryRouter initialEntries={['/create-campaign']}>
           <Routes>
             <Route path="/create-campaign" element={<CreateCampaignPage />} />
           </Routes>
         </MemoryRouter>
-      </MockedProvider>
+      </MockedProvider>,
     );
 
     // Select a profile using helper
@@ -449,7 +460,14 @@ describe("CreateCampaignPage", () => {
           getSharedCampaign: {
             sharedCampaignCode: 'PACK123',
             catalogId: 'catalog-1',
-            catalog: { catalogId: 'catalog-1', catalogName: "2025 Test", catalogType: 'PUBLIC', ownerAccountId: 'admin-account', products: [], __typename: 'Catalog' },
+            catalog: {
+              catalogId: 'catalog-1',
+              catalogName: '2025 Test',
+              catalogType: 'PUBLIC',
+              ownerAccountId: 'admin-account',
+              products: [],
+              __typename: 'Catalog',
+            },
             campaignName: 'Fall',
             campaignYear: 2025,
             startDate: null,
@@ -476,16 +494,16 @@ describe("CreateCampaignPage", () => {
     };
 
     // Place the no-profiles mock first so it is used instead of the base mock
-    const mocks = [noProfilesMock, ...baseMocks.filter(m => m.request.query !== LIST_MY_PROFILES), sharedMock];
+    const mocks = [noProfilesMock, ...baseMocks.filter((m) => m.request.query !== LIST_MY_PROFILES), sharedMock];
 
     render(
       <MockedProvider mocks={mocks}>
-        <MemoryRouter initialEntries={["/c/PACK123"]}>
+        <MemoryRouter initialEntries={['/c/PACK123']}>
           <Routes>
             <Route path="/c/:sharedCampaignCode" element={<CreateCampaignPage />} />
           </Routes>
         </MemoryRouter>
-      </MockedProvider>
+      </MockedProvider>,
     );
 
     // The effect should navigate to /scouts when there are no profiles
@@ -500,30 +518,52 @@ describe("CreateCampaignPage", () => {
 
     render(
       <MockedProvider mocks={[...doubledBaseMocks, errMock]}>
-        <MemoryRouter initialEntries={["/c/BAD"]}>
+        <MemoryRouter initialEntries={['/c/BAD']}>
           <Routes>
             <Route path="/c/:sharedCampaignCode" element={<CreateCampaignPage />} />
           </Routes>
         </MemoryRouter>
-      </MockedProvider>
+      </MockedProvider>,
     );
 
-    // The component falls back to the 'Campaign Not Found' message when the load fails
-    expect(await screen.findByText(/Campaign Not Found/i)).toBeTruthy();
+    // The component shows the error message from the query failure
+    expect(await screen.findByText(/Error Loading Campaign/i)).toBeTruthy();
+    expect(screen.getByText(/network boom/i)).toBeTruthy();
 
     const goButton = screen.getByRole('button', { name: /Go to Profiles/i });
     await userEvent.click(goButton);
     expect(mockNavigate).toHaveBeenCalledWith('/scouts');
   });
 
-  test.skip('shows discovered shared campaign alert and navigates when Use Campaign clicked (deterministic)', async () => { // TODO: flaky test - module mocking issues
+  test.skip('shows discovered shared campaign alert and navigates when Use Campaign clicked (deterministic)', async () => {
+    // TODO: flaky test - module mocking issues
     // Use module mocking + fresh import to ensure the lazy query returns data immediately (avoid debounce complexity)
     vi.resetModules();
     vi.doMock('@apollo/client/react', async () => {
       const actual = await vi.importActual<any>('@apollo/client/react');
       return {
         ...actual,
-        useLazyQuery: () => [vi.fn(), { data: { findSharedCampaigns: [{ sharedCampaignCode: 'PACK123', campaignName: 'Fall', campaignYear: 2025, unitType: 'Pack', unitNumber: 1, city: 'Town', state: 'ST', createdByName: 'Creator Name', isActive: true, __typename: 'SharedCampaign' }] } }],
+        useLazyQuery: () => [
+          vi.fn(),
+          {
+            data: {
+              findSharedCampaigns: [
+                {
+                  sharedCampaignCode: 'PACK123',
+                  campaignName: 'Fall',
+                  campaignYear: 2025,
+                  unitType: 'Pack',
+                  unitNumber: 1,
+                  city: 'Town',
+                  state: 'ST',
+                  createdByName: 'Creator Name',
+                  isActive: true,
+                  __typename: 'SharedCampaign',
+                },
+              ],
+            },
+          },
+        ],
       };
     });
 
@@ -531,21 +571,25 @@ describe("CreateCampaignPage", () => {
 
     render(
       <MockedProvider mocks={[...doubledBaseMocks]} cache={new InMemoryCache()}>
-        <MemoryRouter initialEntries={["/create-campaign"]}>
+        <MemoryRouter initialEntries={['/create-campaign']}>
           <Routes>
             <Route path="/create-campaign" element={<DynCreateCampaignPage />} />
           </Routes>
         </MemoryRouter>
-      </MockedProvider>
+      </MockedProvider>,
     );
 
     // Fill unit fields to trigger discovery logic inside component (lazy hook already returns data)
     const unitHeaders = await screen.findAllByText(/Unit Information/i);
-    const accordionHeader = unitHeaders.find((el) => el.closest('.MuiAccordionSummary-root') || el.closest('.MuiAccordion-root')) || unitHeaders[0];
+    const accordionHeader =
+      unitHeaders.find((el) => el.closest('.MuiAccordionSummary-root') || el.closest('.MuiAccordion-root')) ||
+      unitHeaders[0];
     await userEvent.click(accordionHeader);
 
     // Select unit type
-    const unitTypeLabel = (await screen.findAllByText(/Unit Type/i)).find((el) => el.tagName === 'LABEL') || (await screen.findAllByText(/Unit Type/i))[0];
+    const unitTypeLabel =
+      (await screen.findAllByText(/Unit Type/i)).find((el) => el.tagName === 'LABEL') ||
+      (await screen.findAllByText(/Unit Type/i))[0];
     const unitForm = unitTypeLabel.closest('.MuiFormControl-root') as HTMLElement;
     const unitCombo = unitForm.querySelector('[role="combobox"]') as HTMLElement;
     await userEvent.click(unitCombo);
@@ -556,7 +600,9 @@ describe("CreateCampaignPage", () => {
     fireEvent.change(unitNumber, { target: { value: '1' } });
     const city = await screen.findByLabelText(/City/i);
     fireEvent.change(city, { target: { value: 'Town' } });
-    const stateLabel = (await screen.findAllByText(/State/i)).find((el) => el.tagName === 'LABEL') || (await screen.findAllByText(/State/i))[0];
+    const stateLabel =
+      (await screen.findAllByText(/State/i)).find((el) => el.tagName === 'LABEL') ||
+      (await screen.findAllByText(/State/i))[0];
     const stateForm = stateLabel.closest('.MuiFormControl-root') as HTMLElement;
     const stateCombo = stateForm.querySelector('[role="combobox"]') as HTMLElement;
     await userEvent.click(stateCombo);
@@ -580,9 +626,8 @@ describe("CreateCampaignPage", () => {
     vi.resetModules();
   });
 
-
-
-  test.skip('creates campaign successfully in shared campaign mode and navigates (deterministic)', async () => { // TODO: flaky - convert to E2E or rework with deterministic selection helper
+  test.skip('creates campaign successfully in shared campaign mode and navigates (deterministic)', async () => {
+    // TODO: flaky - convert to E2E or rework with deterministic selection helper
 
     const createCampaignMock = {
       request: { query: CREATE_CAMPAIGN },
@@ -599,7 +644,14 @@ describe("CreateCampaignPage", () => {
           getSharedCampaign: {
             sharedCampaignCode: 'PACK123',
             catalogId: 'catalog-1',
-            catalog: { catalogId: 'catalog-1', catalogName: "2025 Test", catalogType: 'PUBLIC', ownerAccountId: 'admin-account', products: [], __typename: 'Catalog' },
+            catalog: {
+              catalogId: 'catalog-1',
+              catalogName: '2025 Test',
+              catalogType: 'PUBLIC',
+              ownerAccountId: 'admin-account',
+              products: [],
+              __typename: 'Catalog',
+            },
             campaignName: 'Fall',
             campaignYear: 2025,
             startDate: null,
@@ -623,19 +675,26 @@ describe("CreateCampaignPage", () => {
     // Provide a single profile so it will be available for selection
     const oneProfileMock = {
       request: { query: LIST_MY_PROFILES },
-      result: { data: { listMyProfiles: [{ profileId: 'profile-9', sellerName: 'Solo', isOwner: true, permissions: [] }] } },
+      result: {
+        data: { listMyProfiles: [{ profileId: 'profile-9', sellerName: 'Solo', isOwner: true, permissions: [] }] },
+      },
     };
 
-    const mocksOrdered = [oneProfileMock, ...doubledBaseMocks.filter(m => m.request.query !== LIST_MY_PROFILES), sharedMockWithProfile, createCampaignMock];
+    const mocksOrdered = [
+      oneProfileMock,
+      ...doubledBaseMocks.filter((m) => m.request.query !== LIST_MY_PROFILES),
+      sharedMockWithProfile,
+      createCampaignMock,
+    ];
 
     render(
       <MockedProvider mocks={mocksOrdered} cache={new InMemoryCache()}>
-        <MemoryRouter initialEntries={["/c/PACK123"]}>
+        <MemoryRouter initialEntries={['/c/PACK123']}>
           <Routes>
             <Route path="/c/:sharedCampaignCode" element={<CreateCampaignPage />} />
           </Routes>
         </MemoryRouter>
-      </MockedProvider>
+      </MockedProvider>,
     );
 
     // Wait for sharedCampaign content
@@ -666,7 +725,14 @@ describe("CreateCampaignPage", () => {
           getSharedCampaign: {
             sharedCampaignCode: 'PACK123',
             catalogId: 'catalog-1',
-            catalog: { catalogId: 'catalog-1', catalogName: "2025 Test", catalogType: 'PUBLIC', ownerAccountId: 'admin-account', products: [], __typename: 'Catalog' },
+            catalog: {
+              catalogId: 'catalog-1',
+              catalogName: '2025 Test',
+              catalogType: 'PUBLIC',
+              ownerAccountId: 'admin-account',
+              products: [],
+              __typename: 'Catalog',
+            },
             campaignName: 'Fall',
             campaignYear: 2025,
             startDate: null,
@@ -689,19 +755,20 @@ describe("CreateCampaignPage", () => {
 
     render(
       <MockedProvider mocks={[sharedMock, ...doubledBaseMocks]}>
-        <MemoryRouter initialEntries={["/c/PACK123"]}>
+        <MemoryRouter initialEntries={['/c/PACK123']}>
           <Routes>
             <Route path="/c/:sharedCampaignCode" element={<CreateCampaignPage />} />
           </Routes>
         </MemoryRouter>
-      </MockedProvider>
+      </MockedProvider>,
     );
 
     // Progress bar should be visible while query resolves
     expect(await screen.findByRole('progressbar')).toBeTruthy();
   });
 
-  test.skip('creates a campaign successfully in shared campaign mode', async () => { // TODO: revisit flaky selection + create flow - prefer deterministic E2E or isolate mutation
+  test.skip('creates a campaign successfully in shared campaign mode', async () => {
+    // TODO: revisit flaky selection + create flow - prefer deterministic E2E or isolate mutation
     const createCampaignMock = {
       request: { query: CREATE_CAMPAIGN },
       result: { data: { createCampaign: { campaignId: 'camp-1', campaignName: 'Fall', campaignYear: 2025 } } },
@@ -717,7 +784,14 @@ describe("CreateCampaignPage", () => {
           getSharedCampaign: {
             sharedCampaignCode: 'PACK123',
             catalogId: 'catalog-1',
-            catalog: { catalogId: 'catalog-1', catalogName: "2025 Test", catalogType: 'PUBLIC', ownerAccountId: 'admin-account', products: [], __typename: 'Catalog' },
+            catalog: {
+              catalogId: 'catalog-1',
+              catalogName: '2025 Test',
+              catalogType: 'PUBLIC',
+              ownerAccountId: 'admin-account',
+              products: [],
+              __typename: 'Catalog',
+            },
             campaignName: 'Fall',
             campaignYear: 2025,
             startDate: null,
@@ -742,7 +816,9 @@ describe("CreateCampaignPage", () => {
     const mocks = [
       {
         request: { query: LIST_MY_PROFILES },
-        result: { data: { listMyProfiles: [{ profileId: 'profile-9', sellerName: 'Solo', isOwner: true, permissions: [] }] } },
+        result: {
+          data: { listMyProfiles: [{ profileId: 'profile-9', sellerName: 'Solo', isOwner: true, permissions: [] }] },
+        },
       },
       // Catalog queries may still be executed by other components; provide safe empty responses
       { request: { query: LIST_PUBLIC_CATALOGS }, result: { data: { listPublicCatalogs: [] } } },
@@ -753,12 +829,12 @@ describe("CreateCampaignPage", () => {
 
     render(
       <MockedProvider mocks={mocks}>
-        <MemoryRouter initialEntries={["/c/PACK123"]}>
+        <MemoryRouter initialEntries={['/c/PACK123']}>
           <Routes>
             <Route path="/c/:sharedCampaignCode" element={<CreateCampaignPage />} />
           </Routes>
         </MemoryRouter>
-      </MockedProvider>
+      </MockedProvider>,
     );
 
     // Wait for sharedCampaign to load and page content to stabilize
@@ -779,7 +855,7 @@ describe("CreateCampaignPage", () => {
   });
 });
 
-describe("CreateCampaignPage - Prefill Mode", () => {
+describe('CreateCampaignPage - Prefill Mode', () => {
   const sharedMock = {
     request: {
       query: GET_SHARED_CAMPAIGN,
@@ -790,7 +866,14 @@ describe("CreateCampaignPage - Prefill Mode", () => {
         getSharedCampaign: {
           sharedCampaignCode: 'PACK123',
           catalogId: 'catalog-1',
-          catalog: { catalogId: 'catalog-1', catalogName: "2025 Test", catalogType: 'PUBLIC', ownerAccountId: 'admin-account', products: [], __typename: 'Catalog' },
+          catalog: {
+            catalogId: 'catalog-1',
+            catalogName: '2025 Test',
+            catalogType: 'PUBLIC',
+            ownerAccountId: 'admin-account',
+            products: [],
+            __typename: 'Catalog',
+          },
           campaignName: 'Fall',
           campaignYear: 2025,
           startDate: null,
@@ -814,12 +897,12 @@ describe("CreateCampaignPage - Prefill Mode", () => {
   test('shows locked fields when shared campaign code is provided', async () => {
     render(
       <MockedProvider mocks={[sharedMock, ...baseMocks]}>
-        <MemoryRouter initialEntries={["/c/PACK123"]}>
+        <MemoryRouter initialEntries={['/c/PACK123']}>
           <Routes>
             <Route path="/c/:sharedCampaignCode" element={<CreateCampaignPage />} />
           </Routes>
         </MemoryRouter>
-      </MockedProvider>
+      </MockedProvider>,
     );
 
     expect(await screen.findByText(/Campaign by Creator Name/)).toBeTruthy();
@@ -828,12 +911,12 @@ describe("CreateCampaignPage - Prefill Mode", () => {
   test('displays creator message banner', async () => {
     render(
       <MockedProvider mocks={[sharedMock, ...baseMocks]}>
-        <MemoryRouter initialEntries={["/c/PACK123"]}>
+        <MemoryRouter initialEntries={['/c/PACK123']}>
           <Routes>
             <Route path="/c/:sharedCampaignCode" element={<CreateCampaignPage />} />
           </Routes>
         </MemoryRouter>
-      </MockedProvider>
+      </MockedProvider>,
     );
 
     expect(await screen.findByText(/This is a short creator message/)).toBeTruthy();
@@ -842,12 +925,12 @@ describe("CreateCampaignPage - Prefill Mode", () => {
   test('shows share checkbox with warning text', async () => {
     render(
       <MockedProvider mocks={[sharedMock, ...baseMocks]}>
-        <MemoryRouter initialEntries={["/c/PACK123"]}>
+        <MemoryRouter initialEntries={['/c/PACK123']}>
           <Routes>
             <Route path="/c/:sharedCampaignCode" element={<CreateCampaignPage />} />
           </Routes>
         </MemoryRouter>
-      </MockedProvider>
+      </MockedProvider>,
     );
 
     expect(await screen.findByLabelText(/Share this profile with/i)).toBeTruthy();
@@ -856,30 +939,30 @@ describe("CreateCampaignPage - Prefill Mode", () => {
   test('share checkbox is checked by default', async () => {
     render(
       <MockedProvider mocks={[sharedMock, ...baseMocks]}>
-        <MemoryRouter initialEntries={["/c/PACK123"]}>
+        <MemoryRouter initialEntries={['/c/PACK123']}>
           <Routes>
             <Route path="/c/:sharedCampaignCode" element={<CreateCampaignPage />} />
           </Routes>
         </MemoryRouter>
-      </MockedProvider>
+      </MockedProvider>,
     );
 
-    const checkbox = await screen.findByLabelText(/Share this profile with/i) as HTMLInputElement;
+    const checkbox = (await screen.findByLabelText(/Share this profile with/i)) as HTMLInputElement;
     expect(checkbox.checked).toBe(true);
   });
 
   test('share checkbox can be unchecked', async () => {
     render(
       <MockedProvider mocks={[sharedMock, ...baseMocks]}>
-        <MemoryRouter initialEntries={["/c/PACK123"]}>
+        <MemoryRouter initialEntries={['/c/PACK123']}>
           <Routes>
             <Route path="/c/:sharedCampaignCode" element={<CreateCampaignPage />} />
           </Routes>
         </MemoryRouter>
-      </MockedProvider>
+      </MockedProvider>,
     );
 
-    const checkbox = await screen.findByLabelText(/Share this profile with/i) as HTMLInputElement;
+    const checkbox = (await screen.findByLabelText(/Share this profile with/i)) as HTMLInputElement;
     expect(checkbox.checked).toBe(true);
 
     // Click to uncheck
@@ -888,8 +971,8 @@ describe("CreateCampaignPage - Prefill Mode", () => {
   });
 });
 
-describe.skip("CreateCampaignPage - Unauthenticated Redirect", () => {
-  test("redirects unauthenticated user to login with return URL", async () => {
+describe.skip('CreateCampaignPage - Unauthenticated Redirect', () => {
+  test('redirects unauthenticated user to login with return URL', async () => {
     // TODO: Mock useAuth to return isAuthenticated: false
     expect(true).toBe(true);
   });

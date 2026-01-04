@@ -1,30 +1,52 @@
 /**
  * CreateCampaignDialog component tests
- * 
- * ⚠️  ALL TESTS CURRENTLY SKIPPED
- * 
- * Issue: MUI components fail to render in Vitest when wrapped with Apollo MockedProvider.
- * Error: "Element type is invalid: expected a string (for built-in components) or 
- * a class/function (for composite components) but got: undefined."
- * 
- * This is a test environment issue, NOT a runtime issue. The CreateCampaignDialog component
- * works correctly in the actual application.
- * 
- * Root cause: Vitest + @apollo/client@4.0.9 + @mui/material@7.3.6 ESM resolution conflict
- * when MockedProvider wraps MUI components (Dialog, TextField, Select, etc.).
- * 
- * Tests written: 13 comprehensive tests covering all functionality
- * Tests passing: 0 (all skipped due to environment issue)
- * 
- * TODO: Re-enable when MUI/Apollo/Vitest compatibility is resolved, or when
- * migrating to a different test setup (e.g., Playwright for component testing).
+ *
+ * Tests are now enabled using lightweight mocks for MUI Select/MenuItem to avoid jsdom limitations.
  */
 
+import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { CreateCampaignDialog } from '../src/components/CreateCampaignDialog';
 import { LIST_PUBLIC_CATALOGS, LIST_MY_CATALOGS } from '../src/lib/graphql';
+
+// Mock Select/MenuItem to a plain HTML select/option to ensure onChange fires in jsdom
+vi.mock('@mui/material', async () => {
+  const actual = await vi.importActual<any>('@mui/material');
+  const Select = ({ value, onChange, children, label, disabled, ...rest }: any) => (
+    <select
+      role="combobox"
+      aria-label={label || 'Select'}
+      value={value ?? ''}
+      disabled={disabled}
+      aria-disabled={disabled ? 'true' : undefined}
+      onChange={(e) => onChange?.({ target: { value: (e.target as HTMLSelectElement).value } })}
+      {...rest}
+    >
+      {children}
+    </select>
+  );
+  const MenuItem = ({ value, children, disabled, ...rest }: any) => {
+    const getText = (nodes: any): string =>
+      React.Children.toArray(nodes)
+        .map((node) => {
+          if (typeof node === 'string') return node;
+          // Extract nested text for elements like CircularProgress + label
+          // @ts-expect-error accessing children is fine in test-only mock
+          return node?.props?.children ? getText(node.props.children) : '';
+        })
+        .join(' ')
+        .trim();
+    const textContent = getText(children) || (disabled ? 'Disabled option' : 'Option');
+    return (
+      <option value={value ?? ''} disabled={disabled} {...rest}>
+        {textContent}
+      </option>
+    );
+  };
+  return { ...actual, Select, MenuItem };
+});
 
 const mockPublicCatalogs = [
   {
@@ -138,6 +160,25 @@ describe('CreateCampaignDialog', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
+  it('shows no catalogs available when catalogs are empty', async () => {
+    // Mock returning empty catalogs
+    useQueryMockImpl = (query: any) => {
+      if (query === LIST_PUBLIC_CATALOGS) {
+        return { data: { listPublicCatalogs: [] }, loading: false };
+      }
+      if (query === LIST_MY_CATALOGS) {
+        return { data: { listMyCatalogs: [] }, loading: false };
+      }
+      return { data: undefined, loading: false };
+    };
+
+    render(<CreateCampaignDialog open={true} onClose={mockOnClose} onSubmit={mockOnSubmit} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('No catalogs available')).toBeInTheDocument();
+    });
+  });
+
   it('displays form fields', async () => {
     setupUseQueryMock();
     render(<CreateCampaignDialog open={true} onClose={mockOnClose} onSubmit={mockOnSubmit} />);
@@ -145,7 +186,7 @@ describe('CreateCampaignDialog', () => {
     expect(screen.getByLabelText(/campaign name/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/start date/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/end date/i)).toBeInTheDocument();
-    
+
     // Wait for catalog label to appear (MUI may not link label to combobox reliably)
     await waitFor(() => {
       expect(screen.getAllByText(/catalog/i).length).toBeGreaterThan(0);
@@ -197,9 +238,44 @@ describe('CreateCampaignDialog', () => {
     expect(createButton).toBeDisabled();
   });
 
+  it('allows changing the year field', async () => {
+    setupUseQueryMock();
+    render(<CreateCampaignDialog open={true} onClose={mockOnClose} onSubmit={mockOnSubmit} />);
+
+    const user = userEvent.setup();
+
+    await waitFor(() => {
+      expect(screen.getAllByText(/catalog/i).length).toBeGreaterThan(0);
+    });
+
+    // Find and change the year field
+    const yearInput = screen.getByLabelText(/year/i) as HTMLInputElement;
+    await user.clear(yearInput);
+    await user.type(yearInput, '2026');
+
+    expect(yearInput.value).toBe('2026');
+  });
+
+  it('allows changing the start date field', async () => {
+    setupUseQueryMock();
+    render(<CreateCampaignDialog open={true} onClose={mockOnClose} onSubmit={mockOnSubmit} />);
+
+    const user = userEvent.setup();
+
+    await waitFor(() => {
+      expect(screen.getAllByText(/catalog/i).length).toBeGreaterThan(0);
+    });
+
+    // Find and change the start date field
+    const startDateInput = screen.getByLabelText(/start date/i) as HTMLInputElement;
+    await user.type(startDateInput, '2025-09-01');
+
+    expect(startDateInput.value).toBe('2025-09-01');
+  });
+
   // SKIPPED: MUI Select's onChange doesn't fire when clicking MenuItem in jsdom
   // Component works correctly in real browser - this is a test environment limitation
-  it.skip('enables create button when all required fields are filled', async () => {
+  it('enables create button when all required fields are filled', async () => {
     setupUseQueryMock();
     render(<CreateCampaignDialog open={true} onClose={mockOnClose} onSubmit={mockOnSubmit} />);
 
@@ -218,23 +294,7 @@ describe('CreateCampaignDialog', () => {
     // Select a catalog via combobox
     const catalogSelect = getCatalogSelect();
     expect(catalogSelect).toBeTruthy();
-    await user.click(catalogSelect!);
-    
-    // Wait for menu to open
-    await waitFor(() => {
-      expect(screen.getByRole('listbox')).toBeInTheDocument();
-    });
-    
-    // Find the menuitem by its value attribute - this is more reliable for MUI Select
-    const listbox = screen.getByRole('listbox');
-    const catalogOption = listbox.querySelector('[value="catalog-1"]') as HTMLElement;
-    expect(catalogOption).toBeTruthy();
-    await user.click(catalogOption);
-
-    // Wait for menu to close - give it extra time
-    await waitFor(() => {
-      expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
-    }, { timeout: 3000 });
+    await user.selectOptions(catalogSelect!, 'catalog-1');
 
     // Create button should now be enabled
     await waitFor(() => {
@@ -244,7 +304,7 @@ describe('CreateCampaignDialog', () => {
   });
 
   // SKIPPED: MUI Select's onChange doesn't fire when clicking MenuItem in jsdom
-  it.skip('calls onSubmit with correct data when form is submitted', async () => {
+  it('calls onSubmit with correct data when form is submitted', async () => {
     setupUseQueryMock();
     render(<CreateCampaignDialog open={true} onClose={mockOnClose} onSubmit={mockOnSubmit} />);
 
@@ -263,13 +323,7 @@ describe('CreateCampaignDialog', () => {
     // Select a catalog via combobox
     const catalogSelect = getCatalogSelect();
     expect(catalogSelect).toBeTruthy();
-    await user.click(catalogSelect!);
-    await waitFor(() => {
-      expect(screen.getByText('Official 2025 Catalog')).toBeInTheDocument();
-    });
-    await user.click(screen.getByText('Official 2025 Catalog'));
-    // Close the dropdown menu explicitly
-    await user.keyboard('{Escape}');
+    await user.selectOptions(catalogSelect!, 'catalog-1');
 
     // Submit the form
     await waitFor(() => {
@@ -285,13 +339,13 @@ describe('CreateCampaignDialog', () => {
         expect.any(Number), // year
         'catalog-1', // catalog ID
         undefined,
-        undefined
+        undefined,
       );
     });
   });
 
   // SKIPPED: MUI Select's onChange doesn't fire when clicking MenuItem in jsdom
-  it.skip('includes end date in submission when provided', async () => {
+  it('includes end date in submission when provided', async () => {
     setupUseQueryMock();
     render(<CreateCampaignDialog open={true} onClose={mockOnClose} onSubmit={mockOnSubmit} />);
 
@@ -313,13 +367,7 @@ describe('CreateCampaignDialog', () => {
     // Select a catalog
     const catalogSelect = getCatalogSelect();
     expect(catalogSelect).toBeTruthy();
-    await user.click(catalogSelect!);
-    await waitFor(() => {
-      expect(screen.getByText('Official 2025 Catalog')).toBeInTheDocument();
-    });
-    await user.click(screen.getByText('Official 2025 Catalog'));
-    // Close the dropdown menu explicitly
-    await user.keyboard('{Escape}');
+    await user.selectOptions(catalogSelect!, 'catalog-1');
 
     // Submit the form
     await waitFor(() => {
@@ -335,13 +383,13 @@ describe('CreateCampaignDialog', () => {
         expect.any(Number), // year
         'catalog-1',
         undefined,
-        '2025-12-31'
+        '2025-12-31',
       );
     });
   });
 
   // SKIPPED: MUI Select's onChange doesn't fire when clicking MenuItem in jsdom
-  it.skip('resets form after successful submission', async () => {
+  it('resets form after successful submission', async () => {
     setupUseQueryMock();
     render(<CreateCampaignDialog open={true} onClose={mockOnClose} onSubmit={mockOnSubmit} />);
 
@@ -357,11 +405,7 @@ describe('CreateCampaignDialog', () => {
 
     const catalogSelect = getCatalogSelect();
     expect(catalogSelect).toBeTruthy();
-    await user.click(catalogSelect!);
-    await waitFor(() => screen.getByText('Official 2025 Catalog'));
-    await user.click(screen.getByText('Official 2025 Catalog'));
-    // Close the dropdown menu explicitly
-    await user.keyboard('{Escape}');
+    await user.selectOptions(catalogSelect!, 'catalog-1');
 
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /create/i })).toBeEnabled();
@@ -387,17 +431,24 @@ describe('CreateCampaignDialog', () => {
   });
 
   it('shows disabled catalog select while catalogs are loading', () => {
-    setupUseQueryMock({ publicLoading: true, myLoading: true, publicData: { listPublicCatalogs: [] }, myData: { listMyCatalogs: [] } });
+    setupUseQueryMock({
+      publicLoading: true,
+      myLoading: true,
+      publicData: { listPublicCatalogs: [] },
+      myData: { listMyCatalogs: [] },
+    });
 
     render(<CreateCampaignDialog open={true} onClose={mockOnClose} onSubmit={mockOnSubmit} />);
 
     const catalogSelect = getCatalogSelect();
     expect(catalogSelect).toBeTruthy();
-    expect(catalogSelect).toHaveAttribute('aria-disabled', 'true');
+    const formControl = catalogSelect?.closest('.MuiFormControl-root') as HTMLElement | null;
+    const ariaDisabled = formControl?.getAttribute('aria-disabled') ?? catalogSelect?.getAttribute('aria-disabled');
+    expect(ariaDisabled).toBe('true');
   });
 
   // SKIPPED: MUI Select's onChange doesn't fire when clicking MenuItem in jsdom
-  it.skip('handles submission error gracefully', async () => {
+  it('handles submission error gracefully', async () => {
     const errorSubmit = vi.fn().mockRejectedValue(new Error('Network error'));
 
     setupUseQueryMock();
@@ -415,11 +466,7 @@ describe('CreateCampaignDialog', () => {
 
     const catalogSelect = getCatalogSelect();
     expect(catalogSelect).toBeTruthy();
-    await user.click(catalogSelect!);
-    await waitFor(() => screen.getByText('Official 2025 Catalog'));
-    await user.click(screen.getByText('Official 2025 Catalog'));
-    // Close the dropdown menu explicitly
-    await user.keyboard('{Escape}');
+    await user.selectOptions(catalogSelect!, 'catalog-1');
 
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /create/i })).toBeEnabled();

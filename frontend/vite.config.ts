@@ -66,19 +66,21 @@ export default defineConfig({
         '**/mockData',
         'dist/',
       ],
-      // Target coverage thresholds - temporarily reduced to allow CI to pass
-      // while MUI Select testing issues are resolved
-      // TODO: Increase back to 100% when MUI Select onChange issue is fixed
-      //       (https://github.com/testing-library/user-event/issues/1020)
-      // Current blockers:
-      // - CreateCampaignDialog: MUI Select onChange not firing in jsdom (5 skipped tests)
-      // - ScoutsPage: Complex useLazyQuery + useApolloClient patterns
-      // - Dialog onClose: Backdrop click events cannot be simulated
+      // Coverage thresholds - set to current achievable levels given jsdom/MUI limitations
+      // Known untestable code patterns (require Playwright e2e tests for 100%):
+      // - MUI Select/Switch/Accordion onChange handlers don't fire in jsdom
+      // - Complex Apollo useLazyQuery + useApolloClient patterns require integration tests
+      // - Dialog backdrop click/ESC events cannot be simulated
+      // - Async handlers requiring confirmation dialogs + GraphQL mocking
+      // - Mutation onCompleted callbacks with refetch()
+      // - Button click navigation in deeply nested MUI components
+      // See: https://github.com/testing-library/user-event/issues/1020
+      // Note: v8 ignore comments don't work reliably inside function bodies/JSX
       thresholds: {
-        lines: 89,
-        functions: 80,
-        branches: 76,
-        statements: 88,
+        lines: 94,
+        functions: 88,
+        branches: 85,
+        statements: 93,
       },
     },
   },

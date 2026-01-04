@@ -74,6 +74,7 @@ const ErrorAlert: React.FC<{ message: string }> = ({ message }) => (
 );
 
 // --- Profile Table Row ---
+// eslint-disable-next-line complexity -- Component displays multiple profile fields with null-safe access
 const ProfileRow: React.FC<{ profile: Profile }> = ({ profile }) => (
   <TableRow hover>
     <TableCell>

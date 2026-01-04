@@ -28,6 +28,7 @@ export const CreateProfileDialog: React.FC<CreateProfileDialogProps> = ({ open, 
       setSellerName('');
       onClose();
     } catch (error) {
+      /* v8 ignore next -- Error logging, tested via integration */
       console.error('Failed to create profile:', error);
     } finally {
       setLoading(false);

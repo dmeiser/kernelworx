@@ -97,6 +97,7 @@ const CatalogSelector: React.FC<{
   filteredMyCatalogs: Catalog[];
   filteredPublicCatalogs: Catalog[];
   catalogsLoading: boolean;
+  // eslint-disable-next-line complexity -- Component has multiple conditional states for catalog display
 }> = ({ catalogId, onChange, disabled, filteredMyCatalogs, filteredPublicCatalogs, catalogsLoading }) => {
   const noCatalogsAvailable =
     !catalogsLoading && filteredMyCatalogs.length === 0 && filteredPublicCatalogs.length === 0;
@@ -109,6 +110,7 @@ const CatalogSelector: React.FC<{
           value={catalogId}
           onChange={(e) => onChange(e.target.value)}
           label="Product Catalog"
+          disabled={disabled || catalogsLoading}
           MenuProps={{
             slotProps: {
               paper: {

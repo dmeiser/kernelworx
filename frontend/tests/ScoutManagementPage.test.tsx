@@ -11,7 +11,14 @@ const DB_ID = `PROFILE#${RAW_ID}`;
 // Test-controlled fixtures for queries and mutation spies
 let testInvites: any[] = [];
 let testShares: any[] = [];
-let testProfileData: any = { profileId: DB_ID, sellerName: 'Tom Test', ownerAccountId: 'ACCOUNT#abc', createdAt: new Date().toISOString(), isOwner: true, permissions: ['READ','WRITE'] };
+let testProfileData: any = {
+  profileId: DB_ID,
+  sellerName: 'Tom Test',
+  ownerAccountId: 'ACCOUNT#abc',
+  createdAt: new Date().toISOString(),
+  isOwner: true,
+  permissions: ['READ', 'WRITE'],
+};
 let testLoading = false;
 
 const updateProfileMock = vi.fn().mockResolvedValue({ data: {} });
@@ -47,12 +54,16 @@ vi.mock('@apollo/client/react', async () => {
     return handler();
   };
 
-  const createMutationHandler = (mockFn: any, onCompletedData: any = {}) => 
-    (opts: any) => [async (optsVars: any) => { 
-      const res = await mockFn(optsVars); 
-      opts?.onCompleted?.(res?.data ?? onCompletedData); 
-      return res; 
-    }, { loading: false, data: null }];
+  const createMutationHandler =
+    (mockFn: any, onCompletedData: any = {}) =>
+    (opts: any) => [
+      async (optsVars: any) => {
+        const res = await mockFn(optsVars);
+        opts?.onCompleted?.(res?.data ?? onCompletedData);
+        return res;
+      },
+      { loading: false, data: null },
+    ];
 
   const mutationHandlers: Record<string, (opts: any) => any> = {
     UpdateSellerProfile: (opts) => createMutationHandler(updateProfileMock, {})(opts),
@@ -83,7 +94,14 @@ describe('ScoutManagementPage', () => {
     // reset fixtures & mocks
     testInvites = [];
     testShares = [];
-    testProfileData = { profileId: DB_ID, sellerName: 'Tom Test', ownerAccountId: 'ACCOUNT#abc', createdAt: new Date().toISOString(), isOwner: true, permissions: ['READ','WRITE'] };
+    testProfileData = {
+      profileId: DB_ID,
+      sellerName: 'Tom Test',
+      ownerAccountId: 'ACCOUNT#abc',
+      createdAt: new Date().toISOString(),
+      isOwner: true,
+      permissions: ['READ', 'WRITE'],
+    };
     testLoading = false;
 
     updateProfileMock.mockClear();
@@ -95,7 +113,10 @@ describe('ScoutManagementPage', () => {
     if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
       vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue(undefined as any);
     } else {
-      Object.defineProperty(navigator, 'clipboard', { value: { writeText: vi.fn().mockResolvedValue(undefined) }, configurable: true });
+      Object.defineProperty(navigator, 'clipboard', {
+        value: { writeText: vi.fn().mockResolvedValue(undefined) },
+        configurable: true,
+      });
     }
   });
 
@@ -212,7 +233,14 @@ describe('ScoutManagementPage', () => {
 
   it('renders shares section when there are shares', async () => {
     testShares = [
-      { shareId: 's1', profileId: DB_ID, targetAccountId: 'acct#1', targetAccount: { email: 'jane@example.com', givenName: 'Jane', familyName: 'Doe' }, permissions: ['READ'], createdAt: new Date().toISOString() },
+      {
+        shareId: 's1',
+        profileId: DB_ID,
+        targetAccountId: 'acct#1',
+        targetAccount: { email: 'jane@example.com', givenName: 'Jane', familyName: 'Doe' },
+        permissions: ['READ'],
+        createdAt: new Date().toISOString(),
+      },
     ];
 
     render(
@@ -268,7 +296,7 @@ describe('ScoutManagementPage', () => {
     );
 
     const user = userEvent.setup();
-    const readCheckbox = await screen.findByLabelText('Read (view campaigns and orders)') as HTMLInputElement;
+    const readCheckbox = (await screen.findByLabelText('Read (view campaigns and orders)')) as HTMLInputElement;
     const writeCheckbox = screen.getByLabelText('Write (edit campaigns and orders)') as HTMLInputElement;
 
     // Make permissions = [WRITE]
@@ -285,7 +313,14 @@ describe('ScoutManagementPage', () => {
   });
 
   it('copies invite code from table row to clipboard', async () => {
-    testInvites = [ { inviteCode: 'INV-ROW', permissions: ['READ'], createdAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 100000).toISOString() } ];
+    testInvites = [
+      {
+        inviteCode: 'INV-ROW',
+        permissions: ['READ'],
+        createdAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 100000).toISOString(),
+      },
+    ];
     render(
       <MemoryRouter initialEntries={[`/scouts/${encodeURIComponent(RAW_ID)}/manage`]}>
         <Routes>
@@ -305,7 +340,14 @@ describe('ScoutManagementPage', () => {
   });
 
   it('cancelling delete invite does not call delete mutation', async () => {
-    testInvites = [ { inviteCode: 'INV-DEL', permissions: ['READ'], createdAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 100000).toISOString() } ];
+    testInvites = [
+      {
+        inviteCode: 'INV-DEL',
+        permissions: ['READ'],
+        createdAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 100000).toISOString(),
+      },
+    ];
 
     render(
       <MemoryRouter initialEntries={[`/scouts/${encodeURIComponent(RAW_ID)}/manage`]}>
@@ -420,4 +462,3 @@ describe('ScoutManagementPage', () => {
     expect(await screen.findByText('ScoutList')).toBeInTheDocument();
   });
 });
-

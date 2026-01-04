@@ -401,4 +401,90 @@ describe('AdminPage', () => {
       expect(screen.getByText(/Database/i)).toBeInTheDocument();
     });
   });
+
+  test('shows loading state for catalogs tab', async () => {
+    const user = userEvent.setup();
+    const mocks = [
+      {
+        request: { query: LIST_MY_PROFILES },
+        result: { data: { listMyProfiles: [] } },
+      },
+      {
+        request: { query: LIST_PUBLIC_CATALOGS },
+        result: { data: { listPublicCatalogs: [] } },
+        delay: Infinity, // Never resolves
+      },
+    ];
+
+    render(
+      <MockedProvider mocks={mocks} addTypename={false}>
+        <BrowserRouter>
+          <AdminPage />
+        </BrowserRouter>
+      </MockedProvider>,
+    );
+
+    const catalogsTab = screen.getByRole('tab', { name: /catalogs/i });
+    await user.click(catalogsTab);
+
+    expect(screen.getByRole('progressbar')).toBeInTheDocument();
+  });
+
+  test('shows error message when catalogs query fails', async () => {
+    const user = userEvent.setup();
+    const mocks = [
+      {
+        request: { query: LIST_MY_PROFILES },
+        result: { data: { listMyProfiles: [] } },
+      },
+      {
+        request: { query: LIST_PUBLIC_CATALOGS },
+        error: new Error('Failed to fetch catalogs'),
+      },
+    ];
+
+    render(
+      <MockedProvider mocks={mocks} addTypename={false}>
+        <BrowserRouter>
+          <AdminPage />
+        </BrowserRouter>
+      </MockedProvider>,
+    );
+
+    const catalogsTab = screen.getByRole('tab', { name: /catalogs/i });
+    await user.click(catalogsTab);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Failed to fetch catalogs/i)).toBeInTheDocument();
+    });
+  });
+
+  test('shows empty catalogs message when no catalogs exist', async () => {
+    const user = userEvent.setup();
+    const mocks = [
+      {
+        request: { query: LIST_MY_PROFILES },
+        result: { data: { listMyProfiles: [] } },
+      },
+      {
+        request: { query: LIST_PUBLIC_CATALOGS },
+        result: { data: { listPublicCatalogs: [] } },
+      },
+    ];
+
+    render(
+      <MockedProvider mocks={mocks} addTypename={false}>
+        <BrowserRouter>
+          <AdminPage />
+        </BrowserRouter>
+      </MockedProvider>,
+    );
+
+    const catalogsTab = screen.getByRole('tab', { name: /catalogs/i });
+    await user.click(catalogsTab);
+
+    await waitFor(() => {
+      expect(screen.getByText(/No catalogs found/i)).toBeInTheDocument();
+    });
+  });
 });
