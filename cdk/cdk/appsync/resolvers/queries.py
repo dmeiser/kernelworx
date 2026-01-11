@@ -68,13 +68,12 @@ def create_query_resolvers(
         id_suffix="ListMyProfilesResolver",
     )
 
-    # listMyShares (JS)
-    builder.create_js_resolver_on_api(
+    # listMyShares (Lambda - handles orphaned shares gracefully)
+    builder.create_lambda_resolver(
         field_name="listMyShares",
         type_name="Query",
-        datasource_name="shares",
-        code_file=RESOLVERS_DIR / "list_my_shares_resolver.js",
-        id_suffix="ListMySharesResolverV2",  # Changed ID to force replacement
+        lambda_datasource_name="list_my_shares",
+        id_suffix="ListMySharesResolverV2",  # Keep same ID to do in-place update
     )
 
     # === CAMPAIGN QUERIES ===
@@ -264,3 +263,35 @@ def create_query_resolvers(
         lambda_datasource_name="list_unit_campaign_catalogs",
         id_suffix="ListUnitCampaignCatalogsResolver",
     )
+
+    # === PAYMENT METHODS QUERIES ===
+
+    # myPaymentMethods Pipeline
+    builder.create_pipeline_resolver(
+        field_name="myPaymentMethods",
+        type_name="Query",
+        functions=[
+            functions["get_payment_methods"],
+            functions["inject_global_payment_methods"],
+        ],
+        code_file=RESOLVERS_DIR / "my_payment_methods_pipeline_resolver.js",
+        id_suffix="MyPaymentMethodsResolver",
+    )
+
+    # paymentMethodsForProfile Pipeline - conditional creation based on Lambda availability
+    # Note: This uses generate_presigned_urls Lambda which is created conditionally
+    if "generate_presigned_urls" in functions:
+        builder.create_pipeline_resolver(
+            field_name="paymentMethodsForProfile",
+            type_name="Query",
+            functions=[
+                functions["fetch_profile"],
+                functions["check_payment_methods_access"],
+                functions["get_owner_payment_methods"],
+                functions["generate_presigned_urls"],
+                functions["filter_payment_methods_by_access"],
+            ],
+            code_file=RESOLVERS_DIR / "payment_methods_for_profile_pipeline_resolver.js",
+            id_suffix="PaymentMethodsForProfileResolver",
+        )
+

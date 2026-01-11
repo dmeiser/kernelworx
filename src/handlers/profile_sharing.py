@@ -18,10 +18,10 @@ from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Dict, List, cast
 
 import boto3
-from mypy_boto3_dynamodb.type_defs import BatchGetItemOutputServiceResourceTypeDef
 
 if TYPE_CHECKING:
     from mypy_boto3_dynamodb.service_resource import Table
+    from mypy_boto3_dynamodb.type_defs import BatchGetItemOutputServiceResourceTypeDef
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
@@ -38,8 +38,8 @@ except ModuleNotFoundError:  # pragma: no cover
 
 # Expose a module-level proxy for test monkeypatching (tests patch ``profile_sharing.dynamodb.batch_get_item``)
 class _DynamoProxy:
-    def batch_get_item(self, RequestItems: Dict[str, Any]) -> BatchGetItemOutputServiceResourceTypeDef:
-        result: BatchGetItemOutputServiceResourceTypeDef = get_dynamodb_resource().batch_get_item(
+    def batch_get_item(self, RequestItems: Dict[str, Any]) -> "BatchGetItemOutputServiceResourceTypeDef":
+        result: "BatchGetItemOutputServiceResourceTypeDef" = get_dynamodb_resource().batch_get_item(
             RequestItems=RequestItems
         )
         return result
@@ -75,7 +75,7 @@ def _deduplicate_shares(shares: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any
 
 
 def _extract_batch_profiles(
-    batch_response: BatchGetItemOutputServiceResourceTypeDef, table_name: str
+    batch_response: "BatchGetItemOutputServiceResourceTypeDef", table_name: str
 ) -> List[Dict[str, Any]]:
     """Extract profiles from a BatchGetItem response."""
     responses = batch_response.get("Responses", {})
@@ -134,7 +134,7 @@ def _fetch_batch_with_retry(
 
 
 def _log_unprocessed_keys(
-    batch_response: BatchGetItemOutputServiceResourceTypeDef, table_name: str, logger: StructuredLogger
+    batch_response: "BatchGetItemOutputServiceResourceTypeDef", table_name: str, logger: StructuredLogger
 ) -> None:
     """Log any unprocessed keys from BatchGetItem."""
     unprocessed_keys = batch_response.get("UnprocessedKeys", {})
@@ -161,6 +161,14 @@ def _build_shared_profile_result(
     share = shares_by_profile.get(profile_id_str)
     if not share:
         return None
+
+    # Skip profiles with missing required fields (data quality issue)
+    seller_name = profile.get("sellerName")
+    created_at = profile.get("createdAt")
+    updated_at = profile.get("updatedAt")
+    if not seller_name or not created_at or not updated_at:
+        return None
+
     owner_account_id_raw = profile.get("ownerAccountId", "")
     if not isinstance(owner_account_id_raw, str):
         owner_account_id_raw = ""
@@ -172,11 +180,11 @@ def _build_shared_profile_result(
     return {
         "profileId": profile_id_str,
         "ownerAccountId": owner_account_id,
-        "sellerName": profile.get("sellerName"),
+        "sellerName": seller_name,
         "unitType": profile.get("unitType"),
         "unitNumber": profile.get("unitNumber"),
-        "createdAt": profile.get("createdAt"),
-        "updatedAt": profile.get("updatedAt"),
+        "createdAt": created_at,
+        "updatedAt": updated_at,
         "isOwner": profile.get("ownerAccountId") == caller_account_id_with_prefix,
         "permissions": permissions_list,
     }
@@ -211,10 +219,14 @@ def list_my_shares(event: Dict[str, Any], context: Any) -> List[Dict[str, Any]]:
 
     try:
         # Step 1: Query shares table GSI to get all shares for this user
+        # Shares are stored with ACCOUNT# prefix on targetAccountId
+        target_account_id_with_prefix = (
+            caller_account_id if caller_account_id.startswith("ACCOUNT#") else f"ACCOUNT#{caller_account_id}"
+        )
         response = tables.shares.query(
             IndexName="targetAccountId-index",
             KeyConditionExpression="targetAccountId = :targetAccountId",
-            ExpressionAttributeValues={":targetAccountId": caller_account_id},
+            ExpressionAttributeValues={":targetAccountId": target_account_id_with_prefix},
         )
         shares = response.get("Items", [])
 

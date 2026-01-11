@@ -57,6 +57,15 @@ export function response(ctx) {
     if (ctx.error) {
         util.error(ctx.error.message, ctx.error.type);
     }
-    // Return the full share item from stash since PutItem doesn't return attributes by default
-    return ctx.stash.shareItem;
+    // Return the share item with targetAccountId stripped of ACCOUNT# prefix
+    // Keep profileId with PROFILE# prefix for consistency with createSellerProfile
+    const shareItem = ctx.stash.shareItem;
+    const cleanTargetAccountId = shareItem.targetAccountId && shareItem.targetAccountId.startsWith('ACCOUNT#')
+        ? shareItem.targetAccountId.substring(8)
+        : shareItem.targetAccountId;
+    
+    return {
+        ...shareItem,
+        targetAccountId: cleanTargetAccountId
+    };
 }

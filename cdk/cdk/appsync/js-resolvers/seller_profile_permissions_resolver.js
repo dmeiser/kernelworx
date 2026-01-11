@@ -16,12 +16,17 @@ export function request(ctx) {
         };
     }
     
+    // Normalize profileId to ensure PROFILE# prefix for share lookup
+    const dbProfileId = profileId && profileId.startsWith('PROFILE#') ? profileId : `PROFILE#${profileId}`;
+    // Normalize targetAccountId to ensure ACCOUNT# prefix for share lookup
+    const dbTargetAccountId = callerAccountId && callerAccountId.startsWith('ACCOUNT#') ? callerAccountId : `ACCOUNT#${callerAccountId}`;
+    
     // Query shares table for share record: profileId + targetAccountId
     return {
         operation: 'GetItem',
         key: util.dynamodb.toMapValues({ 
-            profileId: profileId, 
-            targetAccountId: callerAccountId 
+            profileId: dbProfileId, 
+            targetAccountId: dbTargetAccountId 
         }),
         consistentRead: true
     };

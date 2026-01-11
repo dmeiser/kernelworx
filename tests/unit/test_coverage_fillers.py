@@ -92,8 +92,16 @@ def test_profile_sharing_log_unprocessed_and_build_result():
 
     share = {"profileId": "PROFILE#1", "ownerAccountId": "ACCOUNT#owner", "permissions": ["READ"]}
     shares_by_profile = {"PROFILE#1": share}
-    profile = {"profileId": "PROFILE#1", "ownerAccountId": 123, "sellerName": "Scout"}
+    # Profile with non-string ownerAccountId but valid required fields
+    profile = {
+        "profileId": "PROFILE#1",
+        "ownerAccountId": 123,  # Non-string
+        "sellerName": "Scout",
+        "createdAt": "2024-01-01T00:00:00Z",
+        "updatedAt": "2024-01-01T00:00:00Z",
+    }
     result = profile_sharing._build_shared_profile_result(profile, shares_by_profile, "ACCOUNT#caller")
+    assert result is not None
     assert result["ownerAccountId"] == "ACCOUNT#"
     assert result["permissions"] == ["READ"]
 
@@ -101,6 +109,10 @@ def test_profile_sharing_log_unprocessed_and_build_result():
     assert (
         profile_sharing._build_shared_profile_result({"profileId": "PROFILE#2"}, shares_by_profile, "ACCOUNT#x") is None
     )
+
+    # Missing required fields returns None
+    profile_missing_fields = {"profileId": "PROFILE#1", "ownerAccountId": "ACCOUNT#owner"}
+    assert profile_sharing._build_shared_profile_result(profile_missing_fields, shares_by_profile, "ACCOUNT#x") is None
 
     # Unprocessed keys path when table missing
     logger2 = DummyLogger()

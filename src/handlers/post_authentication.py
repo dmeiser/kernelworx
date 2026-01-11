@@ -102,6 +102,9 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 "city": "",  # Will be set via updateMyAccount if provided
                 "state": "",  # Will be set via updateMyAccount if provided
                 "unitType": "",  # Will be set via updateMyAccount if provided
+                "preferences": {  # Initialize preferences with empty paymentMethods
+                    "paymentMethods": []
+                },
                 "createdAt": timestamp,
                 "updatedAt": timestamp,
             }

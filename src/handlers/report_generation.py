@@ -8,12 +8,14 @@ Implements:
 import os
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
-from typing import Any, Dict
+from typing import TYPE_CHECKING, Any, Dict
 
 import boto3
-from mypy_boto3_s3.client import S3Client
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill
+
+if TYPE_CHECKING:  # pragma: no cover
+    from mypy_boto3_s3.client import S3Client
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
@@ -29,10 +31,10 @@ except ModuleNotFoundError:  # pragma: no cover
 
 
 # Module-level proxy that tests can monkeypatch
-s3_client: S3Client | None = None
+s3_client: "S3Client | None" = None
 
 
-def _get_s3_client() -> S3Client:
+def _get_s3_client() -> "S3Client":
     """Return the S3 client (module-level override for tests, otherwise a fresh boto3 client)."""
     global s3_client
     if s3_client is not None:

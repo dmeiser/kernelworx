@@ -21,13 +21,6 @@ enum PermissionType {
   WRITE
 }
 
-enum PaymentMethod {
-  CASH
-  CHECK
-  CREDIT_CARD
-  OTHER
-}
-
 enum CatalogType {
   ADMIN_MANAGED
   USER_CREATED
@@ -36,6 +29,17 @@ enum CatalogType {
 # ============================================================================
 # Core Types
 # ============================================================================
+
+type PaymentMethod {
+  name: String!
+  qrCodeUrl: String
+}
+
+type S3UploadInfo {
+  uploadUrl: String!
+  fields: AWSJSON!
+  s3Key: String!
+}
 
 type Account {
   accountId: ID!
@@ -128,7 +132,7 @@ type Order {
   customerPhone: String
   customerAddress: Address
   orderDate: AWSDateTime!
-  paymentMethod: PaymentMethod!
+  paymentMethod: String!
   lineItems: [LineItem!]!
   totalAmount: Float!
   notes: String
@@ -282,7 +286,7 @@ input CreateOrderInput {
   customerPhone: String
   customerAddress: AddressInput
   orderDate: AWSDateTime!
-  paymentMethod: PaymentMethod!
+  paymentMethod: String!
   lineItems: [LineItemInput!]!
   notes: String
 }
@@ -293,7 +297,7 @@ input UpdateOrderInput {
   customerPhone: String
   customerAddress: AddressInput
   orderDate: AWSDateTime
-  paymentMethod: PaymentMethod
+  paymentMethod: String
   lineItems: [LineItemInput!]
   notes: String
 }
@@ -411,6 +415,10 @@ type Query {
   listUnitCatalogs(unitType: String!, unitNumber: Int!, campaignName: String!, campaignYear: Int!): [Catalog!]!
   listUnitCampaignCatalogs(unitType: String!, unitNumber: Int!, city: String!, state: String!, campaignName: String!, campaignYear: Int!): [Catalog!]!
   getUnitReport(unitType: String!, unitNumber: Int!, city: String, state: String, campaignName: String!, campaignYear: Int!, catalogId: ID!): UnitReport
+  
+  # Payment method queries
+  myPaymentMethods: [PaymentMethod!]!
+  paymentMethodsForProfile(profileId: ID!): [PaymentMethod!]!
 }
 
 # ============================================================================
@@ -459,6 +467,14 @@ type Mutation {
   
   # Report generation
   requestCampaignReport(input: RequestCampaignReportInput!): CampaignReport!
+  
+  # Payment method mutations
+  createPaymentMethod(name: String!): PaymentMethod!
+  updatePaymentMethod(currentName: String!, newName: String!): PaymentMethod!
+  deletePaymentMethod(name: String!): Boolean!
+  requestPaymentMethodQRCodeUpload(paymentMethodName: String!): S3UploadInfo!
+  confirmPaymentMethodQRCodeUpload(paymentMethodName: String!, s3Key: String!): PaymentMethod!
+  deletePaymentMethodQRCode(paymentMethodName: String!): Boolean!
 }
 
 # ============================================================================

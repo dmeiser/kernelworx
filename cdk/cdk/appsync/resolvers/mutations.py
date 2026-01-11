@@ -344,3 +344,69 @@ def create_mutation_resolvers(
         lambda_datasource_name="request_campaign_report",
         id_suffix="RequestCampaignReportResolver",
     )
+
+    # === PAYMENT METHODS MUTATIONS ===
+
+    # createPaymentMethod Pipeline
+    builder.create_pipeline_resolver(
+        field_name="createPaymentMethod",
+        type_name="Mutation",
+        functions=[
+            functions["validate_create_payment_method"],
+            functions["create_payment_method"],
+        ],
+        code_file=RESOLVERS_DIR / "create_payment_method_pipeline_resolver.js",
+        id_suffix="CreatePaymentMethodResolver",
+    )
+
+    # updatePaymentMethod Pipeline
+    builder.create_pipeline_resolver(
+        field_name="updatePaymentMethod",
+        type_name="Mutation",
+        functions=[
+            functions["validate_update_payment_method"],
+            functions["update_payment_method"],
+        ],
+        code_file=RESOLVERS_DIR / "update_payment_method_pipeline_resolver.js",
+        id_suffix="UpdatePaymentMethodResolver",
+    )
+
+    # deletePaymentMethod Pipeline (simpler version without QR code deletion until Lambda is implemented)
+    builder.create_pipeline_resolver(
+        field_name="deletePaymentMethod",
+        type_name="Mutation",
+        functions=[
+            functions["get_payment_method_for_delete"],
+            functions["delete_payment_method_from_prefs"],
+        ],
+        code_file=RESOLVERS_DIR / "delete_payment_method_no_qr_pipeline_resolver.js",
+        id_suffix="DeletePaymentMethodResolver",
+    )
+
+    # deletePaymentMethodQRCode (Lambda) - direct resolver, not pipeline
+    if "delete_qr_code_fn" in lambda_datasources:
+        builder.create_lambda_resolver(
+            field_name="deletePaymentMethodQRCode",
+            type_name="Mutation",
+            lambda_datasource_name="delete_qr_code_fn",
+            id_suffix="DeletePaymentMethodQRCodeResolver",
+        )
+
+    # requestPaymentMethodQRCodeUpload (Lambda) - conditional creation
+    if "request_qr_upload_fn" in lambda_datasources:
+        builder.create_lambda_resolver(
+            field_name="requestPaymentMethodQRCodeUpload",
+            type_name="Mutation",
+            lambda_datasource_name="request_qr_upload_fn",
+            id_suffix="RequestPaymentMethodQRCodeUploadResolver",
+        )
+
+    # confirmPaymentMethodQRCodeUpload (Lambda) - conditional creation
+    if "confirm_qr_upload_fn" in lambda_datasources:
+        builder.create_lambda_resolver(
+            field_name="confirmPaymentMethodQRCodeUpload",
+            type_name="Mutation",
+            lambda_datasource_name="confirm_qr_upload_fn",
+            id_suffix="ConfirmPaymentMethodQRCodeUploadResolver",
+        )
+

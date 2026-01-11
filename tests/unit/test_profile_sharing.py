@@ -230,7 +230,7 @@ class TestListMyShares:
         shares_table.put_item(
             Item={
                 "profileId": profile_id,
-                "targetAccountId": another_account_id,
+                "targetAccountId": f"ACCOUNT#{another_account_id}",
                 "ownerAccountId": owner_account_id,
                 "permissions": ["READ"],
                 "createdAt": "2024-01-01T00:00:00Z",
@@ -302,7 +302,7 @@ class TestListMyShares:
             shares_table.put_item(
                 Item={
                     "profileId": pid,
-                    "targetAccountId": another_account_id,
+                    "targetAccountId": f"ACCOUNT#{another_account_id}",
                     "ownerAccountId": owner,
                     "permissions": ["READ"],
                     "createdAt": "2024-01-01T00:00:00Z",
@@ -345,7 +345,7 @@ class TestListMyShares:
         shares_table.put_item(
             Item={
                 "profileId": profile_id,
-                "targetAccountId": another_account_id,
+                "targetAccountId": f"ACCOUNT#{another_account_id}",
                 "ownerAccountId": owner_id,
                 "permissions": ["READ", "WRITE"],
                 "createdAt": "2024-01-01T00:00:00Z",
@@ -390,7 +390,7 @@ class TestListMyShares:
         shares_table.put_item(
             Item={
                 "profileId": profile_id,
-                "targetAccountId": another_account_id,
+                "targetAccountId": f"ACCOUNT#{another_account_id}",
                 "ownerAccountId": owner_id,
                 "permissions": ["READ"],
                 "createdAt": "2024-01-01T00:00:00Z",
@@ -422,7 +422,7 @@ class TestListMyShares:
         shares_table.put_item(
             Item={
                 "profileId": profile_id,
-                "targetAccountId": another_account_id,
+                "targetAccountId": f"ACCOUNT#{another_account_id}",
                 "ownerAccountId": owner_id,
                 "permissions": ["READ"],
                 "createdAt": "2024-01-01T00:00:00Z",
@@ -464,7 +464,7 @@ class TestListMyShares:
         shares_table.put_item(
             Item={
                 "profileId": valid_profile_id,
-                "targetAccountId": another_account_id,
+                "targetAccountId": f"ACCOUNT#{another_account_id}",
                 "ownerAccountId": owner_id,
                 "permissions": ["READ"],
                 "createdAt": "2024-01-01T00:00:00Z",
@@ -476,7 +476,7 @@ class TestListMyShares:
         shares_table.put_item(
             Item={
                 "profileId": invalid_profile_id,
-                "targetAccountId": another_account_id,
+                "targetAccountId": f"ACCOUNT#{another_account_id}",
                 # ownerAccountId intentionally missing - should be skipped
                 "permissions": ["READ"],
             }
@@ -517,7 +517,7 @@ class TestListMyShares:
         shares_table.put_item(
             Item={
                 "profileId": profile_id,
-                "targetAccountId": another_account_id,
+                "targetAccountId": f"ACCOUNT#{another_account_id}",
                 "ownerAccountId": owner_id_with_prefix,
                 "permissions": ["READ"],
                 "createdAt": "2024-01-01T00:00:00Z",
@@ -561,7 +561,7 @@ class TestListMyShares:
         shares_table.put_item(
             Item={
                 "profileId": profile_id,
-                "targetAccountId": another_account_id,
+                "targetAccountId": f"ACCOUNT#{another_account_id}",
                 "ownerAccountId": owner_id_no_prefix,
                 "permissions": ["READ"],
                 "createdAt": "2024-01-01T00:00:00Z",
@@ -593,7 +593,7 @@ class TestListMyShares:
         shares_table.put_item(
             Item={
                 "profileId": "PROFILE#will-fail",
-                "targetAccountId": another_account_id,
+                "targetAccountId": f"ACCOUNT#{another_account_id}",
                 "ownerAccountId": f"ACCOUNT#{sample_account_id}",
                 "permissions": ["READ"],
                 "createdAt": "2024-01-01T00:00:00Z",
@@ -632,7 +632,7 @@ class TestListMyShares:
         shares_table.put_item(
             Item={
                 "profileId": "PROFILE#will-fail",
-                "targetAccountId": another_account_id,
+                "targetAccountId": f"ACCOUNT#{another_account_id}",
                 "ownerAccountId": f"ACCOUNT#{sample_account_id}",
                 "permissions": ["READ"],
                 "createdAt": "2024-01-01T00:00:00Z",
@@ -712,7 +712,7 @@ class TestListMyShares:
         shares_table.put_item(
             Item={
                 "profileId": valid_profile_id,
-                "targetAccountId": another_account_id,
+                "targetAccountId": f"ACCOUNT#{another_account_id}",
                 "ownerAccountId": owner_id,
                 "permissions": ["READ"],
                 "createdAt": "2024-01-01T00:00:00Z",
@@ -782,7 +782,7 @@ class TestListMyShares:
         shares_table.put_item(
             Item={
                 "profileId": valid_profile_id,
-                "targetAccountId": another_account_id,
+                "targetAccountId": f"ACCOUNT#{another_account_id}",
                 "ownerAccountId": owner_id,
                 "permissions": ["READ"],
                 "createdAt": "2024-01-01T00:00:00Z",
@@ -792,21 +792,7 @@ class TestListMyShares:
         event = {**appsync_event, "identity": {"sub": another_account_id}}
 
         # Mock batch_get_item to return a profile with non-string ownerAccountId
-        _ = {
-            "Responses": {
-                "kernelworx-profiles-v2-ue1-dev": [
-                    {
-                        "ownerAccountId": owner_id,
-                        "profileId": valid_profile_id,
-                        "sellerName": "Valid",
-                        "createdAt": "2024-01-01T00:00:00Z",
-                        "updatedAt": "2024-01-01T00:00:00Z",
-                    },
-                ]
-            }
-        }
-
-        # Simulate a profile with ownerAccountId = None
+        # and missing required fields (sellerName is returned, but createdAt/updatedAt are missing)
         mock_response_with_invalid = {
             "Responses": {
                 "kernelworx-profiles-v2-ue1-dev": [
@@ -814,6 +800,7 @@ class TestListMyShares:
                         "ownerAccountId": None,  # Invalid
                         "profileId": valid_profile_id,
                         "sellerName": "Invalid Owner",
+                        # Missing createdAt and updatedAt - required fields
                     },
                 ]
             }
@@ -824,9 +811,9 @@ class TestListMyShares:
         ):
             result = list_my_shares(event, lambda_context)
 
-        # The profile with None owner should still be processed, but with ACCOUNT# prefix on empty
-        assert len(result) == 1
-        assert result[0]["ownerAccountId"] == "ACCOUNT#"  # ACCOUNT# prefix added to empty string
+        # The profile with missing required fields should be skipped entirely
+        # This prevents GraphQL null errors for non-nullable fields
+        assert len(result) == 0
 
     def test_handles_unprocessed_keys(
         self,
@@ -849,7 +836,7 @@ class TestListMyShares:
         shares_table.put_item(
             Item={
                 "profileId": profile_id,
-                "targetAccountId": another_account_id,
+                "targetAccountId": f"ACCOUNT#{another_account_id}",
                 "ownerAccountId": owner_id,
                 "permissions": ["READ"],
                 "createdAt": "2024-01-01T00:00:00Z",
@@ -908,7 +895,7 @@ class TestListMyShares:
         shares_table.put_item(
             Item={
                 "profileId": profile_id,
-                "targetAccountId": another_account_id,
+                "targetAccountId": f"ACCOUNT#{another_account_id}",
                 "ownerAccountId": owner_id,
                 "permissions": ["READ"],
                 "createdAt": "2024-01-01T00:00:00Z",
@@ -967,7 +954,7 @@ class TestListMyShares:
         shares_table.put_item(
             Item={
                 "profileId": profile_id,
-                "targetAccountId": another_account_id,
+                "targetAccountId": f"ACCOUNT#{another_account_id}",
                 "ownerAccountId": owner_id,
                 "permissions": ["READ"],
                 "createdAt": "2024-01-01T00:00:00Z",

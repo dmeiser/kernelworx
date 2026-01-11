@@ -2,11 +2,13 @@
 
 import os
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 import boto3
-from mypy_boto3_dynamodb.client import DynamoDBClient
-from mypy_boto3_dynamodb.type_defs import TransactWriteItemsOutputTypeDef
+
+if TYPE_CHECKING:  # pragma: no cover
+    from mypy_boto3_dynamodb.client import DynamoDBClient
+    from mypy_boto3_dynamodb.type_defs import TransactWriteItemsOutputTypeDef
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
@@ -25,7 +27,7 @@ except ModuleNotFoundError:  # pragma: no cover
 logger = get_logger(__name__)
 
 
-def _get_dynamodb_client() -> DynamoDBClient:
+def _get_dynamodb_client() -> "DynamoDBClient":
     return boto3.client("dynamodb")
 
 
@@ -36,7 +38,7 @@ class _DynamoClientProxy:
         # Expose the client's exceptions so tests can set exception types
         self.exceptions = self._client.exceptions
 
-    def transact_write_items(self, *args: Any, **kwargs: Any) -> TransactWriteItemsOutputTypeDef:
+    def transact_write_items(self, *args: Any, **kwargs: Any) -> "TransactWriteItemsOutputTypeDef":
         return self._client.transact_write_items(*args, **kwargs)
 
 

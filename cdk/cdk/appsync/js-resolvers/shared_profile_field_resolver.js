@@ -13,7 +13,10 @@ export function request(ctx) {
         };
     }
     
-    const profileId = ctx.source.profileId;
+    let profileId = ctx.source.profileId;
+    
+    // Ensure profileId has PROFILE# prefix for GSI lookup
+    const dbProfileId = profileId && profileId.startsWith('PROFILE#') ? profileId : `PROFILE#${profileId}`;
     
     // Query using profileId-index GSI
     return {
@@ -22,7 +25,7 @@ export function request(ctx) {
         query: {
             expression: 'profileId = :profileId',
             expressionValues: util.dynamodb.toMapValues({
-                ':profileId': profileId
+                ':profileId': dbProfileId
             })
         },
         limit: 1

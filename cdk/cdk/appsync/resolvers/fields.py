@@ -128,24 +128,28 @@ def create_field_resolvers(
     )
 
     # === SHARED PROFILE FIELD RESOLVERS ===
-
-    # SharedProfile field resolvers - fetch profile data from profiles table
-    shared_profile_fields = [
-        ("sellerName", "SellerName"),
-        ("ownerAccountId", "OwnerAccountId"),
-        ("unitType", "UnitType"),
-        ("unitNumber", "UnitNumber"),
-        ("createdAt", "CreatedAt"),
-        ("updatedAt", "UpdatedAt"),
-    ]
-    for field_name, construct_suffix in shared_profile_fields:
-        builder.create_js_resolver(
-            field_name=field_name,
-            type_name="SharedProfile",
-            datasource_name="profiles",
-            code_file=RESOLVERS_DIR / "shared_profile_field_resolver.js",
-            id_suffix=f"SharedProfile{construct_suffix}Resolver",
-        )
+    # NOTE: These field resolvers are NO LONGER NEEDED because the listMyShares 
+    # Lambda now returns fully hydrated profile data. These were causing issues
+    # when the Lambda returned valid data but then field resolvers would refetch
+    # from DynamoDB and return nulls for profiles with missing fields.
+    # Commented out in favor of Lambda returning complete data.
+    # 
+    # shared_profile_fields = [
+    #     ("sellerName", "SellerName"),
+    #     ("ownerAccountId", "OwnerAccountId"),
+    #     ("unitType", "UnitType"),
+    #     ("unitNumber", "UnitNumber"),
+    #     ("createdAt", "CreatedAt"),
+    #     ("updatedAt", "UpdatedAt"),
+    # ]
+    # for field_name, construct_suffix in shared_profile_fields:
+    #     builder.create_js_resolver(
+    #         field_name=field_name,
+    #         type_name="SharedProfile",
+    #         datasource_name="profiles",
+    #         code_file=RESOLVERS_DIR / "shared_profile_field_resolver.js",
+    #         id_suffix=f"SharedProfile{construct_suffix}Resolver",
+    #     )
 
     # === ACCOUNT & CATALOG FIELD RESOLVERS ===
 

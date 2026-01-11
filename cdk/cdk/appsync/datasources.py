@@ -78,6 +78,7 @@ def create_lambda_datasources(
     datasources: dict[str, appsync.LambdaDataSource] = {}
 
     lambda_ds_configs = [
+        ("list_my_shares", "ListMySharesDS"),
         ("create_profile", "CreateProfileDS"),
         ("request_campaign_report", "RequestCampaignReportDS"),
         ("unit_reporting", "UnitReportingDS"),
@@ -86,6 +87,10 @@ def create_lambda_datasources(
         ("campaign_operations", "CampaignOperationsDS"),
         ("update_my_account", "UpdateMyAccountDS"),
         ("transfer_ownership", "TransferOwnershipDS"),
+        ("request_qr_upload_fn", "RequestQRUploadDS"),
+        ("confirm_qr_upload_fn", "ConfirmQRUploadDS"),
+        ("generate_presigned_urls_fn", "GeneratePresignedURLsDS"),
+        ("delete_qr_code_fn", "DeleteQRCodeDS"),
     ]
 
     for fn_key, ds_name in lambda_ds_configs:

@@ -108,7 +108,7 @@ def setup_appsync(
     lambda_datasources = create_lambda_datasources(api, lambda_functions)
 
     # Create AppSync functions
-    functions = create_appsync_functions(scope, api, env_name, dynamodb_datasources)
+    functions = create_appsync_functions(scope, api, env_name, dynamodb_datasources, lambda_datasources)
 
     # Create profile delete functions
     profile_delete_functions = create_profile_delete_functions(scope, api, env_name, dynamodb_datasources)

@@ -12,6 +12,7 @@ from constructs import Construct
 from .campaigns import create_campaign_functions
 from .catalogs import create_catalog_functions
 from .orders import create_order_functions
+from .payment_methods import create_payment_methods_functions
 from .profiles import create_profile_delete_functions, create_profile_functions
 from .sharing import create_sharing_functions
 
@@ -21,6 +22,7 @@ def create_appsync_functions(
     api: appsync.GraphqlApi,
     env_name: str,
     datasources: dict[str, Any],
+    lambda_datasources: dict[str, appsync.LambdaDataSource],
 ) -> dict[str, appsync.AppsyncFunction]:
     """
     Create all AppSync functions for pipeline resolvers.
@@ -44,6 +46,7 @@ def create_appsync_functions(
     functions.update(create_order_functions(scope, api, env_name, datasources))
     functions.update(create_catalog_functions(scope, api, env_name, datasources))
     functions.update(create_profile_functions(scope, api, env_name, datasources))
+    functions.update(create_payment_methods_functions(scope, api, env_name, datasources, lambda_datasources))
 
     return functions
 

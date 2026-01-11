@@ -739,6 +739,70 @@ class CdkStack(Stack):  # type: ignore[misc]
         )
 
         # ====================================================================
+        # Payment Methods Lambda Functions - QR Code Operations
+        # ====================================================================
+
+        # Request QR Upload Lambda - Generates pre-signed POST URL for S3
+        self.request_qr_upload_fn = lambda_.Function(
+            self,
+            "RequestQRUploadFn",
+            function_name=self._rn("kernelworx-request-qr-upload"),
+            runtime=lambda_.Runtime.PYTHON_3_13,
+            handler="handlers.payment_methods_handlers.request_qr_upload",
+            code=lambda_code,
+            layers=[self.shared_layer],
+            timeout=Duration.seconds(10),
+            memory_size=256,
+            role=self.lambda_execution_role,
+            environment=lambda_env,
+        )
+
+        # Confirm QR Upload Lambda - Validates S3 object and generates pre-signed GET URL
+        self.confirm_qr_upload_fn = lambda_.Function(
+            self,
+            "ConfirmQRUploadFn",
+            function_name=self._rn("kernelworx-confirm-qr-upload"),
+            runtime=lambda_.Runtime.PYTHON_3_13,
+            handler="handlers.payment_methods_handlers.confirm_qr_upload",
+            code=lambda_code,
+            layers=[self.shared_layer],
+            timeout=Duration.seconds(10),
+            memory_size=256,
+            role=self.lambda_execution_role,
+            environment=lambda_env,
+        )
+
+        # Generate Presigned URLs Lambda - Pipeline step for URL generation
+        self.generate_presigned_urls_fn = lambda_.Function(
+            self,
+            "GeneratePresignedURLsFn",
+            function_name=self._rn("kernelworx-generate-presigned-urls"),
+            runtime=lambda_.Runtime.PYTHON_3_13,
+            handler="handlers.payment_methods_handlers.generate_presigned_urls",
+            code=lambda_code,
+            layers=[self.shared_layer],
+            timeout=Duration.seconds(10),
+            memory_size=256,
+            role=self.lambda_execution_role,
+            environment=lambda_env,
+        )
+
+        # Delete QR Code Lambda - Deletes QR code from S3 and clears DynamoDB reference
+        self.delete_qr_code_fn = lambda_.Function(
+            self,
+            "DeleteQRCodeFn",
+            function_name=self._rn("kernelworx-delete-qr-code"),
+            runtime=lambda_.Runtime.PYTHON_3_13,
+            handler="handlers.payment_methods_handlers.delete_qr_code",
+            code=lambda_code,
+            layers=[self.shared_layer],
+            timeout=Duration.seconds(10),
+            memory_size=256,
+            role=self.lambda_execution_role,
+            environment=lambda_env,
+        )
+
+        # ====================================================================
         # Cognito User Pool - Authentication (Essentials tier)
         # ====================================================================
 
@@ -1070,6 +1134,10 @@ class CdkStack(Stack):  # type: ignore[misc]
                 "campaign_operations": self.campaign_operations_fn,
                 "update_my_account": self.update_my_account_fn,
                 "transfer_ownership": self.transfer_ownership_fn,
+                "request_qr_upload_fn": self.request_qr_upload_fn,
+                "confirm_qr_upload_fn": self.confirm_qr_upload_fn,
+                "generate_presigned_urls_fn": self.generate_presigned_urls_fn,
+                "delete_qr_code_fn": self.delete_qr_code_fn,
             },
         )
         self.api = appsync_resources.api

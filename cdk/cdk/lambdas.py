@@ -258,6 +258,63 @@ def create_lambda_functions(
         environment=lambda_env,
     )
 
+    # Payment Methods Lambda Functions
+    request_qr_upload_fn = lambda_.Function(
+        scope,
+        "RequestQRUploadFn",
+        function_name=rn("kernelworx-request-qr-upload"),
+        runtime=lambda_.Runtime.PYTHON_3_13,
+        handler="handlers.payment_methods_handlers.request_qr_upload",
+        code=lambda_code,
+        layers=[shared_layer],
+        timeout=Duration.seconds(10),
+        memory_size=256,
+        role=lambda_execution_role,
+        environment=lambda_env,
+    )
+
+    confirm_qr_upload_fn = lambda_.Function(
+        scope,
+        "ConfirmQRUploadFn",
+        function_name=rn("kernelworx-confirm-qr-upload"),
+        runtime=lambda_.Runtime.PYTHON_3_13,
+        handler="handlers.payment_methods_handlers.confirm_qr_upload",
+        code=lambda_code,
+        layers=[shared_layer],
+        timeout=Duration.seconds(10),
+        memory_size=256,
+        role=lambda_execution_role,
+        environment=lambda_env,
+    )
+
+    generate_presigned_urls_fn = lambda_.Function(
+        scope,
+        "GeneratePresignedURLsFn",
+        function_name=rn("kernelworx-generate-presigned-urls"),
+        runtime=lambda_.Runtime.PYTHON_3_13,
+        handler="handlers.payment_methods_handlers.generate_presigned_urls",
+        code=lambda_code,
+        layers=[shared_layer],
+        timeout=Duration.seconds(10),
+        memory_size=256,
+        role=lambda_execution_role,
+        environment=lambda_env,
+    )
+
+    delete_qr_code_fn = lambda_.Function(
+        scope,
+        "DeleteQRCodeFn",
+        function_name=rn("kernelworx-delete-qr-code"),
+        runtime=lambda_.Runtime.PYTHON_3_13,
+        handler="handlers.payment_methods_handlers.delete_qr_code",
+        code=lambda_code,
+        layers=[shared_layer],
+        timeout=Duration.seconds(10),
+        memory_size=256,
+        role=lambda_execution_role,
+        environment=lambda_env,
+    )
+
     return {
         "shared_layer": shared_layer,
         "list_my_shares_fn": list_my_shares_fn,
@@ -270,4 +327,8 @@ def create_lambda_functions(
         "update_my_account_fn": update_my_account_fn,
         "post_auth_fn": post_auth_fn,
         "pre_signup_fn": pre_signup_fn,
+        "request_qr_upload_fn": request_qr_upload_fn,
+        "confirm_qr_upload_fn": confirm_qr_upload_fn,
+        "generate_presigned_urls_fn": generate_presigned_urls_fn,
+        "delete_qr_code_fn": delete_qr_code_fn,
     }
