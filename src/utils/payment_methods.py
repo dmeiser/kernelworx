@@ -548,13 +548,24 @@ def generate_presigned_get_url(
             if not s3_key:
                 return None  # No QR code found
 
-        # Generate pre-signed URL
-        url = s3.generate_presigned_url(
-            "get_object", Params={"Bucket": bucket_name, "Key": s3_key}, ExpiresIn=expiry_seconds
-        )
+        # Use CloudFront vanity domain for downloads if available
+        cloudfront_domain = os.getenv("CLOUDFRONT_DOMAIN")  # e.g., dev.kernelworx.app
+        
+        if cloudfront_domain:
+            # Use CloudFront URL with /uploads/ path (no pre-signing needed - S3 is origin)
+            url = f"https://{cloudfront_domain}/uploads/{s3_key}"
+        else:
+            # Fallback to direct S3 pre-signed URL
+            url = s3.generate_presigned_url(
+                "get_object", Params={"Bucket": bucket_name, "Key": s3_key}, ExpiresIn=expiry_seconds
+            )
 
         logger.info(
-            "Generated pre-signed GET URL", account_id=account_id, payment_method=payment_method_name, s3_key=s3_key
+            "Generated GET URL",
+            account_id=account_id,
+            payment_method=payment_method_name,
+            s3_key=s3_key,
+            uses_cloudfront=bool(cloudfront_domain),
         )
 
         return url

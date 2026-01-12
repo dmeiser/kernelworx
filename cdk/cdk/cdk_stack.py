@@ -524,6 +524,7 @@ class CdkStack(Stack):  # type: ignore[misc]
         # Common Lambda environment variables
         lambda_env = {
             "EXPORTS_BUCKET": self.exports_bucket.bucket_name,
+            "CLOUDFRONT_DOMAIN": self.site_domain,  # e.g., dev.kernelworx.app
             "POWERTOOLS_SERVICE_NAME": "kernelworx",
             "LOG_LEVEL": "INFO",
             # New multi-table design table names
@@ -1173,6 +1174,9 @@ class CdkStack(Stack):  # type: ignore[misc]
 
         # Grant CloudFront read access to static assets bucket
         self.static_assets_bucket.grant_read(self.origin_access_identity)
+        
+        # Grant CloudFront read/write access to exports bucket for uploads
+        self.exports_bucket.grant_read_write(self.origin_access_identity)
 
         # CloudFront distribution with custom domain
         self.distribution = cloudfront.Distribution(
@@ -1189,6 +1193,18 @@ class CdkStack(Stack):  # type: ignore[misc]
                 cache_policy=cloudfront.CachePolicy.CACHING_OPTIMIZED,
                 compress=True,
             ),
+            additional_behaviors={
+                "/uploads/*": cloudfront.BehaviorOptions(
+                    origin=origins.S3BucketOrigin.with_origin_access_identity(
+                        self.exports_bucket,
+                        origin_access_identity=self.origin_access_identity,
+                    ),
+                    viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.HTTPS_ONLY,
+                    allowed_methods=cloudfront.AllowedMethods.ALLOW_ALL,  # Allow POST/PUT for uploads
+                    cache_policy=cloudfront.CachePolicy.CACHING_DISABLED,  # Don't cache uploads
+                    compress=False,  # Don't compress binary files
+                ),
+            },
             default_root_object="index.html",
             error_responses=[
                 cloudfront.ErrorResponse(

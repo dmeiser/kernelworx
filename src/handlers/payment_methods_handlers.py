@@ -89,7 +89,8 @@ def request_qr_upload(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         slug = slugify(payment_method_name)
         s3_key = f"payment-qr-codes/{caller_id}/{slug}.png"
 
-        # Generate pre-signed POST URL
+        # Generate pre-signed POST URL (must use direct S3, not CloudFront)
+        # CloudFront vanity domain is only used for downloads (GET), not uploads (POST)
         bucket_name = os.getenv("EXPORTS_BUCKET_NAME", "kernelworx-exports-ue1-dev")
         s3_client = boto3.client("s3", endpoint_url=os.getenv("S3_ENDPOINT"))
 

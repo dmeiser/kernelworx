@@ -26,6 +26,7 @@ def create_cloudfront_distribution(
     site_domain: str,
     site_certificate: "acm.Certificate",
     static_assets_bucket: "s3.Bucket",
+    exports_bucket: "s3.Bucket",
     hosted_zone: route53.IHostedZone,
 ) -> dict[str, Any]:
     """Create CloudFront distribution and related resources.
@@ -35,6 +36,7 @@ def create_cloudfront_distribution(
         site_domain: Domain name for the site (e.g., dev.kernelworx.app)
         site_certificate: ACM certificate for the site domain
         static_assets_bucket: S3 bucket for static assets
+        exports_bucket: S3 bucket for exports/uploads
         hosted_zone: Route53 hosted zone for DNS records
 
     Returns:
@@ -50,6 +52,9 @@ def create_cloudfront_distribution(
 
     # Grant CloudFront read access to static assets bucket
     static_assets_bucket.grant_read(origin_access_identity)
+    
+    # Grant CloudFront read/write access to exports bucket for uploads
+    exports_bucket.grant_read_write(origin_access_identity)
 
     # CloudFront distribution with custom domain
     distribution = cloudfront.Distribution(
@@ -66,6 +71,18 @@ def create_cloudfront_distribution(
             cache_policy=cloudfront.CachePolicy.CACHING_OPTIMIZED,
             compress=True,
         ),
+        additional_behaviors={
+            "/uploads/*": cloudfront.BehaviorOptions(
+                origin=origins.S3BucketOrigin.with_origin_access_identity(
+                    exports_bucket,
+                    origin_access_identity=origin_access_identity,
+                ),
+                viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.HTTPS_ONLY,
+                allowed_methods=cloudfront.AllowedMethods.ALLOW_ALL,  # Allow POST/PUT for uploads
+                cache_policy=cloudfront.CachePolicy.CACHING_DISABLED,  # Don't cache uploads
+                compress=False,  # Don't compress binary files
+            ),
+        },
         default_root_object="index.html",
         error_responses=[
             cloudfront.ErrorResponse(
