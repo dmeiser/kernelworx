@@ -10,7 +10,7 @@
  * - Rate limits (e.g., 50 shared campaigns max) can block future test runs
  */
 
-import { DynamoDBClient, ScanCommand, DeleteItemCommand } from '@aws-sdk/client-dynamodb';
+import { DynamoDBClient, ScanCommand, DeleteItemCommand, QueryCommand } from '@aws-sdk/client-dynamodb';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -22,21 +22,61 @@ const dynamodb = new DynamoDBClient({ region: 'us-east-1' });
 
 // Table names from environment or defaults
 const SHARED_CAMPAIGNS_TABLE = process.env.SHARED_CAMPAIGNS_TABLE_NAME || 'kernelworx-shared-campaigns-ue1-dev';
-const PROFILES_TABLE = process.env.PROFILES_TABLE_NAME || 'kernelworx-profiles-v2-ue1-dev';
-const CAMPAIGNS_TABLE = process.env.CAMPAIGNS_TABLE_NAME || 'kernelworx-campaigns-v2-ue1-dev';
-const ORDERS_TABLE = process.env.ORDERS_TABLE_NAME || 'kernelworx-orders-v2-ue1-dev';
+const PROFILES_TABLE = process.env.PROFILES_TABLE_NAME || 'kernelworx-profiles-ue1-dev';
+const CAMPAIGNS_TABLE = process.env.CAMPAIGNS_TABLE_NAME || 'kernelworx-campaigns-ue1-dev';
+const ORDERS_TABLE = process.env.ORDERS_TABLE_NAME || 'kernelworx-orders-ue1-dev';
 const CATALOGS_TABLE = process.env.CATALOGS_TABLE_NAME || 'kernelworx-catalogs-ue1-dev';
-const SHARES_TABLE = process.env.SHARES_TABLE_NAME || 'kernelworx-shares-v2-ue1-dev';
+const SHARES_TABLE = process.env.SHARES_TABLE_NAME || 'kernelworx-shares-ue1-dev';
+const INVITES_TABLE = process.env.INVITES_TABLE_NAME || 'kernelworx-invites-ue1-dev';
+const ACCOUNTS_TABLE = process.env.ACCOUNTS_TABLE_NAME || 'kernelworx-accounts-ue1-dev';
 
-// Test account IDs (from .env)
-const TEST_ACCOUNT_IDS = [
-  process.env.TEST_OWNER_ACCOUNT_ID,
-  process.env.TEST_CONTRIBUTOR_ACCOUNT_ID,
-  process.env.TEST_READONLY_ACCOUNT_ID,
+// Test user emails (from .env)
+const TEST_USER_EMAILS = [
+  process.env.TEST_OWNER_EMAIL,
+  process.env.TEST_CONTRIBUTOR_EMAIL,
+  process.env.TEST_READONLY_EMAIL,
 ].filter(Boolean) as string[];
+
+// Cache for test account IDs (populated on first use)
+let TEST_ACCOUNT_IDS: string[] = [];
+
+/**
+ * Get account IDs for test users by looking up their emails.
+ * Results are cached to avoid repeated queries.
+ */
+async function getTestAccountIds(): Promise<string[]> {
+  if (TEST_ACCOUNT_IDS.length > 0) {
+    return TEST_ACCOUNT_IDS;
+  }
+
+  for (const email of TEST_USER_EMAILS) {
+    try {
+      const result = await dynamodb.send(new QueryCommand({
+        TableName: ACCOUNTS_TABLE,
+        IndexName: 'email-index',
+        KeyConditionExpression: 'email = :email',
+        ExpressionAttributeValues: {
+          ':email': { S: email },
+        },
+        ProjectionExpression: 'accountId',
+      }));
+
+      const accountId = result.Items?.[0]?.accountId?.S;
+      if (accountId) {
+        TEST_ACCOUNT_IDS.push(accountId);
+      }
+    } catch (error) {
+      console.error(`  Failed to lookup account for ${email}:`, error);
+    }
+  }
+
+  return TEST_ACCOUNT_IDS;
+}
 
 async function cleanupSharedCampaigns(): Promise<number> {
   console.log('  Scanning campaign shared campaigns table...');
+  
+  const testAccountIds = await getTestAccountIds();
   
   const scanResult = await dynamodb.send(new ScanCommand({
     TableName: SHARED_CAMPAIGNS_TABLE,
@@ -52,7 +92,7 @@ async function cleanupSharedCampaigns(): Promise<number> {
     const createdBy = item.createdBy?.S;
     
     // Only delete items created by test accounts
-    if (sharedCampaignCode && sk && TEST_ACCOUNT_IDS.includes(createdBy || '')) {
+    if (sharedCampaignCode && sk && testAccountIds.includes(createdBy || '')) {
       try {
         await dynamodb.send(new DeleteItemCommand({
           TableName: SHARED_CAMPAIGNS_TABLE,
@@ -72,32 +112,48 @@ async function cleanupSharedCampaigns(): Promise<number> {
 }
 
 async function cleanupTestProfiles(): Promise<number> {
-  console.log('  Scanning profiles table for TEST- prefixed items...');
+  console.log('  Querying profiles table by test user ownership...');
   
-  const scanResult = await dynamodb.send(new ScanCommand({
-    TableName: PROFILES_TABLE,
-    FilterExpression: 'begins_with(sellerName, :prefix)',
-    ExpressionAttributeValues: {
-      ':prefix': { S: 'TEST-' },
-    },
-    ProjectionExpression: 'profileId',
-  }));
-  
-  const items = scanResult.Items || [];
+  const testAccountIds = await getTestAccountIds();
   let deleted = 0;
   
-  for (const item of items) {
-    const profileId = item.profileId?.S;
-    if (profileId) {
-      try {
-        await dynamodb.send(new DeleteItemCommand({
-          TableName: PROFILES_TABLE,
-          Key: { profileId: { S: profileId } },
-        }));
-        deleted++;
-      } catch (error) {
-        console.error(`  Failed to delete profile ${profileId}:`, error);
+  // Query profiles for each test account (V2 schema: PK=ownerAccountId, SK=profileId)
+  for (const accountId of testAccountIds) {
+    try {
+      const queryResult = await dynamodb.send(new QueryCommand({
+        TableName: PROFILES_TABLE,
+        KeyConditionExpression: 'ownerAccountId = :ownerAccountId',
+        ExpressionAttributeValues: {
+          ':ownerAccountId': { S: accountId },
+        },
+        ProjectionExpression: 'ownerAccountId, profileId, sellerName',
+      }));
+      
+      const items = queryResult.Items || [];
+      console.log(`    Found ${items.length} profile(s) for account ${accountId}`);
+      
+      for (const item of items) {
+        const ownerAccountId = item.ownerAccountId?.S;
+        const profileId = item.profileId?.S;
+        const sellerName = item.sellerName?.S;
+        
+        if (ownerAccountId && profileId) {
+          try {
+            await dynamodb.send(new DeleteItemCommand({
+              TableName: PROFILES_TABLE,
+              Key: {
+                ownerAccountId: { S: ownerAccountId },
+                profileId: { S: profileId },
+              },
+            }));
+            deleted++;
+          } catch (error) {
+            console.error(`    Failed to delete profile ${sellerName} (${profileId}):`, error);
+          }
+        }
       }
+    } catch (error) {
+      console.error(`  Failed to query profiles for account ${accountId}:`, error);
     }
   }
   
@@ -105,142 +161,230 @@ async function cleanupTestProfiles(): Promise<number> {
 }
 
 async function cleanupTestCatalogs(): Promise<number> {
-  console.log('  Scanning catalogs table for TEST- prefixed items...');
+  console.log('  Querying catalogs table by test user ownership...');
   
-  const scanResult = await dynamodb.send(new ScanCommand({
-    TableName: CATALOGS_TABLE,
-    FilterExpression: 'begins_with(catalogName, :prefix)',
-    ExpressionAttributeValues: {
-      ':prefix': { S: 'TEST-' },
-    },
-    ProjectionExpression: 'catalogId',
-  }));
-  
-  const items = scanResult.Items || [];
+  const testAccountIds = await getTestAccountIds();
   let deleted = 0;
   
-  for (const item of items) {
-    const catalogId = item.catalogId?.S;
-    if (catalogId) {
-      try {
-        await dynamodb.send(new DeleteItemCommand({
-          TableName: CATALOGS_TABLE,
-          Key: { catalogId: { S: catalogId } },
-        }));
-        deleted++;
-      } catch (error) {
-        console.error(`  Failed to delete catalog ${catalogId}:`, error);
+  // Query catalogs for each test account using ownerAccountId-index GSI
+  for (const accountId of testAccountIds) {
+    try {
+      const queryResult = await dynamodb.send(new QueryCommand({
+        TableName: CATALOGS_TABLE,
+        IndexName: 'ownerAccountId-index',
+        KeyConditionExpression: 'ownerAccountId = :ownerAccountId',
+        ExpressionAttributeValues: {
+          ':ownerAccountId': { S: accountId },
+        },
+        ProjectionExpression: 'catalogId, catalogName, isDeleted',
+      }));
+      
+      const items = queryResult.Items || [];
+      console.log(`    Found ${items.length} catalog(s) for account ${accountId}`);
+      
+      for (const item of items) {
+        const catalogId = item.catalogId?.S;
+        const catalogName = item.catalogName?.S;
+        if (catalogId) {
+          try {
+            // HARD DELETE - remove from DynamoDB entirely (not soft delete)
+            await dynamodb.send(new DeleteItemCommand({
+              TableName: CATALOGS_TABLE,
+              Key: { catalogId: { S: catalogId } },
+            }));
+            deleted++;
+          } catch (error) {
+            console.error(`    Failed to delete catalog ${catalogName} (${catalogId}):`, error);
+          }
+        }
       }
+    } catch (error) {
+      console.error(`  Failed to query catalogs for account ${accountId}:`, error);
     }
   }
   
   return deleted;
 }
 
-async function cleanupTestCampaigns(): Promise<number> {
-  console.log('  Scanning campaigns table for TEST- prefixed items...');
+async function cleanupTestCampaigns(profileIds: string[]): Promise<number> {
+  console.log('  Querying campaigns table by test user profiles...');
   
-  const scanResult = await dynamodb.send(new ScanCommand({
-    TableName: CAMPAIGNS_TABLE,
-    FilterExpression: 'begins_with(campaignName, :prefix)',
-    ExpressionAttributeValues: {
-      ':prefix': { S: 'TEST-' },
-    },
-    ProjectionExpression: 'profileId, campaignId',
-  }));
-  
-  const items = scanResult.Items || [];
   let deleted = 0;
   
-  for (const item of items) {
-    const profileId = item.profileId?.S;
-    const campaignId = item.campaignId?.S;
-    if (profileId && campaignId) {
-      try {
-        await dynamodb.send(new DeleteItemCommand({
-          TableName: CAMPAIGNS_TABLE,
-          Key: {
-            profileId: { S: profileId },
-            campaignId: { S: campaignId },
-          },
-        }));
-        deleted++;
-      } catch (error) {
-        console.error(`  Failed to delete campaign ${campaignId}:`, error);
+  // Query campaigns for each test user profile (PK=profileId)
+  for (const profileId of profileIds) {
+    try {
+      const queryResult = await dynamodb.send(new QueryCommand({
+        TableName: CAMPAIGNS_TABLE,
+        KeyConditionExpression: 'profileId = :profileId',
+        ExpressionAttributeValues: {
+          ':profileId': { S: profileId },
+        },
+        ProjectionExpression: 'profileId, campaignId, campaignName',
+      }));
+      
+      const items = queryResult.Items || [];
+      
+      for (const item of items) {
+        const profileId = item.profileId?.S;
+        const campaignId = item.campaignId?.S;
+        const campaignName = item.campaignName?.S;
+        
+        if (profileId && campaignId) {
+          try {
+            await dynamodb.send(new DeleteItemCommand({
+              TableName: CAMPAIGNS_TABLE,
+              Key: {
+                profileId: { S: profileId },
+                campaignId: { S: campaignId },
+              },
+            }));
+            deleted++;
+          } catch (error) {
+            console.error(`    Failed to delete campaign ${campaignName} (${campaignId}):`, error);
+          }
+        }
       }
+    } catch (error) {
+      console.error(`  Failed to query campaigns for profile ${profileId}:`, error);
     }
   }
   
   return deleted;
 }
 
-async function cleanupTestOrders(): Promise<number> {
-  console.log('  Scanning orders table for TEST- prefixed items...');
+async function cleanupTestOrders(campaignIds: string[]): Promise<number> {
+  console.log('  Querying orders table by test user campaigns...');
   
-  const scanResult = await dynamodb.send(new ScanCommand({
-    TableName: ORDERS_TABLE,
-    FilterExpression: 'begins_with(customerName, :prefix)',
-    ExpressionAttributeValues: {
-      ':prefix': { S: 'TEST-' },
-    },
-    ProjectionExpression: 'campaignId, orderId',
-  }));
-  
-  const items = scanResult.Items || [];
   let deleted = 0;
   
-  for (const item of items) {
-    const campaignId = item.campaignId?.S;
-    const orderId = item.orderId?.S;
-    if (campaignId && orderId) {
-      try {
-        await dynamodb.send(new DeleteItemCommand({
-          TableName: ORDERS_TABLE,
-          Key: {
-            campaignId: { S: campaignId },
-            orderId: { S: orderId },
-          },
-        }));
-        deleted++;
-      } catch (error) {
-        console.error(`  Failed to delete order ${orderId}:`, error);
+  // Query orders for each test user campaign (PK=campaignId)
+  for (const campaignId of campaignIds) {
+    try {
+      const queryResult = await dynamodb.send(new QueryCommand({
+        TableName: ORDERS_TABLE,
+        KeyConditionExpression: 'campaignId = :campaignId',
+        ExpressionAttributeValues: {
+          ':campaignId': { S: campaignId },
+        },
+        ProjectionExpression: 'campaignId, orderId, customerName',
+      }));
+      
+      const items = queryResult.Items || [];
+      
+      for (const item of items) {
+        const campaignId = item.campaignId?.S;
+        const orderId = item.orderId?.S;
+        const customerName = item.customerName?.S;
+        
+        if (campaignId && orderId) {
+          try {
+            await dynamodb.send(new DeleteItemCommand({
+              TableName: ORDERS_TABLE,
+              Key: {
+                campaignId: { S: campaignId },
+                orderId: { S: orderId },
+              },
+            }));
+            deleted++;
+          } catch (error) {
+            console.error(`    Failed to delete order ${customerName} (${orderId}):`, error);
+          }
+        }
       }
+    } catch (error) {
+      console.error(`  Failed to query orders for campaign ${campaignId}:`, error);
     }
   }
   
   return deleted;
 }
 
-async function cleanupTestShares(): Promise<number> {
-  console.log('  Scanning shares table for test account items...');
+async function cleanupTestShares(profileIds: string[]): Promise<number> {
+  console.log('  Querying shares table by test user profiles...');
   
-  const scanResult = await dynamodb.send(new ScanCommand({
-    TableName: SHARES_TABLE,
-    ProjectionExpression: 'profileId, shareId, createdByAccountId',
-  }));
-  
-  const items = scanResult.Items || [];
   let deleted = 0;
   
-  for (const item of items) {
-    const profileId = item.profileId?.S;
-    const shareId = item.shareId?.S;
-    const createdBy = item.createdByAccountId?.S;
-    
-    // Only delete items created by test accounts
-    if (profileId && shareId && TEST_ACCOUNT_IDS.includes(createdBy || '')) {
-      try {
-        await dynamodb.send(new DeleteItemCommand({
-          TableName: SHARES_TABLE,
-          Key: {
-            profileId: { S: profileId },
-            shareId: { S: shareId },
-          },
-        }));
-        deleted++;
-      } catch (error) {
-        console.error(`  Failed to delete share ${shareId}:`, error);
+  // Query shares for each test user profile (PK=profileId, SK=targetAccountId)
+  for (const profileId of profileIds) {
+    try {
+      const queryResult = await dynamodb.send(new QueryCommand({
+        TableName: SHARES_TABLE,
+        KeyConditionExpression: 'profileId = :profileId',
+        ExpressionAttributeValues: {
+          ':profileId': { S: profileId },
+        },
+        ProjectionExpression: 'profileId, targetAccountId',
+      }));
+      
+      const items = queryResult.Items || [];
+      
+      for (const item of items) {
+        const profileId = item.profileId?.S;
+        const targetAccountId = item.targetAccountId?.S;
+        
+        if (profileId && targetAccountId) {
+          try {
+            await dynamodb.send(new DeleteItemCommand({
+              TableName: SHARES_TABLE,
+              Key: {
+                profileId: { S: profileId },
+                targetAccountId: { S: targetAccountId },
+              },
+            }));
+            deleted++;
+          } catch (error) {
+            console.error(`    Failed to delete share ${profileId}/${targetAccountId}:`, error);
+          }
+        }
       }
+    } catch (error) {
+      console.error(`  Failed to query shares for profile ${profileId}:`, error);
+    }
+  }
+  
+  return deleted;
+}
+
+async function cleanupTestInvites(profileIds: string[]): Promise<number> {
+  console.log('  Querying invites table by test user profiles...');
+  
+  let deleted = 0;
+  
+  // Query invites for each test user profile using profileId-index GSI
+  for (const profileId of profileIds) {
+    try {
+      const queryResult = await dynamodb.send(new QueryCommand({
+        TableName: INVITES_TABLE,
+        IndexName: 'profileId-index',
+        KeyConditionExpression: 'profileId = :profileId',
+        ExpressionAttributeValues: {
+          ':profileId': { S: profileId },
+        },
+        ProjectionExpression: 'inviteCode',
+      }));
+      
+      const items = queryResult.Items || [];
+      
+      for (const item of items) {
+        const inviteCode = item.inviteCode?.S;
+        
+        if (inviteCode) {
+          try {
+            await dynamodb.send(new DeleteItemCommand({
+              TableName: INVITES_TABLE,
+              Key: {
+                inviteCode: { S: inviteCode },
+              },
+            }));
+            deleted++;
+          } catch (error) {
+            console.error(`    Failed to delete invite ${inviteCode}:`, error);
+          }
+        }
+      }
+    } catch (error) {
+      console.error(`  Failed to query invites for profile ${profileId}:`, error);
     }
   }
   
@@ -251,22 +395,67 @@ export default async function globalTeardown(): Promise<void> {
   console.log('\n🧹 Running global test cleanup...');
   
   try {
-    // Clean up in order of dependencies (child entities first)
+    // Step 1: Get test account IDs
+    const testAccountIds = await getTestAccountIds();
+    console.log(`  Found ${testAccountIds.length} test account(s)`);
+    
+    if (testAccountIds.length === 0) {
+      console.log('⚠️  No test accounts found, skipping cleanup');
+      return;
+    }
+    
+    // Step 2: Collect all profile IDs owned by test accounts
+    console.log('  Collecting test user profiles...');
+    const profileIds: string[] = [];
+    for (const accountId of testAccountIds) {
+      const queryResult = await dynamodb.send(new QueryCommand({
+        TableName: PROFILES_TABLE,
+        KeyConditionExpression: 'ownerAccountId = :ownerAccountId',
+        ExpressionAttributeValues: {
+          ':ownerAccountId': { S: accountId },
+        },
+        ProjectionExpression: 'profileId',
+      }));
+      const items = queryResult.Items || [];
+      profileIds.push(...items.map(item => item.profileId?.S).filter(Boolean) as string[]);
+    }
+    console.log(`    Found ${profileIds.length} profile(s)`);
+    
+    // Step 3: Collect all campaign IDs from test user profiles
+    console.log('  Collecting test user campaigns...');
+    const campaignIds: string[] = [];
+    for (const profileId of profileIds) {
+      const queryResult = await dynamodb.send(new QueryCommand({
+        TableName: CAMPAIGNS_TABLE,
+        KeyConditionExpression: 'profileId = :profileId',
+        ExpressionAttributeValues: {
+          ':profileId': { S: profileId },
+        },
+        ProjectionExpression: 'campaignId',
+      }));
+      const items = queryResult.Items || [];
+      campaignIds.push(...items.map(item => item.campaignId?.S).filter(Boolean) as string[]);
+    }
+    console.log(`    Found ${campaignIds.length} campaign(s)`);
+    
+    // Step 4: Clean up in order of dependencies (child entities first)
     // NOTE: We delete SellerProfiles (Scouts) but NOT Account records or Cognito users
-    const ordersDeleted = await cleanupTestOrders();
-    const campaignsDeleted = await cleanupTestCampaigns();
-    const sharesDeleted = await cleanupTestShares();
-    const profilesDeleted = await cleanupTestProfiles();
+    const ordersDeleted = await cleanupTestOrders(campaignIds);
+    const invitesDeleted = await cleanupTestInvites(profileIds);
+    const sharesDeleted = await cleanupTestShares(profileIds);
+    const campaignsDeleted = await cleanupTestCampaigns(profileIds);
     const catalogsDeleted = await cleanupTestCatalogs();
     const sharedCampaignsDeleted = await cleanupSharedCampaigns();
+    const profilesDeleted = await cleanupTestProfiles();
     
     console.log('✅ Global cleanup complete:');
     console.log(`   - Orders: ${ordersDeleted} deleted`);
-    console.log(`   - Campaigns: ${campaignsDeleted} deleted`);
+    console.log(`   - Invites: ${invitesDeleted} deleted`);
     console.log(`   - Shares: ${sharesDeleted} deleted`);
-    console.log(`   - SellerProfiles: ${profilesDeleted} deleted`);
+    console.log(`   - Campaigns: ${campaignsDeleted} deleted`);
     console.log(`   - Catalogs: ${catalogsDeleted} deleted`);
     console.log(`   - Shared Campaigns: ${sharedCampaignsDeleted} deleted`);
+    console.log(`   - SellerProfiles: ${profilesDeleted} deleted`);
     console.log('   - Account records: preserved (not deleted)');
     console.log('   - Cognito users: preserved (not deleted)');
   } catch (error) {
