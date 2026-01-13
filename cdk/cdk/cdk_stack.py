@@ -685,6 +685,21 @@ class CdkStack(Stack):  # type: ignore[misc]
             environment=lambda_env,
         )
 
+        # Delete Profile Orders Cascade Lambda (cascade delete of orders when profile is deleted)
+        self.delete_profile_orders_cascade_fn = lambda_.Function(
+            self,
+            "DeleteProfileOrdersCascadeFn",
+            function_name=self._rn("kernelworx-delete-profile-orders-cascade"),
+            runtime=lambda_.Runtime.PYTHON_3_13,
+            handler="handlers.delete_profile_orders_cascade.lambda_handler",
+            code=lambda_code,
+            layers=[self.shared_layer],
+            timeout=Duration.seconds(60),  # May take longer for profiles with many orders
+            memory_size=512,
+            role=self.lambda_execution_role,
+            environment=lambda_env,
+        )
+
         # Account Operations Lambda Functions
         self.update_my_account_fn = lambda_.Function(
             self,
@@ -1156,6 +1171,7 @@ class CdkStack(Stack):  # type: ignore[misc]
                 "list_unit_catalogs": self.list_unit_catalogs_fn,
                 "list_unit_campaign_catalogs": self.list_unit_campaign_catalogs_fn,
                 "campaign_operations": self.campaign_operations_fn,
+                "delete_profile_orders_cascade": self.delete_profile_orders_cascade_fn,
                 "update_my_account": self.update_my_account_fn,
                 "transfer_ownership": self.transfer_ownership_fn,
                 "request_qr_upload_fn": self.request_qr_upload_fn,

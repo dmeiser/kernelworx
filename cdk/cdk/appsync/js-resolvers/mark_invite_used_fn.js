@@ -2,22 +2,15 @@ import { util } from '@aws-appsync/utils';
 
 export function request(ctx) {
     const invite = ctx.stash.invite;
-    const now = util.time.nowISO8601();
     
-    // Update invite in invites table using inviteCode as key
+    // Delete invite after successful redemption
     return {
-        operation: 'UpdateItem',
+        operation: 'DeleteItem',
         key: util.dynamodb.toMapValues({ inviteCode: invite.inviteCode }),
-        update: {
-        expression: 'SET used = :used, usedBy = :usedBy, usedAt = :usedAt',
-        expressionValues: util.dynamodb.toMapValues({
-            ':used': true,
-            ':usedBy': ctx.identity.sub,
-            ':usedAt': now,
+        condition: { expression: 'attribute_exists(inviteCode) AND used = :false' },
+        expressionAttributeValues: util.dynamodb.toMapValues({
             ':false': false
         })
-        },
-        condition: { expression: 'attribute_exists(inviteCode) AND used = :false' }
     };
 }
 

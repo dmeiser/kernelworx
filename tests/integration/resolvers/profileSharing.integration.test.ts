@@ -868,6 +868,90 @@ describe('Profile Sharing Integration Tests', () => {
       }
     });
 
+    it('deletes invite from database after successful redemption', async () => {
+      // Arrange: Create profile and invite
+      const { data: profileData } = await ownerClient.mutate({
+        mutation: CREATE_PROFILE,
+        variables: { input: { sellerName: `${getTestPrefix()}-InviteDelete` } },
+      });
+      const testProfileId = profileData.createSellerProfile.profileId;
+      createdProfileIds.push(testProfileId);
+
+      const { data: inviteData } = await ownerClient.mutate({
+        mutation: CREATE_INVITE,
+        variables: {
+          input: {
+            profileId: testProfileId,
+            permissions: ['READ'],
+          },
+        },
+      });
+      const inviteCode = inviteData.createProfileInvite.inviteCode;
+
+      // Act: Contributor redeems invite
+      const { data: redeemData } = await contributorClient.mutate({
+        mutation: REDEEM_INVITE,
+        variables: { input: { inviteCode } },
+      });
+      expect(redeemData.redeemProfileInvite).toBeDefined();
+
+      // Assert: Verify invite is DELETED from database (not just marked used)
+      // Direct DynamoDB query to verify deletion
+      const inviteResult = await dynamoClient.send(new QueryCommand({
+        TableName: TABLE_NAMES.invites,
+        KeyConditionExpression: 'inviteCode = :code',
+        ExpressionAttributeValues: {
+          ':code': { S: inviteCode },
+        },
+      }));
+
+      // Invite should be completely deleted from the database
+      expect(inviteResult.Items).toHaveLength(0);
+    });
+
+    it('creates share with ACCOUNT# prefix in createdByAccountId', async () => {
+      // Arrange: Create profile and invite
+      const { data: profileData } = await ownerClient.mutate({
+        mutation: CREATE_PROFILE,
+        variables: { input: { sellerName: `${getTestPrefix()}-AccountPrefix` } },
+      });
+      const testProfileId = profileData.createSellerProfile.profileId;
+      createdProfileIds.push(testProfileId);
+
+      const { data: inviteData } = await ownerClient.mutate({
+        mutation: CREATE_INVITE,
+        variables: {
+          input: {
+            profileId: testProfileId,
+            permissions: ['READ'],
+          },
+        },
+      });
+      const inviteCode = inviteData.createProfileInvite.inviteCode;
+
+      // Act: Contributor redeems invite
+      const { data: redeemData } = await contributorClient.mutate({
+        mutation: REDEEM_INVITE,
+        variables: { input: { inviteCode } },
+      });
+      expect(redeemData.redeemProfileInvite).toBeDefined();
+
+      // Assert: Verify createdByAccountId has ACCOUNT# prefix in DynamoDB
+      const sharesResult = await dynamoClient.send(new QueryCommand({
+        TableName: TABLE_NAMES.shares,
+        KeyConditionExpression: 'profileId = :pid',
+        ExpressionAttributeValues: {
+          ':pid': { S: `PROFILE#${testProfileId}` },
+        },
+      }));
+
+      expect(sharesResult.Items).toHaveLength(1);
+      const shareItem = sharesResult.Items![0];
+      const createdByAccountId = shareItem.createdByAccountId?.S;
+      expect(createdByAccountId).toBeDefined();
+      expect(createdByAccountId).toMatch(/^ACCOUNT#/);
+    });
+
     it('concurrent redemption of same invite code (race condition)', async () => {
       // Arrange: Create profile and invite
       const { data: profileData } = await ownerClient.mutate({
@@ -1167,6 +1251,44 @@ describe('Profile Sharing Integration Tests', () => {
       expect(shareData.shareProfileDirect.targetAccountId).toBe(contributorAccountId);
       expect(shareData.shareProfileDirect.permissions).toEqual(['READ', 'WRITE']);
       const shareId = shareData.shareProfileDirect.shareId;
+    });
+
+    it('direct share includes ACCOUNT# prefix in createdByAccountId', async () => {
+      // Arrange: Create profile
+      const { data: profileData } = await ownerClient.mutate({
+        mutation: CREATE_PROFILE,
+        variables: { input: { sellerName: `${getTestPrefix()}-DirectSharePrefix` } },
+      });
+      const testProfileId = profileData.createSellerProfile.profileId;
+      createdProfileIds.push(testProfileId);
+
+      // Act: Share profile directly
+      const { data: shareData } = await ownerClient.mutate({
+        mutation: SHARE_DIRECT,
+        variables: {
+          input: {
+            profileId: testProfileId,
+            targetAccountEmail: process.env.TEST_CONTRIBUTOR_EMAIL!,
+            permissions: ['READ'],
+          },
+        },
+      });
+      expect(shareData.shareProfileDirect).toBeDefined();
+
+      // Assert: Verify createdByAccountId has ACCOUNT# prefix in DynamoDB
+      const sharesResult = await dynamoClient.send(new QueryCommand({
+        TableName: TABLE_NAMES.shares,
+        KeyConditionExpression: 'profileId = :pid',
+        ExpressionAttributeValues: {
+          ':pid': { S: `PROFILE#${testProfileId}` },
+        },
+      }));
+
+      expect(sharesResult.Items).toHaveLength(1);
+      const shareItem = sharesResult.Items![0];
+      const createdByAccountId = shareItem.createdByAccountId?.S;
+      expect(createdByAccountId).toBeDefined();
+      expect(createdByAccountId).toMatch(/^ACCOUNT#/);
     });
 
     it('rejects invalid permission values', async () => {

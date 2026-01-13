@@ -38,7 +38,7 @@ export function request(ctx) {
         shareId: shareId,
         permissions: permissions,
         ownerAccountId: ownerAccountId,  // Store for BatchGetItem lookup
-        createdByAccountId: ctx.identity.sub,
+        createdByAccountId: `ACCOUNT#${ctx.identity.sub}`,
         createdAt: now
     };
     

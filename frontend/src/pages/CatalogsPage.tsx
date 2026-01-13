@@ -76,7 +76,7 @@ const buildMyCatalogs = (
   catalogsInUse: Set<string>,
 ): Catalog[] => {
   const activeOwned = myOwnedCatalogs.filter((c) => c.isDeleted !== true);
-  
+
   // Add public catalogs that are in use but not owned
   const ownedIds = new Set(activeOwned.map((c) => c.catalogId));
   const usedPublicNotOwned = publicCatalogs.filter(
@@ -86,7 +86,7 @@ const buildMyCatalogs = (
       catalogsInUse.has(catalog.catalogId) &&
       catalog.isDeleted !== true,
   );
-  
+
   return [...activeOwned, ...usedPublicNotOwned];
 };
 
