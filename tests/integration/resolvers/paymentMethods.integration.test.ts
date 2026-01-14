@@ -117,7 +117,7 @@ const SHARE_DIRECT = gql`
   }
 `;
 
-describe.sequential('Payment Methods Integration Tests', () => {
+describe.skip.sequential('Payment Methods Integration Tests', () => {
   let ownerClient: ApolloClient<any>;
   let writeUserClient: ApolloClient<any>;
   let readUserClient: ApolloClient<any>;

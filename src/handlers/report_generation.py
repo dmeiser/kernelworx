@@ -11,11 +11,11 @@ from io import BytesIO
 from typing import TYPE_CHECKING, Any, Dict
 
 import boto3
-from openpyxl import Workbook
-from openpyxl.styles import Font, PatternFill
 
 if TYPE_CHECKING:  # pragma: no cover
     from mypy_boto3_s3.client import S3Client
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
@@ -247,6 +247,8 @@ def _generate_csv_report(campaign: Dict[str, Any], orders: list[Dict[str, Any]])
 
 def _write_excel_headers(ws: Any, headers: list[str]) -> None:
     """Write styled headers to Excel worksheet."""
+    from openpyxl.styles import Font, PatternFill
+    
     header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
     header_font = Font(bold=True, color="FFFFFF")
     for col, header in enumerate(headers, start=1):
@@ -282,6 +284,8 @@ def _autosize_excel_columns(ws: Any) -> None:
 
 def _generate_excel_report(campaign: Dict[str, Any], orders: list[Dict[str, Any]]) -> bytes:
     """Generate Excel report with product columns."""
+    from openpyxl import Workbook
+    
     wb = Workbook()
     ws = wb.active
     assert ws is not None, "Workbook must have an active worksheet"
