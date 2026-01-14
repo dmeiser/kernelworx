@@ -110,16 +110,6 @@ const REQUEST_CAMPAIGN_REPORT = gql`
   }
 `;
 
-const GET_CAMPAIGN = gql`
-  query GetCampaign($campaignId: ID!) {
-    getCampaign(campaignId: $campaignId) {
-      campaignId
-      campaignName
-      profileId
-    }
-  }
-`;
-
 // Cleanup mutations
 const DELETE_ORDER = gql`
   mutation DeleteOrder($orderId: ID!) {
@@ -373,14 +363,6 @@ describe.skip('requestCampaignReport Integration Tests', () => {
 
   describe('Owner Authorization', () => {
     test('should allow owner to request campaign report with default format (xlsx)', async () => {
-      // First verify the campaign exists
-      const campaignCheck = await ownerClient.query({
-        query: GET_CAMPAIGN,
-        variables: { campaignId: testCampaignId },
-        fetchPolicy: 'network-only',
-      });
-      console.log('Campaign exists:', campaignCheck.data.getCampaign);
-
       const result = await ownerClient.mutate({
         mutation: REQUEST_CAMPAIGN_REPORT,
         variables: {

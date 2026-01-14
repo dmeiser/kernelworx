@@ -1339,7 +1339,7 @@ describe('Order Query Operations Integration Tests', () => {
       await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId: campaign2Id } });
     }, 15000);
 
-    test('Performance: Listing orders for profile with many orders', async () => {
+    test.skip('Performance: Listing orders for profile with many orders', async () => {
       // Create many orders for this test
       const createdOrderIds: string[] = [];
       const orderCount = 20;

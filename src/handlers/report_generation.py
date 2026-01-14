@@ -139,10 +139,9 @@ def request_campaign_report(event: Dict[str, Any], context: Any) -> Dict[str, An
         return result
 
     except AppError as e:
-        logger.error(f"AppError: {e.error_code}: {e.message}")
         return e.to_dict()  # type: ignore[no-any-return]
     except Exception as e:
-        logger.error("Unexpected error generating report", error=str(e), exc_info=True)
+        logger.error("Unexpected error generating report", error=str(e))
         error = AppError(ErrorCode.INTERNAL_ERROR, f"Failed to generate report: {str(e)}")
         return error.to_dict()  # type: ignore[no-any-return]
 
