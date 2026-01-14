@@ -983,66 +983,6 @@ describe('Order Query Operations Integration Tests', () => {
       });
     });
 
-    test.skip('Order with CREDIT_CARD payment method - DEPRECATED', async () => {
-      const { data: orderData }: any = await ownerClient.mutate({
-        mutation: CREATE_ORDER,
-        variables: {
-          input: {
-            profileId: testProfileId,
-            campaignId: testCampaignId,
-            customerName: 'Credit Card Customer',
-            orderDate: new Date().toISOString(),
-            paymentMethod: 'CREDIT_CARD',
-            lineItems: [{ productId: testProductId, quantity: 1 }],
-          },
-        },
-      });
-      const orderId = orderData.createOrder.orderId;
-
-      const { data }: any = await ownerClient.query({
-        query: GET_ORDER,
-        variables: { orderId },
-        fetchPolicy: 'network-only',
-      });
-
-      expect(data.getOrder.paymentMethod).toBe('CREDIT_CARD');
-
-      await ownerClient.mutate({
-        mutation: DELETE_ORDER,
-        variables: { orderId },
-      });
-    });
-
-    test.skip('Order with OTHER payment method - DEPRECATED', async () => {
-      const { data: orderData }: any = await ownerClient.mutate({
-        mutation: CREATE_ORDER,
-        variables: {
-          input: {
-            profileId: testProfileId,
-            campaignId: testCampaignId,
-            customerName: 'Other Payment Customer',
-            orderDate: new Date().toISOString(),
-            paymentMethod: 'OTHER',
-            lineItems: [{ productId: testProductId, quantity: 1 }],
-          },
-        },
-      });
-      const orderId = orderData.createOrder.orderId;
-
-      const { data }: any = await ownerClient.query({
-        query: GET_ORDER,
-        variables: { orderId },
-        fetchPolicy: 'network-only',
-      });
-
-      expect(data.getOrder.paymentMethod).toBe('OTHER');
-
-      await ownerClient.mutate({
-        mutation: DELETE_ORDER,
-        variables: { orderId },
-      });
-    });
-
     test('Order totalAmount calculation is correct with multiple items', async () => {
       // Create order with multiple line items of same product
       const { data: orderData }: any = await ownerClient.mutate({
@@ -1338,64 +1278,6 @@ describe('Order Query Operations Integration Tests', () => {
       await ownerClient.mutate({ mutation: DELETE_ORDER, variables: { orderId: order2Id } });
       await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId: campaign2Id } });
     }, 15000);
-
-    test.skip('Performance: Listing orders for profile with many orders', async () => {
-      // Create many orders for this test
-      const createdOrderIds: string[] = [];
-      const orderCount = 20;
-
-      for (let i = 0; i < orderCount; i++) {
-        const { data: orderData }: any = await ownerClient.mutate({
-          mutation: CREATE_ORDER,
-          variables: {
-            input: {
-              profileId: testProfileId,
-              campaignId: testCampaignId,
-              customerName: `Performance Customer ${i}`,
-              orderDate: new Date(Date.now() - i * 86400000).toISOString(), // Different dates
-              paymentMethod: i % 3 === 0 ? 'CASH' : i % 3 === 1 ? 'CHECK' : 'CASH',  // Use CASH as fallback (CREDIT_CARD is deprecated)
-              lineItems: [{ productId: testProductId, quantity: i + 1 }],
-            },
-          },
-        });
-        createdOrderIds.push(orderData.createOrder.orderId);
-      }
-
-      // Measure query performance for listOrdersByProfile
-      const startTimeProfile = Date.now();
-      const { data: profileData }: any = await ownerClient.query({
-        query: LIST_ORDERS_BY_PROFILE,
-        variables: { profileId: testProfileId },
-        fetchPolicy: 'network-only',
-      });
-      const profileQueryTime = Date.now() - startTimeProfile;
-
-      console.log(`📊 Performance: listOrdersByProfile with ${orderCount} orders took ${profileQueryTime}ms`);
-
-      // Assert: Query should complete in reasonable time (under 5 seconds)
-      expect(profileQueryTime).toBeLessThan(5000);
-      expect(profileData.listOrdersByProfile.length).toBeGreaterThanOrEqual(orderCount);
-
-      // Measure query performance for listOrdersByCampaign
-      const startTimeCampaign = Date.now();
-      const { data: campaignData }: any = await ownerClient.query({
-        query: LIST_ORDERS_BY_CAMPAIGN,
-        variables: { campaignId: testCampaignId },
-        fetchPolicy: 'network-only',
-      });
-      const campaignQueryTime = Date.now() - startTimeCampaign;
-
-      console.log(`📊 Performance: listOrdersByCampaign with ${orderCount} orders took ${campaignQueryTime}ms`);
-
-      // Assert: Query should complete in reasonable time (under 5 seconds)
-      expect(campaignQueryTime).toBeLessThan(5000);
-      expect(campaignData.listOrdersByCampaign.length).toBeGreaterThanOrEqual(orderCount);
-
-      // Cleanup
-      for (const orderId of createdOrderIds) {
-        await ownerClient.mutate({ mutation: DELETE_ORDER, variables: { orderId } });
-      }
-    }, 60000);
 
     test('Performance: Listing orders ordered by orderDate', async () => {
       // Create orders with different dates to test ordering

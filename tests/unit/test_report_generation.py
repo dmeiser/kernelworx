@@ -217,12 +217,9 @@ class TestRequestCampaignReport:
             "arguments": {"input": {"campaignId": sample_campaign_id, "format": "xlsx"}},
         }
 
-        # Act
-        result = request_campaign_report(event, lambda_context)
-
-        # Assert
-        assert "errorCode" in result
-        assert result["errorCode"] == "FORBIDDEN"
+        # Act & Assert - should raise exception
+        with pytest.raises(Exception, match="FORBIDDEN"):
+            request_campaign_report(event, lambda_context)
 
     def test_nonexistent_campaign_returns_error(
         self,
@@ -237,12 +234,9 @@ class TestRequestCampaignReport:
             "arguments": {"input": {"campaignId": "CAMPAIGN#nonexistent", "format": "xlsx"}},
         }
 
-        # Act
-        result = request_campaign_report(event, lambda_context)
-
-        # Assert
-        assert "errorCode" in result
-        assert result["errorCode"] == "NOT_FOUND"
+        # Act & Assert - should raise exception
+        with pytest.raises(Exception, match="NOT_FOUND"):
+            request_campaign_report(event, lambda_context)
 
     def test_default_format_is_xlsx(
         self,
@@ -358,12 +352,9 @@ class TestRequestCampaignReport:
             "src.handlers.report_generation._get_campaign",
             side_effect=ValueError("Unexpected error"),
         ):
-            result = request_campaign_report(event, lambda_context)
-
-        # Assert
-        assert "errorCode" in result
-        assert result["errorCode"] == "INTERNAL_ERROR"
-        assert "Unexpected error" in result["message"]
+            # Act & Assert - should raise exception
+            with pytest.raises(Exception, match="Failed to generate report.*Unexpected error"):
+                request_campaign_report(event, lambda_context)
 
     def test_excel_cell_with_problematic_value(
         self,

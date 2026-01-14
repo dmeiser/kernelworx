@@ -1,7 +1,7 @@
 import { util } from '@aws-appsync/utils';
 
 export function request(ctx) {
-    const createdBy = ctx.identity.sub;
+    const createdBy = `ACCOUNT#${ctx.identity.sub}`;
     return {
         operation: 'Query',
         index: 'GSI1',
@@ -22,6 +22,10 @@ export function response(ctx) {
     const activeItems = [];
     for (const item of items) {
         if (item.isActive !== false) {
+            // Normalize createdBy: strip ACCOUNT# prefix for GraphQL ID type
+            if (item && item.createdBy && item.createdBy.startsWith('ACCOUNT#')) {
+                item.createdBy = item.createdBy.substring(8);
+            }
             activeItems.push(item);
         }
     }

@@ -1,7 +1,7 @@
 import { util } from '@aws-appsync/utils';
 
 export function request(ctx) {
-    const createdBy = ctx.identity.sub;
+    const createdBy = `ACCOUNT#${ctx.identity.sub}`;
     return {
         operation: 'Query',
         index: 'GSI1',

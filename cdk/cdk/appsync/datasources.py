@@ -85,6 +85,7 @@ def create_lambda_datasources(
         ("list_unit_catalogs", "ListUnitCatalogsDS"),
         ("list_unit_campaign_catalogs", "ListUnitCampaignCatalogsDS"),
         ("campaign_operations", "CampaignOperationsDS"),
+        ("delete_profile_orders_cascade", "DeleteProfileOrdersCascadeDS"),
         ("update_my_account", "UpdateMyAccountDS"),
         ("transfer_ownership", "TransferOwnershipDS"),
         ("request_qr_upload_fn", "RequestQRUploadDS"),

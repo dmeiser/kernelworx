@@ -117,7 +117,7 @@ const SHARE_DIRECT = gql`
   }
 `;
 
-describe.skip.sequential('Payment Methods Integration Tests', () => {
+describe.sequential('Payment Methods Integration Tests', () => {
   let ownerClient: ApolloClient<any>;
   let writeUserClient: ApolloClient<any>;
   let readUserClient: ApolloClient<any>;
@@ -868,7 +868,8 @@ describe.skip.sequential('Payment Methods Integration Tests', () => {
         expect(data.requestPaymentMethodQRCodeUpload.fields).toBeDefined();
         expect(data.requestPaymentMethodQRCodeUpload.s3Key).toBeDefined();
         expect(data.requestPaymentMethodQRCodeUpload.s3Key).toContain('payment-qr-codes');
-        expect(data.requestPaymentMethodQRCodeUpload.s3Key).toContain('venmo');
+        expect(data.requestPaymentMethodQRCodeUpload.s3Key).toMatch(/\.png$/);
+        // S3 key uses UUIDs for uniqueness, not the payment method name
 
         // Cleanup
         await ownerClient.mutate({
@@ -945,14 +946,14 @@ describe.skip.sequential('Payment Methods Integration Tests', () => {
       it('should delete QR code while keeping payment method', async () => {
         await ownerClient.mutate({
           mutation: CREATE_PAYMENT_METHOD,
-          variables: { name: 'Venmo' },
+          variables: { name: 'Venmo-DeleteQR' },
         });
 
         // Note: In a real test, we would upload a QR code first
         // For now, we just test the mutation doesn't fail
         const { data } = await ownerClient.mutate({
           mutation: DELETE_QR_CODE,
-          variables: { paymentMethodName: 'Venmo' },
+          variables: { paymentMethodName: 'Venmo-DeleteQR' },
         });
 
         expect(data.deletePaymentMethodQRCode).toBe(true);
@@ -963,12 +964,12 @@ describe.skip.sequential('Payment Methods Integration Tests', () => {
           fetchPolicy: 'network-only',
         });
         const methodNames = queryData.myPaymentMethods.map((m: any) => m.name);
-        expect(methodNames).toContain('Venmo');
+        expect(methodNames).toContain('Venmo-DeleteQR');
 
         // Cleanup
         await ownerClient.mutate({
           mutation: DELETE_PAYMENT_METHOD,
-          variables: { name: 'Venmo' },
+          variables: { name: 'Venmo-DeleteQR' },
         });
       });
 

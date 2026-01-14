@@ -141,7 +141,7 @@ const REVOKE_SHARE = gql`
   }
 `;
 
-describe.skip('requestCampaignReport Integration Tests', () => {
+describe('requestCampaignReport Integration Tests', () => {
   const SUITE_ID = 'request-campaigngn-report';
   
   let ownerClient: any;

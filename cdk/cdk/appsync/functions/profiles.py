@@ -278,21 +278,12 @@ def create_profile_delete_functions(
     if "delete_profile_orders_cascade" in lambda_datasources:
         functions["delete_profile_orders_cascade"] = appsync.AppsyncFunction(
             scope,
-            "DeleteProfileOrdersCascadeFn",
+            "DeleteProfileOrdersCascadeFnAppSync",  # unique ID to avoid collision with Lambda construct
             name=f"DeleteProfileOrdersCascadeFn_{env_name}",
             api=api,
             data_source=lambda_datasources["delete_profile_orders_cascade"],
             runtime=appsync.FunctionRuntime.JS_1_0_0,
-            code=appsync.Code.from_inline(
-                """{
-    "version": "1.0.0",
-    "operation": "Invoke",
-    "payload": {
-        "arguments": $util.toJson($ctx.args),
-        "stash": $util.toJson($ctx.stash)
-    }
-}"""
-            ),
+            code=appsync.Code.from_asset(str(RESOLVERS_DIR / "delete_profile_orders_cascade_fn.js")),
         )
 
     return functions

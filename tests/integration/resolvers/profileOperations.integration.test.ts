@@ -1348,7 +1348,7 @@ describe('Profile Operations Integration Tests', () => {
       // Profile was deleted, no cleanup needed
     }, 15000);
 
-    it.skip('Data Integrity: Deleting profile cascades to orders in single campaign', async () => {
+    it('Data Integrity: Deleting profile cascades to orders in single campaign', async () => {
       // Arrange: Create profile, campaign, and order
       const { DynamoDBClient, QueryCommand } = await import('@aws-sdk/client-dynamodb');
       const dynamoClient = new DynamoDBClient({ region: 'us-east-1' });
@@ -1365,6 +1365,11 @@ describe('Profile Operations Integration Tests', () => {
         mutation CreateCatalog($input: CreateCatalogInput!) {
           createCatalog(input: $input) {
             catalogId
+            products {
+              productId
+              productName
+              price
+            }
           }
         }
       `;
@@ -1420,6 +1425,10 @@ describe('Profile Operations Integration Tests', () => {
 
       // First, get the product ID from the catalog
       const productId = catalogData.createCatalog.products?.[0]?.productId;
+      if (!productId) {
+        throw new Error('Product ID not found in catalog response');
+      }
+      console.log(`Using productId: ${productId} for orders in campaign: ${campaignId}`);
       
       const orders = [];
       for (let i = 0; i < 2; i++) {
@@ -1445,17 +1454,25 @@ describe('Profile Operations Integration Tests', () => {
           console.error('Order creation error:', errors);
           throw errors[0];
         }
+        if (!orderData?.createOrder?.orderId) {
+          console.error('Order creation returned no orderId:', orderData);
+          throw new Error(`Order creation failed for Customer ${i}`);
+        }
+        console.log(`Created order ${i}: ${orderData.createOrder.orderId}`);
         orders.push(orderData.createOrder.orderId);
       }
 
       // Verify orders exist in DynamoDB
+      // Note: campaignId from GraphQL already includes CAMPAIGN# prefix
+      console.log(`Querying orders table for campaignId: ${campaignId}`);
       const beforeDelete = await dynamoClient.send(new QueryCommand({
         TableName: TABLE_NAMES.orders,
         KeyConditionExpression: 'campaignId = :campaignId',
         ExpressionAttributeValues: {
-          ':campaignId': { S: `CAMPAIGN#${campaignId}` },
+          ':campaignId': { S: campaignId }, // Already includes CAMPAIGN# prefix
         },
       }));
+      console.log(`Found ${beforeDelete.Items?.length || 0} orders in DynamoDB`);
       expect(beforeDelete.Items).toHaveLength(2);
 
       // Act: Delete profile
@@ -1470,7 +1487,7 @@ describe('Profile Operations Integration Tests', () => {
         TableName: TABLE_NAMES.orders,
         KeyConditionExpression: 'campaignId = :campaignId',
         ExpressionAttributeValues: {
-          ':campaignId': { S: `CAMPAIGN#${campaignId}` },
+          ':campaignId': { S: campaignId }, // Already includes CAMPAIGN# prefix
         },
       }));
       expect(afterDelete.Items).toHaveLength(0);
@@ -1478,7 +1495,7 @@ describe('Profile Operations Integration Tests', () => {
       // Profile, campaign, and orders all deleted
     }, 30000);
 
-    it.skip('Data Integrity: Deleting profile cascades to orders in multiple campaigns', async () => {
+    it('Data Integrity: Deleting profile cascades to orders in multiple campaigns', async () => {
       // Arrange: Create profile with 2 campaigns, each with multiple orders
       const { DynamoDBClient, QueryCommand } = await import('@aws-sdk/client-dynamodb');
       const dynamoClient = new DynamoDBClient({ region: 'us-east-1' });
@@ -1495,6 +1512,11 @@ describe('Profile Operations Integration Tests', () => {
         mutation CreateCatalog($input: CreateCatalogInput!) {
           createCatalog(input: $input) {
             catalogId
+            products {
+              productId
+              productName
+              price
+            }
           }
         }
       `;
@@ -1578,12 +1600,13 @@ describe('Profile Operations Integration Tests', () => {
       }
 
       // Verify 3 orders in each campaign before deletion
+      // Note: campaignId from GraphQL already includes CAMPAIGN# prefix
       for (const campaignId of campaigns) {
         const result = await dynamoClient.send(new QueryCommand({
           TableName: TABLE_NAMES.orders,
           KeyConditionExpression: 'campaignId = :campaignId',
           ExpressionAttributeValues: {
-            ':campaignId': { S: `CAMPAIGN#${campaignId}` },
+            ':campaignId': { S: campaignId },
           },
         }));
         expect(result.Items).toHaveLength(3);
@@ -1602,7 +1625,7 @@ describe('Profile Operations Integration Tests', () => {
           TableName: TABLE_NAMES.orders,
           KeyConditionExpression: 'campaignId = :campaignId',
           ExpressionAttributeValues: {
-            ':campaignId': { S: `CAMPAIGN#${campaignId}` },
+            ':campaignId': { S: campaignId },
           },
         }));
         expect(result.Items).toHaveLength(0);

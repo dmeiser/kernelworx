@@ -1286,41 +1286,6 @@ describe('Order Operations Integration Tests', () => {
     // With the custom payment types feature (Phase 1-4), only Cash, Check, 
     // and user-created custom methods are valid. These legacy tests are
     // replaced by the "creates order with valid custom payment method" test.
-    test.skip('creates order with CREDIT_CARD payment method - DEPRECATED: CREDIT_CARD no longer valid', async () => {
-      const input = {
-        profileId: testProfileId,
-        campaignId: testCampaignId,
-        customerName: 'Credit Card Customer',
-        orderDate: new Date().toISOString(),
-        paymentMethod: 'CREDIT_CARD',
-        lineItems: [{ productId: testProductId, quantity: 1 }],
-      };
-
-      const { data } = await ownerClient.mutate({
-        mutation: CREATE_ORDER,
-        variables: { input },
-      });
-
-      expect(data.createOrder.paymentMethod).toBe('CREDIT_CARD');
-    }, 10000);
-
-    test.skip('creates order with OTHER payment method - DEPRECATED: OTHER no longer valid', async () => {
-      const input = {
-        profileId: testProfileId,
-        campaignId: testCampaignId,
-        customerName: 'Other Payment Customer',
-        orderDate: new Date().toISOString(),
-        paymentMethod: 'OTHER',
-        lineItems: [{ productId: testProductId, quantity: 1 }],
-      };
-
-      const { data } = await ownerClient.mutate({
-        mutation: CREATE_ORDER,
-        variables: { input },
-      });
-
-      expect(data.createOrder.paymentMethod).toBe('OTHER');
-    }, 10000);
   });
 
   describe('createOrder optional fields', () => {
