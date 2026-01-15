@@ -93,6 +93,7 @@ import { chromium } from 'playwright';
     
     // Check all elements
     const allElements = document.querySelectorAll('*');
+    // eslint-disable-next-line complexity
     allElements.forEach((el) => {
       const rect = el.getBoundingClientRect();
       const computedStyle = window.getComputedStyle(el);

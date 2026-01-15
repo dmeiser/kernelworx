@@ -11,8 +11,6 @@ from io import BytesIO
 from typing import TYPE_CHECKING, Any, Dict
 
 import boto3
-from openpyxl import Workbook
-from openpyxl.styles import Font, PatternFill
 
 if TYPE_CHECKING:  # pragma: no cover
     from mypy_boto3_s3.client import S3Client
@@ -139,11 +137,11 @@ def request_campaign_report(event: Dict[str, Any], context: Any) -> Dict[str, An
         return result
 
     except AppError as e:
-        return e.to_dict()  # type: ignore[no-any-return]
+        logger.error("AppError in request_campaign_report", error_code=e.error_code, error_message=e.message)
+        raise Exception(f"{e.error_code}: {e.message}") from e
     except Exception as e:
         logger.error("Unexpected error generating report", error=str(e))
-        error = AppError(ErrorCode.INTERNAL_ERROR, f"Failed to generate report: {str(e)}")
-        return error.to_dict()  # type: ignore[no-any-return]
+        raise Exception(f"Failed to generate report: {str(e)}") from e
 
 
 def _get_campaign(table: Any, campaign_id: str) -> Dict[str, Any] | None:
@@ -247,6 +245,8 @@ def _generate_csv_report(campaign: Dict[str, Any], orders: list[Dict[str, Any]])
 
 def _write_excel_headers(ws: Any, headers: list[str]) -> None:
     """Write styled headers to Excel worksheet."""
+    from openpyxl.styles import Font, PatternFill
+    
     header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
     header_font = Font(bold=True, color="FFFFFF")
     for col, header in enumerate(headers, start=1):
@@ -282,6 +282,8 @@ def _autosize_excel_columns(ws: Any) -> None:
 
 def _generate_excel_report(campaign: Dict[str, Any], orders: list[Dict[str, Any]]) -> bytes:
     """Generate Excel report with product columns."""
+    from openpyxl import Workbook
+    
     wb = Workbook()
     ws = wb.active
     assert ws is not None, "Workbook must have an active worksheet"

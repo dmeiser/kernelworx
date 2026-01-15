@@ -31,13 +31,13 @@ export function request(ctx) {
         // No updates provided, just return existing shared campaign
         return {
             operation: 'GetItem',
-            key: util.dynamodb.toMapValues({ sharedCampaignCode: input.sharedCampaignCode, SK: 'METADATA' })
+            key: util.dynamodb.toMapValues({ sharedCampaignCode: input.sharedCampaignCode })
         };
     }
     
     return {
         operation: 'UpdateItem',
-        key: util.dynamodb.toMapValues({ sharedCampaignCode: input.sharedCampaignCode, SK: 'METADATA' }),
+        key: util.dynamodb.toMapValues({ sharedCampaignCode: input.sharedCampaignCode }),
         update: {
             expression: 'SET ' + updateParts.join(', '),
             expressionNames: expressionNames,
@@ -50,5 +50,10 @@ export function response(ctx) {
     if (ctx.error) {
         util.error(ctx.error.message, ctx.error.type);
     }
-    return ctx.result;
+    // Normalize createdBy: strip ACCOUNT# prefix for GraphQL ID type
+    const result = ctx.result;
+    if (result && result.createdBy && result.createdBy.startsWith('ACCOUNT#')) {
+        result.createdBy = result.createdBy.substring(8);
+    }
+    return result;
 }

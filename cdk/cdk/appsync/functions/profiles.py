@@ -110,6 +110,7 @@ def create_profile_delete_functions(
     api: appsync.GraphqlApi,
     env_name: str,
     datasources: dict[str, Any],
+    lambda_datasources: dict[str, Any] | None = None,
 ) -> dict[str, appsync.AppsyncFunction]:
     """
     Create AppSync functions for deleteSellerProfile pipeline.
@@ -121,10 +122,13 @@ def create_profile_delete_functions(
         api: The AppSync GraphQL API
         env_name: Environment name
         datasources: Dictionary of datasource name to data source
+        lambda_datasources: Dictionary of Lambda datasource name to data source
 
     Returns:
         Dictionary of function name to AppSync function
     """
+    if lambda_datasources is None:
+        lambda_datasources = {}
     functions: dict[str, appsync.AppsyncFunction] = {}
 
     # LookupProfileForUpdateFn
@@ -269,5 +273,17 @@ def create_profile_delete_functions(
         runtime=appsync.FunctionRuntime.JS_1_0_0,
         code=appsync.Code.from_asset(str(RESOLVERS_DIR / "check_catalog_usage_fn.js")),
     )
+
+    # DeleteProfileOrdersCascadeFn - Lambda function to delete all orders when deleting profile
+    if "delete_profile_orders_cascade" in lambda_datasources:
+        functions["delete_profile_orders_cascade"] = appsync.AppsyncFunction(
+            scope,
+            "DeleteProfileOrdersCascadeFnAppSync",  # unique ID to avoid collision with Lambda construct
+            name=f"DeleteProfileOrdersCascadeFn_{env_name}",
+            api=api,
+            data_source=lambda_datasources["delete_profile_orders_cascade"],
+            runtime=appsync.FunctionRuntime.JS_1_0_0,
+            code=appsync.Code.from_asset(str(RESOLVERS_DIR / "delete_profile_orders_cascade_fn.js")),
+        )
 
     return functions

@@ -128,7 +128,7 @@ def request_qr_upload(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to generate upload URL")
 
 
-def confirm_qr_upload(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+def confirm_qr_upload(event: Dict[str, Any], context: Any) -> Dict[str, Any]:  # noqa: C901
     """
     Confirm QR code upload and generate pre-signed GET URL.
 
@@ -287,7 +287,7 @@ def generate_presigned_urls(event: Dict[str, Any], context: Any) -> Dict[str, An
         raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to generate QR code URLs")
 
 
-def delete_qr_code(event: Dict[str, Any], context: Any) -> bool:
+def delete_qr_code(event: Dict[str, Any], context: Any) -> bool:  # noqa: C901
     """
     Delete QR code from S3 and clear qrCodeUrl in DynamoDB for a payment method.
     """

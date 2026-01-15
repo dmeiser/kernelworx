@@ -134,6 +134,7 @@ def test_create_profile():
   2. DynamoDB/S3 must be checked to confirm all test data has been deleted
 - Use `@mock_dynamodb`, `@mock_s3`, etc. from `moto` - they automatically clean up when the test ends
 - **Important**: Tests with leftover data (orphaned records) are INCOMPLETE and MUST be fixed before merge
+- **Global cleanup** (integration tests): The global teardown process deletes all test user data EXCEPT Account records and Cognito user profiles. This allows tests to reuse the same test user accounts across multiple runs while cleaning up generated data (campaigns, orders, shares, invites, catalogs, etc.).
 
 ## 4. TypeScript/React Code Standards (Frontend)
 

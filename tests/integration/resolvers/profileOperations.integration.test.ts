@@ -1347,5 +1347,291 @@ describe('Profile Operations Integration Tests', () => {
 
       // Profile was deleted, no cleanup needed
     }, 15000);
+
+    it('Data Integrity: Deleting profile cascades to orders in single campaign', async () => {
+      // Arrange: Create profile, campaign, and order
+      const { DynamoDBClient, QueryCommand } = await import('@aws-sdk/client-dynamodb');
+      const dynamoClient = new DynamoDBClient({ region: 'us-east-1' });
+
+      const profileName = `${getTestPrefix()}-CascadeOrderDelete`;
+      const { data: profileData } = await ownerClient.mutate({
+        mutation: CREATE_PROFILE,
+        variables: { input: { sellerName: profileName } },
+      });
+      const profileId = profileData.createSellerProfile.profileId;
+
+      // Create catalog for campaign
+      const CREATE_CATALOG = gql`
+        mutation CreateCatalog($input: CreateCatalogInput!) {
+          createCatalog(input: $input) {
+            catalogId
+            products {
+              productId
+              productName
+              price
+            }
+          }
+        }
+      `;
+      const { data: catalogData } = await ownerClient.mutate({
+        mutation: CREATE_CATALOG,
+        variables: {
+          input: {
+            catalogName: 'Test Catalog for Order Cascade',
+            isPublic: false,
+            products: [
+              {
+                productName: 'Test Product',
+                description: 'Test product',
+                price: 10.00,
+                sortOrder: 1,
+              },
+            ],
+          },
+        },
+      });
+      const catalogId = catalogData.createCatalog.catalogId;
+
+      // Create campaign
+      const CREATE_CAMPAIGN = gql`
+        mutation CreateCampaign($input: CreateCampaignInput!) {
+          createCampaign(input: $input) {
+            campaignId
+          }
+        }
+      `;
+      const { data: campaignData } = await ownerClient.mutate({
+        mutation: CREATE_CAMPAIGN,
+        variables: {
+          input: {
+            profileId,
+            campaignName: 'Test Campaign for Cascade',
+            campaignYear: 2025,
+            startDate: new Date().toISOString(),
+            catalogId,
+          },
+        },
+      });
+      const campaignId = campaignData.createCampaign.campaignId;
+
+      // Create orders
+      const CREATE_ORDER = gql`
+        mutation CreateOrder($input: CreateOrderInput!) {
+          createOrder(input: $input) {
+            orderId
+          }
+        }
+      `;
+
+      // First, get the product ID from the catalog
+      const productId = catalogData.createCatalog.products?.[0]?.productId;
+      if (!productId) {
+        throw new Error('Product ID not found in catalog response');
+      }
+      console.log(`Using productId: ${productId} for orders in campaign: ${campaignId}`);
+      
+      const orders = [];
+      for (let i = 0; i < 2; i++) {
+        const { data: orderData, errors } = await ownerClient.mutate({
+          mutation: CREATE_ORDER,
+          variables: {
+            input: {
+              profileId,
+              campaignId,
+              customerName: `Customer ${i}`,
+              orderDate: new Date().toISOString(),
+              paymentMethod: 'CASH',
+              lineItems: [
+                {
+                  productId,
+                  quantity: 1,
+                },
+              ],
+            },
+          },
+        });
+        if (errors) {
+          console.error('Order creation error:', errors);
+          throw errors[0];
+        }
+        if (!orderData?.createOrder?.orderId) {
+          console.error('Order creation returned no orderId:', orderData);
+          throw new Error(`Order creation failed for Customer ${i}`);
+        }
+        console.log(`Created order ${i}: ${orderData.createOrder.orderId}`);
+        orders.push(orderData.createOrder.orderId);
+      }
+
+      // Verify orders exist in DynamoDB
+      // Note: campaignId from GraphQL already includes CAMPAIGN# prefix
+      console.log(`Querying orders table for campaignId: ${campaignId}`);
+      const beforeDelete = await dynamoClient.send(new QueryCommand({
+        TableName: TABLE_NAMES.orders,
+        KeyConditionExpression: 'campaignId = :campaignId',
+        ExpressionAttributeValues: {
+          ':campaignId': { S: campaignId }, // Already includes CAMPAIGN# prefix
+        },
+      }));
+      console.log(`Found ${beforeDelete.Items?.length || 0} orders in DynamoDB`);
+      expect(beforeDelete.Items).toHaveLength(2);
+
+      // Act: Delete profile
+      const { data } = await ownerClient.mutate({
+        mutation: DELETE_PROFILE,
+        variables: { profileId },
+      });
+      expect(data.deleteSellerProfile).toBe(true);
+
+      // Assert: Verify orders are deleted from DynamoDB
+      const afterDelete = await dynamoClient.send(new QueryCommand({
+        TableName: TABLE_NAMES.orders,
+        KeyConditionExpression: 'campaignId = :campaignId',
+        ExpressionAttributeValues: {
+          ':campaignId': { S: campaignId }, // Already includes CAMPAIGN# prefix
+        },
+      }));
+      expect(afterDelete.Items).toHaveLength(0);
+
+      // Profile, campaign, and orders all deleted
+    }, 30000);
+
+    it('Data Integrity: Deleting profile cascades to orders in multiple campaigns', async () => {
+      // Arrange: Create profile with 2 campaigns, each with multiple orders
+      const { DynamoDBClient, QueryCommand } = await import('@aws-sdk/client-dynamodb');
+      const dynamoClient = new DynamoDBClient({ region: 'us-east-1' });
+
+      const profileName = `${getTestPrefix()}-MultipleCampaignsCascade`;
+      const { data: profileData } = await ownerClient.mutate({
+        mutation: CREATE_PROFILE,
+        variables: { input: { sellerName: profileName } },
+      });
+      const profileId = profileData.createSellerProfile.profileId;
+
+      // Create catalog
+      const CREATE_CATALOG = gql`
+        mutation CreateCatalog($input: CreateCatalogInput!) {
+          createCatalog(input: $input) {
+            catalogId
+            products {
+              productId
+              productName
+              price
+            }
+          }
+        }
+      `;
+      const { data: catalogData } = await ownerClient.mutate({
+        mutation: CREATE_CATALOG,
+        variables: {
+          input: {
+            catalogName: 'Test Catalog for Multiple Campaigns',
+            isPublic: false,
+            products: [
+              {
+                productName: 'Test Product',
+                description: 'Test product',
+                price: 10.00,
+                sortOrder: 1,
+              },
+            ],
+          },
+        },
+      });
+      const catalogId = catalogData.createCatalog.catalogId;
+
+      // Create 2 campaigns
+      const CREATE_CAMPAIGN = gql`
+        mutation CreateCampaign($input: CreateCampaignInput!) {
+          createCampaign(input: $input) {
+            campaignId
+          }
+        }
+      `;
+      const campaigns = [];
+      for (let c = 0; c < 2; c++) {
+        const { data: campaignData } = await ownerClient.mutate({
+          mutation: CREATE_CAMPAIGN,
+          variables: {
+            input: {
+              profileId,
+              campaignName: `Campaign ${c + 1}`,
+              campaignYear: 2025,
+              startDate: new Date().toISOString(),
+              catalogId,
+            },
+          },
+        });
+        campaigns.push(campaignData.createCampaign.campaignId);
+      }
+
+      // Create 3 orders in each campaign
+      const CREATE_ORDER = gql`
+        mutation CreateOrder($input: CreateOrderInput!) {
+          createOrder(input: $input) {
+            orderId
+          }
+        }
+      `;
+      for (let c = 0; c < campaigns.length; c++) {
+        for (let o = 0; o < 3; o++) {
+          const { data: orderData, errors } = await ownerClient.mutate({
+            mutation: CREATE_ORDER,
+            variables: {
+              input: {
+                profileId,
+                campaignId: campaigns[c],
+                customerName: `Campaign ${c + 1} Customer ${o}`,
+                orderDate: new Date().toISOString(),
+                paymentMethod: 'CASH',
+                lineItems: [
+                  {
+                    productId: catalogData.createCatalog.products?.[0]?.productId,
+                    quantity: 1,
+                  },
+                ],
+              },
+            },
+          });
+          if (errors) {
+            console.error('Order creation error:', errors);
+            throw errors[0];
+          }
+        }
+      }
+
+      // Verify 3 orders in each campaign before deletion
+      // Note: campaignId from GraphQL already includes CAMPAIGN# prefix
+      for (const campaignId of campaigns) {
+        const result = await dynamoClient.send(new QueryCommand({
+          TableName: TABLE_NAMES.orders,
+          KeyConditionExpression: 'campaignId = :campaignId',
+          ExpressionAttributeValues: {
+            ':campaignId': { S: campaignId },
+          },
+        }));
+        expect(result.Items).toHaveLength(3);
+      }
+
+      // Act: Delete profile
+      const { data } = await ownerClient.mutate({
+        mutation: DELETE_PROFILE,
+        variables: { profileId },
+      });
+      expect(data.deleteSellerProfile).toBe(true);
+
+      // Assert: Verify ALL orders (6 total) are deleted
+      for (const campaignId of campaigns) {
+        const result = await dynamoClient.send(new QueryCommand({
+          TableName: TABLE_NAMES.orders,
+          KeyConditionExpression: 'campaignId = :campaignId',
+          ExpressionAttributeValues: {
+            ':campaignId': { S: campaignId },
+          },
+        }));
+        expect(result.Items).toHaveLength(0);
+      }
+
+      // Profile, campaigns, and all orders deleted
+    }, 45000);
   });
 });

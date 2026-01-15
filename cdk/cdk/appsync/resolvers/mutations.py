@@ -262,20 +262,28 @@ def create_mutation_resolvers(
     )
 
     # deleteSellerProfile Pipeline
+    delete_profile_functions_list = [
+        profile_delete_functions["verify_profile_owner_for_delete"],
+        profile_delete_functions["query_profile_shares_for_delete"],
+        profile_delete_functions["query_profile_invites_for_delete"],
+        profile_delete_functions["delete_profile_shares"],
+        profile_delete_functions["delete_profile_invites"],
+        profile_delete_functions["query_profile_campaigns_for_delete"],
+    ]
+    # Add delete_profile_orders_cascade function if it exists (cascades order deletion)
+    if "delete_profile_orders_cascade" in profile_delete_functions:
+        delete_profile_functions_list.append(profile_delete_functions["delete_profile_orders_cascade"])
+    
+    delete_profile_functions_list.extend([
+        profile_delete_functions["delete_profile_campaigns"],
+        profile_delete_functions["delete_profile_ownership"],
+        profile_delete_functions["delete_profile_metadata"],
+    ])
+
     builder.create_pipeline_resolver(
         field_name="deleteSellerProfile",
         type_name="Mutation",
-        functions=[
-            profile_delete_functions["verify_profile_owner_for_delete"],
-            profile_delete_functions["query_profile_shares_for_delete"],
-            profile_delete_functions["query_profile_invites_for_delete"],
-            profile_delete_functions["delete_profile_shares"],
-            profile_delete_functions["delete_profile_invites"],
-            profile_delete_functions["query_profile_campaigns_for_delete"],
-            profile_delete_functions["delete_profile_campaigns"],
-            profile_delete_functions["delete_profile_ownership"],
-            profile_delete_functions["delete_profile_metadata"],
-        ],
+        functions=delete_profile_functions_list,
         code_file=RESOLVERS_DIR / "delete_seller_profile_resolver.js",
         id_suffix="DeleteSellerProfileResolver",
     )

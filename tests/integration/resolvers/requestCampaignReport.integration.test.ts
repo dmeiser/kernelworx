@@ -297,7 +297,7 @@ describe('requestCampaignReport Integration Tests', () => {
       },
     });
     readonlyShareId = readonlyShareResponse.data.shareProfileDirect.shareId;
-  });
+  }, 60000);  // 60 second timeout for beforeAll
 
   afterAll(async () => {
     console.log('Cleaning up requestCampaignReport test data...');

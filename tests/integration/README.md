@@ -133,6 +133,10 @@ All tests MUST clean up after themselves to prevent pollution:
 1. **Track created resources** in test context
 2. **Delete in reverse order** of creation (shares → orders → campaigngns → profiles)
 3. **Use try/finally** to ensure cleanup even on test failure
+4. **Global cleanup guideline**: The global teardown process (`globalTeardown.ts`) deletes all data created by test users EXCEPT their user profiles and Account records. This means:
+   - ✅ Deletes: Orders, Invites, Shares, Campaigns, Catalogs, Shared Campaigns, SellerProfiles
+   - ❌ Preserves: Account records and Cognito user profiles (test users themselves)
+   - This approach allows tests to reuse the same test user accounts across multiple test runs while cleaning up generated data
 
 ## CI/CD Integration
 

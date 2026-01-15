@@ -105,6 +105,7 @@ open htmlcov/index.html
   2. Checking DynamoDB/S3 to confirm all test data has been deleted
 - Use `@mock_dynamodb` and `@mock_s3` decorators from `moto` to ensure proper cleanup
 - Tests that leave orphaned data are considered INCOMPLETE and must be fixed before merge
+- **Global cleanup** (integration tests): The global teardown process (`globalTeardown.ts`) deletes all data created by test users EXCEPT their Account records and Cognito user profiles. This allows tests to reuse the same test user accounts across multiple test runs while cleaning up all generated data (campaigns, orders, shares, invites, catalogs, shared campaigns, seller profiles)
 
 **Mocking Strategy**:
 - Use `moto` for mocking AWS services (DynamoDB, S3, SNS/SES, EventBridge)

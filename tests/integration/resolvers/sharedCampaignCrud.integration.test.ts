@@ -163,11 +163,7 @@ const DELETE_PROFILE = gql`
   }
 `;
 
-// SKIPPED: These tests fail due to rate limit (50 shared campaigns per user).
-// The test user has accumulated too many shared campaigns from previous test runs
-// that weren't cleaned up properly. To fix: delete old shared campaigns from DynamoDB
-// or use a fresh test user.
-describe.skip('Shared Campaign CRUD Operations', () => {
+describe('Shared Campaign CRUD Operations', () => {
   let testPrefix: string;
   let ownerClient: ApolloClient<any>;
   let ownerAccountId: string;
@@ -185,31 +181,49 @@ describe.skip('Shared Campaign CRUD Operations', () => {
     ownerClient = ownerResult.client;
     ownerAccountId = ownerResult.accountId;
 
-    // Clean up existing shared campaigns to avoid rate limit errors from previous test runs
-    // Note: Only clean new shared campaigns (with correct schema), skip old ones that may fail
+    // COMPREHENSIVE CLEANUP: Delete ALL existing shared campaigns directly from DynamoDB
+    // The test cleanup should delete EVERYTHING created by the test accounts
+    console.log('Performing comprehensive cleanup of all existing shared campaigns...');
     try {
-      const existingSharedCampaignsResult = await ownerClient.query({
-        query: LIST_MY_CAMPAIGN_SHARED_CAMPAIGNS,
-      });
+      const { DynamoDBClient, QueryCommand, DeleteItemCommand } = await import('@aws-sdk/client-dynamodb');
+      const dynamoClient = new DynamoDBClient({ region: 'us-east-1' });
+      const sharedCampaignsTable = TABLE_NAMES.sharedCampaigns;
       
-      const existingSharedCampaigns = existingSharedCampaignsResult.data.listMySharedCampaigns || [];
-      console.log(`Found ${existingSharedCampaigns.length} existing shared campaigns. Cleaning up...`);
+      // Query GSI1 by createdBy (ACCOUNT# prefixed Cognito sub)
+      const queryResult = await dynamoClient.send(new QueryCommand({
+        TableName: sharedCampaignsTable,
+        IndexName: 'GSI1',
+        KeyConditionExpression: 'createdBy = :accountId',
+        ExpressionAttributeValues: {
+          ':accountId': { S: `ACCOUNT#${ownerAccountId}` },
+        },
+      }));
       
-      // Delete all existing shared campaigns to avoid rate limit
-      for (const sharedCampaign of existingSharedCampaigns) {
+      const existingSharedCampaigns = queryResult.Items || [];
+      console.log(`Found ${existingSharedCampaigns.length} existing shared campaigns. Deleting all via DynamoDB...`);
+      
+      // Delete ALL shared campaigns directly from DynamoDB using primary key
+      let successCount = 0;
+      let failCount = 0;
+      for (const item of existingSharedCampaigns) {
         try {
-          await ownerClient.mutate({
-            mutation: DELETE_CAMPAIGN_SHARED_CAMPAIGN,
-            variables: { sharedCampaignCode: sharedCampaign.sharedCampaignCode },
-          });
-          console.log(`Deleted sharedCampaign: ${sharedCampaign.sharedCampaignCode}`);
+          const sharedCampaignCode = item.sharedCampaignCode.S;
+          await dynamoClient.send(new DeleteItemCommand({
+            TableName: sharedCampaignsTable,
+            Key: {
+              sharedCampaignCode: { S: sharedCampaignCode },
+            },
+          }));
+          successCount++;
         } catch (deleteError: any) {
-          // Log actual error for debugging
-          console.log(`Skipped deletion of ${sharedCampaign.sharedCampaignCode}: ${deleteError.message || deleteError}`);
+          failCount++;
+          console.error(`Failed to delete ${item.sharedCampaignCode.S}: ${deleteError.message || deleteError}`);
         }
       }
-    } catch (listError) {
-      console.warn(`Failed to list existing shared campaigns for cleanup:`, listError);
+      console.log(`Cleanup complete: ${successCount} deleted, ${failCount} failed`);
+    } catch (error: any) {
+      console.error(`Failed to cleanup shared campaigns:`, error.message || error);
+      // Don't throw - allow tests to run even if cleanup fails
     }
 
     // Create a test profile

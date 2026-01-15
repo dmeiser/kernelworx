@@ -16,6 +16,7 @@ export const TABLE_NAMES = {
   orders: process.env.ORDERS_TABLE_NAME || 'kernelworx-orders-ue1-dev',
   catalogs: process.env.CATALOGS_TABLE_NAME || 'kernelworx-catalogs-ue1-dev',
   accounts: process.env.ACCOUNTS_TABLE_NAME || 'kernelworx-accounts-ue1-dev',
+  sharedCampaigns: process.env.SHARED_CAMPAIGNS_TABLE_NAME || 'kernelworx-shared-campaigns-ue1-dev',
 };
 
 interface TestResource {

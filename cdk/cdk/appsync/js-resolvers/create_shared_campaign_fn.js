@@ -33,7 +33,7 @@ export function request(ctx) {
         unitNumber: input.unitNumber,
         city: input.city,
         state: input.state,
-        createdBy: ctx.identity.sub,
+        createdBy: `ACCOUNT#${ctx.identity.sub}`,
         createdByName: createdByName,
         creatorMessage: input.creatorMessage,
         isActive: true,
@@ -52,12 +52,9 @@ export function request(ctx) {
         item.description = input.description;
     }
     
-    // Add SK to item for sort key
-    item.SK = 'METADATA';
-    
     return {
         operation: 'PutItem',
-        key: util.dynamodb.toMapValues({ sharedCampaignCode: sharedCampaignCode, SK: 'METADATA' }),
+        key: util.dynamodb.toMapValues({ sharedCampaignCode: sharedCampaignCode }),
         attributeValues: util.dynamodb.toMapValues(item),
         condition: {
             expression: 'attribute_not_exists(sharedCampaignCode)'
@@ -72,5 +69,10 @@ export function response(ctx) {
         }
         util.error(ctx.error.message, ctx.error.type);
     }
-    return ctx.result;
+    // Normalize createdBy: strip ACCOUNT# prefix for GraphQL ID type
+    const result = ctx.result;
+    if (result && result.createdBy && result.createdBy.startsWith('ACCOUNT#')) {
+        result.createdBy = result.createdBy.substring(8);
+    }
+    return result;
 }
