@@ -422,12 +422,12 @@ export const CreateCampaignPage: React.FC = () => {
   // Handle error
   if (setup.sharedCampaignError) {
     const error = setup.sharedCampaignError instanceof Error ? setup.sharedCampaignError : new Error(String(setup.sharedCampaignError));
-    return <CampaignErrorState error={error} onBack={() => setup.navigate('/scouts')} />;
+    return <CampaignErrorState error={error} onBack={() => setup.navigate(-1)} />;
   }
 
   // Handle inactive campaign
   if (sharedCampaignInactive) {
-    return <CampaignNotFoundError onBack={() => setup.navigate('/scouts')} />;
+    return <CampaignNotFoundError onBack={() => setup.navigate(-1)} />;
   }
 
   const handleSubmitClick = async () => {
@@ -442,7 +442,7 @@ export const CreateCampaignPage: React.FC = () => {
     <Container maxWidth="md" sx={{ py: 3 }}>
       {/* Header with back button */}
       <Stack direction="row" alignItems="center" spacing={2} sx={{ mb: 3 }}>
-        <Button startIcon={<BackIcon />} onClick={() => setup.navigate('/scouts')} disabled={setup.formState.submitting}>
+        <Button startIcon={<BackIcon />} onClick={() => setup.navigate(-1)} disabled={setup.formState.submitting}>
           Back
         </Button>
         <Typography variant="h4" component="h1">
@@ -531,7 +531,7 @@ export const CreateCampaignPage: React.FC = () => {
 
           {/* Action Buttons */}
           <ActionButtonsSection
-            onBack={() => setup.navigate('/scouts')}
+            onBack={() => setup.navigate(-1)}
             onSubmit={handleSubmitClick}
             isSubmitting={setup.formState.submitting}
             isFormValid={setup.isFormValid}

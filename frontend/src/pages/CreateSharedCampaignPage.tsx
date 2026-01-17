@@ -524,8 +524,8 @@ export const CreateSharedCampaignPage: React.FC = () => {
     }
   };
 
-  const handleCancel = () => navigate('/shared-campaigns');
-  const handleBack = () => navigate('/shared-campaigns');
+  const handleCancel = () => navigate(-1);
+  const handleBack = () => navigate(-1);
 
   return (
     <Container maxWidth="md" sx={{ py: 3 }}>
