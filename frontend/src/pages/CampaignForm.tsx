@@ -1,7 +1,7 @@
 /**
  * Campaign form component for CreateCampaignPage
  */
-import React from 'react';
+import React, { memo } from 'react';
 import {
   Paper,
   Stack,
@@ -27,65 +27,13 @@ import {
 import { ExpandMore as ExpandMoreIcon, Info as InfoIcon } from '@mui/icons-material';
 import type { Catalog, SharedCampaign, SellerProfile } from '../types';
 import { UNIT_TYPES } from '../constants/unitTypes';
+import { StateAutocomplete } from '../components/StateAutocomplete';
+import { CatalogSection } from '../components/CatalogSection';
 
 // Local type aliases for convenience
 type Profile = Pick<SellerProfile, 'profileId' | 'sellerName' | 'isOwner'>;
 
-const US_STATES = [
-  'AL',
-  'AK',
-  'AZ',
-  'AR',
-  'CA',
-  'CO',
-  'CT',
-  'DE',
-  'FL',
-  'GA',
-  'HI',
-  'ID',
-  'IL',
-  'IN',
-  'IA',
-  'KS',
-  'KY',
-  'LA',
-  'ME',
-  'MD',
-  'MA',
-  'MI',
-  'MN',
-  'MS',
-  'MO',
-  'MT',
-  'NE',
-  'NV',
-  'NH',
-  'NJ',
-  'NM',
-  'NY',
-  'NC',
-  'ND',
-  'OH',
-  'OK',
-  'OR',
-  'PA',
-  'RI',
-  'SC',
-  'SD',
-  'TN',
-  'TX',
-  'UT',
-  'VT',
-  'VA',
-  'WA',
-  'WV',
-  'WI',
-  'WY',
-  'DC',
-];
-
-interface FormState {
+interface FormStateValues {
   profileId: string;
   campaignName: string;
   campaignYear: number;
@@ -103,6 +51,9 @@ interface FormState {
     message: string;
     severity: 'success' | 'error';
   } | null;
+}
+
+interface FormSetters {
   setProfileId: (id: string) => void;
   setCampaignName: (name: string) => void;
   setCampaignYear: (year: number) => void;
@@ -122,6 +73,9 @@ interface FormState {
     } | null,
   ) => void;
 }
+
+// For backwards compatibility, merge them for the component's FormState prop
+type FormState = FormStateValues & FormSetters;
 
 interface CampaignFormProps {
   formState: FormState;
@@ -229,114 +183,7 @@ const CampaignNameYearFields: React.FC<CampaignNameYearProps> = ({ formState }) 
   </Stack>
 );
 
-// Catalog menu item component
-interface CatalogMenuItemProps {
-  catalog: Catalog;
-}
 
-const CatalogMenuItem: React.FC<CatalogMenuItemProps> = ({ catalog }) => (
-  <MenuItem value={catalog.catalogId}>
-    {catalog.catalogName}
-    {catalog.catalogType === 'ADMIN_MANAGED' && ' (Official)'}
-  </MenuItem>
-);
-
-// Catalog group header
-const CatalogGroupHeader: React.FC<{ label: string }> = ({ label }) => (
-  <MenuItem disabled sx={{ fontWeight: 600, backgroundColor: '#f5f5f5', opacity: 1 }}>
-    {label}
-  </MenuItem>
-);
-
-// Loading state for catalog dropdown
-const CatalogLoadingItem: React.FC = () => (
-  <MenuItem disabled>
-    <CircularProgress size={20} sx={{ mr: 1 }} />
-    Loading catalogs...
-  </MenuItem>
-);
-
-// Empty state for catalog dropdown
-const CatalogEmptyItem: React.FC = () => <MenuItem disabled>No catalogs available</MenuItem>;
-
-// Catalog group component
-interface CatalogGroupProps {
-  catalogs: Catalog[];
-  headerKey: string;
-  headerLabel: string;
-}
-
-const CatalogGroup: React.FC<CatalogGroupProps> = ({ catalogs, headerKey, headerLabel }) => {
-  if (catalogs.length === 0) return null;
-  return (
-    <>
-      <CatalogGroupHeader key={headerKey} label={headerLabel} />
-      {catalogs.map((catalog) => (
-        <CatalogMenuItem key={catalog.catalogId} catalog={catalog} />
-      ))}
-    </>
-  );
-};
-
-// Catalog Selection component
-interface CatalogSelectionProps {
-  formState: FormState;
-  filteredMyCatalogs: Catalog[];
-  filteredPublicCatalogs: Catalog[];
-  catalogsLoading: boolean;
-}
-
-// Check if there are no catalogs available
-const hasNoCatalogs = (loading: boolean, myCatalogs: Catalog[], publicCatalogs: Catalog[]): boolean => {
-  if (loading) return false;
-  return myCatalogs.length === 0 && publicCatalogs.length === 0;
-};
-
-// Check if catalog selection is disabled
-const isCatalogDisabled = (submitting: boolean, loading: boolean): boolean => {
-  return submitting || loading;
-};
-
-const CatalogSelection: React.FC<CatalogSelectionProps> = ({
-  formState,
-  filteredMyCatalogs,
-  filteredPublicCatalogs,
-  catalogsLoading,
-}) => {
-  const noCatalogs = hasNoCatalogs(catalogsLoading, filteredMyCatalogs, filteredPublicCatalogs);
-  const disabled = isCatalogDisabled(formState.submitting, catalogsLoading);
-
-  // Find the selected catalog to display its name
-  const allCatalogs = [...filteredMyCatalogs, ...filteredPublicCatalogs];
-
-  return (
-    <FormControl fullWidth disabled={disabled}>
-      <InputLabel>Product Catalog *</InputLabel>
-      <Select
-        value={formState.catalogId}
-        onChange={(e) => formState.setCatalogId(e.target.value)}
-        label="Product Catalog *"
-        renderValue={(value) => {
-          if (!value) return '';
-          const catalog = allCatalogs.find((c) => c.catalogId === value);
-          return catalog ? catalog.catalogName : '';
-        }}
-        MenuProps={{
-          slotProps: {
-            paper: {
-              sx: { maxHeight: 300 },
-            },
-          },
-        }}
-      >
-        {catalogsLoading && <CatalogLoadingItem />}
-        {noCatalogs && <CatalogEmptyItem />}
-        <CatalogGroup catalogs={filteredMyCatalogs} headerKey="my-header" headerLabel="My Catalogs" />
-        <CatalogGroup catalogs={filteredPublicCatalogs} headerKey="public-header" headerLabel="Public Catalogs" />
-      </Select>
-    </FormControl>
-  );
-};
 
 // Unit Information accordion
 interface UnitInfoAccordionProps {
@@ -423,17 +270,12 @@ const UnitInfoAccordion: React.FC<UnitInfoAccordionProps> = ({ formState }) => {
               disabled={fieldDisabled}
               helperText={getCityHelperText(formState.unitType)}
             />
-            <FormControl fullWidth disabled={fieldDisabled}>
-              <InputLabel>State</InputLabel>
-              <Select value={formState.state} onChange={(e) => formState.setState(e.target.value)} label="State">
-                <MenuItem value="">Select State</MenuItem>
-                {US_STATES.map((s) => (
-                  <MenuItem key={s} value={s}>
-                    {s}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
+            <StateAutocomplete
+              value={formState.state}
+              onChange={formState.setState}
+              disabled={fieldDisabled}
+              fullWidth
+            />
           </Stack>
         </Stack>
       </AccordionDetails>
@@ -547,7 +389,7 @@ interface SharedCampaignModeContentProps {
   formState: FormState;
 }
 
-const SharedCampaignModeContent: React.FC<SharedCampaignModeContentProps> = ({ sharedCampaign, formState }) => {
+const SharedCampaignModeContent = memo<SharedCampaignModeContentProps>(({ sharedCampaign, formState }) => {
   if (!sharedCampaign) return null;
   return (
     <>
@@ -555,7 +397,7 @@ const SharedCampaignModeContent: React.FC<SharedCampaignModeContentProps> = ({ s
       <ShareWithCreatorSection formState={formState} sharedCampaign={sharedCampaign} />
     </>
   );
-};
+});
 
 // Manual mode content
 interface ManualModeContentProps {
@@ -565,7 +407,7 @@ interface ManualModeContentProps {
   catalogsLoading: boolean;
 }
 
-const ManualModeContent: React.FC<ManualModeContentProps> = ({
+const ManualModeContent = memo<ManualModeContentProps>(({
   formState,
   filteredMyCatalogs,
   filteredPublicCatalogs,
@@ -573,15 +415,16 @@ const ManualModeContent: React.FC<ManualModeContentProps> = ({
 }) => (
   <>
     <CampaignNameYearFields formState={formState} />
-    <CatalogSelection
-      formState={formState}
-      filteredMyCatalogs={filteredMyCatalogs}
-      filteredPublicCatalogs={filteredPublicCatalogs}
+    <CatalogSection
+      catalogId={formState.catalogId}
+      onCatalogChange={formState.setCatalogId}
       catalogsLoading={catalogsLoading}
+      myCatalogs={filteredMyCatalogs}
+      filteredPublicCatalogs={filteredPublicCatalogs}
     />
     <UnitInfoAccordion formState={formState} />
   </>
-);
+));
 
 export const CampaignForm: React.FC<CampaignFormProps> = ({
   formState,

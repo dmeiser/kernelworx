@@ -31,61 +31,10 @@ import {
   CREATE_SHARED_CAMPAIGN,
   LIST_MY_SHARED_CAMPAIGNS,
 } from '../lib/graphql';
+import { StateAutocomplete } from '../components/StateAutocomplete';
 import type { Catalog, SharedCampaign } from '../types';
 
 const UNIT_TYPES = ['Pack', 'Troop', 'Crew', 'Ship', 'Post'];
-const US_STATES = [
-  'AL',
-  'AK',
-  'AZ',
-  'AR',
-  'CA',
-  'CO',
-  'CT',
-  'DE',
-  'FL',
-  'GA',
-  'HI',
-  'ID',
-  'IL',
-  'IN',
-  'IA',
-  'KS',
-  'KY',
-  'LA',
-  'ME',
-  'MD',
-  'MA',
-  'MI',
-  'MN',
-  'MS',
-  'MO',
-  'MT',
-  'NE',
-  'NV',
-  'NH',
-  'NJ',
-  'NM',
-  'NY',
-  'NC',
-  'ND',
-  'OH',
-  'OK',
-  'OR',
-  'PA',
-  'RI',
-  'SC',
-  'SD',
-  'TN',
-  'TX',
-  'UT',
-  'VT',
-  'VA',
-  'WA',
-  'WV',
-  'WI',
-  'WY',
-];
 
 const BASE_URL = window.location.origin;
 const MAX_CREATOR_MESSAGE_LENGTH = 300;
@@ -314,16 +263,7 @@ const UnitInfoSection: React.FC<UnitInfoSectionProps> = ({
       </Stack>
       <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
         <TextField label="City" value={city} onChange={(e) => onCityChange(e.target.value)} required fullWidth />
-        <FormControl required fullWidth>
-          <InputLabel>State</InputLabel>
-          <Select value={state} onChange={(e) => onStateChange(e.target.value)} label="State">
-            {US_STATES.map((s) => (
-              <MenuItem key={s} value={s}>
-                {s}
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
+        <StateAutocomplete value={state} onChange={onStateChange} required fullWidth />
       </Stack>
     </Stack>
   </Box>

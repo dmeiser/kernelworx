@@ -47,6 +47,7 @@ import {
   GET_PAYMENT_METHODS_FOR_PROFILE,
 } from '../lib/graphql';
 import { QrCodeImage } from '../components/QrCodeImage';
+import { StateAutocomplete } from '../components/StateAutocomplete';
 import { ensureProfileId, ensureCampaignId, ensureOrderId, toUrlId } from '../lib/ids';
 import { useOrderForm, type OrderFormState, type LineItemInput } from '../hooks/useOrderForm';
 import type { Product, Catalog, OrderAddress } from '../types';
@@ -323,12 +324,11 @@ const CustomerInfoForm: React.FC<CustomerInfoFormProps> = ({ formState, loading 
             onChange={(e) => formState.setCity(e.target.value)}
             disabled={loading}
           />
-          <TextField
-            label="State"
+          <StateAutocomplete
             value={formState.state}
-            onChange={(e) => formState.setState(e.target.value)}
-            sx={{ width: 100 }}
+            onChange={formState.setState}
             disabled={loading}
+            sx={{ width: 100 }}
           />
           <TextField
             label="Zip Code"

@@ -24,6 +24,8 @@ import {
 } from '@mui/material';
 import { LIST_MANAGED_CATALOGS, LIST_MY_CATALOGS, CREATE_SHARED_CAMPAIGN } from '../lib/graphql';
 import { useFormState } from '../hooks/useFormState';
+import { StateAutocomplete } from './StateAutocomplete';
+import { CatalogSelect } from './CatalogSelect';
 import type { Catalog } from '../types';
 
 interface CreateSharedCampaignDialogProps {
@@ -34,58 +36,6 @@ interface CreateSharedCampaignDialogProps {
 }
 
 const UNIT_TYPES = ['Pack', 'Troop', 'Crew', 'Ship', 'Post'];
-const US_STATES = [
-  'AL',
-  'AK',
-  'AZ',
-  'AR',
-  'CA',
-  'CO',
-  'CT',
-  'DE',
-  'FL',
-  'GA',
-  'HI',
-  'ID',
-  'IL',
-  'IN',
-  'IA',
-  'KS',
-  'KY',
-  'LA',
-  'ME',
-  'MD',
-  'MA',
-  'MI',
-  'MN',
-  'MS',
-  'MO',
-  'MT',
-  'NE',
-  'NV',
-  'NH',
-  'NJ',
-  'NM',
-  'NY',
-  'NC',
-  'ND',
-  'OH',
-  'OK',
-  'OR',
-  'PA',
-  'RI',
-  'SC',
-  'SD',
-  'TN',
-  'TX',
-  'UT',
-  'VT',
-  'VA',
-  'WA',
-  'WV',
-  'WI',
-  'WY',
-];
 
 const BASE_URL = window.location.origin;
 const MAX_CREATOR_MESSAGE_LENGTH = 300;
@@ -116,41 +66,6 @@ const isMessageValid = (creatorMessage: string): boolean => creatorMessage.lengt
 
 const validateForm = (formState: FormState): boolean =>
   hasRequiredFields(formState) && isMessageValid(formState.creatorMessage);
-
-const renderCatalogGroup = (title: string, catalogs: Catalog[]): React.ReactNode[] => {
-  if (!catalogs.length) return [];
-  return [
-    <MenuItem key={`${title}-header`} disabled sx={{ fontWeight: 600, backgroundColor: '#f5f5f5', opacity: 1 }}>
-      {title}
-    </MenuItem>,
-    ...catalogs.map((catalog) => (
-      <MenuItem key={catalog.catalogId} value={catalog.catalogId}>
-        {catalog.catalogName}
-      </MenuItem>
-    )),
-  ];
-};
-
-const CatalogOptions: React.FC<{
-  filteredPublicCatalogs: Catalog[];
-  myCatalogs: Catalog[];
-  catalogsLoading: boolean;
-}> = ({ filteredPublicCatalogs, myCatalogs, catalogsLoading }) => {
-  if (catalogsLoading) {
-    return <MenuItem disabled>Loading catalogs...</MenuItem>;
-  }
-
-  if (!filteredPublicCatalogs.length && !myCatalogs.length) {
-    return <MenuItem disabled>No catalogs available</MenuItem>;
-  }
-
-  return (
-    <>
-      {renderCatalogGroup('Public Catalogs', filteredPublicCatalogs)}
-      {renderCatalogGroup('My Catalogs', myCatalogs)}
-    </>
-  );
-};
 
 const useCatalogLists = (open: boolean) => {
   const { data: publicCatalogsData, loading: publicLoading } = useQuery<{
@@ -279,25 +194,14 @@ const CampaignFormFields: React.FC<CampaignFormFieldsProps> = ({
 }) => (
   <>
     {/* Catalog Selection */}
-    <FormControl fullWidth required disabled={catalogsLoading}>
-      <InputLabel>Product Catalog</InputLabel>
-      <Select
-        value={formState.catalogId}
-        onChange={(e) => formSetters.setCatalogId(e.target.value)}
-        label="Product Catalog"
-        MenuProps={{
-          slotProps: {
-            paper: { sx: { maxHeight: 300 } },
-          },
-        }}
-      >
-        <CatalogOptions
-          filteredPublicCatalogs={filteredPublicCatalogs}
-          myCatalogs={myCatalogs}
-          catalogsLoading={catalogsLoading}
-        />
-      </Select>
-    </FormControl>
+    <CatalogSelect
+      value={formState.catalogId}
+      onChange={formSetters.setCatalogId}
+      myCatalogs={myCatalogs}
+      publicCatalogs={filteredPublicCatalogs}
+      loading={catalogsLoading}
+      required
+    />
 
     {/* Catalog Access Warning - only show if catalog is selected */}
     {formState.catalogId && (
@@ -379,16 +283,12 @@ const CampaignFormFields: React.FC<CampaignFormFieldsProps> = ({
         required
         fullWidth
       />
-      <FormControl required sx={{ minWidth: 100 }}>
-        <InputLabel>State</InputLabel>
-        <Select value={formState.state} onChange={(e) => formSetters.setState(e.target.value)} label="State">
-          {US_STATES.map((s) => (
-            <MenuItem key={s} value={s}>
-              {s}
-            </MenuItem>
-          ))}
-        </Select>
-      </FormControl>
+      <StateAutocomplete
+        value={formState.state}
+        onChange={formSetters.setState}
+        required
+        sx={{ minWidth: 100 }}
+      />
     </Stack>
 
     {/* Creator Message */}

@@ -2,6 +2,7 @@
  * Hook that initializes all the queries for CreateCampaignPage
  */
 import { useQuery } from '@apollo/client/react';
+import { useMemo } from 'react';
 import { GET_SHARED_CAMPAIGN } from '../lib/graphql';
 import { useCreateCampaignFormState } from './useCreateCampaignFormState';
 import { useSharedCampaignAndProfiles } from './useSharedCampaignAndProfiles';
@@ -17,7 +18,11 @@ import type { SharedCampaign } from '../types/entities';
 
 export const useCreateCampaignPageSetup = (effectiveSharedCampaignCode: string | undefined) => {
   const navigate = useNavigate();
-  const formState = useCreateCampaignFormState();
+  const rawFormState = useCreateCampaignFormState();
+
+  // Memoize formState to prevent object reference from changing on every render
+  // This is critical for child components like CatalogSelection which rely on callback stability
+  const formState = useMemo(() => rawFormState, [rawFormState]);
 
   // Query shared campaign
   const {
