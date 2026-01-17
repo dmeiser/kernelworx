@@ -28,6 +28,7 @@ import { signUp, confirmSignUp, autoSignIn, fetchAuthSession } from 'aws-amplify
 import { useMutation } from '@apollo/client/react';
 import { UPDATE_MY_ACCOUNT } from '../lib/graphql';
 import { useAuth } from '../contexts/AuthContext';
+import { UNIT_TYPES } from '../constants/unitTypes';
 
 // Types for optional fields
 interface OptionalFields {
@@ -477,17 +478,6 @@ const CoppaWarningAlert: React.FC = () => (
   </Alert>
 );
 
-// Sub-component: Unit type menu items
-const UNIT_TYPE_OPTIONS = [
-  { value: '', label: 'None' },
-  { value: 'Pack', label: 'Pack (Cub Scouts)' },
-  { value: 'Troop', label: 'Troop (Scouts BSA)' },
-  { value: 'Crew', label: 'Crew (Venturing)' },
-  { value: 'Ship', label: 'Ship (Sea Scouts)' },
-  { value: 'Post', label: 'Post (Exploring)' },
-  { value: 'Club', label: 'Club (Exploring)' },
-];
-
 // Sub-component: Signup form view
 interface SignupFormViewProps {
   email: string;
@@ -620,7 +610,7 @@ const SignupFormView: React.FC<SignupFormViewProps> = ({
         margin="normal"
         helperText="Select the type of Scouting unit"
       >
-        {UNIT_TYPE_OPTIONS.map((opt) => (
+        {UNIT_TYPES.map((opt) => (
           <MenuItem key={opt.value} value={opt.value}>
             {opt.label}
           </MenuItem>

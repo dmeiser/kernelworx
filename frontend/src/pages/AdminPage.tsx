@@ -24,7 +24,7 @@ import {
   Stack,
 } from '@mui/material';
 import { People as PeopleIcon, Inventory as CatalogIcon, Info as InfoIcon } from '@mui/icons-material';
-import { LIST_MY_PROFILES, LIST_PUBLIC_CATALOGS } from '../lib/graphql';
+import { LIST_MY_PROFILES, LIST_MANAGED_CATALOGS } from '../lib/graphql';
 import type { SellerProfile, Catalog } from '../types';
 
 // --- Type Definitions ---
@@ -242,10 +242,10 @@ export const AdminPage: React.FC = () => {
     data: catalogsData,
     loading: catalogsLoading,
     error: catalogsError,
-  } = useQuery<{ listPublicCatalogs: Catalog[] }>(LIST_PUBLIC_CATALOGS);
+  } = useQuery<{ listManagedCatalogs: Catalog[] }>(LIST_MANAGED_CATALOGS);
 
   const profiles = profilesData?.listMyProfiles || [];
-  const catalogs = catalogsData?.listPublicCatalogs || [];
+  const catalogs = catalogsData?.listManagedCatalogs || [];
 
   const handleTabChange = (_event: React.SyntheticEvent, newValue: number) => {
     setCurrentTab(newValue);

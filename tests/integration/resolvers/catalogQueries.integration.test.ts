@@ -36,7 +36,6 @@ const GET_CATALOG = gql`
       catalogId
       catalogName
       catalogType
-      ownerAccountId
       isPublic
       products {
         productId
@@ -57,7 +56,6 @@ const LIST_PUBLIC_CATALOGS = gql`
       catalogId
       catalogName
       catalogType
-      ownerAccountId
       isPublic
       products {
         productId
@@ -77,7 +75,6 @@ const LIST_MY_CATALOGS = gql`
       catalogId
       catalogName
       catalogType
-      ownerAccountId
       isPublic
       products {
         productId
@@ -275,7 +272,8 @@ describe('Catalog Query Resolvers Integration Tests', () => {
         expect(catalog.catalogId).toBeDefined();
         expect(catalog.catalogName).toBeDefined();
         expect(catalog.catalogType).toBe('USER_CREATED');
-        expect(catalog.ownerAccountId).toBeDefined();
+        // ownerAccountId is no longer exposed in GraphQL schema
+        expect(catalog.ownerAccountId).toBeUndefined();
         expect(catalog.isPublic).toBe(true);
         expect(catalog.products).toBeInstanceOf(Array);
         expect(catalog.products.length).toBeGreaterThan(0);

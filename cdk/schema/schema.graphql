@@ -89,7 +89,6 @@ type Catalog @aws_cognito_user_pools {
   catalogId: ID!
   catalogName: String!
   catalogType: CatalogType!
-  ownerAccountId: ID
   isPublic: Boolean!
   products: [Product!]!
   createdAt: AWSDateTime!
@@ -394,7 +393,7 @@ type Query {
   
   # Catalog queries
   getCatalog(catalogId: ID!): Catalog @aws_cognito_user_pools
-  listPublicCatalogs: [Catalog!]! @aws_cognito_user_pools
+  listManagedCatalogs: [Catalog!]! @aws_cognito_user_pools
   listMyCatalogs: [Catalog!]!
   
   # Order queries

@@ -1,5 +1,9 @@
 import { util } from '@aws-appsync/utils';
 
+/**
+ * WRITE ACCESS: Only owner can delete catalog (or admin).
+ * Verifies ownership before allowing deletion.
+ */
 export function request(ctx) {
     const catalogId = ctx.args.catalogId;
     // Normalize catalogId for direct GetItem

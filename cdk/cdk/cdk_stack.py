@@ -543,6 +543,8 @@ class CdkStack(Stack):  # type: ignore[misc]
             "ORDERS_TABLE_NAME": self.orders_table.table_name,
             "SHARES_TABLE_NAME": self.shares_table.table_name,
             "INVITES_TABLE_NAME": self.invites_table.table_name,
+            # Shared campaigns table used by create_campaign Lambda
+            "SHARED_CAMPAIGNS_TABLE_NAME": self.shared_campaigns_table.table_name,
         }
 
         # Create Lambda Layer for shared dependencies

@@ -190,13 +190,13 @@ def create_query_resolvers(
         id_suffix="GetCatalogResolver",
     )
 
-    # listPublicCatalogs (JS)
+    # listManagedCatalogs (JS)
     builder.create_js_resolver_on_api(
-        field_name="listPublicCatalogs",
+        field_name="listManagedCatalogs",
         type_name="Query",
         datasource_name="catalogs",
         code_file=RESOLVERS_DIR / "list_public_catalogs_resolver.js",
-        id_suffix="ListPublicCatalogsResolver",
+        id_suffix="ListManagedCatalogsResolver",
     )
 
     # listMyCatalogs (JS)

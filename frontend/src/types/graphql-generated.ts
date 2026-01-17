@@ -89,7 +89,6 @@ export type GqlCatalog = {
   catalogType: GqlCatalogType;
   createdAt: Scalars['AWSDateTime']['output'];
   isPublic: Scalars['Boolean']['output'];
-  ownerAccountId?: Maybe<Scalars['ID']['output']>;
   products: Array<GqlProduct>;
   updatedAt: Scalars['AWSDateTime']['output'];
 };
@@ -388,13 +387,13 @@ export type GqlQuery = {
   getUnitReport?: Maybe<GqlUnitReport>;
   listCampaignsByProfile: Array<GqlCampaign>;
   listInvitesByProfile: Array<GqlProfileInvite>;
+  listManagedCatalogs: Array<GqlCatalog>;
   listMyCatalogs: Array<GqlCatalog>;
   listMyProfiles: Array<GqlSellerProfile>;
   listMySharedCampaigns: Array<GqlSharedCampaign>;
   listMyShares: Array<GqlSharedProfile>;
   listOrdersByCampaign: Array<GqlOrder>;
   listOrdersByProfile: Array<GqlOrder>;
-  listPublicCatalogs: Array<GqlCatalog>;
   listSharesByProfile: Array<GqlShare>;
   listUnitCampaignCatalogs: Array<GqlCatalog>;
   listUnitCatalogs: Array<GqlCatalog>;
@@ -714,7 +713,6 @@ export type GqlCatalogFieldsFragment = {
   catalogId: string;
   catalogName: string;
   catalogType: GqlCatalogType;
-  ownerAccountId?: string | null | undefined;
   isPublic: boolean;
   createdAt: string;
   updatedAt: string;
@@ -993,16 +991,15 @@ export type GqlGetOrderQuery = {
     | undefined;
 };
 
-export type GqlListPublicCatalogsQueryVariables = Exact<{ [key: string]: never }>;
+export type GqlListManagedCatalogsQueryVariables = Exact<{ [key: string]: never }>;
 
-export type GqlListPublicCatalogsQuery = {
+export type GqlListManagedCatalogsQuery = {
   __typename?: 'Query';
-  listPublicCatalogs: Array<{
+  listManagedCatalogs: Array<{
     __typename?: 'Catalog';
     catalogId: string;
     catalogName: string;
     catalogType: GqlCatalogType;
-    ownerAccountId?: string | null | undefined;
     isPublic: boolean;
     createdAt: string;
     updatedAt: string;
@@ -1026,7 +1023,6 @@ export type GqlListMyCatalogsQuery = {
     catalogId: string;
     catalogName: string;
     catalogType: GqlCatalogType;
-    ownerAccountId?: string | null | undefined;
     isPublic: boolean;
     createdAt: string;
     updatedAt: string;
@@ -1053,7 +1049,6 @@ export type GqlGetCatalogQuery = {
         catalogId: string;
         catalogName: string;
         catalogType: GqlCatalogType;
-        ownerAccountId?: string | null | undefined;
         isPublic: boolean;
         createdAt: string;
         updatedAt: string;
@@ -1406,7 +1401,6 @@ export type GqlCreateCatalogMutation = {
     catalogId: string;
     catalogName: string;
     catalogType: GqlCatalogType;
-    ownerAccountId?: string | null | undefined;
     isPublic: boolean;
     createdAt: string;
     updatedAt: string;
@@ -1433,7 +1427,6 @@ export type GqlUpdateCatalogMutation = {
     catalogId: string;
     catalogName: string;
     catalogType: GqlCatalogType;
-    ownerAccountId?: string | null | undefined;
     isPublic: boolean;
     createdAt: string;
     updatedAt: string;
@@ -1523,7 +1516,6 @@ export type GqlListUnitCatalogsQuery = {
     catalogId: string;
     catalogName: string;
     catalogType: GqlCatalogType;
-    ownerAccountId?: string | null | undefined;
     isPublic: boolean;
     createdAt: string;
     updatedAt: string;
@@ -1665,7 +1657,6 @@ export type GqlListUnitCampaignCatalogsQuery = {
     catalogId: string;
     catalogName: string;
     catalogType: GqlCatalogType;
-    ownerAccountId?: string | null | undefined;
     isPublic: boolean;
     createdAt: string;
     updatedAt: string;

@@ -62,7 +62,10 @@ def _build_unit_campaign_key(
 def _get_shared_campaign(shared_campaign_code: str) -> Optional[Dict[str, Any]]:
     """Retrieve a shared campaign by code."""
     try:
-        response = tables.shared_campaigns.get_item(Key={"sharedCampaignCode": shared_campaign_code})
+        response = tables.shared_campaigns.get_item(
+            Key={"sharedCampaignCode": shared_campaign_code},
+            ConsistentRead=True,
+        )
         item: Optional[Dict[str, Any]] = response.get("Item")
         return item
     except Exception as e:

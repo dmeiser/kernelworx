@@ -105,9 +105,9 @@ const getQueryOpNames = (query: any): string[] => {
 // Response types for query mocking
 type QueryOverrides = { publicLoading?: boolean; myLoading?: boolean; publicData?: any; myData?: any };
 
-// Helper: Create response for ListPublicCatalogs
+// Helper: Create response for ListManagedCatalogs
 const createPublicCatalogsResponse = (overrides?: QueryOverrides) => ({
-  data: overrides?.publicData ?? { listPublicCatalogs: publicCatalogsFixture },
+  data: overrides?.publicData ?? { listManagedCatalogs: publicCatalogsFixture },
   loading: !!overrides?.publicLoading,
 });
 
@@ -121,7 +121,7 @@ const createMyCatalogsResponse = (overrides?: QueryOverrides) => ({
 const defaultQueryResponse = { data: undefined, loading: false };
 
 const createQueryResponse = (opNames: string[], overrides?: QueryOverrides) => {
-  if (opNames.includes('ListPublicCatalogs')) return createPublicCatalogsResponse(overrides);
+  if (opNames.includes('ListManagedCatalogs')) return createPublicCatalogsResponse(overrides);
   if (opNames.includes('ListMyCatalogs')) return createMyCatalogsResponse(overrides);
   return defaultQueryResponse;
 };
@@ -186,7 +186,7 @@ describe('CreateSharedCampaignDialog', () => {
 
   // SKIPPED: MUI FormControl disabled state doesn't expose aria-disabled on DOM in jsdom
   it.skip('shows loading state for catalogs (select disabled)', () => {
-    setupQueryMock({ publicLoading: true, myLoading: true, publicData: { listPublicCatalogs: [] }, myData: { listMyCatalogs: [] } });
+    setupQueryMock({ publicLoading: true, myLoading: true, publicData: { listManagedCatalogs: [] }, myData: { listMyCatalogs: [] } });
 
     render(<CreateSharedCampaignDialog open={true} onClose={onClose} onSuccess={onSuccess} canCreate={true} />);
 
@@ -198,7 +198,7 @@ describe('CreateSharedCampaignDialog', () => {
   });
 
   it('shows "No catalogs available" when both lists are empty', async () => {
-    setupQueryMock({ publicData: { listPublicCatalogs: [] }, myData: { listMyCatalogs: [] } });
+    setupQueryMock({ publicData: { listManagedCatalogs: [] }, myData: { listMyCatalogs: [] } });
 
     render(<CreateSharedCampaignDialog open={true} onClose={onClose} onSuccess={onSuccess} canCreate={true} />);
 
@@ -212,7 +212,7 @@ describe('CreateSharedCampaignDialog', () => {
 
   it('deduplicates public catalogs that are also in my catalogs', async () => {
     // public has pub-1, my has pub-1 and my-1 -> filteredPublicCatalogs should exclude pub-1
-    setupQueryMock({ publicData: { listPublicCatalogs: [{ catalogId: 'pub-1', catalogName: 'Public One' }] }, myData: { listMyCatalogs: [{ catalogId: 'pub-1', catalogName: 'Public One' }, { catalogId: 'my-1', catalogName: 'My Catalog' }] } });
+    setupQueryMock({ publicData: { listManagedCatalogs: [{ catalogId: 'pub-1', catalogName: 'Public One' }] }, myData: { listMyCatalogs: [{ catalogId: 'pub-1', catalogName: 'Public One' }, { catalogId: 'my-1', catalogName: 'My Catalog' }] } });
 
     render(<CreateSharedCampaignDialog open={true} onClose={onClose} onSuccess={onSuccess} canCreate={true} />);
 

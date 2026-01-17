@@ -22,6 +22,7 @@ import { UserSettingsPage } from './pages/UserSettingsPage';
 import { AcceptInvitePage } from './pages/AcceptInvitePage';
 import { AdminPage } from './pages/AdminPage';
 import { CatalogsPage } from './pages/CatalogsPage';
+import { CatalogPreviewPage } from './pages/CatalogPreviewPage';
 import { CampaignReportsPage } from './pages/CampaignReportsPage';
 import { CreateCampaignPage } from './pages/CreateCampaignPage';
 import { SharedCampaignsPage } from './pages/SharedCampaignsPage';
@@ -141,6 +142,17 @@ function App() {
                   <ProtectedRoute>
                     <AppLayout>
                       <UserSettingsPage />
+                    </AppLayout>
+                  </ProtectedRoute>
+                }
+              />
+
+              <Route
+                path="/catalogs/:catalogId/preview"
+                element={
+                  <ProtectedRoute>
+                    <AppLayout>
+                      <CatalogPreviewPage />
                     </AppLayout>
                   </ProtectedRoute>
                 }

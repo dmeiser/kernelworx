@@ -28,7 +28,7 @@ import {
   AlertTitle,
 } from '@mui/material';
 import { Delete as DeleteIcon, Warning as WarningIcon } from '@mui/icons-material';
-import { GET_CAMPAIGN, UPDATE_CAMPAIGN, DELETE_CAMPAIGN, LIST_PUBLIC_CATALOGS, LIST_MY_CATALOGS } from '../lib/graphql';
+import { GET_CAMPAIGN, UPDATE_CAMPAIGN, DELETE_CAMPAIGN, LIST_MANAGED_CATALOGS, LIST_MY_CATALOGS } from '../lib/graphql';
 import { ensureCampaignId, ensureCatalogId, toUrlId } from '../lib/ids';
 import type { Campaign, Catalog } from '../types';
 
@@ -39,8 +39,8 @@ const extractDatePart = (isoDate: string | undefined): string => isoDate?.split(
 const decodeUrlParam = (encoded: string | undefined): string => (encoded ? decodeURIComponent(encoded) : '');
 
 // Helper to get catalogs with fallback
-const getPublicCatalogs = (data: { listPublicCatalogs?: Catalog[] } | undefined): Catalog[] =>
-  data?.listPublicCatalogs || [];
+const getPublicCatalogs = (data: { listManagedCatalogs?: Catalog[] } | undefined): Catalog[] =>
+  data?.listManagedCatalogs || [];
 
 const getMyCatalogs = (data: { listMyCatalogs?: Catalog[] } | undefined): Catalog[] => data?.listMyCatalogs || [];
 
@@ -196,8 +196,8 @@ export const CampaignSettingsPage: React.FC = () => {
 
   // Fetch catalogs
   const { data: publicCatalogsData } = useQuery<{
-    listPublicCatalogs: Catalog[];
-  }>(LIST_PUBLIC_CATALOGS);
+    listManagedCatalogs: Catalog[];
+  }>(LIST_MANAGED_CATALOGS);
 
   const { data: myCatalogsData } = useQuery<{
     listMyCatalogs: Catalog[];

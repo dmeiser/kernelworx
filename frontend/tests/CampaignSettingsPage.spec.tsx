@@ -3,7 +3,7 @@ import { MockedProvider } from "@apollo/client/testing/react";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { describe, it, expect, vi } from "vitest";
 import { CampaignSettingsPage } from "../src/pages/CampaignSettingsPage";
-import { GET_CAMPAIGN, LIST_PUBLIC_CATALOGS, LIST_MY_CATALOGS, DELETE_CAMPAIGN, UPDATE_CAMPAIGN } from "../src/lib/graphql";
+import { GET_CAMPAIGN, LIST_MANAGED_CATALOGS, LIST_MY_CATALOGS, DELETE_CAMPAIGN, UPDATE_CAMPAIGN } from "../src/lib/graphql";
 
 // Mock navigate
 const mockNavigate = vi.fn();
@@ -38,7 +38,7 @@ const createMocks = () => {
       request: { query: GET_CAMPAIGN, variables: { campaignId: dbCampaignId } },
       result: { data: { getCampaign: { ...mockCampaign, campaignId: dbCampaignId, profileId: dbProfileId, catalogId: mockCampaign.catalogId, catalog: { catalogId: mockCatalogs[0].catalogId, catalogName: mockCatalogs[0].catalogName, catalogType: mockCatalogs[0].catalogType, isDeleted: mockCatalogs[0].isDeleted } } } },
     },
-    { request: { query: LIST_PUBLIC_CATALOGS }, result: { data: { listPublicCatalogs: mockCatalogs } } },
+    { request: { query: LIST_MANAGED_CATALOGS }, result: { data: { listManagedCatalogs: mockCatalogs } } },
     { request: { query: LIST_MY_CATALOGS }, result: { data: { listMyCatalogs: [] } } },
   ];
 };

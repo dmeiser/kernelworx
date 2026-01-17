@@ -26,19 +26,10 @@ import {
 } from '@mui/material';
 import { ExpandMore as ExpandMoreIcon, Info as InfoIcon } from '@mui/icons-material';
 import type { Catalog, SharedCampaign, SellerProfile } from '../types';
+import { UNIT_TYPES } from '../constants/unitTypes';
 
 // Local type aliases for convenience
 type Profile = Pick<SellerProfile, 'profileId' | 'sellerName' | 'isOwner'>;
-
-const UNIT_TYPES = [
-  { value: '', label: 'None' },
-  { value: 'Pack', label: 'Pack (Cub Scouts)' },
-  { value: 'Troop', label: 'Troop (Scouts BSA)' },
-  { value: 'Crew', label: 'Crew (Venturing)' },
-  { value: 'Ship', label: 'Ship (Sea Scouts)' },
-  { value: 'Post', label: 'Post (Exploring)' },
-  { value: 'Club', label: 'Club (Exploring)' },
-];
 
 const US_STATES = [
   'AL',
@@ -93,8 +84,6 @@ const US_STATES = [
   'WY',
   'DC',
 ];
-
-const CAMPAIGN_OPTIONS = ['Fall', 'Spring', 'Summer', 'Winter'];
 
 interface FormState {
   profileId: string;
@@ -216,20 +205,14 @@ interface CampaignNameYearProps {
 
 const CampaignNameYearFields: React.FC<CampaignNameYearProps> = ({ formState }) => (
   <Stack direction="row" spacing={2}>
-    <FormControl fullWidth disabled={formState.submitting}>
-      <InputLabel>Campaign Name *</InputLabel>
-      <Select
-        value={formState.campaignName}
-        onChange={(e) => formState.setCampaignName(e.target.value)}
-        label="Campaign Name *"
-      >
-        {CAMPAIGN_OPTIONS.map((campaign) => (
-          <MenuItem key={campaign} value={campaign}>
-            {campaign}
-          </MenuItem>
-        ))}
-      </Select>
-    </FormControl>
+    <TextField
+      fullWidth
+      label="Campaign Name *"
+      value={formState.campaignName}
+      onChange={(e) => formState.setCampaignName(e.target.value)}
+      disabled={formState.submitting}
+      placeholder="e.g., Fall 2026, Spring Fundraiser"
+    />
     <TextField
       fullWidth
       label="Year *"

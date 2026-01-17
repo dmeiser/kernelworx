@@ -18,15 +18,15 @@ import {
   InputLabel,
   Select,
   MenuItem,
+  Divider,
   CircularProgress,
   Paper,
   Container,
-  Divider,
 } from '@mui/material';
 import type { SelectChangeEvent } from '@mui/material';
 import { ArrowBack as BackIcon, Save as SaveIcon } from '@mui/icons-material';
 import {
-  LIST_PUBLIC_CATALOGS,
+  LIST_MANAGED_CATALOGS,
   LIST_MY_CATALOGS,
   CREATE_SHARED_CAMPAIGN,
   LIST_MY_SHARED_CAMPAIGNS,
@@ -129,28 +129,6 @@ function isFormValid(data: FormData): boolean {
 // Sub-Components
 // ============================================================================
 
-interface CatalogGroupProps {
-  header: string;
-  catalogs: Catalog[];
-  headerKey: string;
-}
-
-const CatalogGroup: React.FC<CatalogGroupProps> = ({ header, catalogs, headerKey }) => {
-  if (catalogs.length === 0) return null;
-  return (
-    <>
-      <MenuItem key={headerKey} disabled sx={{ fontWeight: 600, backgroundColor: '#f5f5f5', opacity: 1 }}>
-        {header}
-      </MenuItem>
-      {catalogs.map((catalog) => (
-        <MenuItem key={catalog.catalogId} value={catalog.catalogId}>
-          {catalog.catalogName}
-        </MenuItem>
-      ))}
-    </>
-  );
-};
-
 interface CatalogSectionProps {
   catalogId: string;
   onCatalogChange: (value: string) => void;
@@ -176,16 +154,31 @@ const CatalogSection: React.FC<CatalogSectionProps> = ({
       </Typography>
       <FormControl fullWidth required disabled={catalogsLoading}>
         <InputLabel>Select Catalog</InputLabel>
-        <Select
-          value={catalogId}
-          onChange={handleChange}
-          label="Select Catalog"
-          MenuProps={{ slotProps: { paper: { sx: { maxHeight: 300 } } } }}
-        >
+        <Select value={catalogId} onChange={handleChange} label="Select Catalog">
           {catalogsLoading && <MenuItem disabled>Loading catalogs...</MenuItem>}
           {noCatalogs && <MenuItem disabled>No catalogs available</MenuItem>}
-          <CatalogGroup header="Public Catalogs" catalogs={filteredPublicCatalogs} headerKey="public-header" />
-          <CatalogGroup header="My Catalogs" catalogs={myCatalogs} headerKey="my-header" />
+          
+          {filteredPublicCatalogs.length > 0 && (
+            <MenuItem disabled sx={{ fontWeight: 'bold', py: 1 }}>
+              Public Catalogs
+            </MenuItem>
+          )}
+          {filteredPublicCatalogs.map((catalog) => (
+            <MenuItem key={`public-${catalog.catalogId}`} value={catalog.catalogId} sx={{ pl: 4 }}>
+              {catalog.catalogName}
+            </MenuItem>
+          ))}
+          
+          {myCatalogs.length > 0 && (
+            <MenuItem disabled sx={{ fontWeight: 'bold', py: 1 }}>
+              My Catalogs
+            </MenuItem>
+          )}
+          {myCatalogs.map((catalog) => (
+            <MenuItem key={`my-${catalog.catalogId}`} value={catalog.catalogId} sx={{ pl: 4 }}>
+              {catalog.catalogName}
+            </MenuItem>
+          ))}
         </Select>
       </FormControl>
     </Box>
@@ -458,8 +451,11 @@ function filterDuplicateCatalogs(publicCatalogs: Catalog[], myCatalogs: Catalog[
 }
 
 function usePublicCatalogs() {
-  const { data, loading } = useQuery<{ listPublicCatalogs: Catalog[] }>(LIST_PUBLIC_CATALOGS);
-  return { catalogs: getArrayOrEmpty(data?.listPublicCatalogs), loading };
+  const { data, loading } = useQuery<{ listManagedCatalogs: Catalog[] }>(LIST_MANAGED_CATALOGS);
+  const allCatalogs = getArrayOrEmpty(data?.listManagedCatalogs);
+  // Only include admin-managed catalogs for shared campaigns
+  const catalogs = allCatalogs.filter((c) => c.catalogType === 'ADMIN_MANAGED');
+  return { catalogs, loading };
 }
 
 function useMyCatalogs() {

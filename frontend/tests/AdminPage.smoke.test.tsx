@@ -14,7 +14,7 @@ vi.mock('@apollo/client/react', async () => {
   return {
     ...actual,
     useLazyQuery: () => [vi.fn(), { data: { listMyProfiles: [] } }],
-    useQuery: () => ({ data: { listMyProfiles: [], listPublicCatalogs: [] }, loading: false }),
+    useQuery: () => ({ data: { listMyProfiles: [], listManagedCatalogs: [] }, loading: false }),
     useMutation: () => [vi.fn()],
   }
 })

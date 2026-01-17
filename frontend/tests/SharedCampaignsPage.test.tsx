@@ -10,7 +10,7 @@ import { SharedCampaignsPage } from "../src/pages/SharedCampaignsPage";
 import QRCode from "qrcode";
 import {
   LIST_MY_SHARED_CAMPAIGNS,
-  LIST_PUBLIC_CATALOGS,
+  LIST_MANAGED_CATALOGS,
   LIST_MY_CATALOGS,
   DELETE_SHARED_CAMPAIGN,
 } from "../src/lib/graphql";
@@ -84,11 +84,11 @@ const mockSharedCampaigns = [
 const baseMocks = () => [
   {
     request: {
-      query: LIST_PUBLIC_CATALOGS,
+      query: LIST_MANAGED_CATALOGS,
     },
     result: {
       data: {
-        listPublicCatalogs: [
+        listManagedCatalogs: [
           { catalogId: "catalog-1", catalogName: "Official Popcorn 2025", catalogType: "ADMIN_MANAGED" },
         ],
       },

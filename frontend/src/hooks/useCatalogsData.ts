@@ -3,7 +3,7 @@
  */
 import { useMemo } from 'react';
 import { useQuery } from '@apollo/client/react';
-import { LIST_PUBLIC_CATALOGS, LIST_MY_CATALOGS } from '../lib/graphql';
+import { LIST_MANAGED_CATALOGS, LIST_MY_CATALOGS } from '../lib/graphql';
 
 interface Catalog {
   catalogId: string;
@@ -14,15 +14,15 @@ interface Catalog {
 
 export const useCatalogsData = (isSharedCampaignMode: boolean) => {
   const { data: publicCatalogsData, loading: publicLoading } = useQuery<{
-    listPublicCatalogs: Catalog[];
-  }>(LIST_PUBLIC_CATALOGS, { skip: isSharedCampaignMode });
+    listManagedCatalogs: Catalog[];
+  }>(LIST_MANAGED_CATALOGS, { skip: isSharedCampaignMode });
 
   const { data: myCatalogsData, loading: myLoading } = useQuery<{
     listMyCatalogs: Catalog[];
   }>(LIST_MY_CATALOGS, { skip: isSharedCampaignMode });
 
   const { filteredPublicCatalogs, filteredMyCatalogs } = useMemo(() => {
-    const publicCatalogs = publicCatalogsData?.listPublicCatalogs || [];
+    const publicCatalogs = publicCatalogsData?.listManagedCatalogs || [];
     const myCatalogs = myCatalogsData?.listMyCatalogs || [];
     const myIdSet = new Set(myCatalogs.map((c) => c.catalogId));
     return {

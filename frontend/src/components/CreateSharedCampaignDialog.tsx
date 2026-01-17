@@ -22,7 +22,7 @@ import {
   Box,
   CircularProgress,
 } from '@mui/material';
-import { LIST_PUBLIC_CATALOGS, LIST_MY_CATALOGS, CREATE_SHARED_CAMPAIGN } from '../lib/graphql';
+import { LIST_MANAGED_CATALOGS, LIST_MY_CATALOGS, CREATE_SHARED_CAMPAIGN } from '../lib/graphql';
 import { useFormState } from '../hooks/useFormState';
 import type { Catalog } from '../types';
 
@@ -154,14 +154,14 @@ const CatalogOptions: React.FC<{
 
 const useCatalogLists = (open: boolean) => {
   const { data: publicCatalogsData, loading: publicLoading } = useQuery<{
-    listPublicCatalogs: Catalog[];
-  }>(LIST_PUBLIC_CATALOGS, { skip: !open });
+    listManagedCatalogs: Catalog[];
+  }>(LIST_MANAGED_CATALOGS, { skip: !open });
 
   const { data: myCatalogsData, loading: myLoading } = useQuery<{
     listMyCatalogs: Catalog[];
   }>(LIST_MY_CATALOGS, { skip: !open });
 
-  const publicCatalogs = useMemo(() => publicCatalogsData?.listPublicCatalogs || [], [publicCatalogsData]);
+  const publicCatalogs = useMemo(() => publicCatalogsData?.listManagedCatalogs || [], [publicCatalogsData]);
 
   const ownedCatalogs = useMemo(() => myCatalogsData?.listMyCatalogs || [], [myCatalogsData]);
 
@@ -298,6 +298,14 @@ const CampaignFormFields: React.FC<CampaignFormFieldsProps> = ({
         />
       </Select>
     </FormControl>
+
+    {/* Catalog Access Warning - only show if catalog is selected */}
+    {formState.catalogId && (
+      <Alert severity="warning">
+        <AlertTitle>⚠️ Participants Will Access This Catalog</AlertTitle>
+        Anyone who joins this campaign will be able to view this catalog's products and prices.
+      </Alert>
+    )}
 
     {/* Campaign Information */}
     <Stack direction="row" spacing={2}>

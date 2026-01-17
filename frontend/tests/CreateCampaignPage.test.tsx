@@ -13,7 +13,7 @@ import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { CreateCampaignPage } from '../src/pages/CreateCampaignPage';
 import {
   LIST_MY_PROFILES,
-  LIST_PUBLIC_CATALOGS,
+  LIST_MANAGED_CATALOGS,
   LIST_MY_CATALOGS,
   GET_SHARED_CAMPAIGN,
   CREATE_CAMPAIGN,
@@ -74,11 +74,11 @@ const baseMocks = [
   },
   {
     request: {
-      query: LIST_PUBLIC_CATALOGS,
+      query: LIST_MANAGED_CATALOGS,
     },
     result: {
       data: {
-        listPublicCatalogs: [
+        listManagedCatalogs: [
           {
             catalogId: 'catalog-1',
             catalogName: "2024 Trail's End Products",
@@ -271,12 +271,12 @@ describe('CreateCampaignPage', () => {
 
   test("shows '(Official)' label for admin-managed catalogs", async () => {
     const adminCatalogMocks = [
-      ...baseMocks.filter((m) => m.request.query !== LIST_PUBLIC_CATALOGS),
+      ...baseMocks.filter((m) => m.request.query !== LIST_MANAGED_CATALOGS),
       {
-        request: { query: LIST_PUBLIC_CATALOGS },
+        request: { query: LIST_MANAGED_CATALOGS },
         result: {
           data: {
-            listPublicCatalogs: [
+            listManagedCatalogs: [
               {
                 catalogId: 'catalog-admin',
                 catalogName: 'Official',
@@ -821,7 +821,7 @@ describe('CreateCampaignPage', () => {
         },
       },
       // Catalog queries may still be executed by other components; provide safe empty responses
-      { request: { query: LIST_PUBLIC_CATALOGS }, result: { data: { listPublicCatalogs: [] } } },
+      { request: { query: LIST_MANAGED_CATALOGS }, result: { data: { listManagedCatalogs: [] } } },
       { request: { query: LIST_MY_CATALOGS }, result: { data: { listMyCatalogs: [] } } },
       sharedMock,
       createCampaignMock,

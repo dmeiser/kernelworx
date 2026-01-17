@@ -162,11 +162,5 @@ def create_field_resolvers(
         id_suffix="AccountIdResolver",
     )
 
-    # Catalog.ownerAccountId (JS)
-    builder.create_js_resolver(
-        field_name="ownerAccountId",
-        type_name="Catalog",
-        datasource_name="none",
-        code_file=RESOLVERS_DIR / "catalog_owner_account_id_resolver.js",
-        id_suffix="CatalogOwnerAccountIdResolver",
-    )
+    # Note: Catalog.ownerAccountId removed from GraphQL schema (Phase 3)
+    # ownerAccountId still stored in DynamoDB for WRITE authorization but not exposed to clients

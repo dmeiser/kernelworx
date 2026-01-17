@@ -75,7 +75,6 @@ export const CATALOG_FRAGMENT = gql`
     catalogId
     catalogName
     catalogType
-    ownerAccountId
     isPublic
     products {
       productId
@@ -218,10 +217,10 @@ export const GET_ORDER = gql`
   }
 `;
 
-export const LIST_PUBLIC_CATALOGS = gql`
+export const LIST_MANAGED_CATALOGS = gql`
   ${CATALOG_FRAGMENT}
-  query ListPublicCatalogs {
-    listPublicCatalogs {
+  query ListManagedCatalogs {
+    listManagedCatalogs {
       ...CatalogFields
     }
   }

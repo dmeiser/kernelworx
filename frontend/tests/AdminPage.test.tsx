@@ -8,7 +8,7 @@ import userEvent from '@testing-library/user-event';
 import { MockedProvider } from '@apollo/client/testing/react';
 import { BrowserRouter } from 'react-router-dom';
 import { AdminPage } from '../src/pages/AdminPage';
-import { LIST_MY_PROFILES, LIST_PUBLIC_CATALOGS } from '../src/lib/graphql';
+import { LIST_MY_PROFILES, LIST_MANAGED_CATALOGS } from '../src/lib/graphql';
 
 describe('AdminPage', () => {
   beforeEach(() => {
@@ -66,11 +66,11 @@ describe('AdminPage', () => {
       },
       {
         request: {
-          query: LIST_PUBLIC_CATALOGS,
+          query: LIST_MANAGED_CATALOGS,
         },
         result: {
           data: {
-            listPublicCatalogs: [],
+            listManagedCatalogs: [],
           },
         },
       },
@@ -103,11 +103,11 @@ describe('AdminPage', () => {
       },
       {
         request: {
-          query: LIST_PUBLIC_CATALOGS,
+          query: LIST_MANAGED_CATALOGS,
         },
         result: {
           data: {
-            listPublicCatalogs: [],
+            listManagedCatalogs: [],
           },
         },
       },
@@ -140,11 +140,11 @@ describe('AdminPage', () => {
       },
       {
         request: {
-          query: LIST_PUBLIC_CATALOGS,
+          query: LIST_MANAGED_CATALOGS,
         },
         result: {
           data: {
-            listPublicCatalogs: [],
+            listManagedCatalogs: [],
           },
         },
       },
@@ -180,11 +180,11 @@ describe('AdminPage', () => {
       },
       {
         request: {
-          query: LIST_PUBLIC_CATALOGS,
+          query: LIST_MANAGED_CATALOGS,
         },
         result: {
           data: {
-            listPublicCatalogs: mockCatalogs,
+            listManagedCatalogs: mockCatalogs,
           },
         },
       },
@@ -222,11 +222,11 @@ describe('AdminPage', () => {
       },
       {
         request: {
-          query: LIST_PUBLIC_CATALOGS,
+          query: LIST_MANAGED_CATALOGS,
         },
         result: {
           data: {
-            listPublicCatalogs: [],
+            listManagedCatalogs: [],
           },
         },
       },
@@ -264,11 +264,11 @@ describe('AdminPage', () => {
       },
       {
         request: {
-          query: LIST_PUBLIC_CATALOGS,
+          query: LIST_MANAGED_CATALOGS,
         },
         result: {
           data: {
-            listPublicCatalogs: [],
+            listManagedCatalogs: [],
           },
         },
       },
@@ -295,11 +295,11 @@ describe('AdminPage', () => {
       },
       {
         request: {
-          query: LIST_PUBLIC_CATALOGS,
+          query: LIST_MANAGED_CATALOGS,
         },
         result: {
           data: {
-            listPublicCatalogs: [],
+            listManagedCatalogs: [],
           },
         },
       },
@@ -332,11 +332,11 @@ describe('AdminPage', () => {
       },
       {
         request: {
-          query: LIST_PUBLIC_CATALOGS,
+          query: LIST_MANAGED_CATALOGS,
         },
         result: {
           data: {
-            listPublicCatalogs: [],
+            listManagedCatalogs: [],
           },
         },
       },
@@ -373,11 +373,11 @@ describe('AdminPage', () => {
       },
       {
         request: {
-          query: LIST_PUBLIC_CATALOGS,
+          query: LIST_MANAGED_CATALOGS,
         },
         result: {
           data: {
-            listPublicCatalogs: [],
+            listManagedCatalogs: [],
           },
         },
       },
@@ -410,8 +410,8 @@ describe('AdminPage', () => {
         result: { data: { listMyProfiles: [] } },
       },
       {
-        request: { query: LIST_PUBLIC_CATALOGS },
-        result: { data: { listPublicCatalogs: [] } },
+        request: { query: LIST_MANAGED_CATALOGS },
+        result: { data: { listManagedCatalogs: [] } },
         delay: Infinity, // Never resolves
       },
     ];
@@ -438,7 +438,7 @@ describe('AdminPage', () => {
         result: { data: { listMyProfiles: [] } },
       },
       {
-        request: { query: LIST_PUBLIC_CATALOGS },
+        request: { query: LIST_MANAGED_CATALOGS },
         error: new Error('Failed to fetch catalogs'),
       },
     ];
@@ -467,8 +467,8 @@ describe('AdminPage', () => {
         result: { data: { listMyProfiles: [] } },
       },
       {
-        request: { query: LIST_PUBLIC_CATALOGS },
-        result: { data: { listPublicCatalogs: [] } },
+        request: { query: LIST_MANAGED_CATALOGS },
+        result: { data: { listManagedCatalogs: [] } },
       },
     ];
 

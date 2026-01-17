@@ -1,5 +1,10 @@
 import { util } from '@aws-appsync/utils';
 
+/**
+ * Retrieves a catalog by catalogId.
+ * READ ACCESS: Anyone can view catalog by ID (no authorization check).
+ * Security relies on UUID obscurity - catalogIds are not guessable.
+ */
 export function request(ctx) {
     const rawCatalogId = ctx.stash.catalogId;
     if (!rawCatalogId) {
@@ -28,6 +33,8 @@ export function response(ctx) {
         util.error('Catalog not found for id: ' + ctx.stash.catalogId, 'NotFound');
     }
     
+    // READ ACCESS: Anyone can view catalog by ID (no auth check).
+    // Security relies on UUID obscurity - catalogIds are not guessable.
     console.log('GetCatalog: Found catalog with', ctx.result.products ? ctx.result.products.length : 0, 'products');
     // Store catalog in stash for CreateOrderFn
     ctx.stash.catalog = ctx.result;

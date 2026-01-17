@@ -1,7 +1,8 @@
 import { util } from '@aws-appsync/utils';
 
 export function request(ctx) {
-    const ownerAccountId = ctx.identity.sub;
+    // Add ACCOUNT# prefix to match DynamoDB storage format
+    const ownerAccountId = 'ACCOUNT#' + ctx.identity.sub;
     
     // Query catalogs created by this user using the ownerAccountId-index
     return {

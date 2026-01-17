@@ -3,7 +3,8 @@ import { util } from '@aws-appsync/utils';
 /**
  * Updates an existing catalog with new data.
  * Preserves existing productIds or generates new ones.
- * Only allows the owner to update the catalog.
+ * WRITE ACCESS: Only the owner can update the catalog (enforced via condition expression).
+ * ownerAccountId is stored in DynamoDB but not exposed in GraphQL schema.
  */
 export function request(ctx) {
     const catalogId = ctx.args.catalogId;
