@@ -15,21 +15,24 @@ export function request(ctx) {
 }
 
 export function response(ctx) {
-    // Get payment methods with pre-signed URLs from Lambda
-    // Lambda returns { paymentMethods: [...], ownerAccountId: "..." }
-    const lambdaResult = ctx.prev.result || {};
-    const paymentMethods = lambdaResult.paymentMethods || [];
+    // Get custom payment methods from previous step (get_owner_payment_methods)
+    const customPaymentMethods = ctx.prev.result || [];
     const canSeeQR = ctx.stash.canSeeQR;
+    const ownerAccountId = ctx.stash.ownerAccountId;
     
     // Filter QR codes based on access level
-    const filteredMethods = paymentMethods.map(method => {
+    const filteredMethods = customPaymentMethods.map(method => {
         if (!canSeeQR && method.qrCodeUrl) {
             return {
                 ...method,
                 qrCodeUrl: null  // Remove QR URL for READ users
             };
         }
-        return method;
+        // Add ownerAccountId to each method for field resolver
+        return {
+            ...method,
+            ownerAccountId: ownerAccountId
+        };
     });
     
     // Add global methods (no QR codes)

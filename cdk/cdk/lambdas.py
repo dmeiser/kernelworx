@@ -287,16 +287,17 @@ def create_lambda_functions(
         environment=lambda_env,
     )
 
-    generate_presigned_urls_fn = lambda_.Function(
+    # Field resolver for PaymentMethod.qrCodeUrl - generates presigned URL on-demand
+    generate_qr_code_presigned_url_fn = lambda_.Function(
         scope,
-        "GeneratePresignedURLsFn",
-        function_name=rn("kernelworx-generate-presigned-urls"),
+        "GenerateQRCodePresignedURLFn",
+        function_name=rn("kernelworx-generate-qr-code-presigned-url"),
         runtime=lambda_.Runtime.PYTHON_3_13,
-        handler="handlers.payment_methods_handlers.generate_presigned_urls",
+        handler="handlers.generate_qr_code_presigned_url.generate_qr_code_presigned_url",
         code=lambda_code,
         layers=[shared_layer],
-        timeout=Duration.seconds(10),
-        memory_size=256,
+        timeout=Duration.seconds(3),
+        memory_size=128,
         role=lambda_execution_role,
         environment=lambda_env,
     )
@@ -343,7 +344,7 @@ def create_lambda_functions(
         "pre_signup_fn": pre_signup_fn,
         "request_qr_upload_fn": request_qr_upload_fn,
         "confirm_qr_upload_fn": confirm_qr_upload_fn,
-        "generate_presigned_urls_fn": generate_presigned_urls_fn,
+        "generate_qr_code_presigned_url_fn": generate_qr_code_presigned_url_fn,
         "delete_qr_code_fn": delete_qr_code_fn,
         "validate_payment_method_fn": validate_payment_method_fn,
     }

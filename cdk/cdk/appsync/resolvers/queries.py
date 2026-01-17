@@ -72,7 +72,7 @@ def create_query_resolvers(
     builder.create_lambda_resolver(
         field_name="listMyShares",
         type_name="Query",
-        lambda_datasource_name="list_my_shares",
+        lambda_datasource_name="list_my_shares_fn",
         id_suffix="ListMySharesResolverV2",  # Keep same ID to do in-place update
     )
 
@@ -244,7 +244,7 @@ def create_query_resolvers(
     builder.create_lambda_resolver(
         field_name="getUnitReport",
         type_name="Query",
-        lambda_datasource_name="unit_reporting",
+        lambda_datasource_name="unit_reporting_fn",
         id_suffix="GetUnitReportResolver",
     )
 
@@ -252,7 +252,7 @@ def create_query_resolvers(
     builder.create_lambda_resolver(
         field_name="listUnitCatalogs",
         type_name="Query",
-        lambda_datasource_name="list_unit_catalogs",
+        lambda_datasource_name="list_unit_catalogs_fn",
         id_suffix="ListUnitCatalogsResolver",
     )
 
@@ -260,29 +260,29 @@ def create_query_resolvers(
     builder.create_lambda_resolver(
         field_name="listUnitCampaignCatalogs",
         type_name="Query",
-        lambda_datasource_name="list_unit_campaign_catalogs",
+        lambda_datasource_name="list_unit_campaign_catalogs_fn",
         id_suffix="ListUnitCampaignCatalogsResolver",
     )
 
     # === PAYMENT METHODS QUERIES ===
 
     # myPaymentMethods Pipeline
-    my_payment_methods_functions = [
-        functions["get_payment_methods"],
-        functions["inject_global_payment_methods"],
-    ]
-    
+    # Simple pipeline: fetch custom methods, inject globals, set owner in stash for field resolver
     builder.create_pipeline_resolver(
         field_name="myPaymentMethods",
         type_name="Query",
-        functions=my_payment_methods_functions,
+        functions=[
+            functions["get_payment_methods"],
+            functions["inject_global_payment_methods"],
+            functions["set_owner_account_id_in_stash"],
+        ],
         code_file=RESOLVERS_DIR / "my_payment_methods_pipeline_resolver.js",
         id_suffix="MyPaymentMethodsResolver",
     )
 
-    # paymentMethodsForProfile Pipeline - conditional creation based on Lambda availability
-    # Note: This uses generate_presigned_urls Lambda which is created conditionally
-    if "generate_presigned_urls" in functions:
+    # paymentMethodsForProfile Pipeline
+    # Simplified to use field resolver for presigned URLs
+    if "check_payment_methods_access" in functions:
         builder.create_pipeline_resolver(
             field_name="paymentMethodsForProfile",
             type_name="Query",
@@ -290,7 +290,6 @@ def create_query_resolvers(
                 functions["fetch_profile"],
                 functions["check_payment_methods_access"],
                 functions["get_owner_payment_methods"],
-                functions["generate_presigned_urls"],
                 functions["filter_payment_methods_by_access"],
             ],
             code_file=RESOLVERS_DIR / "payment_methods_for_profile_pipeline_resolver.js",

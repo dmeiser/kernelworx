@@ -164,3 +164,20 @@ def create_field_resolvers(
 
     # Note: Catalog.ownerAccountId removed from GraphQL schema (Phase 3)
     # ownerAccountId still stored in DynamoDB for WRITE authorization but not exposed to clients
+
+    # === PAYMENT METHOD FIELD RESOLVERS ===
+
+    # PaymentMethod.qrCodeUrl - Generate presigned S3 URL on-demand
+    # Uses Lambda to convert S3 key to presigned URL
+    # Authorization: reads ownerAccountId from ctx.stash (set by query pipeline)
+    if "generate_qr_code_presigned_url_fn" in lambda_datasources:
+        # Create field resolver with JavaScript code that calls Lambda
+        lambda_ds = lambda_datasources["generate_qr_code_presigned_url_fn"]
+        api.create_resolver(
+            "PaymentMethodQrCodeUrlResolver",
+            type_name="PaymentMethod",
+            field_name="qrCodeUrl",
+            data_source=lambda_ds,
+            runtime=appsync.FunctionRuntime.JS_1_0_0,
+            code=appsync.Code.from_asset(str(RESOLVERS_DIR / "payment_method_qr_code_url_resolver.js")),
+        )

@@ -136,7 +136,7 @@ def create_mutation_resolvers(
     builder.create_lambda_resolver(
         field_name="createCampaign",
         type_name="Mutation",
-        lambda_datasource_name="campaign_operations",
+        lambda_datasource_name="campaign_operations_fn",
         id_suffix="CreateCampaignResolver",
     )
 
@@ -245,7 +245,7 @@ def create_mutation_resolvers(
     builder.create_lambda_resolver(
         field_name="createSellerProfile",
         type_name="Mutation",
-        lambda_datasource_name="create_profile",
+        lambda_datasource_name="create_profile_fn",
         id_suffix="CreateSellerProfileResolver",
     )
 
@@ -334,7 +334,7 @@ def create_mutation_resolvers(
     builder.create_lambda_resolver(
         field_name="updateMyAccount",
         type_name="Mutation",
-        lambda_datasource_name="update_my_account",
+        lambda_datasource_name="update_my_account_fn",
         id_suffix="UpdateMyAccountResolver",
     )
 
@@ -342,7 +342,7 @@ def create_mutation_resolvers(
     builder.create_lambda_resolver(
         field_name="transferProfileOwnership",
         type_name="Mutation",
-        lambda_datasource_name="transfer_ownership",
+        lambda_datasource_name="transfer_ownership_fn",
         id_suffix="TransferProfileOwnershipResolver",
     )
 
@@ -359,7 +359,7 @@ def create_mutation_resolvers(
     builder.create_lambda_resolver(
         field_name="requestCampaignReport",
         type_name="Mutation",
-        lambda_datasource_name="request_campaign_report",
+        lambda_datasource_name="request_campaign_report_fn",
         id_suffix="RequestCampaignReportResolver",
     )
 

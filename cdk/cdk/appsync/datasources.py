@@ -78,19 +78,18 @@ def create_lambda_datasources(
     datasources: dict[str, appsync.LambdaDataSource] = {}
 
     lambda_ds_configs = [
-        ("list_my_shares", "ListMySharesDS"),
-        ("create_profile", "CreateProfileDS"),
-        ("request_campaign_report", "RequestCampaignReportDS"),
-        ("unit_reporting", "UnitReportingDS"),
-        ("list_unit_catalogs", "ListUnitCatalogsDS"),
-        ("list_unit_campaign_catalogs", "ListUnitCampaignCatalogsDS"),
-        ("campaign_operations", "CampaignOperationsDS"),
-        ("delete_profile_orders_cascade", "DeleteProfileOrdersCascadeDS"),
-        ("update_my_account", "UpdateMyAccountDS"),
-        ("transfer_ownership", "TransferOwnershipDS"),
+        ("list_my_shares_fn", "ListMySharesDS"),
+        ("create_profile_fn", "CreateProfileDS"),
+        ("request_campaign_report_fn", "RequestCampaignReportDS"),
+        ("unit_reporting_fn", "UnitReportingDS"),
+        ("list_unit_catalogs_fn", "ListUnitCatalogsDS"),
+        ("list_unit_campaign_catalogs_fn", "ListUnitCampaignCatalogsDS"),
+        ("campaign_operations_fn", "CampaignOperationsDS"),
+        ("update_my_account_fn", "UpdateMyAccountDS"),
+        ("transfer_ownership_fn", "TransferOwnershipDS"),
         ("request_qr_upload_fn", "RequestQRUploadDS"),
         ("confirm_qr_upload_fn", "ConfirmQRUploadDS"),
-        ("generate_presigned_urls_fn", "GeneratePresignedURLsDS"),
+        ("generate_qr_code_presigned_url_fn", "GenerateQRCodePresignedURLDS"),
         ("delete_qr_code_fn", "DeleteQRCodeDS"),
         ("validate_payment_method_fn", "ValidatePaymentMethodDS"),
     ]
@@ -98,5 +97,5 @@ def create_lambda_datasources(
     for fn_key, ds_name in lambda_ds_configs:
         if fn_key in lambda_functions:
             datasources[fn_key] = api.add_lambda_data_source(ds_name, lambda_function=lambda_functions[fn_key])
-
+    
     return datasources

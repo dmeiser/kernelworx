@@ -62,9 +62,21 @@ def create_payment_methods_functions(
         code=appsync.Code.from_asset(str(RESOLVERS_DIR / "inject_global_payment_methods_fn.js")),
     )
 
+    # SetOwnerAccountIdInStashFn - Set ctx.stash.ownerAccountId for field resolvers
+    # This enables the qrCodeUrl field resolver to generate presigned URLs
+    functions["set_owner_account_id_in_stash"] = appsync.AppsyncFunction(
+        scope,
+        "SetOwnerAccountIdInStashFn",
+        name=f"SetOwnerAccountIdInStashFn_{env_name}",
+        api=api,
+        data_source=none_ds,
+        runtime=appsync.FunctionRuntime.JS_1_0_0,
+        code=appsync.Code.from_asset(str(RESOLVERS_DIR / "set_owner_account_id_in_stash_fn.js")),
+    )
+
     # === PAYMENT METHODS FOR PROFILE QUERY FUNCTIONS ===
-    # These functions are only needed when the Lambda is available for presigned URLs
-    if "generate_presigned_urls_fn" in lambda_datasources:
+    # These functions are needed for paymentMethodsForProfile query
+    if "generate_qr_code_presigned_url_fn" in lambda_datasources:
         # CheckPaymentMethodsAccessFn - Verify profile access and determine QR visibility
         functions["check_payment_methods_access"] = appsync.AppsyncFunction(
             scope,
@@ -99,17 +111,6 @@ def create_payment_methods_functions(
             data_source=filter_none_ds,
             runtime=appsync.FunctionRuntime.JS_1_0_0,
             code=appsync.Code.from_asset(str(RESOLVERS_DIR / "filter_payment_methods_by_access_fn.js")),
-        )
-
-        # GeneratePresignedUrlsFn - Lambda step to add pre-signed URLs
-        functions["generate_presigned_urls"] = appsync.AppsyncFunction(
-            scope,
-            "GeneratePresignedUrlsFn",
-            name=f"GeneratePresignedUrlsFn_{env_name}",
-            api=api,
-            data_source=lambda_datasources["generate_presigned_urls_fn"],
-            runtime=appsync.FunctionRuntime.JS_1_0_0,
-            code=appsync.Code.from_asset(str(RESOLVERS_DIR / "lambda_passthrough_resolver.js")),
         )
 
     # === MUTATION FUNCTIONS ===
