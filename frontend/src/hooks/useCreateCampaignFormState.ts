@@ -1,7 +1,7 @@
 /**
  * Custom hook for managing form state in CreateCampaignPage
  */
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useLocation } from 'react-router-dom';
 
 export interface FormState {
@@ -26,11 +26,12 @@ export interface FormState {
 
 export const useCreateCampaignFormState = () => {
   const location = useLocation();
+  const preselectedCatalogId = (location.state as { catalogId?: string })?.catalogId;
   
   const [profileId, setProfileId] = useState('');
   const [campaignName, setCampaignName] = useState('');
   const [campaignYear, setCampaignYear] = useState(new Date().getFullYear());
-  const [catalogId, setCatalogId] = useState('');
+  const [catalogId, setCatalogId] = useState(preselectedCatalogId || '');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [unitType, setUnitType] = useState('');
@@ -45,13 +46,7 @@ export const useCreateCampaignFormState = () => {
     severity: 'success' | 'error';
   } | null>(null);
 
-  // Initialize catalogId from location state if provided
-  useEffect(() => {
-    const preselectedCatalogId = (location.state as { catalogId?: string })?.catalogId;
-    if (preselectedCatalogId) {
-      setCatalogId(preselectedCatalogId);
-    }
-  }, [location.state]);
+
 
   return {
     profileId,

@@ -31,6 +31,7 @@ import {
   CloudUpload as UploadIcon,
   DeleteForever as DeleteQRIcon,
 } from '@mui/icons-material';
+import { QrCodeImage } from './QrCodeImage';
 
 interface PaymentMethod {
   name: string;
@@ -142,15 +143,7 @@ export const PaymentMethodCard: React.FC<PaymentMethodCardProps> = ({
       <Dialog open={qrPreviewOpen} onClose={() => setQrPreviewOpen(false)} maxWidth="sm">
         <DialogTitle>QR Code for {method.name}</DialogTitle>
         <DialogContent>
-          <Box display="flex" justifyContent="center" p={2}>
-            {method.qrCodeUrl && (
-              <img
-                src={method.qrCodeUrl}
-                alt={`QR code for ${method.name}`}
-                style={{ maxWidth: '100%', maxHeight: '400px' }}
-              />
-            )}
-          </Box>
+          <QrCodeImage qrCodeUrl={method.qrCodeUrl} methodName={method.name} />
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setQrPreviewOpen(false)}>Close</Button>

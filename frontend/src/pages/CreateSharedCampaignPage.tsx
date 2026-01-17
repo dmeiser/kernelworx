@@ -5,7 +5,7 @@
 
 import React, { useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client/react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import {
   Typography,
   Box,
@@ -146,6 +146,7 @@ const CatalogSection: React.FC<CatalogSectionProps> = ({
 }) => {
   const handleChange = (e: SelectChangeEvent<string>) => onCatalogChange(e.target.value);
   const noCatalogs = !catalogsLoading && filteredPublicCatalogs.length === 0 && myCatalogs.length === 0;
+  const allCatalogs = [...filteredPublicCatalogs, ...myCatalogs];
 
   return (
     <Box>
@@ -154,7 +155,16 @@ const CatalogSection: React.FC<CatalogSectionProps> = ({
       </Typography>
       <FormControl fullWidth required disabled={catalogsLoading}>
         <InputLabel>Select Catalog</InputLabel>
-        <Select value={catalogId} onChange={handleChange} label="Select Catalog">
+        <Select 
+          value={catalogId} 
+          onChange={handleChange} 
+          label="Select Catalog"
+          renderValue={(value) => {
+            if (!value) return '';
+            const catalog = allCatalogs.find((c) => c.catalogId === value);
+            return catalog ? catalog.catalogName : '';
+          }}
+        >
           {catalogsLoading && <MenuItem disabled>Loading catalogs...</MenuItem>}
           {noCatalogs && <MenuItem disabled>No catalogs available</MenuItem>}
           
@@ -486,9 +496,11 @@ function useCanCreateSharedCampaign() {
 
 export const CreateSharedCampaignPage: React.FC = () => {
   const navigate = useNavigate();
+  const location = useLocation();
+  const preselectedCatalogId = (location.state as { catalogId?: string })?.catalogId;
 
   // Form state
-  const [catalogId, setCatalogId] = useState('');
+  const [catalogId, setCatalogId] = useState(preselectedCatalogId || '');
   const [campaignName, setCampaignName] = useState('');
   const [campaignYear, setCampaignYear] = useState(new Date().getFullYear());
   const [startDate, setStartDate] = useState('');

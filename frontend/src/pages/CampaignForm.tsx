@@ -306,6 +306,9 @@ const CatalogSelection: React.FC<CatalogSelectionProps> = ({
   const noCatalogs = hasNoCatalogs(catalogsLoading, filteredMyCatalogs, filteredPublicCatalogs);
   const disabled = isCatalogDisabled(formState.submitting, catalogsLoading);
 
+  // Find the selected catalog to display its name
+  const allCatalogs = [...filteredMyCatalogs, ...filteredPublicCatalogs];
+
   return (
     <FormControl fullWidth disabled={disabled}>
       <InputLabel>Product Catalog *</InputLabel>
@@ -313,6 +316,11 @@ const CatalogSelection: React.FC<CatalogSelectionProps> = ({
         value={formState.catalogId}
         onChange={(e) => formState.setCatalogId(e.target.value)}
         label="Product Catalog *"
+        renderValue={(value) => {
+          if (!value) return '';
+          const catalog = allCatalogs.find((c) => c.catalogId === value);
+          return catalog ? catalog.catalogName : '';
+        }}
         MenuProps={{
           slotProps: {
             paper: {

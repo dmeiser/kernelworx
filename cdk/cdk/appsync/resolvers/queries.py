@@ -267,13 +267,15 @@ def create_query_resolvers(
     # === PAYMENT METHODS QUERIES ===
 
     # myPaymentMethods Pipeline
+    my_payment_methods_functions = [
+        functions["get_payment_methods"],
+        functions["inject_global_payment_methods"],
+    ]
+    
     builder.create_pipeline_resolver(
         field_name="myPaymentMethods",
         type_name="Query",
-        functions=[
-            functions["get_payment_methods"],
-            functions["inject_global_payment_methods"],
-        ],
+        functions=my_payment_methods_functions,
         code_file=RESOLVERS_DIR / "my_payment_methods_pipeline_resolver.js",
         id_suffix="MyPaymentMethodsResolver",
     )

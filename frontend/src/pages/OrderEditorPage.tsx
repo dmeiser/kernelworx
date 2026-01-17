@@ -46,6 +46,7 @@ import {
   GET_PROFILE,
   GET_PAYMENT_METHODS_FOR_PROFILE,
 } from '../lib/graphql';
+import { QrCodeImage } from '../components/QrCodeImage';
 import { ensureProfileId, ensureCampaignId, ensureOrderId, toUrlId } from '../lib/ids';
 import { useOrderForm, type OrderFormState, type LineItemInput } from '../hooks/useOrderForm';
 import type { Product, Catalog, OrderAddress } from '../types';
@@ -485,20 +486,7 @@ const QRPreviewModal: React.FC<QRPreviewModalProps> = ({ open, onClose, qrCodeUr
   <Dialog open={open} onClose={onClose} maxWidth="xs" fullWidth>
     <DialogTitle>Payment QR Code - {methodName}</DialogTitle>
     <DialogContent>
-      {qrCodeUrl ? (
-        <Box display="flex" justifyContent="center" p={2}>
-          <Box
-            component="img"
-            src={qrCodeUrl}
-            alt={`QR code for ${methodName}`}
-            sx={{ maxWidth: '100%', maxHeight: 300 }}
-          />
-        </Box>
-      ) : (
-        <Typography color="text.secondary" align="center">
-          No QR code available for this payment method.
-        </Typography>
-      )}
+      <QrCodeImage qrCodeUrl={qrCodeUrl} methodName={methodName} maxHeight={300} />
     </DialogContent>
     <DialogActions>
       <Button onClick={onClose}>Close</Button>
@@ -598,7 +586,9 @@ const PaymentNotesForm: React.FC<PaymentNotesFormProps> = ({
   canViewQR,
 }) => {
   const selectedMethod = paymentMethods.find((m) => m.name === paymentMethod) ?? null;
-  const isFormDisabled = loading || paymentMethodsLoading;
+  // Only disable based on mutation loading, NOT query loading
+  // If payment methods query fails, user should still be able to interact with the form
+  const isFormDisabled = loading;
 
   return (
     <Paper sx={{ p: 3, mb: 3 }}>
@@ -763,7 +753,7 @@ async function submitOrder({
   } catch (err: unknown) {
     const error = err as { message?: string };
     formState.setError(error.message || 'Failed to save order');
-    formState.setLoading(false);
+    // Note: loading state is now handled by mutation onError callback
   }
 }
 
@@ -912,20 +902,38 @@ export const OrderEditorPage: React.FC = () => {
     orderData,
   } = useOrderData(urlParams);
 
-  const [createOrder] = useMutation(CREATE_ORDER);
-  const [updateOrder] = useMutation(UPDATE_ORDER);
+  const [createOrder] = useMutation(CREATE_ORDER, {
+    onCompleted: () => {
+      formState.setLoading(false);
+    },
+    onError: (error) => {
+      formState.setError(error.message || 'Failed to create order');
+      formState.setLoading(false);
+    },
+  });
+  const [updateOrder] = useMutation(UPDATE_ORDER, {
+    onCompleted: () => {
+      formState.setLoading(false);
+    },
+    onError: (error) => {
+      formState.setError(error.message || 'Failed to update order');
+      formState.setLoading(false);
+    },
+  });
 
   useEffect(() => {
     if (!orderData) {
       return;
     }
     formState.loadFromOrder(orderData);
-  }, [orderData, formState]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orderData]);
 
   // Set default payment method to "Cash" when payment methods load
   useEffect(() => {
     setDefaultPaymentMethod(paymentMethods, orderData, formState);
-  }, [paymentMethods, orderData, formState]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paymentMethods, orderData]);
 
   const handleCancel = () => navigate(urlParams.ordersUrl);
 
