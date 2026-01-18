@@ -183,8 +183,6 @@ const CampaignNameYearFields: React.FC<CampaignNameYearProps> = ({ formState }) 
   </Stack>
 );
 
-
-
 // Unit Information accordion
 interface UnitInfoAccordionProps {
   formState: FormState;
@@ -407,24 +405,21 @@ interface ManualModeContentProps {
   catalogsLoading: boolean;
 }
 
-const ManualModeContent = memo<ManualModeContentProps>(({
-  formState,
-  filteredMyCatalogs,
-  filteredPublicCatalogs,
-  catalogsLoading,
-}) => (
-  <>
-    <CampaignNameYearFields formState={formState} />
-    <CatalogSection
-      catalogId={formState.catalogId}
-      onCatalogChange={formState.setCatalogId}
-      catalogsLoading={catalogsLoading}
-      myCatalogs={filteredMyCatalogs}
-      filteredPublicCatalogs={filteredPublicCatalogs}
-    />
-    <UnitInfoAccordion formState={formState} />
-  </>
-));
+const ManualModeContent = memo<ManualModeContentProps>(
+  ({ formState, filteredMyCatalogs, filteredPublicCatalogs, catalogsLoading }) => (
+    <>
+      <CampaignNameYearFields formState={formState} />
+      <CatalogSection
+        catalogId={formState.catalogId}
+        onCatalogChange={formState.setCatalogId}
+        catalogsLoading={catalogsLoading}
+        myCatalogs={filteredMyCatalogs}
+        filteredPublicCatalogs={filteredPublicCatalogs}
+      />
+      <UnitInfoAccordion formState={formState} />
+    </>
+  ),
+);
 
 export const CampaignForm: React.FC<CampaignFormProps> = ({
   formState,

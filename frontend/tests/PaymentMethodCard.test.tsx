@@ -42,9 +42,7 @@ describe('PaymentMethodCard', () => {
   });
 
   test('shows QR code icon when method has QR code', () => {
-    render(
-      <PaymentMethodCard {...defaultProps} method={{ name: 'Venmo', qrCodeUrl: 'https://example.com/qr.png' }} />,
-    );
+    render(<PaymentMethodCard {...defaultProps} method={{ name: 'Venmo', qrCodeUrl: 'https://example.com/qr.png' }} />);
     expect(screen.getByLabelText('View QR code for Venmo')).toBeInTheDocument();
   });
 
@@ -55,9 +53,7 @@ describe('PaymentMethodCard', () => {
 
   test('opens QR preview dialog when QR icon clicked', async () => {
     const user = userEvent.setup();
-    render(
-      <PaymentMethodCard {...defaultProps} method={{ name: 'Venmo', qrCodeUrl: 'https://example.com/qr.png' }} />,
-    );
+    render(<PaymentMethodCard {...defaultProps} method={{ name: 'Venmo', qrCodeUrl: 'https://example.com/qr.png' }} />);
 
     await user.click(screen.getByLabelText('View QR code for Venmo'));
 
@@ -68,9 +64,7 @@ describe('PaymentMethodCard', () => {
 
   test('closes QR preview dialog when Close clicked', async () => {
     const user = userEvent.setup();
-    render(
-      <PaymentMethodCard {...defaultProps} method={{ name: 'Venmo', qrCodeUrl: 'https://example.com/qr.png' }} />,
-    );
+    render(<PaymentMethodCard {...defaultProps} method={{ name: 'Venmo', qrCodeUrl: 'https://example.com/qr.png' }} />);
 
     await user.click(screen.getByLabelText('View QR code for Venmo'));
     expect(screen.getByRole('dialog')).toBeInTheDocument();
@@ -107,16 +101,12 @@ describe('PaymentMethodCard', () => {
   });
 
   test('hides upload QR button when QR code exists', () => {
-    render(
-      <PaymentMethodCard {...defaultProps} method={{ name: 'Venmo', qrCodeUrl: 'https://example.com/qr.png' }} />,
-    );
+    render(<PaymentMethodCard {...defaultProps} method={{ name: 'Venmo', qrCodeUrl: 'https://example.com/qr.png' }} />);
     expect(screen.queryByLabelText('Upload QR code for Venmo')).not.toBeInTheDocument();
   });
 
   test('shows delete QR button when QR code exists', () => {
-    render(
-      <PaymentMethodCard {...defaultProps} method={{ name: 'Venmo', qrCodeUrl: 'https://example.com/qr.png' }} />,
-    );
+    render(<PaymentMethodCard {...defaultProps} method={{ name: 'Venmo', qrCodeUrl: 'https://example.com/qr.png' }} />);
     expect(screen.getByLabelText('Delete QR code for Venmo')).toBeInTheDocument();
   });
 
@@ -151,9 +141,7 @@ describe('PaymentMethodCard', () => {
 
   test('calls onDeleteQR when delete QR button clicked', async () => {
     const user = userEvent.setup();
-    render(
-      <PaymentMethodCard {...defaultProps} method={{ name: 'Venmo', qrCodeUrl: 'https://example.com/qr.png' }} />,
-    );
+    render(<PaymentMethodCard {...defaultProps} method={{ name: 'Venmo', qrCodeUrl: 'https://example.com/qr.png' }} />);
 
     await user.click(screen.getByLabelText('Delete QR code for Venmo'));
     expect(mockOnDeleteQR).toHaveBeenCalledTimes(1);

@@ -44,7 +44,7 @@ describe('SettingsPage (unit)', () => {
     render(
       <MemoryRouter>
         <SettingsPage />
-      </MemoryRouter>
+      </MemoryRouter>,
     );
 
     expect(await screen.findByText(/Account Settings/i)).toBeTruthy();
@@ -61,7 +61,7 @@ describe('SettingsPage (unit)', () => {
     render(
       <MemoryRouter>
         <SettingsPage />
-      </MemoryRouter>
+      </MemoryRouter>,
     );
 
     expect(await screen.findByText(/Account Settings/i)).toBeTruthy();

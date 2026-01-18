@@ -44,7 +44,7 @@ export interface Campaign {
   state?: string;
   isShared?: boolean;
   sharedCampaignCode?: string;
-  isActive: boolean;  // Whether campaign is active (default true)
+  isActive: boolean; // Whether campaign is active (default true)
   totalOrders?: number;
   totalRevenue?: number;
   createdAt?: string;

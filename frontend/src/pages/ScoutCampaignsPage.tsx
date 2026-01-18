@@ -37,7 +37,7 @@ function getDecodedProfileId(encodedProfileId: string | undefined): string {
 function separateCampaigns(campaigns: Campaign[]): { active: Campaign[]; inactive: Campaign[] } {
   const active: Campaign[] = [];
   const inactive: Campaign[] = [];
-  
+
   for (const campaign of campaigns) {
     if (campaign.isActive === false) {
       inactive.push(campaign);
@@ -45,7 +45,7 @@ function separateCampaigns(campaigns: Campaign[]): { active: Campaign[]; inactiv
       active.push(campaign);
     }
   }
-  
+
   return { active, inactive };
 }
 
@@ -229,7 +229,7 @@ const ScoutCampaignsContent: React.FC<ScoutCampaignsContentProps> = ({
   const canEdit = canEditProfile(profile);
   const handleNavigateBack = () => navigate('/scouts');
   const handleCreateClick = () => navigate('/create-campaign');
-  
+
   const { active, inactive } = separateCampaigns(campaigns);
   const showDivider = active.length > 0 && inactive.length > 0;
 
@@ -243,7 +243,11 @@ const ScoutCampaignsContent: React.FC<ScoutCampaignsContentProps> = ({
         onCreateClick={handleCreateClick}
       />
       <ErrorAlert error={error} />
-      <CampaignsGrid campaigns={active} profileId={profileId} sectionTitle={inactive.length > 0 ? "Active Campaigns" : undefined} />
+      <CampaignsGrid
+        campaigns={active}
+        profileId={profileId}
+        sectionTitle={inactive.length > 0 ? 'Active Campaigns' : undefined}
+      />
       {showDivider && <Divider sx={{ my: 4 }} />}
       <CampaignsGrid campaigns={inactive} profileId={profileId} sectionTitle="Inactive Campaigns" />
       <EmptyState canEdit={canEdit} loading={loading} campaignsCount={campaigns.length} />

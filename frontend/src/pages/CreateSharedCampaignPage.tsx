@@ -104,9 +104,9 @@ const CatalogSection: React.FC<CatalogSectionProps> = ({
       </Typography>
       <FormControl fullWidth required disabled={catalogsLoading}>
         <InputLabel>Select Catalog</InputLabel>
-        <Select 
-          value={catalogId} 
-          onChange={handleChange} 
+        <Select
+          value={catalogId}
+          onChange={handleChange}
           label="Select Catalog"
           renderValue={(value) => {
             if (!value) return '';
@@ -116,7 +116,7 @@ const CatalogSection: React.FC<CatalogSectionProps> = ({
         >
           {catalogsLoading && <MenuItem disabled>Loading catalogs...</MenuItem>}
           {noCatalogs && <MenuItem disabled>No catalogs available</MenuItem>}
-          
+
           {filteredPublicCatalogs.length > 0 && (
             <MenuItem disabled sx={{ fontWeight: 'bold', py: 1 }}>
               Public Catalogs
@@ -127,7 +127,7 @@ const CatalogSection: React.FC<CatalogSectionProps> = ({
               {catalog.catalogName}
             </MenuItem>
           ))}
-          
+
           {myCatalogs.length > 0 && (
             <MenuItem disabled sx={{ fontWeight: 'bold', py: 1 }}>
               My Catalogs

@@ -15,11 +15,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import { MockedProvider } from '@apollo/client/testing/react';
 import type { MockedResponse } from '@apollo/client/testing';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
-import {
-  GET_CAMPAIGN,
-  GET_PROFILE,
-  GET_PAYMENT_METHODS_FOR_PROFILE,
-} from '../src/lib/graphql';
+import { GET_CAMPAIGN, GET_PROFILE, GET_PAYMENT_METHODS_FOR_PROFILE } from '../src/lib/graphql';
 
 // Mock navigate - must be before component import
 const mockNavigate = vi.fn();
@@ -66,8 +62,22 @@ const mockCampaignData = {
       catalogId: 'CAT~test-catalog-1',
       catalogName: 'Test Catalog',
       products: [
-        { __typename: 'Product', productId: 'PROD~1', productName: 'Product A', description: null, price: 10.0, sortOrder: 0 },
-        { __typename: 'Product', productId: 'PROD~2', productName: 'Product B', description: null, price: 20.0, sortOrder: 1 },
+        {
+          __typename: 'Product',
+          productId: 'PROD~1',
+          productName: 'Product A',
+          description: null,
+          price: 10.0,
+          sortOrder: 0,
+        },
+        {
+          __typename: 'Product',
+          productId: 'PROD~2',
+          productName: 'Product B',
+          description: null,
+          price: 20.0,
+          sortOrder: 1,
+        },
       ],
     },
   },
@@ -163,10 +173,7 @@ function renderWithRouter(mocks: MockedResponse[]) {
     <MockedProvider mocks={mocks}>
       <MemoryRouter initialEntries={[path]}>
         <Routes>
-          <Route
-            path="/scouts/:profileId/campaigns/:campaignId/orders/new"
-            element={<OrderEditorPage />}
-          />
+          <Route path="/scouts/:profileId/campaigns/:campaignId/orders/new" element={<OrderEditorPage />} />
         </Routes>
       </MemoryRouter>
     </MockedProvider>,
@@ -210,14 +217,17 @@ describe('OrderEditorPage - Payment Methods', () => {
 
       // Wait for payment methods to load and Cash to be available
       // MUI Select displays the selected value in an element with role="button"
-      await waitFor(() => {
-        // Look for "Cash" anywhere in the Payment section
-        const paymentPaper = screen.getByText('Payment & Notes').closest('div[class*="MuiPaper"]');
-        expect(paymentPaper).not.toBeNull();
-        // The select should show "Cash" as selected - which appears as text
-        const selectValue = paymentPaper?.querySelector('[class*="MuiSelect-select"]');
-        expect(selectValue?.textContent).toBe('Cash');
-      }, { timeout: 3000 });
+      await waitFor(
+        () => {
+          // Look for "Cash" anywhere in the Payment section
+          const paymentPaper = screen.getByText('Payment & Notes').closest('div[class*="MuiPaper"]');
+          expect(paymentPaper).not.toBeNull();
+          // The select should show "Cash" as selected - which appears as text
+          const selectValue = paymentPaper?.querySelector('[class*="MuiSelect-select"]');
+          expect(selectValue?.textContent).toBe('Cash');
+        },
+        { timeout: 3000 },
+      );
     });
   });
 
@@ -241,11 +251,14 @@ describe('OrderEditorPage - Payment Methods', () => {
       });
 
       // Wait for the Cash default to be selected, then change to Venmo which has QR
-      await waitFor(() => {
-        const paymentPaper = screen.getByText('Payment & Notes').closest('div[class*="MuiPaper"]');
-        const selectValue = paymentPaper?.querySelector('[class*="MuiSelect-select"]');
-        expect(selectValue?.textContent).toBe('Cash');
-      }, { timeout: 3000 });
+      await waitFor(
+        () => {
+          const paymentPaper = screen.getByText('Payment & Notes').closest('div[class*="MuiPaper"]');
+          const selectValue = paymentPaper?.querySelector('[class*="MuiSelect-select"]');
+          expect(selectValue?.textContent).toBe('Cash');
+        },
+        { timeout: 3000 },
+      );
     });
 
     test('WRITE user sees payment form', async () => {

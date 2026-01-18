@@ -1,23 +1,9 @@
-import os
 from typing import Any
 
 from aws_cdk import (
-    CfnOutput,
-    Duration,
-    RemovalPolicy,
     Stack,
     Tags,
 )
-from aws_cdk import aws_certificatemanager as acm
-from aws_cdk import aws_cloudfront as cloudfront
-from aws_cdk import aws_cloudfront_origins as origins
-from aws_cdk import aws_cognito as cognito
-from aws_cdk import aws_dynamodb as dynamodb
-from aws_cdk import aws_iam as iam
-from aws_cdk import aws_lambda as lambda_
-from aws_cdk import aws_route53 as route53
-from aws_cdk import aws_route53_targets as targets
-from aws_cdk import aws_s3 as s3
 from constructs import Construct
 
 from .appsync import setup_appsync
@@ -25,7 +11,7 @@ from .auth import create_cognito_auth
 from .cloudfront_site import create_cloudfront_distribution
 from .dns_certificates import create_dns_and_certificates
 from .dynamodb_tables import create_dynamodb_tables
-from .helpers import get_context_bool, get_domain_names, get_known_user_pool_id, get_region_abbrev
+from .helpers import get_region_abbrev
 from .iam_roles import create_appsync_service_role, create_lambda_execution_role
 from .lambdas import create_lambda_functions
 from .s3_buckets import create_s3_buckets

@@ -70,7 +70,11 @@ export const useCreateCampaignFormState = () => {
     [preselectedCatalogId],
   );
 
-  const { values, setValue, reset: resetValues } = useFormState<FormStateValues>({
+  const {
+    values,
+    setValue,
+    reset: resetValues,
+  } = useFormState<FormStateValues>({
     initialValues: initialFormState,
   });
 
@@ -89,8 +93,7 @@ export const useCreateCampaignFormState = () => {
       setShareWithCreator: (v: boolean) => setValue('shareWithCreator', v),
       setUnitSectionExpanded: (v: boolean) => setValue('unitSectionExpanded', v),
       setSubmitting: (v: boolean) => setValue('submitting', v),
-      setToastMessage: (v: { message: string; severity: 'success' | 'error' } | null) =>
-        setValue('toastMessage', v),
+      setToastMessage: (v: { message: string; severity: 'success' | 'error' } | null) => setValue('toastMessage', v),
       reset: resetValues,
     }),
     [setValue, resetValues],

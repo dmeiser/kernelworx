@@ -241,8 +241,8 @@ export const CatalogEditorDialog: React.FC<CatalogEditorDialogProps> = ({ open, 
           {/* Privacy Notice */}
           <Alert severity="info">
             <AlertTitle>Privacy Notice</AlertTitle>
-            Catalogs are not searchable, but anyone with the catalog ID can view products and prices. When you use
-            this catalog in a shared campaign, campaign participants will see it.
+            Catalogs are not searchable, but anyone with the catalog ID can view products and prices. When you use this
+            catalog in a shared campaign, campaign participants will see it.
           </Alert>
 
           {error && <Alert severity="error">{error}</Alert>}

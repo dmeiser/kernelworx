@@ -1,6 +1,6 @@
 /**
  * Tests for ProtectedRoute component
- * 
+ *
  * Tests authentication and authorization checks
  */
 
@@ -26,7 +26,7 @@ vi.mock('aws-amplify/utils', () => ({
 // Mock setup helpers to reduce complexity
 const mockLoadingState = () => {
   vi.mocked(amplifyAuth.fetchAuthSession).mockImplementation(
-    () => new Promise(() => {}) // Never resolves - simulates loading
+    () => new Promise(() => {}), // Never resolves - simulates loading
   );
 };
 
@@ -61,7 +61,7 @@ const setupAuthMock = (params: AuthParams) => getAuthMockFn(params)();
 // Helper to render with routing context
 const renderWithRouter = (
   ui: React.ReactElement,
-  params: { isAuthenticated?: boolean; isAdmin?: boolean; loading?: boolean } = {}
+  params: { isAuthenticated?: boolean; isAdmin?: boolean; loading?: boolean } = {},
 ) => {
   setupAuthMock(params);
   return render(
@@ -72,7 +72,7 @@ const renderWithRouter = (
           <Route path="/protected" element={ui} />
         </Routes>
       </AuthProvider>
-    </MemoryRouter>
+    </MemoryRouter>,
   );
 };
 
@@ -86,7 +86,7 @@ describe('ProtectedRoute', () => {
       <ProtectedRoute>
         <div>Protected Content</div>
       </ProtectedRoute>,
-      { loading: true }
+      { loading: true },
     );
 
     expect(screen.getByRole('progressbar')).toBeInTheDocument();
@@ -99,7 +99,7 @@ describe('ProtectedRoute', () => {
       <ProtectedRoute>
         <div>Protected Content</div>
       </ProtectedRoute>,
-      { isAuthenticated: false }
+      { isAuthenticated: false },
     );
 
     // Wait for auth check to complete
@@ -114,7 +114,7 @@ describe('ProtectedRoute', () => {
       <ProtectedRoute>
         <div>Protected Content</div>
       </ProtectedRoute>,
-      { isAuthenticated: true }
+      { isAuthenticated: true },
     );
 
     await screen.findByText('Protected Content');
@@ -128,7 +128,7 @@ describe('ProtectedRoute', () => {
       <ProtectedRoute requireAdmin={false}>
         <div>Regular Content</div>
       </ProtectedRoute>,
-      { isAuthenticated: true, isAdmin: false }
+      { isAuthenticated: true, isAdmin: false },
     );
 
     await screen.findByText('Regular Content');
@@ -141,7 +141,7 @@ describe('ProtectedRoute', () => {
       <ProtectedRoute requireAdmin={true}>
         <div>Admin Content</div>
       </ProtectedRoute>,
-      { isAuthenticated: true, isAdmin: false }
+      { isAuthenticated: true, isAdmin: false },
     );
 
     await screen.findByText('Access Denied');
@@ -155,7 +155,7 @@ describe('ProtectedRoute', () => {
     // Note: Current AuthContext implementation returns isAdmin: false from placeholder fetchAccountData
     // This test will need to be updated when Apollo Client integration adds real account fetching
     // For now, we'll test that the component properly checks the isAdmin flag
-    
+
     // Skip this test until Apollo Client is integrated with real account data
     // The test structure is correct but needs real GraphQL mocking
     expect(true).toBe(true);
@@ -168,7 +168,7 @@ describe('ProtectedRoute', () => {
       <ProtectedRoute>
         <div>Protected Content</div>
       </ProtectedRoute>,
-      { isAuthenticated: false }
+      { isAuthenticated: false },
     );
 
     await screen.findByText('Login Page');
@@ -182,7 +182,7 @@ describe('ProtectedRoute', () => {
       <ProtectedRoute>
         <div>Content</div>
       </ProtectedRoute>,
-      { isAuthenticated: true, isAdmin: false }
+      { isAuthenticated: true, isAdmin: false },
     );
 
     await screen.findByText('Content');

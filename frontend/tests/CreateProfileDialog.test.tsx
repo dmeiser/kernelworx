@@ -9,18 +9,14 @@ import { CreateProfileDialog } from '../src/components/CreateProfileDialog';
 
 describe('CreateProfileDialog', () => {
   test('renders when open', () => {
-    render(
-      <CreateProfileDialog open={true} onClose={vi.fn()} onSubmit={vi.fn()} />
-    );
+    render(<CreateProfileDialog open={true} onClose={vi.fn()} onSubmit={vi.fn()} />);
 
     expect(screen.getByText('Create New Scout')).toBeInTheDocument();
     expect(screen.getByLabelText(/Scout Name/i)).toBeInTheDocument();
   });
 
   test('does not render when closed', () => {
-    render(
-      <CreateProfileDialog open={false} onClose={vi.fn()} onSubmit={vi.fn()} />
-    );
+    render(<CreateProfileDialog open={false} onClose={vi.fn()} onSubmit={vi.fn()} />);
 
     expect(screen.queryByText('Create New Scout')).not.toBeInTheDocument();
   });
@@ -29,9 +25,7 @@ describe('CreateProfileDialog', () => {
     const user = userEvent.setup();
     const onClose = vi.fn();
 
-    render(
-      <CreateProfileDialog open={true} onClose={onClose} onSubmit={vi.fn()} />
-    );
+    render(<CreateProfileDialog open={true} onClose={onClose} onSubmit={vi.fn()} />);
 
     const cancelButton = screen.getByRole('button', { name: /Cancel/i });
     await user.click(cancelButton);
@@ -40,9 +34,7 @@ describe('CreateProfileDialog', () => {
   });
 
   test('submit button disabled when name is empty', () => {
-    render(
-      <CreateProfileDialog open={true} onClose={vi.fn()} onSubmit={vi.fn()} />
-    );
+    render(<CreateProfileDialog open={true} onClose={vi.fn()} onSubmit={vi.fn()} />);
 
     const submitButton = screen.getByRole('button', { name: /Create Scout/i });
     expect(submitButton).toBeDisabled();
@@ -50,9 +42,7 @@ describe('CreateProfileDialog', () => {
 
   test('submit button enabled when name has text', async () => {
     const user = userEvent.setup();
-    render(
-      <CreateProfileDialog open={true} onClose={vi.fn()} onSubmit={vi.fn()} />
-    );
+    render(<CreateProfileDialog open={true} onClose={vi.fn()} onSubmit={vi.fn()} />);
 
     const nameInput = screen.getByLabelText(/Scout Name/i);
     await user.type(nameInput, 'Scout Alpha');
@@ -66,9 +56,7 @@ describe('CreateProfileDialog', () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     const onClose = vi.fn();
 
-    render(
-      <CreateProfileDialog open={true} onClose={onClose} onSubmit={onSubmit} />
-    );
+    render(<CreateProfileDialog open={true} onClose={onClose} onSubmit={onSubmit} />);
 
     const nameInput = screen.getByLabelText(/Scout Name/i);
     await user.type(nameInput, '  Scout Alpha  ');
@@ -84,9 +72,7 @@ describe('CreateProfileDialog', () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     const onClose = vi.fn();
 
-    render(
-      <CreateProfileDialog open={true} onClose={onClose} onSubmit={onSubmit} />
-    );
+    render(<CreateProfileDialog open={true} onClose={onClose} onSubmit={onSubmit} />);
 
     const nameInput = screen.getByLabelText(/Scout Name/i);
     await user.type(nameInput, 'Scout Alpha');
@@ -104,9 +90,7 @@ describe('CreateProfileDialog', () => {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const onSubmit = vi.fn((_name: string) => new Promise<void>(() => {})); // Never resolves
 
-    render(
-      <CreateProfileDialog open={true} onClose={vi.fn()} onSubmit={onSubmit} />
-    );
+    render(<CreateProfileDialog open={true} onClose={vi.fn()} onSubmit={onSubmit} />);
 
     const nameInput = screen.getByLabelText(/Scout Name/i);
     await user.type(nameInput, 'Scout Alpha');
@@ -124,9 +108,7 @@ describe('CreateProfileDialog', () => {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const onSubmit = vi.fn((_name: string) => new Promise<void>(() => {})); // Never resolves
 
-    render(
-      <CreateProfileDialog open={true} onClose={vi.fn()} onSubmit={onSubmit} />
-    );
+    render(<CreateProfileDialog open={true} onClose={vi.fn()} onSubmit={onSubmit} />);
 
     const nameInput = screen.getByLabelText(/Scout Name/i);
     await user.type(nameInput, 'Scout Alpha');
@@ -145,9 +127,7 @@ describe('CreateProfileDialog', () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn().mockResolvedValue(undefined);
 
-    render(
-      <CreateProfileDialog open={true} onClose={vi.fn()} onSubmit={onSubmit} />
-    );
+    render(<CreateProfileDialog open={true} onClose={vi.fn()} onSubmit={onSubmit} />);
 
     const nameInput = screen.getByLabelText(/Scout Name/i);
     await user.type(nameInput, 'Scout Alpha{Enter}');
@@ -161,9 +141,7 @@ describe('CreateProfileDialog', () => {
     const user = userEvent.setup();
     const onClose = vi.fn();
 
-    render(
-      <CreateProfileDialog open={true} onClose={onClose} onSubmit={vi.fn()} />
-    );
+    render(<CreateProfileDialog open={true} onClose={onClose} onSubmit={vi.fn()} />);
 
     const nameInput = screen.getByLabelText(/Scout Name/i);
     await user.type(nameInput, 'Scout Alpha');
@@ -178,9 +156,7 @@ describe('CreateProfileDialog', () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn();
 
-    render(
-      <CreateProfileDialog open={true} onClose={vi.fn()} onSubmit={onSubmit} />
-    );
+    render(<CreateProfileDialog open={true} onClose={vi.fn()} onSubmit={onSubmit} />);
 
     const nameInput = screen.getByLabelText(/Scout Name/i);
     await user.type(nameInput, '   ');

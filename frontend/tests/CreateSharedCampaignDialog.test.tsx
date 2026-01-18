@@ -71,9 +71,7 @@ const createMutateFunction = (key: string) => (opts: any) => {
 let useMutationImpl = (m: any) => {
   const key = getMutationKey(m);
   const registered = mutationImpls.get(key) || mutationImpls.get('default');
-  const mutate = registered
-    ? (opts: any) => registered(opts)
-    : createMutateFunction(key);
+  const mutate = registered ? (opts: any) => registered(opts) : createMutateFunction(key);
   return [mutate, { loading: false, data: null }];
 };
 
@@ -93,9 +91,7 @@ const publicCatalogsFixture = [
   { catalogId: 'pub-1', catalogName: 'Public One', catalogType: 'PUBLIC' },
   { catalogId: 'pub-2', catalogName: 'Public Two', catalogType: 'PUBLIC' },
 ];
-const myCatalogsFixture = [
-  { catalogId: 'my-1', catalogName: 'My Catalog', catalogType: 'PRIVATE' },
-];
+const myCatalogsFixture = [{ catalogId: 'my-1', catalogName: 'My Catalog', catalogType: 'PRIVATE' }];
 
 const getQueryOpNames = (query: any): string[] => {
   const defs = query?.definitions || [];
@@ -186,7 +182,12 @@ describe('CreateSharedCampaignDialog', () => {
 
   // SKIPPED: MUI FormControl disabled state doesn't expose aria-disabled on DOM in jsdom
   it.skip('shows loading state for catalogs (select disabled)', () => {
-    setupQueryMock({ publicLoading: true, myLoading: true, publicData: { listManagedCatalogs: [] }, myData: { listMyCatalogs: [] } });
+    setupQueryMock({
+      publicLoading: true,
+      myLoading: true,
+      publicData: { listManagedCatalogs: [] },
+      myData: { listMyCatalogs: [] },
+    });
 
     render(<CreateSharedCampaignDialog open={true} onClose={onClose} onSuccess={onSuccess} canCreate={true} />);
 
@@ -212,7 +213,15 @@ describe('CreateSharedCampaignDialog', () => {
 
   it('deduplicates public catalogs that are also in my catalogs', async () => {
     // public has pub-1, my has pub-1 and my-1 -> filteredPublicCatalogs should exclude pub-1
-    setupQueryMock({ publicData: { listManagedCatalogs: [{ catalogId: 'pub-1', catalogName: 'Public One' }] }, myData: { listMyCatalogs: [{ catalogId: 'pub-1', catalogName: 'Public One' }, { catalogId: 'my-1', catalogName: 'My Catalog' }] } });
+    setupQueryMock({
+      publicData: { listManagedCatalogs: [{ catalogId: 'pub-1', catalogName: 'Public One' }] },
+      myData: {
+        listMyCatalogs: [
+          { catalogId: 'pub-1', catalogName: 'Public One' },
+          { catalogId: 'my-1', catalogName: 'My Catalog' },
+        ],
+      },
+    });
 
     render(<CreateSharedCampaignDialog open={true} onClose={onClose} onSuccess={onSuccess} canCreate={true} />);
 

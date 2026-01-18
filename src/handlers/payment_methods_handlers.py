@@ -5,7 +5,6 @@ These handlers provide S3 pre-signed URL generation for QR code uploads
 and confirmations. They integrate with AppSync pipeline resolvers.
 """
 
-import json
 import os
 from typing import Any, Dict
 
@@ -23,10 +22,7 @@ try:  # pragma: no cover
         generate_presigned_get_url,
         generate_qr_code_s3_key,
         get_payment_methods,
-        get_qr_code_s3_key,
         is_reserved_name,
-        slugify,
-        update_payment_method,
         validate_qr_s3_key,
     )
 except ModuleNotFoundError:  # pragma: no cover
@@ -39,10 +35,7 @@ except ModuleNotFoundError:  # pragma: no cover
         generate_presigned_get_url,
         generate_qr_code_s3_key,
         get_payment_methods,
-        get_qr_code_s3_key,
         is_reserved_name,
-        slugify,
-        update_payment_method,
         validate_qr_s3_key,
     )
 

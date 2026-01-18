@@ -12,12 +12,10 @@ This Lambda code is kept for reference and potential future use.
 See cdk_stack.py for the actual implementations.
 """
 
-import os
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Dict, List, cast
 
-import boto3
 
 if TYPE_CHECKING:
     from mypy_boto3_dynamodb.service_resource import Table

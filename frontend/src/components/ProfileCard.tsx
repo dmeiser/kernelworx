@@ -42,17 +42,17 @@ const ProfileActions: React.FC<{
 }> = ({ isOwner, latestCampaignId, onViewAll, onManage, onViewLatest }) => (
   <CardActions sx={{ pt: 0, flexDirection: 'column', gap: 1 }}>
     {latestCampaignId && onViewLatest && (
-      <Button
-        fullWidth
-        size="small"
-        variant="contained"
-        startIcon={<CampaignIcon />}
-        onClick={onViewLatest}
-      >
+      <Button fullWidth size="small" variant="contained" startIcon={<CampaignIcon />} onClick={onViewLatest}>
         View Latest Campaign
       </Button>
     )}
-    <Button fullWidth size="small" variant={latestCampaignId ? "outlined" : "contained"} startIcon={<ViewIcon />} onClick={onViewAll}>
+    <Button
+      fullWidth
+      size="small"
+      variant={latestCampaignId ? 'outlined' : 'contained'}
+      startIcon={<ViewIcon />}
+      onClick={onViewAll}
+    >
       View All Campaigns
     </Button>
     {isOwner && (
@@ -63,10 +63,10 @@ const ProfileActions: React.FC<{
   </CardActions>
 );
 
-export const ProfileCard: React.FC<ProfileCardProps> = ({ 
-  profileId, 
-  sellerName, 
-  isOwner, 
+export const ProfileCard: React.FC<ProfileCardProps> = ({
+  profileId,
+  sellerName,
+  isOwner,
   permissions,
   latestCampaign,
 }) => {

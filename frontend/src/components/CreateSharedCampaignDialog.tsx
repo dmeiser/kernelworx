@@ -283,12 +283,7 @@ const CampaignFormFields: React.FC<CampaignFormFieldsProps> = ({
         required
         fullWidth
       />
-      <StateAutocomplete
-        value={formState.state}
-        onChange={formSetters.setState}
-        required
-        sx={{ minWidth: 100 }}
-      />
+      <StateAutocomplete value={formState.state} onChange={formSetters.setState} required sx={{ minWidth: 100 }} />
     </Stack>
 
     {/* Creator Message */}

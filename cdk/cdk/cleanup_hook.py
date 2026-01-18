@@ -401,6 +401,84 @@ def _cleanup_orphaned_route53_records(client: Any, domain_names: list[str], dry_
         print(f"   ⚠️  Could not clean Route53 records: {e}")
 
 
+def _find_best_matching_zone(zones: list[dict[str, Any]], domain_name: str) -> dict[str, Any] | None:
+    """Find the best matching hosted zone for a domain (longest suffix match)."""
+    best_zone = None
+    best_domain_length = 0
+
+    for zone in zones:
+        zone_domain = zone["Name"].rstrip(".")
+        if domain_name.endswith(zone_domain):
+            if len(zone_domain) > best_domain_length:
+                best_zone = zone
+                best_domain_length = len(zone_domain)
+
+    return best_zone
+
+
+def _get_region_abbrev(region: str) -> str:
+    """Get the region abbreviation for a given region."""
+    region_abbrevs = {
+        "us-east-1": "ue1",
+        "us-east-2": "ue2",
+        "us-west-1": "uw1",
+        "us-west-2": "uw2",
+    }
+    return region_abbrevs.get(region, region[:3])
+
+
+def _get_managed_route53_records(stack_name: str, region: str) -> set[str]:
+    """Get the set of Route53 record IDs managed by CloudFormation."""
+    cfn_client = boto3.client("cloudformation", region_name=region)
+    managed_record_ids: set[str] = set()
+    try:
+        paginator = cfn_client.get_paginator("list_stack_resources")
+        for page in paginator.paginate(StackName=stack_name):
+            for r in page["StackResourceSummaries"]:
+                if r["ResourceType"] == "AWS::Route53::RecordSet":
+                    managed_record_ids.add(r["PhysicalResourceId"])
+    except Exception:
+        pass
+    return managed_record_ids
+
+
+def _process_route53_record_deletion(
+    client: Any,
+    zone_id: str,
+    record: dict[str, Any],
+    domain_name: str,
+    managed_record_ids: set[str],
+    dry_run: bool,
+    record_types: list[str],
+) -> bool:
+    """Process deletion of a single Route53 record if it matches criteria.
+
+    Returns True if a matching record was found (deleted or skipped).
+    """
+    record_name = record.get("Name", "")
+    record_type = record.get("Type", "")
+    domain_with_dot = f"{domain_name}."
+
+    if record_name not in (domain_with_dot, domain_name):
+        return False
+
+    if record_type not in record_types:
+        return False
+
+    # Check if managed by CloudFormation
+    if domain_name in managed_record_ids:
+        print(f"      ℹ️  {record_type} record is CloudFormation-managed, skipping")
+        return True
+
+    print(f"      🗑️  Found unmanaged {record_type} record: {record_name}")
+    if dry_run:
+        print(f"      [DRY RUN] Would delete {record_type} record for {domain_name}")
+    else:
+        _delete_route53_record(client, zone_id, record)
+        print(f"      ✅ Deleted unmanaged {record_type} record for {domain_name}")
+    return True
+
+
 def _delete_api_domain_cname_record(
     client: Any, domain_name: str, environment_name: str, dry_run: bool = False
 ) -> None:
@@ -412,22 +490,11 @@ def _delete_api_domain_cname_record(
     from orphaned records, while preserving CloudFormation-managed records.
     """
     try:
-        # Find the hosted zone - list all and find the best match
         print(f"      ⏳ Finding hosted zone for {domain_name}")
         all_zones_response = client.list_hosted_zones()
         zones = all_zones_response.get("HostedZones", [])
 
-        # Find the best matching zone (longest matching domain)
-        best_zone = None
-        best_domain_length = 0
-
-        for zone in zones:
-            zone_domain = zone["Name"].rstrip(".")
-            if domain_name.endswith(zone_domain):
-                if len(zone_domain) > best_domain_length:
-                    best_zone = zone
-                    best_domain_length = len(zone_domain)
-
+        best_zone = _find_best_matching_zone(zones, domain_name)
         if not best_zone:
             print(f"      ℹ️  No hosted zones found for {domain_name}")
             return
@@ -436,57 +503,19 @@ def _delete_api_domain_cname_record(
         zone_name = best_zone["Name"].rstrip(".")
         print(f"      ℹ️  Found hosted zone: {zone_name} ({zone_id})")
 
-        # Get stack name to check CloudFormation ownership
         region = os.getenv("AWS_REGION") or "us-east-1"
-        region_abbrevs = {
-            "us-east-1": "ue1",
-            "us-east-2": "ue2",
-            "us-west-1": "uw1",
-            "us-west-2": "uw2",
-        }
-        region_abbrev = region_abbrevs.get(region, region[:3])
+        region_abbrev = _get_region_abbrev(region)
         stack_name = f"kernelworx-{region_abbrev}-{environment_name}"
+        managed_record_ids = _get_managed_route53_records(stack_name, region)
 
-        # List CloudFormation stack resources to check if record is managed
-        # Use pagination to get ALL resources (stacks can have 100+ resources)
-        cfn_client = boto3.client("cloudformation", region_name=region)
-        managed_record_ids: set[str] = set()
-        try:
-            paginator = cfn_client.get_paginator("list_stack_resources")
-            for page in paginator.paginate(StackName=stack_name):
-                for r in page["StackResourceSummaries"]:
-                    if r["ResourceType"] == "AWS::Route53::RecordSet":
-                        managed_record_ids.add(r["PhysicalResourceId"])
-        except Exception:
-            managed_record_ids = set()
-
-        # List records in the zone
         records = _list_hosted_zone_records(client, zone_id)
-
-        # Find CNAME records for this domain (exact match with or without trailing dot)
-        domain_with_dot = f"{domain_name}."
         found = False
 
         for record in records:
-            record_name = record.get("Name", "")
-            record_type = record.get("Type", "")
-
-            # Match the domain name (Route53 returns names with trailing dot)
-            if record_name == domain_with_dot or record_name == domain_name:
-                if record_type == "CNAME":
-                    # Check if this record is managed by CloudFormation
-                    if domain_name in managed_record_ids:
-                        print("      ℹ️  CNAME record is CloudFormation-managed, skipping")
-                        found = True
-                        continue
-
-                    print(f"      🗑️  Found unmanaged CNAME record: {record_name}")
-                    if dry_run:
-                        print(f"      [DRY RUN] Would delete CNAME record for {domain_name}")
-                    else:
-                        _delete_route53_record(client, zone_id, record)
-                        print(f"      ✅ Deleted unmanaged CNAME record for {domain_name}")
-                    found = True
+            if _process_route53_record_deletion(
+                client, zone_id, record, domain_name, managed_record_ids, dry_run, ["CNAME"]
+            ):
+                found = True
 
         if not found:
             print(f"      ℹ️  No CNAME records found for {domain_name}")
@@ -504,22 +533,11 @@ def _delete_cloudfront_domain_record(client: Any, domain_name: str, dry_run: boo
     from orphaned records, while preserving CloudFormation-managed records.
     """
     try:
-        # Find the hosted zone - list all and find the best match
         print(f"      ⏳ Finding hosted zone for {domain_name}")
         all_zones_response = client.list_hosted_zones()
         zones = all_zones_response.get("HostedZones", [])
 
-        # Find the best matching zone (longest matching domain)
-        best_zone = None
-        best_domain_length = 0
-
-        for zone in zones:
-            zone_domain = zone["Name"].rstrip(".")
-            if domain_name.endswith(zone_domain):
-                if len(zone_domain) > best_domain_length:
-                    best_zone = zone
-                    best_domain_length = len(zone_domain)
-
+        best_zone = _find_best_matching_zone(zones, domain_name)
         if not best_zone:
             print(f"      ℹ️  No hosted zones found for {domain_name}")
             return
@@ -528,58 +546,20 @@ def _delete_cloudfront_domain_record(client: Any, domain_name: str, dry_run: boo
         zone_name = best_zone["Name"].rstrip(".")
         print(f"      ℹ️  Found hosted zone: {zone_name} ({zone_id})")
 
-        # Get stack name to check CloudFormation ownership
         environment_name = os.getenv("ENVIRONMENT", "dev")
         region = os.getenv("AWS_REGION") or "us-east-1"
-        region_abbrevs = {
-            "us-east-1": "ue1",
-            "us-east-2": "ue2",
-            "us-west-1": "uw1",
-            "us-west-2": "uw2",
-        }
-        region_abbrev = region_abbrevs.get(region, region[:3])
+        region_abbrev = _get_region_abbrev(region)
         stack_name = f"kernelworx-{region_abbrev}-{environment_name}"
+        managed_record_ids = _get_managed_route53_records(stack_name, region)
 
-        # List CloudFormation stack resources to check if record is managed
-        # Use pagination to get ALL resources (stacks can have 100+ resources)
-        cfn_client = boto3.client("cloudformation", region_name=region)
-        managed_record_ids: set[str] = set()
-        try:
-            paginator = cfn_client.get_paginator("list_stack_resources")
-            for page in paginator.paginate(StackName=stack_name):
-                for r in page["StackResourceSummaries"]:
-                    if r["ResourceType"] == "AWS::Route53::RecordSet":
-                        managed_record_ids.add(r["PhysicalResourceId"])
-        except Exception:
-            managed_record_ids = set()
-
-        # List records in the zone
         records = _list_hosted_zone_records(client, zone_id)
-
-        # Find records for this domain (exact match with or without trailing dot)
-        domain_with_dot = f"{domain_name}."
         found = False
 
         for record in records:
-            record_name = record.get("Name", "")
-            record_type = record.get("Type", "")
-
-            # Match the domain name (Route53 returns names with trailing dot)
-            if record_name == domain_with_dot or record_name == domain_name:
-                if record_type in ["A", "AAAA"]:
-                    # Check if this record is managed by CloudFormation
-                    if domain_name in managed_record_ids:
-                        print(f"      ℹ️  {record_type} record is CloudFormation-managed, skipping")
-                        found = True
-                        continue
-
-                    print(f"      🗑️  Found unmanaged {record_type} record: {record_name}")
-                    if dry_run:
-                        print(f"      [DRY RUN] Would delete {record_type} record for {domain_name}")
-                    else:
-                        _delete_route53_record(client, zone_id, record)
-                        print(f"      ✅ Deleted unmanaged {record_type} record for {domain_name}")
-                    found = True
+            if _process_route53_record_deletion(
+                client, zone_id, record, domain_name, managed_record_ids, dry_run, ["A", "AAAA"]
+            ):
+                found = True
 
         if not found:
             print(f"      ℹ️  No A/AAAA records found for {domain_name}")
@@ -720,53 +700,65 @@ def _delete_orphaned_appsync_domain(domain_name: str, environment_name: str, dry
     """
     region = os.getenv("AWS_REGION") or "us-east-1"
     appsync_client = boto3.client("appsync", region_name=region)
-    cfn_client = boto3.client("cloudformation", region_name=region)
+
+    if not _appsync_domain_exists(appsync_client, domain_name):
+        print(f"      ℹ️  No AppSync domain found for {domain_name}")
+        return
 
     stack_name = f"kernelworx-ue1-{environment_name}" if environment_name else None
+    if stack_name and _is_appsync_domain_cfn_managed(stack_name, region, domain_name):
+        print(f"      ℹ️  AppSync domain {domain_name} is CloudFormation-managed, skipping")
+        return
 
+    print(f"      🔍 Found orphaned AppSync domain: {domain_name}")
+
+    if dry_run:
+        print(f"      [DRY RUN] Would delete AppSync domain: {domain_name}")
+        return
+
+    _disassociate_and_delete_appsync_domain(appsync_client, domain_name)
+
+
+def _appsync_domain_exists(appsync_client: Any, domain_name: str) -> bool:
+    """Check if an AppSync domain exists."""
     try:
-        # Check if domain exists
-        try:
-            appsync_client.get_domain_name(domainName=domain_name)
-        except appsync_client.exceptions.NotFoundException:
-            print(f"      ℹ️  No AppSync domain found for {domain_name}")
-            return
-        except Exception as e:
-            if "NotFoundException" in str(type(e).__name__) or "Not Found" in str(e):
-                print(f"      ℹ️  No AppSync domain found for {domain_name}")
-                return
-            raise
+        appsync_client.get_domain_name(domainName=domain_name)
+        return True
+    except appsync_client.exceptions.NotFoundException:
+        return False
+    except Exception as e:
+        if "NotFoundException" in str(type(e).__name__) or "Not Found" in str(e):
+            return False
+        raise
 
-        # Check if this domain is managed by CloudFormation
-        if stack_name:
-            try:
-                paginator = cfn_client.get_paginator("list_stack_resources")
-                for page in paginator.paginate(StackName=stack_name):
-                    for resource in page.get("StackResourceSummaries", []):
-                        if (
-                            resource.get("ResourceType") == "AWS::AppSync::DomainName"
-                            and resource.get("PhysicalResourceId") == domain_name
-                        ):
-                            print(f"      ℹ️  AppSync domain {domain_name} is CloudFormation-managed, skipping")
-                            return
-            except cfn_client.exceptions.ClientError:
-                pass  # Stack doesn't exist
 
-        print(f"      🔍 Found orphaned AppSync domain: {domain_name}")
+def _is_appsync_domain_cfn_managed(stack_name: str, region: str, domain_name: str) -> bool:
+    """Check if an AppSync domain is managed by CloudFormation."""
+    cfn_client = boto3.client("cloudformation", region_name=region)
+    try:
+        paginator = cfn_client.get_paginator("list_stack_resources")
+        for page in paginator.paginate(StackName=stack_name):
+            for resource in page.get("StackResourceSummaries", []):
+                if (
+                    resource.get("ResourceType") == "AWS::AppSync::DomainName"
+                    and resource.get("PhysicalResourceId") == domain_name
+                ):
+                    return True
+    except cfn_client.exceptions.ClientError:
+        pass  # Stack doesn't exist
+    return False
 
-        if dry_run:
-            print(f"      [DRY RUN] Would delete AppSync domain: {domain_name}")
-            return
 
+def _disassociate_and_delete_appsync_domain(appsync_client: Any, domain_name: str) -> None:
+    """Disassociate any API and delete the AppSync domain."""
+    try:
         # First, disassociate any API association
         try:
             assoc = appsync_client.get_api_association(domainName=domain_name)
-            if assoc.get("apiAssociation"):
-                api_id = assoc["apiAssociation"].get("apiId")
-                if api_id:
-                    print("      ⏳ Disassociating domain from API...")
-                    appsync_client.disassociate_api(domainName=domain_name)
-                    print("      ✅ Disassociated domain from API")
+            if assoc.get("apiAssociation") and assoc["apiAssociation"].get("apiId"):
+                print("      ⏳ Disassociating domain from API...")
+                appsync_client.disassociate_api(domainName=domain_name)
+                print("      ✅ Disassociated domain from API")
         except Exception:
             pass  # No association or already disassociated
 
@@ -774,7 +766,6 @@ def _delete_orphaned_appsync_domain(domain_name: str, environment_name: str, dry
         print(f"      🗑️  Deleting AppSync domain {domain_name}...")
         appsync_client.delete_domain_name(domainName=domain_name)
         print(f"      ✅ Deleted orphaned AppSync domain: {domain_name}")
-
     except Exception as e:
         print(f"      ⚠️  Could not delete AppSync domain {domain_name}: {e}")
 
@@ -1298,71 +1289,91 @@ def _check_cognito_user_pool(
     """
     Check if Cognito UserPool, UserPoolDomain, and SMS Role exist but are not in CloudFormation.
     """
-    # Known User Pool IDs
     KNOWN_USER_POOL_IDS = {
         "dev": "us-east-1_sDiuCOarb",
-        # Add prod when ready
     }
 
     user_pool_id = KNOWN_USER_POOL_IDS.get(environment_name)
     if not user_pool_id:
         return
 
-    # Get the UserPool to find which SMS role it uses
-    pool_details = None
+    pool_details = _get_user_pool_details(client, user_pool_id)
+    if pool_details is None:
+        return
+
+    _check_sms_role(pool_details, stack_resources, resources_to_import)
+    _check_user_pool_resource(user_pool_id, pool_details, stack_resources, resources_to_import)
+    _check_user_pool_domain(client, environment_name, stack_resources, resources_to_import)
+
+
+def _get_user_pool_details(client: Any, user_pool_id: str) -> dict[str, Any] | None:
+    """Get user pool details, or None if not found."""
     try:
         pool_desc = client.describe_user_pool(UserPoolId=user_pool_id)
-        pool_details = pool_desc.get("UserPool", {})
+        return pool_desc.get("UserPool", {})
     except client.exceptions.ResourceNotFoundException:
-        return
+        return None
     except Exception as e:
         print(f"   ⚠️  Could not check user pool {user_pool_id}: {e}", file=sys.stderr)
-        return
+        return None
 
-    # Get the SMS role ARN from the UserPool
+
+def _check_sms_role(
+    pool_details: dict[str, Any],
+    stack_resources: set[str],
+    resources_to_import: list[dict[str, Any]],
+) -> None:
+    """Check SMS role and add to import list if unmanaged."""
     sms_config = pool_details.get("SmsConfiguration", {})
     sms_role_arn = sms_config.get("SnsCallerArn")
-    sms_role_name = None
-    if sms_role_arn:
-        # Extract role name from ARN: arn:aws:iam::ACCOUNT:role/ROLE_NAME
-        sms_role_name = sms_role_arn.split("/")[-1]
+    if not sms_role_arn:
+        return
 
-    # Check for SMS role (use the one UserPool actually references)
-    if sms_role_name:
-        iam_client = boto3.client("iam")
-        try:
-            iam_client.get_role(RoleName=sms_role_name)
-            role_exists = True
-        except iam_client.exceptions.NoSuchEntityException:
-            role_exists = False  # pragma: no cover
-        except Exception as e:  # pragma: no cover
-            print(f"   ⚠️  Could not check SMS role {sms_role_name}: {e}", file=sys.stderr)  # pragma: no cover
-            role_exists = False  # pragma: no cover
+    sms_role_name = sms_role_arn.split("/")[-1]
+    iam_client = boto3.client("iam")
 
-        # If role exists but not in CloudFormation, add to import list
-        if role_exists and sms_role_name not in stack_resources:
-            resources_to_import.append(
-                {
-                    "ResourceType": "AWS::IAM::Role",
-                    "LogicalResourceId": "UserPoolsmsRole1998E37F",
-                    "ResourceIdentifier": {"RoleName": sms_role_name},
-                }
-            )
-            print(f"   🔍 Found unmanaged SMS role: {sms_role_name}", file=sys.stderr)
+    try:
+        iam_client.get_role(RoleName=sms_role_name)
+        role_exists = True
+    except iam_client.exceptions.NoSuchEntityException:
+        role_exists = False  # pragma: no cover
+    except Exception as e:  # pragma: no cover
+        print(f"   ⚠️  Could not check SMS role {sms_role_name}: {e}", file=sys.stderr)  # pragma: no cover
+        role_exists = False  # pragma: no cover
 
-    # Check if user pool exists and add to import if needed
+    if role_exists and sms_role_name not in stack_resources:
+        resources_to_import.append({
+            "ResourceType": "AWS::IAM::Role",
+            "LogicalResourceId": "UserPoolsmsRole1998E37F",
+            "ResourceIdentifier": {"RoleName": sms_role_name},
+        })
+        print(f"   🔍 Found unmanaged SMS role: {sms_role_name}", file=sys.stderr)
+
+
+def _check_user_pool_resource(
+    user_pool_id: str,
+    pool_details: dict[str, Any],
+    stack_resources: set[str],
+    resources_to_import: list[dict[str, Any]],
+) -> None:
+    """Check user pool and add to import list if unmanaged."""
     pool_exists = bool(pool_details)
     if pool_exists and user_pool_id not in stack_resources:
-        resources_to_import.append(
-            {
-                "ResourceType": "AWS::Cognito::UserPool",
-                "LogicalResourceId": "UserPool6BA7E5F2",
-                "ResourceIdentifier": {"UserPoolId": user_pool_id},
-            }
-        )
+        resources_to_import.append({
+            "ResourceType": "AWS::Cognito::UserPool",
+            "LogicalResourceId": "UserPool6BA7E5F2",
+            "ResourceIdentifier": {"UserPoolId": user_pool_id},
+        })
         print(f"   🔍 Found unmanaged user pool: {user_pool_id}", file=sys.stderr)
 
-    # Check if UserPoolDomain exists
+
+def _check_user_pool_domain(
+    client: Any,
+    environment_name: str,
+    stack_resources: set[str],
+    resources_to_import: list[dict[str, Any]],
+) -> None:
+    """Check user pool domain and add to import list if unmanaged."""
     custom_domain = f"login.{environment_name}.kernelworx.app"
     try:
         domain_desc = client.describe_user_pool_domain(Domain=custom_domain)
@@ -1374,15 +1385,12 @@ def _check_cognito_user_pool(
         print(f"   ⚠️  Could not check user pool domain {custom_domain}: {e}", file=sys.stderr)
         domain_exists = False
 
-    # If domain exists but not in CloudFormation, add to import list
     if domain_exists and custom_domain not in stack_resources:
-        resources_to_import.append(
-            {
-                "ResourceType": "AWS::Cognito::UserPoolDomain",
-                "LogicalResourceId": "UserPoolDomain5479B217",
-                "ResourceIdentifier": {"Domain": custom_domain},
-            }
-        )
+        resources_to_import.append({
+            "ResourceType": "AWS::Cognito::UserPoolDomain",
+            "LogicalResourceId": "UserPoolDomain5479B217",
+            "ResourceIdentifier": {"Domain": custom_domain},
+        })
         print(f"   🔍 Found unmanaged user pool domain: {custom_domain}", file=sys.stderr)
 
 

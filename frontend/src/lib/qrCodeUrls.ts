@@ -1,11 +1,11 @@
 /**
  * QR Code URL utilities
- * 
+ *
  * Handles conversion of S3 keys to presigned URLs for QR code display.
  * QR codes may be returned as either:
  * - Full presigned URLs (from queries that include URL generation)
  * - S3 keys (from queries that don't)
- * 
+ *
  * This utility ensures consistent handling across all pages.
  */
 
@@ -19,7 +19,7 @@ export function isPresignedUrl(value: string | null): boolean {
 
 /**
  * Generate a presigned GET URL for a QR code S3 key
- * 
+ *
  * This uses the CloudFront vanity domain endpoint for QR code downloads.
  * CloudFront is configured to serve from the exports bucket with proper
  * CORS and caching headers.
@@ -29,7 +29,7 @@ export function generateQrCodePresignedUrl(s3Key: string): string {
   if (isPresignedUrl(s3Key)) {
     return s3Key;
   }
-  
+
   // If it's an S3 key, construct CloudFront URL
   // Format: https://qr-codes.dev.kernelworx.app/{s3Key}
   // The S3 key includes the full path like: qr-codes/account123/payment-method-name/...
@@ -42,20 +42,20 @@ export function generateQrCodePresignedUrl(s3Key: string): string {
  */
 function getCdnDomain(): string {
   const hostname = window.location.hostname;
-  
+
   if (hostname === 'localhost' || hostname.startsWith('localhost:')) {
     // Local development - use direct S3 endpoint or LocalStack
     return 'http://localhost:9000/kernelworx-exports-ue1-dev';
   }
-  
+
   if (hostname.includes('dev.')) {
     return 'https://qr-codes.dev.kernelworx.app';
   }
-  
+
   if (hostname.includes('staging.')) {
     return 'https://qr-codes.staging.kernelworx.app';
   }
-  
+
   // Production
   return 'https://qr-codes.kernelworx.app';
 }
@@ -68,6 +68,6 @@ export function ensureQrCodeUrl(qrCodeUrlOrKey: string | null): string | null {
   if (!qrCodeUrlOrKey) {
     return null;
   }
-  
+
   return generateQrCodePresignedUrl(qrCodeUrlOrKey);
 }

@@ -124,18 +124,16 @@ interface CatalogActionsProps {
 
 const CatalogActions: React.FC<CatalogActionsProps> = ({ catalog, isOwned, onEdit, onDelete, onView }) => {
   const handleViewClick = () => {
-    localStorage.setItem('lastViewClicked', JSON.stringify({ catalogId: catalog.catalogId, timestamp: new Date().toISOString() }));
+    localStorage.setItem(
+      'lastViewClicked',
+      JSON.stringify({ catalogId: catalog.catalogId, timestamp: new Date().toISOString() }),
+    );
     onView(catalog.catalogId);
   };
 
   return (
     <Stack direction="row" spacing={1} justifyContent="flex-end">
-      <Button
-        size="small"
-        startIcon={<VisibilityIcon />}
-        onClick={handleViewClick}
-        variant="text"
-      >
+      <Button size="small" startIcon={<VisibilityIcon />} onClick={handleViewClick} variant="text">
         View
       </Button>
       {isOwned && (
@@ -628,7 +626,8 @@ const CatalogsInfoAlert: React.FC = () => (
   <Alert severity="info" sx={{ mb: 3 }}>
     <Typography variant="body2">
       <strong>Managed catalogs</strong> are admin-maintained catalogs visible to all users.
-      <strong> Private catalogs</strong> are only visible to you and can be used for your owned tracking and use in shared campaigns.
+      <strong> Private catalogs</strong> are only visible to you and can be used for your owned tracking and use in
+      shared campaigns.
     </Typography>
   </Alert>
 );

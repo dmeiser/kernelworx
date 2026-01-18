@@ -23,12 +23,7 @@ export const QrCodeImage: React.FC<QrCodeImageProps> = ({ qrCodeUrl, methodName,
 
   return (
     <Box display="flex" justifyContent="center" p={2}>
-      <Box
-        component="img"
-        src={qrCodeUrl}
-        alt={`QR code for ${methodName}`}
-        sx={{ maxWidth: '100%', maxHeight }}
-      />
+      <Box component="img" src={qrCodeUrl} alt={`QR code for ${methodName}`} sx={{ maxWidth: '100%', maxHeight }} />
     </Box>
   );
 };

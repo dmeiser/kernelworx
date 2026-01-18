@@ -30,7 +30,13 @@ import {
   Switch,
 } from '@mui/material';
 import { Delete as DeleteIcon, Warning as WarningIcon } from '@mui/icons-material';
-import { GET_CAMPAIGN, UPDATE_CAMPAIGN, DELETE_CAMPAIGN, LIST_MANAGED_CATALOGS, LIST_MY_CATALOGS } from '../lib/graphql';
+import {
+  GET_CAMPAIGN,
+  UPDATE_CAMPAIGN,
+  DELETE_CAMPAIGN,
+  LIST_MANAGED_CATALOGS,
+  LIST_MY_CATALOGS,
+} from '../lib/graphql';
 import { ensureCampaignId, ensureCatalogId, toUrlId } from '../lib/ids';
 import type { Campaign, Catalog } from '../types';
 
@@ -81,7 +87,7 @@ const buildUpdateInput = (
     catalogId: ensureCatalogId(catalogId) ?? catalogId,
     isActive,
   };
-  
+
   // Only include dates if they're not empty, and convert to ISO datetime
   if (startDate && startDate.trim() !== '') {
     input.startDate = dateToISO(startDate);
@@ -89,7 +95,7 @@ const buildUpdateInput = (
   if (endDate && endDate.trim() !== '') {
     input.endDate = dateToISO(endDate);
   }
-  
+
   return input;
 };
 // Helper to determine if query should be skipped

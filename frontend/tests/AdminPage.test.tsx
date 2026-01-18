@@ -81,7 +81,7 @@ describe('AdminPage', () => {
         <BrowserRouter>
           <AdminPage />
         </BrowserRouter>
-      </MockedProvider>
+      </MockedProvider>,
     );
 
     expect(screen.getByText('Admin Console')).toBeInTheDocument();
@@ -118,7 +118,7 @@ describe('AdminPage', () => {
         <BrowserRouter>
           <AdminPage />
         </BrowserRouter>
-      </MockedProvider>
+      </MockedProvider>,
     );
 
     expect(screen.getByRole('tab', { name: /profiles/i })).toBeInTheDocument();
@@ -155,7 +155,7 @@ describe('AdminPage', () => {
         <BrowserRouter>
           <AdminPage />
         </BrowserRouter>
-      </MockedProvider>
+      </MockedProvider>,
     );
 
     await waitFor(() => {
@@ -195,7 +195,7 @@ describe('AdminPage', () => {
         <BrowserRouter>
           <AdminPage />
         </BrowserRouter>
-      </MockedProvider>
+      </MockedProvider>,
     );
 
     const catalogsTab = screen.getByRole('tab', { name: /catalogs/i });
@@ -237,7 +237,7 @@ describe('AdminPage', () => {
         <BrowserRouter>
           <AdminPage />
         </BrowserRouter>
-      </MockedProvider>
+      </MockedProvider>,
     );
 
     const systemInfoTab = screen.getByRole('tab', { name: /system info/i });
@@ -279,7 +279,7 @@ describe('AdminPage', () => {
         <BrowserRouter>
           <AdminPage />
         </BrowserRouter>
-      </MockedProvider>
+      </MockedProvider>,
     );
 
     expect(screen.getByRole('progressbar')).toBeInTheDocument();
@@ -310,7 +310,7 @@ describe('AdminPage', () => {
         <BrowserRouter>
           <AdminPage />
         </BrowserRouter>
-      </MockedProvider>
+      </MockedProvider>,
     );
 
     await waitFor(() => {
@@ -347,7 +347,7 @@ describe('AdminPage', () => {
         <BrowserRouter>
           <AdminPage />
         </BrowserRouter>
-      </MockedProvider>
+      </MockedProvider>,
     );
 
     await waitFor(() => {
@@ -388,7 +388,7 @@ describe('AdminPage', () => {
         <BrowserRouter>
           <AdminPage />
         </BrowserRouter>
-      </MockedProvider>
+      </MockedProvider>,
     );
 
     const systemInfoTab = screen.getByRole('tab', { name: /system info/i });

@@ -248,7 +248,13 @@ const UnitInfoSection: React.FC<UnitInfoSectionProps> = ({
     <Accordion expanded={expanded} onChange={(_, isExpanded) => onExpandChange(isExpanded)}>
       <AccordionSummary expandIcon={<ExpandMoreIcon />}>
         <Typography>
-          Unit Information (Optional) {unitType && <span> - {unitType} {unitNumber}</span>}
+          Unit Information (Optional){' '}
+          {unitType && (
+            <span>
+              {' '}
+              - {unitType} {unitNumber}
+            </span>
+          )}
         </Typography>
       </AccordionSummary>
       <AccordionDetails>
@@ -288,12 +294,7 @@ const UnitInfoSection: React.FC<UnitInfoSectionProps> = ({
               disabled={fieldDisabled}
               helperText={unitType ? 'Required for unit identification' : ''}
             />
-            <StateAutocomplete
-              value={state}
-              onChange={onStateChange}
-              disabled={fieldDisabled}
-              fullWidth
-            />
+            <StateAutocomplete value={state} onChange={onStateChange} disabled={fieldDisabled} fullWidth />
           </Stack>
         </Stack>
       </AccordionDetails>
@@ -349,11 +350,7 @@ const ShareWithCreatorSection: React.FC<ShareWithCreatorSectionProps> = ({
   <Box sx={{ bgcolor: 'warning.light', p: 2, borderRadius: 1 }}>
     <FormControlLabel
       control={
-        <Checkbox
-          checked={shareWithCreator}
-          onChange={(e) => onShareChange(e.target.checked)}
-          disabled={submitting}
-        />
+        <Checkbox checked={shareWithCreator} onChange={(e) => onShareChange(e.target.checked)} disabled={submitting} />
       }
       label={`Share this profile with ${createdByName}`}
     />
@@ -372,12 +369,7 @@ interface ActionButtonsSectionProps {
   isFormValid: boolean;
 }
 
-const ActionButtonsSection: React.FC<ActionButtonsSectionProps> = ({
-  onBack,
-  onSubmit,
-  isSubmitting,
-  isFormValid,
-}) => (
+const ActionButtonsSection: React.FC<ActionButtonsSectionProps> = ({ onBack, onSubmit, isSubmitting, isFormValid }) => (
   <Stack direction={{ xs: 'column-reverse', sm: 'row' }} spacing={2} justifyContent="flex-end">
     <Button onClick={onBack} disabled={isSubmitting} fullWidth={false} sx={{ minWidth: { xs: '100%', sm: 120 } }}>
       Cancel
@@ -396,9 +388,73 @@ const ActionButtonsSection: React.FC<ActionButtonsSectionProps> = ({
 );
 
 // ============================================================================
+// Form Content Components
+// ============================================================================
+
+interface SharedCampaignFormProps {
+  sharedCampaign: NonNullable<ReturnType<typeof useCreateCampaignPageSetup>['sharedCampaign']>;
+  formState: ReturnType<typeof useCreateCampaignPageSetup>['formState'];
+}
+
+const SharedCampaignForm: React.FC<SharedCampaignFormProps> = ({ sharedCampaign, formState }) => (
+  <>
+    <SharedCampaignSection sharedCampaign={sharedCampaign} />
+    <ShareWithCreatorSection
+      shareWithCreator={formState.shareWithCreator}
+      onShareChange={formState.setShareWithCreator}
+      createdByName={sharedCampaign?.createdByName || ''}
+      submitting={formState.submitting}
+    />
+  </>
+);
+
+interface ManualCampaignFormProps {
+  setup: ReturnType<typeof useCreateCampaignPageSetup>;
+}
+
+const ManualCampaignForm: React.FC<ManualCampaignFormProps> = ({ setup }) => (
+  <>
+    <CatalogSection
+      catalogId={setup.formState.catalogId}
+      onCatalogChange={setup.formState.setCatalogId}
+      catalogsLoading={setup.catalogsLoading}
+      myCatalogs={setup.filteredMyCatalogs}
+      filteredPublicCatalogs={setup.filteredPublicCatalogs}
+    />
+
+    <Divider />
+
+    <CampaignNameYearSection
+      campaignName={setup.formState.campaignName}
+      onCampaignNameChange={setup.formState.setCampaignName}
+      campaignYear={setup.formState.campaignYear}
+      onCampaignYearChange={setup.formState.setCampaignYear}
+      submitting={setup.formState.submitting}
+    />
+
+    <Divider />
+
+    <UnitInfoSection
+      unitType={setup.formState.unitType}
+      onUnitTypeChange={setup.formState.setUnitType}
+      unitNumber={setup.formState.unitNumber}
+      onUnitNumberChange={setup.formState.setUnitNumber}
+      city={setup.formState.city}
+      onCityChange={setup.formState.setCity}
+      state={setup.formState.state}
+      onStateChange={setup.formState.setState}
+      submitting={setup.formState.submitting}
+      expanded={setup.formState.unitSectionExpanded}
+      onExpandChange={setup.formState.setUnitSectionExpanded}
+    />
+  </>
+);
+
+// ============================================================================
 // Main Component
 // ============================================================================
 
+// eslint-disable-next-line complexity -- Multiple guard states with simple conditional returns
 export const CreateCampaignPage: React.FC = () => {
   const { sharedCampaignCode } = useParams<{ sharedCampaignCode: string }>();
   const setup = useCreateCampaignPageSetup(sharedCampaignCode);
@@ -421,7 +477,10 @@ export const CreateCampaignPage: React.FC = () => {
 
   // Handle error
   if (setup.sharedCampaignError) {
-    const error = setup.sharedCampaignError instanceof Error ? setup.sharedCampaignError : new Error(String(setup.sharedCampaignError));
+    const error =
+      setup.sharedCampaignError instanceof Error
+        ? setup.sharedCampaignError
+        : new Error(String(setup.sharedCampaignError));
     return <CampaignErrorState error={error} onBack={() => setup.navigate(-1)} />;
   }
 
@@ -465,55 +524,11 @@ export const CreateCampaignPage: React.FC = () => {
 
           {/* Shared Campaign Mode */}
           {setup.isSharedCampaignMode && setup.sharedCampaign && (
-            <>
-              <SharedCampaignSection sharedCampaign={setup.sharedCampaign} />
-              <ShareWithCreatorSection
-                shareWithCreator={setup.formState.shareWithCreator}
-                onShareChange={setup.formState.setShareWithCreator}
-                createdByName={setup.sharedCampaign?.createdByName || ''}
-                submitting={setup.formState.submitting}
-              />
-            </>
+            <SharedCampaignForm sharedCampaign={setup.sharedCampaign} formState={setup.formState} />
           )}
 
           {/* Manual Campaign Mode */}
-          {!setup.isSharedCampaignMode && (
-            <>
-              <CatalogSection
-                catalogId={setup.formState.catalogId}
-                onCatalogChange={setup.formState.setCatalogId}
-                catalogsLoading={setup.catalogsLoading}
-                myCatalogs={setup.filteredMyCatalogs}
-                filteredPublicCatalogs={setup.filteredPublicCatalogs}
-              />
-
-              <Divider />
-
-              <CampaignNameYearSection
-                campaignName={setup.formState.campaignName}
-                onCampaignNameChange={setup.formState.setCampaignName}
-                campaignYear={setup.formState.campaignYear}
-                onCampaignYearChange={setup.formState.setCampaignYear}
-                submitting={setup.formState.submitting}
-              />
-
-              <Divider />
-
-              <UnitInfoSection
-                unitType={setup.formState.unitType}
-                onUnitTypeChange={setup.formState.setUnitType}
-                unitNumber={setup.formState.unitNumber}
-                onUnitNumberChange={setup.formState.setUnitNumber}
-                city={setup.formState.city}
-                onCityChange={setup.formState.setCity}
-                state={setup.formState.state}
-                onStateChange={setup.formState.setState}
-                submitting={setup.formState.submitting}
-                expanded={setup.formState.unitSectionExpanded}
-                onExpandChange={setup.formState.setUnitSectionExpanded}
-              />
-            </>
-          )}
+          {!setup.isSharedCampaignMode && <ManualCampaignForm setup={setup} />}
 
           {/* Date Range - Show for all modes */}
           <Divider />

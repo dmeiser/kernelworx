@@ -33,9 +33,9 @@ describe('CampaignCard', () => {
           startDate="2025-09-01T00:00:00Z"
           endDate="2025-11-30T00:00:00Z"
           totalOrders={25}
-          totalRevenue={1250.50}
+          totalRevenue={1250.5}
         />
-      </BrowserRouter>
+      </BrowserRouter>,
     );
 
     expect(screen.getByText('Fall 2025 Popcorn Sale')).toBeInTheDocument();
@@ -52,7 +52,7 @@ describe('CampaignCard', () => {
           startDate="2025-09-01T00:00:00Z"
           endDate="2025-11-30T00:00:00Z"
         />
-      </BrowserRouter>
+      </BrowserRouter>,
     );
 
     // CampaignCard displays "campaignName campaignYear" format
@@ -70,7 +70,7 @@ describe('CampaignCard', () => {
           campaignYear={2025}
           startDate="2025-09-01T00:00:00Z"
         />
-      </BrowserRouter>
+      </BrowserRouter>,
     );
 
     // Component should render without error
@@ -91,7 +91,7 @@ describe('CampaignCard', () => {
           startDate="2025-01-01T00:00:00Z"
           endDate={futureDate.toISOString()}
         />
-      </BrowserRouter>
+      </BrowserRouter>,
     );
 
     expect(screen.getByText('Active')).toBeInTheDocument();
@@ -106,7 +106,7 @@ describe('CampaignCard', () => {
           campaignName="Ongoing Sale"
           startDate="2025-01-01T00:00:00Z"
         />
-      </BrowserRouter>
+      </BrowserRouter>,
     );
 
     expect(screen.getByText('Active')).toBeInTheDocument();
@@ -124,7 +124,7 @@ describe('CampaignCard', () => {
           startDate="2019-09-01T00:00:00Z"
           endDate={pastDate.toISOString()}
         />
-      </BrowserRouter>
+      </BrowserRouter>,
     );
 
     expect(screen.queryByText('Active')).not.toBeInTheDocument();
@@ -140,7 +140,7 @@ describe('CampaignCard', () => {
           startDate="2025-01-01T00:00:00Z"
           totalOrders={1}
         />
-      </BrowserRouter>
+      </BrowserRouter>,
     );
 
     expect(screen.getByText('1 order')).toBeInTheDocument();
@@ -156,7 +156,7 @@ describe('CampaignCard', () => {
           startDate="2025-01-01T00:00:00Z"
           totalOrders={42}
         />
-      </BrowserRouter>
+      </BrowserRouter>,
     );
 
     expect(screen.getByText('42 orders')).toBeInTheDocument();
@@ -171,7 +171,7 @@ describe('CampaignCard', () => {
           campaignName="Sale"
           startDate="2025-01-01T00:00:00Z"
         />
-      </BrowserRouter>
+      </BrowserRouter>,
     );
 
     expect(screen.getByText('0 orders')).toBeInTheDocument();
@@ -187,7 +187,7 @@ describe('CampaignCard', () => {
           startDate="2025-01-01T00:00:00Z"
           totalRevenue={1234.567}
         />
-      </BrowserRouter>
+      </BrowserRouter>,
     );
 
     expect(screen.getByText('$1234.57 in sales')).toBeInTheDocument();
@@ -202,7 +202,7 @@ describe('CampaignCard', () => {
           campaignName="Sale"
           startDate="2025-01-01T00:00:00Z"
         />
-      </BrowserRouter>
+      </BrowserRouter>,
     );
 
     expect(screen.getByText('$0.00 in sales')).toBeInTheDocument();
@@ -219,7 +219,7 @@ describe('CampaignCard', () => {
           campaignName="Sale"
           startDate="2025-01-01T00:00:00Z"
         />
-      </BrowserRouter>
+      </BrowserRouter>,
     );
 
     const viewButton = screen.getByRole('button', { name: /view orders/i });

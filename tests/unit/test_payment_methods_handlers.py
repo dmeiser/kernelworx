@@ -16,7 +16,6 @@ from moto import mock_aws
 from src.handlers.payment_methods_handlers import (
     confirm_qr_upload,
     delete_qr_code,
-    generate_presigned_urls,
     request_qr_upload,
 )
 from src.utils.errors import AppError, ErrorCode

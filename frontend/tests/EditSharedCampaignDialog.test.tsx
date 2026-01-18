@@ -1,7 +1,7 @@
-import React from 'react'
-import { render, screen, fireEvent } from '@testing-library/react'
-import { EditSharedCampaignDialog } from '../src/components/EditSharedCampaignDialog'
-import { describe, it, expect, vi } from 'vitest'
+import React from 'react';
+import { render, screen, fireEvent } from '@testing-library/react';
+import { EditSharedCampaignDialog } from '../src/components/EditSharedCampaignDialog';
+import { describe, it, expect, vi } from 'vitest';
 
 const baseSharedCampaign = {
   sharedCampaignCode: 'SC-TEST',
@@ -18,40 +18,35 @@ const baseSharedCampaign = {
   description: 'Internal note',
   isActive: true,
   createdAt: new Date().toISOString(),
-}
+};
 
 describe('EditSharedCampaignDialog', () => {
   it('renders initial values and calls onSave', async () => {
-    const onClose = vi.fn()
-    const onSave = vi.fn(() => Promise.resolve())
+    const onClose = vi.fn();
+    const onSave = vi.fn(() => Promise.resolve());
 
     render(
-      <EditSharedCampaignDialog
-        open={true}
-        sharedCampaign={baseSharedCampaign}
-        onClose={onClose}
-        onSave={onSave}
-      />,
-    )
+      <EditSharedCampaignDialog open={true} sharedCampaign={baseSharedCampaign} onClose={onClose} onSave={onSave} />,
+    );
 
     // initial values present
-    expect(screen.getByDisplayValue('Internal note')).toBeInTheDocument()
-    expect(screen.getByDisplayValue('Hello scouts')).toBeInTheDocument()
+    expect(screen.getByDisplayValue('Internal note')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('Hello scouts')).toBeInTheDocument();
 
     // Change description and save
-    const descriptionInput = screen.getByLabelText(/Description \(For Your Reference\)/i)
-    fireEvent.change(descriptionInput, { target: { value: 'New desc' } })
+    const descriptionInput = screen.getByLabelText(/Description \(For Your Reference\)/i);
+    fireEvent.change(descriptionInput, { target: { value: 'New desc' } });
 
-    const saveButton = screen.getByRole('button', { name: /save changes/i })
-    fireEvent.click(saveButton)
+    const saveButton = screen.getByRole('button', { name: /save changes/i });
+    fireEvent.click(saveButton);
 
     // onSave should be called with updated values
-    expect(onSave).toHaveBeenCalled()
-  })
+    expect(onSave).toHaveBeenCalled();
+  });
 
   it('shows validation error for long creator message', async () => {
-    const onClose = vi.fn()
-    const onSave = vi.fn(() => Promise.resolve())
+    const onClose = vi.fn();
+    const onSave = vi.fn(() => Promise.resolve());
 
     render(
       <EditSharedCampaignDialog
@@ -60,16 +55,16 @@ describe('EditSharedCampaignDialog', () => {
         onClose={onClose}
         onSave={onSave}
       />,
-    )
+    );
 
-    const creatorInput = screen.getByLabelText(/Message to Scouts/i)
-    const longMsg = 'x'.repeat(500)
-    fireEvent.change(creatorInput, { target: { value: longMsg } })
+    const creatorInput = screen.getByLabelText(/Message to Scouts/i);
+    const longMsg = 'x'.repeat(500);
+    fireEvent.change(creatorInput, { target: { value: longMsg } });
 
-    const saveButton = screen.getByRole('button', { name: /save changes/i })
-    fireEvent.click(saveButton)
+    const saveButton = screen.getByRole('button', { name: /save changes/i });
+    fireEvent.click(saveButton);
 
-    expect(screen.getByText(/Creator message must be/)).toBeInTheDocument()
-    expect(onSave).not.toHaveBeenCalled()
-  })
-})
+    expect(screen.getByText(/Creator message must be/)).toBeInTheDocument();
+    expect(onSave).not.toHaveBeenCalled();
+  });
+});

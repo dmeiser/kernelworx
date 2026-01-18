@@ -16,7 +16,7 @@ describe('EditProfileDialog', () => {
         currentName="Scout Alpha"
         onClose={vi.fn()}
         onSubmit={vi.fn()}
-      />
+      />,
     );
 
     expect(screen.getByText('Edit Scout')).toBeInTheDocument();
@@ -32,7 +32,7 @@ describe('EditProfileDialog', () => {
         currentName="Scout Alpha"
         onClose={vi.fn()}
         onSubmit={vi.fn()}
-      />
+      />,
     );
 
     expect(screen.queryByText('Edit Scout')).not.toBeInTheDocument();
@@ -49,7 +49,7 @@ describe('EditProfileDialog', () => {
         currentName="Scout Alpha"
         onClose={onClose}
         onSubmit={vi.fn()}
-      />
+      />,
     );
 
     const cancelButton = screen.getByRole('button', { name: /Cancel/i });
@@ -66,7 +66,7 @@ describe('EditProfileDialog', () => {
         currentName="Scout Alpha"
         onClose={vi.fn()}
         onSubmit={vi.fn()}
-      />
+      />,
     );
 
     const submitButton = screen.getByRole('button', { name: /Save Changes/i });
@@ -82,7 +82,7 @@ describe('EditProfileDialog', () => {
         currentName="Scout Alpha"
         onClose={vi.fn()}
         onSubmit={vi.fn()}
-      />
+      />,
     );
 
     const nameInput = screen.getByLabelText(/Scout Name/i);
@@ -101,7 +101,7 @@ describe('EditProfileDialog', () => {
         currentName="Scout Alpha"
         onClose={vi.fn()}
         onSubmit={vi.fn()}
-      />
+      />,
     );
 
     const nameInput = screen.getByLabelText(/Scout Name/i);
@@ -123,7 +123,7 @@ describe('EditProfileDialog', () => {
         currentName="Scout Alpha"
         onClose={vi.fn()}
         onSubmit={onSubmit}
-      />
+      />,
     );
 
     const nameInput = screen.getByLabelText(/Scout Name/i);
@@ -148,7 +148,7 @@ describe('EditProfileDialog', () => {
         currentName="Scout Alpha"
         onClose={onClose}
         onSubmit={onSubmit}
-      />
+      />,
     );
 
     const nameInput = screen.getByLabelText(/Scout Name/i);
@@ -175,7 +175,7 @@ describe('EditProfileDialog', () => {
         currentName="Scout Alpha"
         onClose={vi.fn()}
         onSubmit={onSubmit}
-      />
+      />,
     );
 
     const nameInput = screen.getByLabelText(/Scout Name/i);
@@ -202,7 +202,7 @@ describe('EditProfileDialog', () => {
         currentName="Scout Alpha"
         onClose={vi.fn()}
         onSubmit={onSubmit}
-      />
+      />,
     );
 
     const nameInput = screen.getByLabelText(/Scout Name/i);
@@ -230,7 +230,7 @@ describe('EditProfileDialog', () => {
         currentName="Scout Alpha"
         onClose={vi.fn()}
         onSubmit={onSubmit}
-      />
+      />,
     );
 
     const nameInput = screen.getByLabelText(/Scout Name/i);
@@ -251,7 +251,7 @@ describe('EditProfileDialog', () => {
         currentName="Scout Alpha"
         onClose={vi.fn()}
         onSubmit={vi.fn()}
-      />
+      />,
     );
 
     const nameInput = screen.getByLabelText(/Scout Name/i) as HTMLInputElement;
@@ -267,7 +267,7 @@ describe('EditProfileDialog', () => {
         currentName="Scout Alpha"
         onClose={vi.fn()}
         onSubmit={vi.fn()}
-      />
+      />,
     );
 
     rerender(
@@ -277,7 +277,7 @@ describe('EditProfileDialog', () => {
         currentName="Scout Alpha"
         onClose={vi.fn()}
         onSubmit={vi.fn()}
-      />
+      />,
     );
 
     const nameInputReopened = screen.getByLabelText(/Scout Name/i) as HTMLInputElement;
@@ -295,7 +295,7 @@ describe('EditProfileDialog', () => {
         currentName="Scout Alpha"
         onClose={onClose}
         onSubmit={vi.fn()}
-      />
+      />,
     );
 
     const nameInput = screen.getByLabelText(/Scout Name/i);

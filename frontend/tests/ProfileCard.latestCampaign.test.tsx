@@ -1,21 +1,21 @@
-import { describe, it, expect, vi } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
-import { BrowserRouter } from 'react-router-dom'
+import { describe, it, expect, vi } from 'vitest';
+import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { BrowserRouter } from 'react-router-dom';
 
 // Mock navigate
-const mockNavigate = vi.fn()
+const mockNavigate = vi.fn();
 vi.mock('react-router-dom', async () => {
-  const actual = await vi.importActual('react-router-dom')
+  const actual = await vi.importActual('react-router-dom');
   return {
     ...actual,
     useNavigate: () => mockNavigate,
-  }
-})
+  };
+});
 
 // Mock Apollo useQuery to return campaigns data for this test
 vi.mock('@apollo/client/react', async () => {
-  const actual = await vi.importActual('@apollo/client/react')
+  const actual = await vi.importActual('@apollo/client/react');
   return {
     ...actual,
     useQuery: () => {
@@ -44,50 +44,38 @@ vi.mock('@apollo/client/react', async () => {
           ],
         },
         loading: false,
-      }
+      };
     },
-  }
-})
+  };
+});
 
-import { ProfileCard } from '../src/components/ProfileCard'
+import { ProfileCard } from '../src/components/ProfileCard';
 
 describe('ProfileCard latest campaign', () => {
   it('shows latest campaign stats when campaigns exist', async () => {
     render(
       <BrowserRouter>
-        <ProfileCard
-          profileId="profile-123"
-          sellerName="Scout Alpha"
-          isOwner={true}
-          permissions={[]}
-        />
-      </BrowserRouter>
-    )
+        <ProfileCard profileId="profile-123" sellerName="Scout Alpha" isOwner={true} permissions={[]} />
+      </BrowserRouter>,
+    );
 
-    expect(await screen.findByText(/Alpha Campaign/)).toBeInTheDocument()
-    expect(screen.getByText(/\$200.50/)).toBeInTheDocument()
-  })
+    expect(await screen.findByText(/Alpha Campaign/)).toBeInTheDocument();
+    expect(screen.getByText(/\$200.50/)).toBeInTheDocument();
+  });
 
   it('navigates to latest campaign when View Latest Campaign clicked', async () => {
-    const user = userEvent.setup()
-    mockNavigate.mockClear()
+    const user = userEvent.setup();
+    mockNavigate.mockClear();
 
     render(
       <BrowserRouter>
-        <ProfileCard
-          profileId="profile-123"
-          sellerName="Scout Alpha"
-          isOwner={true}
-          permissions={[]}
-        />
-      </BrowserRouter>
-    )
+        <ProfileCard profileId="profile-123" sellerName="Scout Alpha" isOwner={true} permissions={[]} />
+      </BrowserRouter>,
+    );
 
-    const button = await screen.findByText('View Latest Campaign')
-    await user.click(button)
+    const button = await screen.findByText('View Latest Campaign');
+    await user.click(button);
 
-    await waitFor(() =>
-      expect(mockNavigate).toHaveBeenCalledWith('/scouts/profile-123/campaigns/campaign-1')
-    )
-  })
-})
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/scouts/profile-123/campaigns/campaign-1'));
+  });
+});

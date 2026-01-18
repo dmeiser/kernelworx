@@ -5,7 +5,6 @@ This handler is called as part of the createOrder pipeline to ensure
 the payment method exists for the profile owner's account.
 """
 
-import json
 from typing import Any, Dict
 
 # Handle both Lambda (absolute) and unit test (relative) imports

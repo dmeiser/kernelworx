@@ -24,11 +24,7 @@ import {
   TableRow,
   Chip,
 } from '@mui/material';
-import {
-  Add as AddIcon,
-  Share as ShareIcon,
-  ArrowBack as BackIcon,
-} from '@mui/icons-material';
+import { Add as AddIcon, Share as ShareIcon, ArrowBack as BackIcon } from '@mui/icons-material';
 import { GET_CATALOG } from '../lib/graphql';
 import type { Catalog, Product } from '../types';
 
@@ -37,60 +33,66 @@ interface CatalogPreviewPageProps {
   onCreateSharedCampaign?: (catalogId: string) => void;
 }
 
+// Loading state component
+const LoadingState: React.FC = () => (
+  <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '400px' }}>
+    <CircularProgress />
+  </Box>
+);
+
+// Error state component
+const ErrorState: React.FC<{ message: string }> = ({ message }) => (
+  <Box sx={{ p: 3 }}>
+    <Alert severity="error">Error loading catalog: {message}</Alert>
+  </Box>
+);
+
+// Not found state component
+const NotFoundState: React.FC = () => (
+  <Box sx={{ p: 3 }}>
+    <Alert severity="warning">Catalog not found</Alert>
+  </Box>
+);
+
+// No catalog ID state component
+const NoCatalogIdState: React.FC = () => (
+  <Box sx={{ p: 3 }}>
+    <Alert severity="error">No catalog ID provided</Alert>
+  </Box>
+);
+
 export const CatalogPreviewPage: React.FC<CatalogPreviewPageProps> = ({
   onCreateCampaign,
   onCreateSharedCampaign,
+  // eslint-disable-next-line complexity -- Many early returns for different states, but each is simple
 }) => {
   const { catalogId: catalogUuid } = useParams<{ catalogId: string }>();
   const navigate = useNavigate();
 
-  // Add CATALOG# prefix if not present
+  // Add CATALOG# prefix if not present - always compute this first
   const catalogId = catalogUuid?.startsWith('CATALOG#') ? catalogUuid : `CATALOG#${catalogUuid}`;
 
-  React.useEffect(() => {
-    localStorage.setItem('catalogPreviewPageLoaded', JSON.stringify({ catalogId, timestamp: new Date().toISOString() }));
-  }, [catalogId]);
-
-  if (!catalogId) {
-    return (
-      <Box sx={{ p: 3 }}>
-        <Alert severity="error">No catalog ID provided</Alert>
-      </Box>
-    );
-  }
-
+  // Always call hooks unconditionally - this is required by React rules
   const { data, loading, error } = useQuery<{ getCatalog: Catalog }>(GET_CATALOG, {
     variables: { catalogId },
+    skip: !catalogId, // Skip the query if no catalogId
   });
 
   const catalog: Catalog | undefined = data?.getCatalog;
   const products: Product[] = useMemo(() => catalog?.products || [], [catalog?.products]);
 
-  if (loading) {
-    return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '400px' }}>
-        <CircularProgress />
-      </Box>
-    );
-  }
+  React.useEffect(() => {
+    if (catalogId) {
+      localStorage.setItem(
+        'catalogPreviewPageLoaded',
+        JSON.stringify({ catalogId, timestamp: new Date().toISOString() }),
+      );
+    }
+  }, [catalogId]);
 
-  if (error) {
-    return (
-      <Box sx={{ p: 3 }}>
-        <Alert severity="error">Error loading catalog: {error.message}</Alert>
-      </Box>
-    );
-  }
-
-  if (!catalog) {
-    return (
-      <Box sx={{ p: 3 }}>
-        <Alert severity="warning">Catalog not found</Alert>
-      </Box>
-    );
-  }
-
+  // Handler functions
   const handleCreateCampaign = () => {
+    if (!catalogId) return;
     if (onCreateCampaign) {
       onCreateCampaign(catalogId);
     } else {
@@ -99,6 +101,7 @@ export const CatalogPreviewPage: React.FC<CatalogPreviewPageProps> = ({
   };
 
   const handleCreateSharedCampaign = () => {
+    if (!catalogId) return;
     if (onCreateSharedCampaign) {
       onCreateSharedCampaign(catalogId);
     } else {
@@ -106,15 +109,17 @@ export const CatalogPreviewPage: React.FC<CatalogPreviewPageProps> = ({
     }
   };
 
+  // Render guards - after all hooks
+  if (!catalogId) return <NoCatalogIdState />;
+  if (loading) return <LoadingState />;
+  if (error) return <ErrorState message={error.message} />;
+  if (!catalog) return <NotFoundState />;
+
   return (
     <Box sx={{ p: 3 }}>
       {/* Back button and header */}
       <Stack direction="row" spacing={2} alignItems="center" sx={{ mb: 3 }}>
-        <Button
-          startIcon={<BackIcon />}
-          onClick={() => navigate('/catalogs')}
-          variant="outlined"
-        >
+        <Button startIcon={<BackIcon />} onClick={() => navigate('/catalogs')} variant="outlined">
           Back
         </Button>
         <Box sx={{ flex: 1 }}>
@@ -139,18 +144,10 @@ export const CatalogPreviewPage: React.FC<CatalogPreviewPageProps> = ({
             {catalog.isPublic && <Chip label="Public" variant="filled" />}
           </Stack>
           <Stack direction="row" spacing={1}>
-            <Button
-              variant="contained"
-              startIcon={<AddIcon />}
-              onClick={handleCreateCampaign}
-            >
+            <Button variant="contained" startIcon={<AddIcon />} onClick={handleCreateCampaign}>
               Create Campaign
             </Button>
-            <Button
-              variant="outlined"
-              startIcon={<ShareIcon />}
-              onClick={handleCreateSharedCampaign}
-            >
+            <Button variant="outlined" startIcon={<ShareIcon />} onClick={handleCreateSharedCampaign}>
               Create Shared Campaign
             </Button>
           </Stack>
@@ -178,9 +175,7 @@ export const CatalogPreviewPage: React.FC<CatalogPreviewPageProps> = ({
               {products.map((product) => (
                 <TableRow key={product.productId} hover>
                   <TableCell sx={{ fontWeight: 500 }}>{product.productName}</TableCell>
-                  <TableCell sx={{ maxWidth: 300, whiteSpace: 'normal' }}>
-                    {product.description || '-'}
-                  </TableCell>
+                  <TableCell sx={{ maxWidth: 300, whiteSpace: 'normal' }}>{product.description || '-'}</TableCell>
                   <TableCell align="right">${product.price.toFixed(2)}</TableCell>
                 </TableRow>
               ))}
@@ -191,20 +186,10 @@ export const CatalogPreviewPage: React.FC<CatalogPreviewPageProps> = ({
 
       {/* Action buttons at bottom */}
       <Stack direction="row" spacing={2} sx={{ mt: 3, justifyContent: 'center' }}>
-        <Button
-          variant="contained"
-          size="large"
-          startIcon={<AddIcon />}
-          onClick={handleCreateCampaign}
-        >
+        <Button variant="contained" size="large" startIcon={<AddIcon />} onClick={handleCreateCampaign}>
           Create Campaign
         </Button>
-        <Button
-          variant="outlined"
-          size="large"
-          startIcon={<ShareIcon />}
-          onClick={handleCreateSharedCampaign}
-        >
+        <Button variant="outlined" size="large" startIcon={<ShareIcon />} onClick={handleCreateSharedCampaign}>
           Create Shared Campaign
         </Button>
       </Stack>
