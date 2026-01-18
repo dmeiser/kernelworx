@@ -183,6 +183,7 @@ type SharedProfile {
   updatedAt: AWSDateTime!
   isOwner: Boolean!
   permissions: [PermissionType!]!
+  latestCampaign: Campaign
 }
 
 type ProfileInvite {

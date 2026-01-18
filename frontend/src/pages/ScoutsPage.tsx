@@ -375,7 +375,7 @@ export const ScoutsPage: React.FC = () => {
   const [loadAccount, { data: accountData, loading: accountLoading }] = useLazyQuery<{
     getMyAccount: { accountId: string; preferences?: string };
   }>(GET_MY_ACCOUNT, {
-    fetchPolicy: 'network-only',
+    fetchPolicy: 'cache-first',
   });
 
   // Parse preferences from account data

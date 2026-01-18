@@ -176,6 +176,12 @@ export const LIST_MY_SHARES = gql`
       updatedAt
       isOwner
       permissions
+      latestCampaign {
+        campaignId
+        campaignName
+        campaignYear
+        isActive
+      }
     }
   }
 `;

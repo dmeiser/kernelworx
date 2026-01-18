@@ -16,8 +16,9 @@ export function request(ctx) {
             expression: 'isActive = :isActive OR attribute_not_exists(isActive)',
             expressionValues: util.dynamodb.toMapValues({ ':isActive': true })
         },
-        scanIndexForward: false,  // Descending order (newest first)
-        limit: 1  // Only get the most recent active campaign
+        scanIndexForward: false  // Descending order (newest first)
+        // Note: No limit here because DynamoDB applies limit BEFORE filter
+        // We filter in the response function instead
     };
 }
 

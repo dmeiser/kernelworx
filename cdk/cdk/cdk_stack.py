@@ -21,6 +21,7 @@ from aws_cdk import aws_s3 as s3
 from constructs import Construct
 
 from .appsync import setup_appsync
+from .dynamodb_tables import create_dynamodb_tables
 from .helpers import get_context_bool, get_domain_names, get_known_user_pool_id, get_region_abbrev
 
 
@@ -180,233 +181,18 @@ class CdkStack(Stack):  # type: ignore[misc]
         self.cognito_certificate.apply_removal_policy(RemovalPolicy.RETAIN)
 
         # ====================================================================
-        # DynamoDB Table - Single Table Design
-        # ====================================================================
-        # New Multi-Table Design (Migration from Single-Table)
+        # DynamoDB Tables - Multi-Table Design
         # ====================================================================
 
-        # Accounts Table
-        accounts_table_name = self._rn("kernelworx-accounts")
-        self.accounts_table = dynamodb.Table(
-            self,
-            "AccountsTable",
-            table_name=accounts_table_name,
-            partition_key=dynamodb.Attribute(name="accountId", type=dynamodb.AttributeType.STRING),
-            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
-            point_in_time_recovery_specification=dynamodb.PointInTimeRecoverySpecification(
-                point_in_time_recovery_enabled=True
-            ),
-            removal_policy=RemovalPolicy.RETAIN,
-            deletion_protection=True,
-        )
-        # GSI for email lookup (account by email)
-        self.accounts_table.add_global_secondary_index(
-            index_name="email-index",
-            partition_key=dynamodb.Attribute(name="email", type=dynamodb.AttributeType.STRING),
-            projection_type=dynamodb.ProjectionType.ALL,
-        )
-
-        # Catalogs Table
-        catalogs_table_name = self._rn("kernelworx-catalogs")
-        self.catalogs_table = dynamodb.Table(
-            self,
-            "CatalogsTable",
-            table_name=catalogs_table_name,
-            partition_key=dynamodb.Attribute(name="catalogId", type=dynamodb.AttributeType.STRING),
-            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
-            point_in_time_recovery_specification=dynamodb.PointInTimeRecoverySpecification(
-                point_in_time_recovery_enabled=True
-            ),
-            removal_policy=RemovalPolicy.RETAIN,
-            deletion_protection=True,
-        )
-        # GSIs
-        self.catalogs_table.add_global_secondary_index(
-            index_name="ownerAccountId-index",
-            partition_key=dynamodb.Attribute(name="ownerAccountId", type=dynamodb.AttributeType.STRING),
-            projection_type=dynamodb.ProjectionType.ALL,
-        )
-        self.catalogs_table.add_global_secondary_index(
-            index_name="isPublic-createdAt-index",
-            partition_key=dynamodb.Attribute(name="isPublicStr", type=dynamodb.AttributeType.STRING),
-            sort_key=dynamodb.Attribute(name="createdAt", type=dynamodb.AttributeType.STRING),
-            projection_type=dynamodb.ProjectionType.ALL,
-        )
-
-        # Profiles Table - stores profile METADATA only
-        # NEW STRUCTURE (V2): PK=ownerAccountId, SK=profileId
-        # This enables direct query for listMyProfiles (no GSI needed)
-        # Shares and invites are in separate tables now
-        profiles_table_name = self._rn("kernelworx-profiles")
-        self.profiles_table = dynamodb.Table(
-            self,
-            "ProfilesTableV2",
-            table_name=profiles_table_name,
-            partition_key=dynamodb.Attribute(name="ownerAccountId", type=dynamodb.AttributeType.STRING),
-            sort_key=dynamodb.Attribute(name="profileId", type=dynamodb.AttributeType.STRING),
-            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
-            point_in_time_recovery_specification=dynamodb.PointInTimeRecoverySpecification(
-                point_in_time_recovery_enabled=True
-            ),
-            removal_policy=RemovalPolicy.RETAIN,
-            deletion_protection=True,
-        )
-        # GSI for direct profile lookup by profileId
-        self.profiles_table.add_global_secondary_index(
-            index_name="profileId-index",
-            partition_key=dynamodb.Attribute(name="profileId", type=dynamodb.AttributeType.STRING),
-            projection_type=dynamodb.ProjectionType.ALL,
-        )
-
-        # Shares Table (NEW - separated from profiles for cleaner design)
-        # PK: profileId, SK: targetAccountId
-        # Enables direct query for "all shares for this profile"
-        shares_table_name = self._rn("kernelworx-shares")
-        self.shares_table = dynamodb.Table(
-            self,
-            "SharesTable",
-            table_name=shares_table_name,
-            partition_key=dynamodb.Attribute(name="profileId", type=dynamodb.AttributeType.STRING),
-            sort_key=dynamodb.Attribute(name="targetAccountId", type=dynamodb.AttributeType.STRING),
-            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
-            point_in_time_recovery_specification=dynamodb.PointInTimeRecoverySpecification(
-                point_in_time_recovery_enabled=True
-            ),
-            removal_policy=RemovalPolicy.RETAIN,
-            deletion_protection=True,
-        )
-        # GSI for "profiles shared with me" query
-        self.shares_table.add_global_secondary_index(
-            index_name="targetAccountId-index",
-            partition_key=dynamodb.Attribute(name="targetAccountId", type=dynamodb.AttributeType.STRING),
-            projection_type=dynamodb.ProjectionType.ALL,
-        )
-
-        # Invites Table (NEW - separated from profiles for cleaner design)
-        # PK: inviteCode (enables direct lookup)
-        # TTL: expiresAt (automatic cleanup of expired invites)
-        invites_table_name = self._rn("kernelworx-invites")
-        self.invites_table = dynamodb.Table(
-            self,
-            "InvitesTable",
-            table_name=invites_table_name,
-            partition_key=dynamodb.Attribute(name="inviteCode", type=dynamodb.AttributeType.STRING),
-            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
-            point_in_time_recovery_specification=dynamodb.PointInTimeRecoverySpecification(
-                point_in_time_recovery_enabled=True
-            ),
-            removal_policy=RemovalPolicy.RETAIN,
-            deletion_protection=True,
-        )
-        # GSI for "invites for this profile" query
-        self.invites_table.add_global_secondary_index(
-            index_name="profileId-index",
-            partition_key=dynamodb.Attribute(name="profileId", type=dynamodb.AttributeType.STRING),
-            projection_type=dynamodb.ProjectionType.ALL,
-        )
-
-        # TTL for invites (automatic expiration)
-        cfn_invites_table = self.invites_table.node.default_child
-        assert cfn_invites_table is not None
-        cfn_invites_table.time_to_live_specification = dynamodb.CfnTable.TimeToLiveSpecificationProperty(
-            attribute_name="expiresAt",
-            enabled=True,
-        )
-
-        # Campaigns Table V2
-        # NEW STRUCTURE: PK=profileId, SK=campaignId (note: campaignId contains campaign data)
-        # This enables direct query for listCampaignsByProfile (no GSI needed)
-        campaigns_table_name = self._rn("kernelworx-campaigns")
-        self.campaigns_table = dynamodb.Table(
-            self,
-            "CampaignsTableV2",
-            table_name=campaigns_table_name,
-            partition_key=dynamodb.Attribute(name="profileId", type=dynamodb.AttributeType.STRING),
-            sort_key=dynamodb.Attribute(name="campaignId", type=dynamodb.AttributeType.STRING),
-            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
-            point_in_time_recovery_specification=dynamodb.PointInTimeRecoverySpecification(
-                point_in_time_recovery_enabled=True
-            ),
-            removal_policy=RemovalPolicy.RETAIN,
-            deletion_protection=True,
-        )
-        # GSI for direct getCampaign by campaignId
-        self.campaigns_table.add_global_secondary_index(
-            index_name="campaignId-index",
-            partition_key=dynamodb.Attribute(name="campaignId", type=dynamodb.AttributeType.STRING),
-            projection_type=dynamodb.ProjectionType.ALL,
-        )
-
-        # GSI for campaigns by catalog
-        self.campaigns_table.add_global_secondary_index(
-            index_name="catalogId-index",
-            partition_key=dynamodb.Attribute(name="catalogId", type=dynamodb.AttributeType.STRING),
-            projection_type=dynamodb.ProjectionType.KEYS_ONLY,
-        )
-
-        # Orders Table
-        # Orders Table V2: PK=campaignId, SK=orderId for efficient campaign-based queries
-        # Direct order lookups use orderId-index GSI
-        orders_table_name = self._rn("kernelworx-orders")
-        self.orders_table = dynamodb.Table(
-            self,
-            "OrdersTableV2",
-            table_name=orders_table_name,
-            partition_key=dynamodb.Attribute(name="campaignId", type=dynamodb.AttributeType.STRING),
-            sort_key=dynamodb.Attribute(name="orderId", type=dynamodb.AttributeType.STRING),
-            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
-            point_in_time_recovery_specification=dynamodb.PointInTimeRecoverySpecification(
-                point_in_time_recovery_enabled=True
-            ),
-            removal_policy=RemovalPolicy.RETAIN,
-            deletion_protection=True,
-        )
-        # GSI for direct order lookup by orderId
-        self.orders_table.add_global_secondary_index(
-            index_name="orderId-index",
-            partition_key=dynamodb.Attribute(name="orderId", type=dynamodb.AttributeType.STRING),
-            projection_type=dynamodb.ProjectionType.ALL,
-        )
-
-        # GSI for orders by profile
-        self.orders_table.add_global_secondary_index(
-            index_name="profileId-index",
-            partition_key=dynamodb.Attribute(name="profileId", type=dynamodb.AttributeType.STRING),
-            sort_key=dynamodb.Attribute(name="createdAt", type=dynamodb.AttributeType.STRING),
-            projection_type=dynamodb.ProjectionType.ALL,
-        )
-
-        # Shared Campaigns Table
-        # PK: sharedCampaignCode (enables direct lookup)
-        # GSI1: createdBy + createdAt (for "my shared campaigns" listing)
-        # GSI2: unitCampaignKey (for unit+campaign discovery)
-        shared_campaigns_table_name = self._rn("kernelworx-shared-campaigns")
-        self.shared_campaigns_table = dynamodb.Table(
-            self,
-            "SharedCampaignsTable",
-            table_name=shared_campaigns_table_name,
-            partition_key=dynamodb.Attribute(name="sharedCampaignCode", type=dynamodb.AttributeType.STRING),
-            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
-            point_in_time_recovery_specification=dynamodb.PointInTimeRecoverySpecification(
-                point_in_time_recovery_enabled=True
-            ),
-            removal_policy=RemovalPolicy.RETAIN,
-            deletion_protection=True,
-        )
-        # GSI1: List shared campaigns by creator (for "my shared campaigns" view)
-        self.shared_campaigns_table.add_global_secondary_index(
-            index_name="GSI1",
-            partition_key=dynamodb.Attribute(name="createdBy", type=dynamodb.AttributeType.STRING),
-            sort_key=dynamodb.Attribute(name="createdAt", type=dynamodb.AttributeType.STRING),
-            projection_type=dynamodb.ProjectionType.ALL,
-        )
-        # GSI2: Find shared campaigns by unit+campaign (for discovery during campaign creation)
-        # unitCampaignKey format: {unitType}#{unitNumber}#{city}#{state}#{campaignName}#{campaignYear}
-        self.shared_campaigns_table.add_global_secondary_index(
-            index_name="GSI2",
-            partition_key=dynamodb.Attribute(name="unitCampaignKey", type=dynamodb.AttributeType.STRING),
-            projection_type=dynamodb.ProjectionType.ALL,
-        )
+        tables = create_dynamodb_tables(self, self._rn)
+        self.accounts_table = tables["accounts_table"]
+        self.catalogs_table = tables["catalogs_table"]
+        self.profiles_table = tables["profiles_table"]
+        self.shares_table = tables["shares_table"]
+        self.invites_table = tables["invites_table"]
+        self.campaigns_table = tables["campaigns_table"]
+        self.orders_table = tables["orders_table"]
+        self.shared_campaigns_table = tables["shared_campaigns_table"]
 
         # ====================================================================
         # S3 Buckets
