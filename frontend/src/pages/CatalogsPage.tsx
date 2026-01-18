@@ -2,9 +2,9 @@
  * CatalogsPage - Manage product catalogs (public and user-owned)
  */
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useQuery, useMutation, useLazyQuery } from '@apollo/client/react';
+import { useQuery, useMutation } from '@apollo/client/react';
 import {
   Box,
   Button,
@@ -34,14 +34,11 @@ import { CatalogEditorDialog } from '../components/CatalogEditorDialog';
 import {
   LIST_MANAGED_CATALOGS,
   LIST_MY_CATALOGS,
-  LIST_MY_PROFILES,
-  LIST_MY_SHARES,
-  LIST_CAMPAIGNS_BY_PROFILE,
+  LIST_CATALOGS_IN_USE,
   CREATE_CATALOG,
   UPDATE_CATALOG,
   DELETE_CATALOG,
 } from '../lib/graphql';
-import { ensureProfileId } from '../lib/ids';
 import type { Catalog } from '../types';
 
 // Helper: Format date for display
@@ -51,21 +48,6 @@ const formatDate = (dateString: string): string => {
     month: 'short',
     day: 'numeric',
   });
-};
-
-// Helper: Merge owned profiles with shared profiles
-const mergeProfiles = (
-  myProfilesData: { listMyProfiles: Array<{ profileId: string }> } | undefined,
-  sharedProfilesData: { listMyShares: { profileId: string; permissions: string[] }[] } | undefined,
-): Array<{ profileId: string }> => {
-  return [
-    ...(myProfilesData?.listMyProfiles || []).map((p) => ({
-      profileId: p.profileId,
-    })),
-    ...(sharedProfilesData?.listMyShares || []).map((p) => ({
-      profileId: p.profileId,
-    })),
-  ];
 };
 
 // Helper: Build "My Catalogs" list - includes owned catalogs + used managed catalogs
@@ -161,7 +143,6 @@ interface CatalogRowProps {
   onView: (catalogId: string) => void;
 }
 
-// eslint-disable-next-line complexity
 const CatalogRow: React.FC<CatalogRowProps> = ({ catalog, showActions, inUse, isOwned, onEdit, onDelete, onView }) => (
   <TableRow key={catalog.catalogId} hover>
     <TableCell>
@@ -235,48 +216,11 @@ const CatalogTable: React.FC<CatalogTableProps> = ({
   );
 };
 
-// Custom hook: Fetch catalogs in use by campaigns
-function useCatalogsInUse(allUserProfiles: Array<{ profileId: string }>): Set<string> {
-  const [catalogsInUse, setCatalogsInUse] = useState<Set<string>>(new Set());
+// Custom hook: Fetch catalogs in use by campaigns (single query via backend)
+function useCatalogsInUse(): Set<string> {
+  const { data } = useQuery<{ listCatalogsInUse: string[] }>(LIST_CATALOGS_IN_USE);
 
-  const [fetchCampaigns] = useLazyQuery<{
-    listCampaignsByProfile: Array<{ catalogId: string }>;
-  }>(LIST_CAMPAIGNS_BY_PROFILE);
-
-  useEffect(() => {
-    if (allUserProfiles.length === 0) return;
-
-    let isActive = true;
-
-    const fetchAllCampaigns = async () => {
-      const catalogIds = new Set<string>();
-      for (const profile of allUserProfiles) {
-        if (!isActive) return;
-
-        try {
-          await fetchCampaignsForProfile(profile, fetchCampaigns, catalogIds);
-        } catch (error) {
-          // fetchCampaignsForProfile already logs; swallow here to avoid unhandled rejections
-          if (error instanceof Error && error.name === 'AbortError') {
-            // ignore aborts triggered by unmount or query cancellation
-            continue;
-          }
-          throw error;
-        }
-      }
-      if (isActive) {
-        setCatalogsInUse(catalogIds);
-      }
-    };
-
-    fetchAllCampaigns();
-
-    return () => {
-      isActive = false;
-    };
-  }, [allUserProfiles, fetchCampaigns]);
-
-  return catalogsInUse;
+  return useMemo(() => new Set(data?.listCatalogsInUse || []), [data]);
 }
 
 // Custom hook: Catalog mutations
@@ -359,19 +303,6 @@ function useCatalogQueries(): CatalogQueries {
   };
 }
 
-// Custom hook: Fetch all user profiles (owned + shared)
-function useAllUserProfiles(): Array<{ profileId: string }> {
-  const { data: myProfilesData } = useQuery<{
-    listMyProfiles: Array<{ profileId: string }>;
-  }>(LIST_MY_PROFILES);
-
-  const { data: sharedProfilesData } = useQuery<{
-    listMyShares: { profileId: string; permissions: string[] }[];
-  }>(LIST_MY_SHARES);
-
-  return useMemo(() => mergeProfiles(myProfilesData, sharedProfilesData), [myProfilesData, sharedProfilesData]);
-}
-
 // Data returned by useCatalogsPageData
 interface CatalogsPageData {
   publicCatalogs: Catalog[];
@@ -387,8 +318,7 @@ interface CatalogsPageData {
 function useCatalogsPageData(): CatalogsPageData {
   const { publicCatalogs, myOwnedCatalogs, isLoading, errorMessage, refetchAll } = useCatalogQueries();
 
-  const allUserProfiles = useAllUserProfiles();
-  const catalogsInUse = useCatalogsInUse(allUserProfiles);
+  const catalogsInUse = useCatalogsInUse();
   const mutations = useCatalogMutations(refetchAll);
   const myCatalogs = buildMyCatalogs(myOwnedCatalogs, publicCatalogs, catalogsInUse);
   const myOwnedCatalogIds = new Set(myOwnedCatalogs.map((c) => c.catalogId));
@@ -574,36 +504,6 @@ async function saveCatalog(
     });
   } else {
     await mutations.createCatalog({ variables: { input: catalogData } });
-  }
-}
-
-// Helper: Fetch campaigns for a single profile
-async function fetchCampaignsForProfile(
-  profile: { profileId: string },
-  fetchCampaigns: ReturnType<
-    typeof useLazyQuery<{
-      listCampaignsByProfile: Array<{ catalogId: string }>;
-    }>
-  >[0],
-  catalogIds: Set<string>,
-): Promise<void> {
-  if (!profile.profileId) return;
-
-  try {
-    const { data } = await fetchCampaigns({
-      variables: { profileId: ensureProfileId(profile.profileId) },
-    });
-    data?.listCampaignsByProfile.forEach((campaign) => {
-      if (campaign.catalogId) {
-        catalogIds.add(campaign.catalogId);
-      }
-    });
-  } catch (error) {
-    if (error instanceof Error && error.name === 'AbortError') {
-      // Ignore aborted requests (e.g., component unmount or query cancellation)
-      return;
-    }
-    console.error(`Failed to fetch campaigns for profile ${profile.profileId}:`, error);
   }
 }
 

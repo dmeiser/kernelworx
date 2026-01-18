@@ -246,7 +246,7 @@ def _generate_csv_report(campaign: Dict[str, Any], orders: list[Dict[str, Any]])
 def _write_excel_headers(ws: Any, headers: list[str]) -> None:
     """Write styled headers to Excel worksheet."""
     from openpyxl.styles import Font, PatternFill
-    
+
     header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
     header_font = Font(bold=True, color="FFFFFF")
     for col, header in enumerate(headers, start=1):
@@ -283,7 +283,7 @@ def _autosize_excel_columns(ws: Any) -> None:
 def _generate_excel_report(campaign: Dict[str, Any], orders: list[Dict[str, Any]]) -> bytes:
     """Generate Excel report with product columns."""
     from openpyxl import Workbook
-    
+
     wb = Workbook()
     ws = wb.active
     assert ws is not None, "Workbook must have an active worksheet"

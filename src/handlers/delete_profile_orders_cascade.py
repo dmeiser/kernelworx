@@ -44,10 +44,12 @@ def _query_campaign_orders(orders_table: "Table", campaign_id: str) -> List[Dict
         response = orders_table.query(**query_kwargs)
 
         for item in response.get("Items", []):
-            order_keys.append({
-                "campaignId": str(item["campaignId"]),
-                "orderId": str(item["orderId"]),
-            })
+            order_keys.append(
+                {
+                    "campaignId": str(item["campaignId"]),
+                    "orderId": str(item["orderId"]),
+                }
+            )
 
         last_evaluated_key = response.get("LastEvaluatedKey")
         if last_evaluated_key is None:
@@ -56,9 +58,7 @@ def _query_campaign_orders(orders_table: "Table", campaign_id: str) -> List[Dict
     return order_keys
 
 
-def _collect_all_order_keys(
-    orders_table: "Table", campaigns_to_delete: List[Dict[str, Any]]
-) -> List[Dict[str, str]]:
+def _collect_all_order_keys(orders_table: "Table", campaigns_to_delete: List[Dict[str, Any]]) -> List[Dict[str, str]]:
     """Collect all order keys from all campaigns.
 
     Args:

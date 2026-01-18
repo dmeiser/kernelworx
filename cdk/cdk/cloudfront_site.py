@@ -52,7 +52,7 @@ def create_cloudfront_distribution(
 
     # Grant CloudFront read access to static assets bucket
     static_assets_bucket.grant_read(origin_access_identity)
-    
+
     # Grant CloudFront read/write access to exports bucket for uploads
     exports_bucket.grant_read_write(origin_access_identity)
 

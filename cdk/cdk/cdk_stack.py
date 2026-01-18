@@ -83,9 +83,7 @@ class CdkStack(Stack):  # type: ignore[misc]
         # IAM Roles
         # ====================================================================
 
-        self.lambda_execution_role = create_lambda_execution_role(
-            self, self._rn, tables, self.exports_bucket
-        )
+        self.lambda_execution_role = create_lambda_execution_role(self, self._rn, tables, self.exports_bucket)
 
         # AppSync excludes shared_campaigns_table from GSI access (no GSIs on that table)
         self.appsync_service_role = create_appsync_service_role(
@@ -112,6 +110,7 @@ class CdkStack(Stack):  # type: ignore[misc]
         )
         self.shared_layer = lambda_resources["shared_layer"]
         self.list_my_shares_fn = lambda_resources["list_my_shares_fn"]
+        self.list_catalogs_in_use_fn = lambda_resources["list_catalogs_in_use_fn"]
         self.create_profile_fn = lambda_resources["create_profile_fn"]
         self.request_campaign_report_fn = lambda_resources["request_campaign_report_fn"]
         self.unit_reporting_fn = lambda_resources["unit_reporting_fn"]
@@ -178,6 +177,7 @@ class CdkStack(Stack):  # type: ignore[misc]
             },
             lambda_functions={
                 "list_my_shares_fn": self.list_my_shares_fn,
+                "list_catalogs_in_use_fn": self.list_catalogs_in_use_fn,
                 "create_profile_fn": self.create_profile_fn,
                 "request_campaign_report_fn": self.request_campaign_report_fn,
                 "unit_reporting_fn": self.unit_reporting_fn,

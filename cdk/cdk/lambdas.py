@@ -124,6 +124,22 @@ def create_lambda_functions(
         environment=lambda_env,
     )
 
+    # List Catalogs In Use Lambda - returns all catalog IDs used by campaigns user has access to
+    # Uses Lambda because we need to dynamically query N profiles for shared campaigns
+    list_catalogs_in_use_fn = lambda_.Function(
+        scope,
+        "ListCatalogsInUseFn",
+        function_name=rn("kernelworx-list-catalogs-in-use"),
+        runtime=lambda_.Runtime.PYTHON_3_13,
+        handler="handlers.list_catalogs_in_use.handler",
+        code=lambda_code,
+        layers=[shared_layer],
+        timeout=Duration.seconds(30),
+        memory_size=256,
+        role=lambda_execution_role,
+        environment=lambda_env,
+    )
+
     # Order Operations Lambda Functions
     # NOTE: create_order Lambda REMOVED - replaced with pipeline resolver
 
@@ -365,6 +381,7 @@ def create_lambda_functions(
     return {
         "shared_layer": shared_layer,
         "list_my_shares_fn": list_my_shares_fn,
+        "list_catalogs_in_use_fn": list_catalogs_in_use_fn,
         "create_profile_fn": create_profile_fn,
         "request_campaign_report_fn": request_campaign_report_fn,
         "unit_reporting_fn": unit_reporting_fn,

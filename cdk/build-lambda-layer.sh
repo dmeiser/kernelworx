@@ -18,6 +18,7 @@ mkdir -p "$LAYER_DIR"
 # Lambda expects Python packages in python/ subdirectory
 echo "📦 Installing Python dependencies..."
 pip install \
+    aioboto3 \
     boto3 \
     openpyxl \
     defusedxml \

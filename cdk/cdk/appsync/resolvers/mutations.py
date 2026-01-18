@@ -178,22 +178,24 @@ def create_mutation_resolvers(
         functions["verify_profile_write_access"],
         functions["check_share_permissions"],
     ]
-    
+
     # Add payment method validation if Lambda is available
     if "validate_payment_method" in functions:
         create_order_functions.append(functions["validate_payment_method"])
-    
-    create_order_functions.extend([
-        functions["get_campaign_for_order"],
-        functions["ensure_catalog_for_order"],
-        functions["get_catalog_try_raw"],
-        functions["get_catalog_try_prefixed"],
-        functions["ensure_catalog_final"],
-        functions["get_catalog"],
-        functions["create_order"],
-        # NOTE: log_create_order_state removed to stay within 10-function AppSync limit
-    ])
-    
+
+    create_order_functions.extend(
+        [
+            functions["get_campaign_for_order"],
+            functions["ensure_catalog_for_order"],
+            functions["get_catalog_try_raw"],
+            functions["get_catalog_try_prefixed"],
+            functions["ensure_catalog_final"],
+            functions["get_catalog"],
+            functions["create_order"],
+            # NOTE: log_create_order_state removed to stay within 10-function AppSync limit
+        ]
+    )
+
     builder.create_pipeline_resolver(
         field_name="createOrder",
         type_name="Mutation",
@@ -273,12 +275,14 @@ def create_mutation_resolvers(
     # Add delete_profile_orders_cascade function if it exists (cascades order deletion)
     if "delete_profile_orders_cascade" in profile_delete_functions:
         delete_profile_functions_list.append(profile_delete_functions["delete_profile_orders_cascade"])
-    
-    delete_profile_functions_list.extend([
-        profile_delete_functions["delete_profile_campaigns"],
-        profile_delete_functions["delete_profile_ownership"],
-        profile_delete_functions["delete_profile_metadata"],
-    ])
+
+    delete_profile_functions_list.extend(
+        [
+            profile_delete_functions["delete_profile_campaigns"],
+            profile_delete_functions["delete_profile_ownership"],
+            profile_delete_functions["delete_profile_metadata"],
+        ]
+    )
 
     builder.create_pipeline_resolver(
         field_name="deleteSellerProfile",
@@ -427,4 +431,3 @@ def create_mutation_resolvers(
             lambda_datasource_name="confirm_qr_upload_fn",
             id_suffix="ConfirmPaymentMethodQRCodeUploadResolver",
         )
-

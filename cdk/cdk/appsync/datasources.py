@@ -79,6 +79,7 @@ def create_lambda_datasources(
 
     lambda_ds_configs = [
         ("list_my_shares_fn", "ListMySharesDS"),
+        ("list_catalogs_in_use_fn", "ListCatalogsInUseDS"),
         ("create_profile_fn", "CreateProfileDS"),
         ("request_campaign_report_fn", "RequestCampaignReportDS"),
         ("unit_reporting_fn", "UnitReportingDS"),
@@ -97,5 +98,5 @@ def create_lambda_datasources(
     for fn_key, ds_name in lambda_ds_configs:
         if fn_key in lambda_functions:
             datasources[fn_key] = api.add_lambda_data_source(ds_name, lambda_function=lambda_functions[fn_key])
-    
+
     return datasources

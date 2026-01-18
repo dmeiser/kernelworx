@@ -1342,11 +1342,13 @@ def _check_sms_role(
         role_exists = False  # pragma: no cover
 
     if role_exists and sms_role_name not in stack_resources:
-        resources_to_import.append({
-            "ResourceType": "AWS::IAM::Role",
-            "LogicalResourceId": "UserPoolsmsRole1998E37F",
-            "ResourceIdentifier": {"RoleName": sms_role_name},
-        })
+        resources_to_import.append(
+            {
+                "ResourceType": "AWS::IAM::Role",
+                "LogicalResourceId": "UserPoolsmsRole1998E37F",
+                "ResourceIdentifier": {"RoleName": sms_role_name},
+            }
+        )
         print(f"   🔍 Found unmanaged SMS role: {sms_role_name}", file=sys.stderr)
 
 
@@ -1359,11 +1361,13 @@ def _check_user_pool_resource(
     """Check user pool and add to import list if unmanaged."""
     pool_exists = bool(pool_details)
     if pool_exists and user_pool_id not in stack_resources:
-        resources_to_import.append({
-            "ResourceType": "AWS::Cognito::UserPool",
-            "LogicalResourceId": "UserPool6BA7E5F2",
-            "ResourceIdentifier": {"UserPoolId": user_pool_id},
-        })
+        resources_to_import.append(
+            {
+                "ResourceType": "AWS::Cognito::UserPool",
+                "LogicalResourceId": "UserPool6BA7E5F2",
+                "ResourceIdentifier": {"UserPoolId": user_pool_id},
+            }
+        )
         print(f"   🔍 Found unmanaged user pool: {user_pool_id}", file=sys.stderr)
 
 
@@ -1386,11 +1390,13 @@ def _check_user_pool_domain(
         domain_exists = False
 
     if domain_exists and custom_domain not in stack_resources:
-        resources_to_import.append({
-            "ResourceType": "AWS::Cognito::UserPoolDomain",
-            "LogicalResourceId": "UserPoolDomain5479B217",
-            "ResourceIdentifier": {"Domain": custom_domain},
-        })
+        resources_to_import.append(
+            {
+                "ResourceType": "AWS::Cognito::UserPoolDomain",
+                "LogicalResourceId": "UserPoolDomain5479B217",
+                "ResourceIdentifier": {"Domain": custom_domain},
+            }
+        )
         print(f"   🔍 Found unmanaged user pool domain: {custom_domain}", file=sys.stderr)
 
 

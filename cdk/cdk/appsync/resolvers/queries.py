@@ -76,6 +76,14 @@ def create_query_resolvers(
         id_suffix="ListMySharesResolverV2",  # Keep same ID to do in-place update
     )
 
+    # listCatalogsInUse (Lambda - dynamically queries owned + shared profile campaigns)
+    builder.create_lambda_resolver(
+        field_name="listCatalogsInUse",
+        type_name="Query",
+        lambda_datasource_name="list_catalogs_in_use_fn",
+        id_suffix="ListCatalogsInUseResolver",
+    )
+
     # === CAMPAIGN QUERIES ===
 
     # getCampaign Pipeline
@@ -295,4 +303,3 @@ def create_query_resolvers(
             code_file=RESOLVERS_DIR / "payment_methods_for_profile_pipeline_resolver.js",
             id_suffix="PaymentMethodsForProfileResolver",
         )
-

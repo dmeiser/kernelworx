@@ -146,12 +146,12 @@ def create_field_resolvers(
     )
 
     # === SHARED PROFILE FIELD RESOLVERS ===
-    # NOTE: These field resolvers are NO LONGER NEEDED because the listMyShares 
+    # NOTE: These field resolvers are NO LONGER NEEDED because the listMyShares
     # Lambda now returns fully hydrated profile data. These were causing issues
     # when the Lambda returned valid data but then field resolvers would refetch
     # from DynamoDB and return nulls for profiles with missing fields.
     # Commented out in favor of Lambda returning complete data.
-    # 
+    #
     # shared_profile_fields = [
     #     ("sellerName", "SellerName"),
     #     ("ownerAccountId", "OwnerAccountId"),

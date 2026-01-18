@@ -367,9 +367,7 @@ class TestCreateSmsRole:
     @patch("cdk.auth.iam.PolicyStatement")
     @patch("cdk.auth.iam.ServicePrincipal")
     @patch("cdk.auth.iam.Role")
-    def test_creates_role(
-        self, mock_role_class, mock_service_principal, mock_policy_statement, mock_policy_document
-    ):
+    def test_creates_role(self, mock_role_class, mock_service_principal, mock_policy_statement, mock_policy_document):
         """Function creates an IAM Role."""
         mock_scope = MagicMock()
         mock_role = MagicMock()
@@ -427,9 +425,7 @@ class TestCreateSmsRole:
 
         _create_sms_role(mock_scope, "ue1", "dev")
 
-        mock_policy_statement.assert_called_once_with(
-            actions=["sns:Publish"], resources=["arn:aws:sns:*:*:*"]
-        )
+        mock_policy_statement.assert_called_once_with(actions=["sns:Publish"], resources=["arn:aws:sns:*:*:*"])
 
     @patch("cdk.auth.iam.PolicyDocument")
     @patch("cdk.auth.iam.PolicyStatement")

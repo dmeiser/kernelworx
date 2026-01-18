@@ -260,6 +260,12 @@ export const LIST_MY_CATALOGS = gql`
   }
 `;
 
+export const LIST_CATALOGS_IN_USE = gql`
+  query ListCatalogsInUse {
+    listCatalogsInUse
+  }
+`;
+
 export const GET_CATALOG = gql`
   ${CATALOG_FRAGMENT}
   query GetCatalog($catalogId: ID!) {

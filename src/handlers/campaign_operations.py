@@ -135,6 +135,7 @@ def _build_campaign_item(
     values: Dict[str, Any],
     now: str,
     shared_campaign_code: Optional[str],
+    owner_account_id: str,
 ) -> Dict[str, Any]:
     """Build the campaign DynamoDB item."""
     item: Dict[str, Any] = {
@@ -144,6 +145,7 @@ def _build_campaign_item(
         "campaignYear": values["campaign_year"],
         "startDate": values["start_date"],
         "catalogId": values["catalog_id"],
+        "ownerAccountId": owner_account_id,
         "isActive": True,  # New campaigns are active by default
         "createdAt": now,
         "updatedAt": now,
@@ -335,8 +337,9 @@ def create_campaign(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
         now = datetime.now(timezone.utc).isoformat()
         db_profile_id = profile.get("profileId") or ensure_profile_id(profile_id)
+        owner_account_id = profile.get("ownerAccountId", "")
         campaign_item = _build_campaign_item(
-            db_profile_id, f"CAMPAIGN#{uuid.uuid4()}", values, now, shared_campaign_code
+            db_profile_id, f"CAMPAIGN#{uuid.uuid4()}", values, now, shared_campaign_code, owner_account_id
         )
         share_item = _maybe_build_share_item(inp, shared_campaign, profile, caller_account_id, now)
 

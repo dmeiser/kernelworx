@@ -16,7 +16,6 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Dict, List, cast
 
-
 if TYPE_CHECKING:
     from mypy_boto3_dynamodb.service_resource import Table
     from mypy_boto3_dynamodb.type_defs import BatchGetItemOutputServiceResourceTypeDef
