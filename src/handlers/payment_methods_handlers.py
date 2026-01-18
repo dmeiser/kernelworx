@@ -203,8 +203,9 @@ def confirm_qr_upload(event: Dict[str, Any], context: Any) -> Dict[str, Any]:  #
             ExpressionAttributeValues={":prefs": preferences},
         )
 
-        # Generate pre-signed GET URL
-        presigned_url = generate_presigned_get_url(caller_id, payment_method_name, s3_key, expiry_seconds=900)
+        # Return the payment method with S3 key stored in qrCodeUrl
+        # The PaymentMethod.qrCodeUrl field resolver will generate the presigned URL
+        # This is consistent with how myPaymentMethods and paymentMethodsForProfile work
 
         logger.info(
             "Confirmed QR code upload",
@@ -213,7 +214,7 @@ def confirm_qr_upload(event: Dict[str, Any], context: Any) -> Dict[str, Any]:  #
             s3_key=s3_key,
         )
 
-        return {"name": payment_method_name, "qrCodeUrl": presigned_url}
+        return {"name": payment_method_name, "qrCodeUrl": s3_key}
 
     except AppError:
         raise

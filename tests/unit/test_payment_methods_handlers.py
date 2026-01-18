@@ -174,7 +174,8 @@ class TestConfirmQRUpload:
 
         assert result["name"] == "Venmo"
         assert result["qrCodeUrl"] is not None
-        assert result["qrCodeUrl"].startswith("http")  # Pre-signed URL
+        # Returns S3 key (field resolver will generate presigned URL)
+        assert result["qrCodeUrl"] == s3_key
 
     def test_confirm_upload_nonexistent_s3_object(
         self, dynamodb_tables: Dict[str, Any], s3_bucket: Any, sample_account: Dict[str, Any], sample_account_id: str

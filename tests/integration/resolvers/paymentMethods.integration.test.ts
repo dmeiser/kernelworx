@@ -1,6 +1,6 @@
 /**
  * Integration tests for Payment Methods
- * 
+ *
  * Tests GraphQL resolvers for custom payment methods with QR codes:
  * - myPaymentMethods (query)
  * - paymentMethodsForProfile (query)
@@ -10,7 +10,7 @@
  * - requestPaymentMethodQRCodeUpload (mutation)
  * - confirmPaymentMethodQRCodeUpload (mutation)
  * - deletePaymentMethodQRCode (mutation)
- * 
+ *
  * Coverage:
  * - Default cash/check injection
  * - Custom payment method CRUD
@@ -21,10 +21,13 @@
  * - QR visibility rules (owner/WRITE see QR, READ doesn't)
  */
 
-import '../setup.ts';
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { ApolloClient, gql } from '@apollo/client';
-import { createAuthenticatedClient, AuthenticatedClientResult } from '../setup/apolloClient';
+import "../setup.ts";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { ApolloClient, gql } from "@apollo/client";
+import {
+  createAuthenticatedClient,
+  AuthenticatedClientResult,
+} from "../setup/apolloClient";
 
 // GraphQL Queries
 const MY_PAYMENT_METHODS = gql`
@@ -81,8 +84,14 @@ const REQUEST_QR_UPLOAD = gql`
 `;
 
 const CONFIRM_QR_UPLOAD = gql`
-  mutation ConfirmPaymentMethodQRCodeUpload($paymentMethodName: String!, $s3Key: String!) {
-    confirmPaymentMethodQRCodeUpload(paymentMethodName: $paymentMethodName, s3Key: $s3Key) {
+  mutation ConfirmPaymentMethodQRCodeUpload(
+    $paymentMethodName: String!
+    $s3Key: String!
+  ) {
+    confirmPaymentMethodQRCodeUpload(
+      paymentMethodName: $paymentMethodName
+      s3Key: $s3Key
+    ) {
       name
       qrCodeUrl
     }
@@ -117,24 +126,27 @@ const SHARE_DIRECT = gql`
   }
 `;
 
-describe.sequential('Payment Methods Integration Tests', () => {
+describe.sequential("Payment Methods Integration Tests", () => {
   let ownerClient: ApolloClient<any>;
   let writeUserClient: ApolloClient<any>;
   let readUserClient: ApolloClient<any>;
-  
+
   let ownerAccountId: string;
   let writeUserAccountId: string;
   let readUserAccountId: string;
 
   beforeAll(async () => {
-    const ownerResult: AuthenticatedClientResult = await createAuthenticatedClient('owner');
-    const writeResult: AuthenticatedClientResult = await createAuthenticatedClient('contributor');
-    const readResult: AuthenticatedClientResult = await createAuthenticatedClient('readonly');
+    const ownerResult: AuthenticatedClientResult =
+      await createAuthenticatedClient("owner");
+    const writeResult: AuthenticatedClientResult =
+      await createAuthenticatedClient("contributor");
+    const readResult: AuthenticatedClientResult =
+      await createAuthenticatedClient("readonly");
 
     ownerClient = ownerResult.client;
     writeUserClient = writeResult.client;
     readUserClient = readResult.client;
-    
+
     ownerAccountId = ownerResult.accountId;
     writeUserAccountId = writeResult.accountId;
     readUserAccountId = readResult.accountId;
@@ -142,69 +154,89 @@ describe.sequential('Payment Methods Integration Tests', () => {
     // Clean up any leftover payment methods from previous test runs
     // Clean up for owner
     try {
-      console.log('beforeAll: Fetching existing payment methods (owner)...');
+      console.log("beforeAll: Fetching existing payment methods (owner)...");
       const { data } = await ownerClient.query({
         query: MY_PAYMENT_METHODS,
-        fetchPolicy: 'network-only',
+        fetchPolicy: "network-only",
       });
-      
-      console.log('beforeAll: Found methods (owner):', data.myPaymentMethods.map((m: any) => m.name));
-      
+
+      console.log(
+        "beforeAll: Found methods (owner):",
+        data.myPaymentMethods.map((m: any) => m.name),
+      );
+
       for (const method of data.myPaymentMethods) {
         // Skip Cash and Check (reserved methods)
-        if (method.name !== 'Cash' && method.name !== 'Check') {
-          console.log('beforeAll: Deleting (owner)', method.name);
+        if (method.name !== "Cash" && method.name !== "Check") {
+          console.log("beforeAll: Deleting (owner)", method.name);
           try {
             await ownerClient.mutate({
               mutation: DELETE_PAYMENT_METHOD,
               variables: { name: method.name },
             });
-            console.log('beforeAll: Deleted (owner)', method.name);
+            console.log("beforeAll: Deleted (owner)", method.name);
           } catch (e) {
-            console.log('beforeAll: Failed to delete (owner)', method.name, e);
+            console.log("beforeAll: Failed to delete (owner)", method.name, e);
           }
         }
       }
-      console.log('beforeAll: Owner cleanup complete');
+      console.log("beforeAll: Owner cleanup complete");
     } catch (e) {
-      console.log('beforeAll: Owner cleanup failed', e);
+      console.log("beforeAll: Owner cleanup failed", e);
     }
-    
+
     // Clean up for writeUser
     try {
-      console.log('beforeAll: Fetching existing payment methods (writeUser)...');
+      console.log(
+        "beforeAll: Fetching existing payment methods (writeUser)...",
+      );
       const { data } = await writeUserClient.query({
         query: MY_PAYMENT_METHODS,
-        fetchPolicy: 'network-only',
+        fetchPolicy: "network-only",
       });
-      
-      console.log('beforeAll: Found methods (writeUser):', data.myPaymentMethods.map((m: any) => m.name));
-      
+
+      console.log(
+        "beforeAll: Found methods (writeUser):",
+        data.myPaymentMethods.map((m: any) => m.name),
+      );
+
       for (const method of data.myPaymentMethods) {
         // Skip Cash and Check (reserved methods)
-        if (method.name !== 'Cash' && method.name !== 'Check') {
-          console.log('beforeAll: Deleting (writeUser)', method.name);
+        if (method.name !== "Cash" && method.name !== "Check") {
+          console.log("beforeAll: Deleting (writeUser)", method.name);
           try {
             await writeUserClient.mutate({
               mutation: DELETE_PAYMENT_METHOD,
               variables: { name: method.name },
             });
-            console.log('beforeAll: Deleted (writeUser)', method.name);
+            console.log("beforeAll: Deleted (writeUser)", method.name);
           } catch (e) {
-            console.log('beforeAll: Failed to delete (writeUser)', method.name, e);
+            console.log(
+              "beforeAll: Failed to delete (writeUser)",
+              method.name,
+              e,
+            );
           }
         }
       }
-      console.log('beforeAll: WriteUser cleanup complete');
+      console.log("beforeAll: WriteUser cleanup complete");
     } catch (e) {
-      console.log('beforeAll: WriteUser cleanup failed', e);
+      console.log("beforeAll: WriteUser cleanup failed", e);
     }
   });
 
   afterAll(async () => {
     // Final cleanup of all test payment methods
-    const testMethods = ['Zelle', 'Venmo', 'PayPal', 'Venmo - Tom', 'Venmo - JERRY', 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', 'Cash App'];
-    
+    const testMethods = [
+      "Zelle",
+      "Venmo",
+      "PayPal",
+      "Venmo - Tom",
+      "Venmo - JERRY",
+      "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "Cash App",
+    ];
+
     for (const name of testMethods) {
       try {
         await ownerClient.mutate({
@@ -215,40 +247,40 @@ describe.sequential('Payment Methods Integration Tests', () => {
         // Ignore errors - method might not exist
       }
     }
-    
-    console.log('Payment methods integration test cleanup complete.');
+
+    console.log("Payment methods integration test cleanup complete.");
   }, 30000);
 
-  describe('myPaymentMethods query', () => {
-    describe('Default behavior', () => {
-      it('should return Cash and Check for users with no custom payment methods', async () => {
+  describe("myPaymentMethods query", () => {
+    describe("Default behavior", () => {
+      it("should return Cash and Check for users with no custom payment methods", async () => {
         const { data } = await ownerClient.query({
           query: MY_PAYMENT_METHODS,
-          fetchPolicy: 'network-only',
+          fetchPolicy: "network-only",
         });
 
         expect(data.myPaymentMethods).toBeDefined();
         expect(data.myPaymentMethods.length).toBeGreaterThanOrEqual(2);
-        
+
         const methodNames = data.myPaymentMethods.map((m: any) => m.name);
-        expect(methodNames).toContain('Cash');
-        expect(methodNames).toContain('Check');
+        expect(methodNames).toContain("Cash");
+        expect(methodNames).toContain("Check");
       });
 
-      it('should return methods sorted alphabetically', async () => {
+      it("should return methods sorted alphabetically", async () => {
         // Create custom methods first
         await ownerClient.mutate({
           mutation: CREATE_PAYMENT_METHOD,
-          variables: { name: 'Zelle' },
+          variables: { name: "Zelle" },
         });
         await ownerClient.mutate({
           mutation: CREATE_PAYMENT_METHOD,
-          variables: { name: 'Venmo' },
+          variables: { name: "Venmo" },
         });
 
         const { data } = await ownerClient.query({
           query: MY_PAYMENT_METHODS,
-          fetchPolicy: 'network-only',
+          fetchPolicy: "network-only",
         });
 
         const methodNames = data.myPaymentMethods.map((m: any) => m.name);
@@ -258,104 +290,104 @@ describe.sequential('Payment Methods Integration Tests', () => {
         // Cleanup
         await ownerClient.mutate({
           mutation: DELETE_PAYMENT_METHOD,
-          variables: { name: 'Zelle' },
+          variables: { name: "Zelle" },
         });
         await ownerClient.mutate({
           mutation: DELETE_PAYMENT_METHOD,
-          variables: { name: 'Venmo' },
+          variables: { name: "Venmo" },
         });
       });
 
-      it('should include custom payment methods with Cash and Check', async () => {
+      it("should include custom payment methods with Cash and Check", async () => {
         await ownerClient.mutate({
           mutation: CREATE_PAYMENT_METHOD,
-          variables: { name: 'PayPal' },
+          variables: { name: "PayPal" },
         });
 
         const { data } = await ownerClient.query({
           query: MY_PAYMENT_METHODS,
-          fetchPolicy: 'network-only',
+          fetchPolicy: "network-only",
         });
 
         const methodNames = data.myPaymentMethods.map((m: any) => m.name);
-        expect(methodNames).toContain('Cash');
-        expect(methodNames).toContain('Check');
-        expect(methodNames).toContain('PayPal');
+        expect(methodNames).toContain("Cash");
+        expect(methodNames).toContain("Check");
+        expect(methodNames).toContain("PayPal");
 
         // Cleanup
         await ownerClient.mutate({
           mutation: DELETE_PAYMENT_METHOD,
-          variables: { name: 'PayPal' },
+          variables: { name: "PayPal" },
         });
       });
     });
   });
 
-  describe('createPaymentMethod mutation', () => {
-    describe('Happy path', () => {
-      it('should create a custom payment method', async () => {
+  describe("createPaymentMethod mutation", () => {
+    describe("Happy path", () => {
+      it("should create a custom payment method", async () => {
         const { data } = await ownerClient.mutate({
           mutation: CREATE_PAYMENT_METHOD,
-          variables: { name: 'Venmo' },
+          variables: { name: "Venmo" },
         });
 
         expect(data.createPaymentMethod).toBeDefined();
-        expect(data.createPaymentMethod.name).toBe('Venmo');
+        expect(data.createPaymentMethod.name).toBe("Venmo");
         expect(data.createPaymentMethod.qrCodeUrl).toBeNull();
 
         // Verify it appears in myPaymentMethods
         const { data: queryData } = await ownerClient.query({
           query: MY_PAYMENT_METHODS,
-          fetchPolicy: 'network-only',
+          fetchPolicy: "network-only",
         });
         const methodNames = queryData.myPaymentMethods.map((m: any) => m.name);
-        expect(methodNames).toContain('Venmo');
+        expect(methodNames).toContain("Venmo");
 
         // Cleanup
         await ownerClient.mutate({
           mutation: DELETE_PAYMENT_METHOD,
-          variables: { name: 'Venmo' },
+          variables: { name: "Venmo" },
         });
       });
 
-      it('should allow creating payment methods with different casing variations', async () => {
+      it("should allow creating payment methods with different casing variations", async () => {
         await ownerClient.mutate({
           mutation: CREATE_PAYMENT_METHOD,
-          variables: { name: 'Venmo - Tom' },
+          variables: { name: "Venmo - Tom" },
         });
         await ownerClient.mutate({
           mutation: CREATE_PAYMENT_METHOD,
-          variables: { name: 'Venmo - Harry' },
+          variables: { name: "Venmo - Harry" },
         });
 
         const { data } = await ownerClient.query({
           query: MY_PAYMENT_METHODS,
-          fetchPolicy: 'network-only',
+          fetchPolicy: "network-only",
         });
 
         const methodNames = data.myPaymentMethods.map((m: any) => m.name);
-        expect(methodNames).toContain('Venmo - Tom');
-        expect(methodNames).toContain('Venmo - Harry');
+        expect(methodNames).toContain("Venmo - Tom");
+        expect(methodNames).toContain("Venmo - Harry");
 
         // Cleanup
         await ownerClient.mutate({
           mutation: DELETE_PAYMENT_METHOD,
-          variables: { name: 'Venmo - Tom' },
+          variables: { name: "Venmo - Tom" },
         });
         await ownerClient.mutate({
           mutation: DELETE_PAYMENT_METHOD,
-          variables: { name: 'Venmo - Harry' },
+          variables: { name: "Venmo - Harry" },
         });
       });
     });
 
-    describe('Validation', () => {
+    describe("Validation", () => {
       it('should reject reserved name "Cash"', async () => {
         await expect(
           ownerClient.mutate({
             mutation: CREATE_PAYMENT_METHOD,
-            variables: { name: 'Cash' },
-          })
+            variables: { name: "Cash" },
+          }),
         ).rejects.toThrow();
       });
 
@@ -363,8 +395,8 @@ describe.sequential('Payment Methods Integration Tests', () => {
         await expect(
           ownerClient.mutate({
             mutation: CREATE_PAYMENT_METHOD,
-            variables: { name: 'cash' },
-          })
+            variables: { name: "cash" },
+          }),
         ).rejects.toThrow();
       });
 
@@ -372,8 +404,8 @@ describe.sequential('Payment Methods Integration Tests', () => {
         await expect(
           ownerClient.mutate({
             mutation: CREATE_PAYMENT_METHOD,
-            variables: { name: 'Check' },
-          })
+            variables: { name: "Check" },
+          }),
         ).rejects.toThrow();
       });
 
@@ -381,63 +413,63 @@ describe.sequential('Payment Methods Integration Tests', () => {
         await expect(
           ownerClient.mutate({
             mutation: CREATE_PAYMENT_METHOD,
-            variables: { name: 'check' },
-          })
+            variables: { name: "check" },
+          }),
         ).rejects.toThrow();
       });
 
-      it('should reject duplicate name', async () => {
+      it("should reject duplicate name", async () => {
         await ownerClient.mutate({
           mutation: CREATE_PAYMENT_METHOD,
-          variables: { name: 'Venmo' },
+          variables: { name: "Venmo" },
         });
 
         await expect(
           ownerClient.mutate({
             mutation: CREATE_PAYMENT_METHOD,
-            variables: { name: 'Venmo' },
-          })
+            variables: { name: "Venmo" },
+          }),
         ).rejects.toThrow();
 
         // Cleanup
         await ownerClient.mutate({
           mutation: DELETE_PAYMENT_METHOD,
-          variables: { name: 'Venmo' },
+          variables: { name: "Venmo" },
         });
       });
 
-      it('should reject duplicate name (case-insensitive)', async () => {
+      it("should reject duplicate name (case-insensitive)", async () => {
         await ownerClient.mutate({
           mutation: CREATE_PAYMENT_METHOD,
-          variables: { name: 'Venmo' },
+          variables: { name: "Venmo" },
         });
 
         await expect(
           ownerClient.mutate({
             mutation: CREATE_PAYMENT_METHOD,
-            variables: { name: 'venmo' },
-          })
+            variables: { name: "venmo" },
+          }),
         ).rejects.toThrow();
 
         // Cleanup
         await ownerClient.mutate({
           mutation: DELETE_PAYMENT_METHOD,
-          variables: { name: 'Venmo' },
+          variables: { name: "Venmo" },
         });
       });
 
-      it('should reject name longer than 50 characters', async () => {
-        const longName = 'A'.repeat(51);
+      it("should reject name longer than 50 characters", async () => {
+        const longName = "A".repeat(51);
         await expect(
           ownerClient.mutate({
             mutation: CREATE_PAYMENT_METHOD,
             variables: { name: longName },
-          })
+          }),
         ).rejects.toThrow();
       });
 
-      it('should accept name exactly 50 characters', async () => {
-        const name50 = 'A'.repeat(50);
+      it("should accept name exactly 50 characters", async () => {
+        const name50 = "A".repeat(50);
         const { data } = await ownerClient.mutate({
           mutation: CREATE_PAYMENT_METHOD,
           variables: { name: name50 },
@@ -452,175 +484,175 @@ describe.sequential('Payment Methods Integration Tests', () => {
         });
       });
 
-      it('should reject empty name', async () => {
+      it("should reject empty name", async () => {
         await expect(
           ownerClient.mutate({
             mutation: CREATE_PAYMENT_METHOD,
-            variables: { name: '' },
-          })
+            variables: { name: "" },
+          }),
         ).rejects.toThrow();
       });
     });
   });
 
-  describe('updatePaymentMethod mutation', () => {
-    describe('Happy path', () => {
-      it('should rename payment method', async () => {
+  describe("updatePaymentMethod mutation", () => {
+    describe("Happy path", () => {
+      it("should rename payment method", async () => {
         await ownerClient.mutate({
           mutation: CREATE_PAYMENT_METHOD,
-          variables: { name: 'Venmo' },
+          variables: { name: "Venmo" },
         });
 
         const { data } = await ownerClient.mutate({
           mutation: UPDATE_PAYMENT_METHOD,
           variables: {
-            currentName: 'Venmo',
-            newName: 'Venmo - Tom',
+            currentName: "Venmo",
+            newName: "Venmo - Tom",
           },
         });
 
-        expect(data.updatePaymentMethod.name).toBe('Venmo - Tom');
+        expect(data.updatePaymentMethod.name).toBe("Venmo - Tom");
 
         const { data: queryData } = await ownerClient.query({
           query: MY_PAYMENT_METHODS,
-          fetchPolicy: 'network-only',
+          fetchPolicy: "network-only",
         });
         const methodNames = queryData.myPaymentMethods.map((m: any) => m.name);
-        expect(methodNames).toContain('Venmo - Tom');
-        expect(methodNames).not.toContain('Venmo');
+        expect(methodNames).toContain("Venmo - Tom");
+        expect(methodNames).not.toContain("Venmo");
 
         // Cleanup
         await ownerClient.mutate({
           mutation: DELETE_PAYMENT_METHOD,
-          variables: { name: 'Venmo - Tom' },
+          variables: { name: "Venmo - Tom" },
         });
       });
     });
 
-    describe('Validation', () => {
-      it('should reject renaming to reserved name', async () => {
+    describe("Validation", () => {
+      it("should reject renaming to reserved name", async () => {
         await ownerClient.mutate({
           mutation: CREATE_PAYMENT_METHOD,
-          variables: { name: 'Venmo' },
+          variables: { name: "Venmo" },
         });
 
         await expect(
           ownerClient.mutate({
             mutation: UPDATE_PAYMENT_METHOD,
             variables: {
-              currentName: 'Venmo',
-              newName: 'Cash',
+              currentName: "Venmo",
+              newName: "Cash",
             },
-          })
+          }),
         ).rejects.toThrow();
 
         // Cleanup
         await ownerClient.mutate({
           mutation: DELETE_PAYMENT_METHOD,
-          variables: { name: 'Venmo' },
+          variables: { name: "Venmo" },
         });
       });
 
-      it('should reject renaming to existing name', async () => {
+      it("should reject renaming to existing name", async () => {
         await ownerClient.mutate({
           mutation: CREATE_PAYMENT_METHOD,
-          variables: { name: 'Venmo' },
+          variables: { name: "Venmo" },
         });
         await ownerClient.mutate({
           mutation: CREATE_PAYMENT_METHOD,
-          variables: { name: 'PayPal' },
+          variables: { name: "PayPal" },
         });
 
         await expect(
           ownerClient.mutate({
             mutation: UPDATE_PAYMENT_METHOD,
             variables: {
-              currentName: 'Venmo',
-              newName: 'PayPal',
+              currentName: "Venmo",
+              newName: "PayPal",
             },
-          })
+          }),
         ).rejects.toThrow();
 
         // Cleanup
         await ownerClient.mutate({
           mutation: DELETE_PAYMENT_METHOD,
-          variables: { name: 'Venmo' },
+          variables: { name: "Venmo" },
         });
         await ownerClient.mutate({
           mutation: DELETE_PAYMENT_METHOD,
-          variables: { name: 'PayPal' },
+          variables: { name: "PayPal" },
         });
       });
 
-      it('should reject updating non-existent method', async () => {
+      it("should reject updating non-existent method", async () => {
         await expect(
           ownerClient.mutate({
             mutation: UPDATE_PAYMENT_METHOD,
             variables: {
-              currentName: 'NonExistent',
-              newName: 'NewName',
+              currentName: "NonExistent",
+              newName: "NewName",
             },
-          })
+          }),
         ).rejects.toThrow();
       });
     });
   });
 
-  describe('deletePaymentMethod mutation', () => {
-    describe('Happy path', () => {
-      it('should delete payment method', async () => {
+  describe("deletePaymentMethod mutation", () => {
+    describe("Happy path", () => {
+      it("should delete payment method", async () => {
         await ownerClient.mutate({
           mutation: CREATE_PAYMENT_METHOD,
-          variables: { name: 'Venmo' },
+          variables: { name: "Venmo" },
         });
 
         const { data } = await ownerClient.mutate({
           mutation: DELETE_PAYMENT_METHOD,
-          variables: { name: 'Venmo' },
+          variables: { name: "Venmo" },
         });
 
         expect(data.deletePaymentMethod).toBe(true);
 
         const { data: queryData } = await ownerClient.query({
           query: MY_PAYMENT_METHODS,
-          fetchPolicy: 'network-only',
+          fetchPolicy: "network-only",
         });
         const methodNames = queryData.myPaymentMethods.map((m: any) => m.name);
-        expect(methodNames).not.toContain('Venmo');
+        expect(methodNames).not.toContain("Venmo");
       });
     });
 
-    describe('Validation', () => {
-      it('should reject deleting non-existent method', async () => {
+    describe("Validation", () => {
+      it("should reject deleting non-existent method", async () => {
         await expect(
           ownerClient.mutate({
             mutation: DELETE_PAYMENT_METHOD,
-            variables: { name: 'NonExistent' },
-          })
+            variables: { name: "NonExistent" },
+          }),
         ).rejects.toThrow();
       });
 
-      it('should reject deleting reserved name Cash', async () => {
+      it("should reject deleting reserved name Cash", async () => {
         await expect(
           ownerClient.mutate({
             mutation: DELETE_PAYMENT_METHOD,
-            variables: { name: 'Cash' },
-          })
+            variables: { name: "Cash" },
+          }),
         ).rejects.toThrow();
       });
 
-      it('should reject deleting reserved name Check', async () => {
+      it("should reject deleting reserved name Check", async () => {
         await expect(
           ownerClient.mutate({
             mutation: DELETE_PAYMENT_METHOD,
-            variables: { name: 'Check' },
-          })
+            variables: { name: "Check" },
+          }),
         ).rejects.toThrow();
       });
     });
   });
 
-  describe('paymentMethodsForProfile query', () => {
+  describe("paymentMethodsForProfile query", () => {
     let ownerProfileId: string;
 
     beforeAll(async () => {
@@ -629,71 +661,75 @@ describe.sequential('Payment Methods Integration Tests', () => {
         mutation: CREATE_PROFILE,
         variables: {
           input: {
-            sellerName: 'Test Owner',
+            sellerName: "Test Owner",
           },
         },
       });
       ownerProfileId = data.createSellerProfile.profileId;
     });
 
-    describe('Owner access', () => {
-      it('should return owner payment methods with Cash and Check', async () => {
+    describe("Owner access", () => {
+      it("should return owner payment methods with Cash and Check", async () => {
         await ownerClient.mutate({
           mutation: CREATE_PAYMENT_METHOD,
-          variables: { name: 'Venmo' },
+          variables: { name: "Venmo" },
         });
 
         const { data } = await ownerClient.query({
           query: PAYMENT_METHODS_FOR_PROFILE,
           variables: { profileId: ownerProfileId },
-          fetchPolicy: 'network-only',
+          fetchPolicy: "network-only",
         });
 
-        const methodNames = data.paymentMethodsForProfile.map((m: any) => m.name);
-        expect(methodNames).toContain('Cash');
-        expect(methodNames).toContain('Check');
-        expect(methodNames).toContain('Venmo');
+        const methodNames = data.paymentMethodsForProfile.map(
+          (m: any) => m.name,
+        );
+        expect(methodNames).toContain("Cash");
+        expect(methodNames).toContain("Check");
+        expect(methodNames).toContain("Venmo");
 
         // Cleanup
         await ownerClient.mutate({
           mutation: DELETE_PAYMENT_METHOD,
-          variables: { name: 'Venmo' },
+          variables: { name: "Venmo" },
         });
       });
 
-      it('should return sorted payment methods', async () => {
+      it("should return sorted payment methods", async () => {
         await ownerClient.mutate({
           mutation: CREATE_PAYMENT_METHOD,
-          variables: { name: 'Zelle' },
+          variables: { name: "Zelle" },
         });
         await ownerClient.mutate({
           mutation: CREATE_PAYMENT_METHOD,
-          variables: { name: 'Venmo' },
+          variables: { name: "Venmo" },
         });
 
         const { data } = await ownerClient.query({
           query: PAYMENT_METHODS_FOR_PROFILE,
           variables: { profileId: ownerProfileId },
-          fetchPolicy: 'network-only',
+          fetchPolicy: "network-only",
         });
 
-        const methodNames = data.paymentMethodsForProfile.map((m: any) => m.name);
+        const methodNames = data.paymentMethodsForProfile.map(
+          (m: any) => m.name,
+        );
         const sortedNames = [...methodNames].sort((a, b) => a.localeCompare(b));
         expect(methodNames).toEqual(sortedNames);
 
         // Cleanup
         await ownerClient.mutate({
           mutation: DELETE_PAYMENT_METHOD,
-          variables: { name: 'Zelle' },
+          variables: { name: "Zelle" },
         });
         await ownerClient.mutate({
           mutation: DELETE_PAYMENT_METHOD,
-          variables: { name: 'Venmo' },
+          variables: { name: "Venmo" },
         });
       });
     });
 
-    describe('Shared access - WRITE permissions', () => {
+    describe("Shared access - WRITE permissions", () => {
       beforeAll(async () => {
         // Create share with WRITE permissions
         await ownerClient.mutate({
@@ -702,49 +738,51 @@ describe.sequential('Payment Methods Integration Tests', () => {
             input: {
               profileId: ownerProfileId,
               targetAccountEmail: process.env.TEST_CONTRIBUTOR_EMAIL!,
-              permissions: ['WRITE'],
+              permissions: ["WRITE"],
             },
           },
         });
       });
 
-      it('should return owner payment methods (not shared user own methods)', async () => {
+      it("should return owner payment methods (not shared user own methods)", async () => {
         // Owner creates a payment method
         await ownerClient.mutate({
           mutation: CREATE_PAYMENT_METHOD,
-          variables: { name: 'Owner-Venmo' },
+          variables: { name: "Owner-Venmo" },
         });
 
         // Shared user creates their own payment method
         await writeUserClient.mutate({
           mutation: CREATE_PAYMENT_METHOD,
-          variables: { name: 'WriteUser-PayPal' },
+          variables: { name: "WriteUser-PayPal" },
         });
 
         // Query as shared user
         const { data } = await writeUserClient.query({
           query: PAYMENT_METHODS_FOR_PROFILE,
           variables: { profileId: ownerProfileId },
-          fetchPolicy: 'network-only',
+          fetchPolicy: "network-only",
         });
 
-        const methodNames = data.paymentMethodsForProfile.map((m: any) => m.name);
-        expect(methodNames).toContain('Owner-Venmo');
-        expect(methodNames).not.toContain('WriteUser-PayPal');
+        const methodNames = data.paymentMethodsForProfile.map(
+          (m: any) => m.name,
+        );
+        expect(methodNames).toContain("Owner-Venmo");
+        expect(methodNames).not.toContain("WriteUser-PayPal");
 
         // Cleanup
         await ownerClient.mutate({
           mutation: DELETE_PAYMENT_METHOD,
-          variables: { name: 'Owner-Venmo' },
+          variables: { name: "Owner-Venmo" },
         });
         await writeUserClient.mutate({
           mutation: DELETE_PAYMENT_METHOD,
-          variables: { name: 'WriteUser-PayPal' },
+          variables: { name: "WriteUser-PayPal" },
         });
       });
     });
 
-    describe('Shared access - READ permissions', () => {
+    describe("Shared access - READ permissions", () => {
       beforeAll(async () => {
         // Create share with READ permissions
         await ownerClient.mutate({
@@ -753,28 +791,30 @@ describe.sequential('Payment Methods Integration Tests', () => {
             input: {
               profileId: ownerProfileId,
               targetAccountEmail: process.env.TEST_READONLY_EMAIL!,
-              permissions: ['READ'],
+              permissions: ["READ"],
             },
           },
         });
       });
 
-      it('should return owner payment methods with QR URLs as null', async () => {
+      it("should return owner payment methods with QR URLs as null", async () => {
         await ownerClient.mutate({
           mutation: CREATE_PAYMENT_METHOD,
-          variables: { name: 'Venmo' },
+          variables: { name: "Venmo" },
         });
 
         const { data } = await readUserClient.query({
           query: PAYMENT_METHODS_FOR_PROFILE,
           variables: { profileId: ownerProfileId },
-          fetchPolicy: 'network-only',
+          fetchPolicy: "network-only",
         });
 
-        const methodNames = data.paymentMethodsForProfile.map((m: any) => m.name);
-        expect(methodNames).toContain('Cash');
-        expect(methodNames).toContain('Check');
-        expect(methodNames).toContain('Venmo');
+        const methodNames = data.paymentMethodsForProfile.map(
+          (m: any) => m.name,
+        );
+        expect(methodNames).toContain("Cash");
+        expect(methodNames).toContain("Check");
+        expect(methodNames).toContain("Venmo");
 
         // All QR URLs should be null for READ users
         data.paymentMethodsForProfile.forEach((method: any) => {
@@ -784,19 +824,19 @@ describe.sequential('Payment Methods Integration Tests', () => {
         // Cleanup
         await ownerClient.mutate({
           mutation: DELETE_PAYMENT_METHOD,
-          variables: { name: 'Venmo' },
+          variables: { name: "Venmo" },
         });
       });
     });
 
-    describe('Unauthorized access', () => {
-      it('should reject query for profile without access', async () => {
+    describe("Unauthorized access", () => {
+      it("should reject query for profile without access", async () => {
         // Create another user's profile
         const { data: profileData } = await writeUserClient.mutate({
           mutation: CREATE_PROFILE,
           variables: {
             input: {
-              sellerName: 'Other User',
+              sellerName: "Other User",
             },
           },
         });
@@ -807,14 +847,14 @@ describe.sequential('Payment Methods Integration Tests', () => {
           ownerClient.query({
             query: PAYMENT_METHODS_FOR_PROFILE,
             variables: { profileId: otherProfileId },
-            fetchPolicy: 'network-only',
-          })
+            fetchPolicy: "network-only",
+          }),
         ).rejects.toThrow();
       });
     });
   });
 
-  describe('QR Code Operations', () => {
+  describe("QR Code Operations", () => {
     let ownerProfileIdForQR: string;
 
     beforeAll(async () => {
@@ -823,7 +863,7 @@ describe.sequential('Payment Methods Integration Tests', () => {
         mutation: CREATE_PROFILE,
         variables: {
           input: {
-            sellerName: 'QR Test Owner',
+            sellerName: "QR Test Owner",
           },
         },
       });
@@ -836,7 +876,7 @@ describe.sequential('Payment Methods Integration Tests', () => {
           input: {
             profileId: ownerProfileIdForQR,
             targetAccountEmail: process.env.TEST_CONTRIBUTOR_EMAIL!,
-            permissions: ['WRITE'],
+            permissions: ["WRITE"],
           },
         },
       });
@@ -846,61 +886,63 @@ describe.sequential('Payment Methods Integration Tests', () => {
           input: {
             profileId: ownerProfileIdForQR,
             targetAccountEmail: process.env.TEST_READONLY_EMAIL!,
-            permissions: ['READ'],
+            permissions: ["READ"],
           },
         },
       });
     });
 
-    describe('requestPaymentMethodQRCodeUpload', () => {
-      it('should generate pre-signed POST URL for upload', async () => {
+    describe("requestPaymentMethodQRCodeUpload", () => {
+      it("should generate pre-signed POST URL for upload", async () => {
         await ownerClient.mutate({
           mutation: CREATE_PAYMENT_METHOD,
-          variables: { name: 'Venmo' },
+          variables: { name: "Venmo" },
         });
 
         const { data } = await ownerClient.mutate({
           mutation: REQUEST_QR_UPLOAD,
-          variables: { paymentMethodName: 'Venmo' },
+          variables: { paymentMethodName: "Venmo" },
         });
 
         expect(data.requestPaymentMethodQRCodeUpload.uploadUrl).toBeDefined();
         expect(data.requestPaymentMethodQRCodeUpload.fields).toBeDefined();
         expect(data.requestPaymentMethodQRCodeUpload.s3Key).toBeDefined();
-        expect(data.requestPaymentMethodQRCodeUpload.s3Key).toContain('payment-qr-codes');
+        expect(data.requestPaymentMethodQRCodeUpload.s3Key).toContain(
+          "payment-qr-codes",
+        );
         expect(data.requestPaymentMethodQRCodeUpload.s3Key).toMatch(/\.png$/);
         // S3 key uses UUIDs for uniqueness, not the payment method name
 
         // Cleanup
         await ownerClient.mutate({
           mutation: DELETE_PAYMENT_METHOD,
-          variables: { name: 'Venmo' },
+          variables: { name: "Venmo" },
         });
       });
 
-      it('should reject upload request for reserved name', async () => {
+      it("should reject upload request for reserved name", async () => {
         await expect(
           ownerClient.mutate({
             mutation: REQUEST_QR_UPLOAD,
-            variables: { paymentMethodName: 'Cash' },
-          })
+            variables: { paymentMethodName: "Cash" },
+          }),
         ).rejects.toThrow();
       });
 
-      it('should reject upload request for non-existent method', async () => {
+      it("should reject upload request for non-existent method", async () => {
         await expect(
           ownerClient.mutate({
             mutation: REQUEST_QR_UPLOAD,
-            variables: { paymentMethodName: 'NonExistent' },
-          })
+            variables: { paymentMethodName: "NonExistent" },
+          }),
         ).rejects.toThrow();
       });
 
-      it('WRITE shared user cannot upload QR for owner payment method', async () => {
+      it("WRITE shared user cannot upload QR for owner payment method", async () => {
         // Owner creates payment method
         await ownerClient.mutate({
           mutation: CREATE_PAYMENT_METHOD,
-          variables: { name: 'Venmo-WriteTest' },
+          variables: { name: "Venmo-WriteTest" },
         });
 
         // WRITE shared user attempts to request upload - should fail
@@ -908,52 +950,52 @@ describe.sequential('Payment Methods Integration Tests', () => {
         await expect(
           writeUserClient.mutate({
             mutation: REQUEST_QR_UPLOAD,
-            variables: { paymentMethodName: 'Venmo-WriteTest' },
-          })
+            variables: { paymentMethodName: "Venmo-WriteTest" },
+          }),
         ).rejects.toThrow();
 
         // Cleanup
         await ownerClient.mutate({
           mutation: DELETE_PAYMENT_METHOD,
-          variables: { name: 'Venmo-WriteTest' },
+          variables: { name: "Venmo-WriteTest" },
         });
       });
 
-      it('READ shared user cannot upload QR for owner payment method', async () => {
+      it("READ shared user cannot upload QR for owner payment method", async () => {
         // Owner creates payment method
         await ownerClient.mutate({
           mutation: CREATE_PAYMENT_METHOD,
-          variables: { name: 'Venmo-ReadTest' },
+          variables: { name: "Venmo-ReadTest" },
         });
 
         // READ shared user attempts to request upload - should fail
         await expect(
           readUserClient.mutate({
             mutation: REQUEST_QR_UPLOAD,
-            variables: { paymentMethodName: 'Venmo-ReadTest' },
-          })
+            variables: { paymentMethodName: "Venmo-ReadTest" },
+          }),
         ).rejects.toThrow();
 
         // Cleanup
         await ownerClient.mutate({
           mutation: DELETE_PAYMENT_METHOD,
-          variables: { name: 'Venmo-ReadTest' },
+          variables: { name: "Venmo-ReadTest" },
         });
       });
     });
 
-    describe('deletePaymentMethodQRCode', () => {
-      it('should delete QR code while keeping payment method', async () => {
+    describe("deletePaymentMethodQRCode", () => {
+      it("should delete QR code while keeping payment method", async () => {
         await ownerClient.mutate({
           mutation: CREATE_PAYMENT_METHOD,
-          variables: { name: 'Venmo-DeleteQR' },
+          variables: { name: "Venmo-DeleteQR" },
         });
 
         // Note: In a real test, we would upload a QR code first
         // For now, we just test the mutation doesn't fail
         const { data } = await ownerClient.mutate({
           mutation: DELETE_QR_CODE,
-          variables: { paymentMethodName: 'Venmo-DeleteQR' },
+          variables: { paymentMethodName: "Venmo-DeleteQR" },
         });
 
         expect(data.deletePaymentMethodQRCode).toBe(true);
@@ -961,69 +1003,69 @@ describe.sequential('Payment Methods Integration Tests', () => {
         // Verify payment method still exists
         const { data: queryData } = await ownerClient.query({
           query: MY_PAYMENT_METHODS,
-          fetchPolicy: 'network-only',
+          fetchPolicy: "network-only",
         });
         const methodNames = queryData.myPaymentMethods.map((m: any) => m.name);
-        expect(methodNames).toContain('Venmo-DeleteQR');
+        expect(methodNames).toContain("Venmo-DeleteQR");
 
         // Cleanup
         await ownerClient.mutate({
           mutation: DELETE_PAYMENT_METHOD,
-          variables: { name: 'Venmo-DeleteQR' },
+          variables: { name: "Venmo-DeleteQR" },
         });
       });
 
-      it('WRITE shared user cannot delete QR for owner payment method', async () => {
+      it("WRITE shared user cannot delete QR for owner payment method", async () => {
         // Owner creates payment method
         await ownerClient.mutate({
           mutation: CREATE_PAYMENT_METHOD,
-          variables: { name: 'Venmo-DeleteQRTest' },
+          variables: { name: "Venmo-DeleteQRTest" },
         });
 
         // WRITE shared user attempts to delete QR - should fail
         await expect(
           writeUserClient.mutate({
             mutation: DELETE_QR_CODE,
-            variables: { paymentMethodName: 'Venmo-DeleteQRTest' },
-          })
+            variables: { paymentMethodName: "Venmo-DeleteQRTest" },
+          }),
         ).rejects.toThrow();
 
         // Cleanup
         await ownerClient.mutate({
           mutation: DELETE_PAYMENT_METHOD,
-          variables: { name: 'Venmo-DeleteQRTest' },
+          variables: { name: "Venmo-DeleteQRTest" },
         });
       });
 
-      it('READ shared user cannot delete QR for owner payment method', async () => {
+      it("READ shared user cannot delete QR for owner payment method", async () => {
         // Owner creates payment method
         await ownerClient.mutate({
           mutation: CREATE_PAYMENT_METHOD,
-          variables: { name: 'Venmo-ReadDeleteQRTest' },
+          variables: { name: "Venmo-ReadDeleteQRTest" },
         });
 
         // READ shared user attempts to delete QR - should fail
         await expect(
           readUserClient.mutate({
             mutation: DELETE_QR_CODE,
-            variables: { paymentMethodName: 'Venmo-ReadDeleteQRTest' },
-          })
+            variables: { paymentMethodName: "Venmo-ReadDeleteQRTest" },
+          }),
         ).rejects.toThrow();
 
         // Cleanup
         await ownerClient.mutate({
           mutation: DELETE_PAYMENT_METHOD,
-          variables: { name: 'Venmo-ReadDeleteQRTest' },
+          variables: { name: "Venmo-ReadDeleteQRTest" },
         });
       });
     });
 
-    describe('Shared user cannot delete payment method', () => {
-      it('WRITE shared user cannot delete owner payment method', async () => {
+    describe("Shared user cannot delete payment method", () => {
+      it("WRITE shared user cannot delete owner payment method", async () => {
         // Owner creates payment method
         await ownerClient.mutate({
           mutation: CREATE_PAYMENT_METHOD,
-          variables: { name: 'Venmo-WriteDeleteTest' },
+          variables: { name: "Venmo-WriteDeleteTest" },
         });
 
         // WRITE shared user attempts to delete - should fail
@@ -1031,61 +1073,60 @@ describe.sequential('Payment Methods Integration Tests', () => {
         await expect(
           writeUserClient.mutate({
             mutation: DELETE_PAYMENT_METHOD,
-            variables: { name: 'Venmo-WriteDeleteTest' },
-          })
+            variables: { name: "Venmo-WriteDeleteTest" },
+          }),
         ).rejects.toThrow();
 
         // Verify method still exists for owner
         const { data: queryData } = await ownerClient.query({
           query: MY_PAYMENT_METHODS,
-          fetchPolicy: 'network-only',
+          fetchPolicy: "network-only",
         });
         const methodNames = queryData.myPaymentMethods.map((m: any) => m.name);
-        expect(methodNames).toContain('Venmo-WriteDeleteTest');
+        expect(methodNames).toContain("Venmo-WriteDeleteTest");
 
         // Cleanup
         await ownerClient.mutate({
           mutation: DELETE_PAYMENT_METHOD,
-          variables: { name: 'Venmo-WriteDeleteTest' },
+          variables: { name: "Venmo-WriteDeleteTest" },
         });
       });
 
-      it('READ shared user cannot delete owner payment method', async () => {
+      it("READ shared user cannot delete owner payment method", async () => {
         // Owner creates payment method
         await ownerClient.mutate({
           mutation: CREATE_PAYMENT_METHOD,
-          variables: { name: 'Venmo-ReadDeleteTest' },
+          variables: { name: "Venmo-ReadDeleteTest" },
         });
 
         // READ shared user attempts to delete - should fail
         await expect(
           readUserClient.mutate({
             mutation: DELETE_PAYMENT_METHOD,
-            variables: { name: 'Venmo-ReadDeleteTest' },
-          })
+            variables: { name: "Venmo-ReadDeleteTest" },
+          }),
         ).rejects.toThrow();
 
         // Verify method still exists for owner
         const { data: queryData } = await ownerClient.query({
           query: MY_PAYMENT_METHODS,
-          fetchPolicy: 'network-only',
+          fetchPolicy: "network-only",
         });
         const methodNames = queryData.myPaymentMethods.map((m: any) => m.name);
-        expect(methodNames).toContain('Venmo-ReadDeleteTest');
+        expect(methodNames).toContain("Venmo-ReadDeleteTest");
 
         // Cleanup
         await ownerClient.mutate({
           mutation: DELETE_PAYMENT_METHOD,
-          variables: { name: 'Venmo-ReadDeleteTest' },
+          variables: { name: "Venmo-ReadDeleteTest" },
         });
       });
     });
 
-    describe('confirmPaymentMethodQRCodeUpload', () => {
-      // TODO: Flaky due to Lambda cold start causing timeout - skip for CI
-      it.skip('should confirm QR upload and return payment method with pre-signed GET URL', async () => {
+    describe("confirmPaymentMethodQRCodeUpload", () => {
+      it("should confirm QR upload and return payment method with pre-signed GET URL", async () => {
         const pmName = `Venmo-ConfirmTest-${Date.now()}`;
-        
+
         // Create payment method
         await ownerClient.mutate({
           mutation: CREATE_PAYMENT_METHOD,
@@ -1105,12 +1146,13 @@ describe.sequential('Payment Methods Integration Tests', () => {
         // Actually upload a small PNG to S3 using the pre-signed POST
         // Create a minimal valid PNG (1x1 transparent pixel)
         const pngData = Buffer.from([
-          0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
-          0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
-          0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4, 0x89, 0x00, 0x00, 0x00,
-          0x0a, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0x00, 0x01, 0x00, 0x00,
-          0x05, 0x00, 0x01, 0x0d, 0x0a, 0x2d, 0xb4, 0x00, 0x00, 0x00, 0x00, 0x49,
-          0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+          0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00,
+          0x0d, 0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00,
+          0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4, 0x89,
+          0x00, 0x00, 0x00, 0x0a, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63,
+          0x00, 0x01, 0x00, 0x00, 0x05, 0x00, 0x01, 0x0d, 0x0a, 0x2d, 0xb4,
+          0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60,
+          0x82,
         ]);
 
         // Build form data for S3 upload
@@ -1119,11 +1161,15 @@ describe.sequential('Payment Methods Integration Tests', () => {
         for (const [key, value] of Object.entries(parsedFields)) {
           formData.append(key, value as string);
         }
-        formData.append('file', new Blob([pngData], { type: 'image/png' }), 'qr.png');
+        formData.append(
+          "file",
+          new Blob([pngData], { type: "image/png" }),
+          "qr.png",
+        );
 
         // Upload to S3
         const uploadResponse = await fetch(uploadUrl, {
-          method: 'POST',
+          method: "POST",
           body: formData,
         });
         expect(uploadResponse.ok || uploadResponse.status === 204).toBe(true);
@@ -1138,11 +1184,17 @@ describe.sequential('Payment Methods Integration Tests', () => {
         });
 
         expect(confirmData.confirmPaymentMethodQRCodeUpload.name).toBe(pmName);
-        expect(confirmData.confirmPaymentMethodQRCodeUpload.qrCodeUrl).toBeDefined();
-        expect(confirmData.confirmPaymentMethodQRCodeUpload.qrCodeUrl).toContain('https://');
+        expect(
+          confirmData.confirmPaymentMethodQRCodeUpload.qrCodeUrl,
+        ).toBeDefined();
+        expect(
+          confirmData.confirmPaymentMethodQRCodeUpload.qrCodeUrl,
+        ).toContain("https://");
 
         // Verify the pre-signed GET URL works
-        const getResponse = await fetch(confirmData.confirmPaymentMethodQRCodeUpload.qrCodeUrl);
+        // S3 may have brief eventual consistency delay after upload
+        const qrUrl = confirmData.confirmPaymentMethodQRCodeUpload.qrCodeUrl;
+        const getResponse = await fetch(qrUrl);
         expect(getResponse.ok).toBe(true);
 
         // Cleanup
@@ -1152,11 +1204,11 @@ describe.sequential('Payment Methods Integration Tests', () => {
         });
       });
 
-      it('should reject confirm with non-existent S3 object', async () => {
+      it("should reject confirm with non-existent S3 object", async () => {
         // Create payment method
         await ownerClient.mutate({
           mutation: CREATE_PAYMENT_METHOD,
-          variables: { name: 'Venmo-NoS3' },
+          variables: { name: "Venmo-NoS3" },
         });
 
         // Try to confirm with a fake s3Key that doesn't exist
@@ -1164,24 +1216,24 @@ describe.sequential('Payment Methods Integration Tests', () => {
           ownerClient.mutate({
             mutation: CONFIRM_QR_UPLOAD,
             variables: {
-              paymentMethodName: 'Venmo-NoS3',
-              s3Key: 'payment-qr-codes/fake-account/nonexistent.png',
+              paymentMethodName: "Venmo-NoS3",
+              s3Key: "payment-qr-codes/fake-account/nonexistent.png",
             },
-          })
+          }),
         ).rejects.toThrow();
 
         // Cleanup
         await ownerClient.mutate({
           mutation: DELETE_PAYMENT_METHOD,
-          variables: { name: 'Venmo-NoS3' },
+          variables: { name: "Venmo-NoS3" },
         });
       });
 
-      it('should reject confirm with invalid s3Key format', async () => {
+      it("should reject confirm with invalid s3Key format", async () => {
         // Create payment method
         await ownerClient.mutate({
           mutation: CREATE_PAYMENT_METHOD,
-          variables: { name: 'Venmo-BadKey' },
+          variables: { name: "Venmo-BadKey" },
         });
 
         // Try to confirm with malformed s3Key
@@ -1189,37 +1241,37 @@ describe.sequential('Payment Methods Integration Tests', () => {
           ownerClient.mutate({
             mutation: CONFIRM_QR_UPLOAD,
             variables: {
-              paymentMethodName: 'Venmo-BadKey',
-              s3Key: '../../../etc/passwd',
+              paymentMethodName: "Venmo-BadKey",
+              s3Key: "../../../etc/passwd",
             },
-          })
+          }),
         ).rejects.toThrow();
 
         // Cleanup
         await ownerClient.mutate({
           mutation: DELETE_PAYMENT_METHOD,
-          variables: { name: 'Venmo-BadKey' },
+          variables: { name: "Venmo-BadKey" },
         });
       });
 
-      it('should reject confirm for non-existent payment method', async () => {
+      it("should reject confirm for non-existent payment method", async () => {
         // Try to confirm for a method that doesn't exist
         await expect(
           ownerClient.mutate({
             mutation: CONFIRM_QR_UPLOAD,
             variables: {
-              paymentMethodName: 'NonExistentMethod',
-              s3Key: 'payment-qr-codes/fake/nonexistent.png',
+              paymentMethodName: "NonExistentMethod",
+              s3Key: "payment-qr-codes/fake/nonexistent.png",
             },
-          })
+          }),
         ).rejects.toThrow();
       });
     });
 
-    describe('Delete QR edge cases', () => {
-      it('should handle deleting QR code when no QR exists (idempotent)', async () => {
+    describe("Delete QR edge cases", () => {
+      it("should handle deleting QR code when no QR exists (idempotent)", async () => {
         const pmName = `Venmo-NoQR-${Date.now()}`;
-        
+
         // Create payment method WITHOUT uploading a QR
         await ownerClient.mutate({
           mutation: CREATE_PAYMENT_METHOD,
@@ -1237,7 +1289,7 @@ describe.sequential('Payment Methods Integration Tests', () => {
         // Payment method should still exist
         const { data: queryData } = await ownerClient.query({
           query: MY_PAYMENT_METHODS,
-          fetchPolicy: 'network-only',
+          fetchPolicy: "network-only",
         });
         const methodNames = queryData.myPaymentMethods.map((m: any) => m.name);
         expect(methodNames).toContain(pmName);
@@ -1249,12 +1301,12 @@ describe.sequential('Payment Methods Integration Tests', () => {
         });
       });
 
-      it('should reject deleting QR for non-existent payment method', async () => {
+      it("should reject deleting QR for non-existent payment method", async () => {
         await expect(
           ownerClient.mutate({
             mutation: DELETE_QR_CODE,
-            variables: { paymentMethodName: 'TotallyFakeMethod' },
-          })
+            variables: { paymentMethodName: "TotallyFakeMethod" },
+          }),
         ).rejects.toThrow();
       });
     });
