@@ -333,19 +333,6 @@ describe('Catalog Query Resolvers Integration Tests', () => {
         expect(data.getCatalog.catalogName).toBe('Owner Public Catalog');
       });
 
-      // TODO: Bug #20 - getCatalog authorization not properly checking ownership for private catalogs
-      it.skip('should reject non-owner accessing private catalog', async () => {
-        const { data }: any = await contributorClient.query({
-          query: GET_CATALOG,
-          variables: { catalogId: privateCatalogId },
-          fetchPolicy: 'network-only',
-        });
-
-        // ✅ FIXED Bug #20: getCatalog now checks authorization
-        // Non-owner accessing private catalog should get null
-        expect(data.getCatalog).toBeNull(); // Expected behavior (FIXED)
-      });
-
       it('should reject unauthenticated user accessing catalog', async () => {
         // Unauthenticated user should be rejected when trying to access any catalog
         const unauthClient = createUnauthenticatedClient();

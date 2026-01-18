@@ -461,8 +461,7 @@ describe('Shared Campaign CRUD Operations', () => {
 
     // Cleanup handled by top-level afterAll via createdSharedCampaignCodes tracking
 
-    // TODO: Test is flaky - depends on created shared campaigns existing, but cleanup may run first
-    it.skip('should list all campaign shared campaigns created by the current user', async () => {
+    it('should list all campaign shared campaigns created by the current user', async () => {
       const result = await ownerClient.query({
         query: LIST_MY_CAMPAIGN_SHARED_CAMPAIGNS,
       });

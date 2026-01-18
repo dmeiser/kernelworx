@@ -1348,8 +1348,7 @@ describe('Profile Operations Integration Tests', () => {
       // Profile was deleted, no cleanup needed
     }, 15000);
 
-    // TODO: Cascade delete Lambda not working - needs investigation
-    it.skip('Data Integrity: Deleting profile cascades to orders in single campaign', async () => {
+    it('Data Integrity: Deleting profile cascades to orders in single campaign', async () => {
       // Arrange: Create profile, campaign, and order
       const { DynamoDBClient, QueryCommand } = await import('@aws-sdk/client-dynamodb');
       const dynamoClient = new DynamoDBClient({ region: 'us-east-1' });
@@ -1496,8 +1495,7 @@ describe('Profile Operations Integration Tests', () => {
       // Profile, campaign, and orders all deleted
     }, 30000);
 
-    // TODO: Cascade delete Lambda not working - needs investigation
-    it.skip('Data Integrity: Deleting profile cascades to orders in multiple campaigns', async () => {
+    it('Data Integrity: Deleting profile cascades to orders in multiple campaigns', async () => {
       // Arrange: Create profile with 2 campaigns, each with multiple orders
       const { DynamoDBClient, QueryCommand } = await import('@aws-sdk/client-dynamodb');
       const dynamoClient = new DynamoDBClient({ region: 'us-east-1' });
