@@ -27,7 +27,6 @@ def create_lambda_functions(
     scope: Construct,
     rn: Any,  # Resource naming function
     lambda_execution_role: iam.Role,
-    table: "dynamodb.Table",
     accounts_table: "dynamodb.Table",
     catalogs_table: "dynamodb.Table",
     profiles_table: "dynamodb.Table",
@@ -35,6 +34,7 @@ def create_lambda_functions(
     orders_table: "dynamodb.Table",
     shares_table: "dynamodb.Table",
     invites_table: "dynamodb.Table",
+    shared_campaigns_table: "dynamodb.Table",
     exports_bucket: "s3.Bucket",
 ) -> dict[str, lambda_.Function | lambda_.LayerVersion]:
     """Create all Lambda functions for the stack.
@@ -43,7 +43,6 @@ def create_lambda_functions(
         scope: CDK construct scope
         rn: Resource naming function (name -> formatted name)
         lambda_execution_role: IAM role for Lambda execution
-        table: Main DynamoDB table (legacy single-table)
         accounts_table: Accounts DynamoDB table
         catalogs_table: Catalogs DynamoDB table
         profiles_table: Profiles DynamoDB table
@@ -51,6 +50,7 @@ def create_lambda_functions(
         orders_table: Orders DynamoDB table
         shares_table: Shares DynamoDB table
         invites_table: Invites DynamoDB table
+        shared_campaigns_table: Shared campaigns DynamoDB table
         exports_bucket: S3 bucket for exports
 
     Returns:
@@ -58,10 +58,10 @@ def create_lambda_functions(
     """
     # Common Lambda environment variables
     lambda_env = {
-        "TABLE_NAME": table.table_name,
         "EXPORTS_BUCKET": exports_bucket.bucket_name,
         "POWERTOOLS_SERVICE_NAME": "kernelworx",
         "LOG_LEVEL": "INFO",
+        "LAMBDA_VERSION": "2026-01-12",  # Force Lambda update
         # New multi-table design table names
         "ACCOUNTS_TABLE_NAME": accounts_table.table_name,
         "CATALOGS_TABLE_NAME": catalogs_table.table_name,
@@ -70,6 +70,8 @@ def create_lambda_functions(
         "ORDERS_TABLE_NAME": orders_table.table_name,
         "SHARES_TABLE_NAME": shares_table.table_name,
         "INVITES_TABLE_NAME": invites_table.table_name,
+        # Shared campaigns table used by create_campaign Lambda
+        "SHARED_CAMPAIGNS_TABLE_NAME": shared_campaigns_table.table_name,
     }
 
     # Create Lambda Layer for shared dependencies
@@ -211,6 +213,21 @@ def create_lambda_functions(
         environment=lambda_env,
     )
 
+    # Delete Profile Orders Cascade Lambda (cascade delete of orders when profile is deleted)
+    delete_profile_orders_cascade_fn = lambda_.Function(
+        scope,
+        "DeleteProfileOrdersCascadeFn",
+        function_name=rn("kernelworx-delete-profile-orders-cascade"),
+        runtime=lambda_.Runtime.PYTHON_3_13,
+        handler="handlers.delete_profile_orders_cascade.lambda_handler",
+        code=lambda_code,
+        layers=[shared_layer],
+        timeout=Duration.seconds(60),  # May take longer for profiles with many orders
+        memory_size=512,
+        role=lambda_execution_role,
+        environment=lambda_env,
+    )
+
     # Account Operations Lambda Functions
     update_my_account_fn = lambda_.Function(
         scope,
@@ -218,6 +235,21 @@ def create_lambda_functions(
         function_name=rn("kernelworx-update-account"),
         runtime=lambda_.Runtime.PYTHON_3_13,
         handler="handlers.account_operations.update_my_account",
+        code=lambda_code,
+        layers=[shared_layer],
+        timeout=Duration.seconds(10),
+        memory_size=256,
+        role=lambda_execution_role,
+        environment=lambda_env,
+    )
+
+    # Transfer Profile Ownership Lambda
+    transfer_ownership_fn = lambda_.Function(
+        scope,
+        "TransferProfileOwnershipFn",
+        function_name=rn("kernelworx-transfer-ownership"),
+        runtime=lambda_.Runtime.PYTHON_3_13,
+        handler="handlers.transfer_profile_ownership.lambda_handler",
         code=lambda_code,
         layers=[shared_layer],
         timeout=Duration.seconds(10),
@@ -339,7 +371,9 @@ def create_lambda_functions(
         "list_unit_catalogs_fn": list_unit_catalogs_fn,
         "list_unit_campaign_catalogs_fn": list_unit_campaign_catalogs_fn,
         "campaign_operations_fn": campaign_operations_fn,
+        "delete_profile_orders_cascade_fn": delete_profile_orders_cascade_fn,
         "update_my_account_fn": update_my_account_fn,
+        "transfer_ownership_fn": transfer_ownership_fn,
         "post_auth_fn": post_auth_fn,
         "pre_signup_fn": pre_signup_fn,
         "request_qr_upload_fn": request_qr_upload_fn,

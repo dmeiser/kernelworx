@@ -74,6 +74,7 @@ def _create_sms_role(scope: Construct, region_abbrev: str, env_name: str) -> iam
 def _get_callback_urls(site_domain: str) -> list[str]:
     """Get OAuth callback URLs."""
     return [
+        "http://localhost:5173",
         "https://local.dev.appworx.app:5173",
         f"https://{site_domain}",
         f"https://{site_domain}/callback",
@@ -82,7 +83,11 @@ def _get_callback_urls(site_domain: str) -> list[str]:
 
 def _get_logout_urls(site_domain: str) -> list[str]:
     """Get OAuth logout URLs."""
-    return ["https://local.dev.appworx.app:5173", f"https://{site_domain}"]
+    return [
+        "http://localhost:5173",
+        "https://local.dev.appworx.app:5173",
+        f"https://{site_domain}",
+    ]
 
 
 def _create_oauth_settings(site_domain: str) -> cognito.OAuthSettings:
