@@ -104,6 +104,15 @@ def create_field_resolvers(
         id_suffix="SellerProfilePermissionsResolver",
     )
 
+    # SellerProfile.latestCampaign (JS)
+    builder.create_js_resolver(
+        field_name="latestCampaign",
+        type_name="SellerProfile",
+        datasource_name="campaigns",
+        code_file=RESOLVERS_DIR / "seller_profile_latest_campaign_resolver.js",
+        id_suffix="SellerProfileLatestCampaignResolver",
+    )
+
     # === SHARED CAMPAIGN FIELD RESOLVERS ===
 
     # SharedCampaign.catalog (VTL)

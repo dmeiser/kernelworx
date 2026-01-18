@@ -26,6 +26,11 @@ export function response(ctx) {
     const items = ctx.result.items || [];
     const activeItems = [];
     for (const item of items) {
+        // Set default value for null/undefined isActive
+        if (item.isActive == null) {
+            item.isActive = true;
+        }
+        
         if (item.isActive !== false) {
             activeItems.push(item);
         }

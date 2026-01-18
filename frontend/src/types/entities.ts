@@ -16,6 +16,12 @@ export interface SellerProfile {
   unitNumber?: number;
   isOwner?: boolean;
   permissions?: string[];
+  latestCampaign?: {
+    campaignId: string;
+    campaignName: string;
+    campaignYear: number;
+    isActive: boolean;
+  };
   createdAt: string;
   updatedAt: string;
 }
@@ -38,6 +44,7 @@ export interface Campaign {
   state?: string;
   isShared?: boolean;
   sharedCampaignCode?: string;
+  isActive: boolean;  // Whether campaign is active (default true)
   totalOrders?: number;
   totalRevenue?: number;
   createdAt?: string;

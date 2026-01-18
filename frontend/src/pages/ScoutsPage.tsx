@@ -39,7 +39,7 @@ import { ensureProfileId } from '../lib/ids';
 import type { SellerProfile } from '../types';
 
 // Use SellerProfile as the Profile type for this page
-type Profile = Pick<SellerProfile, 'profileId' | 'sellerName' | 'isOwner' | 'permissions'>;
+type Profile = Pick<SellerProfile, 'profileId' | 'sellerName' | 'isOwner' | 'permissions' | 'latestCampaign'>;
 
 // Default preferences value
 const DEFAULT_PREFERENCES = { showReadOnlyProfiles: true };
@@ -133,6 +133,7 @@ const OwnedProfilesSection: React.FC<{ profiles: Profile[] }> = ({ profiles }) =
               sellerName={profile.sellerName}
               isOwner={profile.isOwner ?? false}
               permissions={profile.permissions ?? []}
+              latestCampaign={profile.latestCampaign}
             />
           </Grid>
         ))}
@@ -159,6 +160,7 @@ const SharedProfilesSection: React.FC<{
               sellerName={profile.sellerName}
               isOwner={profile.isOwner ?? false}
               permissions={profile.permissions ?? []}
+              latestCampaign={profile.latestCampaign}
             />
           </Grid>
         ))}

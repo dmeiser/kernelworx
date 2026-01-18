@@ -1,7 +1,5 @@
 /**
- * ProfileCard component - Display a single scout profile
- *
- * Note: Campaign stats removed to improve performance. Users can click through to see campaigns.
+ * ProfileCard component - Display a single scout profile with latest campaign
  */
 
 import React from 'react';
@@ -11,6 +9,7 @@ import {
   Person as PersonIcon,
   Visibility as ViewIcon,
   Settings as SettingsIcon,
+  Campaign as CampaignIcon,
 } from '@mui/icons-material';
 import { toUrlId } from '../lib/ids';
 
@@ -19,6 +18,12 @@ interface ProfileCardProps {
   sellerName: string;
   isOwner: boolean;
   permissions: string[];
+  latestCampaign?: {
+    campaignId: string;
+    campaignName: string;
+    campaignYear: number;
+    isActive: boolean;
+  };
 }
 
 const PermissionChip: React.FC<{ isOwner: boolean; hasWrite: boolean }> = ({ isOwner, hasWrite }) => {
@@ -30,12 +35,25 @@ const PermissionChip: React.FC<{ isOwner: boolean; hasWrite: boolean }> = ({ isO
 const ProfileActions: React.FC<{
   profileId: string;
   isOwner: boolean;
+  latestCampaignId?: string;
   onViewAll: () => void;
   onManage: () => void;
-}> = ({ isOwner, onViewAll, onManage }) => (
+  onViewLatest?: () => void;
+}> = ({ isOwner, latestCampaignId, onViewAll, onManage, onViewLatest }) => (
   <CardActions sx={{ pt: 0, flexDirection: 'column', gap: 1 }}>
-    <Button fullWidth size="small" variant="contained" startIcon={<ViewIcon />} onClick={onViewAll}>
-      View Campaigns
+    {latestCampaignId && onViewLatest && (
+      <Button
+        fullWidth
+        size="small"
+        variant="contained"
+        startIcon={<CampaignIcon />}
+        onClick={onViewLatest}
+      >
+        View Latest Campaign
+      </Button>
+    )}
+    <Button fullWidth size="small" variant={latestCampaignId ? "outlined" : "contained"} startIcon={<ViewIcon />} onClick={onViewAll}>
+      View All Campaigns
     </Button>
     {isOwner && (
       <Button fullWidth size="small" variant="outlined" color="primary" startIcon={<SettingsIcon />} onClick={onManage}>
@@ -45,12 +63,22 @@ const ProfileActions: React.FC<{
   </CardActions>
 );
 
-export const ProfileCard: React.FC<ProfileCardProps> = ({ profileId, sellerName, isOwner, permissions }) => {
+export const ProfileCard: React.FC<ProfileCardProps> = ({ 
+  profileId, 
+  sellerName, 
+  isOwner, 
+  permissions,
+  latestCampaign,
+}) => {
   const navigate = useNavigate();
 
   const handleViewCampaigns = () => {
     navigate(`/scouts/${toUrlId(profileId)}/campaigns`);
   };
+
+  const handleViewLatestCampaign = latestCampaign
+    ? () => navigate(`/scouts/${toUrlId(profileId)}/campaigns/${toUrlId(latestCampaign.campaignId)}`)
+    : undefined;
 
   return (
     <Card elevation={2} sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
@@ -72,14 +100,26 @@ export const ProfileCard: React.FC<ProfileCardProps> = ({ profileId, sellerName,
             <Stack direction="row" spacing={1} flexWrap="wrap">
               <PermissionChip isOwner={isOwner} hasWrite={permissions.includes('WRITE')} />
             </Stack>
+            {latestCampaign && (
+              <Box mt={1.5}>
+                <Typography variant="body2" color="text.secondary" gutterBottom>
+                  Latest Campaign:
+                </Typography>
+                <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                  {latestCampaign.campaignName} ({latestCampaign.campaignYear})
+                </Typography>
+              </Box>
+            )}
           </Box>
         </Stack>
       </CardContent>
       <ProfileActions
         profileId={profileId}
         isOwner={isOwner}
+        latestCampaignId={latestCampaign?.campaignId}
         onViewAll={handleViewCampaigns}
         onManage={() => navigate(`/scouts/${toUrlId(profileId)}/manage`)}
+        onViewLatest={handleViewLatestCampaign}
       />
     </Card>
   );

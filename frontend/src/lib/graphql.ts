@@ -20,6 +20,24 @@ export const SELLER_PROFILE_FRAGMENT = gql`
   }
 `;
 
+export const SELLER_PROFILE_WITH_LATEST_CAMPAIGN_FRAGMENT = gql`
+  fragment SellerProfileWithLatestCampaignFields on SellerProfile {
+    profileId
+    ownerAccountId
+    sellerName
+    createdAt
+    updatedAt
+    isOwner
+    permissions
+    latestCampaign {
+      campaignId
+      campaignName
+      campaignYear
+      isActive
+    }
+  }
+`;
+
 export const CAMPAIGN_FRAGMENT = gql`
   fragment CampaignFields on Campaign {
     campaignId
@@ -34,6 +52,7 @@ export const CAMPAIGN_FRAGMENT = gql`
     city
     state
     sharedCampaignCode
+    isActive
     createdAt
     updatedAt
     totalOrders
@@ -137,10 +156,10 @@ export const UPDATE_MY_PREFERENCES = gql`
 `;
 
 export const LIST_MY_PROFILES = gql`
-  ${SELLER_PROFILE_FRAGMENT}
+  ${SELLER_PROFILE_WITH_LATEST_CAMPAIGN_FRAGMENT}
   query ListMyProfiles {
     listMyProfiles {
-      ...SellerProfileFields
+      ...SellerProfileWithLatestCampaignFields
     }
   }
 `;

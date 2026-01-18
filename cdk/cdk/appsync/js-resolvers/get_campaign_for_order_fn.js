@@ -26,6 +26,12 @@ export function response(ctx) {
     }
     
     const campaign = items[0];
+    
+    // Ensure isActive has a default value for backward compatibility (handles null and undefined)
+    if (campaign.isActive == null) {
+        campaign.isActive = true;
+    }
+    
     if (!campaign.catalogId) {
         util.error('Campaign has no catalog assigned', 'BadRequest');
     }

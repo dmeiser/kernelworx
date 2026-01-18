@@ -16,6 +16,7 @@ import {
   IconButton,
   Breadcrumbs,
   Link,
+  Divider,
 } from '@mui/material';
 import { Add as AddIcon, ArrowBack as ArrowBackIcon } from '@mui/icons-material';
 import { CampaignCard } from '../components/CampaignCard';
@@ -30,6 +31,22 @@ type Profile = Pick<SellerProfile, 'profileId' | 'sellerName' | 'isOwner' | 'per
 
 function getDecodedProfileId(encodedProfileId: string | undefined): string {
   return encodedProfileId ? decodeURIComponent(encodedProfileId) : '';
+}
+
+// Separate campaigns into active and inactive
+function separateCampaigns(campaigns: Campaign[]): { active: Campaign[]; inactive: Campaign[] } {
+  const active: Campaign[] = [];
+  const inactive: Campaign[] = [];
+  
+  for (const campaign of campaigns) {
+    if (campaign.isActive === false) {
+      inactive.push(campaign);
+    } else {
+      active.push(campaign);
+    }
+  }
+  
+  return { active, inactive };
 }
 
 // eslint-disable-next-line complexity
@@ -115,25 +132,33 @@ const ErrorAlert: React.FC<ErrorAlertProps> = ({ error }) => {
 interface CampaignsGridProps {
   campaigns: Campaign[];
   profileId: string;
+  sectionTitle?: string;
 }
 
-const CampaignsGrid: React.FC<CampaignsGridProps> = ({ campaigns, profileId }) => {
+const CampaignsGrid: React.FC<CampaignsGridProps> = ({ campaigns, profileId, sectionTitle }) => {
   if (campaigns.length === 0) return null;
   return (
-    <Grid container spacing={2}>
-      {campaigns.map((campaign) => (
-        <Grid key={campaign.campaignId} size={{ xs: 12, sm: 6, md: 4 }}>
-          <CampaignCard
-            campaignId={campaign.campaignId}
-            campaignName={campaign.campaignName}
-            campaignYear={campaign.campaignYear}
-            totalOrders={campaign.totalOrders}
-            totalRevenue={campaign.totalRevenue}
-            profileId={profileId}
-          />
-        </Grid>
-      ))}
-    </Grid>
+    <Box>
+      {sectionTitle && (
+        <Typography variant="h6" gutterBottom>
+          {sectionTitle}
+        </Typography>
+      )}
+      <Grid container spacing={2}>
+        {campaigns.map((campaign) => (
+          <Grid key={campaign.campaignId} size={{ xs: 12, sm: 6, md: 4 }}>
+            <CampaignCard
+              campaignId={campaign.campaignId}
+              campaignName={campaign.campaignName}
+              campaignYear={campaign.campaignYear}
+              totalOrders={campaign.totalOrders}
+              totalRevenue={campaign.totalRevenue}
+              profileId={profileId}
+            />
+          </Grid>
+        ))}
+      </Grid>
+    </Box>
   );
 };
 
@@ -204,6 +229,9 @@ const ScoutCampaignsContent: React.FC<ScoutCampaignsContentProps> = ({
   const canEdit = canEditProfile(profile);
   const handleNavigateBack = () => navigate('/scouts');
   const handleCreateClick = () => navigate('/create-campaign');
+  
+  const { active, inactive } = separateCampaigns(campaigns);
+  const showDivider = active.length > 0 && inactive.length > 0;
 
   return (
     <Box>
@@ -215,7 +243,9 @@ const ScoutCampaignsContent: React.FC<ScoutCampaignsContentProps> = ({
         onCreateClick={handleCreateClick}
       />
       <ErrorAlert error={error} />
-      <CampaignsGrid campaigns={campaigns} profileId={profileId} />
+      <CampaignsGrid campaigns={active} profileId={profileId} sectionTitle={inactive.length > 0 ? "Active Campaigns" : undefined} />
+      {showDivider && <Divider sx={{ my: 4 }} />}
+      <CampaignsGrid campaigns={inactive} profileId={profileId} sectionTitle="Inactive Campaigns" />
       <EmptyState canEdit={canEdit} loading={loading} campaignsCount={campaigns.length} />
     </Box>
   );

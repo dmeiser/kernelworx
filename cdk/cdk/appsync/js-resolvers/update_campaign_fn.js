@@ -27,6 +27,10 @@ export function request(ctx) {
         const normalizedCatalogId = (typeof input.catalogId === 'string' && input.catalogId.startsWith('CATALOG#')) ? input.catalogId : 'CATALOG#' + input.catalogId;
         exprValues[':catalogId'] = normalizedCatalogId;
     }
+    if (input.isActive !== undefined) {
+        updates.push('isActive = :isActive');
+        exprValues[':isActive'] = input.isActive;
+    }
     
     // Always update updatedAt
     updates.push('updatedAt = :updatedAt');
@@ -75,6 +79,9 @@ export function response(ctx) {
         result.catalogId = (typeof input.catalogId === 'string' && input.catalogId.startsWith('CATALOG#')) 
             ? input.catalogId 
             : 'CATALOG#' + input.catalogId;
+    }
+    if (input.isActive !== undefined) {
+        result.isActive = input.isActive;
     }
     
     // Always update updatedAt

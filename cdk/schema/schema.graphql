@@ -63,6 +63,7 @@ type SellerProfile {
   updatedAt: AWSDateTime!
   isOwner: Boolean!
   permissions: [PermissionType!]
+  latestCampaign: Campaign  # Field resolver: Most recent campaign for this profile
 }
 
 type Campaign {
@@ -78,6 +79,7 @@ type Campaign {
   city: String              # NEW: Required when unitType provided (for unit uniqueness)
   state: String             # NEW: Required when unitType provided (for unit uniqueness)
   sharedCampaignCode: String       # NEW: If campaign was created from shared campaign
+  isActive: Boolean!        # NEW: Whether campaign is active (default true)
   createdAt: AWSDateTime!
   updatedAt: AWSDateTime!
   catalog: Catalog
@@ -263,6 +265,7 @@ input UpdateCampaignInput {
   startDate: AWSDateTime
   endDate: AWSDateTime
   catalogId: ID
+  isActive: Boolean
 }
 
 input CreateCatalogInput {

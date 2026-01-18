@@ -21,6 +21,11 @@ export function response(ctx) {
     const items = ctx.result.items || [];
     const activeItems = [];
     for (const item of items) {
+        // Set default value for null/undefined isActive
+        if (item.isActive == null) {
+            item.isActive = true;
+        }
+        
         if (item.isActive !== false) {
             // Normalize createdBy: strip ACCOUNT# prefix for GraphQL ID type
             if (item && item.createdBy && item.createdBy.startsWith('ACCOUNT#')) {
