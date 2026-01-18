@@ -45,14 +45,8 @@ def create_s3_buckets(stack: Construct, rn: Callable[[str], str]) -> dict[str, s
         encryption=s3.BucketEncryption.S3_MANAGED,
         block_public_access=s3.BlockPublicAccess.BLOCK_ALL,
         removal_policy=RemovalPolicy.RETAIN,
-        cors=[
-            s3.CorsRule(
-                allowed_methods=[s3.HttpMethods.POST, s3.HttpMethods.PUT, s3.HttpMethods.GET],
-                allowed_origins=["*"],  # Will be restricted to dev.kernelworx.app and kernelworx.app in production
-                allowed_headers=["*"],
-                max_age=3000,
-            )
-        ],
+        # NOTE: CORS is configured manually outside CloudFormation
+        # to allow presigned URL uploads from specific origins
     )
 
     return {

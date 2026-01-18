@@ -21,8 +21,12 @@ from aws_cdk import aws_s3 as s3
 from constructs import Construct
 
 from .appsync import setup_appsync
+from .cloudfront_site import create_cloudfront_distribution
+from .dns_certificates import create_dns_and_certificates
 from .dynamodb_tables import create_dynamodb_tables
 from .helpers import get_context_bool, get_domain_names, get_known_user_pool_id, get_region_abbrev
+from .iam_roles import create_appsync_service_role, create_lambda_execution_role
+from .s3_buckets import create_s3_buckets
 
 
 class CdkStack(Stack):  # type: ignore[misc]
@@ -41,13 +45,6 @@ class CdkStack(Stack):  # type: ignore[misc]
     def _rn(self, name: str) -> str:
         """Generate resource name with region and environment suffix."""
         return f"{name}-{self.region_abbrev}-{self.env_name}"
-
-    def _configure_domains(self, base_domain: str) -> None:
-        """Configure domain names based on environment using helper."""
-        domains = get_domain_names(base_domain, self.env_name)
-        self.site_domain = domains["site_domain"]
-        self.api_domain = domains["api_domain"]
-        self.cognito_domain = domains["cognito_domain"]
 
     def _setup_google_provider(self, supported_providers: list[cognito.UserPoolClientIdentityProvider]) -> None:
         """Configure Google OAuth provider if credentials are available."""
@@ -133,52 +130,18 @@ class CdkStack(Stack):  # type: ignore[misc]
         Tags.of(self).add("Application", "kernelworx")
         Tags.of(self).add("Environment", env_name)
 
-        # Load configuration from environment variables
-        base_domain = os.getenv("BASE_DOMAIN", "kernelworx.app")
-
         # ====================================================================
         # Route 53 & DNS Configuration
         # ====================================================================
 
-        # Import existing hosted zone
-        self.hosted_zone = route53.HostedZone.from_lookup(
-            self,
-            "HostedZone",
-            domain_name=base_domain,
-        )
-
-        # Define domain names based on environment
-        self._configure_domains(base_domain)
-
-        # ACM Certificate for AppSync API
-        # Create new managed certificate (orphaned one cleaned up before deploy)
-        self.api_certificate = acm.Certificate(
-            self,
-            "ApiCertificateV2",  # Changed from ApiCertificate to force recreation
-            domain_name=self.api_domain,
-            validation=acm.CertificateValidation.from_dns(self.hosted_zone),
-        )
-        self.api_certificate.apply_removal_policy(RemovalPolicy.RETAIN)
-
-        # ACM Certificate for CloudFront (site domain)
-        print(f"Creating CloudFront Certificate: {self.site_domain}")
-        self.site_certificate = acm.Certificate(
-            self,
-            "SiteCertificateV3",  # Changed from V2 to force recreation
-            domain_name=self.site_domain,
-            validation=acm.CertificateValidation.from_dns(self.hosted_zone),
-        )
-        self.site_certificate.apply_removal_policy(RemovalPolicy.RETAIN)
-
-        # Separate ACM Certificate for Cognito custom domain
-        print(f"Creating Cognito Certificate: {self.cognito_domain}")
-        self.cognito_certificate = acm.Certificate(
-            self,
-            "CognitoCertificateV2",  # Changed from CognitoCertificate to force recreation
-            domain_name=self.cognito_domain,
-            validation=acm.CertificateValidation.from_dns(self.hosted_zone),
-        )
-        self.cognito_certificate.apply_removal_policy(RemovalPolicy.RETAIN)
+        dns_resources = create_dns_and_certificates(self, self.env_name)
+        self.hosted_zone = dns_resources["hosted_zone"]
+        self.site_domain = dns_resources["site_domain"]
+        self.api_domain = dns_resources["api_domain"]
+        self.cognito_domain = dns_resources["cognito_domain"]
+        self.api_certificate = dns_resources["api_certificate"]
+        self.site_certificate = dns_resources["site_certificate"]
+        self.cognito_certificate = dns_resources["cognito_certificate"]
 
         # ====================================================================
         # DynamoDB Tables - Multi-Table Design
@@ -198,118 +161,22 @@ class CdkStack(Stack):  # type: ignore[misc]
         # S3 Buckets
         # ====================================================================
 
-        # Static assets bucket (for SPA hosting)
-        static_bucket_name = self._rn("kernelworx-static")
-        self.static_assets_bucket = s3.Bucket(
-            self,
-            "StaticAssets",
-            bucket_name=static_bucket_name,
-            versioned=True,
-            encryption=s3.BucketEncryption.S3_MANAGED,
-            block_public_access=s3.BlockPublicAccess.BLOCK_ALL,
-            removal_policy=RemovalPolicy.RETAIN,
-        )
-
-        # Exports bucket (for generated reports)
-        exports_bucket_name = self._rn("kernelworx-exports")
-        self.exports_bucket = s3.Bucket(
-            self,
-            "Exports",
-            bucket_name=exports_bucket_name,
-            versioned=False,
-            encryption=s3.BucketEncryption.S3_MANAGED,
-            block_public_access=s3.BlockPublicAccess.BLOCK_ALL,
-            removal_policy=RemovalPolicy.RETAIN,
-        )
+        s3_resources = create_s3_buckets(self, self._rn)
+        self.static_assets_bucket = s3_resources["static_assets_bucket"]
+        self.exports_bucket = s3_resources["exports_bucket"]
 
         # ====================================================================
         # IAM Roles
         # ====================================================================
 
-        # Lambda execution role (base permissions)
-        self.lambda_execution_role = iam.Role(
-            self,
-            "LambdaExecutionRole",
-            role_name=self._rn("kernelworx-lambda-exec"),
-            assumed_by=iam.ServicePrincipal("lambda.amazonaws.com"),
-            managed_policies=[
-                iam.ManagedPolicy.from_aws_managed_policy_name("service-role/AWSLambdaBasicExecutionRole")
-            ],
+        self.lambda_execution_role = create_lambda_execution_role(
+            self, self._rn, tables, self.exports_bucket
         )
 
-        # Grant Lambda role access to new multi-table design tables
-        self.accounts_table.grant_read_write_data(self.lambda_execution_role)
-        self.catalogs_table.grant_read_write_data(self.lambda_execution_role)
-        self.profiles_table.grant_read_write_data(self.lambda_execution_role)
-        self.campaigns_table.grant_read_write_data(self.lambda_execution_role)
-        self.orders_table.grant_read_write_data(self.lambda_execution_role)
-        self.shares_table.grant_read_write_data(self.lambda_execution_role)
-        self.invites_table.grant_read_write_data(self.lambda_execution_role)
-        self.shared_campaigns_table.grant_read_write_data(self.lambda_execution_role)
-
-        # Grant Lambda role access to new table GSI indexes
-        for table in [
-            self.accounts_table,
-            self.catalogs_table,
-            self.profiles_table,
-            self.campaigns_table,
-            self.orders_table,
-            self.shares_table,
-            self.invites_table,
-            self.shared_campaigns_table,
-        ]:
-            self.lambda_execution_role.add_to_policy(
-                iam.PolicyStatement(
-                    actions=["dynamodb:Query", "dynamodb:Scan"],
-                    resources=[f"{table.table_arn}/index/*"],
-                )
-            )
-
-        # Grant Lambda role access to exports bucket
-        self.exports_bucket.grant_read_write(self.lambda_execution_role)
-
-        # Grant Lambda role permission to create CloudFront invalidations
-        self.lambda_execution_role.add_to_policy(
-            iam.PolicyStatement(
-                actions=["cloudfront:CreateInvalidation"],
-                resources=["*"],  # CloudFront invalidation requires wildcard resource
-            )
+        # AppSync excludes shared_campaigns_table from GSI access (no GSIs on that table)
+        self.appsync_service_role = create_appsync_service_role(
+            self, self._rn, tables, tables_without_gsi=["shared_campaigns_table"]
         )
-
-        # AppSync service role (for direct DynamoDB resolvers)
-        self.appsync_service_role = iam.Role(
-            self,
-            "AppSyncServiceRole",
-            role_name=self._rn("kernelworx-appsync"),
-            assumed_by=iam.ServicePrincipal("appsync.amazonaws.com"),
-        )
-
-        # Grant AppSync role access to new multi-table design tables
-        self.accounts_table.grant_read_write_data(self.appsync_service_role)
-        self.catalogs_table.grant_read_write_data(self.appsync_service_role)
-        self.profiles_table.grant_read_write_data(self.appsync_service_role)
-        self.campaigns_table.grant_read_write_data(self.appsync_service_role)
-        self.orders_table.grant_read_write_data(self.appsync_service_role)
-        self.shares_table.grant_read_write_data(self.appsync_service_role)
-        self.invites_table.grant_read_write_data(self.appsync_service_role)
-        self.shared_campaigns_table.grant_read_write_data(self.appsync_service_role)
-
-        # Grant AppSync role access to new table GSI indexes
-        for table in [
-            self.accounts_table,
-            self.catalogs_table,
-            self.profiles_table,
-            self.campaigns_table,
-            self.orders_table,
-            self.shares_table,
-            self.invites_table,
-        ]:
-            self.appsync_service_role.add_to_policy(
-                iam.PolicyStatement(
-                    actions=["dynamodb:Query", "dynamodb:Scan"],
-                    resources=[f"{table.table_arn}/index/*"],
-                )
-            )
 
         # ====================================================================
         # Lambda Functions
@@ -978,75 +845,17 @@ class CdkStack(Stack):  # type: ignore[misc]
         # CloudFront Distribution for SPA
         # ====================================================================
 
-        # Origin Access Identity for S3
-        self.origin_access_identity = cloudfront.OriginAccessIdentity(
-            self, "OAI", comment="OAI for Popcorn Sales Manager SPA"
-        )
-        self.origin_access_identity.node.default_child.apply_removal_policy(RemovalPolicy.RETAIN)
-
-        # Grant CloudFront read access to static assets bucket
-        self.static_assets_bucket.grant_read(self.origin_access_identity)
-        
-        # Grant CloudFront read/write access to exports bucket for uploads
-        self.exports_bucket.grant_read_write(self.origin_access_identity)
-
-        # CloudFront distribution with custom domain
-        self.distribution = cloudfront.Distribution(
+        cloudfront_resources = create_cloudfront_distribution(
             self,
-            "Distribution",
-            domain_names=[self.site_domain],  # Custom domain for site
-            certificate=self.site_certificate,  # Use dedicated site certificate
-            default_behavior=cloudfront.BehaviorOptions(
-                origin=origins.S3BucketOrigin.with_origin_access_identity(
-                    self.static_assets_bucket,
-                    origin_access_identity=self.origin_access_identity,
-                ),
-                viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
-                cache_policy=cloudfront.CachePolicy.CACHING_OPTIMIZED,
-                compress=True,
-            ),
-            additional_behaviors={
-                "/uploads/*": cloudfront.BehaviorOptions(
-                    origin=origins.S3BucketOrigin.with_origin_access_identity(
-                        self.exports_bucket,
-                        origin_access_identity=self.origin_access_identity,
-                    ),
-                    viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.HTTPS_ONLY,
-                    allowed_methods=cloudfront.AllowedMethods.ALLOW_ALL,  # Allow POST/PUT for uploads
-                    cache_policy=cloudfront.CachePolicy.CACHING_DISABLED,  # Don't cache uploads
-                    compress=False,  # Don't compress binary files
-                ),
-                # Note: /payment-qr-codes/* is served via signed S3 URLs, not CloudFront
-            },
-            default_root_object="index.html",
-            error_responses=[
-                cloudfront.ErrorResponse(
-                    http_status=403,
-                    response_http_status=200,
-                    response_page_path="/index.html",
-                    ttl=Duration.seconds(0),
-                ),
-                cloudfront.ErrorResponse(
-                    http_status=404,
-                    response_http_status=200,
-                    response_page_path="/index.html",
-                    ttl=Duration.seconds(0),
-                ),
-            ],
-            price_class=cloudfront.PriceClass.PRICE_CLASS_100,  # US, Canada, Europe only
-            enabled=True,
+            self.site_domain,
+            self.site_certificate,
+            self.static_assets_bucket,
+            self.exports_bucket,
+            self.hosted_zone,
         )
-        self.distribution.apply_removal_policy(RemovalPolicy.RETAIN)
-
-        # Route53 record for CloudFront distribution
-        self.site_domain_record = route53.ARecord(
-            self,
-            "SiteDomainRecordV2",  # Changed from SiteDomainRecord to force recreation
-            zone=self.hosted_zone,
-            record_name=self.site_domain,
-            target=route53.RecordTarget.from_alias(targets.CloudFrontTarget(self.distribution)),
-        )
-        self.site_domain_record.node.default_child.apply_removal_policy(RemovalPolicy.RETAIN)
+        self.origin_access_identity = cloudfront_resources["origin_access_identity"]
+        self.distribution = cloudfront_resources["distribution"]
+        self.site_domain_record = cloudfront_resources["site_domain_record"]
 
         # Add dependency: UserPoolDomain requires the parent domain A record to exist
         if hasattr(self, "user_pool_domain") and hasattr(self.user_pool_domain, "node"):
