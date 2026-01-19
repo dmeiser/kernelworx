@@ -4,13 +4,14 @@ List catalogs in use Lambda handler.
 Returns all catalog IDs used by campaigns for profiles the user owns or has access to via shares.
 
 This Lambda is necessary because:
-1. We need to query campaigns for owned profiles (1 query via ownerAccountId-index)
-2. We need to query campaigns for shared profiles (1 shares query + N campaign queries)
-3. A pipeline resolver can't dynamically query N profiles
+1. We need to query profiles owned by the account (1 query)
+2. We need to query campaigns for each owned profile (N queries)
+3. We need to query campaigns for shared profiles (1 shares query + N campaign queries)
+4. A pipeline resolver can't dynamically query N profiles
 
 Uses aioboto3 for async parallel queries:
-- owned_catalog_ids and shared_profile_ids run concurrently
-- shared_catalog_ids waits for shared_profile_ids, then runs N queries in parallel
+- owned_profile_ids and shared_profile_ids run concurrently
+- owned_catalog_ids and shared_catalog_ids wait for their respective profile_ids, then run N queries in parallel
 
 GraphQL query: listCatalogsInUse
 Returns: [ID!]! (list of catalog IDs)
@@ -31,17 +32,48 @@ except ModuleNotFoundError:  # pragma: no cover
     from ..utils.logging import StructuredLogger, get_correlation_id
 
 
-async def _async_get_owned_campaign_catalog_ids(
-    dynamodb: Any, campaigns_table_name: str, owner_account_id: str
+async def _async_get_owned_profile_ids(
+    dynamodb: Any, profiles_table_name: str, owner_account_id: str
+) -> List[str]:
+    """Async: Query profiles owned by this account."""
+    profile_ids: List[str] = []
+    table = await dynamodb.Table(profiles_table_name)
+
+    response = await table.query(
+        KeyConditionExpression="ownerAccountId = :ownerAccountId",
+        ExpressionAttributeValues={":ownerAccountId": owner_account_id},
+        ProjectionExpression="profileId",
+    )
+
+    for item in response.get("Items", []):
+        if item.get("profileId"):
+            profile_ids.append(item["profileId"])
+
+    # Handle pagination
+    while response.get("LastEvaluatedKey"):
+        response = await table.query(
+            KeyConditionExpression="ownerAccountId = :ownerAccountId",
+            ExpressionAttributeValues={":ownerAccountId": owner_account_id},
+            ProjectionExpression="profileId",
+            ExclusiveStartKey=response["LastEvaluatedKey"],
+        )
+        for item in response.get("Items", []):  # pragma: no branch
+            if item.get("profileId"):
+                profile_ids.append(item["profileId"])
+
+    return profile_ids
+
+
+async def _async_get_campaigns_for_profile(
+    dynamodb: Any, campaigns_table_name: str, profile_id: str
 ) -> Set[str]:
-    """Async: Query campaigns for profiles owned by this account using ownerAccountId-index GSI."""
+    """Async: Query campaigns for a specific profile and return catalog IDs."""
     catalog_ids: Set[str] = set()
     table = await dynamodb.Table(campaigns_table_name)
 
     response = await table.query(
-        IndexName="ownerAccountId-index",
-        KeyConditionExpression="ownerAccountId = :ownerAccountId",
-        ExpressionAttributeValues={":ownerAccountId": owner_account_id},
+        KeyConditionExpression="profileId = :profileId",
+        ExpressionAttributeValues={":profileId": profile_id},
         ProjectionExpression="catalogId",
     )
 
@@ -52,9 +84,8 @@ async def _async_get_owned_campaign_catalog_ids(
     # Handle pagination
     while response.get("LastEvaluatedKey"):
         response = await table.query(
-            IndexName="ownerAccountId-index",
-            KeyConditionExpression="ownerAccountId = :ownerAccountId",
-            ExpressionAttributeValues={":ownerAccountId": owner_account_id},
+            KeyConditionExpression="profileId = :profileId",
+            ExpressionAttributeValues={":profileId": profile_id},
             ProjectionExpression="catalogId",
             ExclusiveStartKey=response["LastEvaluatedKey"],
         )
@@ -97,43 +128,15 @@ async def _async_get_shared_profile_ids(dynamodb: Any, shares_table_name: str, t
     return profile_ids
 
 
-async def _async_get_campaigns_for_profile(table: Any, profile_id: str) -> Set[str]:
-    """Async: Get all catalog IDs from campaigns for a specific profile."""
-    catalog_ids: Set[str] = set()
-
-    # Query using the async table
-    response = await table.query(
-        KeyConditionExpression="profileId = :profileId",
-        ExpressionAttributeValues={":profileId": profile_id},
-        ProjectionExpression="catalogId",
-    )
-
-    for item in response.get("Items", []):
-        if item.get("catalogId"):
-            catalog_ids.add(item["catalogId"])
-
-    # Handle pagination
-    while response.get("LastEvaluatedKey"):
-        response = await table.query(
-            KeyConditionExpression="profileId = :profileId",
-            ExpressionAttributeValues={":profileId": profile_id},
-            ProjectionExpression="catalogId",
-            ExclusiveStartKey=response["LastEvaluatedKey"],
-        )
-        for item in response.get("Items", []):  # pragma: no branch
-            if item.get("catalogId"):
-                catalog_ids.add(item["catalogId"])
-
-    return catalog_ids
-
-
-async def _async_get_shared_campaign_catalog_ids(table: Any, profile_ids: List[str]) -> Set[str]:
-    """Async: Query campaigns for all shared profiles in parallel."""
+async def _async_get_shared_campaign_catalog_ids(
+    dynamodb: Any, campaigns_table_name: str, profile_ids: List[str]
+) -> Set[str]:
+    """Async: Query campaigns for all profiles in parallel."""
     if not profile_ids:
         return set()
 
     # Create tasks for all profile queries
-    tasks = [_async_get_campaigns_for_profile(table, pid) for pid in profile_ids]
+    tasks = [_async_get_campaigns_for_profile(dynamodb, campaigns_table_name, pid) for pid in profile_ids]
 
     # Run all queries concurrently and collect results
     results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -153,24 +156,28 @@ async def _async_get_all_catalog_ids(account_id: str) -> Tuple[Set[str], List[st
     Run all queries with optimal parallelism.
 
     Flow:
-    - owned_catalog_ids and shared_profile_ids run concurrently
-    - shared_catalog_ids waits for shared_profile_ids, then runs N queries in parallel
+    - owned_profile_ids and shared_profile_ids run concurrently
+    - owned_catalog_ids and shared_catalog_ids wait for their respective profile_ids, then run N queries in parallel
     """
     campaigns_table_name = os.environ.get("CAMPAIGNS_TABLE_NAME", "kernelworx-campaigns-ue1-dev")
+    profiles_table_name = os.environ.get("PROFILES_TABLE_NAME", "kernelworx-profiles-ue1-dev")
     shares_table_name = os.environ.get("SHARES_TABLE_NAME", "kernelworx-shares-ue1-dev")
 
     session = aioboto3.Session()
     async with session.resource("dynamodb") as dynamodb:
-        campaigns_table = await dynamodb.Table(campaigns_table_name)
-
-        # Step 1 & 2: Run owned catalogs and shared profiles queries in parallel
-        owned_task = _async_get_owned_campaign_catalog_ids(dynamodb, campaigns_table_name, account_id)
+        # Step 1 & 2: Run owned profiles and shared profiles queries in parallel
+        owned_profiles_task = _async_get_owned_profile_ids(dynamodb, profiles_table_name, account_id)
         shared_profiles_task = _async_get_shared_profile_ids(dynamodb, shares_table_name, account_id)
 
-        owned_catalog_ids, shared_profile_ids = await asyncio.gather(owned_task, shared_profiles_task)
+        owned_profile_ids, shared_profile_ids = await asyncio.gather(owned_profiles_task, shared_profiles_task)
 
-        # Step 3: Query shared profile campaigns (needs shared_profile_ids from step 2)
-        shared_catalog_ids = await _async_get_shared_campaign_catalog_ids(campaigns_table, shared_profile_ids)
+        # Step 3 & 4: Query campaigns for both owned and shared profiles in parallel
+        owned_catalogs_task = _async_get_shared_campaign_catalog_ids(dynamodb, campaigns_table_name, owned_profile_ids)
+        shared_catalogs_task = _async_get_shared_campaign_catalog_ids(
+            dynamodb, campaigns_table_name, shared_profile_ids
+        )
+
+        owned_catalog_ids, shared_catalog_ids = await asyncio.gather(owned_catalogs_task, shared_catalogs_task)
 
         return owned_catalog_ids, shared_profile_ids, shared_catalog_ids
 

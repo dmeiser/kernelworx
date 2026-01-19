@@ -68,6 +68,16 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Any:
         return admin_get_user_profiles(event, context)
     elif field_name == "adminGetUserCatalogs":
         return admin_get_user_catalogs(event, context)
+    elif field_name == "adminGetUserCampaigns":
+        return admin_get_user_campaigns(event, context)
+    elif field_name == "adminGetUserSharedCampaigns":
+        return admin_get_user_shared_campaigns(event, context)
+    elif field_name == "adminGetProfileShares":
+        return admin_get_profile_shares(event, context)
+    elif field_name == "adminDeleteShare":
+        return admin_delete_share(event, context)
+    elif field_name == "adminUpdateCampaignSharedCode":
+        return admin_update_campaign_shared_code(event, context)
     else:
         raise AppError(ErrorCode.INVALID_INPUT, f"Unknown admin operation: {field_name}")
 
@@ -1074,3 +1084,255 @@ def admin_get_user_catalogs(event: Dict[str, Any], context: Any) -> list[Dict[st
     except Exception as e:
         logger.error("Unexpected error in admin_get_user_catalogs", error=str(e))
         raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to get user catalogs")
+
+
+def admin_get_user_campaigns(event: Dict[str, Any], context: Any) -> list[Dict[str, Any]]:
+    """
+    Get all campaigns for a user's profiles.
+
+    Admin-only operation. Returns all campaigns across all profiles owned by the account.
+    """
+    logger = get_logger(__name__)
+
+    try:
+        if not is_admin(event):
+            raise AppError(ErrorCode.FORBIDDEN, "Admin access required")
+
+        arguments = event.get("arguments", {})
+        account_id = arguments.get("accountId", "").strip()
+
+        if not account_id:
+            raise AppError(ErrorCode.INVALID_INPUT, "Account ID is required")
+
+        # Add ACCOUNT# prefix if not present
+        db_account_id = account_id if account_id.startswith("ACCOUNT#") else f"ACCOUNT#{account_id}"
+
+        # First, get all profiles owned by this account
+        # Note: ownerAccountId is the partition key in the profiles table
+        profiles_response = tables.profiles.query(
+            KeyConditionExpression="ownerAccountId = :owner",
+            ExpressionAttributeValues={
+                ":owner": db_account_id,
+            },
+        )
+
+        profiles = profiles_response.get("Items", [])
+        logger.info("Retrieved user profiles", account_id=account_id, count=len(profiles))
+
+        # Now query campaigns for each profile
+        all_campaigns = []
+        for profile in profiles:
+            profile_id = profile.get("profileId")
+            if profile_id:
+                campaigns_response = tables.campaigns.query(
+                    KeyConditionExpression="profileId = :pid",
+                    ExpressionAttributeValues={
+                        ":pid": profile_id,
+                    },
+                )
+                campaigns = campaigns_response.get("Items", [])
+                all_campaigns.extend(campaigns)
+                logger.info("Retrieved campaigns for profile", profile_id=profile_id, count=len(campaigns))
+
+        logger.info("Retrieved user campaigns", account_id=account_id, count=len(all_campaigns))
+        return all_campaigns
+
+    except AppError:
+        raise
+    except Exception as e:
+        logger.error("Unexpected error in admin_get_user_campaigns", error=str(e), exc_info=True)
+        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to get user campaigns")
+
+
+def admin_get_user_shared_campaigns(event: Dict[str, Any], context: Any) -> list[Dict[str, Any]]:
+    """
+    Get all shared campaigns created by a user.
+
+    Admin-only operation.
+    """
+    logger = get_logger(__name__)
+
+    try:
+        if not is_admin(event):
+            raise AppError(ErrorCode.FORBIDDEN, "Admin access required")
+
+        arguments = event.get("arguments", {})
+        account_id = arguments.get("accountId", "").strip()
+
+        if not account_id:
+            raise AppError(ErrorCode.INVALID_INPUT, "Account ID is required")
+
+        # Add ACCOUNT# prefix if not present
+        db_account_id = account_id if account_id.startswith("ACCOUNT#") else f"ACCOUNT#{account_id}"
+
+        # Query shared campaigns by createdBy using GSI1
+        response = tables.shared_campaigns.query(
+            IndexName="GSI1",
+            KeyConditionExpression="createdBy = :creator",
+            ExpressionAttributeValues={
+                ":creator": db_account_id,
+            },
+        )
+
+        campaigns = response.get("Items", [])
+        logger.info("Retrieved user shared campaigns", account_id=account_id, count=len(campaigns))
+        return campaigns
+
+    except AppError:
+        raise
+    except Exception as e:
+        logger.error("Unexpected error in admin_get_user_shared_campaigns", error=str(e))
+        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to get user shared campaigns")
+
+
+def admin_get_profile_shares(event: Dict[str, Any], context: Any) -> list[Dict[str, Any]]:
+    """
+    Get all shares for a specific profile.
+
+    Admin-only operation. Returns all users who have access to this profile.
+    """
+    logger = get_logger(__name__)
+
+    try:
+        if not is_admin(event):
+            raise AppError(ErrorCode.FORBIDDEN, "Admin access required")
+
+        arguments = event.get("arguments", {})
+        profile_id = arguments.get("profileId", "").strip()
+
+        if not profile_id:
+            raise AppError(ErrorCode.INVALID_INPUT, "Profile ID is required")
+
+        # Add PROFILE# prefix if not present
+        db_profile_id = profile_id if profile_id.startswith("PROFILE#") else f"PROFILE#{profile_id}"
+
+        # Query shares by profileId
+        response = tables.shares.query(
+            KeyConditionExpression="profileId = :pid",
+            ExpressionAttributeValues={
+                ":pid": db_profile_id,
+            },
+        )
+
+        shares = response.get("Items", [])
+        
+        # Convert DynamoDB sets to lists for JSON serialization
+        for share in shares:
+            if "permissions" in share and isinstance(share["permissions"], set):
+                share["permissions"] = list(share["permissions"])
+        
+        logger.info("Retrieved profile shares", profile_id=profile_id, count=len(shares))
+        return shares
+
+    except AppError:
+        raise
+    except Exception as e:
+        logger.error("Unexpected error in admin_get_profile_shares", error=str(e))
+        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to get profile shares")
+
+
+def admin_delete_share(event: Dict[str, Any], context: Any) -> bool:
+    """
+    Delete a specific share (revoke access).
+
+    Admin-only operation. Allows admin to remove someone's access to a profile.
+    """
+    logger = get_logger(__name__)
+
+    try:
+        if not is_admin(event):
+            raise AppError(ErrorCode.FORBIDDEN, "Admin access required")
+
+        arguments = event.get("arguments", {})
+        profile_id = arguments.get("profileId", "").strip()
+        target_account_id = arguments.get("targetAccountId", "").strip()
+
+        if not profile_id or not target_account_id:
+            raise AppError(ErrorCode.INVALID_INPUT, "Profile ID and target account ID are required")
+
+        # Add prefixes if not present
+        db_profile_id = profile_id if profile_id.startswith("PROFILE#") else f"PROFILE#{profile_id}"
+        db_target_id = (
+            target_account_id if target_account_id.startswith("ACCOUNT#") else f"ACCOUNT#{target_account_id}"
+        )
+
+        # Delete the share
+        tables.shares.delete_item(Key={"profileId": db_profile_id, "targetAccountId": db_target_id})
+
+        logger.info("Deleted share", profile_id=profile_id, target_account_id=target_account_id)
+        return True
+
+    except AppError:
+        raise
+    except Exception as e:
+        logger.error("Unexpected error in admin_delete_share", error=str(e))
+        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to delete share")
+
+
+def admin_update_campaign_shared_code(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    """
+    Update a campaign's sharedCampaignCode field.
+
+    Admin-only operation. Allows associating a campaign with a shared campaign.
+    """
+    logger = get_logger(__name__)
+
+    try:
+        if not is_admin(event):
+            raise AppError(ErrorCode.FORBIDDEN, "Admin access required")
+
+        arguments = event.get("arguments", {})
+        campaign_id = arguments.get("campaignId", "").strip()
+        shared_campaign_code = arguments.get("sharedCampaignCode")
+
+        if not campaign_id:
+            raise AppError(ErrorCode.INVALID_INPUT, "Campaign ID is required")
+
+        # Add CAMPAIGN# prefix if not present
+        db_campaign_id = campaign_id if campaign_id.startswith("CAMPAIGN#") else f"CAMPAIGN#{campaign_id}"
+
+        # Get campaign via profileId-campaignId-index
+        response = tables.campaigns.query(
+            IndexName="campaignId-index",
+            KeyConditionExpression="campaignId = :cid",
+            ExpressionAttributeValues={
+                ":cid": db_campaign_id,
+            },
+        )
+
+        items = response.get("Items", [])
+        if not items:
+            raise AppError(ErrorCode.NOT_FOUND, f"Campaign not found: {campaign_id}")
+
+        campaign = items[0]
+        profile_id = campaign["profileId"]
+
+        # Update the campaign
+        update_expr = "SET sharedCampaignCode = :code, updatedAt = :updated"
+        expr_values: Dict[str, Any] = {
+            ":code": shared_campaign_code if shared_campaign_code else None,
+            ":updated": datetime.now(timezone.utc).isoformat(),
+        }
+
+        # If setting to None, use REMOVE instead
+        if shared_campaign_code is None:
+            update_expr = "REMOVE sharedCampaignCode SET updatedAt = :updated"
+            expr_values = {":updated": datetime.now(timezone.utc).isoformat()}
+
+        tables.campaigns.update_item(
+            Key={"profileId": profile_id, "campaignId": db_campaign_id},
+            UpdateExpression=update_expr,
+            ExpressionAttributeValues=expr_values,
+        )
+
+        # Return updated campaign
+        updated_campaign = {**campaign, "sharedCampaignCode": shared_campaign_code, "updatedAt": expr_values[":updated"]}
+
+        logger.info("Updated campaign shared code", campaign_id=campaign_id, shared_campaign_code=shared_campaign_code)
+        return updated_campaign
+
+    except AppError:
+        raise
+    except Exception as e:
+        logger.error("Unexpected error in admin_update_campaign_shared_code", error=str(e))
+        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to update campaign shared code")

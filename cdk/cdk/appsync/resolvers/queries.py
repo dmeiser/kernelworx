@@ -341,3 +341,30 @@ def create_query_resolvers(
             lambda_datasource_name="admin_operations_fn",
             id_suffix="AdminGetUserCatalogsResolver",
         )
+
+    # adminGetUserCampaigns (Lambda) - admin only
+    if "admin_operations_fn" in lambda_datasources:
+        builder.create_lambda_resolver(
+            field_name="adminGetUserCampaigns",
+            type_name="Query",
+            lambda_datasource_name="admin_operations_fn",
+            id_suffix="AdminGetUserCampaignsResolver",
+        )
+
+    # adminGetUserSharedCampaigns (Lambda) - admin only
+    if "admin_operations_fn" in lambda_datasources:
+        builder.create_lambda_resolver(
+            field_name="adminGetUserSharedCampaigns",
+            type_name="Query",
+            lambda_datasource_name="admin_operations_fn",
+            id_suffix="AdminGetUserSharedCampaignsResolver",
+        )
+
+    # adminGetProfileShares (Lambda) - admin only
+    if "admin_operations_fn" in lambda_datasources:
+        builder.create_lambda_resolver(
+            field_name="adminGetProfileShares",
+            type_name="Query",
+            lambda_datasource_name="admin_operations_fn",
+            id_suffix="AdminGetProfileSharesResolver",
+        )

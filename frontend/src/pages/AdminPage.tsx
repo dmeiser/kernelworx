@@ -5,6 +5,7 @@
  */
 
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useLazyQuery } from '@apollo/client/react';
 import {
   Box,
@@ -62,7 +63,6 @@ import {
   DELETE_CATALOG,
 } from '../lib/graphql';
 import { CatalogEditorDialog } from '../components/CatalogEditorDialog';
-import { UserDetailsDialog } from '../components/UserDetailsDialog';
 import type { Catalog, AdminUser } from '../types';
 import type {
   GqlAdminDeleteUserMutation,
@@ -254,12 +254,7 @@ const UsersTabContent: React.FC<UsersTabContentProps> = ({
             },
           }}
         />
-        <Button
-          variant="contained"
-          onClick={onSearch}
-          disabled={loading || !searchQuery.trim()}
-          sx={{ minWidth: 100 }}
-        >
+        <Button variant="contained" onClick={onSearch} disabled={loading || !searchQuery.trim()} sx={{ minWidth: 100 }}>
           {loading ? <CircularProgress size={24} /> : 'Search'}
         </Button>
       </Box>
@@ -268,8 +263,8 @@ const UsersTabContent: React.FC<UsersTabContentProps> = ({
 
       {!hasSearched && !error && (
         <Alert severity="info">
-          Search for a user by email, name, or account ID. Partial matches are supported (e.g.,
-          &quot;john&quot; finds &quot;john.doe@example.com&quot;).
+          Search for a user by email, name, or account ID. Partial matches are supported (e.g., &quot;john&quot; finds
+          &quot;john.doe@example.com&quot;).
         </Alert>
       )}
 
@@ -448,6 +443,7 @@ const SystemInfoTabContent: React.FC = () => (
 // --- Main Component ---
 // eslint-disable-next-line complexity -- Admin page with multiple tabs and state management
 export const AdminPage: React.FC = () => {
+  const navigate = useNavigate();
   const [currentTab, setCurrentTab] = useState(0);
 
   // User search state
@@ -459,7 +455,6 @@ export const AdminPage: React.FC = () => {
   const [resetPasswordUser, setResetPasswordUser] = useState<AdminUser | null>(null);
   const [deleteUserTarget, setDeleteUserTarget] = useState<AdminUser | null>(null);
   const [snackbarMessage, setSnackbarMessage] = useState<string | null>(null);
-  const [selectedUser, setSelectedUser] = useState<AdminUser | null>(null);
 
   // Catalog editor state
   const [catalogEditorOpen, setCatalogEditorOpen] = useState(false);
@@ -474,12 +469,11 @@ export const AdminPage: React.FC = () => {
   } | null>(null);
 
   // Search users (lazy query)
-  const [searchUser, { loading: usersLoading, error: usersError, data: searchUserData }] =
-    useLazyQuery<{
-      adminSearchUser: AdminUser[];
-    }>(ADMIN_SEARCH_USER, {
-      fetchPolicy: 'network-only',
-    });
+  const [searchUser, { loading: usersLoading, error: usersError, data: searchUserData }] = useLazyQuery<{
+    adminSearchUser: AdminUser[];
+  }>(ADMIN_SEARCH_USER, {
+    fetchPolicy: 'network-only',
+  });
 
   // Update searched users state when data changes
   React.useEffect(() => {
@@ -538,18 +532,16 @@ export const AdminPage: React.FC = () => {
   });
 
   // Cascading delete mutations (called sequentially)
-  const [deleteUserOrders] = useMutation<
-    GqlAdminDeleteUserOrdersMutation,
-    GqlAdminDeleteUserOrdersMutationVariables
-  >(ADMIN_DELETE_USER_ORDERS);
+  const [deleteUserOrders] = useMutation<GqlAdminDeleteUserOrdersMutation, GqlAdminDeleteUserOrdersMutationVariables>(
+    ADMIN_DELETE_USER_ORDERS,
+  );
   const [deleteUserCampaigns] = useMutation<
     GqlAdminDeleteUserCampaignsMutation,
     GqlAdminDeleteUserCampaignsMutationVariables
   >(ADMIN_DELETE_USER_CAMPAIGNS);
-  const [deleteUserShares] = useMutation<
-    GqlAdminDeleteUserSharesMutation,
-    GqlAdminDeleteUserSharesMutationVariables
-  >(ADMIN_DELETE_USER_SHARES);
+  const [deleteUserShares] = useMutation<GqlAdminDeleteUserSharesMutation, GqlAdminDeleteUserSharesMutationVariables>(
+    ADMIN_DELETE_USER_SHARES,
+  );
   const [deleteUserProfiles] = useMutation<
     GqlAdminDeleteUserProfilesMutation,
     GqlAdminDeleteUserProfilesMutationVariables
@@ -558,9 +550,7 @@ export const AdminPage: React.FC = () => {
     GqlAdminDeleteUserCatalogsMutation,
     GqlAdminDeleteUserCatalogsMutationVariables
   >(ADMIN_DELETE_USER_CATALOGS);
-  const [deleteUser] = useMutation<GqlAdminDeleteUserMutation, GqlAdminDeleteUserMutationVariables>(
-    ADMIN_DELETE_USER
-  );
+  const [deleteUser] = useMutation<GqlAdminDeleteUserMutation, GqlAdminDeleteUserMutationVariables>(ADMIN_DELETE_USER);
 
   const catalogs = catalogsData?.listManagedCatalogs || [];
 
@@ -728,7 +718,7 @@ export const AdminPage: React.FC = () => {
             hasSearched={hasSearched}
             onResetPassword={handleResetPassword}
             onDeleteUser={handleDeleteUser}
-            onViewDetails={setSelectedUser}
+            onViewDetails={(user) => navigate(`/admin/user-data/${user.accountId}`)}
           />
         </Paper>
       </TabPanel>
@@ -777,8 +767,8 @@ export const AdminPage: React.FC = () => {
             Are you sure you want to delete <strong>{deleteCatalogTarget?.catalogName}</strong>?
             <br />
             <br />
-            This catalog will no longer be available for new campaigns, but existing campaigns using
-            it will continue to work.
+            This catalog will no longer be available for new campaigns, but existing campaigns using it will continue to
+            work.
           </DialogContentText>
         </DialogContent>
         <DialogActions>
@@ -813,8 +803,7 @@ export const AdminPage: React.FC = () => {
         <DialogContent>
           {!deleteProgress ? (
             <DialogContentText>
-              Are you sure you want to permanently delete the user{' '}
-              <strong>{deleteUserTarget?.email}</strong>?
+              Are you sure you want to permanently delete the user <strong>{deleteUserTarget?.email}</strong>?
               <br />
               <br />
               This will delete all their data including:
@@ -833,11 +822,7 @@ export const AdminPage: React.FC = () => {
               {/* Current step */}
               <Box display="flex" alignItems="center" gap={2} mb={2}>
                 {!deleteProgress.error && <CircularProgress size={20} />}
-                <Typography
-                  variant="body1"
-                  color={deleteProgress.error ? 'error' : 'text.primary'}
-                  fontWeight="medium"
-                >
+                <Typography variant="body1" color={deleteProgress.error ? 'error' : 'text.primary'} fontWeight="medium">
                   {deleteProgress.step}
                 </Typography>
               </Box>
@@ -881,15 +866,6 @@ export const AdminPage: React.FC = () => {
         onClose={() => setSnackbarMessage(null)}
         message={snackbarMessage}
       />
-
-      {/* User Details Dialog */}
-      {selectedUser && (
-        <UserDetailsDialog
-          open={!!selectedUser}
-          onClose={() => setSelectedUser(null)}
-          user={selectedUser}
-        />
-      )}
     </Box>
   );
 };

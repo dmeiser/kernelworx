@@ -498,3 +498,19 @@ def create_mutation_resolvers(
             lambda_datasource_name="admin_operations_fn",
             id_suffix="CreateManagedCatalogResolver",
         )
+
+        # adminDeleteShare (Lambda) - admin only
+        builder.create_lambda_resolver(
+            field_name="adminDeleteShare",
+            type_name="Mutation",
+            lambda_datasource_name="admin_operations_fn",
+            id_suffix="AdminDeleteShareResolver",
+        )
+
+        # adminUpdateCampaignSharedCode (Lambda) - admin only
+        builder.create_lambda_resolver(
+            field_name="adminUpdateCampaignSharedCode",
+            type_name="Mutation",
+            lambda_datasource_name="admin_operations_fn",
+            id_suffix="AdminUpdateCampaignSharedCodeResolver",
+        )

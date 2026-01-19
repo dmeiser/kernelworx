@@ -27,12 +27,10 @@ import {
   TableHead,
   TableRow,
   Chip,
-  Stack,
   CircularProgress,
   Alert,
   Button,
   IconButton,
-  Tooltip,
   TextField,
   InputAdornment,
   Breadcrumbs,
@@ -46,14 +44,64 @@ import {
   SwapHoriz as TransferIcon,
   ArrowBack as BackIcon,
   Search as SearchIcon,
+  Delete as DeleteIcon,
+  Edit as EditIcon,
 } from '@mui/icons-material';
 import {
   ADMIN_GET_USER_PROFILES,
   ADMIN_GET_USER_CATALOGS,
+  ADMIN_GET_USER_CAMPAIGNS,
+  ADMIN_GET_USER_SHARED_CAMPAIGNS,
+  ADMIN_GET_PROFILE_SHARES,
   TRANSFER_PROFILE_OWNERSHIP,
   ADMIN_SEARCH_USER,
+  ADMIN_DELETE_SHARE,
+  ADMIN_UPDATE_CAMPAIGN_SHARED_CODE,
 } from '../lib/graphql';
 import type { SellerProfile, Catalog, AdminUser } from '../types';
+
+interface Campaign {
+  campaignId: string;
+  profileId: string;
+  campaignName: string;
+  campaignYear: number;
+  catalogId: string;
+  startDate?: string;
+  endDate?: string;
+  sharedCampaignCode?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+interface SharedCampaign {
+  sharedCampaignCode: string;
+  catalogId: string;
+  campaignName: string;
+  campaignYear: number;
+  startDate?: string;
+  endDate?: string;
+  unitType: string;
+  unitNumber: number;
+  city: string;
+  state: string;
+  createdBy: string;
+  createdByName: string;
+  createdAt?: string;
+}
+
+interface Share {
+  shareId: string;
+  profileId: string;
+  targetAccountId: string;
+  targetAccount?: {
+    accountId: string;
+    email: string;
+    givenName?: string;
+    familyName?: string;
+  };
+  permissions: string[];
+  createdAt?: string;
+}
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -76,6 +124,7 @@ function TabPanel(props: TabPanelProps) {
   );
 }
 
+/* eslint-disable complexity -- UserDataPage has multiple tabs and data management flows */
 export const UserDataPage: React.FC = () => {
   const { accountId } = useParams<{ accountId: string }>();
   const navigate = useNavigate();
@@ -83,6 +132,9 @@ export const UserDataPage: React.FC = () => {
   const [transferProfileId, setTransferProfileId] = useState<string | null>(null);
   const [newOwnerSearch, setNewOwnerSearch] = useState('');
   const [selectedNewOwner, setSelectedNewOwner] = useState<AdminUser | null>(null);
+  const [editingCampaignId, setEditingCampaignId] = useState<string | null>(null);
+  const [editingSharedCode, setEditingSharedCode] = useState('');
+  const [selectedProfileForCampaigns, setSelectedProfileForCampaigns] = useState<string | null>(null);
 
   // Fetch user's profiles
   const {
@@ -105,6 +157,38 @@ export const UserDataPage: React.FC = () => {
     skip: !accountId,
   });
 
+  // Fetch user's campaigns
+  const {
+    data: campaignsData,
+    loading: campaignsLoading,
+    error: campaignsError,
+    refetch: refetchCampaigns,
+  } = useQuery<{ adminGetUserCampaigns: Campaign[] }>(ADMIN_GET_USER_CAMPAIGNS, {
+    variables: { accountId },
+    skip: !accountId,
+  });
+
+  // Fetch user's shared campaigns
+  const {
+    data: sharedCampaignsData,
+    loading: sharedCampaignsLoading,
+    error: sharedCampaignsError,
+  } = useQuery<{ adminGetUserSharedCampaigns: SharedCampaign[] }>(ADMIN_GET_USER_SHARED_CAMPAIGNS, {
+    variables: { accountId },
+    skip: !accountId,
+  });
+
+  // Fetch shares for all profiles
+  const [selectedProfileForShares, setSelectedProfileForShares] = useState<string | null>(null);
+  const {
+    data: sharesData,
+    loading: sharesLoading,
+    refetch: refetchShares,
+  } = useQuery<{ adminGetProfileShares: Share[] }>(ADMIN_GET_PROFILE_SHARES, {
+    variables: { profileId: selectedProfileForShares },
+    skip: !selectedProfileForShares,
+  });
+
   // Search for new owner
   const [searchNewOwner, { data: searchData, loading: searchLoading }] = useLazyQuery<{
     adminSearchUser: AdminUser[];
@@ -123,8 +207,39 @@ export const UserDataPage: React.FC = () => {
     },
   });
 
+  // Delete share mutation
+  const [deleteShare] = useMutation(ADMIN_DELETE_SHARE, {
+    onCompleted: () => {
+      refetchShares();
+    },
+    onError: (error) => {
+      console.error('Delete share failed:', error);
+    },
+  });
+
+  // Update campaign shared code mutation
+  const [updateCampaignSharedCode] = useMutation(ADMIN_UPDATE_CAMPAIGN_SHARED_CODE, {
+    onCompleted: () => {
+      setEditingCampaignId(null);
+      setEditingSharedCode('');
+      refetchCampaigns();
+    },
+    onError: (error) => {
+      console.error('Update shared code failed:', error);
+    },
+  });
+
   const profiles = profilesData?.adminGetUserProfiles || [];
   const catalogs = catalogsData?.adminGetUserCatalogs || [];
+  const allCampaigns = campaignsData?.adminGetUserCampaigns || [];
+
+  // Filter campaigns by selected profile
+  const campaigns = selectedProfileForCampaigns
+    ? allCampaigns.filter((c) => c.profileId === selectedProfileForCampaigns)
+    : [];
+
+  const sharedCampaigns = sharedCampaignsData?.adminGetUserSharedCampaigns || [];
+  const shares = sharesData?.adminGetProfileShares || [];
   const searchResults = searchData?.adminSearchUser || [];
 
   const handleTabChange = (_event: React.SyntheticEvent, newValue: number) => {
@@ -203,6 +318,9 @@ export const UserDataPage: React.FC = () => {
         <Tabs value={currentTab} onChange={handleTabChange}>
           <Tab label={`Profiles (${profiles.length})`} />
           <Tab label={`Catalogs (${catalogs.length})`} />
+          <Tab label={`Campaigns (${campaigns.length})`} />
+          <Tab label={`Shared Campaigns (${sharedCampaigns.length})`} />
+          <Tab label={`Shares`} />
         </Tabs>
       </Paper>
 
@@ -298,7 +416,6 @@ export const UserDataPage: React.FC = () => {
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {/* eslint-disable-next-line complexity -- Catalog table row with conditional chips */}
                   {catalogs.map((catalog) => (
                     <TableRow key={catalog.catalogId}>
                       <TableCell>{catalog.catalogName}</TableCell>
@@ -318,6 +435,336 @@ export const UserDataPage: React.FC = () => {
                 </TableBody>
               </Table>
             </TableContainer>
+          )}
+        </Paper>
+      </TabPanel>
+
+      {/* Campaigns Tab */}
+      <TabPanel value={currentTab} index={2}>
+        <Paper sx={{ p: 3 }}>
+          <Typography variant="h6" gutterBottom>
+            Profile Campaigns
+          </Typography>
+
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Select a profile to view and manage its campaigns.
+          </Typography>
+
+          {campaignsLoading && (
+            <Box display="flex" justifyContent="center" py={4}>
+              <CircularProgress />
+              <Typography variant="body2" sx={{ ml: 2 }}>
+                Loading campaigns...
+              </Typography>
+            </Box>
+          )}
+
+          {campaignsError && <Alert severity="error">Error loading campaigns: {campaignsError.message}</Alert>}
+
+          {!campaignsLoading && !campaignsError && profiles.length === 0 && (
+            <Alert severity="info">No profiles to manage campaigns for.</Alert>
+          )}
+
+          {!campaignsLoading && !campaignsError && profiles.length > 0 && (
+            <>
+              <Alert severity="info" sx={{ mb: 2 }}>
+                Total campaigns loaded: {allCampaigns.length}
+              </Alert>
+              <Box sx={{ mb: 3 }}>
+                {profiles.map((profile) => (
+                  <Button
+                    key={profile.profileId}
+                    variant={selectedProfileForCampaigns === profile.profileId ? 'contained' : 'outlined'}
+                    onClick={() => setSelectedProfileForCampaigns(profile.profileId)}
+                    sx={{ mr: 1, mb: 1 }}
+                  >
+                    {profile.sellerName}
+                  </Button>
+                ))}
+              </Box>
+
+              {selectedProfileForCampaigns && (
+                <>
+                  {campaigns.length === 0 && (
+                    <Alert severity="info">
+                      No campaigns found for this profile. (Total campaigns in system: {allCampaigns.length})
+                    </Alert>
+                  )}
+
+                  {campaigns.length > 0 && (
+                    <TableContainer>
+                      <Table>
+                        <TableHead>
+                          <TableRow>
+                            <TableCell>Campaign Name</TableCell>
+                            <TableCell>Year</TableCell>
+                            <TableCell>Dates</TableCell>
+                            <TableCell>Catalog</TableCell>
+                            <TableCell>Shared Code</TableCell>
+                            <TableCell align="right">Actions</TableCell>
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {campaigns.map((campaign) => (
+                            <TableRow key={campaign.campaignId}>
+                              <TableCell>{campaign.campaignName}</TableCell>
+                              <TableCell>{campaign.campaignYear}</TableCell>
+                              <TableCell>
+                                <Typography variant="body2">
+                                  {campaign.startDate ? new Date(campaign.startDate).toLocaleDateString() : '—'} -{' '}
+                                  {campaign.endDate ? new Date(campaign.endDate).toLocaleDateString() : '—'}
+                                </Typography>
+                              </TableCell>
+                              <TableCell>
+                                <Typography variant="body2" fontSize="0.75rem">
+                                  {campaign.catalogId}
+                                </Typography>
+                              </TableCell>
+                              <TableCell>
+                                {editingCampaignId === campaign.campaignId ? (
+                                  <Box>
+                                    <TextField
+                                      size="small"
+                                      value={editingSharedCode}
+                                      onChange={(e) => setEditingSharedCode(e.target.value)}
+                                      placeholder="Enter code or leave blank to remove"
+                                      helperText="Clear field to unassociate"
+                                      fullWidth
+                                    />
+                                  </Box>
+                                ) : (
+                                  <Typography variant="body2" fontFamily="monospace">
+                                    {campaign.sharedCampaignCode || '—'}
+                                  </Typography>
+                                )}
+                              </TableCell>
+                              <TableCell align="right">
+                                {editingCampaignId === campaign.campaignId ? (
+                                  <>
+                                    <Button
+                                      size="small"
+                                      onClick={() => {
+                                        updateCampaignSharedCode({
+                                          variables: {
+                                            campaignId: campaign.campaignId,
+                                            sharedCampaignCode: editingSharedCode || null,
+                                          },
+                                        });
+                                      }}
+                                    >
+                                      Save
+                                    </Button>
+                                    <Button
+                                      size="small"
+                                      onClick={() => {
+                                        setEditingCampaignId(null);
+                                        setEditingSharedCode('');
+                                      }}
+                                    >
+                                      Cancel
+                                    </Button>
+                                    {editingSharedCode && (
+                                      <Button size="small" onClick={() => setEditingSharedCode('')} color="warning">
+                                        Clear
+                                      </Button>
+                                    )}
+                                  </>
+                                ) : (
+                                  <Button
+                                    size="small"
+                                    startIcon={<EditIcon />}
+                                    onClick={() => {
+                                      setEditingCampaignId(campaign.campaignId);
+                                      setEditingSharedCode(campaign.sharedCampaignCode || '');
+                                    }}
+                                    variant="outlined"
+                                  >
+                                    Edit
+                                  </Button>
+                                )}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
+                  )}
+                </>
+              )}
+            </>
+          )}
+        </Paper>
+      </TabPanel>
+
+      {/* Shared Campaigns Tab */}
+      <TabPanel value={currentTab} index={3}>
+        <Paper sx={{ p: 3 }}>
+          <Typography variant="h6" gutterBottom>
+            Shared Campaigns Created by User
+          </Typography>
+
+          {sharedCampaignsLoading && (
+            <Box display="flex" justifyContent="center" py={4}>
+              <CircularProgress />
+            </Box>
+          )}
+
+          {sharedCampaignsError && (
+            <Alert severity="error">Error loading shared campaigns: {sharedCampaignsError.message}</Alert>
+          )}
+
+          {!sharedCampaignsLoading && !sharedCampaignsError && sharedCampaigns.length === 0 && (
+            <Alert severity="info">No shared campaigns found for this user.</Alert>
+          )}
+
+          {!sharedCampaignsLoading && !sharedCampaignsError && sharedCampaigns.length > 0 && (
+            <TableContainer>
+              <Table>
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Shared Code</TableCell>
+                    <TableCell>Campaign Name</TableCell>
+                    <TableCell>Unit</TableCell>
+                    <TableCell>Start Date</TableCell>
+                    <TableCell>End Date</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {sharedCampaigns.map((sharedCampaign) => (
+                    <TableRow key={sharedCampaign.sharedCampaignCode}>
+                      <TableCell>
+                        <Typography variant="body2" fontFamily="monospace" fontWeight="bold">
+                          {sharedCampaign.sharedCampaignCode}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>{sharedCampaign.campaignName}</TableCell>
+                      <TableCell>
+                        <Typography variant="body2">
+                          {sharedCampaign.unitType} #{sharedCampaign.unitNumber}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          {sharedCampaign.city}, {sharedCampaign.state}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>
+                        {sharedCampaign.startDate ? new Date(sharedCampaign.startDate).toLocaleDateString() : '—'}
+                      </TableCell>
+                      <TableCell>
+                        {sharedCampaign.endDate ? new Date(sharedCampaign.endDate).toLocaleDateString() : '—'}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          )}
+        </Paper>
+      </TabPanel>
+
+      {/* Shares Tab */}
+      <TabPanel value={currentTab} index={4}>
+        <Paper sx={{ p: 3 }}>
+          <Typography variant="h6" gutterBottom>
+            Profile Shares
+          </Typography>
+
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Select a profile to view and manage who has access to it.
+          </Typography>
+
+          {profiles.length === 0 ? (
+            <Alert severity="info">No profiles to manage shares for.</Alert>
+          ) : (
+            <>
+              <Box sx={{ mb: 3 }}>
+                {profiles.map((profile) => (
+                  <Button
+                    key={profile.profileId}
+                    variant={selectedProfileForShares === profile.profileId ? 'contained' : 'outlined'}
+                    onClick={() => setSelectedProfileForShares(profile.profileId)}
+                    sx={{ mr: 1, mb: 1 }}
+                  >
+                    {profile.sellerName}
+                  </Button>
+                ))}
+              </Box>
+
+              {selectedProfileForShares && (
+                <>
+                  {sharesLoading && (
+                    <Box display="flex" justifyContent="center" py={4}>
+                      <CircularProgress />
+                    </Box>
+                  )}
+
+                  {!sharesLoading && shares.length === 0 && (
+                    <Alert severity="info">No shares found for this profile.</Alert>
+                  )}
+
+                  {!sharesLoading && shares.length > 0 && (
+                    <TableContainer>
+                      <Table>
+                        <TableHead>
+                          <TableRow>
+                            <TableCell>User Email</TableCell>
+                            <TableCell>Permissions</TableCell>
+                            <TableCell>Granted</TableCell>
+                            <TableCell align="right">Actions</TableCell>
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {shares.map((share) => (
+                            <TableRow key={share.targetAccountId}>
+                              <TableCell>
+                                <Typography variant="body2">{share.targetAccount?.email || 'Unknown'}</Typography>
+                                {(share.targetAccount?.givenName || share.targetAccount?.familyName) && (
+                                  <Typography variant="caption" color="text.secondary">
+                                    {share.targetAccount.givenName} {share.targetAccount.familyName}
+                                  </Typography>
+                                )}
+                              </TableCell>
+                              <TableCell>
+                                {share.permissions?.map((perm) => (
+                                  <Chip key={perm} label={perm} size="small" sx={{ mr: 0.5 }} />
+                                ))}
+                              </TableCell>
+                              <TableCell>
+                                {share.createdAt ? new Date(share.createdAt).toLocaleDateString() : '—'}
+                              </TableCell>
+                              <TableCell align="right">
+                                <Button
+                                  size="small"
+                                  startIcon={<DeleteIcon />}
+                                  onClick={() => {
+                                    const email = share.targetAccount?.email || 'this user';
+                                    if (
+                                      window.confirm(
+                                        `Are you sure you want to revoke ${email}'s access to this profile?`,
+                                      )
+                                    ) {
+                                      deleteShare({
+                                        variables: {
+                                          profileId: selectedProfileForShares,
+                                          targetAccountId: share.targetAccountId,
+                                        },
+                                      });
+                                    }
+                                  }}
+                                  color="error"
+                                  variant="outlined"
+                                >
+                                  Revoke
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
+                  )}
+                </>
+              )}
+            </>
           )}
         </Paper>
       </TabPanel>
@@ -357,7 +804,6 @@ export const UserDataPage: React.FC = () => {
               </Typography>
               {searchResults
                 .filter((u) => u.accountId !== accountId)
-                // eslint-disable-next-line complexity -- User selection row with conditional styling for selected state
                 .map((searchUser) => (
                   <Box
                     key={searchUser.accountId}

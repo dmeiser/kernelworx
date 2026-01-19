@@ -48,7 +48,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
     # Check authorization: caller must be owner OR admin
     caller_is_owner = profile["ownerAccountId"] == db_caller_id
-    caller_is_admin = is_admin(db_caller_id)
+    caller_is_admin = is_admin(event)
     
     if not caller_is_owner and not caller_is_admin:
         raise PermissionError("Only the profile owner or an admin can transfer ownership")

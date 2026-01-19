@@ -448,6 +448,9 @@ type Query {
   adminSearchUser(query: String!): [AdminUser!]!
   adminGetUserProfiles(accountId: ID!): [SellerProfile!]!
   adminGetUserCatalogs(accountId: ID!): [Catalog!]!
+  adminGetUserCampaigns(accountId: ID!): [Campaign!]!
+  adminGetUserSharedCampaigns(accountId: ID!): [SharedCampaign!]!
+  adminGetProfileShares(profileId: ID!): [Share!]!
 }
 
 # ============================================================================
@@ -513,6 +516,8 @@ type Mutation {
   adminDeleteUserShares(accountId: ID!): Int!
   adminDeleteUserProfiles(accountId: ID!): Int!
   adminDeleteUserCatalogs(accountId: ID!): Int!
+  adminDeleteShare(profileId: ID!, targetAccountId: ID!): Boolean!
+  adminUpdateCampaignSharedCode(campaignId: ID!, sharedCampaignCode: String): Campaign!
   createManagedCatalog(input: CreateCatalogInput!): Catalog!
 }
 

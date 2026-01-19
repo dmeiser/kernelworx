@@ -812,6 +812,61 @@ export const ADMIN_GET_USER_CATALOGS = gql`
   }
 `;
 
+export const ADMIN_GET_USER_CAMPAIGNS = gql`
+  query AdminGetUserCampaigns($accountId: ID!) {
+    adminGetUserCampaigns(accountId: $accountId) {
+      campaignId
+      profileId
+      campaignName
+      campaignYear
+      catalogId
+      startDate
+      endDate
+      sharedCampaignCode
+      createdAt
+      updatedAt
+    }
+  }
+`;
+
+export const ADMIN_GET_USER_SHARED_CAMPAIGNS = gql`
+  query AdminGetUserSharedCampaigns($accountId: ID!) {
+    adminGetUserSharedCampaigns(accountId: $accountId) {
+      sharedCampaignCode
+      catalogId
+      campaignName
+      campaignYear
+      startDate
+      endDate
+      unitType
+      unitNumber
+      city
+      state
+      createdBy
+      createdByName
+      createdAt
+    }
+  }
+`;
+
+export const ADMIN_GET_PROFILE_SHARES = gql`
+  query AdminGetProfileShares($profileId: ID!) {
+    adminGetProfileShares(profileId: $profileId) {
+      shareId
+      profileId
+      targetAccountId
+      targetAccount {
+        accountId
+        email
+        givenName
+        familyName
+      }
+      permissions
+      createdAt
+    }
+  }
+`;
+
 export const ADMIN_RESET_USER_PASSWORD = gql`
   mutation AdminResetUserPassword($email: AWSEmail!) {
     adminResetUserPassword(email: $email)
@@ -851,6 +906,21 @@ export const ADMIN_DELETE_USER_PROFILES = gql`
 export const ADMIN_DELETE_USER_CATALOGS = gql`
   mutation AdminDeleteUserCatalogs($accountId: ID!) {
     adminDeleteUserCatalogs(accountId: $accountId)
+  }
+`;
+
+export const ADMIN_DELETE_SHARE = gql`
+  mutation AdminDeleteShare($profileId: ID!, $targetAccountId: ID!) {
+    adminDeleteShare(profileId: $profileId, targetAccountId: $targetAccountId)
+  }
+`;
+
+export const ADMIN_UPDATE_CAMPAIGN_SHARED_CODE = gql`
+  mutation AdminUpdateCampaignSharedCode($campaignId: ID!, $sharedCampaignCode: String) {
+    adminUpdateCampaignSharedCode(campaignId: $campaignId, sharedCampaignCode: $sharedCampaignCode) {
+      campaignId
+      sharedCampaignCode
+    }
   }
 `;
 

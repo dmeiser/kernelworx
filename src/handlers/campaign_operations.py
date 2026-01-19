@@ -145,7 +145,6 @@ def _build_campaign_item(
         "campaignYear": values["campaign_year"],
         "startDate": values["start_date"],
         "catalogId": values["catalog_id"],
-        "ownerAccountId": owner_account_id,
         "isActive": True,  # New campaigns are active by default
         "createdAt": now,
         "updatedAt": now,

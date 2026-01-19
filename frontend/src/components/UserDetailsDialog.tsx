@@ -36,11 +36,7 @@ import {
   TextField,
   InputAdornment,
 } from '@mui/material';
-import {
-  SwapHoriz as TransferIcon,
-  Close as CloseIcon,
-  Search as SearchIcon,
-} from '@mui/icons-material';
+import { SwapHoriz as TransferIcon, Close as CloseIcon, Search as SearchIcon } from '@mui/icons-material';
 import {
   ADMIN_GET_USER_PROFILES,
   ADMIN_GET_USER_CATALOGS,
@@ -64,12 +60,7 @@ interface TabPanelProps {
 function TabPanel(props: TabPanelProps) {
   const { children, value, index, ...other } = props;
   return (
-    <div
-      role="tabpanel"
-      hidden={value !== index}
-      id={`user-details-tabpanel-${index}`}
-      {...other}
-    >
+    <div role="tabpanel" hidden={value !== index} id={`user-details-tabpanel-${index}`} {...other}>
       {value === index && <Box sx={{ py: 2 }}>{children}</Box>}
     </div>
   );
@@ -197,10 +188,7 @@ export const UserDetailsDialog: React.FC<UserDetailsDialogProps> = ({ open, onCl
                       <TableCell>{profile.sellerName || '—'}</TableCell>
                       <TableCell>
                         <Tooltip title="Transfer Ownership">
-                          <IconButton
-                            size="small"
-                            onClick={() => setTransferProfileId(profile.profileId ?? null)}
-                          >
+                          <IconButton size="small" onClick={() => setTransferProfileId(profile.profileId ?? null)}>
                             <TransferIcon />
                           </IconButton>
                         </Tooltip>
@@ -302,7 +290,8 @@ export const UserDetailsDialog: React.FC<UserDetailsDialogProps> = ({ open, onCl
                       borderColor: selectedNewOwner?.accountId === searchUser.accountId ? 'primary.main' : 'divider',
                       borderRadius: 1,
                       cursor: 'pointer',
-                      bgcolor: selectedNewOwner?.accountId === searchUser.accountId ? 'action.selected' : 'background.paper',
+                      bgcolor:
+                        selectedNewOwner?.accountId === searchUser.accountId ? 'action.selected' : 'background.paper',
                     }}
                     onClick={() => setSelectedNewOwner(searchUser)}
                   >
@@ -317,11 +306,7 @@ export const UserDetailsDialog: React.FC<UserDetailsDialogProps> = ({ open, onCl
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setTransferProfileId(null)}>Cancel</Button>
-          <Button
-            onClick={handleTransferProfile}
-            variant="contained"
-            disabled={!selectedNewOwner || transferring}
-          >
+          <Button onClick={handleTransferProfile} variant="contained" disabled={!selectedNewOwner || transferring}>
             {transferring ? 'Transferring...' : 'Transfer Ownership'}
           </Button>
         </DialogActions>
