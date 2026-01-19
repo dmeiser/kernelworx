@@ -484,7 +484,7 @@ describe('AdminPage', () => {
     await user.click(catalogsTab);
 
     await waitFor(() => {
-      expect(screen.getByText(/No catalogs found/i)).toBeInTheDocument();
+      expect(screen.getByText(/No managed catalogs found/i)).toBeInTheDocument();
     });
   });
 });

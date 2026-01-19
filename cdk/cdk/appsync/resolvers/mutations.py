@@ -431,3 +431,70 @@ def create_mutation_resolvers(
             lambda_datasource_name="confirm_qr_upload_fn",
             id_suffix="ConfirmPaymentMethodQRCodeUploadResolver",
         )
+
+    # === ADMIN MUTATIONS ===
+
+    # adminResetUserPassword (Lambda) - admin only
+    if "admin_operations_fn" in lambda_datasources:
+        builder.create_lambda_resolver(
+            field_name="adminResetUserPassword",
+            type_name="Mutation",
+            lambda_datasource_name="admin_operations_fn",
+            id_suffix="AdminResetUserPasswordResolver",
+        )
+
+        # adminDeleteUser (Lambda) - admin only
+        builder.create_lambda_resolver(
+            field_name="adminDeleteUser",
+            type_name="Mutation",
+            lambda_datasource_name="admin_operations_fn",
+            id_suffix="AdminDeleteUserResolver",
+        )
+
+        # adminDeleteUserOrders (Lambda) - admin only, cascading delete step 1
+        builder.create_lambda_resolver(
+            field_name="adminDeleteUserOrders",
+            type_name="Mutation",
+            lambda_datasource_name="admin_operations_fn",
+            id_suffix="AdminDeleteUserOrdersResolver",
+        )
+
+        # adminDeleteUserCampaigns (Lambda) - admin only, cascading delete step 2
+        builder.create_lambda_resolver(
+            field_name="adminDeleteUserCampaigns",
+            type_name="Mutation",
+            lambda_datasource_name="admin_operations_fn",
+            id_suffix="AdminDeleteUserCampaignsResolver",
+        )
+
+        # adminDeleteUserShares (Lambda) - admin only, cascading delete step 3
+        builder.create_lambda_resolver(
+            field_name="adminDeleteUserShares",
+            type_name="Mutation",
+            lambda_datasource_name="admin_operations_fn",
+            id_suffix="AdminDeleteUserSharesResolver",
+        )
+
+        # adminDeleteUserProfiles (Lambda) - admin only, cascading delete step 4
+        builder.create_lambda_resolver(
+            field_name="adminDeleteUserProfiles",
+            type_name="Mutation",
+            lambda_datasource_name="admin_operations_fn",
+            id_suffix="AdminDeleteUserProfilesResolver",
+        )
+
+        # adminDeleteUserCatalogs (Lambda) - admin only, cascading delete step 5
+        builder.create_lambda_resolver(
+            field_name="adminDeleteUserCatalogs",
+            type_name="Mutation",
+            lambda_datasource_name="admin_operations_fn",
+            id_suffix="AdminDeleteUserCatalogsResolver",
+        )
+
+        # createManagedCatalog (Lambda) - admin only
+        builder.create_lambda_resolver(
+            field_name="createManagedCatalog",
+            type_name="Mutation",
+            lambda_datasource_name="admin_operations_fn",
+            id_suffix="CreateManagedCatalogResolver",
+        )

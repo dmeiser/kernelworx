@@ -198,3 +198,27 @@ export interface SharedCampaign {
   createdAt?: string;
   updatedAt?: string;
 }
+
+/**
+ * Admin user view (Cognito + DynamoDB merged).
+ * Used in admin user management.
+ */
+export interface AdminUser {
+  accountId: string;
+  email: string;
+  displayName?: string | null;
+  status: string; // CONFIRMED, UNCONFIRMED, FORCE_CHANGE_PASSWORD, etc.
+  enabled: boolean;
+  emailVerified: boolean;
+  isAdmin: boolean;
+  createdAt?: string | null;
+  lastModifiedAt?: string | null;
+}
+
+/**
+ * Paginated list of admin users.
+ */
+export interface AdminUserConnection {
+  users: AdminUser[];
+  nextToken?: string | null;
+}

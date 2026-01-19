@@ -45,7 +45,7 @@ interface CatalogFormValues {
 
 export const CatalogEditorDialog: React.FC<CatalogEditorDialogProps> = ({ open, onClose, onSave, initialCatalog }) => {
   const form = useFormState<CatalogFormValues>({
-    initialValues: { catalogName: '', isPublic: false },
+    initialValues: { catalogName: '', isPublic: true }, // Default to public for admin catalogs
   });
   const [products, setProducts] = useState<ProductInput[]>([]);
   const [saving, setSaving] = useState(false);
@@ -53,7 +53,7 @@ export const CatalogEditorDialog: React.FC<CatalogEditorDialogProps> = ({ open, 
   const initializedRef = useRef(false);
 
   const resetForm = useCallback(() => {
-    form.resetTo({ catalogName: '', isPublic: false });
+    form.resetTo({ catalogName: '', isPublic: true }); // Default to public for admin catalogs
     setProducts([{ productName: '', description: '', price: 0 }]);
     setError(null);
   }, [form]);

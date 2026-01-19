@@ -21,6 +21,7 @@ import { SettingsPage } from './pages/SettingsPage';
 import { UserSettingsPage } from './pages/UserSettingsPage';
 import { AcceptInvitePage } from './pages/AcceptInvitePage';
 import { AdminPage } from './pages/AdminPage';
+import { UserDataPage } from './pages/UserDataPage';
 import { CatalogsPage } from './pages/CatalogsPage';
 import { CatalogPreviewPage } from './pages/CatalogPreviewPage';
 import { CampaignReportsPage } from './pages/CampaignReportsPage';
@@ -219,6 +220,17 @@ function App() {
                   <ProtectedRoute requireAdmin>
                     <AppLayout>
                       <AdminPage />
+                    </AppLayout>
+                  </ProtectedRoute>
+                }
+              />
+
+              <Route
+                path="/admin/user-data/:accountId"
+                element={
+                  <ProtectedRoute requireAdmin>
+                    <AppLayout>
+                      <UserDataPage />
                     </AppLayout>
                   </ProtectedRoute>
                 }

@@ -3,6 +3,7 @@
  */
 
 import { gql } from '@apollo/client';
+import type { AdminUser } from '../types/entities';
 
 // ============================================================================
 // Fragments
@@ -746,5 +747,118 @@ export const CONFIRM_PAYMENT_METHOD_QR_UPLOAD = gql`
 export const DELETE_PAYMENT_METHOD_QR_CODE = gql`
   mutation DeletePaymentMethodQRCode($paymentMethodName: String!) {
     deletePaymentMethodQRCode(paymentMethodName: $paymentMethodName)
+  }
+`;
+
+// ============================================================================
+// Admin Operations (requires ADMIN Cognito group)
+// ============================================================================
+
+export const ADMIN_USER_FRAGMENT = gql`
+  fragment AdminUserFields on AdminUser {
+    accountId
+    email
+    displayName
+    status
+    enabled
+    emailVerified
+    isAdmin
+    createdAt
+    lastModifiedAt
+  }
+`;
+
+export const ADMIN_LIST_USERS = gql`
+  ${ADMIN_USER_FRAGMENT}
+  query AdminListUsers($limit: Int, $nextToken: String) {
+    adminListUsers(limit: $limit, nextToken: $nextToken) {
+      users {
+        ...AdminUserFields
+      }
+      nextToken
+    }
+  }
+`;
+
+export const ADMIN_SEARCH_USER = gql`
+  ${ADMIN_USER_FRAGMENT}
+  query AdminSearchUser($query: String!) {
+    adminSearchUser(query: $query) {
+      ...AdminUserFields
+    }
+  }
+`;
+
+// Type for search results
+export type AdminSearchUserResponse = {
+  adminSearchUser: AdminUser[];
+};
+
+export const ADMIN_GET_USER_PROFILES = gql`
+  ${SELLER_PROFILE_FRAGMENT}
+  query AdminGetUserProfiles($accountId: ID!) {
+    adminGetUserProfiles(accountId: $accountId) {
+      ...SellerProfileFields
+    }
+  }
+`;
+
+export const ADMIN_GET_USER_CATALOGS = gql`
+  ${CATALOG_FRAGMENT}
+  query AdminGetUserCatalogs($accountId: ID!) {
+    adminGetUserCatalogs(accountId: $accountId) {
+      ...CatalogFields
+    }
+  }
+`;
+
+export const ADMIN_RESET_USER_PASSWORD = gql`
+  mutation AdminResetUserPassword($email: AWSEmail!) {
+    adminResetUserPassword(email: $email)
+  }
+`;
+
+export const ADMIN_DELETE_USER = gql`
+  mutation AdminDeleteUser($accountId: ID!) {
+    adminDeleteUser(accountId: $accountId)
+  }
+`;
+
+export const ADMIN_DELETE_USER_ORDERS = gql`
+  mutation AdminDeleteUserOrders($accountId: ID!) {
+    adminDeleteUserOrders(accountId: $accountId)
+  }
+`;
+
+export const ADMIN_DELETE_USER_CAMPAIGNS = gql`
+  mutation AdminDeleteUserCampaigns($accountId: ID!) {
+    adminDeleteUserCampaigns(accountId: $accountId)
+  }
+`;
+
+export const ADMIN_DELETE_USER_SHARES = gql`
+  mutation AdminDeleteUserShares($accountId: ID!) {
+    adminDeleteUserShares(accountId: $accountId)
+  }
+`;
+
+export const ADMIN_DELETE_USER_PROFILES = gql`
+  mutation AdminDeleteUserProfiles($accountId: ID!) {
+    adminDeleteUserProfiles(accountId: $accountId)
+  }
+`;
+
+export const ADMIN_DELETE_USER_CATALOGS = gql`
+  mutation AdminDeleteUserCatalogs($accountId: ID!) {
+    adminDeleteUserCatalogs(accountId: $accountId)
+  }
+`;
+
+export const CREATE_MANAGED_CATALOG = gql`
+  ${CATALOG_FRAGMENT}
+  mutation CreateManagedCatalog($input: CreateCatalogInput!) {
+    createManagedCatalog(input: $input) {
+      ...CatalogFields
+    }
   }
 `;

@@ -1,36 +1,38 @@
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { BrowserRouter } from 'react-router-dom';
 import { vi, describe, it, expect, beforeEach } from 'vitest';
+import { MockedProvider } from '@apollo/client/testing/react';
 
 // Mock AuthContext (authenticated admin)
 vi.mock('../src/contexts/AuthContext', () => ({
   useAuth: () => ({ isAuthenticated: true, loading: false, isAdmin: true, account: { accountId: 'admin-account' } }),
 }));
 
-// Partially mock apollo hooks to return empty lists so AdminPage can render
-vi.mock('@apollo/client/react', async () => {
-  const actual = await vi.importActual<any>('@apollo/client/react');
-  return {
-    ...actual,
-    useLazyQuery: () => [vi.fn(), { data: { listMyProfiles: [] } }],
-    useQuery: () => ({ data: { listMyProfiles: [], listManagedCatalogs: [] }, loading: false }),
-    useMutation: () => [vi.fn()],
-  };
-});
-
 import { AdminPage } from '../src/pages/AdminPage';
+import { LIST_MY_PROFILES, LIST_MANAGED_CATALOGS, ADMIN_LIST_USERS } from '../src/lib/graphql';
 
 describe('AdminPage (smoke test)', () => {
   beforeEach(() => vi.clearAllMocks());
 
   it('renders admin console header', async () => {
+    const mocks = [
+      { request: { query: LIST_MY_PROFILES }, result: { data: { listMyProfiles: [] } } },
+      { request: { query: LIST_MANAGED_CATALOGS }, result: { data: { listManagedCatalogs: [] } } },
+      {
+        request: { query: ADMIN_LIST_USERS, variables: { limit: 20 } },
+        result: { data: { adminListUsers: { users: [], nextToken: null } } },
+      },
+    ];
+
     render(
-      <BrowserRouter>
-        <AdminPage />
-      </BrowserRouter>,
+      <MockedProvider mocks={mocks} addTypename={false}>
+        <BrowserRouter>
+          <AdminPage />
+        </BrowserRouter>
+      </MockedProvider>,
     );
 
-    await waitFor(() => expect(screen.getByText(/Admin Console/i)).toBeInTheDocument());
-  }, 10000);
+    expect(screen.getByText(/Admin Console/i)).toBeInTheDocument();
+  });
 });

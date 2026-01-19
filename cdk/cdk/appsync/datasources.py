@@ -94,6 +94,7 @@ def create_lambda_datasources(
         ("generate_qr_code_presigned_url_fn", "GenerateQRCodePresignedURLDS"),
         ("delete_qr_code_fn", "DeleteQRCodeDS"),
         ("validate_payment_method_fn", "ValidatePaymentMethodDS"),
+        ("admin_operations_fn", "AdminOperationsDS"),
     ]
 
     for fn_key, ds_name in lambda_ds_configs:

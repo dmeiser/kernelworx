@@ -127,6 +127,7 @@ class CdkStack(Stack):  # type: ignore[misc]
         self.generate_qr_code_presigned_url_fn = lambda_resources["generate_qr_code_presigned_url_fn"]
         self.delete_qr_code_fn = lambda_resources["delete_qr_code_fn"]
         self.validate_payment_method_fn = lambda_resources["validate_payment_method_fn"]
+        self.admin_operations_fn = lambda_resources["admin_operations_fn"]
 
         # ====================================================================
         # Cognito User Pool - Authentication (Essentials tier)
@@ -152,6 +153,10 @@ class CdkStack(Stack):  # type: ignore[misc]
             self.user_pool_sms_role = auth_resources["user_pool_sms_role"]
         if "cognito_domain_record" in auth_resources:
             self.cognito_domain_record = auth_resources["cognito_domain_record"]
+
+        # Configure admin_operations_fn with Cognito User Pool ID
+        # Note: Cognito permissions are granted in iam_roles.py to avoid circular dependencies
+        self.admin_operations_fn.add_environment("USER_POOL_ID", self.user_pool.user_pool_id)
 
         # ====================================================================
         # AppSync GraphQL API
@@ -192,6 +197,7 @@ class CdkStack(Stack):  # type: ignore[misc]
                 "generate_qr_code_presigned_url_fn": self.generate_qr_code_presigned_url_fn,
                 "delete_qr_code_fn": self.delete_qr_code_fn,
                 "validate_payment_method_fn": self.validate_payment_method_fn,
+                "admin_operations_fn": self.admin_operations_fn,
             },
         )
         self.api = appsync_resources.api

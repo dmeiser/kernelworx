@@ -303,3 +303,41 @@ def create_query_resolvers(
             code_file=RESOLVERS_DIR / "payment_methods_for_profile_pipeline_resolver.js",
             id_suffix="PaymentMethodsForProfileResolver",
         )
+
+    # === ADMIN QUERIES ===
+
+    # adminListUsers (Lambda) - admin only
+    if "admin_operations_fn" in lambda_datasources:
+        builder.create_lambda_resolver(
+            field_name="adminListUsers",
+            type_name="Query",
+            lambda_datasource_name="admin_operations_fn",
+            id_suffix="AdminListUsersResolver",
+        )
+
+    # adminSearchUser (Lambda) - admin only
+    if "admin_operations_fn" in lambda_datasources:
+        builder.create_lambda_resolver(
+            field_name="adminSearchUser",
+            type_name="Query",
+            lambda_datasource_name="admin_operations_fn",
+            id_suffix="AdminSearchUserResolver",
+        )
+
+    # adminGetUserProfiles (Lambda) - admin only
+    if "admin_operations_fn" in lambda_datasources:
+        builder.create_lambda_resolver(
+            field_name="adminGetUserProfiles",
+            type_name="Query",
+            lambda_datasource_name="admin_operations_fn",
+            id_suffix="AdminGetUserProfilesResolver",
+        )
+
+    # adminGetUserCatalogs (Lambda) - admin only
+    if "admin_operations_fn" in lambda_datasources:
+        builder.create_lambda_resolver(
+            field_name="adminGetUserCatalogs",
+            type_name="Query",
+            lambda_datasource_name="admin_operations_fn",
+            id_suffix="AdminGetUserCatalogsResolver",
+        )

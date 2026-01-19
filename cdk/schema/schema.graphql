@@ -55,6 +55,24 @@ type Account {
   updatedAt: AWSDateTime!
 }
 
+# Admin-only type: Cognito user info merged with DynamoDB Account data
+type AdminUser {
+  accountId: ID!           # Cognito sub
+  email: AWSEmail!
+  displayName: String      # From DynamoDB Account (givenName + familyName)
+  status: String!          # Cognito status: CONFIRMED, UNCONFIRMED, FORCE_CHANGE_PASSWORD, etc.
+  enabled: Boolean!        # Whether the Cognito user is enabled
+  emailVerified: Boolean!  # Whether email is verified in Cognito
+  isAdmin: Boolean!        # Whether user is in ADMIN group
+  createdAt: AWSDateTime!  # Cognito user creation date
+  lastModifiedAt: AWSDateTime  # Cognito last modified date
+}
+
+type AdminUserConnection {
+  users: [AdminUser!]!
+  nextToken: String
+}
+
 type SellerProfile {
   profileId: ID!
   ownerAccountId: ID!
@@ -92,6 +110,7 @@ type Catalog @aws_cognito_user_pools {
   catalogName: String!
   catalogType: CatalogType!
   isPublic: Boolean!
+  isDeleted: Boolean
   products: [Product!]!
   createdAt: AWSDateTime!
   updatedAt: AWSDateTime!
@@ -423,6 +442,12 @@ type Query {
   # Payment method queries
   myPaymentMethods: [PaymentMethod!]!
   paymentMethodsForProfile(profileId: ID!): [PaymentMethod!]!
+
+  # Admin queries (requires ADMIN Cognito group)
+  adminListUsers(limit: Int, nextToken: String): AdminUserConnection!
+  adminSearchUser(query: String!): [AdminUser!]!
+  adminGetUserProfiles(accountId: ID!): [SellerProfile!]!
+  adminGetUserCatalogs(accountId: ID!): [Catalog!]!
 }
 
 # ============================================================================
@@ -479,6 +504,16 @@ type Mutation {
   requestPaymentMethodQRCodeUpload(paymentMethodName: String!): S3UploadInfo!
   confirmPaymentMethodQRCodeUpload(paymentMethodName: String!, s3Key: String!): PaymentMethod!
   deletePaymentMethodQRCode(paymentMethodName: String!): Boolean!
+  
+  # Admin mutations (requires ADMIN Cognito group)
+  adminResetUserPassword(email: AWSEmail!): Boolean!
+  adminDeleteUser(accountId: ID!): Boolean!
+  adminDeleteUserOrders(accountId: ID!): Int!
+  adminDeleteUserCampaigns(accountId: ID!): Int!
+  adminDeleteUserShares(accountId: ID!): Int!
+  adminDeleteUserProfiles(accountId: ID!): Int!
+  adminDeleteUserCatalogs(accountId: ID!): Int!
+  createManagedCatalog(input: CreateCatalogInput!): Catalog!
 }
 
 # ============================================================================

@@ -16,9 +16,11 @@ from boto3.dynamodb.conditions import Key
 try:  # pragma: no cover
     from utils.dynamodb import tables
     from utils.ids import ensure_account_id, ensure_profile_id
+    from utils.auth import is_admin
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.dynamodb import tables
     from ..utils.ids import ensure_account_id, ensure_profile_id
+    from ..utils.auth import is_admin
 
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
@@ -44,14 +46,19 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
     profile: Dict[str, Any] = profile_response["Items"][0]
 
-    if profile["ownerAccountId"] != db_caller_id:
-        raise PermissionError("Only the profile owner can transfer ownership")
+    # Check authorization: caller must be owner OR admin
+    caller_is_owner = profile["ownerAccountId"] == db_caller_id
+    caller_is_admin = is_admin(db_caller_id)
+    
+    if not caller_is_owner and not caller_is_admin:
+        raise PermissionError("Only the profile owner or an admin can transfer ownership")
 
-    # 2. Verify new owner has existing share
-    share_response = tables.shares.get_item(Key={"profileId": db_profile_id, "targetAccountId": db_new_owner_id})
-
-    if "Item" not in share_response:
-        raise ValueError("New owner must have existing access to the profile")
+    # 2. Verify new owner has existing share (skip for admin transfers)
+    # Admins can transfer to any user, but regular owners need the target to have a share
+    if not caller_is_admin:
+        share_response = tables.shares.get_item(Key={"profileId": db_profile_id, "targetAccountId": db_new_owner_id})
+        if "Item" not in share_response:
+            raise ValueError("New owner must have existing access to the profile")
 
     # 3. Transfer ownership by deleting and recreating the profile with new owner
     # Cannot update partition key, so we delete and put
@@ -64,8 +71,12 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     profile["ownerAccountId"] = db_new_owner_id
     tables.profiles.put_item(Item=profile)
 
-    # 4. Delete the share (new owner doesn't need it anymore)
-    tables.shares.delete_item(Key={"profileId": db_profile_id, "targetAccountId": db_new_owner_id})
+    # 4. Delete the share if it exists (new owner doesn't need it anymore)
+    # Only delete if share existed (might not exist for admin transfers)
+    try:
+        tables.shares.delete_item(Key={"profileId": db_profile_id, "targetAccountId": db_new_owner_id})
+    except Exception:
+        pass  # Share might not exist for admin transfers
 
     # 5. Return updated profile
     return profile

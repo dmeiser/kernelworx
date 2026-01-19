@@ -19,6 +19,7 @@ def create_lambda_execution_role(
     rn: Callable[[str], str],
     tables: Dict[str, dynamodb.ITable],
     exports_bucket: s3.IBucket,
+    user_pool_arn: Optional[str] = None,
 ) -> iam.Role:
     """Create the Lambda execution role with appropriate permissions.
 
@@ -27,6 +28,7 @@ def create_lambda_execution_role(
         rn: helper function to create resource names
         tables: Dict of DynamoDB tables to grant access to
         exports_bucket: S3 bucket for exports
+        user_pool_arn: Optional ARN of Cognito User Pool for admin operations
 
     Returns:
         The Lambda execution role
@@ -60,6 +62,21 @@ def create_lambda_execution_role(
         iam.PolicyStatement(
             actions=["cloudfront:CreateInvalidation"],
             resources=["*"],  # CloudFront invalidation requires wildcard resource
+        )
+    )
+
+    # Grant Cognito admin permissions for admin operations Lambda
+    # Using wildcard to avoid circular dependency with User Pool creation
+    lambda_execution_role.add_to_policy(
+        iam.PolicyStatement(
+            actions=[
+                "cognito-idp:AdminResetUserPassword",
+                "cognito-idp:AdminDeleteUser",
+                "cognito-idp:ListUsers",
+                "cognito-idp:AdminListGroupsForUser",
+                "cognito-idp:AdminGetUser",
+            ],
+            resources=["*"],  # User Pool ARN not available yet during role creation
         )
     )
 

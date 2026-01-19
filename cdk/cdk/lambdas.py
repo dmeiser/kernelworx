@@ -61,7 +61,7 @@ def create_lambda_functions(
         "EXPORTS_BUCKET": exports_bucket.bucket_name,
         "POWERTOOLS_SERVICE_NAME": "kernelworx",
         "LOG_LEVEL": "INFO",
-        "LAMBDA_VERSION": "2026-01-12",  # Force Lambda update
+        "LAMBDA_VERSION": "2026-01-19",  # Force Lambda update
         # New multi-table design table names
         "ACCOUNTS_TABLE_NAME": accounts_table.table_name,
         "CATALOGS_TABLE_NAME": catalogs_table.table_name,
@@ -378,6 +378,22 @@ def create_lambda_functions(
         environment=lambda_env,
     )
 
+    # Admin Operations Lambda (requires USER_POOL_ID - added after Cognito creation in stack)
+    # Handles: adminResetUserPassword, adminDeleteUser, createManagedCatalog
+    admin_operations_fn = lambda_.Function(
+        scope,
+        "AdminOperationsFn",
+        function_name=rn("kernelworx-admin-operations"),
+        runtime=lambda_.Runtime.PYTHON_3_13,
+        handler="handlers.admin_operations.lambda_handler",
+        code=lambda_code,
+        layers=[shared_layer],
+        timeout=Duration.seconds(30),
+        memory_size=256,
+        role=lambda_execution_role,
+        environment=lambda_env,  # USER_POOL_ID added separately in stack
+    )
+
     return {
         "shared_layer": shared_layer,
         "list_my_shares_fn": list_my_shares_fn,
@@ -398,4 +414,5 @@ def create_lambda_functions(
         "generate_qr_code_presigned_url_fn": generate_qr_code_presigned_url_fn,
         "delete_qr_code_fn": delete_qr_code_fn,
         "validate_payment_method_fn": validate_payment_method_fn,
+        "admin_operations_fn": admin_operations_fn,
     }
