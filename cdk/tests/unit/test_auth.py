@@ -1,10 +1,7 @@
 """Tests for auth module (Cognito User Pool configuration)."""
 
 import inspect
-import os
 from unittest.mock import MagicMock, patch
-
-import pytest
 
 from cdk.auth import (
     KNOWN_USER_POOL_IDS,

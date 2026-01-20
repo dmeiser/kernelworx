@@ -1,6 +1,5 @@
 """Tests for Lambda functions module."""
 
-import os
 from unittest.mock import MagicMock, patch
 
 import pytest

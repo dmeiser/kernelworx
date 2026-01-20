@@ -437,8 +437,13 @@ def _get_managed_route53_records(stack_name: str, region: str) -> set[str]:
             for r in page["StackResourceSummaries"]:
                 if r["ResourceType"] == "AWS::Route53::RecordSet":
                     managed_record_ids.add(r["PhysicalResourceId"])
-    except Exception:
-        pass
+    except Exception as e:
+        # Stack may not exist yet during initial deployment; log for debugging
+        print(
+            f"   ⚠️  Could not list CloudFormation stack resources for Route53 records "
+            f"(stack={stack_name}, region={region}): {e}",
+            file=sys.stderr,
+        )
     return managed_record_ids
 
 
