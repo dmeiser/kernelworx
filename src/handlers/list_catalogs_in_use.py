@@ -32,9 +32,7 @@ except ModuleNotFoundError:  # pragma: no cover
     from ..utils.logging import StructuredLogger, get_correlation_id
 
 
-async def _async_get_owned_profile_ids(
-    dynamodb: Any, profiles_table_name: str, owner_account_id: str
-) -> List[str]:
+async def _async_get_owned_profile_ids(dynamodb: Any, profiles_table_name: str, owner_account_id: str) -> List[str]:
     """Async: Query profiles owned by this account."""
     profile_ids: List[str] = []
     table = await dynamodb.Table(profiles_table_name)
@@ -64,9 +62,7 @@ async def _async_get_owned_profile_ids(
     return profile_ids
 
 
-async def _async_get_campaigns_for_profile(
-    dynamodb: Any, campaigns_table_name: str, profile_id: str
-) -> Set[str]:
+async def _async_get_campaigns_for_profile(dynamodb: Any, campaigns_table_name: str, profile_id: str) -> Set[str]:
     """Async: Query campaigns for a specific profile and return catalog IDs."""
     catalog_ids: Set[str] = set()
     table = await dynamodb.Table(campaigns_table_name)

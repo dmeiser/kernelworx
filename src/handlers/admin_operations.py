@@ -407,7 +407,7 @@ def _search_users_in_cognito_by_email_prefix(
             Filter=f'email ^= "{query}"',  # Prefix match on email
             Limit=50,  # Reasonable limit for search results
         )
-        return response.get("Users", [])
+        return list(response.get("Users", []))
     except ClientError as e:
         logger.warning("Cognito email prefix search failed", error=str(e), query=query)
         return []
@@ -1034,7 +1034,7 @@ def admin_get_user_profiles(event: Dict[str, Any], context: Any) -> list[Dict[st
 
         profiles = response.get("Items", [])
         logger.info("Retrieved user profiles", account_id=account_id, count=len(profiles))
-        return profiles
+        return list(profiles)
 
     except AppError:
         raise
@@ -1077,7 +1077,7 @@ def admin_get_user_catalogs(event: Dict[str, Any], context: Any) -> list[Dict[st
 
         catalogs = response.get("Items", [])
         logger.info("Retrieved user catalogs", account_id=account_id, count=len(catalogs))
-        return catalogs
+        return list(catalogs)
 
     except AppError:
         raise
@@ -1176,7 +1176,7 @@ def admin_get_user_shared_campaigns(event: Dict[str, Any], context: Any) -> list
 
         campaigns = response.get("Items", [])
         logger.info("Retrieved user shared campaigns", account_id=account_id, count=len(campaigns))
-        return campaigns
+        return list(campaigns)
 
     except AppError:
         raise
@@ -1215,14 +1215,14 @@ def admin_get_profile_shares(event: Dict[str, Any], context: Any) -> list[Dict[s
         )
 
         shares = response.get("Items", [])
-        
+
         # Convert DynamoDB sets to lists for JSON serialization
         for share in shares:
             if "permissions" in share and isinstance(share["permissions"], set):
                 share["permissions"] = list(share["permissions"])
-        
+
         logger.info("Retrieved profile shares", profile_id=profile_id, count=len(shares))
-        return shares
+        return list(shares)
 
     except AppError:
         raise
@@ -1252,9 +1252,7 @@ def admin_delete_share(event: Dict[str, Any], context: Any) -> bool:
 
         # Add prefixes if not present
         db_profile_id = profile_id if profile_id.startswith("PROFILE#") else f"PROFILE#{profile_id}"
-        db_target_id = (
-            target_account_id if target_account_id.startswith("ACCOUNT#") else f"ACCOUNT#{target_account_id}"
-        )
+        db_target_id = target_account_id if target_account_id.startswith("ACCOUNT#") else f"ACCOUNT#{target_account_id}"
 
         # Delete the share
         tables.shares.delete_item(Key={"profileId": db_profile_id, "targetAccountId": db_target_id})
@@ -1326,7 +1324,11 @@ def admin_update_campaign_shared_code(event: Dict[str, Any], context: Any) -> Di
         )
 
         # Return updated campaign
-        updated_campaign = {**campaign, "sharedCampaignCode": shared_campaign_code, "updatedAt": expr_values[":updated"]}
+        updated_campaign = {
+            **campaign,
+            "sharedCampaignCode": shared_campaign_code,
+            "updatedAt": expr_values[":updated"],
+        }
 
         logger.info("Updated campaign shared code", campaign_id=campaign_id, shared_campaign_code=shared_campaign_code)
         return updated_campaign

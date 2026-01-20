@@ -14,13 +14,13 @@ from boto3.dynamodb.conditions import Key
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
+    from utils.auth import is_admin
     from utils.dynamodb import tables
     from utils.ids import ensure_account_id, ensure_profile_id
-    from utils.auth import is_admin
 except ModuleNotFoundError:  # pragma: no cover
+    from ..utils.auth import is_admin
     from ..utils.dynamodb import tables
     from ..utils.ids import ensure_account_id, ensure_profile_id
-    from ..utils.auth import is_admin
 
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
@@ -49,7 +49,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     # Check authorization: caller must be owner OR admin
     caller_is_owner = profile["ownerAccountId"] == db_caller_id
     caller_is_admin = is_admin(event)
-    
+
     if not caller_is_owner and not caller_is_admin:
         raise PermissionError("Only the profile owner or an admin can transfer ownership")
 

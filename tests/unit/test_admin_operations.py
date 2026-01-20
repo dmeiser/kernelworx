@@ -3059,9 +3059,7 @@ class TestAdminSearchUser:
                 }
 
                 mock_client.list_users.return_value = {"Users": [mock_cognito_user]}
-                mock_client.admin_list_groups_for_user.return_value = {
-                    "Groups": [{"GroupName": "ADMIN"}]
-                }
+                mock_client.admin_list_groups_for_user.return_value = {"Groups": [{"GroupName": "ADMIN"}]}
                 mock_tables.accounts.get_item.return_value = {}
 
                 result = admin_search_user(event, lambda_context)
