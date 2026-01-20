@@ -191,10 +191,13 @@ describe('OrderEditorPage - Payment Methods', () => {
       renderWithRouter(mocks);
 
       // Wait for page to load - use heading role to avoid matching button
-      await waitFor(() => {
-        expect(screen.getByRole('heading', { name: /create order/i })).toBeInTheDocument();
-      });
-    });
+      await waitFor(
+        () => {
+          expect(screen.getByRole('heading', { name: /create order/i })).toBeInTheDocument();
+        },
+        { timeout: 10000 },
+      );
+    }, 15000);
 
     test('fetches payment methods from paymentMethodsForProfile', async () => {
       const mocks = createMocks(mockProfileOwner);

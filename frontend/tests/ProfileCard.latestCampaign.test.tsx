@@ -13,54 +13,31 @@ vi.mock('react-router-dom', async () => {
   };
 });
 
-// Mock Apollo useQuery to return campaigns data for this test
-vi.mock('@apollo/client/react', async () => {
-  const actual = await vi.importActual('@apollo/client/react');
-  return {
-    ...actual,
-    useQuery: () => {
-      // Return campaigns data for LIST_CAMPAIGNS_BY_PROFILE
-      return {
-        data: {
-          listCampaignsByProfile: [
-            {
-              campaignId: 'campaign-1',
-              campaignName: 'Alpha Campaign',
-              campaignYear: 2025,
-              totalOrders: 10,
-              totalRevenue: 200.5,
-              startDate: '2025-09-01T00:00:00.000Z',
-              __typename: 'Campaign',
-            },
-            {
-              campaignId: 'campaign-2',
-              campaignName: 'Beta Campaign',
-              campaignYear: 2024,
-              totalOrders: 5,
-              totalRevenue: 50.0,
-              startDate: '2024-05-01T00:00:00.000Z',
-              __typename: 'Campaign',
-            },
-          ],
-        },
-        loading: false,
-      };
-    },
-  };
-});
-
 import { ProfileCard } from '../src/components/ProfileCard';
 
+const mockLatestCampaign = {
+  campaignId: 'campaign-1',
+  campaignName: 'Alpha Campaign',
+  campaignYear: 2025,
+  isActive: true,
+};
+
 describe('ProfileCard latest campaign', () => {
-  it('shows latest campaign stats when campaigns exist', async () => {
+  it('shows latest campaign info when latestCampaign prop is provided', async () => {
     render(
       <BrowserRouter>
-        <ProfileCard profileId="profile-123" sellerName="Scout Alpha" isOwner={true} permissions={[]} />
+        <ProfileCard
+          profileId="profile-123"
+          sellerName="Scout Alpha"
+          isOwner={true}
+          permissions={[]}
+          latestCampaign={mockLatestCampaign}
+        />
       </BrowserRouter>,
     );
 
     expect(await screen.findByText(/Alpha Campaign/)).toBeInTheDocument();
-    expect(screen.getByText(/\$200.50/)).toBeInTheDocument();
+    expect(screen.getByText(/2025/)).toBeInTheDocument();
   });
 
   it('navigates to latest campaign when View Latest Campaign clicked', async () => {
@@ -69,7 +46,13 @@ describe('ProfileCard latest campaign', () => {
 
     render(
       <BrowserRouter>
-        <ProfileCard profileId="profile-123" sellerName="Scout Alpha" isOwner={true} permissions={[]} />
+        <ProfileCard
+          profileId="profile-123"
+          sellerName="Scout Alpha"
+          isOwner={true}
+          permissions={[]}
+          latestCampaign={mockLatestCampaign}
+        />
       </BrowserRouter>,
     );
 

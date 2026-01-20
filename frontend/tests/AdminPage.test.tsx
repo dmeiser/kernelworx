@@ -121,12 +121,12 @@ describe('AdminPage', () => {
       </MockedProvider>,
     );
 
-    expect(screen.getByRole('tab', { name: /profiles/i })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /users/i })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: /catalogs/i })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: /system info/i })).toBeInTheDocument();
   });
 
-  test('shows Profiles tab content by default', async () => {
+  test('shows Users tab content by default', async () => {
     const mocks = [
       {
         request: {
@@ -159,9 +159,9 @@ describe('AdminPage', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText('All Scouts')).toBeInTheDocument();
-      expect(screen.getByText('Scout Alpha')).toBeInTheDocument();
-      expect(screen.getByText('Scout Beta')).toBeInTheDocument();
+      // Users tab shows search interface
+      expect(screen.getByText('User Management')).toBeInTheDocument();
+      expect(screen.getByPlaceholderText(/search by email, name/i)).toBeInTheDocument();
     });
   });
 
@@ -202,7 +202,7 @@ describe('AdminPage', () => {
     await user.click(catalogsTab);
 
     await waitFor(() => {
-      expect(screen.getByText('Product Catalogs')).toBeInTheDocument();
+      expect(screen.getByText('Shared Product Catalogs')).toBeInTheDocument();
       expect(screen.getByText('2025 Popcorn Catalog')).toBeInTheDocument();
     });
   });
@@ -249,7 +249,7 @@ describe('AdminPage', () => {
     });
   });
 
-  test('shows loading state for profiles', () => {
+  test('shows loading state for profiles', async () => {
     const mocks = [
       {
         request: {
@@ -282,10 +282,16 @@ describe('AdminPage', () => {
       </MockedProvider>,
     );
 
-    expect(screen.getByRole('progressbar')).toBeInTheDocument();
+    // The Users tab shows a search interface, not a loading state
+    // Loading would only appear during a search operation
+    await waitFor(() => {
+      expect(screen.getByText('User Management')).toBeInTheDocument();
+    });
   });
 
-  test('shows error message when profiles query fails', async () => {
+  // Note: The AdminPage no longer loads profiles on the Users tab.
+  // It shows a search interface instead. Profile errors would only occur during search.
+  test.skip('shows error message when profiles query fails', async () => {
     const mocks = [
       {
         request: {
@@ -318,7 +324,9 @@ describe('AdminPage', () => {
     });
   });
 
-  test('displays owner and shared badges for profiles', async () => {
+  // Note: The AdminPage no longer displays profiles with owner/shared badges.
+  // The Users tab now shows a search interface instead of a profile list.
+  test.skip('displays owner and shared badges for profiles', async () => {
     const mocks = [
       {
         request: {

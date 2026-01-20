@@ -19,7 +19,6 @@ try:  # pragma: no cover
     from utils.payment_methods import (
         delete_qr_by_key,
         delete_qr_from_s3,
-        generate_presigned_get_url,
         generate_qr_code_s3_key,
         get_payment_methods,
         is_reserved_name,
@@ -32,7 +31,6 @@ except ModuleNotFoundError:  # pragma: no cover
     from ..utils.payment_methods import (
         delete_qr_by_key,
         delete_qr_from_s3,
-        generate_presigned_get_url,
         generate_qr_code_s3_key,
         get_payment_methods,
         is_reserved_name,

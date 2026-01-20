@@ -208,9 +208,10 @@ describe('CampaignSettingsPage (core flows)', () => {
             input: {
               campaignId: dbCampaignId,
               campaignName: 'Winter',
-              startDate: '2025-09-01',
-              endDate: '2025-12-01',
               catalogId: dbCatalogId,
+              isActive: true,
+              startDate: '2025-09-01T00:00:00.000Z',
+              endDate: '2025-12-01T00:00:00.000Z',
             },
           },
         },

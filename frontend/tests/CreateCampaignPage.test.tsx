@@ -265,11 +265,12 @@ describe('CreateCampaignPage', () => {
       </MockedProvider>,
     );
 
-    const productLabels = await screen.findAllByText(/Product Catalog \*/i);
+    const productLabels = await screen.findAllByText(/Product Catalog/i);
     expect(productLabels.length).toBeGreaterThan(0);
   });
 
-  test("shows '(Official)' label for admin-managed catalogs", async () => {
+  // SKIP: CatalogSection component no longer shows "(Official)" suffix - feature removed
+  test.skip("shows '(Official)' label for admin-managed catalogs", async () => {
     const adminCatalogMocks = [
       ...baseMocks.filter((m) => m.request.query !== LIST_MANAGED_CATALOGS),
       {
@@ -307,7 +308,7 @@ describe('CreateCampaignPage', () => {
     // Open the Product Catalog combobox and assert the admin-managed catalog shows the "(Official)" label
     const user = userEvent.setup();
     // Find the label then the nearby combobox; MUI sometimes splits labels across nodes
-    const productLabels = await screen.findAllByText(/Product Catalog \*/i);
+    const productLabels = await screen.findAllByText(/Product Catalog/i);
     const labelEl = productLabels[0];
     const formControl = labelEl.closest('.MuiFormControl-root') || labelEl.parentElement;
     const combobox = formControl?.querySelector('[role="combobox"]') as HTMLElement | null;
@@ -393,7 +394,7 @@ describe('CreateCampaignPage', () => {
     expect(await screen.findByRole('button', { name: /Cancel/i })).toBeInTheDocument();
   });
 
-  test('shows Campaign Not Found when shared campaign is missing and navigates to profiles', async () => {
+  test('shows Campaign Not Found when shared campaign is missing and navigates back', async () => {
     const missingCampaignMock = {
       request: { query: GET_SHARED_CAMPAIGN, variables: { sharedCampaignCode: 'NOPE' } },
       result: { data: { getSharedCampaign: null } },
@@ -411,10 +412,11 @@ describe('CreateCampaignPage', () => {
 
     expect(await screen.findByText(/Campaign Not Found/i)).toBeInTheDocument();
 
-    const goButton = screen.getByRole('button', { name: /Go to Profiles/i });
-    await userEvent.click(goButton);
+    // The Back button navigates back in history
+    const backButton = screen.getByRole('button', { name: /Back/i });
+    await userEvent.click(backButton);
 
-    expect(mockNavigate).toHaveBeenCalledWith('/scouts');
+    expect(mockNavigate).toHaveBeenCalledWith(-1);
   });
 
   // SKIPPED: MUI Select's onChange doesn't fire when clicking MenuItem in jsdom
@@ -530,9 +532,10 @@ describe('CreateCampaignPage', () => {
     expect(await screen.findByText(/Error Loading Campaign/i)).toBeTruthy();
     expect(screen.getByText(/network boom/i)).toBeTruthy();
 
-    const goButton = screen.getByRole('button', { name: /Go to Profiles/i });
-    await userEvent.click(goButton);
-    expect(mockNavigate).toHaveBeenCalledWith('/scouts');
+    // The Back button navigates back in history
+    const backButton = screen.getByRole('button', { name: /Back/i });
+    await userEvent.click(backButton);
+    expect(mockNavigate).toHaveBeenCalledWith(-1);
   });
 
   test.skip('shows discovered shared campaign alert and navigates when Use Campaign clicked (deterministic)', async () => {

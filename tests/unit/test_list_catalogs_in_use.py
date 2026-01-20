@@ -1,45 +1,43 @@
 """Unit tests for list_catalogs_in_use Lambda handler."""
 
-from typing import Any, Dict, List, Set
+from typing import Dict, List, Set
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 
-class TestAsyncGetOwnedCampaignCatalogIds:
-    """Tests for _async_get_owned_campaign_catalog_ids helper."""
+class TestAsyncGetOwnedProfileIds:
+    """Tests for _async_get_owned_profile_ids helper."""
 
     @pytest.mark.asyncio
-    async def test_returns_catalog_ids_from_owned_campaigns(self) -> None:
-        """Should return catalog IDs from campaigns owned by the account."""
-        from src.handlers.list_catalogs_in_use import _async_get_owned_campaign_catalog_ids
+    async def test_returns_profile_ids_from_owned_profiles(self) -> None:
+        """Should return profile IDs from profiles owned by the account."""
+        from src.handlers.list_catalogs_in_use import _async_get_owned_profile_ids
 
         mock_table = AsyncMock()
         mock_table.query.return_value = {
             "Items": [
-                {"catalogId": "CATALOG#cat1"},
-                {"catalogId": "CATALOG#cat2"},
-                {"catalogId": "CATALOG#cat1"},  # Duplicate should be deduplicated
+                {"profileId": "PROFILE#prof1"},
+                {"profileId": "PROFILE#prof2"},
             ]
         }
 
         mock_dynamodb = AsyncMock()
         mock_dynamodb.Table.return_value = mock_table
 
-        result = await _async_get_owned_campaign_catalog_ids(mock_dynamodb, "campaigns-table", "ACCOUNT#test-user")
+        result = await _async_get_owned_profile_ids(mock_dynamodb, "profiles-table", "ACCOUNT#test-user")
 
-        assert result == {"CATALOG#cat1", "CATALOG#cat2"}
+        assert result == ["PROFILE#prof1", "PROFILE#prof2"]
         mock_table.query.assert_called_once_with(
-            IndexName="ownerAccountId-index",
             KeyConditionExpression="ownerAccountId = :ownerAccountId",
             ExpressionAttributeValues={":ownerAccountId": "ACCOUNT#test-user"},
-            ProjectionExpression="catalogId",
+            ProjectionExpression="profileId",
         )
 
     @pytest.mark.asyncio
-    async def test_returns_empty_set_when_no_campaigns(self) -> None:
-        """Should return empty set when account has no campaigns."""
-        from src.handlers.list_catalogs_in_use import _async_get_owned_campaign_catalog_ids
+    async def test_returns_empty_list_when_no_profiles(self) -> None:
+        """Should return empty list when account has no profiles."""
+        from src.handlers.list_catalogs_in_use import _async_get_owned_profile_ids
 
         mock_table = AsyncMock()
         mock_table.query.return_value = {"Items": []}
@@ -47,77 +45,77 @@ class TestAsyncGetOwnedCampaignCatalogIds:
         mock_dynamodb = AsyncMock()
         mock_dynamodb.Table.return_value = mock_table
 
-        result = await _async_get_owned_campaign_catalog_ids(mock_dynamodb, "campaigns-table", "ACCOUNT#test-user")
+        result = await _async_get_owned_profile_ids(mock_dynamodb, "profiles-table", "ACCOUNT#test-user")
 
-        assert result == set()
+        assert result == []
 
     @pytest.mark.asyncio
     async def test_handles_pagination(self) -> None:
         """Should handle paginated results."""
-        from src.handlers.list_catalogs_in_use import _async_get_owned_campaign_catalog_ids
+        from src.handlers.list_catalogs_in_use import _async_get_owned_profile_ids
 
         mock_table = AsyncMock()
         mock_table.query.side_effect = [
             {
-                "Items": [{"catalogId": "CATALOG#cat1"}],
+                "Items": [{"profileId": "PROFILE#prof1"}],
                 "LastEvaluatedKey": {"pk": "key1"},
             },
             {
-                "Items": [{"catalogId": "CATALOG#cat2"}],
+                "Items": [{"profileId": "PROFILE#prof2"}],
             },
         ]
 
         mock_dynamodb = AsyncMock()
         mock_dynamodb.Table.return_value = mock_table
 
-        result = await _async_get_owned_campaign_catalog_ids(mock_dynamodb, "campaigns-table", "ACCOUNT#test-user")
+        result = await _async_get_owned_profile_ids(mock_dynamodb, "profiles-table", "ACCOUNT#test-user")
 
-        assert result == {"CATALOG#cat1", "CATALOG#cat2"}
+        assert result == ["PROFILE#prof1", "PROFILE#prof2"]
         assert mock_table.query.call_count == 2
 
     @pytest.mark.asyncio
     async def test_handles_pagination_with_items_in_continuation(self) -> None:
-        """Should collect items from paginated continuation that includes items without catalogId."""
-        from src.handlers.list_catalogs_in_use import _async_get_owned_campaign_catalog_ids
+        """Should collect items from paginated continuation that includes items without profileId."""
+        from src.handlers.list_catalogs_in_use import _async_get_owned_profile_ids
 
         mock_table = AsyncMock()
         mock_table.query.side_effect = [
             {
-                "Items": [{"catalogId": "CATALOG#cat1"}],
+                "Items": [{"profileId": "PROFILE#prof1"}],
                 "LastEvaluatedKey": {"pk": "key1"},
             },
             {
-                "Items": [{"catalogId": "CATALOG#cat2"}, {}],  # Include item without catalogId
+                "Items": [{"profileId": "PROFILE#prof2"}, {}],  # Include item without profileId
             },
         ]
 
         mock_dynamodb = AsyncMock()
         mock_dynamodb.Table.return_value = mock_table
 
-        result = await _async_get_owned_campaign_catalog_ids(mock_dynamodb, "campaigns-table", "ACCOUNT#test-user")
+        result = await _async_get_owned_profile_ids(mock_dynamodb, "profiles-table", "ACCOUNT#test-user")
 
-        assert result == {"CATALOG#cat1", "CATALOG#cat2"}
+        assert result == ["PROFILE#prof1", "PROFILE#prof2"]
 
     @pytest.mark.asyncio
-    async def test_skips_items_without_catalog_id(self) -> None:
-        """Should skip items that don't have catalogId."""
-        from src.handlers.list_catalogs_in_use import _async_get_owned_campaign_catalog_ids
+    async def test_skips_items_without_profile_id(self) -> None:
+        """Should skip items that don't have profileId."""
+        from src.handlers.list_catalogs_in_use import _async_get_owned_profile_ids
 
         mock_table = AsyncMock()
         mock_table.query.return_value = {
             "Items": [
-                {"catalogId": "CATALOG#cat1"},
-                {},  # Missing catalogId
-                {"catalogId": None},  # None catalogId
+                {"profileId": "PROFILE#prof1"},
+                {},  # Missing profileId
+                {"profileId": None},  # None profileId
             ]
         }
 
         mock_dynamodb = AsyncMock()
         mock_dynamodb.Table.return_value = mock_table
 
-        result = await _async_get_owned_campaign_catalog_ids(mock_dynamodb, "campaigns-table", "ACCOUNT#test-user")
+        result = await _async_get_owned_profile_ids(mock_dynamodb, "profiles-table", "ACCOUNT#test-user")
 
-        assert result == {"CATALOG#cat1"}
+        assert result == ["PROFILE#prof1"]
 
 
 class TestAsyncGetSharedProfileIds:
@@ -248,7 +246,10 @@ class TestAsyncGetCampaignsForProfile:
             ]
         }
 
-        result = await _async_get_campaigns_for_profile(mock_table, "PROFILE#prof1")
+        mock_dynamodb = AsyncMock()
+        mock_dynamodb.Table.return_value = mock_table
+
+        result = await _async_get_campaigns_for_profile(mock_dynamodb, "campaigns-table", "PROFILE#prof1")
 
         assert result == {"CATALOG#cat1", "CATALOG#cat2"}
         mock_table.query.assert_called_once_with(
@@ -271,7 +272,10 @@ class TestAsyncGetCampaignsForProfile:
             ]
         }
 
-        result = await _async_get_campaigns_for_profile(mock_table, "PROFILE#prof1")
+        mock_dynamodb = AsyncMock()
+        mock_dynamodb.Table.return_value = mock_table
+
+        result = await _async_get_campaigns_for_profile(mock_dynamodb, "campaigns-table", "PROFILE#prof1")
 
         assert result == {"CATALOG#cat1", "CATALOG#cat2"}
 
@@ -291,9 +295,13 @@ class TestAsyncGetCampaignsForProfile:
             },
         ]
 
-        result = await _async_get_campaigns_for_profile(mock_table, "PROFILE#prof1")
+        mock_dynamodb = AsyncMock()
+        mock_dynamodb.Table.return_value = mock_table
+
+        result = await _async_get_campaigns_for_profile(mock_dynamodb, "campaigns-table", "PROFILE#prof1")
 
         assert result == {"CATALOG#cat1", "CATALOG#cat2"}
+        assert mock_table.query.call_count == 2
 
     @pytest.mark.asyncio
     async def test_handles_pagination_with_items_in_continuation(self) -> None:
@@ -311,7 +319,10 @@ class TestAsyncGetCampaignsForProfile:
             },
         ]
 
-        result = await _async_get_campaigns_for_profile(mock_table, "PROFILE#prof1")
+        mock_dynamodb = AsyncMock()
+        mock_dynamodb.Table.return_value = mock_table
+
+        result = await _async_get_campaigns_for_profile(mock_dynamodb, "campaigns-table", "PROFILE#prof1")
 
         assert result == {"CATALOG#cat1", "CATALOG#cat2"}
 
@@ -331,7 +342,10 @@ class TestAsyncGetCampaignsForProfile:
             },
         ]
 
-        result = await _async_get_campaigns_for_profile(mock_table, "PROFILE#prof1")
+        mock_dynamodb = AsyncMock()
+        mock_dynamodb.Table.return_value = mock_table
+
+        result = await _async_get_campaigns_for_profile(mock_dynamodb, "campaigns-table", "PROFILE#prof1")
 
         # Should only have cat1 from first page
         assert result == {"CATALOG#cat1"}
@@ -345,8 +359,8 @@ class TestAsyncGetSharedCampaignCatalogIds:
         """Should return empty set when no profile IDs provided."""
         from src.handlers.list_catalogs_in_use import _async_get_shared_campaign_catalog_ids
 
-        mock_table = AsyncMock()
-        result = await _async_get_shared_campaign_catalog_ids(mock_table, [])
+        mock_dynamodb = AsyncMock()
+        result = await _async_get_shared_campaign_catalog_ids(mock_dynamodb, "campaigns-table", [])
 
         assert result == set()
 
@@ -362,7 +376,12 @@ class TestAsyncGetSharedCampaignCatalogIds:
             {"Items": [{"catalogId": "CATALOG#cat2"}, {"catalogId": "CATALOG#cat3"}]},
         ]
 
-        result = await _async_get_shared_campaign_catalog_ids(mock_table, ["PROFILE#prof1", "PROFILE#prof2"])
+        mock_dynamodb = AsyncMock()
+        mock_dynamodb.Table.return_value = mock_table
+
+        result = await _async_get_shared_campaign_catalog_ids(
+            mock_dynamodb, "campaigns-table", ["PROFILE#prof1", "PROFILE#prof2"]
+        )
 
         # Should deduplicate cat2
         assert result == {"CATALOG#cat1", "CATALOG#cat2", "CATALOG#cat3"}
@@ -372,16 +391,25 @@ class TestAsyncGetSharedCampaignCatalogIds:
         """Should continue processing if one profile query fails."""
         from src.handlers.list_catalogs_in_use import _async_get_shared_campaign_catalog_ids
 
+        call_count = 0
+
         async def mock_query(**kwargs: object) -> Dict[str, List[Dict[str, str]]]:
-            profile_id = kwargs.get("ExpressionAttributeValues", {}).get(":profileId")
-            if profile_id == "PROFILE#prof2":
-                raise Exception("DynamoDB error")
-            return {"Items": [{"catalogId": "CATALOG#cat1"}]}
+            nonlocal call_count
+            call_count += 1
+            # First call succeeds, second raises an exception
+            if call_count == 1:
+                return {"Items": [{"catalogId": "CATALOG#cat1"}]}
+            raise Exception("DynamoDB error")
 
         mock_table = AsyncMock()
         mock_table.query.side_effect = mock_query
 
-        result = await _async_get_shared_campaign_catalog_ids(mock_table, ["PROFILE#prof1", "PROFILE#prof2"])
+        mock_dynamodb = AsyncMock()
+        mock_dynamodb.Table.return_value = mock_table
+
+        result = await _async_get_shared_campaign_catalog_ids(
+            mock_dynamodb, "campaigns-table", ["PROFILE#prof1", "PROFILE#prof2"]
+        )
 
         # Should return results from successful query
         assert result == {"CATALOG#cat1"}
@@ -392,31 +420,33 @@ class TestAsyncGetAllCatalogIds:
 
     @pytest.mark.asyncio
     async def test_runs_owned_and_shared_profiles_in_parallel(self) -> None:
-        """Should run owned catalogs and shared profiles queries concurrently."""
-        from src.handlers.list_catalogs_in_use import _async_get_all_catalog_ids
+        """Should run owned profiles and shared profiles queries concurrently."""
+        import importlib
+
+        import src.handlers.list_catalogs_in_use as module
+
+        # Reload to ensure clean state
+        importlib.reload(module)
+
+        mock_profiles_table = AsyncMock()
+        mock_profiles_table.query.return_value = {"Items": [{"profileId": "PROFILE#owned1"}]}
 
         mock_campaigns_table = AsyncMock()
+        mock_campaigns_table.query.return_value = {"Items": [{"catalogId": "CATALOG#cat1"}]}
+
         mock_shares_table = AsyncMock()
-
-        # Campaigns table queries
-        mock_campaigns_table.query.side_effect = [
-            # First call: ownerAccountId-index query (owned catalogs)
-            {"Items": [{"catalogId": "CATALOG#cat1"}, {"catalogId": "CATALOG#cat2"}]},
-            # Second call: profileId query for shared profile (shared catalogs)
-            {"Items": [{"catalogId": "CATALOG#cat3"}]},
-        ]
-
-        # Shares table query
-        mock_shares_table.query.return_value = {"Items": [{"profileId": "PROFILE#prof1"}]}
-
-        mock_dynamodb = AsyncMock()
+        mock_shares_table.query.return_value = {"Items": [{"profileId": "PROFILE#shared1"}]}
 
         async def mock_table(table_name: str) -> AsyncMock:
+            """Return the appropriate mock table based on name."""
+            if "profiles" in table_name:
+                return mock_profiles_table
             if "campaigns" in table_name:
                 return mock_campaigns_table
             return mock_shares_table
 
-        mock_dynamodb.Table.side_effect = mock_table
+        mock_dynamodb = AsyncMock()
+        mock_dynamodb.Table = mock_table
 
         mock_session = MagicMock()
         mock_context_manager = AsyncMock()
@@ -424,35 +454,54 @@ class TestAsyncGetAllCatalogIds:
         mock_context_manager.__aexit__.return_value = None
         mock_session.resource.return_value = mock_context_manager
 
-        with patch("src.handlers.list_catalogs_in_use.aioboto3.Session", return_value=mock_session):
-            owned, shared_profiles, shared_catalogs = await _async_get_all_catalog_ids("ACCOUNT#test-user")
+        # Patch directly on the module after reload
+        original_session = module.aioboto3.Session
+        module.aioboto3.Session = MagicMock(return_value=mock_session)
+        try:
+            owned, shared_profiles, shared_catalogs = await module._async_get_all_catalog_ids("ACCOUNT#test-user")
+        finally:
+            module.aioboto3.Session = original_session
 
-        assert owned == {"CATALOG#cat1", "CATALOG#cat2"}
-        assert shared_profiles == ["PROFILE#prof1"]
-        assert shared_catalogs == {"CATALOG#cat3"}
+        assert owned == {"CATALOG#cat1"}
+        assert shared_profiles == ["PROFILE#shared1"]
+        assert shared_catalogs == {"CATALOG#cat1"}
 
     @pytest.mark.asyncio
     async def test_returns_empty_shared_catalogs_when_no_shared_profiles(self) -> None:
         """Should return empty shared catalogs when user has no shared profiles."""
-        from src.handlers.list_catalogs_in_use import _async_get_all_catalog_ids
+        import importlib
+        import os
+
+        import src.handlers.list_catalogs_in_use as module
+
+        # Set environment variables to ensure correct table names
+        os.environ["PROFILES_TABLE_NAME"] = "test-profiles"
+        os.environ["CAMPAIGNS_TABLE_NAME"] = "test-campaigns"
+        os.environ["SHARES_TABLE_NAME"] = "test-shares"
+
+        # Reload to ensure clean state
+        importlib.reload(module)
+
+        # Create separate mock tables for each query
+        mock_profiles_table = AsyncMock()
+        mock_profiles_table.query.return_value = {"Items": [{"profileId": "PROFILE#owned1"}]}
 
         mock_campaigns_table = AsyncMock()
-        mock_shares_table = AsyncMock()
-
-        # Campaigns table: owned catalogs query
         mock_campaigns_table.query.return_value = {"Items": [{"catalogId": "CATALOG#cat1"}]}
 
-        # Shares table: no shares
-        mock_shares_table.query.return_value = {"Items": []}
-
-        mock_dynamodb = AsyncMock()
+        mock_shares_table = AsyncMock()
+        mock_shares_table.query.return_value = {"Items": []}  # No shares
 
         async def mock_table(table_name: str) -> AsyncMock:
+            """Return the appropriate mock table based on name."""
+            if "profiles" in table_name:
+                return mock_profiles_table
             if "campaigns" in table_name:
                 return mock_campaigns_table
             return mock_shares_table
 
-        mock_dynamodb.Table.side_effect = mock_table
+        mock_dynamodb = AsyncMock()
+        mock_dynamodb.Table = mock_table
 
         mock_session = MagicMock()
         mock_context_manager = AsyncMock()
@@ -460,8 +509,13 @@ class TestAsyncGetAllCatalogIds:
         mock_context_manager.__aexit__.return_value = None
         mock_session.resource.return_value = mock_context_manager
 
-        with patch("src.handlers.list_catalogs_in_use.aioboto3.Session", return_value=mock_session):
-            owned, shared_profiles, shared_catalogs = await _async_get_all_catalog_ids("ACCOUNT#test-user")
+        # Patch directly on the module after reload
+        original_session = module.aioboto3.Session
+        module.aioboto3.Session = MagicMock(return_value=mock_session)
+        try:
+            owned, shared_profiles, shared_catalogs = await module._async_get_all_catalog_ids("ACCOUNT#test-user")
+        finally:
+            module.aioboto3.Session = original_session
 
         assert owned == {"CATALOG#cat1"}
         assert shared_profiles == []

@@ -1483,14 +1483,14 @@ class TestAdminDeleteUser:
 
             assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
 
-    def test_self_deletion_prevented(
+    def test_self_deletion_prevented_via_lambda_handler(
         self,
         dynamodb_table: Any,
         admin_appsync_event: Dict[str, Any],
         lambda_context: Any,
         monkeypatch: Any,
     ) -> None:
-        """Test that admin cannot delete their own account."""
+        """Test that admin cannot delete their own account (via lambda_handler)."""
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
 
@@ -3122,3 +3122,1680 @@ class TestAdminSearchUser:
                 assert isinstance(result, list)
                 assert len(result) == 1
                 assert result[0]["accountId"] == "user-sub-123"
+
+    def test_search_user_by_account_prefix_not_found(
+        self,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """Test search with ACCOUNT# prefix when user not found in Cognito."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+
+        event = {
+            **admin_appsync_event,
+            "info": {"fieldName": "adminSearchUser"},
+            "arguments": {"query": "ACCOUNT#nonexistent-user-123"},
+        }
+
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+            with patch("src.handlers.admin_operations.tables"):
+                mock_client = MagicMock()
+                mock_get_client.return_value = mock_client
+
+                # Cognito lookup returns no users
+                mock_client.list_users.return_value = {"Users": []}
+
+                result = admin_search_user(event, lambda_context)
+
+                # Returns empty list when no user found
+                assert result == []
+
+    def test_search_user_by_uuid_not_found(
+        self,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """Test search with UUID when user not found in Cognito."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+
+        event = {
+            **admin_appsync_event,
+            "info": {"fieldName": "adminSearchUser"},
+            "arguments": {"query": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"},  # Valid UUID
+        }
+
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+            with patch("src.handlers.admin_operations.tables"):
+                mock_client = MagicMock()
+                mock_get_client.return_value = mock_client
+
+                # Cognito lookup returns no users
+                mock_client.list_users.return_value = {"Users": []}
+
+                result = admin_search_user(event, lambda_context)
+
+                # Returns empty list when no user found
+                assert result == []
+
+    def test_search_user_dynamodb_account_no_cognito_user(
+        self,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """Test when DynamoDB has account but Cognito user doesn't exist."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+
+        event = {
+            **admin_appsync_event,
+            "info": {"fieldName": "adminSearchUser"},
+            "arguments": {"query": "orphan"},
+        }
+
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+            with patch("src.handlers.admin_operations.tables") as mock_tables:
+                mock_client = MagicMock()
+                mock_get_client.return_value = mock_client
+
+                # DynamoDB has orphaned account (Cognito user deleted)
+                mock_tables.accounts.scan.return_value = {
+                    "Items": [
+                        {
+                            "accountId": "ACCOUNT#orphan-user",
+                            "email": "orphan@example.com",
+                        }
+                    ]
+                }
+
+                # Cognito lookup returns no user for sub, no email match either
+                mock_client.list_users.return_value = {"Users": []}
+
+                result = admin_search_user(event, lambda_context)
+
+                # Empty because Cognito user doesn't exist
+                assert result == []
+
+    def test_search_user_duplicate_deduplicated(
+        self,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """Test duplicate users from DynamoDB and Cognito are deduplicated."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+
+        event = {
+            **admin_appsync_event,
+            "info": {"fieldName": "adminSearchUser"},
+            "arguments": {"query": "test"},
+        }
+
+        mock_cognito_user = {
+            "Username": "test@example.com",
+            "Attributes": [
+                {"Name": "sub", "Value": "test-sub-123"},
+                {"Name": "email", "Value": "test@example.com"},
+            ],
+            "Enabled": True,
+            "UserStatus": "CONFIRMED",
+            "UserCreateDate": datetime(2024, 1, 1, tzinfo=timezone.utc),
+        }
+
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+            with patch("src.handlers.admin_operations.tables") as mock_tables:
+                mock_client = MagicMock()
+                mock_get_client.return_value = mock_client
+
+                # DynamoDB has the account
+                mock_tables.accounts.scan.return_value = {
+                    "Items": [
+                        {
+                            "accountId": "ACCOUNT#test-sub-123",
+                            "email": "test@example.com",
+                        }
+                    ]
+                }
+
+                # Both DynamoDB sub lookup and email prefix return same user
+                mock_client.list_users.return_value = {"Users": [mock_cognito_user]}
+                mock_client.admin_list_groups_for_user.return_value = {"Groups": []}
+                mock_tables.accounts.get_item.return_value = {}
+
+                result = admin_search_user(event, lambda_context)
+
+                # Should only return one result (deduplicated)
+                assert len(result) == 1
+                assert result[0]["accountId"] == "test-sub-123"
+
+    def test_search_user_cognito_only_user_added(
+        self,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """Test user found only via Cognito email search is added (branch 307)."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+
+        event = {
+            **admin_appsync_event,
+            "info": {"fieldName": "adminSearchUser"},
+            "arguments": {"query": "cognitoonly"},
+        }
+
+        # User only exists in Cognito (never logged in, no DynamoDB record)
+        mock_cognito_only_user = {
+            "Username": "cognitoonly@example.com",
+            "Attributes": [
+                {"Name": "sub", "Value": "cognito-only-sub"},
+                {"Name": "email", "Value": "cognitoonly@example.com"},
+            ],
+            "Enabled": True,
+            "UserStatus": "CONFIRMED",
+            "UserCreateDate": datetime(2024, 1, 1, tzinfo=timezone.utc),
+        }
+
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+            with patch("src.handlers.admin_operations.tables") as mock_tables:
+                mock_client = MagicMock()
+                mock_get_client.return_value = mock_client
+
+                # DynamoDB has NO matching accounts
+                mock_tables.accounts.scan.return_value = {"Items": []}
+
+                # Cognito email prefix search returns user (not found in DynamoDB)
+                mock_client.list_users.return_value = {"Users": [mock_cognito_only_user]}
+                mock_client.admin_list_groups_for_user.return_value = {"Groups": []}
+                mock_tables.accounts.get_item.return_value = {}
+
+                result = admin_search_user(event, lambda_context)
+
+                # Should return one result from Cognito only search
+                assert len(result) == 1
+                assert result[0]["accountId"] == "cognito-only-sub"
+                assert result[0]["email"] == "cognitoonly@example.com"
+
+    def test_search_user_malformed_account_id_skipped(
+        self,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """Test DynamoDB account without ACCOUNT# prefix is skipped (branch 293->290)."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+
+        event = {
+            **admin_appsync_event,
+            "info": {"fieldName": "adminSearchUser"},
+            "arguments": {"query": "malformed"},
+        }
+
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+            with patch("src.handlers.admin_operations.tables") as mock_tables:
+                mock_client = MagicMock()
+                mock_get_client.return_value = mock_client
+
+                # DynamoDB returns account without ACCOUNT# prefix (malformed data)
+                mock_tables.accounts.scan.return_value = {
+                    "Items": [
+                        {
+                            "accountId": "malformed-no-prefix",  # Missing ACCOUNT# prefix
+                            "email": "malformed@example.com",
+                        }
+                    ]
+                }
+
+                # Cognito returns nothing
+                mock_client.list_users.return_value = {"Users": []}
+
+                result = admin_search_user(event, lambda_context)
+
+                # Should return empty since malformed account is skipped
+                assert result == []
+
+    def test_search_user_dynamodb_pagination(
+        self,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """Test DynamoDB scan pagination in search."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+
+        event = {
+            **admin_appsync_event,
+            "info": {"fieldName": "adminSearchUser"},
+            "arguments": {"query": "multi"},
+        }
+
+        mock_cognito_user = {
+            "Username": "multi@example.com",
+            "Attributes": [
+                {"Name": "sub", "Value": "multi-sub"},
+                {"Name": "email", "Value": "multi@example.com"},
+            ],
+            "Enabled": True,
+            "UserStatus": "CONFIRMED",
+            "UserCreateDate": datetime(2024, 1, 1, tzinfo=timezone.utc),
+        }
+
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+            with patch("src.handlers.admin_operations.tables") as mock_tables:
+                mock_client = MagicMock()
+                mock_get_client.return_value = mock_client
+
+                # DynamoDB scan returns with pagination (LastEvaluatedKey)
+                mock_tables.accounts.scan.side_effect = [
+                    {
+                        "Items": [{"accountId": "ACCOUNT#multi-sub", "email": "multi@example.com"}],
+                        "LastEvaluatedKey": {"accountId": "ACCOUNT#multi-sub"},
+                    },
+                    {"Items": []},  # Second page is empty
+                ]
+
+                mock_client.list_users.return_value = {"Users": [mock_cognito_user]}
+                mock_client.admin_list_groups_for_user.return_value = {"Groups": []}
+                mock_tables.accounts.get_item.return_value = {}
+
+                result = admin_search_user(event, lambda_context)
+
+                assert len(result) == 1
+                # Verify pagination was used
+                assert mock_tables.accounts.scan.call_count == 2
+
+    def test_search_user_unexpected_exception(
+        self,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """Test exception handler for unexpected errors."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+
+        event = {
+            **admin_appsync_event,
+            "info": {"fieldName": "adminSearchUser"},
+            "arguments": {"query": "test"},
+        }
+
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+            with patch("src.handlers.admin_operations.tables"):
+                mock_get_client.side_effect = RuntimeError("Unexpected error")
+
+                with pytest.raises(AppError) as exc_info:
+                    admin_search_user(event, lambda_context)
+
+                assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+                assert "Failed to search user" in exc_info.value.message
+
+
+class TestAdminGetUserProfiles:
+    """Tests for admin_get_user_profiles function."""
+
+    def test_get_user_profiles_success(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        profiles_table: Any,
+        sample_account_id: str,
+    ) -> None:
+        """Test successful profile retrieval for a user."""
+        # Create a profile for the target user
+        target_account_id = "ACCOUNT#target-user-123"
+        profiles_table.put_item(
+            Item={
+                "ownerAccountId": target_account_id,
+                "profileId": "PROFILE#profile-1",
+                "sellerName": "Test Scout",
+                "createdAt": "2024-01-01T00:00:00Z",
+            }
+        )
+
+        admin_appsync_event["info"]["fieldName"] = "adminGetUserProfiles"
+        admin_appsync_event["arguments"] = {"accountId": "target-user-123"}
+
+        result = lambda_handler(admin_appsync_event, lambda_context)
+
+        assert isinstance(result, list)
+        assert len(result) == 1
+        assert result[0]["profileId"] == "PROFILE#profile-1"
+        assert result[0]["sellerName"] == "Test Scout"
+
+    def test_get_user_profiles_with_prefix(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        profiles_table: Any,
+    ) -> None:
+        """Test profile retrieval with ACCOUNT# prefix."""
+        target_account_id = "ACCOUNT#target-user-456"
+        profiles_table.put_item(
+            Item={
+                "ownerAccountId": target_account_id,
+                "profileId": "PROFILE#profile-2",
+                "sellerName": "Another Scout",
+            }
+        )
+
+        admin_appsync_event["info"]["fieldName"] = "adminGetUserProfiles"
+        admin_appsync_event["arguments"] = {"accountId": target_account_id}
+
+        result = lambda_handler(admin_appsync_event, lambda_context)
+
+        assert len(result) == 1
+        assert result[0]["profileId"] == "PROFILE#profile-2"
+
+    def test_get_user_profiles_empty(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+    ) -> None:
+        """Test empty profile list for user with no profiles."""
+        admin_appsync_event["info"]["fieldName"] = "adminGetUserProfiles"
+        admin_appsync_event["arguments"] = {"accountId": "nonexistent-user"}
+
+        result = lambda_handler(admin_appsync_event, lambda_context)
+
+        assert result == []
+
+    def test_get_user_profiles_missing_account_id(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+    ) -> None:
+        """Test error when accountId is missing."""
+        admin_appsync_event["info"]["fieldName"] = "adminGetUserProfiles"
+        admin_appsync_event["arguments"] = {}
+
+        with pytest.raises(AppError) as exc_info:
+            lambda_handler(admin_appsync_event, lambda_context)
+
+        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+
+    def test_get_user_profiles_non_admin(
+        self,
+        dynamodb_table: Any,
+        non_admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+    ) -> None:
+        """Test forbidden for non-admin user."""
+        non_admin_appsync_event["info"]["fieldName"] = "adminGetUserProfiles"
+        non_admin_appsync_event["arguments"] = {"accountId": "some-user"}
+
+        with pytest.raises(AppError) as exc_info:
+            lambda_handler(non_admin_appsync_event, lambda_context)
+
+        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
+
+
+class TestAdminGetUserCatalogs:
+    """Tests for admin_get_user_catalogs function."""
+
+    def test_get_user_catalogs_success(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        catalogs_table: Any,
+    ) -> None:
+        """Test successful catalog retrieval for a user."""
+        target_account_id = "ACCOUNT#target-user-789"
+        catalogs_table.put_item(
+            Item={
+                "ownerAccountId": target_account_id,
+                "catalogId": "CATALOG#cat-1",
+                "catalogName": "Test Catalog",
+                "catalogType": "USER",
+            }
+        )
+
+        admin_appsync_event["info"]["fieldName"] = "adminGetUserCatalogs"
+        admin_appsync_event["arguments"] = {"accountId": "target-user-789"}
+
+        result = lambda_handler(admin_appsync_event, lambda_context)
+
+        assert isinstance(result, list)
+        assert len(result) == 1
+        assert result[0]["catalogId"] == "CATALOG#cat-1"
+        assert result[0]["catalogName"] == "Test Catalog"
+
+    def test_get_user_catalogs_excludes_deleted(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        catalogs_table: Any,
+    ) -> None:
+        """Test that deleted catalogs are excluded."""
+        target_account_id = "ACCOUNT#target-user-del"
+        # Active catalog
+        catalogs_table.put_item(
+            Item={
+                "ownerAccountId": target_account_id,
+                "catalogId": "CATALOG#active",
+                "catalogName": "Active",
+            }
+        )
+        # Deleted catalog
+        catalogs_table.put_item(
+            Item={
+                "ownerAccountId": target_account_id,
+                "catalogId": "CATALOG#deleted",
+                "catalogName": "Deleted",
+                "isDeleted": True,
+            }
+        )
+
+        admin_appsync_event["info"]["fieldName"] = "adminGetUserCatalogs"
+        admin_appsync_event["arguments"] = {"accountId": "target-user-del"}
+
+        result = lambda_handler(admin_appsync_event, lambda_context)
+
+        assert len(result) == 1
+        assert result[0]["catalogId"] == "CATALOG#active"
+
+    def test_get_user_catalogs_missing_account_id(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+    ) -> None:
+        """Test error when accountId is missing."""
+        admin_appsync_event["info"]["fieldName"] = "adminGetUserCatalogs"
+        admin_appsync_event["arguments"] = {"accountId": ""}
+
+        with pytest.raises(AppError) as exc_info:
+            lambda_handler(admin_appsync_event, lambda_context)
+
+        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+
+    def test_get_user_catalogs_non_admin(
+        self,
+        dynamodb_table: Any,
+        non_admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+    ) -> None:
+        """Test forbidden for non-admin user."""
+        non_admin_appsync_event["info"]["fieldName"] = "adminGetUserCatalogs"
+        non_admin_appsync_event["arguments"] = {"accountId": "some-user"}
+
+        with pytest.raises(AppError) as exc_info:
+            lambda_handler(non_admin_appsync_event, lambda_context)
+
+        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
+
+
+class TestAdminGetUserCampaigns:
+    """Tests for admin_get_user_campaigns function."""
+
+    def test_get_user_campaigns_success(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        profiles_table: Any,
+        campaigns_table: Any,
+    ) -> None:
+        """Test successful campaign retrieval across profiles."""
+        target_account_id = "ACCOUNT#target-campaign-user"
+        profile_id = "PROFILE#profile-camp"
+
+        # Create profile
+        profiles_table.put_item(
+            Item={
+                "ownerAccountId": target_account_id,
+                "profileId": profile_id,
+                "sellerName": "Scout",
+            }
+        )
+        # Create campaign
+        campaigns_table.put_item(
+            Item={
+                "profileId": profile_id,
+                "campaignId": "CAMPAIGN#camp-1",
+                "campaignName": "Spring Sale",
+            }
+        )
+
+        admin_appsync_event["info"]["fieldName"] = "adminGetUserCampaigns"
+        admin_appsync_event["arguments"] = {"accountId": "target-campaign-user"}
+
+        result = lambda_handler(admin_appsync_event, lambda_context)
+
+        assert isinstance(result, list)
+        assert len(result) == 1
+        assert result[0]["campaignId"] == "CAMPAIGN#camp-1"
+        assert result[0]["campaignName"] == "Spring Sale"
+
+    def test_get_user_campaigns_multiple_profiles(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        profiles_table: Any,
+        campaigns_table: Any,
+    ) -> None:
+        """Test campaign retrieval from multiple profiles."""
+        target_account_id = "ACCOUNT#multi-profile-user"
+
+        # Create two profiles
+        profiles_table.put_item(
+            Item={
+                "ownerAccountId": target_account_id,
+                "profileId": "PROFILE#p1",
+                "sellerName": "Scout 1",
+            }
+        )
+        profiles_table.put_item(
+            Item={
+                "ownerAccountId": target_account_id,
+                "profileId": "PROFILE#p2",
+                "sellerName": "Scout 2",
+            }
+        )
+        # Create campaigns for each profile
+        campaigns_table.put_item(
+            Item={
+                "profileId": "PROFILE#p1",
+                "campaignId": "CAMPAIGN#c1",
+                "campaignName": "Campaign 1",
+            }
+        )
+        campaigns_table.put_item(
+            Item={
+                "profileId": "PROFILE#p2",
+                "campaignId": "CAMPAIGN#c2",
+                "campaignName": "Campaign 2",
+            }
+        )
+
+        admin_appsync_event["info"]["fieldName"] = "adminGetUserCampaigns"
+        admin_appsync_event["arguments"] = {"accountId": "multi-profile-user"}
+
+        result = lambda_handler(admin_appsync_event, lambda_context)
+
+        assert len(result) == 2
+        campaign_ids = {c["campaignId"] for c in result}
+        assert "CAMPAIGN#c1" in campaign_ids
+        assert "CAMPAIGN#c2" in campaign_ids
+
+    def test_get_user_campaigns_profile_without_profile_id(
+        self,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+    ) -> None:
+        """Test campaign retrieval skips profiles without profileId (coverage for line 1126->1124)."""
+        admin_appsync_event["info"]["fieldName"] = "adminGetUserCampaigns"
+        admin_appsync_event["arguments"] = {"accountId": "profile-no-id-user"}
+
+        with patch("src.handlers.admin_operations.tables") as mock_tables:
+            # Mock profiles query returning a malformed profile without profileId
+            mock_tables.profiles.query.return_value = {
+                "Items": [
+                    {
+                        "ownerAccountId": "ACCOUNT#profile-no-id-user",
+                        "profileId": "PROFILE#valid",
+                        "sellerName": "Valid Scout",
+                    },
+                    {
+                        "ownerAccountId": "ACCOUNT#profile-no-id-user",
+                        # No profileId field - should be skipped
+                        "sellerName": "Malformed Scout",
+                    },
+                ]
+            }
+
+            # Mock campaigns query for valid profile
+            mock_tables.campaigns.query.return_value = {
+                "Items": [
+                    {
+                        "profileId": "PROFILE#valid",
+                        "campaignId": "CAMPAIGN#valid-c",
+                        "campaignName": "Valid Campaign",
+                    }
+                ]
+            }
+
+            result = lambda_handler(admin_appsync_event, lambda_context)
+
+            # Should only have 1 campaign from the valid profile
+            assert len(result) == 1
+            assert result[0]["campaignId"] == "CAMPAIGN#valid-c"
+            # Should have only queried campaigns once (for valid profile)
+            assert mock_tables.campaigns.query.call_count == 1
+
+    def test_get_user_campaigns_empty(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+    ) -> None:
+        """Test empty campaign list for user with no profiles."""
+        admin_appsync_event["info"]["fieldName"] = "adminGetUserCampaigns"
+        admin_appsync_event["arguments"] = {"accountId": "user-no-campaigns"}
+
+        result = lambda_handler(admin_appsync_event, lambda_context)
+
+        assert result == []
+
+    def test_get_user_campaigns_missing_account_id(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+    ) -> None:
+        """Test error when accountId is missing."""
+        admin_appsync_event["info"]["fieldName"] = "adminGetUserCampaigns"
+        admin_appsync_event["arguments"] = {}
+
+        with pytest.raises(AppError) as exc_info:
+            lambda_handler(admin_appsync_event, lambda_context)
+
+        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+
+    def test_get_user_campaigns_non_admin(
+        self,
+        dynamodb_table: Any,
+        non_admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+    ) -> None:
+        """Test forbidden for non-admin user."""
+        non_admin_appsync_event["info"]["fieldName"] = "adminGetUserCampaigns"
+        non_admin_appsync_event["arguments"] = {"accountId": "some-user"}
+
+        with pytest.raises(AppError) as exc_info:
+            lambda_handler(non_admin_appsync_event, lambda_context)
+
+        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
+
+
+class TestAdminGetUserSharedCampaigns:
+    """Tests for admin_get_user_shared_campaigns function."""
+
+    def test_get_user_shared_campaigns_success(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        shared_campaigns_table: Any,
+    ) -> None:
+        """Test successful shared campaign retrieval."""
+        creator_id = "ACCOUNT#creator-123"
+        shared_campaigns_table.put_item(
+            Item={
+                "sharedCampaignCode": "ABC123",
+                "SK": "METADATA",
+                "createdBy": creator_id,
+                "createdAt": "2024-01-01T00:00:00Z",
+                "catalogId": "CATALOG#cat-1",
+                "campaignName": "Shared Campaign",
+            }
+        )
+
+        admin_appsync_event["info"]["fieldName"] = "adminGetUserSharedCampaigns"
+        admin_appsync_event["arguments"] = {"accountId": "creator-123"}
+
+        result = lambda_handler(admin_appsync_event, lambda_context)
+
+        assert isinstance(result, list)
+        assert len(result) == 1
+        assert result[0]["sharedCampaignCode"] == "ABC123"
+
+    def test_get_user_shared_campaigns_empty(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+    ) -> None:
+        """Test empty list when user has no shared campaigns."""
+        admin_appsync_event["info"]["fieldName"] = "adminGetUserSharedCampaigns"
+        admin_appsync_event["arguments"] = {"accountId": "no-shared-user"}
+
+        result = lambda_handler(admin_appsync_event, lambda_context)
+
+        assert result == []
+
+    def test_get_user_shared_campaigns_missing_account_id(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+    ) -> None:
+        """Test error when accountId is missing."""
+        admin_appsync_event["info"]["fieldName"] = "adminGetUserSharedCampaigns"
+        admin_appsync_event["arguments"] = {}
+
+        with pytest.raises(AppError) as exc_info:
+            lambda_handler(admin_appsync_event, lambda_context)
+
+        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+
+    def test_get_user_shared_campaigns_non_admin(
+        self,
+        dynamodb_table: Any,
+        non_admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+    ) -> None:
+        """Test forbidden for non-admin user."""
+        non_admin_appsync_event["info"]["fieldName"] = "adminGetUserSharedCampaigns"
+        non_admin_appsync_event["arguments"] = {"accountId": "some-user"}
+
+        with pytest.raises(AppError) as exc_info:
+            lambda_handler(non_admin_appsync_event, lambda_context)
+
+        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
+
+
+class TestAdminGetProfileShares:
+    """Tests for admin_get_profile_shares function."""
+
+    def test_get_profile_shares_success(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        shares_table: Any,
+    ) -> None:
+        """Test successful share retrieval."""
+        profile_id = "PROFILE#shared-profile"
+        shares_table.put_item(
+            Item={
+                "profileId": profile_id,
+                "targetAccountId": "ACCOUNT#user-1",
+                "permissions": {"READ"},
+            }
+        )
+        shares_table.put_item(
+            Item={
+                "profileId": profile_id,
+                "targetAccountId": "ACCOUNT#user-2",
+                "permissions": {"READ", "WRITE"},
+            }
+        )
+
+        admin_appsync_event["info"]["fieldName"] = "adminGetProfileShares"
+        admin_appsync_event["arguments"] = {"profileId": "shared-profile"}
+
+        result = lambda_handler(admin_appsync_event, lambda_context)
+
+        assert isinstance(result, list)
+        assert len(result) == 2
+
+    def test_get_profile_shares_with_prefix(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        shares_table: Any,
+    ) -> None:
+        """Test with PROFILE# prefix."""
+        profile_id = "PROFILE#prefixed"
+        shares_table.put_item(
+            Item={
+                "profileId": profile_id,
+                "targetAccountId": "ACCOUNT#user-1",
+                "permissions": {"READ"},
+            }
+        )
+
+        admin_appsync_event["info"]["fieldName"] = "adminGetProfileShares"
+        admin_appsync_event["arguments"] = {"profileId": profile_id}
+
+        result = lambda_handler(admin_appsync_event, lambda_context)
+
+        assert len(result) == 1
+
+    def test_get_profile_shares_empty(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+    ) -> None:
+        """Test empty list for profile with no shares."""
+        admin_appsync_event["info"]["fieldName"] = "adminGetProfileShares"
+        admin_appsync_event["arguments"] = {"profileId": "no-shares-profile"}
+
+        result = lambda_handler(admin_appsync_event, lambda_context)
+
+        assert result == []
+
+    def test_get_profile_shares_missing_profile_id(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+    ) -> None:
+        """Test error when profileId is missing."""
+        admin_appsync_event["info"]["fieldName"] = "adminGetProfileShares"
+        admin_appsync_event["arguments"] = {}
+
+        with pytest.raises(AppError) as exc_info:
+            lambda_handler(admin_appsync_event, lambda_context)
+
+        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+
+    def test_get_profile_shares_permissions_set_conversion(
+        self,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+    ) -> None:
+        """Test that permissions set is converted to list for JSON serialization."""
+        admin_appsync_event["info"]["fieldName"] = "adminGetProfileShares"
+        admin_appsync_event["arguments"] = {"profileId": "test-profile"}
+
+        with patch("src.handlers.admin_operations.tables") as mock_tables:
+            # Return shares where permissions is a Python set
+            mock_tables.shares.query.return_value = {
+                "Items": [
+                    {
+                        "profileId": "PROFILE#test-profile",
+                        "targetAccountId": "ACCOUNT#user-1",
+                        "permissions": {"READ", "WRITE"},  # Python set, not list
+                    }
+                ]
+            }
+
+            result = lambda_handler(admin_appsync_event, lambda_context)
+
+            assert len(result) == 1
+            # Permissions should be converted to a list
+            assert isinstance(result[0]["permissions"], list)
+            assert set(result[0]["permissions"]) == {"READ", "WRITE"}
+
+    def test_get_profile_shares_permissions_already_list(
+        self,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+    ) -> None:
+        """Test that permissions already as list is not modified (branch coverage)."""
+        admin_appsync_event["info"]["fieldName"] = "adminGetProfileShares"
+        admin_appsync_event["arguments"] = {"profileId": "test-profile"}
+
+        with patch("src.handlers.admin_operations.tables") as mock_tables:
+            # Return shares where permissions is already a list (not a set)
+            mock_tables.shares.query.return_value = {
+                "Items": [
+                    {
+                        "profileId": "PROFILE#test-profile",
+                        "targetAccountId": "ACCOUNT#user-1",
+                        "permissions": ["READ", "WRITE"],  # Already a list
+                    }
+                ]
+            }
+
+            result = lambda_handler(admin_appsync_event, lambda_context)
+
+            assert len(result) == 1
+            # Permissions should still be a list
+            assert isinstance(result[0]["permissions"], list)
+            assert result[0]["permissions"] == ["READ", "WRITE"]
+
+    def test_get_profile_shares_non_admin(
+        self,
+        dynamodb_table: Any,
+        non_admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+    ) -> None:
+        """Test forbidden for non-admin user."""
+        non_admin_appsync_event["info"]["fieldName"] = "adminGetProfileShares"
+        non_admin_appsync_event["arguments"] = {"profileId": "some-profile"}
+
+        with pytest.raises(AppError) as exc_info:
+            lambda_handler(non_admin_appsync_event, lambda_context)
+
+        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
+
+
+class TestAdminDeleteShare:
+    """Tests for admin_delete_share function."""
+
+    def test_delete_share_success(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        shares_table: Any,
+    ) -> None:
+        """Test successful share deletion."""
+        profile_id = "PROFILE#del-share"
+        target_id = "ACCOUNT#target"
+        shares_table.put_item(
+            Item={
+                "profileId": profile_id,
+                "targetAccountId": target_id,
+                "permissions": {"READ"},
+            }
+        )
+
+        admin_appsync_event["info"]["fieldName"] = "adminDeleteShare"
+        admin_appsync_event["arguments"] = {
+            "profileId": "del-share",
+            "targetAccountId": "target",
+        }
+
+        result = lambda_handler(admin_appsync_event, lambda_context)
+
+        assert result is True
+
+        # Verify deletion
+        response = shares_table.get_item(Key={"profileId": profile_id, "targetAccountId": target_id})
+        assert "Item" not in response
+
+    def test_delete_share_with_prefixes(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        shares_table: Any,
+    ) -> None:
+        """Test deletion with prefixes already included."""
+        profile_id = "PROFILE#del-share-2"
+        target_id = "ACCOUNT#target-2"
+        shares_table.put_item(
+            Item={
+                "profileId": profile_id,
+                "targetAccountId": target_id,
+                "permissions": {"WRITE"},
+            }
+        )
+
+        admin_appsync_event["info"]["fieldName"] = "adminDeleteShare"
+        admin_appsync_event["arguments"] = {
+            "profileId": profile_id,
+            "targetAccountId": target_id,
+        }
+
+        result = lambda_handler(admin_appsync_event, lambda_context)
+
+        assert result is True
+
+    def test_delete_share_missing_params(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+    ) -> None:
+        """Test error when required params are missing."""
+        admin_appsync_event["info"]["fieldName"] = "adminDeleteShare"
+        admin_appsync_event["arguments"] = {"profileId": "some-id"}
+
+        with pytest.raises(AppError) as exc_info:
+            lambda_handler(admin_appsync_event, lambda_context)
+
+        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+
+    def test_delete_share_non_admin(
+        self,
+        dynamodb_table: Any,
+        non_admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+    ) -> None:
+        """Test forbidden for non-admin user."""
+        non_admin_appsync_event["info"]["fieldName"] = "adminDeleteShare"
+        non_admin_appsync_event["arguments"] = {
+            "profileId": "some",
+            "targetAccountId": "user",
+        }
+
+        with pytest.raises(AppError) as exc_info:
+            lambda_handler(non_admin_appsync_event, lambda_context)
+
+        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
+
+
+class TestAdminUpdateCampaignSharedCode:
+    """Tests for admin_update_campaign_shared_code function."""
+
+    def test_update_campaign_shared_code_success(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        campaigns_table: Any,
+    ) -> None:
+        """Test successful shared code update."""
+        campaigns_table.put_item(
+            Item={
+                "profileId": "PROFILE#p1",
+                "campaignId": "CAMPAIGN#c1",
+                "campaignName": "Test Campaign",
+            }
+        )
+
+        admin_appsync_event["info"]["fieldName"] = "adminUpdateCampaignSharedCode"
+        admin_appsync_event["arguments"] = {
+            "campaignId": "c1",
+            "sharedCampaignCode": "NEWCODE",
+        }
+
+        result = lambda_handler(admin_appsync_event, lambda_context)
+
+        assert result["sharedCampaignCode"] == "NEWCODE"
+        assert "updatedAt" in result
+
+    def test_update_campaign_shared_code_remove(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        campaigns_table: Any,
+    ) -> None:
+        """Test removing shared code (set to None)."""
+        campaigns_table.put_item(
+            Item={
+                "profileId": "PROFILE#p2",
+                "campaignId": "CAMPAIGN#c2",
+                "campaignName": "Test Campaign 2",
+                "sharedCampaignCode": "OLDCODE",
+            }
+        )
+
+        admin_appsync_event["info"]["fieldName"] = "adminUpdateCampaignSharedCode"
+        admin_appsync_event["arguments"] = {
+            "campaignId": "c2",
+            "sharedCampaignCode": None,
+        }
+
+        result = lambda_handler(admin_appsync_event, lambda_context)
+
+        assert result["sharedCampaignCode"] is None
+
+    def test_update_campaign_shared_code_with_prefix(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        campaigns_table: Any,
+    ) -> None:
+        """Test with CAMPAIGN# prefix."""
+        campaigns_table.put_item(
+            Item={
+                "profileId": "PROFILE#p3",
+                "campaignId": "CAMPAIGN#c3",
+                "campaignName": "Test Campaign 3",
+            }
+        )
+
+        admin_appsync_event["info"]["fieldName"] = "adminUpdateCampaignSharedCode"
+        admin_appsync_event["arguments"] = {
+            "campaignId": "CAMPAIGN#c3",
+            "sharedCampaignCode": "CODE123",
+        }
+
+        result = lambda_handler(admin_appsync_event, lambda_context)
+
+        assert result["sharedCampaignCode"] == "CODE123"
+
+    def test_update_campaign_shared_code_not_found(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+    ) -> None:
+        """Test error when campaign not found."""
+        admin_appsync_event["info"]["fieldName"] = "adminUpdateCampaignSharedCode"
+        admin_appsync_event["arguments"] = {
+            "campaignId": "nonexistent",
+            "sharedCampaignCode": "CODE",
+        }
+
+        with pytest.raises(AppError) as exc_info:
+            lambda_handler(admin_appsync_event, lambda_context)
+
+        assert exc_info.value.error_code == ErrorCode.NOT_FOUND
+
+    def test_update_campaign_shared_code_missing_campaign_id(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+    ) -> None:
+        """Test error when campaignId is missing."""
+        admin_appsync_event["info"]["fieldName"] = "adminUpdateCampaignSharedCode"
+        admin_appsync_event["arguments"] = {"sharedCampaignCode": "CODE"}
+
+        with pytest.raises(AppError) as exc_info:
+            lambda_handler(admin_appsync_event, lambda_context)
+
+        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+
+    def test_update_campaign_shared_code_non_admin(
+        self,
+        dynamodb_table: Any,
+        non_admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+    ) -> None:
+        """Test forbidden for non-admin user."""
+        non_admin_appsync_event["info"]["fieldName"] = "adminUpdateCampaignSharedCode"
+        non_admin_appsync_event["arguments"] = {
+            "campaignId": "c1",
+            "sharedCampaignCode": "CODE",
+        }
+
+        with pytest.raises(AppError) as exc_info:
+            lambda_handler(non_admin_appsync_event, lambda_context)
+
+        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
+
+
+class TestAdminOperationExceptionHandlers:
+    """Tests for exception handler paths in admin operations."""
+
+    def test_get_user_profiles_unexpected_error(
+        self,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+    ) -> None:
+        """Test exception handler in admin_get_user_profiles."""
+        admin_appsync_event["info"]["fieldName"] = "adminGetUserProfiles"
+        admin_appsync_event["arguments"] = {"accountId": "test-user"}
+
+        with patch("src.handlers.admin_operations.tables") as mock_tables:
+            mock_tables.profiles.query.side_effect = RuntimeError("Unexpected failure")
+
+            with pytest.raises(AppError) as exc_info:
+                lambda_handler(admin_appsync_event, lambda_context)
+
+            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+            assert "Failed to get user profiles" in exc_info.value.message
+
+    def test_get_user_catalogs_unexpected_error(
+        self,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+    ) -> None:
+        """Test exception handler in admin_get_user_catalogs."""
+        admin_appsync_event["info"]["fieldName"] = "adminGetUserCatalogs"
+        admin_appsync_event["arguments"] = {"accountId": "test-user"}
+
+        with patch("src.handlers.admin_operations.tables") as mock_tables:
+            mock_tables.catalogs.query.side_effect = RuntimeError("Unexpected failure")
+
+            with pytest.raises(AppError) as exc_info:
+                lambda_handler(admin_appsync_event, lambda_context)
+
+            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+            assert "Failed to get user catalogs" in exc_info.value.message
+
+    def test_get_user_campaigns_unexpected_error(
+        self,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+    ) -> None:
+        """Test exception handler in admin_get_user_campaigns."""
+        admin_appsync_event["info"]["fieldName"] = "adminGetUserCampaigns"
+        admin_appsync_event["arguments"] = {"accountId": "test-user"}
+
+        with patch("src.handlers.admin_operations.tables") as mock_tables:
+            mock_tables.profiles.query.side_effect = RuntimeError("Unexpected failure")
+
+            with pytest.raises(AppError) as exc_info:
+                lambda_handler(admin_appsync_event, lambda_context)
+
+            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+            assert "Failed to get user campaigns" in exc_info.value.message
+
+    def test_get_user_shared_campaigns_unexpected_error(
+        self,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+    ) -> None:
+        """Test exception handler in admin_get_user_shared_campaigns."""
+        admin_appsync_event["info"]["fieldName"] = "adminGetUserSharedCampaigns"
+        admin_appsync_event["arguments"] = {"accountId": "test-user"}
+
+        with patch("src.handlers.admin_operations.tables") as mock_tables:
+            mock_tables.shared_campaigns.query.side_effect = RuntimeError("Unexpected failure")
+
+            with pytest.raises(AppError) as exc_info:
+                lambda_handler(admin_appsync_event, lambda_context)
+
+            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+            assert "Failed to get user shared campaigns" in exc_info.value.message
+
+    def test_get_profile_shares_unexpected_error(
+        self,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+    ) -> None:
+        """Test exception handler in admin_get_profile_shares."""
+        admin_appsync_event["info"]["fieldName"] = "adminGetProfileShares"
+        admin_appsync_event["arguments"] = {"profileId": "test-profile"}
+
+        with patch("src.handlers.admin_operations.tables") as mock_tables:
+            mock_tables.shares.query.side_effect = RuntimeError("Unexpected failure")
+
+            with pytest.raises(AppError) as exc_info:
+                lambda_handler(admin_appsync_event, lambda_context)
+
+            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+            assert "Failed to get profile shares" in exc_info.value.message
+
+    def test_delete_share_unexpected_error(
+        self,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+    ) -> None:
+        """Test exception handler in admin_delete_share."""
+        admin_appsync_event["info"]["fieldName"] = "adminDeleteShare"
+        admin_appsync_event["arguments"] = {
+            "profileId": "test-profile",
+            "targetAccountId": "target-user",
+        }
+
+        with patch("src.handlers.admin_operations.tables") as mock_tables:
+            mock_tables.shares.delete_item.side_effect = RuntimeError("Unexpected failure")
+
+            with pytest.raises(AppError) as exc_info:
+                lambda_handler(admin_appsync_event, lambda_context)
+
+            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+            assert "Failed to delete share" in exc_info.value.message
+
+    def test_update_campaign_shared_code_unexpected_error(
+        self,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+    ) -> None:
+        """Test exception handler in admin_update_campaign_shared_code."""
+        admin_appsync_event["info"]["fieldName"] = "adminUpdateCampaignSharedCode"
+        admin_appsync_event["arguments"] = {
+            "campaignId": "test-campaign",
+            "sharedCampaignCode": "CODE123",
+        }
+
+        with patch("src.handlers.admin_operations.tables") as mock_tables:
+            mock_tables.campaigns.query.side_effect = RuntimeError("Unexpected failure")
+
+            with pytest.raises(AppError) as exc_info:
+                lambda_handler(admin_appsync_event, lambda_context)
+
+            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+            assert "Failed to update campaign shared code" in exc_info.value.message
+
+    def test_search_user_account_without_name(
+        self,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """Test _build_admin_user when DynamoDB account has no name fields (branch coverage)."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+
+        event = {
+            **admin_appsync_event,
+            "info": {"fieldName": "adminSearchUser"},
+            "arguments": {"query": "noname"},
+        }
+
+        mock_cognito_user = {
+            "Username": "noname@example.com",
+            "Attributes": [
+                {"Name": "sub", "Value": "noname-sub"},
+                {"Name": "email", "Value": "noname@example.com"},
+            ],
+            "Enabled": True,
+            "UserStatus": "CONFIRMED",
+            "UserCreateDate": datetime(2024, 1, 1, tzinfo=timezone.utc),
+        }
+
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+            with patch("src.handlers.admin_operations.tables") as mock_tables:
+                mock_client = MagicMock()
+                mock_get_client.return_value = mock_client
+
+                # DynamoDB scan returns account
+                mock_tables.accounts.scan.return_value = {
+                    "Items": [{"accountId": "ACCOUNT#noname-sub", "email": "noname@example.com"}]
+                }
+
+                # Cognito finds user
+                mock_client.list_users.return_value = {"Users": [mock_cognito_user]}
+                mock_client.admin_list_groups_for_user.return_value = {"Groups": []}
+
+                # DynamoDB account has NO givenName or familyName
+                mock_tables.accounts.get_item.return_value = {
+                    "Item": {
+                        "accountId": "ACCOUNT#noname-sub",
+                        # No givenName or familyName - tests branch 448->453
+                    }
+                }
+
+                result = admin_search_user(event, lambda_context)
+
+                assert len(result) == 1
+                # displayName should be None when no name fields exist
+                assert result[0]["displayName"] is None
+
+    def test_search_user_build_admin_user_get_item_fails(
+        self,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """Test _build_admin_user handles ClientError from get_item (branch coverage 450-451)."""
+        from botocore.exceptions import ClientError
+
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+
+        event = {
+            **admin_appsync_event,
+            "info": {"fieldName": "adminSearchUser"},
+            "arguments": {"query": "getfail"},
+        }
+
+        mock_cognito_user = {
+            "Username": "getfail@example.com",
+            "Attributes": [
+                {"Name": "sub", "Value": "getfail-sub"},
+                {"Name": "email", "Value": "getfail@example.com"},
+            ],
+            "Enabled": True,
+            "UserStatus": "CONFIRMED",
+            "UserCreateDate": datetime(2024, 1, 1, tzinfo=timezone.utc),
+        }
+
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+            with patch("src.handlers.admin_operations.tables") as mock_tables:
+                mock_client = MagicMock()
+                mock_get_client.return_value = mock_client
+
+                # DynamoDB scan returns account
+                mock_tables.accounts.scan.return_value = {
+                    "Items": [{"accountId": "ACCOUNT#getfail-sub", "email": "getfail@example.com"}]
+                }
+
+                # Cognito finds user
+                mock_client.list_users.return_value = {"Users": [mock_cognito_user]}
+                mock_client.admin_list_groups_for_user.return_value = {"Groups": []}
+
+                # DynamoDB get_item fails with ClientError (branch 450-451)
+                mock_tables.accounts.get_item.side_effect = ClientError(
+                    {"Error": {"Code": "InternalServerError", "Message": "DynamoDB error"}},
+                    "GetItem",
+                )
+
+                result = admin_search_user(event, lambda_context)
+
+                # Should still return user, but without displayName
+                assert len(result) == 1
+                assert result[0]["displayName"] is None
+                assert result[0]["email"] == "getfail@example.com"
+
+    def test_search_user_cognito_sub_search_fails(
+        self,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """Test _search_user_by_sub handles ClientError gracefully."""
+        from botocore.exceptions import ClientError
+
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+
+        event = {
+            **admin_appsync_event,
+            "info": {"fieldName": "adminSearchUser"},
+            "arguments": {"query": "test"},
+        }
+
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+            with patch("src.handlers.admin_operations.tables") as mock_tables:
+                mock_client = MagicMock()
+                mock_get_client.return_value = mock_client
+
+                # DynamoDB returns account with sub
+                mock_tables.accounts.scan.return_value = {
+                    "Items": [{"accountId": "ACCOUNT#test-sub-123", "email": "test@example.com"}]
+                }
+
+                # Cognito sub search fails with ClientError
+                mock_client.list_users.side_effect = ClientError(
+                    {"Error": {"Code": "InternalErrorException", "Message": "Service error"}},
+                    "ListUsers",
+                )
+
+                # Should return empty list since sub search fails
+                result = admin_search_user(event, lambda_context)
+                assert result == []
+
+    def test_search_user_cognito_email_prefix_search_fails(
+        self,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """Test _search_users_in_cognito_by_email_prefix handles ClientError gracefully."""
+        from botocore.exceptions import ClientError
+
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+
+        event = {
+            **admin_appsync_event,
+            "info": {"fieldName": "adminSearchUser"},
+            "arguments": {"query": "test"},
+        }
+
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+            with patch("src.handlers.admin_operations.tables") as mock_tables:
+                mock_client = MagicMock()
+                mock_get_client.return_value = mock_client
+
+                # DynamoDB returns no accounts
+                mock_tables.accounts.scan.return_value = {"Items": []}
+
+                # Cognito email prefix search fails with ClientError
+                mock_client.list_users.side_effect = ClientError(
+                    {"Error": {"Code": "InternalErrorException", "Message": "Service error"}},
+                    "ListUsers",
+                )
+
+                # Should return empty list since cognito search fails
+                result = admin_search_user(event, lambda_context)
+                assert result == []
+
+    def test_search_user_dynamodb_items_not_matching(
+        self,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """Test DynamoDB scan filters out non-matching items (branch 351->343)."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+
+        event = {
+            **admin_appsync_event,
+            "info": {"fieldName": "adminSearchUser"},
+            "arguments": {"query": "findme"},
+        }
+
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+            with patch("src.handlers.admin_operations.tables") as mock_tables:
+                mock_client = MagicMock()
+                mock_get_client.return_value = mock_client
+
+                # DynamoDB returns items where only some match
+                mock_tables.accounts.scan.return_value = {
+                    "Items": [
+                        {"accountId": "ACCOUNT#no-match-1", "email": "other@example.com"},  # No match
+                        {"accountId": "ACCOUNT#match", "email": "findme@example.com"},  # Match
+                        {"accountId": "ACCOUNT#no-match-2", "email": "different@example.com"},  # No match
+                    ]
+                }
+
+                mock_cognito_user = {
+                    "Username": "findme@example.com",
+                    "Attributes": [
+                        {"Name": "sub", "Value": "match"},
+                        {"Name": "email", "Value": "findme@example.com"},
+                    ],
+                    "Enabled": True,
+                    "UserStatus": "CONFIRMED",
+                    "UserCreateDate": datetime(2024, 1, 1, tzinfo=timezone.utc),
+                }
+
+                # Cognito finds only the matching user
+                mock_client.list_users.return_value = {"Users": [mock_cognito_user]}
+                mock_client.admin_list_groups_for_user.return_value = {"Groups": []}
+                mock_tables.accounts.get_item.return_value = {}
+
+                result = admin_search_user(event, lambda_context)
+
+                # Should only have 1 result (the one that matches)
+                assert len(result) == 1
+                assert result[0]["email"] == "findme@example.com"
+
+    def test_search_user_dynamodb_scan_client_error(
+        self,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """Test _search_accounts_in_dynamodb handles ClientError gracefully."""
+        from botocore.exceptions import ClientError
+
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+
+        event = {
+            **admin_appsync_event,
+            "info": {"fieldName": "adminSearchUser"},
+            "arguments": {"query": "test"},
+        }
+
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+            with patch("src.handlers.admin_operations.tables") as mock_tables:
+                mock_client = MagicMock()
+                mock_get_client.return_value = mock_client
+
+                # DynamoDB scan fails with ClientError
+                mock_tables.accounts.scan.side_effect = ClientError(
+                    {"Error": {"Code": "InternalErrorException", "Message": "Service error"}},
+                    "Scan",
+                )
+
+                # Cognito returns empty
+                mock_client.list_users.return_value = {"Users": []}
+
+                # Should return empty list since DynamoDB search fails but cognito still works
+                result = admin_search_user(event, lambda_context)
+                assert result == []
+
+    def test_search_user_max_scan_limit_reached(
+        self,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """Test DynamoDB scan stops at max_scan limit."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+
+        event = {
+            **admin_appsync_event,
+            "info": {"fieldName": "adminSearchUser"},
+            "arguments": {"query": "test"},
+        }
+
+        # Create 1001 items to exceed max_scan of 1000
+        large_items_batch = [{"accountId": f"ACCOUNT#sub-{i}", "email": f"test{i}@example.com"} for i in range(1001)]
+
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+            with patch("src.handlers.admin_operations.tables") as mock_tables:
+                mock_client = MagicMock()
+                mock_get_client.return_value = mock_client
+
+                # DynamoDB returns all items in one batch (simulating reaching limit)
+                mock_tables.accounts.scan.return_value = {
+                    "Items": large_items_batch,
+                    "LastEvaluatedKey": {"accountId": "ACCOUNT#sub-1000"},  # More pages exist
+                }
+
+                # Return cognito user for each DynamoDB account
+                mock_cognito_user = {
+                    "Username": "test@example.com",
+                    "Attributes": [
+                        {"Name": "sub", "Value": "test-sub"},
+                        {"Name": "email", "Value": "test@example.com"},
+                    ],
+                    "Enabled": True,
+                    "UserStatus": "CONFIRMED",
+                    "UserCreateDate": datetime(2024, 1, 1, tzinfo=timezone.utc),
+                }
+                mock_client.list_users.return_value = {"Users": [mock_cognito_user]}
+                mock_client.admin_list_groups_for_user.return_value = {"Groups": []}
+                mock_tables.accounts.get_item.return_value = {}
+
+                admin_search_user(event, lambda_context)
+
+                # Should stop after first batch since scanned_count (1001) >= max_scan (1000)
+                assert mock_tables.accounts.scan.call_count == 1
+
+    def test_search_user_max_results_reached_early(
+        self,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """Test DynamoDB scan stops when max_results (50) is reached."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+
+        event = {
+            **admin_appsync_event,
+            "info": {"fieldName": "adminSearchUser"},
+            "arguments": {"query": "match"},
+        }
+
+        # Create items that all match the query
+        matching_items = [
+            {"accountId": f"ACCOUNT#sub-{i}", "email": f"match{i}@example.com"}
+            for i in range(60)  # More than max_results of 50
+        ]
+
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+            with patch("src.handlers.admin_operations.tables") as mock_tables:
+                mock_client = MagicMock()
+                mock_get_client.return_value = mock_client
+
+                # DynamoDB returns all items
+                mock_tables.accounts.scan.return_value = {
+                    "Items": matching_items,
+                    "LastEvaluatedKey": {"accountId": "ACCOUNT#sub-59"},
+                }
+
+                def mock_list_users(*args: Any, **kwargs: Any) -> Dict[str, Any]:
+                    filter_str = kwargs.get("Filter", "")
+                    if "sub" in filter_str:
+                        # Extract sub value from filter
+                        import re
+
+                        match = re.search(r'sub = "([^"]+)"', filter_str)
+                        if match:
+                            sub_val = match.group(1)
+                            return {
+                                "Users": [
+                                    {
+                                        "Username": f"{sub_val}@example.com",
+                                        "Attributes": [
+                                            {"Name": "sub", "Value": sub_val},
+                                            {"Name": "email", "Value": f"{sub_val}@example.com"},
+                                        ],
+                                        "Enabled": True,
+                                        "UserStatus": "CONFIRMED",
+                                        "UserCreateDate": datetime(2024, 1, 1, tzinfo=timezone.utc),
+                                    }
+                                ]
+                            }
+                    return {"Users": []}
+
+                mock_client.list_users.side_effect = mock_list_users
+                mock_client.admin_list_groups_for_user.return_value = {"Groups": []}
+                mock_tables.accounts.get_item.return_value = {}
+
+                result = admin_search_user(event, lambda_context)
+
+                # Should have 50 results (max_results limit)
+                assert len(result) == 50

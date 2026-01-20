@@ -70,6 +70,34 @@ def invites_table(dynamodb_table: Any) -> Any:
 
 
 @pytest.fixture
+def profiles_table(dynamodb_table: Any) -> Any:
+    """Get the profiles DynamoDB table."""
+    dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
+    return dynamodb.Table("kernelworx-profiles-v2-ue1-dev")
+
+
+@pytest.fixture
+def campaigns_table(dynamodb_table: Any) -> Any:
+    """Get the campaigns DynamoDB table."""
+    dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
+    return dynamodb.Table("kernelworx-campaigns-v2-ue1-dev")
+
+
+@pytest.fixture
+def catalogs_table(dynamodb_table: Any) -> Any:
+    """Get the catalogs DynamoDB table."""
+    dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
+    return dynamodb.Table("kernelworx-catalogs-ue1-dev")
+
+
+@pytest.fixture
+def shared_campaigns_table(dynamodb_table: Any) -> Any:
+    """Get the shared campaigns DynamoDB table."""
+    dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
+    return dynamodb.Table("kernelworx-shared-campaigns-ue1-dev")
+
+
+@pytest.fixture
 def s3_bucket(aws_credentials: None) -> Generator[Any, None, None]:
     """Create mock S3 bucket for report exports."""
     with mock_aws():

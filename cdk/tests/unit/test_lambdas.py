@@ -199,8 +199,8 @@ class TestCreateLambdaFunctions:
             mock_exports_bucket,
         )
 
-        # Should create 18 Lambda functions (excluding the layer)
-        assert mock_function_class.call_count == 18
+        # Should create 19 Lambda functions (excluding the layer)
+        assert mock_function_class.call_count == 19
 
     @patch("cdk.lambdas.lambda_.Function")
     @patch("cdk.lambdas.lambda_.LayerVersion")
