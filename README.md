@@ -1,4 +1,4 @@
-# 🍿 Popcorn Sales Manager
+# 🍿 KernelWorx
 
 A volunteer-run web application to help Scouts and families manage in-person popcorn sales for fundraising.
 
