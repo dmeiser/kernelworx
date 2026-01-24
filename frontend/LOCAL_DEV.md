@@ -68,13 +68,13 @@ sudo update-ca-certificates
 - Browse to "Trusted Root Certification Authorities"
 - Click Finish
 
-### 4. Deploy CDK changes to update Cognito
+### 4. Deploy OpenTofu changes to update Cognito
 
-The CDK stack now includes `https://local.dev.appworx.app:5173` in the Cognito callback URLs. Deploy the changes:
+The OpenTofu configuration includes `https://local.dev.appworx.app:5173` in the Cognito callback URLs. Deploy the changes:
 
 ```bash
-cd cdk
-./deploy.sh
+cd tofu/environments/dev
+tofu apply
 ```
 
 This updates the Cognito User Pool Client to allow redirects to your local domain.

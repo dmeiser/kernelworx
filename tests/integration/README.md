@@ -10,8 +10,8 @@ Integration tests validate AppSync resolvers by making real GraphQL requests aga
 
 1. **Deploy to dev environment:**
    ```bash
-   cd cdk
-   cdk deploy --profile dev
+   cd tofu/environments/dev
+   tofu apply
    ```
 
 2. **Install dependencies:**

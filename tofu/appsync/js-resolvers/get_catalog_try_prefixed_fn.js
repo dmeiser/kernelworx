@@ -1,0 +1,56 @@
+import { util } from '@aws-appsync/utils';
+
+export function request(ctx) {
+    // If a catalog is already in stash, skip lookup — return harmless NOOP GetItem to avoid returning null from a data-source-bound function
+    if (ctx.stash && ctx.stash.catalog) {
+        return {
+            operation: 'GetItem',
+            key: util.dynamodb.toMapValues({ catalogId: 'NOOP' }),
+            consistentRead: true
+        };
+    }
+
+    const rawCatalogId = ctx.stash.catalogId || (ctx.args && ctx.args.input && ctx.args.input.catalogId);
+    if (!rawCatalogId) {
+        util.error('Catalog ID not available for prefixed lookup', 'BadRequest');
+    }
+
+    // Normalize to DB format: ensure it starts with CATALOG#
+    const catalogId = (typeof rawCatalogId === 'string' && rawCatalogId.startsWith('CATALOG#')) ? rawCatalogId : 'CATALOG#' + rawCatalogId;
+    // Save normalized id back to stash so downstream functions see the DB key
+    ctx.stash.catalogId = catalogId;
+    console.log('GetCatalogTryPrefixed: Looking up catalogId:', catalogId);
+    // Direct GetItem on catalogs table
+    return {
+        operation: 'GetItem',
+        key: util.dynamodb.toMapValues({ catalogId: catalogId }),
+        consistentRead: true
+    };
+}
+
+export function response(ctx) {
+    // If we didn't find an item, prefer a previously found result over propagating an error from a NOOP or empty operation
+    if (!ctx.result) {
+        console.log('GetCatalogTryPrefixed: No catalog found for id:', ctx.stash.catalogId);
+        if (ctx.prev && ctx.prev.result) {
+            console.log('GetCatalogTryPrefixed: previous function returned a catalog, using that result');
+            ctx.stash.catalog = ctx.prev.result;
+            return ctx.prev.result;
+        }
+        // No previous result — propagate any runtime error if present, otherwise raise NotFound
+        if (ctx.error) {
+            util.error(ctx.error.message, ctx.error.type);
+        }
+        util.error('Catalog not found for id: ' + ctx.stash.catalogId, 'NotFound');
+    }
+
+    // If there's an error despite having a result, surface it
+    if (ctx.error) {
+        util.error(ctx.error.message, ctx.error.type);
+    }
+
+    console.log('GetCatalogTryPrefixed: Found catalog with', ctx.result.products ? ctx.result.products.length : 0, 'products');
+    // Store catalog in stash for CreateOrderFn
+    ctx.stash.catalog = ctx.result;
+    return ctx.result;
+}

@@ -34,7 +34,7 @@ Popcorn Sales Manager is an open-source, serverless application designed for Sco
 - **Amazon CloudFront** (CDN)
 
 ### Infrastructure
-- **AWS CDK** (Python) for infrastructure as code
+- **OpenTofu** for infrastructure as code
 - **uv** for Python package management
 - **npm** for frontend tooling
 
@@ -97,17 +97,18 @@ npm run typecheck
 npm run test -- --coverage
 ```
 
-### CDK Deployment
+### OpenTofu Deployment
 
 ```bash
-# Synthesize CloudFormation template
-cdk synth
+# Initialize (first time only)
+cd tofu/environments/dev
+tofu init
 
 # Preview changes
-cdk diff
+tofu plan
 
 # Deploy to dev environment
-cdk deploy --profile dev
+tofu apply
 ```
 
 ## Architecture

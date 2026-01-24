@@ -8,6 +8,7 @@ Creates:
 
 from typing import Callable, Dict, List, Optional
 
+from aws_cdk import RemovalPolicy
 from aws_cdk import aws_dynamodb as dynamodb
 from aws_cdk import aws_iam as iam
 from aws_cdk import aws_s3 as s3
@@ -80,6 +81,9 @@ def create_lambda_execution_role(
         )
     )
 
+    # Preserve role when stack is deleted
+    lambda_execution_role.apply_removal_policy(RemovalPolicy.RETAIN)
+
     return lambda_execution_role
 
 
@@ -123,6 +127,9 @@ def create_appsync_service_role(
                     resources=[f"{table.table_arn}/index/*"],
                 )
             )
+
+    # Preserve role when stack is deleted
+    appsync_service_role.apply_removal_policy(RemovalPolicy.RETAIN)
 
     return appsync_service_role
 

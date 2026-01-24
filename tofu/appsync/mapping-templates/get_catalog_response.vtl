@@ -1,0 +1,10 @@
+#if($ctx.error)
+    $util.error($ctx.error.message, $ctx.error.type)
+#end
+#if(!$ctx.result || $ctx.result.isEmpty())
+    $util.toJson(null)
+#else
+    ## READ ACCESS: Anyone can view catalog by ID (no authorization check)
+    ## Note: ownerAccountId is removed from GraphQL schema but still in DynamoDB for WRITE auth
+    $util.toJson($ctx.result)
+#end

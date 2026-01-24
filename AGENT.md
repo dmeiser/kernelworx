@@ -19,7 +19,7 @@ This file contains repository-specific agent rules. Agents should follow these w
 **Tech Stack**:
 - **Frontend**: React + TypeScript + Vite + MUI + Apollo Client + react-router
 - **Backend**: AWS AppSync (GraphQL) + Lambda (Python) + DynamoDB
-- **Infrastructure**: AWS CDK (Python)
+- **Infrastructure**: OpenTofu (Infrastructure as Code)
 - **Auth**: Amazon Cognito (User Pools with Google/Facebook social login)
 - **Storage**: Amazon S3 (static assets, report exports)
 - **Notifications**: Amazon SES/SNS (email)
@@ -334,7 +334,7 @@ pipeline = api.create_resolver(
 
 **Add new Lambda function**:
 1. Create function in `src/lambdas/`
-2. Add to CDK stack with appropriate IAM permissions
+2. Add to OpenTofu lambda module with appropriate IAM permissions
 3. Create unit tests with 100% coverage using `moto` mocks
 4. Run formatters: `isort` → `ruff format` → `mypy`
 5. Deploy to dev environment and test

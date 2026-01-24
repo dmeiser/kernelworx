@@ -1,0 +1,44 @@
+## Validate products array is not empty
+#if($ctx.args.input.products.size() == 0)
+    $util.error("Products array cannot be empty", "ValidationException")
+#end
+#set($catalogId = "CATALOG#$util.autoId()")
+#set($now = $util.time.nowISO8601())
+## Add productId to each product
+#set($productsWithIds = [])
+#foreach($product in $ctx.args.input.products)
+    #set($productId = "PRODUCT#$util.autoId()")
+    #set($productWithId = {
+        "productId": $productId,
+        "productName": $product.productName,
+        "price": $product.price,
+        "sortOrder": $product.sortOrder
+    })
+    #if($product.description)
+        $util.qr($productWithId.put("description", $product.description))
+    #end
+    $util.qr($productsWithIds.add($productWithId))
+#end
+## Convert isPublic boolean to string for GSI
+#if($ctx.args.input.isPublic)
+    #set($isPublicStr = "true")
+#else
+    #set($isPublicStr = "false")
+#end
+{
+    "version": "2017-02-28",
+    "operation": "PutItem",
+    "key": {
+        "catalogId": $util.dynamodb.toDynamoDBJson($catalogId)
+    },
+    "attributeValues": {
+        "catalogName": $util.dynamodb.toDynamoDBJson($ctx.args.input.catalogName),
+        "catalogType": $util.dynamodb.toDynamoDBJson("USER_CREATED"),
+        "ownerAccountId": $util.dynamodb.toDynamoDBJson("ACCOUNT#$ctx.identity.sub"),
+        "isPublic": $util.dynamodb.toDynamoDBJson($isPublicStr),
+        "isPublicStr": $util.dynamodb.toDynamoDBJson($isPublicStr),
+        "products": $util.dynamodb.toDynamoDBJson($productsWithIds),
+        "createdAt": $util.dynamodb.toDynamoDBJson($now),
+        "updatedAt": $util.dynamodb.toDynamoDBJson($now)
+    }
+}

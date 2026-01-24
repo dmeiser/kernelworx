@@ -13,7 +13,7 @@ This module creates all Lambda functions used by the application:
 import os
 from typing import TYPE_CHECKING, Any
 
-from aws_cdk import Duration
+from aws_cdk import Duration, RemovalPolicy
 from aws_cdk import aws_iam as iam
 from aws_cdk import aws_lambda as lambda_
 from constructs import Construct
@@ -407,6 +407,34 @@ def create_lambda_functions(
         role=lambda_execution_role,
         environment=lambda_env,  # USER_POOL_ID added separately in stack
     )
+
+    # Apply RemovalPolicy.RETAIN to all Lambda functions and layer
+    # This ensures resources are preserved when the CloudFormation stack is deleted
+    all_functions = [
+        list_my_shares_fn,
+        list_catalogs_in_use_fn,
+        create_profile_fn,
+        request_campaign_report_fn,
+        unit_reporting_fn,
+        list_unit_catalogs_fn,
+        list_unit_campaign_catalogs_fn,
+        campaign_operations_fn,
+        delete_profile_orders_cascade_fn,
+        update_my_account_fn,
+        delete_my_account_fn,
+        transfer_ownership_fn,
+        post_auth_fn,
+        pre_signup_fn,
+        request_qr_upload_fn,
+        confirm_qr_upload_fn,
+        generate_qr_code_presigned_url_fn,
+        delete_qr_code_fn,
+        validate_payment_method_fn,
+        admin_operations_fn,
+    ]
+    for fn in all_functions:
+        fn.apply_removal_policy(RemovalPolicy.RETAIN)
+    shared_layer.apply_removal_policy(RemovalPolicy.RETAIN)
 
     return {
         "shared_layer": shared_layer,

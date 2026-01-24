@@ -1,0 +1,532 @@
+# Popcorn Sales Manager GraphQL Schema
+# Based on Planning Documents/graphql_schema_v1.md
+
+# ============================================================================
+# Scalars
+# ============================================================================
+
+scalar AWSDateTime
+scalar AWSDate
+scalar AWSEmail
+scalar AWSPhone
+scalar AWSURL
+scalar AWSJSON
+
+# ============================================================================
+# Enums
+# ============================================================================
+
+enum PermissionType {
+  READ
+  WRITE
+}
+
+enum CatalogType {
+  ADMIN_MANAGED
+  USER_CREATED
+}
+
+# ============================================================================
+# Core Types
+# ============================================================================
+
+type PaymentMethod {
+  name: String!
+  qrCodeUrl: String
+}
+
+type S3UploadInfo {
+  uploadUrl: String!
+  fields: AWSJSON!
+  s3Key: String!
+}
+
+type Account {
+  accountId: ID!
+  email: AWSEmail!
+  givenName: String
+  familyName: String
+  city: String
+  state: String
+  unitType: String
+  unitNumber: Int
+  preferences: AWSJSON
+  createdAt: AWSDateTime!
+  updatedAt: AWSDateTime!
+}
+
+# Admin-only type: Cognito user info merged with DynamoDB Account data
+type AdminUser {
+  accountId: ID!           # Cognito sub
+  email: AWSEmail!
+  displayName: String      # From DynamoDB Account (givenName + familyName)
+  status: String!          # Cognito status: CONFIRMED, UNCONFIRMED, FORCE_CHANGE_PASSWORD, etc.
+  enabled: Boolean!        # Whether the Cognito user is enabled
+  emailVerified: Boolean!  # Whether email is verified in Cognito
+  isAdmin: Boolean!        # Whether user is in ADMIN group
+  createdAt: AWSDateTime!  # Cognito user creation date
+  lastModifiedAt: AWSDateTime  # Cognito last modified date
+}
+
+type AdminUserConnection {
+  users: [AdminUser!]!
+  nextToken: String
+}
+
+type SellerProfile {
+  profileId: ID!
+  ownerAccountId: ID!
+  sellerName: String!
+  createdAt: AWSDateTime!
+  updatedAt: AWSDateTime!
+  isOwner: Boolean!
+  permissions: [PermissionType!]
+  latestCampaign: Campaign  # Field resolver: Most recent campaign for this profile
+}
+
+type Campaign {
+  campaignId: ID!
+  profileId: ID!
+  campaignName: String!
+  campaignYear: Int!
+  startDate: AWSDateTime
+  endDate: AWSDateTime
+  catalogId: ID!
+  unitType: String          # NEW: Optional unit information
+  unitNumber: Int           # NEW: Required when unitType provided
+  city: String              # NEW: Required when unitType provided (for unit uniqueness)
+  state: String             # NEW: Required when unitType provided (for unit uniqueness)
+  sharedCampaignCode: String       # NEW: If campaign was created from shared campaign
+  isActive: Boolean!        # NEW: Whether campaign is active (default true)
+  createdAt: AWSDateTime!
+  updatedAt: AWSDateTime!
+  catalog: Catalog
+  totalOrders: Int
+  totalRevenue: Float
+}
+
+type Catalog @aws_cognito_user_pools {
+  catalogId: ID!
+  catalogName: String!
+  catalogType: CatalogType!
+  isPublic: Boolean!
+  isDeleted: Boolean
+  products: [Product!]!
+  createdAt: AWSDateTime!
+  updatedAt: AWSDateTime!
+}
+
+type Product @aws_cognito_user_pools {
+  productId: ID!
+  productName: String!
+  description: String
+  price: Float!
+  sortOrder: Int!
+}
+
+type SharedCampaign {
+  sharedCampaignCode: String!
+  catalogId: ID!
+  catalog: Catalog!
+  campaignName: String!
+  campaignYear: Int!
+  startDate: AWSDate
+  endDate: AWSDate
+  unitType: String!
+  unitNumber: Int!
+  city: String!
+  state: String!
+  createdBy: ID!
+  createdByName: String!
+  creatorMessage: String
+  description: String
+  isActive: Boolean!
+  createdAt: AWSDateTime!
+}
+
+type Order {
+  orderId: ID!
+  profileId: ID!
+  campaignId: ID!
+  customerName: String!
+  customerPhone: String
+  customerAddress: Address
+  orderDate: AWSDateTime!
+  paymentMethod: String!
+  lineItems: [LineItem!]!
+  totalAmount: Float!
+  notes: String
+  createdAt: AWSDateTime!
+  updatedAt: AWSDateTime!
+}
+
+type LineItem {
+  productId: ID!
+  productName: String!
+  quantity: Int!
+  pricePerUnit: Float!
+  subtotal: Float!
+}
+
+type Address {
+  street: String
+  city: String
+  state: String
+  zipCode: String
+}
+
+type Share {
+  shareId: ID!
+  profileId: ID!
+  targetAccountId: ID!
+  targetAccount: Account
+  permissions: [PermissionType!]!
+  createdAt: AWSDateTime!
+  createdByAccountId: ID!
+}
+
+# Lightweight share info (deprecated - use SharedProfile from listMyShares)
+type ShareInfo {
+  profileId: ID!
+  permissions: [PermissionType!]!
+}
+
+# Full profile data with share permissions - returned by listMyShares
+type SharedProfile {
+  profileId: ID!
+  ownerAccountId: ID!
+  sellerName: String!
+  unitType: String
+  unitNumber: Int
+  createdAt: AWSDateTime!
+  updatedAt: AWSDateTime!
+  isOwner: Boolean!
+  permissions: [PermissionType!]!
+  latestCampaign: Campaign
+}
+
+type ProfileInvite {
+  inviteCode: ID!
+  profileId: ID!
+  permissions: [PermissionType!]!
+  expiresAt: AWSDateTime!
+  createdAt: AWSDateTime!
+  createdByAccountId: ID!
+}
+
+type UnitReport {
+  unitType: String!
+  unitNumber: Int!
+  campaignName: String!
+  campaignYear: Int!
+  sellers: [UnitSellerSummary!]!
+  totalSales: Float!
+  totalOrders: Int!
+}
+
+type UnitSellerSummary {
+  profileId: ID!
+  sellerName: String!
+  totalSales: Float!
+  orderCount: Int!
+  orders: [UnitOrderDetail!]!
+}
+
+type UnitOrderDetail {
+  orderId: ID!
+  customerName: String!
+  orderDate: AWSDateTime!
+  totalAmount: Float!
+  lineItems: [LineItem!]!
+}
+
+type CampaignReport {
+  reportId: ID!
+  campaignId: ID!
+  profileId: ID!
+  reportUrl: AWSURL
+  status: String!
+  createdAt: AWSDateTime!
+  expiresAt: AWSDateTime
+}
+
+# ============================================================================
+# Input Types
+# ============================================================================
+
+input CreateSellerProfileInput {
+  sellerName: String!
+}
+
+input UpdateSellerProfileInput {
+  profileId: ID!
+  sellerName: String!
+}
+
+input CreateCampaignInput {
+  profileId: ID!
+  campaignName: String
+  campaignYear: Int
+  startDate: AWSDateTime
+  endDate: AWSDateTime
+  catalogId: ID
+  unitType: String
+  unitNumber: Int
+  city: String
+  state: String
+  sharedCampaignCode: String
+  shareWithCreator: Boolean
+}
+
+input UpdateCampaignInput {
+  campaignId: ID!
+  campaignName: String
+  campaignYear: Int
+  startDate: AWSDateTime
+  endDate: AWSDateTime
+  catalogId: ID
+  isActive: Boolean
+}
+
+input CreateCatalogInput {
+  catalogName: String!
+  isPublic: Boolean!
+  products: [ProductInput!]!
+}
+
+input ProductInput {
+  productName: String!
+  description: String
+  price: Float!
+  sortOrder: Int!
+}
+
+input CreateOrderInput {
+  profileId: ID!
+  campaignId: ID!
+  customerName: String!
+  customerPhone: String
+  customerAddress: AddressInput
+  orderDate: AWSDateTime!
+  paymentMethod: String!
+  lineItems: [LineItemInput!]!
+  notes: String
+}
+
+input UpdateOrderInput {
+  orderId: ID!
+  customerName: String
+  customerPhone: String
+  customerAddress: AddressInput
+  orderDate: AWSDateTime
+  paymentMethod: String
+  lineItems: [LineItemInput!]
+  notes: String
+}
+
+input LineItemInput {
+  productId: ID!
+  quantity: Int!
+}
+
+input AddressInput {
+  street: String
+  city: String
+  state: String
+  zipCode: String
+}
+
+input CreateSharedCampaignInput {
+  catalogId: ID!
+  campaignName: String!
+  campaignYear: Int!
+  startDate: AWSDate
+  endDate: AWSDate
+  unitType: String!
+  unitNumber: Int!
+  city: String!
+  state: String!
+  creatorMessage: String
+  description: String
+}
+
+input UpdateSharedCampaignInput {
+  sharedCampaignCode: String!
+  creatorMessage: String
+  description: String
+  isActive: Boolean
+}
+
+input CreateProfileInviteInput {
+  profileId: ID!
+  permissions: [PermissionType!]!
+  expiresInDays: Int
+}
+
+input RedeemProfileInviteInput {
+  inviteCode: ID!
+}
+
+input ShareProfileDirectInput {
+  profileId: ID!
+  targetAccountEmail: AWSEmail!
+  permissions: [PermissionType!]!
+}
+
+input RevokeShareInput {
+  profileId: ID!
+  targetAccountId: ID!
+}
+
+input TransferProfileOwnershipInput {
+  profileId: ID!
+  newOwnerAccountId: ID!
+}
+
+input UpdateMyAccountInput {
+  givenName: String
+  familyName: String
+  city: String
+  state: String
+  unitType: String
+  unitNumber: Int
+}
+
+input RequestCampaignReportInput {
+  campaignId: ID!
+  format: String
+}
+
+# ============================================================================
+# Query Root
+# ============================================================================
+
+type Query {
+  # Account queries
+  getMyAccount: Account!
+  
+  # Profile queries
+  getProfile(profileId: ID!): SellerProfile
+  listMyProfiles: [SellerProfile!]!
+  listMyShares: [SharedProfile!]!
+  
+  # Campaign queries
+  getCampaign(campaignId: ID!): Campaign
+  listCampaignsByProfile(profileId: ID!): [Campaign!]!
+  
+  # Catalog queries
+  getCatalog(catalogId: ID!): Catalog @aws_cognito_user_pools
+  listManagedCatalogs: [Catalog!]! @aws_cognito_user_pools
+  listMyCatalogs: [Catalog!]!
+  listCatalogsInUse: [ID!]!  # Returns catalog IDs used by any campaign the user has access to
+  
+  # Order queries
+  getOrder(orderId: ID!): Order
+  listOrdersByCampaign(campaignId: ID!): [Order!]!
+  listOrdersByProfile(profileId: ID!): [Order!]!
+  
+  # Share queries
+  listSharesByProfile(profileId: ID!): [Share!]!
+  listInvitesByProfile(profileId: ID!): [ProfileInvite!]!
+  
+  # Shared campaign queries
+  getSharedCampaign(sharedCampaignCode: String!): SharedCampaign
+  listMySharedCampaigns: [SharedCampaign!]!
+  findSharedCampaigns(unitType: String!, unitNumber: Int!, city: String!, state: String!, campaignName: String!, campaignYear: Int!): [SharedCampaign!]!
+  
+  # Unit reporting
+  listUnitCatalogs(unitType: String!, unitNumber: Int!, campaignName: String!, campaignYear: Int!): [Catalog!]!
+  listUnitCampaignCatalogs(unitType: String!, unitNumber: Int!, city: String!, state: String!, campaignName: String!, campaignYear: Int!): [Catalog!]!
+  getUnitReport(unitType: String!, unitNumber: Int!, city: String, state: String, campaignName: String!, campaignYear: Int!, catalogId: ID!): UnitReport
+  
+  # Payment method queries
+  myPaymentMethods: [PaymentMethod!]!
+  paymentMethodsForProfile(profileId: ID!): [PaymentMethod!]!
+
+  # Admin queries (requires ADMIN Cognito group)
+  adminListUsers(limit: Int, nextToken: String): AdminUserConnection!
+  adminSearchUser(query: String!): [AdminUser!]!
+  adminGetUserProfiles(accountId: ID!): [SellerProfile!]!
+  adminGetUserCatalogs(accountId: ID!): [Catalog!]!
+  adminGetUserCampaigns(accountId: ID!): [Campaign!]!
+  adminGetUserSharedCampaigns(accountId: ID!): [SharedCampaign!]!
+  adminGetProfileShares(profileId: ID!): [Share!]!
+}
+
+# ============================================================================
+# Mutation Root
+# ============================================================================
+
+type Mutation {
+  # Account mutations
+  updateMyAccount(input: UpdateMyAccountInput!): Account!
+  updateMyPreferences(preferences: AWSJSON!): Account!
+  deleteMyAccount: Boolean!
+  
+  # Profile mutations
+  createSellerProfile(input: CreateSellerProfileInput!): SellerProfile!
+  updateSellerProfile(input: UpdateSellerProfileInput!): SellerProfile!
+  deleteSellerProfile(profileId: ID!): Boolean!
+  
+  # Campaign mutations
+  createCampaign(input: CreateCampaignInput!): Campaign!
+  updateCampaign(input: UpdateCampaignInput!): Campaign!
+  deleteCampaign(campaignId: ID!): Boolean!
+  
+  # Catalog mutations
+  createCatalog(input: CreateCatalogInput!): Catalog!
+  updateCatalog(catalogId: ID!, input: CreateCatalogInput!): Catalog!
+  deleteCatalog(catalogId: ID!): Boolean!
+  
+  # Order mutations
+  createOrder(input: CreateOrderInput!): Order!
+  updateOrder(input: UpdateOrderInput!): Order!
+  deleteOrder(orderId: ID!): Boolean!
+  
+  # Shared campaign mutations
+  createSharedCampaign(input: CreateSharedCampaignInput!): SharedCampaign!
+  
+  updateSharedCampaign(input: UpdateSharedCampaignInput!): SharedCampaign!
+  
+  deleteSharedCampaign(sharedCampaignCode: String!): Boolean!
+  
+  # Sharing mutations
+  createProfileInvite(input: CreateProfileInviteInput!): ProfileInvite!
+  deleteProfileInvite(profileId: ID!, inviteCode: ID!): Boolean!
+  redeemProfileInvite(input: RedeemProfileInviteInput!): Share!
+  shareProfileDirect(input: ShareProfileDirectInput!): Share!
+  revokeShare(input: RevokeShareInput!): Boolean!
+  transferProfileOwnership(input: TransferProfileOwnershipInput!): SellerProfile!
+  
+  # Report generation
+  requestCampaignReport(input: RequestCampaignReportInput!): CampaignReport!
+  
+  # Payment method mutations
+  createPaymentMethod(name: String!): PaymentMethod!
+  updatePaymentMethod(currentName: String!, newName: String!): PaymentMethod!
+  deletePaymentMethod(name: String!): Boolean!
+  requestPaymentMethodQRCodeUpload(paymentMethodName: String!): S3UploadInfo!
+  confirmPaymentMethodQRCodeUpload(paymentMethodName: String!, s3Key: String!): PaymentMethod!
+  deletePaymentMethodQRCode(paymentMethodName: String!): Boolean!
+  
+  # Admin mutations (requires ADMIN Cognito group)
+  adminResetUserPassword(email: AWSEmail!): Boolean!
+  adminDeleteUser(accountId: ID!): Boolean!
+  adminDeleteUserOrders(accountId: ID!): Int!
+  adminDeleteUserCampaigns(accountId: ID!): Int!
+  adminDeleteUserShares(accountId: ID!): Int!
+  adminDeleteUserProfiles(accountId: ID!): Int!
+  adminDeleteUserCatalogs(accountId: ID!): Int!
+  adminDeleteShare(profileId: ID!, targetAccountId: ID!): Boolean!
+  adminUpdateCampaignSharedCode(campaignId: ID!, sharedCampaignCode: String): Campaign!
+  createManagedCatalog(input: CreateCatalogInput!): Catalog!
+}
+
+# ============================================================================
+# Schema Root
+# ============================================================================
+
+schema {
+  query: Query
+  mutation: Mutation
+}

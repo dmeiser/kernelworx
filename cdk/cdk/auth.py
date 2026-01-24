@@ -324,9 +324,7 @@ def _configure_social_providers(
     """
     from cdk.resource_lookup import lookup_identity_provider  # local utility for AWS lookups
 
-    supported_providers: list[cognito.UserPoolClientIdentityProvider] = [
-        cognito.UserPoolClientIdentityProvider.COGNITO
-    ]
+    supported_providers: list[cognito.UserPoolClientIdentityProvider] = [cognito.UserPoolClientIdentityProvider.COGNITO]
 
     # Attempt to resolve existing user pool id from context (imported pools)
     env_name = scope.node.try_get_context("environment") or "dev"

@@ -19,9 +19,9 @@ Audience: contributors working on Popcorn Sales Manager. Focuses on day-to-day c
 - Coverage bars: app code is 100% (src, frontend); CDK infra is excluded from coverage enforcement.
 
 ### Deployment
-- **Backend/CDK (dev only)**:
-  - From `cdk/`: `./deploy.sh`
-  - Preview first when making infra changes: `cdk diff` (respect dev-only deployment rule).
+- **Backend/OpenTofu (dev only)**:
+  - From `tofu/environments/dev/`: `tofu apply`
+  - Preview first when making infra changes: `tofu plan` (respect dev-only deployment rule).
 - **Frontend**:
   - From `frontend/`: `./deploy.sh` (ensure build succeeds locally with `npm run build`).
 
@@ -158,73 +158,70 @@ All GraphQL types are centralized and should be imported from the types module:
 import type { SellerProfile, Campaign, Order, Catalog } from '../types';
 ```
 
-### CDK Infrastructure Patterns
+### OpenTofu Infrastructure Patterns
 
-#### Helper Utilities (`cdk/cdk/helpers.py`)
+#### Helper Utilities (`tofu/modules/*/`)
 
-Use the centralized helpers for resource naming and configuration:
+Use centralized modules for resource configuration:
 
-```python
-from .helpers import (
-    get_region_abbrev,
-    get_context_bool,
-    get_domain_names,
-    make_resource_namer,
-)
-
-# Get region abbreviation for naming
-region_abbrev = get_region_abbrev()  # e.g., "ue1"
-
-# Get boolean from CDK context
-enabled = get_context_bool(self, "feature_flag", default=True)
-
-# Get environment-specific domain names
-domains = get_domain_names("kernelworx.app", "dev")
-# Returns: {"site_domain": "dev.kernelworx.app", "api_domain": "api.dev.kernelworx.app", ...}
-
-# Create a resource naming function
-rn = make_resource_namer("ue1", "dev")
-bucket_name = rn("exports")  # "exports-ue1-dev"
+```hcl
+# Example from tofu/modules/dynamodb/main.tf
+resource "aws_dynamodb_table" "main" {
+  name         = "${var.name_prefix}-app-${var.region_abbrev}-${var.environment}"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "PK"
+  range_key    = "SK"
+}
 ```
 
-#### Resolver Builder (`cdk/cdk/appsync/resolver_builder.py`)
+#### AppSync Resolvers (`tofu/modules/appsync/`)
 
-For new AppSync resolvers, use the `ResolverBuilder` class:
+AppSync resolvers are defined in OpenTofu using `aws_appsync_resolver` and `aws_appsync_function` resources:
 
-```python
-from .resolver_builder import ResolverBuilder
-
-builder = ResolverBuilder(api, datasources, lambda_datasources, self)
-
+```hcl
 # VTL resolver
-builder.create_vtl_resolver(
-    field_name="getMyAccount",
-    type_name="Query",
-    datasource_name="accounts",
-    request_template=TEMPLATES_DIR / "request.vtl",
-    response_template=TEMPLATES_DIR / "response.vtl",
-)
+resource "aws_appsync_resolver" "get_my_account" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "getMyAccount"
+  data_source = aws_appsync_datasource.accounts.name
+
+  request_template  = file("${local.mapping_templates_dir}/get_my_account_request.vtl")
+  response_template = file("${local.mapping_templates_dir}/get_my_account_response.vtl")
+}
 
 # JavaScript resolver
-builder.create_js_resolver(
-    field_name="listItems",
-    type_name="Query",
-    datasource_name="items",
-    code_file=RESOLVERS_DIR / "list_items.js",
-)
+resource "aws_appsync_resolver" "list_items" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "listItems"
+  data_source = aws_appsync_datasource.items.name
+  code        = file("${local.js_resolvers_dir}/list_items.js")
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+}
 
 # Pipeline resolver
-builder.create_pipeline_resolver(
-    field_name="createItem",
-    type_name="Mutation",
-    functions=[fn1, fn2, fn3],
-    code_file=RESOLVERS_DIR / "create_item.js",
-)
+resource "aws_appsync_resolver" "create_item" {
+  api_id = aws_appsync_graphql_api.main.id
+  type   = "Mutation"
+  field  = "createItem"
+  kind   = "PIPELINE"
+  code   = file("${local.js_resolvers_dir}/create_item.js")
 
-# Lambda resolver
-builder.create_lambda_resolver(
-    field_name="generateReport",
-    type_name="Mutation",
-    lambda_datasource_name="report_generator",
-)
+  pipeline_config {
+    functions = [
+      aws_appsync_function.validate.function_id,
+      aws_appsync_function.create.function_id,
+    ]
+  }
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+}
 ```
