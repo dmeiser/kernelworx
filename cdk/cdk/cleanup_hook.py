@@ -1308,6 +1308,8 @@ def _check_cognito_user_pool(
 
     _check_sms_role(pool_details, stack_resources, resources_to_import)
     _check_user_pool_resource(user_pool_id, pool_details, stack_resources, resources_to_import)
+    # Import existing identity providers (Google, Facebook) so CDK can manage them
+    _check_user_pool_identity_providers(client, user_pool_id, stack_resources, resources_to_import)
     _check_user_pool_domain(client, environment_name, stack_resources, resources_to_import)
 
 
@@ -1403,6 +1405,58 @@ def _check_user_pool_domain(
             }
         )
         print(f"   🔍 Found unmanaged user pool domain: {custom_domain}", file=sys.stderr)
+
+
+def _check_user_pool_identity_providers(
+    client: Any,
+    user_pool_id: str,
+    stack_resources: set[str],
+    resources_to_import: list[dict[str, Any]],
+) -> None:
+    """Check if Cognito User Pool Identity Providers exist but are not in CloudFormation.
+
+    This imports existing IdPs (Google, Facebook) so subsequent CDK deploys won't fail
+    early validation when trying to create resources that already exist.
+    """
+    try:
+        resp = client.list_identity_providers(UserPoolId=user_pool_id)
+        providers = resp.get("Providers", [])
+    except Exception as e:
+        print(f"   ⚠️  Could not list identity providers for {user_pool_id}: {e}", file=sys.stderr)
+        return
+
+    # Map Cognito provider names to CDK logical IDs used in our stack
+    logical_id_map = {
+        "Google": "GoogleProvider",
+        "Facebook": "FacebookProvider",
+    }
+
+    for idp in providers:
+        name = idp.get("ProviderName")
+        if not name:
+            continue
+
+        # CloudFormation physical ID for IdP is the provider name (e.g., 'Google', 'Facebook')
+        physical_id = name
+        if physical_id in stack_resources:
+            continue
+
+        logical_id = logical_id_map.get(name)
+        if not logical_id:
+            # Skip providers we don't manage via CDK
+            continue
+
+        resources_to_import.append(
+            {
+                "ResourceType": "AWS::Cognito::UserPoolIdentityProvider",
+                "LogicalResourceId": logical_id,
+                "ResourceIdentifier": {
+                    "UserPoolId": user_pool_id,
+                    "ProviderName": name,
+                },
+            }
+        )
+        print(f"   🔍 Found unmanaged identity provider: {name}", file=sys.stderr)
 
 
 def _check_cloudfront_distribution(

@@ -21,7 +21,7 @@ import {
   CircularProgress,
   Link as MuiLink,
 } from '@mui/material';
-import { Google as GoogleIcon, Facebook as FacebookIcon, Fingerprint as FingerprintIcon } from '@mui/icons-material';
+import { Google as GoogleIcon, Fingerprint as FingerprintIcon } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { confirmSignIn, signIn, signInWithRedirect } from 'aws-amplify/auth';
@@ -223,16 +223,6 @@ const SocialSection: React.FC<SocialSectionProps> = ({ loading, onSocialLogin, o
         disabled={loading}
       >
         Continue with Google
-      </Button>
-      <Button
-        variant="outlined"
-        fullWidth
-        size="large"
-        startIcon={<FacebookIcon />}
-        onClick={() => onSocialLogin('Facebook')}
-        disabled={loading}
-      >
-        Continue with Facebook
       </Button>
     </Stack>
 

@@ -204,6 +204,11 @@ def _import_existing_user_pool(
         sms_role=user_pool_sms_role,
         sms_role_external_id="kernelworx-sms-role",
         lambda_triggers=user_pool_triggers,
+        sign_in_policy=cognito.SignInPolicy(
+            allowed_first_auth_factors=cognito.AllowedFirstAuthFactors(password=True, passkey=True)
+        ),
+        passkey_relying_party_id=site_domain,
+        passkey_user_verification=cognito.PasskeyUserVerification.PREFERRED,
         removal_policy=RemovalPolicy.RETAIN,
     )
     user_pool.node.add_dependency(user_pool_sms_role)
@@ -311,41 +316,67 @@ def _create_new_user_pool(
 def _configure_social_providers(
     scope: Construct, user_pool: cognito.UserPool
 ) -> list[cognito.UserPoolClientIdentityProvider]:
-    """Configure social identity providers (Google, Facebook)."""
-    supported_providers: list[cognito.UserPoolClientIdentityProvider] = [cognito.UserPoolClientIdentityProvider.COGNITO]
+    """Configure social identity providers (Google, Facebook).
+
+    If an identity provider already exists (e.g., configured manually), we skip creating
+    the resource but still include it in the client supported providers to avoid
+    CloudFormation early validation errors while preserving existing resources.
+    """
+    from cdk.resource_lookup import lookup_identity_provider  # local utility for AWS lookups
+
+    supported_providers: list[cognito.UserPoolClientIdentityProvider] = [
+        cognito.UserPoolClientIdentityProvider.COGNITO
+    ]
+
+    # Attempt to resolve existing user pool id from context (imported pools)
+    env_name = scope.node.try_get_context("environment") or "dev"
+    known_pool_ids = {
+        "dev": "us-east-1_sDiuCOarb",
+    }
+    user_pool_id_ctx = scope.node.try_get_context("user_pool_id") or known_pool_ids.get(str(env_name))
 
     # Google OAuth
     if os.environ.get("GOOGLE_CLIENT_ID") and os.environ.get("GOOGLE_CLIENT_SECRET"):
-        cognito.UserPoolIdentityProviderGoogle(
-            scope,
-            "GoogleProvider",
-            user_pool=user_pool,
-            client_id=os.environ["GOOGLE_CLIENT_ID"],
-            client_secret=os.environ["GOOGLE_CLIENT_SECRET"],
-            scopes=["email", "profile", "openid"],
-            attribute_mapping=cognito.AttributeMapping(
-                email=cognito.ProviderAttribute.GOOGLE_EMAIL,
-                given_name=cognito.ProviderAttribute.GOOGLE_GIVEN_NAME,
-                family_name=cognito.ProviderAttribute.GOOGLE_FAMILY_NAME,
-            ),
-        )
+        idp_exists = False
+        if user_pool_id_ctx:
+            existing_google = lookup_identity_provider(user_pool_id_ctx, "Google")
+            idp_exists = existing_google is not None
+        if not idp_exists:
+            cognito.UserPoolIdentityProviderGoogle(
+                scope,
+                "GoogleProvider",
+                user_pool=user_pool,
+                client_id=os.environ["GOOGLE_CLIENT_ID"],
+                client_secret=os.environ["GOOGLE_CLIENT_SECRET"],
+                scopes=["email", "profile", "openid"],
+                attribute_mapping=cognito.AttributeMapping(
+                    email=cognito.ProviderAttribute.GOOGLE_EMAIL,
+                    given_name=cognito.ProviderAttribute.GOOGLE_GIVEN_NAME,
+                    family_name=cognito.ProviderAttribute.GOOGLE_FAMILY_NAME,
+                ),
+            )
         supported_providers.append(cognito.UserPoolClientIdentityProvider.GOOGLE)
 
     # Facebook OAuth
     if os.environ.get("FACEBOOK_APP_ID") and os.environ.get("FACEBOOK_APP_SECRET"):
-        cognito.UserPoolIdentityProviderFacebook(
-            scope,
-            "FacebookProvider",
-            user_pool=user_pool,
-            client_id=os.environ["FACEBOOK_APP_ID"],
-            client_secret=os.environ["FACEBOOK_APP_SECRET"],
-            scopes=["email", "public_profile"],
-            attribute_mapping=cognito.AttributeMapping(
-                email=cognito.ProviderAttribute.FACEBOOK_EMAIL,
-                given_name=cognito.ProviderAttribute.FACEBOOK_FIRST_NAME,
-                family_name=cognito.ProviderAttribute.FACEBOOK_LAST_NAME,
-            ),
-        )
+        idp_exists = False
+        if user_pool_id_ctx:
+            existing_fb = lookup_identity_provider(user_pool_id_ctx, "Facebook")
+            idp_exists = existing_fb is not None
+        if not idp_exists:
+            cognito.UserPoolIdentityProviderFacebook(
+                scope,
+                "FacebookProvider",
+                user_pool=user_pool,
+                client_id=os.environ["FACEBOOK_APP_ID"],
+                client_secret=os.environ["FACEBOOK_APP_SECRET"],
+                scopes=["email", "public_profile"],
+                attribute_mapping=cognito.AttributeMapping(
+                    email=cognito.ProviderAttribute.FACEBOOK_EMAIL,
+                    given_name=cognito.ProviderAttribute.FACEBOOK_FIRST_NAME,
+                    family_name=cognito.ProviderAttribute.FACEBOOK_LAST_NAME,
+                ),
+            )
         supported_providers.append(cognito.UserPoolClientIdentityProvider.FACEBOOK)
 
     return supported_providers
