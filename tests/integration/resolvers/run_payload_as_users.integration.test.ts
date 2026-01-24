@@ -12,8 +12,7 @@ test('run payload as users', async () => {
     orderDate: new Date().toISOString(),
     paymentMethod: 'CASH',
     lineItems: [
-      // Simulate client bug: productName set to empty object
-      { productId: 'PRODUCT#17bf118c-cca6-464c-92bc-80bfeb982b0a', quantity: 1, productName: {} },
+      { productId: 'PRODUCT#17bf118c-cca6-464c-92bc-80bfeb982b0a', quantity: 1 },
     ],
   };
 

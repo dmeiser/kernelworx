@@ -28,8 +28,24 @@ variable "user_pool_id" {
   type = string
 }
 
+variable "lambda_src_dir" {
+  type        = string
+  description = "Path to Lambda source code directory"
+  default     = ""
+}
+
+variable "lambda_payload_dir" {
+  type        = string
+  description = "Path to directory for Lambda payload zip files"
+  default     = ""
+}
+
 locals {
   func_suffix = "-${var.region_abbrev}-${var.environment}"
+  
+  # Use provided paths or default to relative paths from module
+  src_dir     = var.lambda_src_dir != "" ? var.lambda_src_dir : "${path.module}/../../../src"
+  payload_dir = var.lambda_payload_dir != "" ? var.lambda_payload_dir : "${path.module}/../../../.build/lambda"
   
   common_env = {
     EXPORTS_BUCKET              = var.exports_bucket_name
@@ -156,26 +172,38 @@ locals {
 # Note: Lambda layer and functions would be created here
 # For now, we're importing existing functions
 
+# Archive the Lambda source code
+data "archive_file" "lambda_payload" {
+  type        = "zip"
+  source_dir  = local.src_dir
+  excludes    = [
+    "venv",
+    "__pycache__",
+    "*.pyc",
+    ".pytest_cache",
+    ".mypy_cache"
+  ]
+  output_path = "${local.payload_dir}/lambda_payload.zip"
+}
+
 # Lambda Layer (imported, not created)
 resource "aws_lambda_layer_version" "shared" {
-  layer_name          = "${var.name_prefix}-deps-${var.region_abbrev}-${var.environment}"
-  compatible_runtimes = ["python3.13"]
-  description         = "Shared Python dependencies for Lambda functions"
+  layer_name               = "${var.name_prefix}-deps-${var.region_abbrev}-${var.environment}"
+  compatible_runtimes      = ["python3.13"]
+  compatible_architectures = ["arm64"]
+  description              = "Shared Python dependencies for Lambda functions"
   
   # During import, this will be set from the existing layer
   filename         = "${path.module}/../../lambda-layer/python.zip"
   source_code_hash = filebase64sha256("${path.module}/../../lambda-layer/python.zip")
 
   lifecycle {
-    prevent_destroy = true
-    # Ignore changes to code during import
+    # Ignore changes to code - layer is managed separately
     ignore_changes = [filename, source_code_hash]
   }
 }
 
-# Lambda Functions - defined as data sources for import
-# Each function will be imported with: tofu import 'module.lambda.aws_lambda_function.functions["name"]' function-arn
-
+# Lambda Functions
 resource "aws_lambda_function" "functions" {
   for_each = local.functions
 
@@ -183,12 +211,12 @@ resource "aws_lambda_function" "functions" {
   role          = var.lambda_role_arn
   handler       = each.value.handler
   runtime       = "python3.13"
+  architectures = ["arm64"]
   timeout       = each.value.timeout
   memory_size   = each.value.memory_size
 
-  # Placeholder - will be overridden on import
-  filename         = "${path.module}/../../../src.zip"
-  source_code_hash = filebase64sha256("${path.module}/../../../src.zip")
+  filename         = data.archive_file.lambda_payload.output_path
+  source_code_hash = data.archive_file.lambda_payload.output_base64sha256
 
   layers = [aws_lambda_layer_version.shared.arn]
 
@@ -198,8 +226,6 @@ resource "aws_lambda_function" "functions" {
 
   lifecycle {
     prevent_destroy = true
-    # Ignore code changes - deployments handled separately
-    ignore_changes = [filename, source_code_hash]
   }
 }
 

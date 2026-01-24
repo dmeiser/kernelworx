@@ -7,7 +7,6 @@
 
 import { CognitoIdentityProviderClient, ListUserPoolClientsCommand } from '@aws-sdk/client-cognito-identity-provider';
 import { AppSyncClient, ListGraphqlApisCommand } from '@aws-sdk/client-appsync';
-import { CloudFormationClient, DescribeStacksCommand } from '@aws-sdk/client-cloudformation';
 
 export interface AwsConfig {
   userPoolId: string;
@@ -20,8 +19,8 @@ export interface AwsConfig {
 let cachedConfig: AwsConfig | null = null;
 
 /**
- * Look up AWS configuration dynamically from CloudFormation stack outputs
- * and AWS resources. Caches result for subsequent calls.
+ * Look up AWS configuration dynamically from AWS resources.
+ * Caches result for subsequent calls.
  */
 export async function getAwsConfig(): Promise<AwsConfig> {
   if (cachedConfig) {
@@ -29,47 +28,8 @@ export async function getAwsConfig(): Promise<AwsConfig> {
   }
 
   const region = process.env.TEST_REGION || 'us-east-1';
-  const stackName = process.env.TEST_STACK_NAME || 'kernelworx-ue1-dev';
 
-  // Try to get config from CloudFormation stack first
-  try {
-    const cfClient = new CloudFormationClient({ region });
-    const stackResponse = await cfClient.send(new DescribeStacksCommand({ StackName: stackName }));
-    const stack = stackResponse.Stacks?.[0];
-    
-    if (stack?.Outputs) {
-      // Parse Cognito info from the hosted UI URL output
-      const hostedUiOutput = stack.Outputs.find(o => o.OutputKey === 'CognitoHostedUIUrl');
-      if (hostedUiOutput?.OutputValue) {
-        // URL format: https://login.dev.kernelworx.app.auth.us-east-1.amazoncognito.com/login?client_id=XXX&...
-        const clientIdMatch = hostedUiOutput.OutputValue.match(/client_id=([^&]+)/);
-        if (clientIdMatch) {
-          const clientId = clientIdMatch[1];
-          
-          // Now we need to find the user pool ID. Look it up from Cognito.
-          const cognitoConfig = await lookupCognitoConfig(region, clientId);
-          const appSyncEndpoint = await lookupAppSyncEndpoint(region, 'kernelworx');
-          
-          cachedConfig = {
-            userPoolId: cognitoConfig.userPoolId,
-            userPoolClientId: clientId,
-            appSyncEndpoint,
-            region,
-          };
-          
-          console.log('✅ Integration test environment configured');
-          console.log(`   AppSync: ${cachedConfig.appSyncEndpoint}`);
-          console.log(`   User Pool: ${cachedConfig.userPoolId}`);
-          
-          return cachedConfig;
-        }
-      }
-    }
-  } catch (error) {
-    console.warn('Could not get config from CloudFormation, falling back to direct lookup:', error);
-  }
-
-  // Fallback: Look up resources directly
+  // Look up resources directly from AWS
   const cognitoConfig = await lookupCognitoConfigByPoolName(region, 'kernelworx');
   const appSyncEndpoint = await lookupAppSyncEndpoint(region, 'kernelworx');
 
@@ -85,34 +45,6 @@ export async function getAwsConfig(): Promise<AwsConfig> {
   console.log(`   User Pool: ${cachedConfig.userPoolId}`);
 
   return cachedConfig;
-}
-
-/**
- * Find user pool ID given a client ID
- */
-async function lookupCognitoConfig(region: string, clientId: string): Promise<{ userPoolId: string }> {
-  const { CognitoIdentityProviderClient: CognitoClient, ListUserPoolsCommand } = await import('@aws-sdk/client-cognito-identity-provider');
-  
-  const client = new CognitoClient({ region });
-  
-  // List user pools and find which one has this client
-  const poolsResponse = await client.send(new ListUserPoolsCommand({ MaxResults: 20 }));
-  
-  for (const pool of poolsResponse.UserPools || []) {
-    if (!pool.Id) continue;
-    
-    const clientsResponse = await client.send(new ListUserPoolClientsCommand({
-      UserPoolId: pool.Id,
-      MaxResults: 10,
-    }));
-    
-    const hasClient = clientsResponse.UserPoolClients?.some(c => c.ClientId === clientId);
-    if (hasClient) {
-      return { userPoolId: pool.Id };
-    }
-  }
-  
-  throw new Error(`Could not find user pool containing client ${clientId}`);
 }
 
 /**
