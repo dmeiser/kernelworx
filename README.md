@@ -4,7 +4,7 @@ A volunteer-run web application to help Scouts and families manage in-person pop
 
 ## Overview
 
-Popcorn Sales Manager is an open-source, serverless application designed for Scouting America units to track popcorn sales during fall fundraising campaigns. Built with modern web technologies and AWS services, it provides families with an easy-to-use interface for managing orders, tracking inventory, and generating reports.
+KernelWorx is an open-source, serverless application designed for Scouting America units to track popcorn sales during fall fundraising campaigns. Built with modern web technologies and AWS services, it provides families with an easy-to-use interface for managing orders, tracking inventory, and generating reports.
 
 ## Features
 
