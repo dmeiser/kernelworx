@@ -342,6 +342,14 @@ def create_mutation_resolvers(
         id_suffix="UpdateMyAccountResolver",
     )
 
+    # deleteMyAccount (Lambda)
+    builder.create_lambda_resolver(
+        field_name="deleteMyAccount",
+        type_name="Mutation",
+        lambda_datasource_name="delete_my_account_fn",
+        id_suffix="DeleteMyAccountResolver",
+    )
+
     # transferProfileOwnership (Lambda)
     builder.create_lambda_resolver(
         field_name="transferProfileOwnership",

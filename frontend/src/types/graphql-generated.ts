@@ -209,6 +209,7 @@ export type GqlMutation = {
   createSharedCampaign: GqlSharedCampaign;
   deleteCampaign: Scalars['Boolean']['output'];
   deleteCatalog: Scalars['Boolean']['output'];
+  deleteMyAccount: Scalars['Boolean']['output'];
   deleteOrder: Scalars['Boolean']['output'];
   deletePaymentMethod: Scalars['Boolean']['output'];
   deletePaymentMethodQRCode: Scalars['Boolean']['output'];
@@ -895,6 +896,10 @@ export type GqlUpdateMyAccountMutation = {
     updatedAt: string;
   };
 };
+
+export type GqlDeleteMyAccountMutationVariables = Exact<{ [key: string]: never }>;
+
+export type GqlDeleteMyAccountMutation = { __typename?: 'Mutation'; deleteMyAccount: boolean };
 
 export type GqlUpdateMyPreferencesMutationVariables = Exact<{
   preferences: Scalars['AWSJSON']['input'];

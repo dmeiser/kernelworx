@@ -119,6 +119,7 @@ class CdkStack(Stack):  # type: ignore[misc]
         self.campaign_operations_fn = lambda_resources["campaign_operations_fn"]
         self.delete_profile_orders_cascade_fn = lambda_resources["delete_profile_orders_cascade_fn"]
         self.update_my_account_fn = lambda_resources["update_my_account_fn"]
+        self.delete_my_account_fn = lambda_resources["delete_my_account_fn"]
         self.transfer_ownership_fn = lambda_resources["transfer_ownership_fn"]
         self.post_auth_fn = lambda_resources["post_auth_fn"]
         self.pre_signup_fn = lambda_resources["pre_signup_fn"]
@@ -191,6 +192,7 @@ class CdkStack(Stack):  # type: ignore[misc]
                 "campaign_operations_fn": self.campaign_operations_fn,
                 "delete_profile_orders_cascade_fn": self.delete_profile_orders_cascade_fn,
                 "update_my_account_fn": self.update_my_account_fn,
+                "delete_my_account_fn": self.delete_my_account_fn,
                 "transfer_ownership_fn": self.transfer_ownership_fn,
                 "request_qr_upload_fn": self.request_qr_upload_fn,
                 "confirm_qr_upload_fn": self.confirm_qr_upload_fn,

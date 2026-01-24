@@ -259,6 +259,20 @@ def create_lambda_functions(
         environment=lambda_env,
     )
 
+    delete_my_account_fn = lambda_.Function(
+        scope,
+        "DeleteMyAccountFn",
+        function_name=rn("kernelworx-delete-account"),
+        runtime=lambda_.Runtime.PYTHON_3_13,
+        handler="handlers.account_operations.delete_my_account",
+        code=lambda_code,
+        layers=[shared_layer],
+        timeout=Duration.seconds(30),
+        memory_size=256,
+        role=lambda_execution_role,
+        environment=lambda_env,
+    )
+
     # Transfer Profile Ownership Lambda
     transfer_ownership_fn = lambda_.Function(
         scope,
@@ -290,7 +304,7 @@ def create_lambda_functions(
     )
 
     # Pre-Signup Lambda (Cognito Trigger)
-    # Links federated identities (Google, Facebook, Apple) to existing users
+    # Links federated identities (Google, Facebook) to existing users
     # with the same email to prevent duplicate accounts
     pre_signup_fn = lambda_.Function(
         scope,
@@ -406,6 +420,7 @@ def create_lambda_functions(
         "campaign_operations_fn": campaign_operations_fn,
         "delete_profile_orders_cascade_fn": delete_profile_orders_cascade_fn,
         "update_my_account_fn": update_my_account_fn,
+        "delete_my_account_fn": delete_my_account_fn,
         "transfer_ownership_fn": transfer_ownership_fn,
         "post_auth_fn": post_auth_fn,
         "pre_signup_fn": pre_signup_fn,

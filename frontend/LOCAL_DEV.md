@@ -4,7 +4,7 @@ This guide explains how to develop locally using the domain `local.dev.appworx.a
 
 ## Why use a custom local domain?
 
-- **HTTPS support**: Social OAuth providers (Google, Facebook, Apple) require HTTPS
+- **HTTPS support**: Social OAuth providers (Google, Facebook) require HTTPS
 - **Cookie consistency**: Matches production cookie domain settings
 - **Realistic testing**: Tests your app in an environment closer to production
 

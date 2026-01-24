@@ -182,12 +182,6 @@ export GOOGLE_CLIENT_SECRET="your-client-secret"
 export FACEBOOK_APP_ID="your-app-id"
 export FACEBOOK_APP_SECRET="your-app-secret"
 
-# Apple Sign In
-export APPLE_SERVICES_ID="your-services-id"
-export APPLE_TEAM_ID="your-team-id"
-export APPLE_KEY_ID="your-key-id"
-export APPLE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----"
-
 # Deploy with social providers
 npx cdk deploy -c environment=dev
 ```
@@ -314,7 +308,7 @@ The deployed resources use serverless/on-demand pricing:
 
 1. **Add Lambda Functions to CDK Stack** - Integrate the profile sharing handlers
 2. **Deploy Frontend** - Create React SPA and deploy to S3 + CloudFront
-3. **Configure Social Providers** - Set up OAuth apps with Google/Facebook/Apple
+3. **Configure Social Providers** - Set up OAuth apps with Google/Facebook
 4. **Enable CloudFront** - Once account verification is complete
 5. **Set Up CI/CD** - GitHub Actions for automated testing and deployment
 

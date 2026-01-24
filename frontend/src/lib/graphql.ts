@@ -147,6 +147,12 @@ export const UPDATE_MY_ACCOUNT = gql`
   }
 `;
 
+export const DELETE_MY_ACCOUNT = gql`
+  mutation DeleteMyAccount {
+    deleteMyAccount
+  }
+`;
+
 export const UPDATE_MY_PREFERENCES = gql`
   mutation UpdateMyPreferences($preferences: AWSJSON!) {
     updateMyPreferences(preferences: $preferences) {

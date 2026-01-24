@@ -5,9 +5,11 @@ Handles user account management including updating DynamoDB account metadata.
 """
 
 import json
+import os
 from datetime import datetime, timezone
 from typing import Any, Dict
 
+import boto3
 from botocore.exceptions import ClientError
 
 # Handle both Lambda (absolute) and unit test (relative) imports
@@ -125,3 +127,109 @@ def update_my_account(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     except Exception as e:
         logger.error(f"Failed to update account: {str(e)}")
         raise
+
+
+def delete_my_account(event: Dict[str, Any], context: Any) -> bool:
+    """
+    Delete the authenticated user's account and all associated data.
+
+    This is a self-service account deletion that:
+    1. Deletes all user data from DynamoDB (profiles, campaigns, orders, shares, catalogs, invites)
+    2. Deletes the user from Cognito User Pool
+
+    Args:
+        event: AppSync event with identity
+        context: Lambda context
+
+    Returns:
+        True if account was deleted successfully
+
+    Raises:
+        AppError: If deletion error occurs
+    """
+    logger.info("delete_my_account handler invoked")
+
+    account_id = event["identity"]["sub"]
+    logger.info(f"Deleting account for: {account_id}")
+
+    # Get environment variables
+    user_pool_id = os.environ.get("USER_POOL_ID")
+    if not user_pool_id:
+        raise AppError(ErrorCode.INTERNAL_ERROR, "USER_POOL_ID not configured")
+
+    # Initialize Cognito client
+    cognito = boto3.client("cognito-idp")
+
+    try:
+        # Delete all user data from DynamoDB using admin delete functions
+        from .admin_operations import (
+            admin_delete_user_catalogs,
+            admin_delete_user_campaigns,
+            admin_delete_user_orders,
+            admin_delete_user_profiles,
+            admin_delete_user_shares,
+        )
+
+        # Create pseudo-event for admin functions
+        # Add ADMIN group to allow internal system operations to bypass normal auth checks
+        pseudo_event = {
+            "identity": {
+                "sub": account_id,
+                "claims": {"cognito:groups": ["ADMIN"]}
+            },
+            "arguments": {"accountId": account_id}
+        }
+
+        # 1. Delete orders
+        deleted_orders = admin_delete_user_orders(pseudo_event, context)
+        logger.info(f"Deleted {deleted_orders} orders")
+
+        # 2. Delete campaigns
+        deleted_campaigns = admin_delete_user_campaigns(pseudo_event, context)
+        logger.info(f"Deleted {deleted_campaigns} campaigns")
+
+        # 3. Delete shares (both given and received)
+        deleted_shares = admin_delete_user_shares(pseudo_event, context)
+        logger.info(f"Deleted {deleted_shares} shares")
+
+        # 4. Delete profiles
+        deleted_profiles = admin_delete_user_profiles(pseudo_event, context)
+        logger.info(f"Deleted {deleted_profiles} profiles")
+
+        # 5. Delete catalogs
+        deleted_catalogs = admin_delete_user_catalogs(pseudo_event, context)
+        logger.info(f"Deleted {deleted_catalogs} catalogs")
+
+        # 6. Delete account record from DynamoDB
+        account_id_key = f"ACCOUNT#{account_id}"
+        tables.accounts.delete_item(Key={"accountId": account_id_key})
+        logger.info("Deleted account record from DynamoDB")
+
+        # 7. Delete user from Cognito User Pool
+        try:
+            # Find user by sub attribute
+            users_response = cognito.list_users(UserPoolId=user_pool_id, Filter=f'sub = "{account_id}"', Limit=1)
+
+            users = users_response.get("Users", [])
+            if users:
+                username = users[0]["Username"]
+                cognito.admin_delete_user(UserPoolId=user_pool_id, Username=username)
+                logger.info(f"Deleted user from Cognito: {username}")
+            else:
+                logger.warning(f"User not found in Cognito with sub: {account_id}")
+
+        except ClientError as e:
+            # If user doesn't exist in Cognito, that's okay - continue
+            error_code = e.response.get("Error", {}).get("Code")
+            if error_code != "UserNotFoundException":
+                raise
+
+        logger.info("Account deletion completed successfully")
+        return True
+
+    except ClientError as e:
+        logger.error(f"Cognito error during account deletion: {str(e)}")
+        raise AppError(ErrorCode.INTERNAL_ERROR, f"Failed to delete account from Cognito: {str(e)}")
+    except Exception as e:
+        logger.error(f"Failed to delete account: {str(e)}")
+        raise AppError(ErrorCode.INTERNAL_ERROR, f"Failed to delete account: {str(e)}")

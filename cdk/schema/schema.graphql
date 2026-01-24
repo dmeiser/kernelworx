@@ -461,6 +461,7 @@ type Mutation {
   # Account mutations
   updateMyAccount(input: UpdateMyAccountInput!): Account!
   updateMyPreferences(preferences: AWSJSON!): Account!
+  deleteMyAccount: Boolean!
   
   # Profile mutations
   createSellerProfile(input: CreateSellerProfileInput!): SellerProfile!

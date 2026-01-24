@@ -14,7 +14,7 @@ Popcorn Sales Manager is an open-source, serverless application designed for Sco
 - **Catalog Support**: Use admin-managed catalogs or create custom product catalogs
 - **Sharing & Collaboration**: Share profiles with trusted adults (READ or WRITE permissions)
 - **Reports**: Generate CSV/XLSX reports for unit submission and personal tracking
-- **Social Login**: Sign in with Google, Facebook, or Apple accounts
+- **Social Login**: Sign in with Google or Facebook accounts
 - **Privacy-First**: All data encrypted in-flight and at-rest, COPPA compliance warnings
 
 ## Tech Stack

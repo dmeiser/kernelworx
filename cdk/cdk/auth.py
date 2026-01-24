@@ -4,7 +4,7 @@ This module creates and configures:
 - Cognito User Pool with email sign-in
 - User Pool Client for SPA
 - Custom domain for Cognito hosted UI
-- Social identity providers (Google, Facebook, Apple) when configured
+- Social identity providers (Google, Facebook) when configured
 - SMS role for MFA
 - Route53 record for Cognito custom domain
 """
@@ -208,7 +208,8 @@ def _import_existing_user_pool(
     )
     user_pool.node.add_dependency(user_pool_sms_role)
 
-    # Create/import UserPoolClient
+    # Configure social identity providers and create client
+    supported_providers = _configure_social_providers(scope, user_pool)
     user_pool_client = cognito.UserPoolClient(
         scope,
         "AppClient",
@@ -216,7 +217,7 @@ def _import_existing_user_pool(
         user_pool_client_name="KernelWorx-Web",
         auth_flows=cognito.AuthFlow(user_srp=True, user_password=True, user=True),
         o_auth=_create_oauth_settings(site_domain),
-        supported_identity_providers=[cognito.UserPoolClientIdentityProvider.COGNITO],
+        supported_identity_providers=supported_providers,
         prevent_user_existence_errors=True,
     )
     user_pool_client.node.default_child.apply_removal_policy(RemovalPolicy.RETAIN)
@@ -310,7 +311,7 @@ def _create_new_user_pool(
 def _configure_social_providers(
     scope: Construct, user_pool: cognito.UserPool
 ) -> list[cognito.UserPoolClientIdentityProvider]:
-    """Configure social identity providers (Google, Facebook, Apple)."""
+    """Configure social identity providers (Google, Facebook)."""
     supported_providers: list[cognito.UserPoolClientIdentityProvider] = [cognito.UserPoolClientIdentityProvider.COGNITO]
 
     # Google OAuth
@@ -346,30 +347,6 @@ def _configure_social_providers(
             ),
         )
         supported_providers.append(cognito.UserPoolClientIdentityProvider.FACEBOOK)
-
-    # Apple Sign In
-    if (
-        os.environ.get("APPLE_SERVICES_ID")
-        and os.environ.get("APPLE_TEAM_ID")
-        and os.environ.get("APPLE_KEY_ID")
-        and os.environ.get("APPLE_PRIVATE_KEY")
-    ):
-        cognito.UserPoolIdentityProviderApple(
-            scope,
-            "AppleProvider",
-            user_pool=user_pool,
-            client_id=os.environ["APPLE_SERVICES_ID"],
-            team_id=os.environ["APPLE_TEAM_ID"],
-            key_id=os.environ["APPLE_KEY_ID"],
-            private_key=os.environ["APPLE_PRIVATE_KEY"],
-            scopes=["email", "name"],
-            attribute_mapping=cognito.AttributeMapping(
-                email=cognito.ProviderAttribute.APPLE_EMAIL,
-                given_name=cognito.ProviderAttribute.APPLE_FIRST_NAME,
-                family_name=cognito.ProviderAttribute.APPLE_LAST_NAME,
-            ),
-        )
-        supported_providers.append(cognito.UserPoolClientIdentityProvider.APPLE)
 
     return supported_providers
 

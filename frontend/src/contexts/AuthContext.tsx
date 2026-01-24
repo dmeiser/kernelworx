@@ -178,7 +178,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
    * https://{COGNITO_DOMAIN}/oauth2/authorize
    *
    * The Hosted UI displays all configured authentication options:
-   * - Social providers (Google, Facebook, Apple)
+   * - Social providers (Google, Facebook)
    * - Email/password signup and login
    * - Password reset flows
    *

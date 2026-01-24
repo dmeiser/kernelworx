@@ -13,6 +13,7 @@ import { DevFooter } from './components/DevFooter';
 import { LandingPage } from './pages/LandingPage';
 import { LoginPage } from './pages/LoginPage';
 import { SignupPage } from './pages/SignupPage';
+import { PrivacyPolicyPage } from './pages/PrivacyPolicyPage';
 import { ScoutsPage } from './pages/ScoutsPage';
 import { ScoutCampaignsPage } from './pages/ScoutCampaignsPage';
 import { ScoutManagementPage } from './pages/ScoutManagementPage';
@@ -45,6 +46,7 @@ function App() {
               <Route path="/" element={<LandingPage />} />
               <Route path="/login" element={<LoginPage />} />
               <Route path="/signup" element={<SignupPage />} />
+              <Route path="/privacy" element={<PrivacyPolicyPage />} />
 
               {/* Shared Campaign short-link route */}
               <Route
