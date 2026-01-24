@@ -1,7 +1,7 @@
 """
 Unit tests for payment methods Lambda handlers.
 
-Tests request_qr_upload, confirm_qr_upload, and generate_presigned_urls functions.
+Tests request_qr_upload, confirm_qr_upload, and delete_qr_code functions.
 """
 
 import os
@@ -16,7 +16,6 @@ from moto import mock_aws
 from src.handlers.payment_methods_handlers import (
     confirm_qr_upload,
     delete_qr_code,
-    generate_presigned_urls,
     request_qr_upload,
 )
 from src.utils.errors import AppError, ErrorCode
@@ -175,7 +174,8 @@ class TestConfirmQRUpload:
 
         assert result["name"] == "Venmo"
         assert result["qrCodeUrl"] is not None
-        assert result["qrCodeUrl"].startswith("http")  # Pre-signed URL
+        # Returns S3 key (field resolver will generate presigned URL)
+        assert result["qrCodeUrl"] == s3_key
 
     def test_confirm_upload_nonexistent_s3_object(
         self, dynamodb_tables: Dict[str, Any], s3_bucket: Any, sample_account: Dict[str, Any], sample_account_id: str
@@ -282,97 +282,6 @@ class TestConfirmQRUpload:
         with pytest.raises(AppError) as exc_info:
             confirm_qr_upload(event, None)
         assert exc_info.value.error_code == ErrorCode.FORBIDDEN
-
-
-class TestGeneratePresignedURLs:
-    """Test generate_presigned_urls Lambda handler."""
-
-    def test_generate_urls_success(
-        self, dynamodb_tables: Dict[str, Any], s3_bucket: Any, sample_account: Dict[str, Any], sample_account_id: str
-    ) -> None:
-        """Test successful pre-signed URL generation for multiple methods."""
-        # Create payment methods
-        create_payment_method(sample_account_id, "Venmo")
-        create_payment_method(sample_account_id, "PayPal")
-
-        # Upload QR for Venmo
-        s3_key_venmo = f"payment-qr-codes/{sample_account_id}/venmo.png"
-        bucket_name = os.environ.get("EXPORTS_BUCKET", "test-exports-bucket")
-        s3_bucket.put_object(Bucket=bucket_name, Key=s3_key_venmo, Body=b"fake-qr-data")
-
-        # Update Venmo with S3 key
-        from src.utils.dynamodb import tables
-
-        account_id_key = f"ACCOUNT#{sample_account_id}"
-        response = tables.accounts.get_item(Key={"accountId": account_id_key})
-        methods = response["Item"]["preferences"]["paymentMethods"]
-        for m in methods:
-            if m["name"] == "Venmo":
-                m["qrCodeUrl"] = s3_key_venmo
-
-        # Store preferences properly
-        preferences = response["Item"].get("preferences", {})
-        preferences["paymentMethods"] = methods
-        tables.accounts.update_item(
-            Key={"accountId": account_id_key},
-            UpdateExpression="SET preferences = :prefs",
-            ExpressionAttributeValues={":prefs": preferences},
-        )
-
-        # Create event
-        event = {
-            "prev": {
-                "result": {
-                    "paymentMethods": [
-                        {"name": "Venmo", "qrCodeUrl": s3_key_venmo},
-                        {"name": "PayPal", "qrCodeUrl": None},
-                    ],
-                    "ownerAccountId": sample_account_id,
-                }
-            }
-        }
-
-        # Generate URLs
-        result = generate_presigned_urls(event, None)
-
-        assert "paymentMethods" in result
-        assert len(result["paymentMethods"]) == 2
-
-        # Venmo should have pre-signed URL
-        venmo = next(m for m in result["paymentMethods"] if m["name"] == "Venmo")
-        assert venmo["qrCodeUrl"] is not None
-        assert venmo["qrCodeUrl"].startswith("http")
-
-        # PayPal should have None
-        paypal = next(m for m in result["paymentMethods"] if m["name"] == "PayPal")
-        assert paypal["qrCodeUrl"] is None
-
-    def test_generate_urls_missing_owner_id(self) -> None:
-        """Test generate URLs without owner account ID."""
-        event = {"prev": {"result": {"paymentMethods": []}}}
-
-        with pytest.raises(AppError) as exc_info:
-            generate_presigned_urls(event, None)
-        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
-        assert "owner account id" in exc_info.value.message.lower()
-
-    def test_generate_urls_empty_methods(self, sample_account_id: str) -> None:
-        """Test generate URLs with empty payment methods list."""
-        event = {"prev": {"result": {"paymentMethods": [], "ownerAccountId": sample_account_id}}}
-
-        result = generate_presigned_urls(event, None)
-
-        assert result["paymentMethods"] == []
-        assert result["ownerAccountId"] == sample_account_id
-
-    def test_generate_urls_exception_handling(self, sample_account_id: str) -> None:
-        """Test generic exception handling in generate_presigned_urls."""
-        # Pass invalid event structure to trigger exception
-        event = {"prev": {"result": None}}
-
-        with pytest.raises(AppError) as exc_info:
-            generate_presigned_urls(event, None)
-        assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
 
 
 class TestDeleteQRCode:
@@ -594,52 +503,6 @@ class TestExceptionHandling:
                 delete_qr_code(event, None)
             assert exc_info.value.error_code == ErrorCode.NOT_FOUND
             assert "not found" in str(exc_info.value)
-
-    def test_generate_urls_method_without_qr_url_field(
-        self, dynamodb_tables: Dict[str, Any], s3_bucket: Any, sample_account: Dict[str, Any], sample_account_id: str
-    ) -> None:
-        """Test generate_presigned_urls with method missing qrCodeUrl field entirely."""
-        # Create event with method that has no qrCodeUrl field at all
-        event = {
-            "prev": {
-                "result": {
-                    "paymentMethods": [
-                        {"name": "Venmo"},  # No qrCodeUrl field
-                    ],
-                    "ownerAccountId": sample_account_id,
-                }
-            }
-        }
-
-        result = generate_presigned_urls(event, None)
-
-        assert "paymentMethods" in result
-        assert len(result["paymentMethods"]) == 1
-        assert result["paymentMethods"][0]["qrCodeUrl"] is None
-
-    def test_generate_urls_method_with_http_url(
-        self, dynamodb_tables: Dict[str, Any], s3_bucket: Any, sample_account: Dict[str, Any], sample_account_id: str
-    ) -> None:
-        """Test generate_presigned_urls with method already having http URL (passthrough)."""
-        # Create event with method that already has an HTTP URL (shouldn't regenerate)
-        existing_url = "https://example.com/existing-qr.png"
-        event = {
-            "prev": {
-                "result": {
-                    "paymentMethods": [
-                        {"name": "Venmo", "qrCodeUrl": existing_url},
-                    ],
-                    "ownerAccountId": sample_account_id,
-                }
-            }
-        }
-
-        result = generate_presigned_urls(event, None)
-
-        assert "paymentMethods" in result
-        assert len(result["paymentMethods"]) == 1
-        # Should keep existing URL unchanged
-        assert result["paymentMethods"][0]["qrCodeUrl"] == existing_url
 
     def test_confirm_upload_method_not_found_in_loop(
         self, dynamodb_tables: Dict[str, Any], s3_bucket: Any, sample_account: Dict[str, Any], sample_account_id: str

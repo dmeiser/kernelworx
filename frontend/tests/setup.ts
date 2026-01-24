@@ -1,6 +1,6 @@
 /**
  * Vitest test setup file
- * 
+ *
  * This file runs before all tests and sets up global test utilities.
  */
 

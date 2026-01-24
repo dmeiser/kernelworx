@@ -9,7 +9,6 @@ import os
 import re
 import uuid
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
-from urllib.parse import quote
 
 import boto3
 from botocore.exceptions import ClientError

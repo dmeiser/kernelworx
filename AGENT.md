@@ -20,7 +20,7 @@ This file contains repository-specific agent rules. Agents should follow these w
 - **Frontend**: React + TypeScript + Vite + MUI + Apollo Client + react-router
 - **Backend**: AWS AppSync (GraphQL) + Lambda (Python) + DynamoDB
 - **Infrastructure**: AWS CDK (Python)
-- **Auth**: Amazon Cognito (User Pools with Google/Facebook/Apple social login)
+- **Auth**: Amazon Cognito (User Pools with Google/Facebook social login)
 - **Storage**: Amazon S3 (static assets, report exports)
 - **Notifications**: Amazon SES/SNS (email)
 - **Audit**: Kinesis Firehose → S3

@@ -314,6 +314,166 @@ def test_transfer_profile_ownership_error_paths():
         transfer_module.lambda_handler(event_missing_profile, None)
 
 
+@mock_aws
+def test_transfer_profile_ownership_admin_transfer():
+    """Test admin can transfer profile without share requirement."""
+    os.environ["AWS_REGION"] = "us-east-1"
+    os.environ["PROFILES_TABLE_NAME"] = "ProfilesTable"
+    os.environ["SHARES_TABLE_NAME"] = "SharesTable"
+
+    dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
+    dynamodb.create_table(
+        TableName="ProfilesTable",
+        KeySchema=[
+            {"AttributeName": "ownerAccountId", "KeyType": "HASH"},
+            {"AttributeName": "profileId", "KeyType": "RANGE"},
+        ],
+        AttributeDefinitions=[
+            {"AttributeName": "ownerAccountId", "AttributeType": "S"},
+            {"AttributeName": "profileId", "AttributeType": "S"},
+        ],
+        BillingMode="PAY_PER_REQUEST",
+        GlobalSecondaryIndexes=[
+            {
+                "IndexName": "profileId-index",
+                "KeySchema": [{"AttributeName": "profileId", "KeyType": "HASH"}],
+                "Projection": {"ProjectionType": "ALL"},
+            }
+        ],
+    )
+
+    dynamodb.create_table(
+        TableName="SharesTable",
+        KeySchema=[
+            {"AttributeName": "profileId", "KeyType": "HASH"},
+            {"AttributeName": "targetAccountId", "KeyType": "RANGE"},
+        ],
+        AttributeDefinitions=[
+            {"AttributeName": "profileId", "AttributeType": "S"},
+            {"AttributeName": "targetAccountId", "AttributeType": "S"},
+        ],
+        BillingMode="PAY_PER_REQUEST",
+    )
+
+    module_name = "src.handlers.transfer_profile_ownership"
+    if module_name in sys.modules:
+        del sys.modules[module_name]
+    transfer_module = importlib.import_module(module_name)
+
+    profiles_table = dynamodb.Table("ProfilesTable")
+
+    # Seed profile
+    profiles_table.put_item(
+        Item={
+            "ownerAccountId": "ACCOUNT#owner123",
+            "profileId": "PROFILE#abc",
+            "sellerName": "Scout",
+        }
+    )
+    # Note: NO share created - admin doesn't need one
+
+    # Admin transfer event
+    event = {
+        "identity": {
+            "sub": "admin-user",
+            "claims": {"cognito:groups": ["ADMIN"]},
+        },
+        "arguments": {"input": {"profileId": "PROFILE#abc", "newOwnerAccountId": "new456"}},
+    }
+
+    updated_profile = transfer_module.lambda_handler(event, None)
+
+    assert updated_profile["ownerAccountId"] == "ACCOUNT#new456"
+
+
+@mock_aws
+def test_transfer_profile_ownership_share_delete_fails():
+    """Test that share deletion failure is handled gracefully."""
+    from unittest.mock import MagicMock
+
+    os.environ["AWS_REGION"] = "us-east-1"
+    os.environ["PROFILES_TABLE_NAME"] = "ProfilesTable"
+    os.environ["SHARES_TABLE_NAME"] = "SharesTable"
+
+    dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
+    dynamodb.create_table(
+        TableName="ProfilesTable",
+        KeySchema=[
+            {"AttributeName": "ownerAccountId", "KeyType": "HASH"},
+            {"AttributeName": "profileId", "KeyType": "RANGE"},
+        ],
+        AttributeDefinitions=[
+            {"AttributeName": "ownerAccountId", "AttributeType": "S"},
+            {"AttributeName": "profileId", "AttributeType": "S"},
+        ],
+        BillingMode="PAY_PER_REQUEST",
+        GlobalSecondaryIndexes=[
+            {
+                "IndexName": "profileId-index",
+                "KeySchema": [{"AttributeName": "profileId", "KeyType": "HASH"}],
+                "Projection": {"ProjectionType": "ALL"},
+            }
+        ],
+    )
+
+    dynamodb.create_table(
+        TableName="SharesTable",
+        KeySchema=[
+            {"AttributeName": "profileId", "KeyType": "HASH"},
+            {"AttributeName": "targetAccountId", "KeyType": "RANGE"},
+        ],
+        AttributeDefinitions=[
+            {"AttributeName": "profileId", "AttributeType": "S"},
+            {"AttributeName": "targetAccountId", "AttributeType": "S"},
+        ],
+        BillingMode="PAY_PER_REQUEST",
+    )
+
+    module_name = "src.handlers.transfer_profile_ownership"
+    if module_name in sys.modules:
+        del sys.modules[module_name]
+    transfer_module = importlib.import_module(module_name)
+
+    profiles_table = dynamodb.Table("ProfilesTable")
+    shares_table = dynamodb.Table("SharesTable")
+
+    # Seed profile and share
+    profiles_table.put_item(
+        Item={
+            "ownerAccountId": "ACCOUNT#owner123",
+            "profileId": "PROFILE#abc",
+            "sellerName": "Scout",
+        }
+    )
+    shares_table.put_item(
+        Item={"profileId": "PROFILE#abc", "targetAccountId": "ACCOUNT#new456", "permissions": ["READ"]}
+    )
+
+    event = {
+        "identity": {"sub": "owner123"},
+        "arguments": {"input": {"profileId": "PROFILE#abc", "newOwnerAccountId": "new456"}},
+    }
+
+    # Create a mock for shares table that wraps the real table
+    # but makes delete_item raise an exception
+    mock_shares = MagicMock(wraps=shares_table)
+    mock_shares.get_item = shares_table.get_item  # Keep real get_item for validation
+    mock_shares.delete_item.side_effect = RuntimeError("Simulated failure")
+
+    # Use the _table_overrides mechanism from dynamodb module
+    from src.utils import dynamodb as db_module
+
+    db_module._table_overrides["shares"] = mock_shares
+
+    try:
+        # Should succeed despite share deletion failure
+        updated_profile = transfer_module.lambda_handler(event, None)
+        assert updated_profile["ownerAccountId"] == "ACCOUNT#new456"
+    finally:
+        # Clean up override
+        db_module._table_overrides.pop("shares", None)
+
+
 def test_profile_sharing_fetch_batch_with_zero_retries():
     from src.handlers import profile_sharing
 

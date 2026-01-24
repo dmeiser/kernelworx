@@ -14,7 +14,7 @@ import { Box, Typography, Stack, Alert, CircularProgress, IconButton } from '@mu
 import { ArrowBack as BackIcon } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { GET_MY_ACCOUNT, UPDATE_MY_ACCOUNT } from '../lib/graphql';
+import { GET_MY_ACCOUNT, UPDATE_MY_ACCOUNT, DELETE_MY_ACCOUNT } from '../lib/graphql';
 import { usePasswordChange, useMfa, usePasskeys, useEmailUpdate, useProfileEdit } from '../hooks';
 import {
   PasswordSection,
@@ -23,6 +23,7 @@ import {
   AccountInfoSection,
   EditProfileDialog,
   ChangeEmailDialog,
+  DeleteAccountSection,
 } from '../components/settings';
 
 interface Account {
@@ -141,6 +142,8 @@ export const UserSettingsPage: React.FC = () => {
     onError: createUpdateErrorHandler(profileHook),
   });
 
+  const [deleteMyAccount] = useMutation(DELETE_MY_ACCOUNT);
+
   // Merge GraphQL account data with AuthContext account (which has isAdmin from JWT token)
   const account = mergeAccountData(getAccountFromData(accountData), authAccount);
 
@@ -167,6 +170,12 @@ export const UserSettingsPage: React.FC = () => {
     await updateMyAccount({
       variables: { input: buildProfileInput(profileHook) },
     });
+  };
+
+  const handleDeleteAccount = async () => {
+    await deleteMyAccount();
+    await logout();
+    navigate('/');
   };
 
   if (accountLoading) {
@@ -211,6 +220,9 @@ export const UserSettingsPage: React.FC = () => {
         mfaEnabled={mfaHook.mfaEnabled}
         onRegisterPasskey={handleRegisterPasskey}
       />
+
+      {/* Delete Account Section */}
+      <DeleteAccountSection onDeleteAccount={handleDeleteAccount} userEmail={account?.email} />
 
       {/* Edit Profile Dialog */}
       <EditProfileDialog profileHook={profileHook} updating={updating} onSave={handleSaveProfile} />

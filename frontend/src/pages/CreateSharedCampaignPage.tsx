@@ -5,7 +5,7 @@
 
 import React, { useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client/react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import {
   Typography,
   Box,
@@ -18,74 +18,23 @@ import {
   InputLabel,
   Select,
   MenuItem,
+  Divider,
   CircularProgress,
   Paper,
   Container,
-  Divider,
 } from '@mui/material';
 import type { SelectChangeEvent } from '@mui/material';
 import { ArrowBack as BackIcon, Save as SaveIcon } from '@mui/icons-material';
 import {
-  LIST_PUBLIC_CATALOGS,
+  LIST_MANAGED_CATALOGS,
   LIST_MY_CATALOGS,
   CREATE_SHARED_CAMPAIGN,
   LIST_MY_SHARED_CAMPAIGNS,
 } from '../lib/graphql';
+import { StateAutocomplete } from '../components/StateAutocomplete';
 import type { Catalog, SharedCampaign } from '../types';
 
 const UNIT_TYPES = ['Pack', 'Troop', 'Crew', 'Ship', 'Post'];
-const US_STATES = [
-  'AL',
-  'AK',
-  'AZ',
-  'AR',
-  'CA',
-  'CO',
-  'CT',
-  'DE',
-  'FL',
-  'GA',
-  'HI',
-  'ID',
-  'IL',
-  'IN',
-  'IA',
-  'KS',
-  'KY',
-  'LA',
-  'ME',
-  'MD',
-  'MA',
-  'MI',
-  'MN',
-  'MS',
-  'MO',
-  'MT',
-  'NE',
-  'NV',
-  'NH',
-  'NJ',
-  'NM',
-  'NY',
-  'NC',
-  'ND',
-  'OH',
-  'OK',
-  'OR',
-  'PA',
-  'RI',
-  'SC',
-  'SD',
-  'TN',
-  'TX',
-  'UT',
-  'VT',
-  'VA',
-  'WA',
-  'WV',
-  'WI',
-  'WY',
-];
 
 const BASE_URL = window.location.origin;
 const MAX_CREATOR_MESSAGE_LENGTH = 300;
@@ -129,28 +78,6 @@ function isFormValid(data: FormData): boolean {
 // Sub-Components
 // ============================================================================
 
-interface CatalogGroupProps {
-  header: string;
-  catalogs: Catalog[];
-  headerKey: string;
-}
-
-const CatalogGroup: React.FC<CatalogGroupProps> = ({ header, catalogs, headerKey }) => {
-  if (catalogs.length === 0) return null;
-  return (
-    <>
-      <MenuItem key={headerKey} disabled sx={{ fontWeight: 600, backgroundColor: '#f5f5f5', opacity: 1 }}>
-        {header}
-      </MenuItem>
-      {catalogs.map((catalog) => (
-        <MenuItem key={catalog.catalogId} value={catalog.catalogId}>
-          {catalog.catalogName}
-        </MenuItem>
-      ))}
-    </>
-  );
-};
-
 interface CatalogSectionProps {
   catalogId: string;
   onCatalogChange: (value: string) => void;
@@ -168,6 +95,7 @@ const CatalogSection: React.FC<CatalogSectionProps> = ({
 }) => {
   const handleChange = (e: SelectChangeEvent<string>) => onCatalogChange(e.target.value);
   const noCatalogs = !catalogsLoading && filteredPublicCatalogs.length === 0 && myCatalogs.length === 0;
+  const allCatalogs = [...filteredPublicCatalogs, ...myCatalogs];
 
   return (
     <Box>
@@ -180,12 +108,36 @@ const CatalogSection: React.FC<CatalogSectionProps> = ({
           value={catalogId}
           onChange={handleChange}
           label="Select Catalog"
-          MenuProps={{ slotProps: { paper: { sx: { maxHeight: 300 } } } }}
+          renderValue={(value) => {
+            if (!value) return '';
+            const catalog = allCatalogs.find((c) => c.catalogId === value);
+            return catalog ? catalog.catalogName : '';
+          }}
         >
           {catalogsLoading && <MenuItem disabled>Loading catalogs...</MenuItem>}
           {noCatalogs && <MenuItem disabled>No catalogs available</MenuItem>}
-          <CatalogGroup header="Public Catalogs" catalogs={filteredPublicCatalogs} headerKey="public-header" />
-          <CatalogGroup header="My Catalogs" catalogs={myCatalogs} headerKey="my-header" />
+
+          {filteredPublicCatalogs.length > 0 && (
+            <MenuItem disabled sx={{ fontWeight: 'bold', py: 1 }}>
+              Public Catalogs
+            </MenuItem>
+          )}
+          {filteredPublicCatalogs.map((catalog) => (
+            <MenuItem key={`public-${catalog.catalogId}`} value={catalog.catalogId} sx={{ pl: 4 }}>
+              {catalog.catalogName}
+            </MenuItem>
+          ))}
+
+          {myCatalogs.length > 0 && (
+            <MenuItem disabled sx={{ fontWeight: 'bold', py: 1 }}>
+              My Catalogs
+            </MenuItem>
+          )}
+          {myCatalogs.map((catalog) => (
+            <MenuItem key={`my-${catalog.catalogId}`} value={catalog.catalogId} sx={{ pl: 4 }}>
+              {catalog.catalogName}
+            </MenuItem>
+          ))}
         </Select>
       </FormControl>
     </Box>
@@ -311,16 +263,7 @@ const UnitInfoSection: React.FC<UnitInfoSectionProps> = ({
       </Stack>
       <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
         <TextField label="City" value={city} onChange={(e) => onCityChange(e.target.value)} required fullWidth />
-        <FormControl required fullWidth>
-          <InputLabel>State</InputLabel>
-          <Select value={state} onChange={(e) => onStateChange(e.target.value)} label="State">
-            {US_STATES.map((s) => (
-              <MenuItem key={s} value={s}>
-                {s}
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
+        <StateAutocomplete value={state} onChange={onStateChange} required fullWidth />
       </Stack>
     </Stack>
   </Box>
@@ -458,8 +401,11 @@ function filterDuplicateCatalogs(publicCatalogs: Catalog[], myCatalogs: Catalog[
 }
 
 function usePublicCatalogs() {
-  const { data, loading } = useQuery<{ listPublicCatalogs: Catalog[] }>(LIST_PUBLIC_CATALOGS);
-  return { catalogs: getArrayOrEmpty(data?.listPublicCatalogs), loading };
+  const { data, loading } = useQuery<{ listManagedCatalogs: Catalog[] }>(LIST_MANAGED_CATALOGS);
+  const allCatalogs = getArrayOrEmpty(data?.listManagedCatalogs);
+  // Only include admin-managed catalogs for shared campaigns
+  const catalogs = allCatalogs.filter((c) => c.catalogType === 'ADMIN_MANAGED');
+  return { catalogs, loading };
 }
 
 function useMyCatalogs() {
@@ -490,9 +436,11 @@ function useCanCreateSharedCampaign() {
 
 export const CreateSharedCampaignPage: React.FC = () => {
   const navigate = useNavigate();
+  const location = useLocation();
+  const preselectedCatalogId = (location.state as { catalogId?: string })?.catalogId;
 
   // Form state
-  const [catalogId, setCatalogId] = useState('');
+  const [catalogId, setCatalogId] = useState(preselectedCatalogId || '');
   const [campaignName, setCampaignName] = useState('');
   const [campaignYear, setCampaignYear] = useState(new Date().getFullYear());
   const [startDate, setStartDate] = useState('');
@@ -576,8 +524,8 @@ export const CreateSharedCampaignPage: React.FC = () => {
     }
   };
 
-  const handleCancel = () => navigate('/shared-campaigns');
-  const handleBack = () => navigate('/shared-campaigns');
+  const handleCancel = () => navigate(-1);
+  const handleBack = () => navigate(-1);
 
   return (
     <Container maxWidth="md" sx={{ py: 3 }}>

@@ -1,39 +1,34 @@
-import React from 'react'
-import { render, screen, waitFor, fireEvent } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
-import { vi, describe, it, expect, beforeEach } from 'vitest'
-import { MockedProvider } from '@apollo/client/testing/react'
-import { InMemoryCache } from '@apollo/client'
-import {
-  LIST_MY_PROFILES,
-  LIST_MY_SHARES,
-  GET_MY_ACCOUNT,
-  UPDATE_MY_PREFERENCES,
-} from '../src/lib/graphql'
+import React from 'react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
+import { vi, describe, it, expect, beforeEach } from 'vitest';
+import { MockedProvider } from '@apollo/client/testing/react';
+import { InMemoryCache } from '@apollo/client';
+import { LIST_MY_PROFILES, LIST_MY_SHARES, GET_MY_ACCOUNT, UPDATE_MY_PREFERENCES } from '../src/lib/graphql';
 
 // Mock AuthContext (authenticated)
 vi.mock('../src/contexts/AuthContext', () => ({
   useAuth: () => ({ isAuthenticated: true, loading: false, account: { accountId: 'test-account-id' } }),
-}))
+}));
 
 // Mock navigate
-const mockNavigate = vi.fn()
+const mockNavigate = vi.fn();
 vi.mock('react-router-dom', async () => {
-  const actual = await vi.importActual('react-router-dom')
+  const actual = await vi.importActual('react-router-dom');
   return {
     ...actual,
     useNavigate: () => mockNavigate,
-  }
-})
+  };
+});
 
-import { ScoutsPage } from '../src/pages/ScoutsPage'
+import { ScoutsPage } from '../src/pages/ScoutsPage';
 
 const createCache = () =>
   new InMemoryCache({
     typePolicies: {
       Query: { fields: { listMyProfiles: { merge: (_, incoming) => incoming } } },
     },
-  })
+  });
 
 // Base mocks for ScoutsPage
 const baseMocks = [
@@ -90,12 +85,12 @@ const baseMocks = [
       },
     },
   },
-]
+];
 
 describe('ScoutsPage', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
-  })
+    vi.clearAllMocks();
+  });
 
   it('renders page header with My Scouts title', async () => {
     render(
@@ -104,10 +99,10 @@ describe('ScoutsPage', () => {
           <ScoutsPage />
         </MemoryRouter>
       </MockedProvider>,
-    )
+    );
 
-    await waitFor(() => expect(screen.getByText('My Scouts')).toBeInTheDocument(), { timeout: 5000 })
-  }, 10000)
+    await waitFor(() => expect(screen.getByText('My Scouts')).toBeInTheDocument(), { timeout: 5000 });
+  }, 10000);
 
   it('renders owned profiles section', async () => {
     render(
@@ -116,10 +111,10 @@ describe('ScoutsPage', () => {
           <ScoutsPage />
         </MemoryRouter>
       </MockedProvider>,
-    )
+    );
 
-    await waitFor(() => expect(screen.getByText('Scout Alpha')).toBeInTheDocument(), { timeout: 5000 })
-  }, 10000)
+    await waitFor(() => expect(screen.getByText('Scout Alpha')).toBeInTheDocument(), { timeout: 5000 });
+  }, 10000);
 
   it('renders shared profiles section', async () => {
     render(
@@ -128,10 +123,10 @@ describe('ScoutsPage', () => {
           <ScoutsPage />
         </MemoryRouter>
       </MockedProvider>,
-    )
+    );
 
-    await waitFor(() => expect(screen.getByText('Shared Scout')).toBeInTheDocument(), { timeout: 5000 })
-  }, 10000)
+    await waitFor(() => expect(screen.getByText('Shared Scout')).toBeInTheDocument(), { timeout: 5000 });
+  }, 10000);
 
   it('shows read-only toggle switch', async () => {
     render(
@@ -140,10 +135,10 @@ describe('ScoutsPage', () => {
           <ScoutsPage />
         </MemoryRouter>
       </MockedProvider>,
-    )
+    );
 
-    await waitFor(() => expect(screen.getByText('Show read-only')).toBeInTheDocument(), { timeout: 5000 })
-  }, 10000)
+    await waitFor(() => expect(screen.getByText('Show read-only')).toBeInTheDocument(), { timeout: 5000 });
+  }, 10000);
 
   it('shows Accept Invite and Create Scout buttons', async () => {
     render(
@@ -152,13 +147,16 @@ describe('ScoutsPage', () => {
           <ScoutsPage />
         </MemoryRouter>
       </MockedProvider>,
-    )
+    );
 
-    await waitFor(() => {
-      expect(screen.getByText('Accept Invite')).toBeInTheDocument()
-      expect(screen.getByText('Create Scout')).toBeInTheDocument()
-    }, { timeout: 5000 })
-  }, 10000)
+    await waitFor(
+      () => {
+        expect(screen.getByText('Accept Invite')).toBeInTheDocument();
+        expect(screen.getByText('Create Scout')).toBeInTheDocument();
+      },
+      { timeout: 5000 },
+    );
+  }, 10000);
 
   it('navigates to accept-invite when Accept Invite button clicked', async () => {
     render(
@@ -167,12 +165,12 @@ describe('ScoutsPage', () => {
           <ScoutsPage />
         </MemoryRouter>
       </MockedProvider>,
-    )
+    );
 
-    await waitFor(() => expect(screen.getByText('Accept Invite')).toBeInTheDocument(), { timeout: 5000 })
-    fireEvent.click(screen.getByText('Accept Invite'))
-    expect(mockNavigate).toHaveBeenCalledWith('/accept-invite')
-  }, 10000)
+    await waitFor(() => expect(screen.getByText('Accept Invite')).toBeInTheDocument(), { timeout: 5000 });
+    fireEvent.click(screen.getByText('Accept Invite'));
+    expect(mockNavigate).toHaveBeenCalledWith('/accept-invite');
+  }, 10000);
 
   it('opens create dialog when Create Scout button clicked', async () => {
     render(
@@ -181,14 +179,14 @@ describe('ScoutsPage', () => {
           <ScoutsPage />
         </MemoryRouter>
       </MockedProvider>,
-    )
+    );
 
-    await waitFor(() => expect(screen.getByText('Create Scout')).toBeInTheDocument(), { timeout: 5000 })
-    fireEvent.click(screen.getByText('Create Scout'))
-    
+    await waitFor(() => expect(screen.getByText('Create Scout')).toBeInTheDocument(), { timeout: 5000 });
+    fireEvent.click(screen.getByText('Create Scout'));
+
     // Dialog should open with Create Profile title
-    await waitFor(() => expect(screen.getByRole('dialog')).toBeInTheDocument())
-  }, 10000)
+    await waitFor(() => expect(screen.getByRole('dialog')).toBeInTheDocument());
+  }, 10000);
 
   // Skipped: MUI Switch hidden checkbox is not accessible via testing-library queries in jsdom
   it.skip('toggles read-only switch and calls update preferences mutation', async () => {
@@ -198,7 +196,7 @@ describe('ScoutsPage', () => {
         variables: { preferences: JSON.stringify({ showReadOnlyProfiles: false }) },
       },
       result: { data: { updateMyPreferences: { accountId: 'test-account-id' } } },
-    }
+    };
 
     render(
       <MockedProvider mocks={[...baseMocks, updatePrefsMock]} cache={createCache()}>
@@ -206,16 +204,16 @@ describe('ScoutsPage', () => {
           <ScoutsPage />
         </MemoryRouter>
       </MockedProvider>,
-    )
+    );
 
     // Wait for page to load
-    await waitFor(() => expect(screen.getByText('Show read-only')).toBeInTheDocument(), { timeout: 5000 })
-    
+    await waitFor(() => expect(screen.getByText('Show read-only')).toBeInTheDocument(), { timeout: 5000 });
+
     // Find and click the switch (MUI Switch uses input with role="checkbox")
-    const switchControl = screen.getByRole('checkbox', { hidden: true })
-    fireEvent.click(switchControl)
-    
+    const switchControl = screen.getByRole('checkbox', { hidden: true });
+    fireEvent.click(switchControl);
+
     // The switch should toggle (mutation will be called)
     // We just verify the click happened without error
-  }, 10000)
-})
+  }, 10000);
+});

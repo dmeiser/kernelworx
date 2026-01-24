@@ -2,9 +2,9 @@
  * CatalogsPage - Manage product catalogs (public and user-owned)
  */
 
-import React, { useState, useEffect, useMemo } from 'react';
-import { useQuery, useMutation, useLazyQuery } from '@apollo/client/react';
-import { useAuth } from '../contexts/AuthContext';
+import React, { useState, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useQuery, useMutation } from '@apollo/client/react';
 import {
   Box,
   Button,
@@ -28,21 +28,17 @@ import {
   Add as AddIcon,
   Edit as EditIcon,
   Delete as DeleteIcon,
-  Public as PublicIcon,
-  Lock as PrivateIcon,
+  Visibility as VisibilityIcon,
 } from '@mui/icons-material';
 import { CatalogEditorDialog } from '../components/CatalogEditorDialog';
 import {
-  LIST_PUBLIC_CATALOGS,
+  LIST_MANAGED_CATALOGS,
   LIST_MY_CATALOGS,
-  LIST_MY_PROFILES,
-  LIST_MY_SHARES,
-  LIST_CAMPAIGNS_BY_PROFILE,
+  LIST_CATALOGS_IN_USE,
   CREATE_CATALOG,
   UPDATE_CATALOG,
   DELETE_CATALOG,
 } from '../lib/graphql';
-import { ensureProfileId } from '../lib/ids';
 import type { Catalog } from '../types';
 
 // Helper: Format date for display
@@ -54,22 +50,7 @@ const formatDate = (dateString: string): string => {
   });
 };
 
-// Helper: Merge owned profiles with shared profiles
-const mergeProfiles = (
-  myProfilesData: { listMyProfiles: Array<{ profileId: string }> } | undefined,
-  sharedProfilesData: { listMyShares: { profileId: string; permissions: string[] }[] } | undefined,
-): Array<{ profileId: string }> => {
-  return [
-    ...(myProfilesData?.listMyProfiles || []).map((p) => ({
-      profileId: p.profileId,
-    })),
-    ...(sharedProfilesData?.listMyShares || []).map((p) => ({
-      profileId: p.profileId,
-    })),
-  ];
-};
-
-// Helper: Build "My Catalogs" list - includes owned catalogs + used public catalogs
+// Helper: Build "My Catalogs" list - includes owned catalogs + used managed catalogs
 const buildMyCatalogs = (
   myOwnedCatalogs: Catalog[],
   publicCatalogs: Catalog[],
@@ -77,7 +58,7 @@ const buildMyCatalogs = (
 ): Catalog[] => {
   const activeOwned = myOwnedCatalogs.filter((c) => c.isDeleted !== true);
 
-  // Add public catalogs that are in use but not owned
+  // Add managed catalogs that are in use but not owned
   const ownedIds = new Set(activeOwned.map((c) => c.catalogId));
   const usedPublicNotOwned = publicCatalogs.filter(
     (catalog) =>
@@ -98,28 +79,18 @@ interface EmptyCatalogStateProps {
 const EmptyCatalogState: React.FC<EmptyCatalogStateProps> = ({ isMyTab }) => (
   <Paper sx={{ p: 4, textAlign: 'center' }}>
     <Typography color="text.secondary">
-      {isMyTab ? 'No catalogs yet. Create your first catalog!' : 'No public catalogs available.'}
+      {isMyTab ? 'No catalogs yet. Create your first catalog!' : 'No managed catalogs available.'}
     </Typography>
   </Paper>
 );
 
-// Sub-component: Catalog visibility icon
-interface CatalogVisibilityIconProps {
-  isPublic: boolean;
-}
-
-const CatalogVisibilityIcon: React.FC<CatalogVisibilityIconProps> = ({ isPublic }) =>
-  isPublic ? <PublicIcon fontSize="small" color="primary" /> : <PrivateIcon fontSize="small" color="action" />;
-
 // Sub-component: Catalog type chips
 interface CatalogTypeChipsProps {
-  isPublic: boolean;
   inUse: boolean;
 }
 
-const CatalogTypeChips: React.FC<CatalogTypeChipsProps> = ({ isPublic, inUse }) => (
+const CatalogTypeChips: React.FC<CatalogTypeChipsProps> = ({ inUse }) => (
   <Stack direction="row" spacing={1}>
-    <Chip label={isPublic ? 'Public' : 'Private'} size="small" color={isPublic ? 'primary' : 'default'} />
     {inUse && <Chip label="In Use" size="small" color="success" variant="outlined" />}
   </Stack>
 );
@@ -127,24 +98,36 @@ const CatalogTypeChips: React.FC<CatalogTypeChipsProps> = ({ isPublic, inUse }) 
 // Sub-component: Catalog action buttons
 interface CatalogActionsProps {
   catalog: Catalog;
-  currentAccountId: string | undefined;
+  isOwned: boolean;
   onEdit: (catalog: Catalog) => void;
   onDelete: (catalogId: string, catalogName: string) => void;
+  onView: (catalogId: string) => void;
 }
 
-const CatalogActions: React.FC<CatalogActionsProps> = ({ catalog, currentAccountId, onEdit, onDelete }) => {
-  if (catalog.ownerAccountId !== currentAccountId) {
-    return null;
-  }
+const CatalogActions: React.FC<CatalogActionsProps> = ({ catalog, isOwned, onEdit, onDelete, onView }) => {
+  const handleViewClick = () => {
+    localStorage.setItem(
+      'lastViewClicked',
+      JSON.stringify({ catalogId: catalog.catalogId, timestamp: new Date().toISOString() }),
+    );
+    onView(catalog.catalogId);
+  };
 
   return (
     <Stack direction="row" spacing={1} justifyContent="flex-end">
-      <IconButton size="small" onClick={() => onEdit(catalog)} color="primary">
-        <EditIcon fontSize="small" />
-      </IconButton>
-      <IconButton size="small" onClick={() => onDelete(catalog.catalogId, catalog.catalogName)} color="error">
-        <DeleteIcon fontSize="small" />
-      </IconButton>
+      <Button size="small" startIcon={<VisibilityIcon />} onClick={handleViewClick} variant="text">
+        View
+      </Button>
+      {isOwned && (
+        <>
+          <IconButton size="small" onClick={() => onEdit(catalog)} color="primary">
+            <EditIcon fontSize="small" />
+          </IconButton>
+          <IconButton size="small" onClick={() => onDelete(catalog.catalogId, catalog.catalogName)} color="error">
+            <DeleteIcon fontSize="small" />
+          </IconButton>
+        </>
+      )}
     </Stack>
   );
 };
@@ -154,28 +137,25 @@ interface CatalogRowProps {
   catalog: Catalog;
   showActions: boolean;
   inUse: boolean;
-  currentAccountId: string | undefined;
+  isOwned: boolean;
   onEdit: (catalog: Catalog) => void;
   onDelete: (catalogId: string, catalogName: string) => void;
+  onView: (catalogId: string) => void;
 }
 
-// eslint-disable-next-line complexity
-const CatalogRow: React.FC<CatalogRowProps> = ({ catalog, showActions, inUse, currentAccountId, onEdit, onDelete }) => (
+const CatalogRow: React.FC<CatalogRowProps> = ({ catalog, showActions, inUse, isOwned, onEdit, onDelete, onView }) => (
   <TableRow key={catalog.catalogId} hover>
     <TableCell>
-      <Stack direction="row" spacing={1} alignItems="center">
-        <CatalogVisibilityIcon isPublic={catalog.isPublic ?? false} />
-        <Typography fontWeight="medium">{catalog.catalogName}</Typography>
-      </Stack>
+      <Typography fontWeight="medium">{catalog.catalogName}</Typography>
     </TableCell>
     <TableCell>
-      <CatalogTypeChips isPublic={catalog.isPublic ?? false} inUse={inUse} />
+      <CatalogTypeChips inUse={inUse} />
     </TableCell>
     <TableCell>{(catalog.products ?? []).length} items</TableCell>
     <TableCell>{formatDate(catalog.createdAt ?? '')}</TableCell>
     {showActions && (
       <TableCell align="right">
-        <CatalogActions catalog={catalog} currentAccountId={currentAccountId} onEdit={onEdit} onDelete={onDelete} />
+        <CatalogActions catalog={catalog} isOwned={isOwned} onEdit={onEdit} onDelete={onDelete} onView={onView} />
       </TableCell>
     )}
   </TableRow>
@@ -186,18 +166,20 @@ interface CatalogTableProps {
   catalogs: Catalog[];
   showActionsColumn: boolean;
   catalogsInUse: Set<string>;
-  currentAccountId: string | undefined;
+  myOwnedCatalogIds: Set<string>;
   onEdit: (catalog: Catalog) => void;
   onDelete: (catalogId: string, catalogName: string) => void;
+  onView: (catalogId: string) => void;
 }
 
 const CatalogTable: React.FC<CatalogTableProps> = ({
   catalogs,
   showActionsColumn,
   catalogsInUse,
-  currentAccountId,
+  myOwnedCatalogIds,
   onEdit,
   onDelete,
+  onView,
 }) => {
   if (catalogs.length === 0) {
     return <EmptyCatalogState isMyTab={showActionsColumn} />;
@@ -222,9 +204,10 @@ const CatalogTable: React.FC<CatalogTableProps> = ({
               catalog={catalog}
               showActions={showActionsColumn}
               inUse={catalogsInUse.has(catalog.catalogId)}
-              currentAccountId={currentAccountId}
+              isOwned={myOwnedCatalogIds.has(catalog.catalogId)}
               onEdit={onEdit}
               onDelete={onDelete}
+              onView={onView}
             />
           ))}
         </TableBody>
@@ -233,29 +216,11 @@ const CatalogTable: React.FC<CatalogTableProps> = ({
   );
 };
 
-// Custom hook: Fetch catalogs in use by campaigns
-function useCatalogsInUse(allUserProfiles: Array<{ profileId: string }>): Set<string> {
-  const [catalogsInUse, setCatalogsInUse] = useState<Set<string>>(new Set());
+// Custom hook: Fetch catalogs in use by campaigns (single query via backend)
+function useCatalogsInUse(): Set<string> {
+  const { data } = useQuery<{ listCatalogsInUse: string[] }>(LIST_CATALOGS_IN_USE);
 
-  const [fetchCampaigns] = useLazyQuery<{
-    listCampaignsByProfile: Array<{ catalogId: string }>;
-  }>(LIST_CAMPAIGNS_BY_PROFILE);
-
-  useEffect(() => {
-    if (allUserProfiles.length === 0) return;
-
-    const fetchAllCampaigns = async () => {
-      const catalogIds = new Set<string>();
-      for (const profile of allUserProfiles) {
-        await fetchCampaignsForProfile(profile, fetchCampaigns, catalogIds);
-      }
-      setCatalogsInUse(catalogIds);
-    };
-
-    fetchAllCampaigns();
-  }, [allUserProfiles, fetchCampaigns]);
-
-  return catalogsInUse;
+  return useMemo(() => new Set(data?.listCatalogsInUse || []), [data]);
 }
 
 // Custom hook: Catalog mutations
@@ -280,8 +245,10 @@ function useCatalogMutations(refetchAll: () => void): CatalogMutations {
 }
 
 // Helper: Extract catalogs from query data
-function extractCatalogs(data: { listPublicCatalogs: Catalog[] } | undefined): Catalog[] {
-  return data?.listPublicCatalogs || [];
+// Only include truly managed (admin-maintained) catalogs in the Managed tab
+function extractCatalogs(data: { listManagedCatalogs: Catalog[] } | undefined): Catalog[] {
+  const catalogs = data?.listManagedCatalogs || [];
+  return catalogs.filter((c) => c.catalogType === 'ADMIN_MANAGED');
 }
 
 function extractMyCatalogs(data: { listMyCatalogs: Catalog[] } | undefined): Catalog[] {
@@ -313,7 +280,7 @@ function useCatalogQueries(): CatalogQueries {
     loading: publicLoading,
     error: publicError,
     refetch: refetchPublic,
-  } = useQuery<{ listPublicCatalogs: Catalog[] }>(LIST_PUBLIC_CATALOGS);
+  } = useQuery<{ listManagedCatalogs: Catalog[] }>(LIST_MANAGED_CATALOGS);
 
   const {
     data: myData,
@@ -336,23 +303,11 @@ function useCatalogQueries(): CatalogQueries {
   };
 }
 
-// Custom hook: Fetch all user profiles (owned + shared)
-function useAllUserProfiles(): Array<{ profileId: string }> {
-  const { data: myProfilesData } = useQuery<{
-    listMyProfiles: Array<{ profileId: string }>;
-  }>(LIST_MY_PROFILES);
-
-  const { data: sharedProfilesData } = useQuery<{
-    listMyShares: { profileId: string; permissions: string[] }[];
-  }>(LIST_MY_SHARES);
-
-  return useMemo(() => mergeProfiles(myProfilesData, sharedProfilesData), [myProfilesData, sharedProfilesData]);
-}
-
 // Data returned by useCatalogsPageData
 interface CatalogsPageData {
   publicCatalogs: Catalog[];
   myCatalogs: Catalog[];
+  myOwnedCatalogIds: Set<string>;
   catalogsInUse: Set<string>;
   isLoading: boolean;
   errorMessage: string | undefined;
@@ -363,14 +318,15 @@ interface CatalogsPageData {
 function useCatalogsPageData(): CatalogsPageData {
   const { publicCatalogs, myOwnedCatalogs, isLoading, errorMessage, refetchAll } = useCatalogQueries();
 
-  const allUserProfiles = useAllUserProfiles();
-  const catalogsInUse = useCatalogsInUse(allUserProfiles);
+  const catalogsInUse = useCatalogsInUse();
   const mutations = useCatalogMutations(refetchAll);
   const myCatalogs = buildMyCatalogs(myOwnedCatalogs, publicCatalogs, catalogsInUse);
+  const myOwnedCatalogIds = new Set(myOwnedCatalogs.map((c) => c.catalogId));
 
   return {
     publicCatalogs,
     myCatalogs,
+    myOwnedCatalogIds,
     catalogsInUse,
     isLoading,
     errorMessage,
@@ -401,10 +357,11 @@ interface CatalogsContentProps {
   myCatalogs: Catalog[];
   publicCatalogs: Catalog[];
   catalogsInUse: Set<string>;
-  currentAccountId: string | undefined;
+  myOwnedCatalogIds: Set<string>;
   onEdit: (catalog: Catalog) => void;
   onDelete: (catalogId: string, catalogName: string) => void;
   onCreateCatalog: () => void;
+  onView: (catalogId: string) => void;
 }
 
 const CatalogsContent: React.FC<CatalogsContentProps> = ({
@@ -413,15 +370,17 @@ const CatalogsContent: React.FC<CatalogsContentProps> = ({
   myCatalogs,
   publicCatalogs,
   catalogsInUse,
-  currentAccountId,
+  myOwnedCatalogIds,
   onEdit,
   onDelete,
   onCreateCatalog,
+  onView,
 }) => {
   const catalogTableProps = {
-    currentAccountId,
+    myOwnedCatalogIds,
     onEdit,
     onDelete,
+    onView,
   };
 
   return (
@@ -441,7 +400,7 @@ const CatalogsContent: React.FC<CatalogsContentProps> = ({
       {currentTab === 1 && (
         <CatalogTable
           catalogs={publicCatalogs}
-          showActionsColumn={false}
+          showActionsColumn={true}
           catalogsInUse={catalogsInUse}
           {...catalogTableProps}
         />
@@ -451,12 +410,13 @@ const CatalogsContent: React.FC<CatalogsContentProps> = ({
 };
 
 export const CatalogsPage: React.FC = () => {
-  const { account } = useAuth();
+  const navigate = useNavigate();
   const [currentTab, setCurrentTab] = useState(0);
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingCatalog, setEditingCatalog] = useState<Catalog | null>(null);
 
-  const { publicCatalogs, myCatalogs, catalogsInUse, isLoading, errorMessage, mutations } = useCatalogsPageData();
+  const { publicCatalogs, myCatalogs, myOwnedCatalogIds, catalogsInUse, isLoading, errorMessage, mutations } =
+    useCatalogsPageData();
 
   const handleCreateCatalog = () => {
     setEditingCatalog(null);
@@ -472,6 +432,12 @@ export const CatalogsPage: React.FC = () => {
     const confirmed = confirm(`Are you sure you want to delete "${catalogName}"? This action cannot be undone.`);
     if (!confirmed) return;
     await mutations.deleteCatalog({ variables: { catalogId } });
+  };
+
+  const handleViewCatalog = (catalogId: string) => {
+    // Strip CATALOG# prefix for URL - will be re-added in preview page
+    const catalogUuid = catalogId.replace(/^CATALOG#/, '');
+    navigate(`/catalogs/${catalogUuid}/preview`);
   };
 
   const handleSaveCatalog = async (catalogData: {
@@ -502,10 +468,11 @@ export const CatalogsPage: React.FC = () => {
         myCatalogs={myCatalogs}
         publicCatalogs={publicCatalogs}
         catalogsInUse={catalogsInUse}
-        currentAccountId={account?.accountId}
+        myOwnedCatalogIds={myOwnedCatalogIds}
         onEdit={handleEditCatalog}
         onDelete={handleDeleteCatalog}
         onCreateCatalog={handleCreateCatalog}
+        onView={handleViewCatalog}
       />
       <CatalogEditorDialog
         open={editorOpen}
@@ -540,32 +507,6 @@ async function saveCatalog(
   }
 }
 
-// Helper: Fetch campaigns for a single profile
-async function fetchCampaignsForProfile(
-  profile: { profileId: string },
-  fetchCampaigns: ReturnType<
-    typeof useLazyQuery<{
-      listCampaignsByProfile: Array<{ catalogId: string }>;
-    }>
-  >[0],
-  catalogIds: Set<string>,
-): Promise<void> {
-  if (!profile.profileId) return;
-
-  try {
-    const { data } = await fetchCampaigns({
-      variables: { profileId: ensureProfileId(profile.profileId) },
-    });
-    data?.listCampaignsByProfile.forEach((campaign) => {
-      if (campaign.catalogId) {
-        catalogIds.add(campaign.catalogId);
-      }
-    });
-  } catch (error) {
-    console.error(`Failed to fetch campaigns for profile ${profile.profileId}:`, error);
-  }
-}
-
 // Sub-component: Page header with title and create button
 interface CatalogsHeaderProps {
   onCreateCatalog: () => void;
@@ -584,13 +525,14 @@ const CatalogsHeader: React.FC<CatalogsHeaderProps> = ({ onCreateCatalog }) => (
 const CatalogsInfoAlert: React.FC = () => (
   <Alert severity="info" sx={{ mb: 3 }}>
     <Typography variant="body2">
-      <strong>Public catalogs</strong> are visible to all users and can be used by anyone when creating campaigns.
-      <strong> Private catalogs</strong> are only visible to you and can be used for your own tracking.
+      <strong>Managed catalogs</strong> are admin-maintained catalogs visible to all users.
+      <strong> Private catalogs</strong> are only visible to you and can be used for your owned tracking and use in
+      shared campaigns.
     </Typography>
   </Alert>
 );
 
-// Sub-component: Tabs for switching between My Catalogs and Public Catalogs
+// Sub-component: Tabs for switching between My Catalogs and Managed Catalogs
 interface CatalogsTabsProps {
   currentTab: number;
   onTabChange: (newTab: number) => void;
@@ -600,7 +542,7 @@ const CatalogsTabs: React.FC<CatalogsTabsProps> = ({ currentTab, onTabChange }) 
   <Paper sx={{ mb: 3 }}>
     <Tabs value={currentTab} onChange={(_, newValue) => onTabChange(newValue)} variant="fullWidth">
       <Tab label="My Catalogs" />
-      <Tab label="Public Catalogs" />
+      <Tab label="Managed Catalogs" />
     </Tabs>
   </Paper>
 );

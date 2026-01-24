@@ -2,7 +2,7 @@
  * CatalogEditorDialog - Create or edit a product catalog
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Dialog,
   DialogTitle,
@@ -11,13 +11,12 @@ import {
   Button,
   TextField,
   Box,
-  FormControlLabel,
-  Checkbox,
   Stack,
   IconButton,
   Typography,
   Divider,
   Alert,
+  AlertTitle,
 } from '@mui/material';
 import { Add as AddIcon, Delete as DeleteIcon } from '@mui/icons-material';
 import type { ProductInput, Catalog, Product } from '../types';
@@ -46,33 +45,40 @@ interface CatalogFormValues {
 
 export const CatalogEditorDialog: React.FC<CatalogEditorDialogProps> = ({ open, onClose, onSave, initialCatalog }) => {
   const form = useFormState<CatalogFormValues>({
-    initialValues: { catalogName: '', isPublic: false },
+    initialValues: { catalogName: '', isPublic: true }, // Default to public for admin catalogs
   });
   const [products, setProducts] = useState<ProductInput[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const initializedRef = useRef(false);
 
-  const resetForm = () => {
-    form.resetTo({ catalogName: '', isPublic: false });
+  const resetForm = useCallback(() => {
+    form.resetTo({ catalogName: '', isPublic: true }); // Default to public for admin catalogs
     setProducts([{ productName: '', description: '', price: 0 }]);
     setError(null);
-  };
+  }, [form]);
 
-  const initFromCatalog = (catalog: Catalog) => {
-    form.resetTo({ catalogName: catalog.catalogName, isPublic: catalog.isPublic ?? false });
-    setProducts([...(catalog.products ?? [])]);
-    setError(null);
-  };
+  const initFromCatalog = useCallback(
+    (catalog: Catalog) => {
+      form.resetTo({ catalogName: catalog.catalogName, isPublic: catalog.isPublic ?? false });
+      setProducts([...(catalog.products ?? [])]);
+      setError(null);
+    },
+    [form],
+  );
 
   useEffect(() => {
-    if (open) {
+    if (open && !initializedRef.current) {
+      initializedRef.current = true;
       if (initialCatalog) {
         initFromCatalog(initialCatalog);
       } else {
         resetForm();
       }
+    } else if (!open) {
+      initializedRef.current = false;
     }
-  }, [open, initialCatalog]);
+  }, [open, initialCatalog, initFromCatalog, resetForm]);
 
   const handleAddProduct = () => {
     setProducts([...products, { productName: '', description: '', price: 0 }]);
@@ -161,14 +167,6 @@ export const CatalogEditorDialog: React.FC<CatalogEditorDialogProps> = ({ open, 
             placeholder="e.g., 2025 Popcorn Catalog"
           />
 
-          {/* Public Checkbox */}
-          <FormControlLabel
-            control={
-              <Checkbox checked={form.values.isPublic} onChange={(e) => form.setValue('isPublic', e.target.checked)} />
-            }
-            label="Make this catalog public (visible to all users)"
-          />
-
           <Divider />
 
           {/* Products */}
@@ -239,6 +237,13 @@ export const CatalogEditorDialog: React.FC<CatalogEditorDialogProps> = ({ open, 
               ))}
             </Stack>
           </Box>
+
+          {/* Privacy Notice */}
+          <Alert severity="info">
+            <AlertTitle>Privacy Notice</AlertTitle>
+            Catalogs are not searchable, but anyone with the catalog ID can view products and prices. When you use this
+            catalog in a shared campaign, campaign participants will see it.
+          </Alert>
 
           {error && <Alert severity="error">{error}</Alert>}
         </Stack>

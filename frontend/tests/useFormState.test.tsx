@@ -35,18 +35,14 @@ describe('useFormState', () => {
     });
 
     it('starts with no errors', () => {
-      const { result } = renderHook(() =>
-        useFormState({ initialValues: defaultInitialValues }),
-      );
+      const { result } = renderHook(() => useFormState({ initialValues: defaultInitialValues }));
 
       expect(result.current.errors).toEqual({});
       expect(result.current.isValid).toBe(true);
     });
 
     it('starts as not dirty', () => {
-      const { result } = renderHook(() =>
-        useFormState({ initialValues: defaultInitialValues }),
-      );
+      const { result } = renderHook(() => useFormState({ initialValues: defaultInitialValues }));
 
       expect(result.current.isDirty).toBe(false);
     });
@@ -54,9 +50,7 @@ describe('useFormState', () => {
 
   describe('setValue', () => {
     it('updates a single field', () => {
-      const { result } = renderHook(() =>
-        useFormState({ initialValues: defaultInitialValues }),
-      );
+      const { result } = renderHook(() => useFormState({ initialValues: defaultInitialValues }));
 
       act(() => {
         result.current.setValue('name', 'Jane');
@@ -68,9 +62,7 @@ describe('useFormState', () => {
     });
 
     it('marks form as dirty after change', () => {
-      const { result } = renderHook(() =>
-        useFormState({ initialValues: defaultInitialValues }),
-      );
+      const { result } = renderHook(() => useFormState({ initialValues: defaultInitialValues }));
 
       act(() => {
         result.current.setValue('name', 'Jane');
@@ -102,9 +94,7 @@ describe('useFormState', () => {
 
   describe('setValues', () => {
     it('updates multiple fields at once', () => {
-      const { result } = renderHook(() =>
-        useFormState({ initialValues: defaultInitialValues }),
-      );
+      const { result } = renderHook(() => useFormState({ initialValues: defaultInitialValues }));
 
       act(() => {
         result.current.setValues({ name: 'Jane', age: 30 });
@@ -174,9 +164,7 @@ describe('useFormState', () => {
 
   describe('resetTo', () => {
     it('resets to new values and updates initial snapshot', () => {
-      const { result } = renderHook(() =>
-        useFormState({ initialValues: defaultInitialValues }),
-      );
+      const { result } = renderHook(() => useFormState({ initialValues: defaultInitialValues }));
 
       act(() => {
         result.current.setValue('name', 'Temporary');

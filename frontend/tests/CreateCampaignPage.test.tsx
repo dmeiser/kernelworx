@@ -13,7 +13,7 @@ import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { CreateCampaignPage } from '../src/pages/CreateCampaignPage';
 import {
   LIST_MY_PROFILES,
-  LIST_PUBLIC_CATALOGS,
+  LIST_MANAGED_CATALOGS,
   LIST_MY_CATALOGS,
   GET_SHARED_CAMPAIGN,
   CREATE_CAMPAIGN,
@@ -74,11 +74,11 @@ const baseMocks = [
   },
   {
     request: {
-      query: LIST_PUBLIC_CATALOGS,
+      query: LIST_MANAGED_CATALOGS,
     },
     result: {
       data: {
-        listPublicCatalogs: [
+        listManagedCatalogs: [
           {
             catalogId: 'catalog-1',
             catalogName: "2024 Trail's End Products",
@@ -265,18 +265,19 @@ describe('CreateCampaignPage', () => {
       </MockedProvider>,
     );
 
-    const productLabels = await screen.findAllByText(/Product Catalog \*/i);
+    const productLabels = await screen.findAllByText(/Product Catalog/i);
     expect(productLabels.length).toBeGreaterThan(0);
   });
 
-  test("shows '(Official)' label for admin-managed catalogs", async () => {
+  // SKIP: CatalogSection component no longer shows "(Official)" suffix - feature removed
+  test.skip("shows '(Official)' label for admin-managed catalogs", async () => {
     const adminCatalogMocks = [
-      ...baseMocks.filter((m) => m.request.query !== LIST_PUBLIC_CATALOGS),
+      ...baseMocks.filter((m) => m.request.query !== LIST_MANAGED_CATALOGS),
       {
-        request: { query: LIST_PUBLIC_CATALOGS },
+        request: { query: LIST_MANAGED_CATALOGS },
         result: {
           data: {
-            listPublicCatalogs: [
+            listManagedCatalogs: [
               {
                 catalogId: 'catalog-admin',
                 catalogName: 'Official',
@@ -307,7 +308,7 @@ describe('CreateCampaignPage', () => {
     // Open the Product Catalog combobox and assert the admin-managed catalog shows the "(Official)" label
     const user = userEvent.setup();
     // Find the label then the nearby combobox; MUI sometimes splits labels across nodes
-    const productLabels = await screen.findAllByText(/Product Catalog \*/i);
+    const productLabels = await screen.findAllByText(/Product Catalog/i);
     const labelEl = productLabels[0];
     const formControl = labelEl.closest('.MuiFormControl-root') || labelEl.parentElement;
     const combobox = formControl?.querySelector('[role="combobox"]') as HTMLElement | null;
@@ -393,7 +394,7 @@ describe('CreateCampaignPage', () => {
     expect(await screen.findByRole('button', { name: /Cancel/i })).toBeInTheDocument();
   });
 
-  test('shows Campaign Not Found when shared campaign is missing and navigates to profiles', async () => {
+  test('shows Campaign Not Found when shared campaign is missing and navigates back', async () => {
     const missingCampaignMock = {
       request: { query: GET_SHARED_CAMPAIGN, variables: { sharedCampaignCode: 'NOPE' } },
       result: { data: { getSharedCampaign: null } },
@@ -411,10 +412,11 @@ describe('CreateCampaignPage', () => {
 
     expect(await screen.findByText(/Campaign Not Found/i)).toBeInTheDocument();
 
-    const goButton = screen.getByRole('button', { name: /Go to Profiles/i });
-    await userEvent.click(goButton);
+    // The Back button navigates back in history
+    const backButton = screen.getByRole('button', { name: /Back/i });
+    await userEvent.click(backButton);
 
-    expect(mockNavigate).toHaveBeenCalledWith('/scouts');
+    expect(mockNavigate).toHaveBeenCalledWith(-1);
   });
 
   // SKIPPED: MUI Select's onChange doesn't fire when clicking MenuItem in jsdom
@@ -530,9 +532,10 @@ describe('CreateCampaignPage', () => {
     expect(await screen.findByText(/Error Loading Campaign/i)).toBeTruthy();
     expect(screen.getByText(/network boom/i)).toBeTruthy();
 
-    const goButton = screen.getByRole('button', { name: /Go to Profiles/i });
-    await userEvent.click(goButton);
-    expect(mockNavigate).toHaveBeenCalledWith('/scouts');
+    // The Back button navigates back in history
+    const backButton = screen.getByRole('button', { name: /Back/i });
+    await userEvent.click(backButton);
+    expect(mockNavigate).toHaveBeenCalledWith(-1);
   });
 
   test.skip('shows discovered shared campaign alert and navigates when Use Campaign clicked (deterministic)', async () => {
@@ -821,7 +824,7 @@ describe('CreateCampaignPage', () => {
         },
       },
       // Catalog queries may still be executed by other components; provide safe empty responses
-      { request: { query: LIST_PUBLIC_CATALOGS }, result: { data: { listPublicCatalogs: [] } } },
+      { request: { query: LIST_MANAGED_CATALOGS }, result: { data: { listManagedCatalogs: [] } } },
       { request: { query: LIST_MY_CATALOGS }, result: { data: { listMyCatalogs: [] } } },
       sharedMock,
       createCampaignMock,

@@ -22,7 +22,9 @@ vi.mock('react-router-dom', async () => {
 
 // Mock child components to simplify testing
 vi.mock('../src/components/PaymentMethodCard', () => ({
-  PaymentMethodCard: ({ method }: { method: { name: string } }) => <div data-testid={`card-${method.name}`}>{method.name}</div>,
+  PaymentMethodCard: ({ method }: { method: { name: string } }) => (
+    <div data-testid={`card-${method.name}`}>{method.name}</div>
+  ),
 }));
 
 vi.mock('../src/components/CreatePaymentMethodDialog', () => ({
@@ -41,8 +43,7 @@ vi.mock('../src/components/DeletePaymentMethodDialog', () => ({
 }));
 
 vi.mock('../src/components/QRUploadDialog', () => ({
-  QRUploadDialog: ({ open }: { open: boolean }) =>
-    open ? <div role="dialog">QR Upload</div> : null,
+  QRUploadDialog: ({ open }: { open: boolean }) => (open ? <div role="dialog">QR Upload</div> : null),
 }));
 
 const successMock = {

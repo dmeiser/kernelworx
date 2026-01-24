@@ -76,7 +76,16 @@ describe('useSharedCampaignDiscoveryTrigger', () => {
     const mockDebouncedFind = vi.fn();
     const { rerender } = renderHook(
       ({ campaignName, campaignYear }) =>
-        useSharedCampaignDiscoveryTrigger(false, 'Pack', '123', 'Austin', 'TX', campaignName, campaignYear, mockDebouncedFind),
+        useSharedCampaignDiscoveryTrigger(
+          false,
+          'Pack',
+          '123',
+          'Austin',
+          'TX',
+          campaignName,
+          campaignYear,
+          mockDebouncedFind,
+        ),
       { initialProps: { campaignName: 'Fall Sale', campaignYear: 2025 } },
     );
 

@@ -75,7 +75,7 @@
   - [x] Enable social login providers: ✅
     - [x] Google (required) ✅
     - [x] Facebook (required) ✅
-    - [x] Apple (required) ✅
+    - [x] ~~Apple (required)~~ - Removed (cost optimization)
   - [x] Configure password policies ✅
   - [x] Set up hosted UI (optional for v1) ✅
   - [x] Configure COPPA compliance warnings ✅

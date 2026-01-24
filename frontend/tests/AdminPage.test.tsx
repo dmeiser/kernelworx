@@ -8,7 +8,7 @@ import userEvent from '@testing-library/user-event';
 import { MockedProvider } from '@apollo/client/testing/react';
 import { BrowserRouter } from 'react-router-dom';
 import { AdminPage } from '../src/pages/AdminPage';
-import { LIST_MY_PROFILES, LIST_PUBLIC_CATALOGS } from '../src/lib/graphql';
+import { LIST_MY_PROFILES, LIST_MANAGED_CATALOGS } from '../src/lib/graphql';
 
 describe('AdminPage', () => {
   beforeEach(() => {
@@ -66,11 +66,11 @@ describe('AdminPage', () => {
       },
       {
         request: {
-          query: LIST_PUBLIC_CATALOGS,
+          query: LIST_MANAGED_CATALOGS,
         },
         result: {
           data: {
-            listPublicCatalogs: [],
+            listManagedCatalogs: [],
           },
         },
       },
@@ -81,7 +81,7 @@ describe('AdminPage', () => {
         <BrowserRouter>
           <AdminPage />
         </BrowserRouter>
-      </MockedProvider>
+      </MockedProvider>,
     );
 
     expect(screen.getByText('Admin Console')).toBeInTheDocument();
@@ -103,11 +103,11 @@ describe('AdminPage', () => {
       },
       {
         request: {
-          query: LIST_PUBLIC_CATALOGS,
+          query: LIST_MANAGED_CATALOGS,
         },
         result: {
           data: {
-            listPublicCatalogs: [],
+            listManagedCatalogs: [],
           },
         },
       },
@@ -118,15 +118,15 @@ describe('AdminPage', () => {
         <BrowserRouter>
           <AdminPage />
         </BrowserRouter>
-      </MockedProvider>
+      </MockedProvider>,
     );
 
-    expect(screen.getByRole('tab', { name: /profiles/i })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /users/i })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: /catalogs/i })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: /system info/i })).toBeInTheDocument();
   });
 
-  test('shows Profiles tab content by default', async () => {
+  test('shows Users tab content by default', async () => {
     const mocks = [
       {
         request: {
@@ -140,11 +140,11 @@ describe('AdminPage', () => {
       },
       {
         request: {
-          query: LIST_PUBLIC_CATALOGS,
+          query: LIST_MANAGED_CATALOGS,
         },
         result: {
           data: {
-            listPublicCatalogs: [],
+            listManagedCatalogs: [],
           },
         },
       },
@@ -155,13 +155,13 @@ describe('AdminPage', () => {
         <BrowserRouter>
           <AdminPage />
         </BrowserRouter>
-      </MockedProvider>
+      </MockedProvider>,
     );
 
     await waitFor(() => {
-      expect(screen.getByText('All Scouts')).toBeInTheDocument();
-      expect(screen.getByText('Scout Alpha')).toBeInTheDocument();
-      expect(screen.getByText('Scout Beta')).toBeInTheDocument();
+      // Users tab shows search interface
+      expect(screen.getByText('User Management')).toBeInTheDocument();
+      expect(screen.getByPlaceholderText(/search by email, name/i)).toBeInTheDocument();
     });
   });
 
@@ -180,11 +180,11 @@ describe('AdminPage', () => {
       },
       {
         request: {
-          query: LIST_PUBLIC_CATALOGS,
+          query: LIST_MANAGED_CATALOGS,
         },
         result: {
           data: {
-            listPublicCatalogs: mockCatalogs,
+            listManagedCatalogs: mockCatalogs,
           },
         },
       },
@@ -195,14 +195,14 @@ describe('AdminPage', () => {
         <BrowserRouter>
           <AdminPage />
         </BrowserRouter>
-      </MockedProvider>
+      </MockedProvider>,
     );
 
     const catalogsTab = screen.getByRole('tab', { name: /catalogs/i });
     await user.click(catalogsTab);
 
     await waitFor(() => {
-      expect(screen.getByText('Product Catalogs')).toBeInTheDocument();
+      expect(screen.getByText('Shared Product Catalogs')).toBeInTheDocument();
       expect(screen.getByText('2025 Popcorn Catalog')).toBeInTheDocument();
     });
   });
@@ -222,11 +222,11 @@ describe('AdminPage', () => {
       },
       {
         request: {
-          query: LIST_PUBLIC_CATALOGS,
+          query: LIST_MANAGED_CATALOGS,
         },
         result: {
           data: {
-            listPublicCatalogs: [],
+            listManagedCatalogs: [],
           },
         },
       },
@@ -237,7 +237,7 @@ describe('AdminPage', () => {
         <BrowserRouter>
           <AdminPage />
         </BrowserRouter>
-      </MockedProvider>
+      </MockedProvider>,
     );
 
     const systemInfoTab = screen.getByRole('tab', { name: /system info/i });
@@ -249,7 +249,7 @@ describe('AdminPage', () => {
     });
   });
 
-  test('shows loading state for profiles', () => {
+  test('shows loading state for profiles', async () => {
     const mocks = [
       {
         request: {
@@ -264,11 +264,11 @@ describe('AdminPage', () => {
       },
       {
         request: {
-          query: LIST_PUBLIC_CATALOGS,
+          query: LIST_MANAGED_CATALOGS,
         },
         result: {
           data: {
-            listPublicCatalogs: [],
+            listManagedCatalogs: [],
           },
         },
       },
@@ -279,13 +279,19 @@ describe('AdminPage', () => {
         <BrowserRouter>
           <AdminPage />
         </BrowserRouter>
-      </MockedProvider>
+      </MockedProvider>,
     );
 
-    expect(screen.getByRole('progressbar')).toBeInTheDocument();
+    // The Users tab shows a search interface, not a loading state
+    // Loading would only appear during a search operation
+    await waitFor(() => {
+      expect(screen.getByText('User Management')).toBeInTheDocument();
+    });
   });
 
-  test('shows error message when profiles query fails', async () => {
+  // Note: The AdminPage no longer loads profiles on the Users tab.
+  // It shows a search interface instead. Profile errors would only occur during search.
+  test.skip('shows error message when profiles query fails', async () => {
     const mocks = [
       {
         request: {
@@ -295,11 +301,11 @@ describe('AdminPage', () => {
       },
       {
         request: {
-          query: LIST_PUBLIC_CATALOGS,
+          query: LIST_MANAGED_CATALOGS,
         },
         result: {
           data: {
-            listPublicCatalogs: [],
+            listManagedCatalogs: [],
           },
         },
       },
@@ -310,7 +316,7 @@ describe('AdminPage', () => {
         <BrowserRouter>
           <AdminPage />
         </BrowserRouter>
-      </MockedProvider>
+      </MockedProvider>,
     );
 
     await waitFor(() => {
@@ -318,7 +324,9 @@ describe('AdminPage', () => {
     });
   });
 
-  test('displays owner and shared badges for profiles', async () => {
+  // Note: The AdminPage no longer displays profiles with owner/shared badges.
+  // The Users tab now shows a search interface instead of a profile list.
+  test.skip('displays owner and shared badges for profiles', async () => {
     const mocks = [
       {
         request: {
@@ -332,11 +340,11 @@ describe('AdminPage', () => {
       },
       {
         request: {
-          query: LIST_PUBLIC_CATALOGS,
+          query: LIST_MANAGED_CATALOGS,
         },
         result: {
           data: {
-            listPublicCatalogs: [],
+            listManagedCatalogs: [],
           },
         },
       },
@@ -347,7 +355,7 @@ describe('AdminPage', () => {
         <BrowserRouter>
           <AdminPage />
         </BrowserRouter>
-      </MockedProvider>
+      </MockedProvider>,
     );
 
     await waitFor(() => {
@@ -373,11 +381,11 @@ describe('AdminPage', () => {
       },
       {
         request: {
-          query: LIST_PUBLIC_CATALOGS,
+          query: LIST_MANAGED_CATALOGS,
         },
         result: {
           data: {
-            listPublicCatalogs: [],
+            listManagedCatalogs: [],
           },
         },
       },
@@ -388,7 +396,7 @@ describe('AdminPage', () => {
         <BrowserRouter>
           <AdminPage />
         </BrowserRouter>
-      </MockedProvider>
+      </MockedProvider>,
     );
 
     const systemInfoTab = screen.getByRole('tab', { name: /system info/i });
@@ -410,8 +418,8 @@ describe('AdminPage', () => {
         result: { data: { listMyProfiles: [] } },
       },
       {
-        request: { query: LIST_PUBLIC_CATALOGS },
-        result: { data: { listPublicCatalogs: [] } },
+        request: { query: LIST_MANAGED_CATALOGS },
+        result: { data: { listManagedCatalogs: [] } },
         delay: Infinity, // Never resolves
       },
     ];
@@ -438,7 +446,7 @@ describe('AdminPage', () => {
         result: { data: { listMyProfiles: [] } },
       },
       {
-        request: { query: LIST_PUBLIC_CATALOGS },
+        request: { query: LIST_MANAGED_CATALOGS },
         error: new Error('Failed to fetch catalogs'),
       },
     ];
@@ -467,8 +475,8 @@ describe('AdminPage', () => {
         result: { data: { listMyProfiles: [] } },
       },
       {
-        request: { query: LIST_PUBLIC_CATALOGS },
-        result: { data: { listPublicCatalogs: [] } },
+        request: { query: LIST_MANAGED_CATALOGS },
+        result: { data: { listManagedCatalogs: [] } },
       },
     ];
 
@@ -484,7 +492,7 @@ describe('AdminPage', () => {
     await user.click(catalogsTab);
 
     await waitFor(() => {
-      expect(screen.getByText(/No catalogs found/i)).toBeInTheDocument();
+      expect(screen.getByText(/No managed catalogs found/i)).toBeInTheDocument();
     });
   });
 });

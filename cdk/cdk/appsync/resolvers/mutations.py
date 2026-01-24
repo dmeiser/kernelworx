@@ -136,7 +136,7 @@ def create_mutation_resolvers(
     builder.create_lambda_resolver(
         field_name="createCampaign",
         type_name="Mutation",
-        lambda_datasource_name="campaign_operations",
+        lambda_datasource_name="campaign_operations_fn",
         id_suffix="CreateCampaignResolver",
     )
 
@@ -178,22 +178,24 @@ def create_mutation_resolvers(
         functions["verify_profile_write_access"],
         functions["check_share_permissions"],
     ]
-    
+
     # Add payment method validation if Lambda is available
     if "validate_payment_method" in functions:
         create_order_functions.append(functions["validate_payment_method"])
-    
-    create_order_functions.extend([
-        functions["get_campaign_for_order"],
-        functions["ensure_catalog_for_order"],
-        functions["get_catalog_try_raw"],
-        functions["get_catalog_try_prefixed"],
-        functions["ensure_catalog_final"],
-        functions["get_catalog"],
-        functions["create_order"],
-        # NOTE: log_create_order_state removed to stay within 10-function AppSync limit
-    ])
-    
+
+    create_order_functions.extend(
+        [
+            functions["get_campaign_for_order"],
+            functions["ensure_catalog_for_order"],
+            functions["get_catalog_try_raw"],
+            functions["get_catalog_try_prefixed"],
+            functions["ensure_catalog_final"],
+            functions["get_catalog"],
+            functions["create_order"],
+            # NOTE: log_create_order_state removed to stay within 10-function AppSync limit
+        ]
+    )
+
     builder.create_pipeline_resolver(
         field_name="createOrder",
         type_name="Mutation",
@@ -245,7 +247,7 @@ def create_mutation_resolvers(
     builder.create_lambda_resolver(
         field_name="createSellerProfile",
         type_name="Mutation",
-        lambda_datasource_name="create_profile",
+        lambda_datasource_name="create_profile_fn",
         id_suffix="CreateSellerProfileResolver",
     )
 
@@ -273,12 +275,14 @@ def create_mutation_resolvers(
     # Add delete_profile_orders_cascade function if it exists (cascades order deletion)
     if "delete_profile_orders_cascade" in profile_delete_functions:
         delete_profile_functions_list.append(profile_delete_functions["delete_profile_orders_cascade"])
-    
-    delete_profile_functions_list.extend([
-        profile_delete_functions["delete_profile_campaigns"],
-        profile_delete_functions["delete_profile_ownership"],
-        profile_delete_functions["delete_profile_metadata"],
-    ])
+
+    delete_profile_functions_list.extend(
+        [
+            profile_delete_functions["delete_profile_campaigns"],
+            profile_delete_functions["delete_profile_ownership"],
+            profile_delete_functions["delete_profile_metadata"],
+        ]
+    )
 
     builder.create_pipeline_resolver(
         field_name="deleteSellerProfile",
@@ -334,15 +338,23 @@ def create_mutation_resolvers(
     builder.create_lambda_resolver(
         field_name="updateMyAccount",
         type_name="Mutation",
-        lambda_datasource_name="update_my_account",
+        lambda_datasource_name="update_my_account_fn",
         id_suffix="UpdateMyAccountResolver",
+    )
+
+    # deleteMyAccount (Lambda)
+    builder.create_lambda_resolver(
+        field_name="deleteMyAccount",
+        type_name="Mutation",
+        lambda_datasource_name="delete_my_account_fn",
+        id_suffix="DeleteMyAccountResolver",
     )
 
     # transferProfileOwnership (Lambda)
     builder.create_lambda_resolver(
         field_name="transferProfileOwnership",
         type_name="Mutation",
-        lambda_datasource_name="transfer_ownership",
+        lambda_datasource_name="transfer_ownership_fn",
         id_suffix="TransferProfileOwnershipResolver",
     )
 
@@ -359,7 +371,7 @@ def create_mutation_resolvers(
     builder.create_lambda_resolver(
         field_name="requestCampaignReport",
         type_name="Mutation",
-        lambda_datasource_name="request_campaign_report",
+        lambda_datasource_name="request_campaign_report_fn",
         id_suffix="RequestCampaignReportResolver",
     )
 
@@ -428,3 +440,85 @@ def create_mutation_resolvers(
             id_suffix="ConfirmPaymentMethodQRCodeUploadResolver",
         )
 
+    # === ADMIN MUTATIONS ===
+
+    # adminResetUserPassword (Lambda) - admin only
+    if "admin_operations_fn" in lambda_datasources:
+        builder.create_lambda_resolver(
+            field_name="adminResetUserPassword",
+            type_name="Mutation",
+            lambda_datasource_name="admin_operations_fn",
+            id_suffix="AdminResetUserPasswordResolver",
+        )
+
+        # adminDeleteUser (Lambda) - admin only
+        builder.create_lambda_resolver(
+            field_name="adminDeleteUser",
+            type_name="Mutation",
+            lambda_datasource_name="admin_operations_fn",
+            id_suffix="AdminDeleteUserResolver",
+        )
+
+        # adminDeleteUserOrders (Lambda) - admin only, cascading delete step 1
+        builder.create_lambda_resolver(
+            field_name="adminDeleteUserOrders",
+            type_name="Mutation",
+            lambda_datasource_name="admin_operations_fn",
+            id_suffix="AdminDeleteUserOrdersResolver",
+        )
+
+        # adminDeleteUserCampaigns (Lambda) - admin only, cascading delete step 2
+        builder.create_lambda_resolver(
+            field_name="adminDeleteUserCampaigns",
+            type_name="Mutation",
+            lambda_datasource_name="admin_operations_fn",
+            id_suffix="AdminDeleteUserCampaignsResolver",
+        )
+
+        # adminDeleteUserShares (Lambda) - admin only, cascading delete step 3
+        builder.create_lambda_resolver(
+            field_name="adminDeleteUserShares",
+            type_name="Mutation",
+            lambda_datasource_name="admin_operations_fn",
+            id_suffix="AdminDeleteUserSharesResolver",
+        )
+
+        # adminDeleteUserProfiles (Lambda) - admin only, cascading delete step 4
+        builder.create_lambda_resolver(
+            field_name="adminDeleteUserProfiles",
+            type_name="Mutation",
+            lambda_datasource_name="admin_operations_fn",
+            id_suffix="AdminDeleteUserProfilesResolver",
+        )
+
+        # adminDeleteUserCatalogs (Lambda) - admin only, cascading delete step 5
+        builder.create_lambda_resolver(
+            field_name="adminDeleteUserCatalogs",
+            type_name="Mutation",
+            lambda_datasource_name="admin_operations_fn",
+            id_suffix="AdminDeleteUserCatalogsResolver",
+        )
+
+        # createManagedCatalog (Lambda) - admin only
+        builder.create_lambda_resolver(
+            field_name="createManagedCatalog",
+            type_name="Mutation",
+            lambda_datasource_name="admin_operations_fn",
+            id_suffix="CreateManagedCatalogResolver",
+        )
+
+        # adminDeleteShare (Lambda) - admin only
+        builder.create_lambda_resolver(
+            field_name="adminDeleteShare",
+            type_name="Mutation",
+            lambda_datasource_name="admin_operations_fn",
+            id_suffix="AdminDeleteShareResolver",
+        )
+
+        # adminUpdateCampaignSharedCode (Lambda) - admin only
+        builder.create_lambda_resolver(
+            field_name="adminUpdateCampaignSharedCode",
+            type_name="Mutation",
+            lambda_datasource_name="admin_operations_fn",
+            id_suffix="AdminUpdateCampaignSharedCodeResolver",
+        )

@@ -2,6 +2,7 @@ import { util } from '@aws-appsync/utils';
 
 /**
  * Pipeline resolver for deleteCatalog mutation.
+ * WRITE ACCESS: Only the owner can delete (enforced in upstream GetCatalogForDelete function).
  * Orchestrates: GetCatalogForDelete -> CheckCatalogUsage -> DeleteCatalog
  */
 export function request(ctx) {

@@ -26,7 +26,6 @@ const CREATE_CATALOG = gql`
       catalogId
       catalogName
       catalogType
-      ownerAccountId
       isPublic
       products {
         productId
@@ -130,7 +129,8 @@ describe('Catalog CRUD Integration Tests', () => {
         expect(data.createCatalog.catalogId).toMatch(/^CATALOG#/);
         expect(data.createCatalog.catalogName).toBe('Test Catalog');
         expect(data.createCatalog.catalogType).toBe('USER_CREATED');
-        expect(data.createCatalog.ownerAccountId).toBeDefined();
+        // ownerAccountId is no longer exposed in GraphQL schema
+        expect(data.createCatalog.ownerAccountId).toBeUndefined();
         expect(data.createCatalog.isPublic).toBe(true);
         expect(data.createCatalog.products).toHaveLength(2);
         expect(data.createCatalog.createdAt).toBeDefined();
@@ -224,7 +224,7 @@ describe('Catalog CRUD Integration Tests', () => {
         expect(data.createCatalog.catalogType).toBe('USER_CREATED');
       });
 
-      it('should set ownerAccountId to current user', async () => {
+      it('should NOT expose ownerAccountId in GraphQL response', async () => {
         // Arrange
         const input = {
           catalogName: 'My Catalog',
@@ -241,8 +241,8 @@ describe('Catalog CRUD Integration Tests', () => {
         // Assert
         const catalogId = data.createCatalog.catalogId;
         await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId } });
-        expect(data.createCatalog.ownerAccountId).toBeDefined();
-        expect(typeof data.createCatalog.ownerAccountId).toBe('string');
+        // ownerAccountId field should not be present in GraphQL schema
+        expect(data.createCatalog.ownerAccountId).toBeUndefined();
       });
 
       it('should create public catalog (isPublic=true)', async () => {
@@ -358,7 +358,8 @@ describe('Catalog CRUD Integration Tests', () => {
         // Assert
         const catalogId = data.createCatalog.catalogId;
         expect(data.createCatalog).toBeDefined();
-        expect(data.createCatalog.ownerAccountId).toBeDefined();
+        // ownerAccountId is no longer exposed in GraphQL schema
+        expect(data.createCatalog.ownerAccountId).toBeUndefined();
         
         // Cleanup - contributor must delete their own catalog
         await contributorClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId } });

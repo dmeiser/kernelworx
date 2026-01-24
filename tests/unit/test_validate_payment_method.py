@@ -44,7 +44,6 @@ def sample_account_id() -> str:
 @pytest.fixture
 def sample_account(dynamodb_tables: Dict[str, Any], sample_account_id: str) -> Dict[str, Any]:
     """Create a sample account with payment methods."""
-    from src.utils import payment_methods
 
     account_id_key = f"ACCOUNT#{sample_account_id}"
     account = {

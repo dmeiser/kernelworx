@@ -1,6 +1,6 @@
 /**
  * Tests for Toast component
- * 
+ *
  * Tests toast notifications from GraphQL error events
  */
 
@@ -33,7 +33,9 @@ describe('Toast', () => {
         operation: 'createProfile',
       },
     });
-    act(() => { window.dispatchEvent(errorEvent); });
+    act(() => {
+      window.dispatchEvent(errorEvent);
+    });
 
     // Wait for toast to appear
     await waitFor(() => {
@@ -54,7 +56,9 @@ describe('Toast', () => {
         operation: 'someOperation',
       },
     });
-    act(() => { window.dispatchEvent(errorEvent); });
+    act(() => {
+      window.dispatchEvent(errorEvent);
+    });
 
     await waitFor(() => {
       expect(screen.getByText('An error occurred')).toBeInTheDocument();
@@ -71,7 +75,9 @@ describe('Toast', () => {
         operation: 'query',
       },
     });
-    act(() => { window.dispatchEvent(errorEvent); });
+    act(() => {
+      window.dispatchEvent(errorEvent);
+    });
 
     await waitFor(() => {
       const alert = screen.getByRole('alert');
@@ -91,7 +97,9 @@ describe('Toast', () => {
         operation: 'test',
       },
     });
-    act(() => { window.dispatchEvent(errorEvent); });
+    act(() => {
+      window.dispatchEvent(errorEvent);
+    });
 
     await waitFor(() => {
       expect(screen.getByRole('alert')).toBeInTheDocument();
@@ -99,9 +107,7 @@ describe('Toast', () => {
 
     // Find and click the close button on the Alert
     const closeButtons = screen.getAllByRole('button');
-    const alertCloseButton = closeButtons.find(
-      (btn) => btn.className && btn.className.includes('MuiAlert-action'),
-    );
+    const alertCloseButton = closeButtons.find((btn) => btn.className && btn.className.includes('MuiAlert-action'));
 
     if (alertCloseButton) {
       await userEvent.click(alertCloseButton);

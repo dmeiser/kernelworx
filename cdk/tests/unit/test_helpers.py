@@ -3,8 +3,6 @@
 import os
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from cdk.helpers import (
     REGION_ABBREVIATIONS,
     get_context_bool,

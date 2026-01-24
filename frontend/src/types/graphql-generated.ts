@@ -50,6 +50,25 @@ export type GqlAddressInput = {
   zipCode?: InputMaybe<Scalars['String']['input']>;
 };
 
+export type GqlAdminUser = {
+  __typename?: 'AdminUser';
+  accountId: Scalars['ID']['output'];
+  createdAt: Scalars['AWSDateTime']['output'];
+  displayName?: Maybe<Scalars['String']['output']>;
+  email: Scalars['AWSEmail']['output'];
+  emailVerified: Scalars['Boolean']['output'];
+  enabled: Scalars['Boolean']['output'];
+  isAdmin: Scalars['Boolean']['output'];
+  lastModifiedAt?: Maybe<Scalars['AWSDateTime']['output']>;
+  status: Scalars['String']['output'];
+};
+
+export type GqlAdminUserConnection = {
+  __typename?: 'AdminUserConnection';
+  nextToken?: Maybe<Scalars['String']['output']>;
+  users: Array<GqlAdminUser>;
+};
+
 export type GqlCampaign = {
   __typename?: 'Campaign';
   campaignId: Scalars['ID']['output'];
@@ -60,6 +79,7 @@ export type GqlCampaign = {
   city?: Maybe<Scalars['String']['output']>;
   createdAt: Scalars['AWSDateTime']['output'];
   endDate?: Maybe<Scalars['AWSDateTime']['output']>;
+  isActive: Scalars['Boolean']['output'];
   profileId: Scalars['ID']['output'];
   sharedCampaignCode?: Maybe<Scalars['String']['output']>;
   startDate?: Maybe<Scalars['AWSDateTime']['output']>;
@@ -88,8 +108,8 @@ export type GqlCatalog = {
   catalogName: Scalars['String']['output'];
   catalogType: GqlCatalogType;
   createdAt: Scalars['AWSDateTime']['output'];
+  isDeleted?: Maybe<Scalars['Boolean']['output']>;
   isPublic: Scalars['Boolean']['output'];
-  ownerAccountId?: Maybe<Scalars['ID']['output']>;
   products: Array<GqlProduct>;
   updatedAt: Scalars['AWSDateTime']['output'];
 };
@@ -169,9 +189,19 @@ export type GqlLineItemInput = {
 
 export type GqlMutation = {
   __typename?: 'Mutation';
+  adminDeleteShare: Scalars['Boolean']['output'];
+  adminDeleteUser: Scalars['Boolean']['output'];
+  adminDeleteUserCampaigns: Scalars['Int']['output'];
+  adminDeleteUserCatalogs: Scalars['Int']['output'];
+  adminDeleteUserOrders: Scalars['Int']['output'];
+  adminDeleteUserProfiles: Scalars['Int']['output'];
+  adminDeleteUserShares: Scalars['Int']['output'];
+  adminResetUserPassword: Scalars['Boolean']['output'];
+  adminUpdateCampaignSharedCode: GqlCampaign;
   confirmPaymentMethodQRCodeUpload: GqlPaymentMethod;
   createCampaign: GqlCampaign;
   createCatalog: GqlCatalog;
+  createManagedCatalog: GqlCatalog;
   createOrder: GqlOrder;
   createPaymentMethod: GqlPaymentMethod;
   createProfileInvite: GqlProfileInvite;
@@ -179,6 +209,7 @@ export type GqlMutation = {
   createSharedCampaign: GqlSharedCampaign;
   deleteCampaign: Scalars['Boolean']['output'];
   deleteCatalog: Scalars['Boolean']['output'];
+  deleteMyAccount: Scalars['Boolean']['output'];
   deleteOrder: Scalars['Boolean']['output'];
   deletePaymentMethod: Scalars['Boolean']['output'];
   deletePaymentMethodQRCode: Scalars['Boolean']['output'];
@@ -201,6 +232,44 @@ export type GqlMutation = {
   updateSharedCampaign: GqlSharedCampaign;
 };
 
+export type GqlMutation_AdminDeleteShareArgs = {
+  profileId: Scalars['ID']['input'];
+  targetAccountId: Scalars['ID']['input'];
+};
+
+export type GqlMutation_AdminDeleteUserArgs = {
+  accountId: Scalars['ID']['input'];
+};
+
+export type GqlMutation_AdminDeleteUserCampaignsArgs = {
+  accountId: Scalars['ID']['input'];
+};
+
+export type GqlMutation_AdminDeleteUserCatalogsArgs = {
+  accountId: Scalars['ID']['input'];
+};
+
+export type GqlMutation_AdminDeleteUserOrdersArgs = {
+  accountId: Scalars['ID']['input'];
+};
+
+export type GqlMutation_AdminDeleteUserProfilesArgs = {
+  accountId: Scalars['ID']['input'];
+};
+
+export type GqlMutation_AdminDeleteUserSharesArgs = {
+  accountId: Scalars['ID']['input'];
+};
+
+export type GqlMutation_AdminResetUserPasswordArgs = {
+  email: Scalars['AWSEmail']['input'];
+};
+
+export type GqlMutation_AdminUpdateCampaignSharedCodeArgs = {
+  campaignId: Scalars['ID']['input'];
+  sharedCampaignCode?: InputMaybe<Scalars['String']['input']>;
+};
+
 export type GqlMutation_ConfirmPaymentMethodQrCodeUploadArgs = {
   paymentMethodName: Scalars['String']['input'];
   s3Key: Scalars['String']['input'];
@@ -211,6 +280,10 @@ export type GqlMutation_CreateCampaignArgs = {
 };
 
 export type GqlMutation_CreateCatalogArgs = {
+  input: GqlCreateCatalogInput;
+};
+
+export type GqlMutation_CreateManagedCatalogArgs = {
   input: GqlCreateCatalogInput;
 };
 
@@ -378,6 +451,13 @@ export type GqlProfileInvite = {
 
 export type GqlQuery = {
   __typename?: 'Query';
+  adminGetProfileShares: Array<GqlShare>;
+  adminGetUserCampaigns: Array<GqlCampaign>;
+  adminGetUserCatalogs: Array<GqlCatalog>;
+  adminGetUserProfiles: Array<GqlSellerProfile>;
+  adminGetUserSharedCampaigns: Array<GqlSharedCampaign>;
+  adminListUsers: GqlAdminUserConnection;
+  adminSearchUser: Array<GqlAdminUser>;
   findSharedCampaigns: Array<GqlSharedCampaign>;
   getCampaign?: Maybe<GqlCampaign>;
   getCatalog?: Maybe<GqlCatalog>;
@@ -387,19 +467,49 @@ export type GqlQuery = {
   getSharedCampaign?: Maybe<GqlSharedCampaign>;
   getUnitReport?: Maybe<GqlUnitReport>;
   listCampaignsByProfile: Array<GqlCampaign>;
+  listCatalogsInUse: Array<Scalars['ID']['output']>;
   listInvitesByProfile: Array<GqlProfileInvite>;
+  listManagedCatalogs: Array<GqlCatalog>;
   listMyCatalogs: Array<GqlCatalog>;
   listMyProfiles: Array<GqlSellerProfile>;
   listMySharedCampaigns: Array<GqlSharedCampaign>;
   listMyShares: Array<GqlSharedProfile>;
   listOrdersByCampaign: Array<GqlOrder>;
   listOrdersByProfile: Array<GqlOrder>;
-  listPublicCatalogs: Array<GqlCatalog>;
   listSharesByProfile: Array<GqlShare>;
   listUnitCampaignCatalogs: Array<GqlCatalog>;
   listUnitCatalogs: Array<GqlCatalog>;
   myPaymentMethods: Array<GqlPaymentMethod>;
   paymentMethodsForProfile: Array<GqlPaymentMethod>;
+};
+
+export type GqlQuery_AdminGetProfileSharesArgs = {
+  profileId: Scalars['ID']['input'];
+};
+
+export type GqlQuery_AdminGetUserCampaignsArgs = {
+  accountId: Scalars['ID']['input'];
+};
+
+export type GqlQuery_AdminGetUserCatalogsArgs = {
+  accountId: Scalars['ID']['input'];
+};
+
+export type GqlQuery_AdminGetUserProfilesArgs = {
+  accountId: Scalars['ID']['input'];
+};
+
+export type GqlQuery_AdminGetUserSharedCampaignsArgs = {
+  accountId: Scalars['ID']['input'];
+};
+
+export type GqlQuery_AdminListUsersArgs = {
+  limit?: InputMaybe<Scalars['Int']['input']>;
+  nextToken?: InputMaybe<Scalars['String']['input']>;
+};
+
+export type GqlQuery_AdminSearchUserArgs = {
+  query: Scalars['String']['input'];
 };
 
 export type GqlQuery_FindSharedCampaignsArgs = {
@@ -506,6 +616,7 @@ export type GqlSellerProfile = {
   __typename?: 'SellerProfile';
   createdAt: Scalars['AWSDateTime']['output'];
   isOwner: Scalars['Boolean']['output'];
+  latestCampaign?: Maybe<GqlCampaign>;
   ownerAccountId: Scalars['ID']['output'];
   permissions?: Maybe<Array<GqlPermissionType>>;
   profileId: Scalars['ID']['output'];
@@ -561,6 +672,7 @@ export type GqlSharedProfile = {
   __typename?: 'SharedProfile';
   createdAt: Scalars['AWSDateTime']['output'];
   isOwner: Scalars['Boolean']['output'];
+  latestCampaign?: Maybe<GqlCampaign>;
   ownerAccountId: Scalars['ID']['output'];
   permissions: Array<GqlPermissionType>;
   profileId: Scalars['ID']['output'];
@@ -610,6 +722,7 @@ export type GqlUpdateCampaignInput = {
   campaignYear?: InputMaybe<Scalars['Int']['input']>;
   catalogId?: InputMaybe<Scalars['ID']['input']>;
   endDate?: InputMaybe<Scalars['AWSDateTime']['input']>;
+  isActive?: InputMaybe<Scalars['Boolean']['input']>;
   startDate?: InputMaybe<Scalars['AWSDateTime']['input']>;
 };
 
@@ -656,6 +769,21 @@ export type GqlSellerProfileFieldsFragment = {
   permissions?: Array<GqlPermissionType> | null | undefined;
 };
 
+export type GqlSellerProfileWithLatestCampaignFieldsFragment = {
+  __typename?: 'SellerProfile';
+  profileId: string;
+  ownerAccountId: string;
+  sellerName: string;
+  createdAt: string;
+  updatedAt: string;
+  isOwner: boolean;
+  permissions?: Array<GqlPermissionType> | null | undefined;
+  latestCampaign?:
+    | { __typename?: 'Campaign'; campaignId: string; campaignName: string; campaignYear: number; isActive: boolean }
+    | null
+    | undefined;
+};
+
 export type GqlCampaignFieldsFragment = {
   __typename?: 'Campaign';
   campaignId: string;
@@ -670,6 +798,7 @@ export type GqlCampaignFieldsFragment = {
   city?: string | null | undefined;
   state?: string | null | undefined;
   sharedCampaignCode?: string | null | undefined;
+  isActive: boolean;
   createdAt: string;
   updatedAt: string;
   totalOrders?: number | null | undefined;
@@ -714,7 +843,6 @@ export type GqlCatalogFieldsFragment = {
   catalogId: string;
   catalogName: string;
   catalogType: GqlCatalogType;
-  ownerAccountId?: string | null | undefined;
   isPublic: boolean;
   createdAt: string;
   updatedAt: string;
@@ -769,6 +897,10 @@ export type GqlUpdateMyAccountMutation = {
   };
 };
 
+export type GqlDeleteMyAccountMutationVariables = Exact<{ [key: string]: never }>;
+
+export type GqlDeleteMyAccountMutation = { __typename?: 'Mutation'; deleteMyAccount: boolean };
+
 export type GqlUpdateMyPreferencesMutationVariables = Exact<{
   preferences: Scalars['AWSJSON']['input'];
 }>;
@@ -795,6 +927,10 @@ export type GqlListMyProfilesQuery = {
     updatedAt: string;
     isOwner: boolean;
     permissions?: Array<GqlPermissionType> | null | undefined;
+    latestCampaign?:
+      | { __typename?: 'Campaign'; campaignId: string; campaignName: string; campaignYear: number; isActive: boolean }
+      | null
+      | undefined;
   }>;
 };
 
@@ -813,6 +949,10 @@ export type GqlListMySharesQuery = {
     updatedAt: string;
     isOwner: boolean;
     permissions: Array<GqlPermissionType>;
+    latestCampaign?:
+      | { __typename?: 'Campaign'; campaignId: string; campaignName: string; campaignYear: number; isActive: boolean }
+      | null
+      | undefined;
   }>;
 };
 
@@ -857,6 +997,7 @@ export type GqlListCampaignsByProfileQuery = {
     city?: string | null | undefined;
     state?: string | null | undefined;
     sharedCampaignCode?: string | null | undefined;
+    isActive: boolean;
     createdAt: string;
     updatedAt: string;
     totalOrders?: number | null | undefined;
@@ -885,6 +1026,7 @@ export type GqlGetCampaignQuery = {
         city?: string | null | undefined;
         state?: string | null | undefined;
         sharedCampaignCode?: string | null | undefined;
+        isActive: boolean;
         createdAt: string;
         updatedAt: string;
         totalOrders?: number | null | undefined;
@@ -993,16 +1135,15 @@ export type GqlGetOrderQuery = {
     | undefined;
 };
 
-export type GqlListPublicCatalogsQueryVariables = Exact<{ [key: string]: never }>;
+export type GqlListManagedCatalogsQueryVariables = Exact<{ [key: string]: never }>;
 
-export type GqlListPublicCatalogsQuery = {
+export type GqlListManagedCatalogsQuery = {
   __typename?: 'Query';
-  listPublicCatalogs: Array<{
+  listManagedCatalogs: Array<{
     __typename?: 'Catalog';
     catalogId: string;
     catalogName: string;
     catalogType: GqlCatalogType;
-    ownerAccountId?: string | null | undefined;
     isPublic: boolean;
     createdAt: string;
     updatedAt: string;
@@ -1026,7 +1167,6 @@ export type GqlListMyCatalogsQuery = {
     catalogId: string;
     catalogName: string;
     catalogType: GqlCatalogType;
-    ownerAccountId?: string | null | undefined;
     isPublic: boolean;
     createdAt: string;
     updatedAt: string;
@@ -1041,6 +1181,10 @@ export type GqlListMyCatalogsQuery = {
   }>;
 };
 
+export type GqlListCatalogsInUseQueryVariables = Exact<{ [key: string]: never }>;
+
+export type GqlListCatalogsInUseQuery = { __typename?: 'Query'; listCatalogsInUse: Array<string> };
+
 export type GqlGetCatalogQueryVariables = Exact<{
   catalogId: Scalars['ID']['input'];
 }>;
@@ -1053,7 +1197,6 @@ export type GqlGetCatalogQuery = {
         catalogId: string;
         catalogName: string;
         catalogType: GqlCatalogType;
-        ownerAccountId?: string | null | undefined;
         isPublic: boolean;
         createdAt: string;
         updatedAt: string;
@@ -1176,6 +1319,7 @@ export type GqlCreateCampaignMutation = {
     city?: string | null | undefined;
     state?: string | null | undefined;
     sharedCampaignCode?: string | null | undefined;
+    isActive: boolean;
     createdAt: string;
     updatedAt: string;
     totalOrders?: number | null | undefined;
@@ -1203,6 +1347,7 @@ export type GqlUpdateCampaignMutation = {
     city?: string | null | undefined;
     state?: string | null | undefined;
     sharedCampaignCode?: string | null | undefined;
+    isActive: boolean;
     createdAt: string;
     updatedAt: string;
     totalOrders?: number | null | undefined;
@@ -1406,7 +1551,6 @@ export type GqlCreateCatalogMutation = {
     catalogId: string;
     catalogName: string;
     catalogType: GqlCatalogType;
-    ownerAccountId?: string | null | undefined;
     isPublic: boolean;
     createdAt: string;
     updatedAt: string;
@@ -1433,7 +1577,6 @@ export type GqlUpdateCatalogMutation = {
     catalogId: string;
     catalogName: string;
     catalogType: GqlCatalogType;
-    ownerAccountId?: string | null | undefined;
     isPublic: boolean;
     createdAt: string;
     updatedAt: string;
@@ -1523,7 +1666,6 @@ export type GqlListUnitCatalogsQuery = {
     catalogId: string;
     catalogName: string;
     catalogType: GqlCatalogType;
-    ownerAccountId?: string | null | undefined;
     isPublic: boolean;
     createdAt: string;
     updatedAt: string;
@@ -1665,7 +1807,6 @@ export type GqlListUnitCampaignCatalogsQuery = {
     catalogId: string;
     catalogName: string;
     catalogType: GqlCatalogType;
-    ownerAccountId?: string | null | undefined;
     isPublic: boolean;
     createdAt: string;
     updatedAt: string;
@@ -1826,3 +1967,263 @@ export type GqlDeletePaymentMethodQrCodeMutationVariables = Exact<{
 }>;
 
 export type GqlDeletePaymentMethodQrCodeMutation = { __typename?: 'Mutation'; deletePaymentMethodQRCode: boolean };
+
+export type GqlAdminUserFieldsFragment = {
+  __typename?: 'AdminUser';
+  accountId: string;
+  email: string;
+  displayName?: string | null | undefined;
+  status: string;
+  enabled: boolean;
+  emailVerified: boolean;
+  isAdmin: boolean;
+  createdAt: string;
+  lastModifiedAt?: string | null | undefined;
+};
+
+export type GqlAdminListUsersQueryVariables = Exact<{
+  limit?: InputMaybe<Scalars['Int']['input']>;
+  nextToken?: InputMaybe<Scalars['String']['input']>;
+}>;
+
+export type GqlAdminListUsersQuery = {
+  __typename?: 'Query';
+  adminListUsers: {
+    __typename?: 'AdminUserConnection';
+    nextToken?: string | null | undefined;
+    users: Array<{
+      __typename?: 'AdminUser';
+      accountId: string;
+      email: string;
+      displayName?: string | null | undefined;
+      status: string;
+      enabled: boolean;
+      emailVerified: boolean;
+      isAdmin: boolean;
+      createdAt: string;
+      lastModifiedAt?: string | null | undefined;
+    }>;
+  };
+};
+
+export type GqlAdminSearchUserQueryVariables = Exact<{
+  query: Scalars['String']['input'];
+}>;
+
+export type GqlAdminSearchUserQuery = {
+  __typename?: 'Query';
+  adminSearchUser: Array<{
+    __typename?: 'AdminUser';
+    accountId: string;
+    email: string;
+    displayName?: string | null | undefined;
+    status: string;
+    enabled: boolean;
+    emailVerified: boolean;
+    isAdmin: boolean;
+    createdAt: string;
+    lastModifiedAt?: string | null | undefined;
+  }>;
+};
+
+export type GqlAdminGetUserProfilesQueryVariables = Exact<{
+  accountId: Scalars['ID']['input'];
+}>;
+
+export type GqlAdminGetUserProfilesQuery = {
+  __typename?: 'Query';
+  adminGetUserProfiles: Array<{
+    __typename?: 'SellerProfile';
+    profileId: string;
+    ownerAccountId: string;
+    sellerName: string;
+    createdAt: string;
+    updatedAt: string;
+    isOwner: boolean;
+    permissions?: Array<GqlPermissionType> | null | undefined;
+  }>;
+};
+
+export type GqlAdminGetUserCatalogsQueryVariables = Exact<{
+  accountId: Scalars['ID']['input'];
+}>;
+
+export type GqlAdminGetUserCatalogsQuery = {
+  __typename?: 'Query';
+  adminGetUserCatalogs: Array<{
+    __typename?: 'Catalog';
+    catalogId: string;
+    catalogName: string;
+    catalogType: GqlCatalogType;
+    isPublic: boolean;
+    createdAt: string;
+    updatedAt: string;
+    products: Array<{
+      __typename?: 'Product';
+      productId: string;
+      productName: string;
+      description?: string | null | undefined;
+      price: number;
+      sortOrder: number;
+    }>;
+  }>;
+};
+
+export type GqlAdminGetUserCampaignsQueryVariables = Exact<{
+  accountId: Scalars['ID']['input'];
+}>;
+
+export type GqlAdminGetUserCampaignsQuery = {
+  __typename?: 'Query';
+  adminGetUserCampaigns: Array<{
+    __typename?: 'Campaign';
+    campaignId: string;
+    profileId: string;
+    campaignName: string;
+    campaignYear: number;
+    catalogId: string;
+    startDate?: string | null | undefined;
+    endDate?: string | null | undefined;
+    sharedCampaignCode?: string | null | undefined;
+    createdAt: string;
+    updatedAt: string;
+  }>;
+};
+
+export type GqlAdminGetUserSharedCampaignsQueryVariables = Exact<{
+  accountId: Scalars['ID']['input'];
+}>;
+
+export type GqlAdminGetUserSharedCampaignsQuery = {
+  __typename?: 'Query';
+  adminGetUserSharedCampaigns: Array<{
+    __typename?: 'SharedCampaign';
+    sharedCampaignCode: string;
+    catalogId: string;
+    campaignName: string;
+    campaignYear: number;
+    startDate?: string | null | undefined;
+    endDate?: string | null | undefined;
+    unitType: string;
+    unitNumber: number;
+    city: string;
+    state: string;
+    createdBy: string;
+    createdByName: string;
+    createdAt: string;
+  }>;
+};
+
+export type GqlAdminGetProfileSharesQueryVariables = Exact<{
+  profileId: Scalars['ID']['input'];
+}>;
+
+export type GqlAdminGetProfileSharesQuery = {
+  __typename?: 'Query';
+  adminGetProfileShares: Array<{
+    __typename?: 'Share';
+    shareId: string;
+    profileId: string;
+    targetAccountId: string;
+    permissions: Array<GqlPermissionType>;
+    createdAt: string;
+    targetAccount?:
+      | {
+          __typename?: 'Account';
+          accountId: string;
+          email: string;
+          givenName?: string | null | undefined;
+          familyName?: string | null | undefined;
+        }
+      | null
+      | undefined;
+  }>;
+};
+
+export type GqlAdminResetUserPasswordMutationVariables = Exact<{
+  email: Scalars['AWSEmail']['input'];
+}>;
+
+export type GqlAdminResetUserPasswordMutation = { __typename?: 'Mutation'; adminResetUserPassword: boolean };
+
+export type GqlAdminDeleteUserMutationVariables = Exact<{
+  accountId: Scalars['ID']['input'];
+}>;
+
+export type GqlAdminDeleteUserMutation = { __typename?: 'Mutation'; adminDeleteUser: boolean };
+
+export type GqlAdminDeleteUserOrdersMutationVariables = Exact<{
+  accountId: Scalars['ID']['input'];
+}>;
+
+export type GqlAdminDeleteUserOrdersMutation = { __typename?: 'Mutation'; adminDeleteUserOrders: number };
+
+export type GqlAdminDeleteUserCampaignsMutationVariables = Exact<{
+  accountId: Scalars['ID']['input'];
+}>;
+
+export type GqlAdminDeleteUserCampaignsMutation = { __typename?: 'Mutation'; adminDeleteUserCampaigns: number };
+
+export type GqlAdminDeleteUserSharesMutationVariables = Exact<{
+  accountId: Scalars['ID']['input'];
+}>;
+
+export type GqlAdminDeleteUserSharesMutation = { __typename?: 'Mutation'; adminDeleteUserShares: number };
+
+export type GqlAdminDeleteUserProfilesMutationVariables = Exact<{
+  accountId: Scalars['ID']['input'];
+}>;
+
+export type GqlAdminDeleteUserProfilesMutation = { __typename?: 'Mutation'; adminDeleteUserProfiles: number };
+
+export type GqlAdminDeleteUserCatalogsMutationVariables = Exact<{
+  accountId: Scalars['ID']['input'];
+}>;
+
+export type GqlAdminDeleteUserCatalogsMutation = { __typename?: 'Mutation'; adminDeleteUserCatalogs: number };
+
+export type GqlAdminDeleteShareMutationVariables = Exact<{
+  profileId: Scalars['ID']['input'];
+  targetAccountId: Scalars['ID']['input'];
+}>;
+
+export type GqlAdminDeleteShareMutation = { __typename?: 'Mutation'; adminDeleteShare: boolean };
+
+export type GqlAdminUpdateCampaignSharedCodeMutationVariables = Exact<{
+  campaignId: Scalars['ID']['input'];
+  sharedCampaignCode?: InputMaybe<Scalars['String']['input']>;
+}>;
+
+export type GqlAdminUpdateCampaignSharedCodeMutation = {
+  __typename?: 'Mutation';
+  adminUpdateCampaignSharedCode: {
+    __typename?: 'Campaign';
+    campaignId: string;
+    sharedCampaignCode?: string | null | undefined;
+  };
+};
+
+export type GqlCreateManagedCatalogMutationVariables = Exact<{
+  input: GqlCreateCatalogInput;
+}>;
+
+export type GqlCreateManagedCatalogMutation = {
+  __typename?: 'Mutation';
+  createManagedCatalog: {
+    __typename?: 'Catalog';
+    catalogId: string;
+    catalogName: string;
+    catalogType: GqlCatalogType;
+    isPublic: boolean;
+    createdAt: string;
+    updatedAt: string;
+    products: Array<{
+      __typename?: 'Product';
+      productId: string;
+      productName: string;
+      description?: string | null | undefined;
+      price: number;
+      sortOrder: number;
+    }>;
+  };
+};

@@ -8,11 +8,26 @@ import { LIST_CAMPAIGNS_BY_PROFILE } from '../src/lib/graphql';
 
 // Provide explicit mocks per profileId to ensure request variable matching
 const campaignsEmptyMocks = [
-  { request: { query: LIST_CAMPAIGNS_BY_PROFILE, variables: { profileId: 'PROFILE#profile-123' } }, result: { data: { listCampaignsByProfile: [] } } },
-  { request: { query: LIST_CAMPAIGNS_BY_PROFILE, variables: { profileId: 'PROFILE#profile-456' } }, result: { data: { listCampaignsByProfile: [] } } },
-  { request: { query: LIST_CAMPAIGNS_BY_PROFILE, variables: { profileId: 'PROFILE#profile-789' } }, result: { data: { listCampaignsByProfile: [] } } },
-  { request: { query: LIST_CAMPAIGNS_BY_PROFILE, variables: { profileId: 'PROFILE#profile-999' } }, result: { data: { listCampaignsByProfile: [] } } },
-  { request: { query: LIST_CAMPAIGNS_BY_PROFILE, variables: { profileId: 'PROFILE#profile-empty' } }, result: { data: { listCampaignsByProfile: [] } } },
+  {
+    request: { query: LIST_CAMPAIGNS_BY_PROFILE, variables: { profileId: 'PROFILE#profile-123' } },
+    result: { data: { listCampaignsByProfile: [] } },
+  },
+  {
+    request: { query: LIST_CAMPAIGNS_BY_PROFILE, variables: { profileId: 'PROFILE#profile-456' } },
+    result: { data: { listCampaignsByProfile: [] } },
+  },
+  {
+    request: { query: LIST_CAMPAIGNS_BY_PROFILE, variables: { profileId: 'PROFILE#profile-789' } },
+    result: { data: { listCampaignsByProfile: [] } },
+  },
+  {
+    request: { query: LIST_CAMPAIGNS_BY_PROFILE, variables: { profileId: 'PROFILE#profile-999' } },
+    result: { data: { listCampaignsByProfile: [] } },
+  },
+  {
+    request: { query: LIST_CAMPAIGNS_BY_PROFILE, variables: { profileId: 'PROFILE#profile-empty' } },
+    result: { data: { listCampaignsByProfile: [] } },
+  },
 ];
 
 import userEvent from '@testing-library/user-event';
@@ -37,16 +52,11 @@ describe('ProfileCard', () => {
 
   test('renders profile information correctly', async () => {
     render(
-        <MockedProvider mocks={campaignsEmptyMocks}>
+      <MockedProvider mocks={campaignsEmptyMocks}>
         <BrowserRouter>
-          <ProfileCard
-            profileId="profile-123"
-            sellerName="Scout Alpha"
-            isOwner={true}
-            permissions={[]}
-          />
+          <ProfileCard profileId="profile-123" sellerName="Scout Alpha" isOwner={true} permissions={[]} />
         </BrowserRouter>
-      </MockedProvider>
+      </MockedProvider>,
     );
 
     expect(await screen.findByText('Scout Alpha')).toBeInTheDocument();
@@ -56,14 +66,9 @@ describe('ProfileCard', () => {
     render(
       <MockedProvider mocks={campaignsEmptyMocks}>
         <BrowserRouter>
-          <ProfileCard
-            profileId="profile-456"
-            sellerName="Scout Beta"
-            isOwner={true}
-            permissions={[]}
-          />
+          <ProfileCard profileId="profile-456" sellerName="Scout Beta" isOwner={true} permissions={[]} />
         </BrowserRouter>
-      </MockedProvider>
+      </MockedProvider>,
     );
 
     expect(await screen.findByText('Owner')).toBeInTheDocument();
@@ -73,14 +78,9 @@ describe('ProfileCard', () => {
     render(
       <MockedProvider mocks={campaignsEmptyMocks}>
         <BrowserRouter>
-          <ProfileCard
-            profileId="profile-789"
-            sellerName="Scout Gamma"
-            isOwner={false}
-            permissions={['WRITE']}
-          />
+          <ProfileCard profileId="profile-789" sellerName="Scout Gamma" isOwner={false} permissions={['WRITE']} />
         </BrowserRouter>
-      </MockedProvider>
+      </MockedProvider>,
     );
 
     expect(await screen.findByText('Editor')).toBeInTheDocument();
@@ -90,14 +90,9 @@ describe('ProfileCard', () => {
     render(
       <MockedProvider mocks={campaignsEmptyMocks}>
         <BrowserRouter>
-          <ProfileCard
-            profileId="profile-999"
-            sellerName="Scout Delta"
-            isOwner={false}
-            permissions={['READ']}
-          />
+          <ProfileCard profileId="profile-999" sellerName="Scout Delta" isOwner={false} permissions={['READ']} />
         </BrowserRouter>
-      </MockedProvider>
+      </MockedProvider>,
     );
 
     expect(await screen.findByText('Read-only')).toBeInTheDocument();
@@ -107,14 +102,9 @@ describe('ProfileCard', () => {
     render(
       <MockedProvider mocks={campaignsEmptyMocks}>
         <BrowserRouter>
-          <ProfileCard
-            profileId="profile-empty"
-            sellerName="Scout Epsilon"
-            isOwner={true}
-            permissions={[]}
-          />
+          <ProfileCard profileId="profile-empty" sellerName="Scout Epsilon" isOwner={true} permissions={[]} />
         </BrowserRouter>
-      </MockedProvider>
+      </MockedProvider>,
     );
 
     // Either loading spinner or "No campaigns yet" should appear eventually
@@ -126,14 +116,9 @@ describe('ProfileCard', () => {
     render(
       <MockedProvider mocks={campaignsEmptyMocks}>
         <BrowserRouter>
-          <ProfileCard
-            profileId="profile-123"
-            sellerName="Scout Alpha"
-            isOwner={true}
-            permissions={[]}
-          />
+          <ProfileCard profileId="profile-123" sellerName="Scout Alpha" isOwner={true} permissions={[]} />
         </BrowserRouter>
-      </MockedProvider>
+      </MockedProvider>,
     );
 
     expect(await screen.findByText('View All Campaigns')).toBeInTheDocument();
@@ -149,21 +134,15 @@ describe('ProfileCard', () => {
     render(
       <MockedProvider mocks={campaignsEmptyMocks}>
         <BrowserRouter>
-          <ProfileCard
-            profileId="profile-123"
-            sellerName="Scout Alpha"
-            isOwner={true}
-            permissions={[]}
-          />
+          <ProfileCard profileId="profile-123" sellerName="Scout Alpha" isOwner={true} permissions={[]} />
         </BrowserRouter>
-      </MockedProvider>
+      </MockedProvider>,
     );
 
     const button = await screen.findByText('View All Campaigns');
     await user.click(button);
 
     await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/scouts/profile-123/campaigns'));
-
   });
 
   test('navigates to scout management when Manage Scout clicked for owners', async () => {
@@ -172,35 +151,24 @@ describe('ProfileCard', () => {
     render(
       <MockedProvider mocks={campaignsEmptyMocks}>
         <BrowserRouter>
-          <ProfileCard
-            profileId="profile-123"
-            sellerName="Scout Alpha"
-            isOwner={true}
-            permissions={[]}
-          />
+          <ProfileCard profileId="profile-123" sellerName="Scout Alpha" isOwner={true} permissions={[]} />
         </BrowserRouter>
-      </MockedProvider>
+      </MockedProvider>,
     );
 
     const button = await screen.findByText('Manage Scout');
     await user.click(button);
 
     await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/scouts/profile-123/manage'));
-
   });
 
   test('does not show Manage Scout button for non-owners', async () => {
     render(
       <MockedProvider mocks={campaignsEmptyMocks}>
         <BrowserRouter>
-          <ProfileCard
-            profileId="profile-789"
-            sellerName="Scout Gamma"
-            isOwner={false}
-            permissions={['WRITE']}
-          />
+          <ProfileCard profileId="profile-789" sellerName="Scout Gamma" isOwner={false} permissions={['WRITE']} />
         </BrowserRouter>
-      </MockedProvider>
+      </MockedProvider>,
     );
 
     await waitFor(() => expect(screen.queryByText('Manage Scout')).not.toBeInTheDocument());
@@ -210,14 +178,9 @@ describe('ProfileCard', () => {
     render(
       <MockedProvider mocks={campaignsEmptyMocks}>
         <BrowserRouter>
-          <ProfileCard
-            profileId="profile-empty"
-            sellerName="Scout Zeta"
-            isOwner={true}
-            permissions={[]}
-          />
+          <ProfileCard profileId="profile-empty" sellerName="Scout Zeta" isOwner={true} permissions={[]} />
         </BrowserRouter>
-      </MockedProvider>
+      </MockedProvider>,
     );
 
     // View Latest Campaign button should not exist when there are no campaigns

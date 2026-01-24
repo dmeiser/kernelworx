@@ -9,7 +9,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { CreateCampaignDialog } from '../src/components/CreateCampaignDialog';
-import { LIST_PUBLIC_CATALOGS, LIST_MY_CATALOGS } from '../src/lib/graphql';
+import { LIST_MANAGED_CATALOGS, LIST_MY_CATALOGS } from '../src/lib/graphql';
 
 // Mock Select/MenuItem to a plain HTML select/option to ensure onChange fires in jsdom
 vi.mock('@mui/material', async () => {
@@ -96,7 +96,7 @@ describe('CreateCampaignDialog', () => {
   });
 
   const createPublicCatalogResponse = (overrides?: { publicLoading?: boolean; publicData?: any }) => ({
-    data: overrides?.publicData ?? { listPublicCatalogs: mockPublicCatalogs },
+    data: overrides?.publicData ?? { listManagedCatalogs: mockPublicCatalogs },
     loading: overrides?.publicLoading ?? false,
   });
 
@@ -113,7 +113,7 @@ describe('CreateCampaignDialog', () => {
   }) => {
     useQueryMockImpl = (query: any) => {
       const handlers = new Map<any, any>([
-        [LIST_PUBLIC_CATALOGS, createPublicCatalogResponse(overrides)],
+        [LIST_MANAGED_CATALOGS, createPublicCatalogResponse(overrides)],
         [LIST_MY_CATALOGS, createMyCatalogResponse(overrides)],
       ]);
       return handlers.get(query) ?? { data: undefined, loading: false };
@@ -163,8 +163,8 @@ describe('CreateCampaignDialog', () => {
   it('shows no catalogs available when catalogs are empty', async () => {
     // Mock returning empty catalogs
     useQueryMockImpl = (query: any) => {
-      if (query === LIST_PUBLIC_CATALOGS) {
-        return { data: { listPublicCatalogs: [] }, loading: false };
+      if (query === LIST_MANAGED_CATALOGS) {
+        return { data: { listManagedCatalogs: [] }, loading: false };
       }
       if (query === LIST_MY_CATALOGS) {
         return { data: { listMyCatalogs: [] }, loading: false };
@@ -434,7 +434,7 @@ describe('CreateCampaignDialog', () => {
     setupUseQueryMock({
       publicLoading: true,
       myLoading: true,
-      publicData: { listPublicCatalogs: [] },
+      publicData: { listManagedCatalogs: [] },
       myData: { listMyCatalogs: [] },
     });
 

@@ -104,6 +104,24 @@ def create_field_resolvers(
         id_suffix="SellerProfilePermissionsResolver",
     )
 
+    # SellerProfile.latestCampaign (JS)
+    builder.create_js_resolver(
+        field_name="latestCampaign",
+        type_name="SellerProfile",
+        datasource_name="campaigns",
+        code_file=RESOLVERS_DIR / "seller_profile_latest_campaign_resolver.js",
+        id_suffix="SellerProfileLatestCampaignResolver",
+    )
+
+    # SharedProfile.latestCampaign (JS) - Same resolver as SellerProfile
+    builder.create_js_resolver(
+        field_name="latestCampaign",
+        type_name="SharedProfile",
+        datasource_name="campaigns",
+        code_file=RESOLVERS_DIR / "seller_profile_latest_campaign_resolver.js",
+        id_suffix="SharedProfileLatestCampaignResolver",
+    )
+
     # === SHARED CAMPAIGN FIELD RESOLVERS ===
 
     # SharedCampaign.catalog (VTL)
@@ -128,12 +146,12 @@ def create_field_resolvers(
     )
 
     # === SHARED PROFILE FIELD RESOLVERS ===
-    # NOTE: These field resolvers are NO LONGER NEEDED because the listMyShares 
+    # NOTE: These field resolvers are NO LONGER NEEDED because the listMyShares
     # Lambda now returns fully hydrated profile data. These were causing issues
     # when the Lambda returned valid data but then field resolvers would refetch
     # from DynamoDB and return nulls for profiles with missing fields.
     # Commented out in favor of Lambda returning complete data.
-    # 
+    #
     # shared_profile_fields = [
     #     ("sellerName", "SellerName"),
     #     ("ownerAccountId", "OwnerAccountId"),
@@ -162,11 +180,22 @@ def create_field_resolvers(
         id_suffix="AccountIdResolver",
     )
 
-    # Catalog.ownerAccountId (JS)
-    builder.create_js_resolver(
-        field_name="ownerAccountId",
-        type_name="Catalog",
-        datasource_name="none",
-        code_file=RESOLVERS_DIR / "catalog_owner_account_id_resolver.js",
-        id_suffix="CatalogOwnerAccountIdResolver",
-    )
+    # Note: Catalog.ownerAccountId removed from GraphQL schema (Phase 3)
+    # ownerAccountId still stored in DynamoDB for WRITE authorization but not exposed to clients
+
+    # === PAYMENT METHOD FIELD RESOLVERS ===
+
+    # PaymentMethod.qrCodeUrl - Generate presigned S3 URL on-demand
+    # Uses Lambda to convert S3 key to presigned URL
+    # Authorization: reads ownerAccountId from ctx.stash (set by query pipeline)
+    if "generate_qr_code_presigned_url_fn" in lambda_datasources:
+        # Create field resolver with JavaScript code that calls Lambda
+        lambda_ds = lambda_datasources["generate_qr_code_presigned_url_fn"]
+        api.create_resolver(
+            "PaymentMethodQrCodeUrlResolver",
+            type_name="PaymentMethod",
+            field_name="qrCodeUrl",
+            data_source=lambda_ds,
+            runtime=appsync.FunctionRuntime.JS_1_0_0,
+            code=appsync.Code.from_asset(str(RESOLVERS_DIR / "payment_method_qr_code_url_resolver.js")),
+        )

@@ -13,6 +13,7 @@ import { DevFooter } from './components/DevFooter';
 import { LandingPage } from './pages/LandingPage';
 import { LoginPage } from './pages/LoginPage';
 import { SignupPage } from './pages/SignupPage';
+import { PrivacyPolicyPage } from './pages/PrivacyPolicyPage';
 import { ScoutsPage } from './pages/ScoutsPage';
 import { ScoutCampaignsPage } from './pages/ScoutCampaignsPage';
 import { ScoutManagementPage } from './pages/ScoutManagementPage';
@@ -21,7 +22,9 @@ import { SettingsPage } from './pages/SettingsPage';
 import { UserSettingsPage } from './pages/UserSettingsPage';
 import { AcceptInvitePage } from './pages/AcceptInvitePage';
 import { AdminPage } from './pages/AdminPage';
+import { UserDataPage } from './pages/UserDataPage';
 import { CatalogsPage } from './pages/CatalogsPage';
+import { CatalogPreviewPage } from './pages/CatalogPreviewPage';
 import { CampaignReportsPage } from './pages/CampaignReportsPage';
 import { CreateCampaignPage } from './pages/CreateCampaignPage';
 import { SharedCampaignsPage } from './pages/SharedCampaignsPage';
@@ -43,6 +46,7 @@ function App() {
               <Route path="/" element={<LandingPage />} />
               <Route path="/login" element={<LoginPage />} />
               <Route path="/signup" element={<SignupPage />} />
+              <Route path="/privacy" element={<PrivacyPolicyPage />} />
 
               {/* Shared Campaign short-link route */}
               <Route
@@ -147,6 +151,17 @@ function App() {
               />
 
               <Route
+                path="/catalogs/:catalogId/preview"
+                element={
+                  <ProtectedRoute>
+                    <AppLayout>
+                      <CatalogPreviewPage />
+                    </AppLayout>
+                  </ProtectedRoute>
+                }
+              />
+
+              <Route
                 path="/catalogs"
                 element={
                   <ProtectedRoute>
@@ -207,6 +222,17 @@ function App() {
                   <ProtectedRoute requireAdmin>
                     <AppLayout>
                       <AdminPage />
+                    </AppLayout>
+                  </ProtectedRoute>
+                }
+              />
+
+              <Route
+                path="/admin/user-data/:accountId"
+                element={
+                  <ProtectedRoute requireAdmin>
+                    <AppLayout>
+                      <UserDataPage />
                     </AppLayout>
                   </ProtectedRoute>
                 }

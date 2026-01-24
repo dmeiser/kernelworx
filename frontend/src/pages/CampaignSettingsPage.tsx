@@ -26,21 +26,36 @@ import {
   MenuItem,
   Alert,
   AlertTitle,
+  FormControlLabel,
+  Switch,
 } from '@mui/material';
 import { Delete as DeleteIcon, Warning as WarningIcon } from '@mui/icons-material';
-import { GET_CAMPAIGN, UPDATE_CAMPAIGN, DELETE_CAMPAIGN, LIST_PUBLIC_CATALOGS, LIST_MY_CATALOGS } from '../lib/graphql';
+import {
+  GET_CAMPAIGN,
+  UPDATE_CAMPAIGN,
+  DELETE_CAMPAIGN,
+  LIST_MANAGED_CATALOGS,
+  LIST_MY_CATALOGS,
+} from '../lib/graphql';
 import { ensureCampaignId, ensureCatalogId, toUrlId } from '../lib/ids';
 import type { Campaign, Catalog } from '../types';
 
 // Helper to extract date part from ISO string
 const extractDatePart = (isoDate: string | undefined): string => isoDate?.split('T')[0] || '';
 
+// Helper to convert date string to ISO datetime
+const dateToISO = (dateString: string): string => {
+  if (!dateString || dateString.trim() === '') return '';
+  // Add time portion if not present (assume midnight UTC)
+  return dateString.includes('T') ? dateString : `${dateString}T00:00:00.000Z`;
+};
+
 // Helper to safely decode URL component
 const decodeUrlParam = (encoded: string | undefined): string => (encoded ? decodeURIComponent(encoded) : '');
 
 // Helper to get catalogs with fallback
-const getPublicCatalogs = (data: { listPublicCatalogs?: Catalog[] } | undefined): Catalog[] =>
-  data?.listPublicCatalogs || [];
+const getPublicCatalogs = (data: { listManagedCatalogs?: Catalog[] } | undefined): Catalog[] =>
+  data?.listManagedCatalogs || [];
 
 const getMyCatalogs = (data: { listMyCatalogs?: Catalog[] } | undefined): Catalog[] => data?.listMyCatalogs || [];
 
@@ -64,13 +79,25 @@ const buildUpdateInput = (
   startDate: string,
   endDate: string,
   catalogId: string,
-) => ({
-  campaignId: dbCampaignId,
-  campaignName: campaignName.trim(),
-  startDate: startDate || undefined,
-  endDate: endDate || undefined,
-  catalogId: ensureCatalogId(catalogId),
-});
+  isActive: boolean,
+): Record<string, string | boolean> => {
+  const input: Record<string, string | boolean> = {
+    campaignId: dbCampaignId,
+    campaignName: campaignName.trim(),
+    catalogId: ensureCatalogId(catalogId) ?? catalogId,
+    isActive,
+  };
+
+  // Only include dates if they're not empty, and convert to ISO datetime
+  if (startDate && startDate.trim() !== '') {
+    input.startDate = dateToISO(startDate);
+  }
+  if (endDate && endDate.trim() !== '') {
+    input.endDate = dateToISO(endDate);
+  }
+
+  return input;
+};
 // Helper to determine if query should be skipped
 const shouldSkipCampaignQuery = (id: string): boolean => !id;
 
@@ -134,6 +161,7 @@ const checkFormChanges = (
   formStart: string,
   formEnd: string,
   formCatalog: string,
+  formIsActive: boolean,
   campaign: Campaign | undefined,
 ): boolean => {
   if (!campaign) return false;
@@ -143,7 +171,8 @@ const checkFormChanges = (
     formName !== campaign.campaignName ||
     formStart !== origStart ||
     formEnd !== origEnd ||
-    formCatalog !== campaign.catalogId
+    formCatalog !== campaign.catalogId ||
+    formIsActive !== campaign.isActive
   );
 };
 
@@ -158,12 +187,14 @@ const initializeFormFromCampaign = (
   setStartDate: (v: string) => void,
   setEndDate: (v: string) => void,
   setCatalogId: (v: string) => void,
+  setIsActive: (v: boolean) => void,
 ): void => {
   if (campaign) {
     setCampaignName(campaign.campaignName);
     setStartDate(extractDatePart(campaign.startDate));
     setEndDate(extractDatePart(campaign.endDate));
     setCatalogId(campaign.catalogId);
+    setIsActive(campaign.isActive ?? true);
   }
 };
 
@@ -181,6 +212,7 @@ export const CampaignSettingsPage: React.FC = () => {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [catalogId, setCatalogId] = useState('');
+  const [isActive, setIsActive] = useState(true);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [unitChangeConfirmOpen, setUnitChangeConfirmOpen] = useState(false);
 
@@ -196,8 +228,8 @@ export const CampaignSettingsPage: React.FC = () => {
 
   // Fetch catalogs
   const { data: publicCatalogsData } = useQuery<{
-    listPublicCatalogs: Catalog[];
-  }>(LIST_PUBLIC_CATALOGS);
+    listManagedCatalogs: Catalog[];
+  }>(LIST_MANAGED_CATALOGS);
 
   const { data: myCatalogsData } = useQuery<{
     listMyCatalogs: Catalog[];
@@ -210,7 +242,7 @@ export const CampaignSettingsPage: React.FC = () => {
   // Initialize form when campaign loads
   React.useEffect(() => {
     const c = getCampaign(campaignData);
-    initializeFormFromCampaign(c, setCampaignName, setStartDate, setEndDate, setCatalogId);
+    initializeFormFromCampaign(c, setCampaignName, setStartDate, setEndDate, setCatalogId, setIsActive);
   }, [campaignData]);
 
   // Update campaign mutation
@@ -245,7 +277,7 @@ export const CampaignSettingsPage: React.FC = () => {
     setUnitChangeConfirmOpen(false);
     const isValid = canSave(campaignId, campaignName, catalogId);
     if (!dbCampaignId) return;
-    const input = buildUpdateInput(dbCampaignId, campaignName, startDate, endDate, catalogId);
+    const input = buildUpdateInput(dbCampaignId, campaignName, startDate, endDate, catalogId, isActive);
     await maybeUpdateCampaign(isValid, updateCampaign, input);
   };
 
@@ -259,7 +291,7 @@ export const CampaignSettingsPage: React.FC = () => {
     return <LoadingState />;
   }
 
-  const hasChanges = checkFormChanges(campaignName, startDate, endDate, catalogId, campaign);
+  const hasChanges = checkFormChanges(campaignName, startDate, endDate, catalogId, isActive, campaign);
 
   return (
     <Box>
@@ -316,6 +348,10 @@ export const CampaignSettingsPage: React.FC = () => {
               ))}
             </Select>
           </FormControl>
+          <FormControlLabel
+            control={<Switch checked={isActive} onChange={(e) => setIsActive(e.target.checked)} disabled={updating} />}
+            label="Campaign is Active"
+          />
           <Button variant="contained" onClick={handleSaveClick} disabled={!hasChanges || updating}>
             {updating ? 'Saving...' : 'Save Changes'}
           </Button>

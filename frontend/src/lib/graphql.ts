@@ -3,6 +3,7 @@
  */
 
 import { gql } from '@apollo/client';
+import type { AdminUser } from '../types/entities';
 
 // ============================================================================
 // Fragments
@@ -20,6 +21,24 @@ export const SELLER_PROFILE_FRAGMENT = gql`
   }
 `;
 
+export const SELLER_PROFILE_WITH_LATEST_CAMPAIGN_FRAGMENT = gql`
+  fragment SellerProfileWithLatestCampaignFields on SellerProfile {
+    profileId
+    ownerAccountId
+    sellerName
+    createdAt
+    updatedAt
+    isOwner
+    permissions
+    latestCampaign {
+      campaignId
+      campaignName
+      campaignYear
+      isActive
+    }
+  }
+`;
+
 export const CAMPAIGN_FRAGMENT = gql`
   fragment CampaignFields on Campaign {
     campaignId
@@ -34,6 +53,7 @@ export const CAMPAIGN_FRAGMENT = gql`
     city
     state
     sharedCampaignCode
+    isActive
     createdAt
     updatedAt
     totalOrders
@@ -75,7 +95,6 @@ export const CATALOG_FRAGMENT = gql`
     catalogId
     catalogName
     catalogType
-    ownerAccountId
     isPublic
     products {
       productId
@@ -128,6 +147,12 @@ export const UPDATE_MY_ACCOUNT = gql`
   }
 `;
 
+export const DELETE_MY_ACCOUNT = gql`
+  mutation DeleteMyAccount {
+    deleteMyAccount
+  }
+`;
+
 export const UPDATE_MY_PREFERENCES = gql`
   mutation UpdateMyPreferences($preferences: AWSJSON!) {
     updateMyPreferences(preferences: $preferences) {
@@ -138,10 +163,10 @@ export const UPDATE_MY_PREFERENCES = gql`
 `;
 
 export const LIST_MY_PROFILES = gql`
-  ${SELLER_PROFILE_FRAGMENT}
+  ${SELLER_PROFILE_WITH_LATEST_CAMPAIGN_FRAGMENT}
   query ListMyProfiles {
     listMyProfiles {
-      ...SellerProfileFields
+      ...SellerProfileWithLatestCampaignFields
     }
   }
 `;
@@ -158,6 +183,12 @@ export const LIST_MY_SHARES = gql`
       updatedAt
       isOwner
       permissions
+      latestCampaign {
+        campaignId
+        campaignName
+        campaignYear
+        isActive
+      }
     }
   }
 `;
@@ -218,10 +249,10 @@ export const GET_ORDER = gql`
   }
 `;
 
-export const LIST_PUBLIC_CATALOGS = gql`
+export const LIST_MANAGED_CATALOGS = gql`
   ${CATALOG_FRAGMENT}
-  query ListPublicCatalogs {
-    listPublicCatalogs {
+  query ListManagedCatalogs {
+    listManagedCatalogs {
       ...CatalogFields
     }
   }
@@ -233,6 +264,12 @@ export const LIST_MY_CATALOGS = gql`
     listMyCatalogs {
       ...CatalogFields
     }
+  }
+`;
+
+export const LIST_CATALOGS_IN_USE = gql`
+  query ListCatalogsInUse {
+    listCatalogsInUse
   }
 `;
 
@@ -716,5 +753,188 @@ export const CONFIRM_PAYMENT_METHOD_QR_UPLOAD = gql`
 export const DELETE_PAYMENT_METHOD_QR_CODE = gql`
   mutation DeletePaymentMethodQRCode($paymentMethodName: String!) {
     deletePaymentMethodQRCode(paymentMethodName: $paymentMethodName)
+  }
+`;
+
+// ============================================================================
+// Admin Operations (requires ADMIN Cognito group)
+// ============================================================================
+
+export const ADMIN_USER_FRAGMENT = gql`
+  fragment AdminUserFields on AdminUser {
+    accountId
+    email
+    displayName
+    status
+    enabled
+    emailVerified
+    isAdmin
+    createdAt
+    lastModifiedAt
+  }
+`;
+
+export const ADMIN_LIST_USERS = gql`
+  ${ADMIN_USER_FRAGMENT}
+  query AdminListUsers($limit: Int, $nextToken: String) {
+    adminListUsers(limit: $limit, nextToken: $nextToken) {
+      users {
+        ...AdminUserFields
+      }
+      nextToken
+    }
+  }
+`;
+
+export const ADMIN_SEARCH_USER = gql`
+  ${ADMIN_USER_FRAGMENT}
+  query AdminSearchUser($query: String!) {
+    adminSearchUser(query: $query) {
+      ...AdminUserFields
+    }
+  }
+`;
+
+// Type for search results
+export type AdminSearchUserResponse = {
+  adminSearchUser: AdminUser[];
+};
+
+export const ADMIN_GET_USER_PROFILES = gql`
+  ${SELLER_PROFILE_FRAGMENT}
+  query AdminGetUserProfiles($accountId: ID!) {
+    adminGetUserProfiles(accountId: $accountId) {
+      ...SellerProfileFields
+    }
+  }
+`;
+
+export const ADMIN_GET_USER_CATALOGS = gql`
+  ${CATALOG_FRAGMENT}
+  query AdminGetUserCatalogs($accountId: ID!) {
+    adminGetUserCatalogs(accountId: $accountId) {
+      ...CatalogFields
+    }
+  }
+`;
+
+export const ADMIN_GET_USER_CAMPAIGNS = gql`
+  query AdminGetUserCampaigns($accountId: ID!) {
+    adminGetUserCampaigns(accountId: $accountId) {
+      campaignId
+      profileId
+      campaignName
+      campaignYear
+      catalogId
+      startDate
+      endDate
+      sharedCampaignCode
+      createdAt
+      updatedAt
+    }
+  }
+`;
+
+export const ADMIN_GET_USER_SHARED_CAMPAIGNS = gql`
+  query AdminGetUserSharedCampaigns($accountId: ID!) {
+    adminGetUserSharedCampaigns(accountId: $accountId) {
+      sharedCampaignCode
+      catalogId
+      campaignName
+      campaignYear
+      startDate
+      endDate
+      unitType
+      unitNumber
+      city
+      state
+      createdBy
+      createdByName
+      createdAt
+    }
+  }
+`;
+
+export const ADMIN_GET_PROFILE_SHARES = gql`
+  query AdminGetProfileShares($profileId: ID!) {
+    adminGetProfileShares(profileId: $profileId) {
+      shareId
+      profileId
+      targetAccountId
+      targetAccount {
+        accountId
+        email
+        givenName
+        familyName
+      }
+      permissions
+      createdAt
+    }
+  }
+`;
+
+export const ADMIN_RESET_USER_PASSWORD = gql`
+  mutation AdminResetUserPassword($email: AWSEmail!) {
+    adminResetUserPassword(email: $email)
+  }
+`;
+
+export const ADMIN_DELETE_USER = gql`
+  mutation AdminDeleteUser($accountId: ID!) {
+    adminDeleteUser(accountId: $accountId)
+  }
+`;
+
+export const ADMIN_DELETE_USER_ORDERS = gql`
+  mutation AdminDeleteUserOrders($accountId: ID!) {
+    adminDeleteUserOrders(accountId: $accountId)
+  }
+`;
+
+export const ADMIN_DELETE_USER_CAMPAIGNS = gql`
+  mutation AdminDeleteUserCampaigns($accountId: ID!) {
+    adminDeleteUserCampaigns(accountId: $accountId)
+  }
+`;
+
+export const ADMIN_DELETE_USER_SHARES = gql`
+  mutation AdminDeleteUserShares($accountId: ID!) {
+    adminDeleteUserShares(accountId: $accountId)
+  }
+`;
+
+export const ADMIN_DELETE_USER_PROFILES = gql`
+  mutation AdminDeleteUserProfiles($accountId: ID!) {
+    adminDeleteUserProfiles(accountId: $accountId)
+  }
+`;
+
+export const ADMIN_DELETE_USER_CATALOGS = gql`
+  mutation AdminDeleteUserCatalogs($accountId: ID!) {
+    adminDeleteUserCatalogs(accountId: $accountId)
+  }
+`;
+
+export const ADMIN_DELETE_SHARE = gql`
+  mutation AdminDeleteShare($profileId: ID!, $targetAccountId: ID!) {
+    adminDeleteShare(profileId: $profileId, targetAccountId: $targetAccountId)
+  }
+`;
+
+export const ADMIN_UPDATE_CAMPAIGN_SHARED_CODE = gql`
+  mutation AdminUpdateCampaignSharedCode($campaignId: ID!, $sharedCampaignCode: String) {
+    adminUpdateCampaignSharedCode(campaignId: $campaignId, sharedCampaignCode: $sharedCampaignCode) {
+      campaignId
+      sharedCampaignCode
+    }
+  }
+`;
+
+export const CREATE_MANAGED_CATALOG = gql`
+  ${CATALOG_FRAGMENT}
+  mutation CreateManagedCatalog($input: CreateCatalogInput!) {
+    createManagedCatalog(input: $input) {
+      ...CatalogFields
+    }
   }
 `;

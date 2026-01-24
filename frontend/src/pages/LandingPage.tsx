@@ -135,7 +135,7 @@ export const LandingPage: React.FC = () => {
                   🔒 Secure & Private
                 </Typography>
                 <Typography variant="body1" color="text.secondary">
-                  Your data is encrypted and stored securely in AWS. Sign in with Google, Facebook, or Apple.
+                  Your data is encrypted and stored securely in AWS. Sign in with Google or Facebook.
                 </Typography>
               </Box>
             </Stack>
@@ -181,6 +181,16 @@ export const LandingPage: React.FC = () => {
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
               Open source • MIT License • Free to use
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+              <Button
+                onClick={() => navigate('/privacy')}
+                variant="text"
+                size="small"
+                sx={{ textTransform: 'none', color: 'text.secondary', textDecoration: 'underline' }}
+              >
+                Privacy Policy
+              </Button>
             </Typography>
           </Box>
         </Stack>

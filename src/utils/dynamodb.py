@@ -6,7 +6,7 @@ and test monkeypatch support.
 """
 
 import os
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Optional
 
 import boto3
 

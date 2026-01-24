@@ -59,12 +59,12 @@ export const EditProfileDialog: React.FC<EditProfileDialogProps> = ({ profileHoo
             helperText="Optional"
           >
             <MenuItem value="">None</MenuItem>
-            <MenuItem value="Pack">Pack (Cub Scouts)</MenuItem>
-            <MenuItem value="Troop">Troop (Scouts BSA)</MenuItem>
-            <MenuItem value="Crew">Crew (Venturing)</MenuItem>
-            <MenuItem value="Ship">Ship (Sea Scouts)</MenuItem>
-            <MenuItem value="Post">Post (Exploring)</MenuItem>
-            <MenuItem value="Club">Club (Exploring)</MenuItem>
+            <MenuItem value="Pack">Pack</MenuItem>
+            <MenuItem value="Troop">Troop</MenuItem>
+            <MenuItem value="Crew">Crew</MenuItem>
+            <MenuItem value="Ship">Ship</MenuItem>
+            <MenuItem value="Post">Post</MenuItem>
+            <MenuItem value="Club">Club</MenuItem>
           </TextField>
           <TextField
             label="Unit Number"

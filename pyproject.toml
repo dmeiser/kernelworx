@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Popcorn Sales Manager - Lambda functions and backend code"
 requires-python = ">=3.13"
 dependencies = [
+    "aioboto3>=14.3.0",
     "boto3>=1.35.0",
     "openpyxl>=3.1.0",
 ]
@@ -16,6 +17,7 @@ dev = [
     "moto[dynamodb,s3,lambda,sns,ses]>=5.1.17",
     "mypy>=1.19.0",
     "pytest>=9.0.1",
+    "pytest-asyncio>=1.0.0",
     "pytest-cov>=7.0.0",
     "types-openpyxl>=3.1.5.20250919",
     "radon>=6.0.1",

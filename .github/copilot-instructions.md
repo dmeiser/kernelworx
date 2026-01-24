@@ -51,7 +51,7 @@ Essential knowledge for GitHub Copilot when working on this volunteer-run Scouti
 - **API**: AWS AppSync (GraphQL)
 - **Functions**: AWS Lambda (Python 3.13)
 - **Data**: Amazon DynamoDB (single-table design)
-- **Auth**: Amazon Cognito User Pools (Google/Facebook/Apple social login)
+- **Auth**: Amazon Cognito User Pools (Google/Facebook social login)
 - **Infrastructure**: AWS CDK (Python)
 - **Package Management**: uv (Python), npm (frontend)
 

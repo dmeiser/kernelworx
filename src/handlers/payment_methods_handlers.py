@@ -5,7 +5,6 @@ These handlers provide S3 pre-signed URL generation for QR code uploads
 and confirmations. They integrate with AppSync pipeline resolvers.
 """
 
-import json
 import os
 from typing import Any, Dict
 
@@ -20,13 +19,9 @@ try:  # pragma: no cover
     from utils.payment_methods import (
         delete_qr_by_key,
         delete_qr_from_s3,
-        generate_presigned_get_url,
         generate_qr_code_s3_key,
         get_payment_methods,
-        get_qr_code_s3_key,
         is_reserved_name,
-        slugify,
-        update_payment_method,
         validate_qr_s3_key,
     )
 except ModuleNotFoundError:  # pragma: no cover
@@ -36,13 +31,9 @@ except ModuleNotFoundError:  # pragma: no cover
     from ..utils.payment_methods import (
         delete_qr_by_key,
         delete_qr_from_s3,
-        generate_presigned_get_url,
         generate_qr_code_s3_key,
         get_payment_methods,
-        get_qr_code_s3_key,
         is_reserved_name,
-        slugify,
-        update_payment_method,
         validate_qr_s3_key,
     )
 
@@ -210,8 +201,9 @@ def confirm_qr_upload(event: Dict[str, Any], context: Any) -> Dict[str, Any]:  #
             ExpressionAttributeValues={":prefs": preferences},
         )
 
-        # Generate pre-signed GET URL
-        presigned_url = generate_presigned_get_url(caller_id, payment_method_name, s3_key, expiry_seconds=900)
+        # Return the payment method with S3 key stored in qrCodeUrl
+        # The PaymentMethod.qrCodeUrl field resolver will generate the presigned URL
+        # This is consistent with how myPaymentMethods and paymentMethodsForProfile work
 
         logger.info(
             "Confirmed QR code upload",
@@ -220,71 +212,13 @@ def confirm_qr_upload(event: Dict[str, Any], context: Any) -> Dict[str, Any]:  #
             s3_key=s3_key,
         )
 
-        return {"name": payment_method_name, "qrCodeUrl": presigned_url}
+        return {"name": payment_method_name, "qrCodeUrl": s3_key}
 
     except AppError:
         raise
     except Exception as e:
         logger.error("Failed to confirm QR code upload", error=str(e))
         raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to confirm upload")
-
-
-def generate_presigned_urls(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
-    """
-    Generate pre-signed GET URLs for payment methods with QR codes.
-
-    Used in pipeline resolver for paymentMethodsForProfile query.
-    Takes payment methods from previous pipeline step and adds pre-signed URLs.
-
-    Args:
-        event: AppSync event with payload.prev.result containing payment methods and owner account ID
-        context: Lambda context
-
-    Returns:
-        Updated list of payment methods with pre-signed URLs
-
-    Raises:
-        AppError: If URL generation fails
-    """
-    logger = get_logger(__name__)
-
-    try:
-        # Get payload from AppSync Lambda resolver request
-        payload = event.get("payload", event)
-        # Get previous result from pipeline
-        prev_result = payload.get("prev", {}).get("result", {})
-        methods = prev_result.get("paymentMethods", [])
-        owner_account_id = prev_result.get("ownerAccountId")
-
-        if not owner_account_id:
-            raise AppError(ErrorCode.INVALID_INPUT, "Owner account ID is required")
-
-        # Generate pre-signed URLs for methods with QR codes
-        updated_methods = []
-        for method in methods:
-            method_copy = dict(method)
-            s3_key = method_copy.get("qrCodeUrl")
-
-            if s3_key and not s3_key.startswith("http"):
-                # It's an S3 key, generate pre-signed URL
-                presigned_url = generate_presigned_get_url(
-                    owner_account_id, method_copy.get("name", ""), s3_key, expiry_seconds=900
-                )
-                method_copy["qrCodeUrl"] = presigned_url
-            elif not s3_key:
-                method_copy["qrCodeUrl"] = None
-
-            updated_methods.append(method_copy)
-
-        logger.info("Generated pre-signed URLs", owner_account_id=owner_account_id, count=len(updated_methods))
-
-        return {"paymentMethods": updated_methods, "ownerAccountId": owner_account_id}
-
-    except AppError:
-        raise
-    except Exception as e:
-        logger.error("Failed to generate pre-signed URLs", error=str(e))
-        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to generate QR code URLs")
 
 
 def delete_qr_code(event: Dict[str, Any], context: Any) -> bool:  # noqa: C901

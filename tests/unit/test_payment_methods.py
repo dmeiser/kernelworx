@@ -539,7 +539,6 @@ class TestDeletePaymentMethod:
         self, dynamodb_tables: Dict[str, Any], sample_account: Dict[str, Any], s3_bucket: Any, sample_account_id: str
     ) -> None:
         """Test deleting method when S3 delete fails (should log warning and continue)."""
-        from unittest.mock import patch
 
         # Create method with QR code
         payment_methods.create_payment_method(sample_account_id, "Venmo")
@@ -783,7 +782,6 @@ class TestDeleteQRByKey:
 
     def test_delete_qr_by_key_nosuchkey_error(self, sample_account_id: str) -> None:
         """Test S3 NoSuchKey error during delete (404 should be silently ignored)."""
-        from unittest.mock import MagicMock, patch
 
         s3_key = f"payment-qr-codes/{sample_account_id}/test.png"
 
@@ -797,7 +795,6 @@ class TestDeleteQRByKey:
 
     def test_delete_qr_by_key_s3_error(self, sample_account_id: str) -> None:
         """Test S3 error during delete (non-404 error)."""
-        from unittest.mock import MagicMock, patch
 
         s3_key = f"payment-qr-codes/{sample_account_id}/test.png"
 
@@ -812,7 +809,6 @@ class TestDeleteQRByKey:
 
     def test_delete_qr_by_key_generic_exception(self, sample_account_id: str) -> None:
         """Test generic Exception during delete (non-ClientError)."""
-        from unittest.mock import MagicMock, patch
 
         s3_key = f"payment-qr-codes/{sample_account_id}/test.png"
 
@@ -918,7 +914,6 @@ class TestErrorHandling:
         self, dynamodb_tables: Dict[str, Any], sample_account: Dict[str, Any], sample_account_id: str
     ) -> None:
         """Test validate_name_unique handles DynamoDB errors."""
-        from unittest.mock import MagicMock
 
         from src.utils.dynamodb import override_table
 
@@ -941,7 +936,6 @@ class TestErrorHandling:
         self, dynamodb_tables: Dict[str, Any], sample_account: Dict[str, Any], sample_account_id: str
     ) -> None:
         """Test get_payment_methods handles DynamoDB errors."""
-        from unittest.mock import MagicMock
 
         from src.utils.dynamodb import override_table
 
@@ -962,7 +956,6 @@ class TestErrorHandling:
         self, dynamodb_tables: Dict[str, Any], sample_account: Dict[str, Any], sample_account_id: str
     ) -> None:
         """Test create_payment_method handles DynamoDB errors."""
-        from unittest.mock import MagicMock
 
         from src.utils.dynamodb import override_table
 
@@ -986,7 +979,6 @@ class TestErrorHandling:
         self, dynamodb_tables: Dict[str, Any], sample_account: Dict[str, Any], sample_account_id: str
     ) -> None:
         """Test update_payment_method handles DynamoDB errors."""
-        from unittest.mock import MagicMock
 
         from src.utils.dynamodb import override_table
 
@@ -1010,7 +1002,6 @@ class TestErrorHandling:
         self, dynamodb_tables: Dict[str, Any], sample_account: Dict[str, Any], sample_account_id: str
     ) -> None:
         """Test update_payment_method handles update_item DynamoDB errors."""
-        from unittest.mock import MagicMock
 
         from src.utils.dynamodb import override_table
 
@@ -1040,7 +1031,6 @@ class TestErrorHandling:
         self, dynamodb_tables: Dict[str, Any], sample_account: Dict[str, Any], sample_account_id: str
     ) -> None:
         """Test delete_payment_method handles DynamoDB errors."""
-        from unittest.mock import MagicMock
 
         from src.utils.dynamodb import override_table
 
@@ -1060,7 +1050,6 @@ class TestErrorHandling:
     def test_upload_qr_s3_error(self, s3_bucket: Any, sample_account_id: str) -> None:
         """Test upload_qr_to_s3 handles S3 errors."""
         # Replace S3 client with mock that raises error
-        from unittest.mock import MagicMock
 
         mock_s3 = MagicMock()
         mock_s3.put_object.side_effect = ClientError(
@@ -1078,7 +1067,6 @@ class TestErrorHandling:
 
     def test_generate_presigned_url_s3_error(self, s3_bucket: Any, sample_account_id: str) -> None:
         """Test generate_presigned_get_url handles S3 errors."""
-        from unittest.mock import MagicMock
 
         mock_s3 = MagicMock()
         mock_s3.head_object.return_value = {}  # File exists
@@ -1146,7 +1134,6 @@ class TestErrorHandling:
 
     def test_delete_qr_with_other_s3_error(self, s3_bucket: Any, sample_account_id: str) -> None:
         """Test delete_qr_from_s3 raises on non-NoSuchKey S3 errors."""
-        from unittest.mock import MagicMock
 
         mock_s3 = MagicMock()
         # Raise a non-NoSuchKey error
@@ -1186,7 +1173,6 @@ class TestErrorHandling:
         self, dynamodb_tables: Dict[str, Any], sample_account: Dict[str, Any], sample_account_id: str, s3_bucket: Any
     ) -> None:
         """Test delete_payment_method handles S3 delete warning path."""
-        from unittest.mock import MagicMock
 
         # Create a method with a qrCodeUrl
         payment_methods.create_payment_method(sample_account_id, "Venmo")
@@ -1211,7 +1197,6 @@ class TestErrorHandling:
 
     def test_delete_qr_outer_exception(self, s3_bucket: Any, sample_account_id: str) -> None:
         """Test delete_qr_from_s3 handles outer exception path."""
-        from unittest.mock import MagicMock
 
         mock_s3 = MagicMock()
         # Raise an exception during _get_s3_client or before entering the loop

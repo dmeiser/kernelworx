@@ -16,6 +16,12 @@ export interface SellerProfile {
   unitNumber?: number;
   isOwner?: boolean;
   permissions?: string[];
+  latestCampaign?: {
+    campaignId: string;
+    campaignName: string;
+    campaignYear: number;
+    isActive: boolean;
+  };
   createdAt: string;
   updatedAt: string;
 }
@@ -38,6 +44,7 @@ export interface Campaign {
   state?: string;
   isShared?: boolean;
   sharedCampaignCode?: string;
+  isActive: boolean; // Whether campaign is active (default true)
   totalOrders?: number;
   totalRevenue?: number;
   createdAt?: string;
@@ -190,4 +197,28 @@ export interface SharedCampaign {
   createdByName?: string;
   createdAt?: string;
   updatedAt?: string;
+}
+
+/**
+ * Admin user view (Cognito + DynamoDB merged).
+ * Used in admin user management.
+ */
+export interface AdminUser {
+  accountId: string;
+  email: string;
+  displayName?: string | null;
+  status: string; // CONFIRMED, UNCONFIRMED, FORCE_CHANGE_PASSWORD, etc.
+  enabled: boolean;
+  emailVerified: boolean;
+  isAdmin: boolean;
+  createdAt?: string | null;
+  lastModifiedAt?: string | null;
+}
+
+/**
+ * Paginated list of admin users.
+ */
+export interface AdminUserConnection {
+  users: AdminUser[];
+  nextToken?: string | null;
 }

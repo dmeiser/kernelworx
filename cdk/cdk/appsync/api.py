@@ -46,7 +46,7 @@ def create_appsync_api(
     schema_path = os.path.join(os.path.dirname(__file__), "..", "..", "schema", "schema.graphql")
 
     # Determine if logging should be enabled
-    enable_appsync_logging = os.getenv("ENABLE_APPSYNC_LOGGING", "true").lower() == "true"
+    enable_appsync_logging = os.getenv("ENABLE_APPSYNC_LOGGING", "false").lower() == "true"
 
     # Create AppSync GraphQL API
     api_name = resource_name("kernelworx-api")

@@ -85,7 +85,9 @@ describe('useCreateCampaignValidation', () => {
     });
 
     it('returns false in shared campaign mode when profileId is empty', () => {
-      const { result } = renderHook(() => useCreateCampaignValidation('', 'Campaign', 'catalog-1', true, '', '', '', ''));
+      const { result } = renderHook(() =>
+        useCreateCampaignValidation('', 'Campaign', 'catalog-1', true, '', '', '', ''),
+      );
 
       expect(result.current.isFormValid).toBe(false);
     });

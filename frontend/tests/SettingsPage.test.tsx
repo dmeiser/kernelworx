@@ -65,7 +65,7 @@ describe('SettingsPage', () => {
         <BrowserRouter>
           <SettingsPage />
         </BrowserRouter>
-      </MockedProvider>
+      </MockedProvider>,
     );
 
     expect(screen.getByText('Account Settings')).toBeInTheDocument();
@@ -80,7 +80,7 @@ describe('SettingsPage', () => {
         <BrowserRouter>
           <SettingsPage />
         </BrowserRouter>
-      </MockedProvider>
+      </MockedProvider>,
     );
 
     // Wait for the admin button to appear
@@ -94,12 +94,12 @@ describe('SettingsPage', () => {
         <BrowserRouter>
           <SettingsPage />
         </BrowserRouter>
-      </MockedProvider>
+      </MockedProvider>,
     );
 
     // Give time for query to resolve
     await screen.findByText('Quick Actions');
-    
+
     // Admin button should not be present
     expect(screen.queryByRole('button', { name: /Admin Console/i })).not.toBeInTheDocument();
   });
@@ -111,7 +111,7 @@ describe('SettingsPage', () => {
         <BrowserRouter>
           <SettingsPage />
         </BrowserRouter>
-      </MockedProvider>
+      </MockedProvider>,
     );
 
     await user.click(screen.getByRole('button', { name: /User Settings/i }));
@@ -125,7 +125,7 @@ describe('SettingsPage', () => {
         <BrowserRouter>
           <SettingsPage />
         </BrowserRouter>
-      </MockedProvider>
+      </MockedProvider>,
     );
 
     await user.click(screen.getByRole('button', { name: /Manage My Scouts/i }));
@@ -139,7 +139,7 @@ describe('SettingsPage', () => {
         <BrowserRouter>
           <SettingsPage />
         </BrowserRouter>
-      </MockedProvider>
+      </MockedProvider>,
     );
 
     const adminButton = await screen.findByRole('button', { name: /Admin Console/i });
@@ -153,7 +153,7 @@ describe('SettingsPage', () => {
         <BrowserRouter>
           <SettingsPage />
         </BrowserRouter>
-      </MockedProvider>
+      </MockedProvider>,
     );
 
     expect(screen.getByText('Data & Privacy')).toBeInTheDocument();
@@ -166,7 +166,7 @@ describe('SettingsPage', () => {
         <BrowserRouter>
           <SettingsPage />
         </BrowserRouter>
-      </MockedProvider>
+      </MockedProvider>,
     );
 
     expect(screen.getByText('About KernelWorx')).toBeInTheDocument();
@@ -179,7 +179,7 @@ describe('SettingsPage', () => {
         <BrowserRouter>
           <SettingsPage />
         </BrowserRouter>
-      </MockedProvider>
+      </MockedProvider>,
     );
 
     await user.click(screen.getByRole('button', { name: /Sign Out/i }));

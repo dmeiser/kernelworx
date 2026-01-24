@@ -382,7 +382,7 @@ def lookup_identity_provider(user_pool_id: str, provider_name: str) -> Optional[
 
     Args:
         user_pool_id: The Cognito User Pool ID
-        provider_name: The provider name (e.g., "Google", "Facebook", "SignInWithApple")
+        provider_name: The provider name (e.g., "Google", "Facebook")
 
     Returns:
         Dict with provider info if found, None otherwise

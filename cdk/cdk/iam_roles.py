@@ -6,7 +6,7 @@ Creates:
 - AppSync service role for direct DynamoDB resolvers
 """
 
-from typing import Callable, Dict
+from typing import Callable, Dict, List, Optional
 
 from aws_cdk import aws_dynamodb as dynamodb
 from aws_cdk import aws_iam as iam
@@ -19,6 +19,7 @@ def create_lambda_execution_role(
     rn: Callable[[str], str],
     tables: Dict[str, dynamodb.ITable],
     exports_bucket: s3.IBucket,
+    user_pool_arn: Optional[str] = None,
 ) -> iam.Role:
     """Create the Lambda execution role with appropriate permissions.
 
@@ -27,6 +28,7 @@ def create_lambda_execution_role(
         rn: helper function to create resource names
         tables: Dict of DynamoDB tables to grant access to
         exports_bucket: S3 bucket for exports
+        user_pool_arn: Optional ARN of Cognito User Pool for admin operations
 
     Returns:
         The Lambda execution role
@@ -55,6 +57,29 @@ def create_lambda_execution_role(
     # Grant Lambda role access to exports bucket
     exports_bucket.grant_read_write(lambda_execution_role)
 
+    # Grant Lambda role permission to create CloudFront invalidations
+    lambda_execution_role.add_to_policy(
+        iam.PolicyStatement(
+            actions=["cloudfront:CreateInvalidation"],
+            resources=["*"],  # CloudFront invalidation requires wildcard resource
+        )
+    )
+
+    # Grant Cognito admin permissions for admin operations Lambda
+    # Using wildcard to avoid circular dependency with User Pool creation
+    lambda_execution_role.add_to_policy(
+        iam.PolicyStatement(
+            actions=[
+                "cognito-idp:AdminResetUserPassword",
+                "cognito-idp:AdminDeleteUser",
+                "cognito-idp:ListUsers",
+                "cognito-idp:AdminListGroupsForUser",
+                "cognito-idp:AdminGetUser",
+            ],
+            resources=["*"],  # User Pool ARN not available yet during role creation
+        )
+    )
+
     return lambda_execution_role
 
 
@@ -62,6 +87,7 @@ def create_appsync_service_role(
     stack: Construct,
     rn: Callable[[str], str],
     tables: Dict[str, dynamodb.ITable],
+    tables_without_gsi: Optional[List[str]] = None,
 ) -> iam.Role:
     """Create the AppSync service role for direct DynamoDB resolvers.
 
@@ -69,10 +95,14 @@ def create_appsync_service_role(
         stack: CDK Construct (usually the Stack instance)
         rn: helper function to create resource names
         tables: Dict of DynamoDB tables to grant access to
+        tables_without_gsi: List of table names that should NOT get GSI access
 
     Returns:
         The AppSync service role
     """
+    if tables_without_gsi is None:
+        tables_without_gsi = []
+
     # AppSync service role
     appsync_service_role = iam.Role(
         stack,
@@ -85,13 +115,14 @@ def create_appsync_service_role(
     for table_name, table in tables.items():
         table.grant_read_write_data(appsync_service_role)
 
-        # Grant access to GSI indexes
-        appsync_service_role.add_to_policy(
-            iam.PolicyStatement(
-                actions=["dynamodb:Query", "dynamodb:Scan"],
-                resources=[f"{table.table_arn}/index/*"],
+        # Grant access to GSI indexes (unless excluded)
+        if table_name not in tables_without_gsi:
+            appsync_service_role.add_to_policy(
+                iam.PolicyStatement(
+                    actions=["dynamodb:Query", "dynamodb:Scan"],
+                    resources=[f"{table.table_arn}/index/*"],
+                )
             )
-        )
 
     return appsync_service_role
 

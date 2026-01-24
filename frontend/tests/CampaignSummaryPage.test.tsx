@@ -17,10 +17,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import { MockedProvider } from '@apollo/client/testing/react';
 import type { MockedResponse } from '@apollo/client/testing';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
-import {
-  LIST_ORDERS_BY_CAMPAIGN,
-  GET_PAYMENT_METHODS_FOR_PROFILE,
-} from '../src/lib/graphql';
+import { LIST_ORDERS_BY_CAMPAIGN, GET_PAYMENT_METHODS_FOR_PROFILE } from '../src/lib/graphql';
 import { CampaignSummaryPage } from '../src/pages/CampaignSummaryPage';
 
 // Test constants - use raw IDs (without prefix) since they will be in URL
@@ -41,7 +38,15 @@ const mockOrdersData = {
       customerPhone: null,
       customerAddress: null,
       lineItems: [
-        { __typename: 'LineItem', productId: 'PROD~1', productName: 'Product A', price: 10.0, pricePerUnit: 10.0, quantity: 2, subtotal: 20.0 },
+        {
+          __typename: 'LineItem',
+          productId: 'PROD~1',
+          productName: 'Product A',
+          price: 10.0,
+          pricePerUnit: 10.0,
+          quantity: 2,
+          subtotal: 20.0,
+        },
       ],
       totalAmount: 20.0,
       paymentMethod: 'Cash',
@@ -58,7 +63,15 @@ const mockOrdersData = {
       customerPhone: null,
       customerAddress: null,
       lineItems: [
-        { __typename: 'LineItem', productId: 'PROD~1', productName: 'Product A', price: 10.0, pricePerUnit: 10.0, quantity: 5, subtotal: 50.0 },
+        {
+          __typename: 'LineItem',
+          productId: 'PROD~1',
+          productName: 'Product A',
+          price: 10.0,
+          pricePerUnit: 10.0,
+          quantity: 5,
+          subtotal: 50.0,
+        },
       ],
       totalAmount: 50.0,
       paymentMethod: 'Venmo',
@@ -75,7 +88,15 @@ const mockOrdersData = {
       customerPhone: null,
       customerAddress: null,
       lineItems: [
-        { __typename: 'LineItem', productId: 'PROD~2', productName: 'Product B', price: 15.0, pricePerUnit: 15.0, quantity: 2, subtotal: 30.0 },
+        {
+          __typename: 'LineItem',
+          productId: 'PROD~2',
+          productName: 'Product B',
+          price: 15.0,
+          pricePerUnit: 15.0,
+          quantity: 2,
+          subtotal: 30.0,
+        },
       ],
       totalAmount: 30.0,
       paymentMethod: 'Cash',
@@ -92,7 +113,15 @@ const mockOrdersData = {
       customerPhone: null,
       customerAddress: null,
       lineItems: [
-        { __typename: 'LineItem', productId: 'PROD~1', productName: 'Product A', price: 10.0, pricePerUnit: 10.0, quantity: 1, subtotal: 10.0 },
+        {
+          __typename: 'LineItem',
+          productId: 'PROD~1',
+          productName: 'Product A',
+          price: 10.0,
+          pricePerUnit: 10.0,
+          quantity: 1,
+          subtotal: 10.0,
+        },
       ],
       totalAmount: 10.0,
       paymentMethod: 'Zelle', // This will be an inactive payment method
@@ -113,10 +142,7 @@ const mockPaymentMethods = {
 };
 
 // Helper to create standard mocks
-function createMocks(
-  orders = mockOrdersData,
-  paymentMethods = mockPaymentMethods,
-): MockedResponse[] {
+function createMocks(orders = mockOrdersData, paymentMethods = mockPaymentMethods): MockedResponse[] {
   return [
     {
       request: {
@@ -143,10 +169,7 @@ function renderWithRouter(mocks: MockedResponse[]) {
     <MockedProvider mocks={mocks}>
       <MemoryRouter initialEntries={[path]}>
         <Routes>
-          <Route
-            path="/scouts/:profileId/campaigns/:campaignId/summary"
-            element={<CampaignSummaryPage />}
-          />
+          <Route path="/scouts/:profileId/campaigns/:campaignId/summary" element={<CampaignSummaryPage />} />
         </Routes>
       </MemoryRouter>
     </MockedProvider>,

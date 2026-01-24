@@ -275,13 +275,13 @@ def create_profile_delete_functions(
     )
 
     # DeleteProfileOrdersCascadeFn - Lambda function to delete all orders when deleting profile
-    if "delete_profile_orders_cascade" in lambda_datasources:
+    if "delete_profile_orders_cascade_fn" in lambda_datasources:
         functions["delete_profile_orders_cascade"] = appsync.AppsyncFunction(
             scope,
             "DeleteProfileOrdersCascadeFnAppSync",  # unique ID to avoid collision with Lambda construct
             name=f"DeleteProfileOrdersCascadeFn_{env_name}",
             api=api,
-            data_source=lambda_datasources["delete_profile_orders_cascade"],
+            data_source=lambda_datasources["delete_profile_orders_cascade_fn"],
             runtime=appsync.FunctionRuntime.JS_1_0_0,
             code=appsync.Code.from_asset(str(RESOLVERS_DIR / "delete_profile_orders_cascade_fn.js")),
         )

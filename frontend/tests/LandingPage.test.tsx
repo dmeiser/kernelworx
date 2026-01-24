@@ -1,6 +1,6 @@
 /**
  * Tests for LandingPage
- * 
+ *
  * Tests rendering, login button behavior, branding compliance
  */
 
@@ -37,17 +37,15 @@ vi.mock('react-router-dom', async () => {
 
 const renderWithAuth = (isAuthenticated = false) => {
   if (isAuthenticated) {
-     
     vi.mocked(amplifyAuth.fetchAuthSession).mockResolvedValue({
       tokens: { idToken: { toString: () => 'mock-token' } },
     } as any);
-     
+
     vi.mocked(amplifyAuth.getCurrentUser).mockResolvedValue({
       userId: 'user-123',
       username: 'testuser',
     } as any);
   } else {
-     
     vi.mocked(amplifyAuth.fetchAuthSession).mockResolvedValue({
       tokens: undefined,
     } as any);
@@ -58,7 +56,7 @@ const renderWithAuth = (isAuthenticated = false) => {
       <AuthProvider>
         <LandingPage />
       </AuthProvider>
-    </BrowserRouter>
+    </BrowserRouter>,
   );
 };
 
@@ -94,8 +92,8 @@ describe('LandingPage', () => {
     await waitFor(() => {
       expect(
         screen.getByText(
-          'Track orders, manage sellers, and generate reports for your Scouting America popcorn fundraiser'
-        )
+          'Track orders, manage sellers, and generate reports for your Scouting America popcorn fundraiser',
+        ),
       ).toBeInTheDocument();
     });
   });
@@ -116,9 +114,7 @@ describe('LandingPage', () => {
 
     await waitFor(() => {
       expect(screen.getByText('⚠️ Age Requirement (COPPA Compliance)')).toBeInTheDocument();
-      expect(
-        screen.getByText(/You must be at least 13 years old to create an account/)
-      ).toBeInTheDocument();
+      expect(screen.getByText(/You must be at least 13 years old to create an account/)).toBeInTheDocument();
     });
   });
 

@@ -36,5 +36,14 @@ export function response(ctx) {
         return [];
     }
     
-    return ctx.result.items || [];
+    // Return all campaigns (active and inactive) with default isActive value
+    const items = ctx.result.items || [];
+    for (const item of items) {
+        // Set default value for null/undefined isActive (backward compatibility)
+        if (item.isActive == null) {
+            item.isActive = true;
+        }
+    }
+    
+    return items;
 }

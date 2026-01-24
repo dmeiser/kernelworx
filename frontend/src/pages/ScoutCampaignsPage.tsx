@@ -2,9 +2,9 @@
  * ScoutCampaignsPage - List all campaigns for a specific scout profile
  */
 
-import React, { useState } from 'react';
+import React from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useQuery, useMutation } from '@apollo/client/react';
+import { useQuery } from '@apollo/client/react';
 import {
   Typography,
   Box,
@@ -16,12 +16,12 @@ import {
   IconButton,
   Breadcrumbs,
   Link,
+  Divider,
 } from '@mui/material';
 import { Add as AddIcon, ArrowBack as ArrowBackIcon } from '@mui/icons-material';
 import { CampaignCard } from '../components/CampaignCard';
-import { CreateCampaignDialog } from '../components/CreateCampaignDialog';
-import { GET_PROFILE, LIST_CAMPAIGNS_BY_PROFILE, CREATE_CAMPAIGN } from '../lib/graphql';
-import { ensureProfileId, ensureCatalogId } from '../lib/ids';
+import { GET_PROFILE, LIST_CAMPAIGNS_BY_PROFILE } from '../lib/graphql';
+import { ensureProfileId } from '../lib/ids';
 import type { Campaign, SellerProfile } from '../types';
 
 // Use SellerProfile with only the fields we need
@@ -31,6 +31,22 @@ type Profile = Pick<SellerProfile, 'profileId' | 'sellerName' | 'isOwner' | 'per
 
 function getDecodedProfileId(encodedProfileId: string | undefined): string {
   return encodedProfileId ? decodeURIComponent(encodedProfileId) : '';
+}
+
+// Separate campaigns into active and inactive
+function separateCampaigns(campaigns: Campaign[]): { active: Campaign[]; inactive: Campaign[] } {
+  const active: Campaign[] = [];
+  const inactive: Campaign[] = [];
+
+  for (const campaign of campaigns) {
+    if (campaign.isActive === false) {
+      inactive.push(campaign);
+    } else {
+      active.push(campaign);
+    }
+  }
+
+  return { active, inactive };
 }
 
 // eslint-disable-next-line complexity
@@ -116,25 +132,33 @@ const ErrorAlert: React.FC<ErrorAlertProps> = ({ error }) => {
 interface CampaignsGridProps {
   campaigns: Campaign[];
   profileId: string;
+  sectionTitle?: string;
 }
 
-const CampaignsGrid: React.FC<CampaignsGridProps> = ({ campaigns, profileId }) => {
+const CampaignsGrid: React.FC<CampaignsGridProps> = ({ campaigns, profileId, sectionTitle }) => {
   if (campaigns.length === 0) return null;
   return (
-    <Grid container spacing={2}>
-      {campaigns.map((campaign) => (
-        <Grid key={campaign.campaignId} size={{ xs: 12, sm: 6, md: 4 }}>
-          <CampaignCard
-            campaignId={campaign.campaignId}
-            campaignName={campaign.campaignName}
-            campaignYear={campaign.campaignYear}
-            totalOrders={campaign.totalOrders}
-            totalRevenue={campaign.totalRevenue}
-            profileId={profileId}
-          />
-        </Grid>
-      ))}
-    </Grid>
+    <Box>
+      {sectionTitle && (
+        <Typography variant="h6" gutterBottom>
+          {sectionTitle}
+        </Typography>
+      )}
+      <Grid container spacing={2}>
+        {campaigns.map((campaign) => (
+          <Grid key={campaign.campaignId} size={{ xs: 12, sm: 6, md: 4 }}>
+            <CampaignCard
+              campaignId={campaign.campaignId}
+              campaignName={campaign.campaignName}
+              campaignYear={campaign.campaignYear}
+              totalOrders={campaign.totalOrders}
+              totalRevenue={campaign.totalRevenue}
+              profileId={profileId}
+            />
+          </Grid>
+        ))}
+      </Grid>
+    </Box>
   );
 };
 
@@ -183,45 +207,6 @@ function useCampaignsData(dbProfileId: string) {
 
 // --- Main Component ---
 
-// --- Helper for building campaign input ---
-
-function buildCampaignInput(
-  dbProfileId: string,
-  campaignName: string,
-  campaignYear: number,
-  catalogId: string,
-  startDate?: string,
-  endDate?: string,
-) {
-  const input: Record<string, unknown> = {
-    profileId: dbProfileId,
-    campaignName,
-    campaignYear,
-    catalogId: ensureCatalogId(catalogId),
-  };
-  if (startDate) input.startDate = new Date(startDate).toISOString();
-  if (endDate) input.endDate = new Date(endDate).toISOString();
-  return input;
-}
-
-// --- Create Campaign Handler Hook ---
-
-type MutationFn = ReturnType<typeof useMutation>[0];
-
-function useCreateCampaignHandler(profileId: string, dbProfileId: string, createCampaign: MutationFn) {
-  return async (
-    campaignName: string,
-    campaignYear: number,
-    catalogId: string,
-    startDate?: string,
-    endDate?: string,
-  ) => {
-    if (!profileId) return;
-    const input = buildCampaignInput(dbProfileId, campaignName, campaignYear, catalogId, startDate, endDate);
-    await createCampaign({ variables: { input } });
-  };
-}
-
 // --- Page Content Component ---
 
 interface ScoutCampaignsContentProps {
@@ -230,13 +215,6 @@ interface ScoutCampaignsContentProps {
   campaigns: Campaign[];
   loading: boolean;
   error: ReturnType<typeof useQuery>['error'];
-  onCreateCampaign: (
-    campaignName: string,
-    campaignYear: number,
-    catalogId: string,
-    startDate?: string,
-    endDate?: string,
-  ) => Promise<void>;
 }
 
 const ScoutCampaignsContent: React.FC<ScoutCampaignsContentProps> = ({
@@ -245,13 +223,15 @@ const ScoutCampaignsContent: React.FC<ScoutCampaignsContentProps> = ({
   campaigns,
   loading,
   error,
-  onCreateCampaign,
 }) => {
   const navigate = useNavigate();
-  const [createDialogOpen, setCreateDialogOpen] = useState(false);
 
   const canEdit = canEditProfile(profile);
   const handleNavigateBack = () => navigate('/scouts');
+  const handleCreateClick = () => navigate('/create-campaign');
+
+  const { active, inactive } = separateCampaigns(campaigns);
+  const showDivider = active.length > 0 && inactive.length > 0;
 
   return (
     <Box>
@@ -260,16 +240,17 @@ const ScoutCampaignsContent: React.FC<ScoutCampaignsContentProps> = ({
         sellerName={profile?.sellerName}
         canEdit={canEdit}
         onNavigateBack={handleNavigateBack}
-        onCreateClick={() => setCreateDialogOpen(true)}
+        onCreateClick={handleCreateClick}
       />
       <ErrorAlert error={error} />
-      <CampaignsGrid campaigns={campaigns} profileId={profileId} />
-      <EmptyState canEdit={canEdit} loading={loading} campaignsCount={campaigns.length} />
-      <CreateCampaignDialog
-        open={createDialogOpen}
-        onClose={() => setCreateDialogOpen(false)}
-        onSubmit={onCreateCampaign}
+      <CampaignsGrid
+        campaigns={active}
+        profileId={profileId}
+        sectionTitle={inactive.length > 0 ? 'Active Campaigns' : undefined}
       />
+      {showDivider && <Divider sx={{ my: 4 }} />}
+      <CampaignsGrid campaigns={inactive} profileId={profileId} sectionTitle="Inactive Campaigns" />
+      <EmptyState canEdit={canEdit} loading={loading} campaignsCount={campaigns.length} />
     </Box>
   );
 };
@@ -281,31 +262,17 @@ interface ScoutCampaignsPageData {
   campaigns: Campaign[];
   loading: boolean;
   error: ReturnType<typeof useQuery>['error'];
-  handleCreateCampaign: (
-    campaignName: string,
-    campaignYear: number,
-    catalogId: string,
-    startDate?: string,
-    endDate?: string,
-  ) => Promise<void>;
 }
 
-function useScoutCampaignsPageData(profileId: string, dbProfileId: string): ScoutCampaignsPageData {
+function useScoutCampaignsPageData(dbProfileId: string): ScoutCampaignsPageData {
   const { profile, profileLoading, profileError } = useProfileData(dbProfileId);
-  const { campaigns, campaignsLoading, campaignsError, refetchCampaigns } = useCampaignsData(dbProfileId);
-
-  const [createCampaign] = useMutation(CREATE_CAMPAIGN, {
-    onCompleted: () => refetchCampaigns(),
-  });
-
-  const handleCreateCampaign = useCreateCampaignHandler(profileId, dbProfileId, createCampaign);
+  const { campaigns, campaignsLoading, campaignsError } = useCampaignsData(dbProfileId);
 
   return {
     profile,
     campaigns,
     loading: profileLoading || campaignsLoading,
     error: profileError || campaignsError,
-    handleCreateCampaign,
   };
 }
 
@@ -324,10 +291,7 @@ export const ScoutCampaignsPage: React.FC = () => {
   const profileId = getDecodedProfileId(encodedProfileId);
   const dbProfileId = ensureProfileId(profileId);
 
-  const { profile, campaigns, loading, error, handleCreateCampaign } = useScoutCampaignsPageData(
-    profileId,
-    dbProfileId ?? '',
-  );
+  const { profile, campaigns, loading, error } = useScoutCampaignsPageData(dbProfileId ?? '');
 
   if (shouldShowLoading(loading, profile)) return <LoadingState />;
   if (shouldShowNotFound(profileId, loading, profile)) return <ProfileNotFoundState />;
@@ -339,7 +303,6 @@ export const ScoutCampaignsPage: React.FC = () => {
       campaigns={campaigns}
       loading={loading}
       error={error}
-      onCreateCampaign={handleCreateCampaign}
     />
   );
 };

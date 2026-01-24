@@ -27,7 +27,6 @@ def create_lambda_functions(
     scope: Construct,
     rn: Any,  # Resource naming function
     lambda_execution_role: iam.Role,
-    table: "dynamodb.Table",
     accounts_table: "dynamodb.Table",
     catalogs_table: "dynamodb.Table",
     profiles_table: "dynamodb.Table",
@@ -35,6 +34,7 @@ def create_lambda_functions(
     orders_table: "dynamodb.Table",
     shares_table: "dynamodb.Table",
     invites_table: "dynamodb.Table",
+    shared_campaigns_table: "dynamodb.Table",
     exports_bucket: "s3.Bucket",
 ) -> dict[str, lambda_.Function | lambda_.LayerVersion]:
     """Create all Lambda functions for the stack.
@@ -43,7 +43,6 @@ def create_lambda_functions(
         scope: CDK construct scope
         rn: Resource naming function (name -> formatted name)
         lambda_execution_role: IAM role for Lambda execution
-        table: Main DynamoDB table (legacy single-table)
         accounts_table: Accounts DynamoDB table
         catalogs_table: Catalogs DynamoDB table
         profiles_table: Profiles DynamoDB table
@@ -51,6 +50,7 @@ def create_lambda_functions(
         orders_table: Orders DynamoDB table
         shares_table: Shares DynamoDB table
         invites_table: Invites DynamoDB table
+        shared_campaigns_table: Shared campaigns DynamoDB table
         exports_bucket: S3 bucket for exports
 
     Returns:
@@ -58,10 +58,10 @@ def create_lambda_functions(
     """
     # Common Lambda environment variables
     lambda_env = {
-        "TABLE_NAME": table.table_name,
         "EXPORTS_BUCKET": exports_bucket.bucket_name,
         "POWERTOOLS_SERVICE_NAME": "kernelworx",
         "LOG_LEVEL": "INFO",
+        "LAMBDA_VERSION": "2026-01-19",  # Force Lambda update
         # New multi-table design table names
         "ACCOUNTS_TABLE_NAME": accounts_table.table_name,
         "CATALOGS_TABLE_NAME": catalogs_table.table_name,
@@ -70,6 +70,8 @@ def create_lambda_functions(
         "ORDERS_TABLE_NAME": orders_table.table_name,
         "SHARES_TABLE_NAME": shares_table.table_name,
         "INVITES_TABLE_NAME": invites_table.table_name,
+        # Shared campaigns table used by create_campaign Lambda
+        "SHARED_CAMPAIGNS_TABLE_NAME": shared_campaigns_table.table_name,
     }
 
     # Create Lambda Layer for shared dependencies
@@ -114,6 +116,22 @@ def create_lambda_functions(
         function_name=rn("kernelworx-list-my-shares"),
         runtime=lambda_.Runtime.PYTHON_3_13,
         handler="handlers.profile_sharing.list_my_shares",
+        code=lambda_code,
+        layers=[shared_layer],
+        timeout=Duration.seconds(30),
+        memory_size=256,
+        role=lambda_execution_role,
+        environment=lambda_env,
+    )
+
+    # List Catalogs In Use Lambda - returns all catalog IDs used by campaigns user has access to
+    # Uses Lambda because we need to dynamically query N profiles for shared campaigns
+    list_catalogs_in_use_fn = lambda_.Function(
+        scope,
+        "ListCatalogsInUseFn",
+        function_name=rn("kernelworx-list-catalogs-in-use"),
+        runtime=lambda_.Runtime.PYTHON_3_13,
+        handler="handlers.list_catalogs_in_use.handler",
         code=lambda_code,
         layers=[shared_layer],
         timeout=Duration.seconds(30),
@@ -211,6 +229,21 @@ def create_lambda_functions(
         environment=lambda_env,
     )
 
+    # Delete Profile Orders Cascade Lambda (cascade delete of orders when profile is deleted)
+    delete_profile_orders_cascade_fn = lambda_.Function(
+        scope,
+        "DeleteProfileOrdersCascadeFn",
+        function_name=rn("kernelworx-delete-profile-orders-cascade"),
+        runtime=lambda_.Runtime.PYTHON_3_13,
+        handler="handlers.delete_profile_orders_cascade.lambda_handler",
+        code=lambda_code,
+        layers=[shared_layer],
+        timeout=Duration.seconds(60),  # May take longer for profiles with many orders
+        memory_size=512,
+        role=lambda_execution_role,
+        environment=lambda_env,
+    )
+
     # Account Operations Lambda Functions
     update_my_account_fn = lambda_.Function(
         scope,
@@ -218,6 +251,35 @@ def create_lambda_functions(
         function_name=rn("kernelworx-update-account"),
         runtime=lambda_.Runtime.PYTHON_3_13,
         handler="handlers.account_operations.update_my_account",
+        code=lambda_code,
+        layers=[shared_layer],
+        timeout=Duration.seconds(10),
+        memory_size=256,
+        role=lambda_execution_role,
+        environment=lambda_env,
+    )
+
+    delete_my_account_fn = lambda_.Function(
+        scope,
+        "DeleteMyAccountFn",
+        function_name=rn("kernelworx-delete-account"),
+        runtime=lambda_.Runtime.PYTHON_3_13,
+        handler="handlers.account_operations.delete_my_account",
+        code=lambda_code,
+        layers=[shared_layer],
+        timeout=Duration.seconds(30),
+        memory_size=256,
+        role=lambda_execution_role,
+        environment=lambda_env,
+    )
+
+    # Transfer Profile Ownership Lambda
+    transfer_ownership_fn = lambda_.Function(
+        scope,
+        "TransferProfileOwnershipFn",
+        function_name=rn("kernelworx-transfer-ownership"),
+        runtime=lambda_.Runtime.PYTHON_3_13,
+        handler="handlers.transfer_profile_ownership.lambda_handler",
         code=lambda_code,
         layers=[shared_layer],
         timeout=Duration.seconds(10),
@@ -242,7 +304,7 @@ def create_lambda_functions(
     )
 
     # Pre-Signup Lambda (Cognito Trigger)
-    # Links federated identities (Google, Facebook, Apple) to existing users
+    # Links federated identities (Google, Facebook) to existing users
     # with the same email to prevent duplicate accounts
     pre_signup_fn = lambda_.Function(
         scope,
@@ -287,16 +349,17 @@ def create_lambda_functions(
         environment=lambda_env,
     )
 
-    generate_presigned_urls_fn = lambda_.Function(
+    # Field resolver for PaymentMethod.qrCodeUrl - generates presigned URL on-demand
+    generate_qr_code_presigned_url_fn = lambda_.Function(
         scope,
-        "GeneratePresignedURLsFn",
-        function_name=rn("kernelworx-generate-presigned-urls"),
+        "GenerateQRCodePresignedURLFn",
+        function_name=rn("kernelworx-generate-qr-code-presigned-url"),
         runtime=lambda_.Runtime.PYTHON_3_13,
-        handler="handlers.payment_methods_handlers.generate_presigned_urls",
+        handler="handlers.generate_qr_code_presigned_url.generate_qr_code_presigned_url",
         code=lambda_code,
         layers=[shared_layer],
-        timeout=Duration.seconds(10),
-        memory_size=256,
+        timeout=Duration.seconds(3),
+        memory_size=128,
         role=lambda_execution_role,
         environment=lambda_env,
     )
@@ -329,21 +392,42 @@ def create_lambda_functions(
         environment=lambda_env,
     )
 
+    # Admin Operations Lambda (requires USER_POOL_ID - added after Cognito creation in stack)
+    # Handles: adminResetUserPassword, adminDeleteUser, createManagedCatalog
+    admin_operations_fn = lambda_.Function(
+        scope,
+        "AdminOperationsFn",
+        function_name=rn("kernelworx-admin-operations"),
+        runtime=lambda_.Runtime.PYTHON_3_13,
+        handler="handlers.admin_operations.lambda_handler",
+        code=lambda_code,
+        layers=[shared_layer],
+        timeout=Duration.seconds(30),
+        memory_size=256,
+        role=lambda_execution_role,
+        environment=lambda_env,  # USER_POOL_ID added separately in stack
+    )
+
     return {
         "shared_layer": shared_layer,
         "list_my_shares_fn": list_my_shares_fn,
+        "list_catalogs_in_use_fn": list_catalogs_in_use_fn,
         "create_profile_fn": create_profile_fn,
         "request_campaign_report_fn": request_campaign_report_fn,
         "unit_reporting_fn": unit_reporting_fn,
         "list_unit_catalogs_fn": list_unit_catalogs_fn,
         "list_unit_campaign_catalogs_fn": list_unit_campaign_catalogs_fn,
         "campaign_operations_fn": campaign_operations_fn,
+        "delete_profile_orders_cascade_fn": delete_profile_orders_cascade_fn,
         "update_my_account_fn": update_my_account_fn,
+        "delete_my_account_fn": delete_my_account_fn,
+        "transfer_ownership_fn": transfer_ownership_fn,
         "post_auth_fn": post_auth_fn,
         "pre_signup_fn": pre_signup_fn,
         "request_qr_upload_fn": request_qr_upload_fn,
         "confirm_qr_upload_fn": confirm_qr_upload_fn,
-        "generate_presigned_urls_fn": generate_presigned_urls_fn,
+        "generate_qr_code_presigned_url_fn": generate_qr_code_presigned_url_fn,
         "delete_qr_code_fn": delete_qr_code_fn,
         "validate_payment_method_fn": validate_payment_method_fn,
+        "admin_operations_fn": admin_operations_fn,
     }
