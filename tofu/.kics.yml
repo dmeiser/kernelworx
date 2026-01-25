@@ -13,5 +13,5 @@ exclude-queries:
   # Not enabling IAM Access Analyzer for cost reasons
   - e592a0c5-5bdb-414c-9066-5dba7cdea370
   - 8d29754a-2a18-460d-a1ba-9509f8d359da
-  # not eanbling x-ray for cost reasons
+  # not enabling x-ray for cost reasons
   - 8152e0cf-d2f0-47ad-96d5-d003a76eabd1
