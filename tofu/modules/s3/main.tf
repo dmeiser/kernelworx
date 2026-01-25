@@ -1,14 +1,17 @@
 # S3 Buckets Module
 
 variable "environment" {
+  description = "Deployment environment (e.g., dev, prod)"
   type = string
 }
 
 variable "region_abbrev" {
+  description = "Short region code used in bucket names (e.g., ue1)"
   type = string
 }
 
 variable "name_prefix" {
+  description = "Global name prefix for S3 buckets"
   type = string
 }
 
@@ -135,21 +138,26 @@ resource "aws_s3_bucket_cors_configuration" "exports" {
 
 # Outputs
 output "static_bucket_id" {
-  value = aws_s3_bucket.static.id
+  description = "ID of the static assets S3 bucket"
+  value       = aws_s3_bucket.static.id
 }
 
 output "static_bucket_arn" {
-  value = aws_s3_bucket.static.arn
+  description = "ARN of the static assets S3 bucket"
+  value       = aws_s3_bucket.static.arn
 }
 
 output "static_bucket_regional_domain" {
-  value = aws_s3_bucket.static.bucket_regional_domain_name
+  description = "Regional domain name of the static assets S3 bucket"
+  value       = aws_s3_bucket.static.bucket_regional_domain_name
 }
 
 output "exports_bucket_name" {
-  value = aws_s3_bucket.exports.bucket
+  description = "Name of the exports S3 bucket"
+  value       = aws_s3_bucket.exports.bucket
 }
 
 output "exports_bucket_arn" {
-  value = aws_s3_bucket.exports.arn
+  description = "ARN of the exports S3 bucket"
+  value       = aws_s3_bucket.exports.arn
 }

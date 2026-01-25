@@ -1,10 +1,12 @@
 # ACM Certificates Module
 
 variable "environment" {
+  description = "Deployment environment (e.g., dev, prod)"
   type = string
 }
 
 variable "domain" {
+  description = "Base domain name used for site/api/login certificates"
   type = string
 }
 
@@ -61,13 +63,16 @@ resource "aws_acm_certificate" "login" {
 
 # Outputs
 output "site_certificate_arn" {
-  value = aws_acm_certificate.site.arn
+  description = "ARN of the ACM certificate for the site domain"
+  value       = aws_acm_certificate.site.arn
 }
 
 output "api_certificate_arn" {
-  value = aws_acm_certificate.api.arn
+  description = "ARN of the ACM certificate for the API domain"
+  value       = aws_acm_certificate.api.arn
 }
 
 output "login_certificate_arn" {
-  value = aws_acm_certificate.login.arn
+  description = "ARN of the ACM certificate for the login domain"
+  value       = aws_acm_certificate.login.arn
 }

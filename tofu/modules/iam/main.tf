@@ -1,29 +1,42 @@
 # IAM Roles Module
 
 variable "environment" {
+  description = "Deployment environment (e.g., dev, prod)"
   type = string
 }
 
 variable "region_abbrev" {
+  description = "Short region code used in IAM resource names (e.g., ue1)"
   type = string
 }
 
 variable "name_prefix" {
+  description = "Global name prefix for IAM roles and policies"
   type = string
 }
 
 variable "dynamodb_table_arns" {
+  description = "Map of DynamoDB table ARNs used by the application"
   type = map(string)
 }
 
 variable "exports_bucket_arn" {
+  description = "ARN of the S3 bucket used for report exports"
   type = string
+}
+
+# Restrict AppSync's Lambda invoke permissions to only the functions it needs
+variable "lambda_function_arns" {
+  type        = map(string)
+  description = "Map of Lambda function ARNs that AppSync is permitted to invoke"
 }
 
 locals {
   role_suffix         = "-${var.region_abbrev}-${var.environment}"
   dynamodb_table_arns = values(var.dynamodb_table_arns)
   dynamodb_index_arns = [for arn in values(var.dynamodb_table_arns) : "${arn}/index/*"]
+  # Include both the base function ARN and the qualifier variant (versions/aliases)
+  lambda_invoke_arns  = flatten([for arn in values(var.lambda_function_arns) : [arn, "${arn}:*"]])
 }
 
 # =============================================================================
@@ -202,7 +215,9 @@ data "aws_iam_policy_document" "appsync_lambda" {
   statement {
     effect    = "Allow"
     actions   = ["lambda:InvokeFunction"]
-    resources = ["*"]
+    # Principle of least privilege: limit AppSync to specific Lambda functions it calls.
+    # KICS recommendation: also allow qualified ARNs (":*") for versions/aliases.
+    resources = length(local.lambda_invoke_arns) > 0 ? local.lambda_invoke_arns : ["*"]
   }
 }
 
@@ -257,17 +272,21 @@ resource "aws_iam_role_policy" "cognito_sms" {
 # =============================================================================
 
 output "lambda_execution_role_arn" {
-  value = aws_iam_role.lambda_execution.arn
+  description = "ARN of the Lambda execution role"
+  value       = aws_iam_role.lambda_execution.arn
 }
 
 output "lambda_execution_role_name" {
-  value = aws_iam_role.lambda_execution.name
+  description = "Name of the Lambda execution role"
+  value       = aws_iam_role.lambda_execution.name
 }
 
 output "appsync_service_role_arn" {
-  value = aws_iam_role.appsync_service.arn
+  description = "ARN of the AppSync service role"
+  value       = aws_iam_role.appsync_service.arn
 }
 
 output "cognito_sms_role_arn" {
-  value = aws_iam_role.cognito_sms.arn
+  description = "ARN of the Cognito SMS role"
+  value       = aws_iam_role.cognito_sms.arn
 }

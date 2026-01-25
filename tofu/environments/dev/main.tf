@@ -133,6 +133,7 @@ module "iam" {
 
   dynamodb_table_arns = module.dynamodb.table_arns
   exports_bucket_arn  = module.s3.exports_bucket_arn
+  lambda_function_arns = module.lambda.function_arns
 }
 
 module "certificates" {
@@ -208,21 +209,26 @@ module "cloudfront" {
 
 # Outputs
 output "cognito_user_pool_id" {
-  value = module.cognito.user_pool_id
+  description = "ID of the Cognito User Pool for authentication"
+  value       = module.cognito.user_pool_id
 }
 
 output "cognito_client_id" {
-  value = module.cognito.client_id
+  description = "Client ID for the Cognito User Pool web application"
+  value       = module.cognito.client_id
 }
 
 output "appsync_api_url" {
-  value = module.appsync.api_url
+  description = "GraphQL API URL for the AppSync API"
+  value       = module.appsync.api_url
 }
 
 output "cloudfront_distribution_id" {
-  value = module.cloudfront.distribution_id
+  description = "ID of the CloudFront distribution serving the site"
+  value       = module.cloudfront.distribution_id
 }
 
 output "site_url" {
-  value = "https://${local.site_domain}"
+  description = "Public URL of the application site"
+  value       = "https://${local.site_domain}"
 }

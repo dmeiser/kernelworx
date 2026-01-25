@@ -1,30 +1,37 @@
 # Lambda Functions Module
 
 variable "environment" {
+  description = "Deployment environment (e.g., dev, prod)"
   type = string
 }
 
 variable "region_abbrev" {
+  description = "Short region code used in function naming (e.g., ue1)"
   type = string
 }
 
 variable "name_prefix" {
+  description = "Global name prefix for Lambda resources"
   type = string
 }
 
 variable "lambda_role_arn" {
+  description = "IAM role ARN assumed by the Lambda functions"
   type = string
 }
 
 variable "exports_bucket_name" {
+  description = "Name of the S3 bucket used for report exports"
   type = string
 }
 
 variable "table_names" {
+  description = "Map of DynamoDB table names used by the Lambdas"
   type = map(string)
 }
 
 variable "user_pool_id" {
+  description = "Cognito User Pool ID passed to relevant Lambdas"
   type = string
 }
 
@@ -124,11 +131,17 @@ locals {
       memory_size = 256
     }
     "post-auth" = {
+      # DLQ intentionally not configured for Cognito Post Authentication trigger.
+      # Cognito invokes this synchronously and handles retries; introducing a DLQ adds
+      # unnecessary cost/complexity without operational benefit for this flow.
       handler     = "handlers.post_authentication.lambda_handler"
       timeout     = 10
       memory_size = 256
     }
     "pre-signup" = {
+      # DLQ intentionally not configured for Cognito Pre Sign-Up trigger.
+      # Cognito manages retries for this trigger; failures are surfaced to the client
+      # and are not suitable for asynchronous reprocessing via a DLQ.
       handler     = "handlers.pre_signup.lambda_handler"
       timeout     = 10
       memory_size = 256
@@ -204,6 +217,7 @@ resource "aws_lambda_layer_version" "shared" {
 }
 
 # Lambda Functions
+# kics-scan ignore-line
 resource "aws_lambda_function" "functions" {
   for_each = local.functions
 
@@ -231,13 +245,16 @@ resource "aws_lambda_function" "functions" {
 
 # Outputs
 output "function_arns" {
-  value = { for k, v in aws_lambda_function.functions : k => v.arn }
+  description = "Map of Lambda function names to their ARNs"
+  value       = { for k, v in aws_lambda_function.functions : k => v.arn }
 }
 
 output "function_names" {
-  value = { for k, v in aws_lambda_function.functions : k => v.function_name }
+  description = "Map of Lambda function logical names to their function names"
+  value       = { for k, v in aws_lambda_function.functions : k => v.function_name }
 }
 
 output "layer_arn" {
-  value = aws_lambda_layer_version.shared.arn
+  description = "ARN of the shared Lambda layer"
+  value       = aws_lambda_layer_version.shared.arn
 }

@@ -6,4 +6,12 @@ exclude-queries:
   - 1419b4c6-6d5c-4534-9cf6-6a5266085333
   # S3 access logging disabled to minimize storage costs
   - 4552b71f-0a2a-4bc4-92dd-ed7ec1b4674c
-  
+  # MFA Delete cannot be enabled via Terraform, requires AWS CLI with MFA device
+  - c5b31ab9-0f26-4a49-b8aa-4cc064392f4d
+  # S3 bucket notifications not needed for this use case
+  - e39f87f5-0abf-488b-864c-63ee1f588140
+  # Not enabling IAM Access Analyzer for cost reasons
+  - e592a0c5-5bdb-414c-9066-5dba7cdea370
+  - 8d29754a-2a18-460d-a1ba-9509f8d359da
+  # not eanbling x-ray for cost reasons
+  - 8152e0cf-d2f0-47ad-96d5-d003a76eabd1

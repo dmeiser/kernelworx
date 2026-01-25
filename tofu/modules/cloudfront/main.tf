@@ -1,26 +1,32 @@
 # CloudFront Distribution Module
 
 variable "environment" {
+  description = "Deployment environment (e.g., dev, prod)"
   type = string
 }
 
 variable "domain" {
+  description = "Base domain used to build the site hostname"
   type = string
 }
 
 variable "site_certificate_arn" {
+  description = "ACM certificate ARN for the CloudFront site domain"
   type = string
 }
 
 variable "static_bucket_id" {
+  description = "ID of the S3 bucket serving static assets"
   type = string
 }
 
 variable "static_bucket_arn" {
+  description = "ARN of the S3 bucket serving static assets"
   type = string
 }
 
 variable "static_bucket_regional_domain" {
+  description = "Regional domain name of the S3 bucket for CloudFront origin"
   type = string
 }
 
@@ -127,13 +133,16 @@ resource "aws_cloudfront_distribution" "site" {
 
 # Outputs
 output "distribution_id" {
-  value = aws_cloudfront_distribution.site.id
+  description = "ID of the CloudFront distribution"
+  value       = aws_cloudfront_distribution.site.id
 }
 
 output "distribution_domain" {
-  value = aws_cloudfront_distribution.site.domain_name
+  description = "Domain name of the CloudFront distribution"
+  value       = aws_cloudfront_distribution.site.domain_name
 }
 
 output "distribution_hosted_zone_id" {
-  value = aws_cloudfront_distribution.site.hosted_zone_id
+  description = "Route 53 zone ID for the CloudFront distribution"
+  value       = aws_cloudfront_distribution.site.hosted_zone_id
 }

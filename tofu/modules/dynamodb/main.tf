@@ -2,14 +2,17 @@
 # Schema matches actual existing AWS tables
 
 variable "environment" {
+  description = "Deployment environment (e.g., dev, prod)"
   type = string
 }
 
 variable "region_abbrev" {
+  description = "Short region code used in table names (e.g., ue1)"
   type = string
 }
 
 variable "name_prefix" {
+  description = "Global name prefix for DynamoDB tables"
   type = string
 }
 
@@ -459,6 +462,7 @@ resource "aws_dynamodb_table" "shared_campaigns" {
 # Outputs
 # ============================================================================
 output "table_arns" {
+  description = "Map of all DynamoDB table ARNs"
   value = {
     accounts         = aws_dynamodb_table.accounts.arn
     catalogs         = aws_dynamodb_table.catalogs.arn
@@ -472,6 +476,7 @@ output "table_arns" {
 }
 
 output "table_names" {
+  description = "Map of all DynamoDB table names"
   value = {
     accounts         = aws_dynamodb_table.accounts.name
     catalogs         = aws_dynamodb_table.catalogs.name
@@ -486,33 +491,41 @@ output "table_names" {
 
 # Individual table name outputs for module references
 output "accounts_table_name" {
-  value = aws_dynamodb_table.accounts.name
+  description = "Name of the accounts DynamoDB table"
+  value       = aws_dynamodb_table.accounts.name
 }
 
 output "catalogs_table_name" {
-  value = aws_dynamodb_table.catalogs.name
+  description = "Name of the catalogs DynamoDB table"
+  value       = aws_dynamodb_table.catalogs.name
 }
 
 output "profiles_table_name" {
-  value = aws_dynamodb_table.profiles.name
+  description = "Name of the profiles DynamoDB table"
+  value       = aws_dynamodb_table.profiles.name
 }
 
 output "campaigns_table_name" {
-  value = aws_dynamodb_table.campaigns.name
+  description = "Name of the campaigns DynamoDB table"
+  value       = aws_dynamodb_table.campaigns.name
 }
 
 output "orders_table_name" {
-  value = aws_dynamodb_table.orders.name
+  description = "Name of the orders DynamoDB table"
+  value       = aws_dynamodb_table.orders.name
 }
 
 output "shares_table_name" {
-  value = aws_dynamodb_table.shares.name
+  description = "Name of the shares DynamoDB table"
+  value       = aws_dynamodb_table.shares.name
 }
 
 output "invites_table_name" {
-  value = aws_dynamodb_table.invites.name
+  description = "Name of the invites DynamoDB table"
+  value       = aws_dynamodb_table.invites.name
 }
 
 output "shared_campaigns_table_name" {
-  value = aws_dynamodb_table.shared_campaigns.name
+  description = "Name of the shared campaigns DynamoDB table"
+  value       = aws_dynamodb_table.shared_campaigns.name
 }

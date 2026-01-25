@@ -2,38 +2,46 @@
 # Matches actual AWS configuration
 
 variable "environment" {
+  description = "Deployment environment (e.g., dev, prod)"
   type = string
 }
 
 variable "region_abbrev" {
+  description = "Short region code used in resource names (e.g., ue1)"
   type = string
 }
 
 variable "name_prefix" {
+  description = "Global name prefix for Cognito resources"
   type = string
 }
 
 variable "domain" {
+  description = "Base domain for Cognito-hosted UI and login subdomain"
   type = string
 }
 
 variable "google_client_id" {
+  description = "Google OAuth client ID for social login"
   type      = string
   sensitive = true
   default   = ""
 }
 
 variable "google_client_secret" {
+  description = "Google OAuth client secret for social login"
   type      = string
   sensitive = true
   default   = ""
 }
 
 variable "login_certificate_arn" {
+  description = "ARN of ACM certificate for the Cognito login domain"
   type = string
 }
 
 variable "sms_role_arn" {
+  description = "IAM role ARN used by Cognito for SMS/MFA delivery"
   type = string
 }
 
@@ -215,21 +223,26 @@ resource "aws_cognito_user_pool_domain" "custom" {
 
 # Outputs
 output "user_pool_id" {
-  value = aws_cognito_user_pool.main.id
+  description = "ID of the Cognito User Pool"
+  value       = aws_cognito_user_pool.main.id
 }
 
 output "user_pool_arn" {
-  value = aws_cognito_user_pool.main.arn
+  description = "ARN of the Cognito User Pool"
+  value       = aws_cognito_user_pool.main.arn
 }
 
 output "user_pool_endpoint" {
-  value = aws_cognito_user_pool.main.endpoint
+  description = "Endpoint of the Cognito User Pool"
+  value       = aws_cognito_user_pool.main.endpoint
 }
 
 output "client_id" {
-  value = aws_cognito_user_pool_client.web.id
+  description = "ID of the Cognito User Pool client"
+  value       = aws_cognito_user_pool_client.web.id
 }
 
 output "domain" {
-  value = aws_cognito_user_pool_domain.custom.domain
+  description = "Custom domain for Cognito User Pool"
+  value       = aws_cognito_user_pool_domain.custom.domain
 }

@@ -1,26 +1,32 @@
 # AppSync Module Variables
 
 variable "environment" {
+  description = "Deployment environment (e.g., dev, prod)"
   type = string
 }
 
 variable "region_abbrev" {
+  description = "Short region code used in API naming (e.g., ue1)"
   type = string
 }
 
 variable "name_prefix" {
+  description = "Global name prefix for AppSync resources"
   type = string
 }
 
 variable "domain" {
+  description = "Base domain used to build the AppSync API hostname"
   type = string
 }
 
 variable "api_certificate_arn" {
+  description = "ACM certificate ARN for the AppSync custom domain"
   type = string
 }
 
 variable "appsync_service_role_arn" {
+  description = "IAM role ARN used by AppSync to access data sources"
   type = string
 }
 
