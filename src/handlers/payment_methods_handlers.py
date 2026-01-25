@@ -38,6 +38,32 @@ except ModuleNotFoundError:  # pragma: no cover
     )
 
 
+def _extract_and_validate_caller(event: Dict[str, Any]) -> str:
+    """Extract and validate caller identity from event."""
+    identity = event.get("identity", {})
+    caller_id = identity.get("sub")
+    if not caller_id:
+        raise AppError(ErrorCode.UNAUTHORIZED, "Authentication required")
+    return str(caller_id)
+
+
+def _validate_payment_method_name(payment_method_name: str) -> None:
+    """Validate payment method name is not empty or reserved."""
+    if not payment_method_name:
+        raise AppError(ErrorCode.INVALID_INPUT, "Payment method name is required")
+    if is_reserved_name(payment_method_name):
+        raise AppError(ErrorCode.INVALID_INPUT, f"Cannot use reserved method name '{payment_method_name}'")
+
+
+def _verify_payment_method_exists(caller_id: str, payment_method_name: str) -> Dict[str, Any]:
+    """Verify payment method exists and return it."""
+    methods = get_payment_methods(caller_id)
+    target = next((m for m in methods if m.get("name") == payment_method_name), None)
+    if not target:
+        raise AppError(ErrorCode.NOT_FOUND, f"Payment method '{payment_method_name}' not found")
+    return dict(target)
+
+
 def request_qr_upload(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
     Generate pre-signed POST URL for QR code upload.
@@ -57,38 +83,17 @@ def request_qr_upload(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     logger = get_logger(__name__)
 
     try:
-        # Extract caller identity
-        identity = event.get("identity", {})
-        caller_id = identity.get("sub")
-
-        if not caller_id:
-            raise AppError(ErrorCode.UNAUTHORIZED, "Authentication required")
-
-        # Extract arguments
+        caller_id = _extract_and_validate_caller(event)
+        
         arguments = event.get("arguments", {})
         payment_method_name = arguments.get("paymentMethodName", "").strip()
-
-        if not payment_method_name:
-            raise AppError(ErrorCode.INVALID_INPUT, "Payment method name is required")
-
-        # Validate not reserved
-        if is_reserved_name(payment_method_name):
-            raise AppError(
-                ErrorCode.INVALID_INPUT, f"Cannot upload QR code for reserved method '{payment_method_name}'"
-            )
-
-        # Verify payment method exists
-        methods = get_payment_methods(caller_id)
-        method_exists = any(m.get("name") == payment_method_name for m in methods)
-
-        if not method_exists:
-            raise AppError(ErrorCode.NOT_FOUND, f"Payment method '{payment_method_name}' not found")
+        _validate_payment_method_name(payment_method_name)
+        _verify_payment_method_exists(caller_id, payment_method_name)
 
         # Generate UUID-based S3 key to avoid collisions from similar payment method names
         s3_key = generate_qr_code_s3_key(caller_id, "png")
 
         # Generate pre-signed POST URL (must use direct S3, not CloudFront)
-        # CloudFront vanity domain is only used for downloads (GET), not uploads (POST)
         bucket_name = get_required_env("EXPORTS_BUCKET")
         s3_client = boto3.client("s3", endpoint_url=os.getenv("S3_ENDPOINT"))
 
@@ -119,7 +124,58 @@ def request_qr_upload(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to generate upload URL")
 
 
-def confirm_qr_upload(event: Dict[str, Any], context: Any) -> Dict[str, Any]:  # noqa: C901
+def _validate_s3_object_exists(bucket_name: str, s3_key: str) -> None:
+    """Validate that S3 object exists at the specified key."""
+    s3_client = boto3.client("s3", endpoint_url=os.getenv("S3_ENDPOINT"))
+    try:
+        s3_client.head_object(Bucket=bucket_name, Key=s3_key)
+    except ClientError as e:
+        if e.response.get("Error", {}).get("Code") == "404":
+            raise AppError(ErrorCode.NOT_FOUND, "Upload not found. Please upload the file first.")
+        raise
+
+
+def _validate_qr_upload_inputs(payment_method_name: str, s3_key: str, caller_id: str) -> None:
+    """Validate QR upload inputs (payment method name, s3_key, and s3_key ownership)."""
+    if not payment_method_name or not s3_key:
+        raise AppError(ErrorCode.INVALID_INPUT, "Payment method name and s3Key are required")
+    
+    if not validate_qr_s3_key(s3_key, caller_id):
+        raise AppError(ErrorCode.FORBIDDEN, "Invalid S3 key - access denied")
+
+
+def _update_payment_method_qr_url(caller_id: str, payment_method_name: str, s3_key: str) -> Dict[str, Any]:
+    """Update payment method with QR code S3 key and return updated method."""
+    account_id_key = f"ACCOUNT#{caller_id}"
+    response = tables.accounts.get_item(Key={"accountId": account_id_key})
+
+    if "Item" not in response:
+        raise AppError(ErrorCode.NOT_FOUND, f"Payment method '{payment_method_name}' not found")
+
+    existing_methods = response["Item"].get("preferences", {}).get("paymentMethods", [])
+
+    method_updated = None
+    for method in existing_methods:
+        if method.get("name") == payment_method_name:
+            method["qrCodeUrl"] = s3_key
+            method_updated = method
+            break
+
+    if not method_updated:
+        raise AppError(ErrorCode.NOT_FOUND, f"Payment method '{payment_method_name}' not found")
+
+    preferences = response.get("Item", {}).get("preferences", {})
+    preferences["paymentMethods"] = existing_methods
+    tables.accounts.update_item(
+        Key={"accountId": account_id_key},
+        UpdateExpression="SET preferences = :prefs",
+        ExpressionAttributeValues={":prefs": preferences},
+    )
+    
+    return dict(method_updated)
+
+
+def confirm_qr_upload(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
     Confirm QR code upload and generate pre-signed GET URL.
 
@@ -139,71 +195,17 @@ def confirm_qr_upload(event: Dict[str, Any], context: Any) -> Dict[str, Any]:  #
     logger = get_logger(__name__)
 
     try:
-        # Extract caller identity
-        identity = event.get("identity", {})
-        caller_id = identity.get("sub")
+        caller_id = _extract_and_validate_caller(event)
 
-        if not caller_id:
-            raise AppError(ErrorCode.UNAUTHORIZED, "Authentication required")
-
-        # Extract arguments
         arguments = event.get("arguments", {})
         payment_method_name = arguments.get("paymentMethodName", "").strip()
         s3_key = arguments.get("s3Key", "").strip()
 
-        if not payment_method_name or not s3_key:
-            raise AppError(ErrorCode.INVALID_INPUT, "Payment method name and s3Key are required")
+        _validate_qr_upload_inputs(payment_method_name, s3_key, caller_id)
 
-        # Security: Validate s3_key belongs to this caller's account
-        # Prevents users from claiming QR codes they don't own
-        if not validate_qr_s3_key(s3_key, caller_id):
-            raise AppError(ErrorCode.FORBIDDEN, "Invalid S3 key - access denied")
-
-        # Validate S3 object exists
         bucket_name = get_required_env("EXPORTS_BUCKET")
-        s3_client = boto3.client("s3", endpoint_url=os.getenv("S3_ENDPOINT"))
-
-        try:
-            s3_client.head_object(Bucket=bucket_name, Key=s3_key)
-        except ClientError as e:
-            if e.response.get("Error", {}).get("Code") == "404":
-                raise AppError(ErrorCode.NOT_FOUND, "Upload not found. Please upload the file first.")
-            raise
-
-        # Update DynamoDB with s3_key (store in qrCodeUrl field temporarily)
-        # Note: The actual pre-signed URL will be generated on read
-        # For now, we'll update the payment method record to indicate QR exists
-        account_id_key = f"ACCOUNT#{caller_id}"
-        response = tables.accounts.get_item(Key={"accountId": account_id_key})
-
-        if "Item" not in response:
-            raise AppError(ErrorCode.NOT_FOUND, f"Payment method '{payment_method_name}' not found")
-
-        existing_methods = response["Item"].get("preferences", {}).get("paymentMethods", [])
-
-        # Find and update method
-        method_updated = None
-        for method in existing_methods:
-            if method.get("name") == payment_method_name:
-                method["qrCodeUrl"] = s3_key  # Store S3 key, not URL
-                method_updated = method
-                break
-
-        if not method_updated:
-            raise AppError(ErrorCode.NOT_FOUND, f"Payment method '{payment_method_name}' not found")
-
-        # Save updated methods
-        preferences = response.get("Item", {}).get("preferences", {})
-        preferences["paymentMethods"] = existing_methods
-        tables.accounts.update_item(
-            Key={"accountId": account_id_key},
-            UpdateExpression="SET preferences = :prefs",
-            ExpressionAttributeValues={":prefs": preferences},
-        )
-
-        # Return the payment method with S3 key stored in qrCodeUrl
-        # The PaymentMethod.qrCodeUrl field resolver will generate the presigned URL
-        # This is consistent with how myPaymentMethods and paymentMethodsForProfile work
+        _validate_s3_object_exists(bucket_name, s3_key)
+        _update_payment_method_qr_url(caller_id, payment_method_name, s3_key)
 
         logger.info(
             "Confirmed QR code upload",
@@ -221,71 +223,72 @@ def confirm_qr_upload(event: Dict[str, Any], context: Any) -> Dict[str, Any]:  #
         raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to confirm upload")
 
 
-def delete_qr_code(event: Dict[str, Any], context: Any) -> bool:  # noqa: C901
+def _delete_qr_from_s3_storage(stored_qr_key: str | None, caller_id: str, payment_method_name: str, logger: Any) -> None:
+    """Delete QR code from S3 storage if it exists."""
+    if not stored_qr_key:
+        return
+    
+    if stored_qr_key.startswith("payment-qr-codes/"):
+        try:
+            delete_qr_by_key(stored_qr_key)
+        except Exception as e:
+            logger.info("S3 delete completed (object may not have existed)", error=str(e))
+    else:
+        # Fallback: Legacy slug-based key or HTTP URL - try the old method
+        try:
+            delete_qr_from_s3(caller_id, payment_method_name)
+        except Exception as e:
+            logger.info("S3 delete completed (object may not have existed)", error=str(e))
+
+
+def _clear_qr_url_in_payment_method(caller_id: str, payment_method_name: str) -> None:
+    """Update DynamoDB to clear qrCodeUrl for the specified payment method."""
+    account_id_key = f"ACCOUNT#{caller_id}"
+    response = tables.accounts.get_item(Key={"accountId": account_id_key})
+
+    if "Item" not in response:
+        raise AppError(ErrorCode.NOT_FOUND, f"Payment method '{payment_method_name}' not found")
+
+    preferences = response["Item"].get("preferences", {})
+    existing_methods = preferences.get("paymentMethods", [])
+    updated_methods = []
+    for m in existing_methods:
+        method_copy = dict(m)
+        if method_copy.get("name") == payment_method_name:
+            method_copy["qrCodeUrl"] = None
+        updated_methods.append(method_copy)
+
+    preferences["paymentMethods"] = updated_methods
+    tables.accounts.update_item(
+        Key={"accountId": account_id_key},
+        UpdateExpression="SET preferences = :prefs",
+        ExpressionAttributeValues={":prefs": preferences},
+    )
+
+
+def delete_qr_code(event: Dict[str, Any], context: Any) -> bool:
     """
     Delete QR code from S3 and clear qrCodeUrl in DynamoDB for a payment method.
     """
     logger = get_logger(__name__)
 
     try:
-        identity = event.get("identity", {})
-        caller_id = identity.get("sub")
-        if not caller_id:
-            raise AppError(ErrorCode.UNAUTHORIZED, "Authentication required")
-
+        caller_id = _extract_and_validate_caller(event)
+        
         arguments = event.get("arguments", {})
         payment_method_name = arguments.get("paymentMethodName", "").strip()
+        
         if not payment_method_name:
             raise AppError(ErrorCode.INVALID_INPUT, "Payment method name is required")
-
+        
         if is_reserved_name(payment_method_name):
             raise AppError(ErrorCode.INVALID_INPUT, "Cannot delete QR for reserved methods")
 
-        methods = get_payment_methods(caller_id)
-        target = next((m for m in methods if m.get("name") == payment_method_name), None)
-        if not target:
-            raise AppError(ErrorCode.NOT_FOUND, f"Payment method '{payment_method_name}' not found")
-
-        # Get the stored s3_key from the payment method (if it exists)
+        target = _verify_payment_method_exists(caller_id, payment_method_name)
         stored_qr_key = target.get("qrCodeUrl")
-
-        # Delete QR from S3 using the stored key (if it's a valid s3 path, not a URL)
-        if stored_qr_key and stored_qr_key.startswith("payment-qr-codes/"):
-            try:
-                delete_qr_by_key(stored_qr_key)
-            except Exception as e:
-                # S3 delete is idempotent - if object doesn't exist, that's fine
-                logger.info("S3 delete completed (object may not have existed)", error=str(e))
-        elif stored_qr_key:
-            # Fallback: Legacy slug-based key or HTTP URL - try the old method
-            try:
-                delete_qr_from_s3(caller_id, payment_method_name)
-            except Exception as e:
-                logger.info("S3 delete completed (object may not have existed)", error=str(e))
-
-        # Update payment method to clear QR code URL
-        account_id_key = f"ACCOUNT#{caller_id}"
-        response = tables.accounts.get_item(Key={"accountId": account_id_key})
-
-        if "Item" not in response:
-            raise AppError(ErrorCode.NOT_FOUND, f"Payment method '{payment_method_name}' not found")
-
-        preferences = response["Item"].get("preferences", {})
-        existing_methods = preferences.get("paymentMethods", [])
-        updated_methods = []
-        for m in existing_methods:
-            method_copy = dict(m)
-            if method_copy.get("name") == payment_method_name:
-                method_copy["qrCodeUrl"] = None
-            updated_methods.append(method_copy)
-
-        preferences = response["Item"].get("preferences", {})
-        preferences["paymentMethods"] = updated_methods
-        tables.accounts.update_item(
-            Key={"accountId": account_id_key},
-            UpdateExpression="SET preferences = :prefs",
-            ExpressionAttributeValues={":prefs": preferences},
-        )
+        
+        _delete_qr_from_s3_storage(stored_qr_key, caller_id, payment_method_name, logger)
+        _clear_qr_url_in_payment_method(caller_id, payment_method_name)
 
         logger.info("Deleted QR code", account_id=caller_id, payment_method=payment_method_name)
         return True

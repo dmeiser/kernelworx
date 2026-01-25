@@ -595,3 +595,30 @@ class TestIsAdmin:
         result = is_admin(event)
 
         assert result is False
+
+
+class TestHasRequiredPermissionEdgeCases:
+    """Tests for _has_required_permission edge cases."""
+
+    def test_invalid_permission_returns_false(
+        self,
+        dynamodb_table: Any,
+        shares_table: Any,
+        sample_profile: Any,
+        sample_profile_id: str,
+        another_account_id: str,
+    ) -> None:
+        """Test that invalid permission string returns False."""
+        # Create share with READ permission
+        shares_table.put_item(
+            Item={
+                "profileId": sample_profile_id,
+                "targetAccountId": f"ACCOUNT#{another_account_id}",
+                "permissions": ["READ"],
+            }
+        )
+
+        # Test with invalid permission string - should return False via the default case
+        result = check_profile_access(another_account_id, sample_profile_id, "INVALID_PERMISSION")
+
+        assert result is False

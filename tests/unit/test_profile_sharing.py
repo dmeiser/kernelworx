@@ -680,6 +680,85 @@ class TestListMyShares:
             assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
             assert "Failed to list shared profiles" in exc_info.value.message
 
+    def test_profile_without_share_skipped(
+        self,
+        dynamodb_table: Any,
+        shares_table: Any,
+        another_account_id: str,
+        sample_account_id: str,
+        appsync_event: Dict[str, Any],
+        lambda_context: Any,
+    ) -> None:
+        """Test that profiles without matching shares are skipped (covers line 199)."""
+        from src.handlers.profile_sharing import list_my_shares
+        from unittest.mock import patch
+
+        profile_id = "PROFILE#has-share"
+        orphan_profile_id = "PROFILE#no-share"
+
+        # Create two profiles
+        dynamodb_table.put_item(
+            Item={
+                "ownerAccountId": f"ACCOUNT#{sample_account_id}",
+                "profileId": profile_id,
+                "sellerName": "Has Share",
+                "createdAt": "2024-01-01T00:00:00Z",
+                "updatedAt": "2024-01-01T00:00:00Z",
+            }
+        )
+        dynamodb_table.put_item(
+            Item={
+                "ownerAccountId": f"ACCOUNT#{sample_account_id}",
+                "profileId": orphan_profile_id,
+                "sellerName": "No Share",
+                "createdAt": "2024-01-01T00:00:00Z",
+                "updatedAt": "2024-01-01T00:00:00Z",
+            }
+        )
+
+        # Create only one share
+        shares_table.put_item(
+            Item={
+                "profileId": profile_id,
+                "targetAccountId": f"ACCOUNT#{another_account_id}",
+                "ownerAccountId": f"ACCOUNT#{sample_account_id}",
+                "permissions": ["READ"],
+                "createdAt": "2024-01-01T00:00:00Z",
+            }
+        )
+
+        event = {**appsync_event, "identity": {"sub": another_account_id}}
+        
+        # Mock batch_get_item to return both profiles
+        with patch("src.handlers.profile_sharing.dynamodb.batch_get_item") as mock_batch_get:
+            mock_batch_get.return_value = {
+                "Responses": {
+                    "kernelworx-profiles-ue1-dev": [
+                        {
+                            "ownerAccountId": f"ACCOUNT#{sample_account_id}",
+                            "profileId": profile_id,
+                            "sellerName": "Has Share",
+                            "createdAt": "2024-01-01T00:00:00Z",
+                            "updatedAt": "2024-01-01T00:00:00Z",
+                        },
+                        {
+                            "ownerAccountId": f"ACCOUNT#{sample_account_id}",
+                            "profileId": orphan_profile_id,  # This one has no share
+                            "sellerName": "No Share",
+                            "createdAt": "2024-01-01T00:00:00Z",
+                            "updatedAt": "2024-01-01T00:00:00Z",
+                        },
+                    ]
+                }
+            }
+            
+            result = list_my_shares(event, lambda_context)
+
+        # Should only return the profile with a share, orphan profile is filtered out at line 199
+        assert len(result) == 1
+        assert result[0]["profileId"] == profile_id
+        assert result[0]["sellerName"] == "Has Share"
+
     def test_skips_profile_with_non_string_profile_id(
         self,
         dynamodb_table: Any,

@@ -17,6 +17,27 @@ except ModuleNotFoundError:  # pragma: no cover
 logger = get_logger(__name__)
 
 
+def _build_profile_data(profile_id: str, owner_account_id_stored: str, seller_name: str, now: str, unit_type: str | None, unit_number: Any, logger: Any) -> Dict[str, Any]:
+    """Build profile data dict with optional unit fields."""
+    profile_data: Dict[str, Any] = {
+        "profileId": profile_id,
+        "ownerAccountId": owner_account_id_stored,
+        "sellerName": seller_name,
+        "createdAt": now,
+        "updatedAt": now,
+    }
+
+    if unit_type:
+        profile_data["unitType"] = unit_type
+    if unit_number:
+        try:
+            profile_data["unitNumber"] = int(unit_number)
+        except (ValueError, TypeError):
+            logger.warning(f"Invalid unitNumber: {unit_number}, skipping")
+
+    return profile_data
+
+
 def create_seller_profile(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
     Create a new seller profile.
@@ -39,43 +60,19 @@ def create_seller_profile(event: Dict[str, Any], context: Any) -> Dict[str, Any]
         ValueError: If input validation fails
     """
     try:
-        # Extract parameters
         input_data = event["arguments"]["input"]
         seller_name = input_data["sellerName"]
         unit_type = input_data.get("unitType")
         unit_number = input_data.get("unitNumber")
         caller_account_id = event["identity"]["sub"]
 
-        logger.info(
-            "Creating seller profile",
-            extra={"sellerName": seller_name, "callerAccountId": caller_account_id},
-        )
+        logger.info("Creating seller profile", extra={"sellerName": seller_name, "callerAccountId": caller_account_id})
 
-        # Generate IDs and timestamp
         profile_id = f"PROFILE#{uuid.uuid4()}"
-        # Store with ACCOUNT# prefix for consistency with resolver ownership checks
         owner_account_id_stored = f"ACCOUNT#{caller_account_id}"
         now = datetime.now(timezone.utc).isoformat()
 
-        # Profile data to return - ownerAccountId WITH ACCOUNT# prefix per normalization rules
-        profile_data = {
-            "profileId": profile_id,
-            "ownerAccountId": owner_account_id_stored,  # Return with ACCOUNT# prefix
-            "sellerName": seller_name,
-            "createdAt": now,
-            "updatedAt": now,
-        }
-
-        # Add optional unit fields if provided
-        if unit_type:
-            profile_data["unitType"] = unit_type
-        if unit_number:
-            # Convert to int for GraphQL schema compatibility
-            try:
-                profile_data["unitNumber"] = int(unit_number)
-            except (ValueError, TypeError):
-                logger.warning(f"Invalid unitNumber: {unit_number}, skipping")
-                pass
+        profile_data = _build_profile_data(profile_id, owner_account_id_stored, seller_name, now, unit_type, unit_number, logger)
 
         # In multi-table design V2, profiles table uses:
         # - PK: ownerAccountId (ACCOUNT#sub) - enables listMyProfiles via PK query

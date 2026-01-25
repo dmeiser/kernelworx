@@ -81,6 +81,19 @@ def generate_qr_code_s3_key(account_id: str, extension: str = "png") -> str:
     return f"{QR_CODE_S3_PREFIX}/{account_id}/{file_id}.{extension}"
 
 
+def _check_s3_key_prefix(s3_key: str) -> bool:
+    """Check if S3 key has correct prefix."""
+    return s3_key.startswith(f"{QR_CODE_S3_PREFIX}/")
+
+
+def _check_s3_key_owner(s3_key: str, account_id: str) -> bool:
+    """Check if S3 key belongs to the account."""
+    parts = s3_key.split("/")
+    if len(parts) < 3:
+        return False
+    return parts[1] == account_id
+
+
 def validate_qr_s3_key(s3_key: str, account_id: str) -> bool:
     """Validate that an S3 key belongs to the given account.
 
@@ -93,20 +106,14 @@ def validate_qr_s3_key(s3_key: str, account_id: str) -> bool:
     Returns:
         True if key is valid and belongs to account, False otherwise
     """
-    # Key must start with the QR code prefix
-    if not s3_key.startswith(f"{QR_CODE_S3_PREFIX}/"):
+    if not _check_s3_key_prefix(s3_key):
         return False
 
-    # Key must contain the account ID as the second path segment
-    parts = s3_key.split("/")
-    if len(parts) < 3:
-        return False
-
-    # parts[0] = "payment-qr-codes", parts[1] = account_id, parts[2] = filename
-    if parts[1] != account_id:
+    if not _check_s3_key_owner(s3_key, account_id):
         return False
 
     # Filename must have allowed extension
+    parts = s3_key.split("/")
     filename = parts[2]
     allowed_extensions = (".png", ".jpg", ".jpeg", ".webp")
     if not any(filename.endswith(ext) for ext in allowed_extensions):
@@ -164,6 +171,32 @@ def is_reserved_name(name: str) -> bool:
     return name.lower() in RESERVED_NAMES
 
 
+def _get_existing_payment_methods(account_id: str) -> list[Dict[str, Any]]:
+    """Get existing payment methods from account record."""
+    account_id_key = f"ACCOUNT#{account_id}"
+    response = tables.accounts.get_item(Key={"accountId": account_id_key})
+
+    if "Item" not in response:
+        return []
+
+    preferences = response["Item"].get("preferences", {})
+    return list(preferences.get("paymentMethods", []))
+
+
+def _check_duplicate_name(existing_methods: list[Dict[str, Any]], name: str, exclude_current: Optional[str]) -> None:
+    """Check for duplicate payment method names (case-insensitive)."""
+    name_lower = name.lower()
+    for method in existing_methods:
+        method_name = method.get("name", "")
+
+        # Skip the current method if we're updating
+        if exclude_current and method_name.lower() == exclude_current.lower():
+            continue
+
+        if method_name.lower() == name_lower:
+            raise AppError(ErrorCode.INVALID_INPUT, f"Payment method '{name}' already exists")
+
+
 def validate_name_unique(account_id: str, name: str, exclude_current: Optional[str] = None) -> None:
     """
     Validate that a payment method name is unique for the account.
@@ -182,27 +215,10 @@ def validate_name_unique(account_id: str, name: str, exclude_current: Optional[s
 
     try:
         # Get existing payment methods from account record
-        account_id_key = f"ACCOUNT#{account_id}"
-        response = tables.accounts.get_item(Key={"accountId": account_id_key})
-
-        if "Item" not in response:
-            return  # No account found, name is unique
-
-        # Payment methods are stored in preferences.paymentMethods
-        preferences = response["Item"].get("preferences", {})
-        existing_methods = preferences.get("paymentMethods", [])
+        existing_methods = _get_existing_payment_methods(account_id)
 
         # Check for duplicates (case-insensitive)
-        name_lower = name.lower()
-        for method in existing_methods:
-            method_name = method.get("name", "")
-
-            # Skip the current method if we're updating
-            if exclude_current and method_name.lower() == exclude_current.lower():
-                continue
-
-            if method_name.lower() == name_lower:
-                raise AppError(ErrorCode.INVALID_INPUT, f"Payment method '{name}' already exists")
+        _check_duplicate_name(existing_methods, name, exclude_current)
 
     except ClientError as e:
         logger.error("Failed to check payment method uniqueness", error=str(e))
@@ -268,6 +284,22 @@ def validate_payment_method_exists(account_id: str, payment_method_name: str) ->
         )
 
 
+def _validate_payment_method_name(name: str) -> str:
+    """Validate and normalize payment method name."""
+    if not name or not name.strip():
+        raise AppError(ErrorCode.INVALID_INPUT, "Payment method name is required")
+
+    name = name.strip()
+
+    if len(name) > MAX_NAME_LENGTH:
+        raise AppError(ErrorCode.INVALID_INPUT, f"Payment method name must be {MAX_NAME_LENGTH} characters or less")
+
+    if is_reserved_name(name):
+        raise AppError(ErrorCode.INVALID_INPUT, f"'{name}' is a reserved payment method name")
+
+    return name
+
+
 def create_payment_method(account_id: str, name: str) -> Dict[str, Any]:
     """
     Create a new custom payment method.
@@ -285,16 +317,7 @@ def create_payment_method(account_id: str, name: str) -> Dict[str, Any]:
     logger = get_logger(__name__)
 
     # Validate name
-    if not name or not name.strip():
-        raise AppError(ErrorCode.INVALID_INPUT, "Payment method name is required")
-
-    name = name.strip()
-
-    if len(name) > MAX_NAME_LENGTH:
-        raise AppError(ErrorCode.INVALID_INPUT, f"Payment method name must be {MAX_NAME_LENGTH} characters or less")
-
-    if is_reserved_name(name):
-        raise AppError(ErrorCode.INVALID_INPUT, f"'{name}' is a reserved payment method name")
+    name = _validate_payment_method_name(name)
 
     # Check uniqueness
     validate_name_unique(account_id, name)
@@ -333,6 +356,16 @@ def create_payment_method(account_id: str, name: str) -> Dict[str, Any]:
         raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to create payment method")
 
 
+def _find_and_update_method(existing_methods: list[Dict[str, Any]], old_name: str, new_name: str) -> Dict[str, Any]:
+    """Find and update a payment method in the list."""
+    for method in existing_methods:  # pragma: no branch
+        if method.get("name") == old_name:
+            method["name"] = new_name
+            return dict(method)
+
+    raise AppError(ErrorCode.NOT_FOUND, f"Payment method '{old_name}' not found")
+
+
 def update_payment_method(account_id: str, old_name: str, new_name: str) -> Dict[str, Any]:
     """
     Update (rename) a payment method.
@@ -351,16 +384,7 @@ def update_payment_method(account_id: str, old_name: str, new_name: str) -> Dict
     logger = get_logger(__name__)
 
     # Validate new name
-    if not new_name or not new_name.strip():
-        raise AppError(ErrorCode.INVALID_INPUT, "Payment method name is required")
-
-    new_name = new_name.strip()
-
-    if len(new_name) > MAX_NAME_LENGTH:
-        raise AppError(ErrorCode.INVALID_INPUT, f"Payment method name must be {MAX_NAME_LENGTH} characters or less")
-
-    if is_reserved_name(new_name):  # pragma: no branch
-        raise AppError(ErrorCode.INVALID_INPUT, f"'{new_name}' is a reserved payment method name")
+    new_name = _validate_payment_method_name(new_name)
 
     # Check uniqueness (exclude current method)
     validate_name_unique(account_id, new_name, exclude_current=old_name)
@@ -377,15 +401,7 @@ def update_payment_method(account_id: str, old_name: str, new_name: str) -> Dict
         existing_methods = preferences.get("paymentMethods", [])
 
         # Find and update method
-        updated_method = None
-        for method in existing_methods:  # pragma: no branch
-            if method.get("name") == old_name:
-                method["name"] = new_name
-                updated_method = method
-                break
-
-        if not updated_method:  # pragma: no branch
-            raise AppError(ErrorCode.NOT_FOUND, f"Payment method '{old_name}' not found")
+        updated_method = _find_and_update_method(existing_methods, old_name, new_name)
 
         # Update account with modified methods
         preferences = response.get("Item", {}).get("preferences", {})
@@ -398,12 +414,37 @@ def update_payment_method(account_id: str, old_name: str, new_name: str) -> Dict
 
         logger.info("Updated payment method", account_id=account_id, old_name=old_name, new_name=new_name)
 
-        # Return updated method (create a copy for type safety)
-        return dict(updated_method)
+        return updated_method
 
     except ClientError as e:
         logger.error("Failed to update payment method", error=str(e))
         raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to update payment method")
+
+
+def _find_and_remove_method(existing_methods: list[Dict[str, Any]], name: str) -> tuple[list[Dict[str, Any]], Dict[str, Any]]:
+    """Find and remove a payment method from the list. Returns (remaining_methods, deleted_method)."""
+    method_to_delete = None
+    new_methods = []
+    
+    for method in existing_methods:  # pragma: no branch
+        if method.get("name") == name:
+            method_to_delete = method
+        else:
+            new_methods.append(method)
+
+    if not method_to_delete:  # pragma: no branch
+        raise AppError(ErrorCode.NOT_FOUND, f"Payment method '{name}' not found")
+
+    return new_methods, method_to_delete
+
+
+def _delete_qr_if_exists(logger: Any, account_id: str, name: str, method_to_delete: Dict[str, Any]) -> None:
+    """Delete QR code from S3 if it exists."""
+    if method_to_delete.get("qrCodeUrl"):
+        try:
+            delete_qr_from_s3(account_id, name)
+        except Exception as e:
+            logger.warning("Failed to delete QR code, continuing with method deletion", error=str(e))
 
 
 def delete_payment_method(account_id: str, name: str) -> None:
@@ -435,23 +476,10 @@ def delete_payment_method(account_id: str, name: str) -> None:
         existing_methods = preferences.get("paymentMethods", [])
 
         # Find and remove method
-        method_to_delete = None
-        new_methods = []
-        for method in existing_methods:  # pragma: no branch
-            if method.get("name") == name:
-                method_to_delete = method
-            else:
-                new_methods.append(method)
-
-        if not method_to_delete:  # pragma: no branch
-            raise AppError(ErrorCode.NOT_FOUND, f"Payment method '{name}' not found")
+        new_methods, method_to_delete = _find_and_remove_method(existing_methods, name)
 
         # Delete QR code from S3 if exists
-        if method_to_delete.get("qrCodeUrl"):
-            try:
-                delete_qr_from_s3(account_id, name)
-            except Exception as e:
-                logger.warning("Failed to delete QR code, continuing with method deletion", error=str(e))
+        _delete_qr_if_exists(logger, account_id, name, method_to_delete)
 
         # Update account with remaining methods (or empty list)
         preferences = response.get("Item", {}).get("preferences", {})
@@ -606,6 +634,21 @@ def delete_qr_from_s3(account_id: str, payment_method_name: str) -> None:
         raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to delete QR code")
 
 
+def _find_existing_qr_s3_key(s3_client: Any, bucket_name: str, account_id: str, payment_method_name: str) -> Optional[str]:
+    """Find existing QR code S3 key by checking all supported extensions."""
+    extensions = ["png", "jpg", "webp"]
+
+    for ext in extensions:
+        test_key = get_qr_code_s3_key(account_id, payment_method_name, ext)
+        try:
+            s3_client.head_object(Bucket=bucket_name, Key=test_key)
+            return test_key
+        except ClientError:
+            continue
+
+    return None
+
+
 def generate_presigned_get_url(
     account_id: str, payment_method_name: str, s3_key: Optional[str] = None, expiry_seconds: int = 900
 ) -> Optional[str]:
@@ -633,17 +676,7 @@ def generate_presigned_get_url(
 
         # If no s3_key provided, try to find existing file
         if not s3_key:
-            extensions = ["png", "jpg", "webp"]
-
-            for ext in extensions:
-                test_key = get_qr_code_s3_key(account_id, payment_method_name, ext)
-                try:
-                    s3.head_object(Bucket=bucket_name, Key=test_key)
-                    s3_key = test_key
-                    break
-                except ClientError:
-                    continue
-
+            s3_key = _find_existing_qr_s3_key(s3, bucket_name, account_id, payment_method_name)
             if not s3_key:
                 return None  # No QR code found
 
