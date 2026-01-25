@@ -1,179 +1,179 @@
 # Data Schema - Popcorn Sales Manager
 
-Visual schema documentation for the data model using entity-relationship diagrams.
+Visual schema documentation for the DynamoDB data model.
 
-## Database Architecture
+## Tables Overview
 
 ```mermaid
-erDiagram
-    ACCOUNT ||--o{ SELLER_PROFILE : owns
-    ACCOUNT ||--o{ CATALOG : creates
-    ACCOUNT ||--o{ SHARE : receives
-    ACCOUNT ||--o{ INVITE : receives
-    ACCOUNT ||--o{ SHARED_CAMPAIGN : creates
+graph LR
+    A["📋 ACCOUNTS<br/>PK: accountId<br/>GSI: email"] 
+    B["👤 PROFILES<br/>PK: ownerAccountId + profileId<br/>GSI: profileId"]
+    C["📊 CAMPAIGNS<br/>PK: profileId + campaignId<br/>GSI: campaignId, catalogId, unitCampaignKey, profileId+createdAt"]
+    D["📦 ORDERS<br/>PK: campaignId + orderId<br/>GSI: orderId, profileId+createdAt"]
+    E["🛍️ CATALOGS<br/>PK: catalogId<br/>GSI: ownerAccountId, isPublic+createdAt"]
+    F["🔗 SHARES<br/>PK: profileId + targetAccountId<br/>GSI: targetAccountId"]
+    G["🎫 INVITES<br/>PK: inviteCode<br/>GSI: profileId<br/>TTL: expiresAt"]
+    H["🔄 SHARED_CAMPAIGNS<br/>PK: sharedCampaignCode<br/>GSI: createdBy+createdAt, unitCampaignKey"]
     
-    SELLER_PROFILE ||--o{ CAMPAIGN : contains
-    SELLER_PROFILE ||--o{ SHARE : "shared via"
-    SELLER_PROFILE ||--o{ INVITE : "invited via"
-    
-    CAMPAIGN ||--o{ ORDER : contains
-    CAMPAIGN ||--o{ CATALOG : uses
-    CAMPAIGN }o--|| SHARED_CAMPAIGN : "created from"
-    
-    ORDER }o--|| CAMPAIGN : "placed in"
-    ORDER }o--|| SELLER_PROFILE : "for profile"
-    
-    CATALOG ||--o{ CAMPAIGN : "used by"
-    CATALOG }o--|| ACCOUNT : "owned by"
-    
-    SHARE }o--|| SELLER_PROFILE : grants
-    SHARE }o--|| ACCOUNT : "to account"
-    
-    INVITE }o--|| SELLER_PROFILE : "for profile"
-    INVITE }o--|| ACCOUNT : "sent to"
-    
-    SHARED_CAMPAIGN }o--|| CATALOG : uses
-    SHARED_CAMPAIGN ||--o{ CAMPAIGN : "template for"
+    B -->|created by| A
+    C -->|in| B
+    D -->|in| C
+    C -->|uses| E
+    F -->|grants access to| B
+    G -->|for| B
+    H -->|creates| C
+    E -->|created by| A
 ```
 
-## Table Structures
+## Table Details
 
-### ACCOUNT
-```mermaid
-classDiagram
-    class ACCOUNT {
-        accountId: String (PK)
-        email: String (GSI)
-        givenName: String
-        familyName: String
-        city: String
-        state: String
-        unitType: String
-        unitNumber: Integer
-        isAdmin: Boolean
-        preferences: JSON
-        createdAt: DateTime
-        updatedAt: DateTime
-    }
-```
+### accounts
+Primary Key: `accountId` (String)
+Global Secondary Indexes: `email-index` (email)
 
-### SELLER_PROFILE
-```mermaid
-classDiagram
-    class SELLER_PROFILE {
-        ownerAccountId: String (PK)
-        profileId: String (SK, GSI)
-        sellerName: String
-        createdAt: DateTime
-        updatedAt: DateTime
-    }
-```
+| Attribute | Type | Purpose |
+|-----------|------|---------|
+| accountId | String | PK - Cognito user sub |
+| email | String | GSI - User lookup by email |
+| givenName | String | User's first name |
+| familyName | String | User's last name |
+| city | String | Location |
+| state | String | Location |
+| unitType | String | Scout unit type |
+| unitNumber | Integer | Scout unit number |
+| isAdmin | Boolean | Admin flag |
+| preferences | JSON | User settings |
+| createdAt | DateTime | Timestamp |
+| updatedAt | DateTime | Timestamp |
 
-### CAMPAIGN
-```mermaid
-classDiagram
-    class CAMPAIGN {
-        profileId: String (PK)
-        campaignId: String (SK, GSI)
-        campaignName: String
-        campaignYear: Integer
-        startDate: DateTime
-        endDate: DateTime
-        catalogId: String (GSI)
-        unitType: String
-        unitNumber: Integer
-        city: String
-        state: String
-        sharedCampaignCode: String
-        isActive: Boolean
-        totalOrders: Integer
-        totalRevenue: Float
-        unitCampaignKey: String (GSI)
-        createdAt: DateTime (GSI)
-        updatedAt: DateTime
-    }
-```
+### profiles
+Primary Key: `ownerAccountId` + `profileId` (Composite)
+Global Secondary Indexes: `profileId-index` (profileId)
 
-### ORDER
-```mermaid
-classDiagram
-    class ORDER {
-        campaignId: String (PK)
-        orderId: String (SK, GSI)
-        profileId: String (GSI)
-        customerName: String
-        customerEmail: String
-        customerPhone: String
-        items: JSON
-        totalAmount: Float
-        paymentMethod: String
-        deliveryStatus: String
-        notes: String
-        createdAt: DateTime (GSI)
-        updatedAt: DateTime
-    }
-```
+| Attribute | Type | Purpose |
+|-----------|------|---------|
+| ownerAccountId | String | PK - Account owner |
+| profileId | String | SK - Profile ID, also in GSI |
+| sellerName | String | Scout/seller name |
+| createdAt | DateTime | Timestamp |
+| updatedAt | DateTime | Timestamp |
 
-### CATALOG
-```mermaid
-classDiagram
-    class CATALOG {
-        catalogId: String (PK)
-        catalogName: String
-        products: JSON
-        ownerAccountId: String (GSI)
-        catalogType: String
-        isPublic: Boolean (GSI)
-        isPublicStr: String
-        isDeleted: Boolean
-        createdAt: DateTime (GSI)
-        updatedAt: DateTime
-    }
-```
+### campaigns
+Primary Key: `profileId` + `campaignId` (Composite)
+Global Secondary Indexes: 
+- `campaignId-index` (campaignId)
+- `catalogId-index` (catalogId)
+- `unitCampaignKey-index` (unitCampaignKey)
+- `profileId-createdAt-index` (profileId + createdAt)
 
-### SHARE
-```mermaid
-classDiagram
-    class SHARE {
-        profileId: String (PK)
-        targetAccountId: String (SK, GSI)
-        permissions: StringSet
-        createdAt: DateTime
-        updatedAt: DateTime
-    }
-```
+| Attribute | Type | Purpose |
+|-----------|------|---------|
+| profileId | String | PK - Profile owner |
+| campaignId | String | SK - Campaign ID, also in GSI |
+| campaignName | String | Campaign display name |
+| campaignYear | Integer | Sales year |
+| startDate | DateTime | Optional start date |
+| endDate | DateTime | Optional end date |
+| catalogId | String | GSI - Which catalog used |
+| unitType | String | Scout unit type |
+| unitNumber | Integer | Scout unit number |
+| city | String | Unit location |
+| state | String | Unit location |
+| sharedCampaignCode | String | Reference to shared template |
+| isActive | Boolean | Active/inactive flag |
+| totalOrders | Integer | Denormalized count |
+| totalRevenue | Float | Denormalized sum |
+| unitCampaignKey | String | GSI - Composite lookup key |
+| createdAt | DateTime | GSI - Sorting |
+| updatedAt | DateTime | Timestamp |
 
-### INVITE
-```mermaid
-classDiagram
-    class INVITE {
-        inviteCode: String (PK)
-        profileId: String (GSI)
-        permissions: StringSet
-        expiresAt: DateTime (TTL)
-        createdAt: DateTime
-    }
-```
+### orders
+Primary Key: `campaignId` + `orderId` (Composite)
+Global Secondary Indexes:
+- `orderId-index` (orderId)
+- `profileId-index` (profileId + createdAt)
 
-### SHARED_CAMPAIGN
-```mermaid
-classDiagram
-    class SHARED_CAMPAIGN {
-        sharedCampaignCode: String (PK)
-        campaignName: String
-        catalogId: String
-        unitType: String
-        unitNumber: Integer
-        city: String
-        state: String
-        campaignYear: Integer
-        createdBy: String (GSI)
-        createdAt: DateTime (GSI)
-        isActive: Boolean
-        description: String
-        unitCampaignKey: String (GSI)
-    }
-```
+| Attribute | Type | Purpose |
+|-----------|------|---------|
+| campaignId | String | PK - Campaign |
+| orderId | String | SK - Order ID, also in GSI |
+| profileId | String | GSI - For cross-campaign queries |
+| customerName | String | Customer name |
+| customerEmail | String | Customer email |
+| customerPhone | String | Customer phone |
+| items | JSON | Line items array |
+| totalAmount | Float | Order total |
+| paymentMethod | String | Payment type |
+| deliveryStatus | String | Delivery state |
+| notes | String | Order notes |
+| createdAt | DateTime | GSI - Sorting |
+| updatedAt | DateTime | Timestamp |
+
+### catalogs
+Primary Key: `catalogId` (String)
+Global Secondary Indexes:
+- `ownerAccountId-index` (ownerAccountId)
+- `isPublic-createdAt-index` (isPublicStr + createdAt)
+
+| Attribute | Type | Purpose |
+|-----------|------|---------|
+| catalogId | String | PK - Catalog ID |
+| catalogName | String | Catalog name |
+| products | JSON | Product definitions |
+| ownerAccountId | String | GSI - User's catalogs |
+| catalogType | String | ADMIN_MANAGED or USER_CREATED |
+| isPublic | Boolean | Visibility flag |
+| isPublicStr | String | String version for GSI |
+| isDeleted | Boolean | Soft-delete flag |
+| createdAt | DateTime | GSI - Sorting |
+| updatedAt | DateTime | Timestamp |
+
+### shares
+Primary Key: `profileId` + `targetAccountId` (Composite)
+Global Secondary Indexes: `targetAccountId-index` (targetAccountId)
+
+| Attribute | Type | Purpose |
+|-----------|------|---------|
+| profileId | String | PK - Shared profile |
+| targetAccountId | String | SK - Recipient account, also in GSI |
+| permissions | StringSet | READ, WRITE |
+| createdAt | DateTime | Timestamp |
+| updatedAt | DateTime | Timestamp |
+
+### invites
+Primary Key: `inviteCode` (String)
+Global Secondary Indexes: `profileId-index` (profileId)
+TTL: `expiresAt` (14 days)
+
+| Attribute | Type | Purpose |
+|-----------|------|---------|
+| inviteCode | String | PK - 8-char code |
+| profileId | String | GSI - Profile being invited to |
+| permissions | StringSet | READ, WRITE permissions |
+| expiresAt | DateTime | TTL - Auto-delete after 14 days |
+| createdAt | DateTime | Timestamp |
+
+### shared_campaigns
+Primary Key: `sharedCampaignCode` (String)
+Global Secondary Indexes:
+- `GSI1` (createdBy + createdAt)
+- `GSI2` (unitCampaignKey)
+
+| Attribute | Type | Purpose |
+|-----------|------|---------|
+| sharedCampaignCode | String | PK - Shareable template code |
+| campaignName | String | Template name |
+| catalogId | String | Catalog reference |
+| unitType | String | Target unit type |
+| unitNumber | Integer | Target unit number (0 = any) |
+| city | String | Unit location |
+| state | String | Unit location |
+| campaignYear | Integer | Sales year |
+| createdBy | String | GSI1 - Creator account |
+| createdAt | DateTime | GSI1 - Sorting, GSI2 lookup |
+| isActive | Boolean | Active/inactive |
+| description | String | Template description |
+| unitCampaignKey | String | GSI2 - Unit lookup |
 
 ## Query Flows
 
