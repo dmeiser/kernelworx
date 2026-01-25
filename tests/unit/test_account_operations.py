@@ -334,7 +334,6 @@ class TestDeleteMyAccount:
         campaign_id = "CAMPAIGN#test-campaign-123"
         catalog_id = "CATALOG#test-catalog-123"
         order_id = "ORDER#test-order-123"
-        share_id = f"SHARE#{sample_account_id}#other-user"
 
         # 1. Create account
         accounts_table.put_item(
@@ -395,7 +394,7 @@ class TestDeleteMyAccount:
         shares_table.put_item(
             Item={
                 "profileId": profile_id,
-                "targetAccountId": f"ACCOUNT#other-user",
+                "targetAccountId": "ACCOUNT#other-user",
                 "permissions": ["READ", "WRITE"],
                 "createdAt": datetime.now(timezone.utc).isoformat(),
             }
@@ -407,7 +406,7 @@ class TestDeleteMyAccount:
         assert campaigns_table.get_item(Key={"profileId": profile_id, "campaignId": campaign_id}).get("Item") is not None
         assert catalogs_table.get_item(Key={"catalogId": catalog_id}).get("Item") is not None
         assert orders_table.get_item(Key={"campaignId": campaign_id, "orderId": order_id}).get("Item") is not None
-        assert shares_table.get_item(Key={"profileId": profile_id, "targetAccountId": f"ACCOUNT#other-user"}).get("Item") is not None
+        assert shares_table.get_item(Key={"profileId": profile_id, "targetAccountId": "ACCOUNT#other-user"}).get("Item") is not None
 
         # Mock Cognito client
         with patch("boto3.client") as mock_boto_client:
@@ -720,7 +719,6 @@ class TestDeleteMyAccount:
     ) -> None:
         """Test deletion succeeds even if user not found in Cognito."""
         from src.handlers.account_operations import delete_my_account
-        from botocore.exceptions import ClientError
 
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
         monkeypatch.setenv("USER_POOL_ID", "us-east-1_test123")
