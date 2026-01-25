@@ -121,6 +121,7 @@ module "s3" {
   environment   = var.environment
   region_abbrev = var.region_abbrev
   name_prefix   = local.name_prefix
+  domain        = var.domain
 }
 
 module "iam" {

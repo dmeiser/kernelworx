@@ -58,6 +58,8 @@ resource "aws_s3_bucket_policy" "static" {
 }
 
 # CloudFront Distribution
+# NOTE: CloudFront logging is disabled to minimize AWS costs.
+# kics-scan ignore-line
 resource "aws_cloudfront_distribution" "site" {
   enabled             = true
   is_ipv6_enabled     = true

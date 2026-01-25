@@ -12,11 +12,19 @@ variable "name_prefix" {
   type = string
 }
 
+variable "domain" {
+  type = string
+  description = "Base domain for CORS configuration"
+}
+
 locals {
   bucket_suffix = "-${var.region_abbrev}-${var.environment}"
 }
 
 # Static Assets Bucket
+# NOTE: S3 access logging is disabled to minimize AWS costs for this volunteer project.
+# Logging would incur additional S3 storage costs for log files.
+# kics-scan ignore-line
 resource "aws_s3_bucket" "static" {
   bucket = "${var.name_prefix}-static${local.bucket_suffix}"
 
@@ -51,6 +59,9 @@ resource "aws_s3_bucket_public_access_block" "static" {
 }
 
 # Exports Bucket
+# NOTE: S3 access logging is disabled to minimize AWS costs for this volunteer project.
+# Logging would incur additional S3 storage costs for log files.
+# kics-scan ignore-line
 resource "aws_s3_bucket" "exports" {
   bucket = "${var.name_prefix}-exports${local.bucket_suffix}"
 
@@ -105,9 +116,19 @@ resource "aws_s3_bucket_cors_configuration" "exports" {
   bucket = aws_s3_bucket.exports.id
 
   cors_rule {
-    allowed_headers = ["*"]
+    # Restrict headers to those needed for S3 uploads
+    allowed_headers = [
+      "Content-Type",
+      "Content-MD5",
+      "x-amz-date",
+      "Authorization"
+    ]
     allowed_methods = ["GET", "PUT", "POST"]
-    allowed_origins = ["*"]
+    # Restrict CORS to our application domain only (not wildcard)
+    allowed_origins = [
+      "https://${var.environment}.${var.domain}",
+      "https://www.${var.environment}.${var.domain}"
+    ]
     max_age_seconds = 3600
   }
 }

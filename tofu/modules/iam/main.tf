@@ -82,9 +82,13 @@ resource "aws_iam_role_policy" "lambda_dynamodb" {
 }
 
 # Lambda S3 Access
+# NOTE: S3 GetObject permission is required for Lambda functions to download reports
+# from the exports bucket. This is expected behavior, not data exfiltration.
+# kics-scan disable-line
 data "aws_iam_policy_document" "lambda_s3" {
   statement {
     effect = "Allow"
+    # kics-scan ignore-line
     actions = [
       "s3:GetObject",
       "s3:PutObject",

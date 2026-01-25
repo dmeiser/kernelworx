@@ -395,3 +395,4 @@ benchmarks/
 
 # TODO: Remove before production
 # (Add any temporary files you're using during development)
+tofu/kics-results/

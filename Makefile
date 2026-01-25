@@ -110,7 +110,8 @@ kics:
 		-v "$(PWD)/tofu/kics-results":/results:z \
 		checkmarx/kics scan \
 		-p /path \
-		-o /results
+		-o /results \
+		--config /path/.kics.yml
 	@echo "KICS results saved to tofu/kics-results/"
 
 # All infrastructure checks (linting only, no deployment)
