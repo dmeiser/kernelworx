@@ -142,6 +142,18 @@ def validate_address(address: Dict[str, Any]) -> None:
         raise AppError(ErrorCode.INVALID_ADDRESS, "ZIP code must be 5 or 9 digits", {"zip": zip_code})
 
 
+def _validate_contact_methods(customer: Dict[str, Any]) -> None:
+    """Validate customer has at least one contact method."""
+    has_phone = bool(customer.get("phone"))
+    has_address = bool(customer.get("address"))
+
+    if not has_phone and not has_address:
+        raise AppError(
+            ErrorCode.INVALID_INPUT,
+            "Customer must have at least one contact method (phone or address)",
+        )
+
+
 def validate_customer_input(customer: Dict[str, Any]) -> Dict[str, Any]:
     """
     Validate customer information for orders.
@@ -166,23 +178,16 @@ def validate_customer_input(customer: Dict[str, Any]) -> Dict[str, Any]:
         raise AppError(ErrorCode.INVALID_INPUT, "Customer name is required")
 
     # At least one contact method required
-    has_phone = bool(customer.get("phone"))
-    has_address = bool(customer.get("address"))
-
-    if not has_phone and not has_address:
-        raise AppError(
-            ErrorCode.INVALID_INPUT,
-            "Customer must have at least one contact method (phone or address)",
-        )
+    _validate_contact_methods(customer)
 
     # Normalize and validate phone if provided
     validated_customer = {"name": customer["name"].strip()}
 
-    if has_phone:
+    if customer.get("phone"):
         validated_customer["phone"] = normalize_phone(customer["phone"])
 
     # Validate address if provided
-    if has_address:
+    if customer.get("address"):
         validate_address(customer["address"])
         validated_customer["address"] = customer["address"]
 
@@ -319,6 +324,15 @@ def _is_valid_quantity(item: Dict[str, Any]) -> bool:
     return quantity > 0
 
 
+def _validate_price(item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Validate price per unit if provided."""
+    from .errors import create_error_response
+
+    if "pricePerUnit" in item and not isinstance(item["pricePerUnit"], (int, float)):
+        return create_error_response("INVALID_INPUT", "Price per unit must be a number")
+    return None
+
+
 def _validate_single_line_item(item: Any) -> Optional[Dict[str, Any]]:
     """Validate a single line item."""
     from .errors import create_error_response
@@ -329,21 +343,29 @@ def _validate_single_line_item(item: Any) -> Optional[Dict[str, Any]]:
         return create_error_response("INVALID_INPUT", "Each line item must have a productId")
     if not _is_valid_quantity(item):
         return create_error_response("INVALID_INPUT", "Each line item must have a positive quantity")
-    if "pricePerUnit" in item and not isinstance(item["pricePerUnit"], (int, float)):
-        return create_error_response("INVALID_INPUT", "Price per unit must be a number")
+    return _validate_price(item)
+
+
+def _check_line_items_array(line_items: Any) -> Optional[Dict[str, Any]]:
+    """Check if line items is a valid non-empty array."""
+    from .errors import create_error_response
+
+    if not isinstance(line_items, list):
+        return create_error_response("INVALID_INPUT", "Line items must be an array")
+    if not line_items:
+        return create_error_response("INVALID_INPUT", "Order must have at least one line item")
     return None
 
 
 def _validate_order_line_items(updates: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Validate lineItems if provided."""
-    from .errors import create_error_response
-
     if "lineItems" not in updates:
         return None
-    if not isinstance(updates["lineItems"], list):
-        return create_error_response("INVALID_INPUT", "Line items must be an array")
-    if not updates["lineItems"]:
-        return create_error_response("INVALID_INPUT", "Order must have at least one line item")
+    
+    error = _check_line_items_array(updates["lineItems"])
+    if error:
+        return error
+    
     for item in updates["lineItems"]:
         error = _validate_single_line_item(item)
         if error:

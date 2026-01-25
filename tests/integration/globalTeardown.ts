@@ -10,7 +10,7 @@
  * - Rate limits (e.g., 50 shared campaigns max) can block future test runs
  */
 
-import { DynamoDBClient, ScanCommand, DeleteItemCommand, QueryCommand } from '@aws-sdk/client-dynamodb';
+import { DynamoDBClient, ScanCommand, DeleteItemCommand, QueryCommand, GetItemCommand } from '@aws-sdk/client-dynamodb';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -169,6 +169,7 @@ async function cleanupTestCatalogs(): Promise<number> {
   // Query catalogs for each test account using ownerAccountId-index GSI
   for (const accountId of testAccountIds) {
     try {
+      console.log(`    Querying catalogs for account: ${accountId}`);
       const queryResult = await dynamodb.send(new QueryCommand({
         TableName: CATALOGS_TABLE,
         IndexName: 'ownerAccountId-index',
@@ -187,12 +188,14 @@ async function cleanupTestCatalogs(): Promise<number> {
         const catalogName = item.catalogName?.S;
         if (catalogId) {
           try {
+            console.log(`      Deleting catalog: ${catalogName} (${catalogId})`);
             // HARD DELETE - remove from DynamoDB entirely (not soft delete)
             await dynamodb.send(new DeleteItemCommand({
               TableName: CATALOGS_TABLE,
               Key: { catalogId: { S: catalogId } },
             }));
             deleted++;
+            console.log(`      ✓ Deleted catalog: ${catalogName}`);
           } catch (error) {
             console.error(`    Failed to delete catalog ${catalogName} (${catalogId}):`, error);
           }
@@ -203,6 +206,7 @@ async function cleanupTestCatalogs(): Promise<number> {
     }
   }
   
+  console.log(`  Total catalogs deleted: ${deleted}`);
   return deleted;
 }
 
@@ -300,76 +304,478 @@ async function cleanupTestOrders(campaignIds: string[]): Promise<number> {
   return deleted;
 }
 
-async function cleanupTestShares(profileIds: string[]): Promise<number> {
-  console.log('  Querying shares table by test user profiles...');
+async function cleanupTestShares(profileIds: string[], testAccountIds: string[]): Promise<number> {
+  console.log('  Scanning shares table for test account involvement...');
   
   let deleted = 0;
+  const testAccountSet = new Set(testAccountIds);
   
-  // Query shares for each test user profile (PK=profileId, SK=targetAccountId)
-  for (const profileId of profileIds) {
-    try {
-      const queryResult = await dynamodb.send(new QueryCommand({
-        TableName: SHARES_TABLE,
-        KeyConditionExpression: 'profileId = :profileId',
-        ExpressionAttributeValues: {
-          ':profileId': { S: profileId },
-        },
-        ProjectionExpression: 'profileId, targetAccountId',
-      }));
+  try {
+    // Scan all shares and delete if ANY account ID is a test account
+    const scanResult = await dynamodb.send(new ScanCommand({
+      TableName: SHARES_TABLE,
+      ProjectionExpression: 'profileId, targetAccountId, ownerAccountId, createdByAccountId',
+    }));
+    
+    const items = scanResult.Items || [];
+    console.log(`    Found ${items.length} total share(s)`);
+    
+    for (const item of items) {
+      const profileId = item.profileId?.S;
+      const targetAccountId = item.targetAccountId?.S;
+      const ownerAccountId = item.ownerAccountId?.S;
+      const createdByAccountId = item.createdByAccountId?.S;
       
-      const items = queryResult.Items || [];
+      if (!profileId || !targetAccountId) continue;
       
-      for (const item of items) {
-        const profileId = item.profileId?.S;
-        const targetAccountId = item.targetAccountId?.S;
-        
-        if (profileId && targetAccountId) {
-          try {
-            await dynamodb.send(new DeleteItemCommand({
-              TableName: SHARES_TABLE,
-              Key: {
-                profileId: { S: profileId },
-                targetAccountId: { S: targetAccountId },
-              },
-            }));
-            deleted++;
-          } catch (error) {
-            console.error(`    Failed to delete share ${profileId}/${targetAccountId}:`, error);
-          }
+      // Delete if ANY of these accounts is a test account
+      const isTestRelated = 
+        testAccountSet.has(targetAccountId) ||
+        (ownerAccountId && testAccountSet.has(ownerAccountId)) ||
+        (createdByAccountId && testAccountSet.has(createdByAccountId));
+      
+      if (isTestRelated) {
+        try {
+          await dynamodb.send(new DeleteItemCommand({
+            TableName: SHARES_TABLE,
+            Key: {
+              profileId: { S: profileId },
+              targetAccountId: { S: targetAccountId },
+            },
+          }));
+          deleted++;
+        } catch (error) {
+          console.error(`    Failed to delete share ${profileId}/${targetAccountId}:`, error);
         }
       }
-    } catch (error) {
-      console.error(`  Failed to query shares for profile ${profileId}:`, error);
     }
+  } catch (error) {
+    console.error(`  Failed to scan shares:`, error);
   }
   
   return deleted;
 }
 
-async function cleanupTestInvites(profileIds: string[]): Promise<number> {
-  console.log('  Querying invites table by test user profiles...');
+async function cleanupTestInvites(profileIds: string[], testAccountIds: string[]): Promise<number> {
+  console.log('  Scanning invites table for test account involvement...');
   
   let deleted = 0;
+  const testAccountSet = new Set(testAccountIds);
+  const testProfileIdsWithPrefix = new Set(profileIds.map(id => `PROFILE#${id}`));
   
-  // Query invites for each test user profile using profileId-index GSI
-  for (const profileId of profileIds) {
-    try {
-      const queryResult = await dynamodb.send(new QueryCommand({
-        TableName: INVITES_TABLE,
-        IndexName: 'profileId-index',
-        KeyConditionExpression: 'profileId = :profileId',
-        ExpressionAttributeValues: {
-          ':profileId': { S: profileId },
-        },
-        ProjectionExpression: 'inviteCode',
-      }));
+  try {
+    // Scan all invites and delete if profile belongs to test account
+    const scanResult = await dynamodb.send(new ScanCommand({
+      TableName: INVITES_TABLE,
+      ProjectionExpression: 'inviteCode, profileId',
+    }));
+    
+    const items = scanResult.Items || [];
+    console.log(`    Found ${items.length} total invite(s)`);
+    
+    for (const item of items) {
+      const inviteCode = item.inviteCode?.S;
+      const profileIdWithPrefix = item.profileId?.S;
       
-      const items = queryResult.Items || [];
+      if (!inviteCode || !profileIdWithPrefix) continue;
       
-      for (const item of items) {
-        const inviteCode = item.inviteCode?.S;
+      // Delete if profile is owned by test account
+      if (testProfileIdsWithPrefix.has(profileIdWithPrefix)) {
+        try {
+          await dynamodb.send(new DeleteItemCommand({
+            TableName: INVITES_TABLE,
+            Key: {
+              inviteCode: { S: inviteCode },
+            },
+          }));
+          deleted++;
+        } catch (error) {
+          console.error(`    Failed to delete invite ${inviteCode}:`, error);
+        }
+      }
+    }
+  } catch (error) {
+    console.error(`  Failed to scan invites:`, error);
+  }
+  
+  return deleted;
+}
+
+/**
+ * Clean up orphaned shares (shares referencing non-existent TEST profiles)
+ * Only deletes shares for profiles that were owned by test accounts
+ */
+async function cleanupOrphanedShares(testProfileIds: string[]): Promise<number> {
+  console.log('  Checking for orphaned shares from deleted test profiles...');
+  let deleted = 0;
+  
+  // Build set of test profile IDs with PROFILE# prefix
+  const testProfileIdsWithPrefix = new Set(testProfileIds.map(id => `PROFILE#${id}`));
+  
+  try {
+    // Only query shares for test profiles that were collected
+    for (const profileIdWithPrefix of testProfileIdsWithPrefix) {
+      try {
+        const queryResult = await dynamodb.send(new QueryCommand({
+          TableName: SHARES_TABLE,
+          KeyConditionExpression: 'profileId = :profileId',
+          ExpressionAttributeValues: {
+            ':profileId': { S: profileIdWithPrefix },
+          },
+          ProjectionExpression: 'profileId, targetAccountId',
+        }));
         
-        if (inviteCode) {
+        const shares = queryResult.Items || [];
+        
+        // If we found shares, the profile was already deleted but shares remain
+        for (const share of shares) {
+          const targetAccountId = share.targetAccountId?.S;
+          
+          if (profileIdWithPrefix && targetAccountId) {
+            console.log(`    Deleting orphaned share: ${profileIdWithPrefix} → ${targetAccountId}`);
+            await dynamodb.send(new DeleteItemCommand({
+              TableName: SHARES_TABLE,
+              Key: {
+                profileId: { S: profileIdWithPrefix },
+                targetAccountId: { S: targetAccountId },
+              },
+            }));
+            deleted++;
+          }
+        }
+      } catch (error) {
+        console.error(`    Failed to check/delete shares for ${profileIdWithPrefix}:`, error);
+      }
+    }
+  } catch (error) {
+    console.error('  Failed to query orphaned shares:', error);
+  }
+  
+  console.log(`    Deleted ${deleted} orphaned test share(s)`);
+  return deleted;
+}
+
+/**
+ * Clean up ALL orphaned shares (shares where profile or account doesn't exist).
+ * 
+ * A share is orphaned if:
+ * 1. The profileId doesn't exist in the profiles table
+ * 2. The targetAccountId doesn't exist in the accounts table
+ * 3. The createdBy accountId doesn't exist in the accounts table (if present)
+ * 
+ * @param dryRun If true, only reports what would be deleted without actually deleting
+ * @param maxDeletions Maximum number of shares to delete in one run (safety limit)
+ */
+async function cleanupAllOrphanedShares(dryRun: boolean = true, maxDeletions: number = 100): Promise<number> {
+  console.log(`  ${dryRun ? '[DRY RUN]' : ''} Scanning ALL shares for orphaned records...`);
+  let deleted = 0;
+  let checked = 0;
+  
+  try {
+    // Step 1: Load all valid profileIds
+    console.log('    Loading all profiles...');
+    const validProfileIds = new Set<string>();
+    const profilesScanResult = await dynamodb.send(new ScanCommand({
+      TableName: PROFILES_TABLE,
+      ProjectionExpression: 'profileId',
+    }));
+    for (const profile of profilesScanResult.Items || []) {
+      const profileId = profile.profileId?.S;  // This includes PROFILE# prefix
+      if (profileId) {
+        validProfileIds.add(profileId);
+      }
+    }
+    console.log(`    Found ${validProfileIds.size} valid profile(s)`);
+    
+    // Step 2: Load all valid accountIds
+    console.log('    Loading all accounts...');
+    const validAccountIds = new Set<string>();
+    const accountsScanResult = await dynamodb.send(new ScanCommand({
+      TableName: ACCOUNTS_TABLE,
+      ProjectionExpression: 'accountId',
+    }));
+    for (const account of accountsScanResult.Items || []) {
+      const accountId = account.accountId?.S;  // This includes ACCOUNT# prefix
+      if (accountId) {
+        validAccountIds.add(accountId);
+      }
+    }
+    console.log(`    Found ${validAccountIds.size} valid account(s)`);
+    
+    // Step 3: Scan all shares and check validity
+    const sharesScanResult = await dynamodb.send(new ScanCommand({
+      TableName: SHARES_TABLE,
+      ProjectionExpression: 'profileId, targetAccountId, createdBy',
+    }));
+    
+    const shares = sharesScanResult.Items || [];
+    console.log(`    Found ${shares.length} total share(s) to validate`);
+    
+    for (const share of shares) {
+      const profileIdWithPrefix = share.profileId?.S;  // This includes PROFILE# prefix
+      const targetAccountId = share.targetAccountId?.S;  // This includes ACCOUNT# prefix
+      const createdBy = share.createdBy?.S;
+      
+      if (!profileIdWithPrefix || !targetAccountId) continue;
+      
+      checked++;
+      
+      // Check if share is orphaned - NO LONGER strip prefixes!
+      let isOrphaned = false;
+      let reason = '';
+      
+      if (!validProfileIds.has(profileIdWithPrefix)) {
+        isOrphaned = true;
+        reason = 'profile not found';
+      } else if (!validAccountIds.has(targetAccountId)) {
+        isOrphaned = true;
+        reason = `target account ${targetAccountId} not found`;
+      } else if (createdBy && !validAccountIds.has(createdBy)) {
+        isOrphaned = true;
+        reason = `creator account ${createdBy} not found`;
+      }
+      
+      if (isOrphaned) {
+        console.log(`    ${dryRun ? 'WOULD DELETE' : 'DELETING'} orphaned share: ${profileIdWithPrefix} → ${targetAccountId} (${reason})`);
+        
+        if (!dryRun && deleted < maxDeletions) {
+          try {
+            await dynamodb.send(new DeleteItemCommand({
+              TableName: SHARES_TABLE,
+              Key: {
+                profileId: { S: profileIdWithPrefix },
+                targetAccountId: { S: targetAccountId },
+              },
+            }));
+            deleted++;
+          } catch (error) {
+            console.error(`    Failed to delete share ${profileIdWithPrefix}/${targetAccountId}:`, error);
+          }
+        } else if (dryRun) {
+          deleted++; // Count what would be deleted
+        }
+        
+        if (deleted >= maxDeletions) {
+          console.log(`    ⚠️  Reached max deletions limit (${maxDeletions}), stopping`);
+          break;
+        }
+      }
+    }
+    
+    console.log(`    Checked ${checked} share(s), ${dryRun ? 'would delete' : 'deleted'} ${deleted}`);
+  } catch (error) {
+    console.error('  Failed to scan shares:', error);
+  }
+  
+  return deleted;
+}
+
+/**
+ * Clean up orphaned orders (orders referencing non-existent campaigns)
+ */
+async function cleanupOrphanedOrders(): Promise<number> {
+  console.log('  Scanning for orphaned orders...');
+  let deleted = 0;
+  
+  try {
+    // First, get all campaigns to build a set of valid campaignIds
+    const validCampaignIds = new Set<string>();
+    const campaignsResult = await dynamodb.send(new ScanCommand({
+      TableName: CAMPAIGNS_TABLE,
+      ProjectionExpression: 'campaignId',
+    }));
+    
+    for (const campaign of campaignsResult.Items || []) {
+      const campaignId = campaign.campaignId?.S;
+      if (campaignId) {
+        validCampaignIds.add(campaignId);
+      }
+    }
+    
+    console.log(`    Found ${validCampaignIds.size} valid campaign(s)`);
+    
+    // Scan all orders
+    const scanResult = await dynamodb.send(new ScanCommand({
+      TableName: ORDERS_TABLE,
+      ProjectionExpression: 'campaignId, orderId',
+    }));
+    
+    const orders = scanResult.Items || [];
+    console.log(`    Found ${orders.length} total order(s)`);
+    
+    // Check each order to see if campaign exists
+    for (const order of orders) {
+      const campaignId = order.campaignId?.S;
+      const orderId = order.orderId?.S;
+      
+      if (!campaignId || !orderId) continue;
+      
+      if (!validCampaignIds.has(campaignId)) {
+        // Campaign doesn't exist - orphaned order!
+        console.log(`    Deleting orphaned order: ${orderId} (campaign ${campaignId})`);
+        try {
+          await dynamodb.send(new DeleteItemCommand({
+            TableName: ORDERS_TABLE,
+            Key: {
+              campaignId: { S: campaignId },
+              orderId: { S: orderId },
+            },
+          }));
+          deleted++;
+        } catch (error) {
+          console.error(`    Failed to delete order ${orderId}:`, error);
+        }
+      }
+    }
+  } catch (error) {
+    console.error('  Failed to scan orders:', error);
+  }
+  
+  return deleted;
+}
+
+/**
+ * Clean up orphaned invites (invites referencing non-existent TEST profiles)
+ * Only deletes invites for profiles that were owned by test accounts
+ */
+async function cleanupOrphanedInvites(testProfileIds: string[]): Promise<number> {
+  console.log('  Checking for orphaned invites from deleted test profiles...');
+  let deleted = 0;
+  
+  // Build set of test profile IDs with PROFILE# prefix
+  const testProfileIdsWithPrefix = new Set(testProfileIds.map(id => `PROFILE#${id}`));
+  
+  try {
+    // Only query invites for test profiles using the profileId-index GSI
+    for (const profileIdWithPrefix of testProfileIdsWithPrefix) {
+      try {
+        const queryResult = await dynamodb.send(new QueryCommand({
+          TableName: INVITES_TABLE,
+          IndexName: 'profileId-index',
+          KeyConditionExpression: 'profileId = :profileId',
+          ExpressionAttributeValues: {
+            ':profileId': { S: profileIdWithPrefix },
+          },
+          ProjectionExpression: 'inviteCode',
+        }));
+        
+        const invites = queryResult.Items || [];
+        
+        // If we found invites, the profile was already deleted but invites remain
+        for (const invite of invites) {
+          const inviteCode = invite.inviteCode?.S;
+          
+          if (inviteCode) {
+            console.log(`    Deleting orphaned invite: ${inviteCode} (profile ${profileIdWithPrefix} not found)`);
+            try {
+              await dynamodb.send(new DeleteItemCommand({
+                TableName: INVITES_TABLE,
+                Key: {
+                  inviteCode: { S: inviteCode },
+                },
+              }));
+              deleted++;
+            } catch (error) {
+              console.error(`    Failed to delete invite ${inviteCode}:`, error);
+            }
+          }
+        }
+      } catch (error) {
+        console.error(`    Failed to query invites for ${profileIdWithPrefix}:`, error);
+      }
+    }
+  } catch (error) {
+    console.error('  Failed to query orphaned invites:', error);
+  }
+  
+  console.log(`    Deleted ${deleted} orphaned test invite(s)`);
+  return deleted;
+}
+
+/**
+ * Clean up ALL orphaned invites (invites where profile or owner account doesn't exist).
+ * 
+ * An invite is orphaned if:
+ * 1. The profileId doesn't exist in the profiles table
+ * 2. The ownerAccountId (of the profile) doesn't exist in the accounts table
+ * 
+ * @param dryRun If true, only reports what would be deleted without actually deleting
+ * @param maxDeletions Maximum number of invites to delete in one run (safety limit)
+ */
+async function cleanupAllOrphanedInvites(dryRun: boolean = true, maxDeletions: number = 100): Promise<number> {
+  console.log(`  ${dryRun ? '[DRY RUN]' : ''} Scanning ALL invites for orphaned records...`);
+  let deleted = 0;
+  let checked = 0;
+  
+  try {
+    // Step 1: Load all valid profileIds with their ownerAccountIds
+    console.log('    Loading all profiles...');
+    const profileToOwner = new Map<string, string>();
+    const profilesScanResult = await dynamodb.send(new ScanCommand({
+      TableName: PROFILES_TABLE,
+      ProjectionExpression: 'profileId, ownerAccountId',
+    }));
+    for (const profile of profilesScanResult.Items || []) {
+      const profileId = profile.profileId?.S;  // This includes PROFILE# prefix
+      const ownerAccountId = profile.ownerAccountId?.S;  // This includes ACCOUNT# prefix
+      if (profileId && ownerAccountId) {
+        profileToOwner.set(profileId, ownerAccountId);
+      }
+    }
+    console.log(`    Found ${profileToOwner.size} valid profile(s)`);
+    
+    // Step 2: Load all valid accountIds
+    console.log('    Loading all accounts...');
+    const validAccountIds = new Set<string>();
+    const accountsScanResult = await dynamodb.send(new ScanCommand({
+      TableName: ACCOUNTS_TABLE,
+      ProjectionExpression: 'accountId',
+    }));
+    for (const account of accountsScanResult.Items || []) {
+      const accountId = account.accountId?.S;  // This includes ACCOUNT# prefix
+      if (accountId) {
+        validAccountIds.add(accountId);
+      }
+    }
+    console.log(`    Found ${validAccountIds.size} valid account(s)`);
+    
+    // Step 3: Scan all invites and check validity
+    const invitesScanResult = await dynamodb.send(new ScanCommand({
+      TableName: INVITES_TABLE,
+      ProjectionExpression: 'inviteCode, profileId',
+    }));
+    
+    const invites = invitesScanResult.Items || [];
+    console.log(`    Found ${invites.length} total invite(s) to validate`);
+    
+    for (const invite of invites) {
+      const inviteCode = invite.inviteCode?.S;
+      const profileIdWithPrefix = invite.profileId?.S;  // This includes PROFILE# prefix
+      
+      if (!inviteCode || !profileIdWithPrefix) continue;
+      
+      checked++;
+      
+      // Check if invite is orphaned - NO LONGER strip prefix!
+      let isOrphaned = false;
+      let reason = '';
+      
+      const ownerAccountId = profileToOwner.get(profileIdWithPrefix);
+      
+      if (!ownerAccountId) {
+        // Profile doesn't exist
+        isOrphaned = true;
+        reason = `profile ${profileIdWithPrefix} not found`;
+      } else if (!validAccountIds.has(ownerAccountId)) {
+        // Owner account doesn't exist
+        isOrphaned = true;
+        reason = `owner account ${ownerAccountId} not found`;
+      }
+      
+      if (isOrphaned) {
+        console.log(`    ${dryRun ? 'WOULD DELETE' : 'DELETING'} orphaned invite: ${inviteCode} (${reason})`);
+        
+        if (!dryRun && deleted < maxDeletions) {
           try {
             await dynamodb.send(new DeleteItemCommand({
               TableName: INVITES_TABLE,
@@ -381,11 +787,79 @@ async function cleanupTestInvites(profileIds: string[]): Promise<number> {
           } catch (error) {
             console.error(`    Failed to delete invite ${inviteCode}:`, error);
           }
+        } else if (dryRun) {
+          deleted++; // Count what would be deleted
+        }
+        
+        if (deleted >= maxDeletions) {
+          console.log(`    ⚠️  Reached max deletions limit (${maxDeletions}), stopping`);
+          break;
         }
       }
-    } catch (error) {
-      console.error(`  Failed to query invites for profile ${profileId}:`, error);
     }
+    
+    console.log(`    Checked ${checked} invite(s), ${dryRun ? 'would delete' : 'deleted'} ${deleted}`);
+  } catch (error) {
+    console.error('  Failed to scan invites:', error);
+  }
+  
+  return deleted;
+}
+
+/**
+ * Clean up empty campaigns (campaigns with no orders)
+ */
+async function cleanupEmptyCampaigns(): Promise<number> {
+  console.log('  Scanning for empty campaigns...');
+  let deleted = 0;
+  
+  try {
+    // Scan all campaigns
+    const scanResult = await dynamodb.send(new ScanCommand({
+      TableName: CAMPAIGNS_TABLE,
+      ProjectionExpression: 'campaignId, profileId',
+    }));
+    
+    const campaigns = scanResult.Items || [];
+    console.log(`    Found ${campaigns.length} total campaign(s)`);
+    
+    // Check each campaign for orders
+    for (const campaign of campaigns) {
+      const campaignId = campaign.campaignId?.S;
+      const profileId = campaign.profileId?.S;
+      
+      if (!campaignId || !profileId) continue;
+      
+      // Query orders for this campaign
+      try {
+        const ordersResult = await dynamodb.send(new QueryCommand({
+          TableName: ORDERS_TABLE,
+          KeyConditionExpression: 'campaignId = :campaignId',
+          ExpressionAttributeValues: {
+            ':campaignId': { S: campaignId },
+          },
+          ProjectionExpression: 'orderId',
+          Limit: 1, // Just check if any exist
+        }));
+        
+        if (!ordersResult.Items || ordersResult.Items.length === 0) {
+          // No orders - empty campaign!
+          console.log(`    Deleting empty campaign: ${campaignId}`);
+          await dynamodb.send(new DeleteItemCommand({
+            TableName: CAMPAIGNS_TABLE,
+            Key: {
+              profileId: { S: profileId },
+              campaignId: { S: campaignId },
+            },
+          }));
+          deleted++;
+        }
+      } catch (error) {
+        console.error(`    Failed to check/delete campaign ${campaignId}:`, error);
+      }
+    }
+  } catch (error) {
+    console.error('  Failed to scan campaigns:', error);
   }
   
   return deleted;
@@ -441,12 +915,32 @@ export default async function globalTeardown(): Promise<void> {
     // Step 4: Clean up in order of dependencies (child entities first)
     // NOTE: We delete SellerProfiles (Scouts) but NOT Account records or Cognito users
     const ordersDeleted = await cleanupTestOrders(campaignIds);
-    const invitesDeleted = await cleanupTestInvites(profileIds);
-    const sharesDeleted = await cleanupTestShares(profileIds);
+    const invitesDeleted = await cleanupTestInvites(profileIds, testAccountIds);
+    const sharesDeleted = await cleanupTestShares(profileIds, testAccountIds);
     const campaignsDeleted = await cleanupTestCampaigns(profileIds);
     const catalogsDeleted = await cleanupTestCatalogs();
     const sharedCampaignsDeleted = await cleanupSharedCampaigns();
     const profilesDeleted = await cleanupTestProfiles();
+    
+    // Step 5: Clean up orphaned records (data integrity issues) - ONLY for test profiles
+    console.log('\n  Cleaning up orphaned test data...');
+    const orphanedSharesDeleted = await cleanupOrphanedShares(profileIds);
+    const orphanedOrdersDeleted = await cleanupOrphanedOrders();
+    const orphanedInvitesDeleted = await cleanupOrphanedInvites(profileIds);
+    const emptyCampaignsDeleted = await cleanupEmptyCampaigns();
+    
+    // Step 6: Clean up ALL orphaned shares and invites (DRY RUN by default)
+    // Set DRY_RUN=false environment variable to actually delete
+    const dryRun = process.env.DRY_RUN !== 'false';
+    const maxDeletions = parseInt(process.env.MAX_DELETIONS || '100', 10);
+    
+    console.log('\n  Cleaning up ALL orphaned data (not just test data)...');
+    if (dryRun) {
+      console.log('  ⚠️  DRY RUN MODE - No actual deletions will occur');
+      console.log('  ℹ️  Set DRY_RUN=false to actually delete orphaned data');
+    }
+    const allOrphanedSharesDeleted = await cleanupAllOrphanedShares(dryRun, maxDeletions);
+    const allOrphanedInvitesDeleted = await cleanupAllOrphanedInvites(dryRun, maxDeletions);
     
     console.log('✅ Global cleanup complete:');
     console.log(`   - Orders: ${ordersDeleted} deleted`);
@@ -456,6 +950,12 @@ export default async function globalTeardown(): Promise<void> {
     console.log(`   - Catalogs: ${catalogsDeleted} deleted`);
     console.log(`   - Shared Campaigns: ${sharedCampaignsDeleted} deleted`);
     console.log(`   - SellerProfiles: ${profilesDeleted} deleted`);
+    console.log(`   - Orphaned Shares (test): ${orphanedSharesDeleted} deleted`);
+    console.log(`   - Orphaned Orders: ${orphanedOrdersDeleted} deleted`);
+    console.log(`   - Orphaned Invites (test): ${orphanedInvitesDeleted} deleted`);
+    console.log(`   - Empty Campaigns: ${emptyCampaignsDeleted} deleted`);
+    console.log(`   - Orphaned Shares (all): ${allOrphanedSharesDeleted} ${dryRun ? 'would be' : ''} deleted`);
+    console.log(`   - Orphaned Invites (all): ${allOrphanedInvitesDeleted} ${dryRun ? 'would be' : ''} deleted`);
     console.log('   - Account records: preserved (not deleted)');
     console.log('   - Cognito users: preserved (not deleted)');
   } catch (error) {

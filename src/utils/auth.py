@@ -37,17 +37,34 @@ def _profile_exists(profiles_table: "Table", db_profile_id: str) -> bool:
     return bool(response.get("Items", []))
 
 
+def _convert_permission_to_string(perm: Any) -> str | None:
+    """Convert a permission item to string, handling dict or string formats."""
+    if isinstance(perm, str):
+        return str(perm.upper())
+    if isinstance(perm, dict) and "S" in perm:
+        return str(perm["S"].upper())
+    return None
+
+
 def _normalize_permissions(permissions: Any) -> list[str]:
     """Normalize permissions to uppercase list, handling various formats."""
     if not isinstance(permissions, (list, set)):
         return []
     result = []
     for perm in permissions:
-        if isinstance(perm, str):
-            result.append(perm.upper())
-        elif isinstance(perm, dict) and "S" in perm:
-            result.append(perm["S"].upper())
+        converted = _convert_permission_to_string(perm)
+        if converted:
+            result.append(converted)
     return result
+
+
+def _has_required_permission(permissions: list[str], required_permission: str) -> bool:
+    """Check if permissions list contains the required permission."""
+    if required_permission == "READ":
+        return "READ" in permissions or "WRITE" in permissions
+    if required_permission == "WRITE":
+        return "WRITE" in permissions
+    return False
 
 
 def _check_share_permissions(
@@ -59,11 +76,7 @@ def _check_share_permissions(
         return False
     share = share_response["Item"]
     permissions = _normalize_permissions(share.get("permissions", []))
-    if required_permission == "READ" and ("READ" in permissions or "WRITE" in permissions):
-        return True
-    if required_permission == "WRITE" and "WRITE" in permissions:
-        return True
-    return False
+    return _has_required_permission(permissions, required_permission)
 
 
 def check_profile_access(caller_account_id: str, profile_id: str, required_permission: str = "READ") -> bool:

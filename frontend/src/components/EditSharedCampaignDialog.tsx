@@ -174,7 +174,7 @@ const useEditFormState = (sharedCampaign: SharedCampaign) => {
       creatorMessage: sharedCampaign.creatorMessage || '',
       isActive: sharedCampaign.isActive,
     });
-  }, [sharedCampaign]);
+  }, [sharedCampaign, form]);
 
   return {
     description: form.values.description,

@@ -40,6 +40,15 @@ def _get_s3_client() -> "S3Client":
     return boto3.client("s3", endpoint_url=os.getenv("S3_ENDPOINT"))
 
 
+def _generate_report_content(campaign: Dict[str, Any], orders: list[Dict[str, Any]], report_format: str) -> tuple[bytes, str, str]:
+    """Generate report content based on format."""
+    if report_format.lower() == "csv":
+        return _generate_csv_report(campaign, orders), "text/csv", "csv"
+    return (_generate_excel_report(campaign, orders), 
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", 
+            "xlsx")
+
+
 def request_campaign_report(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
     Generate a campaign report and upload to S3.
@@ -90,14 +99,7 @@ def request_campaign_report(event: Dict[str, Any], context: Any) -> Dict[str, An
         orders = _get_campaign_orders(tables.orders, campaign_id)
 
         # Generate report
-        if report_format.lower() == "csv":
-            report_content = _generate_csv_report(campaign, orders)
-            content_type = "text/csv"
-            file_extension = "csv"
-        else:
-            report_content = _generate_excel_report(campaign, orders)
-            content_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            file_extension = "xlsx"
+        report_content, content_type, file_extension = _generate_report_content(campaign, orders, report_format)
 
         # Upload to S3
         report_id = f"REPORT#{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
@@ -175,6 +177,11 @@ def _get_campaign_orders(table: Any, campaign_id: str) -> list[Dict[str, Any]]:
     return list(items) if items else []
 
 
+def _format_city_state_zip(address: Dict[str, Any]) -> str:
+    """Format city, state, and zip code."""
+    return " ".join(filter(None, [address.get("city"), address.get("state"), address.get("zipCode")]))
+
+
 def _format_address(address: Dict[str, Any] | None) -> str:
     """Format address object as string."""
     if not address:
@@ -182,15 +189,9 @@ def _format_address(address: Dict[str, Any] | None) -> str:
     parts = []
     if address.get("street"):
         parts.append(address["street"])
-    if address.get("city") or address.get("state") or address.get("zipCode"):
-        city_state_zip = " ".join(
-            filter(
-                None,
-                [address.get("city"), address.get("state"), address.get("zipCode")],
-            )
-        )
-        if city_state_zip:  # pragma: no branch - always true if we entered outer if
-            parts.append(city_state_zip)
+    city_state_zip = _format_city_state_zip(address)
+    if city_state_zip:
+        parts.append(city_state_zip)
     return ", ".join(parts)
 
 

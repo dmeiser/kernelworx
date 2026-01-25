@@ -20,11 +20,11 @@ cd kernelworx
 # Install Python dependencies (Lambda functions)
 uv sync
 
-# Install CDK dependencies
-cd cdk
-uv sync
-npm install
-cd ..
+# Install OpenTofu (macOS with Homebrew)
+brew install opentofu
+
+# Or on Linux
+curl -fsSL https://get.opentofu.org | bash
 ```
 
 ### 2. Configure AWS Credentials
@@ -39,35 +39,19 @@ export AWS_PROFILE=dev
 
 ### 3. Configure Deployment Settings
 
-**Important**: Create a `.env` file in the `cdk/` directory with your configuration:
+**Important**: Create a `.env` file in the `tofu/` directory with your configuration:
 
 ```bash
-cd cdk
+cd tofu
 cp .env.example .env
 ```
 
-Edit `cdk/.env` with your settings:
+Edit `tofu/.env` with your settings:
 
 ```bash
-# Environment name (dev, staging, prod)
-ENVIRONMENT=dev
-
-# Domain Configuration - your Route53 hosted zone
-BASE_DOMAIN=psm.repeatersolutions.com
-
-# AWS Account Configuration
-AWS_ACCOUNT_ID=750620721302
-AWS_REGION=us-east-1
-
-# Existing Resource Names (for import - leave blank for new deployment)
-STATIC_BUCKET_NAME=
-EXPORTS_BUCKET_NAME=
-TABLE_NAME=
-USER_POOL_ID=
-APPSYNC_API_ID=
+# Encryption passphrase for state files (generate a secure random string)
+ENCRYPTION_PASSPHRASE=your-secure-passphrase-here
 ```
-
-**⚠️ Security Note**: The `.env` file is gitignored and should **never** be committed to version control. It contains environment-specific configuration that may be sensitive.
 
 ### 4. Verify Environment
 
@@ -89,15 +73,19 @@ aws sts get-caller-identity
 
 ### Quick Start Deployment (Recommended)
 
-The easiest way to deploy is using the provided deployment script, which reads configuration from your `.env` file:
+The easiest way to deploy is using OpenTofu:
 
 ```bash
-cd cdk
+cd tofu/environments/dev
 
-# Ensure .env is configured (see step 3 above)
+# Initialize OpenTofu (first time only)
+tofu init
 
-# Deploy using the script
-./deploy.sh
+# Preview changes
+tofu plan
+
+# Apply changes
+tofu apply
 ```
 
 The script will:
@@ -108,35 +96,37 @@ The script will:
 
 ### Manual Deployment
 
-If you prefer to deploy manually:
+If you prefer more control:
 
 ```bash
-cd cdk
+cd tofu/environments/dev
 
-# Bootstrap CDK (first time only)
-npx cdk bootstrap
+# Set encryption passphrase
+export TF_VAR_encryption_passphrase='your-passphrase'
 
-# Synthesize CloudFormation template
-npx cdk synth
+# Initialize OpenTofu
+tofu init
 
-# Deploy the stack (reads from .env automatically)
-npx cdk deploy --require-approval never
+# Preview changes
+tofu plan -out=tfplan
+
+# Apply the plan
+tofu apply tfplan
 ```
 
 ### Deployment with Existing Resources (Import)
 
-If you have existing resources from a previous deployment, add them to your `.env` file:
+If you have existing resources from a previous deployment, you can import them into OpenTofu state:
 
 ```bash
-# Edit cdk/.env
-STATIC_BUCKET_NAME=kernelworx-static-dev
-EXPORTS_BUCKET_NAME=kernelworx-exports-dev
-TABLE_NAME=psm-app-dev
-USER_POOL_ID=us-east-1_m861e2M
-APPSYNC_API_ID=xxxxxxxxxxxxx
-```
+cd tofu/environments/dev
 
-Then deploy normally with `./deploy.sh` - the script will automatically pass these as context parameters.
+# Import existing DynamoDB table
+tofu import 'module.dynamodb.aws_dynamodb_table.main' table-name
+
+# Import existing S3 bucket
+tofu import 'module.s3.aws_s3_bucket.static' bucket-name
+```
 
 **Finding existing resources:**
 
@@ -156,34 +146,32 @@ aws appsync list-graphql-apis --query 'graphqlApis[?contains(name, `popcorn`)].i
 
 ### Environment-Specific Deployments
 
-Change the `ENVIRONMENT` variable in your `.env` file:
+Each environment has its own directory:
 
 ```bash
-# For dev environment (default)
-ENVIRONMENT=dev
+# For dev environment
+cd tofu/environments/dev
+tofu apply
 
-# For prod environment
-ENVIRONMENT=prod
+# For prod environment (when ready)
+cd tofu/environments/prod
+tofu apply
 ```
 
 Each environment gets its own isolated resources with environment-specific naming.
-- S3 buckets: `kernelworx-static-{env}` and `kernelworx-exports-{env}`
 
 ## Social Authentication (Optional)
 
 To enable social login providers, set environment variables before deployment:
 
 ```bash
-# Google OAuth
-export GOOGLE_CLIENT_ID="your-client-id"
-export GOOGLE_CLIENT_SECRET="your-client-secret"
+# Set OAuth credentials as OpenTofu variables
+export TF_VAR_google_client_id="your-client-id"
+export TF_VAR_google_client_secret="your-client-secret"
 
-# Facebook OAuth
-export FACEBOOK_APP_ID="your-app-id"
-export FACEBOOK_APP_SECRET="your-app-secret"
-
-# Deploy with social providers
-npx cdk deploy -c environment=dev
+# Deploy
+cd tofu/environments/dev
+tofu apply
 ```
 
 If these variables are not set, only email/password authentication will be available.
@@ -220,33 +208,32 @@ uv run mypy src/ && \
 uv run pytest tests/unit --cov=src --cov-fail-under=100
 ```
 
-### CDK Commands
+### OpenTofu Commands
 
 ```bash
-cd cdk
+cd tofu/environments/dev
 
-# Synthesize CloudFormation template
-npx cdk synth
+# Initialize working directory
+tofu init
 
 # Show differences between deployed and local
-npx cdk diff -c environment=dev
+tofu plan
 
 # Deploy changes
-npx cdk deploy -c environment=dev
+tofu apply
 
-# Destroy stack (WARNING: keeps data due to RETAIN policy)
-npx cdk destroy -c environment=dev
+# Destroy resources (WARNING: use with caution)
+tofu destroy
 ```
 
 ## Accessing Deployed Resources
 
-After deployment, CDK outputs key resource identifiers:
+After deployment, OpenTofu outputs key resource identifiers:
 
 ```bash
-# Get stack outputs
-aws cloudformation describe-stacks \
-  --stack-name kernelworx-dev \
-  --query 'Stacks[0].Outputs'
+# Get outputs
+cd tofu/environments/dev
+tofu output
 ```
 
 Key outputs include:
@@ -259,20 +246,11 @@ Key outputs include:
 
 ## Troubleshooting
 
-### "Stack does not exist" but resources exist
+### State lock issues
 
-Use the auto-import deployment method:
+If a previous apply was interrupted:
 ```bash
-./cdk/deploy-with-import.sh dev
-```
-
-### CloudFormation stack stuck in REVIEW_IN_PROGRESS
-
-```bash
-# Delete the failed changeset
-aws cloudformation delete-change-set \
-  --stack-name kernelworx-dev \
-  --change-set-name <changeset-name>
+tofu force-unlock <lock-id>
 ```
 
 ### Cognito domain already exists

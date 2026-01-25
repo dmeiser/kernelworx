@@ -153,6 +153,28 @@ def build_profile_response(
     return response
 
 
+def _parse_int_field(item: Dict[str, Any], field_name: str) -> Optional[int]:
+    """Parse an integer field from DynamoDB item, returning None on error."""
+    value = item.get(field_name)
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (ValueError, TypeError):
+        return None
+
+
+def _parse_float_field(item: Dict[str, Any], field_name: str) -> Optional[float]:
+    """Parse a float field from DynamoDB item, returning None on error."""
+    value = item.get(field_name)
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        return None
+
+
 def build_campaign_response(item: Dict[str, Any]) -> CampaignResponse:
     """
     Build a Campaign response from a DynamoDB item.
@@ -164,26 +186,9 @@ def build_campaign_response(item: Dict[str, Any]) -> CampaignResponse:
         CampaignResponse with normalized field names
     """
     # Parse numeric fields
-    campaign_year = item.get("campaignYear")
-    if campaign_year is not None:
-        try:
-            campaign_year = int(campaign_year)
-        except (ValueError, TypeError):
-            campaign_year = None
-
-    unit_number = item.get("unitNumber")
-    if unit_number is not None:
-        try:
-            unit_number = int(unit_number)
-        except (ValueError, TypeError):
-            unit_number = None
-
-    goal_amount = item.get("goalAmount")
-    if goal_amount is not None:
-        try:
-            goal_amount = float(goal_amount)
-        except (ValueError, TypeError):
-            goal_amount = None
+    campaign_year = _parse_int_field(item, "campaignYear")
+    unit_number = _parse_int_field(item, "unitNumber")
+    goal_amount = _parse_float_field(item, "goalAmount")
 
     return CampaignResponse(
         campaignId=cast(str, item.get("campaignId", "")),

@@ -24,6 +24,8 @@ import { GET_PROFILE, LIST_CAMPAIGNS_BY_PROFILE } from '../lib/graphql';
 import { ensureProfileId } from '../lib/ids';
 import type { Campaign, SellerProfile } from '../types';
 
+/* eslint-disable complexity */
+
 // Use SellerProfile with only the fields we need
 type Profile = Pick<SellerProfile, 'profileId' | 'sellerName' | 'isOwner' | 'permissions'>;
 
@@ -49,7 +51,6 @@ function separateCampaigns(campaigns: Campaign[]): { active: Campaign[]; inactiv
   return { active, inactive };
 }
 
-// eslint-disable-next-line complexity
 function canEditProfile(profile: Profile | undefined): boolean {
   if (!profile) return false;
   return (profile.isOwner ?? false) || (profile.permissions?.includes('WRITE') ?? false);

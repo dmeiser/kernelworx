@@ -1,0 +1,29 @@
+{
+	"kics_version": "v2.1.19",
+	"files_scanned": 33,
+	"lines_scanned": 5072,
+	"files_parsed": 33,
+	"lines_parsed": 4783,
+	"lines_ignored": 289,
+	"files_failed_to_scan": 0,
+	"queries_total": 1666,
+	"queries_failed_to_execute": 0,
+	"queries_failed_to_compute_similarity_id": 0,
+	"scan_id": "console",
+	"severity_counters": {
+		"CRITICAL": 0,
+		"HIGH": 0,
+		"INFO": 0,
+		"LOW": 0,
+		"MEDIUM": 0,
+		"TRACE": 0
+	},
+	"total_counter": 0,
+	"total_bom_resources": 0,
+	"start": "2026-01-25T20:56:31.458044759Z",
+	"end": "2026-01-25T20:56:42.357507685Z",
+	"paths": [
+		"/path"
+	],
+	"queries": []
+}

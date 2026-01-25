@@ -25,10 +25,10 @@ Essential knowledge for GitHub Copilot when working on this volunteer-run Scouti
 - ❌ NEVER run aws cloudformation delete-stack
 - ❌ NEVER create situations where rollback will destroy resources
 - ❌ NEVER perform AWS operations without understanding their impact on stack state
-- ✅ You ARE permitted to deploy to **dev environment only** by running `./deploy.sh` in the `cdk/` folder as part of normal workflow
-- ✅ ALWAYS use `cdk diff` to preview changes before deploying
+- ✅ You ARE permitted to deploy to **dev environment only** by running `./deploy.sh dev apply` in the `tofu/environments/dev/` folder as part of normal workflow
+- ✅ ALWAYS use `tofu plan` to preview changes before deploying
 - ✅ ONLY use read-only AWS CLI commands (describe, list, get) for verification
-- ✅ ASK before running any AWS command that modifies infrastructure outside of CDK
+- ✅ ASK before running any AWS command that modifies infrastructure outside of OpenTofu
 - ✅ ALWAYS preserve existing resources (RemovalPolicy.RETAIN)
 - ✅ ALWAYS import existing resources instead of creating new ones
 - ✅ ALWAYS ask before running ANY AWS CLI command that modifies infrastructure
@@ -37,7 +37,7 @@ Essential knowledge for GitHub Copilot when working on this volunteer-run Scouti
 
 **NEVER modify .env files without explicit permission!**
 
-- ❌ NEVER modify `cdk/.env` or `frontend/.env` without explicit user authorization
+- ❌ NEVER modify `tofu/.env` or `frontend/.env` without explicit user authorization
 - ❌ NEVER add new environment variables to .env files without permission
 - ❌ NEVER change existing values in .env files
 - ✅ You MAY read .env.example files to understand configuration
@@ -52,7 +52,7 @@ Essential knowledge for GitHub Copilot when working on this volunteer-run Scouti
 - **Functions**: AWS Lambda (Python 3.13)
 - **Data**: Amazon DynamoDB (single-table design)
 - **Auth**: Amazon Cognito User Pools (Google/Facebook social login)
-- **Infrastructure**: AWS CDK (Python)
+- **Infrastructure**: OpenTofu (Infrastructure as Code)
 - **Package Management**: uv (Python), npm (frontend)
 
 **Key Design Patterns**:
@@ -173,39 +173,42 @@ test('renders profile card with owner badge', () => {
 - High contrast colors (WCAG 2.1 AAA aspirational)
 - Test with screen readers when possible
 
-## 5. AWS CDK Patterns
+## 5. OpenTofu Infrastructure Patterns
 
-**Stack Organization**:
-```python
-from aws_cdk import (
-    Stack,
-    aws_dynamodb as dynamodb,
-    aws_cognito as cognito,
-    aws_appsync as appsync,
-)
+**Module Organization**:
+```hcl
+# tofu/modules/dynamodb/main.tf
+resource "aws_dynamodb_table" "main" {
+  name         = "${var.name_prefix}-app-${var.region_abbrev}-${var.environment}"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "PK"
+  range_key    = "SK"
 
-class PopcornSalesStack(Stack):
-    def __init__(self, scope, id, **kwargs):
-        super().__init__(scope, id, **kwargs)
-        
-        # DynamoDB table with GSIs
-        table = dynamodb.Table(self, "PsmApp",
-            partition_key=dynamodb.Attribute(name="PK", type=dynamodb.AttributeType.STRING),
-            sort_key=dynamodb.Attribute(name="SK", type=dynamodb.AttributeType.STRING),
-            billing_mode=dynamodb.BillingMode.ON_DEMAND,  # Cost-effective
-            point_in_time_recovery=True,
-        )
-        
-        # Add GSI1, GSI2, GSI3...
+  attribute {
+    name = "PK"
+    type = "S"
+  }
+  attribute {
+    name = "SK"
+    type = "S"
+  }
+
+  point_in_time_recovery {
+    enabled = true
+  }
+
+  # Add GSI1, GSI2, GSI3...
+}
 ```
 
 **Environment-specific configuration**:
-```python
-# Use CDK context for environment switching
-if self.node.try_get_context("environment") == "localstack":
-    # LocalStack endpoints
-else:
-    # AWS endpoints
+```hcl
+# tofu/environments/dev/main.tf
+module "dynamodb" {
+  source      = "../../modules/dynamodb"
+  environment = "dev"
+  # ... other variables
+}
 ```
 
 ## 6. Authorization Pattern
@@ -398,7 +401,7 @@ def generate_report(profile_id: str, campaign_id: str) -> str:
 
 ## 13. Quick Command Reference
 
-**Backend (Python/CDK)**:
+**Backend (Python/OpenTofu)**:
 ```bash
 # Install dependencies
 uv sync
@@ -412,8 +415,8 @@ uv run mypy src/
 # Test with coverage
 uv run pytest tests/unit --cov=src --cov-fail-under=100
 
-# Deploy CDK (from cdk/ directory)
-cd cdk && ./deploy.sh
+# Deploy OpenTofu (from tofu/environments/dev directory)
+cd tofu/environments/dev && tofu plan && tofu apply
 ```
 
 **Frontend (React/TypeScript)**:

@@ -115,6 +115,38 @@ def _get_seller_data(profile_id: str, profile: Dict[str, Any], campaigns: List[D
     }
 
 
+def _extract_unit_report_params(event: Dict[str, Any]) -> tuple[str, int, str, str, str, int, str, str]:
+    """Extract and validate parameters from unit report event."""
+    unit_type = event["arguments"]["unitType"]
+    unit_number = int(event["arguments"]["unitNumber"])
+    city = event["arguments"].get("city", "")
+    state = event["arguments"].get("state", "")
+    campaign_name = event["arguments"]["campaignName"]
+    campaign_year = int(event["arguments"]["campaignYear"])
+    catalog_id = event["arguments"]["catalogId"]
+    caller_account_id = event["identity"]["sub"]
+    return unit_type, unit_number, city, state, campaign_name, campaign_year, catalog_id, caller_account_id
+
+
+def _aggregate_seller_data(
+    accessible_profiles: Dict[str, Dict[str, Any]], profile_campaigns: Dict[str, List[Dict[str, Any]]]
+) -> tuple[List[Dict[str, Any]], float, int]:
+    """Aggregate seller data from accessible profiles."""
+    sellers: List[Dict[str, Any]] = []
+    total_unit_sales = 0.0
+    total_unit_orders = 0
+
+    for profile_id, profile in accessible_profiles.items():
+        seller_data = _get_seller_data(profile_id, profile, profile_campaigns[profile_id])
+        if seller_data["orders"] or seller_data["totalSales"] > 0:
+            sellers.append(seller_data)
+            total_unit_sales += seller_data["totalSales"]
+            total_unit_orders += seller_data["orderCount"]
+
+    sellers.sort(key=lambda s: s["totalSales"], reverse=True)
+    return sellers, total_unit_sales, total_unit_orders
+
+
 def get_unit_report(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
     Generate unit-level popcorn sales report using unitCampaignKey-index queries.
@@ -138,14 +170,9 @@ def get_unit_report(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
     try:
         # Extract parameters
-        unit_type = event["arguments"]["unitType"]
-        unit_number = int(event["arguments"]["unitNumber"])
-        city = event["arguments"].get("city", "")
-        state = event["arguments"].get("state", "")
-        campaign_name = event["arguments"]["campaignName"]
-        campaign_year = int(event["arguments"]["campaignYear"])
-        catalog_id = event["arguments"]["catalogId"]
-        caller_account_id = event["identity"]["sub"]
+        unit_type, unit_number, city, state, campaign_name, campaign_year, catalog_id, caller_account_id = (
+            _extract_unit_report_params(event)
+        )
 
         logger.info(
             f"Generating unit report for {unit_type} {unit_number} in {city}, {state}, "
@@ -177,18 +204,7 @@ def get_unit_report(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             return _empty_report(unit_type, unit_number, campaign_name, campaign_year)
 
         # Step 4: Build seller data
-        sellers: List[Dict[str, Any]] = []
-        total_unit_sales = 0.0
-        total_unit_orders = 0
-
-        for profile_id, profile in accessible_profiles.items():
-            seller_data = _get_seller_data(profile_id, profile, profile_campaigns[profile_id])
-            if seller_data["orders"] or seller_data["totalSales"] > 0:
-                sellers.append(seller_data)
-                total_unit_sales += seller_data["totalSales"]
-                total_unit_orders += seller_data["orderCount"]
-
-        sellers.sort(key=lambda s: s["totalSales"], reverse=True)
+        sellers, total_unit_sales, total_unit_orders = _aggregate_seller_data(accessible_profiles, profile_campaigns)
 
         logger.info(f"Report complete: {len(sellers)} sellers, ${total_unit_sales:.2f}, {total_unit_orders} orders")
 

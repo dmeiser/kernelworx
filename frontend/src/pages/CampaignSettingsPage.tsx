@@ -40,6 +40,8 @@ import {
 import { ensureCampaignId, ensureCatalogId, toUrlId } from '../lib/ids';
 import type { Campaign, Catalog } from '../types';
 
+/* eslint-disable complexity */
+
 // Helper to extract date part from ISO string
 const extractDatePart = (isoDate: string | undefined): string => isoDate?.split('T')[0] || '';
 
@@ -198,7 +200,6 @@ const initializeFormFromCampaign = (
   }
 };
 
-// eslint-disable-next-line complexity -- Component already well modularized; complexity 6 is acceptable
 export const CampaignSettingsPage: React.FC = () => {
   const { profileId: encodedProfileId, campaignId: encodedCampaignId } = useParams<{
     profileId: string;

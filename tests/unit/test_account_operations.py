@@ -334,7 +334,6 @@ class TestDeleteMyAccount:
         campaign_id = "CAMPAIGN#test-campaign-123"
         catalog_id = "CATALOG#test-catalog-123"
         order_id = "ORDER#test-order-123"
-        share_id = f"SHARE#{sample_account_id}#other-user"
 
         # 1. Create account
         accounts_table.put_item(
@@ -395,7 +394,7 @@ class TestDeleteMyAccount:
         shares_table.put_item(
             Item={
                 "profileId": profile_id,
-                "targetAccountId": f"ACCOUNT#other-user",
+                "targetAccountId": "ACCOUNT#other-user",
                 "permissions": ["READ", "WRITE"],
                 "createdAt": datetime.now(timezone.utc).isoformat(),
             }
@@ -407,7 +406,7 @@ class TestDeleteMyAccount:
         assert campaigns_table.get_item(Key={"profileId": profile_id, "campaignId": campaign_id}).get("Item") is not None
         assert catalogs_table.get_item(Key={"catalogId": catalog_id}).get("Item") is not None
         assert orders_table.get_item(Key={"campaignId": campaign_id, "orderId": order_id}).get("Item") is not None
-        assert shares_table.get_item(Key={"profileId": profile_id, "targetAccountId": f"ACCOUNT#other-user"}).get("Item") is not None
+        assert shares_table.get_item(Key={"profileId": profile_id, "targetAccountId": "ACCOUNT#other-user"}).get("Item") is not None
 
         # Mock Cognito client
         with patch("boto3.client") as mock_boto_client:
@@ -720,7 +719,6 @@ class TestDeleteMyAccount:
     ) -> None:
         """Test deletion succeeds even if user not found in Cognito."""
         from src.handlers.account_operations import delete_my_account
-        from botocore.exceptions import ClientError
 
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
         monkeypatch.setenv("USER_POOL_ID", "us-east-1_test123")
@@ -835,3 +833,155 @@ class TestDeleteMyAccount:
             assert "Failed to delete account from Cognito" in str(exc_info.value)
         # Account should still be deleted from DynamoDB
         assert accounts_table.get_item(Key={"accountId": account_id_key}).get("Item") is None
+
+    def test_delete_account_cognito_admin_delete_error(
+        self,
+        dynamodb_table: Any,
+        sample_account_id: str,
+        appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """Test deletion handles Cognito admin_delete_user errors (covers line 171)."""
+        from src.handlers.account_operations import delete_my_account
+        from botocore.exceptions import ClientError
+
+        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
+        monkeypatch.setenv("USER_POOL_ID", "us-east-1_test123")
+
+        dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
+        accounts_table = dynamodb.Table("kernelworx-accounts-ue1-dev")
+
+        account_id_key = f"ACCOUNT#{sample_account_id}"
+
+        accounts_table.put_item(
+            Item={
+                "accountId": account_id_key,
+                "email": "test@example.com",
+                "createdAt": datetime.now(timezone.utc).isoformat(),
+                "updatedAt": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+
+        # Mock Cognito - list_users succeeds, admin_delete_user fails
+        with patch("boto3.client") as mock_boto_client:
+            mock_cognito = MagicMock()
+            mock_boto_client.return_value = mock_cognito
+
+            # list_users returns a user
+            mock_cognito.list_users.return_value = {
+                "Users": [
+                    {
+                        "Username": "test-user",
+                        "Attributes": [{"Name": "sub", "Value": sample_account_id}],
+                    }
+                ]
+            }
+
+            # admin_delete_user raises non-UserNotFoundException error
+            error_response = {"Error": {"Code": "InternalError", "Message": "Internal error"}}
+            mock_cognito.admin_delete_user.side_effect = ClientError(error_response, "AdminDeleteUser")
+
+            event = {
+                **appsync_event,
+                "identity": {"sub": sample_account_id},
+            }
+
+            # Should raise the error (line 171 re-raises), which is then caught and wrapped at line 211
+            with pytest.raises(AppError) as exc_info:
+                delete_my_account(event, lambda_context)
+
+            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+            assert "Failed to delete account from Cognito" in str(exc_info.value)
+
+    def test_delete_account_unexpected_exception(
+        self,
+        dynamodb_table: Any,
+        sample_account_id: str,
+        appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """Test deletion handles unexpected exceptions (covers lines 213-215)."""
+        from src.handlers.account_operations import delete_my_account
+
+        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
+        monkeypatch.setenv("USER_POOL_ID", "us-east-1_test123")
+
+        # Mock Cognito
+        with patch("boto3.client") as mock_boto_client:
+            mock_cognito = MagicMock()
+            mock_boto_client.return_value = mock_cognito
+
+            # Mock an unexpected exception type (not ClientError)
+            mock_cognito.list_users.side_effect = RuntimeError("Unexpected error")
+
+            event = {
+                **appsync_event,
+                "identity": {"sub": sample_account_id},
+            }
+
+            # Should catch and wrap as AppError (lines 213-215)
+            with pytest.raises(AppError) as exc_info:
+                delete_my_account(event, lambda_context)
+
+            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+            assert "Failed to delete account" in str(exc_info.value)
+
+    def test_delete_account_cognito_user_not_found_exception(
+        self,
+        dynamodb_table: Any,
+        sample_account_id: str,
+        appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """Test deletion handles UserNotFoundException gracefully (covers line 171 inverse branch)."""
+        from src.handlers.account_operations import delete_my_account
+        from botocore.exceptions import ClientError
+
+        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
+        monkeypatch.setenv("USER_POOL_ID", "us-east-1_test123")
+
+        dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
+        accounts_table = dynamodb.Table("kernelworx-accounts-ue1-dev")
+
+        account_id_key = f"ACCOUNT#{sample_account_id}"
+
+        accounts_table.put_item(
+            Item={
+                "accountId": account_id_key,
+                "email": "test@example.com",
+                "createdAt": datetime.now(timezone.utc).isoformat(),
+                "updatedAt": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+
+        # Mock Cognito - list_users succeeds, admin_delete_user fails with UserNotFoundException
+        with patch("boto3.client") as mock_boto_client:
+            mock_cognito = MagicMock()
+            mock_boto_client.return_value = mock_cognito
+
+            # list_users returns a user
+            mock_cognito.list_users.return_value = {
+                "Users": [
+                    {
+                        "Username": "test-user",
+                        "Attributes": [{"Name": "sub", "Value": sample_account_id}],
+                    }
+                ]
+            }
+
+            # admin_delete_user raises UserNotFoundException - should be swallowed (NOT re-raised)
+            error_response = {"Error": {"Code": "UserNotFoundException", "Message": "User not found"}}
+            mock_cognito.admin_delete_user.side_effect = ClientError(error_response, "AdminDeleteUser")
+
+            event = {
+                **appsync_event,
+                "identity": {"sub": sample_account_id},
+            }
+
+            # Should succeed even though Cognito user wasn't found (already deleted)
+            result = delete_my_account(event, lambda_context)
+            
+            assert result is True

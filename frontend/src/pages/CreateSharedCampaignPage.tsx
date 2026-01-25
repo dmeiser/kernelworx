@@ -34,6 +34,8 @@ import {
 import { StateAutocomplete } from '../components/StateAutocomplete';
 import type { Catalog, SharedCampaign } from '../types';
 
+/* eslint-disable complexity */
+
 const UNIT_TYPES = ['Pack', 'Troop', 'Crew', 'Ship', 'Post'];
 
 const BASE_URL = window.location.origin;

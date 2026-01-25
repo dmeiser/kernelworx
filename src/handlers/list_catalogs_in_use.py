@@ -32,96 +32,58 @@ except ModuleNotFoundError:  # pragma: no cover
     from ..utils.logging import StructuredLogger, get_correlation_id
 
 
+async def _extract_field_values(items: list[Dict[str, Any]], field_name: str) -> List[str]:
+    """Extract field values from DynamoDB items."""
+    return [item[field_name] for item in items if item.get(field_name)]
+
+
+async def _handle_pagination(table: Any, query_params: Dict[str, Any], field_name: str) -> List[str]:
+    """Handle DynamoDB pagination for query operations."""
+    results: List[str] = []
+    response = await table.query(**query_params)
+    results.extend(await _extract_field_values(response.get("Items", []), field_name))
+    
+    while response.get("LastEvaluatedKey"):
+        query_params["ExclusiveStartKey"] = response["LastEvaluatedKey"]
+        response = await table.query(**query_params)
+        results.extend(await _extract_field_values(response.get("Items", []), field_name))
+    
+    return results
+
+
 async def _async_get_owned_profile_ids(dynamodb: Any, profiles_table_name: str, owner_account_id: str) -> List[str]:
     """Async: Query profiles owned by this account."""
-    profile_ids: List[str] = []
     table = await dynamodb.Table(profiles_table_name)
-
-    response = await table.query(
-        KeyConditionExpression="ownerAccountId = :ownerAccountId",
-        ExpressionAttributeValues={":ownerAccountId": owner_account_id},
-        ProjectionExpression="profileId",
-    )
-
-    for item in response.get("Items", []):
-        if item.get("profileId"):
-            profile_ids.append(item["profileId"])
-
-    # Handle pagination
-    while response.get("LastEvaluatedKey"):
-        response = await table.query(
-            KeyConditionExpression="ownerAccountId = :ownerAccountId",
-            ExpressionAttributeValues={":ownerAccountId": owner_account_id},
-            ProjectionExpression="profileId",
-            ExclusiveStartKey=response["LastEvaluatedKey"],
-        )
-        for item in response.get("Items", []):  # pragma: no branch
-            if item.get("profileId"):
-                profile_ids.append(item["profileId"])
-
-    return profile_ids
+    query_params = {
+        "KeyConditionExpression": "ownerAccountId = :ownerAccountId",
+        "ExpressionAttributeValues": {":ownerAccountId": owner_account_id},
+        "ProjectionExpression": "profileId",
+    }
+    return await _handle_pagination(table, query_params, "profileId")
 
 
 async def _async_get_campaigns_for_profile(dynamodb: Any, campaigns_table_name: str, profile_id: str) -> Set[str]:
     """Async: Query campaigns for a specific profile and return catalog IDs."""
-    catalog_ids: Set[str] = set()
     table = await dynamodb.Table(campaigns_table_name)
-
-    response = await table.query(
-        KeyConditionExpression="profileId = :profileId",
-        ExpressionAttributeValues={":profileId": profile_id},
-        ProjectionExpression="catalogId",
-    )
-
-    for item in response.get("Items", []):
-        if item.get("catalogId"):
-            catalog_ids.add(item["catalogId"])
-
-    # Handle pagination
-    while response.get("LastEvaluatedKey"):
-        response = await table.query(
-            KeyConditionExpression="profileId = :profileId",
-            ExpressionAttributeValues={":profileId": profile_id},
-            ProjectionExpression="catalogId",
-            ExclusiveStartKey=response["LastEvaluatedKey"],
-        )
-        for item in response.get("Items", []):  # pragma: no branch
-            if item.get("catalogId"):
-                catalog_ids.add(item["catalogId"])
-
-    return catalog_ids
+    query_params = {
+        "KeyConditionExpression": "profileId = :profileId",
+        "ExpressionAttributeValues": {":profileId": profile_id},
+        "ProjectionExpression": "catalogId",
+    }
+    catalog_list = await _handle_pagination(table, query_params, "catalogId")
+    return set(catalog_list)
 
 
 async def _async_get_shared_profile_ids(dynamodb: Any, shares_table_name: str, target_account_id: str) -> List[str]:
     """Async: Get profile IDs that are shared with this account."""
-    profile_ids: List[str] = []
     table = await dynamodb.Table(shares_table_name)
-
-    response = await table.query(
-        IndexName="targetAccountId-index",
-        KeyConditionExpression="targetAccountId = :targetAccountId",
-        ExpressionAttributeValues={":targetAccountId": target_account_id},
-        ProjectionExpression="profileId",
-    )
-
-    for item in response.get("Items", []):
-        if item.get("profileId"):
-            profile_ids.append(item["profileId"])
-
-    # Handle pagination
-    while response.get("LastEvaluatedKey"):
-        response = await table.query(
-            IndexName="targetAccountId-index",
-            KeyConditionExpression="targetAccountId = :targetAccountId",
-            ExpressionAttributeValues={":targetAccountId": target_account_id},
-            ProjectionExpression="profileId",
-            ExclusiveStartKey=response["LastEvaluatedKey"],
-        )
-        for item in response.get("Items", []):  # pragma: no branch
-            if item.get("profileId"):
-                profile_ids.append(item["profileId"])
-
-    return profile_ids
+    query_params = {
+        "IndexName": "targetAccountId-index",
+        "KeyConditionExpression": "targetAccountId = :targetAccountId",
+        "ExpressionAttributeValues": {":targetAccountId": target_account_id},
+        "ProjectionExpression": "profileId",
+    }
+    return await _handle_pagination(table, query_params, "profileId")
 
 
 async def _async_get_shared_campaign_catalog_ids(

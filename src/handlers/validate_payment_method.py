@@ -18,6 +18,26 @@ except ModuleNotFoundError:  # pragma: no cover
     from src.utils.payment_methods import validate_payment_method_exists
 
 
+def _extract_and_normalize_inputs(event: Dict[str, Any]) -> tuple[str, str]:
+    """Extract and normalize owner_account_id and payment_method from event."""
+    prev_result = event.get("prev", {}).get("result", {})
+    arguments = event.get("arguments", {})
+    input_data = arguments.get("input", {})
+
+    owner_account_id = prev_result.get("ownerAccountId")
+    if not owner_account_id:
+        raise AppError(ErrorCode.INVALID_INPUT, "Owner account ID not found in pipeline context")
+
+    payment_method = input_data.get("paymentMethod")
+    if not payment_method:
+        raise AppError(ErrorCode.INVALID_INPUT, "Payment method is required")
+
+    if owner_account_id.startswith("ACCOUNT#"):
+        owner_account_id = owner_account_id[8:]
+
+    return owner_account_id, payment_method
+
+
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
     Validate that the payment method exists for the profile owner's account.
@@ -37,41 +57,13 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     logger = get_logger(__name__)
 
     try:
-        # Extract from AppSync pipeline event
-        prev_result = event.get("prev", {}).get("result", {})
-        arguments = event.get("arguments", {})
-        input_data = arguments.get("input", {})
+        owner_account_id, payment_method = _extract_and_normalize_inputs(event)
 
-        # Get owner account ID from previous pipeline step (should be set by verify_profile_write_access)
-        owner_account_id = prev_result.get("ownerAccountId")
-        if not owner_account_id:
-            raise AppError(ErrorCode.INVALID_INPUT, "Owner account ID not found in pipeline context")
-
-        # Get payment method from order input
-        payment_method = input_data.get("paymentMethod")
-        if not payment_method:
-            raise AppError(ErrorCode.INVALID_INPUT, "Payment method is required")
-
-        # Remove ACCOUNT# prefix if present
-        if owner_account_id.startswith("ACCOUNT#"):
-            owner_account_id = owner_account_id[8:]
-
-        logger.info(
-            "Validating payment method for order",
-            owner_account_id=owner_account_id,
-            payment_method=payment_method,
-        )
-
-        # Validate payment method exists
+        logger.info("Validating payment method for order", owner_account_id=owner_account_id, payment_method=payment_method)
         validate_payment_method_exists(owner_account_id, payment_method)
+        logger.info("Payment method validated successfully", owner_account_id=owner_account_id, payment_method=payment_method)
 
-        logger.info(
-            "Payment method validated successfully",
-            owner_account_id=owner_account_id,
-            payment_method=payment_method,
-        )
-
-        # Return the prev.result unchanged (passthrough)
+        prev_result = event.get("prev", {}).get("result", {})
         result: Dict[str, Any] = dict(prev_result) if isinstance(prev_result, dict) else {}
         return result
 

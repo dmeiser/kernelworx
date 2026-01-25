@@ -51,23 +51,38 @@ def generate_invite_code() -> str:
     return secrets.token_urlsafe(8)[:10].upper().replace("-", "X").replace("_", "Y")
 
 
+def _is_valid_share_entry(profile_id: Any, owner_account_id: Any) -> bool:
+    """Check if share entry has valid profile ID and owner account ID."""
+    if not (profile_id and owner_account_id):
+        return False
+    return isinstance(profile_id, str) and isinstance(owner_account_id, str)
+
+
+def _add_share_to_map(
+    shares_by_profile: Dict[str, Dict[str, Any]],
+    share: Dict[str, Any]
+) -> None:
+    """Add a share to the deduplicated map if valid and not already present."""
+    profile_id_val = share.get("profileId")
+    owner_account_id_val = share.get("ownerAccountId")
+    
+    if not _is_valid_share_entry(profile_id_val, owner_account_id_val):
+        return
+    if profile_id_val in shares_by_profile:
+        return
+        
+    shares_by_profile[profile_id_val] = {  # type: ignore[index]
+        "profileId": profile_id_val,
+        "ownerAccountId": owner_account_id_val,
+        "permissions": share.get("permissions", []),
+    }
+
+
 def _deduplicate_shares(shares: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
     """Deduplicate shares by profileId and extract key fields."""
     shares_by_profile: Dict[str, Dict[str, Any]] = {}
     for share in shares:
-        profile_id_val = share.get("profileId")
-        owner_account_id_val = share.get("ownerAccountId")
-        if not (profile_id_val and owner_account_id_val):
-            continue
-        if not (isinstance(profile_id_val, str) and isinstance(owner_account_id_val, str)):
-            continue
-        if profile_id_val in shares_by_profile:
-            continue
-        shares_by_profile[profile_id_val] = {
-            "profileId": profile_id_val,
-            "ownerAccountId": owner_account_id_val,
-            "permissions": share.get("permissions", []),
-        }
+        _add_share_to_map(shares_by_profile, share)
     return shares_by_profile
 
 
@@ -130,20 +145,41 @@ def _fetch_batch_with_retry(
     return []  # Should never reach here due to raise above
 
 
+def _get_unprocessed_table(unprocessed_keys: Dict[str, Any], table_name: str) -> Any:
+    """Get unprocessed table from unprocessed keys."""
+    unprocessed_table = unprocessed_keys.get(table_name, {})
+    if not unprocessed_table and isinstance(unprocessed_keys, dict):
+        for v in unprocessed_keys.values():
+            return v
+    return unprocessed_table
+
+
 def _log_unprocessed_keys(
     batch_response: "BatchGetItemOutputServiceResourceTypeDef", table_name: str, logger: StructuredLogger
 ) -> None:
     """Log any unprocessed keys from BatchGetItem."""
     unprocessed_keys = batch_response.get("UnprocessedKeys", {})
-    unprocessed_table: Any = unprocessed_keys.get(table_name, {})
-    if not unprocessed_table and isinstance(unprocessed_keys, dict):
-        for v in unprocessed_keys.values():
-            unprocessed_table = v
-            break
+    unprocessed_table = _get_unprocessed_table(unprocessed_keys, table_name)
     if unprocessed_table:
         unprocessed_key_list = unprocessed_table.get("Keys", [])
         if unprocessed_key_list:
             logger.warning("Unprocessed keys in batch", count=len(unprocessed_key_list))
+
+
+def _validate_profile_fields(profile: Dict[str, Any]) -> tuple[str, str, str, str] | None:
+    """Validate and extract required profile fields. Returns (profile_id, seller_name, created_at, updated_at) or None."""
+    profile_id_str = profile.get("profileId")
+    if not isinstance(profile_id_str, str):
+        return None
+    
+    seller_name = profile.get("sellerName")
+    created_at = profile.get("createdAt")
+    updated_at = profile.get("updatedAt")
+    
+    if not seller_name or not created_at or not updated_at:
+        return None
+        
+    return (profile_id_str, seller_name, created_at, updated_at)
 
 
 def _build_shared_profile_result(
@@ -152,26 +188,21 @@ def _build_shared_profile_result(
     caller_account_id_with_prefix: str,
 ) -> Dict[str, Any] | None:
     """Build a single shared profile result item."""
-    profile_id_str = profile.get("profileId")
-    if not isinstance(profile_id_str, str):
+    validated = _validate_profile_fields(profile)
+    if not validated:
         return None
+    
+    profile_id_str, seller_name, created_at, updated_at = validated
+    
     share = shares_by_profile.get(profile_id_str)
     if not share:
-        return None
-
-    # Skip profiles with missing required fields (data quality issue)
-    seller_name = profile.get("sellerName")
-    created_at = profile.get("createdAt")
-    updated_at = profile.get("updatedAt")
-    if not seller_name or not created_at or not updated_at:
         return None
 
     owner_account_id_raw = profile.get("ownerAccountId", "")
     if not isinstance(owner_account_id_raw, str):
         owner_account_id_raw = ""
-    owner_account_id = (
-        owner_account_id_raw if owner_account_id_raw.startswith("ACCOUNT#") else f"ACCOUNT#{owner_account_id_raw}"
-    )
+    owner_account_id = _normalize_caller_account_id(owner_account_id_raw)
+    
     permissions = share.get("permissions", [])
     permissions_list = list(permissions) if isinstance(permissions, set) else permissions
     return {
@@ -185,6 +216,35 @@ def _build_shared_profile_result(
         "isOwner": profile.get("ownerAccountId") == caller_account_id_with_prefix,
         "permissions": permissions_list,
     }
+
+
+def _normalize_caller_account_id(caller_account_id: str) -> str:
+    """Normalize caller account ID with ACCOUNT# prefix."""
+    return caller_account_id if caller_account_id.startswith("ACCOUNT#") else f"ACCOUNT#{caller_account_id}"
+
+
+def _query_shares_for_account(target_account_id: str, logger: StructuredLogger) -> List[Dict[str, Any]]:
+    """Query shares table GSI to get all shares for this user."""
+    response = tables.shares.query(
+        IndexName="targetAccountId-index",
+        KeyConditionExpression="targetAccountId = :targetAccountId",
+        ExpressionAttributeValues={":targetAccountId": target_account_id},
+    )
+    return list(response.get("Items", []))
+
+
+def _merge_profiles_with_shares(
+    all_profiles: List[Dict[str, Any]],
+    shares_by_profile: Dict[str, Dict[str, Any]],
+    caller_account_id_with_prefix: str
+) -> List[Dict[str, Any]]:
+    """Merge profile data with share permissions."""
+    result: List[Dict[str, Any]] = []
+    for profile in all_profiles:  # pragma: no branch
+        profile_result = _build_shared_profile_result(profile, shares_by_profile, caller_account_id_with_prefix)
+        if profile_result:
+            result.append(profile_result)
+    return result
 
 
 def list_my_shares(event: Dict[str, Any], context: Any) -> List[Dict[str, Any]]:
@@ -216,16 +276,8 @@ def list_my_shares(event: Dict[str, Any], context: Any) -> List[Dict[str, Any]]:
 
     try:
         # Step 1: Query shares table GSI to get all shares for this user
-        # Shares are stored with ACCOUNT# prefix on targetAccountId
-        target_account_id_with_prefix = (
-            caller_account_id if caller_account_id.startswith("ACCOUNT#") else f"ACCOUNT#{caller_account_id}"
-        )
-        response = tables.shares.query(
-            IndexName="targetAccountId-index",
-            KeyConditionExpression="targetAccountId = :targetAccountId",
-            ExpressionAttributeValues={":targetAccountId": target_account_id_with_prefix},
-        )
-        shares = response.get("Items", [])
+        target_account_id_with_prefix = _normalize_caller_account_id(caller_account_id)
+        shares = _query_shares_for_account(target_account_id_with_prefix, logger)
 
         if not shares:
             logger.info("No shares found")
@@ -233,7 +285,6 @@ def list_my_shares(event: Dict[str, Any], context: Any) -> List[Dict[str, Any]]:
 
         # Deduplicate by profileId (in case of duplicate shares)
         shares_by_profile = _deduplicate_shares(shares)
-
         logger.info("Found shares", count=len(shares_by_profile))
 
         # Step 2: BatchGetItem to get full profile data
@@ -241,16 +292,10 @@ def list_my_shares(event: Dict[str, Any], context: Any) -> List[Dict[str, Any]]:
             {"ownerAccountId": s["ownerAccountId"], "profileId": s["profileId"]} for s in shares_by_profile.values()
         ]
         all_profiles = _batch_get_profiles(profile_keys, tables.profiles, logger)
-
         logger.info("Retrieved profiles", count=len(all_profiles))
 
         # Step 3: Merge profile data with share permissions
-        caller_account_id_with_prefix = f"ACCOUNT#{caller_account_id}"
-        result: List[Dict[str, Any]] = []
-        for profile in all_profiles:  # pragma: no branch
-            profile_result = _build_shared_profile_result(profile, shares_by_profile, caller_account_id_with_prefix)
-            if profile_result:
-                result.append(profile_result)
+        result = _merge_profiles_with_shares(all_profiles, shares_by_profile, _normalize_caller_account_id(caller_account_id))
 
         logger.info("Returning shared profiles", count=len(result))
         return result
@@ -260,6 +305,16 @@ def list_my_shares(event: Dict[str, Any], context: Any) -> List[Dict[str, Any]]:
     except Exception as e:
         logger.error("Failed to list shared profiles", error=str(e))
         raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to list shared profiles")
+
+
+def _validate_invite_inputs(profile_id: str, permissions: list[str], caller_account_id: str) -> None:
+    """Validate invite creation inputs."""
+    if not is_profile_owner(caller_account_id, profile_id):
+        raise AppError(ErrorCode.FORBIDDEN, "Only profile owner can create invites")
+    
+    valid_permissions = {"READ", "WRITE"}
+    if not set(permissions).issubset(valid_permissions):
+        raise AppError(ErrorCode.INVALID_INPUT, f"Invalid permissions: {permissions}")
 
 
 def create_profile_invite(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
@@ -296,14 +351,8 @@ def create_profile_invite(event: Dict[str, Any], context: Any) -> Dict[str, Any]
             caller_account_id=caller_account_id,
         )
 
-        # Authorization: Must be owner to create invites
-        if not is_profile_owner(caller_account_id, profile_id):
-            raise AppError(ErrorCode.FORBIDDEN, "Only profile owner can create invites")
-
-        # Validate permissions
-        valid_permissions = {"READ", "WRITE"}
-        if not set(permissions).issubset(valid_permissions):
-            raise AppError(ErrorCode.INVALID_INPUT, f"Invalid permissions. Must be one of: {valid_permissions}")
+        # Authorization and validation
+        _validate_invite_inputs(profile_id, permissions, caller_account_id)
 
         # Generate invite code
         invite_code = generate_invite_code()
