@@ -292,6 +292,6 @@ The deployed resources use serverless/on-demand pricing:
 
 ## Support
 
-- **Documentation**: See `Planning Documents/` folder for detailed specifications
+- **Documentation**: See [AGENT.md](../AGENT.md) and [docs/](../) for development guidelines and specifications
 - **Issues**: File issues on GitHub repository
 - **Contact**: dave@repeatersolutions.com

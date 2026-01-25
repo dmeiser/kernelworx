@@ -16,21 +16,6 @@ This folder contains branding assets used for the Cognito Hosted UI (login page)
 - `favicon.png` - PNG version of favicon
 - `favicon.svg` - Vector version of favicon
 
-### Background
-- `page-background.svg` - Solid color background for the login page
-
-### Configuration
-- `managed-login-settings.json` - Cognito Managed Login configuration (colors, fonts, COPPA warning)
-
-## Deployment
-
-These assets are deployed to Cognito via the `cdk/deploy-cognito-branding.sh` script.
-
-```bash
-cd cdk
-./deploy-cognito-branding.sh
-```
-
 ## Design Specifications
 
 - **Primary Color**: #1976d2 (Material Blue)
@@ -43,5 +28,3 @@ cd cdk
 To update branding:
 1. Edit the source SVG files in this directory
 2. Export optimized PNG versions if needed
-3. Update `managed-login-settings.json` for color/font changes
-4. Run `cdk/deploy-cognito-branding.sh` to deploy changes

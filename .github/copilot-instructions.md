@@ -56,8 +56,8 @@ Essential knowledge for GitHub Copilot when working on this volunteer-run Scouti
 - **Package Management**: uv (Python), npm (frontend)
 
 **Key Design Patterns**:
-- **Single-table DynamoDB**: `PK`/`SK` with GSI1, GSI2, GSI3 (see `Planning Documents/dynamodb_physical_schema_v1.md`)
-- **GraphQL schema**: See `Planning Documents/graphql_schema_v1.md`
+- **Single-table DynamoDB**: `PK`/`SK` with GSI1, GSI2, GSI3 (see `tofu/modules/dynamodb/` and code comments)
+- **GraphQL schema**: See `tofu/schema/schema.graphql`
 - **Authorization**: Owner-based + Share-based (READ/WRITE permissions)
 - **100% test coverage**: No exceptions, all tests must pass
 
@@ -372,13 +372,11 @@ def generate_report(profile_id: str, campaign_id: str) -> str:
 - `TODO.md`: Current phase and task tracking
 - `TODO_SIMPLIFY_LAMBDA.md`: Lambda reduction plan (15 → 7 completed, target: 2-3 Lambdas)
 - `AGENT.md`: Detailed AI agent rules and quality standards
+- `docs/DEVELOPER_GUIDE.md`: Development workflow and code patterns
+- `docs/GETTING_STARTED.md`: Setup and deployment instructions
 - `docs/VTL_RESOLVER_NOTES.md`: VTL resolver implementation notes
-- `Planning Documents/`: Complete requirements and architecture
-  - `graphql_schema_v1.md`: GraphQL API definition
-  - `dynamodb_physical_schema_v1.md`: DynamoDB table design
-  - `auth_and_sharing_model.md`: Authorization rules
-  - `Popcorn Manager.md`: Original requirements
-- `GAP_ANALYSIS.md`: Planning completeness assessment
+- `tofu/schema/schema.graphql`: GraphQL API definition
+- `tofu/modules/`: Infrastructure modules (DynamoDB, S3, Cognito, etc.)
 
 ## 11. Safety & Privacy Rules
 
@@ -439,7 +437,7 @@ npm run test -- --coverage
 
 ## 14. When in Doubt
 
-- **Refer to planning documents** in `Planning Documents/`
+- **Refer to AGENT.md, docs/, and TODO.md** for requirements and architecture
 - **Check AGENT.md** for detailed quality standards
 - **Follow TODO.md** for current phase priorities
 - **Ask the repo owner** before making large design changes

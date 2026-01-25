@@ -113,14 +113,9 @@ tofu apply
 
 ## Architecture
 
-See the `.temp/planning_documents/` directory for complete architecture documentation:
-
-- [System Architecture & SRS](.temp/planning_documents/psm_srs_v1.md)
-- [GraphQL Schema](.temp/planning_documents/graphql_schema_v1.md)
-- [DynamoDB Physical Schema](.temp/planning_documents/dynamodb_physical_schema_v1.md)
-- [Auth & Sharing Model](.temp/planning_documents/auth_and_sharing_model.md)
-- [Tech Stack Overview](.temp/planning_documents/tech_stack_and_architecture.md)
-- [Admin Console Spec](.temp/planning_documents/admin_console_spec_v1.md)
+For detailed architecture and requirements documentation, see:
+- [AGENT.md](AGENT.md) - Development guidelines and domain model reference
+- [docs/](docs/) - Developer guides and getting started instructions
 
 ## Testing
 

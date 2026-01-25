@@ -211,8 +211,8 @@ Before claiming work is complete:
 
 ## Architecture Notes
 
-**GraphQL Schema**: Defined in `Planning Documents/graphql_schema_v1.md`
-**DynamoDB Schema**: Defined in `Planning Documents/dynamodb_physical_schema_v1.md`
+**GraphQL Schema**: Defined in `tofu/schema/schema.graphql`
+**DynamoDB Schema**: Single-table design with PK/SK + GSI1, GSI2, GSI3 (see code comments in `tofu/modules/dynamodb/`)
 **Authorization Model**: Owner-based + Share-based (READ/WRITE permissions)
 **Auth Flow**: Cognito User Pools → AppSync → Lambda/VTL/JS resolvers
 
@@ -316,9 +316,9 @@ pipeline = api.create_resolver(
 
 - `TODO.md`: Track progress and current phase
 - `TODO_SIMPLIFY_LAMBDA.md`: Lambda reduction analysis and migration plan
-- `Planning Documents/`: Complete requirements, architecture, schemas
+- `docs/DEVELOPER_GUIDE.md`: Development workflow and code patterns
+- `docs/GETTING_STARTED.md`: Setup and deployment instructions
 - `docs/VTL_RESOLVER_NOTES.md`: VTL resolver capabilities and limitations
-- `GAP_ANALYSIS.md`: Planning completeness assessment
 - `AGENT.md`: This file - AI agent rules and guidelines
 - `.github/copilot-instructions.md`: GitHub Copilot specific instructions
 
