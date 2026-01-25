@@ -199,27 +199,3 @@ resource "aws_appsync_datasource" "admin_operations" {
     function_arn = var.lambda_function_arns["admin-operations"]
   }
 }
-
-# Map of Lambda data sources
-locals {
-  lambda_datasources = {
-    list_my_shares               = aws_appsync_datasource.list_my_shares.name
-    list_catalogs_in_use         = aws_appsync_datasource.list_catalogs_in_use.name
-    create_profile               = aws_appsync_datasource.create_profile.name
-    request_report               = aws_appsync_datasource.request_report.name
-    unit_reporting               = aws_appsync_datasource.unit_reporting.name
-    list_unit_catalogs           = aws_appsync_datasource.list_unit_catalogs.name
-    list_unit_campaign_catalogs  = aws_appsync_datasource.list_unit_campaign_catalogs.name
-    campaign_operations          = aws_appsync_datasource.campaign_operations.name
-    delete_profile_orders_cascade = aws_appsync_datasource.delete_profile_orders_cascade.name
-    update_account               = aws_appsync_datasource.update_account.name
-    delete_account               = aws_appsync_datasource.delete_account.name
-    transfer_ownership           = aws_appsync_datasource.transfer_ownership.name
-    request_qr_upload            = aws_appsync_datasource.request_qr_upload.name
-    confirm_qr_upload            = aws_appsync_datasource.confirm_qr_upload.name
-    generate_qr_presigned_url    = aws_appsync_datasource.generate_qr_presigned_url.name
-    delete_qr_code               = aws_appsync_datasource.delete_qr_code.name
-    validate_payment_method      = aws_appsync_datasource.validate_payment_method.name
-    admin_operations             = aws_appsync_datasource.admin_operations.name
-  }
-}

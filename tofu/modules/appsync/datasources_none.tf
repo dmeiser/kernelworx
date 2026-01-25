@@ -19,11 +19,3 @@ resource "aws_appsync_datasource" "filter_payment_methods_none" {
   name   = "FilterPaymentMethodsNoneDataSource"
   type   = "NONE"
 }
-
-locals {
-  none_datasources = {
-    none                    = aws_appsync_datasource.none.name
-    payment_methods_none    = aws_appsync_datasource.payment_methods_none.name
-    filter_payment_methods_none = aws_appsync_datasource.filter_payment_methods_none.name
-  }
-}

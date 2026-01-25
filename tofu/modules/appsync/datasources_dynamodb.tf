@@ -96,17 +96,3 @@ resource "aws_appsync_datasource" "shared_campaigns" {
     region     = var.aws_region
   }
 }
-
-# Map of DynamoDB data sources by logical name
-locals {
-  dynamodb_datasources = {
-    accounts         = aws_appsync_datasource.accounts.name
-    catalogs         = aws_appsync_datasource.catalogs.name
-    profiles         = aws_appsync_datasource.profiles.name
-    campaigns        = aws_appsync_datasource.campaigns.name
-    orders           = aws_appsync_datasource.orders.name
-    shares           = aws_appsync_datasource.shares.name
-    invites          = aws_appsync_datasource.invites.name
-    shared_campaigns = aws_appsync_datasource.shared_campaigns.name
-  }
-}

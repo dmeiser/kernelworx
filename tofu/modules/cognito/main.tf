@@ -46,7 +46,6 @@ variable "enable_google_idp" {
 locals {
   user_pool_name = "${var.name_prefix}-users-${var.region_abbrev}-${var.environment}"
   login_domain   = "login.${var.environment}.${var.domain}"
-  site_domain    = "${var.environment}.${var.domain}"
   tags = {
     Environment = var.environment
     ManagedBy   = "opentofu"

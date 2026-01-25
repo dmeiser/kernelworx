@@ -53,6 +53,10 @@ resource "aws_dynamodb_table" "accounts" {
     enabled = true
   }
 
+  server_side_encryption {
+    enabled = true
+  }
+
   tags = local.tags
 
   lifecycle {
@@ -109,6 +113,10 @@ resource "aws_dynamodb_table" "catalogs" {
     enabled = true
   }
 
+  server_side_encryption {
+    enabled = true
+  }
+
   tags = local.tags
 
   lifecycle {
@@ -145,6 +153,10 @@ resource "aws_dynamodb_table" "profiles" {
   }
 
   point_in_time_recovery {
+    enabled = true
+  }
+
+  server_side_encryption {
     enabled = true
   }
 
@@ -221,6 +233,10 @@ resource "aws_dynamodb_table" "campaigns" {
     enabled = true
   }
 
+  server_side_encryption {
+    enabled = true
+  }
+
   tags = local.tags
 
   lifecycle {
@@ -277,6 +293,10 @@ resource "aws_dynamodb_table" "orders" {
     enabled = true
   }
 
+  server_side_encryption {
+    enabled = true
+  }
+
   tags = local.tags
 
   lifecycle {
@@ -313,6 +333,10 @@ resource "aws_dynamodb_table" "shares" {
   }
 
   point_in_time_recovery {
+    enabled = true
+  }
+
+  server_side_encryption {
     enabled = true
   }
 
@@ -357,6 +381,10 @@ resource "aws_dynamodb_table" "invites" {
   }
 
   point_in_time_recovery {
+    enabled = true
+  }
+
+  server_side_encryption {
     enabled = true
   }
 
@@ -413,6 +441,10 @@ resource "aws_dynamodb_table" "shared_campaigns" {
   }
 
   point_in_time_recovery {
+    enabled = true
+  }
+
+  server_side_encryption {
     enabled = true
   }
 

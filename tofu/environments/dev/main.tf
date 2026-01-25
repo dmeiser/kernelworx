@@ -103,13 +103,7 @@ variable "google_client_secret" {
 # Local computed values
 locals {
   name_prefix     = "kernelworx"
-  full_prefix     = "${local.name_prefix}-${var.region_abbrev}-${var.environment}"
   site_domain     = "${var.environment}.${var.domain}"
-  api_domain      = "api.${var.environment}.${var.domain}"
-  login_domain    = "login.${var.environment}.${var.domain}"
-  
-  # Resource naming function equivalent
-  rn = "${local.name_prefix}-%s-${var.region_abbrev}-${var.environment}"
 }
 
 # Module instantiations
@@ -196,10 +190,8 @@ module "appsync" {
   user_pool_id             = module.cognito.user_pool_id
   aws_region               = var.aws_region
   
-  dynamodb_table_arns  = module.dynamodb.table_arns
   dynamodb_table_names = module.dynamodb.table_names
   lambda_function_arns = module.lambda.function_arns
-  lambda_function_names = module.lambda.function_names
 }
 
 module "cloudfront" {

@@ -24,11 +24,6 @@ variable "appsync_service_role_arn" {
   type = string
 }
 
-variable "dynamodb_table_arns" {
-  type        = map(string)
-  description = "Map of DynamoDB table names to ARNs"
-}
-
 variable "dynamodb_table_names" {
   type        = map(string)
   description = "Map of logical names to DynamoDB table names"
@@ -37,11 +32,6 @@ variable "dynamodb_table_names" {
 variable "lambda_function_arns" {
   type        = map(string)
   description = "Map of Lambda function names to ARNs"
-}
-
-variable "lambda_function_names" {
-  type        = map(string)
-  description = "Map of logical names to Lambda function names"
 }
 
 variable "user_pool_id" {
