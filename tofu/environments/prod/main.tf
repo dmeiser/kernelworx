@@ -1,4 +1,4 @@
-# OpenTofu Dev Environment Configuration
+# OpenTofu Prod Environment Configuration
 
 terraform {
   required_version = ">= 1.7.0"
@@ -25,9 +25,9 @@ terraform {
   }
 
   backend "s3" {
-    bucket       = "kernelworx-tofu-state-${var.aws_region}-${var.environment}"
-    key          = "kernelworx/dev/terraform.tfstate"
-    region       = var.aws_region
+    bucket       = "kernelworx-tofu-state-us-east-1-prod"
+    key          = "kernelworx/prod/terraform.tfstate"
+    region       = "us-east-1"
     encrypt      = true
     use_lockfile = true
   }
@@ -72,7 +72,7 @@ variable "aws_region" {
 
 variable "environment" {
   type        = string
-  default     = "dev"
+  default     = "prod"
   description = "Environment name"
 }
 
@@ -103,7 +103,7 @@ variable "google_client_secret" {
 # Local computed values
 locals {
   name_prefix     = "kernelworx"
-  site_domain     = "${var.environment}.${var.domain}"
+  site_domain     = var.domain  # Production uses apex domain
 }
 
 # Module instantiations
@@ -233,6 +233,11 @@ output "cognito_client_id" {
   value       = module.cognito.client_id
 }
 
+output "cognito_domain" {
+  description = "Cognito domain for OAuth"
+  value       = module.cognito.domain
+}
+
 output "appsync_api_url" {
   description = "GraphQL API URL for the AppSync API"
   value       = module.appsync.api_url
@@ -241,6 +246,11 @@ output "appsync_api_url" {
 output "cloudfront_distribution_id" {
   description = "ID of the CloudFront distribution serving the site"
   value       = module.cloudfront.distribution_id
+}
+
+output "static_assets_bucket" {
+  description = "Name of the S3 bucket for static assets"
+  value       = module.s3.static_bucket_id
 }
 
 output "site_url" {

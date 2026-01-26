@@ -1,0 +1,134 @@
+name: Deploy Production
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    name: Plan and deploy to prod
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Install Python dependencies
+        run: uv sync --locked
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Set up OpenTofu
+        uses: opentofu/setup-opentofu@v1
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_PROD_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+          role-session-name: github-actions-deploy-prod
+
+      - name: OpenTofu init (prod)
+        env:
+          ENCRYPTION_PASSPHRASE: ${{ secrets.ENCRYPTION_PASSPHRASE }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          TF_IN_AUTOMATION: "true"
+        run: ./tofu/scripts/deploy.sh prod init
+
+      - name: OpenTofu plan (prod)
+        env:
+          ENCRYPTION_PASSPHRASE: ${{ secrets.ENCRYPTION_PASSPHRASE }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          TF_IN_AUTOMATION: "true"
+        run: ./tofu/scripts/deploy.sh prod plan
+
+      - name: OpenTofu apply (prod)
+        env:
+          ENCRYPTION_PASSPHRASE: ${{ secrets.ENCRYPTION_PASSPHRASE }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          TF_IN_AUTOMATION: "true"
+        run: ./tofu/scripts/deploy.sh prod apply
+
+      - name: Extract OpenTofu outputs for frontend
+        id: tofu_outputs
+        working-directory: tofu/environments/prod
+        run: |
+          echo "user_pool_id=$(tofu output -raw cognito_user_pool_id)" >> $GITHUB_OUTPUT
+          echo "client_id=$(tofu output -raw cognito_client_id)" >> $GITHUB_OUTPUT
+          echo "cognito_domain=$(tofu output -raw cognito_domain)" >> $GITHUB_OUTPUT
+          echo "api_url=$(tofu output -raw appsync_api_url)" >> $GITHUB_OUTPUT
+          echo "site_url=$(tofu output -raw site_url)" >> $GITHUB_OUTPUT
+
+      - name: Lookup AWS resources by tags
+        id: aws_resources
+        run: |
+          # Lookup S3 static assets bucket by tags
+          S3_BUCKET=$(aws s3api list-buckets --query 'Buckets[].Name' --output text | \
+            xargs -I {} aws s3api get-bucket-tagging --bucket {} 2>/dev/null | \
+            jq -r 'select(.TagSet | map(select(.Key == "Application" and .Value == "kernelworx")) | length > 0) | 
+                   select(.TagSet | map(select(.Key == "Environment" and .Value == "prod")) | length > 0) | 
+                   input_filename' | head -1 || \
+            tofu -chdir=tofu/environments/prod output -raw static_assets_bucket)
+          
+          # Lookup CloudFront distribution by tags
+          CF_DISTRO=$(aws cloudfront list-distributions --query 'DistributionList.Items[].{Id:Id,ARN:ARN}' --output json | \
+            jq -r '.[] | .Id' | while read id; do
+              TAGS=$(aws cloudfront list-tags-for-resource --resource "arn:aws:cloudfront::$(aws sts get-caller-identity --query Account --output text):distribution/$id" 2>/dev/null | \
+                jq -r '.Tags.Items | map(select(.Key == "Application" and .Value == "kernelworx")) | length')
+              if [ "$TAGS" -gt 0 ]; then
+                ENV_TAG=$(aws cloudfront list-tags-for-resource --resource "arn:aws:cloudfront::$(aws sts get-caller-identity --query Account --output text):distribution/$id" 2>/dev/null | \
+                  jq -r '.Tags.Items | map(select(.Key == "Environment" and .Value == "prod")) | length')
+                if [ "$ENV_TAG" -gt 0 ]; then
+                  echo "$id"
+                  break
+                fi
+              fi
+            done || tofu -chdir=tofu/environments/prod output -raw cloudfront_distribution_id)
+          
+          echo "s3_bucket=${S3_BUCKET}" >> $GITHUB_OUTPUT
+          echo "cloudfront_id=${CF_DISTRO}" >> $GITHUB_OUTPUT
+
+      - name: Build and deploy frontend
+        env:
+          # Vite build-time variables
+          VITE_APPSYNC_ENDPOINT: ${{ steps.tofu_outputs.outputs.api_url }}
+          VITE_APPSYNC_REGION: ${{ secrets.AWS_REGION }}
+          VITE_COGNITO_USER_POOL_ID: ${{ steps.tofu_outputs.outputs.user_pool_id }}
+          VITE_COGNITO_USER_POOL_CLIENT_ID: ${{ steps.tofu_outputs.outputs.client_id }}
+          VITE_COGNITO_DOMAIN: ${{ steps.tofu_outputs.outputs.cognito_domain }}
+          VITE_OAUTH_REDIRECT_SIGNIN: ${{ steps.tofu_outputs.outputs.site_url }}
+          VITE_OAUTH_REDIRECT_SIGNOUT: ${{ steps.tofu_outputs.outputs.site_url }}
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+          aws s3 sync dist "s3://${{ steps.aws_resources.outputs.s3_bucket }}" --delete --region "${{ secrets.AWS_REGION }}"
+          aws cloudfront create-invalidation --distribution-id "${{ steps.aws_resources.outputs.cloudfront_id }}" --paths "/*"
