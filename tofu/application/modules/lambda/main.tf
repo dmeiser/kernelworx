@@ -51,7 +51,7 @@ locals {
   func_suffix = "-${var.region_abbrev}-${var.environment}"
   
   # Use provided paths or default to relative paths from module
-  src_dir     = var.lambda_src_dir != "" ? var.lambda_src_dir : "${path.module}/../../../src"
+  src_dir     = var.lambda_src_dir != "" ? var.lambda_src_dir : "${path.module}/../../../../src"
   payload_dir = var.lambda_payload_dir != "" ? var.lambda_payload_dir : "${path.module}/../../../.build/lambda"
   
   common_env = {
