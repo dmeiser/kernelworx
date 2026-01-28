@@ -38,14 +38,20 @@ resource "aws_budgets_budget" "monthly" {
   }
 }
 
-# Cost Anomaly Detection - Use existing monitor ARN
+# Cost Anomaly Detection - Use existing monitor or create new one
+resource "aws_ce_anomaly_monitor" "main" {
+  count = var.create_anomaly_monitor ? 1 : 0
+  
+  name              = "${var.name_prefix}-anomaly-monitor"
+  monitor_type      = "DIMENSIONAL"
+  monitor_dimension = "SERVICE"
+}
+
 resource "aws_ce_anomaly_subscription" "alerts" {
   name      = "${var.name_prefix}-anomaly-alerts"
   frequency = "DAILY"
 
-  monitor_arn_list = [
-    var.existing_monitor_arn,
-  ]
+  monitor_arn_list = var.create_anomaly_monitor ? [aws_ce_anomaly_monitor.main[0].arn] : [var.existing_monitor_arn]
 
   subscriber {
     type    = "EMAIL"

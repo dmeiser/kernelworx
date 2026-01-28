@@ -7,7 +7,7 @@ output "budget_name" {
 
 output "anomaly_monitor_arn" {
   description = "ARN of the anomaly detection monitor"
-  value       = var.existing_monitor_arn
+  value       = var.create_anomaly_monitor ? aws_ce_anomaly_monitor.main[0].arn : var.existing_monitor_arn
 }
 
 output "anomaly_subscription_arn" {

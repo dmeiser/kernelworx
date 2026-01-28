@@ -31,7 +31,14 @@ variable "primary_alert_email" {
   type        = string
 }
 
+variable "create_anomaly_monitor" {
+  description = "Whether to create a new anomaly monitor (false = use existing)"
+  type        = bool
+  default     = false
+}
+
 variable "existing_monitor_arn" {
-  description = "ARN of existing anomaly monitor to use"
+  description = "ARN of existing anomaly monitor (required if create_anomaly_monitor=false)"
   type        = string
+  default     = null
 }

@@ -11,8 +11,8 @@ OpenTofu project for managing AWS cost budgets, anomaly detection, and free tier
 ## Deployment
 
 ```bash
-cd tofu/budgets/environments/prod
-tofu init
+cd tofu/bootstrap/budgets/environments/prod
+tofu init -reconfigure
 tofu plan
 tofu apply
 ```
