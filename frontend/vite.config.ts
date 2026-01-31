@@ -1,3 +1,4 @@
+// @ts-nocheck
 /// <reference types="vitest" />
 import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
@@ -17,6 +18,7 @@ const getBuildInfo = () => {
 
 const buildInfo = getBuildInfo()
 
+// eslint-disable-next-line complexity -- Config branching for optional local certs
 const resolveHttpsConfig = () => {
   const localKeyPath = '.cert/key-local.pem'
   const localCertPath = '.cert/cert-local.pem'

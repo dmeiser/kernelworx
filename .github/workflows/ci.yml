@@ -14,8 +14,8 @@ jobs:
     name: Backend quality
     runs-on: ubuntu-latest
     env:
-      AWS_REGION: ${{ vars.AWS_REGION }}
-      AWS_DEFAULT_REGION: ${{ vars.AWS_REGION }}
+      AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+      AWS_DEFAULT_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
     permissions:
       contents: read
     steps:
@@ -98,6 +98,9 @@ jobs:
           tflint --chdir application/environments/prod
           tflint --chdir bootstrap
 
+      - name: Prepare KICS output dir
+        run: mkdir -p tofu/kics-results
+
       - name: KICS security scan
         uses: checkmarx/kics-github-action@v2
         with:
@@ -105,3 +108,4 @@ jobs:
           config_path: tofu/.kics.yml
           fail_on: high,medium
           output_path: tofu/kics-results
+          output_formats: json
