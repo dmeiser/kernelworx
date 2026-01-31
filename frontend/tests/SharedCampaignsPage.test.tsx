@@ -29,23 +29,6 @@ Object.assign(navigator, {
   },
 });
 
-// Mock document.createElement and related DOM methods to prevent jsdom navigation errors on data URLs
-const originalCreateElement = document.createElement;
-beforeEach(() => {
-  document.createElement = vi.fn((tagName: string) => {
-    const element = originalCreateElement.call(document, tagName);
-    if (tagName === 'a') {
-      // Mock click to prevent navigation attempt in jsdom
-      element.click = vi.fn();
-    }
-    return element;
-  }) as any;
-});
-
-afterEach(() => {
-  document.createElement = originalCreateElement;
-});
-
 const mockSharedCampaigns = [
   {
     __typename: 'SharedCampaign',
@@ -147,12 +130,24 @@ const renderWithProviders = (mocks: any[]) => {
 };
 
 describe('SharedCampaignsPage', () => {
+  // Mock document.createElement to prevent jsdom navigation errors on data URLs
+  const originalCreateElement = document.createElement;
+  
   beforeEach(() => {
     vi.clearAllMocks();
+    document.createElement = vi.fn((tagName: string) => {
+      const element = originalCreateElement.call(document, tagName);
+      if (tagName === 'a') {
+        // Mock click to prevent navigation attempt in jsdom
+        element.click = vi.fn();
+      }
+      return element;
+    }) as any;
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
+    document.createElement = originalCreateElement;
   });
 
   describe('List display', () => {
@@ -394,8 +389,8 @@ describe('SharedCampaignsPage', () => {
         },
       };
 
-      // Provide an extra list mock to satisfy the refetch after deletion
-      renderWithProviders([createListMock(), createListMock(), deleteMock]);
+      // Provide list mock for initial render AND refetch after mutation
+      renderWithProviders([createListMock(), deleteMock, createListMock([])]);
 
       await waitFor(() => {
         expect(screen.getByText('PACK123F25')).toBeInTheDocument();
@@ -411,9 +406,10 @@ describe('SharedCampaignsPage', () => {
       const deactivateButton = screen.getByRole('button', { name: 'Deactivate' });
       fireEvent.click(deactivateButton);
 
+      // Wait for the successful snackbar after mutation and refetch
       await waitFor(() => {
         expect(screen.getByText('Shared Campaign deactivated')).toBeInTheDocument();
-      });
+      }, { timeout: 5000 });
     });
   });
 
