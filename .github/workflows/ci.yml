@@ -93,6 +93,7 @@ jobs:
           tflint --init
           tflint modules/
           tflint environments/prod/
+          cd ../bootstrap && tflint
 
       - name: KICS security scan
         uses: checkmarx/kics-github-action@v2
