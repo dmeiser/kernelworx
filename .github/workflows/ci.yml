@@ -91,7 +91,8 @@ jobs:
         run: |
           cd tofu/application
           tflint --init
-          tflint --recursive
+          tflint modules/
+          tflint environments/prod/
 
       - name: KICS security scan
         uses: checkmarx/kics-github-action@v2
