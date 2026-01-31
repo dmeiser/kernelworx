@@ -73,7 +73,7 @@ jobs:
         run: npm run typecheck
 
       - name: Vitest (coverage)
-        run: npm run test -- --coverage --no-file-parallelism --pool=threads --maxWorkers=1 --reporter=hanging-process
+        run: npm run test -- --coverage
 
   infra:
     name: Infrastructure linting
