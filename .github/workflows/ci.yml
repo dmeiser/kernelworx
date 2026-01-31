@@ -47,6 +47,7 @@ jobs:
   frontend:
     name: Frontend quality
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
     defaults:
@@ -73,7 +74,7 @@ jobs:
         run: npm run typecheck
 
       - name: Vitest (coverage)
-        run: npm run test -- --coverage
+        run: npm run test -- --coverage --no-file-parallelism --reporter=verbose
 
   infra:
     name: Infrastructure linting
