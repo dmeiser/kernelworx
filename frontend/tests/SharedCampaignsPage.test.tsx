@@ -42,6 +42,10 @@ beforeEach(() => {
   }) as any;
 });
 
+afterEach(() => {
+  document.createElement = originalCreateElement;
+});
+
 const mockSharedCampaigns = [
   {
     __typename: 'SharedCampaign',
