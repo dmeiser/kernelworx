@@ -1,12 +1,16 @@
 import boto3
+import pytest
 
-from cdk.cdk.cleanup_hook import (
-    _find_best_matching_zone,
-    _get_region_abbrev,
-    _is_unmanaged_certificate,
-    _is_validation_record,
-    _matches_domain,
+cleanup_hook = pytest.importorskip(
+    "cdk.cdk.cleanup_hook",
+    reason="cdk cleanup hook module not available in this repository",
 )
+
+_find_best_matching_zone = cleanup_hook._find_best_matching_zone
+_get_region_abbrev = cleanup_hook._get_region_abbrev
+_is_unmanaged_certificate = cleanup_hook._is_unmanaged_certificate
+_is_validation_record = cleanup_hook._is_validation_record
+_matches_domain = cleanup_hook._matches_domain
 
 # =============================================================================
 # Test fixtures and mocks

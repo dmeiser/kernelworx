@@ -17,6 +17,31 @@ const getBuildInfo = () => {
 
 const buildInfo = getBuildInfo()
 
+const resolveHttpsConfig = () => {
+  const localKeyPath = '.cert/key-local.pem'
+  const localCertPath = '.cert/cert-local.pem'
+  const fallbackKeyPath = '.cert/key.pem'
+  const fallbackCertPath = '.cert/cert.pem'
+
+  const keyPath = fs.existsSync(localKeyPath)
+    ? localKeyPath
+    : (fs.existsSync(fallbackKeyPath) ? fallbackKeyPath : null)
+  const certPath = fs.existsSync(localCertPath)
+    ? localCertPath
+    : (fs.existsSync(fallbackCertPath) ? fallbackCertPath : null)
+
+  if (!keyPath || !certPath) {
+    return false
+  }
+
+  return {
+    key: fs.readFileSync(keyPath),
+    cert: fs.readFileSync(certPath),
+  }
+}
+
+const httpsConfig = resolveHttpsConfig()
+
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
@@ -30,15 +55,7 @@ export default defineConfig({
     host: '0.0.0.0', // Listen on all interfaces
     port: 5173,
     strictPort: true,
-    https: {
-      // Use local certificate if it exists, otherwise fall back to dev certificate
-      key: fs.existsSync('.cert/key-local.pem') 
-        ? fs.readFileSync('.cert/key-local.pem')
-        : fs.readFileSync('.cert/key.pem'),
-      cert: fs.existsSync('.cert/cert-local.pem')
-        ? fs.readFileSync('.cert/cert-local.pem')
-        : fs.readFileSync('.cert/cert.pem'),
-    },
+    https: httpsConfig,
     hmr: {
       host: 'local.dev.appworx.app',
       protocol: 'wss',

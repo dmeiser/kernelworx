@@ -13,6 +13,9 @@ jobs:
   backend:
     name: Backend quality
     runs-on: ubuntu-latest
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      AWS_DEFAULT_REGION: ${{ vars.AWS_REGION }}
     permissions:
       contents: read
     steps:
