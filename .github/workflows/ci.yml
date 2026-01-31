@@ -91,11 +91,9 @@ jobs:
         run: |
           cd tofu
           tflint --init
-          cd application
-          tflint modules/
-          tflint environments/prod/
-          cd ../bootstrap
-          tflint
+          tflint --chdir application/modules
+          tflint --chdir application/environments/prod
+          tflint --chdir bootstrap
 
       - name: KICS security scan
         uses: checkmarx/kics-github-action@v2
