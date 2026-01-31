@@ -29,6 +29,19 @@ Object.assign(navigator, {
   },
 });
 
+// Mock document.createElement and related DOM methods to prevent jsdom navigation errors on data URLs
+const originalCreateElement = document.createElement;
+beforeEach(() => {
+  document.createElement = vi.fn((tagName: string) => {
+    const element = originalCreateElement.call(document, tagName);
+    if (tagName === 'a') {
+      // Mock click to prevent navigation attempt in jsdom
+      element.click = vi.fn();
+    }
+    return element;
+  }) as any;
+});
+
 const mockSharedCampaigns = [
   {
     __typename: 'SharedCampaign',

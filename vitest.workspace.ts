@@ -16,11 +16,18 @@ export default defineWorkspace([
       environment: 'jsdom',
       globals: true,
       setupFiles: [path.resolve(cwd, './frontend/tests/setup.ts')],
-      // Explicitly configure jsdom environment
-      pool: 'forks',
+      // Use threads pool for better jsdom compatibility
+      pool: 'threads',
       poolOptions: {
-        forks: {
+        threads: {
           isolate: true,
+        },
+      },
+      // Configure jsdom to handle window.location navigation
+      environmentOptions: {
+        jsdom: {
+          navigationUrl: 'http://localhost/',
+          beforeUnload: true,
         },
       },
       server: {
