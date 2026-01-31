@@ -199,21 +199,29 @@ data "archive_file" "lambda_payload" {
   output_path = "${local.payload_dir}/lambda_payload.zip"
 }
 
-# Lambda Layer (imported, not created)
+# Lambda Layer - Archive dependencies from .venv
+data "archive_file" "lambda_layer" {
+  type        = "zip"
+  source_dir  = "${path.module}/../../../../.venv/lib/python3.13/site-packages"
+  output_path = "${local.payload_dir}/lambda_layer.zip"
+  excludes = [
+    "__pycache__",
+    "*.pyc",
+    "*.pyo",
+    "*.dist-info",
+    "*.egg-info"
+  ]
+}
+
 resource "aws_lambda_layer_version" "shared" {
   layer_name               = "${var.name_prefix}-deps-${var.region_abbrev}-${var.environment}"
   compatible_runtimes      = ["python3.13"]
   compatible_architectures = ["arm64"]
   description              = "Shared Python dependencies for Lambda functions"
   
-  # During import, this will be set from the existing layer
-  filename         = "${path.module}/../../lambda-layer/python.zip"
-  source_code_hash = filebase64sha256("${path.module}/../../lambda-layer/python.zip")
-
-  lifecycle {
-    # Ignore changes to code - layer is managed separately
-    ignore_changes = [filename, source_code_hash]
-  }
+  # Archive gets regenerated every time (cheap), but layer only updates when lock file changes
+  filename         = data.archive_file.lambda_layer.output_path
+  source_code_hash = filebase64sha256("${path.module}/../../../../uv.lock")
 }
 
 # Lambda Functions

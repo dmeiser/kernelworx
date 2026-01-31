@@ -6,7 +6,7 @@ ENV="${1:-dev}"
 ACTION="${2:-plan}"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 ENV_DIR="$SCRIPT_DIR/../environments/$ENV"
 
 # Load environment variables from root .env
@@ -17,19 +17,14 @@ if [ -f "$ROOT_DIR/.env" ]; then
     set +a
 fi
 
-# Set OpenTofu variables from env
-export TF_VAR_encryption_passphrase="${ENCRYPTION_PASSPHRASE:-}"
-export TF_VAR_google_client_id="${GOOGLE_CLIENT_ID:-}"
-export TF_VAR_google_client_secret="${GOOGLE_CLIENT_SECRET:-}"
-
-# Validation
+# Validation (TF_VAR_* already sourced from .env)
 if [ -z "$TF_VAR_encryption_passphrase" ]; then
-    echo "❌ ENCRYPTION_PASSPHRASE not set in .env"
+    echo "❌ TF_VAR_encryption_passphrase not set in .env"
     exit 1
 fi
 
 if [ -z "$TF_VAR_google_client_id" ] || [ -z "$TF_VAR_google_client_secret" ]; then
-    echo "⚠️  Warning: Google OAuth credentials not set"
+    echo "⚠️  Warning: Google OAuth credentials not set (TF_VAR_google_client_id/secret)"
 fi
 
 cd "$ENV_DIR"
@@ -49,13 +44,18 @@ case "$ACTION" in
         tofu plan -out=tfplan
         ;;
     apply)
+        AUTO_APPROVE_FLAG=""
+        if [ "${AUTO_APPROVE:-}" = "1" ]; then
+            AUTO_APPROVE_FLAG="-auto-approve"
+        fi
+
         if [ -f tfplan ]; then
             echo "🚀 Applying saved plan..."
-            tofu apply tfplan
+            tofu apply $AUTO_APPROVE_FLAG tfplan
             rm tfplan
         else
             echo "🚀 Applying changes..."
-            tofu apply
+            tofu apply $AUTO_APPROVE_FLAG
         fi
         ;;
     destroy)

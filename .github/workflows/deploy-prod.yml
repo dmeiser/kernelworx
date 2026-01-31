@@ -29,9 +29,9 @@ jobs:
           python-version: "3.13"
 
       - name: Install uv
-        run: |
-          curl -LsSf https://astral.sh/uv/install.sh | sh
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
 
       - name: Install Python dependencies
         run: uv sync --locked
@@ -55,27 +55,30 @@ jobs:
 
       - name: OpenTofu init (prod)
         env:
-          ENCRYPTION_PASSPHRASE: ${{ secrets.ENCRYPTION_PASSPHRASE }}
-          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
-          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          TF_VAR_encryption_passphrase: ${{ secrets.TF_VAR_encryption_passphrase }}
+          TF_VAR_google_client_id: ${{ secrets.TF_VAR_google_client_id }}
+          TF_VAR_google_client_secret: ${{ secrets.TF_VAR_google_client_secret }}
           TF_IN_AUTOMATION: "true"
-        run: ./tofu/scripts/deploy.sh prod init
+        working-directory: tofu/environments/prod
+        run: tofu init
 
       - name: OpenTofu plan (prod)
         env:
-          ENCRYPTION_PASSPHRASE: ${{ secrets.ENCRYPTION_PASSPHRASE }}
-          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
-          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          TF_VAR_encryption_passphrase: ${{ secrets.TF_VAR_encryption_passphrase }}
+          TF_VAR_google_client_id: ${{ secrets.TF_VAR_google_client_id }}
+          TF_VAR_google_client_secret: ${{ secrets.TF_VAR_google_client_secret }}
           TF_IN_AUTOMATION: "true"
-        run: ./tofu/scripts/deploy.sh prod plan
+        working-directory: tofu/environments/prod
+        run: tofu plan
 
       - name: OpenTofu apply (prod)
         env:
-          ENCRYPTION_PASSPHRASE: ${{ secrets.ENCRYPTION_PASSPHRASE }}
-          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
-          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          TF_VAR_encryption_passphrase: ${{ secrets.TF_VAR_encryption_passphrase }}
+          TF_VAR_google_client_id: ${{ secrets.TF_VAR_google_client_id }}
+          TF_VAR_google_client_secret: ${{ secrets.TF_VAR_google_client_secret }}
           TF_IN_AUTOMATION: "true"
-        run: ./tofu/scripts/deploy.sh prod apply
+        working-directory: tofu/environments/prod
+        run: tofu apply -auto-approve
 
       - name: Extract OpenTofu outputs for frontend
         id: tofu_outputs
