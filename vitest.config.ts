@@ -4,6 +4,7 @@ import path from 'path';
 export default defineConfig({
   test: {
     globalSetup: path.resolve(__dirname, './vitest.global.setup.ts'),
-    globalTeardown: path.resolve(__dirname, './vitest.global.teardown.ts'),
+    // Note: globalTeardown removed - integration tests have their own teardown
+    // in tests/integration/vitest.config.ts. Frontend tests don't need AWS cleanup.
   },
 });
