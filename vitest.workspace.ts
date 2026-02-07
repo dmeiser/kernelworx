@@ -32,7 +32,7 @@ export default defineWorkspace([
       },
       server: {
         deps: {
-          inline: ['@mui/material'],
+          inline: ['@mui/material', 'react-router', 'react-router-dom'],
         },
       },
     },

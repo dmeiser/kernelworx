@@ -18,16 +18,18 @@ Vitest with jsdom environment has a known issue where the test process doesn't e
 We use a wrapper script (`run-tests.js`) that:
 1. Runs vitest with the appropriate pool configuration
 2. Monitors test output in real-time
-3. Detects when output stops for 30 seconds (indicating tests have hung)
+3. Detects when output stops for 5 minutes (indicating tests have hung)
 4. Forcibly terminates the process with the correct exit code
 
 This ensures tests complete and CI jobs don't timeout.
 
 ### Technical Details
-- **Pool**: Uses `vmThreads` pool with `isolate: false` for better jsdom compatibility
-- **Timeout**: 30 seconds of no output triggers forced exit
+- **Pool**: Uses `threads` pool with `isolate: true` for better module resolution
+- **Timeout**: 5 minutes of no output triggers forced exit
 - **Safety**: 10-minute absolute timeout as failsafe
 - **Exit code**: Preserves the original test exit code (0 for success, non-zero for failure)
+
+**Note**: Prior attempts used `vmThreads` pool which has compatibility issues with React Router v7's dual module format (ESM/CJS). The `threads` pool properly handles ES module mocking required for react-router-dom v7.
 
 ### Configuration Files
 - `run-tests.js` - Wrapper script that monitors and controls test execution

@@ -9,7 +9,7 @@ import { spawn } from 'child_process';
 import process from 'process';
 
 const args = process.argv.slice(2);
-const vitestArgs = ['run', '--pool=vmThreads', ...args];
+const vitestArgs = ['run', ...args];
 
 console.log(`Running: npx vitest ${vitestArgs.join(' ')}\n`);
 
@@ -40,7 +40,7 @@ child.on('exit', (code, signal) => {
 });
 
 // Check every 5 seconds if output has stopped
-const OUTPUT_TIMEOUT_MS = 30 * 1000; // 30 seconds of no output
+const OUTPUT_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes of no output
 const checkInterval = setInterval(() => {
   const timeSinceLastOutput = Date.now() - lastOutputTime;
   
