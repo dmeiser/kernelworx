@@ -46,6 +46,9 @@ const httpsConfig = resolveHttpsConfig()
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
+  optimizeDeps: {
+    include: ['react-router', 'react-router-dom'],
+  },
   define: {
     __BUILD_TIME__: JSON.stringify(new Date().toISOString()),
     __GIT_COMMIT__: JSON.stringify(buildInfo.gitCommit),
@@ -63,16 +66,19 @@ export default defineConfig({
       port: 5173,
     },
   },
+  ssr: {
+    noExternal: ['react-router', 'react-router-dom'],
+  },
   test: {
     globals: true,
     environment: 'jsdom',
     setupFiles: './tests/setup.ts',
     exclude: ['**/node_modules/**', '**/dist/**', '**/tests/e2e/**'],
-    // Use vmThreads pool with no isolation - helps avoid hanging in CI
-    pool: 'vmThreads',
+    // Use threads pool for consistent module resolution
+    pool: 'threads',
     poolOptions: {
-      vmThreads: {
-        isolate: false,
+      threads: {
+        isolate: true,
       },
     },
     // Run test files sequentially to avoid jsdom cleanup issues
@@ -81,10 +87,15 @@ export default defineConfig({
     testTimeout: 10000,
     hookTimeout: 10000,
     teardownTimeout: 10000,
-    server: {
-      deps: {
-        inline: ['@mui/material'],
+    deps: {
+      optimizer: {
+        web: {
+          include: ['react-router', 'react-router-dom'],
+        },
       },
+    },
+    resolve: {
+      conditions: ['import', 'module', 'browser', 'default'],
     },
     coverage: {
       provider: 'v8',
