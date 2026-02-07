@@ -130,26 +130,6 @@ const renderWithProviders = (mocks: any[]) => {
 };
 
 describe('SharedCampaignsPage', () => {
-  // Mock document.createElement to prevent jsdom navigation errors on data URLs
-  const originalCreateElement = document.createElement;
-  
-  beforeEach(() => {
-    vi.clearAllMocks();
-    document.createElement = vi.fn((tagName: string) => {
-      const element = originalCreateElement.call(document, tagName);
-      if (tagName === 'a') {
-        // Mock click to prevent navigation attempt in jsdom
-        element.click = vi.fn();
-      }
-      return element;
-    }) as any;
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
-    document.createElement = originalCreateElement;
-  });
-
   describe('List display', () => {
     it('shows loading state initially', () => {
       renderWithProviders([createListMock()]);
@@ -218,6 +198,17 @@ describe('SharedCampaignsPage', () => {
 
   describe('QR code download', () => {
     it('opens QR dialog and downloads QR code when button clicked', async () => {
+      // Mock document.createElement only for this test to prevent jsdom navigation errors on data URLs
+      const originalCreateElement = document.createElement.bind(document);
+      const mockClick = vi.fn();
+      vi.spyOn(document, 'createElement').mockImplementation((tagName: string) => {
+        const element = originalCreateElement(tagName);
+        if (tagName === 'a') {
+          element.click = mockClick;
+        }
+        return element;
+      });
+
       renderWithProviders([createListMock()]);
 
       await waitFor(() => {
