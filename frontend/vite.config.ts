@@ -68,6 +68,19 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: './tests/setup.ts',
     exclude: ['**/node_modules/**', '**/dist/**', '**/tests/e2e/**'],
+    // Use vmThreads pool with no isolation - helps avoid hanging in CI
+    pool: 'vmThreads',
+    poolOptions: {
+      vmThreads: {
+        isolate: false,
+      },
+    },
+    // Run test files sequentially to avoid jsdom cleanup issues
+    fileParallelism: false,
+    // Ensure tests timeout rather than hang
+    testTimeout: 10000,
+    hookTimeout: 10000,
+    teardownTimeout: 10000,
     server: {
       deps: {
         inline: ['@mui/material'],
