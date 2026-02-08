@@ -11,7 +11,7 @@ concurrency:
 
 jobs:
   backend:
-    name: Backend quality
+    name: backend
     runs-on: ubuntu-latest
     env:
       AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
@@ -55,7 +55,7 @@ jobs:
           echo "- Pytest (100% coverage required)" >> $GITHUB_STEP_SUMMARY
 
   frontend:
-    name: Frontend quality
+    name: frontend
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
