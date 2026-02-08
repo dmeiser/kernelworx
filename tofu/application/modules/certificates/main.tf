@@ -76,3 +76,21 @@ output "login_certificate_arn" {
   description = "ARN of the ACM certificate for the login domain"
   value       = aws_acm_certificate.login.arn
 }
+
+output "api_validation_records" {
+  description = "Validation records for API certificate"
+  value = [for dvo in aws_acm_certificate.api.domain_validation_options : {
+    name   = dvo.resource_record_name
+    record = dvo.resource_record_value
+    type   = dvo.resource_record_type
+  }]
+}
+
+output "login_validation_records" {
+  description = "Validation records for login certificate"
+  value = [for dvo in aws_acm_certificate.login.domain_validation_options : {
+    name   = dvo.resource_record_name
+    record = dvo.resource_record_value
+    type   = dvo.resource_record_type
+  }]
+}

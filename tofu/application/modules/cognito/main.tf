@@ -246,3 +246,13 @@ output "domain" {
   description = "Custom domain for Cognito User Pool"
   value       = aws_cognito_user_pool_domain.custom.domain
 }
+
+output "cloudfront_distribution_arn" {
+  description = "CloudFront distribution ARN backing the Cognito custom domain"
+  value       = aws_cognito_user_pool_domain.custom.cloudfront_distribution_arn
+}
+
+output "cloudfront_domain" {
+  description = "CloudFront domain name backing the Cognito custom domain"
+  value       = aws_cognito_user_pool_domain.custom.cloudfront_distribution_arn
+}

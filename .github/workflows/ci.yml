@@ -1,0 +1,132 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - main
+
+concurrency:
+  group: ci-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: backend
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+      AWS_DEFAULT_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+    permissions:
+      contents: read
+      checks: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Sync Python dependencies
+        run: uv sync --locked --dev
+
+      - name: Ruff (lint)
+        run: uv run ruff check src/ tests/
+
+      - name: Mypy (type check)
+        run: uv run mypy src/
+
+      - name: Pytest (unit coverage)
+        run: uv run pytest tests/unit --cov=src --cov-fail-under=100 -v --cov-report=term-missing
+
+      - name: Generate job summary
+        if: success()
+        run: |
+          echo "## ✅ Backend Quality Checks Passed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- Ruff (linting)" >> $GITHUB_STEP_SUMMARY
+          echo "- Mypy (type checking - strict mode)" >> $GITHUB_STEP_SUMMARY
+          echo "- Pytest (100% coverage required)" >> $GITHUB_STEP_SUMMARY
+
+  frontend:
+    name: frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      checks: write
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: ESLint
+        run: npm run lint
+
+      - name: TypeScript type check
+        run: npm run typecheck
+
+      - name: Vitest (coverage)
+        run: npm run test -- --coverage
+
+      - name: Generate job summary
+        if: success()
+        run: |
+          echo "## ✅ Frontend Quality Checks Passed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- ESLint (linting)" >> $GITHUB_STEP_SUMMARY
+          echo "- TypeScript (type checking)" >> $GITHUB_STEP_SUMMARY
+          echo "- Vitest (unit tests with coverage)" >> $GITHUB_STEP_SUMMARY
+
+  infra:
+    name: Infrastructure linting
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up OpenTofu
+        uses: opentofu/setup-opentofu@v1
+
+      - name: tflint setup
+        uses: terraform-linters/setup-tflint@v4
+
+      - name: tflint
+        run: |
+          cd tofu
+          tflint --init
+          tflint --chdir application/modules
+          tflint --chdir application/environments/prod
+          tflint --chdir bootstrap
+
+      - name: Prepare KICS output dir
+        run: mkdir -p tofu/kics-results
+
+      - name: KICS security scan
+        uses: checkmarx/kics-github-action@v2
+        with:
+          path: tofu
+          config_path: tofu/.kics.yml
+          fail_on: high,medium
+          output_path: tofu/kics-results
+          output_formats: json

@@ -37,4 +37,11 @@ export default defineConfig([
       '@typescript-eslint/no-explicit-any': 'off',
     },
   },
+  // Node-specific config files
+  {
+    files: ['vite.config.ts', '**/*.config.{ts,js}'],
+    languageOptions: {
+      globals: globals.node,
+    },
+  },
 ])

@@ -65,6 +65,25 @@ const mockUser = {
   username: 'testuser',
 };
 
+const mockWindowLocationHref = () => {
+  const locationHrefSpy = vi.fn();
+  const mockLocation = {
+    ...window.location,
+  };
+
+  Object.defineProperty(mockLocation, 'href', {
+    get: () => '',
+    set: (value: string) => locationHrefSpy(value),
+  });
+
+  const locationSpy = vi.spyOn(window as any, 'location', 'get').mockReturnValue(mockLocation);
+
+  return {
+    locationHrefSpy,
+    restore: () => locationSpy.mockRestore(),
+  };
+};
+
 // Test component that uses the auth context
 const TestComponent = () => {
   const { account, loading, isAuthenticated, isAdmin, login, logout, refreshSession } = useAuth();
@@ -255,16 +274,7 @@ describe('AuthContext', () => {
     vi.mocked(amplifyAuth.getCurrentUser).mockResolvedValue(mockUser as any);
     vi.mocked(amplifyAuth.signOut).mockRejectedValue(new Error('Logout failed'));
 
-    // Mock window.location.href
-    const originalLocation = window.location;
-    const locationHrefSpy = vi.fn();
-    Object.defineProperty(window, 'location', {
-      value: { ...originalLocation, href: '' },
-      writable: true,
-    });
-    Object.defineProperty(window.location, 'href', {
-      set: locationHrefSpy,
-    });
+    const { locationHrefSpy, restore } = mockWindowLocationHref();
 
     render(
       <AuthProvider>
@@ -294,11 +304,7 @@ describe('AuthContext', () => {
     expect(redirectUrl).toContain('/logout?client_id=');
     expect(redirectUrl).toContain('&logout_uri=');
 
-    // Restore window.location
-    Object.defineProperty(window, 'location', {
-      value: originalLocation,
-      writable: true,
-    });
+    restore();
     consoleErrorSpy.mockRestore();
   });
 
@@ -595,16 +601,7 @@ describe('AuthContext', () => {
       // Save a redirect URL before auth completes
       sessionStorage.setItem('oauth_redirect', '/campaigns/123');
 
-      // Mock window.location.href
-      const originalLocation = window.location;
-      const locationHrefSpy = vi.fn();
-      Object.defineProperty(window, 'location', {
-        value: { ...originalLocation, href: '' },
-        writable: true,
-      });
-      Object.defineProperty(window.location, 'href', {
-        set: locationHrefSpy,
-      });
+      const { locationHrefSpy, restore } = mockWindowLocationHref();
 
       // Simulate successful auth session that triggers OAuth redirect handling
       vi.mocked(amplifyAuth.fetchAuthSession).mockResolvedValue(createMockSession(true) as any);
@@ -644,11 +641,7 @@ describe('AuthContext', () => {
       // sessionStorage should be cleared
       expect(sessionStorage.getItem('oauth_redirect')).toBeNull();
 
-      // Restore
-      Object.defineProperty(window, 'location', {
-        value: originalLocation,
-        writable: true,
-      });
+      restore();
     });
   });
 

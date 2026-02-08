@@ -17,9 +17,38 @@ const getBuildInfo = () => {
 
 const buildInfo = getBuildInfo()
 
+// eslint-disable-next-line complexity -- Config branching for optional local certs
+const resolveHttpsConfig = () => {
+  const localKeyPath = '.cert/key-local.pem'
+  const localCertPath = '.cert/cert-local.pem'
+  const fallbackKeyPath = '.cert/key.pem'
+  const fallbackCertPath = '.cert/cert.pem'
+
+  const keyPath = fs.existsSync(localKeyPath)
+    ? localKeyPath
+    : (fs.existsSync(fallbackKeyPath) ? fallbackKeyPath : null)
+  const certPath = fs.existsSync(localCertPath)
+    ? localCertPath
+    : (fs.existsSync(fallbackCertPath) ? fallbackCertPath : null)
+
+  if (!keyPath || !certPath) {
+    return false
+  }
+
+  return {
+    key: fs.readFileSync(keyPath),
+    cert: fs.readFileSync(certPath),
+  }
+}
+
+const httpsConfig = resolveHttpsConfig()
+
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
+  optimizeDeps: {
+    include: ['react-router', 'react-router-dom'],
+  },
   define: {
     __BUILD_TIME__: JSON.stringify(new Date().toISOString()),
     __GIT_COMMIT__: JSON.stringify(buildInfo.gitCommit),
@@ -30,30 +59,43 @@ export default defineConfig({
     host: '0.0.0.0', // Listen on all interfaces
     port: 5173,
     strictPort: true,
-    https: {
-      // Use local certificate if it exists, otherwise fall back to dev certificate
-      key: fs.existsSync('.cert/key-local.pem') 
-        ? fs.readFileSync('.cert/key-local.pem')
-        : fs.readFileSync('.cert/key.pem'),
-      cert: fs.existsSync('.cert/cert-local.pem')
-        ? fs.readFileSync('.cert/cert-local.pem')
-        : fs.readFileSync('.cert/cert.pem'),
-    },
+    https: httpsConfig,
     hmr: {
       host: 'local.dev.appworx.app',
       protocol: 'wss',
       port: 5173,
     },
   },
+  ssr: {
+    noExternal: ['react-router', 'react-router-dom'],
+  },
   test: {
     globals: true,
     environment: 'jsdom',
     setupFiles: './tests/setup.ts',
     exclude: ['**/node_modules/**', '**/dist/**', '**/tests/e2e/**'],
-    server: {
-      deps: {
-        inline: ['@mui/material'],
+    // Use threads pool for consistent module resolution
+    pool: 'threads',
+    poolOptions: {
+      threads: {
+        isolate: true,
       },
+    },
+    // Run test files sequentially to avoid jsdom cleanup issues
+    fileParallelism: false,
+    // Ensure tests timeout rather than hang
+    testTimeout: 10000,
+    hookTimeout: 10000,
+    teardownTimeout: 10000,
+    deps: {
+      optimizer: {
+        web: {
+          include: ['react-router', 'react-router-dom'],
+        },
+      },
+    },
+    resolve: {
+      conditions: ['import', 'module', 'browser', 'default'],
     },
     coverage: {
       provider: 'v8',

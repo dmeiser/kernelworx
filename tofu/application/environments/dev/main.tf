@@ -26,7 +26,7 @@ terraform {
 
   backend "s3" {
     bucket       = "kernelworx-tofu-state-ue1"
-    key          = "kernelworx/dev/terraform.tfstate"
+    key          = "application/dev/terraform.tfstate"
     region       = "us-east-1"
     encrypt      = true
     use_lockfile = true

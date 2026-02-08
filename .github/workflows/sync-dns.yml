@@ -1,0 +1,47 @@
+name: Sync DNS to CloudFlare
+
+# Production DNS records are synced to CloudFlare for redundancy and CDN
+# Dev environment is fully delegated to its own Route53 zone and doesn't need CloudFlare sync
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'tofu/modules/route53/**'
+      - 'tofu/modules/certificates/**'
+      - 'tofu/modules/cloudfront/**'
+      - 'tofu/environments/prod/main.tf'
+
+concurrency:
+  group: dns-sync-prod
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  sync-prod-dns:
+    name: Sync Production DNS to CloudFlare
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_PROD_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+          role-session-name: github-actions-dns-sync
+
+      - name: Sync production DNS to CloudFlare
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+          ROUTE53_ZONE_ID: Z0668256MJ44IP3FDZCD
+        run: |
+          ./scripts/sync-to-cloudflare.sh "$ROUTE53_ZONE_ID" prod

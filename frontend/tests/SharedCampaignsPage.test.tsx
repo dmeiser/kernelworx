@@ -2,7 +2,7 @@
  * SharedCampaignsPage Tests
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MockedProvider } from '@apollo/client/testing/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
@@ -130,14 +130,6 @@ const renderWithProviders = (mocks: any[]) => {
 };
 
 describe('SharedCampaignsPage', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
   describe('List display', () => {
     it('shows loading state initially', () => {
       renderWithProviders([createListMock()]);
@@ -206,6 +198,17 @@ describe('SharedCampaignsPage', () => {
 
   describe('QR code download', () => {
     it('opens QR dialog and downloads QR code when button clicked', async () => {
+      // Mock document.createElement only for this test to prevent jsdom navigation errors on data URLs
+      const originalCreateElement = document.createElement.bind(document);
+      const mockClick = vi.fn();
+      vi.spyOn(document, 'createElement').mockImplementation((tagName: string) => {
+        const element = originalCreateElement(tagName);
+        if (tagName === 'a') {
+          element.click = mockClick;
+        }
+        return element;
+      });
+
       renderWithProviders([createListMock()]);
 
       await waitFor(() => {
@@ -377,8 +380,8 @@ describe('SharedCampaignsPage', () => {
         },
       };
 
-      // Provide an extra list mock to satisfy the refetch after deletion
-      renderWithProviders([createListMock(), createListMock(), deleteMock]);
+      // Provide list mock for initial render AND refetch after mutation
+      renderWithProviders([createListMock(), deleteMock, createListMock([])]);
 
       await waitFor(() => {
         expect(screen.getByText('PACK123F25')).toBeInTheDocument();
@@ -394,9 +397,10 @@ describe('SharedCampaignsPage', () => {
       const deactivateButton = screen.getByRole('button', { name: 'Deactivate' });
       fireEvent.click(deactivateButton);
 
+      // Wait for the successful snackbar after mutation and refetch
       await waitFor(() => {
         expect(screen.getByText('Shared Campaign deactivated')).toBeInTheDocument();
-      });
+      }, { timeout: 5000 });
     });
   });
 
