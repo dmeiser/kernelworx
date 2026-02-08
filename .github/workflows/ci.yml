@@ -43,36 +43,16 @@ jobs:
         run: uv run mypy src/
 
       - name: Pytest (unit coverage)
-        run: uv run pytest tests/unit --cov=src --cov-fail-under=100 -v --junitxml=pytest-results.xml --cov-report=json --cov-report=term-missing
-
-      - name: Upload coverage reports
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: backend-coverage
-          path: |
-            .coverage
-            htmlcov/
-            coverage.json
-
-      - name: Report test results
-        if: always()
-        uses: dorny/test-reporter@v1
-        with:
-          name: Backend Tests
-          path: pytest-results.xml
-          reporter: java-junit
+        run: uv run pytest tests/unit --cov=src --cov-fail-under=100 -v --cov-report=term-missing
 
       - name: Generate job summary
-        if: always()
+        if: success()
         run: |
-          echo "## Backend Quality Checks" >> $GITHUB_STEP_SUMMARY
+          echo "## ✅ Backend Quality Checks Passed" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "✅ Ruff (linting)" >> $GITHUB_STEP_SUMMARY
-          echo "✅ Mypy (type checking - strict mode)" >> $GITHUB_STEP_SUMMARY
-          echo "✅ Pytest (unit tests with 100% coverage)" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Coverage reports available in artifacts" >> $GITHUB_STEP_SUMMARY
+          echo "- Ruff (linting)" >> $GITHUB_STEP_SUMMARY
+          echo "- Mypy (type checking - strict mode)" >> $GITHUB_STEP_SUMMARY
+          echo "- Pytest (100% coverage required)" >> $GITHUB_STEP_SUMMARY
 
   frontend:
     name: Frontend quality
@@ -107,23 +87,14 @@ jobs:
       - name: Vitest (coverage)
         run: npm run test -- --coverage
 
-      - name: Upload coverage reports
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: frontend-coverage
-          path: frontend/coverage/
-
       - name: Generate job summary
-        if: always()
+        if: success()
         run: |
-          echo "## Frontend Quality Checks" >> $GITHUB_STEP_SUMMARY
+          echo "## ✅ Frontend Quality Checks Passed" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "✅ ESLint (linting)" >> $GITHUB_STEP_SUMMARY
-          echo "✅ TypeScript (type checking)" >> $GITHUB_STEP_SUMMARY
-          echo "✅ Vitest (unit tests with 100% coverage)" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Coverage reports available in artifacts" >> $GITHUB_STEP_SUMMARY
+          echo "- ESLint (linting)" >> $GITHUB_STEP_SUMMARY
+          echo "- TypeScript (type checking)" >> $GITHUB_STEP_SUMMARY
+          echo "- Vitest (unit tests with coverage)" >> $GITHUB_STEP_SUMMARY
 
   infra:
     name: Infrastructure linting
