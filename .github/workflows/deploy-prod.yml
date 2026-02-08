@@ -59,7 +59,7 @@ jobs:
           TF_VAR_google_client_id: ${{ secrets.TF_VAR_google_client_id }}
           TF_VAR_google_client_secret: ${{ secrets.TF_VAR_google_client_secret }}
           TF_IN_AUTOMATION: "true"
-        working-directory: tofu/environments/prod
+        working-directory: tofu/application/environments/prod
         run: tofu init
 
       - name: OpenTofu plan (prod)
@@ -68,7 +68,7 @@ jobs:
           TF_VAR_google_client_id: ${{ secrets.TF_VAR_google_client_id }}
           TF_VAR_google_client_secret: ${{ secrets.TF_VAR_google_client_secret }}
           TF_IN_AUTOMATION: "true"
-        working-directory: tofu/environments/prod
+        working-directory: tofu/application/environments/prod
         run: tofu plan
 
       - name: OpenTofu apply (prod)
@@ -77,12 +77,12 @@ jobs:
           TF_VAR_google_client_id: ${{ secrets.TF_VAR_google_client_id }}
           TF_VAR_google_client_secret: ${{ secrets.TF_VAR_google_client_secret }}
           TF_IN_AUTOMATION: "true"
-        working-directory: tofu/environments/prod
+        working-directory: tofu/application/environments/prod
         run: tofu apply -auto-approve
 
       - name: Extract OpenTofu outputs for frontend
         id: tofu_outputs
-        working-directory: tofu/environments/prod
+        working-directory: tofu/application/environments/prod
         run: |
           echo "user_pool_id=$(tofu output -raw cognito_user_pool_id)" >> $GITHUB_OUTPUT
           echo "client_id=$(tofu output -raw cognito_client_id)" >> $GITHUB_OUTPUT
@@ -99,7 +99,7 @@ jobs:
             jq -r 'select(.TagSet | map(select(.Key == "Application" and .Value == "kernelworx")) | length > 0) | 
                    select(.TagSet | map(select(.Key == "Environment" and .Value == "prod")) | length > 0) | 
                    input_filename' | head -1 || \
-            tofu -chdir=tofu/environments/prod output -raw static_assets_bucket)
+            tofu -chdir=tofu/application/environments/prod output -raw static_assets_bucket)
           
           # Lookup CloudFront distribution by tags
           CF_DISTRO=$(aws cloudfront list-distributions --query 'DistributionList.Items[].{Id:Id,ARN:ARN}' --output json | \
@@ -114,7 +114,7 @@ jobs:
                   break
                 fi
               fi
-            done || tofu -chdir=tofu/environments/prod output -raw cloudfront_distribution_id)
+            done || tofu -chdir=tofu/application/environments/prod output -raw cloudfront_distribution_id)
           
           echo "s3_bucket=${S3_BUCKET}" >> $GITHUB_OUTPUT
           echo "cloudfront_id=${CF_DISTRO}" >> $GITHUB_OUTPUT
