@@ -131,13 +131,13 @@ resource "aws_route53_record" "login" {
 # ACM Certificate validation records
 resource "aws_route53_record" "cert_validation" {
   for_each = {
-    for rec in concat(
-      var.api_validation_records,
-      var.login_validation_records,
-      var.site_validation_records
-    ) :
-    # Strip trailing dot to create stable keys
-    trimspace(trimsuffix(rec.name, ".")) => rec
+    for domain in ["api", "login", "site"] :
+    domain => {
+      name   = domain == "api" ? (length(var.api_validation_records) > 0 ? var.api_validation_records[0].name : "") : domain == "login" ? (length(var.login_validation_records) > 0 ? var.login_validation_records[0].name : "") : (length(var.site_validation_records) > 0 ? var.site_validation_records[0].name : "")
+      type   = domain == "api" ? (length(var.api_validation_records) > 0 ? var.api_validation_records[0].type : "") : domain == "login" ? (length(var.login_validation_records) > 0 ? var.login_validation_records[0].type : "") : (length(var.site_validation_records) > 0 ? var.site_validation_records[0].type : "")
+      record = domain == "api" ? (length(var.api_validation_records) > 0 ? var.api_validation_records[0].record : "") : domain == "login" ? (length(var.login_validation_records) > 0 ? var.login_validation_records[0].record : "") : (length(var.site_validation_records) > 0 ? var.site_validation_records[0].record : "")
+    }
+    if domain == "api" ? length(var.api_validation_records) > 0 : domain == "login" ? length(var.login_validation_records) > 0 : length(var.site_validation_records) > 0
   }
 
   allow_overwrite = true
