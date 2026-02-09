@@ -122,7 +122,10 @@ resource "aws_route53_record" "login" {
 
 # ACM Certificate validation records
 resource "aws_route53_record" "cert_validation" {
-  for_each = { for rec in concat(var.api_validation_records, var.login_validation_records) : rec.name => rec }
+  for_each = {
+    for idx, rec in concat(var.api_validation_records, var.login_validation_records) :
+    idx => rec
+  }
 
   allow_overwrite = true
 
