@@ -25,7 +25,7 @@ terraform {
   }
 
   backend "s3" {
-    bucket       = "kernelworx-tofu-state-ue1"
+    bucket       = "kernelworx-tofu-state-us-east-1-dev"
     key          = "application/dev/terraform.tfstate"
     region       = "us-east-1"
     encrypt      = true
