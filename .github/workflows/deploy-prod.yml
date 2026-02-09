@@ -55,27 +55,27 @@ jobs:
 
       - name: OpenTofu init (prod)
         env:
-          TF_VAR_encryption_passphrase: ${{ secrets.TF_VAR_encryption_passphrase }}
-          TF_VAR_google_client_id: ${{ secrets.TF_VAR_google_client_id }}
-          TF_VAR_google_client_secret: ${{ secrets.TF_VAR_google_client_secret }}
+          TF_VAR_encryption_passphrase: ${{ secrets.TF_VAR_ENCRYPTION_PASSPHRASE }}
+          TF_VAR_google_client_id: ${{ secrets.TF_VAR_GOOGLE_CLIENT_ID }}
+          TF_VAR_google_client_secret: ${{ secrets.TF_VAR_GOOGLE_CLIENT_SECRET }}
           TF_IN_AUTOMATION: "true"
         working-directory: tofu/application/environments/prod
         run: tofu init
 
       - name: OpenTofu plan (prod)
         env:
-          TF_VAR_encryption_passphrase: ${{ secrets.TF_VAR_encryption_passphrase }}
-          TF_VAR_google_client_id: ${{ secrets.TF_VAR_google_client_id }}
-          TF_VAR_google_client_secret: ${{ secrets.TF_VAR_google_client_secret }}
+          TF_VAR_encryption_passphrase: ${{ secrets.TF_VAR_ENCRYPTION_PASSPHRASE }}
+          TF_VAR_google_client_id: ${{ secrets.TF_VAR_GOOGLE_CLIENT_ID }}
+          TF_VAR_google_client_secret: ${{ secrets.TF_VAR_GOOGLE_CLIENT_SECRET }}
           TF_IN_AUTOMATION: "true"
         working-directory: tofu/application/environments/prod
         run: tofu plan
 
       - name: OpenTofu apply (prod)
         env:
-          TF_VAR_encryption_passphrase: ${{ secrets.TF_VAR_encryption_passphrase }}
-          TF_VAR_google_client_id: ${{ secrets.TF_VAR_google_client_id }}
-          TF_VAR_google_client_secret: ${{ secrets.TF_VAR_google_client_secret }}
+          TF_VAR_encryption_passphrase: ${{ secrets.TF_VAR_ENCRYPTION_PASSPHRASE }}
+          TF_VAR_google_client_id: ${{ secrets.TF_VAR_GOOGLE_CLIENT_ID }}
+          TF_VAR_google_client_secret: ${{ secrets.TF_VAR_GOOGLE_CLIENT_SECRET }}
           TF_IN_AUTOMATION: "true"
         working-directory: tofu/application/environments/prod
         run: tofu apply -auto-approve
