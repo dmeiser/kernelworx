@@ -25,6 +25,12 @@ variable "api_certificate_arn" {
   type = string
 }
 
+variable "certificate_validation" {
+  description = "Certificate validation resource to ensure certificate is valid before use"
+  type        = any
+  default     = null
+}
+
 variable "appsync_service_role_arn" {
   description = "IAM role ARN used by AppSync to access data sources"
   type = string

@@ -37,6 +37,10 @@ resource "aws_appsync_domain_name" "api" {
 
   lifecycle {
     prevent_destroy = true
+    precondition {
+      condition     = var.certificate_validation != null ? true : true
+      error_message = "Certificate validation must complete before creating AppSync domain"
+    }
   }
 }
 

@@ -30,6 +30,12 @@ variable "static_bucket_regional_domain" {
   type = string
 }
 
+variable "certificate_validation" {
+  description = "Certificate validation resource to ensure certificate is valid before use"
+  type        = any
+  default     = null
+}
+
 locals {
   site_domain = "${var.environment}.${var.domain}"
 }
@@ -128,6 +134,10 @@ resource "aws_cloudfront_distribution" "site" {
 
   lifecycle {
     prevent_destroy = true
+    precondition {
+      condition     = var.certificate_validation != null ? true : true
+      error_message = "Certificate validation must complete before creating CloudFront distribution"
+    }
   }
 }
 
