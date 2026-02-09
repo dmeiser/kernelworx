@@ -188,6 +188,7 @@ module "appsync" {
   name_prefix              = local.name_prefix
   domain                   = var.domain
   api_certificate_arn      = module.certificates.api_certificate_arn
+  certificate_validation   = aws_acm_certificate_validation.api
   appsync_service_role_arn = module.iam.appsync_service_role_arn
   user_pool_id             = module.cognito.user_pool_id
   aws_region               = var.aws_region
@@ -202,6 +203,7 @@ module "cloudfront" {
   environment          = var.environment
   domain               = var.domain
   site_certificate_arn = module.certificates.site_certificate_arn
+  certificate_validation = aws_acm_certificate_validation.site
   static_bucket_id     = module.s3.static_bucket_id
   static_bucket_arn    = module.s3.static_bucket_arn
   static_bucket_regional_domain = module.s3.static_bucket_regional_domain
@@ -220,6 +222,23 @@ module "route53" {
   login_certificate_arn  = module.certificates.login_certificate_arn
   api_validation_records   = module.certificates.api_validation_records
   login_validation_records = module.certificates.login_validation_records
+  site_validation_records  = module.certificates.site_validation_records
+}
+
+# Certificate validations - wait for DNS records to propagate and certificates to validate
+resource "aws_acm_certificate_validation" "api" {
+  certificate_arn         = module.certificates.api_certificate_arn
+  validation_record_fqdns = [for rec in module.route53.cert_validation_records : rec.fqdn if can(regex("api\\.", rec.name))]
+}
+
+resource "aws_acm_certificate_validation" "login" {
+  certificate_arn         = module.certificates.login_certificate_arn
+  validation_record_fqdns = [for rec in module.route53.cert_validation_records : rec.fqdn if can(regex("login\\.", rec.name))]
+}
+
+resource "aws_acm_certificate_validation" "site" {
+  certificate_arn         = module.certificates.site_certificate_arn
+  validation_record_fqdns = [for rec in module.route53.cert_validation_records : rec.fqdn if can(regex("^(prod|dev)\\.", rec.name))]
 }
 
 # Outputs

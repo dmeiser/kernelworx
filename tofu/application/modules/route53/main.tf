@@ -59,6 +59,15 @@ variable "login_validation_records" {
   }))
 }
 
+variable "site_validation_records" {
+  description = "Validation records for site certificate"
+  type = list(object({
+    name   = string
+    record = string
+    type   = string
+  }))
+}
+
 # Locals for domain construction
 locals {
   is_prod   = var.environment == "prod"
@@ -123,7 +132,11 @@ resource "aws_route53_record" "login" {
 # ACM Certificate validation records
 resource "aws_route53_record" "cert_validation" {
   for_each = {
-    for idx, rec in concat(var.api_validation_records, var.login_validation_records) :
+    for idx, rec in concat(
+      var.api_validation_records,
+      var.login_validation_records,
+      var.site_validation_records
+    ) :
     idx => rec
   }
 
@@ -160,4 +173,8 @@ output "login_fqdn" {
 output "site_fqdn" {
   description = "Fully qualified domain name for site apex"
   value       = aws_route53_record.site.fqdn
+}
+output "cert_validation_records" {
+  description = "Certificate validation Route53 records"
+  value       = [for rec in aws_route53_record.cert_validation : rec]
 }

@@ -250,6 +250,12 @@ data "aws_iam_policy_document" "cognito_assume_role" {
       type        = "Service"
       identifiers = ["cognito-idp.amazonaws.com"]
     }
+
+    condition {
+      test     = "StringEquals"
+      variable = "sts:ExternalId"
+      values   = ["kernelworx-sms-role"]
+    }
   }
 }
 
