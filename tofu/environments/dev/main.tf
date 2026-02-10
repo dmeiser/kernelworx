@@ -35,7 +35,7 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 5.0"
+      version = "~> 6.0"
     }
     archive = {
       source  = "hashicorp/archive"
@@ -108,7 +108,7 @@ locals {
 
 # Module instantiations
 module "dynamodb" {
-  source = "../../modules/dynamodb"
+  source = "../../application/modules/dynamodb"
 
   environment   = var.environment
   region_abbrev = var.region_abbrev
@@ -116,7 +116,7 @@ module "dynamodb" {
 }
 
 module "s3" {
-  source = "../../modules/s3"
+  source = "../../application/modules/s3"
 
   environment   = var.environment
   region_abbrev = var.region_abbrev
@@ -125,7 +125,7 @@ module "s3" {
 }
 
 module "iam" {
-  source = "../../modules/iam"
+  source = "../../application/modules/iam"
 
   environment   = var.environment
   region_abbrev = var.region_abbrev
@@ -137,14 +137,14 @@ module "iam" {
 }
 
 module "certificates" {
-  source = "../../modules/certificates"
+  source = "../../application/modules/certificates"
 
   environment = var.environment
   domain      = var.domain
 }
 
 module "cognito" {
-  source = "../../modules/cognito"
+  source = "../../application/modules/cognito"
 
   environment          = var.environment
   region_abbrev        = var.region_abbrev
@@ -158,7 +158,7 @@ module "cognito" {
 }
 
 module "lambda" {
-  source = "../../modules/lambda"
+  source = "../../application/modules/lambda"
 
   environment         = var.environment
   region_abbrev       = var.region_abbrev
@@ -181,7 +181,7 @@ module "lambda" {
 }
 
 module "appsync" {
-  source = "../../modules/appsync"
+  source = "../../application/modules/appsync"
 
   environment              = var.environment
   region_abbrev            = var.region_abbrev
@@ -197,7 +197,7 @@ module "appsync" {
 }
 
 module "cloudfront" {
-  source = "../../modules/cloudfront"
+  source = "../../application/modules/cloudfront"
 
   environment          = var.environment
   domain               = var.domain
@@ -208,7 +208,7 @@ module "cloudfront" {
 }
 
 module "route53" {
-  source = "../../modules/route53"
+  source = "../../application/modules/route53"
 
   environment            = var.environment
   domain                 = var.domain

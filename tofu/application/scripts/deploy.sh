@@ -4,6 +4,8 @@ set -e
 
 ENV="${1:-dev}"
 ACTION="${2:-plan}"
+shift 2 2>/dev/null || shift $#  # Remove first two args, keep rest as extra flags
+EXTRA_FLAGS="$@"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
@@ -37,11 +39,11 @@ echo ""
 case "$ACTION" in
     init)
         echo "📦 Initializing OpenTofu..."
-        tofu init -upgrade
+        tofu init -upgrade $EXTRA_FLAGS
         ;;
     plan)
         echo "📋 Planning changes..."
-        tofu plan -out=tfplan
+        tofu plan -out=tfplan $EXTRA_FLAGS
         ;;
     apply)
         AUTO_APPROVE_FLAG=""
@@ -51,18 +53,18 @@ case "$ACTION" in
 
         if [ -f tfplan ]; then
             echo "🚀 Applying saved plan..."
-            tofu apply $AUTO_APPROVE_FLAG tfplan
+            tofu apply $AUTO_APPROVE_FLAG $EXTRA_FLAGS tfplan
             rm tfplan
         else
             echo "🚀 Applying changes..."
-            tofu apply $AUTO_APPROVE_FLAG
+            tofu apply $AUTO_APPROVE_FLAG $EXTRA_FLAGS
         fi
         ;;
     destroy)
         echo "⚠️  Are you sure? This will destroy all resources!"
         read -p "Type 'yes' to confirm: " confirm
         if [ "$confirm" == "yes" ]; then
-            tofu destroy
+            tofu destroy $EXTRA_FLAGS
         else
             echo "Aborted."
         fi
@@ -73,14 +75,14 @@ case "$ACTION" in
         ;;
     validate)
         echo "✅ Validating configuration..."
-        tofu validate
+        tofu validate $EXTRA_FLAGS
         ;;
     fmt)
         echo "🎨 Formatting configuration..."
         tofu fmt -recursive "$SCRIPT_DIR/.."
         ;;
     *)
-        echo "Usage: $0 <env> <init|plan|apply|destroy|import|validate|fmt>"
+        echo "Usage: $0 <env> <init|plan|apply|destroy|import|validate|fmt> [extra-flags]"
         echo ""
         echo "Commands:"
         echo "  init      Initialize OpenTofu (download providers)"
@@ -90,6 +92,11 @@ case "$ACTION" in
         echo "  import    Import existing AWS resources"
         echo "  validate  Validate configuration"
         echo "  fmt       Format configuration files"
+        echo ""
+        echo "Examples:"
+        echo "  $0 dev init -migrate-state    # Migrate state during init"
+        echo "  $0 dev init -reconfigure      # Reconfigure backend without migration"
+        echo "  $0 dev plan -target=module.s3 # Plan only s3 module"
         exit 1
         ;;
 esac

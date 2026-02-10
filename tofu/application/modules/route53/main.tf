@@ -132,12 +132,13 @@ resource "aws_route53_record" "login" {
 # ACM Certificate validation records
 resource "aws_route53_record" "cert_validation" {
   for_each = {
-    for idx, rec in concat(
+    for rec in concat(
       var.api_validation_records,
       var.login_validation_records,
       var.site_validation_records
     ) :
-    idx => rec
+    # Strip trailing dot to create stable keys
+    trimspace(trimsuffix(rec.name, ".")) => rec
   }
 
   allow_overwrite = true
