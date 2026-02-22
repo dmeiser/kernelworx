@@ -113,7 +113,7 @@ case "$ACTION" in
         echo "  $0 dev init -migrate-state    # Migrate state during init"
         echo "  $0 dev init -reconfigure      # Reconfigure backend without migration"
         echo "  $0 dev plan -target=module.s3 # Plan only s3 module"
-        exit 1
+                exit 1
         ;;
 esac
 echo ""
