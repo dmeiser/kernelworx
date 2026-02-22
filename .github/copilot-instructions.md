@@ -49,7 +49,7 @@ Essential knowledge for GitHub Copilot when working on this volunteer-run Scouti
 **Full-stack serverless application**:
 - **Frontend**: React + TypeScript + Vite + MUI + Apollo Client
 - **API**: AWS AppSync (GraphQL)
-- **Functions**: AWS Lambda (Python 3.13)
+- **Functions**: AWS Lambda (Python 3.14)
 - **Data**: Amazon DynamoDB (single-table design)
 - **Auth**: Amazon Cognito User Pools (Google/Facebook social login)
 - **Infrastructure**: OpenTofu (Infrastructure as Code)

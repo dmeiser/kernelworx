@@ -8,6 +8,7 @@
   },
   "devDependencies": {
     "@apollo/client": "^4.0.9",
+    "@aws-sdk/client-appsync": "^3.947.0",
     "@aws-sdk/client-cognito-identity-provider": "^3.947.0",
     "@aws-sdk/client-dynamodb": "^3.947.0",
     "aws-amplify": "^6.15.8",

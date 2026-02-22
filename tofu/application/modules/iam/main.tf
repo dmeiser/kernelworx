@@ -263,7 +263,7 @@ data "aws_iam_policy_document" "cognito_sms" {
   statement {
     effect    = "Allow"
     actions   = ["sns:Publish"]
-    resources = ["arn:aws:sns:*:*:*"]
+    resources = ["*"]
   }
 }
 
@@ -295,4 +295,5 @@ output "appsync_service_role_arn" {
 output "cognito_sms_role_arn" {
   description = "ARN of the Cognito SMS role"
   value       = aws_iam_role.cognito_sms.arn
+  depends_on  = [aws_iam_role_policy.cognito_sms]
 }

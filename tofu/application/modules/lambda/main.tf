@@ -202,7 +202,7 @@ data "archive_file" "lambda_payload" {
 # Lambda Layer - Archive dependencies from .venv
 data "archive_file" "lambda_layer" {
   type        = "zip"
-  source_dir  = "${path.module}/../../../../.venv/lib/python3.13/site-packages"
+  source_dir  = "${path.module}/../../../../.build/lambda-layer"
   output_path = "${local.payload_dir}/lambda_layer.zip"
   excludes = [
     "__pycache__",
@@ -215,7 +215,7 @@ data "archive_file" "lambda_layer" {
 
 resource "aws_lambda_layer_version" "shared" {
   layer_name               = "${var.name_prefix}-deps-${var.region_abbrev}-${var.environment}"
-  compatible_runtimes      = ["python3.13"]
+  compatible_runtimes      = ["python3.14"]
   compatible_architectures = ["arm64"]
   description              = "Shared Python dependencies for Lambda functions"
   
@@ -232,7 +232,7 @@ resource "aws_lambda_function" "functions" {
   function_name = "${var.name_prefix}-${each.key}${local.func_suffix}"
   role          = var.lambda_role_arn
   handler       = each.value.handler
-  runtime       = "python3.13"
+  runtime       = "python3.14"
   architectures = ["arm64"]
   timeout       = each.value.timeout
   memory_size   = each.value.memory_size
