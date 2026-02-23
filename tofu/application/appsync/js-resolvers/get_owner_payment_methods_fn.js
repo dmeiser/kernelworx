@@ -18,7 +18,7 @@ export function request(ctx) {
     return {
         operation: 'GetItem',
         key: util.dynamodb.toMapValues(key),
-        consistentRead: false
+        consistentRead: true
     };
 }
 

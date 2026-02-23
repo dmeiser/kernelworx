@@ -39,7 +39,7 @@ export function request(ctx) {
             profileId: dbProfileId,
             targetAccountId: callerAccountId
         }),
-        consistentRead: false
+        consistentRead: true
     };
 }
 
