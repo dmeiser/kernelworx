@@ -147,7 +147,7 @@ def _validate_qr_upload_inputs(payment_method_name: str, s3_key: str, caller_id:
 def _update_payment_method_qr_url(caller_id: str, payment_method_name: str, s3_key: str) -> Dict[str, Any]:
     """Update payment method with QR code S3 key and return updated method."""
     account_id_key = f"ACCOUNT#{caller_id}"
-    response = tables.accounts.get_item(Key={"accountId": account_id_key})
+    response = tables.accounts.get_item(Key={"accountId": account_id_key}, ConsistentRead=True)
 
     if "Item" not in response:
         raise AppError(ErrorCode.NOT_FOUND, f"Payment method '{payment_method_name}' not found")
@@ -244,7 +244,7 @@ def _delete_qr_from_s3_storage(stored_qr_key: str | None, caller_id: str, paymen
 def _clear_qr_url_in_payment_method(caller_id: str, payment_method_name: str) -> None:
     """Update DynamoDB to clear qrCodeUrl for the specified payment method."""
     account_id_key = f"ACCOUNT#{caller_id}"
-    response = tables.accounts.get_item(Key={"accountId": account_id_key})
+    response = tables.accounts.get_item(Key={"accountId": account_id_key}, ConsistentRead=True)
 
     if "Item" not in response:
         raise AppError(ErrorCode.NOT_FOUND, f"Payment method '{payment_method_name}' not found")

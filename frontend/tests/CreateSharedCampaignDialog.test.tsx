@@ -6,19 +6,22 @@ import userEvent from '@testing-library/user-event';
 // Mock Select/MenuItem to plain HTML select/option to ensure onChange fires in jsdom
 vi.mock('@mui/material', async () => {
   const actual = await vi.importActual<any>('@mui/material');
-  const Select = ({ value, onChange, children, label, disabled, ...rest }: any) => (
-    <select
-      role="combobox"
-      aria-label={label || 'Select'}
-      value={value ?? ''}
-      disabled={disabled}
-      aria-disabled={disabled ? 'true' : undefined}
-      onChange={(e) => onChange?.({ target: { value: (e.target as HTMLSelectElement).value } })}
-      {...rest}
-    >
-      {children}
-    </select>
-  );
+  const Select = ({ value, onChange, children, label, disabled, ...rest }: any) => {
+    const { MenuProps, ...domProps } = rest;
+    return (
+      <select
+        role="combobox"
+        aria-label={label || 'Select'}
+        value={value ?? ''}
+        disabled={disabled}
+        aria-disabled={disabled ? 'true' : undefined}
+        onChange={(e) => onChange?.({ target: { value: (e.target as HTMLSelectElement).value } })}
+        {...domProps}
+      >
+        {children}
+      </select>
+    );
+  };
   const MenuItem = ({ value, children, disabled, ...rest }: any) => {
     const getText = (nodes: any): string =>
       React.Children.toArray(nodes)
@@ -40,7 +43,7 @@ vi.mock('@mui/material', async () => {
 });
 
 // ESM-safe module-level mocks for Apollo hooks
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
+ 
 let useQueryImpl = (_q: any) => ({ data: undefined, loading: false });
 // Map of named mutation impls so mutate functions read the latest impl at call time (reduces race)
 const mutationImpls = new Map<string, any>();
@@ -162,9 +165,9 @@ describe('CreateSharedCampaignDialog', () => {
   afterEach(() => {
     // Restore mocks and reset module-level mock implementations to safe defaults
     vi.restoreAllMocks();
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+     
     useQueryImpl = (_q: any) => ({ data: undefined, loading: false });
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+     
     useMutationImpl = (_m: any) => [vi.fn()];
     mutationImpls.clear();
   });

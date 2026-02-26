@@ -74,7 +74,7 @@ const mockMyCatalogs = [
 
 // Mock @apollo/client/react's useQuery at module scope. We can't spy on ESM named exports in Vitest,
 // so provide a variable implementation that tests can replace.
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
+ 
 let useQueryMockImpl = (_query: any) => ({ data: undefined, loading: false });
 vi.mock('@apollo/client/react', () => ({
   useQuery: (query: any) => useQueryMockImpl(query),

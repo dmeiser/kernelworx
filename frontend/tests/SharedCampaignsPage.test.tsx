@@ -232,6 +232,7 @@ describe('SharedCampaignsPage', () => {
     });
 
     it('shows error when QR generation fails', async () => {
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       // Override mocked QRCode to reject
       const orig = (QRCode as any).toDataURL;
       (QRCode as any).toDataURL = vi.fn().mockRejectedValue(new Error('QR failed'));
@@ -250,6 +251,7 @@ describe('SharedCampaignsPage', () => {
 
       // restore
       (QRCode as any).toDataURL = orig;
+      consoleSpy.mockRestore();
     });
   });
 

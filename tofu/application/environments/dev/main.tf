@@ -35,7 +35,7 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 5.0"
+      version = "~> 6.0"
     }
     archive = {
       source  = "hashicorp/archive"
@@ -220,6 +220,7 @@ module "route53" {
   login_certificate_arn  = module.certificates.login_certificate_arn
   api_validation_records   = module.certificates.api_validation_records
   login_validation_records = module.certificates.login_validation_records
+  site_validation_records  = module.certificates.site_validation_records
 }
 
 # Outputs

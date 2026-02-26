@@ -2,7 +2,7 @@
 name = "kernelworx"
 version = "0.1.0"
 description = "Popcorn Sales Manager - Lambda functions and backend code"
-requires-python = ">=3.13"
+requires-python = ">=3.14"
 dependencies = [
     "aioboto3>=14.3.0",
     "boto3>=1.35.0",
@@ -32,7 +32,7 @@ profile = "black"
 line_length = 120
 
 [tool.mypy]
-python_version = "3.13"
+python_version = "3.14"
 strict = true
 warn_return_any = true
 warn_unused_configs = true

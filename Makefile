@@ -50,7 +50,7 @@ test-e2e:
 # Integration tests
 test-integration:
 	@echo "Running integration tests..."
-	uv run pytest tests/integration -v
+	cd tests/integration && npm run test
 
 # Run all tests
 test-all: test test-frontend test-integration test-e2e
