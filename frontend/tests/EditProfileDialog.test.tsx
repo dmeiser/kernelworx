@@ -165,7 +165,7 @@ describe('EditProfileDialog', () => {
 
   test('shows loading state during submission', async () => {
     const user = userEvent.setup();
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+     
     const onSubmit = vi.fn((_profileId: string, _name: string) => new Promise<void>(() => {})); // Never resolves
 
     render(
@@ -192,7 +192,7 @@ describe('EditProfileDialog', () => {
 
   test('disables input and buttons during submission', async () => {
     const user = userEvent.setup();
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+     
     const onSubmit = vi.fn((_profileId: string, _name: string) => new Promise<void>(() => {})); // Never resolves
 
     render(
