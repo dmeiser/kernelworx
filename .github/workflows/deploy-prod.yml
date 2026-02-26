@@ -36,6 +36,14 @@ jobs:
       - name: Install Python dependencies
         run: uv sync --locked
 
+      - name: Build Lambda Layer
+        run: |
+          LAYER_DIR=".build/lambda-layer"
+          echo "📦 Building Lambda layer dependencies..."
+          rm -rf "$LAYER_DIR"
+          uv export --no-dev --format requirements-txt -o requirements.txt
+          uv pip install -r requirements.txt --target "$LAYER_DIR/python"
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
