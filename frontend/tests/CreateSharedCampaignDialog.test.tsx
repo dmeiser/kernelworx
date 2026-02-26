@@ -6,19 +6,22 @@ import userEvent from '@testing-library/user-event';
 // Mock Select/MenuItem to plain HTML select/option to ensure onChange fires in jsdom
 vi.mock('@mui/material', async () => {
   const actual = await vi.importActual<any>('@mui/material');
-  const Select = ({ value, onChange, children, label, disabled, MenuProps: _MenuProps, ...rest }: any) => (
-    <select
-      role="combobox"
-      aria-label={label || 'Select'}
-      value={value ?? ''}
-      disabled={disabled}
-      aria-disabled={disabled ? 'true' : undefined}
-      onChange={(e) => onChange?.({ target: { value: (e.target as HTMLSelectElement).value } })}
-      {...rest}
-    >
-      {children}
-    </select>
-  );
+  const Select = ({ value, onChange, children, label, disabled, ...rest }: any) => {
+    const { MenuProps, ...domProps } = rest;
+    return (
+      <select
+        role="combobox"
+        aria-label={label || 'Select'}
+        value={value ?? ''}
+        disabled={disabled}
+        aria-disabled={disabled ? 'true' : undefined}
+        onChange={(e) => onChange?.({ target: { value: (e.target as HTMLSelectElement).value } })}
+        {...domProps}
+      >
+        {children}
+      </select>
+    );
+  };
   const MenuItem = ({ value, children, disabled, ...rest }: any) => {
     const getText = (nodes: any): string =>
       React.Children.toArray(nodes)
