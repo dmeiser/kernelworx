@@ -11,6 +11,11 @@ variable "zone_domain" {
   type        = string
 }
 
+variable "zone_domain" {
+  description = "DNS zone domain to look up (e.g., kernelworx.app for prod, dev.kernelworx.app for dev)"
+  type        = string
+}
+
 variable "cloudfront_domain_name" {
   description = "CloudFront distribution domain name for static site"
   type        = string

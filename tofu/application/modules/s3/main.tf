@@ -20,6 +20,11 @@ variable "site_domain" {
   type = string
 }
 
+variable "site_domain" {
+  description = "Fully qualified site domain for CORS allowed origins (e.g., dev.kernelworx.app or kernelworx.app)"
+  type = string
+}
+
 locals {
   bucket_suffix = "-${var.region_abbrev}-${var.environment}"
 }
