@@ -20,6 +20,11 @@ variable "domain" {
   type = string
 }
 
+variable "api_domain" {
+  description = "Fully qualified API domain (e.g., api.dev.kernelworx.app or api.kernelworx.app)"
+  type = string
+}
+
 variable "api_certificate_arn" {
   description = "ACM certificate ARN for the AppSync custom domain"
   type = string
@@ -58,7 +63,7 @@ variable "aws_region" {
 
 locals {
   api_name   = "${var.name_prefix}-api-${var.region_abbrev}-${var.environment}"
-  api_domain = "api.${var.environment}.${var.domain}"
+  api_domain = var.api_domain
   env_suffix = "_${var.environment}"
   
   # JS resolver code path

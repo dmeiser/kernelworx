@@ -21,6 +21,16 @@ variable "domain" {
   type = string
 }
 
+variable "site_domain" {
+  description = "Fully qualified site domain (e.g., dev.kernelworx.app or kernelworx.app)"
+  type = string
+}
+
+variable "login_domain" {
+  description = "Fully qualified login domain (e.g., login.dev.kernelworx.app or login.kernelworx.app)"
+  type = string
+}
+
 variable "google_client_id" {
   description = "Google OAuth client ID for social login"
   type      = string
@@ -53,7 +63,7 @@ variable "enable_google_idp" {
 
 locals {
   user_pool_name = "${var.name_prefix}-users-${var.region_abbrev}-${var.environment}"
-  login_domain   = "login.${var.environment}.${var.domain}"
+  login_domain   = var.login_domain
   tags = {
     Environment = var.environment
     ManagedBy   = "opentofu"
@@ -179,14 +189,14 @@ resource "aws_cognito_user_pool_client" "web" {
 
   callback_urls = [
     "http://localhost:5173",
-    "https://dev.kernelworx.app",
-    "https://dev.kernelworx.app/callback",
+    "https://${var.site_domain}",
+    "https://${var.site_domain}/callback",
     "https://local.dev.appworx.app:5173"
   ]
 
   logout_urls = [
     "http://localhost:5173",
-    "https://dev.kernelworx.app",
+    "https://${var.site_domain}",
     "https://local.dev.appworx.app:5173"
   ]
 

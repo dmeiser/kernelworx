@@ -11,6 +11,11 @@ variable "domain" {
   description = "Base domain for DNS records"
 }
 
+variable "zone_domain" {
+  description = "DNS zone domain to look up (e.g., kernelworx.app for prod, dev.kernelworx.app for dev)"
+  type        = string
+}
+
 variable "cloudfront_domain_name" {
   description = "CloudFront distribution domain name for static site"
   type        = string
@@ -70,8 +75,7 @@ variable "site_validation_records" {
 
 # Locals for domain construction
 locals {
-  is_prod   = var.environment == "prod"
-  zone_name = local.is_prod ? "${var.domain}." : "${var.environment}.${var.domain}."
+  zone_name = "${var.zone_domain}."
 
   # Record names relative to the hosted zone
   site_record_name  = ""      # zone apex for both prod and dev
