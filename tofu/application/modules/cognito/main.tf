@@ -26,16 +26,6 @@ variable "login_domain" {
   type = string
 }
 
-variable "site_domain" {
-  description = "Fully qualified site domain (e.g., dev.kernelworx.app or kernelworx.app)"
-  type = string
-}
-
-variable "login_domain" {
-  description = "Fully qualified login domain (e.g., login.dev.kernelworx.app or login.kernelworx.app)"
-  type = string
-}
-
 variable "google_client_id" {
   description = "Google OAuth client ID for social login"
   type      = string

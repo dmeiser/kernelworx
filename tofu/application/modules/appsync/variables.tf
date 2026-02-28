@@ -20,11 +20,6 @@ variable "api_domain" {
   type = string
 }
 
-variable "api_domain" {
-  description = "Fully qualified API domain (e.g., api.dev.kernelworx.app or api.kernelworx.app)"
-  type = string
-}
-
 variable "api_certificate_arn" {
   description = "ACM certificate ARN for the AppSync custom domain"
   type = string
