@@ -28,7 +28,6 @@ resource "aws_acm_certificate" "site" {
   validation_method = "DNS"
 
   lifecycle {
-    prevent_destroy = true
     create_before_destroy = true
   }
 
@@ -42,7 +41,6 @@ resource "aws_acm_certificate" "api" {
   validation_method = "DNS"
 
   lifecycle {
-    prevent_destroy = true
     create_before_destroy = true
   }
 
@@ -56,7 +54,6 @@ resource "aws_acm_certificate" "login" {
   validation_method = "DNS"
 
   lifecycle {
-    prevent_destroy = true
     create_before_destroy = true
   }
 
