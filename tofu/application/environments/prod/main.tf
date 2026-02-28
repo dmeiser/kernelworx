@@ -102,8 +102,11 @@ variable "google_client_secret" {
 
 # Local computed values
 locals {
-  name_prefix     = "kernelworx"
-  site_domain     = var.domain  # Production uses apex domain
+  name_prefix  = "kernelworx"
+  site_domain  = var.domain               # Production uses apex domain
+  api_domain   = "api.${var.domain}"
+  login_domain = "login.${var.domain}"
+  zone_domain  = var.domain
 }
 
 # Module instantiations
@@ -121,7 +124,7 @@ module "s3" {
   environment   = var.environment
   region_abbrev = var.region_abbrev
   name_prefix   = local.name_prefix
-  domain        = var.domain
+  site_domain   = local.site_domain
 }
 
 module "iam" {
@@ -139,8 +142,10 @@ module "iam" {
 module "certificates" {
   source = "../../modules/certificates"
 
-  environment = var.environment
-  domain      = var.domain
+  environment  = var.environment
+  site_domain  = local.site_domain
+  api_domain   = local.api_domain
+  login_domain = local.login_domain
 }
 
 module "cognito" {
@@ -149,7 +154,8 @@ module "cognito" {
   environment          = var.environment
   region_abbrev        = var.region_abbrev
   name_prefix          = local.name_prefix
-  domain               = var.domain
+  site_domain          = local.site_domain
+  login_domain         = local.login_domain
   google_client_id     = var.google_client_id
   google_client_secret = var.google_client_secret
   login_certificate_arn = module.certificates.login_certificate_arn
@@ -186,7 +192,7 @@ module "appsync" {
   environment              = var.environment
   region_abbrev            = var.region_abbrev
   name_prefix              = local.name_prefix
-  domain                   = var.domain
+  api_domain               = local.api_domain
   api_certificate_arn      = module.certificates.api_certificate_arn
   certificate_validation   = aws_acm_certificate_validation.api
   appsync_service_role_arn = module.iam.appsync_service_role_arn
@@ -201,7 +207,7 @@ module "cloudfront" {
   source = "../../modules/cloudfront"
 
   environment          = var.environment
-  domain               = var.domain
+  site_domain          = local.site_domain
   site_certificate_arn = module.certificates.site_certificate_arn
   certificate_validation = aws_acm_certificate_validation.site
   static_bucket_id     = module.s3.static_bucket_id
@@ -213,7 +219,7 @@ module "route53" {
   source = "../../modules/route53"
 
   environment            = var.environment
-  domain                 = var.domain
+  zone_domain            = local.zone_domain
   appsync_api_url        = module.appsync.api_url
   cognito_domain         = module.cognito.domain
   cognito_cloudfront_domain = module.cognito.cloudfront_domain
@@ -238,7 +244,7 @@ resource "aws_acm_certificate_validation" "login" {
 
 resource "aws_acm_certificate_validation" "site" {
   certificate_arn         = module.certificates.site_certificate_arn
-  validation_record_fqdns = [for rec in module.route53.cert_validation_records : rec.fqdn if can(regex("^(prod|dev)\\.", rec.name))]
+  validation_record_fqdns = [for rec in module.route53.cert_validation_records : rec.fqdn if !can(regex("(api|login)\\.", rec.name))]
 }
 
 # Outputs

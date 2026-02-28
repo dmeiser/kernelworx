@@ -102,8 +102,11 @@ variable "google_client_secret" {
 
 # Local computed values
 locals {
-  name_prefix     = "kernelworx"
-  site_domain     = "${var.environment}.${var.domain}"
+  name_prefix  = "kernelworx"
+  site_domain  = "${var.environment}.${var.domain}"
+  api_domain   = "api.${var.environment}.${var.domain}"
+  login_domain = "login.${var.environment}.${var.domain}"
+  zone_domain  = "${var.environment}.${var.domain}"
 }
 
 # Module instantiations
@@ -121,7 +124,7 @@ module "s3" {
   environment   = var.environment
   region_abbrev = var.region_abbrev
   name_prefix   = local.name_prefix
-  domain        = var.domain
+  site_domain   = local.site_domain
 }
 
 module "iam" {
@@ -139,8 +142,10 @@ module "iam" {
 module "certificates" {
   source = "../../modules/certificates"
 
-  environment = var.environment
-  domain      = var.domain
+  environment  = var.environment
+  site_domain  = local.site_domain
+  api_domain   = local.api_domain
+  login_domain = local.login_domain
 }
 
 module "cognito" {
@@ -149,7 +154,8 @@ module "cognito" {
   environment          = var.environment
   region_abbrev        = var.region_abbrev
   name_prefix          = local.name_prefix
-  domain               = var.domain
+  site_domain          = local.site_domain
+  login_domain         = local.login_domain
   google_client_id     = var.google_client_id
   google_client_secret = var.google_client_secret
   login_certificate_arn = module.certificates.login_certificate_arn
@@ -186,7 +192,7 @@ module "appsync" {
   environment              = var.environment
   region_abbrev            = var.region_abbrev
   name_prefix              = local.name_prefix
-  domain                   = var.domain
+  api_domain               = local.api_domain
   api_certificate_arn      = module.certificates.api_certificate_arn
   appsync_service_role_arn = module.iam.appsync_service_role_arn
   user_pool_id             = module.cognito.user_pool_id
@@ -200,7 +206,7 @@ module "cloudfront" {
   source = "../../modules/cloudfront"
 
   environment          = var.environment
-  domain               = var.domain
+  site_domain          = local.site_domain
   site_certificate_arn = module.certificates.site_certificate_arn
   static_bucket_id     = module.s3.static_bucket_id
   static_bucket_arn    = module.s3.static_bucket_arn
@@ -211,7 +217,7 @@ module "route53" {
   source = "../../modules/route53"
 
   environment            = var.environment
-  domain                 = var.domain
+  zone_domain            = local.zone_domain
   appsync_api_url        = module.appsync.api_url
   cognito_domain         = module.cognito.domain
   cognito_cloudfront_domain = module.cognito.cloudfront_domain

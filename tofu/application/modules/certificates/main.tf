@@ -2,25 +2,29 @@
 
 variable "environment" {
   description = "Deployment environment (e.g., dev, prod)"
-  type = string
+  type        = string
 }
 
-variable "domain" {
-  description = "Base domain name used for site/api/login certificates"
-  type = string
+variable "site_domain" {
+  description = "Fully qualified site domain (e.g., dev.kernelworx.app or kernelworx.app)"
+  type        = string
 }
 
-locals {
-  site_domain  = "${var.environment}.${var.domain}"
-  api_domain   = "api.${var.environment}.${var.domain}"
-  login_domain = "login.${var.environment}.${var.domain}"
+variable "api_domain" {
+  description = "Fully qualified API domain (e.g., api.dev.kernelworx.app or api.kernelworx.app)"
+  type        = string
+}
+
+variable "login_domain" {
+  description = "Fully qualified login domain (e.g., login.dev.kernelworx.app or login.kernelworx.app)"
+  type        = string
 }
 
 # Note: These certificates were created manually/by CDK and validated
 # They are imported here for management, not created fresh
 
 resource "aws_acm_certificate" "site" {
-  domain_name       = local.site_domain
+  domain_name       = var.site_domain
   validation_method = "DNS"
 
   lifecycle {
@@ -34,7 +38,7 @@ resource "aws_acm_certificate" "site" {
 }
 
 resource "aws_acm_certificate" "api" {
-  domain_name       = local.api_domain
+  domain_name       = var.api_domain
   validation_method = "DNS"
 
   lifecycle {
@@ -48,7 +52,7 @@ resource "aws_acm_certificate" "api" {
 }
 
 resource "aws_acm_certificate" "login" {
-  domain_name       = local.login_domain
+  domain_name       = var.login_domain
   validation_method = "DNS"
 
   lifecycle {

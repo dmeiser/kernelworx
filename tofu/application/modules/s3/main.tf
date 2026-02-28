@@ -15,9 +15,9 @@ variable "name_prefix" {
   type = string
 }
 
-variable "domain" {
+variable "site_domain" {
+  description = "Fully qualified site domain for CORS allowed origins (e.g., dev.kernelworx.app or kernelworx.app)"
   type = string
-  description = "Base domain for CORS configuration"
 }
 
 locals {
@@ -129,8 +129,8 @@ resource "aws_s3_bucket_cors_configuration" "exports" {
     allowed_methods = ["GET", "PUT", "POST"]
     # Restrict CORS to our application domain only (not wildcard)
     allowed_origins = [
-      "https://${var.environment}.${var.domain}",
-      "https://www.${var.environment}.${var.domain}"
+      "https://${var.site_domain}",
+      "https://www.${var.site_domain}"
     ]
     max_age_seconds = 3600
   }

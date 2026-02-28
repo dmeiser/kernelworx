@@ -5,8 +5,8 @@ variable "environment" {
   type = string
 }
 
-variable "domain" {
-  description = "Base domain used to build the site hostname"
+variable "site_domain" {
+  description = "Fully qualified site domain (e.g., dev.kernelworx.app or kernelworx.app)"
   type = string
 }
 
@@ -37,7 +37,7 @@ variable "certificate_validation" {
 }
 
 locals {
-  site_domain = "${var.environment}.${var.domain}"
+  site_domain = var.site_domain
 }
 
 # Origin Access Identity
