@@ -124,7 +124,6 @@ module "s3" {
   environment   = var.environment
   region_abbrev = var.region_abbrev
   name_prefix   = local.name_prefix
-  domain        = var.domain
   site_domain   = local.site_domain
 }
 
@@ -155,7 +154,6 @@ module "cognito" {
   environment          = var.environment
   region_abbrev        = var.region_abbrev
   name_prefix          = local.name_prefix
-  domain               = var.domain
   site_domain          = local.site_domain
   login_domain         = local.login_domain
   google_client_id     = var.google_client_id
@@ -194,7 +192,6 @@ module "appsync" {
   environment              = var.environment
   region_abbrev            = var.region_abbrev
   name_prefix              = local.name_prefix
-  domain                   = var.domain
   api_domain               = local.api_domain
   api_certificate_arn      = module.certificates.api_certificate_arn
   certificate_validation   = aws_acm_certificate_validation.api
@@ -222,7 +219,6 @@ module "route53" {
   source = "../../modules/route53"
 
   environment            = var.environment
-  domain                 = var.domain
   zone_domain            = local.zone_domain
   appsync_api_url        = module.appsync.api_url
   cognito_domain         = module.cognito.domain

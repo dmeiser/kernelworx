@@ -13,7 +13,7 @@ echo "   Region: $REGION"
 echo ""
 
 # Get User Pool ID
-USER_POOL_ID=$(grep TEST_USER_POOL_ID "$ENV_FILE" | cut -d= -f2)
+USER_POOL_ID=$(grep "^TEST_USER_POOL_ID=" "$ENV_FILE" | cut -d= -f2)
 
 if [ -z "$USER_POOL_ID" ]; then
     echo "❌ Error: TEST_USER_POOL_ID not found in .env"

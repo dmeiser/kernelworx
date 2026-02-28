@@ -16,11 +16,6 @@ variable "name_prefix" {
   type = string
 }
 
-variable "domain" {
-  description = "Base domain for Cognito-hosted UI and login subdomain"
-  type = string
-}
-
 variable "site_domain" {
   description = "Fully qualified site domain (e.g., dev.kernelworx.app or kernelworx.app)"
   type = string

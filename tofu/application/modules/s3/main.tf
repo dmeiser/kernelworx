@@ -15,11 +15,6 @@ variable "name_prefix" {
   type = string
 }
 
-variable "domain" {
-  type = string
-  description = "Base domain for CORS configuration"
-}
-
 variable "site_domain" {
   description = "Fully qualified site domain for CORS allowed origins (e.g., dev.kernelworx.app or kernelworx.app)"
   type = string

@@ -6,11 +6,6 @@ variable "environment" {
   type        = string
 }
 
-variable "domain" {
-  type        = string
-  description = "Base domain for DNS records"
-}
-
 variable "zone_domain" {
   description = "DNS zone domain to look up (e.g., kernelworx.app for prod, dev.kernelworx.app for dev)"
   type        = string

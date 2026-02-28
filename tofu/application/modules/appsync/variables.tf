@@ -15,11 +15,6 @@ variable "name_prefix" {
   type = string
 }
 
-variable "domain" {
-  description = "Base domain used to build the AppSync API hostname"
-  type = string
-}
-
 variable "api_domain" {
   description = "Fully qualified API domain (e.g., api.dev.kernelworx.app or api.kernelworx.app)"
   type = string
