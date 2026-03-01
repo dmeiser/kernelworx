@@ -90,6 +90,11 @@ jobs:
 
       - name: Extract OpenTofu outputs for frontend
         id: tofu_outputs
+        env:
+          TF_VAR_encryption_passphrase: ${{ secrets.TF_VAR_ENCRYPTION_PASSPHRASE }}
+          TF_VAR_google_client_id: ${{ secrets.TF_VAR_GOOGLE_CLIENT_ID }}
+          TF_VAR_google_client_secret: ${{ secrets.TF_VAR_GOOGLE_CLIENT_SECRET }}
+          TF_IN_AUTOMATION: "true"
         working-directory: tofu/application/environments/prod
         run: |
           echo "user_pool_id=$(tofu output -raw cognito_user_pool_id)" >> $GITHUB_OUTPUT
@@ -100,6 +105,11 @@ jobs:
 
       - name: Lookup AWS resources by tags
         id: aws_resources
+        env:
+          TF_VAR_encryption_passphrase: ${{ secrets.TF_VAR_ENCRYPTION_PASSPHRASE }}
+          TF_VAR_google_client_id: ${{ secrets.TF_VAR_GOOGLE_CLIENT_ID }}
+          TF_VAR_google_client_secret: ${{ secrets.TF_VAR_GOOGLE_CLIENT_SECRET }}
+          TF_IN_AUTOMATION: "true"
         run: |
           # Lookup S3 static assets bucket by tags
           S3_BUCKET=$(aws s3api list-buckets --query 'Buckets[].Name' --output text | \
