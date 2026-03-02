@@ -21,6 +21,9 @@ dev = [
     "pytest-cov>=7.0.0",
     "types-openpyxl>=3.1.5.20250919",
     "radon>=6.0.1",
+    "playwright>=1.51.0",
+    "pytest-playwright>=0.7.0",
+    "python-dotenv>=1.2.1",
 ]
 
 [tool.ruff]
@@ -52,7 +55,7 @@ module = "constructs"
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests/unit"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
