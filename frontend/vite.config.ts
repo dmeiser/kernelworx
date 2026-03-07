@@ -32,7 +32,7 @@ const resolveHttpsConfig = () => {
     : (fs.existsSync(fallbackCertPath) ? fallbackCertPath : null)
 
   if (!keyPath || !certPath) {
-    return false
+    return undefined
   }
 
   return {
@@ -76,11 +76,6 @@ export default defineConfig({
     exclude: ['**/node_modules/**', '**/dist/**', '**/tests/e2e/**'],
     // Use threads pool for consistent module resolution
     pool: 'threads',
-    poolOptions: {
-      threads: {
-        isolate: true,
-      },
-    },
     // Run test files sequentially to avoid jsdom cleanup issues
     fileParallelism: false,
     // Ensure tests timeout rather than hang
@@ -93,9 +88,6 @@ export default defineConfig({
           include: ['react-router', 'react-router-dom'],
         },
       },
-    },
-    resolve: {
-      conditions: ['import', 'module', 'browser', 'default'],
     },
     coverage: {
       provider: 'v8',
