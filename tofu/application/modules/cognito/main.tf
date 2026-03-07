@@ -56,6 +56,18 @@ variable "enable_google_idp" {
   description = "Enable Google Identity Provider"
 }
 
+variable "pre_signup_lambda_arn" {
+  description = "ARN of the Pre Sign-Up Lambda trigger. If null, no pre-signup trigger is configured."
+  type        = string
+  default     = null
+}
+
+variable "post_auth_lambda_arn" {
+  description = "ARN of the Post Authentication Lambda trigger. If null, no post-auth trigger is configured."
+  type        = string
+  default     = null
+}
+
 locals {
   user_pool_name = "${var.name_prefix}-users-${var.region_abbrev}-${var.environment}"
   login_domain   = var.login_domain
@@ -130,11 +142,41 @@ resource "aws_cognito_user_pool" "main" {
     attributes_require_verification_before_update = ["email"]
   }
 
+  # Lambda triggers (restored from CDK; omitted during CDK → OpenTofu migration)
+  dynamic "lambda_config" {
+    for_each = (var.pre_signup_lambda_arn != null || var.post_auth_lambda_arn != null) ? [1] : []
+    content {
+      pre_sign_up         = var.pre_signup_lambda_arn
+      post_authentication = var.post_auth_lambda_arn
+    }
+  }
+
   tags = local.tags
 
   lifecycle {
     prevent_destroy = true
   }
+}
+
+# Lambda permissions - allow Cognito to invoke trigger functions
+resource "aws_lambda_permission" "cognito_pre_signup" {
+  count = var.pre_signup_lambda_arn != null ? 1 : 0
+
+  statement_id  = "AllowCognitoInvokePreSignup"
+  action        = "lambda:InvokeFunction"
+  function_name = var.pre_signup_lambda_arn
+  principal     = "cognito-idp.amazonaws.com"
+  source_arn    = aws_cognito_user_pool.main.arn
+}
+
+resource "aws_lambda_permission" "cognito_post_auth" {
+  count = var.post_auth_lambda_arn != null ? 1 : 0
+
+  statement_id  = "AllowCognitoInvokePostAuth"
+  action        = "lambda:InvokeFunction"
+  function_name = var.post_auth_lambda_arn
+  principal     = "cognito-idp.amazonaws.com"
+  source_arn    = aws_cognito_user_pool.main.arn
 }
 
 # Google Identity Provider (optional - not currently configured)

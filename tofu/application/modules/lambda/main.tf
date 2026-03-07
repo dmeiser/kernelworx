@@ -124,6 +124,9 @@ locals {
       handler     = "handlers.account_operations.delete_my_account"
       timeout     = 30
       memory_size = 256
+      extra_env = {
+        USER_POOL_ID = var.user_pool_id
+      }
     }
     "transfer-ownership" = {
       handler     = "handlers.transfer_profile_ownership.lambda_handler"
