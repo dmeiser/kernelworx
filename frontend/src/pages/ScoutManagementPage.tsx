@@ -47,6 +47,7 @@ import {
   DELETE_PROFILE_INVITE,
   LIST_INVITES_BY_PROFILE,
   LIST_SHARES_BY_PROFILE,
+  LIST_MY_PROFILES,
   REVOKE_SHARE,
   TRANSFER_PROFILE_OWNERSHIP,
 } from '../lib/graphql';
@@ -497,6 +498,8 @@ export const ScoutManagementPage: React.FC = () => {
 
   // Delete profile mutation
   const [deleteProfile] = useMutation(DELETE_SELLER_PROFILE, {
+    refetchQueries: [{ query: LIST_MY_PROFILES }],
+    awaitRefetchQueries: true,
     onCompleted: () => {
       navigate('/scouts');
     },

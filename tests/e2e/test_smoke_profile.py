@@ -12,8 +12,8 @@ any test in this module runs.
 """
 
 import re
-import time
 import urllib.parse
+from uuid import uuid4
 
 import pytest
 from playwright.sync_api import Browser, BrowserContext, Page, expect
@@ -73,7 +73,7 @@ def test_create_profile_via_ui(owner_page: Page) -> None:
     Args:
         owner_page: Function-scoped Playwright page authenticated as owner.
     """
-    profile_name = f"UI Create Test {int(time.time())}"
+    profile_name = f"UI Create Test {uuid4().hex[:12]}"
 
     dashboard = DashboardPage(owner_page)
     dashboard.goto()
@@ -104,7 +104,7 @@ def test_delete_profile(owner_page: Page) -> None:
     Args:
         owner_page: Function-scoped Playwright page authenticated as owner.
     """
-    profile_name = f"Delete Me {int(time.time())}"
+    profile_name = f"Delete Me {uuid4().hex[:12]}"
 
     dashboard = DashboardPage(owner_page)
     dashboard.goto()
@@ -134,12 +134,22 @@ def test_delete_profile(owner_page: Page) -> None:
     manage.goto(profile_id)
     manage.delete_profile()
 
-    # Verify the profile is gone.  Navigate back and wait for the GraphQL
-    # cache to re-fetch — the profile card may linger briefly after deletion.
-    dashboard.goto()
-    profile_card_heading = owner_page.locator("div.MuiCard-root h3", has_text=profile_name)
-    expect(profile_card_heading).to_have_count(0, timeout=15_000)
-    names_after_delete = dashboard.get_profile_names()
+    # Verify the profile is gone.
+    #
+    # In dev, profile deletion can be briefly stale due to eventual
+    # consistency / client cache timing. Use bounded polling with fresh
+    # navigation to avoid false negatives while still failing hard if the
+    # profile truly remains.
+    names_after_delete: list[str] = []
+    for _ in range(12):  # up to ~60s (12 * 5s)
+        dashboard.goto()
+        dashboard.wait_for_loading()
+        dashboard.wait_for_profiles_loaded()
+        names_after_delete = dashboard.get_profile_names()
+        if profile_name not in names_after_delete:
+            break
+        owner_page.wait_for_timeout(5_000)
+
     assert profile_name not in names_after_delete, (
         f"'{profile_name}' still visible on dashboard after deletion; visible: {names_after_delete}"
     )

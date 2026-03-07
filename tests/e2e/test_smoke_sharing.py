@@ -33,6 +33,7 @@ tests that run with a fresh page fixture.
 import os
 import re
 import urllib.parse
+from uuid import uuid4
 
 import pytest
 from playwright.sync_api import Browser, BrowserContext, Page, expect
@@ -261,6 +262,24 @@ def test_write_share_contributor_can_create_order(
     assert match, f"Expected /scouts/{{id}}/campaigns after clicking profile; got: {owner_page.url}"
     profile_id = urllib.parse.unquote(match.group(1))
 
+    # Ensure there is at least one campaign on the shared profile.
+    campaign_page_owner = CampaignPage(owner_page)
+    campaign_page_owner.goto(profile_id)
+    campaign_page_owner.wait_for_loading()
+    if not campaign_page_owner.get_campaign_names():
+        campaign_page_owner.create_campaign_first_catalog(f"Share Seed Campaign {uuid4().hex[:10]}")
+
+    # Campaign list visibility can lag briefly after creation.
+    owner_campaigns: list[str] = []
+    for _ in range(12):  # up to ~60s
+        campaign_page_owner.goto(profile_id)
+        campaign_page_owner.wait_for_loading()
+        owner_campaigns = campaign_page_owner.get_campaign_names()
+        if owner_campaigns:
+            break
+        owner_page.wait_for_timeout(5_000)
+    assert owner_campaigns, "Shared profile must have at least one campaign before creating a WRITE invite"
+
     # ------------------------------------------------------------------
     # Owner: generate a WRITE invite
     # ------------------------------------------------------------------
@@ -280,9 +299,14 @@ def test_write_share_contributor_can_create_order(
         SharePage(contributor_pg).accept_invite(invite_code)
 
         campaign_page_contrib = CampaignPage(contributor_pg)
-        campaign_page_contrib.goto(profile_id)
-        campaign_page_contrib.wait_for_loading()
-        campaigns = campaign_page_contrib.get_campaign_names()
+        campaigns: list[str] = []
+        for _ in range(12):  # up to ~60s after invite redemption
+            campaign_page_contrib.goto(profile_id)
+            campaign_page_contrib.wait_for_loading()
+            campaigns = campaign_page_contrib.get_campaign_names()
+            if campaigns:
+                break
+            contributor_pg.wait_for_timeout(5_000)
         assert campaigns, "Shared profile must have at least one campaign"
 
         campaign_page_contrib.click_campaign(campaigns[0])
