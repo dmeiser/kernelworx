@@ -108,8 +108,15 @@ def test_view_campaign_detail(owner_page: Page, ensure_owner_profile: str) -> No
     """
     _, campaign_page = _navigate_to_first_profile_campaigns(owner_page)
     names = campaign_page.get_campaign_names()
-    assert names, "Owner must have at least one campaign to run test_view_campaign_detail"
-    campaign_page.click_campaign(names[0])
+
+    campaign_to_open = names[0] if names else None
+    if campaign_to_open is None:
+        # Self-heal in sparse dev environments where cleanup removed all
+        # campaigns for the current profile.
+        campaign_to_open = f"View Detail Seed {int(time.time())}"
+        _create_campaign_with_first_catalog(campaign_page, campaign_to_open)
+
+    campaign_page.click_campaign(campaign_to_open)
     url = owner_page.url
     assert "/campaigns/" in url, f"Expected /campaigns/ in URL after click; got: {url}"
     # The app uses a catch-all route (/campaigns/:id/*); the default tab renders

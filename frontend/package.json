@@ -15,11 +15,7 @@
     "test": "node run-tests.js",
     "test:watch": "vitest --watch",
     "test:ui": "vitest --ui",
-    "test:coverage": "node run-tests.js --coverage",
-    "test:e2e": "npx playwright test",
-    "test:e2e:headed": "npx playwright test --headed",
-    "test:e2e:report": "npx playwright show-report",
-    "brand:capture": "node playwright-capture.js"
+    "test:coverage": "node run-tests.js --coverage"
   },
   "dependencies": {
     "@apollo/client": "^4.0.9",

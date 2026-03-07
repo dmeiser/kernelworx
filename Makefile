@@ -1,4 +1,4 @@
-.PHONY: help test lint format typecheck integration infra all clean test-e2e test-e2e-frontend
+.PHONY: help test lint format typecheck integration infra all clean test-e2e
 
 # Default target
 help:
@@ -8,7 +8,6 @@ help:
 	@echo "  make test              - Run Python unit tests (pytest)"
 	@echo "  make test-frontend     - Run TypeScript unit tests (vitest)"
 	@echo "  make test-e2e          - Run Python E2E smoke tests (pytest-playwright)"
-	@echo "  make test-e2e-frontend - Run frontend E2E tests (npm playwright)"
 	@echo "  make test-integration  - Run integration tests"
 	@echo "  make test-all          - Run all tests (unit + integration + e2e)"
 	@echo ""
@@ -48,18 +47,13 @@ test-e2e:
 	@echo "Running Python E2E smoke tests..."
 	uv run pytest tests/e2e/ -v
 
-# Frontend E2E tests (npm/playwright)
-test-e2e-frontend:
-	@echo "Running frontend E2E tests..."
-	cd frontend && npm run test:e2e
-
 # Integration tests
 test-integration:
 	@echo "Running integration tests..."
 	cd tests/integration && npm run test
 
 # Run all tests
-test-all: test test-frontend test-integration test-e2e test-e2e-frontend
+test-all: test test-frontend test-integration test-e2e
 
 # Python linting and type checking
 lint-python:

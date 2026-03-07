@@ -31,7 +31,9 @@ in the UI, which may be wrong if orphaned campaigns exist.
 """
 
 import re
+import time
 import urllib.parse
+from uuid import uuid4
 
 import pytest
 from playwright.sync_api import Page, expect
@@ -100,8 +102,19 @@ def _navigate_to_orders(owner_page: Page) -> tuple[OrderPage, str, str]:
     """
     dashboard = DashboardPage(owner_page)
     dashboard.goto()
-    dashboard.wait_for_profiles_loaded()
+    dashboard.wait_for_loading()
     profiles = dashboard.get_profile_names()
+    if not profiles:
+        # Self-heal sparse environments by creating a profile on demand.
+        profile_name = f"Order Seed Profile {uuid4().hex[:10]}"
+        dashboard._create_scout_button().click()
+        dialog = owner_page.get_by_role("dialog")
+        owner_page.get_by_label("Scout Name").fill(profile_name)
+        owner_page.get_by_role("button", name="Create Scout").click()
+        expect(dialog).to_be_hidden(timeout=15_000)
+        dashboard.wait_for_loading()
+        profiles = dashboard.get_profile_names()
+
     assert profiles, "Owner must have at least one seller profile"
 
     campaign_page = CampaignPage(owner_page)
@@ -116,10 +129,28 @@ def _navigate_to_orders(owner_page: Page) -> tuple[OrderPage, str, str]:
         if campaigns:
             chosen_profile = profile_name
             break
-    assert chosen_profile is not None, (
-        "Owner must have at least one campaign — run test_smoke_campaign.py first "
-        "or create a campaign manually in the dev environment"
-    )
+    if chosen_profile is None:
+        # No campaigns found on any profile; seed one for orders smoke tests.
+        dashboard.goto()
+        dashboard.wait_for_loading()
+        dashboard.click_profile(profiles[0])
+        campaign_page.wait_for_loading()
+        profile_match = re.search(r"/scouts/([^/]+)/campaigns", owner_page.url)
+        assert profile_match, f"Expected /scouts/{{id}}/campaigns URL, got: {owner_page.url}"
+        seed_profile_id = urllib.parse.unquote(profile_match.group(1))
+        seed_name = f"Order Seed Campaign {int(time.time())}"
+        campaign_page.create_campaign_first_catalog(seed_name)
+        # Poll with fresh navigations; campaign visibility can lag briefly.
+        campaigns = []
+        for _ in range(12):  # up to ~60s
+            campaign_page.goto(seed_profile_id)
+            campaigns = campaign_page.get_campaign_names()
+            if campaigns:
+                break
+            owner_page.wait_for_timeout(5_000)
+        assert campaigns, "Failed to seed campaign for order smoke tests"
+        chosen_profile = profiles[0]
+
     campaign_page.click_campaign(campaigns[0])
 
     profile_id, campaign_id = _extract_profile_and_campaign_ids(owner_page.url)
