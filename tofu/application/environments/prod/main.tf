@@ -169,7 +169,7 @@ module "cognito" {
   google_client_secret = var.google_client_secret
   login_certificate_arn = module.certificates.login_certificate_arn
   sms_role_arn         = module.iam.cognito_sms_role_arn
-  enable_google_idp    = false  # Not currently configured in AWS
+  enable_google_idp    = true
   callback_urls        = local.cognito_callback_urls
   logout_urls          = local.cognito_logout_urls
 
