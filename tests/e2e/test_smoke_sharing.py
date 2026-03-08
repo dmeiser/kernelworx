@@ -177,9 +177,19 @@ def test_revoke_share(owner_page: Page, _module_state: dict[str, str]) -> None:
     share_page = SharePage(owner_page)
     share_page.goto(profile_id)
 
-    # Guard: only attempt revocation if the share actually exists
-    if not share_page.has_shared_access(contributor_email):
-        pytest.skip(f"'{contributor_email}' is not in the shares table; ensure test_accept_share ran first")
+    # Hard assertion: if the contributor share does not appear after accept flow,
+    # that is a test failure (not a skip). Allow bounded polling for UI/backend lag.
+    has_access = False
+    for _ in range(12):  # up to ~60s
+        if share_page.has_shared_access(contributor_email):
+            has_access = True
+            break
+        owner_page.wait_for_timeout(5_000)
+
+    assert has_access, (
+        f"Expected contributor '{contributor_email}' to appear in Current Access after accepting invite, "
+        "but no share row was found. This indicates a failed share-accept flow."
+    )
 
     share_page.revoke_access(contributor_email)
 

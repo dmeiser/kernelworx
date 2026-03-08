@@ -107,6 +107,19 @@ locals {
   api_domain   = "api.${var.environment}.${var.domain}"
   login_domain = "login.${var.environment}.${var.domain}"
   zone_domain  = "${var.environment}.${var.domain}"
+
+  cognito_callback_urls = [
+    "https://${local.site_domain}",
+    "https://${local.site_domain}/callback",
+    "http://localhost:5173",
+    "https://local.dev.appworx.app:5173",
+  ]
+
+  cognito_logout_urls = [
+    "https://${local.site_domain}",
+    "http://localhost:5173",
+    "https://local.dev.appworx.app:5173",
+  ]
 }
 
 # Module instantiations
@@ -160,7 +173,9 @@ module "cognito" {
   google_client_secret = var.google_client_secret
   login_certificate_arn = module.certificates.login_certificate_arn
   sms_role_arn         = module.iam.cognito_sms_role_arn
-  enable_google_idp    = false  # Not currently configured in AWS
+  enable_google_idp    = true
+  callback_urls        = local.cognito_callback_urls
+  logout_urls          = local.cognito_logout_urls
 
   # Cognito trigger Lambdas (restored from CDK configuration)
   enable_lambda_triggers = true

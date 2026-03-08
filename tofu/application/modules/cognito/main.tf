@@ -86,6 +86,16 @@ variable "web_authn_relying_party_id" {
   default     = null
 }
 
+variable "callback_urls" {
+  description = "OAuth callback URLs for the Cognito User Pool client"
+  type        = list(string)
+}
+
+variable "logout_urls" {
+  description = "OAuth logout URLs for the Cognito User Pool client"
+  type        = list(string)
+}
+
 locals {
   user_pool_name = "${var.name_prefix}-users-${var.region_abbrev}-${var.environment}"
   login_domain   = var.login_domain
@@ -259,21 +269,12 @@ resource "aws_cognito_user_pool_client" "web" {
     "ALLOW_USER_AUTH"
   ]
 
-  # Currently only COGNITO (Google IdP not yet configured)
-  supported_identity_providers = ["COGNITO"]
+  # Include Google IdP when enabled for this environment
+  supported_identity_providers = var.enable_google_idp ? ["COGNITO", "Google"] : ["COGNITO"]
 
-  callback_urls = [
-    "http://localhost:5173",
-    "https://${var.site_domain}",
-    "https://${var.site_domain}/callback",
-    "https://local.dev.appworx.app:5173"
-  ]
+  callback_urls = var.callback_urls
 
-  logout_urls = [
-    "http://localhost:5173",
-    "https://${var.site_domain}",
-    "https://local.dev.appworx.app:5173"
-  ]
+  logout_urls = var.logout_urls
 
   allowed_oauth_flows                  = ["code", "implicit"]
   allowed_oauth_flows_user_pool_client = true

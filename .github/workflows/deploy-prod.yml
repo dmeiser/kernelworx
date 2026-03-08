@@ -121,3 +121,110 @@ jobs:
           npm run build
           aws s3 sync dist "s3://${{ steps.tofu_outputs.outputs.static_assets_bucket }}" --delete --region "${{ secrets.AWS_REGION }}"
           aws cloudfront create-invalidation --distribution-id "${{ steps.tofu_outputs.outputs.cloudfront_distribution_id }}" --paths "/*"
+
+  smoke-tests-prod:
+    name: Post-deploy smoke tests (prod full)
+    runs-on: ubuntu-latest
+    needs: deploy
+    if: ${{ needs.deploy.result == 'success' }}
+    environment:
+      name: production
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install Python dependencies (including dev/test)
+        run: uv sync --locked --dev
+
+      - name: Install Playwright browser dependencies
+        run: uv run playwright install --with-deps chromium
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: tests/integration/package.json
+
+      - name: Install Node.js dependencies for integration cleanup
+        working-directory: tests/integration
+        run: npm install
+
+      - name: Configure AWS credentials for cleanup
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_PROD_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+          role-session-name: github-actions-smoke-tests-prod
+
+      - name: Validate smoke target URL (prod)
+        env:
+          E2E_BASE_URL: ${{ vars.E2E_BASE_URL_PROD }}
+        run: |
+          test -n "$E2E_BASE_URL"
+          case "$E2E_BASE_URL" in
+            https://dev.*|http://localhost:*)
+              echo "Refusing to run prod smoke tests against a dev/local URL. Set E2E_BASE_URL_PROD to your production app URL."
+              exit 1
+              ;;
+            *)
+              echo "Smoke tests target: $E2E_BASE_URL"
+              ;;
+          esac
+
+      - name: Validate production test users
+        env:
+          TEST_OWNER_EMAIL: ${{ secrets.TEST_OWNER_EMAIL_PROD }}
+          TEST_CONTRIBUTOR_EMAIL: ${{ secrets.TEST_CONTRIBUTOR_EMAIL_PROD }}
+          TEST_READONLY_EMAIL: ${{ secrets.TEST_READONLY_EMAIL_PROD }}
+          TEST_USER_POOL_ID: ${{ secrets.TEST_USER_POOL_ID_PROD }}
+        run: |
+          test -n "$TEST_OWNER_EMAIL"
+          test -n "$TEST_CONTRIBUTOR_EMAIL"
+          test -n "$TEST_READONLY_EMAIL"
+          test -n "$TEST_USER_POOL_ID"
+
+          # Force explicit "test-only" naming so misconfigured real users are rejected.
+          for email in "$TEST_OWNER_EMAIL" "$TEST_CONTRIBUTOR_EMAIL" "$TEST_READONLY_EMAIL"; do
+            local_part="${email%@*}"
+            if ! echo "$local_part" | grep -Eiq '(test|smoke|integration)'; then
+              echo "Refusing to run: email '$email' does not look like a test account (must include test/smoke/integration in local-part)."
+              exit 1
+            fi
+          done
+
+          # Verify each configured email exists in the configured prod user pool.
+          for email in "$TEST_OWNER_EMAIL" "$TEST_CONTRIBUTOR_EMAIL" "$TEST_READONLY_EMAIL"; do
+            count=$(aws cognito-idp list-users --user-pool-id "$TEST_USER_POOL_ID" --filter "email = \"$email\"" --query 'length(Users)' --output text)
+            if [ "$count" != "1" ]; then
+              echo "Refusing to run: expected exactly one Cognito user for '$email' in pool '$TEST_USER_POOL_ID', got '$count'."
+              exit 1
+            fi
+          done
+
+      - name: Run E2E smoke tests (prod full smoke)
+        env:
+          E2E_BASE_URL: ${{ vars.E2E_BASE_URL_PROD }}
+          TEST_OWNER_EMAIL: ${{ secrets.TEST_OWNER_EMAIL_PROD }}
+          TEST_OWNER_PASSWORD: ${{ secrets.TEST_OWNER_PASSWORD_PROD }}
+          TEST_CONTRIBUTOR_EMAIL: ${{ secrets.TEST_CONTRIBUTOR_EMAIL_PROD }}
+          TEST_CONTRIBUTOR_PASSWORD: ${{ secrets.TEST_CONTRIBUTOR_PASSWORD_PROD }}
+          TEST_READONLY_EMAIL: ${{ secrets.TEST_READONLY_EMAIL_PROD }}
+          TEST_READONLY_PASSWORD: ${{ secrets.TEST_READONLY_PASSWORD_PROD }}
+          TEST_USER_POOL_ID: ${{ secrets.TEST_USER_POOL_ID_PROD }}
+          TEST_REGION: ${{ secrets.AWS_REGION }}
+          # Explicitly allow cleanup against prod tables; guarded by the validation step above.
+          E2E_SKIP_SAFETY_CHECK: "1"
+          # In prod CI, fail the job if pre/post cleanup cannot run successfully.
+          E2E_FAIL_ON_CLEANUP_ERROR: "1"
+        run: uv run pytest tests/e2e/ -m smoke -v

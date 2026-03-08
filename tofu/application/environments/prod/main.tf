@@ -107,6 +107,15 @@ locals {
   api_domain   = "api.${var.domain}"
   login_domain = "login.${var.domain}"
   zone_domain  = var.domain
+
+  cognito_callback_urls = [
+    "https://${local.site_domain}",
+    "https://${local.site_domain}/callback",
+  ]
+
+  cognito_logout_urls = [
+    "https://${local.site_domain}",
+  ]
 }
 
 # Module instantiations
@@ -161,6 +170,8 @@ module "cognito" {
   login_certificate_arn = module.certificates.login_certificate_arn
   sms_role_arn         = module.iam.cognito_sms_role_arn
   enable_google_idp    = false  # Not currently configured in AWS
+  callback_urls        = local.cognito_callback_urls
+  logout_urls          = local.cognito_logout_urls
 
   # Cognito trigger Lambdas (restored from CDK configuration)
   enable_lambda_triggers = true
