@@ -27,6 +27,16 @@ import {
 function parseEnvironmentFromUrl(baseUrl: string): string {
   try {
     const url = new URL(baseUrl);
+    const hostname = url.hostname.toLowerCase();
+
+    if (hostname === 'localhost' || hostname.endsWith('.localhost')) {
+      return 'dev';
+    }
+
+    if (hostname === 'kernelworx.app' || hostname === 'www.kernelworx.app') {
+      return 'prod';
+    }
+
     const parts = url.hostname.split('.');
     // Multi-part hostname like "dev.kernelworx.app" -> first part is the env
     if (parts.length >= 3) {

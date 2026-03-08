@@ -258,6 +258,7 @@ resource "aws_cognito_identity_provider" "google" {
 resource "aws_cognito_user_pool_client" "web" {
   name         = "KernelWorx-Web"
   user_pool_id = aws_cognito_user_pool.main.id
+  depends_on   = [aws_cognito_identity_provider.google]
 
   # Note: generate_secret must not be specified for imported clients 
   # as it forces replacement

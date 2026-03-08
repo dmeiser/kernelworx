@@ -2,8 +2,9 @@
 
 End-to-end smoke tests that exercise the running app from a browser using
 [Playwright for Python](https://playwright.dev/python/) (Chromium).  Tests
-target the **dev environment** (`https://dev.kernelworx.app`) only; never
-run against staging or production.
+target the **dev environment** (`https://dev.kernelworx.app`) for local runs.
+In CI, these smoke tests are also run against **production** after successful
+prod deploys (with explicit guardrails in workflow validation).
 
 ---
 
@@ -135,6 +136,8 @@ uv run pytest tests/e2e/ --headed --slowmo=500 -v
 | `test_smoke_order.py` | Create an order; order persists on reload |
 | `test_smoke_sharing.py` | Invite → accept → revoke share; read-only restriction |
 | `test_smoke_signup.py` | New-user sign-up flow |
+| `test_smoke_settings.py` | Basic settings page flow (view and update settings) |
+| `test_smoke_reports.py` | Reports page smoke: load and request/download report |
 
 ---
 
@@ -144,17 +147,21 @@ uv run pytest tests/e2e/ --headed --slowmo=500 -v
 tests/e2e/
 ├── conftest.py               # Session fixtures; test-user loading; post-suite cleanup
 ├── pytest.ini                # strict-markers, no-randomly, screenshot/video on failure
+├── test_smoke_settings.py    # Smoke tests for settings flows
+├── test_smoke_reports.py     # Smoke tests for reports flows
 ├── pages/
 │   ├── base_page.py
 │   ├── login_page.py
 │   ├── dashboard_page.py
 │   ├── campaign_page.py
+│   ├── campaign_settings_page.py
+│   ├── manage_page.py
 │   ├── order_page.py
 │   ├── payment_page.py
+│   ├── reports_page.py
 │   └── share_page.py
 └── utils/
-    ├── auth.py               # login / logout helpers
-    └── cleanup.py            # DynamoDB sweep after suite run
+    └── auth.py               # login / logout helpers
 ```
 
 ---
