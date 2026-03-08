@@ -134,11 +134,25 @@ def test_accept_share(contributor_page: Page, _module_state: dict[str, str]) -> 
     share_page = SharePage(contributor_page)
     share_page.accept_invite(invite_code)
 
+    # AcceptInvitePage renders a success alert whose text begins with
+    # "Successfully accepted!" before redirecting to /scouts.
     alert = contributor_page.get_by_role("alert").first
     expect(alert).to_be_visible(timeout=15_000)
-    alert_text = alert.inner_text()
+    alert_text = alert.inner_text().strip()
     assert alert_text, "A non-empty alert must appear after accepting the invite"
-    assert "error" not in alert_text.lower(), f"Invite acceptance should not show an error; alert reads: '{alert_text}'"
+    assert "successfully accepted!" in alert_text.lower(), (
+        "Invite acceptance must show the success message from AcceptInvitePage; "
+        f"got alert text: '{alert_text}'"
+    )
+    assert "error" not in alert_text.lower() and "failed" not in alert_text.lower(), (
+        f"Invite acceptance should not show an error; alert reads: '{alert_text}'"
+    )
+
+    # The page should redirect to /scouts shortly after successful acceptance.
+    contributor_page.wait_for_url("**/scouts", timeout=15_000)
+    assert "/scouts" in contributor_page.url, (
+        f"Expected redirect to /scouts after successful invite acceptance; got: {contributor_page.url}"
+    )
 
 
 @pytest.mark.smoke

@@ -7,7 +7,8 @@ repository root.
 Cleanup policy
 --------------
 After the full test suite completes, all DynamoDB records created by test users
-are deleted by ``global_cleanup``.  Cognito users and Account records are
+are deleted by the TypeScript integration cleanup invoked by ``global_cleanup``.
+Cognito users and Account records are
 intentionally preserved so the same accounts can be reused across multiple runs.
 
 Fixture hierarchy
@@ -22,17 +23,20 @@ This conftest adds:
   contributor_page     (function scope) – authenticated Page for the contributor role
   readonly_page        (function scope) – authenticated Page for the read-only role
   ensure_owner_profile (session scope)  – guarantee owner has at least one seller profile
-  global_cleanup       (session scope, autouse) – post-suite DynamoDB cleanup
+    global_cleanup       (session scope, autouse) – post-suite TypeScript cleanup
 """
 
 import os
 import re
+import subprocess
 import urllib.parse
+import warnings
 from collections.abc import Generator
 from pathlib import Path
 from typing import TypedDict
 
 import pytest
+import boto3
 from dotenv import load_dotenv
 from playwright.sync_api import Browser, BrowserContext, Page, expect
 
@@ -51,6 +55,43 @@ load_dotenv(dotenv_path=_REPO_ROOT / ".env")
 
 #: Seller name used when ``ensure_owner_profile`` must create a profile from scratch.
 _OWNER_ENSURE_PROFILE_NAME: str = "Test Scout"
+
+
+def _run_typescript_cleanup() -> None:
+    """Run canonical TypeScript cleanup from ``tests/integration``.
+
+    Raises:
+        RuntimeError: If the cleanup command fails.
+    """
+    integration_dir = _REPO_ROOT / "tests" / "integration"
+    result = subprocess.run(
+        ["npm", "run", "cleanup"],
+        cwd=integration_dir,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            "TypeScript cleanup failed with exit code "
+            f"{result.returncode}\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+        )
+
+
+def _cleanup_unconfirmed_smoke_users(user_pool_id: str) -> None:
+    """Delete UNCONFIRMED Cognito users whose email starts with ``smoke+``."""
+    client = boto3.client("cognito-idp")
+    paginator = client.get_paginator("list_users")
+    for page in paginator.paginate(
+        UserPoolId=user_pool_id,
+        Filter='email ^= "smoke+"',
+    ):
+        for user in page["Users"]:
+            if user["UserStatus"] == "UNCONFIRMED":
+                client.admin_delete_user(
+                    UserPoolId=user_pool_id,
+                    Username=user["Username"],
+                )
 
 
 # ---------------------------------------------------------------------------
@@ -245,36 +286,24 @@ def readonly_page(page: Page) -> Generator[Page, None, None]:
 
 @pytest.fixture(scope="session", autouse=True)
 def global_setup() -> Generator[None, None, None]:
-    """Session-scoped autouse fixture that cleans up stale test data BEFORE all tests run.
+    """Session-scoped autouse fixture that runs TypeScript cleanup BEFORE tests.
 
     This ensures each run starts from a clean state even if the previous
     run's post-suite cleanup failed (e.g., due to expired AWS credentials).
     """
-    all_emails: list[str] = [
-        email for creds in TEST_USERS_BY_ROLE.values() if (email := creds.get("email")) is not None
-    ]
-
-    from tests.e2e.utils.cleanup import cleanup_all_test_users  # noqa: PLC0415
-
     try:
-        cleanup_all_test_users(all_emails)
+        _run_typescript_cleanup()
     except Exception as exc:  # noqa: BLE001
-        import warnings
-
         warnings.warn(
-            f"E2E pre-suite cleanup skipped — AWS credentials may be unavailable: {exc}",
+            f"E2E pre-suite TypeScript cleanup skipped — AWS credentials may be unavailable: {exc}",
             stacklevel=2,
         )
 
     user_pool_id = os.getenv("TEST_USER_POOL_ID")
     if user_pool_id:
-        from tests.e2e.utils.cleanup import cleanup_unconfirmed_smoke_users  # noqa: PLC0415
-
         try:
-            cleanup_unconfirmed_smoke_users(user_pool_id)
+            _cleanup_unconfirmed_smoke_users(user_pool_id)
         except Exception as exc:  # noqa: BLE001
-            import warnings
-
             warnings.warn(
                 f"E2E pre-suite signup cleanup skipped — AWS credentials may be unavailable: {exc}",
                 stacklevel=2,
@@ -285,47 +314,26 @@ def global_setup() -> Generator[None, None, None]:
 
 @pytest.fixture(scope="session", autouse=True)
 def global_cleanup() -> Generator[None, None, None]:
-    """Session-scoped autouse fixture that cleans up test data after all tests.
+    """Session-scoped autouse fixture that runs TypeScript cleanup after tests.
 
-    The ``cleanup_all_test_users`` function is implemented in
-    ``tests/e2e/utils/cleanup.py`` (maintained separately).  It deletes all
-    DynamoDB records belonging to the test users while leaving Cognito profiles
-    and Account records intact so the same users can be reused on the next run.
-
-    The import is intentionally deferred to the teardown phase so that a
-    missing cleanup module does not prevent test collection or execution.
+    This reuses the canonical integration cleanup implementation so E2E and
+    integration suites share the same DynamoDB cleanup source of truth.
     """
     yield  # ← all tests run here
 
-    # Collect non-None emails for every registered test role.
-    all_emails: list[str] = [
-        email for creds in TEST_USERS_BY_ROLE.values() if (email := creds.get("email")) is not None
-    ]
-
-    # Lazy import: the cleanup module is written by a separate agent and may
-    # not yet be present during early development.  The noqa comment suppresses
-    # the PLC0415 (import-outside-toplevel) lint rule intentionally.
-    from tests.e2e.utils.cleanup import cleanup_all_test_users  # noqa: PLC0415
-
     try:
-        cleanup_all_test_users(all_emails)
+        _run_typescript_cleanup()
     except Exception as exc:  # noqa: BLE001
-        import warnings
-
         warnings.warn(
-            f"E2E cleanup skipped — AWS credentials may be unavailable: {exc}",
+            f"E2E TypeScript cleanup skipped — AWS credentials may be unavailable: {exc}",
             stacklevel=2,
         )
 
     user_pool_id = os.getenv("TEST_USER_POOL_ID")
     if user_pool_id:
-        from tests.e2e.utils.cleanup import cleanup_unconfirmed_smoke_users  # noqa: PLC0415
-
         try:
-            cleanup_unconfirmed_smoke_users(user_pool_id)
+            _cleanup_unconfirmed_smoke_users(user_pool_id)
         except Exception as exc:  # noqa: BLE001
-            import warnings
-
             warnings.warn(
                 f"E2E signup cleanup skipped — AWS credentials may be unavailable: {exc}",
                 stacklevel=2,
