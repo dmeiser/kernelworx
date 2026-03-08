@@ -57,6 +57,19 @@ load_dotenv(dotenv_path=_REPO_ROOT / ".env")
 _OWNER_ENSURE_PROFILE_NAME: str = "Test Scout"
 
 
+def _handle_cleanup_error(message: str, exc: Exception) -> None:
+    """Warn or fail on cleanup errors based on ``E2E_FAIL_ON_CLEANUP_ERROR``.
+
+    When set to truthy values (1/true/yes), cleanup errors raise to fail the run.
+    Otherwise, errors are downgraded to warnings to keep local dev ergonomics.
+    """
+    strict = os.getenv("E2E_FAIL_ON_CLEANUP_ERROR", "").lower() in ("1", "true", "yes")
+    formatted = f"{message}: {exc}"
+    if strict:
+        raise RuntimeError(formatted) from exc
+    warnings.warn(formatted, stacklevel=2)
+
+
 def _run_typescript_cleanup() -> None:
     """Run canonical TypeScript cleanup from ``tests/integration``.
 
@@ -294,9 +307,9 @@ def global_setup() -> Generator[None, None, None]:
     try:
         _run_typescript_cleanup()
     except Exception as exc:  # noqa: BLE001
-        warnings.warn(
-            f"E2E pre-suite TypeScript cleanup skipped — AWS credentials may be unavailable: {exc}",
-            stacklevel=2,
+        _handle_cleanup_error(
+            "E2E pre-suite TypeScript cleanup failed (AWS credentials or Node.js runtime may be unavailable)",
+            exc,
         )
 
     user_pool_id = os.getenv("TEST_USER_POOL_ID")
@@ -304,9 +317,9 @@ def global_setup() -> Generator[None, None, None]:
         try:
             _cleanup_unconfirmed_smoke_users(user_pool_id)
         except Exception as exc:  # noqa: BLE001
-            warnings.warn(
-                f"E2E pre-suite signup cleanup skipped — AWS credentials may be unavailable: {exc}",
-                stacklevel=2,
+            _handle_cleanup_error(
+                "E2E pre-suite signup cleanup failed (AWS credentials may be unavailable)",
+                exc,
             )
 
     yield  # all tests run after this point
@@ -324,9 +337,9 @@ def global_cleanup() -> Generator[None, None, None]:
     try:
         _run_typescript_cleanup()
     except Exception as exc:  # noqa: BLE001
-        warnings.warn(
-            f"E2E TypeScript cleanup skipped — AWS credentials may be unavailable: {exc}",
-            stacklevel=2,
+        _handle_cleanup_error(
+            "E2E post-suite TypeScript cleanup failed (AWS credentials or Node.js runtime may be unavailable)",
+            exc,
         )
 
     user_pool_id = os.getenv("TEST_USER_POOL_ID")
@@ -334,7 +347,7 @@ def global_cleanup() -> Generator[None, None, None]:
         try:
             _cleanup_unconfirmed_smoke_users(user_pool_id)
         except Exception as exc:  # noqa: BLE001
-            warnings.warn(
-                f"E2E signup cleanup skipped — AWS credentials may be unavailable: {exc}",
-                stacklevel=2,
+            _handle_cleanup_error(
+                "E2E post-suite signup cleanup failed (AWS credentials may be unavailable)",
+                exc,
             )
