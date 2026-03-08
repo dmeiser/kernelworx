@@ -74,6 +74,18 @@ variable "enable_lambda_triggers" {
   default     = false
 }
 
+variable "enable_webauthn" {
+  description = "Enable WebAuthn (passkey) sign-in. When true, web_authn_relying_party_id must also be provided."
+  type        = bool
+  default     = false
+}
+
+variable "web_authn_relying_party_id" {
+  description = "WebAuthn relying party ID (typically the apex domain, e.g. 'kernelworx.app'). Required when enable_webauthn = true."
+  type        = string
+  default     = null
+}
+
 locals {
   user_pool_name = "${var.name_prefix}-users-${var.region_abbrev}-${var.environment}"
   login_domain   = var.login_domain
@@ -147,6 +159,18 @@ resource "aws_cognito_user_pool" "main" {
   user_attribute_update_settings {
     attributes_require_verification_before_update = ["email"]
   }
+
+  # WebAuthn / passkey sign-in
+  # Gated on a static bool (known at plan time) to avoid unknown for_each values on greenfield applies.
+  dynamic "sign_in_policy" {
+    for_each = var.enable_webauthn ? [1] : []
+    content {
+      allowed_first_auth_factors = ["PASSWORD", "WEB_AUTHN"]
+    }
+  }
+
+  web_authn_relying_party_id  = var.enable_webauthn ? var.web_authn_relying_party_id : null
+  web_authn_user_verification = var.enable_webauthn ? "preferred" : null
 
   # Lambda triggers (restored from CDK; omitted during CDK → OpenTofu migration)
   # Use a static block (not dynamic) so the block is always emitted; null values are

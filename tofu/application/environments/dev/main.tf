@@ -166,6 +166,10 @@ module "cognito" {
   enable_lambda_triggers = true
   pre_signup_lambda_arn  = module.lambda.trigger_function_arns["pre-signup"]
   post_auth_lambda_arn   = module.lambda.trigger_function_arns["post-auth"]
+
+  # WebAuthn / passkey sign-in
+  enable_webauthn            = true
+  web_authn_relying_party_id = var.domain
 }
 
 module "lambda" {
