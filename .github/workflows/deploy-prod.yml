@@ -223,8 +223,6 @@ jobs:
           TEST_READONLY_PASSWORD: ${{ secrets.TEST_READONLY_PASSWORD_PROD }}
           TEST_USER_POOL_ID: ${{ secrets.TEST_USER_POOL_ID_PROD }}
           TEST_REGION: ${{ secrets.AWS_REGION }}
-          # Explicitly allow cleanup against prod tables; guarded by the validation step above.
-          E2E_SKIP_SAFETY_CHECK: "1"
           # In prod CI, fail the job if pre/post cleanup cannot run successfully.
           E2E_FAIL_ON_CLEANUP_ERROR: "1"
         run: uv run pytest tests/e2e/ -m smoke -v

@@ -33,7 +33,6 @@ import urllib.parse
 import warnings
 from collections.abc import Generator
 from pathlib import Path
-from typing import TypedDict
 
 import pytest
 import boto3
@@ -105,32 +104,6 @@ def _cleanup_unconfirmed_smoke_users(user_pool_id: str) -> None:
                     UserPoolId=user_pool_id,
                     Username=user["Username"],
                 )
-
-
-# ---------------------------------------------------------------------------
-# Test-user registry
-# ---------------------------------------------------------------------------
-
-
-class UserCredentials(TypedDict):
-    email: str | None
-    password: str | None
-
-
-TEST_USERS_BY_ROLE: dict[str, UserCredentials] = {
-    "owner": {
-        "email": os.getenv("TEST_OWNER_EMAIL"),
-        "password": os.getenv("TEST_OWNER_PASSWORD"),
-    },
-    "contributor": {
-        "email": os.getenv("TEST_CONTRIBUTOR_EMAIL"),
-        "password": os.getenv("TEST_CONTRIBUTOR_PASSWORD"),
-    },
-    "readonly": {
-        "email": os.getenv("TEST_READONLY_EMAIL"),
-        "password": os.getenv("TEST_READONLY_PASSWORD"),
-    },
-}
 
 
 # ---------------------------------------------------------------------------
