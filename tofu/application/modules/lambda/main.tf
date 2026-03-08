@@ -303,19 +303,13 @@ resource "aws_lambda_function" "functions" {
 
 # Outputs
 output "function_arns" {
-  description = "Map of all Lambda function names to their ARNs (app + trigger functions)"
-  value       = merge(
-    { for k, v in aws_lambda_function.functions : k => v.arn },
-    { for k, v in aws_lambda_function.trigger_functions : k => v.arn }
-  )
+  description = "Map of app Lambda function logical names to their ARNs (AppSync-invokable only; excludes Cognito trigger functions to avoid over-broad IAM invoke permissions)"
+  value       = { for k, v in aws_lambda_function.functions : k => v.arn }
 }
 
 output "function_names" {
-  description = "Map of all Lambda function logical names to their function names"
-  value       = merge(
-    { for k, v in aws_lambda_function.functions : k => v.function_name },
-    { for k, v in aws_lambda_function.trigger_functions : k => v.function_name }
-  )
+  description = "Map of app Lambda function logical names to their function names (AppSync-invokable only; excludes Cognito trigger functions)"
+  value       = { for k, v in aws_lambda_function.functions : k => v.function_name }
 }
 
 output "trigger_function_arns" {

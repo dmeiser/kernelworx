@@ -163,8 +163,9 @@ module "cognito" {
   enable_google_idp    = false  # Not currently configured in AWS
 
   # Cognito trigger Lambdas (restored from CDK configuration)
-  pre_signup_lambda_arn = module.lambda.trigger_function_arns["pre-signup"]
-  post_auth_lambda_arn  = module.lambda.trigger_function_arns["post-auth"]
+  enable_lambda_triggers = true
+  pre_signup_lambda_arn  = module.lambda.trigger_function_arns["pre-signup"]
+  post_auth_lambda_arn   = module.lambda.trigger_function_arns["post-auth"]
 }
 
 module "lambda" {
