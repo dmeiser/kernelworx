@@ -56,6 +56,24 @@ variable "enable_google_idp" {
   description = "Enable Google Identity Provider"
 }
 
+variable "pre_signup_lambda_arn" {
+  description = "ARN of the Pre Sign-Up Lambda trigger. If null, no pre-signup trigger is configured."
+  type        = string
+  default     = null
+}
+
+variable "post_auth_lambda_arn" {
+  description = "ARN of the Post Authentication Lambda trigger. If null, no post-auth trigger is configured."
+  type        = string
+  default     = null
+}
+
+variable "enable_lambda_triggers" {
+  description = "Whether Cognito Lambda triggers are configured. Use a static bool (known at plan time) rather than deriving from ARN nullability to avoid unknown count/for_each values during greenfield applies."
+  type        = bool
+  default     = false
+}
+
 locals {
   user_pool_name = "${var.name_prefix}-users-${var.region_abbrev}-${var.environment}"
   login_domain   = var.login_domain
@@ -130,11 +148,42 @@ resource "aws_cognito_user_pool" "main" {
     attributes_require_verification_before_update = ["email"]
   }
 
+  # Lambda triggers (restored from CDK; omitted during CDK → OpenTofu migration)
+  # Use a static block (not dynamic) so the block is always emitted; null values are
+  # treated as "no trigger" by the provider without plan-time unknown issues.
+  lambda_config {
+    pre_sign_up         = var.pre_signup_lambda_arn
+    post_authentication = var.post_auth_lambda_arn
+  }
+
   tags = local.tags
 
   lifecycle {
     prevent_destroy = true
   }
+}
+
+# Lambda permissions - allow Cognito to invoke trigger functions
+# count is gated on a static boolean (known at plan time) rather than ARN nullability
+# to avoid unknown count values during greenfield applies.
+resource "aws_lambda_permission" "cognito_pre_signup" {
+  count = var.enable_lambda_triggers ? 1 : 0
+
+  statement_id  = "AllowCognitoInvokePreSignup"
+  action        = "lambda:InvokeFunction"
+  function_name = var.pre_signup_lambda_arn
+  principal     = "cognito-idp.amazonaws.com"
+  source_arn    = aws_cognito_user_pool.main.arn
+}
+
+resource "aws_lambda_permission" "cognito_post_auth" {
+  count = var.enable_lambda_triggers ? 1 : 0
+
+  statement_id  = "AllowCognitoInvokePostAuth"
+  action        = "lambda:InvokeFunction"
+  function_name = var.post_auth_lambda_arn
+  principal     = "cognito-idp.amazonaws.com"
+  source_arn    = aws_cognito_user_pool.main.arn
 }
 
 # Google Identity Provider (optional - not currently configured)

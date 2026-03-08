@@ -161,6 +161,11 @@ module "cognito" {
   login_certificate_arn = module.certificates.login_certificate_arn
   sms_role_arn         = module.iam.cognito_sms_role_arn
   enable_google_idp    = false  # Not currently configured in AWS
+
+  # Cognito trigger Lambdas (restored from CDK configuration)
+  enable_lambda_triggers = true
+  pre_signup_lambda_arn  = module.lambda.trigger_function_arns["pre-signup"]
+  post_auth_lambda_arn   = module.lambda.trigger_function_arns["post-auth"]
 }
 
 module "lambda" {

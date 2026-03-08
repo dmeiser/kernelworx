@@ -124,25 +124,12 @@ locals {
       handler     = "handlers.account_operations.delete_my_account"
       timeout     = 30
       memory_size = 256
+      extra_env = {
+        USER_POOL_ID = var.user_pool_id
+      }
     }
     "transfer-ownership" = {
       handler     = "handlers.transfer_profile_ownership.lambda_handler"
-      timeout     = 10
-      memory_size = 256
-    }
-    "post-auth" = {
-      # DLQ intentionally not configured for Cognito Post Authentication trigger.
-      # Cognito invokes this synchronously and handles retries; introducing a DLQ adds
-      # unnecessary cost/complexity without operational benefit for this flow.
-      handler     = "handlers.post_authentication.lambda_handler"
-      timeout     = 10
-      memory_size = 256
-    }
-    "pre-signup" = {
-      # DLQ intentionally not configured for Cognito Pre Sign-Up trigger.
-      # Cognito manages retries for this trigger; failures are surfaced to the client
-      # and are not suitable for asynchronous reprocessing via a DLQ.
-      handler     = "handlers.pre_signup.lambda_handler"
       timeout     = 10
       memory_size = 256
     }
@@ -178,6 +165,28 @@ locals {
       extra_env = {
         USER_POOL_ID = var.user_pool_id
       }
+    }
+  }
+
+  # Cognito trigger functions are kept separate to avoid module-level dependency
+  # cycles. These functions have no extra_env and do not reference var.user_pool_id,
+  # so their ARNs can be passed to the cognito module without creating a cycle.
+  trigger_functions = {
+    "post-auth" = {
+      # DLQ intentionally not configured for Cognito Post Authentication trigger.
+      # Cognito invokes this synchronously and handles retries; introducing a DLQ adds
+      # unnecessary cost/complexity without operational benefit for this flow.
+      handler     = "handlers.post_authentication.lambda_handler"
+      timeout     = 10
+      memory_size = 256
+    }
+    "pre-signup" = {
+      # DLQ intentionally not configured for Cognito Pre Sign-Up trigger.
+      # Cognito manages retries for this trigger; failures are surfaced to the client
+      # and are not suitable for asynchronous reprocessing via a DLQ.
+      handler     = "handlers.pre_signup.lambda_handler"
+      timeout     = 10
+      memory_size = 256
     }
   }
 }
@@ -224,7 +233,48 @@ resource "aws_lambda_layer_version" "shared" {
   source_code_hash = filebase64sha256("${path.module}/../../../../uv.lock")
 }
 
-# Lambda Functions
+# Cognito trigger functions (post-auth, pre-signup) - separate resource block so
+# their ARNs can be referenced by the cognito module without creating a cycle.
+# These functions must NOT reference var.user_pool_id (directly or via extra_env).
+# kics-scan ignore-line
+resource "aws_lambda_function" "trigger_functions" {
+  for_each = local.trigger_functions
+
+  function_name = "${var.name_prefix}-${each.key}${local.func_suffix}"
+  role          = var.lambda_role_arn
+  handler       = each.value.handler
+  runtime       = "python3.14"
+  architectures = ["arm64"]
+  timeout       = each.value.timeout
+  memory_size   = each.value.memory_size
+
+  filename         = data.archive_file.lambda_payload.output_path
+  source_code_hash = data.archive_file.lambda_payload.output_base64sha256
+
+  layers = [aws_lambda_layer_version.shared.arn]
+
+  environment {
+    variables = local.common_env
+  }
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+# State migration: post-auth and pre-signup were previously part of
+# aws_lambda_function.functions and are now in aws_lambda_function.trigger_functions.
+moved {
+  from = aws_lambda_function.functions["post-auth"]
+  to   = aws_lambda_function.trigger_functions["post-auth"]
+}
+
+moved {
+  from = aws_lambda_function.functions["pre-signup"]
+  to   = aws_lambda_function.trigger_functions["pre-signup"]
+}
+
+# App functions (all functions that may depend on var.user_pool_id via extra_env)
 # kics-scan ignore-line
 resource "aws_lambda_function" "functions" {
   for_each = local.functions
@@ -253,13 +303,18 @@ resource "aws_lambda_function" "functions" {
 
 # Outputs
 output "function_arns" {
-  description = "Map of Lambda function names to their ARNs"
+  description = "Map of app Lambda function logical names to their ARNs (AppSync-invokable only; excludes Cognito trigger functions to avoid over-broad IAM invoke permissions)"
   value       = { for k, v in aws_lambda_function.functions : k => v.arn }
 }
 
 output "function_names" {
-  description = "Map of Lambda function logical names to their function names"
+  description = "Map of app Lambda function logical names to their function names (AppSync-invokable only; excludes Cognito trigger functions)"
   value       = { for k, v in aws_lambda_function.functions : k => v.function_name }
+}
+
+output "trigger_function_arns" {
+  description = "Map of Cognito trigger Lambda function names to their ARNs (no user_pool_id dependency)"
+  value       = { for k, v in aws_lambda_function.trigger_functions : k => v.arn }
 }
 
 output "layer_arn" {
