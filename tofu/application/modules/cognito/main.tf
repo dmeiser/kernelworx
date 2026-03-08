@@ -161,11 +161,21 @@ resource "aws_cognito_user_pool" "main" {
   }
 
   # WebAuthn / passkey sign-in
-  # Gated on a static bool (known at plan time) to avoid unknown for_each values on greenfield applies.
+  # user_pool_tier must be ESSENTIALS or PLUS to use WebAuthn.
+  user_pool_tier = var.enable_webauthn ? "ESSENTIALS" : "LITE"
+
   dynamic "sign_in_policy" {
     for_each = var.enable_webauthn ? [1] : []
     content {
       allowed_first_auth_factors = ["PASSWORD", "WEB_AUTHN"]
+    }
+  }
+
+  dynamic "web_authn_configuration" {
+    for_each = var.enable_webauthn ? [1] : []
+    content {
+      relying_party_id  = var.web_authn_relying_party_id
+      user_verification = "preferred"
     }
   }
 
@@ -182,16 +192,6 @@ resource "aws_cognito_user_pool" "main" {
   lifecycle {
     prevent_destroy = true
   }
-}
-
-# WebAuthn relying party configuration (separate resource; web_authn_* are not
-# top-level arguments on aws_cognito_user_pool in this provider version).
-resource "aws_cognito_user_pool_web_authn_configuration" "main" {
-  count = var.enable_webauthn ? 1 : 0
-
-  user_pool_id      = aws_cognito_user_pool.main.id
-  relying_party_id  = var.web_authn_relying_party_id
-  user_verification = "preferred"
 }
 
 # Lambda permissions - allow Cognito to invoke trigger functions
