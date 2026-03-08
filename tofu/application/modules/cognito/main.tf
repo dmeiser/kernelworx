@@ -169,9 +169,6 @@ resource "aws_cognito_user_pool" "main" {
     }
   }
 
-  web_authn_relying_party_id  = var.enable_webauthn ? var.web_authn_relying_party_id : null
-  web_authn_user_verification = var.enable_webauthn ? "preferred" : null
-
   # Lambda triggers (restored from CDK; omitted during CDK → OpenTofu migration)
   # Use a static block (not dynamic) so the block is always emitted; null values are
   # treated as "no trigger" by the provider without plan-time unknown issues.
@@ -185,6 +182,16 @@ resource "aws_cognito_user_pool" "main" {
   lifecycle {
     prevent_destroy = true
   }
+}
+
+# WebAuthn relying party configuration (separate resource; web_authn_* are not
+# top-level arguments on aws_cognito_user_pool in this provider version).
+resource "aws_cognito_user_pool_web_authn_configuration" "main" {
+  count = var.enable_webauthn ? 1 : 0
+
+  user_pool_id      = aws_cognito_user_pool.main.id
+  relying_party_id  = var.web_authn_relying_party_id
+  user_verification = "preferred"
 }
 
 # Lambda permissions - allow Cognito to invoke trigger functions
