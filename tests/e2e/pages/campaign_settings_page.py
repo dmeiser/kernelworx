@@ -2,7 +2,7 @@
 
 import urllib.parse
 
-from playwright.sync_api import Locator, Page, expect
+from playwright.sync_api import Page
 
 from .base_page import BasePage
 

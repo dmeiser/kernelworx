@@ -4,7 +4,7 @@ import re
 import urllib.parse
 
 import pytest
-from playwright.sync_api import Page, expect
+from playwright.sync_api import Page
 
 from tests.e2e.pages.campaign_page import CampaignPage
 from tests.e2e.pages.dashboard_page import DashboardPage
