@@ -3,14 +3,45 @@
 Audience: contributors working on Popcorn Sales Manager. Focuses on day-to-day commands, quality bars, and deployment steps. Infra coverage is intentionally excluded from coverage gates per project policy.
 
 ### Testing
-- **Backend Lambdas (Python)**
-  - Unit tests (100% enforced):
-    - From repo root: `uv run pytest tests/unit --cov=src --cov-fail-under=100`
-- **Infrastructure/CDK (Python)**
-  - No unit tests maintained; CDK coverage is intentionally excluded. Optional synth/snapshot checks are allowed locally but are not required.
-- **Frontend (TypeScript)**
-  - Unit/component tests with coverage: `npm run test -- --coverage`
-  - E2E (optional): `npm run test:e2e` if configured.
+
+#### Backend Lambdas (Python)
+- Unit tests (100% enforced):
+  ```bash
+  uv run pytest tests/unit --cov=src --cov-fail-under=100
+  ```
+
+#### Infrastructure/CDK (Python)
+- No unit tests maintained; CDK coverage is intentionally excluded. Optional synth/snapshot checks are allowed locally but are not required.
+
+#### Frontend (TypeScript)
+- Unit/component tests with coverage:
+  ```bash
+  npm run test -- --coverage
+  ```
+
+#### E2E Smoke Tests (Python + Playwright)
+
+End-to-end tests run against the **deployed dev environment** (`https://dev.kernelworx.app`) using Playwright for Python (Chromium). See [`tests/e2e/README.md`](../tests/e2e/README.md) for full setup instructions.
+
+**Prerequisites** (one-time):
+1. Dev environment deployed (`tofu apply` from `tofu/environments/dev/`)
+2. Test users created: `bash scripts/create-test-users.sh`
+3. At least one admin-managed catalog exists in the dev app
+4. `.env` populated with e2e credentials and DynamoDB table names (see `.env.example`)
+5. Playwright browsers installed: `uv run playwright install chromium`
+
+**Running e2e tests**:
+```bash
+# Full suite
+uv run pytest tests/e2e/ --ignore=tests/unit -v
+
+# Single file
+uv run pytest tests/e2e/test_smoke_auth.py -v
+```
+
+**Test coverage**: auth (login/logout), authorization boundaries (unauthenticated redirect, access control), profile viewing, campaign creation and listing, order creation and listing, profile sharing (invite/accept/revoke/read-only), and signup flow.
+
+**Cleanup**: after each run, a `global_cleanup` fixture deletes all DynamoDB records owned by the test users (profiles, campaigns, orders, shares, invites) while preserving Cognito users and Account records.
 
 ### Code Quality
 - **Python (app)**: `uv run ruff check src tests` • `uv run isort src/ tests/` • `uv run ruff format src/ tests/` • `uv run mypy src`

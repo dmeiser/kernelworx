@@ -1,4 +1,4 @@
-.PHONY: help test lint format typecheck integration infra all clean
+.PHONY: help test lint format typecheck integration infra all clean test-e2e test-cleanup
 
 # Default target
 help:
@@ -7,8 +7,9 @@ help:
 	@echo "Testing:"
 	@echo "  make test              - Run Python unit tests (pytest)"
 	@echo "  make test-frontend     - Run TypeScript unit tests (vitest)"
-	@echo "  make test-e2e          - Run E2E tests (playwright)"
+	@echo "  make test-e2e          - Run Python E2E smoke tests (pytest-playwright)"
 	@echo "  make test-integration  - Run integration tests"
+	@echo "  make test-cleanup      - Run TypeScript global cleanup only"
 	@echo "  make test-all          - Run all tests (unit + integration + e2e)"
 	@echo ""
 	@echo "Linting & Type Checking:"
@@ -42,15 +43,20 @@ test-frontend:
 	@echo "Running TypeScript unit tests..."
 	cd frontend && npm run test:coverage
 
-# E2E tests
+# Python E2E smoke tests (pytest-playwright)
 test-e2e:
-	@echo "Running E2E tests..."
-	cd frontend && npm run test:e2e
+	@echo "Running Python E2E smoke tests..."
+	uv run pytest tests/e2e/ -v
 
 # Integration tests
 test-integration:
 	@echo "Running integration tests..."
 	cd tests/integration && npm run test
+
+# TypeScript cleanup only (reuses integration globalTeardown)
+test-cleanup:
+	@echo "Running TypeScript cleanup..."
+	cd tests/integration && npm run cleanup
 
 # Run all tests
 test-all: test test-frontend test-integration test-e2e

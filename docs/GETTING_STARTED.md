@@ -191,6 +191,20 @@ uv run pytest tests/unit/test_profile_sharing.py -v
 uv run pytest tests/unit --cov=src --cov-report=html
 ```
 
+### E2E Smoke Tests
+
+A Playwright-based e2e smoke suite exercises the deployed dev environment end-to-end (auth, profiles, campaigns, orders, sharing, signup). It requires the dev environment to be live and test users pre-created.
+
+```bash
+# Install Playwright browsers (first time only)
+uv run playwright install chromium
+
+# Run the full e2e suite
+uv run pytest tests/e2e/ --ignore=tests/unit -v
+```
+
+See [`tests/e2e/README.md`](../tests/e2e/README.md) for full prerequisites, `.env` requirements, and troubleshooting.
+
 ### Code Quality Checks
 
 ```bash

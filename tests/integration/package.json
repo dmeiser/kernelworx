@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "vitest --run"
+    "test": "vitest --run",
+    "cleanup": "vitest --run --config vitest.cleanup.config.ts"
   },
   "devDependencies": {
     "@apollo/client": "^4.0.9",
