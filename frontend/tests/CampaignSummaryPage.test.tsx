@@ -32,17 +32,17 @@ const mockOrdersData = {
     {
       __typename: 'Order',
       orderId: 'ORDER#1',
+      profileId: TEST_PROFILE_ID,
       campaignId: TEST_CAMPAIGN_ID,
       customerName: 'John Doe',
-      customerEmail: null,
       customerPhone: null,
       customerAddress: null,
+      orderDate: '2024-01-01T00:00:00Z',
       lineItems: [
         {
           __typename: 'LineItem',
           productId: 'PROD~1',
           productName: 'Product A',
-          price: 10.0,
           pricePerUnit: 10.0,
           quantity: 2,
           subtotal: 20.0,
@@ -57,17 +57,17 @@ const mockOrdersData = {
     {
       __typename: 'Order',
       orderId: 'ORDER#2',
+      profileId: TEST_PROFILE_ID,
       campaignId: TEST_CAMPAIGN_ID,
       customerName: 'Jane Smith',
-      customerEmail: null,
       customerPhone: null,
       customerAddress: null,
+      orderDate: '2024-01-02T00:00:00Z',
       lineItems: [
         {
           __typename: 'LineItem',
           productId: 'PROD~1',
           productName: 'Product A',
-          price: 10.0,
           pricePerUnit: 10.0,
           quantity: 5,
           subtotal: 50.0,
@@ -82,17 +82,17 @@ const mockOrdersData = {
     {
       __typename: 'Order',
       orderId: 'ORDER#3',
+      profileId: TEST_PROFILE_ID,
       campaignId: TEST_CAMPAIGN_ID,
       customerName: 'Bob Wilson',
-      customerEmail: null,
       customerPhone: null,
       customerAddress: null,
+      orderDate: '2024-01-03T00:00:00Z',
       lineItems: [
         {
           __typename: 'LineItem',
           productId: 'PROD~2',
           productName: 'Product B',
-          price: 15.0,
           pricePerUnit: 15.0,
           quantity: 2,
           subtotal: 30.0,
@@ -107,17 +107,17 @@ const mockOrdersData = {
     {
       __typename: 'Order',
       orderId: 'ORDER#4',
+      profileId: TEST_PROFILE_ID,
       campaignId: TEST_CAMPAIGN_ID,
       customerName: 'Alice Brown',
-      customerEmail: null,
       customerPhone: null,
       customerAddress: null,
+      orderDate: '2024-01-04T00:00:00Z',
       lineItems: [
         {
           __typename: 'LineItem',
           productId: 'PROD~1',
           productName: 'Product A',
-          price: 10.0,
           pricePerUnit: 10.0,
           quantity: 1,
           subtotal: 10.0,

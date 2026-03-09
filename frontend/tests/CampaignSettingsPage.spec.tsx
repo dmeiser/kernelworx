@@ -278,6 +278,6 @@ describe('CampaignSettingsPage (core flows)', () => {
     fireEvent.click(deletePermanentlyButton);
 
     // Should navigate back after deletion
-    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith(`/scouts/${mockCampaign.profileId}/manage`));
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith(`/scouts/${mockCampaign.profileId}/campaigns`));
   });
 });

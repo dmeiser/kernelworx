@@ -167,14 +167,16 @@ const useEditFormState = (sharedCampaign: SharedCampaign) => {
       isActive: sharedCampaign.isActive,
     },
   });
+  const { resetTo } = form;
 
   useEffect(() => {
-    form.resetTo({
+    resetTo({
       description: sharedCampaign.description || '',
       creatorMessage: sharedCampaign.creatorMessage || '',
       isActive: sharedCampaign.isActive,
     });
-  }, [sharedCampaign, form]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sharedCampaign, resetTo]);
 
   return {
     description: form.values.description,

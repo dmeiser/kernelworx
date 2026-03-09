@@ -16,23 +16,8 @@ export default defineWorkspace([
       environment: 'jsdom',
       globals: true,
       setupFiles: [path.resolve(cwd, './frontend/tests/setup.ts')],
-      // Use forks pool with single fork to prevent worker hanging issues
-      pool: 'forks',
-      poolOptions: {
-        forks: {
-          singleFork: true, // Run all tests in single process
-        },
-      },
-      // Add explicit test timeout to prevent hangs
-      testTimeout: 30000, // 30 seconds per test
-      hookTimeout: 10000, // 10 seconds for hooks
-      // Configure jsdom to handle window.location navigation
-      environmentOptions: {
-        jsdom: {
-          navigationUrl: 'http://localhost/',
-          beforeUnload: true,
-        },
-      },
+      testTimeout: 30000,
+      hookTimeout: 10000,
       server: {
         deps: {
           inline: ['@mui/material', 'react-router', 'react-router-dom'],
