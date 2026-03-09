@@ -14,7 +14,7 @@ import { LIST_MANAGED_CATALOGS, LIST_MY_CATALOGS } from '../src/lib/graphql';
 // Mock Select/MenuItem to a plain HTML select/option to ensure onChange fires in jsdom
 vi.mock('@mui/material', async () => {
   const actual = await vi.importActual<any>('@mui/material');
-  const Select = ({ value, onChange, children, label, disabled, ...rest }: any) => (
+  const Select = ({ value, onChange, children, label, disabled, MenuProps, ...rest }: any) => (
     <select
       role="combobox"
       aria-label={label || 'Select'}

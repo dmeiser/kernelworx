@@ -6,8 +6,7 @@ import userEvent from '@testing-library/user-event';
 // Mock Select/MenuItem to plain HTML select/option to ensure onChange fires in jsdom
 vi.mock('@mui/material', async () => {
   const actual = await vi.importActual<any>('@mui/material');
-  const Select = ({ value, onChange, children, label, disabled, ...rest }: any) => {
-    const { MenuProps, ...domProps } = rest;
+  const Select = ({ value, onChange, children, label, disabled, MenuProps, ...domProps }: any) => {
     return (
       <select
         role="combobox"

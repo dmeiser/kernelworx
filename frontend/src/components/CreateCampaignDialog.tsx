@@ -152,7 +152,7 @@ const CampaignFields: React.FC<{
       fullWidth
       label="Year"
       type="number"
-      value={campaignYear}
+      value={isNaN(campaignYear) ? '' : campaignYear}
       onChange={(e) => onYearChange(parseInt(e.target.value, 10))}
       disabled={loading}
       inputProps={{
