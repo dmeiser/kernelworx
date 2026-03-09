@@ -2,15 +2,26 @@
 
 # === ACCOUNT & PROFILE QUERIES ===
 
-# getMyAccount (VTL)
+# getMyAccount Pipeline (JS)
 resource "aws_appsync_resolver" "get_my_account" {
-  api_id      = aws_appsync_graphql_api.main.id
-  type        = "Query"
-  field       = "getMyAccount"
-  data_source = aws_appsync_datasource.accounts.name
+  api_id = aws_appsync_graphql_api.main.id
+  type   = "Query"
+  field  = "getMyAccount"
+  kind   = "PIPELINE"
 
-  request_template  = file("${local.mapping_templates_dir}/get_my_account_request.vtl")
-  response_template = file("${local.mapping_templates_dir}/get_my_account_response.vtl")
+  pipeline_config {
+    functions = [
+      aws_appsync_function.get_my_account_exact.function_id,
+      aws_appsync_function.ensure_my_account_exists.function_id,
+    ]
+  }
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/get_my_account_pipeline_resolver.js")
 }
 
 # getProfile Pipeline

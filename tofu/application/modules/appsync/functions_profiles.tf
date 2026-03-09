@@ -1,4 +1,30 @@
-# AppSync Functions for Profile Operations
+# AppSync Functions for Profile and Account Operations
+
+resource "aws_appsync_function" "get_my_account_exact" {
+  api_id      = aws_appsync_graphql_api.main.id
+  data_source = aws_appsync_datasource.accounts.name
+  name        = "GetMyAccountExactFn${local.env_suffix}"
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/get_my_account_exact_fn.js")
+}
+
+resource "aws_appsync_function" "ensure_my_account_exists" {
+  api_id      = aws_appsync_graphql_api.main.id
+  data_source = aws_appsync_datasource.accounts.name
+  name        = "EnsureMyAccountExistsFn${local.env_suffix}"
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/ensure_my_account_exists_fn.js")
+}
 
 # Profile Query Functions
 resource "aws_appsync_function" "fetch_profile" {

@@ -11,6 +11,7 @@
  */
 
 import { DynamoDBClient, ScanCommand, DeleteItemCommand, QueryCommand, GetItemCommand } from '@aws-sdk/client-dynamodb';
+import { AdminDeleteUserCommand, CognitoIdentityProviderClient, ListUsersCommand } from '@aws-sdk/client-cognito-identity-provider';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -19,6 +20,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
 const dynamodb = new DynamoDBClient({ region: 'us-east-1' });
+const cognito = new CognitoIdentityProviderClient({ region: process.env.TEST_REGION || 'us-east-1' });
 
 // Table names from environment or defaults
 const SHARED_CAMPAIGNS_TABLE = process.env.SHARED_CAMPAIGNS_TABLE_NAME || 'kernelworx-shared-campaigns-ue1-dev';
@@ -29,6 +31,55 @@ const CATALOGS_TABLE = process.env.CATALOGS_TABLE_NAME || 'kernelworx-catalogs-u
 const SHARES_TABLE = process.env.SHARES_TABLE_NAME || 'kernelworx-shares-ue1-dev';
 const INVITES_TABLE = process.env.INVITES_TABLE_NAME || 'kernelworx-invites-ue1-dev';
 const ACCOUNTS_TABLE = process.env.ACCOUNTS_TABLE_NAME || 'kernelworx-accounts-ue1-dev';
+const TEST_USER_POOL_ID = process.env.TEST_USER_POOL_ID;
+
+async function cleanupUnconfirmedSmokeUsers(): Promise<number> {
+  if (!TEST_USER_POOL_ID) {
+    console.log('  TEST_USER_POOL_ID not configured, skipping Cognito smoke user cleanup');
+    return 0;
+  }
+
+  console.log('  Cleaning up UNCONFIRMED smoke+ Cognito users...');
+  let deleted = 0;
+  let paginationToken: string | undefined;
+
+  try {
+    do {
+      const result = await cognito.send(
+        new ListUsersCommand({
+          UserPoolId: TEST_USER_POOL_ID,
+          Filter: 'email ^= "smoke+"',
+          PaginationToken: paginationToken,
+          Limit: 60,
+        })
+      );
+
+      for (const user of result.Users || []) {
+        if (user.UserStatus !== 'UNCONFIRMED' || !user.Username) {
+          continue;
+        }
+
+        try {
+          await cognito.send(
+            new AdminDeleteUserCommand({
+              UserPoolId: TEST_USER_POOL_ID,
+              Username: user.Username,
+            })
+          );
+          deleted++;
+        } catch (error) {
+          console.error(`    Failed to delete smoke user ${user.Username}:`, error);
+        }
+      }
+
+      paginationToken = result.PaginationToken;
+    } while (paginationToken);
+  } catch (error) {
+    console.error('  Failed to list/delete smoke users:', error);
+  }
+
+  return deleted;
+}
 
 // Test user emails (from .env)
 const TEST_USER_EMAILS = [
@@ -869,12 +920,18 @@ export default async function globalTeardown(): Promise<void> {
   console.log('\n🧹 Running global test cleanup...');
   
   try {
+    const smokeUsersDeleted = await cleanupUnconfirmedSmokeUsers();
+
     // Step 1: Get test account IDs
     const testAccountIds = await getTestAccountIds();
     console.log(`  Found ${testAccountIds.length} test account(s)`);
     
     if (testAccountIds.length === 0) {
-      console.log('⚠️  No test accounts found, skipping cleanup');
+      console.log('⚠️  No test accounts found, skipping DynamoDB cleanup');
+      console.log('✅ Global cleanup complete:');
+      console.log(`   - Cognito smoke+ UNCONFIRMED users: ${smokeUsersDeleted} deleted`);
+      console.log('   - Account records: preserved (not deleted)');
+      console.log('   - Cognito users: preserved (except smoke+ UNCONFIRMED test users)');
       return;
     }
     
@@ -956,8 +1013,9 @@ export default async function globalTeardown(): Promise<void> {
     console.log(`   - Empty Campaigns: ${emptyCampaignsDeleted} deleted`);
     console.log(`   - Orphaned Shares (all): ${allOrphanedSharesDeleted} ${dryRun ? 'would be' : ''} deleted`);
     console.log(`   - Orphaned Invites (all): ${allOrphanedInvitesDeleted} ${dryRun ? 'would be' : ''} deleted`);
+    console.log(`   - Cognito smoke+ UNCONFIRMED users: ${smokeUsersDeleted} deleted`);
     console.log('   - Account records: preserved (not deleted)');
-    console.log('   - Cognito users: preserved (not deleted)');
+    console.log('   - Cognito users: preserved (except smoke+ UNCONFIRMED test users)');
   } catch (error) {
     console.error('❌ Global cleanup failed:', error);
     // Don't throw - we don't want cleanup failures to break CI
