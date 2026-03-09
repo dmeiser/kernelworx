@@ -28,7 +28,7 @@ afterEach(async () => {
   if (globalThis.apolloClient) {
     try {
       await globalThis.apolloClient.clearStore();
-    } catch (e) {
+    } catch (_e) {
       // Ignore errors during cleanup
     }
   }
