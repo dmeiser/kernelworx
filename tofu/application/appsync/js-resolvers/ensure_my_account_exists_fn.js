@@ -6,13 +6,9 @@ function claim(ctx, name) {
 }
 
 export function request(ctx) {
-    // If already found, do a consistent read no-op path and return existing in response().
+    // No-op when already found; response() will return ctx.prev.result.
     if (ctx.prev.result) {
-        return {
-            operation: 'GetItem',
-            consistentRead: true,
-            key: util.dynamodb.toMapValues({ accountId: `ACCOUNT#${ctx.identity.sub}` })
-        };
+        return {};
     }
 
     const accountId = `ACCOUNT#${ctx.identity.sub}`;
@@ -22,7 +18,7 @@ export function request(ctx) {
         operation: 'UpdateItem',
         key: util.dynamodb.toMapValues({ accountId }),
         update: {
-            expression: 'SET #email = if_not_exists(#email, :email), #givenName = if_not_exists(#givenName, :givenName), #familyName = if_not_exists(#familyName, :familyName), #city = if_not_exists(#city, :city), #state = if_not_exists(#state, :state), #unitType = if_not_exists(#unitType, :unitType), #unitNumber = if_not_exists(#unitNumber, :unitNumber), #preferences = if_not_exists(#preferences, :preferences), #createdAt = if_not_exists(#createdAt, :createdAt), #updatedAt = if_not_exists(#updatedAt, :updatedAt)',
+            expression: 'SET #email = if_not_exists(#email, :email), #givenName = if_not_exists(#givenName, :givenName), #familyName = if_not_exists(#familyName, :familyName), #city = if_not_exists(#city, :city), #state = if_not_exists(#state, :state), #unitType = if_not_exists(#unitType, :unitType), #preferences = if_not_exists(#preferences, :preferences), #createdAt = if_not_exists(#createdAt, :createdAt), #updatedAt = if_not_exists(#updatedAt, :updatedAt)',
             expressionNames: {
                 '#email': 'email',
                 '#givenName': 'givenName',
@@ -30,7 +26,6 @@ export function request(ctx) {
                 '#city': 'city',
                 '#state': 'state',
                 '#unitType': 'unitType',
-                '#unitNumber': 'unitNumber',
                 '#preferences': 'preferences',
                 '#createdAt': 'createdAt',
                 '#updatedAt': 'updatedAt'
@@ -42,7 +37,6 @@ export function request(ctx) {
                 ':city': '',
                 ':state': '',
                 ':unitType': '',
-                ':unitNumber': '',
                 ':preferences': { paymentMethods: [] },
                 ':createdAt': now,
                 ':updatedAt': now

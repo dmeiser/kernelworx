@@ -1,4 +1,4 @@
-# AppSync Functions for Profile Operations
+# AppSync Functions for Profile and Account Operations
 
 resource "aws_appsync_function" "get_my_account_exact" {
   api_id      = aws_appsync_graphql_api.main.id

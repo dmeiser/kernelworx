@@ -3,51 +3,51 @@
 
 variable "environment" {
   description = "Deployment environment (e.g., dev, prod)"
-  type = string
+  type        = string
 }
 
 variable "region_abbrev" {
   description = "Short region code used in resource names (e.g., ue1)"
-  type = string
+  type        = string
 }
 
 variable "name_prefix" {
   description = "Global name prefix for Cognito resources"
-  type = string
+  type        = string
 }
 
 variable "site_domain" {
   description = "Fully qualified site domain (e.g., dev.kernelworx.app or kernelworx.app)"
-  type = string
+  type        = string
 }
 
 variable "login_domain" {
   description = "Fully qualified login domain (e.g., login.dev.kernelworx.app or login.kernelworx.app)"
-  type = string
+  type        = string
 }
 
 variable "google_client_id" {
   description = "Google OAuth client ID for social login"
-  type      = string
-  sensitive = true
-  default   = ""
+  type        = string
+  sensitive   = true
+  default     = ""
 }
 
 variable "google_client_secret" {
   description = "Google OAuth client secret for social login"
-  type      = string
-  sensitive = true
-  default   = ""
+  type        = string
+  sensitive   = true
+  default     = ""
 }
 
 variable "login_certificate_arn" {
   description = "ARN of ACM certificate for the Cognito login domain"
-  type = string
+  type        = string
 }
 
 variable "sms_role_arn" {
   description = "IAM role ARN used by Cognito for SMS/MFA delivery"
-  type = string
+  type        = string
 }
 
 variable "enable_google_idp" {
@@ -78,6 +78,15 @@ variable "enable_lambda_triggers" {
   description = "Whether Cognito Lambda triggers are configured. Use a static bool (known at plan time) rather than deriving from ARN nullability to avoid unknown count/for_each values during greenfield applies."
   type        = bool
   default     = false
+
+  validation {
+    condition = !var.enable_lambda_triggers || (
+      var.pre_signup_lambda_arn != null &&
+      var.post_auth_lambda_arn != null &&
+      var.post_confirmation_lambda_arn != null
+    )
+    error_message = "When enable_lambda_triggers is true, pre_signup_lambda_arn, post_auth_lambda_arn, and post_confirmation_lambda_arn must all be non-null."
+  }
 }
 
 variable "enable_webauthn" {
@@ -199,9 +208,9 @@ resource "aws_cognito_user_pool" "main" {
   # Use a static block (not dynamic) so the block is always emitted; null values are
   # treated as "no trigger" by the provider without plan-time unknown issues.
   lambda_config {
-    pre_sign_up          = var.pre_signup_lambda_arn
-    post_authentication  = var.post_auth_lambda_arn
-    post_confirmation    = var.post_confirmation_lambda_arn
+    pre_sign_up         = var.pre_signup_lambda_arn
+    post_authentication = var.post_auth_lambda_arn
+    post_confirmation   = var.post_confirmation_lambda_arn
   }
 
   tags = local.tags
@@ -215,7 +224,7 @@ resource "aws_cognito_user_pool" "main" {
 # count is gated on a static boolean (known at plan time) rather than ARN nullability
 # to avoid unknown count values during greenfield applies.
 resource "aws_lambda_permission" "cognito_pre_signup" {
-  count = var.enable_lambda_triggers ? 1 : 0
+  count = var.enable_lambda_triggers && var.pre_signup_lambda_arn != null ? 1 : 0
 
   statement_id  = "AllowCognitoInvokePreSignup"
   action        = "lambda:InvokeFunction"
@@ -225,7 +234,7 @@ resource "aws_lambda_permission" "cognito_pre_signup" {
 }
 
 resource "aws_lambda_permission" "cognito_post_auth" {
-  count = var.enable_lambda_triggers ? 1 : 0
+  count = var.enable_lambda_triggers && var.post_auth_lambda_arn != null ? 1 : 0
 
   statement_id  = "AllowCognitoInvokePostAuth"
   action        = "lambda:InvokeFunction"
@@ -235,7 +244,7 @@ resource "aws_lambda_permission" "cognito_post_auth" {
 }
 
 resource "aws_lambda_permission" "cognito_post_confirmation" {
-  count = var.enable_lambda_triggers ? 1 : 0
+  count = var.enable_lambda_triggers && var.post_confirmation_lambda_arn != null ? 1 : 0
 
   statement_id  = "AllowCognitoInvokePostConfirmation"
   action        = "lambda:InvokeFunction"
