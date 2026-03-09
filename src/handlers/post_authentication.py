@@ -1,11 +1,12 @@
 """
-Cognito Post-Authentication Lambda Trigger
+Cognito Account Bootstrap Lambda Trigger
 
-Creates or updates the Account record in DynamoDB when a user successfully authenticates.
-This ensures that getMyAccount always has data to return.
+Creates or updates the Account record in DynamoDB when Cognito invokes either:
+- Post Authentication (sign-in path)
+- Post Confirmation (new-user confirmation path)
 
-Trigger: Post Authentication
-Event: After user signs in (including first-time social login)
+This ensures that getMyAccount always has data to return, including for
+first-time social sign-ins where trigger timing can differ.
 """
 
 import logging
@@ -27,9 +28,9 @@ logger.setLevel(logging.INFO)
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
-    Post-Authentication Lambda Trigger Handler
+    Cognito account bootstrap trigger handler
 
-    Creates or updates Account record in DynamoDB after successful authentication.
+    Creates or updates Account record in DynamoDB after Cognito trigger invocation.
 
     Event structure:
     {
@@ -51,14 +52,14 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     }
 
     Args:
-        event: Cognito Post Authentication trigger event
+        event: Cognito trigger event (PostAuthentication or PostConfirmation)
         context: Lambda context
 
     Returns:
         event: Must return the event unmodified for Cognito to continue
     """
     try:
-        logger.info(f"Post-authentication trigger invoked: {event.get('triggerSource')}")
+        logger.info(f"Account bootstrap trigger invoked: {event.get('triggerSource')}")
 
         # Extract user attributes
         user_attributes = event.get("request", {}).get("userAttributes", {})

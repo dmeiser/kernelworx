@@ -206,3 +206,24 @@ def test_email_gsi_available(
     assert response["Count"] == 1
     account = response["Items"][0]
     assert account["accountId"] == "ACCOUNT#a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+
+
+def test_create_new_account_from_post_confirmation_trigger(
+    cognito_event: dict[str, Any],
+    lambda_context: MagicMock,
+    dynamodb_table: Any,
+    monkeypatch: Any,
+) -> None:
+    """Test account bootstrap works when invoked from PostConfirmation trigger."""
+    monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
+    cognito_event["triggerSource"] = "PostConfirmation_ConfirmSignUp"
+
+    result = lambda_handler(cognito_event, lambda_context)
+
+    assert result == cognito_event
+
+    accounts_table = get_accounts_table()
+    response = accounts_table.get_item(Key={"accountId": "ACCOUNT#a1b2c3d4-e5f6-7890-abcd-ef1234567890"})
+
+    assert "Item" in response
+    assert response["Item"]["email"] == "user@example.com"
