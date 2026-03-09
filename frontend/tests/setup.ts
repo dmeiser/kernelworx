@@ -17,10 +17,24 @@ globalThis.React = React;
 expect.extend(matchers);
 
 // Cleanup after each test
-afterEach(() => {
+afterEach(async () => {
   cleanup();
   vi.restoreAllMocks();
+  vi.clearAllMocks();
   vi.useRealTimers();
+  vi.clearAllTimers();
+  
+  // Force clear any Apollo Client cache
+  if (globalThis.apolloClient) {
+    try {
+      await globalThis.apolloClient.clearStore();
+    } catch (e) {
+      // Ignore errors during cleanup
+    }
+  }
+  
+  // Clear any pending microtasks and force event loop drain
+  await new Promise((resolve) => setTimeout(resolve, 0));
 });
 
 // Mock window.matchMedia for MUI responsive components
