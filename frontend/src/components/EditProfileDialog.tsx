@@ -32,11 +32,12 @@ export const EditProfileDialog: React.FC<EditProfileDialogProps> = ({
   const form = useFormState<ProfileFormValues>({
     initialValues: { sellerName: currentName },
   });
+  const { resetTo } = form;
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    form.resetTo({ sellerName: currentName });
-  }, [currentName, open, form]);
+    resetTo({ sellerName: currentName });
+  }, [currentName, open, resetTo]);
 
   const handleSubmit = async () => {
     if (!form.values.sellerName.trim() || !form.isDirty) return;

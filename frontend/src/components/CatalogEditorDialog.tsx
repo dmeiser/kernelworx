@@ -52,19 +52,21 @@ export const CatalogEditorDialog: React.FC<CatalogEditorDialogProps> = ({ open, 
   const [error, setError] = useState<string | null>(null);
   const initializedRef = useRef(false);
 
+  const { resetTo } = form;
+
   const resetForm = useCallback(() => {
-    form.resetTo({ catalogName: '', isPublic: true }); // Default to public for admin catalogs
+    resetTo({ catalogName: '', isPublic: true }); // Default to public for admin catalogs
     setProducts([{ productName: '', description: '', price: 0 }]);
     setError(null);
-  }, [form]);
+  }, [resetTo]);
 
   const initFromCatalog = useCallback(
     (catalog: Catalog) => {
-      form.resetTo({ catalogName: catalog.catalogName, isPublic: catalog.isPublic ?? false });
+      resetTo({ catalogName: catalog.catalogName, isPublic: catalog.isPublic ?? false });
       setProducts([...(catalog.products ?? [])]);
       setError(null);
     },
-    [form],
+    [resetTo],
   );
 
   useEffect(() => {

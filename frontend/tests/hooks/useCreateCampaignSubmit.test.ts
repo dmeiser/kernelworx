@@ -171,6 +171,33 @@ describe('useCreateCampaignSubmit', () => {
     expect(params.onSuccess).toHaveBeenCalledWith('Campaign created successfully!');
   });
 
+  it('builds base input in shared mode when no shared code provided', async () => {
+    mockCreateCampaign.mockResolvedValue({
+      data: {
+        createCampaign: {
+          campaignId: 'CAMPAIGN#camp-123',
+          campaignName: 'Fall Sale',
+          campaignYear: 2025,
+        },
+      },
+    });
+
+    const { result } = renderHook(() => useCreateCampaignSubmit());
+    const params = createBaseParams({
+      isSharedCampaignMode: true,
+      effectiveSharedCampaignCode: undefined,
+      shareWithCreator: false,
+    });
+
+    await act(async () => {
+      await result.current.handleSubmit(params);
+    });
+
+    expect(mockCreateCampaign).toHaveBeenCalled();
+    const callArgs = mockCreateCampaign.mock.calls[0][0];
+    expect(callArgs.variables.input.sharedCampaignCode).toBeUndefined();
+  });
+
   it('handles dates when provided', async () => {
     mockCreateCampaign.mockResolvedValue({
       data: {

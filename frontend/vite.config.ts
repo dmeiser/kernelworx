@@ -74,10 +74,6 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: './tests/setup.ts',
     exclude: ['**/node_modules/**', '**/dist/**', '**/tests/e2e/**'],
-    // Use threads pool for consistent module resolution
-    pool: 'threads',
-    // Run test files sequentially to avoid jsdom cleanup issues
-    fileParallelism: false,
     // Ensure tests timeout rather than hang
     testTimeout: 10000,
     hookTimeout: 10000,

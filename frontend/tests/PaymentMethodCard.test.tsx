@@ -75,6 +75,19 @@ describe('PaymentMethodCard', () => {
     });
   });
 
+  test('closes QR preview dialog when Escape key pressed', async () => {
+    const user = userEvent.setup();
+    render(<PaymentMethodCard {...defaultProps} method={{ name: 'Venmo', qrCodeUrl: 'https://example.com/qr.png' }} />);
+
+    await user.click(screen.getByLabelText('View QR code for Venmo'));
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+
+    await user.keyboard('{Escape}');
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+  });
+
   test('shows edit button for custom methods', () => {
     render(<PaymentMethodCard {...defaultProps} />);
     expect(screen.getByLabelText('Edit Venmo')).toBeInTheDocument();

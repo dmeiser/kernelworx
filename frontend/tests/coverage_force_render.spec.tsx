@@ -32,7 +32,6 @@ vi.mock('@mui/material', async () => {
 });
 
 const TO_RENDER = [
-  '../src/pages/CreateCampaignPage',
   '../src/pages/ScoutManagementPage',
   '../src/pages/AdminPage',
   '../src/pages/SettingsPage',
