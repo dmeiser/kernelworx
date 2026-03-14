@@ -37,7 +37,6 @@ export const EditProfileDialog: React.FC<EditProfileDialogProps> = ({
 
   useEffect(() => {
     resetTo({ sellerName: currentName });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentName, open, resetTo]);
 
   const handleSubmit = async () => {

@@ -47,34 +47,32 @@ let capturedCreateOpts: any;
 let capturedUpdateOpts: any;
 let capturedDeleteOpts: any;
 
+const buildLazyQueryResult = (name: string | undefined) => {
+  const lazyQueryHandlers: Record<string, () => [any, any]> = {
+    ListMyProfiles: () => [
+      loadMyProfilesMock,
+      {
+        data: { listMyProfiles: mockMyProfilesError ? [] : mockMyProfiles },
+        loading: mockMyProfilesLoading,
+        error: mockMyProfilesError ?? undefined,
+      },
+    ],
+    GetMyAccount: () => [
+      loadAccountMock,
+      { data: mockAccountData ? { getMyAccount: mockAccountData } : undefined, loading: false },
+    ],
+  };
+
+  return lazyQueryHandlers[name ?? '']?.() ?? [vi.fn(), { data: undefined, loading: false }];
+};
+
 vi.mock('@apollo/client/react', async () => {
   const actual = await vi.importActual('@apollo/client/react');
 
   const getOpName = (query: any): string | undefined =>
     query?.definitions?.find((d: any) => d?.kind === 'OperationDefinition')?.name?.value;
 
-  const useLazyQuery = (query: any) => {
-    const name = getOpName(query);
-    if (name === 'ListMyProfiles') {
-      return [
-        loadMyProfilesMock,
-        {
-          // Return empty data array even on error so the page exits loading state and shows the error alert
-          data: { listMyProfiles: mockMyProfilesError ? [] : mockMyProfiles },
-          loading: mockMyProfilesLoading,
-          error: mockMyProfilesError ?? undefined,
-        },
-      ];
-    }
-    if (name === 'GetMyAccount') {
-      return [
-        loadAccountMock,
-        { data: mockAccountData ? { getMyAccount: mockAccountData } : undefined, loading: false },
-      ];
-    }
-    // ListMyShares — shared profiles loaded via apolloClient.query, not useLazyQuery
-    return [vi.fn(), { data: undefined, loading: false }];
-  };
+  const useLazyQuery = (query: any) => buildLazyQueryResult(getOpName(query));
 
   const mutationHandlers: Record<string, (opts: any) => any> = {
     CreateSellerProfile: (opts) => {

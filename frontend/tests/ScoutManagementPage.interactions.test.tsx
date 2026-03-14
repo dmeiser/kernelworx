@@ -54,8 +54,27 @@ let testLoading = false;
 // Capture mutation opts so tests can invoke onCompleted
 let capturedUpdateOpts: any;
 let capturedDeleteOpts: any;
-let capturedCreateInviteOpts: any;
-let capturedDeleteInviteOpts: any;
+
+const captureMutationOpts = (captureKey: string, opts: any) => {
+  const captureTargets: Record<string, (value: any) => void> = {
+    update: (value) => {
+      capturedUpdateOpts = value;
+    },
+    delete: (value) => {
+      capturedDeleteOpts = value;
+    },
+  };
+
+  captureTargets[captureKey]?.(opts);
+};
+
+const getCompletedMutationData = (result: any, fallbackData?: any) => result?.data ?? fallbackData ?? {};
+
+const runMockMutation = async (mockFn: any, optsVars: any, opts: any, fallbackData?: any) => {
+  const res = await mockFn(optsVars);
+  opts?.onCompleted?.(getCompletedMutationData(res, fallbackData));
+  return res;
+};
 
 vi.mock('@apollo/client/react', async () => {
   const actual = await vi.importActual('@apollo/client/react');
@@ -90,17 +109,9 @@ vi.mock('@apollo/client/react', async () => {
   const makeMutationHandler =
     (mockFn: any, captureKey: string, onCompletedData?: any) =>
     (opts: any) => {
-      // Store opts for test access
-      if (captureKey === 'update') capturedUpdateOpts = opts;
-      if (captureKey === 'delete') capturedDeleteOpts = opts;
-      if (captureKey === 'createInvite') capturedCreateInviteOpts = opts;
-      if (captureKey === 'deleteInvite') capturedDeleteInviteOpts = opts;
+      captureMutationOpts(captureKey, opts);
       return [
-        async (optsVars: any) => {
-          const res = await mockFn(optsVars);
-          opts?.onCompleted?.(res?.data ?? onCompletedData ?? {});
-          return res;
-        },
+        async (optsVars: any) => runMockMutation(mockFn, optsVars, opts, onCompletedData),
         { loading: false, data: null },
       ];
     };
@@ -151,8 +162,6 @@ describe('ScoutManagementPage – additional interactions', () => {
     vi.clearAllMocks();
     capturedUpdateOpts = undefined;
     capturedDeleteOpts = undefined;
-    capturedCreateInviteOpts = undefined;
-    capturedDeleteInviteOpts = undefined;
 
     createInviteMock.mockResolvedValue({ data: { createProfileInvite: { inviteCode: 'TESTCODE' } } });
     updateProfileMock.mockResolvedValue({ data: {} });
