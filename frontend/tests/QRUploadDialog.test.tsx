@@ -2,7 +2,7 @@
  * Tests for QRUploadDialog component
  */
 
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, test, expect, vi, beforeEach } from 'vitest';
 import { QRUploadDialog } from '../src/components/QRUploadDialog';
@@ -113,6 +113,19 @@ describe('QRUploadDialog', () => {
       });
     });
 
+    test('shows error for unsupported file type', () => {
+      render(<QRUploadDialog {...defaultProps} />);
+
+      const file = createMockFile('document.pdf', 1024 * 100, 'application/pdf');
+      const input = screen.getByLabelText('Select QR code image') as HTMLInputElement;
+
+      // Use fireEvent + Object.defineProperty to bypass userEvent accept-filter
+      Object.defineProperty(input, 'files', { value: [file], configurable: true });
+      fireEvent.change(input);
+
+      expect(screen.getByText(/Please select a PNG, JPG, or WEBP image file/i)).toBeInTheDocument();
+    });
+
     test('accepts PNG files', async () => {
       const user = userEvent.setup();
       render(<QRUploadDialog {...defaultProps} />);
@@ -195,6 +208,16 @@ describe('QRUploadDialog', () => {
       await user.click(screen.getByRole('button', { name: /cancel/i }));
 
       expect(onClose).toHaveBeenCalled();
+    });
+
+    test('triggers file input click when upload area is clicked', () => {
+      const clickSpy = vi.spyOn(HTMLInputElement.prototype, 'click').mockImplementation(() => {});
+      render(<QRUploadDialog {...defaultProps} />);
+
+      fireEvent.click(screen.getByText(/Click to select an image/i));
+
+      expect(clickSpy).toHaveBeenCalled();
+      clickSpy.mockRestore();
     });
   });
 

@@ -154,4 +154,29 @@ describe('CatalogSection', () => {
     // MUI renders a zero-width space (U+200B) for empty select display
     expect(select.textContent?.replace(/\u200B/g, '')).toBe('');
   });
+
+  test('removes aria-hidden from root element when select opens', () => {
+    const root = document.createElement('div');
+    root.id = 'root';
+    root.setAttribute('aria-hidden', 'true');
+    document.body.appendChild(root);
+    const removeAttrSpy = vi.spyOn(root, 'removeAttribute');
+
+    const onChange = vi.fn();
+    render(
+      <CatalogSection
+        catalogId=""
+        onCatalogChange={onChange}
+        catalogsLoading={false}
+        filteredPublicCatalogs={publicCatalogs}
+        myCatalogs={[]}
+      />,
+    );
+
+    fireEvent.mouseDown(screen.getByRole('combobox'));
+
+    expect(removeAttrSpy).toHaveBeenCalledWith('aria-hidden');
+
+    document.body.removeChild(root);
+  });
 });

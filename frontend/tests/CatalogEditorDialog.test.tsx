@@ -205,6 +205,29 @@ describe('CatalogEditorDialog', () => {
   });
 
   describe('edit mode', () => {
+    test('validates empty products list when catalog has no products', async () => {
+      const user = userEvent.setup();
+      const emptyCatalog: Catalog = {
+        catalogId: 'CAT~EMPTY',
+        catalogName: 'Empty Catalog',
+        isPublic: true,
+        products: [],
+      };
+      render(
+        <CatalogEditorDialog
+          open={true}
+          onClose={mockOnClose}
+          onSave={mockOnSave}
+          initialCatalog={emptyCatalog}
+        />,
+      );
+
+      await user.click(screen.getByRole('button', { name: /save catalog/i }));
+
+      expect(screen.getByText('At least one product is required')).toBeInTheDocument();
+      expect(mockOnSave).not.toHaveBeenCalled();
+    });
+
     test('renders edit dialog with existing catalog data', () => {
       render(
         <CatalogEditorDialog
