@@ -2,8 +2,11 @@ name: Nightly Rebuild and Test
 
 on:
   schedule:
-    - cron: '0 4 * * *' # 4 AM UTC (12 AM EDT)
+    - cron: '0 4 * * *' # 4 AM UTC (midnight ET during DST)
   workflow_dispatch: # Allow manual trigger
+
+permissions:
+  contents: read
 
 jobs:
   quality:
@@ -32,8 +35,12 @@ jobs:
       - name: Extract Version
         id: version
         run: |
-          # Get version from package.json or pyproject.toml
-          VERSION=$(grep '"version":' package.json | cut -d'"' -f4)
+          # Get version from pyproject.toml [project] section
+          VERSION=$(grep -m 1 'version = ' pyproject.toml | cut -d'"' -f2)
+          if [ -z "$VERSION" ]; then
+            echo "Error: Could not extract version from pyproject.toml"
+            exit 1
+          fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           
           # Extract major and major.minor

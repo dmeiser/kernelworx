@@ -4,6 +4,10 @@ on:
   pull_request:
     branches:
       - main
+  workflow_call:
+    secrets:
+      AWS_REGION:
+        required: false
 
 concurrency:
   group: ci-${{ github.head_ref || github.run_id }}
