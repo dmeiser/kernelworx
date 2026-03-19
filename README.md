@@ -145,9 +145,9 @@ This is a volunteer-run project. Contributions are welcome! Please read [AGENT.m
 The project publishes official Docker images with a standardized tagging policy:
 
 - `:latest`: Always points to the most recent tip of the `main` branch, rebuilt nightly.
-- `:2`: Points to the latest major version (e.g., v2.x.x), updated with each release and rebuilt nightly for security patches.
-- `:2.0`: Points to the latest minor version (e.g., v2.0.x), updated with each release and rebuilt nightly.
-- `:2.0.x`: Immutable tags for specific releases. Use these for production stability.
+- `:<major>`: Points to the latest release of a major version (e.g., `:1`), updated with each release and rebuilt nightly for security patches.
+- `:<major>.<minor>`: Points to the latest release of a minor version (e.g., `:1.2`), updated with each release and rebuilt nightly.
+- `:<major>.<minor>.<patch>`: Immutable tags for specific releases (e.g., `:1.2.3`). Use these for production stability.
 
 Images are rebuilt nightly to include the latest OS security updates while preserving application version stability for floating tags.
 
