@@ -140,13 +140,16 @@ This is a volunteer-run project. Contributions are welcome! Please read [AGENT.m
 3. **Follow code quality standards** - isort, ruff, mypy (Python); ESLint, Prettier (TypeScript)
 4. **Document your changes** - update README and relevant docs
 
-## Code Quality
+### Docker Tags
 
-- **Python**: isort + black + mypy + pytest (100% coverage)
-- **TypeScript**: ESLint + Prettier + Vitest (100% coverage)
-- **Git workflow**: Feature branches + pull requests only
+The project publishes official Docker images with a standardized tagging policy:
 
-See [AGENT.md](AGENT.md) for detailed quality standards.
+- `:latest`: Always points to the most recent tip of the `main` branch, rebuilt nightly.
+- `:2`: Points to the latest major version (e.g., v2.x.x), updated with each release and rebuilt nightly for security patches.
+- `:2.0`: Points to the latest minor version (e.g., v2.0.x), updated with each release and rebuilt nightly.
+- `:2.0.x`: Immutable tags for specific releases. Use these for production stability.
+
+Images are rebuilt nightly to include the latest OS security updates while preserving application version stability for floating tags.
 
 ## License
 
