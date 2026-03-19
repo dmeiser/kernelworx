@@ -1,0 +1,27 @@
+# .dockerignore
+.git
+.github
+frontend
+tofu
+tests
+docs
+memory
+MEMORY.md
+AGENTS.md
+IDENTITY.md
+SOUL.md
+TOOLS.md
+USER.md
+HEARTBEAT.md
+.python-version
+.venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+.coverage
+htmlcov
+*.egg-info
+dist
+build

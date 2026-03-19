@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: read
+  actions: write
 
 jobs:
   quality:
@@ -58,6 +59,5 @@ jobs:
             ${{ secrets.DOCKERHUB_REPO }}:latest
             ${{ secrets.DOCKERHUB_REPO }}:${{ steps.version.outputs.major }}
             ${{ secrets.DOCKERHUB_REPO }}:${{ steps.version.outputs.major_minor }}
-            ${{ secrets.DOCKERHUB_REPO }}:${{ steps.version.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
