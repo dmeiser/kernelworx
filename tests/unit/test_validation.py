@@ -64,7 +64,7 @@ class TestValidateAddress:
 
     def test_valid_address_passes(self) -> None:
         """Test that valid address passes validation."""
-        address = {"street": "123 Main St", "city": "Springfield", "state": "IL", "zip": "62701"}
+        address = {"street": "123 Main St", "city": "Springfield", "state": "IL", "zipCode": "62701"}
 
         # Should not raise
         validate_address(address)
@@ -75,14 +75,14 @@ class TestValidateAddress:
             "street": "123 Main St",
             "city": "Springfield",
             "state": "IL",
-            "zip": "62701-1234",
+            "zipCode": "62701-1234",
         }
 
         validate_address(address)
 
     def test_missing_street_raises_error(self) -> None:
         """Test that missing street raises error."""
-        address = {"city": "Springfield", "state": "IL", "zip": "62701"}
+        address = {"city": "Springfield", "state": "IL", "zipCode": "62701"}
 
         with pytest.raises(AppError) as exc_info:
             validate_address(address)
@@ -100,11 +100,11 @@ class TestValidateAddress:
         assert exc_info.value.error_code == ErrorCode.INVALID_ADDRESS
         assert "city" in exc_info.value.details["missingFields"]
         assert "state" in exc_info.value.details["missingFields"]
-        assert "zip" in exc_info.value.details["missingFields"]
+        assert "zipCode" in exc_info.value.details["missingFields"]
 
     def test_invalid_zip_raises_error(self) -> None:
         """Test that invalid ZIP code raises error."""
-        address = {"street": "123 Main St", "city": "Springfield", "state": "IL", "zip": "ABC"}
+        address = {"street": "123 Main St", "city": "Springfield", "state": "IL", "zipCode": "ABC"}
 
         with pytest.raises(AppError) as exc_info:
             validate_address(address)
@@ -129,7 +129,7 @@ class TestValidateCustomerInput:
         """Test valid customer with address."""
         customer = {
             "name": "Jane Smith",
-            "address": {"street": "456 Oak Ave", "city": "Boston", "state": "MA", "zip": "02101"},
+            "address": {"street": "456 Oak Ave", "city": "Boston", "state": "MA", "zipCode": "02101"},
         }
 
         result = validate_customer_input(customer)
@@ -143,7 +143,7 @@ class TestValidateCustomerInput:
         customer = {
             "name": "Bob Johnson",
             "phone": "(555) 123-4567",
-            "address": {"street": "789 Elm St", "city": "Austin", "state": "TX", "zip": "78701"},
+            "address": {"street": "789 Elm St", "city": "Austin", "state": "TX", "zipCode": "78701"},
         }
 
         result = validate_customer_input(customer)
@@ -447,7 +447,7 @@ class TestValidateOrderUpdate:
                 "street": "123 Main St",
                 "city": "Anytown",
                 "state": "CA",
-                "zip": "12345",
+                "zipCode": "12345",
             }
         }
 
