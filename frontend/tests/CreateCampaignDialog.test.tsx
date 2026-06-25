@@ -6,7 +6,7 @@
 
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { CreateCampaignDialog } from '../src/components/CreateCampaignDialog';
 import { LIST_MANAGED_CATALOGS, LIST_MY_CATALOGS } from '../src/lib/graphql';
@@ -478,6 +478,82 @@ describe('CreateCampaignDialog', () => {
     await waitFor(() => {
       expect(errorSubmit).toHaveBeenCalled();
       expect(screen.getByRole('dialog')).toBeInTheDocument();
+    });
+  });
+
+  it('shows official label for admin managed catalogs', async () => {
+    useQueryMockImpl = (query: any) => {
+      if (query === LIST_MANAGED_CATALOGS) {
+        return {
+          data: {
+            listManagedCatalogs: [
+              {
+                catalogId: 'admin-1',
+                catalogName: 'Admin Catalog',
+                catalogType: 'ADMIN_MANAGED',
+                isDeleted: false,
+              },
+            ],
+          },
+          loading: false,
+        };
+      }
+      if (query === LIST_MY_CATALOGS) {
+        return { data: { listMyCatalogs: [] }, loading: false };
+      }
+      return { data: undefined, loading: false };
+    };
+
+    render(<CreateCampaignDialog open={true} onClose={mockOnClose} onSubmit={mockOnSubmit} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Admin Catalog (Official)')).toBeInTheDocument();
+    });
+  });
+
+  it('does not close while submission is in progress', async () => {
+    let resolveSubmit: (() => void) | undefined;
+    const hangingSubmit = vi.fn().mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveSubmit = resolve;
+        }),
+    );
+
+    setupUseQueryMock();
+    render(<CreateCampaignDialog open={true} onClose={mockOnClose} onSubmit={hangingSubmit} />);
+
+    const user = userEvent.setup();
+
+    await waitFor(() => {
+      expect(screen.getAllByText(/catalog/i).length).toBeGreaterThan(0);
+    });
+
+    const nameInput = screen.getByLabelText(/campaign name/i);
+    await user.type(nameInput, 'Fall 2025');
+
+    const catalogSelect = getCatalogSelect();
+    expect(catalogSelect).toBeTruthy();
+    await user.selectOptions(catalogSelect!, 'catalog-1');
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /create/i })).toBeEnabled();
+    });
+
+    const createButton = screen.getByRole('button', { name: /create/i });
+    await user.click(createButton);
+
+    // While submission is pending, closing via the Dialog (e.g. Escape) is ignored
+    const dialog = screen.getByRole('dialog');
+    fireEvent.keyDown(dialog, { key: 'Escape', code: 'Escape' });
+
+    await waitFor(() => {
+      expect(hangingSubmit).toHaveBeenCalled();
+    });
+    expect(mockOnClose).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolveSubmit?.();
     });
   });
 });

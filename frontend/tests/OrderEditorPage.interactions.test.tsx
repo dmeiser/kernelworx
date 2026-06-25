@@ -15,6 +15,7 @@ import {
   GET_PAYMENT_METHODS_FOR_PROFILE,
   GET_ORDER,
   UPDATE_ORDER,
+  CREATE_ORDER,
 } from '../src/lib/graphql';
 
 // Mock MUI Select/MenuItem with plain HTML select/option so onChange fires in jsdom
@@ -138,6 +139,33 @@ const mockExistingOrder = {
     totalAmount: 20,
     createdAt: '2025-10-01T00:00:00Z',
     updatedAt: '2025-10-01T00:00:00Z',
+  },
+};
+
+const mockCreatedOrder = {
+  __typename: 'Order',
+  orderId: 'ORDER#new-123',
+  profileId: PROFILE_DB,
+  campaignId: CAMPAIGN_DB,
+  customerName: 'John Doe',
+  customerPhone: null,
+  customerAddress: null,
+  orderDate: '2025-10-15T00:00:00Z',
+  paymentMethod: 'Cash',
+  lineItems: [
+    { __typename: 'OrderLineItem', productId: 'PROD~A', productName: 'Caramel Corn', quantity: 2, pricePerUnit: 10, subtotal: 20 },
+  ],
+  totalAmount: 20,
+  notes: null,
+  createdAt: '2025-10-15T00:00:00Z',
+  updatedAt: '2025-10-15T00:00:00Z',
+};
+
+const mockProfileOwnerUndefinedPermissions = {
+  getProfile: {
+    ...mockProfileOwner.getProfile,
+    isOwner: false,
+    permissions: undefined,
   },
 };
 
@@ -493,6 +521,188 @@ describe('OrderEditorPage - Create Order', () => {
       expect(screen.getByText('Payment & Notes')).toBeInTheDocument();
     });
   }, 15000);
+
+  test('successfully creates order and navigates to orders list', async () => {
+    const createOrderMock: MockedResponse = {
+      request: { query: CREATE_ORDER, variables: () => true },
+      result: { data: { createOrder: mockCreatedOrder } },
+    };
+    renderCreateOrder(baseMocks([createOrderMock]));
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: /create order/i })).toBeInTheDocument();
+    }, { timeout: 10000 });
+
+    await waitFor(() => {
+      const paymentSelect = screen.getByRole('combobox', { name: /payment method/i });
+      expect((paymentSelect as HTMLSelectElement).value).toBe('Cash');
+    }, { timeout: 5000 });
+
+    fireEvent.change(screen.getByLabelText(/Customer Name/i), { target: { value: 'John Doe' } });
+
+    const productSelects = screen.getAllByRole('combobox', { name: 'Select' });
+    expect(productSelects.length).toBeGreaterThan(0);
+    fireEvent.change(productSelects[0], { target: { value: 'PROD~A' } });
+
+    const quantityInputs = screen.getAllByRole('spinbutton');
+    expect(quantityInputs.length).toBeGreaterThan(0);
+    fireEvent.change(quantityInputs[0], { target: { value: '2' } });
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /create order/i })).not.toBeDisabled();
+    }, { timeout: 3000 });
+
+    fireEvent.click(screen.getByRole('button', { name: /create order/i }));
+
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith(
+        `/scouts/${encodeURIComponent(PROFILE_RAW)}/campaigns/${encodeURIComponent(CAMPAIGN_RAW)}/orders`,
+      );
+    }, { timeout: 5000 });
+  }, 25000);
+
+  test('shows error when create order mutation fails', async () => {
+    const createOrderError: MockedResponse = {
+      request: { query: CREATE_ORDER, variables: () => true },
+      error: new Error('Create order failed'),
+    };
+    renderCreateOrder(baseMocks([createOrderError]));
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: /create order/i })).toBeInTheDocument();
+    }, { timeout: 10000 });
+
+    await waitFor(() => {
+      const paymentSelect = screen.getByRole('combobox', { name: /payment method/i });
+      expect((paymentSelect as HTMLSelectElement).value).toBe('Cash');
+    }, { timeout: 5000 });
+
+    fireEvent.change(screen.getByLabelText(/Customer Name/i), { target: { value: 'John Doe' } });
+
+    const productSelects = screen.getAllByRole('combobox', { name: 'Select' });
+    if (productSelects.length > 0) {
+      fireEvent.change(productSelects[0], { target: { value: 'PROD~A' } });
+    }
+
+    const quantityInputs = screen.getAllByRole('spinbutton');
+    if (quantityInputs.length > 0) {
+      fireEvent.change(quantityInputs[0], { target: { value: '2' } });
+    }
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /create order/i })).not.toBeDisabled();
+    }, { timeout: 3000 });
+
+    fireEvent.click(screen.getByRole('button', { name: /create order/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Create order failed|Failed to save order/i)).toBeInTheDocument();
+    }, { timeout: 5000 });
+  }, 25000);
+
+  test('updates product and quantity for a line item', async () => {
+    renderCreateOrder(baseMocks());
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: /create order/i })).toBeInTheDocument();
+    }, { timeout: 10000 });
+
+    const productSelects = screen.getAllByRole('combobox', { name: 'Select' });
+    expect(productSelects.length).toBeGreaterThan(0);
+
+    fireEvent.change(productSelects[0], { target: { value: 'PROD~A' } });
+
+    const quantityInputs = screen.getAllByRole('spinbutton');
+    expect(quantityInputs.length).toBeGreaterThan(0);
+    fireEvent.change(quantityInputs[0], { target: { value: '5' } });
+
+    await waitFor(() => {
+      expect((productSelects[0] as HTMLSelectElement).value).toBe('PROD~A');
+      expect((quantityInputs[0] as HTMLInputElement).value).toBe('5');
+    });
+  }, 15000);
+
+  test('updates customer address fields', async () => {
+    renderCreateOrder(baseMocks());
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: /create order/i })).toBeInTheDocument();
+    }, { timeout: 10000 });
+
+    fireEvent.change(screen.getByLabelText(/Street Address/i), { target: { value: '456 Elm St' } });
+    fireEvent.change(screen.getByLabelText(/City/i), { target: { value: 'Springfield' } });
+    fireEvent.change(screen.getByLabelText(/Zip Code/i), { target: { value: '62704' } });
+
+    await waitFor(() => {
+      expect((screen.getByLabelText(/Street Address/i) as HTMLInputElement).value).toBe('456 Elm St');
+      expect((screen.getByLabelText(/City/i) as HTMLInputElement).value).toBe('Springfield');
+      expect((screen.getByLabelText(/Zip Code/i) as HTMLInputElement).value).toBe('62704');
+    });
+  }, 15000);
+
+  test('updates payment method and notes fields', async () => {
+    renderCreateOrder(baseMocks());
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: /create order/i })).toBeInTheDocument();
+    }, { timeout: 10000 });
+
+    await waitFor(() => {
+      const paymentSelect = screen.getByRole('combobox', { name: /payment method/i });
+      expect((paymentSelect as HTMLSelectElement).value).toBe('Cash');
+    }, { timeout: 5000 });
+
+    const paymentSelect = screen.getByRole('combobox', { name: /payment method/i });
+    fireEvent.change(paymentSelect, { target: { value: 'Venmo' } });
+
+    fireEvent.change(screen.getByLabelText(/Notes/i), { target: { value: 'Leave at front door' } });
+
+    await waitFor(() => {
+      expect((paymentSelect as HTMLSelectElement).value).toBe('Venmo');
+      expect((screen.getByLabelText(/Notes/i) as HTMLInputElement).value).toBe('Leave at front door');
+    });
+  }, 15000);
+
+  test('Campaigns breadcrumb navigates to profile campaigns', async () => {
+    const user = userEvent.setup();
+    renderCreateOrder(baseMocks());
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: /create order/i })).toBeInTheDocument();
+    }, { timeout: 10000 });
+
+    await user.click(screen.getByRole('button', { name: /campaigns/i }));
+
+    expect(mockNavigate).toHaveBeenCalledWith(`/scouts/${encodeURIComponent(PROFILE_RAW)}/campaigns`);
+  }, 15000);
+
+  test('Orders breadcrumb navigates back to orders list', async () => {
+    const user = userEvent.setup();
+    renderCreateOrder(baseMocks());
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: /create order/i })).toBeInTheDocument();
+    }, { timeout: 10000 });
+
+    await user.click(screen.getByRole('button', { name: /^orders$/i }));
+
+    expect(mockNavigate).toHaveBeenCalledWith(
+      `/scouts/${encodeURIComponent(PROFILE_RAW)}/campaigns/${encodeURIComponent(CAMPAIGN_RAW)}/orders`,
+    );
+  }, 15000);
+
+  test('handles profile with undefined permissions array', async () => {
+    const mocks: MockedResponse[] = [
+      { request: { query: GET_CAMPAIGN, variables: { campaignId: CAMPAIGN_DB } }, result: { data: mockCampaign } },
+      { request: { query: GET_PROFILE, variables: { profileId: PROFILE_DB } }, result: { data: mockProfileOwnerUndefinedPermissions } },
+      { request: { query: GET_PAYMENT_METHODS_FOR_PROFILE, variables: { profileId: PROFILE_DB } }, result: { data: mockPaymentMethods } },
+    ];
+    renderCreateOrder(mocks);
+
+    await waitFor(() => {
+      expect(screen.getByText(/don't have permission/i)).toBeInTheDocument();
+    }, { timeout: 10000 });
+  }, 15000);
 });
 
 describe('OrderEditorPage - Edit Order', () => {
@@ -619,6 +829,73 @@ describe('OrderEditorPage - Edit Order', () => {
 
     expect(screen.getByRole('progressbar')).toBeInTheDocument();
   }, 15000);
+
+  test('shows error when update order mutation fails', async () => {
+    const updateOrderError: MockedResponse = {
+      request: { query: UPDATE_ORDER, variables: () => true },
+      error: new Error('Update order failed'),
+    };
+    renderEditOrder(editMocks([updateOrderError]));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /update order/i })).toBeInTheDocument();
+    }, { timeout: 15000 });
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('Jane Smith')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /update order/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Update order failed|Failed to save order/i)).toBeInTheDocument();
+    }, { timeout: 5000 });
+  }, 25000);
+
+  test('submits update with empty phone and notes', async () => {
+    const updateOrderResult = {
+      updateOrder: {
+        __typename: 'Order',
+        orderId: ORDER_DB,
+        profileId: PROFILE_DB,
+        campaignId: CAMPAIGN_DB,
+        customerName: 'Jane Smith',
+        customerPhone: null,
+        customerAddress: { street: '123 Oak St', city: 'Springfield', state: 'IL', zipCode: '62701' },
+        paymentMethod: 'Venmo',
+        notes: null,
+        orderDate: '2025-10-01T00:00:00Z',
+        lineItems: [{ __typename: 'OrderLineItem', productId: 'PROD~A', productName: 'Caramel Corn', quantity: 2, pricePerUnit: 10, subtotal: 20 }],
+        totalAmount: 20,
+        createdAt: '2025-10-01T00:00:00Z',
+        updatedAt: '2025-10-01T00:00:00Z',
+      },
+    };
+    const mocks = editMocks([
+      {
+        request: { query: UPDATE_ORDER, variables: () => true },
+        result: { data: updateOrderResult },
+      },
+    ]);
+    renderEditOrder(mocks);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /update order/i })).toBeInTheDocument();
+    }, { timeout: 15000 });
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('Jane Smith')).toBeInTheDocument();
+    });
+
+    fireEvent.change(screen.getByLabelText(/Phone Number/i), { target: { value: '' } });
+    fireEvent.change(screen.getByLabelText(/Notes/i), { target: { value: '' } });
+
+    fireEvent.click(screen.getByRole('button', { name: /update order/i }));
+
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalled();
+    }, { timeout: 5000 });
+  }, 25000);
 });
 
 describe('OrderEditorPage - QR Code', () => {

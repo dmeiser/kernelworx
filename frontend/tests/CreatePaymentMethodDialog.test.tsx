@@ -2,7 +2,7 @@
  * Tests for CreatePaymentMethodDialog component
  */
 
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi } from 'vitest';
 import { CreatePaymentMethodDialog } from '../src/components/CreatePaymentMethodDialog';
@@ -81,6 +81,36 @@ describe('CreatePaymentMethodDialog', () => {
       });
     });
 
+    it('shows error when submitting empty name via Enter key', async () => {
+      const user = userEvent.setup();
+      const onCreate = vi.fn().mockResolvedValue(undefined);
+      render(<CreatePaymentMethodDialog {...defaultProps} onCreate={onCreate} />);
+
+      const input = screen.getByLabelText('Payment method name');
+      await user.type(input, '{Enter}');
+
+      await waitFor(() => {
+        expect(screen.getByText(/name is required/i)).toBeInTheDocument();
+      });
+      expect(onCreate).not.toHaveBeenCalled();
+    });
+
+    it('shows error when name exceeds maximum length', async () => {
+      const user = userEvent.setup();
+      const onCreate = vi.fn().mockResolvedValue(undefined);
+      render(<CreatePaymentMethodDialog {...defaultProps} onCreate={onCreate} />);
+
+      const input = screen.getByLabelText('Payment method name') as HTMLInputElement;
+      const longName = 'A'.repeat(51);
+      fireEvent.change(input, { target: { value: longName } });
+      await user.click(screen.getByRole('button', { name: /create/i }));
+
+      await waitFor(() => {
+        expect(screen.getByText(/Name must be 50 characters or less/i)).toBeInTheDocument();
+      });
+      expect(onCreate).not.toHaveBeenCalled();
+    });
+
     it('shows error for duplicate name', async () => {
       const user = userEvent.setup();
       render(<CreatePaymentMethodDialog {...defaultProps} />);
@@ -91,6 +121,26 @@ describe('CreatePaymentMethodDialog', () => {
 
       await waitFor(() => {
         expect(screen.getByText(/already exists/i)).toBeInTheDocument();
+      });
+    });
+
+    it('clears error when user types after validation failure', async () => {
+      const user = userEvent.setup();
+      render(<CreatePaymentMethodDialog {...defaultProps} />);
+
+      const input = screen.getByLabelText('Payment method name');
+      await user.type(input, 'Venmo');
+      await user.click(screen.getByRole('button', { name: /create/i }));
+
+      await waitFor(() => {
+        expect(screen.getByText(/already exists/i)).toBeInTheDocument();
+      });
+
+      await user.clear(input);
+      await user.type(input, 'Zelle');
+
+      await waitFor(() => {
+        expect(screen.queryByText(/already exists/i)).not.toBeInTheDocument();
       });
     });
 
@@ -138,6 +188,44 @@ describe('CreatePaymentMethodDialog', () => {
       await waitFor(() => {
         expect(onCreate).toHaveBeenCalledWith('Zelle');
       });
+    });
+
+    it('does not close dialog when onCreate rejects', async () => {
+      const user = userEvent.setup();
+      const onCreate = vi.fn().mockRejectedValue(new Error('Creation failed'));
+      const onClose = vi.fn();
+      render(<CreatePaymentMethodDialog {...defaultProps} onCreate={onCreate} onClose={onClose} />);
+
+      const input = screen.getByLabelText('Payment method name');
+      await user.type(input, 'Zelle');
+      await user.click(screen.getByRole('button', { name: /create/i }));
+
+      await waitFor(() => {
+        expect(onCreate).toHaveBeenCalledWith('Zelle');
+      });
+      expect(onClose).not.toHaveBeenCalled();
+    });
+
+    it('does not submit on non-Enter keys', async () => {
+      const user = userEvent.setup();
+      const onCreate = vi.fn().mockResolvedValue(undefined);
+      render(<CreatePaymentMethodDialog {...defaultProps} onCreate={onCreate} />);
+
+      const input = screen.getByLabelText('Payment method name');
+      await user.type(input, 'Zelle{Escape}');
+
+      expect(onCreate).not.toHaveBeenCalled();
+    });
+
+    it('does not submit on Enter key while loading', async () => {
+      const user = userEvent.setup();
+      const onCreate = vi.fn().mockResolvedValue(undefined);
+      render(<CreatePaymentMethodDialog {...defaultProps} onCreate={onCreate} isLoading={true} />);
+
+      const input = screen.getByLabelText('Payment method name');
+      await user.type(input, 'Zelle{Enter}');
+
+      expect(onCreate).not.toHaveBeenCalled();
     });
   });
 

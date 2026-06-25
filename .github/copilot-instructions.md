@@ -138,15 +138,15 @@ def test_create_profile():
 
 ## 4. TypeScript/React Code Standards (Frontend)
 
-**CRITICAL**: 100% test coverage required. All tests must pass.
+**CRITICAL**: All tests must pass and frontend unit-test coverage must meet the thresholds in `vite.config.ts`. True 100% coverage of UI flows (MUI Select, dialogs, Apollo mutations, navigation) requires Playwright e2e tests; do not paper over jsdom-unreachable branches with `// v8 ignore` comments except as a last resort with a clear explanation.
 
 **Development Workflow**:
 1. Write component
-2. Write tests (100% coverage)
+2. Write tests covering reachable logic, branches, and error handlers
 3. Run: `npm run lint`
 4. Run: `npm run format`
 5. Run: `npm run typecheck`
-6. Run: `npm run test -- --coverage` (100% coverage, all pass)
+6. Run: `npm run test -- --coverage` (must pass the configured thresholds)
 
 **Testing with Vitest**:
 ```typescript

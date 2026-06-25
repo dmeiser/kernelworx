@@ -4,6 +4,7 @@
 
 import { describe, test, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { StateAutocomplete } from '../src/components/StateAutocomplete';
 
 describe('StateAutocomplete', () => {
@@ -45,5 +46,30 @@ describe('StateAutocomplete', () => {
     const onChange = vi.fn();
     render(<StateAutocomplete value="TX" onChange={onChange} />);
     expect(screen.getByDisplayValue('TX')).toBeInTheDocument();
+  });
+
+  test('calls onChange when an option is selected from the dropdown', async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(<StateAutocomplete value="" onChange={onChange} />);
+
+    const input = screen.getByRole('combobox');
+    await user.type(input, 'C');
+
+    const option = await screen.findByRole('option', { name: 'CA' });
+    await user.click(option);
+
+    expect(onChange).toHaveBeenLastCalledWith('CA');
+  });
+
+  test('calls onChange with empty string when selection is cleared', async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(<StateAutocomplete value="CA" onChange={onChange} />);
+
+    const clearButton = screen.getByTitle('Clear');
+    await user.click(clearButton);
+
+    expect(onChange).toHaveBeenLastCalledWith('');
   });
 });

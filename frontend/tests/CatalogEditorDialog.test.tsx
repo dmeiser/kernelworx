@@ -42,6 +42,18 @@ describe('CatalogEditorDialog', () => {
       expect(screen.queryByText('Create Catalog')).not.toBeInTheDocument();
     });
 
+    test('closes open dialog and resets initialization state', async () => {
+      const { rerender } = render(
+        <CatalogEditorDialog open={true} onClose={mockOnClose} onSave={mockOnSave} />,
+      );
+      expect(screen.getByText('Create Catalog')).toBeInTheDocument();
+
+      rerender(<CatalogEditorDialog open={false} onClose={mockOnClose} onSave={mockOnSave} />);
+      await waitFor(() => {
+        expect(screen.queryByText('Create Catalog')).not.toBeInTheDocument();
+      });
+    });
+
     test('validates empty catalog name', async () => {
       const user = userEvent.setup();
       render(<CatalogEditorDialog open={true} onClose={mockOnClose} onSave={mockOnSave} />);
@@ -202,6 +214,14 @@ describe('CatalogEditorDialog', () => {
       render(<CatalogEditorDialog open={true} onClose={mockOnClose} onSave={mockOnSave} />);
       expect(screen.getByText('Privacy Notice')).toBeInTheDocument();
     });
+
+    test('falls back to zero when price input is cleared', () => {
+      render(<CatalogEditorDialog open={true} onClose={mockOnClose} onSave={mockOnSave} />);
+
+      const priceInput = screen.getByLabelText(/Price/i);
+      fireEvent.change(priceInput, { target: { value: '' } });
+      expect(priceInput).toHaveValue(0);
+    });
   });
 
   describe('edit mode', () => {
@@ -242,6 +262,43 @@ describe('CatalogEditorDialog', () => {
       expect(screen.getByLabelText(/Catalog Name/i)).toHaveValue('2025 Popcorn');
       expect(screen.getByText('Product 1')).toBeInTheDocument();
       expect(screen.getByText('Product 2')).toBeInTheDocument();
+    });
+
+    test('handles catalog without explicit isPublic field', () => {
+      const catalogWithoutIsPublic: Catalog = {
+        ...existingCatalog,
+        isPublic: undefined,
+      };
+      render(
+        <CatalogEditorDialog
+          open={true}
+          onClose={mockOnClose}
+          onSave={mockOnSave}
+          initialCatalog={catalogWithoutIsPublic}
+        />,
+      );
+
+      expect(screen.getByText('Edit Catalog')).toBeInTheDocument();
+      expect(screen.getByLabelText(/Catalog Name/i)).toHaveValue('2025 Popcorn');
+    });
+
+    test('handles catalog without products field', () => {
+      const catalogWithoutProducts: Catalog = {
+        catalogId: 'CAT~NOPRODS',
+        catalogName: 'No Products Catalog',
+        isPublic: true,
+      };
+      render(
+        <CatalogEditorDialog
+          open={true}
+          onClose={mockOnClose}
+          onSave={mockOnSave}
+          initialCatalog={catalogWithoutProducts}
+        />,
+      );
+
+      expect(screen.getByText('Edit Catalog')).toBeInTheDocument();
+      expect(screen.queryByText('Product 1')).not.toBeInTheDocument();
     });
 
     test('saves updated catalog', async () => {

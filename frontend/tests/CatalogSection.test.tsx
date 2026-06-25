@@ -2,8 +2,10 @@
  * Tests for CatalogSection component
  */
 
+import React from 'react';
 import { describe, test, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
+import type { SelectProps } from '@mui/material';
 import { CatalogSection } from '../src/components/CatalogSection';
 
 const publicCatalogs = [
@@ -155,6 +157,22 @@ describe('CatalogSection', () => {
     expect(select.textContent?.replace(/\u200B/g, '')).toBe('');
   });
 
+  test('renders empty string when catalogId is empty in renderValue', () => {
+    const onChange = vi.fn();
+    render(
+      <CatalogSection
+        catalogId=""
+        onCatalogChange={onChange}
+        catalogsLoading={false}
+        filteredPublicCatalogs={publicCatalogs}
+        myCatalogs={[]}
+      />,
+    );
+
+    const select = screen.getByRole('combobox');
+    expect(select.textContent?.replace(/\u200B/g, '')).toBe('');
+  });
+
   test('removes aria-hidden from root element when select opens', () => {
     const root = document.createElement('div');
     root.id = 'root';
@@ -178,5 +196,81 @@ describe('CatalogSection', () => {
     expect(removeAttrSpy).toHaveBeenCalledWith('aria-hidden');
 
     document.body.removeChild(root);
+  });
+
+  test('handleOpen does nothing when root element is absent', () => {
+    const onChange = vi.fn();
+    render(
+      <CatalogSection
+        catalogId=""
+        onCatalogChange={onChange}
+        catalogsLoading={false}
+        filteredPublicCatalogs={publicCatalogs}
+        myCatalogs={[]}
+      />,
+    );
+
+    expect(() => fireEvent.mouseDown(screen.getByRole('combobox'))).not.toThrow();
+  });
+
+  test('handleOpen leaves root alone when aria-hidden is not true', () => {
+    const root = document.createElement('div');
+    root.id = 'root';
+    root.setAttribute('aria-hidden', 'false');
+    document.body.appendChild(root);
+    const removeAttrSpy = vi.spyOn(root, 'removeAttribute');
+
+    const onChange = vi.fn();
+    render(
+      <CatalogSection
+        catalogId=""
+        onCatalogChange={onChange}
+        catalogsLoading={false}
+        filteredPublicCatalogs={publicCatalogs}
+        myCatalogs={[]}
+      />,
+    );
+
+    fireEvent.mouseDown(screen.getByRole('combobox'));
+
+    expect(removeAttrSpy).not.toHaveBeenCalled();
+
+    document.body.removeChild(root);
+  });
+});
+
+describe('CatalogSection renderValue edge case', () => {
+  afterEach(() => {
+    vi.doUnmock('@mui/material');
+  });
+
+  test('returns empty string when MUI invokes renderValue with an empty value', async () => {
+    vi.resetModules();
+    vi.doMock('@mui/material', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('@mui/material')>();
+      const MockSelect = React.forwardRef<HTMLDivElement, SelectProps<string>>((props, ref) => {
+        const renderedValue = props.renderValue ? props.renderValue('') : '';
+        return (
+          <div ref={ref} role="combobox" data-testid="mock-select">
+            {renderedValue}
+          </div>
+        );
+      });
+      return { ...actual, Select: MockSelect };
+    });
+
+    const { CatalogSection: CatalogSectionMocked } = await import('../src/components/CatalogSection');
+    const onChange = vi.fn();
+    render(
+      <CatalogSectionMocked
+        catalogId=""
+        onCatalogChange={onChange}
+        catalogsLoading={false}
+        filteredPublicCatalogs={publicCatalogs}
+        myCatalogs={[]}
+      />,
+    );
+
+    expect(screen.getByTestId('mock-select')).toHaveTextContent('');
   });
 });

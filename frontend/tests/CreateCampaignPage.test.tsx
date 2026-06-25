@@ -394,6 +394,63 @@ describe('CreateCampaignPage', () => {
     expect(await screen.findByRole('button', { name: /Cancel/i })).toBeInTheDocument();
   });
 
+  test('back button in header navigates back when clicked', async () => {
+    render(
+      <MockedProvider mocks={baseMocks}>
+        <MemoryRouter initialEntries={['/create-campaign']}>
+          <Routes>
+            <Route path="/create-campaign" element={<CreateCampaignPage />} />
+          </Routes>
+        </MemoryRouter>
+      </MockedProvider>,
+    );
+
+    const backButton = await screen.findByRole('button', { name: /Back/i });
+    await userEvent.click(backButton);
+
+    expect(mockNavigate).toHaveBeenCalledWith(-1);
+  });
+
+  test('cancel button navigates back when clicked', async () => {
+    render(
+      <MockedProvider mocks={baseMocks}>
+        <MemoryRouter initialEntries={['/create-campaign']}>
+          <Routes>
+            <Route path="/create-campaign" element={<CreateCampaignPage />} />
+          </Routes>
+        </MemoryRouter>
+      </MockedProvider>,
+    );
+
+    const cancelButton = await screen.findByRole('button', { name: /Cancel/i });
+    await userEvent.click(cancelButton);
+
+    expect(mockNavigate).toHaveBeenCalledWith(-1);
+  });
+
+  test('removes aria-hidden attribute from root element on mount', async () => {
+    const root = document.createElement('div');
+    root.id = 'root';
+    root.setAttribute('aria-hidden', 'true');
+    document.body.appendChild(root);
+
+    render(
+      <MockedProvider mocks={baseMocks}>
+        <MemoryRouter initialEntries={['/create-campaign']}>
+          <Routes>
+            <Route path="/create-campaign" element={<CreateCampaignPage />} />
+          </Routes>
+        </MemoryRouter>
+      </MockedProvider>,
+    );
+
+    await waitFor(() => {
+      expect(root.hasAttribute('aria-hidden')).toBe(false);
+    });
+
+    document.body.removeChild(root);
+  });
+
   test('shows Campaign Not Found when shared campaign is missing and navigates back', async () => {
     const missingCampaignMock = {
       request: { query: GET_SHARED_CAMPAIGN, variables: { sharedCampaignCode: 'NOPE' } },

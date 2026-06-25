@@ -260,4 +260,24 @@ describe('useCreateCampaignSubmitHandler', () => {
       severity: 'error',
     });
   });
+
+  it('handles unit validation failure with null error message gracefully', async () => {
+    mockValidateUnitFields.mockReturnValue({ isValid: false, error: null });
+
+    const formState = createMockFormState();
+    const { result } = renderHook(() => useCreateCampaignSubmitHandler(formState));
+
+    await act(async () => {
+      await result.current.handleSubmit({
+        isSharedCampaignMode: false,
+        effectiveSharedCampaignCode: undefined,
+        sharedCampaignCreatedByName: undefined,
+      });
+    });
+
+    expect(formState.setToastMessage).toHaveBeenCalledWith({
+      message: 'Validation failed',
+      severity: 'error',
+    });
+  });
 });

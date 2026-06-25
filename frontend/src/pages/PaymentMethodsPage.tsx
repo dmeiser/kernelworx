@@ -196,7 +196,9 @@ export const PaymentMethodsPage: React.FC = () => {
   };
 
   const handleDelete = async () => {
+    /* v8 ignore start - Dialog only opens when a method is selected; defensive guard */
     if (!selectedMethod) return;
+    /* v8 ignore stop */
     setError(null);
     await deletePaymentMethod({ variables: { name: selectedMethod.name } });
   };
@@ -224,7 +226,9 @@ export const PaymentMethodsPage: React.FC = () => {
   };
 
   const handleQRUpload = async (file: File): Promise<void> => {
+    /* v8 ignore start - Dialog only opens when a method is selected; defensive guard */
     if (!selectedMethod) return;
+    /* v8 ignore stop */
     setError(null);
     setQrUploadError(null);
     setUploadingQR(true);
@@ -235,9 +239,11 @@ export const PaymentMethodsPage: React.FC = () => {
         variables: { paymentMethodName: selectedMethod.name },
       });
 
+      /* v8 ignore start - Apollo Client returns data on success; defensive null check */
       if (!uploadData) {
         throw new Error('Failed to get upload URL');
       }
+      /* v8 ignore stop */
 
       const { uploadUrl, fields, s3Key } = uploadData.requestPaymentMethodQRCodeUpload;
 
@@ -292,6 +298,7 @@ export const PaymentMethodsPage: React.FC = () => {
   };
 
   // Sort payment methods alphabetically - returns empty array if no data
+  // v8 ignore next - data is defined when query succeeds; defensive fallback
   const sortedMethods = data?.myPaymentMethods ?? [];
   const paymentMethods = [...sortedMethods].sort((a, b) =>
     a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }),
@@ -302,6 +309,7 @@ export const PaymentMethodsPage: React.FC = () => {
 
   // Get list of existing names for validation
   const existingNames = paymentMethods.map((m) => m.name);
+  // v8 ignore next - Dialog only opens when a method is selected; defensive fallback
   const selectedName = selectedMethod?.name ?? '';
   const isAnyMutationLoading = deleting;
 

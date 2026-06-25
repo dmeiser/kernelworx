@@ -2,6 +2,7 @@
  * Tests for reportExport utility functions
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import * as XLSX from 'xlsx';
 
 vi.stubGlobal('document', {
   createElement: vi.fn(() => ({
@@ -141,6 +142,33 @@ describe('reportExport utilities', () => {
         ],
       };
       expect(() => downloadAsXLSX([mockOrder, mockOrder2, order3], 'campaign-456')).not.toThrow();
+    });
+
+    it('should handle empty product names when styling XLSX headers', () => {
+      const orderWithEmptyProduct = {
+        ...mockOrder,
+        lineItems: [
+          {
+            productId: 'prod-empty',
+            productName: '',
+            quantity: 1,
+            pricePerUnit: 6.0,
+            subtotal: 6.0,
+          },
+        ],
+      };
+      expect(() => downloadAsXLSX([orderWithEmptyProduct], 'campaign-empty')).not.toThrow();
+    });
+
+    it('should handle missing header cells when styling XLSX', () => {
+      const originalAoaToSheet = XLSX.utils.aoa_to_sheet;
+      vi.spyOn(XLSX.utils, 'aoa_to_sheet').mockImplementation((rows) => {
+        const ws = originalAoaToSheet(rows);
+        const firstCellAddress = XLSX.utils.encode_cell({ r: 0, c: 0 });
+        delete ws[firstCellAddress];
+        return ws;
+      });
+      expect(() => downloadAsXLSX([mockOrder], 'campaign-missing-header')).not.toThrow();
     });
   });
 

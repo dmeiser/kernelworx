@@ -21,25 +21,6 @@ interface CatalogSelectProps {
 }
 
 /**
- * Renders a catalog item as a MenuItem
- */
-const CatalogMenuItem: React.FC<{ catalog: Catalog; keyPrefix: string }> = ({ catalog, keyPrefix }) => (
-  <MenuItem key={`${keyPrefix}-${catalog.catalogId}`} value={catalog.catalogId}>
-    {catalog.catalogName}
-    {catalog.catalogType === 'ADMIN_MANAGED' && ' (Official)'}
-  </MenuItem>
-);
-
-/**
- * Renders a group header MenuItem
- */
-const GroupHeader: React.FC<{ label: string; keyValue: string }> = ({ label, keyValue }) => (
-  <MenuItem key={keyValue} disabled sx={{ fontWeight: 600, backgroundColor: '#f5f5f5', opacity: 1 }}>
-    {label}
-  </MenuItem>
-);
-
-/**
  * Builds menu items for the catalog select dropdown
  */
 function buildCatalogMenuItems(
@@ -68,16 +49,34 @@ function buildCatalogMenuItems(
   const items: React.ReactNode[] = [];
 
   if (myCatalogs.length > 0) {
-    items.push(<GroupHeader key="my-header" label="My Catalogs" keyValue="my-header" />);
+    items.push(
+      <MenuItem key="my-header" disabled sx={{ fontWeight: 600, backgroundColor: '#f5f5f5', opacity: 1 }}>
+        My Catalogs
+      </MenuItem>,
+    );
     myCatalogs.forEach((catalog) => {
-      items.push(<CatalogMenuItem key={`my-${catalog.catalogId}`} catalog={catalog} keyPrefix="my" />);
+      items.push(
+        <MenuItem key={`my-${catalog.catalogId}`} value={catalog.catalogId}>
+          {catalog.catalogName}
+          {catalog.catalogType === 'ADMIN_MANAGED' && ' (Official)'}
+        </MenuItem>,
+      );
     });
   }
 
   if (publicCatalogs.length > 0) {
-    items.push(<GroupHeader key="public-header" label="Public Catalogs" keyValue="public-header" />);
+    items.push(
+      <MenuItem key="public-header" disabled sx={{ fontWeight: 600, backgroundColor: '#f5f5f5', opacity: 1 }}>
+        Public Catalogs
+      </MenuItem>,
+    );
     publicCatalogs.forEach((catalog) => {
-      items.push(<CatalogMenuItem key={`public-${catalog.catalogId}`} catalog={catalog} keyPrefix="public" />);
+      items.push(
+        <MenuItem key={`public-${catalog.catalogId}`} value={catalog.catalogId}>
+          {catalog.catalogName}
+          {catalog.catalogType === 'ADMIN_MANAGED' && ' (Official)'}
+        </MenuItem>,
+      );
     });
   }
 
@@ -98,6 +97,7 @@ export const CatalogSelect: React.FC<CatalogSelectProps> = ({
   // eslint-disable-next-line complexity -- Many optional props with defaults inflate complexity count
 }) => {
   const selectId = useId();
+  const labelId = `${selectId}-label`;
   const hasNoCatalogs = !loading && myCatalogs.length === 0 && publicCatalogs.length === 0;
   // CRITICAL: Don't disable during loading - MUI Select has issues with toggling disabled state during interaction
   const selectDisabled = disabled && !loading;
@@ -111,9 +111,12 @@ export const CatalogSelect: React.FC<CatalogSelectProps> = ({
 
   return (
     <FormControl fullWidth={fullWidth}>
-      <InputLabel htmlFor={selectId}>{labelText}</InputLabel>
+      <InputLabel id={labelId} htmlFor={selectId}>
+        {labelText}
+      </InputLabel>
       <Select
         id={selectId}
+        labelId={labelId}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         label={labelText}

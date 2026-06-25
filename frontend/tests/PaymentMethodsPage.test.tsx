@@ -3,7 +3,7 @@
  */
 
 import { describe, test, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MockedProvider } from '@apollo/client/testing/react';
 import type { MockedResponse } from '@apollo/client/testing';
@@ -77,7 +77,7 @@ vi.mock('../src/components/CreatePaymentMethodDialog', () => ({
         Create Payment Method
         <button
           data-testid="mock-create-submit"
-          onClick={() => onCreate('NewMethod')}
+          onClick={() => onCreate('NewMethod').catch(() => {})}
         >
           Create
         </button>
@@ -161,7 +161,9 @@ vi.mock('../src/components/QRUploadDialog', () => ({
         {uploadError && <span data-testid="qr-upload-error">{uploadError}</span>}
         <button
           data-testid="mock-qr-upload"
-          onClick={() => onUpload(new File(['test'], 'qr.png', { type: 'image/png' }))}
+          onClick={() =>
+            onUpload(new File(['test'], 'qr.png', { type: 'image/png' })).catch(() => {})
+          }
         >
           Upload
         </button>
@@ -210,6 +212,10 @@ function renderPage(mocks: MockedResponse[]) {
 describe('PaymentMethodsPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   test('renders page title after loading', async () => {
@@ -525,5 +531,245 @@ describe('PaymentMethodsPage', () => {
     expect(screen.getByText('Create Payment Method')).toBeInTheDocument();
     await user.click(screen.getByTestId('mock-create-close'));
     expect(screen.queryByText('Create Payment Method')).not.toBeInTheDocument();
+  });
+
+  test('dismisses success message', async () => {
+    const user = userEvent.setup();
+    const createMock: MockedResponse = {
+      request: {
+        query: CREATE_PAYMENT_METHOD,
+        variables: { name: 'NewMethod' },
+      },
+      result: {
+        data: {
+          createPaymentMethod: { __typename: 'PaymentMethod', name: 'NewMethod', qrCodeUrl: null },
+        },
+      },
+    };
+    const refetchMock: MockedResponse = {
+      request: { query: GET_MY_PAYMENT_METHODS },
+      result: { data: { myPaymentMethods: paymentMethods } },
+    };
+
+    renderPage([successMock, createMock, refetchMock]);
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /add payment method/i })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole('button', { name: /add payment method/i }));
+    await user.click(screen.getByTestId('mock-create-submit'));
+    await waitFor(() => {
+      expect(screen.getByText(/created successfully/i)).toBeInTheDocument();
+    });
+    await user.click(screen.getByLabelText('Close'));
+    await waitFor(() => {
+      expect(screen.queryByText(/created successfully/i)).not.toBeInTheDocument();
+    });
+  });
+
+  test('auto-dismisses success message after timeout', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const createMock: MockedResponse = {
+      request: {
+        query: CREATE_PAYMENT_METHOD,
+        variables: { name: 'NewMethod' },
+      },
+      result: {
+        data: {
+          createPaymentMethod: { __typename: 'PaymentMethod', name: 'NewMethod', qrCodeUrl: null },
+        },
+      },
+    };
+    const refetchMock: MockedResponse = {
+      request: { query: GET_MY_PAYMENT_METHODS },
+      result: { data: { myPaymentMethods: paymentMethods } },
+    };
+
+    renderPage([successMock, createMock, refetchMock]);
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /add payment method/i })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole('button', { name: /add payment method/i }));
+    await user.click(screen.getByTestId('mock-create-submit'));
+    await waitFor(() => {
+      expect(screen.getByText(/created successfully/i)).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000);
+    });
+    await waitFor(() => {
+      expect(screen.queryByText(/created successfully/i)).not.toBeInTheDocument();
+    });
+
+    vi.useRealTimers();
+  });
+
+  test('dismisses mutation error message', async () => {
+    const user = userEvent.setup();
+    const createErrorMock: MockedResponse = {
+      request: {
+        query: CREATE_PAYMENT_METHOD,
+        variables: { name: 'NewMethod' },
+      },
+      error: new Error('Create failed'),
+    };
+
+    renderPage([successMock, createErrorMock]);
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /add payment method/i })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole('button', { name: /add payment method/i }));
+    await user.click(screen.getByTestId('mock-create-submit'));
+    await waitFor(() => {
+      expect(screen.getByText(/Create failed/i)).toBeInTheDocument();
+    });
+    await user.click(screen.getByLabelText('Close'));
+    await waitFor(() => {
+      expect(screen.queryByText(/Create failed/i)).not.toBeInTheDocument();
+    });
+  });
+
+  test('shows error when QR upload request fails', async () => {
+    const user = userEvent.setup();
+    const requestUploadErrorMock: MockedResponse = {
+      request: {
+        query: REQUEST_PAYMENT_METHOD_QR_UPLOAD,
+        variables: { paymentMethodName: 'PayPal' },
+      },
+      error: new Error('Request failed'),
+    };
+
+    renderPage([successMock, requestUploadErrorMock]);
+    await waitFor(() => {
+      expect(screen.getByTestId('card-PayPal')).toBeInTheDocument();
+    });
+    await user.click(screen.getByTestId('upload-qr-PayPal'));
+    await user.click(screen.getByTestId('mock-qr-upload'));
+    await waitFor(() => {
+      expect(screen.getByTestId('qr-upload-error')).toHaveTextContent('Request failed');
+    });
+  });
+
+  test('shows error when QR upload to S3 fails', async () => {
+    const user = userEvent.setup();
+    const mockFetch = vi.fn().mockResolvedValue({ ok: false });
+    vi.stubGlobal('fetch', mockFetch);
+
+    const requestUploadMock: MockedResponse = {
+      request: {
+        query: REQUEST_PAYMENT_METHOD_QR_UPLOAD,
+        variables: { paymentMethodName: 'PayPal' },
+      },
+      result: {
+        data: {
+          requestPaymentMethodQRCodeUpload: {
+            uploadUrl: 'https://s3.example.com/upload',
+            fields: JSON.stringify({ key: 'test-key', Policy: 'test-policy' }),
+            s3Key: 'qr-codes/paypal.png',
+          },
+        },
+      },
+    };
+
+    renderPage([successMock, requestUploadMock]);
+    await waitFor(() => {
+      expect(screen.getByTestId('card-PayPal')).toBeInTheDocument();
+    });
+    await user.click(screen.getByTestId('upload-qr-PayPal'));
+    await user.click(screen.getByTestId('mock-qr-upload'));
+    await waitFor(() => {
+      expect(screen.getByTestId('qr-upload-error')).toHaveTextContent(
+        'Failed to upload file to S3',
+      );
+    });
+  });
+
+  test('handles non-Error QR upload failure', async () => {
+    const user = userEvent.setup();
+    const mockFetch = vi.fn().mockRejectedValue('network failure');
+    vi.stubGlobal('fetch', mockFetch);
+
+    const requestUploadMock: MockedResponse = {
+      request: {
+        query: REQUEST_PAYMENT_METHOD_QR_UPLOAD,
+        variables: { paymentMethodName: 'PayPal' },
+      },
+      result: {
+        data: {
+          requestPaymentMethodQRCodeUpload: {
+            uploadUrl: 'https://s3.example.com/upload',
+            fields: JSON.stringify({ key: 'test-key' }),
+            s3Key: 'qr-codes/paypal.png',
+          },
+        },
+      },
+    };
+
+    renderPage([successMock, requestUploadMock]);
+    await waitFor(() => {
+      expect(screen.getByTestId('card-PayPal')).toBeInTheDocument();
+    });
+    await user.click(screen.getByTestId('upload-qr-PayPal'));
+    await user.click(screen.getByTestId('mock-qr-upload'));
+    await waitFor(() => {
+      expect(screen.getByTestId('qr-upload-error')).toHaveTextContent('Failed to upload QR code');
+    });
+  });
+
+  test('uploads QR code with object fields', async () => {
+    const user = userEvent.setup();
+    const mockFetch = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal('fetch', mockFetch);
+
+    const requestUploadMock: MockedResponse = {
+      request: {
+        query: REQUEST_PAYMENT_METHOD_QR_UPLOAD,
+        variables: { paymentMethodName: 'PayPal' },
+      },
+      result: {
+        data: {
+          requestPaymentMethodQRCodeUpload: {
+            uploadUrl: 'https://s3.example.com/upload',
+            fields: { key: 'test-key', Policy: 'test-policy' },
+            s3Key: 'qr-codes/paypal.png',
+          },
+        },
+      },
+    };
+    const confirmUploadMock: MockedResponse = {
+      request: {
+        query: CONFIRM_PAYMENT_METHOD_QR_UPLOAD,
+        variables: { paymentMethodName: 'PayPal', s3Key: 'qr-codes/paypal.png' },
+      },
+      result: {
+        data: {
+          confirmPaymentMethodQRCodeUpload: {
+            __typename: 'PaymentMethod',
+            name: 'PayPal',
+            qrCodeUrl: 'https://example.com/paypal-qr.png',
+          },
+        },
+      },
+    };
+    const refetchMock: MockedResponse = {
+      request: { query: GET_MY_PAYMENT_METHODS },
+      result: { data: { myPaymentMethods: paymentMethods } },
+    };
+
+    renderPage([successMock, requestUploadMock, confirmUploadMock, refetchMock]);
+    await waitFor(() => {
+      expect(screen.getByTestId('card-PayPal')).toBeInTheDocument();
+    });
+    await user.click(screen.getByTestId('upload-qr-PayPal'));
+    await user.click(screen.getByTestId('mock-qr-upload'));
+    await waitFor(() => {
+      expect(screen.getByText(/QR code uploaded successfully/i)).toBeInTheDocument();
+    });
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      'https://s3.example.com/upload',
+      expect.objectContaining({ method: 'POST' }),
+    );
   });
 });

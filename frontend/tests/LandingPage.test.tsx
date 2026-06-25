@@ -214,4 +214,20 @@ describe('LandingPage', () => {
       expect(logo).toHaveAttribute('src', '/logo.svg');
     });
   });
+
+  it('navigates to privacy policy when footer link clicked', async () => {
+    const user = userEvent.setup();
+    renderWithAuth();
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /privacy policy/i })).toBeInTheDocument();
+    });
+
+    const privacyButton = screen.getByRole('button', { name: /privacy policy/i });
+    await user.click(privacyButton);
+
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith('/privacy');
+    });
+  });
 });
