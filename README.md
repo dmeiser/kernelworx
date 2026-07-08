@@ -27,7 +27,7 @@ KernelWorx is an open-source, serverless application designed for Scouting Ameri
 
 ### Backend
 - **AWS AppSync** (GraphQL API)
-- **AWS Lambda** (Python 3.13)
+- **AWS Lambda** (Python 3.14)
 - **Amazon DynamoDB** (single-table design)
 - **Amazon Cognito** (authentication with social providers)
 - **Amazon S3** (static hosting + report exports)
@@ -101,7 +101,7 @@ npm run test -- --coverage
 
 ```bash
 # Initialize (first time only)
-cd tofu/environments/dev
+cd tofu/application/environments/dev
 tofu init
 
 # Preview changes
