@@ -25,7 +25,7 @@ Essential knowledge for GitHub Copilot when working on this volunteer-run Scouti
 - ❌ NEVER run aws cloudformation delete-stack
 - ❌ NEVER create situations where rollback will destroy resources
 - ❌ NEVER perform AWS operations without understanding their impact on stack state
-- ✅ You ARE permitted to deploy to **dev environment only** by running `./deploy.sh dev apply` in the `tofu/environments/dev/` folder as part of normal workflow
+- ✅ You ARE permitted to deploy to **dev environment only** by running `./deploy.sh dev apply` in the `tofu/application/environments/dev/` folder as part of normal workflow
 - ✅ ALWAYS use `tofu plan` to preview changes before deploying
 - ✅ ONLY use read-only AWS CLI commands (describe, list, get) for verification
 - ✅ ASK before running any AWS command that modifies infrastructure outside of OpenTofu
@@ -57,7 +57,7 @@ Essential knowledge for GitHub Copilot when working on this volunteer-run Scouti
 
 **Key Design Patterns**:
 - **Single-table DynamoDB**: `PK`/`SK` with GSI1, GSI2, GSI3 (see `tofu/modules/dynamodb/` and code comments)
-- **GraphQL schema**: See `tofu/schema/schema.graphql`
+- **GraphQL schema**: See `tofu/application/schema/schema.graphql`
 - **Authorization**: Owner-based + Share-based (READ/WRITE permissions)
 - **100% test coverage**: No exceptions, all tests must pass
 
@@ -203,7 +203,7 @@ resource "aws_dynamodb_table" "main" {
 
 **Environment-specific configuration**:
 ```hcl
-# tofu/environments/dev/main.tf
+# tofu/application/environments/dev/main.tf
 module "dynamodb" {
   source      = "../../modules/dynamodb"
   environment = "dev"
@@ -375,8 +375,8 @@ def generate_report(profile_id: str, campaign_id: str) -> str:
 - `docs/DEVELOPER_GUIDE.md`: Development workflow and code patterns
 - `docs/GETTING_STARTED.md`: Setup and deployment instructions
 - `docs/VTL_RESOLVER_NOTES.md`: VTL resolver implementation notes
-- `tofu/schema/schema.graphql`: GraphQL API definition
-- `tofu/modules/`: Infrastructure modules (DynamoDB, S3, Cognito, etc.)
+- `tofu/application/schema/schema.graphql`: GraphQL API definition
+- `tofu/application/modules/`: Infrastructure modules (DynamoDB, S3, Cognito, etc.)
 
 ## 11. Safety & Privacy Rules
 
@@ -413,8 +413,8 @@ uv run mypy src/
 # Test with coverage
 uv run pytest tests/unit --cov=src --cov-fail-under=100
 
-# Deploy OpenTofu (from tofu/environments/dev directory)
-cd tofu/environments/dev && tofu plan && tofu apply
+# Deploy OpenTofu (from tofu/application/environments/dev directory)
+cd tofu/application/environments/dev && tofu plan && tofu apply
 ```
 
 **Frontend (React/TypeScript)**:
