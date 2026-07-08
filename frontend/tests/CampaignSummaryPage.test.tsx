@@ -364,4 +364,56 @@ describe('CampaignSummaryPage - Payment Method Totals', () => {
       expect(fourElements.length).toBeGreaterThanOrEqual(1);
     });
   });
+
+  describe('Error state', () => {
+    test('shows error message when orders query fails', async () => {
+      const errorMock = {
+        request: {
+          query: LIST_ORDERS_BY_CAMPAIGN,
+          variables: { campaignId: TEST_CAMPAIGN_ID },
+        },
+        error: new Error('Network error loading orders'),
+      };
+
+      const mocks = [
+        errorMock,
+        {
+          request: {
+            query: GET_PAYMENT_METHODS_FOR_PROFILE,
+            variables: { profileId: TEST_PROFILE_ID },
+          },
+          result: { data: mockPaymentMethods },
+        },
+      ];
+
+      renderWithRouter(mocks);
+
+      await waitFor(() => {
+        expect(screen.getByText(/Failed to load summary/i)).toBeInTheDocument();
+      });
+
+      expect(screen.getByText(/Network error loading orders/i)).toBeInTheDocument();
+    });
+  });
+
+  describe('Missing URL parameters', () => {
+    test('renders empty summary when route params are absent', async () => {
+      render(
+        <MockedProvider mocks={[]}>
+          <MemoryRouter initialEntries={['/no-params']}>
+            <Routes>
+              <Route path="/no-params" element={<CampaignSummaryPage />} />
+            </Routes>
+          </MemoryRouter>
+        </MockedProvider>,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText('Campaign Summary')).toBeInTheDocument();
+      });
+
+      expect(screen.getByText('No orders yet')).toBeInTheDocument();
+      expect(screen.getByText('No product sales yet')).toBeInTheDocument();
+    });
+  });
 });

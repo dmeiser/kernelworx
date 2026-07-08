@@ -295,6 +295,41 @@ describe('ScoutsPage – interactions', () => {
     await waitFor(() => expect(screen.getByText('Alice Scout')).toBeInTheDocument(), { timeout: 5000 });
   }, 10000);
 
+  it('renders owned profile when optional fields are missing', async () => {
+    mockMyProfiles = [
+      {
+        profileId: 'PROFILE#p-no-perms',
+        sellerName: 'No Optional Fields Scout',
+        accountId: 'acct-1',
+        ownerAccountId: 'acct-1',
+        createdAt: '2024-01-01T00:00:00Z',
+        updatedAt: '2024-01-01T00:00:00Z',
+        latestCampaign: null,
+        __typename: 'SellerProfile',
+      },
+    ];
+    renderScoutsPage();
+    await waitFor(() => expect(screen.getByText('No Optional Fields Scout')).toBeInTheDocument(), { timeout: 5000 });
+  }, 10000);
+
+  it('renders shared profile when optional fields are missing', async () => {
+    mockMyProfiles = [];
+    mockSharedProfiles = [
+      {
+        profileId: 'PROFILE#shared-no-perms',
+        sellerName: 'Shared No Fields Scout',
+        accountId: 'shared-acct',
+        ownerAccountId: 'shared-acct',
+        createdAt: '2024-01-01T00:00:00Z',
+        updatedAt: '2024-01-01T00:00:00Z',
+        latestCampaign: null,
+        __typename: 'SellerProfile',
+      },
+    ];
+    renderScoutsPage();
+    await waitFor(() => expect(screen.getByText('Shared No Fields Scout')).toBeInTheDocument(), { timeout: 5000 });
+  }, 10000);
+
   // ── loading state ─────────────────────────────────────────────────────────
 
   it('shows loading spinner when profiles are loading', async () => {

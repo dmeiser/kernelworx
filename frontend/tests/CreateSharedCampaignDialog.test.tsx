@@ -1,7 +1,7 @@
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import userEvent, { type UserEvent } from '@testing-library/user-event';
 
 // Mock Select/MenuItem to plain HTML select/option to ensure onChange fires in jsdom
 vi.mock('@mui/material', async () => {
@@ -42,7 +42,7 @@ vi.mock('@mui/material', async () => {
 });
 
 // ESM-safe module-level mocks for Apollo hooks
- 
+
 let useQueryImpl = (_q: any) => ({ data: undefined, loading: false });
 // Map of named mutation impls so mutate functions read the latest impl at call time (reduces race)
 const mutationImpls = new Map<string, any>();
@@ -70,7 +70,7 @@ const createMutateFunction = (key: string) => (opts: any) => {
   return Promise.resolve(impl(opts));
 };
 
-let useMutationImpl = (m: any) => {
+const useMutationImpl = (m: any) => {
   const key = getMutationKey(m);
   const registered = mutationImpls.get(key) || mutationImpls.get('default');
   const mutate = registered ? (opts: any) => registered(opts) : createMutateFunction(key);
@@ -150,6 +150,25 @@ const getCatalogSelect = () => {
   return form?.querySelector('[role="combobox"]') as HTMLElement | null;
 };
 
+const getSelectByLabel = (labelRegex: RegExp) => {
+  const labels = screen.queryAllByText(labelRegex);
+  const label = labels.find((el) => el.tagName === 'LABEL') || labels[0];
+  if (!label) return null;
+  const form = label.closest('.MuiFormControl-root');
+  return form?.querySelector('[role="combobox"]') as HTMLSelectElement | null;
+};
+
+const fillRequiredFields = async (user: UserEvent) => {
+  await user.type(screen.getByLabelText(/Campaign Name/i), 'Fundraiser');
+  await user.selectOptions(getSelectByLabel(/Unit Type/i)!, 'Pack');
+  await user.type(screen.getByLabelText(/Unit Number/i), '5');
+  await user.type(screen.getByLabelText(/City/i), 'Testville');
+  await user.type(screen.getByRole('combobox', { name: /State/i }), 'CA');
+  const catalogSelect = getCatalogSelect();
+  expect(catalogSelect).toBeTruthy();
+  await user.selectOptions(catalogSelect!, 'pub-1');
+};
+
 describe('CreateSharedCampaignDialog', () => {
   let onClose: ReturnType<typeof vi.fn>;
   let onSuccess: ReturnType<typeof vi.fn>;
@@ -164,10 +183,9 @@ describe('CreateSharedCampaignDialog', () => {
   afterEach(() => {
     // Restore mocks and reset module-level mock implementations to safe defaults
     vi.restoreAllMocks();
-     
+
     useQueryImpl = (_q: any) => ({ data: undefined, loading: false });
-     
-    useMutationImpl = (_m: any) => [vi.fn()];
+
     mutationImpls.clear();
   });
 
@@ -251,9 +269,7 @@ describe('CreateSharedCampaignDialog', () => {
     expect(screen.queryByText(/Please fill in all required fields/i)).not.toBeInTheDocument();
   });
 
-  // SKIPPED: MUI Autocomplete's state select has issues with testing-library selectOptions in jsdom
-  // The state select is an Autocomplete component that doesn't work with selectOptions
-  it.skip('submits successfully and passes expected variables to mutation', { timeout: 20000 }, async () => {
+  it('submits successfully and passes expected variables to mutation', { timeout: 20000 }, async () => {
     const createMock = vi.fn().mockResolvedValue({ data: { createSharedCampaign: { sharedCampaignCode: 'ABC' } } });
     setupMutationMock(createMock);
 
@@ -261,96 +277,86 @@ describe('CreateSharedCampaignDialog', () => {
 
     const user = userEvent.setup();
 
-    // Fill in required fields
-    await user.type(screen.getByLabelText(/Campaign Name/i), ' Fundraiser  '); // has whitespace to test trim
-
-    // Helper to get select by label
-    const getSelectByLabel = (labelRegex: RegExp) => {
-      const labels = screen.queryAllByText(labelRegex);
-      const label = labels.find((el) => el.tagName === 'LABEL') || labels[0];
-      if (!label) return null;
-      const form = label.closest('.MuiFormControl-root');
-      return form?.querySelector('[role="combobox"]') as HTMLSelectElement | null;
-    };
-
-    // Select unit type using native selectOptions
-    const unitTypeSelect = getSelectByLabel(/Unit Type/i);
-    expect(unitTypeSelect).toBeTruthy();
-    await user.selectOptions(unitTypeSelect!, 'Pack');
-
-    // Unit number
+    await user.type(screen.getByLabelText(/Campaign Name/i), ' Fundraiser  ');
+    await user.selectOptions(getSelectByLabel(/Unit Type/i)!, 'Pack');
     await user.type(screen.getByLabelText(/Unit Number/i), '5');
-    // City
     await user.type(screen.getByLabelText(/City/i), 'Testville');
+    await user.type(screen.getByRole('combobox', { name: /State/i }), 'CA');
 
-    // Select state
-    const stateSelect = getSelectByLabel(/State/i);
-    expect(stateSelect).toBeTruthy();
-    await user.selectOptions(stateSelect!, 'CA');
-
-    // Select a catalog
     const select = getCatalogSelect();
     expect(select).toBeTruthy();
     await user.selectOptions(select!, 'pub-1');
 
-    // Submit
+    fireEvent.change(screen.getByLabelText(/Start Date/i), { target: { value: '2025-09-01' } });
+    fireEvent.change(screen.getByLabelText(/End Date/i), { target: { value: '2025-12-31' } });
+    await user.type(screen.getByLabelText(/Message to Scouts/i), ' Hello scouts ');
+    fireEvent.change(screen.getByLabelText(/Description/i), { target: { value: ' Internal notes ' } });
+
     const createBtn = screen.getByRole('button', { name: /Create Shared Campaign/i });
     await waitFor(() => expect(createBtn).toBeEnabled());
 
     await user.click(createBtn);
 
-    // Wait for onSuccess to be called
     await waitFor(() => {
       expect(onSuccess).toHaveBeenCalled();
     });
+
+    expect(createMock).toHaveBeenCalledWith({
+      variables: {
+        input: {
+          catalogId: 'pub-1',
+          campaignName: 'Fundraiser',
+          campaignYear: new Date().getFullYear(),
+          startDate: '2025-09-01',
+          endDate: '2025-12-31',
+          unitType: 'Pack',
+          unitNumber: 5,
+          city: 'Testville',
+          state: 'CA',
+          creatorMessage: 'Hello scouts',
+          description: 'Internal notes',
+        },
+      },
+    });
+    expect(onClose).not.toHaveBeenCalled();
   });
 
-  // SKIPPED: Mutation mock rejection handling is flaky in jsdom environment
-  it.skip('shows mutation error message when create fails', { timeout: 15000 }, async () => {
+  it('shows mutation error message when create fails', { timeout: 15000 }, async () => {
     const createMock = vi.fn().mockRejectedValue(new Error('Server failure'));
     setupMutationMock(createMock);
 
     render(<CreateSharedCampaignDialog open={true} onClose={onClose} onSuccess={onSuccess} canCreate={true} />);
 
     const user = userEvent.setup();
-
-    // Fill minimal required fields
-    await user.type(screen.getByLabelText(/Campaign Name/i), 'X');
-
-    const getSelectByLabel = (labelRegex: RegExp) => {
-      const labels = screen.queryAllByText(labelRegex);
-      const label = labels.find((el) => el.tagName === 'LABEL') || labels[0];
-      if (!label) return null;
-      const form = label.closest('.MuiFormControl-root');
-      return form?.querySelector('[role="combobox"]') as HTMLSelectElement | null;
-    };
-
-    // Select unit type
-    const unitTypeSelect = getSelectByLabel(/Unit Type/i);
-    expect(unitTypeSelect).toBeTruthy();
-    await user.selectOptions(unitTypeSelect!, 'Pack');
-
-    await user.type(screen.getByLabelText(/Unit Number/i), '1');
-    await user.type(screen.getByLabelText(/City/i), 'C');
-
-    // Select state
-    const stateSelect = getSelectByLabel(/State/i);
-    expect(stateSelect).toBeTruthy();
-    await user.selectOptions(stateSelect!, 'AL');
-
-    // Select catalog
-    const select = getCatalogSelect();
-    expect(select).toBeTruthy();
-    await user.selectOptions(select!, 'pub-1');
+    await fillRequiredFields(user);
 
     const createBtn = screen.getByRole('button', { name: /Create Shared Campaign/i });
     await waitFor(() => expect(createBtn).toBeEnabled());
 
     await user.click(createBtn);
 
-    // Wait for error message
     await waitFor(() => {
       expect(screen.getByText(/Server failure/)).toBeInTheDocument();
+    });
+    expect(onSuccess).not.toHaveBeenCalled();
+  });
+
+  it('shows generic error message when mutation rejects a non-Error value', { timeout: 15000 }, async () => {
+    const createMock = vi.fn().mockRejectedValue('network error');
+    setupMutationMock(createMock);
+
+    render(<CreateSharedCampaignDialog open={true} onClose={onClose} onSuccess={onSuccess} canCreate={true} />);
+
+    const user = userEvent.setup();
+    await fillRequiredFields(user);
+
+    const createBtn = screen.getByRole('button', { name: /Create Shared Campaign/i });
+    await waitFor(() => expect(createBtn).toBeEnabled());
+
+    await user.click(createBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Failed to create campaign sharedCampaign/)).toBeInTheDocument();
     });
   });
 
@@ -412,6 +418,15 @@ describe('CreateSharedCampaignDialog', () => {
     expect(yearField).toHaveValue(2026);
   });
 
+  it('falls back to 0 when campaign year is cleared', async () => {
+    render(<CreateSharedCampaignDialog open={true} onClose={onClose} onSuccess={onSuccess} canCreate={true} />);
+
+    const yearField = screen.getByLabelText(/Campaign Year/i);
+    fireEvent.change(yearField, { target: { value: '2026' } });
+    fireEvent.change(yearField, { target: { value: '' } });
+    expect(yearField).toHaveValue(0);
+  });
+
   it('allows setting start date field', async () => {
     render(<CreateSharedCampaignDialog open={true} onClose={onClose} onSuccess={onSuccess} canCreate={true} />);
 
@@ -421,5 +436,110 @@ describe('CreateSharedCampaignDialog', () => {
     // Change the start date value
     fireEvent.change(startDateField, { target: { value: '2025-01-01' } });
     expect(startDateField).toHaveValue('2025-01-01');
+  });
+
+  it('calls onClose when Cancel is clicked', async () => {
+    render(<CreateSharedCampaignDialog open={true} onClose={onClose} onSuccess={onSuccess} canCreate={true} />);
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: /Cancel/i }));
+
+    expect(onClose).toHaveBeenCalled();
+    expect(onSuccess).not.toHaveBeenCalled();
+  });
+
+  it('shows catalog access warning after selecting a catalog', async () => {
+    render(<CreateSharedCampaignDialog open={true} onClose={onClose} onSuccess={onSuccess} canCreate={true} />);
+
+    const user = userEvent.setup();
+    const select = getCatalogSelect();
+    expect(select).toBeTruthy();
+    await user.selectOptions(select!, 'pub-1');
+
+    expect(screen.getByText(/Participants Will Access This Catalog/i)).toBeInTheDocument();
+  });
+
+  it('disables create when catalog is selected but campaign name is missing', async () => {
+    render(<CreateSharedCampaignDialog open={true} onClose={onClose} onSuccess={onSuccess} canCreate={true} />);
+
+    const user = userEvent.setup();
+    const select = getCatalogSelect();
+    expect(select).toBeTruthy();
+    await user.selectOptions(select!, 'pub-1');
+
+    const createBtn = screen.getByRole('button', { name: /Create Shared Campaign/i });
+    expect(createBtn).toBeDisabled();
+  });
+
+  it('disables create when campaign info is complete but unit info is missing', async () => {
+    render(<CreateSharedCampaignDialog open={true} onClose={onClose} onSuccess={onSuccess} canCreate={true} />);
+
+    const user = userEvent.setup();
+    const select = getCatalogSelect();
+    expect(select).toBeTruthy();
+    await user.selectOptions(select!, 'pub-1');
+    await user.type(screen.getByLabelText(/Campaign Name/i), 'Fundraiser');
+
+    const createBtn = screen.getByRole('button', { name: /Create Shared Campaign/i });
+    expect(createBtn).toBeDisabled();
+  });
+
+  it('disables create and does not submit when canCreate is false even with a valid form', { timeout: 15000 }, async () => {
+    const createMock = vi.fn().mockResolvedValue({ data: {} });
+    setupMutationMock(createMock);
+
+    render(<CreateSharedCampaignDialog open={true} onClose={onClose} onSuccess={onSuccess} canCreate={false} />);
+
+    const user = userEvent.setup();
+    await fillRequiredFields(user);
+
+    const createBtn = screen.getByRole('button', { name: /Create Shared Campaign/i });
+    expect(createBtn).toBeDisabled();
+    expect(createMock).not.toHaveBeenCalled();
+  });
+
+  it('shows Creating... state while the mutation is in flight', { timeout: 15000 }, async () => {
+    let resolveMutation: (value: unknown) => void = () => {};
+    const createMock = vi.fn().mockImplementation(() => new Promise((resolve) => { resolveMutation = resolve; }));
+    setupMutationMock(createMock);
+
+    render(<CreateSharedCampaignDialog open={true} onClose={onClose} onSuccess={onSuccess} canCreate={true} />);
+
+    const user = userEvent.setup();
+    await fillRequiredFields(user);
+
+    const createBtn = screen.getByRole('button', { name: /Create Shared Campaign/i });
+    await waitFor(() => expect(createBtn).toBeEnabled());
+
+    await user.click(createBtn);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Creating.../i })).toBeInTheDocument();
+    });
+    expect(screen.getByRole('button', { name: /Creating.../i })).toBeDisabled();
+
+    resolveMutation({ data: { createSharedCampaign: { sharedCampaignCode: 'XYZ' } } });
+
+    await waitFor(() => expect(onSuccess).toHaveBeenCalled());
+  });
+
+  it('handles undefined catalog query data by showing no catalogs', async () => {
+    useQueryImpl = (_query: any) => ({ data: undefined, loading: false });
+
+    render(<CreateSharedCampaignDialog open={true} onClose={onClose} onSuccess={onSuccess} canCreate={true} />);
+
+    const user = userEvent.setup();
+    const select = getCatalogSelect();
+    expect(select).toBeTruthy();
+    await user.click(select!);
+
+    await waitFor(() => expect(screen.getByText(/No catalogs available/i)).toBeInTheDocument());
+  });
+
+  it('does not render dialog content when closed', () => {
+    render(<CreateSharedCampaignDialog open={false} onClose={onClose} onSuccess={onSuccess} canCreate={true} />);
+
+    expect(screen.queryByRole('heading', { name: /Create Shared Campaign/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 });

@@ -126,6 +126,16 @@ describe('QRUploadDialog', () => {
       expect(screen.getByText(/Please select a PNG, JPG, or WEBP image file/i)).toBeInTheDocument();
     });
 
+    test('clears selection when file input change has no files', () => {
+      render(<QRUploadDialog {...defaultProps} />);
+
+      const input = screen.getByLabelText('Select QR code image') as HTMLInputElement;
+      Object.defineProperty(input, 'files', { value: [], configurable: true });
+      fireEvent.change(input);
+
+      expect(screen.getByRole('button', { name: /upload/i })).toBeDisabled();
+    });
+
     test('accepts PNG files', async () => {
       const user = userEvent.setup();
       render(<QRUploadDialog {...defaultProps} />);
@@ -176,6 +186,50 @@ describe('QRUploadDialog', () => {
 
       const input = screen.getByLabelText('Select QR code image') as HTMLInputElement;
       expect(input.accept).toBe('.png,.jpg,.jpeg,.webp');
+    });
+  });
+
+  describe('external upload errors', () => {
+    test('displays external uploadError when provided', () => {
+      render(<QRUploadDialog {...defaultProps} uploadError="Upload failed" />);
+
+      expect(screen.getByRole('alert')).toHaveTextContent('Upload failed');
+    });
+
+    test('hides external uploadError when a local validation error exists', () => {
+      render(<QRUploadDialog {...defaultProps} uploadError="Upload failed" />);
+
+      const file = createMockFile('document.pdf', 1024 * 100, 'application/pdf');
+      const input = screen.getByLabelText('Select QR code image') as HTMLInputElement;
+
+      Object.defineProperty(input, 'files', { value: [file], configurable: true });
+      fireEvent.change(input);
+
+      expect(screen.getByText(/Please select a PNG, JPG, or WEBP image file/i)).toBeInTheDocument();
+      expect(screen.queryByText('Upload failed')).not.toBeInTheDocument();
+    });
+  });
+
+  describe('state cleanup', () => {
+    test('revokes preview URL when dialog closes after file selection', async () => {
+      const user = userEvent.setup();
+      const { rerender, unmount } = render(<QRUploadDialog {...defaultProps} />);
+
+      const file = createMockFile('qr-code.png', 1024 * 100, 'image/png');
+      const input = screen.getByLabelText('Select QR code image');
+
+      await user.upload(input, file);
+      await waitFor(() => {
+        expect(screen.getByAltText('QR code preview')).toBeInTheDocument();
+      });
+
+      expect(URL.revokeObjectURL).not.toHaveBeenCalled();
+
+      // Closing the dialog re-registers the cleanup with the current previewUrl
+      rerender(<QRUploadDialog {...defaultProps} open={false} />);
+      unmount();
+
+      expect(URL.revokeObjectURL).toHaveBeenCalled();
     });
   });
 

@@ -6,6 +6,7 @@ import { describe, test, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MockedProvider } from '@apollo/client/testing/react';
+import { GraphQLError } from 'graphql';
 import { BrowserRouter } from 'react-router-dom';
 import { AdminPage } from '../src/pages/AdminPage';
 import {
@@ -319,6 +320,24 @@ describe('AdminPage - User Search', () => {
       expect(screen.getByText('ARCHIVED')).toBeInTheDocument();
     });
   });
+
+  test('shows error alert when user search fails', async () => {
+    const user = userEvent.setup();
+    const mocks = baseMocks([
+      {
+        request: { query: ADMIN_SEARCH_USER, variables: { query: 'bad' } },
+        error: new Error('Search query failed'),
+      },
+    ]);
+    renderAdmin(mocks);
+
+    fireEvent.change(screen.getByPlaceholderText(/search by email, name/i), { target: { value: 'bad' } });
+    await user.click(screen.getByRole('button', { name: /search/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Failed to load: Search query failed/i)).toBeInTheDocument();
+    });
+  });
 });
 
 describe('AdminPage - Reset Password', () => {
@@ -395,6 +414,92 @@ describe('AdminPage - Reset Password', () => {
 
     await waitFor(() => {
       expect(screen.getByText(/Password reset email sent/i)).toBeInTheDocument();
+    });
+  });
+
+  test('closes reset password dialog via Escape key', async () => {
+    const user = userEvent.setup();
+    const mocks = baseMocks([
+      {
+        request: { query: ADMIN_SEARCH_USER, variables: { query: 'test' } },
+        result: { data: { adminSearchUser: [mockAdminUser] } },
+      },
+    ]);
+    renderAdmin(mocks);
+
+    fireEvent.change(screen.getByPlaceholderText(/search by email, name/i), { target: { value: 'test' } });
+    await user.click(screen.getByRole('button', { name: /search/i }));
+    await waitFor(() => expect(screen.getByText('test@example.com')).toBeInTheDocument());
+
+    await user.click(screen.getByRole('button', { name: /Reset password for test@example.com/i }));
+    expect(screen.getByText('Reset Password')).toBeInTheDocument();
+
+    fireEvent.keyDown(document.activeElement ?? document, { key: 'Escape' });
+
+    await waitFor(() => {
+      expect(screen.queryByText('Reset Password')).not.toBeInTheDocument();
+    });
+  });
+
+  test('closes snackbar after reset password', async () => {
+    const user = userEvent.setup();
+    const mocks = baseMocks([
+      {
+        request: { query: ADMIN_SEARCH_USER, variables: { query: 'test' } },
+        result: { data: { adminSearchUser: [mockAdminUser] } },
+      },
+      {
+        request: { query: ADMIN_RESET_USER_PASSWORD, variables: { email: 'test@example.com' } },
+        result: { data: { adminResetUserPassword: true } },
+      },
+    ]);
+    renderAdmin(mocks);
+
+    fireEvent.change(screen.getByPlaceholderText(/search by email, name/i), { target: { value: 'test' } });
+    await user.click(screen.getByRole('button', { name: /search/i }));
+    await waitFor(() => expect(screen.getByText('test@example.com')).toBeInTheDocument());
+
+    await user.click(screen.getByRole('button', { name: /Reset password for test@example.com/i }));
+    await user.click(screen.getByRole('button', { name: /send reset email/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Password reset email sent/i)).toBeInTheDocument();
+    });
+
+    // Wait for the reset dialog to finish closing so the snackbar action is reachable
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: /reset password/i })).not.toBeInTheDocument();
+    });
+    await user.click(screen.getByRole('button', { name: /close/i }));
+
+    await waitFor(() => {
+      expect(screen.queryByText(/Password reset email sent/i)).not.toBeInTheDocument();
+    });
+  });
+
+  test('shows error snackbar when reset password mutation fails', async () => {
+    const user = userEvent.setup();
+    const mocks = baseMocks([
+      {
+        request: { query: ADMIN_SEARCH_USER, variables: { query: 'test' } },
+        result: { data: { adminSearchUser: [mockAdminUser] } },
+      },
+      {
+        request: { query: ADMIN_RESET_USER_PASSWORD, variables: { email: 'test@example.com' } },
+        result: { errors: [new GraphQLError('Reset password failed')] },
+      },
+    ]);
+    renderAdmin(mocks);
+
+    fireEvent.change(screen.getByPlaceholderText(/search by email, name/i), { target: { value: 'test' } });
+    await user.click(screen.getByRole('button', { name: /search/i }));
+    await waitFor(() => expect(screen.getByText('test@example.com')).toBeInTheDocument());
+
+    await user.click(screen.getByRole('button', { name: /Reset password for test@example.com/i }));
+    await user.click(screen.getByRole('button', { name: /send reset email/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Error: Reset password failed/i)).toBeInTheDocument();
     });
   });
 });
@@ -520,6 +625,53 @@ describe('AdminPage - Delete User', () => {
     });
   });
 
+  test('delete user handles mutation results with missing counts', async () => {
+    const user = userEvent.setup();
+    const accountId = 'ACCOUNT#test-user-1';
+    const mocks = baseMocks([
+      {
+        request: { query: ADMIN_SEARCH_USER, variables: { query: 'test' } },
+        result: { data: { adminSearchUser: [mockAdminUser] } },
+      },
+      {
+        request: { query: ADMIN_DELETE_USER_ORDERS, variables: { accountId } },
+        result: { data: { adminDeleteUserOrders: null } },
+      },
+      {
+        request: { query: ADMIN_DELETE_USER_CAMPAIGNS, variables: { accountId } },
+        result: { data: {} },
+      },
+      {
+        request: { query: ADMIN_DELETE_USER_SHARES, variables: { accountId } },
+        result: { data: { adminDeleteUserShares: null } },
+      },
+      {
+        request: { query: ADMIN_DELETE_USER_PROFILES, variables: { accountId } },
+        result: { data: {} },
+      },
+      {
+        request: { query: ADMIN_DELETE_USER_CATALOGS, variables: { accountId } },
+        result: { data: { adminDeleteUserCatalogs: null } },
+      },
+      {
+        request: { query: ADMIN_DELETE_USER, variables: { accountId } },
+        result: { data: { adminDeleteUser: true } },
+      },
+    ]);
+    renderAdmin(mocks);
+
+    fireEvent.change(screen.getByPlaceholderText(/search by email, name/i), { target: { value: 'test' } });
+    await user.click(screen.getByRole('button', { name: /search/i }));
+    await waitFor(() => expect(screen.getByText('test@example.com')).toBeInTheDocument());
+
+    await user.click(screen.getByRole('button', { name: /Delete user test@example.com/i }));
+    await user.click(screen.getByRole('button', { name: /delete user/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/deleted successfully/i)).toBeInTheDocument();
+    });
+  });
+
   test('clicking user row navigates to user details', async () => {
     const user = userEvent.setup();
     const mocks = baseMocks([
@@ -538,8 +690,8 @@ describe('AdminPage - Delete User', () => {
     const emailCell = screen.getByText('test@example.com');
     await user.click(emailCell);
 
-    // Navigation should have been triggered (window.location changes in BrowserRouter)
-    expect(window.location.pathname).toContain('admin');
+    // Navigation should have been triggered to the user-data detail page
+    expect(window.location.pathname).toBe('/admin/user-data/ACCOUNT%23test-user-1');
   });
 });
 
@@ -719,6 +871,29 @@ describe('AdminPage - Catalog Management', () => {
     });
   });
 
+  test('closes delete catalog dialog via Escape key', async () => {
+    const user = userEvent.setup();
+    const mocks = [
+      {
+        request: { query: LIST_MANAGED_CATALOGS },
+        result: { data: { listManagedCatalogs: [mockCatalog] } },
+      },
+    ];
+    renderAdmin(mocks);
+
+    await user.click(screen.getByRole('tab', { name: /catalogs/i }));
+    await waitFor(() => expect(screen.getByText('Test Catalog')).toBeInTheDocument());
+
+    await user.click(screen.getByRole('button', { name: /delete catalog/i }));
+    await waitFor(() => expect(screen.getByText('Delete Catalog')).toBeInTheDocument());
+
+    fireEvent.keyDown(document.activeElement ?? document, { key: 'Escape' });
+
+    await waitFor(() => {
+      expect(screen.queryByText(/This catalog will no longer be available/i)).not.toBeInTheDocument();
+    });
+  });
+
   test('creates new catalog via dialog', async () => {
     const user = userEvent.setup();
     const newCatalog = { ...mockCatalog, catalogId: 'CAT~2', catalogName: 'New Catalog' };
@@ -850,6 +1025,149 @@ describe('AdminPage - Catalog Management', () => {
 
     await waitFor(() => {
       expect(screen.getByText('Unnamed Catalog')).toBeInTheDocument();
+    });
+  });
+
+  test('shows catalog with undefined products as 0 products', async () => {
+    const user = userEvent.setup();
+    const noProductsCatalog = { ...mockCatalog, products: undefined };
+    const mocks = [
+      {
+        request: { query: LIST_MANAGED_CATALOGS },
+        result: { data: { listManagedCatalogs: [noProductsCatalog] } },
+      },
+    ];
+    renderAdmin(mocks);
+
+    await user.click(screen.getByRole('tab', { name: /catalogs/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('0 products')).toBeInTheDocument();
+    });
+  });
+
+  test('renders catalog with undefined catalogId using fallback key', async () => {
+    const user = userEvent.setup();
+    const noIdCatalog = { ...mockCatalog, catalogId: undefined };
+    const mocks = [
+      {
+        request: { query: LIST_MANAGED_CATALOGS },
+        result: { data: { listManagedCatalogs: [noIdCatalog] } },
+      },
+    ];
+    renderAdmin(mocks);
+
+    await user.click(screen.getByRole('tab', { name: /catalogs/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Test Catalog')).toBeInTheDocument();
+    });
+  });
+
+  test('shows error snackbar when create catalog mutation fails', async () => {
+    const user = userEvent.setup();
+    const mocks = [
+      {
+        request: { query: LIST_MANAGED_CATALOGS },
+        result: { data: { listManagedCatalogs: [] } },
+      },
+      {
+        request: {
+          query: CREATE_MANAGED_CATALOG,
+          variables: {
+            input: {
+              catalogName: 'Bad Catalog',
+              isPublic: true,
+              products: [{ productName: 'Test Product', description: undefined, price: 10, sortOrder: 0 }],
+            },
+          },
+        },
+        result: { errors: [new GraphQLError('Create catalog failed')] },
+      },
+    ];
+    renderAdmin(mocks);
+
+    await user.click(screen.getByRole('tab', { name: /catalogs/i }));
+    await waitFor(() => expect(screen.getByRole('button', { name: /new catalog/i })).toBeInTheDocument());
+
+    await user.click(screen.getByRole('button', { name: /new catalog/i }));
+    await waitFor(() => expect(screen.getByText('Create Catalog')).toBeInTheDocument());
+
+    fireEvent.change(screen.getByLabelText(/Catalog Name/i), { target: { value: 'Bad Catalog' } });
+    fireEvent.change(screen.getByLabelText(/Product Name/i), { target: { value: 'Test Product' } });
+    fireEvent.change(screen.getByLabelText(/Price/i), { target: { value: '10' } });
+
+    await user.click(screen.getByRole('button', { name: /save catalog/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Error creating catalog: Create catalog failed/i)).toBeInTheDocument();
+    });
+  });
+
+  test('shows error snackbar when update catalog mutation fails', async () => {
+    const user = userEvent.setup();
+    const mocks = [
+      {
+        request: { query: LIST_MANAGED_CATALOGS },
+        result: { data: { listManagedCatalogs: [mockCatalog] } },
+      },
+      {
+        request: {
+          query: UPDATE_CATALOG,
+          variables: {
+            catalogId: 'CAT~1',
+            input: {
+              catalogName: 'Bad Update',
+              isPublic: true,
+              products: [{ productName: 'Caramel Corn', description: undefined, price: 20, sortOrder: 0 }],
+            },
+          },
+        },
+        result: { errors: [new GraphQLError('Update catalog failed')] },
+      },
+    ];
+    renderAdmin(mocks);
+
+    await user.click(screen.getByRole('tab', { name: /catalogs/i }));
+    await waitFor(() => expect(screen.getByText('Test Catalog')).toBeInTheDocument());
+
+    await user.click(screen.getByRole('button', { name: /edit catalog/i }));
+    await waitFor(() => expect(screen.getByText('Edit Catalog')).toBeInTheDocument());
+
+    fireEvent.change(screen.getByLabelText(/Catalog Name/i), { target: { value: 'Bad Update' } });
+
+    await user.click(screen.getByRole('button', { name: /save catalog/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Error updating catalog: Update catalog failed/i)).toBeInTheDocument();
+    });
+  });
+
+  test('shows error snackbar when delete catalog mutation fails', async () => {
+    const user = userEvent.setup();
+    const mocks = [
+      {
+        request: { query: LIST_MANAGED_CATALOGS },
+        result: { data: { listManagedCatalogs: [mockCatalog] } },
+      },
+      {
+        request: { query: DELETE_CATALOG, variables: { catalogId: 'CAT~1' } },
+        result: { errors: [new GraphQLError('Delete catalog failed')] },
+      },
+    ];
+    renderAdmin(mocks);
+
+    await user.click(screen.getByRole('tab', { name: /catalogs/i }));
+    await waitFor(() => expect(screen.getByText('Test Catalog')).toBeInTheDocument());
+
+    await user.click(screen.getByRole('button', { name: /delete catalog/i }));
+    await waitFor(() => expect(screen.getByText('Delete Catalog')).toBeInTheDocument());
+
+    const deleteButtons = screen.getAllByRole('button', { name: /delete/i });
+    await user.click(deleteButtons[deleteButtons.length - 1]);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Error deleting catalog: Delete catalog failed/i)).toBeInTheDocument();
     });
   });
 });

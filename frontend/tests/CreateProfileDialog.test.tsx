@@ -3,7 +3,7 @@
  */
 
 import { describe, test, expect, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { CreateProfileDialog } from '../src/components/CreateProfileDialog';
 
@@ -163,5 +163,64 @@ describe('CreateProfileDialog', () => {
 
     const submitButton = screen.getByRole('button', { name: /Create Scout/i });
     expect(submitButton).toBeDisabled();
+  });
+
+  test('does not submit on Enter when name is only whitespace', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+
+    render(<CreateProfileDialog open={true} onClose={vi.fn()} onSubmit={onSubmit} />);
+
+    const nameInput = screen.getByLabelText(/Scout Name/i);
+    await user.type(nameInput, '   {Enter}');
+
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  test('resets loading state when submission fails', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn().mockRejectedValue(new Error('Create failed'));
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    render(<CreateProfileDialog open={true} onClose={vi.fn()} onSubmit={onSubmit} />);
+
+    const nameInput = screen.getByLabelText(/Scout Name/i);
+    await user.type(nameInput, 'Scout Alpha');
+
+    const submitButton = screen.getByRole('button', { name: /Create Scout/i });
+    await user.click(submitButton);
+
+    await waitFor(() => {
+      expect(consoleErrorSpy).toHaveBeenCalledWith('Failed to create profile:', expect.any(Error));
+    });
+
+    expect(screen.getByRole('button', { name: /Create Scout/i })).toBeInTheDocument();
+    expect(nameInput).not.toBeDisabled();
+
+    consoleErrorSpy.mockRestore();
+  });
+
+  test('does not close when close event is triggered while submitting', async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    const onSubmit = vi.fn((_name: string) => new Promise<void>(() => {}));
+
+    render(<CreateProfileDialog open={true} onClose={onClose} onSubmit={onSubmit} />);
+
+    const nameInput = screen.getByLabelText(/Scout Name/i);
+    await user.type(nameInput, 'Scout Alpha');
+
+    const submitButton = screen.getByRole('button', { name: /Create Scout/i });
+    await user.click(submitButton);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Creating.../i })).toBeInTheDocument();
+    });
+
+    // Trigger the Dialog onClose handler via Escape key while the Cancel button is disabled
+    const dialog = screen.getByRole('dialog');
+    fireEvent.keyDown(dialog, { key: 'Escape' });
+
+    expect(onClose).not.toHaveBeenCalled();
   });
 });

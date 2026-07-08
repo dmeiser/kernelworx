@@ -147,6 +147,20 @@ describe('SettingsPage', () => {
     expect(mockNavigate).toHaveBeenCalledWith('/admin');
   });
 
+  test('navigates to payment methods page when Payment Methods clicked', async () => {
+    const user = userEvent.setup();
+    render(
+      <MockedProvider mocks={[standardAccountMock]} addTypename={false}>
+        <BrowserRouter>
+          <SettingsPage />
+        </BrowserRouter>
+      </MockedProvider>,
+    );
+
+    await user.click(screen.getByRole('button', { name: /Payment Methods/i }));
+    expect(mockNavigate).toHaveBeenCalledWith('/payment-methods');
+  });
+
   test('displays Data & Privacy section', () => {
     render(
       <MockedProvider mocks={[standardAccountMock]} addTypename={false}>
@@ -184,5 +198,6 @@ describe('SettingsPage', () => {
 
     await user.click(screen.getByRole('button', { name: /Sign Out/i }));
     expect(mockLogout).toHaveBeenCalled();
+    expect(mockNavigate).toHaveBeenCalledWith('/');
   });
 });
