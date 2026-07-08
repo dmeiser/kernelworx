@@ -1,7 +1,7 @@
 import { util } from '@aws-appsync/utils';
 
 export function request(ctx) {
-    const profileId = ctx.args.input.profileId || ctx.stash.invite?.profileId;
+    const profileId = ctx.args.input.profileId || (ctx.stash.invite ? ctx.stash.invite.profileId : undefined);
     var targetAccountId = ctx.stash.targetAccountId;
     
     // Strip ACCOUNT# prefix if present

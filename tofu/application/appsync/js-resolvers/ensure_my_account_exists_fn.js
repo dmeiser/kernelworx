@@ -1,7 +1,7 @@
 import { util } from '@aws-appsync/utils';
 
 function claim(ctx, name) {
-    const value = ctx.identity?.claims?.[name];
+    const value = ctx.identity && ctx.identity.claims ? ctx.identity.claims[name] : undefined;
     return typeof value === 'string' ? value : '';
 }
 
