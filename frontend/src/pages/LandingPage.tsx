@@ -31,7 +31,6 @@ import {
   People as PeopleIcon,
   Share as ShareIcon,
   Assessment as AssessmentIcon,
-  Code as CodeIcon,
   Payment as PaymentIcon,
   Favorite as FavoriteIcon,
   Close as CloseIcon,
@@ -260,10 +259,8 @@ export const LandingPage: React.FC = () => {
               component="h1"
               gutterBottom
               sx={{
-                fontFamily: '"Kaushan Script", cursive',
                 color: 'primary.main',
-                fontWeight: 600,
-                letterSpacing: '0.08em',
+                fontWeight: 700,
                 fontSize: { xs: '2.5rem', sm: '3rem', md: '3.75rem' },
               }}
             >
@@ -277,11 +274,23 @@ export const LandingPage: React.FC = () => {
                 fontWeight: 400,
                 maxWidth: 800,
                 mx: 'auto',
-                mb: 4,
+                mb: 2,
               }}
             >
               Track orders, manage sellers, and generate reports for your Scouting America popcorn fundraiser — all in
               one simple, secure place.
+            </Typography>
+            <Typography
+              variant="subtitle1"
+              color="success.dark"
+              sx={{
+                fontWeight: 600,
+                maxWidth: 700,
+                mx: 'auto',
+                mb: 4,
+              }}
+            >
+              Free and open source — no subscriptions and no hidden fees.
             </Typography>
             <Button
               variant="contained"
@@ -405,31 +414,6 @@ export const LandingPage: React.FC = () => {
                 />
               </Grid>
             </Grid>
-          </Paper>
-
-          {/* Open Source */}
-          <Paper
-            elevation={1}
-            sx={{
-              p: { xs: 3, sm: 4 },
-              bgcolor: 'success.light',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 3,
-              flexDirection: { xs: 'column', sm: 'row' },
-              textAlign: { xs: 'center', sm: 'left' },
-            }}
-          >
-            <CodeIcon sx={{ fontSize: 48, color: 'success.dark' }} />
-            <Box>
-              <Typography variant="h6" gutterBottom>
-                Free & Open Source
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                KernelWorx is built by volunteers and released under the MIT License. No subscriptions, no hidden fees,
-                and no lock-in. If you find it useful, you can even contribute or sponsor development on GitHub.
-              </Typography>
-            </Box>
           </Paper>
 
           {/* Final CTA */}

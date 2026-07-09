@@ -157,17 +157,6 @@ describe('LandingPage', () => {
     });
   });
 
-  it('applies correct branding to hero title', async () => {
-    renderWithAuth();
-
-    await waitFor(() => {
-      const heroTitle = screen.getByText('Popcorn Sales Made Easy');
-      expect(heroTitle).toHaveStyle({
-        fontFamily: '"Kaushan Script", cursive',
-      });
-    });
-  });
-
   it('renders logo image in header', async () => {
     renderWithAuth();
 
