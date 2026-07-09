@@ -243,16 +243,16 @@ export const LandingPage: React.FC = () => {
               one simple, secure place.
             </Typography>
             <Typography
-              variant="h5"
+              variant="subtitle1"
               color="success.dark"
               sx={{
                 fontWeight: 600,
                 maxWidth: 700,
                 mx: 'auto',
-                mb: 2,
+                mb: 4,
               }}
             >
-              Free — no subscriptions and no hidden fees.
+              Free — no paid features.
             </Typography>
             <Button
               variant="contained"
@@ -264,12 +264,12 @@ export const LandingPage: React.FC = () => {
             >
               {isAuthenticated ? 'Go to Dashboard' : 'Start Selling Smarter'}
             </Button>
-            <Box sx={{ mt: 2 }}>
+            <Box sx={{ mt: 1 }}>
               <Button
                 onClick={() => navigate('/story')}
                 variant="text"
-                size="small"
-                sx={{ textTransform: 'none', color: 'text.secondary', textDecoration: 'underline' }}
+                size="large"
+                sx={{ textTransform: 'none', color: 'text.secondary', textDecoration: 'underline', py: 0 }}
               >
                 Read the story behind KernelWorx
               </Button>
