@@ -48,14 +48,13 @@ export const StoryPage: React.FC = () => {
           <Paper elevation={2} sx={{ p: { xs: 3, sm: 4, md: 5 } }}>
             <Stack spacing={3}>
               <Typography variant="body1" color="text.primary">
-                I am a Cub Scout dad. Like a lot of Scout parents, popcorn season at our house meant
-                spreading paper order sheets across the kitchen table, trying to keep straight who
-                ordered what, how they wanted to pay, and whether the money had actually come in.
+                I am a parent and den leader. Popcorn season meant tracking orders across paper
+                sheets, payment apps, and spreadsheets — and I kept making mistakes.
               </Typography>
 
               <Typography variant="body1" color="text.primary">
                 At pickup sites I would stand there with multiple payment apps open, waiting for QR
-                codes to load while customers waited — sometimes with little or no cell signal. My
+                codes to load while supporters waited — sometimes with little or no cell signal. My
                 handwriting is not great, so I made mistakes. Then I would spend evenings building a
                 spreadsheet just to figure out who had paid with which service and whether anything
                 was still owed.
@@ -64,8 +63,8 @@ export const StoryPage: React.FC = () => {
               <Typography variant="body1" color="text.primary">
                 And I was only handling one Scout. Our Pack Kernel had to decipher all of that for
                 every youth in the pack, piece together the orders, and make sure the right products
-                went to the right families. It was a lot of work for a volunteer, and it was a lot of
-                friction for parents and Scouts who were just trying to sell popcorn.
+                went to the right families. It was a lot of work for a volunteer, and it made selling
+                popcorn harder than it needed to be for parents and Scouts.
               </Typography>
 
               <Typography variant="body1" color="text.primary">
