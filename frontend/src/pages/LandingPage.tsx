@@ -259,8 +259,10 @@ export const LandingPage: React.FC = () => {
               component="h1"
               gutterBottom
               sx={{
+                fontFamily: '"Kaushan Script", cursive',
                 color: 'primary.main',
-                fontWeight: 700,
+                fontWeight: 600,
+                letterSpacing: '0.08em',
                 fontSize: { xs: '2.5rem', sm: '3rem', md: '3.75rem' },
               }}
             >
@@ -290,7 +292,7 @@ export const LandingPage: React.FC = () => {
                 mb: 4,
               }}
             >
-              Free and open source — no subscriptions and no hidden fees.
+              Free — no subscriptions and no hidden fees.
             </Typography>
             <Button
               variant="contained"
