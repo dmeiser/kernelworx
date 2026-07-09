@@ -19,6 +19,8 @@ import { CombinedGraphQLErrors } from '@apollo/client/errors';
 import type { GraphQLFormattedError } from 'graphql';
 import { fetchAuthSession } from 'aws-amplify/auth';
 
+
+
 /**
  * HTTP link to AppSync endpoint
  */
@@ -210,5 +212,5 @@ export const apolloClient = new ApolloClient({
     mutate: {
       errorPolicy: 'all',
     },
-  },
+  } as unknown as NonNullable<ConstructorParameters<typeof ApolloClient>[0]['defaultOptions']>,
 });

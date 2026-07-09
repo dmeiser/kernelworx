@@ -6,17 +6,23 @@ function claim(ctx, name) {
 }
 
 export function request(ctx) {
+    const accountId = `ACCOUNT#${ctx.identity.sub}`;
+
     // No-op when already found; response() will return ctx.prev.result.
     if (ctx.prev.result) {
-        return {};
+        return {
+            operation: 'GetItem',
+            consistentRead: true,
+            key: util.dynamodb.toMapValues({ accountId })
+        };
     }
 
-    const accountId = `ACCOUNT#${ctx.identity.sub}`;
     const now = util.time.nowISO8601();
 
     return {
         operation: 'UpdateItem',
         key: util.dynamodb.toMapValues({ accountId }),
+        returnValues: 'ALL_NEW',
         update: {
             expression: 'SET #email = if_not_exists(#email, :email), #givenName = if_not_exists(#givenName, :givenName), #familyName = if_not_exists(#familyName, :familyName), #city = if_not_exists(#city, :city), #state = if_not_exists(#state, :state), #unitType = if_not_exists(#unitType, :unitType), #preferences = if_not_exists(#preferences, :preferences), #createdAt = if_not_exists(#createdAt, :createdAt), #updatedAt = if_not_exists(#updatedAt, :updatedAt)',
             expressionNames: {
