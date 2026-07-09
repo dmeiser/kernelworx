@@ -212,7 +212,7 @@ export const LandingPage: React.FC = () => {
 
       {/* Main content */}
       <Container maxWidth="lg" sx={{ mt: { xs: 4, sm: 6, md: 8 }, mb: { xs: 6, sm: 8 } }}>
-        <Stack spacing={{ xs: 5, sm: 6, md: 8 }}>
+        <Stack spacing={{ xs: 4, sm: 5, md: 6 }}>
           {/* Hero section */}
           <Box textAlign="center">
             <Typography
@@ -265,7 +265,7 @@ export const LandingPage: React.FC = () => {
             >
               {isAuthenticated ? 'Go to Dashboard' : 'Start Selling Smarter'}
             </Button>
-            <Box sx={{ mt: 2, textAlign: 'center' }}>
+            <Box sx={{ mt: 3, textAlign: 'center' }}>
               <Link
                 component="button"
                 variant="h5"
