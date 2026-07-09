@@ -22,6 +22,9 @@ import {
   Grid,
   Card,
   CardContent,
+  Dialog,
+  DialogContent,
+  IconButton,
 } from '@mui/material';
 import {
   Login as LoginIcon,
@@ -31,6 +34,8 @@ import {
   Code as CodeIcon,
   Payment as PaymentIcon,
   Favorite as FavoriteIcon,
+  Close as CloseIcon,
+  ZoomIn as ZoomInIcon,
 } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -40,9 +45,17 @@ interface FeatureCardProps {
   icon: React.ReactNode;
   screenshot?: string;
   screenshotAlt?: string;
+  onScreenshotClick?: (src: string, alt: string) => void;
 }
 
-const FeatureCard: React.FC<FeatureCardProps> = ({ title, description, icon, screenshot, screenshotAlt }) => (
+const FeatureCard: React.FC<FeatureCardProps> = ({
+  title,
+  description,
+  icon,
+  screenshot,
+  screenshotAlt,
+  onScreenshotClick,
+}) => (
   <Card elevation={2} sx={{ height: '100%' }}>
     <CardContent>
       <Stack spacing={2}>
@@ -65,21 +78,52 @@ const FeatureCard: React.FC<FeatureCardProps> = ({ title, description, icon, scr
         </Typography>
         {screenshot ? (
           <Box
-            component="img"
-            src={screenshot}
-            alt={screenshotAlt || title}
+            onClick={() => onScreenshotClick?.(screenshot, screenshotAlt || title)}
             sx={{
               mt: 2,
-              width: '100%',
-              height: 160,
-              objectFit: 'cover',
-              objectPosition: 'top',
+              position: 'relative',
               borderRadius: 1,
               border: '1px solid',
               borderColor: 'divider',
-              display: 'block',
+              overflow: 'hidden',
+              cursor: 'pointer',
+              '&:hover .zoom-overlay': {
+                opacity: 1,
+              },
+              '&:hover img': {
+                transform: 'scale(1.02)',
+              },
             }}
-          />
+          >
+            <Box
+              component="img"
+              src={screenshot}
+              alt={screenshotAlt || title}
+              sx={{
+                width: '100%',
+                height: 160,
+                objectFit: 'cover',
+                objectPosition: 'top',
+                display: 'block',
+                transition: 'transform 0.2s ease-in-out',
+              }}
+            />
+            <Box
+              className="zoom-overlay"
+              sx={{
+                position: 'absolute',
+                inset: 0,
+                bgcolor: 'rgba(0, 0, 0, 0.4)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                opacity: 0,
+                transition: 'opacity 0.2s ease-in-out',
+              }}
+            >
+              <ZoomInIcon sx={{ color: 'white', fontSize: 32 }} />
+            </Box>
+          </Box>
         ) : (
           <Box
             sx={{
@@ -142,6 +186,8 @@ const Step: React.FC<StepProps> = ({ number, title, description }) => (
 export const LandingPage: React.FC = () => {
   const navigate = useNavigate();
   const { isAuthenticated } = useAuth();
+  const [lightboxOpen, setLightboxOpen] = React.useState(false);
+  const [lightboxImage, setLightboxImage] = React.useState<{ src: string; alt: string } | null>(null);
 
   const handleLogin = () => {
     if (isAuthenticated) {
@@ -149,6 +195,16 @@ export const LandingPage: React.FC = () => {
     } else {
       navigate('/login');
     }
+  };
+
+  const handleScreenshotClick = (src: string, alt: string) => {
+    setLightboxImage({ src, alt });
+    setLightboxOpen(true);
+  };
+
+  const handleCloseLightbox = () => {
+    setLightboxOpen(false);
+    setLightboxImage(null);
   };
 
   return (
@@ -285,6 +341,7 @@ export const LandingPage: React.FC = () => {
                   icon={<PeopleIcon />}
                   screenshot="/marketing/scouts-page.png"
                   screenshotAlt="My Scouts page showing seller management"
+                  onScreenshotClick={handleScreenshotClick}
                 />
               </Grid>
               <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
@@ -301,6 +358,7 @@ export const LandingPage: React.FC = () => {
                   icon={<PaymentIcon />}
                   screenshot="/marketing/payment-methods-page.png"
                   screenshotAlt="Payment Methods page showing built-in and custom payment options"
+                  onScreenshotClick={handleScreenshotClick}
                 />
               </Grid>
               <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
@@ -425,6 +483,50 @@ export const LandingPage: React.FC = () => {
           </Box>
         </Stack>
       </Container>
+
+      {/* Screenshot lightbox */}
+      <Dialog
+        open={lightboxOpen}
+        onClose={handleCloseLightbox}
+        maxWidth="lg"
+        fullWidth
+        PaperProps={{ sx: { bgcolor: 'background.paper', borderRadius: 2 } }}
+      >
+        <Box sx={{ position: 'relative' }}>
+          <IconButton
+            onClick={handleCloseLightbox}
+            sx={{
+              position: 'absolute',
+              top: 8,
+              right: 8,
+              bgcolor: 'rgba(0, 0, 0, 0.5)',
+              color: 'white',
+              '&:hover': { bgcolor: 'rgba(0, 0, 0, 0.7)' },
+              zIndex: 1,
+            }}
+            aria-label="Close screenshot preview"
+          >
+            <CloseIcon />
+          </IconButton>
+          <DialogContent sx={{ p: 1 }}>
+            {lightboxImage && (
+              <Box
+                component="img"
+                src={lightboxImage.src}
+                alt={lightboxImage.alt}
+                sx={{
+                  width: '100%',
+                  height: 'auto',
+                  maxHeight: '80vh',
+                  objectFit: 'contain',
+                  display: 'block',
+                  borderRadius: 1,
+                }}
+              />
+            )}
+          </DialogContent>
+        </Box>
+      </Dialog>
     </Box>
   );
 };
