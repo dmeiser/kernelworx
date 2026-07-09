@@ -207,7 +207,7 @@ export const LandingPage: React.FC = () => {
   };
 
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: 'background.default' }}>
+    <Box sx={{ minHeight: '100vh', bgcolor: 'background.paper' }}>
       <LandingHeader />
 
       {/* Main content */}
