@@ -243,13 +243,13 @@ export const LandingPage: React.FC = () => {
               one simple, secure place.
             </Typography>
             <Typography
-              variant="subtitle1"
+              variant="h5"
               color="success.dark"
               sx={{
                 fontWeight: 600,
                 maxWidth: 700,
                 mx: 'auto',
-                mb: 4,
+                mb: 2,
               }}
             >
               Free — no subscriptions and no hidden fees.
