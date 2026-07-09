@@ -85,20 +85,33 @@ if [ -z "$CLIENT_ID" ] || [ "$CLIENT_ID" == "None" ]; then
 fi
 echo "   Client ID: $CLIENT_ID"
 
-# Get Cognito Domain
-COGNITO_DOMAIN=$(aws cloudformation list-stack-resources \
-    --stack-name "$STACK_NAME" \
-    --query "StackResourceSummaries[?LogicalResourceId=='UserPoolUserPoolDomain9F01E991'].PhysicalResourceId" \
-    --output text \
-    --region "$REGION" 2>/dev/null || echo "")
+# Construct site domain early; needed for fallback construction below
+if [ "$ENVIRONMENT" == "prod" ]; then
+    SITE_DOMAIN="kernelworx.app"
+else
+    SITE_DOMAIN="${ENVIRONMENT}.kernelworx.app"
+fi
+
+# OpenTofu environment directory (for output lookups)
+TOFU_DIR="$SCRIPT_DIR/../tofu/application/environments/$ENVIRONMENT"
+
+# Get Cognito custom domain
+# 1. Prefer OpenTofu output (matches the managed infrastructure config)
+# 2. Fall back to the actual Cognito user pool custom domain via AWS CLI
+# 3. Last resort: construct the expected domain and warn
+COGNITO_DOMAIN=$(cd "$TOFU_DIR" && tofu output -raw cognito_domain 2>/dev/null || echo "")
 
 if [ -z "$COGNITO_DOMAIN" ] || [ "$COGNITO_DOMAIN" == "None" ]; then
-    # Fallback to constructed domain
-    if [ "$ENVIRONMENT" == "prod" ]; then
-        COGNITO_DOMAIN="login.kernelworx.app"
-    else
-        COGNITO_DOMAIN="login.${ENVIRONMENT}.kernelworx.app"
-    fi
+    COGNITO_DOMAIN=$(aws cognito-idp describe-user-pool \
+        --user-pool-id "$USER_POOL_ID" \
+        --query 'UserPool.CustomDomain' \
+        --output text \
+        --region "$REGION" 2>/dev/null || echo "")
+fi
+
+if [ -z "$COGNITO_DOMAIN" ] || [ "$COGNITO_DOMAIN" == "None" ]; then
+    COGNITO_DOMAIN="login.${SITE_DOMAIN}"
+    echo "⚠️  Warning: Could not discover Cognito custom domain; using constructed value: $COGNITO_DOMAIN"
 fi
 echo "   Cognito Domain: $COGNITO_DOMAIN"
 
@@ -146,12 +159,7 @@ if [ -z "$CF_DISTRIBUTION" ] || [ "$CF_DISTRIBUTION" == "None" ]; then
 fi
 echo "   CloudFront Distribution: $CF_DISTRIBUTION"
 
-# Construct site domain and API endpoint
-if [ "$ENVIRONMENT" == "prod" ]; then
-    SITE_DOMAIN="kernelworx.app"
-else
-    SITE_DOMAIN="${ENVIRONMENT}.kernelworx.app"
-fi
+# Construct API endpoint
 API_ENDPOINT="https://api.${SITE_DOMAIN}/graphql"
 echo "   Site Domain: $SITE_DOMAIN"
 echo "   API Endpoint: $API_ENDPOINT"
