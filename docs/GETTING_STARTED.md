@@ -274,10 +274,10 @@ Key outputs include:
 - **cognito_user_pool_id**: Cognito User Pool ID
 - **cognito_client_id**: App client ID for authentication
 - **appsync_api_url**: AppSync GraphQL API endpoint
-- **dynamodb_table_name**: DynamoDB table name
+- **cloudfront_distribution_id**: CloudFront distribution ID for invalidations
 - **static_assets_bucket**: S3 bucket for SPA hosting
 - **exports_bucket**: S3 bucket for generated reports
-- **cloudfront_distribution_id**: CloudFront distribution ID for invalidations
+- **site_url**: Public URL of the deployed application
 
 ### Frontend Build and Deploy
 

@@ -29,7 +29,7 @@ export const CreateProfileDialog: React.FC<CreateProfileDialogProps> = ({ open, 
   const handleSubmit = async () => {
     /* v8 ignore start -- Defensive guard; unreachable because the submit button is disabled and Enter key handler checks the same condition */
     if (!form.values.sellerName.trim()) return;
-    /* v8 ignore end */
+    /* v8 ignore stop */
 
     setLoading(true);
     try {

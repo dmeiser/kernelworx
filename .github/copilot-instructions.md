@@ -56,7 +56,7 @@ Essential knowledge for GitHub Copilot when working on this volunteer-run Scouti
 - **Package Management**: uv (Python), npm (frontend)
 
 **Key Design Patterns**:
-- **Single-table DynamoDB**: `PK`/`SK` with GSI1, GSI2, GSI3 (see `tofu/modules/dynamodb/` and code comments)
+- **Single-table DynamoDB**: `PK`/`SK` with GSI1, GSI2, GSI3 (see `tofu/application/modules/dynamodb/` and code comments)
 - **GraphQL schema**: See `tofu/application/schema/schema.graphql`
 - **Authorization**: Owner-based + Share-based (READ/WRITE permissions)
 - **100% test coverage**: No exceptions, all tests must pass
