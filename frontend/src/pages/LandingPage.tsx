@@ -212,7 +212,7 @@ export const LandingPage: React.FC = () => {
 
       {/* Main content */}
       <Container maxWidth="lg" sx={{ mt: { xs: 4, sm: 6, md: 8 }, mb: { xs: 6, sm: 8 } }}>
-        <Stack spacing={{ xs: 6, sm: 8, md: 10 }}>
+        <Stack spacing={{ xs: 5, sm: 6, md: 8 }}>
           {/* Hero section */}
           <Box textAlign="center">
             <Typography
@@ -265,25 +265,26 @@ export const LandingPage: React.FC = () => {
             >
               {isAuthenticated ? 'Go to Dashboard' : 'Start Selling Smarter'}
             </Button>
-            <Link
-              component="button"
-              variant="h5"
-              onClick={() => navigate('/story')}
-              sx={{
-                color: 'text.secondary',
-                textDecoration: 'underline',
-                mt: 1,
-                mb: 0,
-                p: 0,
-                fontWeight: 400,
-                textTransform: 'none',
-                cursor: 'pointer',
-                background: 'none',
-                border: 'none',
-              }}
-            >
-              Read the story behind KernelWorx
-            </Link>
+            <Box sx={{ mt: 2, textAlign: 'center' }}>
+              <Link
+                component="button"
+                variant="h5"
+                onClick={() => navigate('/story')}
+                sx={{
+                  color: 'text.secondary',
+                  textDecoration: 'underline',
+                  p: 0,
+                  fontWeight: 400,
+                  lineHeight: 1.2,
+                  textTransform: 'none',
+                  cursor: 'pointer',
+                  background: 'none',
+                  border: 'none',
+                }}
+              >
+                Read the story behind KernelWorx
+              </Link>
+            </Box>
           </Box>
 
           {/* Hero screenshot */}
