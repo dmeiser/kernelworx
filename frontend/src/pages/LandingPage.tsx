@@ -103,7 +103,7 @@ const FeatureCard: React.FC<FeatureCardProps> = ({
                 width: '100%',
                 height: 160,
                 objectFit: 'cover',
-                objectPosition: 'top',
+                objectPosition: 'top left',
                 display: 'block',
                 transition: 'transform 0.2s ease-in-out',
               }}
@@ -314,7 +314,7 @@ export const LandingPage: React.FC = () => {
                 width: '100%',
                 height: { xs: 220, sm: 320, md: 420 },
                 objectFit: 'cover',
-                objectPosition: 'top',
+                objectPosition: 'top left',
                 display: 'block',
               }}
             />
