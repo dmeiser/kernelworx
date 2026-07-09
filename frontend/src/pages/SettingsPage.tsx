@@ -127,6 +127,29 @@ export const SettingsPage: React.FC = () => {
         </Stack>
       </Paper>
 
+      {/* Support */}
+      <Paper sx={{ p: { xs: 2, sm: 3 }, mb: { xs: 2, sm: 3 } }}>
+        <Typography variant="h6" gutterBottom>
+          Support KernelWorx
+        </Typography>
+        <Stack spacing={2}>
+          <Typography variant="body2" color="text.secondary">
+            KernelWorx is volunteer-built and free to use. If you find it valuable, consider sponsoring development
+            through GitHub Sponsors.
+          </Typography>
+          <Button
+            variant="outlined"
+            href="https://github.com/sponsors/dmeiser"
+            target="_blank"
+            rel="noopener noreferrer"
+            fullWidth
+            sx={{ justifyContent: 'flex-start' }}
+          >
+            Sponsor on GitHub
+          </Button>
+        </Stack>
+      </Paper>
+
       {/* Logout */}
       <Paper
         sx={{

@@ -158,7 +158,7 @@ This project is volunteer-maintained and operated. Operating costs are paid by v
 
 - Contributing code or documentation
 - Reporting bugs and suggesting features
-- Sponsoring the project (link TBD)
+- [Sponsoring the project on GitHub Sponsors](https://github.com/sponsors/dmeiser)
 
 ## Privacy & Compliance
 

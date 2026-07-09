@@ -30,6 +30,7 @@ import { CreateCampaignPage } from './pages/CreateCampaignPage';
 import { SharedCampaignsPage } from './pages/SharedCampaignsPage';
 import { CreateSharedCampaignPage } from './pages/CreateSharedCampaignPage';
 import { PaymentMethodsPage } from './pages/PaymentMethodsPage';
+import { HomePage } from './pages/HomePage';
 import { apolloClient } from './lib/apollo';
 import { theme } from './lib/theme';
 import { AppLayout } from './components/AppLayout';
@@ -84,6 +85,17 @@ function App() {
               />
 
               {/* Protected routes */}
+              <Route
+                path="/home"
+                element={
+                  <ProtectedRoute>
+                    <AppLayout>
+                      <HomePage />
+                    </AppLayout>
+                  </ProtectedRoute>
+                }
+              />
+
               <Route
                 path="/scouts"
                 element={

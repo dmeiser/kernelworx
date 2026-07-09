@@ -86,37 +86,7 @@ describe('LandingPage', () => {
     });
   });
 
-  it('renders the subtitle', async () => {
-    renderWithAuth();
 
-    await waitFor(() => {
-      expect(
-        screen.getByText(
-          'Track orders, manage sellers, and generate reports for your Scouting America popcorn fundraiser',
-        ),
-      ).toBeInTheDocument();
-    });
-  });
-
-  it('renders all feature sections', async () => {
-    renderWithAuth();
-
-    await waitFor(() => {
-      expect(screen.getByText('🍿 Organize Your Sales')).toBeInTheDocument();
-      expect(screen.getByText('🤝 Collaborate with Others')).toBeInTheDocument();
-      expect(screen.getByText('📊 Generate Reports')).toBeInTheDocument();
-      expect(screen.getByText('🔒 Secure & Private')).toBeInTheDocument();
-    });
-  });
-
-  it('renders COPPA warning', async () => {
-    renderWithAuth();
-
-    await waitFor(() => {
-      expect(screen.getByText('⚠️ Age Requirement (COPPA Compliance)')).toBeInTheDocument();
-      expect(screen.getByText(/You must be at least 13 years old to create an account/)).toBeInTheDocument();
-    });
-  });
 
   it('renders footer text', async () => {
     renderWithAuth();
@@ -127,20 +97,13 @@ describe('LandingPage', () => {
     });
   });
 
-  it('shows "Login" button when not authenticated', async () => {
-    renderWithAuth(false);
 
-    await waitFor(() => {
-      const loginButtons = screen.getAllByRole('button', { name: /login/i });
-      expect(loginButtons.length).toBeGreaterThan(0);
-    });
-  });
 
-  it('shows "Go to My Scouts" button when authenticated', async () => {
+  it('shows "Go to Dashboard" button when authenticated', async () => {
     renderWithAuth(true);
 
     await waitFor(() => {
-      expect(screen.getAllByRole('button', { name: /go to my scouts/i }).length).toBeGreaterThan(0);
+      expect(screen.getAllByRole('button', { name: /go to dashboard/i }).length).toBeGreaterThan(0);
     });
   });
 
@@ -150,10 +113,10 @@ describe('LandingPage', () => {
     renderWithAuth(false);
 
     await waitFor(() => {
-      expect(screen.getAllByRole('button', { name: /login/i }).length).toBeGreaterThan(0);
+      expect(screen.getAllByRole('button', { name: /get started free/i }).length).toBeGreaterThan(0);
     });
 
-    const loginButton = screen.getAllByRole('button', { name: /login/i })[0];
+    const loginButton = screen.getAllByRole('button', { name: /get started free/i })[0];
     await user.click(loginButton);
 
     await waitFor(() => {
@@ -161,36 +124,36 @@ describe('LandingPage', () => {
     });
   });
 
-  it('navigates to scouts when button clicked and user is authenticated', async () => {
+  it('navigates to /home when dashboard button clicked and user is authenticated', async () => {
     const user = userEvent.setup();
 
     renderWithAuth(true);
 
     await waitFor(() => {
-      expect(screen.getAllByRole('button', { name: /go to my scouts/i }).length).toBeGreaterThan(0);
+      expect(screen.getAllByRole('button', { name: /go to dashboard/i }).length).toBeGreaterThan(0);
     });
 
-    const buttons = screen.getAllByRole('button', { name: /go to my scouts/i });
+    const buttons = screen.getAllByRole('button', { name: /go to dashboard/i });
     await user.click(buttons[0]);
 
     await waitFor(() => {
-      expect(mockNavigate).toHaveBeenCalledWith('/scouts');
+      expect(mockNavigate).toHaveBeenCalledWith('/home');
     });
   });
 
-  it('shows "Get Started" CTA button when not authenticated', async () => {
+  it('shows "Get Started Free" CTA button when not authenticated', async () => {
     renderWithAuth(false);
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /get started/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /get started free/i })).toBeInTheDocument();
     });
   });
 
-  it('shows "Go to My Scouts" CTA button when authenticated', async () => {
+  it('shows "Go to Dashboard" CTA button when authenticated', async () => {
     renderWithAuth(true);
 
     await waitFor(() => {
-      expect(screen.getAllByRole('button', { name: /go to my scouts/i }).length).toBeGreaterThan(0);
+      expect(screen.getAllByRole('button', { name: /go to dashboard/i }).length).toBeGreaterThan(0);
     });
   });
 

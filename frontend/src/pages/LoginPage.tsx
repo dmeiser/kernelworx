@@ -383,7 +383,7 @@ function useLoginState(
     setError(null);
     setLoading(true);
     try {
-      if (from !== '/scouts') {
+      if (from !== '/home') {
         sessionStorage.setItem('oauth_redirect', from);
       }
       await signInWithRedirect({ provider });
@@ -495,7 +495,7 @@ export const LoginPage: React.FC = () => {
   const location = useLocation();
   const { isAuthenticated, loginWithPassword } = useAuth();
 
-  const from = (location.state as { from?: { pathname?: string } } | undefined)?.from?.pathname || '/scouts';
+  const from = (location.state as { from?: { pathname?: string } } | undefined)?.from?.pathname || '/home';
 
   useEffect(() => {
     if (isAuthenticated) {
