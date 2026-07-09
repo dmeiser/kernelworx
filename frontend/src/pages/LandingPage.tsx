@@ -15,6 +15,7 @@ import {
   Button,
   Container,
   Typography,
+  Link,
   Paper,
   Stack,
   Grid,
@@ -264,16 +265,25 @@ export const LandingPage: React.FC = () => {
             >
               {isAuthenticated ? 'Go to Dashboard' : 'Start Selling Smarter'}
             </Button>
-            <Box sx={{ mt: 1 }}>
-              <Button
-                onClick={() => navigate('/story')}
-                variant="text"
-                size="large"
-                sx={{ textTransform: 'none', color: 'text.secondary', textDecoration: 'underline', py: 0 }}
-              >
-                Read the story behind KernelWorx
-              </Button>
-            </Box>
+            <Link
+              component="button"
+              variant="h5"
+              onClick={() => navigate('/story')}
+              sx={{
+                color: 'text.secondary',
+                textDecoration: 'underline',
+                mt: 1,
+                mb: 0,
+                p: 0,
+                fontWeight: 400,
+                textTransform: 'none',
+                cursor: 'pointer',
+                background: 'none',
+                border: 'none',
+              }}
+            >
+              Read the story behind KernelWorx
+            </Link>
           </Box>
 
           {/* Hero screenshot */}
