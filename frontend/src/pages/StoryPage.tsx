@@ -54,10 +54,9 @@ export const StoryPage: React.FC = () => {
 
               <Typography variant="body1" color="text.primary">
                 At pickup sites I would stand there with multiple payment apps open, waiting for QR
-                codes to load while supporters waited — sometimes with little or no cell signal. My
-                handwriting is not great, so I made mistakes. Then I would spend evenings building a
+                codes to load while supporters waited. Then I would spend evenings building a
                 spreadsheet just to figure out who had paid with which service and whether anything
-                was still owed.
+                was still owed. My handwriting is not great, so I made mistakes.
               </Typography>
 
               <Typography variant="body1" color="text.primary">
@@ -80,10 +79,12 @@ export const StoryPage: React.FC = () => {
               </Typography>
 
               <Typography variant="body1" color="text.primary">
-                The site is free to use. I have done my best to keep the costs of building and running
-                KernelWorx as low as possible. If you find it valuable, you are welcome to sponsor
-                development through GitHub Sponsors — it helps defray hosting and development
-                expenses. KernelWorx is not a non-profit, so donations are not tax deductible.
+                The site is free to use. I don't want to make a profit off this thing, but I don't
+                want to pay for it completely out of pocket either. I spent ~$250-300 on tools and
+                $80 on other development costs. That's likely to continue plus the operations costs.
+                If you find it valuable, please sponsor development through GitHub Sponsors — it
+                helps defray hosting and development expenses. KernelWorx is not a non-profit, so
+                donations are not tax deductible.
               </Typography>
             </Stack>
           </Paper>
