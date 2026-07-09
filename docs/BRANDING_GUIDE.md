@@ -180,14 +180,6 @@ font-family: 'Kaushan Script', 'Open Sans', cursive;
   <button style="padding: 10px 24px; border-radius: 4px; border: none; font-size: 0.95rem; font-weight: 500; background: #dc004e; color: white; margin-bottom: 0.5rem; cursor: pointer;">Danger Button</button>
 </div>
 
-### COPPA Warning (Required on Signup)
-
-<div style="background: #fff3e0; border-left: 4px solid #f57c00; padding: 1.5rem; margin: 1.5rem 0; border-radius: 4px;">
-  <h4 style="color: #e65100; margin-bottom: 0.5rem;">⚠️ Age Requirement (COPPA Compliance)</h4>
-  <p>You must be at least 13 years old to create an account and use this service. By signing in, you confirm that you meet this age requirement.</p>
-  <p style="margin-top: 0.5rem; font-size: 0.9rem;">This application is designed for parents and guardians to manage their Scout's fundraising activities. We do not collect personal information from children under 13.</p>
-</div>
-
 ## Accessibility (WCAG 2.1 AAA Aspirational)
 
 <div style="background: #e3f2fd; border-left: 4px solid #1976d2; padding: 1rem; margin: 1rem 0; border-radius: 4px;">

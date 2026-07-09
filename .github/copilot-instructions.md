@@ -385,7 +385,6 @@ def generate_report(profile_id: str, campaign_id: str) -> str:
 - **Treat all PII as sensitive** (encrypt at rest and in-flight)
 - **Test with test data only** (never production data)
 - **Monitor AWS costs** (set budget alerts, use Free Tier)
-- **COPPA compliance**: Warn users that only 13+ may create accounts
 
 ## 12. Volunteer Context
 

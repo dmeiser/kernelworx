@@ -141,25 +141,6 @@ export const LandingPage: React.FC = () => {
             </Stack>
           </Paper>
 
-          {/* COPPA Warning */}
-          <Paper
-            elevation={1}
-            sx={{
-              p: 3,
-              bgcolor: 'warning.light',
-              borderLeft: 4,
-              borderColor: 'warning.main',
-            }}
-          >
-            <Typography variant="body2" sx={{ fontWeight: 600, mb: 1 }}>
-              ⚠️ Age Requirement (COPPA Compliance)
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              You must be at least 13 years old to create an account. If you are under 13, please ask a parent or
-              guardian to create an account and manage your sales.
-            </Typography>
-          </Paper>
-
           {/* CTA */}
           <Box textAlign="center" sx={{ pt: 2 }}>
             <Button

@@ -148,16 +148,6 @@ export const PrivacyPolicyPage: React.FC = () => {
             (e.g., AWS hosting).
           </Typography>
 
-          {/* COPPA Compliance */}
-          <Typography variant="h6" gutterBottom fontWeight={600} sx={{ mt: 3 }}>
-            Children's Privacy (COPPA)
-          </Typography>
-          <Typography variant="body1" paragraph>
-            This service is designed for use by adults (parents, guardians, and unit leaders) aged 13 and older. We do
-            not knowingly collect personal information from children under 13. Scout profiles created by adults do not
-            require the Scout to have an account or login.
-          </Typography>
-
           {/* Data Retention */}
           <Typography variant="h6" gutterBottom fontWeight={600} sx={{ mt: 3 }}>
             Data Retention

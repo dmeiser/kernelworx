@@ -109,15 +109,6 @@ describe('LandingPage', () => {
     });
   });
 
-  it('renders COPPA warning', async () => {
-    renderWithAuth();
-
-    await waitFor(() => {
-      expect(screen.getByText('⚠️ Age Requirement (COPPA Compliance)')).toBeInTheDocument();
-      expect(screen.getByText(/You must be at least 13 years old to create an account/)).toBeInTheDocument();
-    });
-  });
-
   it('renders footer text', async () => {
     renderWithAuth();
 

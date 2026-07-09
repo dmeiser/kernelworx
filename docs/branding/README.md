@@ -21,7 +21,6 @@ This folder contains branding assets used for the Cognito Hosted UI (login page)
 - **Primary Color**: #1976d2 (Material Blue)
 - **Font (Headings)**: Satisfy (Google Fonts)
 - **Font (Body)**: Open Sans (Google Fonts)
-- **COPPA Compliance**: 13+ age requirement warning displayed
 
 ## Editing
 

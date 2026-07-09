@@ -241,20 +241,6 @@ const SocialSection: React.FC<SocialSectionProps> = ({ loading, onSocialLogin, o
       </Typography>
     </Box>
 
-    <Alert
-      severity="warning"
-      sx={{
-        mt: 3,
-        mb: 4,
-        backgroundColor: '#fff3e0',
-        borderLeft: '4px solid #f57c00',
-        '& .MuiAlert-icon': { color: '#e65100' },
-      }}
-    >
-      <Typography variant="caption" sx={{ color: '#e65100' }}>
-        <strong>⚠️ Age Requirement:</strong> You must be at least 13 years old to create an account (COPPA compliance).
-      </Typography>
-    </Alert>
   </>
 );
 

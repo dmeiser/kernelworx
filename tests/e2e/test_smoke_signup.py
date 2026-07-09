@@ -87,7 +87,7 @@ def test_signup_shows_verification_prompt(page: Page) -> None:
     for pw_field in page.locator('input[type="password"]').all():
         pw_field.fill(password)
 
-    # Age / COPPA confirmation checkbox — required before submit.
+    # Age confirmation checkbox — required before submit.
     age_checkbox = page.get_by_label(_AGE_LABEL, exact=False)
     if not age_checkbox.is_checked():
         age_checkbox.check()
