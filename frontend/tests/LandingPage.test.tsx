@@ -93,7 +93,7 @@ describe('LandingPage', () => {
 
     await waitFor(() => {
       expect(screen.getByText('Built with ❤️ for Scouting America volunteers')).toBeInTheDocument();
-      expect(screen.getByText('Open source • MIT License • Free to use')).toBeInTheDocument();
+      expect(screen.getByText('Free to use • MIT License')).toBeInTheDocument();
     });
   });
 

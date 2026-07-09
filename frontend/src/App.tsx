@@ -31,6 +31,7 @@ import { SharedCampaignsPage } from './pages/SharedCampaignsPage';
 import { CreateSharedCampaignPage } from './pages/CreateSharedCampaignPage';
 import { PaymentMethodsPage } from './pages/PaymentMethodsPage';
 import { HomePage } from './pages/HomePage';
+import { StoryPage } from './pages/StoryPage';
 import { apolloClient } from './lib/apollo';
 import { theme } from './lib/theme';
 import { AppLayout } from './components/AppLayout';
@@ -48,6 +49,7 @@ function App() {
               <Route path="/login" element={<LoginPage />} />
               <Route path="/signup" element={<SignupPage />} />
               <Route path="/privacy" element={<PrivacyPolicyPage />} />
+              <Route path="/story" element={<StoryPage />} />
 
               {/* Shared Campaign short-link route */}
               <Route

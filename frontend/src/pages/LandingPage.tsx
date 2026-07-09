@@ -444,7 +444,7 @@ export const LandingPage: React.FC = () => {
               Built with ❤️ for Scouting America volunteers
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-              Open source • MIT License • Free to use
+              Free to use • MIT License
             </Typography>
             <Stack
               direction="row"
@@ -452,6 +452,14 @@ export const LandingPage: React.FC = () => {
               justifyContent="center"
               sx={{ mt: 1 }}
             >
+              <Button
+                onClick={() => navigate('/story')}
+                variant="text"
+                size="small"
+                sx={{ textTransform: 'none', color: 'text.secondary', textDecoration: 'underline' }}
+              >
+                Our Story
+              </Button>
               <Button
                 onClick={() => navigate('/privacy')}
                 variant="text"
