@@ -349,6 +349,9 @@ export const LandingPage: React.FC = () => {
                   title="Collaborate"
                   description="Share profiles with parents, den leaders, and volunteers with flexible read or write permissions."
                   icon={<ShareIcon />}
+                  screenshot="/marketing/collaborate-page.png"
+                  screenshotAlt="Invite codes for sharing a scout profile"
+                  onScreenshotClick={handleScreenshotClick}
                 />
               </Grid>
               <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
@@ -366,6 +369,9 @@ export const LandingPage: React.FC = () => {
                   title="Report & Export"
                   description="Generate detailed sales reports in Excel or CSV format. Track totals, payments, and delivery status."
                   icon={<AssessmentIcon />}
+                  screenshot="/marketing/reports-page.png"
+                  screenshotAlt="Sales report with CSV and Excel export buttons"
+                  onScreenshotClick={handleScreenshotClick}
                 />
               </Grid>
             </Grid>
