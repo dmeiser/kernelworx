@@ -252,7 +252,7 @@ export const LandingPage: React.FC = () => {
                 mb: 4,
               }}
             >
-              Free — no paid features.
+              Free: No subscriptions, no paid features.
             </Typography>
             <Button
               variant="contained"
