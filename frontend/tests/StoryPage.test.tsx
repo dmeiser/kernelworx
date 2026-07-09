@@ -6,24 +6,38 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { StoryPage } from '../src/pages/StoryPage';
 import { BrowserRouter } from 'react-router-dom';
+import { AuthProvider } from '../src/contexts/AuthContext';
+import * as amplifyAuth from 'aws-amplify/auth';
 
-const mockNavigate = vi.fn();
-vi.mock('react-router-dom', async () => {
-  const actual = await vi.importActual('react-router-dom');
-  return {
-    ...actual,
-    useNavigate: () => mockNavigate,
-  };
-});
+vi.mock('aws-amplify/auth', () => ({
+  fetchAuthSession: vi.fn(),
+  signInWithRedirect: vi.fn(),
+  getCurrentUser: vi.fn(),
+}));
+
+vi.mock('aws-amplify/utils', () => ({
+  Hub: {
+    listen: vi.fn(() => vi.fn()),
+  },
+}));
 
 const renderStoryPage = () =>
   render(
     <BrowserRouter>
-      <StoryPage />
+      <AuthProvider>
+        <StoryPage />
+      </AuthProvider>
     </BrowserRouter>,
   );
 
 describe('StoryPage', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(amplifyAuth.fetchAuthSession).mockResolvedValue({
+      tokens: undefined,
+    } as any);
+  });
+
   it('renders the story heading', () => {
     renderStoryPage();
     expect(screen.getByRole('heading', { name: 'The Story of KernelWorx' })).toBeInTheDocument();

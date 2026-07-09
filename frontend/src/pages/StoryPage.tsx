@@ -6,7 +6,6 @@
  */
 
 import React from 'react';
-import { useNavigate } from 'react-router-dom';
 import {
   Box,
   Button,
@@ -15,33 +14,13 @@ import {
   Paper,
   Stack,
 } from '@mui/material';
-import { ArrowBack as ArrowBackIcon, Favorite as FavoriteIcon } from '@mui/icons-material';
+import { Favorite as FavoriteIcon } from '@mui/icons-material';
+import { LandingHeader } from '../components/LandingHeader';
 
 export const StoryPage: React.FC = () => {
-  const navigate = useNavigate();
-
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: 'background.default' }}>
-      {/* Header */}
-      <Box
-        sx={{
-          bgcolor: 'primary.main',
-          color: 'primary.contrastText',
-          py: 2,
-          px: { xs: 2, sm: 3 },
-        }}
-      >
-        <Container maxWidth="lg">
-          <Button
-            onClick={() => navigate('/')}
-            startIcon={<ArrowBackIcon />}
-            color="inherit"
-            sx={{ textTransform: 'none' }}
-          >
-            Back to KernelWorx
-          </Button>
-        </Container>
-      </Box>
+      <LandingHeader />
 
       {/* Story content */}
       <Container maxWidth="md" sx={{ py: { xs: 4, sm: 6, md: 8 } }}>

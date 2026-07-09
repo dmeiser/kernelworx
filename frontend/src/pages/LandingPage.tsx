@@ -17,8 +17,6 @@ import {
   Typography,
   Paper,
   Stack,
-  AppBar,
-  Toolbar,
   Grid,
   Card,
   CardContent,
@@ -37,6 +35,7 @@ import {
   ZoomIn as ZoomInIcon,
 } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext';
+import { LandingHeader } from '../components/LandingHeader';
 
 interface FeatureCardProps {
   title: string;
@@ -208,62 +207,7 @@ export const LandingPage: React.FC = () => {
 
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: 'background.default' }}>
-      {/* Header with login button */}
-      <AppBar position="static" color="primary" elevation={1}>
-        <Toolbar>
-          <Box sx={{ display: 'flex', alignItems: 'center', flexGrow: 1 }}>
-            <Box
-              component="img"
-              src="/logo.svg"
-              alt="Popcorn kernel"
-              sx={{
-                width: { xs: '28px', sm: '32px', md: '40px' },
-                height: { xs: '28px', sm: '32px', md: '40px' },
-                mr: { xs: 0.5, sm: 1 },
-              }}
-            />
-            <Typography
-              variant="h6"
-              noWrap
-              component="div"
-              sx={{
-                fontFamily: '"Kaushan Script", cursive',
-                fontWeight: 600,
-                letterSpacing: '0.08em',
-                fontSize: { xs: '28px', sm: '32px', md: '40px' },
-                lineHeight: 1,
-                color: 'white',
-                WebkitTextStroke: '0.8px rgba(255, 255, 255, 0.8)',
-                textShadow: '0 1px 0 rgba(255,255,255,0.12), 0 2px 0 rgba(255,255,255,0.06)',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              KernelWorx
-            </Typography>
-          </Box>
-          <Stack direction="row" spacing={1} alignItems="center">
-            <Button
-              onClick={() => navigate('/story')}
-              color="inherit"
-              size="small"
-              sx={{
-                textTransform: 'none',
-                color: 'white',
-                fontWeight: 500,
-                textDecoration: 'underline',
-                textUnderlineOffset: 3,
-              }}
-            >
-              Our Story
-            </Button>
-            <Button variant="contained" color="secondary" startIcon={<LoginIcon />} onClick={handleLogin}>
-              {isAuthenticated ? 'Go to Dashboard' : 'Get Started'}
-            </Button>
-          </Stack>
-        </Toolbar>
-      </AppBar>
+      <LandingHeader />
 
       {/* Main content */}
       <Container maxWidth="lg" sx={{ mt: { xs: 4, sm: 6, md: 8 }, mb: { xs: 6, sm: 8 } }}>
@@ -320,6 +264,16 @@ export const LandingPage: React.FC = () => {
             >
               {isAuthenticated ? 'Go to Dashboard' : 'Start Selling Smarter'}
             </Button>
+            <Box sx={{ mt: 2 }}>
+              <Button
+                onClick={() => navigate('/story')}
+                variant="text"
+                size="small"
+                sx={{ textTransform: 'none', color: 'text.secondary', textDecoration: 'underline' }}
+              >
+                Read the story behind KernelWorx
+              </Button>
+            </Box>
           </Box>
 
           {/* Hero screenshot */}
