@@ -243,9 +243,25 @@ export const LandingPage: React.FC = () => {
               KernelWorx
             </Typography>
           </Box>
-          <Button variant="contained" color="secondary" startIcon={<LoginIcon />} onClick={handleLogin}>
-            {isAuthenticated ? 'Go to Dashboard' : 'Get Started'}
-          </Button>
+          <Stack direction="row" spacing={1} alignItems="center">
+            <Button
+              onClick={() => navigate('/story')}
+              color="inherit"
+              size="small"
+              sx={{
+                textTransform: 'none',
+                color: 'white',
+                fontWeight: 500,
+                textDecoration: 'underline',
+                textUnderlineOffset: 3,
+              }}
+            >
+              Our Story
+            </Button>
+            <Button variant="contained" color="secondary" startIcon={<LoginIcon />} onClick={handleLogin}>
+              {isAuthenticated ? 'Go to Dashboard' : 'Get Started'}
+            </Button>
+          </Stack>
         </Toolbar>
       </AppBar>
 
