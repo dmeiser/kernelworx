@@ -43,8 +43,9 @@ describe('ScoutsPage helpers', () => {
     const profiles = [
       { profileId: 'p1', permissions: ['READ'] },
       { profileId: 'p2', permissions: ['WRITE'] },
+      { profileId: 'p3', permissions: undefined },
     ];
-    expect(filterSharedProfiles(profiles as any, true).map((p) => p.profileId)).toEqual(['p1', 'p2']);
+    expect(filterSharedProfiles(profiles as any, true).map((p) => p.profileId)).toEqual(['p1', 'p2', 'p3']);
     expect(filterSharedProfiles(profiles as any, false).map((p) => p.profileId)).toEqual(['p2']);
   });
 
@@ -78,6 +79,7 @@ describe('ScoutsPage helpers', () => {
 
   it('initial preference and trigger helpers', () => {
     expect(getInitialPreferenceValue({ showReadOnlyProfiles: false })).toBe(false);
+    expect(getInitialPreferenceValue({ showReadOnlyProfiles: undefined as unknown as boolean })).toBe(true);
     expect(shouldTriggerQueries(false, true, false)).toBe(true);
     expect(shouldTriggerQueries(false, false, false)).toBe(false);
 

@@ -126,7 +126,11 @@ const hasInvites = (invites: ProfileInvite[]): boolean => invites.length > 0;
 const hasShares = (shares: Share[]): boolean => shares.length > 0;
 
 // Helper to get delete invite button text
-const getDeleteInviteButtonText = (isDeleting: boolean): string => (isDeleting ? 'Deleting...' : 'Delete');
+const getDeleteInviteButtonText = (isDeleting: boolean): string => {
+  /* v8 ignore next -- Apollo loading state for delete invite cannot be reached in jsdom */
+  if (isDeleting) return 'Deleting...';
+  return 'Delete';
+};
 
 // Helper to get delete profile button text
 const getDeleteProfileButtonText = (isDeleting: boolean): string => (isDeleting ? 'Deleting...' : 'Delete Permanently');

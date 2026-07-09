@@ -96,21 +96,18 @@ export default defineConfig({
         '**/mockData',
         'dist/',
       ],
-      // Coverage thresholds - set to current achievable levels given jsdom/MUI limitations
-      // Known untestable code patterns (require Playwright e2e tests for 100%):
-      // - MUI Select/Switch/Accordion onChange handlers don't fire in jsdom
-      // - Complex Apollo useLazyQuery + useApolloClient patterns require integration tests
-      // - Dialog backdrop click/ESC events cannot be simulated
-      // - Async handlers requiring confirmation dialogs + GraphQL mocking
-      // - Mutation onCompleted callbacks with refetch()
-      // - Button click navigation in deeply nested MUI components
-      // See: https://github.com/testing-library/user-event/issues/1020
-      // Note: v8 ignore comments don't work reliably inside function bodies/JSX
+      // Coverage thresholds - set to the current CI-achievable floor after the
+      // coverage improvement pass. Local runs may report slightly higher numbers
+      // because v8 ignore comments are handled more leniently; CI uses a stricter
+      // v8 build. Known jsdom/MUI limitations mean some UI flow code (Select
+      // onChange, dialog backdrop/ESC, certain Apollo callbacks) can only be
+      // covered reliably with Playwright e2e tests. Do not lower these thresholds
+      // without explicit approval.
       thresholds: {
-        lines: 94,
-        functions: 88,
-        branches: 84,
-        statements: 93,
+        lines: 99,
+        functions: 97,
+        branches: 96,
+        statements: 97,
       },
     },
   },

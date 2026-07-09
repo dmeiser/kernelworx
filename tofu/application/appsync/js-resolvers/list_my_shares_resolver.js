@@ -27,7 +27,7 @@ export function response(ctx) {
     }
     
     // Ensure we always return an array, never null
-    const shares = ctx.result?.items || [];
+    const shares = (ctx.result && ctx.result.items) || [];
     
     // Return shares with permissions - profile fields will be resolved by field resolvers
     // Strip PROFILE# prefix from profileId for GraphQL API response

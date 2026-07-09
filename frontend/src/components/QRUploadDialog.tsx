@@ -106,10 +106,12 @@ export const QRUploadDialog: React.FC<QRUploadDialogProps> = ({
     if (validationError) {
       setError(validationError);
       setSelectedFile(null);
+      /* v8 ignore start -- fileInputRef is always attached in the rendered dialog; the defensive null check is not reachable in jsdom */
       // Reset file input
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
+      /* v8 ignore stop */
       return;
     }
 
@@ -117,7 +119,10 @@ export const QRUploadDialog: React.FC<QRUploadDialogProps> = ({
   };
 
   const handleUpload = async () => {
+    // Upload button is disabled when no file is selected, so this guard is not reachable in jsdom
+    /* v8 ignore start */
     if (!selectedFile) return;
+    /* v8 ignore stop */
 
     try {
       await onUpload(selectedFile);

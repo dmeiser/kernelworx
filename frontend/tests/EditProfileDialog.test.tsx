@@ -307,4 +307,160 @@ describe('EditProfileDialog', () => {
 
     expect(onClose).toHaveBeenCalled();
   });
+
+  test('resets loading state when submission fails', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn().mockRejectedValue(new Error('Update failed'));
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    render(
+      <EditProfileDialog
+        open={true}
+        profileId="profile-123"
+        currentName="Scout Alpha"
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    const nameInput = screen.getByLabelText(/Scout Name/i);
+    await user.clear(nameInput);
+    await user.type(nameInput, 'Scout Beta');
+
+    const submitButton = screen.getByRole('button', { name: /Save Changes/i });
+    await user.click(submitButton);
+
+    await waitFor(() => {
+      expect(consoleErrorSpy).toHaveBeenCalledWith('Failed to update profile:', expect.any(Error));
+    });
+
+    expect(screen.getByRole('button', { name: /Save Changes/i })).toBeInTheDocument();
+    expect(nameInput).not.toBeDisabled();
+
+    consoleErrorSpy.mockRestore();
+  });
+
+  test('does not close when Cancel is clicked while submitting', async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    const onSubmit = vi.fn((_profileId: string, _name: string) => new Promise<void>(() => {}));
+
+    render(
+      <EditProfileDialog
+        open={true}
+        profileId="profile-123"
+        currentName="Scout Alpha"
+        onClose={onClose}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    const nameInput = screen.getByLabelText(/Scout Name/i);
+    await user.clear(nameInput);
+    await user.type(nameInput, 'Scout Beta');
+
+    const submitButton = screen.getByRole('button', { name: /Save Changes/i });
+    await user.click(submitButton);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Saving.../i })).toBeInTheDocument();
+    });
+
+    const cancelButton = screen.getByRole('button', { name: /Cancel/i });
+    expect(cancelButton).toBeDisabled();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  test('does not submit on Enter when name is unchanged', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <EditProfileDialog
+        open={true}
+        profileId="profile-123"
+        currentName="Scout Alpha"
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    const nameInput = screen.getByLabelText(/Scout Name/i);
+    await user.type(nameInput, '{Enter}');
+
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  test('does not submit on Enter when name is empty', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <EditProfileDialog
+        open={true}
+        profileId="profile-123"
+        currentName="Scout Alpha"
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    const nameInput = screen.getByLabelText(/Scout Name/i);
+    await user.clear(nameInput);
+    await user.type(nameInput, '{Enter}');
+
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  test('does not submit on non-Enter key press', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <EditProfileDialog
+        open={true}
+        profileId="profile-123"
+        currentName="Scout Alpha"
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    const nameInput = screen.getByLabelText(/Scout Name/i);
+    await user.clear(nameInput);
+    await user.type(nameInput, 'Scout Beta');
+    await user.type(nameInput, 'a');
+
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  test('resets to new currentName when prop changes while open', async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(
+      <EditProfileDialog
+        open={true}
+        profileId="profile-123"
+        currentName="Scout Alpha"
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+      />,
+    );
+
+    const nameInput = screen.getByLabelText(/Scout Name/i) as HTMLInputElement;
+    await user.clear(nameInput);
+    await user.type(nameInput, 'Scout Beta');
+    expect(nameInput.value).toBe('Scout Beta');
+
+    rerender(
+      <EditProfileDialog
+        open={true}
+        profileId="profile-123"
+        currentName="Scout Gamma"
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+      />,
+    );
+
+    expect(nameInput.value).toBe('Scout Gamma');
+  });
 });

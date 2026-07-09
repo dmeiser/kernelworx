@@ -275,6 +275,16 @@ output "cloudfront_distribution_id" {
   value       = module.cloudfront.distribution_id
 }
 
+output "static_assets_bucket" {
+  description = "Name of the S3 bucket for static assets"
+  value       = module.s3.static_bucket_id
+}
+
+output "exports_bucket" {
+  description = "Name of the S3 bucket for generated reports"
+  value       = module.s3.exports_bucket_name
+}
+
 output "site_url" {
   description = "Public URL of the application site"
   value       = "https://${local.site_domain}"

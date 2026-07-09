@@ -87,7 +87,7 @@ export const useCreateCampaignPageSetup = (effectiveSharedCampaignCode: string |
   );
 
   // Submit handler
-  const { handleSubmit, isFormValid } = useCreateCampaignSubmitHandler(formState);
+  const { handleSubmit, isFormValid } = useCreateCampaignSubmitHandler(formState, isSharedCampaignMode);
 
   return {
     formState,

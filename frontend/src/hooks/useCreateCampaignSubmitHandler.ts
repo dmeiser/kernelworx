@@ -48,12 +48,15 @@ interface SubmitParams {
   sharedCampaignCreatedByName: string | undefined;
 }
 
-export const useCreateCampaignSubmitHandler = (formState: FormState) => {
+export const useCreateCampaignSubmitHandler = (
+  formState: FormState,
+  isSharedCampaignMode: boolean = false,
+) => {
   const { isFormValid, validateProfileSelection, validateUnitFields } = useCreateCampaignValidation(
     formState.profileId,
     formState.campaignName,
     formState.catalogId,
-    formState.submitting === false, // placeholder, will override in validation
+    isSharedCampaignMode,
     formState.unitType,
     formState.unitNumber,
     formState.city,

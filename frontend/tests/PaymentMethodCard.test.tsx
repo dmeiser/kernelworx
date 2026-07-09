@@ -182,4 +182,12 @@ describe('PaymentMethodCard', () => {
     expect(screen.queryByLabelText(/Delete/)).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/Upload QR/)).not.toBeInTheDocument();
   });
+
+  test('shows loading spinner and disables upload button while QR is uploading', () => {
+    render(<PaymentMethodCard {...defaultProps} isUploadingQR={true} />);
+
+    const uploadButton = screen.getByLabelText('Upload QR code for Venmo');
+    expect(uploadButton).toBeDisabled();
+    expect(uploadButton.querySelector('.MuiCircularProgress-root')).toBeInTheDocument();
+  });
 });

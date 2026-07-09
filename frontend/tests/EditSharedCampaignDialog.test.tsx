@@ -228,4 +228,49 @@ describe('EditSharedCampaignDialog', () => {
 
     expect(screen.getByText(/\/c\/SC-TEST/)).toBeInTheDocument();
   });
+
+  it('renders with undefined description using fallback', () => {
+    render(
+      <EditSharedCampaignDialog
+        open={true}
+        sharedCampaign={{ ...baseSharedCampaign, description: undefined }}
+        onClose={onClose}
+        onSave={onSave}
+      />,
+    );
+
+    expect(screen.getByLabelText(/Description \(For Your Reference\)/i)).toHaveValue('');
+  });
+
+  it('submits undefined description when description is cleared', async () => {
+    const user = userEvent.setup();
+    render(
+      <EditSharedCampaignDialog open={true} sharedCampaign={baseSharedCampaign} onClose={onClose} onSave={onSave} />,
+    );
+
+    const input = screen.getByLabelText(/Description \(For Your Reference\)/i);
+    await user.clear(input);
+
+    await user.click(screen.getByRole('button', { name: /save changes/i }));
+
+    await waitFor(() => {
+      expect(onSave).toHaveBeenCalledWith('SC-TEST', expect.objectContaining({ description: undefined }));
+    });
+  });
+
+  it('submits undefined creatorMessage when creatorMessage is cleared', async () => {
+    const user = userEvent.setup();
+    render(
+      <EditSharedCampaignDialog open={true} sharedCampaign={baseSharedCampaign} onClose={onClose} onSave={onSave} />,
+    );
+
+    const input = screen.getByLabelText(/Message to Scouts/i);
+    await user.clear(input);
+
+    await user.click(screen.getByRole('button', { name: /save changes/i }));
+
+    await waitFor(() => {
+      expect(onSave).toHaveBeenCalledWith('SC-TEST', expect.objectContaining({ creatorMessage: undefined }));
+    });
+  });
 });

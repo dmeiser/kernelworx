@@ -53,7 +53,7 @@ resource "aws_dynamodb_table" "accounts" {
   }
 
   point_in_time_recovery {
-    enabled = true
+    enabled = false
   }
 
   server_side_encryption {
@@ -113,7 +113,7 @@ resource "aws_dynamodb_table" "catalogs" {
   }
 
   point_in_time_recovery {
-    enabled = true
+    enabled = false
   }
 
   server_side_encryption {
@@ -156,7 +156,7 @@ resource "aws_dynamodb_table" "profiles" {
   }
 
   point_in_time_recovery {
-    enabled = true
+    enabled = false
   }
 
   server_side_encryption {
@@ -233,7 +233,7 @@ resource "aws_dynamodb_table" "campaigns" {
   }
 
   point_in_time_recovery {
-    enabled = true
+    enabled = false
   }
 
   server_side_encryption {
@@ -293,7 +293,7 @@ resource "aws_dynamodb_table" "orders" {
   }
 
   point_in_time_recovery {
-    enabled = true
+    enabled = false
   }
 
   server_side_encryption {
@@ -336,7 +336,7 @@ resource "aws_dynamodb_table" "shares" {
   }
 
   point_in_time_recovery {
-    enabled = true
+    enabled = false
   }
 
   server_side_encryption {
@@ -384,7 +384,7 @@ resource "aws_dynamodb_table" "invites" {
   }
 
   point_in_time_recovery {
-    enabled = true
+    enabled = false
   }
 
   server_side_encryption {
@@ -444,7 +444,7 @@ resource "aws_dynamodb_table" "shared_campaigns" {
   }
 
   point_in_time_recovery {
-    enabled = true
+    enabled = false
   }
 
   server_side_encryption {

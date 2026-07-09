@@ -262,7 +262,7 @@ const LineItemRow: React.FC<LineItemRowProps> = ({
           inputProps={{ min: 1, max: 99999, step: 1 }}
         />
       </TableCell>
-      <TableCell align="right">${product?.price.toFixed(2)}</TableCell>
+      <TableCell align="right">{product?.price != null ? `$${product.price.toFixed(2)}` : '—'}</TableCell>
       <TableCell align="right">
         <strong>${subtotal.toFixed(2)}</strong>
       </TableCell>

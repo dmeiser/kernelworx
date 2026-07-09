@@ -497,6 +497,59 @@ describe('AuthContext', () => {
     expect(screen.getByTestId('isAdmin')).toHaveTextContent('false');
   });
 
+  it('handles token without cognito:groups claim', async () => {
+    vi.mocked(amplifyAuth.fetchAuthSession).mockResolvedValue({
+      tokens: {
+        idToken: {
+          toString: () => 'mock-token',
+          payload: {},
+        },
+      },
+    } as any);
+    vi.mocked(amplifyAuth.getCurrentUser).mockResolvedValue(mockUser as any);
+
+    render(
+      <AuthProvider>
+        <TestComponent />
+      </AuthProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('loading')).toHaveTextContent('false');
+    });
+
+    expect(screen.getByTestId('isAdmin')).toHaveTextContent('false');
+  });
+
+  it('handles unknown Hub auth events gracefully', async () => {
+    let hubCallback: any;
+    vi.mocked(amplifyUtils.Hub.listen).mockImplementation((channel, callback) => {
+      hubCallback = callback;
+      return vi.fn();
+    });
+
+    vi.mocked(amplifyAuth.fetchAuthSession).mockResolvedValue(createMockSession(true) as any);
+    vi.mocked(amplifyAuth.getCurrentUser).mockResolvedValue(mockUser as any);
+
+    render(
+      <AuthProvider>
+        <TestComponent />
+      </AuthProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('isAuthenticated')).toHaveTextContent('true');
+    });
+
+    // Simulate an unknown event - should not throw or change state
+    hubCallback({ payload: { event: 'unknownEvent' } });
+
+    // State should remain unchanged
+    await waitFor(() => {
+      expect(screen.getByTestId('isAuthenticated')).toHaveTextContent('true');
+    });
+  });
+
   describe('loginWithPassword', () => {
     it('successfully logs in and refreshes session when isSignedIn is true', async () => {
       vi.mocked(amplifyAuth.fetchAuthSession).mockResolvedValue(createMockSession(true) as any);
@@ -643,6 +696,46 @@ describe('AuthContext', () => {
 
       restore();
     });
+
+    it('does not redirect when no OAuth redirect is saved', async () => {
+      // Ensure no redirect is saved
+      sessionStorage.removeItem('oauth_redirect');
+
+      const { locationHrefSpy, restore } = mockWindowLocationHref();
+
+      vi.mocked(amplifyAuth.fetchAuthSession).mockResolvedValue(createMockSession(true) as any);
+      vi.mocked(amplifyAuth.getCurrentUser).mockResolvedValue(mockUser as any);
+
+      const hubListen = vi.mocked(amplifyUtils.Hub.listen);
+      let capturedListener: any;
+      hubListen.mockImplementation((_channel, listener) => {
+        capturedListener = listener;
+        return vi.fn();
+      });
+
+      render(
+        <AuthProvider>
+          <TestComponent />
+        </AuthProvider>,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTestId('loading')).toHaveTextContent('false');
+      });
+
+      if (capturedListener) {
+        await act(async () => {
+          capturedListener({ payload: { event: 'signInWithRedirect' } });
+        });
+      }
+
+      // Wait a tick to ensure any async redirect handling completes
+      await waitFor(() => {
+        expect(locationHrefSpy).not.toHaveBeenCalled();
+      });
+
+      restore();
+    });
   });
 
   describe('refreshSession', () => {
@@ -701,6 +794,34 @@ describe('AuthContext', () => {
       expect(screen.queryByTestId('accountId')).not.toBeInTheDocument();
 
       consoleErrorSpy.mockRestore();
+    });
+
+    it('returns null when getMyAccount is null', async () => {
+      const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      vi.mocked(amplifyAuth.fetchAuthSession).mockResolvedValue(createMockSession(true) as any);
+      vi.mocked(amplifyAuth.getCurrentUser).mockResolvedValue(mockUser as any);
+
+      // Mock Apollo client to return null getMyAccount
+      const { apolloClient } = await import('../src/lib/apollo');
+      vi.mocked(apolloClient.query).mockResolvedValueOnce({ data: { getMyAccount: null } } as any);
+
+      render(
+        <AuthProvider>
+          <TestComponent />
+        </AuthProvider>,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTestId('loading')).toHaveTextContent('false');
+      });
+
+      // Warning should have been logged for authenticated user without account record
+      expect(consoleWarnSpy).toHaveBeenCalledWith('User has valid tokens but no account record yet');
+
+      // Account should be null
+      expect(screen.queryByTestId('accountId')).not.toBeInTheDocument();
+
+      consoleWarnSpy.mockRestore();
     });
   });
 });

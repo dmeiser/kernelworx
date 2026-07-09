@@ -121,12 +121,12 @@ def validate_address(address: Dict[str, Any]) -> None:
     Validate address has all required fields.
 
     Args:
-        address: Address dictionary with street, city, state, zip
+        address: Address dictionary with street, city, state, zipCode
 
     Raises:
         AppError: If address is missing required fields
     """
-    required_fields = ["street", "city", "state", "zip"]
+    required_fields = ["street", "city", "state", "zipCode"]
     missing_fields = [field for field in required_fields if not address.get(field)]
 
     if missing_fields:
@@ -137,9 +137,9 @@ def validate_address(address: Dict[str, Any]) -> None:
         )
 
     # Validate zip code (5 or 9 digits)
-    zip_code = str(address.get("zip", "")).strip()
+    zip_code = str(address.get("zipCode", "")).strip()
     if not re.match(r"^\d{5}(-\d{4})?$", zip_code):
-        raise AppError(ErrorCode.INVALID_ADDRESS, "ZIP code must be 5 or 9 digits", {"zip": zip_code})
+        raise AppError(ErrorCode.INVALID_ADDRESS, "ZIP code must be 5 or 9 digits", {"zipCode": zip_code})
 
 
 def _validate_contact_methods(customer: Dict[str, Any]) -> None:
@@ -361,11 +361,11 @@ def _validate_order_line_items(updates: Dict[str, Any]) -> Optional[Dict[str, An
     """Validate lineItems if provided."""
     if "lineItems" not in updates:
         return None
-    
+
     error = _check_line_items_array(updates["lineItems"])
     if error:
         return error
-    
+
     for item in updates["lineItems"]:
         error = _validate_single_line_item(item)
         if error:

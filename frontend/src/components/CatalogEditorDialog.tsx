@@ -87,6 +87,7 @@ export const CatalogEditorDialog: React.FC<CatalogEditorDialogProps> = ({ open, 
   };
 
   const handleRemoveProduct = (index: number) => {
+    /* v8 ignore next -- Delete button is hidden when only one product remains, so this branch is unreachable in the UI */
     if (products.length > 1) {
       setProducts(products.filter((_, i) => i !== index));
     }

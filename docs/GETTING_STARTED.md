@@ -2,11 +2,12 @@
 
 ## Prerequisites
 
-- **Python 3.13+** with `uv` package manager
-- **Node.js 18+** with `npm`
-- **AWS CLI** configured with appropriate credentials
-- **AWS Account** with permissions for DynamoDB, S3, Cognito, AppSync, CloudFormation
+- **Python 3.14+** with `uv` package manager
+- **Node.js 20+** with `npm`
+- **AWS CLI v2** configured with appropriate credentials
+- **AWS Account** with permissions for IAM, DynamoDB, S3, Cognito, AppSync, ACM, Route 53, CloudFront, Lambda, SNS, CloudFormation, and CloudWatch/Billing
 - **Git** for version control
+- **OpenTofu** >= 1.7.0
 
 ## Initial Setup
 
@@ -37,33 +38,53 @@ aws configure --profile dev
 export AWS_PROFILE=dev
 ```
 
-### 3. Configure Deployment Settings
+### 3. Bootstrap the OpenTofu State Bucket
 
-**Important**: Create a `.env` file in the `tofu/` directory with your configuration:
+OpenTofu stores state in S3. The backend bucket must exist before the first `tofu init`:
 
 ```bash
-cd tofu
+# Deploy the bootstrap CloudFormation stack (adjust Environment if needed)
+aws cloudformation deploy \
+  --template-file tofu/bootstrap/state-bucket.yaml \
+  --stack-name kernelworx-tofu-state \
+  --parameter-overrides Environment=dev \
+  --region us-east-1
+```
+
+Verify the bucket name matches the backend configured in `tofu/application/environments/dev/main.tf` (default: `kernelworx-tofu-state-us-east-1-dev`). If you changed regions or naming conventions, update the backend config or the template parameters accordingly.
+
+### 4. Configure Deployment Settings
+
+**Important**: Create a `.env` file in the repository root with your configuration:
+
+```bash
 cp .env.example .env
 ```
 
-Edit `tofu/.env` with your settings:
+Edit `.env` with your settings:
 
 ```bash
 # Encryption passphrase for state files (generate a secure random string)
-ENCRYPTION_PASSPHRASE=your-secure-passphrase-here
+TF_VAR_encryption_passphrase=your-secure-passphrase-here
 ```
 
-### 4. Verify Environment
+The deployment helper scripts source this root `.env` file. If you run `tofu` directly, export the variable instead:
+
+```bash
+export TF_VAR_encryption_passphrase='your-passphrase'
+```
+
+### 5. Verify Environment
 
 ```bash
 # Check Python version
-python --version  # Should be 3.13+
+python --version  # Should be 3.14+
 
 # Check uv
 uv --version
 
 # Check Node.js
-node --version  # Should be 18+
+node --version  # Should be 20+
 
 # Check AWS credentials
 aws sts get-caller-identity
@@ -76,7 +97,7 @@ aws sts get-caller-identity
 The easiest way to deploy is using OpenTofu:
 
 ```bash
-cd tofu/environments/dev
+cd tofu/application/environments/dev
 
 # Initialize OpenTofu (first time only)
 tofu init
@@ -88,18 +109,17 @@ tofu plan
 tofu apply
 ```
 
-The script will:
-1. Load configuration from `.env`
+The process will:
+1. Load configuration from the root `.env`
 2. Validate required settings
-3. Auto-detect existing resources if specified in `.env`
-4. Deploy the CDK stack
+3. Deploy the OpenTofu-managed infrastructure
 
 ### Manual Deployment
 
 If you prefer more control:
 
 ```bash
-cd tofu/environments/dev
+cd tofu/application/environments/dev
 
 # Set encryption passphrase
 export TF_VAR_encryption_passphrase='your-passphrase'
@@ -119,13 +139,13 @@ tofu apply tfplan
 If you have existing resources from a previous deployment, you can import them into OpenTofu state:
 
 ```bash
-cd tofu/environments/dev
+cd tofu/application/environments/dev
 
 # Import existing DynamoDB table
-tofu import 'module.dynamodb.aws_dynamodb_table.main' table-name
+tofu import 'module.dynamodb.aws_dynamodb_table.accounts' table-name
 
 # Import existing S3 bucket
-tofu import 'module.s3.aws_s3_bucket.static' bucket-name
+tofu import 'module.s3.aws_s3_bucket.static_assets' bucket-name
 ```
 
 **Finding existing resources:**
@@ -150,11 +170,11 @@ Each environment has its own directory:
 
 ```bash
 # For dev environment
-cd tofu/environments/dev
+cd tofu/application/environments/dev
 tofu apply
 
 # For prod environment (when ready)
-cd tofu/environments/prod
+cd tofu/application/environments/prod
 tofu apply
 ```
 
@@ -170,11 +190,11 @@ export TF_VAR_google_client_id="your-client-id"
 export TF_VAR_google_client_secret="your-client-secret"
 
 # Deploy
-cd tofu/environments/dev
+cd tofu/application/environments/dev
 tofu apply
 ```
 
-If these variables are not set, only email/password authentication will be available.
+**Important:** the dev environment currently enables Google IdP and WebAuthn by default. If you do not have Google OAuth credentials, set `enable_google_idp = false` and `enable_webauthn = false` in `tofu/application/environments/dev/main.tf` before running `tofu apply`, or the deployment may create a broken Cognito configuration. If these variables are not set and Google IdP remains enabled, only email/password authentication will work reliably.
 
 ## Development Workflow
 
@@ -225,7 +245,7 @@ uv run pytest tests/unit --cov=src --cov-fail-under=100
 ### OpenTofu Commands
 
 ```bash
-cd tofu/environments/dev
+cd tofu/application/environments/dev
 
 # Initialize working directory
 tofu init
@@ -246,17 +266,40 @@ After deployment, OpenTofu outputs key resource identifiers:
 
 ```bash
 # Get outputs
-cd tofu/environments/dev
+cd tofu/application/environments/dev
 tofu output
 ```
 
 Key outputs include:
-- **UserPoolId**: Cognito User Pool ID
-- **UserPoolClientId**: App client ID for authentication
-- **ApiEndpoint**: AppSync GraphQL API endpoint
-- **TableName**: DynamoDB table name
-- **StaticAssetsBucket**: S3 bucket for SPA hosting
-- **ExportsBucket**: S3 bucket for generated reports
+- **cognito_user_pool_id**: Cognito User Pool ID
+- **cognito_client_id**: App client ID for authentication
+- **appsync_api_url**: AppSync GraphQL API endpoint
+- **cloudfront_distribution_id**: CloudFront distribution ID for invalidations
+- **static_assets_bucket**: S3 bucket for SPA hosting
+- **exports_bucket**: S3 bucket for generated reports
+- **site_url**: Public URL of the deployed application
+
+### Frontend Build and Deploy
+
+After the backend is deployed, build and deploy the React SPA:
+
+```bash
+cd frontend
+
+# Copy and fill in values from `tofu output`
+cp .env.example .env.local
+
+# Build the production bundle
+npm run build
+
+# Upload to S3
+aws s3 sync dist s3://$(tofu -chdir=../tofu/application/environments/dev output -raw static_assets_bucket) --delete
+
+# Invalidate the CloudFront distribution
+aws cloudfront create-invalidation \
+  --distribution-id $(tofu -chdir=../tofu/application/environments/dev output -raw cloudfront_distribution_id) \
+  --paths "/*"
+```
 
 ## Troubleshooting
 
@@ -298,11 +341,13 @@ The deployed resources use serverless/on-demand pricing:
 
 ## Next Steps
 
-1. **Add Lambda Functions to CDK Stack** - Integrate the profile sharing handlers
-2. **Deploy Frontend** - Create React SPA and deploy to S3 + CloudFront
-3. **Configure Social Providers** - Set up OAuth apps with Google/Facebook
-4. **Enable CloudFront** - Once account verification is complete
-5. **Set Up CI/CD** - GitHub Actions for automated testing and deployment
+1. **Run Backend Tests** - `uv run pytest tests/unit --cov=src --cov-fail-under=100`
+2. **Deploy Frontend** - Build the React SPA and deploy to S3 + CloudFront
+3. **Configure Social Providers** - Set up OAuth apps with Google/Facebook (optional)
+4. **Create an Admin Catalog** - Required before campaigns can be created
+5. **Create Test Users** - `bash scripts/create-test-users.sh`
+6. **Run E2E Smoke Tests** - `uv run pytest tests/e2e/ --ignore=tests/unit -v`
+7. **Set Up CI/CD** - GitHub Actions for automated testing and deployment
 
 ## Support
 

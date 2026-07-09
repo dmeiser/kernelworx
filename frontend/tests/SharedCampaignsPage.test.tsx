@@ -177,6 +177,23 @@ describe('SharedCampaignsPage', () => {
         expect(screen.getByText(/1\/50 active/)).toBeInTheDocument();
       });
     });
+
+    it('shows Unknown Catalog fallback when catalog is missing', async () => {
+      const campaignsWithMissingCatalog = [
+        {
+          ...mockSharedCampaigns[0],
+          sharedCampaignCode: 'NOCAT123',
+          catalog: null,
+        },
+      ];
+      renderWithProviders([createListMock(campaignsWithMissingCatalog)]);
+
+      await waitFor(() => {
+        expect(screen.getByText('NOCAT123')).toBeInTheDocument();
+      });
+
+      expect(screen.getByText('Unknown Catalog')).toBeInTheDocument();
+    });
   });
 
   describe('Copy link functionality', () => {
@@ -193,6 +210,28 @@ describe('SharedCampaignsPage', () => {
       await waitFor(() => {
         expect(navigator.clipboard.writeText).toHaveBeenCalledWith(expect.stringContaining('/c/PACK123F25'));
       });
+    });
+
+    it('shows error snackbar when copy fails', async () => {
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const originalWriteText = navigator.clipboard.writeText;
+      navigator.clipboard.writeText = vi.fn().mockRejectedValue(new Error('Clipboard denied'));
+
+      renderWithProviders([createListMock()]);
+
+      await waitFor(() => {
+        expect(screen.getByText('PACK123F25')).toBeInTheDocument();
+      });
+
+      const copyButtons = screen.getAllByLabelText('Copy link');
+      fireEvent.click(copyButtons[0]);
+
+      await waitFor(() => {
+        expect(screen.getByText('Failed to copy link')).toBeInTheDocument();
+      });
+
+      navigator.clipboard.writeText = originalWriteText;
+      consoleSpy.mockRestore();
     });
   });
 
