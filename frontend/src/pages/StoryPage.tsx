@@ -54,11 +54,11 @@ export const StoryPage: React.FC = () => {
               </Typography>
 
               <Typography variant="body1" color="text.primary">
-                At pickup sites I'd stand there fumbling between apps, trying to find the right QR
-                code while a supporter waited. Then I'd go home and rebuild the same spreadsheet I'd
-                made the year before, just to figure out who had paid with which service and whether
-                anything was still owed. My handwriting didn't help — I'd transpose numbers, lose
-                names, and create more work for myself.
+                Out selling door-to-door, somebody would decide to buy something, and I'd stand there
+                fumbling between payment apps trying to find the right QR code while they waited.
+                Then I'd go home and build a spreadsheet because I couldn't keep doing the paper
+                sheets and I needed the numbers. My handwriting didn't help — I'd transpose numbers,
+                lose names, and create more work for myself.
               </Typography>
 
               <Typography variant="body1" color="text.primary">

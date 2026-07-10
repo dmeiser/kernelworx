@@ -46,7 +46,7 @@ describe('StoryPage', () => {
   it('renders key story content', () => {
     renderStoryPage();
     expect(screen.getByText(/one step behind/i)).toBeInTheDocument();
-    expect(screen.getByText(/supporter/i)).toBeInTheDocument();
+    expect(screen.getByText(/door-to-door/i)).toBeInTheDocument();
     expect(screen.getByText(/harder for both parents and Scouts/i)).toBeInTheDocument();
     expect(screen.getAllByText(/Pack Kernel/i).length).toBeGreaterThan(0);
   });
