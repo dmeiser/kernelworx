@@ -81,9 +81,10 @@ const BrowserFrame: React.FC<{ url?: string; children: React.ReactNode; sx?: SxP
   </Box>
 );
 
-const PhoneFrameSvg: React.FC<{ variant: 'iphone' | 'android'; children: React.ReactNode }> = ({
+const PhoneFrameSvg: React.FC<{ variant: 'iphone' | 'android'; children: React.ReactNode; sx?: SxProps<Theme> }> = ({
   variant,
   children,
+  sx,
 }) => {
   const isIphone = variant === 'iphone';
   const frameColor = isIphone ? '#1c1c1e' : '#1a1a1a';
@@ -105,6 +106,7 @@ const PhoneFrameSvg: React.FC<{ variant: 'iphone' | 'android'; children: React.R
         mx: 'auto',
         position: 'relative',
         '& svg': { display: 'block', width: '100%', height: 'auto' },
+        ...((sx as object) || {}),
       }}
     >
       <svg viewBox={`0 0 ${width} ${height}`} xmlns="http://www.w3.org/2000/svg">
@@ -159,5 +161,9 @@ export const DeviceFrame: React.FC<DeviceFrameProps> = ({ variant, url, children
     );
   }
 
-  return <PhoneFrameSvg variant={variant}>{children}</PhoneFrameSvg>;
+  return (
+    <PhoneFrameSvg variant={variant} sx={sx}>
+      {children}
+    </PhoneFrameSvg>
+  );
 };

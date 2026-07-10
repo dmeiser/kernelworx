@@ -19,9 +19,6 @@ import {
   Paper,
   Stack,
   Grid,
-  Dialog,
-  DialogContent,
-  IconButton,
   Tabs,
   Tab,
 } from '@mui/material';
@@ -32,8 +29,6 @@ import {
   Assessment as AssessmentIcon,
   Payment as PaymentIcon,
   Favorite as FavoriteIcon,
-  Close as CloseIcon,
-  ZoomIn as ZoomInIcon,
 } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext';
 import { LandingHeader } from '../components/LandingHeader';
@@ -77,12 +72,6 @@ const Step: React.FC<StepProps> = ({ number, title, description }) => (
 export const LandingPage: React.FC = () => {
   const navigate = useNavigate();
   const { isAuthenticated } = useAuth();
-  const [lightboxOpen, setLightboxOpen] = React.useState(false);
-  const [lightboxImage, setLightboxImage] = React.useState<{
-    src: string;
-    alt: string;
-    frameVariant?: 'browser' | 'iphone' | 'android';
-  } | null>(null);
   const [activeFeature, setActiveFeature] = React.useState(0);
 
   const features = [
@@ -130,20 +119,6 @@ export const LandingPage: React.FC = () => {
     } else {
       navigate('/login');
     }
-  };
-
-  const handleScreenshotClick = (
-    src: string,
-    alt: string,
-    frameVariant?: 'browser' | 'iphone' | 'android',
-  ) => {
-    setLightboxImage({ src, alt, frameVariant });
-    setLightboxOpen(true);
-  };
-
-  const handleCloseLightbox = () => {
-    setLightboxOpen(false);
-    setLightboxImage(null);
   };
 
   return (
@@ -283,22 +258,10 @@ export const LandingPage: React.FC = () => {
                       </Typography>
                     </Box>
                     <Box
-                      onClick={() =>
-                        handleScreenshotClick(
-                          features[activeFeature].screenshot,
-                          features[activeFeature].screenshotAlt,
-                          features[activeFeature].frameVariant,
-                        )
-                      }
                       sx={{
-                        position: 'relative',
-                        cursor: 'pointer',
                         width: '100%',
                         display: 'flex',
                         justifyContent: 'center',
-                        '&:hover .zoom-overlay': {
-                          opacity: 1,
-                        },
                       }}
                     >
                       <DeviceFrame
@@ -316,29 +279,13 @@ export const LandingPage: React.FC = () => {
                           alt={features[activeFeature].screenshotAlt}
                           sx={{
                             width: '100%',
-                            height: features[activeFeature].frameVariant === 'browser' ? { xs: 220, sm: 360 } : { xs: 360, sm: 520 },
+                            height: features[activeFeature].frameVariant === 'browser' ? { xs: 220, sm: 360 } : '100%',
                             objectFit: 'cover',
                             objectPosition: 'top left',
                             display: 'block',
                           }}
                         />
                       </DeviceFrame>
-                      <Box
-                        className="zoom-overlay"
-                        sx={{
-                          position: 'absolute',
-                          inset: 0,
-                          bgcolor: 'rgba(0, 0, 0, 0.4)',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          opacity: 0,
-                          transition: 'opacity 0.2s ease-in-out',
-                          borderRadius: 2,
-                        }}
-                      >
-                        <ZoomInIcon sx={{ color: 'white', fontSize: 40 }} />
-                      </Box>
                     </Box>
                   </Stack>
                 </Box>
@@ -442,83 +389,6 @@ export const LandingPage: React.FC = () => {
         </Stack>
       </Container>
 
-      {/* Screenshot lightbox */}
-      <Dialog
-        open={lightboxOpen}
-        onClose={handleCloseLightbox}
-        maxWidth="lg"
-        fullWidth
-        PaperProps={{ sx: { bgcolor: 'background.paper', borderRadius: 2 } }}
-      >
-        <Box sx={{ position: 'relative' }}>
-          <IconButton
-            onClick={handleCloseLightbox}
-            sx={{
-              position: 'absolute',
-              top: 8,
-              right: 8,
-              bgcolor: 'rgba(0, 0, 0, 0.5)',
-              color: 'white',
-              '&:hover': { bgcolor: 'rgba(0, 0, 0, 0.7)' },
-              zIndex: 1,
-            }}
-            aria-label="Close screenshot preview"
-          >
-            <CloseIcon />
-          </IconButton>
-          <DialogContent sx={{ p: 1 }}>
-            {lightboxImage && lightboxImage.frameVariant ? (
-              <Box
-                sx={{
-                  display: 'flex',
-                  justifyContent: 'center',
-                  alignItems: 'center',
-                  minHeight: '60vh',
-                }}
-              >
-                <DeviceFrame
-                  variant={lightboxImage.frameVariant}
-                  url={lightboxImage.frameVariant === 'browser' ? 'kernelworx.com' : undefined}
-                  sx={
-                    lightboxImage.frameVariant === 'browser'
-                      ? { width: '100%', maxWidth: 1100 }
-                      : { maxWidth: 420 }
-                  }
-                >
-                  <Box
-                    component="img"
-                    src={lightboxImage.src}
-                    alt={lightboxImage.alt}
-                    sx={{
-                      width: '100%',
-                      height: lightboxImage.frameVariant === 'browser' ? 520 : '100%',
-                      objectFit: 'cover',
-                      objectPosition: 'top left',
-                      display: 'block',
-                    }}
-                  />
-                </DeviceFrame>
-              </Box>
-            ) : (
-              lightboxImage && (
-                <Box
-                  component="img"
-                  src={lightboxImage.src}
-                  alt={lightboxImage.alt}
-                  sx={{
-                    width: '100%',
-                    height: 'auto',
-                    maxHeight: '80vh',
-                    objectFit: 'contain',
-                    display: 'block',
-                    borderRadius: 1,
-                  }}
-                />
-              )
-            )}
-          </DialogContent>
-        </Box>
-      </Dialog>
     </Box>
   );
 };
