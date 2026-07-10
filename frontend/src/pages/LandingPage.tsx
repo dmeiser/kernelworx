@@ -253,7 +253,7 @@ export const LandingPage: React.FC = () => {
             </Typography>
             <Typography
               variant="subtitle1"
-              color="success.dark"
+              color="primary.main"
               sx={{
                 fontWeight: 600,
                 maxWidth: 700,
@@ -261,11 +261,11 @@ export const LandingPage: React.FC = () => {
                 mb: 1,
               }}
             >
-              Free: No subscriptions, no paid features.
+              Built for parents and Units. Use it on your own or with the whole pack.
             </Typography>
             <Typography
               variant="subtitle1"
-              color="primary.main"
+              color="success.dark"
               sx={{
                 fontWeight: 600,
                 maxWidth: 700,
@@ -273,7 +273,7 @@ export const LandingPage: React.FC = () => {
                 mb: 4,
               }}
             >
-              Built for parents and Units. Use it on your own or with the whole pack.
+              Free: No subscriptions, no paid features.
             </Typography>
             <Button
               variant="contained"
