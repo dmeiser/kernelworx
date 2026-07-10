@@ -19,11 +19,10 @@ import {
   Paper,
   Stack,
   Grid,
-  Card,
-  CardContent,
   Dialog,
   DialogContent,
   IconButton,
+  MobileStepper,
 } from '@mui/material';
 import {
   Login as LoginIcon,
@@ -34,133 +33,12 @@ import {
   Favorite as FavoriteIcon,
   Close as CloseIcon,
   ZoomIn as ZoomInIcon,
+  KeyboardArrowLeft as KeyboardArrowLeftIcon,
+  KeyboardArrowRight as KeyboardArrowRightIcon,
 } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext';
 import { LandingHeader } from '../components/LandingHeader';
 import { DeviceFrame } from '../components/DeviceFrame';
-
-interface FeatureCardProps {
-  title: string;
-  description: string;
-  icon: React.ReactNode;
-  screenshot?: string;
-  screenshotAlt?: string;
-  frameVariant?: 'browser' | 'iphone' | 'android';
-  onScreenshotClick?: (src: string, alt: string) => void;
-}
-
-const FeatureCard: React.FC<FeatureCardProps> = ({
-  title,
-  description,
-  icon,
-  screenshot,
-  screenshotAlt,
-  frameVariant,
-  onScreenshotClick,
-}) => (
-  <Card elevation={2} sx={{ height: '100%' }}>
-    <CardContent>
-      <Stack spacing={2}>
-        <Box
-          sx={{
-            p: 2,
-            bgcolor: 'primary.light',
-            borderRadius: 2,
-            display: 'inline-flex',
-            color: 'primary.contrastText',
-          }}
-        >
-          {icon}
-        </Box>
-        <Typography variant="h6" component="h2" gutterBottom sx={{ fontWeight: 700 }}>
-          {title}
-        </Typography>
-        <Typography variant="body2" color="text.secondary">
-          {description}
-        </Typography>
-        {screenshot ? (
-          <Box
-            onClick={() => onScreenshotClick?.(screenshot, screenshotAlt || title)}
-            sx={{
-              mt: 2,
-              position: 'relative',
-              cursor: 'pointer',
-              '&:hover .zoom-overlay': {
-                opacity: 1,
-              },
-            }}
-          >
-            {frameVariant ? (
-              <DeviceFrame variant={frameVariant}>
-                <Box
-                  component="img"
-                  src={screenshot}
-                  alt={screenshotAlt || title}
-                  sx={{
-                    width: '100%',
-                    height: frameVariant === 'browser' ? 160 : '100%',
-                    objectFit: 'cover',
-                    objectPosition: 'top left',
-                    bgcolor: 'grey.900',
-                    display: 'block',
-                  }}
-                />
-              </DeviceFrame>
-            ) : (
-              <Box
-                component="img"
-                src={screenshot}
-                alt={screenshotAlt || title}
-                sx={{
-                  width: '100%',
-                  height: 160,
-                  borderRadius: 1,
-                  objectFit: 'cover',
-                  objectPosition: 'top left',
-                  display: 'block',
-                }}
-              />
-            )}
-            <Box
-              className="zoom-overlay"
-              sx={{
-                position: 'absolute',
-                inset: 0,
-                bgcolor: 'rgba(0, 0, 0, 0.4)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                opacity: 0,
-                transition: 'opacity 0.2s ease-in-out',
-                borderRadius: frameVariant ? 2 : 1,
-              }}
-            >
-              <ZoomInIcon sx={{ color: 'white', fontSize: 32 }} />
-            </Box>
-          </Box>
-        ) : (
-          <Box
-            sx={{
-              mt: 2,
-              height: 160,
-              bgcolor: 'action.hover',
-              borderRadius: 1,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              border: '1px dashed',
-              borderColor: 'divider',
-            }}
-          >
-            <Typography variant="caption" color="text.disabled">
-              Screenshot coming soon
-            </Typography>
-          </Box>
-        )}
-      </Stack>
-    </CardContent>
-  </Card>
-);
 
 interface StepProps {
   number: number;
@@ -201,7 +79,51 @@ export const LandingPage: React.FC = () => {
   const navigate = useNavigate();
   const { isAuthenticated } = useAuth();
   const [lightboxOpen, setLightboxOpen] = React.useState(false);
-  const [lightboxImage, setLightboxImage] = React.useState<{ src: string; alt: string } | null>(null);
+  const [lightboxImage, setLightboxImage] = React.useState<{
+    src: string;
+    alt: string;
+    frameVariant?: 'browser' | 'iphone' | 'android';
+  } | null>(null);
+  const [activeFeature, setActiveFeature] = React.useState(0);
+
+  const features = [
+    {
+      title: 'Organize Sellers',
+      description:
+        'Create and manage multiple scout profiles. Track each seller\'s campaigns, orders, and progress over time.',
+      icon: <PeopleIcon />,
+      screenshot: '/marketing/scouts-page-mobile.png',
+      screenshotAlt: 'My Scouts page showing seller management',
+      frameVariant: 'iphone' as const,
+    },
+    {
+      title: 'Collaborate',
+      description:
+        'Share profiles with parents, den leaders, and volunteers with flexible read or write permissions.',
+      icon: <ShareIcon />,
+      screenshot: '/marketing/collaborate-page-mobile.png',
+      screenshotAlt: 'Invite codes for sharing a scout profile',
+      frameVariant: 'android' as const,
+    },
+    {
+      title: 'Track Payments',
+      description:
+        'Set up custom payment methods with optional QR codes so buyers can pay the way that works best.',
+      icon: <PaymentIcon />,
+      screenshot: '/marketing/payment-methods-page-mobile.png',
+      screenshotAlt: 'Payment Methods page showing built-in and custom payment options',
+      frameVariant: 'iphone' as const,
+    },
+    {
+      title: 'Report & Export',
+      description:
+        'Generate detailed sales reports in Excel or CSV format. Track totals, payments, and delivery status.',
+      icon: <AssessmentIcon />,
+      screenshot: '/marketing/reports-page.png',
+      screenshotAlt: 'Sales report with CSV and Excel export buttons',
+      frameVariant: 'browser' as const,
+    },
+  ];
 
   const handleLogin = () => {
     if (isAuthenticated) {
@@ -211,8 +133,12 @@ export const LandingPage: React.FC = () => {
     }
   };
 
-  const handleScreenshotClick = (src: string, alt: string) => {
-    setLightboxImage({ src, alt });
+  const handleScreenshotClick = (
+    src: string,
+    alt: string,
+    frameVariant?: 'browser' | 'iphone' | 'android',
+  ) => {
+    setLightboxImage({ src, alt, frameVariant });
     setLightboxOpen(true);
   };
 
@@ -331,52 +257,136 @@ export const LandingPage: React.FC = () => {
             >
               KernelWorx helps Scouting America volunteers run smoother popcorn sales from sign-up to final report.
             </Typography>
-            <Grid container spacing={3}>
-              <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
-                <FeatureCard
-                  title="Organize Sellers"
-                  description="Create and manage multiple scout profiles. Track each seller's campaigns, orders, and progress over time."
-                  icon={<PeopleIcon />}
-                  screenshot="/marketing/scouts-page-mobile.png"
-                  screenshotAlt="My Scouts page showing seller management"
-                  frameVariant="iphone"
-                  onScreenshotClick={handleScreenshotClick}
-                />
-              </Grid>
-              <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
-                <FeatureCard
-                  title="Collaborate"
-                  description="Share profiles with parents, den leaders, and volunteers with flexible read or write permissions."
-                  icon={<ShareIcon />}
-                  screenshot="/marketing/collaborate-page-mobile.png"
-                  screenshotAlt="Invite codes for sharing a scout profile"
-                  frameVariant="android"
-                  onScreenshotClick={handleScreenshotClick}
-                />
-              </Grid>
-              <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
-                <FeatureCard
-                  title="Track Payments"
-                  description="Set up custom payment methods with optional QR codes so buyers can pay the way that works best."
-                  icon={<PaymentIcon />}
-                  screenshot="/marketing/payment-methods-page-mobile.png"
-                  screenshotAlt="Payment Methods page showing built-in and custom payment options"
-                  frameVariant="iphone"
-                  onScreenshotClick={handleScreenshotClick}
-                />
-              </Grid>
-              <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
-                <FeatureCard
-                  title="Report & Export"
-                  description="Generate detailed sales reports in Excel or CSV format. Track totals, payments, and delivery status."
-                  icon={<AssessmentIcon />}
-                  screenshot="/marketing/reports-page.png"
-                  screenshotAlt="Sales report with CSV and Excel export buttons"
-                  frameVariant="browser"
-                  onScreenshotClick={handleScreenshotClick}
-                />
-              </Grid>
-            </Grid>
+
+            <Box sx={{ position: 'relative' }}>
+              <Stack direction="row" spacing={2} alignItems="center" justifyContent="center">
+                <IconButton
+                  onClick={() => setActiveFeature((prev) => (prev > 0 ? prev - 1 : features.length - 1))}
+                  aria-label="Previous feature"
+                  sx={{ display: { xs: 'none', sm: 'inline-flex' } }}
+                >
+                  <KeyboardArrowLeftIcon />
+                </IconButton>
+
+                <Box sx={{ flex: 1, maxWidth: 720, mx: 'auto' }}>
+                  <Paper elevation={2} sx={{ p: { xs: 2, sm: 4 }, borderRadius: 2 }}>
+                    <Stack spacing={3} alignItems="center" textAlign="center">
+                      <Box
+                        sx={{
+                          p: 2,
+                          bgcolor: 'primary.light',
+                          borderRadius: 2,
+                          display: 'inline-flex',
+                          color: 'primary.contrastText',
+                        }}
+                      >
+                        {features[activeFeature].icon}
+                      </Box>
+                      <Box>
+                        <Typography variant="h5" component="h3" gutterBottom sx={{ fontWeight: 700 }}>
+                          {features[activeFeature].title}
+                        </Typography>
+                        <Typography variant="body1" color="text.secondary">
+                          {features[activeFeature].description}
+                        </Typography>
+                      </Box>
+                      <Box
+                        onClick={() =>
+                          handleScreenshotClick(
+                            features[activeFeature].screenshot,
+                            features[activeFeature].screenshotAlt,
+                            features[activeFeature].frameVariant,
+                          )
+                        }
+                        sx={{
+                          position: 'relative',
+                          cursor: 'pointer',
+                          width: '100%',
+                          display: 'flex',
+                          justifyContent: 'center',
+                          '&:hover .zoom-overlay': {
+                            opacity: 1,
+                          },
+                        }}
+                      >
+                        <DeviceFrame
+                          variant={features[activeFeature].frameVariant}
+                          url={features[activeFeature].frameVariant === 'browser' ? 'kernelworx.com' : undefined}
+                          sx={
+                            features[activeFeature].frameVariant === 'browser'
+                              ? { width: '100%' }
+                              : { maxWidth: { xs: 260, sm: 320 } }
+                          }
+                        >
+                          <Box
+                            component="img"
+                            src={features[activeFeature].screenshot}
+                            alt={features[activeFeature].screenshotAlt}
+                            sx={{
+                              width: '100%',
+                              height: features[activeFeature].frameVariant === 'browser' ? { xs: 220, sm: 360 } : { xs: 360, sm: 520 },
+                              objectFit: 'cover',
+                              objectPosition: 'top left',
+                              display: 'block',
+                            }}
+                          />
+                        </DeviceFrame>
+                        <Box
+                          className="zoom-overlay"
+                          sx={{
+                            position: 'absolute',
+                            inset: 0,
+                            bgcolor: 'rgba(0, 0, 0, 0.4)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            opacity: 0,
+                            transition: 'opacity 0.2s ease-in-out',
+                            borderRadius: 2,
+                          }}
+                        >
+                          <ZoomInIcon sx={{ color: 'white', fontSize: 40 }} />
+                        </Box>
+                      </Box>
+                    </Stack>
+                  </Paper>
+                </Box>
+
+                <IconButton
+                  onClick={() => setActiveFeature((prev) => (prev < features.length - 1 ? prev + 1 : 0))}
+                  aria-label="Next feature"
+                  sx={{ display: { xs: 'none', sm: 'inline-flex' } }}
+                >
+                  <KeyboardArrowRightIcon />
+                </IconButton>
+              </Stack>
+
+              <MobileStepper
+                variant="dots"
+                steps={features.length}
+                position="static"
+                activeStep={activeFeature}
+                nextButton={
+                  <Button
+                    size="small"
+                    onClick={() => setActiveFeature((prev) => (prev < features.length - 1 ? prev + 1 : 0))}
+                    endIcon={<KeyboardArrowRightIcon />}
+                  >
+                    Next
+                  </Button>
+                }
+                backButton={
+                  <Button
+                    size="small"
+                    onClick={() => setActiveFeature((prev) => (prev > 0 ? prev - 1 : features.length - 1))}
+                    startIcon={<KeyboardArrowLeftIcon />}
+                  >
+                    Back
+                  </Button>
+                }
+                sx={{ justifyContent: 'center', mt: 2, bgcolor: 'transparent' }}
+              />
+            </Box>
           </Box>
 
           {/* How it works */}
@@ -500,20 +510,54 @@ export const LandingPage: React.FC = () => {
             <CloseIcon />
           </IconButton>
           <DialogContent sx={{ p: 1 }}>
-            {lightboxImage && (
+            {lightboxImage && lightboxImage.frameVariant ? (
               <Box
-                component="img"
-                src={lightboxImage.src}
-                alt={lightboxImage.alt}
                 sx={{
-                  width: '100%',
-                  height: 'auto',
-                  maxHeight: '80vh',
-                  objectFit: 'contain',
-                  display: 'block',
-                  borderRadius: 1,
+                  display: 'flex',
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  minHeight: '60vh',
                 }}
-              />
+              >
+                <DeviceFrame
+                  variant={lightboxImage.frameVariant}
+                  url={lightboxImage.frameVariant === 'browser' ? 'kernelworx.com' : undefined}
+                  sx={
+                    lightboxImage.frameVariant === 'browser'
+                      ? { width: '100%', maxWidth: 1100 }
+                      : { maxWidth: 420 }
+                  }
+                >
+                  <Box
+                    component="img"
+                    src={lightboxImage.src}
+                    alt={lightboxImage.alt}
+                    sx={{
+                      width: '100%',
+                      height: lightboxImage.frameVariant === 'browser' ? 520 : '100%',
+                      objectFit: 'cover',
+                      objectPosition: 'top left',
+                      display: 'block',
+                    }}
+                  />
+                </DeviceFrame>
+              </Box>
+            ) : (
+              lightboxImage && (
+                <Box
+                  component="img"
+                  src={lightboxImage.src}
+                  alt={lightboxImage.alt}
+                  sx={{
+                    width: '100%',
+                    height: 'auto',
+                    maxHeight: '80vh',
+                    objectFit: 'contain',
+                    display: 'block',
+                    borderRadius: 1,
+                  }}
+                />
+              )
             )}
           </DialogContent>
         </Box>
