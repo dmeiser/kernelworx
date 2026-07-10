@@ -81,9 +81,11 @@ const FeatureCard: React.FC<FeatureCardProps> = ({
             sx={{
               mt: 2,
               position: 'relative',
-              borderRadius: 1,
-              border: '1px solid',
-              borderColor: 'divider',
+              borderRadius: 2,
+              border: '2px solid',
+              borderColor: 'grey.300',
+              bgcolor: 'background.paper',
+              p: 0.5,
               overflow: 'hidden',
               cursor: 'pointer',
               '&:hover .zoom-overlay': {
@@ -101,6 +103,7 @@ const FeatureCard: React.FC<FeatureCardProps> = ({
               sx={{
                 width: '100%',
                 height: 160,
+                borderRadius: 1,
                 objectFit: 'cover',
                 objectPosition: 'top left',
                 display: 'block',
@@ -207,7 +210,7 @@ export const LandingPage: React.FC = () => {
   };
 
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: 'background.paper' }}>
+    <Box sx={{ minHeight: '100vh', bgcolor: 'background.default' }}>
       <LandingHeader />
 
       {/* Main content */}
@@ -289,13 +292,14 @@ export const LandingPage: React.FC = () => {
 
           {/* Hero screenshot */}
           <Paper
-            elevation={3}
+            elevation={4}
             sx={{
-              p: 1,
+              p: 1.5,
               borderRadius: 2,
               overflow: 'hidden',
-              border: '1px solid',
-              borderColor: 'divider',
+              bgcolor: 'background.paper',
+              border: '2px solid',
+              borderColor: 'grey.300',
             }}
           >
             <Box
@@ -304,6 +308,7 @@ export const LandingPage: React.FC = () => {
               alt="KernelWorx dashboard preview"
               sx={{
                 width: '100%',
+                borderRadius: 1,
                 height: { xs: 220, sm: 320, md: 420 },
                 objectFit: 'cover',
                 objectPosition: 'top left',
