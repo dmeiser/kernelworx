@@ -253,7 +253,7 @@ export const LandingPage: React.FC = () => {
             </Typography>
             <Typography
               variant="subtitle1"
-              color="primary.main"
+              color="text.secondary"
               sx={{
                 fontWeight: 600,
                 maxWidth: 700,
@@ -265,7 +265,7 @@ export const LandingPage: React.FC = () => {
             </Typography>
             <Typography
               variant="subtitle1"
-              color="success.dark"
+              color="text.secondary"
               sx={{
                 fontWeight: 600,
                 maxWidth: 700,
@@ -273,7 +273,10 @@ export const LandingPage: React.FC = () => {
                 mb: 4,
               }}
             >
-              Free: No subscriptions, no paid features.
+              <Box component="span" color="success.dark">
+                Free:
+              </Box>{' '}
+              No subscriptions, no paid features.
             </Typography>
             <Button
               variant="contained"
