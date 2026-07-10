@@ -279,8 +279,8 @@ export const LandingPage: React.FC = () => {
                           alt={features[activeFeature].screenshotAlt}
                           sx={{
                             width: '100%',
-                            height: features[activeFeature].frameVariant === 'browser' ? { xs: 220, sm: 360 } : '100%',
-                            objectFit: features[activeFeature].frameVariant === 'browser' ? 'contain' : 'cover',
+                            height: features[activeFeature].frameVariant === 'browser' ? { xs: 260, sm: 480 } : '100%',
+                            objectFit: 'cover',
                             objectPosition: 'top left',
                             display: 'block',
                           }}

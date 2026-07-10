@@ -172,17 +172,24 @@ async function takeScreenshot(page) {
   await page.getByRole('tab', { name: 'Reports' }).click().catch(() => {});
   await delay(2000);
 
-  // Hide app header, page breadcrumbs/tabs, and dev build bar for the screenshot
+  // Hide app header, sidebar, page breadcrumbs/tabs, and dev build bar for the screenshot
   await page.addStyleTag({
     content: `
       header.MuiAppBar-root,
       .MuiAppBar-root,
       [role="banner"],
       .MuiBottomNavigation-root,
+      .MuiDrawer-root,
+      .MuiDrawer-paper,
       nav,
       [role="tablist"],
-      .MuiTabs-root {
+      .MuiTabs-root,
+      footer {
         display: none !important;
+      }
+      main {
+        margin-left: 0 !important;
+        width: 100% !important;
       }
       body {
         padding-top: 0 !important;
@@ -190,25 +197,8 @@ async function takeScreenshot(page) {
     `,
   });
 
-  // Hide the page header (back arrow + campaign title) and dev build bar
+  // Hide the page header (back arrow + campaign title)
   await page.evaluate(() => {
-    // Hide dev build bar
-    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-    let node;
-    while ((node = walker.nextNode())) {
-      if (node.textContent && node.textContent.includes('DEV | v')) {
-        let el = node.parentElement;
-        while (el && el !== document.body) {
-          if (el.tagName === 'DIV' || el.tagName === 'FOOTER') {
-            el.style.display = 'none';
-            break;
-          }
-          el = el.parentElement;
-        }
-      }
-    }
-
-    // Hide page title header that contains the campaign name and back arrow
     const headers = document.querySelectorAll('h1, h2, h3, h4, h5, h6');
     for (const header of headers) {
       if (header.textContent && header.textContent.includes('Popcorn Sale')) {
@@ -227,14 +217,24 @@ async function takeScreenshot(page) {
 
   fs.mkdirSync(OUTPUT_DIR, { recursive: true });
 
-  const scrollY = await page.evaluate(() => window.scrollY);
+  // Find the "Reports & Exports" heading and crop the screenshot so it starts
+  // right at the content, removing any dead space from the hidden header.
+  const headingBox = await page.evaluate(() => {
+    const heading = Array.from(document.querySelectorAll('h2, h3, h4, h5, h6'))
+      .find((el) => el.textContent?.includes('Reports & Exports'));
+    if (!heading) return null;
+    const rect = heading.getBoundingClientRect();
+    return { x: rect.x, y: rect.y + window.scrollY };
+  });
+
+  const cropY = headingBox ? Math.max(0, headingBox.y - 16) : 0;
   await page.screenshot({
     path: OUTPUT_FILE,
     clip: {
-      x: 240,
-      y: scrollY,
-      width: 1040,
-      height: 1100,
+      x: 0,
+      y: cropY,
+      width: 1440,
+      height: 900,
     },
   });
 
@@ -249,7 +249,7 @@ async function main() {
   }
 
   const browser = await chromium.launch({ headless: true });
-  const page = await browser.newPage({ viewport: { width: 1280, height: 1200 } });
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 
   try {
     await login(page, email, password);
