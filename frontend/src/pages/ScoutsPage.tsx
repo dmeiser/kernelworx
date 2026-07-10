@@ -115,7 +115,7 @@ const InfoMessageAlert: React.FC<{ message: string }> = ({ message }) => (
 
 // Empty state component
 const EmptyState: React.FC = () => (
-  <Alert severity="info">You don't have any scouts yet. Click "Create Scout" to get started!</Alert>
+  <Alert severity="info">You don't have any Scouts yet. Click "Create Scout" to get started!</Alert>
 );
 
 // Owned profiles section component

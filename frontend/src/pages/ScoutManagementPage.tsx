@@ -746,7 +746,7 @@ export const ScoutManagementPage: React.FC = () => {
             Danger Zone
           </Typography>
           <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
-            Permanently delete this scout and all associated campaigns and orders. This action cannot be undone.
+            Permanently delete this Scout and all associated campaigns and orders. This action cannot be undone.
           </Typography>
           <Button variant="contained" color="error" onClick={() => setDeleteConfirmOpen(true)}>
             Delete Scout
@@ -790,7 +790,7 @@ export const ScoutManagementPage: React.FC = () => {
             This will permanently delete:
           </Typography>
           <ul>
-            <li>The scout and all metadata</li>
+            <li>The Scout and all metadata</li>
             <li>All campaigns and associated data</li>
             <li>All orders and order items</li>
             <li>All active invite codes and shares</li>

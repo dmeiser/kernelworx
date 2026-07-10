@@ -293,7 +293,7 @@ const AdditionalInfoSection: React.FC<AdditionalInfoSectionProps> = ({
         label="Message to Scouts (Optional)"
         value={creatorMessage}
         onChange={(e) => onCreatorMessageChange(e.target.value)}
-        placeholder="Enter a message that will be shown to scouts when they use this link"
+        placeholder="Enter a message that will be shown to Scouts when they use this link"
         multiline
         rows={3}
         fullWidth

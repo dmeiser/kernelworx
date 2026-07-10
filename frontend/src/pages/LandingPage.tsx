@@ -370,7 +370,7 @@ export const LandingPage: React.FC = () => {
                 <Step
                   number={3}
                   title="Share & Report"
-                  description="Collaborate with your team and export reports for unit submission or parent reconciliation."
+                  description="Collaborate with your unit and export reports for unit submission or parent reconciliation."
                 />
               </Grid>
             </Grid>
