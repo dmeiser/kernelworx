@@ -87,7 +87,7 @@ export const LandingPage: React.FC = () => {
 
   const features = [
     {
-      title: 'Organize Sellers',
+      title: 'Organize Your Sellers',
       description:
         'Create and manage multiple Scout profiles. Track each seller\'s campaigns, orders, and progress over time.',
       icon: <PeopleIcon />,
@@ -96,7 +96,7 @@ export const LandingPage: React.FC = () => {
       frameVariant: 'iphone' as const,
     },
     {
-      title: 'Collaborate',
+      title: 'Share With Your Unit',
       description:
         'Share profiles with parents, den leaders, and volunteers with flexible read or write permissions.',
       icon: <ShareIcon />,
@@ -105,7 +105,7 @@ export const LandingPage: React.FC = () => {
       frameVariant: 'android' as const,
     },
     {
-      title: 'Track Payments',
+      title: 'Flexible Payments',
       description:
         'Set up custom payment methods with optional QR codes so buyers can pay the way that works best.',
       icon: <PaymentIcon />,
@@ -114,7 +114,7 @@ export const LandingPage: React.FC = () => {
       frameVariant: 'iphone' as const,
     },
     {
-      title: 'Report & Export',
+      title: 'Run Reports',
       description:
         'Generate detailed sales reports in Excel or CSV format. Track totals, payments, and delivery status.',
       icon: <AssessmentIcon />,
