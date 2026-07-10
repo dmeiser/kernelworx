@@ -254,7 +254,7 @@ export const LandingPage: React.FC = () => {
               textAlign="center"
               sx={{ maxWidth: 700, mx: 'auto', mb: 4 }}
             >
-              KernelWorx helps Scouting America volunteers run smoother popcorn sales from sign-up to final report.
+              KernelWorx helps Scouting units run smoother popcorn sales from sign-up to final report.
             </Typography>
 
             <Box sx={{ maxWidth: 720, mx: 'auto' }}>
