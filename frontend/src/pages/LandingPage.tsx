@@ -180,7 +180,7 @@ export const LandingPage: React.FC = () => {
     {
       title: 'Share With Your Unit',
       description:
-        'Share profiles with parents, den leaders, and volunteers with flexible read or write permissions.',
+        'Share profiles with parents and unit leaders with flexible read or write permissions.',
       icon: <ShareIcon />,
       screenshot: '/marketing/collaborate-page-mobile.png',
       screenshotAlt: 'Invite codes for sharing a Scout profile',
