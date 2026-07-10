@@ -37,6 +37,7 @@ import {
 } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext';
 import { LandingHeader } from '../components/LandingHeader';
+import { DeviceFrame } from '../components/DeviceFrame';
 
 interface FeatureCardProps {
   title: string;
@@ -44,6 +45,7 @@ interface FeatureCardProps {
   icon: React.ReactNode;
   screenshot?: string;
   screenshotAlt?: string;
+  frameVariant?: 'browser' | 'iphone' | 'android';
   onScreenshotClick?: (src: string, alt: string) => void;
 }
 
@@ -53,6 +55,7 @@ const FeatureCard: React.FC<FeatureCardProps> = ({
   icon,
   screenshot,
   screenshotAlt,
+  frameVariant,
   onScreenshotClick,
 }) => (
   <Card elevation={2} sx={{ height: '100%' }}>
@@ -81,35 +84,43 @@ const FeatureCard: React.FC<FeatureCardProps> = ({
             sx={{
               mt: 2,
               position: 'relative',
-              borderRadius: 2,
-              border: '2px solid',
-              borderColor: 'grey.300',
-              bgcolor: 'background.paper',
-              p: 0.5,
-              overflow: 'hidden',
               cursor: 'pointer',
               '&:hover .zoom-overlay': {
                 opacity: 1,
               },
-              '&:hover img': {
-                transform: 'scale(1.02)',
-              },
             }}
           >
-            <Box
-              component="img"
-              src={screenshot}
-              alt={screenshotAlt || title}
-              sx={{
-                width: '100%',
-                height: 160,
-                borderRadius: 1,
-                objectFit: 'cover',
-                objectPosition: 'top left',
-                display: 'block',
-                transition: 'transform 0.2s ease-in-out',
-              }}
-            />
+            {frameVariant ? (
+              <DeviceFrame variant={frameVariant}>
+                <Box
+                  component="img"
+                  src={screenshot}
+                  alt={screenshotAlt || title}
+                  sx={{
+                    width: '100%',
+                    height: frameVariant === 'browser' ? 160 : 260,
+                    objectFit: 'cover',
+                    objectPosition: 'top left',
+                    bgcolor: 'grey.900',
+                    display: 'block',
+                  }}
+                />
+              </DeviceFrame>
+            ) : (
+              <Box
+                component="img"
+                src={screenshot}
+                alt={screenshotAlt || title}
+                sx={{
+                  width: '100%',
+                  height: 160,
+                  borderRadius: 1,
+                  objectFit: 'cover',
+                  objectPosition: 'top left',
+                  display: 'block',
+                }}
+              />
+            )}
             <Box
               className="zoom-overlay"
               sx={{
@@ -121,6 +132,7 @@ const FeatureCard: React.FC<FeatureCardProps> = ({
                 justifyContent: 'center',
                 opacity: 0,
                 transition: 'opacity 0.2s ease-in-out',
+                borderRadius: frameVariant ? 2 : 1,
               }}
             >
               <ZoomInIcon sx={{ color: 'white', fontSize: 32 }} />
@@ -291,31 +303,20 @@ export const LandingPage: React.FC = () => {
           </Box>
 
           {/* Hero screenshot */}
-          <Paper
-            elevation={4}
-            sx={{
-              p: 1.5,
-              borderRadius: 2,
-              overflow: 'hidden',
-              bgcolor: 'background.paper',
-              border: '2px solid',
-              borderColor: 'grey.300',
-            }}
-          >
+          <DeviceFrame variant="browser" url="kernelworx.com">
             <Box
               component="img"
               src="/marketing/home-page.png"
               alt="KernelWorx dashboard preview"
               sx={{
                 width: '100%',
-                borderRadius: 1,
                 height: { xs: 220, sm: 320, md: 420 },
                 objectFit: 'cover',
                 objectPosition: 'top left',
                 display: 'block',
               }}
             />
-          </Paper>
+          </DeviceFrame>
 
           {/* Features */}
           <Box>
@@ -338,6 +339,7 @@ export const LandingPage: React.FC = () => {
                   icon={<PeopleIcon />}
                   screenshot="/marketing/scouts-page.png"
                   screenshotAlt="My Scouts page showing seller management"
+                  frameVariant="iphone"
                   onScreenshotClick={handleScreenshotClick}
                 />
               </Grid>
@@ -348,6 +350,7 @@ export const LandingPage: React.FC = () => {
                   icon={<ShareIcon />}
                   screenshot="/marketing/collaborate-page.png"
                   screenshotAlt="Invite codes for sharing a scout profile"
+                  frameVariant="android"
                   onScreenshotClick={handleScreenshotClick}
                 />
               </Grid>
@@ -358,6 +361,7 @@ export const LandingPage: React.FC = () => {
                   icon={<PaymentIcon />}
                   screenshot="/marketing/payment-methods-page.png"
                   screenshotAlt="Payment Methods page showing built-in and custom payment options"
+                  frameVariant="iphone"
                   onScreenshotClick={handleScreenshotClick}
                 />
               </Grid>
@@ -368,6 +372,7 @@ export const LandingPage: React.FC = () => {
                   icon={<AssessmentIcon />}
                   screenshot="/marketing/reports-page.png"
                   screenshotAlt="Sales report with CSV and Excel export buttons"
+                  frameVariant="browser"
                   onScreenshotClick={handleScreenshotClick}
                 />
               </Grid>
