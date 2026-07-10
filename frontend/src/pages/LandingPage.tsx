@@ -346,7 +346,7 @@ export const LandingPage: React.FC = () => {
           {/* Footer */}
           <Box textAlign="center" sx={{ pt: 4, pb: 4 }}>
             <Typography variant="body2" color="text.secondary">
-              Built with ❤️ for Scouting America volunteers
+              Built with ❤️ for Scouting America parents
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
               Free to use • MIT License
