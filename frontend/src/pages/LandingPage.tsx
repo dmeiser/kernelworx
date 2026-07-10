@@ -337,7 +337,7 @@ export const LandingPage: React.FC = () => {
                   title="Organize Sellers"
                   description="Create and manage multiple scout profiles. Track each seller's campaigns, orders, and progress over time."
                   icon={<PeopleIcon />}
-                  screenshot="/marketing/scouts-page.png"
+                  screenshot="/marketing/scouts-page-mobile.png"
                   screenshotAlt="My Scouts page showing seller management"
                   frameVariant="iphone"
                   onScreenshotClick={handleScreenshotClick}
@@ -348,7 +348,7 @@ export const LandingPage: React.FC = () => {
                   title="Collaborate"
                   description="Share profiles with parents, den leaders, and volunteers with flexible read or write permissions."
                   icon={<ShareIcon />}
-                  screenshot="/marketing/collaborate-page.png"
+                  screenshot="/marketing/collaborate-page-mobile.png"
                   screenshotAlt="Invite codes for sharing a scout profile"
                   frameVariant="android"
                   onScreenshotClick={handleScreenshotClick}
@@ -359,7 +359,7 @@ export const LandingPage: React.FC = () => {
                   title="Track Payments"
                   description="Set up custom payment methods with optional QR codes so buyers can pay the way that works best."
                   icon={<PaymentIcon />}
-                  screenshot="/marketing/payment-methods-page.png"
+                  screenshot="/marketing/payment-methods-page-mobile.png"
                   screenshotAlt="Payment Methods page showing built-in and custom payment options"
                   frameVariant="iphone"
                   onScreenshotClick={handleScreenshotClick}
