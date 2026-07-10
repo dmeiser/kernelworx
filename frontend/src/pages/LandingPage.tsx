@@ -89,7 +89,7 @@ export const LandingPage: React.FC = () => {
     {
       title: 'Organize Sellers',
       description:
-        'Create and manage multiple scout profiles. Track each seller\'s campaigns, orders, and progress over time.',
+        'Create and manage multiple Scout profiles. Track each seller\'s campaigns, orders, and progress over time.',
       icon: <PeopleIcon />,
       screenshot: '/marketing/scouts-page-mobile.png',
       screenshotAlt: 'My Scouts page showing seller management',
@@ -101,7 +101,7 @@ export const LandingPage: React.FC = () => {
         'Share profiles with parents, den leaders, and volunteers with flexible read or write permissions.',
       icon: <ShareIcon />,
       screenshot: '/marketing/collaborate-page-mobile.png',
-      screenshotAlt: 'Invite codes for sharing a scout profile',
+      screenshotAlt: 'Invite codes for sharing a Scout profile',
       frameVariant: 'android' as const,
     },
     {
@@ -356,7 +356,7 @@ export const LandingPage: React.FC = () => {
                 <Step
                   number={1}
                   title="Create Your Unit"
-                  description="Sign up, add your scouts, and set up your first fundraising campaign in minutes."
+                  description="Sign up, add your Scouts, and set up your first fundraising campaign in minutes."
                 />
               </Grid>
               <Grid size={{ xs: 12, sm: 4 }}>
