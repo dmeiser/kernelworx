@@ -258,10 +258,22 @@ export const LandingPage: React.FC = () => {
                 fontWeight: 600,
                 maxWidth: 700,
                 mx: 'auto',
-                mb: 4,
+                mb: 1,
               }}
             >
               Free: No subscriptions, no paid features.
+            </Typography>
+            <Typography
+              variant="subtitle1"
+              color="primary.main"
+              sx={{
+                fontWeight: 600,
+                maxWidth: 700,
+                mx: 'auto',
+                mb: 4,
+              }}
+            >
+              Built for parents and Units. Use it on your own or with the whole pack.
             </Typography>
             <Button
               variant="contained"
@@ -371,10 +383,6 @@ export const LandingPage: React.FC = () => {
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
               Free to use • MIT License
-            </Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mt: 1, maxWidth: 560, mx: 'auto' }}>
-              KernelWorx is built so parents and units can manage their own popcorn sales — even if
-              the rest of the pack isn&apos;t using it.
             </Typography>
             <Stack
               direction="row"
