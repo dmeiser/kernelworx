@@ -252,10 +252,9 @@ export const LandingPage: React.FC = () => {
               one simple, secure place.
             </Typography>
             <Typography
-              variant="subtitle1"
+              variant="body1"
               color="text.secondary"
               sx={{
-                fontWeight: 600,
                 maxWidth: 700,
                 mx: 'auto',
                 mb: 1,
@@ -264,10 +263,9 @@ export const LandingPage: React.FC = () => {
               Built for parents and Units. Use it on your own or with the whole pack.
             </Typography>
             <Typography
-              variant="subtitle1"
+              variant="body1"
               color="text.secondary"
               sx={{
-                fontWeight: 600,
                 maxWidth: 700,
                 mx: 'auto',
                 mb: 4,
