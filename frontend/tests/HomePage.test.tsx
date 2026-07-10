@@ -6,21 +6,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { HomePage } from '../src/pages/HomePage';
-import { AuthProvider } from '../src/contexts/AuthContext';
 import { BrowserRouter } from 'react-router-dom';
-import * as amplifyAuth from 'aws-amplify/auth';
-
-vi.mock('aws-amplify/auth', () => ({
-  fetchAuthSession: vi.fn(),
-  signInWithRedirect: vi.fn(),
-  getCurrentUser: vi.fn(),
-}));
-
-vi.mock('aws-amplify/utils', () => ({
-  Hub: {
-    listen: vi.fn(() => vi.fn()),
-  },
-}));
+import type { Account } from '../src/types/auth';
 
 const mockNavigate = vi.fn();
 vi.mock('react-router-dom', async () => {
@@ -31,21 +18,17 @@ vi.mock('react-router-dom', async () => {
   };
 });
 
-const renderWithAuth = () => {
-  vi.mocked(amplifyAuth.fetchAuthSession).mockResolvedValue({
-    tokens: { idToken: { toString: () => 'mock-token' } },
-  } as any);
+const mockUseAuth = vi.fn();
+vi.mock('../src/contexts/AuthContext', () => ({
+  useAuth: () => mockUseAuth(),
+}));
 
-  vi.mocked(amplifyAuth.getCurrentUser).mockResolvedValue({
-    userId: 'user-123',
-    username: 'testuser',
-  } as any);
+const renderWithAuth = (account: Account | null = null) => {
+  mockUseAuth.mockReturnValue({ account });
 
   return render(
     <BrowserRouter>
-      <AuthProvider>
-        <HomePage />
-      </AuthProvider>
+      <HomePage />
     </BrowserRouter>,
   );
 };
@@ -54,13 +37,53 @@ describe('HomePage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockNavigate.mockClear();
+    mockUseAuth.mockReturnValue({ account: null });
   });
 
-  it('renders welcome heading', async () => {
+  it('renders welcome heading without a name when account is missing', async () => {
     renderWithAuth();
 
     await waitFor(() => {
-      expect(screen.getByText(/welcome back/i)).toBeInTheDocument();
+      expect(screen.getByText('Welcome back')).toBeInTheDocument();
+    });
+  });
+
+  it('renders welcome heading with first name when givenName is available', async () => {
+    renderWithAuth({
+      accountId: 'account-123',
+      email: 'alex@example.com',
+      givenName: 'Alex',
+      familyName: 'Kernel',
+      isAdmin: false,
+    } as Account);
+
+    await waitFor(() => {
+      expect(screen.getByText('Welcome back, Alex')).toBeInTheDocument();
+    });
+  });
+
+  it('renders welcome heading with givenName when familyName is missing', async () => {
+    renderWithAuth({
+      accountId: 'account-123',
+      email: 'alex@example.com',
+      givenName: 'Alex',
+      isAdmin: false,
+    } as Account);
+
+    await waitFor(() => {
+      expect(screen.getByText('Welcome back, Alex')).toBeInTheDocument();
+    });
+  });
+
+  it('falls back to email when name fields are missing', async () => {
+    renderWithAuth({
+      accountId: 'account-123',
+      email: 'alex@example.com',
+      isAdmin: false,
+    } as Account);
+
+    await waitFor(() => {
+      expect(screen.getByText('Welcome back, alex@example.com')).toBeInTheDocument();
     });
   });
 
