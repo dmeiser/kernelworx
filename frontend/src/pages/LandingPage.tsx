@@ -373,7 +373,8 @@ export const LandingPage: React.FC = () => {
               Free to use • MIT License
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mt: 1, maxWidth: 560, mx: 'auto' }}>
-              KernelWorx is an independent tool for units and parents managing their own popcorn sales.
+              KernelWorx is built so parents and units can manage their own popcorn sales — even if
+              the rest of the pack isn&apos;t using it.
             </Typography>
             <Stack
               direction="row"
