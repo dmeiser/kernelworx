@@ -271,10 +271,7 @@ export const LandingPage: React.FC = () => {
                 mb: 4,
               }}
             >
-              <Box component="span" color="success.dark">
-                Free:
-              </Box>{' '}
-              No subscriptions, no paid features.
+              Free: No subscriptions, no paid features.
             </Typography>
             <Button
               variant="contained"
