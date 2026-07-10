@@ -50,13 +50,12 @@ export const StoryPage: React.FC = () => {
               <Typography variant="body1" color="text.primary">
                 As a parent of a Cub Scout and a Den Leader, I never felt like I had a handle on
                 popcorn season. No matter how organized I tried to be, I was still juggling paper
-                sales sheets, payment apps, and a spreadsheet that never matched what actually
-                happened.
+                sales sheets, payment apps, and a spreadsheet that never matched the actual orders.
               </Typography>
 
               <Typography variant="body1" color="text.primary">
-                Out selling door-to-door, somebody would decide to buy something, and I'd stand there
-                fumbling between payment apps trying to find the right QR code while they waited.
+                Out selling door-to-door, I'd write down an order, then pull out my phone and fumble
+                between payment apps trying to find the right QR code while they waited.
                 Then I'd go home and build a spreadsheet because I couldn't keep doing the paper
                 sheets and I needed the numbers. My handwriting didn't help — I'd transpose numbers,
                 lose names, and create more work for myself.
