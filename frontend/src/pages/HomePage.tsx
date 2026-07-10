@@ -73,8 +73,8 @@ export const HomePage: React.FC = () => {
           News & Updates
         </Typography>
         <Typography variant="body1" color="text.secondary">
-          You&apos;re all set for the open beta. Watch this space for announcements, new features, and tips for
-          managing your popcorn sales.
+          You&apos;re all set. Watch this space for announcements, new features, and tips for managing
+          your popcorn sales.
         </Typography>
       </Paper>
 

@@ -350,7 +350,7 @@ export const LandingPage: React.FC = () => {
               Ready to simplify your popcorn sale?
             </Typography>
             <Typography variant="body1" color="text.secondary" sx={{ mb: 3 }}>
-              Join the open beta and start managing your fundraiser with KernelWorx.
+              Start managing your fundraiser with KernelWorx.
             </Typography>
             <Button
               variant="contained"
