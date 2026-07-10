@@ -4,7 +4,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
-import { userEvent } from '@testing-library/user-event';
+import userEvent from '@testing-library/user-event';
 import { HomePage } from '../src/pages/HomePage';
 import { AuthProvider } from '../src/contexts/AuthContext';
 import { BrowserRouter } from 'react-router-dom';
@@ -31,7 +31,7 @@ vi.mock('react-router-dom', async () => {
   };
 });
 
-const renderWithAuth = (account = null) => {
+const renderWithAuth = () => {
   vi.mocked(amplifyAuth.fetchAuthSession).mockResolvedValue({
     tokens: { idToken: { toString: () => 'mock-token' } },
   } as any);

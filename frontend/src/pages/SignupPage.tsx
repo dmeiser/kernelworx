@@ -162,7 +162,7 @@ async function handlePostVerificationAuth(
     await fetchAuthSession();
     console.log('User is authenticated despite autoSignIn failure');
     await refreshSession();
-    navigate('/scouts');
+    navigate('/home');
   } catch {
     console.log('User is not authenticated, redirecting to login');
     setSuccess('Please log in with your new account');
@@ -182,7 +182,7 @@ async function processAutoSignIn(
     await autoSignIn();
     await saveOptionalFields(updateMyAccount, optionalFields);
     await refreshSession();
-    navigate('/scouts');
+    navigate('/home');
   } catch (autoSignInError) {
     console.log('Auto sign-in failed, checking authentication state:', autoSignInError);
     await handlePostVerificationAuth(refreshSession, navigate, setSuccess);

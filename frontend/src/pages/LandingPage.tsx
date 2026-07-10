@@ -69,12 +69,105 @@ const Step: React.FC<StepProps> = ({ number, title, description }) => (
   </Box>
 );
 
+interface FeatureItem {
+  title: string;
+  description: string;
+  icon: React.ReactNode;
+  screenshot: string;
+  screenshotAlt: string;
+  frameVariant: 'iphone' | 'android' | 'browser';
+}
+
+interface FeatureShowcaseProps {
+  features: FeatureItem[];
+}
+
+const FeatureShowcase: React.FC<FeatureShowcaseProps> = ({ features }) => {
+  const [activeFeature, setActiveFeature] = React.useState(0);
+  const currentFeature = features[activeFeature];
+
+  return (
+    <Box>
+      <Typography variant="h3" component="h2" textAlign="center" gutterBottom sx={{ fontWeight: 700 }}>
+        Everything You Need for Your Fundraiser
+      </Typography>
+      <Typography
+        variant="body1"
+        color="text.secondary"
+        textAlign="center"
+        sx={{ maxWidth: 700, mx: 'auto', mb: 4 }}
+      >
+        KernelWorx helps Scouting units run smoother popcorn sales from sign-up to final report.
+      </Typography>
+
+      <Box sx={{ maxWidth: 720, mx: 'auto' }}>
+        <Paper elevation={2} sx={{ borderRadius: 2, overflow: 'hidden' }}>
+          <Tabs
+            value={activeFeature}
+            onChange={(_event, newValue) => setActiveFeature(newValue)}
+            variant="fullWidth"
+            textColor="primary"
+            indicatorColor="primary"
+            aria-label="Feature screenshots"
+          >
+            <Tab icon={<PeopleIcon />} label="Organize" aria-label="Organize Sellers" />
+            <Tab icon={<ShareIcon />} label="Collaborate" aria-label="Collaborate" />
+            <Tab icon={<PaymentIcon />} label="Track" aria-label="Track Payments" />
+            <Tab icon={<AssessmentIcon />} label="Report" aria-label="Report & Export" />
+          </Tabs>
+          <Box sx={{ p: { xs: 2, sm: 4 }, textAlign: 'center' }}>
+            <Stack spacing={3} alignItems="center">
+              <Box>
+                <Typography variant="h5" component="h3" gutterBottom sx={{ fontWeight: 700 }}>
+                  {currentFeature.title}
+                </Typography>
+                <Typography variant="body1" color="text.secondary">
+                  {currentFeature.description}
+                </Typography>
+              </Box>
+              <Box
+                sx={{
+                  width: '100%',
+                  display: 'flex',
+                  justifyContent: 'center',
+                }}
+              >
+                <DeviceFrame
+                  variant={currentFeature.frameVariant}
+                  url={currentFeature.frameVariant === 'browser' ? 'kernelworx.com' : undefined}
+                  sx={
+                    currentFeature.frameVariant === 'browser'
+                      ? { width: '100%' }
+                      : { maxWidth: { xs: 260, sm: 320 } }
+                  }
+                >
+                  <Box
+                    component="img"
+                    src={currentFeature.screenshot}
+                    alt={currentFeature.screenshotAlt}
+                    sx={{
+                      width: '100%',
+                      height: currentFeature.frameVariant === 'browser' ? { xs: 260, sm: 480 } : '100%',
+                      objectFit: 'cover',
+                      objectPosition: 'top left',
+                      display: 'block',
+                    }}
+                  />
+                </DeviceFrame>
+              </Box>
+            </Stack>
+          </Box>
+        </Paper>
+      </Box>
+    </Box>
+  );
+};
+
 export const LandingPage: React.FC = () => {
   const navigate = useNavigate();
   const { isAuthenticated } = useAuth();
-  const [activeFeature, setActiveFeature] = React.useState(0);
 
-  const features = [
+  const features: FeatureItem[] = [
     {
       title: 'Organize Your Sellers',
       description:
@@ -82,7 +175,7 @@ export const LandingPage: React.FC = () => {
       icon: <PeopleIcon />,
       screenshot: '/marketing/scouts-page-mobile.png',
       screenshotAlt: 'My Scouts page showing seller management',
-      frameVariant: 'iphone' as const,
+      frameVariant: 'iphone',
     },
     {
       title: 'Share With Your Unit',
@@ -91,7 +184,7 @@ export const LandingPage: React.FC = () => {
       icon: <ShareIcon />,
       screenshot: '/marketing/collaborate-page-mobile.png',
       screenshotAlt: 'Invite codes for sharing a Scout profile',
-      frameVariant: 'android' as const,
+      frameVariant: 'android',
     },
     {
       title: 'Flexible Payments',
@@ -100,7 +193,7 @@ export const LandingPage: React.FC = () => {
       icon: <PaymentIcon />,
       screenshot: '/marketing/payment-methods-page-mobile.png',
       screenshotAlt: 'Payment Methods page showing built-in and custom payment options',
-      frameVariant: 'iphone' as const,
+      frameVariant: 'iphone',
     },
     {
       title: 'Run Reports',
@@ -109,7 +202,7 @@ export const LandingPage: React.FC = () => {
       icon: <AssessmentIcon />,
       screenshot: '/marketing/reports-page.png',
       screenshotAlt: 'Sales report with CSV and Excel export buttons',
-      frameVariant: 'browser' as const,
+      frameVariant: 'browser',
     },
   ];
 
@@ -219,79 +312,7 @@ export const LandingPage: React.FC = () => {
           </DeviceFrame>
 
           {/* Features */}
-          <Box>
-            <Typography variant="h3" component="h2" textAlign="center" gutterBottom sx={{ fontWeight: 700 }}>
-              Everything You Need for Your Fundraiser
-            </Typography>
-            <Typography
-              variant="body1"
-              color="text.secondary"
-              textAlign="center"
-              sx={{ maxWidth: 700, mx: 'auto', mb: 4 }}
-            >
-              KernelWorx helps Scouting units run smoother popcorn sales from sign-up to final report.
-            </Typography>
-
-            <Box sx={{ maxWidth: 720, mx: 'auto' }}>
-              <Paper elevation={2} sx={{ borderRadius: 2, overflow: 'hidden' }}>
-                <Tabs
-                  value={activeFeature}
-                  onChange={(_event, newValue) => setActiveFeature(newValue)}
-                  variant="fullWidth"
-                  textColor="primary"
-                  indicatorColor="primary"
-                  aria-label="Feature screenshots"
-                >
-                  <Tab icon={<PeopleIcon />} label="Organize" aria-label="Organize Sellers" />
-                  <Tab icon={<ShareIcon />} label="Collaborate" aria-label="Collaborate" />
-                  <Tab icon={<PaymentIcon />} label="Track" aria-label="Track Payments" />
-                  <Tab icon={<AssessmentIcon />} label="Report" aria-label="Report & Export" />
-                </Tabs>
-                <Box sx={{ p: { xs: 2, sm: 4 }, textAlign: 'center' }}>
-                  <Stack spacing={3} alignItems="center">
-                    <Box>
-                      <Typography variant="h5" component="h3" gutterBottom sx={{ fontWeight: 700 }}>
-                        {features[activeFeature].title}
-                      </Typography>
-                      <Typography variant="body1" color="text.secondary">
-                        {features[activeFeature].description}
-                      </Typography>
-                    </Box>
-                    <Box
-                      sx={{
-                        width: '100%',
-                        display: 'flex',
-                        justifyContent: 'center',
-                      }}
-                    >
-                      <DeviceFrame
-                        variant={features[activeFeature].frameVariant}
-                        url={features[activeFeature].frameVariant === 'browser' ? 'kernelworx.com' : undefined}
-                        sx={
-                          features[activeFeature].frameVariant === 'browser'
-                            ? { width: '100%' }
-                            : { maxWidth: { xs: 260, sm: 320 } }
-                        }
-                      >
-                        <Box
-                          component="img"
-                          src={features[activeFeature].screenshot}
-                          alt={features[activeFeature].screenshotAlt}
-                          sx={{
-                            width: '100%',
-                            height: features[activeFeature].frameVariant === 'browser' ? { xs: 260, sm: 480 } : '100%',
-                            objectFit: 'cover',
-                            objectPosition: 'top left',
-                            display: 'block',
-                          }}
-                        />
-                      </DeviceFrame>
-                    </Box>
-                  </Stack>
-                </Box>
-              </Paper>
-            </Box>
-          </Box>
+          <FeatureShowcase features={features} />
 
           {/* How it works */}
           <Paper elevation={2} sx={{ p: { xs: 3, sm: 4, md: 6 } }}>

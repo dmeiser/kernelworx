@@ -107,7 +107,7 @@ describe('LandingPage', () => {
     });
   });
 
-  it('navigates to /login when Login button is clicked and user not authenticated', async () => {
+  it('navigates to /login when Get Started Free button is clicked and user not authenticated', async () => {
     const user = userEvent.setup();
 
     renderWithAuth(false);
@@ -116,8 +116,8 @@ describe('LandingPage', () => {
       expect(screen.getAllByRole('button', { name: /get started free/i }).length).toBeGreaterThan(0);
     });
 
-    const loginButton = screen.getAllByRole('button', { name: /get started free/i })[0];
-    await user.click(loginButton);
+    const getStartedButton = screen.getAllByRole('button', { name: /get started free/i })[0];
+    await user.click(getStartedButton);
 
     await waitFor(() => {
       expect(mockNavigate).toHaveBeenCalledWith('/login');
