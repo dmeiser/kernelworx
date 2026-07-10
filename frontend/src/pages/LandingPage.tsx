@@ -280,7 +280,7 @@ export const LandingPage: React.FC = () => {
                           sx={{
                             width: '100%',
                             height: features[activeFeature].frameVariant === 'browser' ? { xs: 220, sm: 360 } : '100%',
-                            objectFit: 'cover',
+                            objectFit: features[activeFeature].frameVariant === 'browser' ? 'contain' : 'cover',
                             objectPosition: 'top left',
                             display: 'block',
                           }}
