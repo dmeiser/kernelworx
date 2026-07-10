@@ -82,9 +82,9 @@ export const StoryPage: React.FC = () => {
 
               <Typography variant="body1" color="text.primary">
                 The site is free to use — no subscriptions, no paid features — so any sponsorship
-                goes toward hosting and ongoing development instead of coming out of my pocket. If
-                KernelWorx saves you time or hassle, please consider sponsoring through GitHub
-                Sponsors. KernelWorx is not a non-profit, so donations are not tax deductible.
+                helps defray the cost of hosting and development. If KernelWorx saves you time or
+                hassle, please consider sponsoring through GitHub Sponsors. KernelWorx is not a
+                non-profit, so donations are not tax deductible.
               </Typography>
             </Stack>
           </Paper>
