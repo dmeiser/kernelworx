@@ -231,9 +231,9 @@ async function takeScreenshot(page) {
   await page.screenshot({
     path: OUTPUT_FILE,
     clip: {
-      x: 0,
+      x: 150,
       y: cropY,
-      width: 1440,
+      width: 1290,
       height: 900,
     },
   });

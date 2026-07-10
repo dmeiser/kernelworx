@@ -20,6 +20,7 @@ import { Delete as DeleteIcon } from '@mui/icons-material';
 import { LandingHeader } from '../components/LandingHeader';
 
 export const PrivacyPolicyPage: React.FC = () => {
+  return (
     <Box sx={{ minHeight: '100vh', bgcolor: 'background.default' }}>
       <LandingHeader />
 
