@@ -45,8 +45,8 @@ describe('StoryPage', () => {
 
   it('renders key story content', () => {
     renderStoryPage();
-    expect(screen.getByText(/parent and den leader/i)).toBeInTheDocument();
-    expect(screen.getByText(/supporters/i)).toBeInTheDocument();
+    expect(screen.getByText(/paper sales sheets/i)).toBeInTheDocument();
+    expect(screen.getByText(/supporter/i)).toBeInTheDocument();
     expect(screen.getByText(/harder than it needed to be/i)).toBeInTheDocument();
     expect(screen.getAllByText(/Pack Kernel/i).length).toBeGreaterThan(0);
   });

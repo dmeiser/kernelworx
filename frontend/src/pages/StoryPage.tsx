@@ -48,22 +48,24 @@ export const StoryPage: React.FC = () => {
           <Paper elevation={2} sx={{ p: { xs: 3, sm: 4, md: 5 } }}>
             <Stack spacing={3}>
               <Typography variant="body1" color="text.primary">
-                I am a parent and den leader. Popcorn season meant tracking orders across paper
-                sheets, payment apps, and spreadsheets — and I kept making mistakes.
+                Popcorn season used to mean paper sales sheets spread across the kitchen table,
+                payment apps open on my phone, and at least one spreadsheet that never quite matched
+                reality.
               </Typography>
 
               <Typography variant="body1" color="text.primary">
-                At pickup sites I would stand there with multiple payment apps open, waiting for QR
-                codes to load while supporters waited. Then I would spend evenings building a
-                spreadsheet just to figure out who had paid with which service and whether anything
-                was still owed. My handwriting is not great, so I made mistakes.
+                At pickup sites I'd stand there fumbling between apps, trying to find the right QR
+                code while a supporter waited. Then I'd go home and rebuild the same spreadsheet I'd
+                made the year before, just to figure out who had paid with which service and whether
+                anything was still owed. My handwriting didn't help — I'd transpose numbers, lose
+                names, and create more work for myself.
               </Typography>
 
               <Typography variant="body1" color="text.primary">
-                And I was only handling one Scout. Our Pack Kernel had to decipher all of that for
-                every youth in the pack, piece together the orders, and make sure the right products
-                went to the right families. It was a lot of work for a volunteer, and it made selling
-                popcorn harder than it needed to be for parents and Scouts.
+                I was doing this for one Scout. Our Pack Kernel had to do it for every youth in the
+                pack, piecing together orders, matching payments, and making sure the right products
+                ended up with the right families. It was a lot to ask of a volunteer, and it made
+                selling popcorn harder than it needed to be for parents and Scouts.
               </Typography>
 
               <Typography variant="body1" color="text.primary">
@@ -74,17 +76,16 @@ export const StoryPage: React.FC = () => {
               <Typography variant="body1" color="text.primary">
                 KernelWorx is my answer. It brings orders, seller profiles, payments, and reporting
                 into one place so nobody has to juggle paper sheets or rebuild spreadsheets by hand.
-                As an Eagle Scout and Order of the Arrow Brotherhood member, I care deeply about
-                helping Scouting volunteers succeed, and I built KernelWorx with that spirit in mind.
+                As an Eagle Scout and Order of the Arrow Brotherhood member, I built it because I
+                care about helping Scouting volunteers succeed.
               </Typography>
 
               <Typography variant="body1" color="text.primary">
-                The site is free to use. I don't want to make a profit off this thing, but I don't
-                want to pay for it completely out of pocket either. I spent ~$250-300 on tools and
-                $80 on other development costs. That's likely to continue plus the operations costs.
-                If you find it valuable, please sponsor development through GitHub Sponsors — it
-                helps defray hosting and development expenses. KernelWorx is not a non-profit, so
-                donations are not tax deductible.
+                The site is free to use — no subscriptions, no paid features. I'm not trying to make
+                a profit; I just don't want to pay for the whole thing out of pocket. If KernelWorx
+                saves you time or hassle, please consider sponsoring development through GitHub
+                Sponsors. It helps cover hosting and ongoing development. KernelWorx is not a
+                non-profit, so donations are not tax deductible.
               </Typography>
             </Stack>
           </Paper>
