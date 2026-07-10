@@ -96,7 +96,7 @@ export const LandingPage: React.FC = () => {
     {
       title: 'Flexible Payments',
       description:
-        'Set up the payment methods you want to accept, add QR codes for easy access, and mark orders as paid so nothing slips through the cracks.',
+        'Set up your custom payment methods, add QR codes for easy access, and mark orders as paid so nothing slips through the cracks.',
       icon: <PaymentIcon />,
       screenshot: '/marketing/payment-methods-page-mobile.png',
       screenshotAlt: 'Payment Methods page showing built-in and custom payment options',
