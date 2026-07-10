@@ -62,15 +62,15 @@ export const StoryPage: React.FC = () => {
               </Typography>
 
               <Typography variant="body1" color="text.primary">
-                I was doing this for one Scout. Our Pack Kernel had to do it for every youth in the
-                pack, piecing together orders, matching payments, and making sure the right products
-                ended up with the right families. It was a lot to ask of a volunteer — and it made
-                selling popcorn harder for both parents and Scouts.
+                I was doing this for one Scout. Our Pack Kernel had to make sense of it for every
+                youth in the pack — paper orders, payments families turned in, and making sure the
+                right products ended up with the right families. It was a lot to ask of a volunteer —
+                and it made selling popcorn harder for both parents and Scouts.
               </Typography>
 
               <Typography variant="body1" color="text.primary">
-                I started asking a simple question: how could this whole process be easier — not just
-                for me, but for the Pack Kernel, the parents, and the Scouts?
+                I started asking a simple question: how could this Process be easier — not just for
+                me, but for the Pack Kernel, the parents, and the Scouts?
               </Typography>
 
               <Typography variant="body1" color="text.primary">
