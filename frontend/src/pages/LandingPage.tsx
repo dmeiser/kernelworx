@@ -180,7 +180,7 @@ export const LandingPage: React.FC = () => {
                 mb: 2,
               }}
             >
-              Track orders, manage sellers, and generate reports for your Scouting America popcorn fundraiser — all in
+              Track orders, manage sellers, and generate reports for your Scouting America popcorn sale — all in
               one simple, secure place.
             </Typography>
             <Typography
