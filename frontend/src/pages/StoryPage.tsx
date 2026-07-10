@@ -41,16 +41,16 @@ export const StoryPage: React.FC = () => {
               The Story of KernelWorx
             </Typography>
             <Typography variant="subtitle1" color="text.secondary">
-              Built by a Scout parent who wanted fundraising to be easier for everyone.
+              Built because popcorn season felt harder than it had to be.
             </Typography>
           </Box>
 
           <Paper elevation={2} sx={{ p: { xs: 3, sm: 4, md: 5 } }}>
             <Stack spacing={3}>
               <Typography variant="body1" color="text.primary">
-                Popcorn season used to mean paper sales sheets spread across the kitchen table,
-                payment apps open on my phone, and at least one spreadsheet that never quite matched
-                reality.
+                Popcorn season always made me feel like I was one step behind. I could be as
+                organized as I wanted, but I was still juggling paper sales sheets, payment apps,
+                and a spreadsheet that never matched what actually happened.
               </Typography>
 
               <Typography variant="body1" color="text.primary">
@@ -64,13 +64,13 @@ export const StoryPage: React.FC = () => {
               <Typography variant="body1" color="text.primary">
                 I was doing this for one Scout. Our Pack Kernel had to do it for every youth in the
                 pack, piecing together orders, matching payments, and making sure the right products
-                ended up with the right families. It was a lot to ask of a volunteer, and it made
-                selling popcorn harder than it needed to be for parents and Scouts.
+                ended up with the right families. It was a lot to ask of a volunteer — and it made
+                selling popcorn harder for both parents and Scouts.
               </Typography>
 
               <Typography variant="body1" color="text.primary">
                 I started asking a simple question: how could this whole process be easier — not just
-                for me, but for the Pack Kernel, the parents, and the Scouts doing the selling?
+                for me, but for the Pack Kernel, the parents, and the Scouts?
               </Typography>
 
               <Typography variant="body1" color="text.primary">
