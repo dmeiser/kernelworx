@@ -22,7 +22,8 @@ import {
   Dialog,
   DialogContent,
   IconButton,
-  MobileStepper,
+  Tabs,
+  Tab,
 } from '@mui/material';
 import {
   Login as LoginIcon,
@@ -33,8 +34,6 @@ import {
   Favorite as FavoriteIcon,
   Close as CloseIcon,
   ZoomIn as ZoomInIcon,
-  KeyboardArrowLeft as KeyboardArrowLeftIcon,
-  KeyboardArrowRight as KeyboardArrowRightIcon,
 } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext';
 import { LandingHeader } from '../components/LandingHeader';
@@ -258,134 +257,92 @@ export const LandingPage: React.FC = () => {
               KernelWorx helps Scouting America volunteers run smoother popcorn sales from sign-up to final report.
             </Typography>
 
-            <Box sx={{ position: 'relative' }}>
-              <Stack direction="row" spacing={2} alignItems="center" justifyContent="center">
-                <IconButton
-                  onClick={() => setActiveFeature((prev) => (prev > 0 ? prev - 1 : features.length - 1))}
-                  aria-label="Previous feature"
-                  sx={{ display: { xs: 'none', sm: 'inline-flex' } }}
+            <Box sx={{ maxWidth: 720, mx: 'auto' }}>
+              <Paper elevation={2} sx={{ borderRadius: 2, overflow: 'hidden' }}>
+                <Tabs
+                  value={activeFeature}
+                  onChange={(_event, newValue) => setActiveFeature(newValue)}
+                  variant="fullWidth"
+                  textColor="primary"
+                  indicatorColor="primary"
+                  aria-label="Feature screenshots"
                 >
-                  <KeyboardArrowLeftIcon />
-                </IconButton>
-
-                <Box sx={{ flex: 1, maxWidth: 720, mx: 'auto' }}>
-                  <Paper elevation={2} sx={{ p: { xs: 2, sm: 4 }, borderRadius: 2 }}>
-                    <Stack spacing={3} alignItems="center" textAlign="center">
-                      <Box
-                        sx={{
-                          p: 2,
-                          bgcolor: 'primary.light',
-                          borderRadius: 2,
-                          display: 'inline-flex',
-                          color: 'primary.contrastText',
-                        }}
-                      >
-                        {features[activeFeature].icon}
-                      </Box>
-                      <Box>
-                        <Typography variant="h5" component="h3" gutterBottom sx={{ fontWeight: 700 }}>
-                          {features[activeFeature].title}
-                        </Typography>
-                        <Typography variant="body1" color="text.secondary">
-                          {features[activeFeature].description}
-                        </Typography>
-                      </Box>
-                      <Box
-                        onClick={() =>
-                          handleScreenshotClick(
-                            features[activeFeature].screenshot,
-                            features[activeFeature].screenshotAlt,
-                            features[activeFeature].frameVariant,
-                          )
+                  <Tab icon={<PeopleIcon />} label="Organize" aria-label="Organize Sellers" />
+                  <Tab icon={<ShareIcon />} label="Collaborate" aria-label="Collaborate" />
+                  <Tab icon={<PaymentIcon />} label="Track" aria-label="Track Payments" />
+                  <Tab icon={<AssessmentIcon />} label="Report" aria-label="Report & Export" />
+                </Tabs>
+                <Box sx={{ p: { xs: 2, sm: 4 }, textAlign: 'center' }}>
+                  <Stack spacing={3} alignItems="center">
+                    <Box>
+                      <Typography variant="h5" component="h3" gutterBottom sx={{ fontWeight: 700 }}>
+                        {features[activeFeature].title}
+                      </Typography>
+                      <Typography variant="body1" color="text.secondary">
+                        {features[activeFeature].description}
+                      </Typography>
+                    </Box>
+                    <Box
+                      onClick={() =>
+                        handleScreenshotClick(
+                          features[activeFeature].screenshot,
+                          features[activeFeature].screenshotAlt,
+                          features[activeFeature].frameVariant,
+                        )
+                      }
+                      sx={{
+                        position: 'relative',
+                        cursor: 'pointer',
+                        width: '100%',
+                        display: 'flex',
+                        justifyContent: 'center',
+                        '&:hover .zoom-overlay': {
+                          opacity: 1,
+                        },
+                      }}
+                    >
+                      <DeviceFrame
+                        variant={features[activeFeature].frameVariant}
+                        url={features[activeFeature].frameVariant === 'browser' ? 'kernelworx.com' : undefined}
+                        sx={
+                          features[activeFeature].frameVariant === 'browser'
+                            ? { width: '100%' }
+                            : { maxWidth: { xs: 260, sm: 320 } }
                         }
+                      >
+                        <Box
+                          component="img"
+                          src={features[activeFeature].screenshot}
+                          alt={features[activeFeature].screenshotAlt}
+                          sx={{
+                            width: '100%',
+                            height: features[activeFeature].frameVariant === 'browser' ? { xs: 220, sm: 360 } : { xs: 360, sm: 520 },
+                            objectFit: 'cover',
+                            objectPosition: 'top left',
+                            display: 'block',
+                          }}
+                        />
+                      </DeviceFrame>
+                      <Box
+                        className="zoom-overlay"
                         sx={{
-                          position: 'relative',
-                          cursor: 'pointer',
-                          width: '100%',
+                          position: 'absolute',
+                          inset: 0,
+                          bgcolor: 'rgba(0, 0, 0, 0.4)',
                           display: 'flex',
+                          alignItems: 'center',
                           justifyContent: 'center',
-                          '&:hover .zoom-overlay': {
-                            opacity: 1,
-                          },
+                          opacity: 0,
+                          transition: 'opacity 0.2s ease-in-out',
+                          borderRadius: 2,
                         }}
                       >
-                        <DeviceFrame
-                          variant={features[activeFeature].frameVariant}
-                          url={features[activeFeature].frameVariant === 'browser' ? 'kernelworx.com' : undefined}
-                          sx={
-                            features[activeFeature].frameVariant === 'browser'
-                              ? { width: '100%' }
-                              : { maxWidth: { xs: 260, sm: 320 } }
-                          }
-                        >
-                          <Box
-                            component="img"
-                            src={features[activeFeature].screenshot}
-                            alt={features[activeFeature].screenshotAlt}
-                            sx={{
-                              width: '100%',
-                              height: features[activeFeature].frameVariant === 'browser' ? { xs: 220, sm: 360 } : { xs: 360, sm: 520 },
-                              objectFit: 'cover',
-                              objectPosition: 'top left',
-                              display: 'block',
-                            }}
-                          />
-                        </DeviceFrame>
-                        <Box
-                          className="zoom-overlay"
-                          sx={{
-                            position: 'absolute',
-                            inset: 0,
-                            bgcolor: 'rgba(0, 0, 0, 0.4)',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            opacity: 0,
-                            transition: 'opacity 0.2s ease-in-out',
-                            borderRadius: 2,
-                          }}
-                        >
-                          <ZoomInIcon sx={{ color: 'white', fontSize: 40 }} />
-                        </Box>
+                        <ZoomInIcon sx={{ color: 'white', fontSize: 40 }} />
                       </Box>
-                    </Stack>
-                  </Paper>
+                    </Box>
+                  </Stack>
                 </Box>
-
-                <IconButton
-                  onClick={() => setActiveFeature((prev) => (prev < features.length - 1 ? prev + 1 : 0))}
-                  aria-label="Next feature"
-                  sx={{ display: { xs: 'none', sm: 'inline-flex' } }}
-                >
-                  <KeyboardArrowRightIcon />
-                </IconButton>
-              </Stack>
-
-              <MobileStepper
-                variant="dots"
-                steps={features.length}
-                position="static"
-                activeStep={activeFeature}
-                nextButton={
-                  <Button
-                    size="small"
-                    onClick={() => setActiveFeature((prev) => (prev < features.length - 1 ? prev + 1 : 0))}
-                    endIcon={<KeyboardArrowRightIcon />}
-                  >
-                    Next
-                  </Button>
-                }
-                backButton={
-                  <Button
-                    size="small"
-                    onClick={() => setActiveFeature((prev) => (prev > 0 ? prev - 1 : features.length - 1))}
-                    startIcon={<KeyboardArrowLeftIcon />}
-                  >
-                    Back
-                  </Button>
-                }
-                sx={{ justifyContent: 'center', mt: 2, bgcolor: 'transparent' }}
-              />
+              </Paper>
             </Box>
           </Box>
 
