@@ -98,7 +98,7 @@ const FeatureCard: React.FC<FeatureCardProps> = ({
                   alt={screenshotAlt || title}
                   sx={{
                     width: '100%',
-                    height: frameVariant === 'browser' ? 160 : 260,
+                    height: frameVariant === 'browser' ? 160 : '100%',
                     objectFit: 'cover',
                     objectPosition: 'top left',
                     bgcolor: 'grey.900',
