@@ -6,58 +6,22 @@
  */
 
 import React from 'react';
-import { useNavigate } from 'react-router-dom';
 import {
   Box,
   Container,
   Typography,
   Paper,
-  AppBar,
-  Toolbar,
-  Button,
   Divider,
   List,
   ListItem,
   ListItemText,
 } from '@mui/material';
-import { ArrowBack as ArrowBackIcon, Delete as DeleteIcon } from '@mui/icons-material';
+import { Delete as DeleteIcon } from '@mui/icons-material';
+import { LandingHeader } from '../components/LandingHeader';
 
 export const PrivacyPolicyPage: React.FC = () => {
-  const navigate = useNavigate();
-
-  return (
     <Box sx={{ minHeight: '100vh', bgcolor: 'background.default' }}>
-      {/* Header */}
-      <AppBar position="static" color="primary" elevation={1}>
-        <Toolbar>
-          <Button color="inherit" startIcon={<ArrowBackIcon />} onClick={() => navigate('/')}>
-            Home
-          </Button>
-          <Box sx={{ display: 'flex', alignItems: 'center', flexGrow: 1, ml: 2 }}>
-            <Box
-              component="img"
-              src="/logo.svg"
-              alt="Popcorn kernel"
-              sx={{
-                width: { xs: '28px', sm: '32px' },
-                height: { xs: '28px', sm: '32px' },
-                mr: 1,
-              }}
-            />
-            <Typography
-              variant="h6"
-              component="div"
-              sx={{
-                fontFamily: '"Kaushan Script", cursive',
-                fontWeight: 600,
-                fontSize: { xs: '1.1rem', sm: '1.25rem' },
-              }}
-            >
-              Popcorn Sales Manager
-            </Typography>
-          </Box>
-        </Toolbar>
-      </AppBar>
+      <LandingHeader />
 
       {/* Main Content */}
       <Container maxWidth="md" sx={{ py: 4 }}>
@@ -77,7 +41,7 @@ export const PrivacyPolicyPage: React.FC = () => {
             About This Service
           </Typography>
           <Typography variant="body1" paragraph>
-            Popcorn Sales Manager is a volunteer-run application designed to help Scouting America units manage their
+            KernelWorx is a volunteer-run application designed to help Scouting America units manage their
             popcorn fundraising campaigns. This service is provided free of charge to support youth development
             programs.
           </Typography>
