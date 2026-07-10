@@ -69,8 +69,8 @@ export const StoryPage: React.FC = () => {
               </Typography>
 
               <Typography variant="body1" color="text.primary">
-                I started asking a simple question: how could this Process be easier — not just for
-                me, but for the Pack Kernel, the parents, and the Scouts?
+                I started asking a simple question: How could popcorn season be easier — not just
+                for me, but for the Pack Kernel, the parents, and the Scouts?
               </Typography>
 
               <Typography variant="body1" color="text.primary">
