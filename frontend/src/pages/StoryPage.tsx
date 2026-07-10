@@ -48,9 +48,10 @@ export const StoryPage: React.FC = () => {
           <Paper elevation={2} sx={{ p: { xs: 3, sm: 4, md: 5 } }}>
             <Stack spacing={3}>
               <Typography variant="body1" color="text.primary">
-                Popcorn season always made me feel like I was one step behind. I could be as
-                organized as I wanted, but I was still juggling paper sales sheets, payment apps,
-                and a spreadsheet that never matched what actually happened.
+                As a parent of a Cub Scout and a Den Leader, popcorn season always made me feel like
+                I was one step behind. I could be as organized as I wanted, but I was still juggling
+                paper sales sheets, payment apps, and a spreadsheet that never matched what actually
+                happened.
               </Typography>
 
               <Typography variant="body1" color="text.primary">
