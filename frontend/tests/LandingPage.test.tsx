@@ -178,6 +178,36 @@ describe('LandingPage', () => {
     });
   });
 
+  it('navigates to story page when hero story link clicked', async () => {
+    const user = userEvent.setup();
+    renderWithAuth();
+
+    await waitFor(() => {
+      expect(screen.getByText('Read the story behind KernelWorx')).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByText('Read the story behind KernelWorx'));
+
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith('/story');
+    });
+  });
+
+  it('navigates to story page when footer Our Story button clicked', async () => {
+    const user = userEvent.setup();
+    renderWithAuth();
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /our story/i })).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole('button', { name: /our story/i }));
+
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith('/story');
+    });
+  });
+
   it('navigates to privacy policy when footer link clicked', async () => {
     const user = userEvent.setup();
     renderWithAuth();
@@ -191,6 +221,54 @@ describe('LandingPage', () => {
 
     await waitFor(() => {
       expect(mockNavigate).toHaveBeenCalledWith('/privacy');
+    });
+  });
+
+  it('navigates to sponsor page when Sponsor button clicked', async () => {
+    renderWithAuth();
+
+    await waitFor(() => {
+      expect(screen.getByRole('link', { name: /sponsor kernelworx/i })).toBeInTheDocument();
+    });
+
+    const sponsorLink = screen.getByRole('link', { name: /sponsor kernelworx/i });
+    expect(sponsorLink).toHaveAttribute('href', 'https://github.com/sponsors/dmeiser');
+    expect(sponsorLink).toHaveAttribute('target', '_blank');
+  });
+
+  it('switches feature tabs and renders device frame variants', async () => {
+    const user = userEvent.setup();
+    renderWithAuth();
+
+    await waitFor(() => {
+      expect(screen.getByText('Organize Your Sellers')).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole('tab', { name: /collaborate/i }));
+    await waitFor(() => {
+      expect(screen.getByText('Share With Your Unit')).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole('tab', { name: /report/i }));
+    await waitFor(() => {
+      expect(screen.getByText('Run Reports')).toBeInTheDocument();
+    });
+  });
+
+  it('navigates to /home when authenticated dashboard button is clicked', async () => {
+    const user = userEvent.setup();
+    renderWithAuth(true);
+
+    await waitFor(() => {
+      expect(screen.getAllByRole('button', { name: /go to dashboard/i }).length).toBeGreaterThan(0);
+    });
+
+    // Click the last LandingPage dashboard button (avoid LandingHeader's button)
+    const dashboardButtons = screen.getAllByRole('button', { name: /go to dashboard/i });
+    await user.click(dashboardButtons[dashboardButtons.length - 1]);
+
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith('/home');
     });
   });
 });

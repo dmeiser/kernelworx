@@ -346,16 +346,7 @@ resource "aws_appsync_resolver" "delete_seller_profile" {
 
   pipeline_config {
     functions = [
-      aws_appsync_function.verify_profile_owner_for_delete.function_id,
-      aws_appsync_function.query_profile_shares_for_delete.function_id,
-      aws_appsync_function.query_profile_invites_for_delete.function_id,
-      aws_appsync_function.delete_profile_shares.function_id,
-      aws_appsync_function.delete_profile_invites.function_id,
-      aws_appsync_function.query_profile_campaigns_for_delete.function_id,
-      aws_appsync_function.delete_profile_orders_cascade_appsync.function_id,
-      aws_appsync_function.delete_profile_campaigns.function_id,
-      aws_appsync_function.delete_profile_ownership.function_id,
-      aws_appsync_function.delete_profile_metadata.function_id,
+      aws_appsync_function.delete_profile_cascade.function_id,
     ]
   }
 

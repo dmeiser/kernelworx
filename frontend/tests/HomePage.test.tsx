@@ -135,4 +135,34 @@ describe('HomePage', () => {
       expect(mockNavigate).toHaveBeenCalledWith('/payment-methods');
     });
   });
+
+  it('navigates to /catalogs when Catalogs tile clicked', async () => {
+    const user = userEvent.setup();
+    renderWithAuth();
+
+    await waitFor(() => {
+      expect(screen.getByText('Catalogs')).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByText('Catalogs'));
+
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith('/catalogs');
+    });
+  });
+
+  it('navigates to /shared-campaigns when Shared Campaigns tile clicked', async () => {
+    const user = userEvent.setup();
+    renderWithAuth();
+
+    await waitFor(() => {
+      expect(screen.getByText('Shared Campaigns')).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByText('Shared Campaigns'));
+
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith('/shared-campaigns');
+    });
+  });
 });

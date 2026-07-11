@@ -257,9 +257,7 @@ def test_edit_order(owner_page: Page, ensure_owner_profile: str) -> None:
     owner_page.wait_for_url("**/orders", timeout=15_000)
     order_page.wait_for_loading()
 
-    assert order_page.has_order("Edited Customer"), (
-        "'Edited Customer' must appear in the orders table after editing"
-    )
+    assert order_page.has_order("Edited Customer"), "'Edited Customer' must appear in the orders table after editing"
 
 
 @pytest.mark.smoke

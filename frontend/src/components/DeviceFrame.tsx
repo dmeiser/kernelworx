@@ -113,14 +113,7 @@ const PhoneFrameSvg: React.FC<{ variant: 'iphone' | 'android'; children: React.R
         {/* Phone body */}
         <rect x={0} y={0} width={width} height={height} rx={cornerRadius} fill={frameColor} />
         {/* Screen */}
-        <rect
-          x={screenX}
-          y={screenY}
-          width={screenW}
-          height={screenH}
-          rx={screenRadius}
-          fill="#000"
-        />
+        <rect x={screenX} y={screenY} width={screenW} height={screenH} rx={screenRadius} fill="#000" />
         {isIphone ? (
           <>
             {/* Dynamic Island */}

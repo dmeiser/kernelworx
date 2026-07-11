@@ -52,29 +52,33 @@ export const QRUploadDialog: React.FC<QRUploadDialogProps> = ({
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const previewUrlRef = useRef<string | null>(null);
 
   // Reset state when dialog opens/closes
   useEffect(() => {
     if (open) {
       setSelectedFile(null);
       setPreviewUrl(null);
+      previewUrlRef.current = null;
       setError(null);
     }
+  }, [open]);
 
-    // Cleanup preview URL when component unmounts or file changes
+  // Cleanup preview URL when component unmounts
+  useEffect(() => {
     return () => {
-      if (previewUrl) {
-        URL.revokeObjectURL(previewUrl);
+      if (previewUrlRef.current) {
+        URL.revokeObjectURL(previewUrlRef.current);
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- Intentionally not including previewUrl to avoid infinite loop
-  }, [open]);
+  }, []);
 
   // Generate preview URL when file is selected
   useEffect(() => {
     if (selectedFile) {
       const url = URL.createObjectURL(selectedFile);
       setPreviewUrl(url);
+      previewUrlRef.current = url;
       return () => URL.revokeObjectURL(url);
     }
     return undefined;

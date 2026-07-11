@@ -690,8 +690,9 @@ class TestListMyShares:
         lambda_context: Any,
     ) -> None:
         """Test that profiles without matching shares are skipped (covers line 199)."""
-        from src.handlers.profile_sharing import list_my_shares
         from unittest.mock import patch
+
+        from src.handlers.profile_sharing import list_my_shares
 
         profile_id = "PROFILE#has-share"
         orphan_profile_id = "PROFILE#no-share"
@@ -728,7 +729,7 @@ class TestListMyShares:
         )
 
         event = {**appsync_event, "identity": {"sub": another_account_id}}
-        
+
         # Mock batch_get_item to return both profiles
         with patch("src.handlers.profile_sharing.dynamodb.batch_get_item") as mock_batch_get:
             mock_batch_get.return_value = {
@@ -751,7 +752,7 @@ class TestListMyShares:
                     ]
                 }
             }
-            
+
             result = list_my_shares(event, lambda_context)
 
         # Should only return the profile with a share, orphan profile is filtered out at line 199

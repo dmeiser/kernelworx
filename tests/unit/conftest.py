@@ -98,6 +98,13 @@ def shared_campaigns_table(dynamodb_table: Any) -> Any:
 
 
 @pytest.fixture
+def orders_table(dynamodb_table: Any) -> Any:
+    """Get the orders DynamoDB table."""
+    dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
+    return dynamodb.Table("kernelworx-orders-v2-ue1-dev")
+
+
+@pytest.fixture
 def s3_bucket(aws_credentials: None) -> Generator[Any, None, None]:
     """Create mock S3 bucket for report exports."""
     with mock_aws():

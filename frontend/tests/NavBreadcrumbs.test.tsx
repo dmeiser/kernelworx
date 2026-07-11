@@ -3,7 +3,7 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
-import { NavBreadcrumbs, type BreadcrumbItem } from './NavBreadcrumbs';
+import { NavBreadcrumbs, type BreadcrumbItem } from '../src/components/NavBreadcrumbs';
 
 describe('NavBreadcrumbs', () => {
   describe('rendering', () => {

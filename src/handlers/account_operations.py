@@ -132,8 +132,8 @@ def update_my_account(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 def _delete_all_user_data(account_id: str, context: Any, logger: Any) -> None:
     """Delete all user data from DynamoDB using admin delete functions."""
     from .admin_operations import (
-        admin_delete_user_catalogs,
         admin_delete_user_campaigns,
+        admin_delete_user_catalogs,
         admin_delete_user_orders,
         admin_delete_user_profiles,
         admin_delete_user_shares,

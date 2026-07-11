@@ -50,6 +50,11 @@ variable "sms_role_arn" {
   type        = string
 }
 
+variable "lambda_execution_role_arn" {
+  description = "ARN of the Lambda execution role to attach the scoped Cognito admin policy to"
+  type        = string
+}
+
 variable "enable_google_idp" {
   type        = bool
   default     = false
@@ -253,6 +258,31 @@ resource "aws_lambda_permission" "cognito_post_confirmation" {
   source_arn    = aws_cognito_user_pool.main.arn
 }
 
+# Least-privilege Cognito admin policy for Lambda handlers.
+# Scopes actions to the created user pool. Only actions actually used by the
+# Lambda handlers (list/search users, list groups, delete/reset/link users) are
+# granted. AdminCreateUser/AdminSetUserPassword/AdminGetUser are not used.
+# kics-scan ignore-line
+data "aws_iam_policy_document" "lambda_cognito_admin" {
+  statement {
+    effect = "Allow"
+    actions = [
+      "cognito-idp:ListUsers",
+      "cognito-idp:AdminListGroupsForUser",
+      "cognito-idp:AdminDeleteUser",
+      "cognito-idp:AdminResetUserPassword",
+      "cognito-idp:AdminLinkProviderForUser",
+    ]
+    resources = [aws_cognito_user_pool.main.arn]
+  }
+}
+
+resource "aws_iam_role_policy" "lambda_cognito_admin" {
+  name   = "cognito-admin"
+  role   = var.lambda_execution_role_arn
+  policy = data.aws_iam_policy_document.lambda_cognito_admin.json
+}
+
 # Google Identity Provider (optional - not currently configured)
 resource "aws_cognito_identity_provider" "google" {
   count = var.enable_google_idp ? 1 : 0
@@ -303,7 +333,9 @@ resource "aws_cognito_user_pool_client" "web" {
 
   logout_urls = var.logout_urls
 
-  allowed_oauth_flows                  = ["code", "implicit"]
+  # Frontend uses the authorization-code flow via Amplify. Implicit flow is not
+  # required, so it is omitted to reduce token exposure in the browser.
+  allowed_oauth_flows                  = ["code"]
   allowed_oauth_flows_user_pool_client = true
   allowed_oauth_scopes                 = ["email", "openid", "profile"]
 

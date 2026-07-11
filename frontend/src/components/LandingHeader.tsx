@@ -25,7 +25,10 @@ export const LandingHeader: React.FC = () => {
   return (
     <AppBar position="static" color="primary" elevation={1}>
       <Toolbar>
-        <Box sx={{ display: 'flex', alignItems: 'center', flexGrow: 1, cursor: 'pointer' }} onClick={() => navigate('/')}>
+        <Box
+          sx={{ display: 'flex', alignItems: 'center', flexGrow: 1, cursor: 'pointer' }}
+          onClick={() => navigate('/')}
+        >
           <Box
             component="img"
             src="/logo.svg"

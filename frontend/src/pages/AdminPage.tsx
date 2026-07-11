@@ -336,12 +336,12 @@ const CatalogCard: React.FC<CatalogCardProps> = ({ catalog, onEdit, onDelete }) 
           size="small"
         />
         <Tooltip title="Edit Catalog">
-          <IconButton size="small" onClick={() => onEdit(catalog)} color="primary">
+          <IconButton size="small" onClick={() => onEdit(catalog)} color="primary" aria-label="Edit catalog">
             <EditIcon fontSize="small" />
           </IconButton>
         </Tooltip>
         <Tooltip title="Delete Catalog">
-          <IconButton size="small" onClick={() => onDelete(catalog)} color="error">
+          <IconButton size="small" onClick={() => onDelete(catalog)} color="error" aria-label="Delete catalog">
             <DeleteIcon fontSize="small" />
           </IconButton>
         </Tooltip>
@@ -710,9 +710,27 @@ export const AdminPage: React.FC = () => {
       {/* Tabs */}
       <Paper sx={{ mb: 3 }}>
         <Tabs value={currentTab} onChange={handleTabChange}>
-          <Tab label="Users" icon={<PersonIcon />} iconPosition="start" />
-          <Tab label="Catalogs" icon={<CatalogIcon />} iconPosition="start" />
-          <Tab label="System Info" icon={<InfoIcon />} iconPosition="start" />
+          <Tab
+            id="admin-tab-0"
+            aria-controls="admin-tabpanel-0"
+            label="Users"
+            icon={<PersonIcon />}
+            iconPosition="start"
+          />
+          <Tab
+            id="admin-tab-1"
+            aria-controls="admin-tabpanel-1"
+            label="Catalogs"
+            icon={<CatalogIcon />}
+            iconPosition="start"
+          />
+          <Tab
+            id="admin-tab-2"
+            aria-controls="admin-tabpanel-2"
+            label="System Info"
+            icon={<InfoIcon />}
+            iconPosition="start"
+          />
         </Tabs>
       </Paper>
 

@@ -198,7 +198,12 @@ export const CatalogEditorDialog: React.FC<CatalogEditorDialogProps> = ({ open, 
                         Product {index + 1}
                       </Typography>
                       {products.length > 1 && (
-                        <IconButton size="small" onClick={() => handleRemoveProduct(index)} color="error">
+                        <IconButton
+                          size="small"
+                          onClick={() => handleRemoveProduct(index)}
+                          color="error"
+                          aria-label={`Remove product ${index + 1}`}
+                        >
                           <DeleteIcon fontSize="small" />
                         </IconButton>
                       )}

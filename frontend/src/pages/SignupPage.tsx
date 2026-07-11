@@ -8,7 +8,7 @@
  * - Email verification flow
  */
 
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import {
   Box,
   Button,
@@ -78,15 +78,7 @@ function getVerificationErrorMessage(error: { name?: string; message?: string })
   return getErrorFromTable(VERIFICATION_ERROR_MESSAGES, error.name, fallback);
 }
 
-// Validation rules as array of [condition, errorMessage] tuples
-type ValidationRule = [boolean, string];
-
-function getValidationError(rules: ValidationRule[]): string | null {
-  for (const [condition, message] of rules) {
-    if (condition) return message;
-  }
-  return null;
-}
+const PASSWORD_REGEX = /^(?=.*[A-Z])(?=.*[a-z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,}$/;
 
 // Helper: Validate form fields and return error message or null
 function validateFormFields(
@@ -95,14 +87,25 @@ function validateFormFields(
   confirmPassword: string,
   ageConfirmed: boolean,
 ): string | null {
-  const rules: ValidationRule[] = [
-    [!email || !password || !confirmPassword, 'Email and password are required'],
-    [!email.includes('@'), 'Please enter a valid email address'],
-    [password.length < 8, 'Password must be at least 8 characters'],
-    [password !== confirmPassword, 'Passwords do not match'],
-    [!ageConfirmed, 'You must be 13 years or older to create an account'],
+  if ([email, password, confirmPassword].some((value) => !value)) {
+    return 'Email and password are required';
+  }
+
+  const validators: [() => boolean, string][] = [
+    [() => email.includes('@'), 'Please enter a valid email address'],
+    [
+      () => PASSWORD_REGEX.test(password),
+      'Password must be at least 8 characters and include uppercase, lowercase, number, and symbol',
+    ],
+    [() => password === confirmPassword, 'Passwords do not match'],
+    [() => ageConfirmed, 'You must be 13 years or older to create an account'],
   ];
-  return getValidationError(rules);
+
+  for (const [isValid, message] of validators) {
+    if (!isValid()) return message;
+  }
+
+  return null;
 }
 
 // Helper: Check if any optional fields are provided
@@ -157,6 +160,7 @@ async function handlePostVerificationAuth(
   refreshSession: () => Promise<void>,
   navigate: NavigateFunction,
   setSuccess: (msg: string | null) => void,
+  scheduleRedirect: (callback: () => void) => void,
 ): Promise<void> {
   try {
     await fetchAuthSession();
@@ -166,7 +170,7 @@ async function handlePostVerificationAuth(
   } catch {
     console.log('User is not authenticated, redirecting to login');
     setSuccess('Please log in with your new account');
-    setTimeout(() => navigate('/login'), 1500);
+    scheduleRedirect(() => navigate('/login'));
   }
 }
 
@@ -177,6 +181,7 @@ async function processAutoSignIn(
   refreshSession: () => Promise<void>,
   navigate: NavigateFunction,
   setSuccess: (msg: string | null) => void,
+  scheduleRedirect: (callback: () => void) => void,
 ): Promise<void> {
   try {
     await autoSignIn();
@@ -185,7 +190,7 @@ async function processAutoSignIn(
     navigate('/home');
   } catch (autoSignInError) {
     console.log('Auto sign-in failed, checking authentication state:', autoSignInError);
-    await handlePostVerificationAuth(refreshSession, navigate, setSuccess);
+    await handlePostVerificationAuth(refreshSession, navigate, setSuccess, scheduleRedirect);
   }
 }
 
@@ -208,6 +213,22 @@ export const SignupPage: React.FC = () => {
   const [ageConfirmed, setAgeConfirmed] = useState(false);
   const [showVerification, setShowVerification] = useState(false);
   const [verificationCode, setVerificationCode] = useState('');
+  const redirectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const scheduleRedirect = (callback: () => void) => {
+    if (redirectTimeoutRef.current) {
+      clearTimeout(redirectTimeoutRef.current);
+    }
+    redirectTimeoutRef.current = setTimeout(callback, 1500);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (redirectTimeoutRef.current) {
+        clearTimeout(redirectTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const getOptionalFields = (): OptionalFields => ({
     givenName,
@@ -263,7 +284,7 @@ export const SignupPage: React.FC = () => {
     }
     if (signUpStep === 'DONE') {
       setSuccess('Account created successfully!');
-      setTimeout(() => navigate('/login'), 1500);
+      scheduleRedirect(() => navigate('/login'));
     }
   };
 
@@ -286,7 +307,14 @@ export const SignupPage: React.FC = () => {
 
       setSuccess('Email verified! Signing you in...');
       await new Promise((resolve) => setTimeout(resolve, 1000));
-      await processAutoSignIn(updateMyAccount, getOptionalFields(), refreshSession, navigate, setSuccess);
+      await processAutoSignIn(
+        updateMyAccount,
+        getOptionalFields(),
+        refreshSession,
+        navigate,
+        setSuccess,
+        scheduleRedirect,
+      );
     } catch (err: unknown) {
       console.error('Email verification failed:', err);
       const typedError = err as { name?: string; message?: string };

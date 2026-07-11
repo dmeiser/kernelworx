@@ -2,7 +2,7 @@
  * AcceptInvitePage - Accept a profile invite code
  */
 
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMutation } from '@apollo/client/react';
 import { Box, Typography, TextField, Button, Alert, CircularProgress, Card, CardContent, Stack } from '@mui/material';
@@ -42,12 +42,24 @@ export const AcceptInvitePage: React.FC = () => {
   const [inviteCode, setInviteCode] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
   const [error, setError] = useState('');
+  const redirectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (redirectTimeoutRef.current) {
+        clearTimeout(redirectTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const handleSuccess = (data: { redeemProfileInvite: { permissions: string[] } }) => {
     const share = data.redeemProfileInvite;
     setSuccessMessage(buildSuccessMessage(share.permissions));
     setInviteCode('');
-    setTimeout(() => navigate('/scouts'), 2000);
+    if (redirectTimeoutRef.current) {
+      clearTimeout(redirectTimeoutRef.current);
+    }
+    redirectTimeoutRef.current = setTimeout(() => navigate('/scouts'), 2000);
   };
 
   const handleError = (err: Error) => {

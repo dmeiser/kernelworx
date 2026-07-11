@@ -9,15 +9,21 @@ import boto3
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
     from utils.dynamodb import tables
+    from utils.errors import AppError, ErrorCode
     from utils.logging import get_logger
+    from utils.validation import validate_unit_number
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.dynamodb import tables
+    from ..utils.errors import AppError, ErrorCode
     from ..utils.logging import get_logger
+    from ..utils.validation import validate_unit_number
 
 logger = get_logger(__name__)
 
 
-def _build_profile_data(profile_id: str, owner_account_id_stored: str, seller_name: str, now: str, unit_type: str | None, unit_number: Any, logger: Any) -> Dict[str, Any]:
+def _build_profile_data(
+    profile_id: str, owner_account_id_stored: str, seller_name: str, now: str, unit_type: str | None, unit_number: Any
+) -> Dict[str, Any]:
     """Build profile data dict with optional unit fields."""
     profile_data: Dict[str, Any] = {
         "profileId": profile_id,
@@ -29,11 +35,8 @@ def _build_profile_data(profile_id: str, owner_account_id_stored: str, seller_na
 
     if unit_type:
         profile_data["unitType"] = unit_type
-    if unit_number:
-        try:
-            profile_data["unitNumber"] = int(unit_number)
-        except (ValueError, TypeError):
-            logger.warning(f"Invalid unitNumber: {unit_number}, skipping")
+    if unit_number is not None:
+        profile_data["unitNumber"] = int(unit_number)
 
     return profile_data
 
@@ -66,13 +69,21 @@ def create_seller_profile(event: Dict[str, Any], context: Any) -> Dict[str, Any]
         unit_number = input_data.get("unitNumber")
         caller_account_id = event["identity"]["sub"]
 
+        if not seller_name or not str(seller_name).strip():
+            raise AppError(ErrorCode.INVALID_INPUT, "sellerName is required")
+
+        if unit_number is not None:
+            validate_unit_number(unit_number, required=True)
+
         logger.info("Creating seller profile", extra={"sellerName": seller_name, "callerAccountId": caller_account_id})
 
         profile_id = f"PROFILE#{uuid.uuid4()}"
         owner_account_id_stored = f"ACCOUNT#{caller_account_id}"
         now = datetime.now(timezone.utc).isoformat()
 
-        profile_data = _build_profile_data(profile_id, owner_account_id_stored, seller_name, now, unit_type, unit_number, logger)
+        profile_data = _build_profile_data(
+            profile_id, owner_account_id_stored, seller_name, now, unit_type, unit_number
+        )
 
         # In multi-table design V2, profiles table uses:
         # - PK: ownerAccountId (ACCOUNT#sub) - enables listMyProfiles via PK query
@@ -106,6 +117,8 @@ def create_seller_profile(event: Dict[str, Any], context: Any) -> Dict[str, Any]
 
         return profile_data
 
+    except AppError:
+        raise
     except Exception as e:
         logger.error("Error creating seller profile", extra={"error": str(e)}, exc_info=True)
         raise RuntimeError(f"Failed to create seller profile: {str(e)}") from e

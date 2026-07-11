@@ -10,18 +10,7 @@
 
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import {
-  Box,
-  Button,
-  Container,
-  Typography,
-  Link,
-  Paper,
-  Stack,
-  Grid,
-  Tabs,
-  Tab,
-} from '@mui/material';
+import { Box, Button, Container, Typography, Link, Paper, Stack, Grid, Tabs, Tab } from '@mui/material';
 import {
   Login as LoginIcon,
   People as PeopleIcon,
@@ -91,12 +80,7 @@ const FeatureShowcase: React.FC<FeatureShowcaseProps> = ({ features }) => {
       <Typography variant="h3" component="h2" textAlign="center" gutterBottom sx={{ fontWeight: 700 }}>
         Everything You Need for Your Fundraiser
       </Typography>
-      <Typography
-        variant="body1"
-        color="text.secondary"
-        textAlign="center"
-        sx={{ maxWidth: 700, mx: 'auto', mb: 4 }}
-      >
+      <Typography variant="body1" color="text.secondary" textAlign="center" sx={{ maxWidth: 700, mx: 'auto', mb: 4 }}>
         KernelWorx helps Scouting units run smoother popcorn sales from sign-up to final report.
       </Typography>
 
@@ -136,9 +120,7 @@ const FeatureShowcase: React.FC<FeatureShowcaseProps> = ({ features }) => {
                   variant={currentFeature.frameVariant}
                   url={currentFeature.frameVariant === 'browser' ? 'kernelworx.com' : undefined}
                   sx={
-                    currentFeature.frameVariant === 'browser'
-                      ? { width: '100%' }
-                      : { maxWidth: { xs: 260, sm: 320 } }
+                    currentFeature.frameVariant === 'browser' ? { width: '100%' } : { maxWidth: { xs: 260, sm: 320 } }
                   }
                 >
                   <Box
@@ -171,7 +153,7 @@ export const LandingPage: React.FC = () => {
     {
       title: 'Organize Your Sellers',
       description:
-        'Create and manage multiple Scout profiles. Track each seller\'s campaigns, orders, and progress over time.',
+        "Create and manage multiple Scout profiles. Track each seller's campaigns, orders, and progress over time.",
       icon: <PeopleIcon />,
       screenshot: '/marketing/scouts-page-mobile.png',
       screenshotAlt: 'My Scouts page showing seller management',
@@ -179,8 +161,7 @@ export const LandingPage: React.FC = () => {
     },
     {
       title: 'Share With Your Unit',
-      description:
-        'Share profiles with parents and unit leaders with flexible read or write permissions.',
+      description: 'Share profiles with parents and unit leaders with flexible read or write permissions.',
       icon: <ShareIcon />,
       screenshot: '/marketing/collaborate-page-mobile.png',
       screenshotAlt: 'Invite codes for sharing a Scout profile',
@@ -248,8 +229,8 @@ export const LandingPage: React.FC = () => {
                 mb: 2,
               }}
             >
-              Track orders, manage sellers, and generate reports for your Scouting America popcorn sale — all in
-              one simple, secure place.
+              Track orders, manage sellers, and generate reports for your Scouting America popcorn sale — all in one
+              simple, secure place.
             </Typography>
             <Typography
               variant="body1"
@@ -382,12 +363,7 @@ export const LandingPage: React.FC = () => {
             <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
               Free to use • MIT License
             </Typography>
-            <Stack
-              direction="row"
-              spacing={2}
-              justifyContent="center"
-              sx={{ mt: 1 }}
-            >
+            <Stack direction="row" spacing={2} justifyContent="center" sx={{ mt: 1 }}>
               <Button
                 onClick={() => navigate('/story')}
                 variant="text"
@@ -419,7 +395,6 @@ export const LandingPage: React.FC = () => {
           </Box>
         </Stack>
       </Container>
-
     </Box>
   );
 };

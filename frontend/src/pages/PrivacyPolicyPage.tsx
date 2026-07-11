@@ -6,16 +6,7 @@
  */
 
 import React from 'react';
-import {
-  Box,
-  Container,
-  Typography,
-  Paper,
-  Divider,
-  List,
-  ListItem,
-  ListItemText,
-} from '@mui/material';
+import { Box, Container, Typography, Paper, Divider, List, ListItem, ListItemText } from '@mui/material';
 import { Delete as DeleteIcon } from '@mui/icons-material';
 import { LandingHeader } from '../components/LandingHeader';
 
@@ -42,9 +33,8 @@ export const PrivacyPolicyPage: React.FC = () => {
             About This Service
           </Typography>
           <Typography variant="body1" paragraph>
-            KernelWorx is a volunteer-run application designed to help Scouting America units manage their
-            popcorn fundraising campaigns. This service is provided free of charge to support youth development
-            programs.
+            KernelWorx is a volunteer-run application designed to help Scouting America units manage their popcorn
+            fundraising campaigns. This service is provided free of charge to support youth development programs.
           </Typography>
 
           {/* Information We Collect */}
@@ -152,7 +142,6 @@ export const PrivacyPolicyPage: React.FC = () => {
                 secondary="Social login authentication - subject to Google's privacy policy"
               />
             </ListItem>
-
           </List>
 
           <Divider sx={{ my: 4 }} />
@@ -222,7 +211,13 @@ export const PrivacyPolicyPage: React.FC = () => {
             </Typography>
             <Typography
               variant="body1"
-              sx={{ fontFamily: 'monospace', bgcolor: 'background.paper', p: 1, borderRadius: 1, display: 'inline-block' }}
+              sx={{
+                fontFamily: 'monospace',
+                bgcolor: 'background.paper',
+                p: 1,
+                borderRadius: 1,
+                display: 'inline-block',
+              }}
             >
               privacy@kernelworx.app
             </Typography>
@@ -248,7 +243,13 @@ export const PrivacyPolicyPage: React.FC = () => {
           </Typography>
           <Typography
             variant="body1"
-            sx={{ fontFamily: 'monospace', bgcolor: 'background.paper', p: 1, borderRadius: 1, display: 'inline-block' }}
+            sx={{
+              fontFamily: 'monospace',
+              bgcolor: 'background.paper',
+              p: 1,
+              borderRadius: 1,
+              display: 'inline-block',
+            }}
           >
             privacy@kernelworx.app
           </Typography>

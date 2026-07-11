@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
 
-const RESOLVERS_DIR = join(__dirname, '..', '..', 'cdk', 'cdk', 'resolvers');
+const RESOLVERS_DIR = join(__dirname, '..', '..', 'tofu', 'application', 'appsync', 'js-resolvers');
 
 describe('AppSync resolver functions should not return empty object from request()', () => {
   const files = readdirSync(RESOLVERS_DIR).filter(f => f.endsWith('.js'));

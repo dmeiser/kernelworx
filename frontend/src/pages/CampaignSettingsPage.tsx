@@ -46,7 +46,6 @@ import type { Campaign, Catalog } from '../types';
 // Helper to extract date part from ISO string
 const extractDatePart = (isoDate: string | undefined): string => isoDate?.split('T')[0] || '';
 
-
 // Helper to safely decode URL component
 const decodeUrlParam = (encoded: string | undefined): string => (encoded ? decodeURIComponent(encoded) : '');
 
@@ -135,10 +134,11 @@ const maybeDeleteCampaign = async (
   campaignId: string,
 ): Promise<void> => {
   // canDelete is always true when reached; handleDeleteCampaign guards the falsy case
-  // v8 ignore next
+  /* v8 ignore start */
   if (canDelete) {
     await deleteCampaign({ variables: { campaignId } });
   }
+  /* v8 ignore stop */
 };
 
 // Helper component for shared campaign warning
@@ -275,8 +275,9 @@ export const CampaignSettingsPage: React.FC = () => {
     setUnitChangeConfirmOpen(false);
     const isValid = canSave(campaignId, campaignName, catalogId);
     // Save button is disabled when dbCampaignId is missing
-    // v8 ignore next
+    /* v8 ignore start */
     if (!dbCampaignId) return;
+    /* v8 ignore stop */
     const input = buildUpdateInput(dbCampaignId, campaignName, startDate, endDate, catalogId, isActive);
     await maybeUpdateCampaign(isValid, updateCampaign, input);
   };
@@ -288,10 +289,10 @@ export const CampaignSettingsPage: React.FC = () => {
   };
 
   // Dialog backdrop/ESC close cannot be simulated in jsdom
-  // v8 ignore next
+  /* v8 ignore next */
   const handleDeleteDialogClose = () => setDeleteConfirmOpen(false);
   // Dialog backdrop/ESC close cannot be simulated in jsdom
-  // v8 ignore next
+  /* v8 ignore next */
   const handleUnitChangeDialogClose = () => setUnitChangeConfirmOpen(false);
 
   if (loading) {

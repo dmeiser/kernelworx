@@ -2,12 +2,12 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { renderHook, act, waitFor } from '@testing-library/react';
 import { MockedProvider } from '@apollo/client/testing/react';
 import type { ReactNode } from 'react';
-import { useQRUpload } from './useQRUpload';
+import { useQRUpload } from '../../src/hooks/useQRUpload';
 import {
   REQUEST_PAYMENT_METHOD_QR_UPLOAD,
   CONFIRM_PAYMENT_METHOD_QR_UPLOAD,
   DELETE_PAYMENT_METHOD_QR_CODE,
-} from '../lib/graphql';
+} from '../../src/lib/graphql';
 
 // Mock fetch globally
 const mockFetch = vi.fn();

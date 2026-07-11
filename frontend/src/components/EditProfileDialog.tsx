@@ -76,7 +76,7 @@ export const EditProfileDialog: React.FC<EditProfileDialogProps> = ({
             label="Scout Name"
             value={form.values.sellerName}
             onChange={(e) => form.setValue('sellerName', e.target.value)}
-            onKeyPress={(e) => {
+            onKeyDown={(e) => {
               if (e.key === 'Enter' && form.values.sellerName.trim() && form.isDirty) {
                 handleSubmit();
               }

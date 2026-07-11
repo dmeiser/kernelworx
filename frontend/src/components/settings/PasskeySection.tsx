@@ -15,6 +15,10 @@ import {
   ListItemText,
   ListItemIcon,
   IconButton,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
 } from '@mui/material';
 import { Fingerprint as PasskeyIcon, Delete as DeleteIcon, Add as AddIcon } from '@mui/icons-material';
 import type { UsePasskeysReturn } from '../../hooks/usePasskeys';
@@ -40,6 +44,7 @@ export const PasskeySection: React.FC<PasskeySectionProps> = ({ passkeyHook, mfa
       <PasskeyStatusAlerts hook={passkeyHook} />
       <RegisteredPasskeys hook={passkeyHook} />
       <RegisterPasskeyForm hook={passkeyHook} onRegisterPasskey={onRegisterPasskey} />
+      <PasskeyConfirmDialog hook={passkeyHook} />
     </Paper>
   );
 };
@@ -88,6 +93,7 @@ const RegisteredPasskeys: React.FC<{ hook: UsePasskeysReturn }> = ({ hook }) => 
                 edge="end"
                 onClick={() => pk.credentialId && hook.handleDeletePasskey(pk.credentialId)}
                 disabled={hook.passkeyLoading || !pk.credentialId}
+                aria-label="Delete passkey"
               >
                 <DeleteIcon />
               </IconButton>
@@ -142,3 +148,22 @@ const RegisterPasskeyForm: React.FC<{
     </Alert>
   </Box>
 );
+
+const PasskeyConfirmDialog: React.FC<{ hook: UsePasskeysReturn }> = ({ hook }) => {
+  if (!hook.pendingConfirmation) return null;
+
+  return (
+    <Dialog open onClose={hook.cancelPasskeyConfirmation}>
+      <DialogTitle>{hook.pendingConfirmation.type === 'delete' ? 'Delete Passkey?' : 'Disable MFA?'}</DialogTitle>
+      <DialogContent>
+        <Typography>{hook.pendingConfirmation.message}</Typography>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={hook.cancelPasskeyConfirmation}>Cancel</Button>
+        <Button onClick={() => void hook.confirmPasskeyAction()} color="error" variant="contained">
+          {hook.pendingConfirmation.type === 'delete' ? 'Delete' : 'Continue'}
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+};

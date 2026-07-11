@@ -9,16 +9,7 @@
 
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import {
-  Box,
-  Typography,
-  Paper,
-  Grid,
-  Card,
-  CardActionArea,
-  CardContent,
-  Stack,
-} from '@mui/material';
+import { Box, Typography, Paper, Grid, Card, CardActionArea, CardContent, Stack } from '@mui/material';
 import PersonIcon from '@mui/icons-material/Person';
 import PaymentIcon from '@mui/icons-material/Payment';
 import InventoryIcon from '@mui/icons-material/Inventory';
@@ -73,8 +64,8 @@ export const HomePage: React.FC = () => {
           News & Updates
         </Typography>
         <Typography variant="body1" color="text.secondary">
-          Welcome to KernelWorx. Watch this space for announcements, new features, and tips for
-          managing your popcorn sales.
+          Welcome to KernelWorx. Watch this space for announcements, new features, and tips for managing your popcorn
+          sales.
         </Typography>
       </Paper>
 

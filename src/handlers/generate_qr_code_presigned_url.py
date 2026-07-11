@@ -23,10 +23,18 @@ def _is_already_presigned(qr_code_url: str) -> bool:
 
 def _validate_and_extract_params(event: Dict[str, Any]) -> tuple[str, str, str | None]:
     """Validate event and extract required parameters."""
+    identity = event.get("identity", {})
+    caller_id = identity.get("sub")
+    if not caller_id:
+        raise AppError(ErrorCode.UNAUTHORIZED, "Authentication required")
+
     owner_account_id: str | None = event.get("ownerAccountId")
     if not owner_account_id:
         raise AppError(ErrorCode.UNAUTHORIZED, "Owner account ID required")
-    
+
+    if caller_id != owner_account_id:
+        raise AppError(ErrorCode.FORBIDDEN, "Access denied")
+
     method_name: str = event.get("methodName", "")
     s3_key: str | None = event.get("s3Key")
     return owner_account_id, method_name, s3_key

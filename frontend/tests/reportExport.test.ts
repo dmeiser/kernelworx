@@ -4,6 +4,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as XLSX from 'xlsx';
 
+vi.mock('xlsx', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('xlsx')>();
+  return {
+    ...mod,
+    writeFile: vi.fn(),
+  };
+});
+
 vi.stubGlobal('document', {
   createElement: vi.fn(() => ({
     setAttribute: vi.fn(),

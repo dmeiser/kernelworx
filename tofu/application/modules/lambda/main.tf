@@ -110,8 +110,8 @@ locals {
       timeout     = 30
       memory_size = 512
     }
-    "delete-profile-orders-cascade" = {
-      handler     = "handlers.delete_profile_orders_cascade.lambda_handler"
+    "delete-profile-cascade" = {
+      handler     = "handlers.delete_profile_cascade.lambda_handler"
       timeout     = 60
       memory_size = 512
     }
@@ -228,9 +228,10 @@ resource "aws_lambda_layer_version" "shared" {
   compatible_architectures = ["arm64"]
   description              = "Shared Python dependencies for Lambda functions"
   
-  # Archive gets regenerated every time (cheap), but layer only updates when lock file changes
+  # Archive gets regenerated every time (cheap), but layer only updates when the
+  # layer zip content changes. Hash must reflect the actual layer archive, not uv.lock.
   filename         = data.archive_file.lambda_layer.output_path
-  source_code_hash = filebase64sha256("${path.module}/../../../../uv.lock")
+  source_code_hash = filebase64sha256(data.archive_file.lambda_layer.output_path)
 }
 
 # Cognito trigger functions (post-auth, pre-signup) - separate resource block so

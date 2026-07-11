@@ -10,7 +10,6 @@ from tests.e2e.pages.campaign_page import CampaignPage
 from tests.e2e.pages.dashboard_page import DashboardPage
 from tests.e2e.pages.reports_page import ReportsPage
 
-
 # ---------------------------------------------------------------------------
 # Private helpers
 # ---------------------------------------------------------------------------

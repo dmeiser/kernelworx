@@ -460,7 +460,7 @@ export const ScoutsPage: React.FC = () => {
   });
 
   // Delete profile mutation
-  const [deleteProfile] = useMutation(DELETE_SELLER_PROFILE, {
+  const [deleteProfile, { loading: deletingProfile }] = useMutation(DELETE_SELLER_PROFILE, {
     onCompleted: () => {
       setDeleteConfirmOpen(false);
       setDeletingProfileId(null);
@@ -571,9 +571,11 @@ export const ScoutsPage: React.FC = () => {
           </Typography>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setDeleteConfirmOpen(false)}>Cancel</Button>
-          <Button onClick={handleDeleteProfile} color="error" variant="contained">
-            Delete Permanently
+          <Button onClick={() => setDeleteConfirmOpen(false)} disabled={deletingProfile}>
+            Cancel
+          </Button>
+          <Button onClick={handleDeleteProfile} color="error" variant="contained" disabled={deletingProfile}>
+            {deletingProfile ? 'Deleting...' : 'Delete Permanently'}
           </Button>
         </DialogActions>
       </Dialog>

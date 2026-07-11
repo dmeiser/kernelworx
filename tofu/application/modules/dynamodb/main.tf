@@ -16,6 +16,12 @@ variable "name_prefix" {
   type = string
 }
 
+variable "enable_point_in_time_recovery" {
+  description = "Enable DynamoDB point-in-time recovery (recommended for production)"
+  type        = bool
+  default     = false
+}
+
 locals {
   table_suffix = "-${var.region_abbrev}-${var.environment}"
   tags = {
@@ -53,7 +59,7 @@ resource "aws_dynamodb_table" "accounts" {
   }
 
   point_in_time_recovery {
-    enabled = false
+    enabled = var.enable_point_in_time_recovery
   }
 
   server_side_encryption {
@@ -113,7 +119,7 @@ resource "aws_dynamodb_table" "catalogs" {
   }
 
   point_in_time_recovery {
-    enabled = false
+    enabled = var.enable_point_in_time_recovery
   }
 
   server_side_encryption {
@@ -156,7 +162,7 @@ resource "aws_dynamodb_table" "profiles" {
   }
 
   point_in_time_recovery {
-    enabled = false
+    enabled = var.enable_point_in_time_recovery
   }
 
   server_side_encryption {
@@ -233,7 +239,7 @@ resource "aws_dynamodb_table" "campaigns" {
   }
 
   point_in_time_recovery {
-    enabled = false
+    enabled = var.enable_point_in_time_recovery
   }
 
   server_side_encryption {
@@ -293,7 +299,7 @@ resource "aws_dynamodb_table" "orders" {
   }
 
   point_in_time_recovery {
-    enabled = false
+    enabled = var.enable_point_in_time_recovery
   }
 
   server_side_encryption {
@@ -336,7 +342,7 @@ resource "aws_dynamodb_table" "shares" {
   }
 
   point_in_time_recovery {
-    enabled = false
+    enabled = var.enable_point_in_time_recovery
   }
 
   server_side_encryption {
@@ -384,7 +390,7 @@ resource "aws_dynamodb_table" "invites" {
   }
 
   point_in_time_recovery {
-    enabled = false
+    enabled = var.enable_point_in_time_recovery
   }
 
   server_side_encryption {
@@ -444,7 +450,7 @@ resource "aws_dynamodb_table" "shared_campaigns" {
   }
 
   point_in_time_recovery {
-    enabled = false
+    enabled = var.enable_point_in_time_recovery
   }
 
   server_side_encryption {

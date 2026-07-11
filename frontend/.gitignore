@@ -25,3 +25,8 @@ dist-ssr
 *.sln
 *.sw?
 .cert/
+
+# Local one-off screenshot capture scripts (not for source control)
+scripts/take-home-screenshot.cjs
+scripts/take-mobile-screenshots.cjs
+scripts/take-reports-screenshot.cjs

@@ -26,9 +26,7 @@ def test_settings_page_loads(owner_page: Page) -> None:
     base.navigate("/settings")
     base.wait_for_loading()
 
-    assert "/settings" in owner_page.url, (
-        f"Expected URL to contain '/settings'; got: {owner_page.url}"
-    )
+    assert "/settings" in owner_page.url, f"Expected URL to contain '/settings'; got: {owner_page.url}"
 
     heading = owner_page.get_by_role("heading").first
     expect(heading).to_be_visible(timeout=10_000)

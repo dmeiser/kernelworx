@@ -97,7 +97,7 @@ interface PageHeaderProps {
 const PageHeader: React.FC<PageHeaderProps> = ({ sellerName, canEdit, onNavigateBack, onCreateClick }) => (
   <Stack direction="row" justifyContent="space-between" alignItems="center" mb={3}>
     <Stack direction="row" alignItems="center" spacing={2}>
-      <IconButton onClick={onNavigateBack} edge="start">
+      <IconButton onClick={onNavigateBack} edge="start" aria-label="Back to profiles">
         <ArrowBackIcon />
       </IconButton>
       <Box>

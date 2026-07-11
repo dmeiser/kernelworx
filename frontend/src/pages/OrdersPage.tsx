@@ -175,10 +175,20 @@ const OrderRow: React.FC<OrderRowProps> = ({ order, hasWritePermission, onEdit, 
     {hasWritePermission && (
       <TableCell align="right">
         <Stack direction={{ xs: 'column', sm: 'row' }} spacing={0.5}>
-          <IconButton size="small" onClick={() => onEdit(order.orderId)} color="primary">
+          <IconButton
+            size="small"
+            onClick={() => onEdit(order.orderId)}
+            color="primary"
+            aria-label={`Edit order for ${order.customerName}`}
+          >
             <EditIcon fontSize="small" />
           </IconButton>
-          <IconButton size="small" onClick={() => onDelete(order.orderId)} color="error">
+          <IconButton
+            size="small"
+            onClick={() => onDelete(order.orderId)}
+            color="error"
+            aria-label={`Delete order for ${order.customerName}`}
+          >
             <DeleteIcon fontSize="small" />
           </IconButton>
         </Stack>

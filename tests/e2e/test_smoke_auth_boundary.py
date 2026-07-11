@@ -42,6 +42,7 @@ from playwright.sync_api import Page
 from tests.e2e.pages.campaign_page import CampaignPage
 from tests.e2e.pages.dashboard_page import DashboardPage
 
+
 def _base_url() -> str:
     """Return base URL from env at call time (after load_dotenv has run)."""
     return os.getenv("E2E_BASE_URL", "https://localhost:5173").rstrip("/")
@@ -82,7 +83,9 @@ def test_unauthenticated_redirect_to_login(page: Page) -> None:
 
 
 @pytest.mark.smoke
-def test_owner_profile_id_for_boundary(owner_page: Page, _auth_boundary_state: dict[str, str], ensure_owner_profile: str) -> None:
+def test_owner_profile_id_for_boundary(
+    owner_page: Page, _auth_boundary_state: dict[str, str], ensure_owner_profile: str
+) -> None:
     """Capture the owner's first profile ID for use by the contributor boundary test.
 
     Navigates the owner to their dashboard, clicks the first visible profile

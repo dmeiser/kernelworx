@@ -250,14 +250,19 @@ class TestErrorHandling:
         lambda_context: MagicMock,
     ) -> None:
         """Should handle case where link already exists"""
+        from botocore.exceptions import ClientError
+
         with patch("boto3.client") as mock_client:
             mock_cognito = MagicMock()
             mock_cognito.list_users.return_value = {"Users": [{"Username": "existing-user-uuid"}]}
-            # Simulate link already exists error
-            mock_cognito.exceptions = MagicMock()
-            mock_cognito.exceptions.InvalidParameterException = type("InvalidParameterException", (Exception,), {})
-            mock_cognito.admin_link_provider_for_user.side_effect = mock_cognito.exceptions.InvalidParameterException(
-                "Link already exists"
+            mock_cognito.admin_link_provider_for_user.side_effect = ClientError(
+                {
+                    "Error": {
+                        "Code": "InvalidParameterException",
+                        "Message": "Link already exists",
+                    }
+                },
+                "AdminLinkProviderForUser",
             )
             mock_client.return_value = mock_cognito
 
@@ -266,6 +271,34 @@ class TestErrorHandling:
 
             # Should still raise exception to prevent duplicate
             assert "already exists" in str(exc_info.value)
+
+    def test_cognito_invalid_parameter_without_link_message(
+        self,
+        federated_signup_event: dict[str, Any],
+        lambda_context: MagicMock,
+    ) -> None:
+        """Should handle Cognito InvalidParameterException that is not a duplicate link."""
+        from botocore.exceptions import ClientError
+
+        with patch("boto3.client") as mock_client:
+            mock_cognito = MagicMock()
+            mock_cognito.list_users.return_value = {"Users": [{"Username": "existing-user-uuid"}]}
+            mock_cognito.admin_link_provider_for_user.side_effect = ClientError(
+                {
+                    "Error": {
+                        "Code": "InvalidParameterException",
+                        "Message": "Invalid source user",
+                    }
+                },
+                "AdminLinkProviderForUser",
+            )
+            mock_client.return_value = mock_cognito
+
+            with pytest.raises(Exception) as exc_info:
+                lambda_handler(federated_signup_event, lambda_context)
+
+            assert "already exists" in str(exc_info.value)
+            assert federated_signup_event["request"]["userAttributes"]["email"] in str(exc_info.value)
 
     def test_cognito_api_error_allows_signup(
         self,
@@ -290,7 +323,7 @@ class TestErrorHandling:
         federated_signup_event: dict[str, Any],
         lambda_context: MagicMock,
     ) -> None:
-        """Should handle unexpected username format gracefully"""
+        """Should reject malformed federated usernames to prevent duplicate accounts."""
         federated_signup_event["userName"] = "malformed-username-no-underscore"
 
         with patch("boto3.client") as mock_client:
@@ -298,7 +331,7 @@ class TestErrorHandling:
             mock_cognito.list_users.return_value = {"Users": [{"Username": "existing-user-uuid"}]}
             mock_client.return_value = mock_cognito
 
-            result = lambda_handler(federated_signup_event, lambda_context)
+            with pytest.raises(Exception) as exc_info:
+                lambda_handler(federated_signup_event, lambda_context)
 
-            # Should return event (can't parse provider)
-            assert result == federated_signup_event
+            assert "invalid username format" in str(exc_info.value).lower()
