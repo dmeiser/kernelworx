@@ -148,15 +148,23 @@ export const UserDetailsDialog: React.FC<UserDetailsDialogProps> = ({ open, onCl
               {user.displayName || 'No name set'}
             </Typography>
           </Box>
-          <IconButton onClick={onClose}>
+          <IconButton onClick={onClose} aria-label="Close user details">
             <CloseIcon />
           </IconButton>
         </Stack>
       </DialogTitle>
       <DialogContent>
         <Tabs value={currentTab} onChange={handleTabChange}>
-          <Tab label={`Profiles (${profiles.length})`} />
-          <Tab label={`Catalogs (${catalogs.length})`} />
+          <Tab
+            id="user-details-tab-0"
+            aria-controls="user-details-tabpanel-0"
+            label={`Profiles (${profiles.length})`}
+          />
+          <Tab
+            id="user-details-tab-1"
+            aria-controls="user-details-tabpanel-1"
+            label={`Catalogs (${catalogs.length})`}
+          />
         </Tabs>
 
         {/* Profiles Tab */}
@@ -188,7 +196,11 @@ export const UserDetailsDialog: React.FC<UserDetailsDialogProps> = ({ open, onCl
                       <TableCell>{profile.sellerName || '—'}</TableCell>
                       <TableCell>
                         <Tooltip title="Transfer Ownership">
-                          <IconButton size="small" onClick={() => setTransferProfileId(profile.profileId ?? null)}>
+                          <IconButton
+                            size="small"
+                            onClick={() => setTransferProfileId(profile.profileId ?? null)}
+                            aria-label="Transfer ownership"
+                          >
                             <TransferIcon />
                           </IconButton>
                         </Tooltip>
@@ -256,12 +268,12 @@ export const UserDetailsDialog: React.FC<UserDetailsDialogProps> = ({ open, onCl
             fullWidth
             value={newOwnerSearch}
             onChange={(e) => setNewOwnerSearch(e.target.value)}
-            onKeyPress={(e) => e.key === 'Enter' && handleSearchNewOwner()}
+            onKeyDown={(e) => e.key === 'Enter' && handleSearchNewOwner()}
             placeholder="Search by email or name..."
             InputProps={{
               endAdornment: (
                 <InputAdornment position="end">
-                  <IconButton onClick={handleSearchNewOwner} disabled={searchLoading}>
+                  <IconButton onClick={handleSearchNewOwner} disabled={searchLoading} aria-label="Search new owner">
                     <SearchIcon />
                   </IconButton>
                 </InputAdornment>

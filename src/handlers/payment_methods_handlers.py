@@ -84,7 +84,7 @@ def request_qr_upload(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
     try:
         caller_id = _extract_and_validate_caller(event)
-        
+
         arguments = event.get("arguments", {})
         payment_method_name = arguments.get("paymentMethodName", "").strip()
         _validate_payment_method_name(payment_method_name)
@@ -139,7 +139,7 @@ def _validate_qr_upload_inputs(payment_method_name: str, s3_key: str, caller_id:
     """Validate QR upload inputs (payment method name, s3_key, and s3_key ownership)."""
     if not payment_method_name or not s3_key:
         raise AppError(ErrorCode.INVALID_INPUT, "Payment method name and s3Key are required")
-    
+
     if not validate_qr_s3_key(s3_key, caller_id):
         raise AppError(ErrorCode.FORBIDDEN, "Invalid S3 key - access denied")
 
@@ -171,7 +171,7 @@ def _update_payment_method_qr_url(caller_id: str, payment_method_name: str, s3_k
         UpdateExpression="SET preferences = :prefs",
         ExpressionAttributeValues={":prefs": preferences},
     )
-    
+
     return dict(method_updated)
 
 
@@ -223,11 +223,13 @@ def confirm_qr_upload(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to confirm upload")
 
 
-def _delete_qr_from_s3_storage(stored_qr_key: str | None, caller_id: str, payment_method_name: str, logger: Any) -> None:
+def _delete_qr_from_s3_storage(
+    stored_qr_key: str | None, caller_id: str, payment_method_name: str, logger: Any
+) -> None:
     """Delete QR code from S3 storage if it exists."""
     if not stored_qr_key:
         return
-    
+
     if stored_qr_key.startswith("payment-qr-codes/"):
         try:
             delete_qr_by_key(stored_qr_key)
@@ -274,19 +276,19 @@ def delete_qr_code(event: Dict[str, Any], context: Any) -> bool:
 
     try:
         caller_id = _extract_and_validate_caller(event)
-        
+
         arguments = event.get("arguments", {})
         payment_method_name = arguments.get("paymentMethodName", "").strip()
-        
+
         if not payment_method_name:
             raise AppError(ErrorCode.INVALID_INPUT, "Payment method name is required")
-        
+
         if is_reserved_name(payment_method_name):
             raise AppError(ErrorCode.INVALID_INPUT, "Cannot delete QR for reserved methods")
 
         target = _verify_payment_method_exists(caller_id, payment_method_name)
         stored_qr_key = target.get("qrCodeUrl")
-        
+
         _delete_qr_from_s3_storage(stored_qr_key, caller_id, payment_method_name, logger)
         _clear_qr_url_in_payment_method(caller_id, payment_method_name)
 

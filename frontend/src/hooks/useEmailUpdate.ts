@@ -1,7 +1,7 @@
 /**
  * Custom hook for email update functionality
  */
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { updateUserAttribute, confirmUserAttribute } from 'aws-amplify/auth';
 
 export interface UseEmailUpdateReturn {
@@ -51,6 +51,15 @@ export const useEmailUpdate = (): UseEmailUpdateReturn => {
   const [emailUpdateLoading, setEmailUpdateLoading] = useState(false);
   const [emailUpdateError, setEmailUpdateError] = useState<string | null>(null);
   const [emailUpdateSuccess, setEmailUpdateSuccess] = useState(false);
+  const emailTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (emailTimeoutRef.current) {
+        clearTimeout(emailTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const handleOpenEmailDialog = () => {
     setEmailDialogOpen(true);
@@ -121,7 +130,10 @@ export const useEmailUpdate = (): UseEmailUpdateReturn => {
       setEmailUpdateSuccess(true);
       setEmailUpdateError(null);
 
-      setTimeout(async () => {
+      if (emailTimeoutRef.current) {
+        clearTimeout(emailTimeoutRef.current);
+      }
+      emailTimeoutRef.current = setTimeout(async () => {
         handleCloseEmailDialog();
         await logout();
         navigate('/');

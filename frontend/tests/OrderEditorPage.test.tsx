@@ -28,7 +28,7 @@ vi.mock('react-router-dom', async () => {
 });
 
 // Import component AFTER mocks
-import { OrderEditorPage } from '../src/pages/OrderEditorPage';
+import { OrderEditorPage, LoadingSpinner, PermissionError, hasWriteInPermissions, getQRModalData, getDefaultPaymentMethodName, trimOrNull } from '../src/pages/OrderEditorPage';
 
 // Test constants - use raw IDs (without prefix) since they will be in URL
 // The component calls ensureProfileId/ensureCampaignId which adds the prefix
@@ -303,5 +303,87 @@ describe('OrderEditorPage - Order detail shows name only', () => {
     // This is tested in OrdersPage.test.tsx
     // The OrdersPage only shows payment method name in a Chip, no QR code
     expect(true).toBe(true);
+  });
+});
+
+describe('OrderEditorPage helper components', () => {
+  test('LoadingSpinner renders nothing when show is false', () => {
+    const { container } = render(<LoadingSpinner show={false} />);
+    expect(container.firstChild).toBeNull();
+  });
+
+  test('LoadingSpinner renders spinner when show is true', () => {
+    render(<LoadingSpinner show />);
+    expect(screen.getByRole('progressbar')).toBeInTheDocument();
+  });
+
+  test('PermissionError renders nothing when hasPermission is true', () => {
+    const { container } = render(<PermissionError hasPermission />);
+    expect(container.firstChild).toBeNull();
+  });
+
+  test('PermissionError renders alert when hasPermission is false', () => {
+    render(<PermissionError hasPermission={false} />);
+    expect(screen.getByText(/don't have permission/i)).toBeInTheDocument();
+  });
+});
+
+describe('hasWriteInPermissions', () => {
+  test('returns false for undefined permissions', () => {
+    expect(hasWriteInPermissions(undefined)).toBe(false);
+  });
+
+  test('returns false when WRITE is not present', () => {
+    expect(hasWriteInPermissions(['READ'])).toBe(false);
+  });
+
+  test('returns true when WRITE is present', () => {
+    expect(hasWriteInPermissions(['READ', 'WRITE'])).toBe(true);
+  });
+});
+
+describe('getQRModalData', () => {
+  test('returns null and empty string when selectedMethod is null', () => {
+    expect(getQRModalData(null)).toEqual({ qrCodeUrl: null, methodName: '' });
+  });
+
+  test('returns qrCodeUrl and name from selected method', () => {
+    expect(getQRModalData({ name: 'Venmo', qrCodeUrl: 'https://example.com/qr.png' })).toEqual({
+      qrCodeUrl: 'https://example.com/qr.png',
+      methodName: 'Venmo',
+    });
+  });
+
+  test('returns null qrCodeUrl when method has no QR code', () => {
+    expect(getQRModalData({ name: 'Cash', qrCodeUrl: null })).toEqual({ qrCodeUrl: null, methodName: 'Cash' });
+  });
+});
+
+describe('getDefaultPaymentMethodName', () => {
+  test('prefers Cash when available', () => {
+    expect(
+      getDefaultPaymentMethodName([
+        { name: 'Venmo', qrCodeUrl: null },
+        { name: 'Cash', qrCodeUrl: null },
+      ]),
+    ).toBe('Cash');
+  });
+
+  test('falls back to first method when Cash is not available', () => {
+    expect(getDefaultPaymentMethodName([{ name: 'Venmo', qrCodeUrl: null }])).toBe('Venmo');
+  });
+
+  test('returns empty string when payment methods is empty', () => {
+    expect(getDefaultPaymentMethodName([])).toBe('');
+  });
+});
+
+describe('trimOrNull', () => {
+  test('trims whitespace and returns value for non-empty string', () => {
+    expect(trimOrNull('  hello  ')).toBe('hello');
+  });
+
+  test('returns null for empty string', () => {
+    expect(trimOrNull('   ')).toBe(null);
   });
 });

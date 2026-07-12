@@ -58,6 +58,17 @@ class TestNormalizePhone:
             normalize_phone("123-456-ABCD")
         assert exc_info.value.error_code == ErrorCode.INVALID_PHONE
 
+    def test_non_string_phone_coerced(self) -> None:
+        """Test that non-string phone is coerced to string."""
+        result = normalize_phone(1234567890)
+        assert result == "+11234567890"
+
+    def test_non_string_phone_invalid_raises_error(self) -> None:
+        """Test that invalid non-string phone raises error."""
+        with pytest.raises(AppError) as exc_info:
+            normalize_phone(None)
+        assert exc_info.value.error_code == ErrorCode.INVALID_PHONE
+
 
 class TestValidateAddress:
     """Tests for validate_address function."""

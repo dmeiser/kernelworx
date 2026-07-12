@@ -12,14 +12,20 @@ if TYPE_CHECKING:  # pragma: no cover
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
+    from botocore.exceptions import ClientError
+
     from utils.auth import check_profile_access
     from utils.dynamodb import tables
+    from utils.errors import AppError, ErrorCode
     from utils.ids import ensure_catalog_id, ensure_profile_id
     from utils.logging import get_logger
     from utils.validation import validate_required_fields, validate_unit_fields
 except ModuleNotFoundError:  # pragma: no cover
+    from botocore.exceptions import ClientError
+
     from ..utils.auth import check_profile_access
     from ..utils.dynamodb import tables
+    from ..utils.errors import AppError, ErrorCode
     from ..utils.ids import ensure_catalog_id, ensure_profile_id
     from ..utils.logging import get_logger
     from ..utils.validation import validate_required_fields, validate_unit_fields
@@ -250,14 +256,17 @@ def _execute_campaign_transaction(
 
 
 def _verify_write_access(caller_account_id: str, profile_id: str) -> None:
-    """Verify caller has write access to profile. Raises PermissionError if not."""
+    """Verify caller has write access to profile. Raises AppError if not."""
     if not check_profile_access(
         caller_account_id=caller_account_id,
         profile_id=profile_id,
         required_permission="WRITE",
     ):
         logger.warning(f"Access denied for {caller_account_id} to profile {profile_id}")
-        raise PermissionError("You do not have permission to create a campaign for this profile")
+        raise AppError(
+            ErrorCode.FORBIDDEN,
+            "You do not have permission to create a campaign for this profile",
+        )
 
 
 def _load_shared_campaign(shared_campaign_code: Optional[str]) -> Optional[Dict[str, Any]]:
@@ -267,9 +276,15 @@ def _load_shared_campaign(shared_campaign_code: Optional[str]) -> Optional[Dict[
 
     shared_campaign = _get_shared_campaign(shared_campaign_code)
     if not shared_campaign:
-        raise ValueError(f"Shared Campaign {shared_campaign_code} not found")
+        raise AppError(
+            ErrorCode.NOT_FOUND,
+            f"Shared Campaign {shared_campaign_code} not found",
+        )
     if not shared_campaign.get("isActive", True):
-        raise ValueError(f"Shared Campaign {shared_campaign_code} is no longer active")
+        raise AppError(
+            ErrorCode.INVALID_INPUT,
+            f"Shared Campaign {shared_campaign_code} is no longer active",
+        )
 
     logger.info(f"Using shared campaign {shared_campaign_code} from creator {shared_campaign.get('createdBy')}")
     return shared_campaign
@@ -286,11 +301,11 @@ def _extract_campaign_values(
 
 
 def _get_verified_profile(caller_account_id: str, profile_id: str) -> Dict[str, Any]:
-    """Verify access and get profile. Raises if access denied or not found."""
+    """Verify access and get profile. Raises AppError if access denied or not found."""
     _verify_write_access(caller_account_id, profile_id)
     profile = _get_profile(profile_id)
     if not profile:
-        raise ValueError(f"Profile {profile_id} not found")
+        raise AppError(ErrorCode.NOT_FOUND, f"Profile {profile_id} not found")
     return profile
 
 
@@ -345,11 +360,11 @@ def create_campaign(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         _execute_campaign_transaction(campaign_item, share_item, profile_id)
         return campaign_item
 
-    except (PermissionError, ValueError):
+    except AppError, ClientError:
         raise
     except Exception as e:
         logger.error(f"Error creating campaign: {str(e)}", exc_info=True)
-        raise
+        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to create campaign") from e
 
 
 def _dynamo_value_for_list(value: list[Any]) -> Dict[str, Any]:

@@ -35,6 +35,7 @@ class OrderPage(BasePage):
 
     # Form field labels (OrderEditorPage / CustomerInfoForm)
     _CUSTOMER_NAME_LABEL: str = "Customer Name"
+    _CUSTOMER_PHONE_LABEL: str = "Phone Number"
     _ADD_PRODUCT_BTN: str = "Add Product"
 
     def __init__(self, page: Page) -> None:
@@ -77,6 +78,10 @@ class OrderPage(BasePage):
         """Return locator for the *Customer Name* text field in the order form."""
         return self.page.get_by_label(self._CUSTOMER_NAME_LABEL)
 
+    def _customer_phone_input(self) -> Locator:
+        """Return locator for the *Phone Number* text field in the order form."""
+        return self.page.get_by_label(self._CUSTOMER_PHONE_LABEL)
+
     def _create_order_button(self) -> Locator:
         """Return locator for the *Create Order* submit button."""
         return self.get_by_role_button(self._CREATE_ORDER_BTN)
@@ -103,6 +108,7 @@ class OrderPage(BasePage):
         self._new_order_button().click()
         self.wait_for_loading()
         self._customer_name_input().fill(customer_name)
+        self._customer_phone_input().fill("5551234567")
         self._add_product_button().click()
         product_row = self.page.get_by_role("row").nth(1)  # nth(0) is <thead>
         product_row.get_by_role("combobox").click()

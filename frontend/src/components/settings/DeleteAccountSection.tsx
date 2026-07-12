@@ -178,7 +178,12 @@ export const DeleteAccountSection: React.FC<DeleteAccountSectionProps> = ({ onDe
           <Button onClick={handleCloseDialog} disabled={deleting}>
             Cancel
           </Button>
-          <Button onClick={handleDelete} color="error" variant="contained" disabled={deleting || confirmText !== 'DELETE'}>
+          <Button
+            onClick={handleDelete}
+            color="error"
+            variant="contained"
+            disabled={deleting || confirmText !== 'DELETE'}
+          >
             {deleting ? 'Deleting...' : 'Delete Account'}
           </Button>
         </DialogActions>

@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from src.handlers.scout_operations import create_seller_profile
+from src.utils.errors import AppError, ErrorCode
 
 
 class TestCreateSellerProfile:
@@ -200,7 +201,7 @@ class TestCreateSellerProfile:
         appsync_event: Dict[str, Any],
         lambda_context: Any,
     ) -> None:
-        """Test profile creation with invalid (non-numeric) unit number logs warning and skips field."""
+        """Test profile creation with invalid (non-numeric) unit number raises an error."""
         # Arrange
         mock_dynamodb = MagicMock()
         mock_client.return_value = mock_dynamodb
@@ -216,11 +217,31 @@ class TestCreateSellerProfile:
             },
         }
 
-        # Act
-        result = create_seller_profile(event, lambda_context)
+        # Act & Assert
+        with pytest.raises(AppError) as exc_info:
+            create_seller_profile(event, lambda_context)
 
-        # Assert - unitNumber should be skipped when invalid
-        assert result["sellerName"] == "Pack Invalid Scout"
-        assert result["unitType"] == "PACK"
-        assert "unitNumber" not in result
-        mock_dynamodb.transact_write_items.assert_called_once()
+        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+        assert "unitNumber must be a valid integer" in str(exc_info.value.message)
+
+    @patch("src.handlers.scout_operations.boto3.client")
+    def test_create_seller_profile_empty_seller_name(
+        self,
+        mock_client: MagicMock,
+        appsync_event: Dict[str, Any],
+        lambda_context: Any,
+    ) -> None:
+        """Test profile creation with empty sellerName raises an error."""
+        mock_dynamodb = MagicMock()
+        mock_client.return_value = mock_dynamodb
+
+        event = {
+            **appsync_event,
+            "arguments": {"input": {"sellerName": "   "}},
+        }
+
+        with pytest.raises(AppError) as exc_info:
+            create_seller_profile(event, lambda_context)
+
+        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+        assert "sellerName is required" in str(exc_info.value.message)

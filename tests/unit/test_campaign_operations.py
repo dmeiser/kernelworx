@@ -10,7 +10,7 @@ from src.handlers.campaign_operations import (
     _to_dynamo_value,
     create_campaign,
 )
-from src.utils.errors import AppError
+from src.utils.errors import AppError, ErrorCode
 
 
 class TestBuildUnitCampaignKey:
@@ -380,7 +380,7 @@ class TestCreateCampaign:
         mock_get_shared_campaign.return_value = None  # Shared campaign not found
 
         # Act & Assert
-        with pytest.raises(ValueError, match="Shared Campaign .* not found"):
+        with pytest.raises(AppError, match="Shared Campaign .* not found"):
             create_campaign(event_with_shared_campaign, lambda_context)
 
     @patch("src.handlers.campaign_operations.check_profile_access")
@@ -404,7 +404,7 @@ class TestCreateCampaign:
         mock_get_shared_campaign.return_value = sample_shared_campaign
 
         # Act & Assert
-        with pytest.raises(ValueError, match="Shared Campaign .* is no longer active"):
+        with pytest.raises(AppError, match="Shared Campaign .* is no longer active"):
             create_campaign(event_with_shared_campaign, lambda_context)
 
     @patch("src.handlers.campaign_operations.dynamodb_client")
@@ -466,7 +466,7 @@ class TestCreateCampaign:
         mock_check_access.return_value = False
 
         # Act & Assert
-        with pytest.raises(PermissionError, match="You do not have permission"):
+        with pytest.raises(AppError, match="You do not have permission"):
             create_campaign(event, lambda_context)
 
     @patch("src.handlers.campaign_operations.check_profile_access")
@@ -484,7 +484,7 @@ class TestCreateCampaign:
         mock_get_profile.return_value = None
 
         # Act & Assert
-        with pytest.raises(ValueError, match="Profile .* not found"):
+        with pytest.raises(AppError, match="Profile .* not found"):
             create_campaign(event, lambda_context)
 
     @patch("src.handlers.campaign_operations.check_profile_access")
@@ -693,6 +693,31 @@ class TestCreateCampaign:
         # Act & Assert
         with pytest.raises(ClientError):
             create_campaign(event, lambda_context)
+
+    @patch("src.handlers.campaign_operations.dynamodb_client")
+    @patch("src.handlers.campaign_operations.check_profile_access")
+    @patch("src.handlers.campaign_operations._get_profile")
+    def test_create_campaign_generic_error_is_wrapped(
+        self,
+        mock_get_profile: MagicMock,
+        mock_check_access: MagicMock,
+        mock_dynamodb_client: MagicMock,
+        event: Dict[str, Any],
+        lambda_context: MagicMock,
+        sample_profile: Dict[str, Any],
+    ) -> None:
+        """Test that unexpected errors during creation are wrapped as INTERNAL_ERROR AppError."""
+        # Arrange
+        mock_check_access.return_value = True
+        mock_get_profile.return_value = sample_profile
+        mock_dynamodb_client.transact_write_items.side_effect = TypeError("Unexpected failure")
+
+        # Act & Assert
+        with pytest.raises(AppError) as exc_info:
+            create_campaign(event, lambda_context)
+
+        assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+        assert "Failed to create campaign" in str(exc_info.value.message)
 
     @patch("src.handlers.campaign_operations.dynamodb_client")
     @patch("src.handlers.campaign_operations.check_profile_access")

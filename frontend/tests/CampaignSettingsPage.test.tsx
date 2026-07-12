@@ -536,6 +536,56 @@ describe('CampaignSettingsPage', () => {
     });
   });
 
+  it('closes delete campaign dialog via backdrop click', async () => {
+    const user = userEvent.setup();
+    renderPage(createMocks());
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('Spring Sale')).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole('button', { name: /delete campaign/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Delete Campaign?')).toBeInTheDocument();
+    });
+
+    const backdrop = document.querySelector('.MuiBackdrop-root');
+    expect(backdrop).not.toBeNull();
+    fireEvent.click(backdrop!);
+
+    await waitFor(() => {
+      expect(screen.queryByText('Delete Campaign?')).not.toBeInTheDocument();
+    });
+  });
+
+  it('closes unit change confirmation dialog via backdrop click', async () => {
+    const user = userEvent.setup();
+    renderPage(createMocks(mockSharedCampaign));
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('Spring Sale')).toBeInTheDocument();
+    });
+
+    const nameInput = screen.getByLabelText('Campaign Name');
+    await user.clear(nameInput);
+    await user.type(nameInput, 'Updated Sale');
+
+    await user.click(screen.getByRole('button', { name: /save changes/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Confirm Changes to Shared Campaign')).toBeInTheDocument();
+    });
+
+    const backdrop = document.querySelector('.MuiBackdrop-root');
+    expect(backdrop).not.toBeNull();
+    fireEvent.click(backdrop!);
+
+    await waitFor(() => {
+      expect(screen.queryByText('Confirm Changes to Shared Campaign')).not.toBeInTheDocument();
+    });
+  });
+
   it('navigates to manage scout page', async () => {
     const user = userEvent.setup();
     renderPage(createMocks());

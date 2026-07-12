@@ -1,6 +1,8 @@
 import boto3
+import pytest
 
 from src.handlers import scout_operations as so
+from src.utils.errors import AppError, ErrorCode
 
 
 class DummyDynamoClient:
@@ -13,6 +15,7 @@ def test_create_seller_profile_invalid_unit_number(monkeypatch):
     monkeypatch.setattr(boto3, "client", lambda service: DummyDynamoClient())
 
     event = {"arguments": {"input": {"sellerName": "Joe", "unitNumber": "not-an-int"}}, "identity": {"sub": "acct-1"}}
-    result = so.create_seller_profile(event, None)
-    # Invalid unitNumber should be skipped and not included in response
-    assert "unitNumber" not in result
+    with pytest.raises(AppError) as exc_info:
+        so.create_seller_profile(event, None)
+
+    assert exc_info.value.error_code == ErrorCode.INVALID_INPUT

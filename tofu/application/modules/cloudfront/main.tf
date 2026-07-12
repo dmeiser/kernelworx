@@ -147,6 +147,11 @@ output "distribution_id" {
   value       = aws_cloudfront_distribution.site.id
 }
 
+output "distribution_arn" {
+  description = "ARN of the CloudFront distribution"
+  value       = aws_cloudfront_distribution.site.arn
+}
+
 output "distribution_domain" {
   description = "Domain name of the CloudFront distribution"
   value       = aws_cloudfront_distribution.site.domain_name

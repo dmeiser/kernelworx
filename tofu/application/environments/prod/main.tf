@@ -122,9 +122,10 @@ locals {
 module "dynamodb" {
   source = "../../modules/dynamodb"
 
-  environment   = var.environment
-  region_abbrev = var.region_abbrev
-  name_prefix   = local.name_prefix
+  environment                   = var.environment
+  region_abbrev                 = var.region_abbrev
+  name_prefix                   = local.name_prefix
+  enable_point_in_time_recovery = true
 }
 
 module "s3" {
@@ -146,6 +147,8 @@ module "iam" {
   dynamodb_table_arns = module.dynamodb.table_arns
   exports_bucket_arn  = module.s3.exports_bucket_arn
   lambda_function_arns = module.lambda.function_arns
+
+  cloudfront_distribution_arn = module.cloudfront.distribution_arn
 }
 
 module "certificates" {
@@ -173,6 +176,7 @@ module "cognito" {
   callback_urls        = local.cognito_callback_urls
   logout_urls          = local.cognito_logout_urls
 
+  lambda_execution_role_arn = module.iam.lambda_execution_role_arn
   # Cognito trigger Lambdas (restored from CDK configuration)
   enable_lambda_triggers = true
   pre_signup_lambda_arn  = module.lambda.trigger_function_arns["pre-signup"]

@@ -2,7 +2,7 @@
 
 import urllib.parse
 
-from playwright.sync_api import Locator, Page, expect
+from playwright.sync_api import Locator, Page, TimeoutError as PlaywrightTimeoutError, expect
 
 from .base_page import BasePage
 
@@ -91,21 +91,17 @@ class CampaignPage(BasePage):
     # Actions
     # ------------------------------------------------------------------
 
-    def create_campaign_first_catalog(self, name: str) -> None:
+    def create_campaign_first_catalog(self, name: str, profile_id: str | None = None) -> None:
         """Open the *New Campaign* dialog, fill *name*, pick the first catalog, and submit.
 
         Encapsulates the full creation flow so test helpers do not need access
         to private locator methods.  Waits for the dialog to close before
         returning.
 
-        Raises:
-            AssertionError: When the catalog dropdown opens with no options,
-                meaning no catalog exists in the dev environment.  An admin
-                must create at least one catalog before running e2e tests.
-                See ``tests/e2e/README.md`` for prerequisites.
-
         Args:
             name: Human-readable campaign name (e.g. ``"Fall 2025"``).
+            profile_id: Optional profile ID to select in the create-campaign
+                page. When omitted, the first enabled profile is selected.
         """
         # Save campaigns URL to return after the page-based creation flow.
         campaigns_url = self.page.url
@@ -114,16 +110,27 @@ class CampaignPage(BasePage):
         self.page.wait_for_url("**/create-campaign**", timeout=10_000)
         self.wait_for_loading()
         self._campaign_name_input().fill(name)
-        # Select the first available profile (required when >1 profile exists; auto-selected only for 1).
+
+        # Select the intended profile (or the first enabled one if no ID given).
         profile_combobox = self.page.get_by_role("combobox", name=self._PAGE_PROFILE_LABEL)
         profile_combobox.click()
         profile_listbox = self.page.get_by_role("listbox")
-        if profile_listbox.is_visible():
-            profile_options = profile_listbox.locator('[role="option"]:not([aria-disabled="true"])')
-            if profile_options.count() > 0:
-                profile_options.first.click()
+        expect(profile_listbox).to_be_visible(timeout=5_000)
+
+        if profile_id:
+            option = profile_listbox.locator(f'[role="option"][data-value="{profile_id}"]')
+            if option.count() == 0:
+                option = profile_listbox.locator('[role="option"]:not([aria-disabled="true"])').first
+        else:
+            option = profile_listbox.locator('[role="option"]:not([aria-disabled="true"])').first
+
+        expect(option).to_be_visible(timeout=5_000)
+        option.click()
+        expect(profile_listbox).to_be_hidden(timeout=5_000)
+
         self.wait_for_loading()
         catalog_combobox = self.page.get_by_role("combobox", name=self._PAGE_CATALOG_LABEL)
+        expect(catalog_combobox).to_be_visible(timeout=10_000)
         catalog_combobox.click()
         listbox = self.page.get_by_role("listbox")
         expect(listbox).to_be_visible(timeout=5_000)
@@ -140,6 +147,11 @@ class CampaignPage(BasePage):
         # Navigate back to the campaigns list so has_campaign() can verify.
         self.page.goto(campaigns_url)
         self.wait_for_loading()
+        # Wait for the new campaign to appear before returning so callers can
+        # immediately inspect the campaign list.
+        assert self.has_campaign(name), (
+            f"Campaign '{name}' must be visible in the list after creation"
+        )
 
     def create_campaign(self, name: str, catalog_name: str) -> None:
         """Open the *New Campaign* dialog, fill it, and submit.
@@ -208,14 +220,21 @@ class CampaignPage(BasePage):
     # State queries
     # ------------------------------------------------------------------
 
-    def has_campaign(self, name: str) -> bool:
+    def has_campaign(self, name: str, timeout: int = 10_000) -> bool:
         """Return ``True`` when a campaign heading containing *name* is visible.
+
+        Polls briefly to tolerate list-query lag after creation.
 
         Args:
             name: Substring to search for in campaign card headings.
+            timeout: Maximum wait in milliseconds. Defaults to 10 000.
         """
         heading = self.page.locator(self._CAMPAIGN_HEADING_SEL, has_text=name)
-        return heading.first.is_visible()
+        try:
+            heading.first.wait_for(state="visible", timeout=timeout)
+        except PlaywrightTimeoutError:
+            return False
+        return True
 
     def get_campaign_names(self) -> list[str]:
         """Return the inner text of all visible campaign headings.

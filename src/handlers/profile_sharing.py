@@ -58,19 +58,16 @@ def _is_valid_share_entry(profile_id: Any, owner_account_id: Any) -> bool:
     return isinstance(profile_id, str) and isinstance(owner_account_id, str)
 
 
-def _add_share_to_map(
-    shares_by_profile: Dict[str, Dict[str, Any]],
-    share: Dict[str, Any]
-) -> None:
+def _add_share_to_map(shares_by_profile: Dict[str, Dict[str, Any]], share: Dict[str, Any]) -> None:
     """Add a share to the deduplicated map if valid and not already present."""
     profile_id_val = share.get("profileId")
     owner_account_id_val = share.get("ownerAccountId")
-    
+
     if not _is_valid_share_entry(profile_id_val, owner_account_id_val):
         return
     if profile_id_val in shares_by_profile:
         return
-        
+
     shares_by_profile[profile_id_val] = {  # type: ignore[index]
         "profileId": profile_id_val,
         "ownerAccountId": owner_account_id_val,
@@ -171,14 +168,14 @@ def _validate_profile_fields(profile: Dict[str, Any]) -> tuple[str, str, str, st
     profile_id_str = profile.get("profileId")
     if not isinstance(profile_id_str, str):
         return None
-    
+
     seller_name = profile.get("sellerName")
     created_at = profile.get("createdAt")
     updated_at = profile.get("updatedAt")
-    
+
     if not seller_name or not created_at or not updated_at:
         return None
-        
+
     return (profile_id_str, seller_name, created_at, updated_at)
 
 
@@ -191,9 +188,9 @@ def _build_shared_profile_result(
     validated = _validate_profile_fields(profile)
     if not validated:
         return None
-    
+
     profile_id_str, seller_name, created_at, updated_at = validated
-    
+
     share = shares_by_profile.get(profile_id_str)
     if not share:
         return None
@@ -202,7 +199,7 @@ def _build_shared_profile_result(
     if not isinstance(owner_account_id_raw, str):
         owner_account_id_raw = ""
     owner_account_id = _normalize_caller_account_id(owner_account_id_raw)
-    
+
     permissions = share.get("permissions", [])
     permissions_list = list(permissions) if isinstance(permissions, set) else permissions
     return {
@@ -234,9 +231,7 @@ def _query_shares_for_account(target_account_id: str, logger: StructuredLogger) 
 
 
 def _merge_profiles_with_shares(
-    all_profiles: List[Dict[str, Any]],
-    shares_by_profile: Dict[str, Dict[str, Any]],
-    caller_account_id_with_prefix: str
+    all_profiles: List[Dict[str, Any]], shares_by_profile: Dict[str, Dict[str, Any]], caller_account_id_with_prefix: str
 ) -> List[Dict[str, Any]]:
     """Merge profile data with share permissions."""
     result: List[Dict[str, Any]] = []
@@ -295,7 +290,9 @@ def list_my_shares(event: Dict[str, Any], context: Any) -> List[Dict[str, Any]]:
         logger.info("Retrieved profiles", count=len(all_profiles))
 
         # Step 3: Merge profile data with share permissions
-        result = _merge_profiles_with_shares(all_profiles, shares_by_profile, _normalize_caller_account_id(caller_account_id))
+        result = _merge_profiles_with_shares(
+            all_profiles, shares_by_profile, _normalize_caller_account_id(caller_account_id)
+        )
 
         logger.info("Returning shared profiles", count=len(result))
         return result
@@ -311,7 +308,7 @@ def _validate_invite_inputs(profile_id: str, permissions: list[str], caller_acco
     """Validate invite creation inputs."""
     if not is_profile_owner(caller_account_id, profile_id):
         raise AppError(ErrorCode.FORBIDDEN, "Only profile owner can create invites")
-    
+
     valid_permissions = {"READ", "WRITE"}
     if not set(permissions).issubset(valid_permissions):
         raise AppError(ErrorCode.INVALID_INPUT, f"Invalid permissions: {permissions}")

@@ -1,7 +1,7 @@
 /**
  * Custom hook for managing shared campaign discovery
  */
-import { useCallback, useRef } from 'react';
+import { useCallback, useRef, useEffect } from 'react';
 import { useLazyQuery } from '@apollo/client/react';
 import { FIND_SHARED_CAMPAIGNS } from '../lib/graphql';
 import { SHARED_DISCOVERY_DEBOUNCE_MS } from '../lib/sharedCampaignDiscovery';
@@ -77,6 +77,14 @@ export const useSharedCampaignDiscovery = () => {
     },
     [findSharedCampaigns],
   );
+
+  useEffect(() => {
+    return () => {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+    };
+  }, []);
 
   return {
     discoveredSharedCampaigns,

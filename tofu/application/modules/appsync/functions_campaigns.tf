@@ -62,7 +62,9 @@ resource "aws_appsync_function" "delete_campaign_orders" {
     runtime_version = "1.0.0"
   }
 
-  code = file("${local.js_resolvers_dir}/delete_campaign_orders_fn.js")
+  code = templatefile("${local.js_resolvers_dir}/delete_campaign_orders_fn.js", {
+    table_name = var.dynamodb_table_names.orders
+  })
 }
 
 resource "aws_appsync_function" "delete_campaign" {

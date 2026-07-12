@@ -141,8 +141,7 @@ def test_accept_share(contributor_page: Page, _module_state: dict[str, str]) -> 
     alert_text = alert.inner_text().strip()
     assert alert_text, "A non-empty alert must appear after accepting the invite"
     assert "successfully accepted!" in alert_text.lower(), (
-        "Invite acceptance must show the success message from AcceptInvitePage; "
-        f"got alert text: '{alert_text}'"
+        f"Invite acceptance must show the success message from AcceptInvitePage; got alert text: '{alert_text}'"
     )
     assert "error" not in alert_text.lower() and "failed" not in alert_text.lower(), (
         f"Invite acceptance should not show an error; alert reads: '{alert_text}'"
@@ -230,8 +229,7 @@ def test_readonly_share_cannot_modify(readonly_page: Page, ensure_readonly_share
 
     profiles = dashboard.get_profile_names()
     assert profiles, (
-        "Readonly user must have at least one visible profile; "
-        "ensure_readonly_share should have created the READ share"
+        "Readonly user must have at least one visible profile; ensure_readonly_share should have created the READ share"
     )
 
     # Navigate to the campaigns page for the first visible profile.
@@ -291,7 +289,8 @@ def test_write_share_contributor_can_create_order(
     campaign_page_owner.goto(profile_id)
     campaign_page_owner.wait_for_loading()
     if not campaign_page_owner.get_campaign_names():
-        campaign_page_owner.create_campaign_first_catalog(f"Share Seed Campaign {uuid4().hex[:10]}")
+        campaign_page_owner.create_campaign_first_catalog(f"Share Seed Campaign {uuid4().hex[:10]}", profile_id)
+
 
     # Campaign list visibility can lag briefly after creation.
     owner_campaigns: list[str] = []

@@ -151,6 +151,7 @@ vi.mock('@apollo/client/react', async () => {
 });
 
 import { ScoutManagementPage } from '../src/pages/ScoutManagementPage';
+import { maybeDeleteProfile, togglePermission, maybeCreateInvite, maybeDeleteInvite } from '../src/pages/ScoutManagementPage';
 
 const makePage = (initialEntry = `/scouts/${encodeURIComponent(RAW_ID)}/manage`) => (
   <MemoryRouter initialEntries={[initialEntry]}>
@@ -207,8 +208,6 @@ describe('ScoutManagementPage – additional interactions', () => {
         writable: true,
       });
     }
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
-    vi.spyOn(window, 'alert').mockImplementation(() => {});
   });
 
   // ── handleSaveChanges (canSaveProfile covered) ───────────────────────────
@@ -290,7 +289,30 @@ describe('ScoutManagementPage – additional interactions', () => {
     await act(async () => {
       capturedDeleteOpts.onCompleted?.({});
     });
-    expect(await screen.findByText('ScoutsList')).toBeInTheDocument();
+
+    // Verify success snackbar appears before navigation
+    expect(screen.getByText('Profile deleted successfully')).toBeInTheDocument();
+
+    expect(await screen.findByText('ScoutsList', {}, { timeout: 10000 })).toBeInTheDocument();
+  }, 10000);
+
+  it('closes delete success snackbar via Alert close button', async () => {
+    renderPage();
+    const user = userEvent.setup();
+    await screen.findByRole('heading', { name: /Scout Management/i });
+    await waitFor(() => expect(capturedDeleteOpts).toBeDefined(), { timeout: 5000 });
+    await act(async () => {
+      capturedDeleteOpts.onCompleted?.({});
+    });
+
+    expect(screen.getByText('Profile deleted successfully')).toBeInTheDocument();
+
+    const closeButton = screen.getByRole('button', { name: /close/i });
+    await user.click(closeButton);
+
+    await waitFor(() =>
+      expect(screen.queryByText('Profile deleted successfully')).not.toBeInTheDocument(),
+    );
   }, 10000);
 
   // ── formatDate and isExpired in invite rows ───────────────────────────────
@@ -421,6 +443,23 @@ describe('ScoutManagementPage – additional interactions', () => {
     expect(screen.getByRole('button', { name: /Transfer Ownership/i })).toBeInTheDocument();
   }, 10000);
 
+  it('renders share row with missing createdAt', async () => {
+    testShares = [
+      {
+        shareId: 's-no-date',
+        profileId: DB_ID,
+        targetAccountId: 'acct-no-date',
+        targetAccount: { email: 'nodate@example.com', givenName: null, familyName: null },
+        permissions: ['READ'],
+        createdAt: undefined,
+      },
+    ];
+    renderPage();
+
+    expect(await screen.findByText(/Who Has Access/i)).toBeInTheDocument();
+    expect(screen.getByText('nodate@example.com')).toBeInTheDocument();
+  }, 10000);
+
   it('calls revokeShare after confirming revoke access', async () => {
     testShares = [
       {
@@ -441,7 +480,11 @@ describe('ScoutManagementPage – additional interactions', () => {
     const revokeBtn = screen.getByTitle('Revoke access');
     await user.click(revokeBtn);
 
-    // window.confirm returns true (mocked), so revokeShare mutation should be called
+    // Confirm the MUI dialog to proceed with revocation
+    const confirmBtn = screen.getByRole('button', { name: /Revoke/i });
+    await user.click(confirmBtn);
+
+    // The dialog was confirmed, so revokeShare mutation should be called
     await waitFor(() => expect(revokeShareMock).toHaveBeenCalled(), { timeout: 3000 });
   }, 10000);
 
@@ -464,12 +507,13 @@ describe('ScoutManagementPage – additional interactions', () => {
     const transferBtn = screen.getByRole('button', { name: /Transfer Ownership/i });
     await user.click(transferBtn);
 
+    const confirmBtn = screen.getByRole('button', { name: /Transfer/i });
+    await user.click(confirmBtn);
+
     await waitFor(() => expect(transferOwnershipMock).toHaveBeenCalled(), { timeout: 3000 });
   }, 10000);
 
   it('does not call revokeShare when confirm is cancelled', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(false);
-
     testShares = [
       {
         shareId: 's4',
@@ -488,13 +532,14 @@ describe('ScoutManagementPage – additional interactions', () => {
     const revokeBtn = screen.getByTitle('Revoke access');
     await user.click(revokeBtn);
 
+    const cancelBtn = screen.getByRole('button', { name: /Cancel/i });
+    await user.click(cancelBtn);
+
     await new Promise((r) => setTimeout(r, 200));
     expect(revokeShareMock).not.toHaveBeenCalled();
   }, 10000);
 
   it('does not call transferOwnership when confirm is cancelled', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(false);
-
     testShares = [
       {
         shareId: 's6',
@@ -512,6 +557,9 @@ describe('ScoutManagementPage – additional interactions', () => {
 
     const transferBtn = screen.getByRole('button', { name: /Transfer Ownership/i });
     await user.click(transferBtn);
+
+    const cancelBtn = screen.getByRole('button', { name: /Cancel/i });
+    await user.click(cancelBtn);
 
     await new Promise((r) => setTimeout(r, 200));
     expect(transferOwnershipMock).not.toHaveBeenCalled();
@@ -543,12 +591,6 @@ describe('ScoutManagementPage – additional interactions', () => {
   // ── getUserDisplayName fallback (no email) ────────────────────────────────
 
   it('shows fallback display name in confirm when share has no email', async () => {
-    vi.spyOn(window, 'confirm').mockImplementation((msg) => {
-      // Verify the fallback message format `User {id}...`
-      expect(msg).toMatch(/User acct-no-/i);
-      return false;
-    });
-
     testShares = [
       {
         shareId: 's5',
@@ -566,15 +608,12 @@ describe('ScoutManagementPage – additional interactions', () => {
 
     const revokeBtn = screen.getByTitle('Revoke access');
     await user.click(revokeBtn);
-    // confirm was called and we verified the message format above
+
+    // Verify the dialog contains the fallback display name
+    expect(screen.getAllByText(/User acct-no-/i).length).toBeGreaterThanOrEqual(1);
   }, 10000);
 
   it('uses fallback display name when transferring ownership to a user without email', async () => {
-    vi.spyOn(window, 'confirm').mockImplementation((msg) => {
-      expect(msg).toMatch(/User acct-no-/);
-      return true;
-    });
-
     testShares = [
       {
         shareId: 's8',
@@ -593,12 +632,13 @@ describe('ScoutManagementPage – additional interactions', () => {
     const transferBtn = screen.getByRole('button', { name: /Transfer Ownership/i });
     await user.click(transferBtn);
 
-    await waitFor(() => expect(transferOwnershipMock).toHaveBeenCalled(), { timeout: 3000 });
+    // Verify the dialog contains the fallback display name
+    expect(screen.getAllByText(/User acct-no-/i).length).toBeGreaterThanOrEqual(1);
   }, 10000);
 
   // ── Error handling in revoke / transfer helpers ──────────────────────────
 
-  it('alerts when revokeShare mutation fails', async () => {
+  it('shows error when revokeShare mutation fails', async () => {
     const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     revokeShareMock.mockRejectedValue(new Error('Revoke failed'));
 
@@ -618,21 +658,21 @@ describe('ScoutManagementPage – additional interactions', () => {
     await screen.findByText('err@example.com');
     await user.click(screen.getByTitle('Revoke access'));
 
-    await waitFor(() => expect(window.alert).toHaveBeenCalledWith('Failed to revoke access'));
+    const confirmBtn = screen.getByRole('button', { name: /Revoke/i });
+    await user.click(confirmBtn);
+
+    await waitFor(() => expect(screen.getByText('Failed to revoke access')).toBeInTheDocument());
     expect(consoleSpy).toHaveBeenCalled();
     consoleSpy.mockRestore();
   }, 10000);
 
-  it('alerts when transferOwnership mutation fails', async () => {
-    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    transferOwnershipMock.mockRejectedValue(new Error('Transfer failed'));
-
+  it('closes share action dialog via Escape key', async () => {
     testShares = [
       {
-        shareId: 's-transfer-err',
+        shareId: 's-esc',
         profileId: DB_ID,
-        targetAccountId: 'acct-transfer-err',
-        targetAccount: { email: 'transfer-err@example.com' },
+        targetAccountId: 'acct-esc',
+        targetAccount: { email: 'esc@example.com' },
         permissions: ['READ'],
         createdAt: new Date().toISOString(),
       },
@@ -640,11 +680,128 @@ describe('ScoutManagementPage – additional interactions', () => {
     renderPage();
 
     const user = userEvent.setup();
-    await screen.findByText('transfer-err@example.com');
-    await user.click(screen.getByRole('button', { name: /Transfer Ownership/i }));
+    await screen.findByText('esc@example.com');
+    await user.click(screen.getByTitle('Revoke access'));
 
-    await waitFor(() => expect(window.alert).toHaveBeenCalledWith('Failed to transfer ownership'));
-    expect(consoleSpy).toHaveBeenCalled();
-    consoleSpy.mockRestore();
+    expect(screen.getByText(/Revoke Access\?/i)).toBeInTheDocument();
+
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByText(/Revoke Access\?/i)).not.toBeInTheDocument());
   }, 10000);
+
+  it('dismisses share action error alert', async () => {
+    revokeShareMock.mockRejectedValue(new Error('Revoke failed'));
+
+    testShares = [
+      {
+        shareId: 's-dismiss',
+        profileId: DB_ID,
+        targetAccountId: 'acct-dismiss',
+        targetAccount: { email: 'dismiss@example.com' },
+        permissions: ['READ'],
+        createdAt: new Date().toISOString(),
+      },
+    ];
+    renderPage();
+
+    const user = userEvent.setup();
+    await screen.findByText('dismiss@example.com');
+    await user.click(screen.getByTitle('Revoke access'));
+
+    const confirmBtn = screen.getByRole('button', { name: /Revoke/i });
+    await user.click(confirmBtn);
+
+    await waitFor(() => expect(screen.getByText('Failed to revoke access')).toBeInTheDocument());
+
+    await user.click(screen.getByRole('button', { name: /close/i }));
+    await waitFor(() => expect(screen.queryByText('Failed to revoke access')).not.toBeInTheDocument());
+  }, 10000);
+});
+
+describe('ScoutManagementPage helper functions', () => {
+  it('togglePermission adds permission when checked and not present', () => {
+    let permissions: string[] = ['READ'];
+    const setPermissions = (updater: React.SetStateAction<string[]>) => {
+      permissions = typeof updater === 'function' ? updater(permissions) : updater;
+    };
+
+    togglePermission('WRITE', true, setPermissions);
+    expect(permissions).toEqual(['READ', 'WRITE']);
+  });
+
+  it('togglePermission keeps permissions unchanged when checked and already present', () => {
+    let permissions: string[] = ['READ', 'WRITE'];
+    const setPermissions = (updater: React.SetStateAction<string[]>) => {
+      permissions = typeof updater === 'function' ? updater(permissions) : updater;
+    };
+
+    togglePermission('READ', true, setPermissions);
+    expect(permissions).toEqual(['READ', 'WRITE']);
+  });
+
+  it('maybeDeleteProfile does nothing when canDelete is false', async () => {
+    const setDeletingProfile = vi.fn();
+    const deleteProfile = vi.fn().mockResolvedValue({ data: {} });
+
+    await maybeDeleteProfile(false, setDeletingProfile, deleteProfile, DB_ID);
+
+    expect(setDeletingProfile).not.toHaveBeenCalled();
+    expect(deleteProfile).not.toHaveBeenCalled();
+  });
+
+  it('maybeCreateInvite does nothing when canCreate is false', async () => {
+    const createInvite = vi.fn().mockResolvedValue({ data: {} });
+    const setInvitePermissions = vi.fn();
+
+    await maybeCreateInvite(false, createInvite, DB_ID, ['READ', 'WRITE'], setInvitePermissions);
+
+    expect(createInvite).not.toHaveBeenCalled();
+    expect(setInvitePermissions).not.toHaveBeenCalled();
+  });
+
+  it('maybeCreateInvite creates invite and resets permissions when canCreate is true', async () => {
+    const createInvite = vi.fn().mockResolvedValue({ data: {} });
+    const setInvitePermissions = vi.fn();
+
+    await maybeCreateInvite(true, createInvite, DB_ID, ['READ', 'WRITE'], setInvitePermissions);
+
+    expect(createInvite).toHaveBeenCalledWith({
+      variables: {
+        input: {
+          profileId: DB_ID,
+          permissions: ['READ', 'WRITE'],
+        },
+      },
+    });
+    expect(setInvitePermissions).toHaveBeenCalledWith(['READ']);
+  });
+
+  it('maybeDeleteInvite does nothing when canDelete is false', async () => {
+    const deleteInvite = vi.fn().mockResolvedValue({ data: {} });
+
+    await maybeDeleteInvite(false, deleteInvite, DB_ID, 'INV-123');
+
+    expect(deleteInvite).not.toHaveBeenCalled();
+  });
+
+  it('maybeDeleteInvite does nothing when deletingInviteCode is null', async () => {
+    const deleteInvite = vi.fn().mockResolvedValue({ data: {} });
+
+    await maybeDeleteInvite(true, deleteInvite, DB_ID, null);
+
+    expect(deleteInvite).not.toHaveBeenCalled();
+  });
+
+  it('maybeDeleteInvite deletes invite when canDelete is true and code is provided', async () => {
+    const deleteInvite = vi.fn().mockResolvedValue({ data: {} });
+
+    await maybeDeleteInvite(true, deleteInvite, DB_ID, 'INV-123');
+
+    expect(deleteInvite).toHaveBeenCalledWith({
+      variables: {
+        profileId: DB_ID,
+        inviteCode: 'INV-123',
+      },
+    });
+  });
 });

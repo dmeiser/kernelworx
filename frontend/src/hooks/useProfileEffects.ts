@@ -34,7 +34,7 @@ export const useProfileEffects = (
         state: {
           returnTo: `/c/${effectiveSharedCampaignCode}`,
           sharedCampaignCode: effectiveSharedCampaignCode,
-          message: 'Create a scout to use this campaign link',
+          message: 'Create a Scout to use this campaign link',
         },
         replace: true,
       });

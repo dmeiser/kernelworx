@@ -304,6 +304,7 @@ class TestUpdateMyAccount:
         stored_item = accounts_table.get_item(Key={"accountId": account_id_key})
         assert "unitNumber" not in stored_item["Item"]
 
+
 class TestDeleteMyAccount:
     """Tests for delete_my_account handler - comprehensive cascade deletion tests."""
 
@@ -402,26 +403,32 @@ class TestDeleteMyAccount:
 
         # Verify all data exists before deletion
         assert accounts_table.get_item(Key={"accountId": account_id_key}).get("Item") is not None
-        assert profiles_table.get_item(Key={"ownerAccountId": account_id_key, "profileId": profile_id}).get("Item") is not None
-        assert campaigns_table.get_item(Key={"profileId": profile_id, "campaignId": campaign_id}).get("Item") is not None
+        assert (
+            profiles_table.get_item(Key={"ownerAccountId": account_id_key, "profileId": profile_id}).get("Item")
+            is not None
+        )
+        assert (
+            campaigns_table.get_item(Key={"profileId": profile_id, "campaignId": campaign_id}).get("Item") is not None
+        )
         assert catalogs_table.get_item(Key={"catalogId": catalog_id}).get("Item") is not None
         assert orders_table.get_item(Key={"campaignId": campaign_id, "orderId": order_id}).get("Item") is not None
-        assert shares_table.get_item(Key={"profileId": profile_id, "targetAccountId": "ACCOUNT#other-user"}).get("Item") is not None
+        assert (
+            shares_table.get_item(Key={"profileId": profile_id, "targetAccountId": "ACCOUNT#other-user"}).get("Item")
+            is not None
+        )
 
         # Mock Cognito client
         with patch("boto3.client") as mock_boto_client:
             mock_cognito = MagicMock()
             mock_boto_client.return_value = mock_cognito
-            mock_cognito.list_users.return_value = {
-                "Users": [{"Username": "testuser@example.com"}]
-            }
+            mock_cognito.list_users.return_value = {"Users": [{"Username": "testuser@example.com"}]}
 
             # Execute delete
             event = {
                 **appsync_event,
                 "identity": {
                     "sub": sample_account_id,
-                    "claims": {"cognito:groups": ["ADMIN"]}  # Add admin claim for the pseudo event
+                    "claims": {"cognito:groups": ["ADMIN"]},  # Add admin claim for the pseudo event
                 },
             }
 
@@ -433,7 +440,9 @@ class TestDeleteMyAccount:
         assert accounts_table.get_item(Key={"accountId": account_id_key}).get("Item") is None
 
         # 2. Profile should be gone
-        assert profiles_table.get_item(Key={"ownerAccountId": account_id_key, "profileId": profile_id}).get("Item") is None
+        assert (
+            profiles_table.get_item(Key={"ownerAccountId": account_id_key, "profileId": profile_id}).get("Item") is None
+        )
 
         # 3. Campaign should be gone
         assert campaigns_table.get_item(Key={"profileId": profile_id, "campaignId": campaign_id}).get("Item") is None
@@ -455,8 +464,7 @@ class TestDeleteMyAccount:
 
         # 7. Verify Cognito deletion was called
         mock_cognito.admin_delete_user.assert_called_once_with(
-            UserPoolId="us-east-1_test123",
-            Username="testuser@example.com"
+            UserPoolId="us-east-1_test123", Username="testuser@example.com"
         )
 
     def test_cannot_delete_another_users_account(
@@ -503,9 +511,7 @@ class TestDeleteMyAccount:
         with patch("boto3.client") as mock_boto_client:
             mock_cognito = MagicMock()
             mock_boto_client.return_value = mock_cognito
-            mock_cognito.list_users.return_value = {
-                "Users": [{"Username": "user1@example.com"}]
-            }
+            mock_cognito.list_users.return_value = {"Users": [{"Username": "user1@example.com"}]}
 
             # Try to delete as user1 (should succeed for their own account)
             event = {
@@ -610,8 +616,7 @@ class TestDeleteMyAccount:
 
         # Verify all items exist
         profiles_response = profiles_table.scan(
-            FilterExpression="ownerAccountId = :owner",
-            ExpressionAttributeValues={":owner": account_id_key}
+            FilterExpression="ownerAccountId = :owner", ExpressionAttributeValues={":owner": account_id_key}
         )
         assert len(profiles_response["Items"]) == 3
 
@@ -622,8 +627,7 @@ class TestDeleteMyAccount:
         assert len(orders_response["Items"]) == 3
 
         catalogs_response = catalogs_table.scan(
-            FilterExpression="ownerAccountId = :owner",
-            ExpressionAttributeValues={":owner": account_id_key}
+            FilterExpression="ownerAccountId = :owner", ExpressionAttributeValues={":owner": account_id_key}
         )
         assert len(catalogs_response["Items"]) == 3
 
@@ -631,9 +635,7 @@ class TestDeleteMyAccount:
         with patch("boto3.client") as mock_boto_client:
             mock_cognito = MagicMock()
             mock_boto_client.return_value = mock_cognito
-            mock_cognito.list_users.return_value = {
-                "Users": [{"Username": "testuser@example.com"}]
-            }
+            mock_cognito.list_users.return_value = {"Users": [{"Username": "testuser@example.com"}]}
 
             event = {
                 **appsync_event,
@@ -691,9 +693,7 @@ class TestDeleteMyAccount:
         with patch("boto3.client") as mock_boto_client:
             mock_cognito = MagicMock()
             mock_boto_client.return_value = mock_cognito
-            mock_cognito.list_users.return_value = {
-                "Users": [{"Username": "testuser@example.com"}]
-            }
+            mock_cognito.list_users.return_value = {"Users": [{"Username": "testuser@example.com"}]}
 
             event = {
                 **appsync_event,
@@ -792,8 +792,9 @@ class TestDeleteMyAccount:
         monkeypatch: Any,
     ) -> None:
         """Test deletion handles Cognito client errors."""
-        from src.handlers.account_operations import delete_my_account
         from botocore.exceptions import ClientError
+
+        from src.handlers.account_operations import delete_my_account
 
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
         monkeypatch.setenv("USER_POOL_ID", "us-east-1_test123")
@@ -843,8 +844,9 @@ class TestDeleteMyAccount:
         monkeypatch: Any,
     ) -> None:
         """Test deletion handles Cognito admin_delete_user errors (covers line 171)."""
-        from src.handlers.account_operations import delete_my_account
         from botocore.exceptions import ClientError
+
+        from src.handlers.account_operations import delete_my_account
 
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
         monkeypatch.setenv("USER_POOL_ID", "us-east-1_test123")
@@ -937,8 +939,9 @@ class TestDeleteMyAccount:
         monkeypatch: Any,
     ) -> None:
         """Test deletion handles UserNotFoundException gracefully (covers line 171 inverse branch)."""
-        from src.handlers.account_operations import delete_my_account
         from botocore.exceptions import ClientError
+
+        from src.handlers.account_operations import delete_my_account
 
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
         monkeypatch.setenv("USER_POOL_ID", "us-east-1_test123")
@@ -983,5 +986,5 @@ class TestDeleteMyAccount:
 
             # Should succeed even though Cognito user wasn't found (already deleted)
             result = delete_my_account(event, lambda_context)
-            
+
             assert result is True

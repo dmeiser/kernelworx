@@ -38,18 +38,24 @@ def test_campaign_operations_dynamo_value_for_scalar_fallback():
 
 
 def test_pre_signup_handle_signup_exception_returns_event():
+    from botocore.exceptions import ClientError
+
     from src.handlers import pre_signup
 
     event = {"response": {}}
     returned = pre_signup._handle_signup_exception(Exception("unexpected"), "user@example.com", event)
     assert returned is event
 
-    class InvalidParameterException(Exception):
-        pass
+    client_error = ClientError(
+        {"Error": {"Code": "InvalidParameterException", "Message": "Link already exists"}},
+        "AdminLinkProviderForUser",
+    )
+    with pytest.raises(Exception):
+        pre_signup._handle_signup_exception(client_error, "user@example.com", event)
 
     with pytest.raises(Exception):
         pre_signup._handle_signup_exception(
-            InvalidParameterException("InvalidParameterException"), "user@example.com", event
+            Exception("Cannot link federated identity: invalid username format"), "user@example.com", event
         )
 
 

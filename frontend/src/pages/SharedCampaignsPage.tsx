@@ -199,10 +199,8 @@ const DeactivateDetails: React.FC<{
         <strong>Unit:</strong> {campaign.unitType} {campaign.unitNumber}
       </Typography>
     </Box>
-  ) : (
-    // v8 ignore next -- Deactivate dialog always has a target campaign selected
-    null
-  );
+  ) : // v8 ignore next -- Deactivate dialog always has a target campaign selected
+  null;
 
 // QR dialog title suffix component
 const QRDialogTitleSuffix: React.FC<{
@@ -210,10 +208,8 @@ const QRDialogTitleSuffix: React.FC<{
 }> = ({ campaign }) =>
   campaign ? (
     <> - {campaign.sharedCampaignCode}</>
-  ) : (
-    // v8 ignore next -- QR dialog always has a campaign selected
-    null
-  );
+  ) : // v8 ignore next -- QR dialog always has a campaign selected
+  null;
 
 // QR code image component
 const QRCodeImage: React.FC<{
@@ -234,10 +230,8 @@ const QRCodeImage: React.FC<{
         p: 2,
       }}
     />
-  ) : (
-    // v8 ignore next -- QR image only rendered after data URL is generated
-    null
-  );
+  ) : // v8 ignore next -- QR image only rendered after data URL is generated
+  null;
 
 // QR link display component
 const QRLinkDisplay: React.FC<{
@@ -252,10 +246,8 @@ const QRLinkDisplay: React.FC<{
         {getShortLinkForCode(campaign.sharedCampaignCode)}
       </Typography>
     </Box>
-  ) : (
-    // v8 ignore next -- QR dialog always has a campaign selected
-    null
-  );
+  ) : // v8 ignore next -- QR dialog always has a campaign selected
+  null;
 
 // Campaigns list component (table or empty state)
 const CampaignsList: React.FC<{

@@ -31,6 +31,11 @@ variable "lambda_function_arns" {
   description = "Map of Lambda function ARNs that AppSync is permitted to invoke"
 }
 
+variable "cloudfront_distribution_arn" {
+  description = "ARN of the CloudFront site distribution to scope invalidations to"
+  type        = string
+}
+
 locals {
   role_suffix         = "-${var.region_abbrev}-${var.environment}"
   dynamodb_table_arns = values(var.dynamodb_table_arns)
@@ -122,11 +127,12 @@ resource "aws_iam_role_policy" "lambda_s3" {
 }
 
 # Lambda CloudFront Access
+# Scope invalidations to the site distribution used by the application.
 data "aws_iam_policy_document" "lambda_cloudfront" {
   statement {
     effect    = "Allow"
     actions   = ["cloudfront:CreateInvalidation"]
-    resources = ["*"]
+    resources = [var.cloudfront_distribution_arn]
   }
 }
 
@@ -134,30 +140,6 @@ resource "aws_iam_role_policy" "lambda_cloudfront" {
   name   = "cloudfront-invalidation"
   role   = aws_iam_role.lambda_execution.id
   policy = data.aws_iam_policy_document.lambda_cloudfront.json
-}
-
-# Lambda Cognito Admin Access
-data "aws_iam_policy_document" "lambda_cognito" {
-  statement {
-    effect = "Allow"
-    actions = [
-      "cognito-idp:AdminResetUserPassword",
-      "cognito-idp:AdminDeleteUser",
-      "cognito-idp:ListUsers",
-      "cognito-idp:AdminListGroupsForUser",
-      "cognito-idp:AdminGetUser",
-      "cognito-idp:AdminLinkProviderForUser",
-      "cognito-idp:AdminCreateUser",
-      "cognito-idp:AdminSetUserPassword",
-    ]
-    resources = ["*"]
-  }
-}
-
-resource "aws_iam_role_policy" "lambda_cognito" {
-  name   = "cognito-admin"
-  role   = aws_iam_role.lambda_execution.id
-  policy = data.aws_iam_policy_document.lambda_cognito.json
 }
 
 # =============================================================================
@@ -260,6 +242,9 @@ data "aws_iam_policy_document" "cognito_assume_role" {
 }
 
 data "aws_iam_policy_document" "cognito_sms" {
+  # NOTE: Cognito uses this role to publish SMS messages directly to phone numbers
+  # via SNS. There is no application-managed SNS topic, so SNS SMS requires the
+  # resource to remain "*". Scoping to a topic ARN is not possible here.
   statement {
     effect    = "Allow"
     actions   = ["sns:Publish"]

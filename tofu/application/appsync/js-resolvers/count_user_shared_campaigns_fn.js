@@ -17,8 +17,7 @@ export function response(ctx) {
     if (ctx.error) {
         util.error(ctx.error.message, ctx.error.type);
     }
-    const count = ctx.result.scannedCount || 0;
-    // Rate limit: 50 shared campaigns per user
+    const count = ctx.result.count || 0;
     if (count >= 50) {
         util.error('Rate limit exceeded: Maximum 50 campaign shared campaigns per user', 'RateLimitExceeded');
     }

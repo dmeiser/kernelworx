@@ -267,7 +267,7 @@ const LineItemRow: React.FC<LineItemRowProps> = ({
         <strong>${subtotal.toFixed(2)}</strong>
       </TableCell>
       <TableCell align="right">
-        <IconButton size="small" onClick={() => onRemove(index)} disabled={loading}>
+        <IconButton size="small" onClick={() => onRemove(index)} disabled={loading} aria-label="Remove product">
           <DeleteIcon fontSize="small" />
         </IconButton>
       </TableCell>
@@ -578,33 +578,6 @@ const isFormComplete = (
   return hasName && hasContact && hasItems && hasDate;
 };
 
-// Form initialization helpers
-const initializeFromOrder = (
-  order: NonNullable<OrderEditorDialogProps['order']>,
-  customer: ReturnType<typeof useCustomerFormState>,
-  lineItemsState: ReturnType<typeof useLineItemsState>,
-  orderDetails: ReturnType<typeof useOrderDetailsState>,
-) => {
-  customer.setFromOrder(order);
-  lineItemsState.setLineItems(
-    order.lineItems.map((item) => ({
-      productId: item.productId,
-      quantity: item.quantity,
-    })),
-  );
-  orderDetails.setFromOrder(order);
-};
-
-const resetAllForms = (
-  customer: ReturnType<typeof useCustomerFormState>,
-  lineItemsState: ReturnType<typeof useLineItemsState>,
-  orderDetails: ReturnType<typeof useOrderDetailsState>,
-) => {
-  customer.reset();
-  lineItemsState.setLineItems([]);
-  orderDetails.reset();
-};
-
 // Line items props builder
 const buildLineItemsProps = (
   lineItemsState: ReturnType<typeof useLineItemsState>,
@@ -643,25 +616,6 @@ const executeOrderMutation = async (
 // Get default product ID safely
 const getDefaultProductId = (products: Product[]): string | undefined => {
   return products.length > 0 ? products[0].productId : undefined;
-};
-
-// Form initialization effect handler
-const useFormInitEffect = (
-  open: boolean,
-  order: OrderEditorDialogProps['order'],
-  customer: ReturnType<typeof useCustomerFormState>,
-  lineItemsState: ReturnType<typeof useLineItemsState>,
-  orderDetails: ReturnType<typeof useOrderDetailsState>,
-) => {
-  useEffect(() => {
-    if (!open) return;
-    if (order) {
-      initializeFromOrder(order, customer, lineItemsState, orderDetails);
-    } else {
-      resetAllForms(customer, lineItemsState, orderDetails);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, order]);
 };
 
 // Submit button text helper
@@ -705,14 +659,14 @@ const prepareAndSubmit = async (
   campaignId: string,
   createOrder: ReturnType<typeof useMutation>[0],
   updateOrder: ReturnType<typeof useMutation>[0],
-): Promise<void> => {
+): Promise<string | null> => {
   const validationError = addOptionalInputFields(input, customer, notes);
   if (validationError) {
-    alert(validationError);
-    return;
+    return validationError;
   }
 
   await executeOrderMutation(isUpdate, input, orderId, profileId, campaignId, createOrder, updateOrder);
+  return null;
 };
 
 export const OrderEditorDialog: React.FC<OrderEditorDialogProps> = ({
@@ -731,8 +685,29 @@ export const OrderEditorDialog: React.FC<OrderEditorDialogProps> = ({
   const lineItemsState = useLineItemsState(getDefaultProductId(products));
   const orderDetails = useOrderDetailsState();
   const isUpdate = order !== null;
+  const [dialogError, setDialogError] = useState<string | null>(null);
 
-  useFormInitEffect(open, order, customer, lineItemsState, orderDetails);
+  const { setFromOrder: setCustomerFromOrder, reset: resetCustomer } = customer;
+  const { setLineItems } = lineItemsState;
+  const { setFromOrder: setDetailsFromOrder, reset: resetOrderDetails } = orderDetails;
+
+  useEffect(() => {
+    if (!open) return;
+    if (order) {
+      setCustomerFromOrder(order);
+      setLineItems(
+        order.lineItems.map((item) => ({
+          productId: item.productId,
+          quantity: item.quantity,
+        })),
+      );
+      setDetailsFromOrder(order);
+    } else {
+      resetCustomer();
+      setLineItems([]);
+      resetOrderDetails();
+    }
+  }, [open, order, setCustomerFromOrder, setLineItems, setDetailsFromOrder, resetCustomer, resetOrderDetails]);
 
   const [createOrder, { loading: creating, error: createError }] = useMutation(CREATE_ORDER, {
     onCompleted: onComplete,
@@ -755,13 +730,15 @@ export const OrderEditorDialog: React.FC<OrderEditorDialogProps> = ({
     })),
   });
 
+  // eslint-disable-next-line complexity -- Submit handler with validation and error branches
   const handleSubmit = async () => {
-    if (!isFormValid) return;
-    if (!dbProfileId) return;
+    if (!isFormValid || !dbProfileId) return;
+
+    setDialogError(null);
 
     try {
       const input: Record<string, unknown> = buildBaseInput();
-      await prepareAndSubmit(
+      const validationError = await prepareAndSubmit(
         input,
         customer,
         orderDetails.notes,
@@ -772,9 +749,12 @@ export const OrderEditorDialog: React.FC<OrderEditorDialogProps> = ({
         createOrder,
         updateOrder,
       );
+      if (validationError) {
+        setDialogError(validationError);
+      }
     } catch (err: unknown) {
       console.error('Failed to save order:', err);
-      alert(`Error: ${formatSubmitError(err)}`);
+      setDialogError(`Error: ${formatSubmitError(err)}`);
     }
   };
 
@@ -821,6 +801,11 @@ export const OrderEditorDialog: React.FC<OrderEditorDialogProps> = ({
           />
 
           {error && <Alert severity="error">Failed to save order: {error.message}</Alert>}
+          {dialogError && (
+            <Alert severity="error" onClose={() => setDialogError(null)}>
+              {dialogError}
+            </Alert>
+          )}
         </Stack>
       </DialogContent>
       <DialogActions>

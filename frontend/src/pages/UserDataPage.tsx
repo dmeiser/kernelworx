@@ -180,6 +180,12 @@ export const UserDataPage: React.FC = () => {
 
   // Fetch shares for all profiles
   const [selectedProfileForShares, setSelectedProfileForShares] = useState<string | null>(null);
+  const [revokeShareTarget, setRevokeShareTarget] = useState<{
+    profileId: string;
+    targetAccountId: string;
+    email: string;
+  } | null>(null);
+  const [revokeShareError, setRevokeShareError] = useState<string | null>(null);
   const {
     data: sharesData,
     loading: sharesLoading,
@@ -210,10 +216,13 @@ export const UserDataPage: React.FC = () => {
   // Delete share mutation
   const [deleteShare] = useMutation(ADMIN_DELETE_SHARE, {
     onCompleted: () => {
+      setRevokeShareTarget(null);
+      setRevokeShareError(null);
       refetchShares();
     },
     onError: (error) => {
       console.error('Delete share failed:', error);
+      setRevokeShareError(error.message);
     },
   });
 
@@ -277,6 +286,17 @@ export const UserDataPage: React.FC = () => {
     setSelectedNewOwner(null);
   };
 
+  const handleConfirmRevokeShare = () => {
+    if (!revokeShareTarget) return;
+    setRevokeShareError(null);
+    deleteShare({
+      variables: {
+        profileId: revokeShareTarget.profileId,
+        targetAccountId: revokeShareTarget.targetAccountId,
+      },
+    });
+  };
+
   if (!accountId) {
     return (
       <Box p={3}>
@@ -316,11 +336,15 @@ export const UserDataPage: React.FC = () => {
       {/* Tabs */}
       <Paper sx={{ mb: 3 }}>
         <Tabs value={currentTab} onChange={handleTabChange}>
-          <Tab label={`Profiles (${profiles.length})`} />
-          <Tab label={`Catalogs (${catalogs.length})`} />
-          <Tab label={`Campaigns (${campaigns.length})`} />
-          <Tab label={`Shared Campaigns (${sharedCampaigns.length})`} />
-          <Tab label={`Shares`} />
+          <Tab id="user-data-tab-0" aria-controls="user-data-tabpanel-0" label={`Profiles (${profiles.length})`} />
+          <Tab id="user-data-tab-1" aria-controls="user-data-tabpanel-1" label={`Catalogs (${catalogs.length})`} />
+          <Tab id="user-data-tab-2" aria-controls="user-data-tabpanel-2" label={`Campaigns (${campaigns.length})`} />
+          <Tab
+            id="user-data-tab-3"
+            aria-controls="user-data-tabpanel-3"
+            label={`Shared Campaigns (${sharedCampaigns.length})`}
+          />
+          <Tab id="user-data-tab-4" aria-controls="user-data-tabpanel-4" label={`Shares`} />
         </Tabs>
       </Paper>
 
@@ -737,18 +761,11 @@ export const UserDataPage: React.FC = () => {
                                   startIcon={<DeleteIcon />}
                                   onClick={() => {
                                     const email = share.targetAccount?.email || 'this user';
-                                    if (
-                                      window.confirm(
-                                        `Are you sure you want to revoke ${email}'s access to this profile?`,
-                                      )
-                                    ) {
-                                      deleteShare({
-                                        variables: {
-                                          profileId: selectedProfileForShares,
-                                          targetAccountId: share.targetAccountId,
-                                        },
-                                      });
-                                    }
+                                    setRevokeShareTarget({
+                                      profileId: selectedProfileForShares ?? '',
+                                      targetAccountId: share.targetAccountId,
+                                      email,
+                                    });
                                   }}
                                   color="error"
                                   variant="outlined"
@@ -787,7 +804,11 @@ export const UserDataPage: React.FC = () => {
             InputProps={{
               endAdornment: (
                 <InputAdornment position="end">
-                  <IconButton onClick={handleSearchNewOwner} disabled={!newOwnerSearch.trim() || searchLoading}>
+                  <IconButton
+                    onClick={handleSearchNewOwner}
+                    disabled={!newOwnerSearch.trim() || searchLoading}
+                    aria-label="Search new owner"
+                  >
                     <SearchIcon />
                   </IconButton>
                 </InputAdornment>
@@ -837,6 +858,25 @@ export const UserDataPage: React.FC = () => {
             startIcon={transferring ? <CircularProgress size={16} /> : <TransferIcon />}
           >
             {transferring ? 'Transferring...' : 'Confirm Transfer'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Revoke Share Confirmation Dialog */}
+      <Dialog open={!!revokeShareTarget} onClose={() => setRevokeShareTarget(null)}>
+        <DialogTitle>Revoke Access?</DialogTitle>
+        <DialogContent>
+          <Typography>Are you sure you want to revoke {revokeShareTarget?.email}'s access to this profile?</Typography>
+          {revokeShareError && (
+            <Alert severity="error" sx={{ mt: 2 }} onClose={() => setRevokeShareError(null)}>
+              {revokeShareError}
+            </Alert>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setRevokeShareTarget(null)}>Cancel</Button>
+          <Button onClick={handleConfirmRevokeShare} color="error">
+            Revoke
           </Button>
         </DialogActions>
       </Dialog>

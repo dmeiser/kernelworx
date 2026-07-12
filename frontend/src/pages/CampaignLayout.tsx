@@ -139,7 +139,7 @@ const CampaignHeader: React.FC<CampaignHeaderProps> = ({ campaign, onBack }) => 
 
   return (
     <Stack direction="row" alignItems="center" spacing={2} mb={3}>
-      <IconButton edge="start" color="inherit" onClick={onBack} sx={{ mr: 2 }}>
+      <IconButton edge="start" color="inherit" onClick={onBack} sx={{ mr: 2 }} aria-label="Back to campaigns">
         <ArrowBackIcon />
       </IconButton>
       <Box flexGrow={1}>

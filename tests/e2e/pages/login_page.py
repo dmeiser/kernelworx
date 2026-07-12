@@ -82,7 +82,7 @@ class LoginPage(BasePage):
         self._password_input().fill(password)
         self._submit_button().click()
 
-    def wait_for_redirect(self, destination: str = "/scouts", timeout: int = 15_000) -> None:
+    def wait_for_redirect(self, destination: str = "/home", timeout: int = 15_000) -> None:
         """Block until the browser navigates away to *destination*.
 
         Args:

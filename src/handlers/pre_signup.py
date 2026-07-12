@@ -18,9 +18,10 @@ How it works:
 """
 
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, NoReturn
 
 import boto3
+from botocore.exceptions import ClientError
 
 # Configure logging
 logger = logging.getLogger()
@@ -34,11 +35,11 @@ def _auto_confirm_event(event: Dict[str, Any]) -> Dict[str, Any]:
     return event
 
 
-def _link_federated_identity(cognito: Any, user_pool_id: str, existing_username: str, username: str) -> None:
+def _link_federated_identity(cognito: Any, user_pool_id: str, existing_username: str, username: str) -> NoReturn:
     """Link federated identity to existing user."""
     if "_" not in username:
         logger.error(f"Unexpected federated username format: {username}")
-        return
+        raise Exception("Cannot link federated identity: invalid username format")
     provider_name, provider_user_id = username.split("_", 1)
     cognito.admin_link_provider_for_user(
         UserPoolId=user_pool_id,
@@ -57,7 +58,7 @@ def _link_federated_identity(cognito: Any, user_pool_id: str, existing_username:
 
 def _handle_existing_user(
     cognito: Any, user_pool_id: str, email: str, username: str, existing_user: Dict[str, Any]
-) -> None:
+) -> NoReturn:
     """Handle linking when an existing user is found."""
     existing_username = existing_user["Username"]
     logger.info(f"Found existing user {existing_username} for email {email}, linking identity")
@@ -69,7 +70,9 @@ def _handle_signup_exception(e: Exception, email: str, event: Dict[str, Any]) ->
     error_msg = str(e)
     if "already exists" in error_msg or "has been linked" in error_msg:
         raise
-    if "InvalidParameterException" in type(e).__name__:
+    if "invalid username format" in error_msg:
+        raise
+    if isinstance(e, ClientError) and e.response.get("Error", {}).get("Code") == "InvalidParameterException":
         logger.warning(f"Link may already exist: {e}")
         raise Exception(f"Account with email {email} already exists. Please sign in again.")
     logger.exception(f"Error in pre-signup trigger: {error_msg}")
@@ -149,7 +152,6 @@ def _process_federated_signup(event: Dict[str, Any], user_pool_id: str, username
             return _auto_confirm_event(event)
 
         _handle_existing_user(cognito, user_pool_id, email, username, existing_users[0])
-        return event  # Should not reach here due to exception
 
     except Exception as e:
         return _handle_signup_exception(e, email, event)
