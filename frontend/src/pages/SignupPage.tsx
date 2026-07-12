@@ -4,7 +4,6 @@
  * Provides branded signup interface with:
  * - Email/password registration
  * - Optional user metadata (first name, last name, city, state, unit number)
- * - COPPA compliance warning (13+ age requirement)
  * - Email verification flow
  */
 
@@ -488,24 +487,6 @@ const VerificationView: React.FC<VerificationViewProps> = ({
   </PageLayout>
 );
 
-// Sub-component: COPPA Warning Alert
-const CoppaWarningAlert: React.FC = () => (
-  <Alert
-    severity="warning"
-    sx={{
-      mb: 3,
-      backgroundColor: '#fff3e0',
-      borderLeft: '4px solid #f57c00',
-      '& .MuiAlert-icon': { color: '#e65100' },
-    }}
-  >
-    <Typography variant="body2" sx={{ color: '#e65100' }}>
-      <strong>⚠️ Age Requirement:</strong> You must be 13 years or older to create an account. By signing up, you
-      confirm that you meet this age requirement as required by COPPA (Children's Online Privacy Protection Act).
-    </Typography>
-  </Alert>
-);
-
 // Sub-component: Signup form view
 interface SignupFormViewProps {
   email: string;
@@ -576,7 +557,6 @@ const SignupFormView: React.FC<SignupFormViewProps> = ({
       Join KernelWorx to manage your popcorn sales
     </Typography>
 
-    <CoppaWarningAlert />
     <AlertMessages error={error} success={success} />
 
     <Box component="form" onSubmit={onSignup}>

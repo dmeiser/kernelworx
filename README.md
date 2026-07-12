@@ -15,7 +15,7 @@ KernelWorx is an open-source, serverless application designed for Scouting Ameri
 - **Sharing & Collaboration**: Share profiles with trusted adults (READ or WRITE permissions)
 - **Reports**: Generate CSV/XLSX reports for unit submission and personal tracking
 - **Social Login**: Sign in with Google or Facebook accounts
-- **Privacy-First**: All data encrypted in-flight and at-rest, COPPA compliance warnings
+- **Privacy-First**: All data encrypted in-flight and at-rest
 
 ## Tech Stack
 
@@ -162,7 +162,6 @@ This project is volunteer-maintained and operated. Operating costs are paid by v
 
 ## Privacy & Compliance
 
-- **COPPA Warning**: Only users 13+ may create accounts
 - **Data Encryption**: All data encrypted in-flight (HTTPS) and at-rest (AWS-managed encryption)
 - **Privacy Policy**: Users are responsible for their own customer data; customer-level privacy requests are handled directly by sellers
 
