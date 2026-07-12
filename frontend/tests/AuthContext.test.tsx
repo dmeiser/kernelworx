@@ -697,7 +697,7 @@ describe('AuthContext', () => {
       restore();
     });
 
-    it('does not redirect when no OAuth redirect is saved', async () => {
+    it('redirects to /home when no OAuth redirect is saved', async () => {
       // Ensure no redirect is saved
       sessionStorage.removeItem('oauth_redirect');
 
@@ -729,10 +729,13 @@ describe('AuthContext', () => {
         });
       }
 
-      // Wait a tick to ensure any async redirect handling completes
+      // Default post-login destination is /home
       await waitFor(() => {
-        expect(locationHrefSpy).not.toHaveBeenCalled();
+        expect(locationHrefSpy).toHaveBeenCalledWith('/home');
       });
+
+      // sessionStorage should be cleared
+      expect(sessionStorage.getItem('oauth_redirect')).toBeNull();
 
       restore();
     });

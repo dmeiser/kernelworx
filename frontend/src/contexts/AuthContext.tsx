@@ -40,11 +40,9 @@ const mergeAccountWithAdminStatus = (accountData: Account, isAdmin: boolean): Ac
 // Handle redirect after OAuth login
 const handleOAuthRedirect = () => {
   const savedRedirect = sessionStorage.getItem('oauth_redirect');
-  if (savedRedirect) {
-    sessionStorage.removeItem('oauth_redirect');
-    const safeRedirect = getSafeRedirect(savedRedirect, '/home');
-    window.location.href = safeRedirect;
-  }
+  sessionStorage.removeItem('oauth_redirect');
+  const safeRedirect = getSafeRedirect(savedRedirect, '/home');
+  window.location.href = safeRedirect;
 };
 
 // Auth event handler types
