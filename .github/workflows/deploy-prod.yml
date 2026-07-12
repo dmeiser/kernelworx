@@ -79,7 +79,26 @@ jobs:
         working-directory: tofu/application/environments/prod
         run: tofu plan
 
+      - name: Check if delete profile migration is needed
+        id: check_delete_profile_migration
+        env:
+          TF_VAR_encryption_passphrase: ${{ secrets.TF_VAR_ENCRYPTION_PASSPHRASE }}
+          TF_VAR_google_client_id: ${{ secrets.TF_VAR_GOOGLE_CLIENT_ID }}
+          TF_VAR_google_client_secret: ${{ secrets.TF_VAR_GOOGLE_CLIENT_SECRET }}
+          TF_IN_AUTOMATION: "true"
+        working-directory: tofu/application/environments/prod
+        run: |
+          old_functions=$(tofu state list 2>/dev/null | grep -E '^module\.appsync\.aws_appsync_function\.(delete_profile_(campaigns|invites|metadata|orders_cascade_appsync|ownership|shares)|query_profile_(shares|invites|campaigns)_for_delete|verify_profile_owner_for_delete)$' || true)
+          if [ -n "$old_functions" ]; then
+            echo "needs_migration=true" >> "$GITHUB_OUTPUT"
+            echo "Old delete-profile pipeline functions still in state; migration required."
+          else
+            echo "needs_migration=false" >> "$GITHUB_OUTPUT"
+            echo "No old delete-profile pipeline functions in state; skipping migration."
+          fi
+
       - name: OpenTofu apply - migrate delete profile resolver first
+        if: steps.check_delete_profile_migration.outputs.needs_migration == 'true'
         env:
           TF_VAR_encryption_passphrase: ${{ secrets.TF_VAR_ENCRYPTION_PASSPHRASE }}
           TF_VAR_google_client_id: ${{ secrets.TF_VAR_GOOGLE_CLIENT_ID }}
@@ -88,9 +107,11 @@ jobs:
         working-directory: tofu/application/environments/prod
         # One-time migration: the deleteSellerProfile resolver was refactored from
         # a multi-function pipeline to a single function. AppSync rejects deleting
-        # functions still referenced by a resolver, so update the resolver first.
+        # functions still referenced by a resolver, and the AWS provider has a
+        # long-standing issue ordering resolver updates before function deletions.
+        # Recreating the resolver first removes the old function references reliably.
         run: |
-          tofu apply -target=aws_appsync_resolver.delete_seller_profile -auto-approve || true
+          tofu apply -replace=module.appsync.aws_appsync_resolver.delete_seller_profile -auto-approve
 
       - name: OpenTofu apply (prod)
         env:
