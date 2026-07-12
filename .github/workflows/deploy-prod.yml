@@ -79,6 +79,19 @@ jobs:
         working-directory: tofu/application/environments/prod
         run: tofu plan
 
+      - name: OpenTofu apply - migrate delete profile resolver first
+        env:
+          TF_VAR_encryption_passphrase: ${{ secrets.TF_VAR_ENCRYPTION_PASSPHRASE }}
+          TF_VAR_google_client_id: ${{ secrets.TF_VAR_GOOGLE_CLIENT_ID }}
+          TF_VAR_google_client_secret: ${{ secrets.TF_VAR_GOOGLE_CLIENT_SECRET }}
+          TF_IN_AUTOMATION: "true"
+        working-directory: tofu/application/environments/prod
+        # One-time migration: the deleteSellerProfile resolver was refactored from
+        # a multi-function pipeline to a single function. AppSync rejects deleting
+        # functions still referenced by a resolver, so update the resolver first.
+        run: |
+          tofu apply -target=aws_appsync_resolver.delete_seller_profile -auto-approve || true
+
       - name: OpenTofu apply (prod)
         env:
           TF_VAR_encryption_passphrase: ${{ secrets.TF_VAR_ENCRYPTION_PASSPHRASE }}
