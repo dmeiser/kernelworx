@@ -74,13 +74,14 @@ class ManagePage(BasePage):
         """Return True when the Transfer Ownership button is visible and enabled.
 
         The button only appears in the share table rows (one per existing
-        share), so this method returns False when no shares exist.
+        share), so this method returns False when no shares exist. When multiple
+        shares exist, the first Transfer Ownership button is checked.
 
         Returns:
             ``True`` when at least one visible, enabled Transfer Ownership
             button exists on the page.
         """
-        btn = self.get_by_role_button(self._TRANSFER_BTN)
+        btn = self.page.get_by_role("button", name=self._TRANSFER_BTN, exact=True).first
         return bool(btn.is_visible() and btn.is_enabled())
 
     # ------------------------------------------------------------------
@@ -117,7 +118,8 @@ class ManagePage(BasePage):
 
         Playwright auto-dismisses ``window.confirm`` dialogs when no explicit
         handler is set, so this click verifies the button is functional without
-        completing the ownership transfer.
+        completing the ownership transfer. If multiple shares exist, the first
+        Transfer Ownership button is clicked.
         """
-        self.get_by_role_button(self._TRANSFER_BTN).click()
+        self.page.get_by_role("button", name=self._TRANSFER_BTN, exact=True).first.click()
         self.wait_for_loading()

@@ -139,7 +139,7 @@ def _navigate_to_orders(owner_page: Page) -> tuple[OrderPage, str, str]:
         assert profile_match, f"Expected /scouts/{{id}}/campaigns URL, got: {owner_page.url}"
         seed_profile_id = urllib.parse.unquote(profile_match.group(1))
         seed_name = f"Order Seed Campaign {int(time.time())}"
-        campaign_page.create_campaign_first_catalog(seed_name)
+        campaign_page.create_campaign_first_catalog(seed_name, seed_profile_id)
         # Poll with fresh navigations; campaign visibility can lag briefly.
         campaigns = []
         for _ in range(12):  # up to ~60s
