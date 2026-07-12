@@ -17,6 +17,7 @@ dropdown, making the test independent of the exact catalog name.
 import re
 import time
 import urllib.parse
+import uuid
 
 import pytest
 from playwright.sync_api import Page, expect
@@ -25,7 +26,7 @@ from tests.e2e.pages.campaign_page import CampaignPage
 from tests.e2e.pages.campaign_settings_page import CampaignSettingsPage
 from tests.e2e.pages.dashboard_page import DashboardPage
 
-_CAMPAIGN_NAME: str = "Smoke Test Campaign 2026"
+_CAMPAIGN_NAME: str = f"Smoke Test Campaign {uuid.uuid4().hex[:8]}"
 
 
 # ---------------------------------------------------------------------------

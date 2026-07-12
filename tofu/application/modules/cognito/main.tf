@@ -279,7 +279,7 @@ data "aws_iam_policy_document" "lambda_cognito_admin" {
 
 resource "aws_iam_role_policy" "lambda_cognito_admin" {
   name   = "cognito-admin"
-  role   = var.lambda_execution_role_arn
+  role   = regex("^.*/(.+)$", var.lambda_execution_role_arn)[0]
   policy = data.aws_iam_policy_document.lambda_cognito_admin.json
 }
 

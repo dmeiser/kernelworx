@@ -1674,7 +1674,7 @@ describe('Order Operations Integration Tests', () => {
             profileId: testProfileId,
             campaignId: testCampaignId,
             customerName: 'Optional Fields Test',
-            customerPhone: '555-1234',
+            customerPhone: '555-123-1234',
             orderDate: new Date().toISOString(),
             paymentMethod: 'CASH',
             lineItems: [{ productId: testProductId, quantity: 1 }],
@@ -1695,7 +1695,7 @@ describe('Order Operations Integration Tests', () => {
       });
 
       // Assert: customerPhone should STILL have original value (removing not supported)
-      expect(updateData.updateOrder.customerPhone).toBe('555-1234');
+      expect(updateData.updateOrder.customerPhone).toBe('+15551231234');
 
       // Cleanup
       await ownerClient.mutate({ mutation: DELETE_ORDER, variables: { orderId } });
@@ -1922,8 +1922,8 @@ describe('Order Operations Integration Tests', () => {
     }, 15000);
 
     test('historical orders unchanged after payment method deletion', async () => {
-      // Setup: Create a custom payment method
-      const customMethodName = 'Zelle-Historical-Test';
+      // Setup: Create a custom payment method with unique name to avoid collisions
+      const customMethodName = `Zelle-Historical-Test-${Date.now()}`;
       await ownerClient.mutate({
         mutation: CREATE_PAYMENT_METHOD,
         variables: { name: customMethodName },

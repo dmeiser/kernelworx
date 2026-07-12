@@ -57,12 +57,12 @@ export async function createAuthenticatedClient(
     uri: endpoint,
   });
 
-  // Add authentication header
+  // Add authentication header (AppSync Cognito auth expects the raw token)
   const authLink = setContext((_, { headers }) => {
     return {
       headers: {
         ...headers,
-        authorization: `Bearer ${authResult.tokens.idToken}`,
+        Authorization: authResult.tokens.idToken,
       },
     };
   });

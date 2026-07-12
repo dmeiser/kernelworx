@@ -40,6 +40,7 @@ export function request(ctx) {
             ownerAccountId: ownerAccountId,
             methodName: methodName,
             s3Key: s3Key,
+            identity: ctx.identity,
         }
     };
 }

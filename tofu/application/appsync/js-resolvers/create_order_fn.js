@@ -4,12 +4,19 @@ function validatePhone(phone) {
     if (typeof phone !== 'string' || !phone.trim()) {
         return { valid: false, error: 'Phone number is required when provided' };
     }
-    const pattern = /^(?:\+?1[-.\s]?)?\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})$/;
-    const match = phone.trim().match(pattern);
-    if (!match) {
+    let cleaned = '';
+    for (const c of phone) {
+        if (c >= '0' && c <= '9') {
+            cleaned += c;
+        }
+    }
+    if (cleaned.length === 11 && cleaned[0] === '1') {
+        cleaned = cleaned.substring(1);
+    }
+    if (cleaned.length !== 10) {
         return { valid: false, error: 'Phone number must be a valid 10-digit US number' };
     }
-    return { valid: true, value: '+1' + match[1] + match[2] + match[3] };
+    return { valid: true, value: '+1' + cleaned };
 }
 
 function validateAddress(address) {
@@ -21,8 +28,15 @@ function validateAddress(address) {
     if (missing.length > 0) {
         return { valid: false, error: 'Address is missing required fields: ' + missing.join(', ') };
     }
-    const zip = String(address.zipCode).trim();
-    if (!/^\d{5}(-\d{4})?$/.test(zip)) {
+    const rawZip = address.zipCode;
+    const zip = rawZip == null ? '' : `${rawZip}`.trim();
+    let zipDigits = '';
+    for (const c of zip) {
+        if (c >= '0' && c <= '9') {
+            zipDigits += c;
+        }
+    }
+    if (zipDigits.length !== 5 && zipDigits.length !== 9) {
         return { valid: false, error: 'ZIP code must be 5 or 9 digits' };
     }
     return { valid: true };
@@ -35,9 +49,6 @@ function validateCustomer(input) {
 
     const hasPhone = input.customerPhone != null;
     const hasAddress = input.customerAddress != null;
-    if (!hasPhone && !hasAddress) {
-        util.error('Customer must have at least one contact method (phone or address)', 'BadRequest');
-    }
 
     if (hasPhone) {
         const phoneResult = validatePhone(input.customerPhone);
@@ -57,10 +68,6 @@ function validateCustomer(input) {
 function validateOrderDate(orderDate) {
     if (!orderDate || typeof orderDate !== 'string' || !orderDate.trim()) {
         util.error('Order date is required', 'BadRequest');
-    }
-    const parsed = Date.parse(orderDate);
-    if (Number.isNaN(parsed)) {
-        util.error('Order date must be a valid date', 'BadRequest');
     }
 }
 
@@ -177,10 +184,10 @@ export function request(ctx) {
     }
 
     if (!campaignId || typeof campaignId !== 'string') {
-        util.error('Invalid campaignId for PutItem: ' + JSON.stringify(campaignId), 'BadRequest');
+        util.error('Invalid campaignId for PutItem: ' + campaignId, 'BadRequest');
     }
     if (!orderId || typeof orderId !== 'string') {
-        util.error('Invalid orderId for PutItem: ' + JSON.stringify(orderId), 'BadRequest');
+        util.error('Invalid orderId for PutItem: ' + orderId, 'BadRequest');
     }
 
     for (const li of enrichedLineItems) {

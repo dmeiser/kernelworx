@@ -5,6 +5,15 @@ provider "registry.opentofu.org/hashicorp/archive" {
   version     = "2.7.1"
   constraints = "~> 2.0"
   hashes = [
+    "h1:/Y6fLmEGMtbcAFi3ALu5tAwEIfUc8vGZRErNjMIfi2U=",
+    "h1:0xjcyFzd5XoXalIuCK7VM8fzJP/DIyhvaQvPDTcs/64=",
+    "h1:C0tsbylWg7ppq/rbFl0+xQQVVO96Sav9H5qRPB4MI70=",
+    "h1:HCKUMrStmDK01YqZ27Ub4f9ZpdDsECBxt7zha3ND/SU=",
+    "h1:PMde1GnA48ocNlv8MMXiBNg+HZvJfhDUNbtKO3tzKO0=",
+    "h1:RCRbnwtCorjaBJUWXRUgNb8YFTcWuyGiH2uQVjO4f5s=",
+    "h1:e12gTxhM2qRQHWk+5jNZfBnnFqpzDOZTCL2vnvykMAo=",
+    "h1:hzAw9IeXx5KcAq5YmIomSUeRKO8AKa7aUVyajUMZOiA=",
+    "h1:nktacFm78d9PeaacuR5XmbNIIq8aBx72HJBQwMSMtlE=",
     "h1:sQrOJIawX8VeHjXi9yOj8yTG6MWmDueNiOEwtug+plw=",
     "zh:4f8fe5f92125fc7be91379dbde004aaf676fbb523082af167d0a57ac723836bc",
     "zh:4fba9a08c254fd3c17464c1e13398e4927b1d3e22bfdc3bb66c4e5bd9573ada4",
@@ -23,7 +32,15 @@ provider "registry.opentofu.org/hashicorp/aws" {
   version     = "6.31.0"
   constraints = "~> 6.0"
   hashes = [
+    "h1:/NZ7N5KZ4AtbADMedSXuYDJ7UN1ID//Vm5Sg1FpJ01w=",
+    "h1:GOVFUXeawJxB/a2xXeC8KysTDELEGo66HmHBnBiB9lk=",
+    "h1:MUX4jV+ZiFMjzUlOkWUbN8MBr0zTKHm+5HjKfvIUJVk=",
+    "h1:SQs/AJ+vD/NdenGjrwMv6lpVNvTtpkp2SDAVeo6QbGk=",
+    "h1:aVArahOuhTSr9mbzQjJ4TvHUl2u668P0/X8VJ4P47lg=",
     "h1:d6Lvb7ZuKZkUXowkVDd3sNr3a/BoEFQe63YtfjtxD2U=",
+    "h1:jfvyLm1+0yRZGpXU9a1VAvPcq7DrZfADduCMmGkfMic=",
+    "h1:kPjuvs3kMhzZXw3X0bx3+AHgkWT+xRPz+vuL6BPhpA4=",
+    "h1:yNj5rY2CtV8331DHyQkCsBrgt8rAY/H8YESEm3df27c=",
     "zh:15038bcfac8cad8f1422d4e5e6d02aebed9b8cb67df5f2a9fec6823fbfefa6b1",
     "zh:5662e6801a6c5c0d9ac76b70ab77395702cf9ece871cd5c714038dfd97e58962",
     "zh:a4dbbe440e2bcc6d4770c96769963bf4b81a484ff9783251633a4564da2cf56b",

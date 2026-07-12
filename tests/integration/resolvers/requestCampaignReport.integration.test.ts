@@ -237,7 +237,7 @@ describe('requestCampaignReport Integration Tests', () => {
           profileId: testProfileId,
           campaignId: testCampaignId,
           customerName: 'Test Customer 1',
-          customerPhone: '555-0101',
+          customerPhone: '555-010-0001',
           orderDate: '2024-06-01T12:00:00.000Z',
           paymentMethod: 'CASH',
           lineItems: [
@@ -258,7 +258,7 @@ describe('requestCampaignReport Integration Tests', () => {
           profileId: testProfileId,
           campaignId: testCampaignId,
           customerName: 'Test Customer 2',
-          customerPhone: '555-0102',
+          customerPhone: '555-010-0002',
           orderDate: '2024-06-15T14:30:00.000Z',
           paymentMethod: 'CHECK',
           lineItems: [
@@ -734,7 +734,7 @@ describe('requestCampaignReport Integration Tests', () => {
                 profileId: testProfileId,
                 campaignId: performanceCampaignId,
                 customerName: `Performance Customer ${i + 1}`,
-                customerPhone: `555-${String(i).padStart(4, '0')}`,
+                customerPhone: `555-000-${String(i).padStart(4, '0')}`,
                 orderDate: `2024-0${Math.floor(i / 10) + 1}-${String((i % 28) + 1).padStart(2, '0')}T12:00:00.000Z`,
                 paymentMethod: 'CASH',
                 lineItems: [

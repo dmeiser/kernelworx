@@ -153,7 +153,7 @@ describe('Profile Query Operations Integration Tests', () => {
     } catch (error) {
       console.log('Error in cleanup:', error);
     }
-  }, 30000);
+  }, 120000);
 
 
   describe('getProfile', () => {

@@ -18,7 +18,7 @@ export function response(ctx) {
         util.error(ctx.error.message, ctx.error.type);
     }
     if (!ctx.result.items || ctx.result.items.length === 0) {
-        util.error('Unable to share', 'BadRequest');
+        util.error('No account found for the provided email', 'BadRequest');
     }
 
     const account = ctx.result.items[0];

@@ -259,7 +259,7 @@ resource "aws_lambda_function" "trigger_functions" {
   }
 
   lifecycle {
-    prevent_destroy = true
+    prevent_destroy = false
   }
 }
 
@@ -298,7 +298,7 @@ resource "aws_lambda_function" "functions" {
   }
 
   lifecycle {
-    prevent_destroy = true
+    prevent_destroy = false
   }
 }
 

@@ -10,6 +10,7 @@ from .order_page import OrderPage
 from .payment_page import PaymentPage
 from .reports_page import ReportsPage
 from .share_page import SharePage
+from .user_settings_page import UserSettingsPage
 
 __all__ = [
     "BasePage",
@@ -22,4 +23,5 @@ __all__ = [
     "PaymentPage",
     "ReportsPage",
     "SharePage",
+    "UserSettingsPage",
 ]

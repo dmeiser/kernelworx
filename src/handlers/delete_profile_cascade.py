@@ -7,16 +7,14 @@ if TYPE_CHECKING:  # pragma: no cover
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
-    from utils.auth import require_profile_access
     from utils.dynamodb import tables
     from utils.errors import AppError, ErrorCode
-    from utils.ids import ensure_profile_id
+    from utils.ids import ensure_account_id, ensure_profile_id
     from utils.logging import get_logger
 except ModuleNotFoundError:  # pragma: no cover
-    from ..utils.auth import require_profile_access
     from ..utils.dynamodb import tables
     from ..utils.errors import AppError, ErrorCode
-    from ..utils.ids import ensure_profile_id
+    from ..utils.ids import ensure_account_id, ensure_profile_id
     from ..utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -178,9 +176,14 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> bool:
     assert db_profile_id is not None
 
     caller_account_id = event.get("identity", {}).get("sub")
-    require_profile_access(caller_account_id, db_profile_id, "WRITE")
+    if not caller_account_id:
+        raise AppError(ErrorCode.UNAUTHORIZED, "Authentication required")
 
     owner_account_id = _get_profile_owner_id(db_profile_id)
+    db_caller_id = ensure_account_id(caller_account_id)
+    if owner_account_id != db_caller_id:
+        raise AppError(ErrorCode.FORBIDDEN, "Only profile owner can delete a profile")
+
     logger.info(f"Starting cascade delete for profile {db_profile_id}")
 
     shares = _query_all_items(

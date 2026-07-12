@@ -109,7 +109,7 @@ class ManagePage(BasePage):
         self.get_by_role_button(self._DELETE_SCOUT_BTN).click()
         dialog = self.wait_for_dialog(self._DELETE_DIALOG_TITLE)
         dialog.get_by_role("button", name=self._DELETE_PERM_BTN, exact=True).click()
-        self.page.wait_for_url("**/scouts**", timeout=20_000)
+        self.page.wait_for_url("**/scouts", timeout=20_000)
         self.wait_for_loading()
 
     def click_transfer_ownership(self) -> None:

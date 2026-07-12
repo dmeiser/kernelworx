@@ -361,8 +361,8 @@ class TestDeleteProfileCascade:
         response = profiles_table.get_item(Key={"ownerAccountId": f"ACCOUNT#{owner_id}", "profileId": profile_id})
         assert "Item" not in response
 
-    def test_shared_user_with_write_access_can_delete(self, profiles_table: Any, shares_table: Any) -> None:
-        """Test that a shared user with WRITE access can delete the profile."""
+    def test_shared_user_with_write_access_cannot_delete(self, profiles_table: Any, shares_table: Any) -> None:
+        """Test that a shared user with WRITE access cannot delete the profile (owner only)."""
         owner_id = "owner-123"
         writer_id = "writer-456"
         profile_id = "PROFILE#shared-delete"
@@ -380,11 +380,20 @@ class TestDeleteProfileCascade:
             "arguments": {"profileId": profile_id},
             "identity": {"sub": writer_id},
         }
-        result = lambda_handler(event, None)
-        assert result is True
+        with pytest.raises(Exception):
+            lambda_handler(event, None)
 
-        response = profiles_table.get_item(Key={"ownerAccountId": f"ACCOUNT#{owner_id}", "profileId": profile_id})
-        assert "Item" not in response
+    def test_unauthenticated_user_cannot_delete(self, profiles_table: Any) -> None:
+        """Test that an unauthenticated user cannot delete a profile."""
+        owner_id = "owner-123"
+        profile_id = "PROFILE#unauthenticated-delete"
+        _create_profile(profiles_table, owner_id, profile_id)
+
+        event = {
+            "arguments": {"profileId": profile_id},
+        }
+        with pytest.raises(Exception):
+            lambda_handler(event, None)
 
     def test_shared_user_with_read_only_cannot_delete(self, profiles_table: Any, shares_table: Any) -> None:
         """Test that a shared user with only READ access cannot delete."""
