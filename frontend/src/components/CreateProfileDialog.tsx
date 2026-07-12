@@ -63,7 +63,7 @@ export const CreateProfileDialog: React.FC<CreateProfileDialogProps> = ({ open, 
             placeholder="e.g., Scout's First and Last Name"
             value={form.values.sellerName}
             onChange={(e) => form.setValue('sellerName', e.target.value)}
-            onKeyPress={(e) => {
+            onKeyDown={(e) => {
               if (e.key === 'Enter' && form.values.sellerName.trim()) {
                 handleSubmit();
               }

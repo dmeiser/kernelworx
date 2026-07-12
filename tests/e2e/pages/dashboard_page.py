@@ -8,9 +8,10 @@ from .base_page import BasePage
 class DashboardPage(BasePage):
     """Page object for the ``/scouts`` dashboard route.
 
-    After login users land on the Scouts page, which shows a grid of
-    :class:`ProfileCard` components — one per seller profile (Scout) the
-    authenticated account owns or has been shared access to.
+    The Scouts page shows a grid of :class:`ProfileCard` components — one per
+    seller profile (Scout) the authenticated account owns or has been shared
+    access to.  After login the app lands on ``/home``; tests that need the
+    dashboard should navigate here explicitly.
 
     Selector notes:
 
@@ -113,5 +114,12 @@ class DashboardPage(BasePage):
         self.wait_for_loading()
 
     def wait_for_profiles_loaded(self) -> None:
-        """Block until at least one profile card heading is visible."""
-        expect(self._profile_headings().first).to_be_visible()
+        """Block until the dashboard has finished loading profiles.
+
+        The dashboard is considered loaded when either at least one profile
+        card heading is visible, or the empty-state alert is visible (e.g.
+        after deleting the last profile).
+        """
+        profile_heading = self._profile_headings().first
+        empty_alert = self.page.get_by_text("You don't have any Scouts yet")
+        expect(profile_heading.or_(empty_alert)).to_be_visible()

@@ -852,6 +852,62 @@ describe('OrderEditorPage - Edit Order', () => {
     }, { timeout: 5000 });
   }, 25000);
 
+  test('shows fallback error when create order mutation fails without message', async () => {
+    const createOrderError: MockedResponse = {
+      request: { query: CREATE_ORDER, variables: () => true },
+      error: new Error(),
+    };
+    renderCreateOrder(baseMocks([createOrderError]));
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: /create order/i })).toBeInTheDocument();
+    }, { timeout: 10000 });
+
+    await waitFor(() => {
+      const paymentSelect = screen.getByRole('combobox', { name: /payment method/i });
+      expect((paymentSelect as HTMLSelectElement).value).toBe('Cash');
+    }, { timeout: 5000 });
+
+    fireEvent.change(screen.getByLabelText(/Customer Name/i), { target: { value: 'John Doe' } });
+
+    const productSelects = screen.getAllByRole('combobox', { name: 'Select' });
+    if (productSelects.length > 0) {
+      fireEvent.change(productSelects[0], { target: { value: 'PROD~A' } });
+    }
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /create order/i })).not.toBeDisabled();
+    }, { timeout: 3000 });
+
+    fireEvent.click(screen.getByRole('button', { name: /create order/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Failed to save order|Failed to create order/i)).toBeInTheDocument();
+    }, { timeout: 5000 });
+  }, 25000);
+
+  test('shows fallback error when update order mutation fails without message', async () => {
+    const updateOrderError: MockedResponse = {
+      request: { query: UPDATE_ORDER, variables: () => true },
+      error: new Error(),
+    };
+    renderEditOrder(editMocks([updateOrderError]));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /update order/i })).toBeInTheDocument();
+    }, { timeout: 15000 });
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('Jane Smith')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /update order/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Failed to save order|Failed to update order/i)).toBeInTheDocument();
+    }, { timeout: 5000 });
+  }, 25000);
+
   test('submits update with empty phone and notes', async () => {
     const updateOrderResult = {
       updateOrder: {
@@ -894,6 +950,29 @@ describe('OrderEditorPage - Edit Order', () => {
 
     await waitFor(() => {
       expect(mockNavigate).toHaveBeenCalled();
+    }, { timeout: 5000 });
+  }, 25000);
+
+  test('shows generic error when update order mutation rejects without a message', async () => {
+    const updateOrderError: MockedResponse = {
+      request: { query: UPDATE_ORDER, variables: () => true },
+      error: 'Update failure' as any,
+    };
+    renderEditOrder(editMocks([updateOrderError]));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /update order/i })).toBeInTheDocument();
+    }, { timeout: 15000 });
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('Jane Smith')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /update order/i }));
+
+    await waitFor(() => {
+      const alerts = screen.queryAllByRole('alert');
+      expect(alerts.length).toBeGreaterThan(0);
     }, { timeout: 5000 });
   }, 25000);
 });
@@ -984,4 +1063,122 @@ describe('OrderEditorPage - Line Items', () => {
     // The products section shows Total (the order total heading)
     expect(screen.getAllByText(/total/i).length).toBeGreaterThanOrEqual(1);
   }, 15000);
+
+  test('can remove a line item when multiple items exist', async () => {
+    const user = userEvent.setup();
+    renderCreateOrder(baseMocks());
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: /create order/i })).toBeInTheDocument();
+    }, { timeout: 10000 });
+
+    // Add two more line items so removal is allowed
+    await user.click(screen.getByRole('button', { name: /add product/i }));
+    await user.click(screen.getByRole('button', { name: /add product/i }));
+
+    await waitFor(() => {
+      const rows = screen.getAllByRole('row');
+      expect(rows.length).toBeGreaterThan(3);
+    });
+
+    const deleteButtons = screen.getAllByRole('button').filter(btn =>
+      btn.querySelector('svg[data-testid="DeleteIcon"]')
+    );
+    expect(deleteButtons.length).toBeGreaterThan(0);
+    await user.click(deleteButtons[0]);
+  }, 15000);
+
+  test('defaults to first payment method when Cash is not available', async () => {
+    const venmoOnlyMethods = {
+      paymentMethodsForProfile: [
+        { __typename: 'PaymentMethod', name: 'Venmo', qrCodeUrl: 'https://example.com/qr.png' },
+      ],
+    };
+    const mocks: MockedResponse[] = [
+      { request: { query: GET_CAMPAIGN, variables: { campaignId: CAMPAIGN_DB } }, result: { data: mockCampaign } },
+      { request: { query: GET_PROFILE, variables: { profileId: PROFILE_DB } }, result: { data: mockProfileOwner } },
+      { request: { query: GET_PAYMENT_METHODS_FOR_PROFILE, variables: { profileId: PROFILE_DB } }, result: { data: venmoOnlyMethods } },
+    ];
+    renderCreateOrder(mocks);
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: /create order/i })).toBeInTheDocument();
+    }, { timeout: 10000 });
+
+    await waitFor(() => {
+      const paymentSelect = screen.getByRole('combobox', { name: /payment method/i });
+      expect((paymentSelect as HTMLSelectElement).value).toBe('Venmo');
+    }, { timeout: 5000 });
+  }, 15000);
+
+  test('shows generic error when create order mutation rejects without a message', async () => {
+    const createOrderError: MockedResponse = {
+      request: { query: CREATE_ORDER, variables: () => true },
+      error: 'Network failure' as any,
+    };
+    renderCreateOrder(baseMocks([createOrderError]));
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: /create order/i })).toBeInTheDocument();
+    }, { timeout: 10000 });
+
+    await waitFor(() => {
+      const paymentSelect = screen.getByRole('combobox', { name: /payment method/i });
+      expect((paymentSelect as HTMLSelectElement).value).toBe('Cash');
+    }, { timeout: 5000 });
+
+    fireEvent.change(screen.getByLabelText(/Customer Name/i), { target: { value: 'John Doe' } });
+
+    const productSelects = screen.getAllByRole('combobox', { name: 'Select' });
+    if (productSelects.length > 0) {
+      fireEvent.change(productSelects[0], { target: { value: 'PROD~A' } });
+    }
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /create order/i })).not.toBeDisabled();
+    }, { timeout: 3000 });
+
+    fireEvent.click(screen.getByRole('button', { name: /create order/i }));
+
+    await waitFor(() => {
+      const alerts = screen.queryAllByRole('alert');
+      expect(alerts.length).toBeGreaterThan(0);
+    }, { timeout: 5000 });
+  }, 25000);
+
+  test('submits order with no customer address', async () => {
+    const createOrderMock: MockedResponse = {
+      request: { query: CREATE_ORDER, variables: () => true },
+      result: { data: { createOrder: mockCreatedOrder } },
+    };
+    renderCreateOrder(baseMocks([createOrderMock]));
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: /create order/i })).toBeInTheDocument();
+    }, { timeout: 10000 });
+
+    await waitFor(() => {
+      const paymentSelect = screen.getByRole('combobox', { name: /payment method/i });
+      expect((paymentSelect as HTMLSelectElement).value).toBe('Cash');
+    }, { timeout: 5000 });
+
+    fireEvent.change(screen.getByLabelText(/Customer Name/i), { target: { value: 'John Doe' } });
+
+    const productSelects = screen.getAllByRole('combobox', { name: 'Select' });
+    if (productSelects.length > 0) {
+      fireEvent.change(productSelects[0], { target: { value: 'PROD~A' } });
+    }
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /create order/i })).not.toBeDisabled();
+    }, { timeout: 3000 });
+
+    fireEvent.click(screen.getByRole('button', { name: /create order/i }));
+
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith(
+        `/scouts/${encodeURIComponent(PROFILE_RAW)}/campaigns/${encodeURIComponent(CAMPAIGN_RAW)}/orders`,
+      );
+    }, { timeout: 5000 });
+  }, 25000);
 });

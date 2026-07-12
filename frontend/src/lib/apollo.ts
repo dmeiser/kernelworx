@@ -19,8 +19,6 @@ import { CombinedGraphQLErrors } from '@apollo/client/errors';
 import type { GraphQLFormattedError } from 'graphql';
 import { fetchAuthSession } from 'aws-amplify/auth';
 
-
-
 /**
  * HTTP link to AppSync endpoint
  */

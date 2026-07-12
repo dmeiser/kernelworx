@@ -47,7 +47,6 @@ const createUpdateCompletedHandler = (profileHook: ReturnType<typeof useProfileE
     profileHook.setUpdateError(null);
     profileHook.setEditDialogOpen(false);
     refetch();
-    setTimeout(() => profileHook.setUpdateSuccess(false), 3000);
   };
 };
 
@@ -129,6 +128,10 @@ export const UserSettingsPage: React.FC = () => {
   const emailHook = useEmailUpdate();
   const profileHook = useProfileEdit();
 
+  const { checkMfaStatus } = mfaHook;
+  const { loadPasskeys } = passkeyHook;
+  const { updateSuccess, setUpdateSuccess } = profileHook;
+
   // Account query and mutation
   const {
     data: accountData,
@@ -149,10 +152,16 @@ export const UserSettingsPage: React.FC = () => {
 
   // Load MFA and passkey status on mount
   useEffect(() => {
-    mfaHook.checkMfaStatus();
-    passkeyHook.loadPasskeys();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- Specific functions are stable via useCallback
-  }, [mfaHook.checkMfaStatus, passkeyHook.loadPasskeys]);
+    checkMfaStatus();
+    loadPasskeys();
+  }, [checkMfaStatus, loadPasskeys]);
+
+  // Auto-hide profile update success message after 3 seconds
+  useEffect(() => {
+    if (!updateSuccess) return;
+    const timer = setTimeout(() => setUpdateSuccess(false), 3000);
+    return () => clearTimeout(timer);
+  }, [updateSuccess, setUpdateSuccess]);
 
   // Wrapper handlers for cross-feature interactions
   const handleSetupMFA = () => mfaHook.handleSetupMFA(passkeyHook.passkeys, passkeyHook.loadPasskeys);
@@ -190,7 +199,7 @@ export const UserSettingsPage: React.FC = () => {
     <Box sx={{ p: 3 }}>
       {/* Header */}
       <Stack direction="row" alignItems="center" spacing={2} sx={{ mb: 3 }}>
-        <IconButton onClick={() => navigate('/settings')} edge="start">
+        <IconButton onClick={() => navigate('/settings')} edge="start" aria-label="Back to settings">
           <BackIcon />
         </IconButton>
         <Typography variant="h4" component="h1">

@@ -8,7 +8,7 @@
  * - Link to signup page
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   Box,
   Button,
@@ -26,6 +26,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { confirmSignIn, signIn, signInWithRedirect } from 'aws-amplify/auth';
 import type { SignInOutput } from 'aws-amplify/auth';
+import { getSafeRedirect } from '../lib/redirect';
 
 // Get error message from unknown error
 function getErrorMessage(err: unknown, fallback: string): string {
@@ -37,13 +38,6 @@ function getErrorMessage(err: unknown, fallback: string): string {
 // Check if step contains WebAuthn
 function isWebAuthnStep(step: string | undefined): boolean {
   return Boolean(step?.includes('WEBAUTHN'));
-}
-
-// Delayed redirect helper
-function delayedRedirect(path: string): void {
-  setTimeout(() => {
-    window.location.href = path;
-  }, 500);
 }
 
 // Handle login result that is not signed in
@@ -271,6 +265,22 @@ function useLoginState(
   const [mfaCode, setMfaCode] = useState('');
   const [showMfa, setShowMfa] = useState(false);
   const [showPasskeyPrompt, setShowPasskeyPrompt] = useState(false);
+  const redirectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const scheduleRedirect = (callback: () => void, delay: number) => {
+    if (redirectTimeoutRef.current) {
+      clearTimeout(redirectTimeoutRef.current);
+    }
+    redirectTimeoutRef.current = setTimeout(callback, delay);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (redirectTimeoutRef.current) {
+        clearTimeout(redirectTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const applyLoginAction = (action: LoginStepResult) => {
     if (action.showMfa) {
@@ -307,7 +317,7 @@ function useLoginState(
     setShowMfa(false);
     setMfaCode('');
     setPassword('');
-    setTimeout(() => navigate(from, { replace: true }), 500);
+    scheduleRedirect(() => navigate(from, { replace: true }), 500);
   };
 
   const handleMfaSubmit = async (e: React.FormEvent) => {
@@ -335,7 +345,9 @@ function useLoginState(
       challengeResponse: 'WEB_AUTHN',
     });
     if (confirmResult.isSignedIn) {
-      delayedRedirect(from);
+      scheduleRedirect(() => {
+        window.location.href = getSafeRedirect(from, '/home');
+      }, 500);
       return;
     }
     if (confirmResult.nextStep?.signInStep) {
@@ -346,7 +358,9 @@ function useLoginState(
 
   const processPasskeyResult = async (result: SignInOutput) => {
     if (result.isSignedIn) {
-      delayedRedirect(from);
+      scheduleRedirect(() => {
+        window.location.href = getSafeRedirect(from, '/home');
+      }, 500);
       return;
     }
     const action = getLoginStepAction(result.nextStep?.signInStep);
@@ -383,8 +397,9 @@ function useLoginState(
     setError(null);
     setLoading(true);
     try {
-      if (from !== '/scouts') {
-        sessionStorage.setItem('oauth_redirect', from);
+      const safeFrom = getSafeRedirect(from, '/home');
+      if (safeFrom !== '/home') {
+        sessionStorage.setItem('oauth_redirect', safeFrom);
       }
       await signInWithRedirect({ provider });
     } catch (err: unknown) {
@@ -495,7 +510,10 @@ export const LoginPage: React.FC = () => {
   const location = useLocation();
   const { isAuthenticated, loginWithPassword } = useAuth();
 
-  const from = (location.state as { from?: { pathname?: string } } | undefined)?.from?.pathname || '/scouts';
+  const from = getSafeRedirect(
+    (location.state as { from?: { pathname?: string } } | undefined)?.from?.pathname,
+    '/home',
+  );
 
   useEffect(() => {
     if (isAuthenticated) {

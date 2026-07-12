@@ -421,11 +421,13 @@ def update_payment_method(account_id: str, old_name: str, new_name: str) -> Dict
         raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to update payment method")
 
 
-def _find_and_remove_method(existing_methods: list[Dict[str, Any]], name: str) -> tuple[list[Dict[str, Any]], Dict[str, Any]]:
+def _find_and_remove_method(
+    existing_methods: list[Dict[str, Any]], name: str
+) -> tuple[list[Dict[str, Any]], Dict[str, Any]]:
     """Find and remove a payment method from the list. Returns (remaining_methods, deleted_method)."""
     method_to_delete = None
     new_methods = []
-    
+
     for method in existing_methods:  # pragma: no branch
         if method.get("name") == name:
             method_to_delete = method
@@ -634,7 +636,9 @@ def delete_qr_from_s3(account_id: str, payment_method_name: str) -> None:
         raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to delete QR code")
 
 
-def _find_existing_qr_s3_key(s3_client: Any, bucket_name: str, account_id: str, payment_method_name: str) -> Optional[str]:
+def _find_existing_qr_s3_key(
+    s3_client: Any, bucket_name: str, account_id: str, payment_method_name: str
+) -> Optional[str]:
     """Find existing QR code S3 key by checking all supported extensions."""
     extensions = ["png", "jpg", "webp"]
 

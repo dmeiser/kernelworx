@@ -291,7 +291,7 @@ const CampaignFormFields: React.FC<CampaignFormFieldsProps> = ({
       label="Message to Scouts (Optional)"
       value={formState.creatorMessage}
       onChange={(e) => formSetters.setCreatorMessage(e.target.value)}
-      placeholder="Enter a message that will be shown to scouts when they use this link"
+      placeholder="Enter a message that will be shown to Scouts when they use this link"
       multiline
       rows={2}
       fullWidth

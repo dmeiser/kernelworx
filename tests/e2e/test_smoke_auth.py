@@ -10,14 +10,15 @@ from tests.e2e.utils.auth import logout
 
 @pytest.mark.smoke
 def test_login_success(owner_page: Page) -> None:
-    """Verify the owner can log in and the dashboard (``/scouts``) is visible.
+    """Verify the owner can log in and then navigate to the dashboard (``/scouts``).
 
-    The ``owner_page`` fixture handles navigation and authentication; this test
-    only asserts that the resulting page is the authenticated dashboard.
+    The app redirects to ``/home`` after successful login.  This test navigates
+    explicitly to ``/scouts`` and asserts the authenticated dashboard is visible.
     """
     dashboard = DashboardPage(owner_page)
+    dashboard.goto()
     dashboard.wait_for_loading()
-    assert dashboard.is_visible(), "Dashboard (/scouts) must be visible immediately after owner login"
+    assert dashboard.is_visible(), "Dashboard (/scouts) must be visible after navigating from /home"
 
 
 @pytest.mark.smoke

@@ -6,8 +6,8 @@ export function request(ctx) {
         operation: 'Query',
         index: 'email-index',
         query: {
-        expression: 'email = :email',
-        expressionValues: util.dynamodb.toMapValues({ ':email': email })
+            expression: 'email = :email',
+            expressionValues: util.dynamodb.toMapValues({ ':email': email })
         },
         limit: 1
     };
@@ -18,12 +18,11 @@ export function response(ctx) {
         util.error(ctx.error.message, ctx.error.type);
     }
     if (!ctx.result.items || ctx.result.items.length === 0) {
-        util.error('No account found with email ' + ctx.args.input.targetAccountEmail, 'NotFound');
+        util.error('No account found for the provided email', 'BadRequest');
     }
-    
+
     const account = ctx.result.items[0];
-    // accountId is now the primary key directly
     ctx.stash.targetAccountId = account.accountId;
-    
+
     return account;
 }

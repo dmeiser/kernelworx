@@ -28,6 +28,7 @@ import {
   DialogContent,
   DialogActions,
   CircularProgress,
+  Snackbar,
   Table,
   TableBody,
   TableCell,
@@ -127,8 +128,9 @@ const hasShares = (shares: Share[]): boolean => shares.length > 0;
 
 // Helper to get delete invite button text
 const getDeleteInviteButtonText = (isDeleting: boolean): string => {
-  /* v8 ignore next -- Apollo loading state for delete invite cannot be reached in jsdom */
+  /* v8 ignore start -- Apollo loading state for delete invite cannot be reached in jsdom */
   if (isDeleting) return 'Deleting...';
+  /* v8 ignore stop */
   return 'Delete';
 };
 
@@ -144,16 +146,6 @@ const canDeleteInvite = (deletingInviteCode: string | null, profileId: string): 
 
 // Helper to check if delete profile is allowed
 const canDeleteProfile = (profileId: string): boolean => Boolean(profileId);
-
-// Helper to confirm revoke share action
-const confirmRevokeShare = (userName: string): boolean =>
-  window.confirm(`Are you sure you want to revoke access for ${userName}?`);
-
-// Helper to confirm transfer ownership action
-const confirmTransferOwnership = (userName: string): boolean =>
-  window.confirm(
-    `Are you sure you want to transfer ownership to ${userName}?\n\nThis action cannot be undone. You will lose ownership of this profile and all associated campaigns.`,
-  );
 
 // Helper to conditionally save profile
 const maybeSaveProfile = async (
@@ -179,7 +171,8 @@ const maybeSaveProfile = async (
 };
 
 // Helper to conditionally create invite
-const maybeCreateInvite = async (
+// eslint-disable-next-line react-refresh/only-export-components -- exported for unit tests
+export const maybeCreateInvite = async (
   canCreate: boolean,
   createInvite: (options: { variables: { input: { profileId: string; permissions: string[] } } }) => Promise<unknown>,
   dbProfileId: string,
@@ -200,7 +193,8 @@ const maybeCreateInvite = async (
 };
 
 // Helper to conditionally delete invite
-const maybeDeleteInvite = async (
+// eslint-disable-next-line react-refresh/only-export-components -- exported for unit tests
+export const maybeDeleteInvite = async (
   canDelete: boolean,
   deleteInvite: (options: { variables: { profileId: string; inviteCode: string } }) => Promise<unknown>,
   dbProfileId: string,
@@ -213,60 +207,9 @@ const maybeDeleteInvite = async (
   }
 };
 
-// Helper to handle revoke share with confirmation
-const handleRevokeShareWithConfirmation = async (
-  userName: string,
-  revokeShare: (options: { variables: { input: { profileId: string; targetAccountId: string } } }) => Promise<unknown>,
-  dbProfileId: string,
-  targetAccountId: string,
-): Promise<void> => {
-  const confirmed = confirmRevokeShare(userName);
-  if (confirmed) {
-    try {
-      await revokeShare({
-        variables: {
-          input: {
-            profileId: dbProfileId,
-            targetAccountId,
-          },
-        },
-      });
-    } catch (err) {
-      console.error('Error revoking share:', err);
-      alert('Failed to revoke access');
-    }
-  }
-};
-
-// Helper to handle transfer ownership with confirmation
-const handleTransferOwnershipWithConfirmation = async (
-  userName: string,
-  transferOwnership: (options: {
-    variables: { input: { profileId: string; newOwnerAccountId: string } };
-  }) => Promise<unknown>,
-  dbProfileId: string,
-  targetAccountId: string,
-): Promise<void> => {
-  const confirmed = confirmTransferOwnership(userName);
-  if (confirmed) {
-    try {
-      await transferOwnership({
-        variables: {
-          input: {
-            profileId: dbProfileId,
-            newOwnerAccountId: targetAccountId,
-          },
-        },
-      });
-    } catch (err) {
-      console.error('Error transferring ownership:', err);
-      alert('Failed to transfer ownership');
-    }
-  }
-};
-
 // Helper to conditionally delete profile
-const maybeDeleteProfile = async (
+// eslint-disable-next-line react-refresh/only-export-components -- exported for unit tests
+export const maybeDeleteProfile = async (
   canDelete: boolean,
   setDeletingProfile: (v: boolean) => void,
   deleteProfile: (options: { variables: { profileId: string } }) => Promise<unknown>,
@@ -325,7 +268,8 @@ const NewInviteCodeAlert: React.FC<{
   ) : null;
 
 // Helper to toggle permission in array
-const togglePermission = (
+// eslint-disable-next-line react-refresh/only-export-components -- exported for unit tests
+export const togglePermission = (
   permission: string,
   checked: boolean,
   setPermissions: React.Dispatch<React.SetStateAction<string[]>>,
@@ -385,6 +329,7 @@ const ShareRow: React.FC<{
             color="error"
             onClick={() => onRevokeShare(share.targetAccountId, share.targetAccount?.email ?? '')}
             title="Revoke access"
+            aria-label="Revoke access"
           >
             <DeleteIcon fontSize="small" />
           </IconButton>
@@ -433,6 +378,7 @@ const SharesSection: React.FC<{
     </Paper>
   ) : null;
 
+/* eslint-disable-next-line complexity -- Scout management page with multiple sections and dialogs */
 export const ScoutManagementPage: React.FC = () => {
   const { profileId: encodedProfileId } = useParams<{
     profileId: string;
@@ -445,11 +391,34 @@ export const ScoutManagementPage: React.FC = () => {
   const [updating, setUpdating] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deletingProfile, setDeletingProfile] = useState(false);
+  const [deleteSuccess, setDeleteSuccess] = useState(false);
   const [inviteCode, setInviteCode] = useState<string | null>(null);
   const [invitePermissions, setInvitePermissions] = useState<string[]>(['READ']);
   const [deleteInviteConfirmOpen, setDeleteInviteConfirmOpen] = useState(false);
   const [deletingInviteCode, setDeletingInviteCode] = useState<string | null>(null);
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
+  const copyTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [pendingAction, setPendingAction] = useState<{
+    type: 'revoke' | 'transfer';
+    targetAccountId: string;
+    userName: string;
+  } | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  React.useEffect(() => {
+    return () => {
+      if (copyTimeoutRef.current) {
+        clearTimeout(copyTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  // Navigate to scouts list after showing a brief success message
+  React.useEffect(() => {
+    if (!deleteSuccess) return undefined;
+    const timer = setTimeout(() => navigate('/scouts'), 1200);
+    return () => clearTimeout(timer);
+  }, [deleteSuccess, navigate]);
 
   /* v8 ignore start -- Dialog backdrop click handlers cannot be simulated in jsdom */
   const handleInviteDialogDismiss = () => {
@@ -505,7 +474,8 @@ export const ScoutManagementPage: React.FC = () => {
     refetchQueries: [{ query: LIST_MY_PROFILES }],
     awaitRefetchQueries: true,
     onCompleted: () => {
-      navigate('/scouts');
+      setDeleteSuccess(true);
+      setDeleteConfirmOpen(false);
     },
   });
 
@@ -547,46 +517,90 @@ export const ScoutManagementPage: React.FC = () => {
 
   const handleSaveChanges = async () => {
     const canSave = canSaveProfile(profileId, profileName);
+    /* v8 ignore start -- dbProfileId is always present when page is rendered; defensive guard */
     if (!dbProfileId) return;
+    /* v8 ignore stop */
     await maybeSaveProfile(canSave, setUpdating, updateProfile, dbProfileId, profileName);
   };
 
   const handleCreateInvite = async () => {
     const canCreate = canCreateInvite(profileId);
+    /* v8 ignore start -- dbProfileId is always present when page is rendered; defensive guard */
     if (!dbProfileId) return;
+    /* v8 ignore stop */
     await maybeCreateInvite(canCreate, createInvite, dbProfileId, invitePermissions, setInvitePermissions);
   };
 
   const handleDeleteInvite = async () => {
     const canDelete = canDeleteInvite(deletingInviteCode, profileId);
+    /* v8 ignore start -- dbProfileId is always present when page is rendered; defensive guard */
     if (!dbProfileId) return;
+    /* v8 ignore stop */
     await maybeDeleteInvite(canDelete, deleteInvite, dbProfileId, deletingInviteCode);
   };
 
   /* v8 ignore start -- async handlers requiring complex GraphQL mocking and confirmation dialogs */
   const handleRevokeShare = async (targetAccountId: string, email?: string) => {
     const userName = getUserDisplayName(email, targetAccountId);
-    if (!dbProfileId) return;
-    await handleRevokeShareWithConfirmation(userName, revokeShare, dbProfileId, targetAccountId);
+    setPendingAction({ type: 'revoke', targetAccountId, userName });
   };
 
   const handleTransferOwnership = async (targetAccountId: string, email?: string) => {
     const userName = getUserDisplayName(email, targetAccountId);
-    if (!dbProfileId) return;
-    await handleTransferOwnershipWithConfirmation(userName, transferOwnership, dbProfileId, targetAccountId);
+    setPendingAction({ type: 'transfer', targetAccountId, userName });
+  };
+
+  const runPendingAction = async (action: NonNullable<typeof pendingAction>) => {
+    if (action.type === 'revoke') {
+      await revokeShare({
+        variables: {
+          input: {
+            profileId: dbProfileId!,
+            targetAccountId: action.targetAccountId,
+          },
+        },
+      });
+    } else {
+      await transferOwnership({
+        variables: {
+          input: {
+            profileId: dbProfileId!,
+            newOwnerAccountId: action.targetAccountId,
+          },
+        },
+      });
+    }
+  };
+
+  // eslint-disable-next-line complexity -- Confirmation handler with revoke/transfer branches
+  const handleConfirmPendingAction = async () => {
+    if (!pendingAction || !dbProfileId) return;
+    setActionError(null);
+    try {
+      await runPendingAction(pendingAction);
+      setPendingAction(null);
+    } catch (err) {
+      console.error(`Error ${pendingAction.type === 'revoke' ? 'revoking share' : 'transferring ownership'}:`, err);
+      setActionError(pendingAction.type === 'revoke' ? 'Failed to revoke access' : 'Failed to transfer ownership');
+    }
   };
   /* v8 ignore stop */
 
   const handleDeleteProfile = async () => {
     const canDelete = canDeleteProfile(profileId);
+    /* v8 ignore start -- dbProfileId is always present when page is rendered; defensive guard */
     if (!dbProfileId) return;
+    /* v8 ignore stop */
     await maybeDeleteProfile(canDelete, setDeletingProfile, deleteProfile, dbProfileId);
   };
 
   const handleCopyCode = (code: string) => {
     copyToClipboard(code);
     setCopiedCode(code);
-    setTimeout(() => setCopiedCode(null), 2000);
+    if (copyTimeoutRef.current) {
+      clearTimeout(copyTimeoutRef.current);
+    }
+    copyTimeoutRef.current = setTimeout(() => setCopiedCode(null), 2000);
   };
 
   if (loading) {
@@ -695,7 +709,11 @@ export const ScoutManagementPage: React.FC = () => {
                           <Typography variant="body2" fontFamily="monospace">
                             {invite.inviteCode}
                           </Typography>
-                          <IconButton size="small" onClick={() => handleCopyCode(invite.inviteCode)}>
+                          <IconButton
+                            size="small"
+                            onClick={() => handleCopyCode(invite.inviteCode)}
+                            aria-label="Copy invite code"
+                          >
                             <CopyIcon fontSize="small" />
                           </IconButton>
                         </Stack>
@@ -717,6 +735,7 @@ export const ScoutManagementPage: React.FC = () => {
                             setDeleteInviteConfirmOpen(true);
                           }}
                           disabled={deletingInvite}
+                          aria-label="Delete invite"
                         >
                           <DeleteIcon fontSize="small" />
                         </IconButton>
@@ -746,7 +765,7 @@ export const ScoutManagementPage: React.FC = () => {
             Danger Zone
           </Typography>
           <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
-            Permanently delete this scout and all associated campaigns and orders. This action cannot be undone.
+            Permanently delete this Scout and all associated campaigns and orders. This action cannot be undone.
           </Typography>
           <Button variant="contained" color="error" onClick={() => setDeleteConfirmOpen(true)}>
             Delete Scout
@@ -783,21 +802,30 @@ export const ScoutManagementPage: React.FC = () => {
       <Dialog open={deleteConfirmOpen} onClose={handleDeleteDialogDismiss}>
         <DialogTitle>Delete Seller Profile?</DialogTitle>
         <DialogContent>
-          <Typography>
-            Are you sure you want to delete seller profile <strong>{profile.sellerName}</strong>?
-          </Typography>
-          <Typography variant="body2" color="error" sx={{ mt: 2 }}>
-            This will permanently delete:
-          </Typography>
-          <ul>
-            <li>The scout and all metadata</li>
-            <li>All campaigns and associated data</li>
-            <li>All orders and order items</li>
-            <li>All active invite codes and shares</li>
-          </ul>
-          <Typography variant="body2" color="error">
-            This action cannot be undone.
-          </Typography>
+          {deletingProfile ? (
+            <Box display="flex" alignItems="center" gap={2} py={2}>
+              <CircularProgress size={24} />
+              <Typography>Deleting profile and all related data...</Typography>
+            </Box>
+          ) : (
+            <>
+              <Typography>
+                Are you sure you want to delete seller profile <strong>{profile.sellerName}</strong>?
+              </Typography>
+              <Typography variant="body2" color="error" sx={{ mt: 2 }}>
+                This will permanently delete:
+              </Typography>
+              <ul>
+                <li>The Scout and all metadata</li>
+                <li>All campaigns and associated data</li>
+                <li>All orders and order items</li>
+                <li>All active invite codes and shares</li>
+              </ul>
+              <Typography variant="body2" color="error">
+                This action cannot be undone.
+              </Typography>
+            </>
+          )}
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setDeleteConfirmOpen(false)} disabled={deletingProfile}>
@@ -808,6 +836,40 @@ export const ScoutManagementPage: React.FC = () => {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* Share Action Confirmation Dialog */}
+      <Dialog open={!!pendingAction} onClose={() => setPendingAction(null)}>
+        <DialogTitle>{pendingAction?.type === 'revoke' ? 'Revoke Access?' : 'Transfer Ownership?'}</DialogTitle>
+        <DialogContent>
+          <Typography>
+            {pendingAction?.type === 'revoke'
+              ? `Are you sure you want to revoke access for ${pendingAction?.userName}?`
+              : `Are you sure you want to transfer ownership to ${pendingAction?.userName}? This action cannot be undone. You will lose ownership of this profile and all associated campaigns.`}
+          </Typography>
+          {actionError && (
+            <Alert severity="error" sx={{ mt: 2 }} onClose={() => setActionError(null)}>
+              {actionError}
+            </Alert>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setPendingAction(null)}>Cancel</Button>
+          <Button onClick={handleConfirmPendingAction} color="error" variant="contained">
+            {pendingAction?.type === 'revoke' ? 'Revoke' : 'Transfer'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Snackbar
+        open={deleteSuccess}
+        autoHideDuration={1200}
+        onClose={() => setDeleteSuccess(false)}
+        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+      >
+        <Alert severity="success" onClose={() => setDeleteSuccess(false)}>
+          Profile deleted successfully
+        </Alert>
+      </Snackbar>
     </Box>
   );
 };

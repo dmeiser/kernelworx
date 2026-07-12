@@ -8,6 +8,7 @@
 import React from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { getSafeRedirect } from '../lib/redirect';
 import { Box, CircularProgress, Typography } from '@mui/material';
 
 interface ProtectedRouteProps {
@@ -42,7 +43,8 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, requir
   // Redirect to login if not authenticated
   if (routeState === 'login') {
     // Save the intended destination for after login
-    sessionStorage.setItem('oauth_redirect', location.pathname);
+    const safeRedirect = getSafeRedirect(location.pathname, '/home');
+    sessionStorage.setItem('oauth_redirect', safeRedirect);
     return <Navigate to="/login" state={{ from: { pathname: location.pathname } }} replace />;
   }
 

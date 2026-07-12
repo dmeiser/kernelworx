@@ -42,12 +42,12 @@ async def _handle_pagination(table: Any, query_params: Dict[str, Any], field_nam
     results: List[str] = []
     response = await table.query(**query_params)
     results.extend(await _extract_field_values(response.get("Items", []), field_name))
-    
+
     while response.get("LastEvaluatedKey"):
         query_params["ExclusiveStartKey"] = response["LastEvaluatedKey"]
         response = await table.query(**query_params)
         results.extend(await _extract_field_values(response.get("Items", []), field_name))
-    
+
     return results
 
 

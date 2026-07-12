@@ -120,10 +120,20 @@ const CatalogActions: React.FC<CatalogActionsProps> = ({ catalog, isOwned, onEdi
       </Button>
       {isOwned && (
         <>
-          <IconButton size="small" onClick={() => onEdit(catalog)} color="primary">
+          <IconButton
+            size="small"
+            onClick={() => onEdit(catalog)}
+            color="primary"
+            aria-label={`Edit ${catalog.catalogName}`}
+          >
             <EditIcon fontSize="small" />
           </IconButton>
-          <IconButton size="small" onClick={() => onDelete(catalog.catalogId, catalog.catalogName)} color="error">
+          <IconButton
+            size="small"
+            onClick={() => onDelete(catalog.catalogId, catalog.catalogName)}
+            color="error"
+            aria-label={`Delete ${catalog.catalogName}`}
+          >
             <DeleteIcon fontSize="small" />
           </IconButton>
         </>

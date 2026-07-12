@@ -371,7 +371,7 @@ describe('Order Query Operations Integration Tests', () => {
             profileId: testProfileId,
             campaignId: testCampaignId,
             customerName: 'Test Customer 1',
-            customerPhone: '555-0001',
+            customerPhone: '555-000-0001',
             orderDate: new Date('2025-02-01T10:00:00Z').toISOString(),
             paymentMethod: 'CASH',
             lineItems: [
@@ -393,7 +393,7 @@ describe('Order Query Operations Integration Tests', () => {
             profileId: testProfileId,
             campaignId: testCampaignId,
             customerName: 'Test Customer 2',
-            customerPhone: '555-0002',
+            customerPhone: '555-000-0002',
             orderDate: new Date('2025-02-15T14:00:00Z').toISOString(),
             paymentMethod: 'CHECK',
             lineItems: [
@@ -450,7 +450,7 @@ describe('Order Query Operations Integration Tests', () => {
             profileId: unsharedProfileId,
             campaignId: unsharedCampaignId,
             customerName: 'Unshared Order Customer',
-            customerPhone: '555-9999',
+            customerPhone: '555-999-9999',
             orderDate: new Date('2025-03-01T10:00:00Z').toISOString(),
             paymentMethod: 'CASH',
             lineItems: [
@@ -580,7 +580,7 @@ describe('Order Query Operations Integration Tests', () => {
       expect(data.getOrder).toBeDefined();
       expect(data.getOrder.orderId).toBe(testOrderId1);
       expect(data.getOrder.customerName).toBe('Test Customer 1');
-      expect(data.getOrder.customerPhone).toBe('555-0001');
+      expect(data.getOrder.customerPhone).toBe('+15550000001');
       expect(data.getOrder.profileId).toBe(testProfileId);
       expect(data.getOrder.campaignId).toBe(testCampaignId);
     });
@@ -1080,7 +1080,7 @@ describe('Order Query Operations Integration Tests', () => {
         fetchPolicy: 'network-only',
       });
 
-      expect(data.getOrder.customerPhone).toBe('555-123-4567');
+      expect(data.getOrder.customerPhone).toBe('+15551234567');
 
       await ownerClient.mutate({
         mutation: DELETE_ORDER,

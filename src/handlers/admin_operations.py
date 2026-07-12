@@ -8,6 +8,7 @@ Provides:
 """
 
 import os
+import re
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -61,13 +62,13 @@ def _get_cognito_user_attributes(cognito_user: Dict[str, Any]) -> tuple[str, str
     """Extract core attributes from a Cognito user dict."""
     username = cognito_user.get("Username", "")
     attributes = {attr["Name"]: attr["Value"] for attr in cognito_user.get("Attributes", [])}
-    
+
     account_id = attributes.get("sub", username)
     email = attributes.get("email", "")
     email_verified = attributes.get("email_verified", "false").lower() == "true"
     user_status = cognito_user.get("UserStatus", "UNKNOWN")
     enabled = cognito_user.get("Enabled", True)
-    
+
     return account_id, email, email_verified, user_status, enabled
 
 
@@ -95,16 +96,16 @@ def _build_admin_user_dict(
 ) -> Dict[str, Any]:
     """Build AdminUser dict from Cognito user data and DynamoDB account."""
     account_id, email, email_verified, user_status, enabled = _get_cognito_user_attributes(cognito_user)
-    
+
     created_at = cognito_user.get("UserCreateDate")
     last_modified_at = cognito_user.get("UserLastModifiedDate")
-    
+
     username = cognito_user.get("Username", "")
     groups = _get_user_groups(cognito, user_pool_id, username)
     is_admin_user = "ADMIN" in groups
-    
+
     display_name = _get_display_name_from_dynamodb(account_id, logger)
-    
+
     return {
         "accountId": account_id,
         "email": email,
@@ -118,7 +119,9 @@ def _build_admin_user_dict(
     }
 
 
-def _list_cognito_users(cognito: Any, user_pool_id: str, limit: int, next_token: str | None, logger: Any) -> tuple[list[Dict[str, Any]], str | None]:
+def _list_cognito_users(
+    cognito: Any, user_pool_id: str, limit: int, next_token: str | None, logger: Any
+) -> tuple[list[Dict[str, Any]], str | None]:
     """Call Cognito list_users API and return (users, pagination_token)."""
     list_params: Dict[str, Any] = {"UserPoolId": user_pool_id, "Limit": limit}
     if next_token:
@@ -219,6 +222,8 @@ def admin_search_user(event: Dict[str, Any], context: Any) -> list[Dict[str, Any
         if not query:
             raise AppError(ErrorCode.INVALID_INPUT, "Search query is required")
 
+        _validate_search_query(query)
+
         user_pool_id = _get_required_env("USER_POOL_ID")
         cognito = _get_cognito_client()
 
@@ -257,13 +262,13 @@ def _validate_admin_and_get_account_id(event: Dict[str, Any]) -> str:
     """Validate admin access and extract account ID from event."""
     if not is_admin(event):
         raise AppError(ErrorCode.FORBIDDEN, "Admin access required")
-    
+
     arguments = event.get("arguments", {})
     account_id = str(arguments.get("accountId", "")).strip()
-    
+
     if not account_id:
         raise AppError(ErrorCode.INVALID_INPUT, "Account ID is required")
-    
+
     return account_id
 
 
@@ -272,7 +277,9 @@ def _normalize_account_id(account_id: str) -> str:
     return account_id if account_id.startswith("ACCOUNT#") else f"ACCOUNT#{account_id}"
 
 
-def _add_dynamodb_users_to_map(results_map: dict[str, Dict[str, Any]], query: str, cognito: Any, user_pool_id: str, logger: Any) -> None:
+def _add_dynamodb_users_to_map(
+    results_map: dict[str, Dict[str, Any]], query: str, cognito: Any, user_pool_id: str, logger: Any
+) -> None:
     """Search DynamoDB and add users to results map."""
     accounts = _search_accounts_in_dynamodb(query, logger)
     for account in accounts:
@@ -285,7 +292,9 @@ def _add_dynamodb_users_to_map(results_map: dict[str, Dict[str, Any]], query: st
                 results_map[admin_user["accountId"]] = admin_user
 
 
-def _add_cognito_users_to_map(results_map: dict[str, Dict[str, Any]], query: str, cognito: Any, user_pool_id: str, logger: Any) -> None:
+def _add_cognito_users_to_map(
+    results_map: dict[str, Dict[str, Any]], query: str, cognito: Any, user_pool_id: str, logger: Any
+) -> None:
     """Search Cognito by email and add users to results map."""
     cognito_users = _search_users_in_cognito_by_email_prefix(cognito, user_pool_id, query, logger)
     for cognito_user in cognito_users:
@@ -310,7 +319,9 @@ def _matches_query(item: Dict[str, Any], query_lower: str) -> bool:
     return query_lower in email or query_lower in given_name or query_lower in family_name
 
 
-def _filter_matching_accounts(items: list[Dict[str, Any]], query_lower: str, matches: list[Dict[str, Any]], max_results: int) -> None:
+def _filter_matching_accounts(
+    items: list[Dict[str, Any]], query_lower: str, matches: list[Dict[str, Any]], max_results: int
+) -> None:
     """Filter accounts that match the query and add to matches list."""
     for item in items:
         if len(matches) >= max_results:
@@ -349,9 +360,9 @@ def _search_accounts_in_dynamodb(query: str, logger: Any) -> list[Dict[str, Any]
 
         while scanned_count < max_scan and len(matches) < max_results:
             items, last_key = _scan_accounts_page(paginator_params)
-            
+
             _filter_matching_accounts(items, query_lower, matches, max_results)
-            
+
             scanned_count += len(items)
 
             # Check for more pages
@@ -374,6 +385,28 @@ def _looks_like_uuid(value: str) -> bool:
 
     uuid_pattern = r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
     return bool(re.match(uuid_pattern, value.lower()))
+
+
+def _is_valid_email_prefix(value: str) -> bool:
+    """Check if a string is a valid email prefix (local part or local@partial-domain)."""
+    email_prefix_pattern = r"^[a-zA-Z0-9._%+-]+(?:@[a-zA-Z0-9.-]*)?$"
+    return bool(re.match(email_prefix_pattern, value)) and len(value) <= 254
+
+
+def _validate_search_query(query: str) -> None:
+    """Validate that the admin search query is a safe UUID, email prefix, or ACCOUNT#UUID."""
+    if query.startswith("ACCOUNT#"):
+        if _looks_like_uuid(query[8:]):
+            return
+    elif _looks_like_uuid(query):
+        return
+    elif _is_valid_email_prefix(query):
+        return
+
+    raise AppError(
+        ErrorCode.INVALID_INPUT,
+        "Search query must be a valid UUID, email prefix, or ACCOUNT#UUID",
+    )
 
 
 def _search_user_by_sub(cognito: Any, user_pool_id: str, sub: str, logger: Any) -> Dict[str, Any] | None:
@@ -475,7 +508,9 @@ def _build_admin_user(cognito: Any, user_pool_id: str, cognito_user: Dict[str, A
     }
 
 
-def _find_cognito_user_by_sub(cognito: Any, user_pool_id: str, account_id: str, logger: Any) -> tuple[str | None, str | None]:
+def _find_cognito_user_by_sub(
+    cognito: Any, user_pool_id: str, account_id: str, logger: Any
+) -> tuple[str | None, str | None]:
     """Find Cognito user by sub and return (username, email)."""
     try:
         users_response = cognito.list_users(
@@ -785,7 +820,7 @@ def _delete_orders_for_campaign(campaign_id: str, logger: Any) -> int:
         KeyConditionExpression="campaignId = :cid",
         ExpressionAttributeValues={":cid": campaign_id},
     )
-    
+
     deleted_count = 0
     for order in orders_response.get("Items", []):
         tables.orders.delete_item(Key={"campaignId": campaign_id, "orderId": order["orderId"]})
@@ -1274,7 +1309,7 @@ def _get_campaign_profile_id(db_campaign_id: str, campaign_id: str) -> str:
 def _update_campaign_shared_code(profile_id: str, db_campaign_id: str, shared_campaign_code: Optional[str]) -> None:
     """Update campaign's sharedCampaignCode field."""
     updated_at = datetime.now(timezone.utc).isoformat()
-    
+
     if shared_campaign_code is None:
         update_expr = "REMOVE sharedCampaignCode SET updatedAt = :updated"
         expr_vals = {":updated": updated_at}
@@ -1378,8 +1413,8 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Any:
     """
     field_name = event.get("info", {}).get("fieldName", "")
     handler = _OPERATION_HANDLERS.get(field_name)
-    
+
     if not handler:
         raise AppError(ErrorCode.INVALID_INPUT, f"Unknown admin operation: {field_name}")
-    
+
     return handler(event, context)

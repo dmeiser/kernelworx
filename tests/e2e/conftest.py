@@ -34,8 +34,8 @@ import warnings
 from collections.abc import Generator
 from pathlib import Path
 
-import pytest
 import boto3
+import pytest
 from dotenv import load_dotenv
 from playwright.sync_api import Browser, BrowserContext, Page, expect
 

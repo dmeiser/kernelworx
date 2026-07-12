@@ -186,6 +186,22 @@ describe('SettingsPage', () => {
     expect(screen.getByText('About KernelWorx')).toBeInTheDocument();
   });
 
+  test('displays Support KernelWorx section with GitHub Sponsors link', () => {
+    render(
+      <MockedProvider mocks={[standardAccountMock]} addTypename={false}>
+        <BrowserRouter>
+          <SettingsPage />
+        </BrowserRouter>
+      </MockedProvider>,
+    );
+
+    expect(screen.getByText('Support KernelWorx')).toBeInTheDocument();
+    const sponsorLink = screen.getByRole('link', { name: /Sponsor on GitHub/i });
+    expect(sponsorLink).toHaveAttribute('href', 'https://github.com/sponsors/dmeiser');
+    expect(sponsorLink).toHaveAttribute('target', '_blank');
+    expect(sponsorLink).toHaveAttribute('rel', 'noopener noreferrer');
+  });
+
   test('calls logout and navigates home when Sign Out clicked', async () => {
     const user = userEvent.setup();
     render(

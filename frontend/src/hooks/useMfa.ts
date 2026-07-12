@@ -1,7 +1,7 @@
 /**
  * Custom hook for MFA (TOTP) functionality
  */
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import {
   setUpTOTP,
   verifyTOTPSetup,
@@ -11,6 +11,11 @@ import {
   type AuthWebAuthnCredential,
 } from 'aws-amplify/auth';
 import QRCode from 'qrcode';
+
+export interface MfaPendingConfirmation {
+  type: 'disable' | 'removePasskeys';
+  message: string;
+}
 
 export interface UseMfaReturn {
   mfaSetupCode: string | null;
@@ -23,9 +28,13 @@ export interface UseMfaReturn {
   setMfaSuccess: (value: boolean) => void;
   mfaLoading: boolean;
   mfaEnabled: boolean;
-  handleSetupMFA: (passkeys: AuthWebAuthnCredential[], loadPasskeys: () => Promise<void>) => Promise<void>;
+  pendingConfirmation: MfaPendingConfirmation | null;
+  handleSetupMFA: (passkeys: AuthWebAuthnCredential[], loadPasskeys: () => Promise<void>) => void;
+  confirmSetupMFA: () => Promise<void>;
   handleVerifyMFA: (e: React.FormEvent) => Promise<void>;
-  handleDisableMFA: () => Promise<void>;
+  handleDisableMFA: () => void;
+  confirmDisableMFA: () => Promise<void>;
+  cancelMfaConfirmation: () => void;
   checkMfaStatus: () => Promise<void>;
   setMfaEnabled: (enabled: boolean) => void;
   resetMfaSetup: () => void;
@@ -39,40 +48,30 @@ const getErrorMessage = (err: unknown, fallback: string): string => {
   return fallback;
 };
 
-const confirmMfaDisable = () =>
-  window.confirm(
-    'Are you sure you want to disable multi-factor authentication? This will make your account less secure.',
-  );
+const MFA_MESSAGES = {
+  disable: 'Are you sure you want to disable multi-factor authentication? This will make your account less secure.',
+  removePasskeys: 'TOTP MFA and Passkeys cannot be used together. Do you want to delete all passkeys and enable MFA?',
+};
 
-const confirmPasskeyRemoval = () =>
-  window.confirm('TOTP MFA and Passkeys cannot be used together. Do you want to delete all passkeys and enable MFA?');
-
-// Helper to remove passkeys before MFA setup
-const removePasskeysIfNeeded = async (
-  passkeys: AuthWebAuthnCredential[],
-  loadPasskeys: () => Promise<void>,
-): Promise<{ cancelled: boolean; error: string | null }> => {
-  if (passkeys.length === 0) {
-    return { cancelled: false, error: null };
-  }
-
-  if (!confirmPasskeyRemoval()) {
-    return { cancelled: true, error: null };
-  }
-
+const runMfaSetup = async (
+  setMfaSetupCode: (code: string) => void,
+  setQrCodeUrl: (url: string) => void,
+  setMfaError: (error: string | null) => void,
+  setMfaLoading: (loading: boolean) => void,
+): Promise<void> => {
+  setMfaLoading(true);
   try {
-    await Promise.all(
-      passkeys
-        .filter((passkey) => passkey.credentialId)
-        .map((passkey) => deleteWebAuthnCredential({ credentialId: passkey.credentialId! })),
-    );
-    await loadPasskeys();
-    return { cancelled: false, error: null };
+    const totpSetupDetails = await setUpTOTP();
+    const setupUri = totpSetupDetails.getSetupUri('PopcornManager');
+    const qrDataUrl = await QRCode.toDataURL(setupUri.href);
+
+    setMfaSetupCode(totpSetupDetails.sharedSecret);
+    setQrCodeUrl(qrDataUrl);
   } catch (err: unknown) {
-    return {
-      cancelled: false,
-      error: getErrorMessage(err, 'Failed to remove passkeys'),
-    };
+    console.error('MFA setup failed:', err);
+    setMfaError(getErrorMessage(err, 'Failed to set up MFA'));
+  } finally {
+    setMfaLoading(false);
   }
 };
 
@@ -84,6 +83,11 @@ export const useMfa = (): UseMfaReturn => {
   const [mfaSuccess, setMfaSuccess] = useState(false);
   const [mfaLoading, setMfaLoading] = useState(false);
   const [mfaEnabled, setMfaEnabled] = useState(false);
+  const [pendingConfirmation, setPendingConfirmation] = useState<MfaPendingConfirmation | null>(null);
+  const pendingSetupArgsRef = useRef<{
+    passkeys: AuthWebAuthnCredential[];
+    loadPasskeys: () => Promise<void>;
+  } | null>(null);
 
   const checkMfaStatus = useCallback(async () => {
     try {
@@ -94,30 +98,41 @@ export const useMfa = (): UseMfaReturn => {
     }
   }, []);
 
-  const handleSetupMFA = async (passkeys: AuthWebAuthnCredential[], loadPasskeys: () => Promise<void>) => {
-    const { cancelled, error } = await removePasskeysIfNeeded(passkeys, loadPasskeys);
-    if (cancelled) return;
-    if (error) {
-      setMfaError(error);
+  const handleSetupMFA = (passkeys: AuthWebAuthnCredential[], loadPasskeys: () => Promise<void>) => {
+    setPendingConfirmation(null);
+    pendingSetupArgsRef.current = { passkeys, loadPasskeys };
+
+    if (passkeys.length > 0) {
+      setPendingConfirmation({ type: 'removePasskeys', message: MFA_MESSAGES.removePasskeys });
       return;
     }
 
+    void runMfaSetup(setMfaSetupCode, setQrCodeUrl, setMfaError, setMfaLoading);
+  };
+
+  const confirmSetupMFA = async () => {
+    setPendingConfirmation(null);
     setMfaError(null);
-    setMfaLoading(true);
+
+    const { passkeys, loadPasskeys } = pendingSetupArgsRef.current ?? {};
+    if (!loadPasskeys) return;
 
     try {
-      const totpSetupDetails = await setUpTOTP();
-      const setupUri = totpSetupDetails.getSetupUri('PopcornManager');
-      const qrDataUrl = await QRCode.toDataURL(setupUri.href);
-
-      setMfaSetupCode(totpSetupDetails.sharedSecret);
-      setQrCodeUrl(qrDataUrl);
+      await Promise.all(
+        (passkeys ?? [])
+          .filter((passkey) => passkey.credentialId)
+          .map((passkey) => deleteWebAuthnCredential({ credentialId: passkey.credentialId! })),
+      );
+      await loadPasskeys();
     } catch (err: unknown) {
-      console.error('MFA setup failed:', err);
-      setMfaError(getErrorMessage(err, 'Failed to set up MFA'));
+      console.error('Failed to remove passkeys:', err);
+      setMfaError(getErrorMessage(err, 'Failed to remove passkeys'));
+      return;
     } finally {
-      setMfaLoading(false);
+      pendingSetupArgsRef.current = null;
     }
+
+    await runMfaSetup(setMfaSetupCode, setQrCodeUrl, setMfaError, setMfaLoading);
   };
 
   const handleVerifyMFA = async (e: React.FormEvent) => {
@@ -142,11 +157,12 @@ export const useMfa = (): UseMfaReturn => {
     }
   };
 
-  const handleDisableMFA = async () => {
-    if (!confirmMfaDisable()) {
-      return;
-    }
+  const handleDisableMFA = () => {
+    setPendingConfirmation({ type: 'disable', message: MFA_MESSAGES.disable });
+  };
 
+  const confirmDisableMFA = async () => {
+    setPendingConfirmation(null);
     setMfaError(null);
     setMfaLoading(true);
 
@@ -160,6 +176,11 @@ export const useMfa = (): UseMfaReturn => {
     } finally {
       setMfaLoading(false);
     }
+  };
+
+  const cancelMfaConfirmation = () => {
+    setPendingConfirmation(null);
+    pendingSetupArgsRef.current = null;
   };
 
   const resetMfaSetup = () => {
@@ -179,9 +200,13 @@ export const useMfa = (): UseMfaReturn => {
     setMfaSuccess,
     mfaLoading,
     mfaEnabled,
+    pendingConfirmation,
     handleSetupMFA,
+    confirmSetupMFA,
     handleVerifyMFA,
     handleDisableMFA,
+    confirmDisableMFA,
+    cancelMfaConfirmation,
     checkMfaStatus,
     setMfaEnabled,
     resetMfaSetup,

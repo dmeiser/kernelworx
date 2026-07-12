@@ -2995,6 +2995,47 @@ class TestAdminSearchUser:
 
         assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
 
+    def test_search_user_invalid_query_raises_error(
+        self,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """Test search with unsafe query raises INVALID_INPUT error."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+
+        event = {
+            **admin_appsync_event,
+            "info": {"fieldName": "adminSearchUser"},
+            "arguments": {"query": 'test"injection'},
+        }
+
+        with pytest.raises(AppError) as exc_info:
+            admin_search_user(event, lambda_context)
+
+        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+        assert "valid UUID" in exc_info.value.message
+
+    def test_search_user_malformed_account_prefix_raises_error(
+        self,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """Test search with ACCOUNT# prefix that is not a UUID is rejected."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+
+        event = {
+            **admin_appsync_event,
+            "info": {"fieldName": "adminSearchUser"},
+            "arguments": {"query": "ACCOUNT#not-a-uuid"},
+        }
+
+        with pytest.raises(AppError) as exc_info:
+            admin_search_user(event, lambda_context)
+
+        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+
     def test_search_user_non_admin_raises_error(
         self,
         non_admin_appsync_event: Dict[str, Any],
@@ -3135,7 +3176,7 @@ class TestAdminSearchUser:
         event = {
             **admin_appsync_event,
             "info": {"fieldName": "adminSearchUser"},
-            "arguments": {"query": "ACCOUNT#nonexistent-user-123"},
+            "arguments": {"query": "ACCOUNT#123e4567-e89b-12d3-a456-426614174000"},
         }
 
         with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:

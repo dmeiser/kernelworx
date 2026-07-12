@@ -1,7 +1,21 @@
 /**
  * MFA (Multi-Factor Authentication) section for User Settings
  */
-import { Alert, Box, Button, CircularProgress, Divider, Paper, Stack, TextField, Typography } from '@mui/material';
+import {
+  Alert,
+  Box,
+  Button,
+  CircularProgress,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  Divider,
+  Paper,
+  Stack,
+  TextField,
+  Typography,
+} from '@mui/material';
 import {
   CheckCircle as CheckIcon,
   Delete as DeleteIcon,
@@ -153,6 +167,37 @@ const MfaSetupSection: React.FC<MfaSetupSectionProps> = ({ hook }) => {
   );
 };
 
+interface MfaConfirmDialogProps {
+  hook: UseMfaReturn;
+}
+
+const MfaConfirmDialog: React.FC<MfaConfirmDialogProps> = ({ hook }) => {
+  if (!hook.pendingConfirmation) return null;
+
+  const handleConfirm = () => {
+    if (hook.pendingConfirmation?.type === 'disable') {
+      void hook.confirmDisableMFA();
+    } else {
+      void hook.confirmSetupMFA();
+    }
+  };
+
+  return (
+    <Dialog open onClose={hook.cancelMfaConfirmation}>
+      <DialogTitle>{hook.pendingConfirmation.type === 'disable' ? 'Disable MFA?' : 'Remove Passkeys?'}</DialogTitle>
+      <DialogContent>
+        <Typography>{hook.pendingConfirmation.message}</Typography>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={hook.cancelMfaConfirmation}>Cancel</Button>
+        <Button onClick={handleConfirm} color="error" variant="contained">
+          {hook.pendingConfirmation.type === 'disable' ? 'Disable' : 'Continue'}
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+};
+
 export const MfaSection: React.FC<MfaSectionProps> = ({ mfaHook, passkeyCount, onSetupMFA }) => (
   <Paper sx={{ p: 3, mb: 3 }}>
     <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }}>
@@ -168,5 +213,6 @@ export const MfaSection: React.FC<MfaSectionProps> = ({ mfaHook, passkeyCount, o
     <MfaStatusAlerts hook={mfaHook} />
     <MfaPrimaryActions hook={mfaHook} onSetup={onSetupMFA} />
     <MfaSetupSection hook={mfaHook} />
+    <MfaConfirmDialog hook={mfaHook} />
   </Paper>
 );

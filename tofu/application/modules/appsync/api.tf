@@ -11,14 +11,9 @@ resource "aws_appsync_graphql_api" "main" {
     user_pool_id   = var.user_pool_id
   }
 
-  # Additional auth modes
-  additional_authentication_provider {
-    authentication_type = "AWS_IAM"
-  }
-
-  additional_authentication_provider {
-    authentication_type = "API_KEY"
-  }
+  # Only Amazon Cognito User Pools authentication is used by the frontend.
+  # AppSync service roles for DynamoDB/Lambda data sources are configured
+  # separately as IAM assume-role policies; they are not additional auth providers.
 
   xray_enabled = true
 

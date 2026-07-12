@@ -143,19 +143,6 @@ resource "aws_appsync_function" "get_catalog_try_prefixed" {
   code = file("${local.js_resolvers_dir}/get_catalog_try_prefixed_fn.js")
 }
 
-resource "aws_appsync_function" "diagnose_catalog_for_order" {
-  api_id      = aws_appsync_graphql_api.main.id
-  data_source = aws_appsync_datasource.campaigns.name
-  name        = "DiagnoseCatalogForOrderFn${local.env_suffix}"
-
-  runtime {
-    name            = "APPSYNC_JS"
-    runtime_version = "1.0.0"
-  }
-
-  code = file("${local.js_resolvers_dir}/diagnose_catalog_for_order_fn.js")
-}
-
 resource "aws_appsync_function" "ensure_catalog_final" {
   api_id      = aws_appsync_graphql_api.main.id
   data_source = aws_appsync_datasource.campaigns.name
@@ -169,19 +156,6 @@ resource "aws_appsync_function" "ensure_catalog_final" {
   code = file("${local.js_resolvers_dir}/ensure_catalog_final_fn.js")
 }
 
-resource "aws_appsync_function" "log_create_order_state" {
-  api_id      = aws_appsync_graphql_api.main.id
-  data_source = aws_appsync_datasource.none.name
-  name        = "LogCreateOrderStateFn${local.env_suffix}"
-
-  runtime {
-    name            = "APPSYNC_JS"
-    runtime_version = "1.0.0"
-  }
-
-  code = file("${local.js_resolvers_dir}/log_create_order_state_fn.js")
-}
-
 resource "aws_appsync_function" "create_order" {
   api_id      = aws_appsync_graphql_api.main.id
   data_source = aws_appsync_datasource.orders.name
@@ -193,19 +167,6 @@ resource "aws_appsync_function" "create_order" {
   }
 
   code = file("${local.js_resolvers_dir}/create_order_fn.js")
-}
-
-resource "aws_appsync_function" "inspect_put_item" {
-  api_id      = aws_appsync_graphql_api.main.id
-  data_source = aws_appsync_datasource.none.name
-  name        = "InspectPutItemFn${local.env_suffix}"
-
-  runtime {
-    name            = "APPSYNC_JS"
-    runtime_version = "1.0.0"
-  }
-
-  code = file("${local.js_resolvers_dir}/inspect_put_item_fn.js")
 }
 
 resource "aws_appsync_function" "query_order" {

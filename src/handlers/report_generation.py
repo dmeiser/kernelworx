@@ -20,11 +20,13 @@ try:  # pragma: no cover
     from utils.auth import check_profile_access
     from utils.dynamodb import get_required_env, tables
     from utils.errors import AppError, ErrorCode
+    from utils.ids import ensure_campaign_id
     from utils.logging import get_logger
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.auth import check_profile_access
     from ..utils.dynamodb import get_required_env, tables
     from ..utils.errors import AppError, ErrorCode
+    from ..utils.ids import ensure_campaign_id
     from ..utils.logging import get_logger
 
 
@@ -40,13 +42,17 @@ def _get_s3_client() -> "S3Client":
     return boto3.client("s3", endpoint_url=os.getenv("S3_ENDPOINT"))
 
 
-def _generate_report_content(campaign: Dict[str, Any], orders: list[Dict[str, Any]], report_format: str) -> tuple[bytes, str, str]:
+def _generate_report_content(
+    campaign: Dict[str, Any], orders: list[Dict[str, Any]], report_format: str
+) -> tuple[bytes, str, str]:
     """Generate report content based on format."""
     if report_format.lower() == "csv":
         return _generate_csv_report(campaign, orders), "text/csv", "csv"
-    return (_generate_excel_report(campaign, orders), 
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", 
-            "xlsx")
+    return (
+        _generate_excel_report(campaign, orders),
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "xlsx",
+    )
 
 
 def request_campaign_report(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
@@ -71,8 +77,7 @@ def request_campaign_report(event: Dict[str, Any], context: Any) -> Dict[str, An
     try:
         # Extract arguments - GraphQL passes campaignId, but we store as campaignId in DynamoDB
         args = event["arguments"]["input"]
-        campaign_id = args["campaignId"]  # GraphQL uses campaignId
-        campaign_id = campaign_id  # Map to internal campaignId for DynamoDB queries
+        campaign_id = ensure_campaign_id(args["campaignId"])  # Normalize CAMPAIGN# prefix
         report_format = args.get("format", "xlsx")  # xlsx or csv
         caller_account_id = event["identity"]["sub"]
 
@@ -140,10 +145,10 @@ def request_campaign_report(event: Dict[str, Any], context: Any) -> Dict[str, An
 
     except AppError as e:
         logger.error("AppError in request_campaign_report", error_code=e.error_code, error_message=e.message)
-        raise Exception(f"{e.error_code}: {e.message}") from e
+        raise
     except Exception as e:
         logger.error("Unexpected error generating report", error=str(e))
-        raise Exception(f"Failed to generate report: {str(e)}") from e
+        raise AppError(ErrorCode.INTERNAL_ERROR, f"Failed to generate report: {e}") from e
 
 
 def _get_campaign(table: Any, campaign_id: str) -> Dict[str, Any] | None:

@@ -21,6 +21,8 @@ let testProfileData: any = {
 };
 let testLoading = false;
 
+const revokeShareMock = vi.fn().mockResolvedValue({ data: {} });
+const transferOwnershipMock = vi.fn().mockResolvedValue({ data: {} });
 const updateProfileMock = vi.fn().mockResolvedValue({ data: {} });
 const deleteProfileMock = vi.fn().mockResolvedValue({ data: {} });
 const createInviteMock = vi.fn().mockResolvedValue({ data: { createProfileInvite: { inviteCode: 'INV123' } } });
@@ -70,6 +72,8 @@ vi.mock('@apollo/client/react', async () => {
     DeleteSellerProfile: (opts) => createMutationHandler(deleteProfileMock, {})(opts),
     CreateProfileInvite: (opts) => createMutationHandler(createInviteMock)(opts),
     DeleteProfileInvite: (opts) => createMutationHandler(deleteInviteMock, {})(opts),
+    RevokeShare: (opts) => createMutationHandler(revokeShareMock, {})(opts),
+    TransferProfileOwnership: (opts) => createMutationHandler(transferOwnershipMock, {})(opts),
   };
 
   // Default mutation handler
@@ -108,6 +112,8 @@ describe('ScoutManagementPage', () => {
     deleteProfileMock.mockClear();
     createInviteMock.mockClear();
     deleteInviteMock.mockClear();
+    revokeShareMock.mockClear();
+    transferOwnershipMock.mockClear();
 
     // Ensure clipboard is available for tests; spy if it exists otherwise define it
     if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
@@ -459,6 +465,193 @@ describe('ScoutManagementPage', () => {
     await user.click(confirmDelete);
 
     // After completion, we should have navigated to the /scouts route
-    expect(await screen.findByText('ScoutList')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText('ScoutList')).toBeInTheDocument(), { timeout: 3000 });
+  });
+
+  it('shows a success snackbar after deleting profile', async () => {
+    render(
+      <MemoryRouter initialEntries={[`/scouts/${encodeURIComponent(RAW_ID)}/manage`]}>
+        <Routes>
+          <Route path="/scouts/:profileId/manage" element={<ScoutManagementPage />} />
+          <Route path="/scouts" element={<div>ScoutList</div>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    const user = userEvent.setup();
+    const deleteScoutBtn = await screen.findByRole('button', { name: /Delete Scout/i });
+    await user.click(deleteScoutBtn);
+
+    const confirmDelete = await screen.findByRole('button', { name: /Delete Permanently/i });
+    await user.click(confirmDelete);
+
+    await waitFor(() => expect(screen.getByText('Profile deleted successfully')).toBeInTheDocument(), { timeout: 2000 });
+  });
+
+  it('revokes share via confirmation dialog', async () => {
+    testShares = [
+      {
+        shareId: 's1',
+        profileId: DB_ID,
+        targetAccountId: 'acct#1',
+        targetAccount: { email: 'jane@example.com', givenName: 'Jane', familyName: 'Doe' },
+        permissions: ['READ'],
+        createdAt: new Date().toISOString(),
+      },
+    ];
+
+    render(
+      <MemoryRouter initialEntries={[`/scouts/${encodeURIComponent(RAW_ID)}/manage`]}>
+        <Routes>
+          <Route path="/scouts/:profileId/manage" element={<ScoutManagementPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    const user = userEvent.setup();
+    expect(await screen.findByText(/Who Has Access/i)).toBeInTheDocument();
+
+    const row = screen.getByText('jane@example.com').closest('tr') as HTMLElement;
+    const buttons = Array.from(row.querySelectorAll('button'));
+    // Last button is revoke (delete icon), second-to-last is transfer
+    const revokeBtn = buttons[buttons.length - 1];
+    await user.click(revokeBtn);
+
+    expect(await screen.findByText(/Revoke Access\?/i)).toBeInTheDocument();
+
+    const confirmBtn = screen.getByRole('button', { name: /Revoke/i });
+    await user.click(confirmBtn);
+
+    await waitFor(() => expect(revokeShareMock).toHaveBeenCalled());
+  });
+
+  it('cancels revoke share dialog without calling mutation', async () => {
+    testShares = [
+      {
+        shareId: 's1',
+        profileId: DB_ID,
+        targetAccountId: 'acct#1',
+        targetAccount: { email: 'jane@example.com' },
+        permissions: ['READ'],
+        createdAt: new Date().toISOString(),
+      },
+    ];
+
+    render(
+      <MemoryRouter initialEntries={[`/scouts/${encodeURIComponent(RAW_ID)}/manage`]}>
+        <Routes>
+          <Route path="/scouts/:profileId/manage" element={<ScoutManagementPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    const user = userEvent.setup();
+    expect(await screen.findByText(/Who Has Access/i)).toBeInTheDocument();
+
+    const row = screen.getByText('jane@example.com').closest('tr') as HTMLElement;
+    const buttons = Array.from(row.querySelectorAll('button'));
+    await user.click(buttons[buttons.length - 1]);
+
+    expect(await screen.findByText(/Revoke Access\?/i)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /^Cancel$/i }));
+
+    await waitFor(() => {
+      expect(screen.queryByText(/Revoke Access\?/i)).not.toBeInTheDocument();
+    });
+
+    expect(revokeShareMock).not.toHaveBeenCalled();
+  });
+
+  it('transfers ownership via confirmation dialog', async () => {
+    testShares = [
+      {
+        shareId: 's1',
+        profileId: DB_ID,
+        targetAccountId: 'acct#1',
+        targetAccount: { email: 'jane@example.com', givenName: 'Jane', familyName: 'Doe' },
+        permissions: ['READ'],
+        createdAt: new Date().toISOString(),
+      },
+    ];
+
+    render(
+      <MemoryRouter initialEntries={[`/scouts/${encodeURIComponent(RAW_ID)}/manage`]}>
+        <Routes>
+          <Route path="/scouts/:profileId/manage" element={<ScoutManagementPage />} />
+          <Route path="/scouts" element={<div>ScoutList</div>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    const user = userEvent.setup();
+    expect(await screen.findByText(/Who Has Access/i)).toBeInTheDocument();
+
+    const row = screen.getByText('jane@example.com').closest('tr') as HTMLElement;
+    const buttons = Array.from(row.querySelectorAll('button'));
+    const transferBtn = buttons[buttons.length - 2];
+    await user.click(transferBtn);
+
+    expect(await screen.findByText(/Transfer Ownership\?/i)).toBeInTheDocument();
+
+    const confirmBtn = screen.getByRole('button', { name: /Transfer/i });
+    await user.click(confirmBtn);
+
+    await waitFor(() => expect(transferOwnershipMock).toHaveBeenCalled());
+  });
+
+  it('clears previous copy timeout when copying a new code', async () => {
+    render(
+      <MemoryRouter initialEntries={[`/scouts/${encodeURIComponent(RAW_ID)}/manage`]}>
+        <Routes>
+          <Route path="/scouts/:profileId/manage" element={<ScoutManagementPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    const user = userEvent.setup();
+    const createButton = await screen.findByRole('button', { name: /Generate New Invite/i });
+    await user.click(createButton);
+
+    await waitFor(() => expect(createInviteMock).toHaveBeenCalled());
+    expect(await screen.findByText(/New Invite Code:/i)).toBeInTheDocument();
+
+    const copyButton = screen.getByRole('button', { name: /Copy/i });
+    await user.click(copyButton);
+    expect(await screen.findByRole('button', { name: /Copied!/i })).toBeTruthy();
+
+    // Copying again should clear the previous timeout and restart the cycle
+    await user.click(copyButton);
+    expect(await screen.findByRole('button', { name: /Copied!/i })).toBeTruthy();
+  });
+
+  it('renders delete invite button loading text', async () => {
+    testInvites = [
+      {
+        inviteCode: 'INV-DEL',
+        permissions: ['READ'],
+        createdAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 100000).toISOString(),
+      },
+    ];
+
+    render(
+      <MemoryRouter initialEntries={[`/scouts/${encodeURIComponent(RAW_ID)}/manage`]}>
+        <Routes>
+          <Route path="/scouts/:profileId/manage" element={<ScoutManagementPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    const user = userEvent.setup();
+    const row = await screen.findByText('INV-DEL');
+    const tr = row.closest('tr') as HTMLElement;
+    const buttons = Array.from(tr.querySelectorAll('button')) as HTMLButtonElement[];
+    const deleteBtn = buttons[buttons.length - 1];
+    await user.click(deleteBtn);
+
+    expect(await screen.findByText(/Delete Invite Code\?/i)).toBeInTheDocument();
+    const confirmDelete = screen.getByRole('button', { name: /^Delete$/i });
+    expect(confirmDelete).toBeInTheDocument();
   });
 });

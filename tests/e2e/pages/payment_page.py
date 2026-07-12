@@ -29,6 +29,8 @@ class PaymentPage(BasePage):
     _ADD_BTN: str = "Add Payment Method"
     _DIALOG_FIELD_LABEL: str = "Payment Method Name"
     _DIALOG_SUBMIT_BTN: str = "Create"
+    _DELETE_DIALOG_TITLE: str = "Delete Payment Method"
+    _DELETE_BTN: str = "Delete"
 
     def __init__(self, page: Page) -> None:
         """Store the Playwright Page instance.
@@ -64,6 +66,23 @@ class PaymentPage(BasePage):
         # Scoped inside the open dialog to avoid collisions with other buttons
         return self.page.get_by_role("dialog").get_by_role("button", name=self._DIALOG_SUBMIT_BTN)
 
+    def _delete_button(self, method_type: str) -> Locator:
+        """Return the delete button for the card matching *method_type*.
+
+        The button is an IconButton whose accessible name is
+        ``"Delete {method_type}"``.
+
+        Args:
+            method_type: Exact payment method name (case-sensitive).
+        """
+        return self._card_for(method_type).get_by_role(
+            "button", name=f"Delete {method_type}", exact=True
+        )
+
+    def _delete_dialog_confirm_button(self) -> Locator:
+        """Return locator for the *Delete* button in the confirmation dialog."""
+        return self.page.get_by_role("dialog").get_by_role("button", name=self._DELETE_BTN)
+
     def _card_for(self, method_type: str) -> Locator:
         """Return a locator for the payment method card matching *method_type*.
 
@@ -92,6 +111,21 @@ class PaymentPage(BasePage):
         dialog = self.wait_for_dialog("Create Payment Method")
         self._dialog_name_input().fill(method_type)
         self._dialog_submit_button().click()
+        expect(dialog).to_be_hidden(timeout=10_000)
+        self.wait_for_loading()
+
+    def delete_payment_method(self, method_type: str) -> None:
+        """Click the delete action on the card and confirm the dialog.
+
+        Waits for the confirmation dialog to close and the list to reload
+        before returning.
+
+        Args:
+            method_type: Name of the custom payment method to delete.
+        """
+        self._delete_button(method_type).click()
+        dialog = self.wait_for_dialog(self._DELETE_DIALOG_TITLE)
+        self._delete_dialog_confirm_button().click()
         expect(dialog).to_be_hidden(timeout=10_000)
         self.wait_for_loading()
 

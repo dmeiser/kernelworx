@@ -10,6 +10,7 @@ import { fetchAuthSession, signInWithRedirect, signIn, signOut, getCurrentUser }
 import { Hub } from 'aws-amplify/utils';
 import { apolloClient } from '../lib/apollo';
 import { GET_MY_ACCOUNT } from '../lib/graphql';
+import { getSafeRedirect } from '../lib/redirect';
 import type { Account, AuthContextValue } from '../types/auth';
 import type { AuthSession } from 'aws-amplify/auth';
 
@@ -41,7 +42,8 @@ const handleOAuthRedirect = () => {
   const savedRedirect = sessionStorage.getItem('oauth_redirect');
   if (savedRedirect) {
     sessionStorage.removeItem('oauth_redirect');
-    window.location.href = savedRedirect;
+    const safeRedirect = getSafeRedirect(savedRedirect, '/home');
+    window.location.href = safeRedirect;
   }
 };
 

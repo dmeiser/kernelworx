@@ -14,6 +14,7 @@ import openpyxl
 import pytest
 
 from src.handlers.report_generation import request_campaign_report
+from src.utils.errors import AppError, ErrorCode
 
 
 def get_orders_table() -> Any:
@@ -217,9 +218,11 @@ class TestRequestCampaignReport:
             "arguments": {"input": {"campaignId": sample_campaign_id, "format": "xlsx"}},
         }
 
-        # Act & Assert - should raise exception
-        with pytest.raises(Exception, match="FORBIDDEN"):
+        # Act & Assert - should raise AppError with FORBIDDEN
+        with pytest.raises(AppError) as exc_info:
             request_campaign_report(event, lambda_context)
+
+        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
 
     def test_nonexistent_campaign_returns_error(
         self,
@@ -234,9 +237,11 @@ class TestRequestCampaignReport:
             "arguments": {"input": {"campaignId": "CAMPAIGN#nonexistent", "format": "xlsx"}},
         }
 
-        # Act & Assert - should raise exception
-        with pytest.raises(Exception, match="NOT_FOUND"):
+        # Act & Assert - should raise AppError with NOT_FOUND
+        with pytest.raises(AppError) as exc_info:
             request_campaign_report(event, lambda_context)
+
+        assert exc_info.value.error_code == ErrorCode.NOT_FOUND
 
     def test_default_format_is_xlsx(
         self,
@@ -265,6 +270,29 @@ class TestRequestCampaignReport:
         bucket_name = os.environ.get("EXPORTS_BUCKET", "test-exports-bucket")
         objects = s3_bucket.list_objects_v2(Bucket=bucket_name)
         assert objects["Contents"][0]["Key"].endswith(".xlsx")
+
+    def test_raw_campaign_id_gets_prefixed(
+        self,
+        dynamodb_table: Any,
+        s3_bucket: Any,
+        sample_profile: Dict[str, Any],
+        sample_campaign: Dict[str, Any],
+        sample_orders: list[Dict[str, Any]],
+        sample_campaign_id: str,
+        appsync_event: Dict[str, Any],
+        lambda_context: Any,
+    ) -> None:
+        """Test that campaignId without CAMPAIGN# prefix is normalized before lookup."""
+        raw_campaign_id = sample_campaign_id.replace("CAMPAIGN#", "")
+        event = {
+            **appsync_event,
+            "arguments": {"input": {"campaignId": raw_campaign_id, "format": "xlsx"}},
+        }
+
+        result = request_campaign_report(event, lambda_context)
+
+        assert result["status"] == "COMPLETED"
+        assert result["campaignId"] == sample_campaign_id
 
     def test_empty_campaign_generates_report_with_no_orders(
         self,

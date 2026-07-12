@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@apollo/client": "^4.0.9",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.1",
     "@mui/icons-material": "^7.3.6",
@@ -29,8 +30,7 @@
     "qrcode": "^1.5.4",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
-    "react-router-dom": "^7.10.1",
-    "xlsx": "^0.18.5"
+    "react-router-dom": "^7.10.1"
   },
   "devDependencies": {
     "@aws-sdk/client-appsync": "^3.987.0",

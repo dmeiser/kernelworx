@@ -19,6 +19,7 @@ import {
   Divider,
 } from '@mui/material';
 import MenuIcon from '@mui/icons-material/Menu';
+import HomeIcon from '@mui/icons-material/Home';
 import PersonIcon from '@mui/icons-material/Person';
 import SettingsIcon from '@mui/icons-material/Settings';
 import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
@@ -28,6 +29,7 @@ import LogoutIcon from '@mui/icons-material/Logout';
 import CardGiftcardIcon from '@mui/icons-material/CardGiftcard';
 import AssessmentIcon from '@mui/icons-material/Assessment';
 import CampaignIcon from '@mui/icons-material/Campaign';
+import PaymentIcon from '@mui/icons-material/Payment';
 import { useAuth } from '../contexts/AuthContext';
 import { Toast } from './Toast';
 import { Outlet } from 'react-router-dom';
@@ -45,6 +47,12 @@ const DrawerContent: React.FC<{
     <Toolbar />
     <Divider />
     <List sx={{ flexGrow: 1 }}>
+      <ListItemButton onClick={() => onNavigate('/home')} selected={isActive('/home')}>
+        <ListItemIcon>
+          <HomeIcon />
+        </ListItemIcon>
+        <ListItemText primary="Home" />
+      </ListItemButton>
       <ListItemButton onClick={() => onNavigate('/scouts')} selected={isActive('/scouts')}>
         <ListItemIcon>
           <PersonIcon />
@@ -62,6 +70,12 @@ const DrawerContent: React.FC<{
           <InventoryIcon />
         </ListItemIcon>
         <ListItemText primary="Catalogs" />
+      </ListItemButton>
+      <ListItemButton onClick={() => onNavigate('/payment-methods')} selected={isActive('/payment-methods')}>
+        <ListItemIcon>
+          <PaymentIcon />
+        </ListItemIcon>
+        <ListItemText primary="Payment Methods" />
       </ListItemButton>
       <ListItemButton onClick={() => onNavigate('/shared-campaigns')} selected={isActive('/shared-campaigns')}>
         <ListItemIcon>

@@ -72,6 +72,7 @@ class TestGenerateQrCodePresignedUrl:
         event: Dict[str, Any] = {
             "qrCodeUrl": existing_url,
             "ownerAccountId": "account-123",
+            "identity": {"sub": "account-123"},
             "methodName": "Venmo",
             "s3Key": "payment-qr-codes/account-123/venmo.png",
         }
@@ -86,6 +87,7 @@ class TestGenerateQrCodePresignedUrl:
         event: Dict[str, Any] = {
             "qrCodeUrl": existing_url,
             "ownerAccountId": "account-123",
+            "identity": {"sub": "account-123"},
             "methodName": "Venmo",
             "s3Key": "payment-qr-codes/account-123/venmo.png",
         }
@@ -99,6 +101,7 @@ class TestGenerateQrCodePresignedUrl:
         event: Dict[str, Any] = {
             "qrCodeUrl": "s3://bucket/key",
             "ownerAccountId": None,
+            "identity": {"sub": "account-123"},
             "methodName": "Venmo",
             "s3Key": "payment-qr-codes/account-123/venmo.png",
         }
@@ -114,6 +117,7 @@ class TestGenerateQrCodePresignedUrl:
         event: Dict[str, Any] = {
             "qrCodeUrl": "s3://bucket/key",
             "ownerAccountId": "",
+            "identity": {"sub": "account-123"},
             "methodName": "Venmo",
             "s3Key": "payment-qr-codes/account-123/venmo.png",
         }
@@ -122,6 +126,7 @@ class TestGenerateQrCodePresignedUrl:
             generate_qr_code_presigned_url(event, None)
 
         assert exc_info.value.error_code == ErrorCode.UNAUTHORIZED
+        assert "Owner account ID required" in str(exc_info.value.message)
 
     def test_generates_presigned_url_success(self, s3_bucket: Any) -> None:
         """Test successful presigned URL generation."""
@@ -136,6 +141,7 @@ class TestGenerateQrCodePresignedUrl:
         event: Dict[str, Any] = {
             "qrCodeUrl": s3_key,
             "ownerAccountId": owner_account_id,
+            "identity": {"sub": owner_account_id},
             "methodName": method_name,
             "s3Key": s3_key,
         }
@@ -152,6 +158,7 @@ class TestGenerateQrCodePresignedUrl:
         event: Dict[str, Any] = {
             "qrCodeUrl": "s3://bucket/key",
             "ownerAccountId": "account-123",
+            "identity": {"sub": "account-123"},
             "methodName": "Venmo",
             "s3Key": "some-key",
         }
@@ -176,6 +183,7 @@ class TestGenerateQrCodePresignedUrl:
         event: Dict[str, Any] = {
             "qrCodeUrl": s3_key,
             "ownerAccountId": owner_account_id,
+            "identity": {"sub": owner_account_id},
             # methodName intentionally omitted
             "s3Key": s3_key,
         }
@@ -184,3 +192,32 @@ class TestGenerateQrCodePresignedUrl:
 
         assert result is not None
         assert result.startswith("https://")
+
+    def test_raises_forbidden_when_caller_mismatches_owner(self) -> None:
+        """Test that FORBIDDEN is raised when caller is not the owner."""
+        event: Dict[str, Any] = {
+            "qrCodeUrl": "payment-qr-codes/account-123/venmo.png",
+            "ownerAccountId": "account-123",
+            "identity": {"sub": "other-account"},
+            "methodName": "Venmo",
+            "s3Key": "payment-qr-codes/account-123/venmo.png",
+        }
+
+        with pytest.raises(AppError) as exc_info:
+            generate_qr_code_presigned_url(event, None)
+
+        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
+
+    def test_raises_unauthorized_when_identity_missing(self) -> None:
+        """Test that UNAUTHORIZED is raised when identity is missing."""
+        event: Dict[str, Any] = {
+            "qrCodeUrl": "payment-qr-codes/account-123/venmo.png",
+            "ownerAccountId": "account-123",
+            "methodName": "Venmo",
+            "s3Key": "payment-qr-codes/account-123/venmo.png",
+        }
+
+        with pytest.raises(AppError) as exc_info:
+            generate_qr_code_presigned_url(event, None)
+
+        assert exc_info.value.error_code == ErrorCode.UNAUTHORIZED

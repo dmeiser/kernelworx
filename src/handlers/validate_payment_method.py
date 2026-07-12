@@ -59,9 +59,13 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     try:
         owner_account_id, payment_method = _extract_and_normalize_inputs(event)
 
-        logger.info("Validating payment method for order", owner_account_id=owner_account_id, payment_method=payment_method)
+        logger.info(
+            "Validating payment method for order", owner_account_id=owner_account_id, payment_method=payment_method
+        )
         validate_payment_method_exists(owner_account_id, payment_method)
-        logger.info("Payment method validated successfully", owner_account_id=owner_account_id, payment_method=payment_method)
+        logger.info(
+            "Payment method validated successfully", owner_account_id=owner_account_id, payment_method=payment_method
+        )
 
         prev_result = event.get("prev", {}).get("result", {})
         result: Dict[str, Any] = dict(prev_result) if isinstance(prev_result, dict) else {}

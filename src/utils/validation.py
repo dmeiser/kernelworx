@@ -34,7 +34,7 @@ def validate_unit_number(value: Any, required: bool = False) -> Optional[int]:
 
     try:
         return int(value)
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         raise AppError(ErrorCode.INVALID_INPUT, "unitNumber must be a valid integer")
 
 
@@ -94,7 +94,7 @@ def normalize_phone(phone: str) -> str:
     Normalize US phone number to E.164 format (+1XXXXXXXXXX).
 
     Args:
-        phone: Phone number with various formatting
+        phone: Phone number with various formatting (string or coercible value).
 
     Returns:
         Normalized phone number
@@ -102,6 +102,9 @@ def normalize_phone(phone: str) -> str:
     Raises:
         AppError: If phone number is invalid
     """
+    if not isinstance(phone, str):
+        phone = str(phone)
+
     match = PHONE_PATTERN.match(phone.strip())
 
     if not match:

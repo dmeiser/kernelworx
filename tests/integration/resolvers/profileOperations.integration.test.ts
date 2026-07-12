@@ -620,7 +620,7 @@ describe('Profile Operations Integration Tests', () => {
     });
   });
 
-  describe('deleteSellerProfile (VTL Resolver)', () => {
+  describe('deleteSellerProfile (Lambda Resolver)', () => {
     it('deletes existing profile', async () => {
       // Arrange: Create profile
       const profileName = `${getTestPrefix()}-DeleteTest`;
