@@ -19,18 +19,52 @@ import { fileURLToPath } from 'url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
-const dynamodb = new DynamoDBClient({ region: 'us-east-1' });
+const dynamodbRegion = process.env.TEST_REGION || 'us-east-1';
+const dynamodb = new DynamoDBClient({ region: dynamodbRegion });
 const cognito = new CognitoIdentityProviderClient({ region: process.env.TEST_REGION || 'us-east-1' });
 
-// Table names from environment or defaults
-const SHARED_CAMPAIGNS_TABLE = process.env.SHARED_CAMPAIGNS_TABLE_NAME || 'kernelworx-shared-campaigns-ue1-dev';
-const PROFILES_TABLE = process.env.PROFILES_TABLE_NAME || 'kernelworx-profiles-ue1-dev';
-const CAMPAIGNS_TABLE = process.env.CAMPAIGNS_TABLE_NAME || 'kernelworx-campaigns-ue1-dev';
-const ORDERS_TABLE = process.env.ORDERS_TABLE_NAME || 'kernelworx-orders-ue1-dev';
-const CATALOGS_TABLE = process.env.CATALOGS_TABLE_NAME || 'kernelworx-catalogs-ue1-dev';
-const SHARES_TABLE = process.env.SHARES_TABLE_NAME || 'kernelworx-shares-ue1-dev';
-const INVITES_TABLE = process.env.INVITES_TABLE_NAME || 'kernelworx-invites-ue1-dev';
-const ACCOUNTS_TABLE = process.env.ACCOUNTS_TABLE_NAME || 'kernelworx-accounts-ue1-dev';
+function parseEnvironmentFromUrl(baseUrl: string): string {
+  try {
+    const url = new URL(baseUrl);
+    const hostname = url.hostname.toLowerCase();
+    if (hostname === 'localhost' || hostname.endsWith('.localhost')) return 'dev';
+    if (hostname === 'kernelworx.app' || hostname === 'www.kernelworx.app') return 'prod';
+    const parts = url.hostname.split('.');
+    if (parts.length >= 3) return parts[0];
+  } catch {
+    // fall through
+  }
+  return 'dev';
+}
+
+function regionToAbbrev(region: string): string {
+  return region
+    .split('-')
+    .filter((part) => part)
+    .map((part) => part[0])
+    .join('');
+}
+
+function resolveTableName(baseName: string): string {
+  const envKey = `${baseName.toUpperCase()}_TABLE_NAME`;
+  if (process.env[envKey]) return process.env[envKey] as string;
+  const baseUrl = process.env.E2E_BASE_URL || 'https://dev.kernelworx.app';
+  const environment = parseEnvironmentFromUrl(baseUrl);
+  const region = process.env.TEST_REGION || 'us-east-1';
+  const regionAbbrev = regionToAbbrev(region);
+  const slug = baseName.toLowerCase().replace(/_/g, '-');
+  return `kernelworx-${slug}-${regionAbbrev}-${environment}`;
+}
+
+// Table names from environment or derived from E2E_BASE_URL + TEST_REGION
+const SHARED_CAMPAIGNS_TABLE = resolveTableName('SHARED_CAMPAIGNS');
+const PROFILES_TABLE = resolveTableName('PROFILES');
+const CAMPAIGNS_TABLE = resolveTableName('CAMPAIGNS');
+const ORDERS_TABLE = resolveTableName('ORDERS');
+const CATALOGS_TABLE = resolveTableName('CATALOGS');
+const SHARES_TABLE = resolveTableName('SHARES');
+const INVITES_TABLE = resolveTableName('INVITES');
+const ACCOUNTS_TABLE = resolveTableName('ACCOUNTS');
 const TEST_USER_POOL_ID = process.env.TEST_USER_POOL_ID;
 
 async function cleanupUnconfirmedSmokeUsers(): Promise<number> {
