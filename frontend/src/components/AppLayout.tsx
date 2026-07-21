@@ -197,7 +197,7 @@ const AppLayoutView: React.FC<{
   children,
 }) => (
   <Box sx={{ display: 'flex' }}>
-    <AppBar position="fixed" sx={{ zIndex: (theme) => theme.zIndex.drawer + 1 }}>
+    <AppBar position="fixed" color="default" sx={{ zIndex: (theme) => theme.zIndex.drawer + 1 }}>
       <Container maxWidth="lg">
         <Toolbar disableGutters>
           {!isDesktop && (
@@ -212,15 +212,14 @@ const AppLayoutView: React.FC<{
             </IconButton>
           )}
 
-          <Box sx={{ display: 'flex', alignItems: 'center', flexGrow: 1 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', flexGrow: 1, gap: 1 }}>
             <Box
               component="img"
               src="/logo.svg"
-              alt="Popcorn kernel"
+              alt="KernelWorx mark"
               sx={{
-                width: { xs: '28px', sm: '32px', md: '40px' },
-                height: { xs: '28px', sm: '32px', md: '40px' },
-                mr: { xs: 0.5, sm: 1 },
+                width: { xs: 28, sm: 32, md: 36 },
+                height: { xs: 28, sm: 32, md: 36 },
               }}
             />
             <Typography
@@ -228,19 +227,22 @@ const AppLayoutView: React.FC<{
               noWrap
               component="div"
               sx={{
-                fontFamily: '"Kaushan Script", cursive',
-                fontWeight: 600,
-                letterSpacing: '0.08em',
-                fontSize: { xs: '28px', sm: '32px', md: '40px' },
+                fontFamily: '"Bricolage Grotesque", "Atkinson Hyperlegible", sans-serif',
+                fontWeight: 700,
+                fontSize: { xs: '1.25rem', sm: '1.35rem' },
                 lineHeight: 1,
-                WebkitTextStroke: '0.8px rgba(255, 255, 255, 0.8)',
-                textShadow: '0 1px 0 rgba(255,255,255,0.12), 0 2px 0 rgba(255,255,255,0.06)',
+                letterSpacing: '-0.01em',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
               }}
             >
-              KernelWorx
+              <Box component="span" sx={{ color: '#333333' }}>
+                Kernel
+              </Box>
+              <Box component="span" sx={{ color: 'primary.main' }}>
+                Worx
+              </Box>
             </Typography>
           </Box>
 
