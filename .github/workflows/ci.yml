@@ -80,7 +80,7 @@ jobs:
 
       - name: Spell check
         working-directory: .
-        run: ./frontend/node_modules/.bin/cspell '**' --config cspell.json
+        run: ./frontend/node_modules/.bin/cspell --config cspell.json .
 
       - name: ESLint
         run: npm run lint

@@ -45,8 +45,8 @@ def test_login_invalid_credentials(page: Page) -> None:
 def test_logout(owner_page: Page) -> None:
     """Verify that after sign-out the browser is redirected to ``/login``.
 
-    Relies on ``logout()`` from ``utils.auth``, which navigates to ``/settings``
-    and clicks the *Sign Out* button.  The test then confirms the final URL.
+    Relies on ``logout()`` from ``utils.auth``, which navigates to ``/home``
+    and clicks the *Sign out* button in the AppBar.  The test then confirms the final URL.
     """
     logout(owner_page)
     assert "/login" in owner_page.url, "Browser must redirect to /login after the owner clicks 'Sign Out'"

@@ -79,7 +79,7 @@ lint-frontend:
 # Spell check across the repository
 spellcheck:
 	@echo "Running cspell..."
-	frontend/node_modules/.bin/cspell '**' --config cspell.json
+	frontend/node_modules/.bin/cspell --config cspell.json .
 
 # All linting
 lint: lint-python lint-frontend
@@ -133,7 +133,7 @@ lint-infra: tflint kics
 all: format lint typecheck test test-frontend
 
 # CI pipeline (no formatting, just validation)
-ci: spellcheck lint typecheck test test-frontend test-integration
+ci: lint typecheck spellcheck test test-frontend test-integration
 
 # Clean generated files
 clean:

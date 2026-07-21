@@ -25,24 +25,27 @@
 ## Project Structure
 
 ```
-tofu/budgets/
+tofu/bootstrap/budgets/
 ├── README.md
+├── DEPLOYMENT.md
 ├── modules/
 │   └── budget/
 │       ├── main.tf         # Budget and anomaly resources
 │       ├── variables.tf    # Input variables
 │       └── outputs.tf      # Outputs
 └── environments/
+    ├── dev/
+    │   ├── main.tf         # Development configuration
+    │   └── outputs.tf      # Development outputs
     └── prod/
         ├── main.tf         # Production configuration
-        ├── outputs.tf      # Production outputs
-        └── terraform.tfstate  # Local state file
+        └── outputs.tf      # Production outputs
 ```
 
 ## Management Commands
 
 ```bash
-cd tofu/budgets/environments/prod
+cd tofu/bootstrap/budgets/environments/prod
 
 # View current configuration
 tofu show
@@ -64,6 +67,11 @@ tofu destroy
 
 **Check your email** (dave@repeatersolutions.com) and confirm these subscriptions.
 
+### Runbook: After `budget_name` rename
+
+After applying the `budget_name` rename, re-confirm 3 budget notification
+subscription emails (AWS sends new confirmation emails for the new budget name).
+
 ## Alerts You'll Receive
 
 - **Budget Alerts**: When spending hits 50%, 80%, or 100% of $10/month
@@ -79,6 +87,6 @@ Consider adding:
 
 ## Notes
 
-- State stored locally in `terraform.tfstate` (separate from main infrastructure)
+- State is stored remotely in S3 with `use_lockfile = true` (see the `backend "s3"` block in each environment's `main.tf`); no local `terraform.tfstate` is used.
 - Uses existing Default-Services-Monitor to avoid AWS quota limits
 - Anomaly frequency is DAILY (IMMEDIATE requires SNS instead of email)

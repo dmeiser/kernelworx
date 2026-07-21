@@ -26,6 +26,7 @@ This conftest adds:
     global_cleanup       (session scope, autouse) – post-suite TypeScript cleanup
 """
 
+import json
 import os
 import re
 import subprocess
@@ -34,7 +35,6 @@ import warnings
 from collections.abc import Generator
 from pathlib import Path
 
-import json
 import pytest
 from dotenv import load_dotenv
 from playwright.sync_api import Browser, BrowserContext, Page, expect

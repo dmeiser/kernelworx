@@ -63,7 +63,6 @@ For responsive web exports, treat these as a modern breakpoint system for one ad
 8. Compare final screenshots against the export at 360×800, 390×844, 430×932, 820×1180, 1024×768, 1366×768, 1440×900, and 1920×1080 before declaring done.
 
 ## Entry points
-- `assets/BRANDING_GUIDE.html`
 - `brand.html`
 - `system/artifacts/deck.html`
 - `system/artifacts/email.html`
@@ -76,8 +75,8 @@ For responsive web exports, treat these as a modern breakpoint system for one ad
 - `system/kit.html`
 
 ## Styles
-- `context/github/dmeiser-kernelworx/files/frontend/src/App.css`
-- `context/github/dmeiser-kernelworx/files/frontend/src/index.css`
+- `frontend/src/App.css`
+- `frontend/src/index.css`
 - `fonts/fonts.css`
 - `system/variables.css`
 - `system/variables.dark.css`

@@ -39,6 +39,9 @@ data "aws_caller_identity" "current" {}
 module "budget" {
   source = "../../modules/budget"
 
+  # name_prefix uses lowercase `kernelworx` for AWS resource naming (programmatic
+  # identifiers, e.g. SNS topic names, IAM policies). Display names (budget_name
+  # below) use PascalCase `KernelWorx`. This casing split is intentional.
   name_prefix           = "kernelworx-dev"
   budget_name           = "KernelWorxDev-Monthly"
   limit_amount          = "10.0"
