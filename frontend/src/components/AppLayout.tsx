@@ -7,7 +7,6 @@ import {
   Toolbar,
   Typography,
   IconButton,
-  Button,
   Drawer,
   List,
   ListItemText,
@@ -24,7 +23,6 @@ import PersonIcon from '@mui/icons-material/Person';
 import SettingsIcon from '@mui/icons-material/Settings';
 import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
 import InventoryIcon from '@mui/icons-material/Inventory';
-import AccountCircleIcon from '@mui/icons-material/AccountCircle';
 import LogoutIcon from '@mui/icons-material/Logout';
 import CardGiftcardIcon from '@mui/icons-material/CardGiftcard';
 import AssessmentIcon from '@mui/icons-material/Assessment';
@@ -255,7 +253,6 @@ export const AppLayout: React.FC<{ children?: React.ReactNode }> = ({ children }
   return (
     <AppLayoutView
       isDesktop={isDesktop}
-      account={account}
       displayName={displayName}
       onLogout={logout}
       onNavigate={handleNavigation}
@@ -271,7 +268,6 @@ export const AppLayout: React.FC<{ children?: React.ReactNode }> = ({ children }
 
 const AppLayoutView: React.FC<{
   isDesktop: boolean;
-  account: ReturnType<typeof useAuth>['account'];
   displayName: string;
   onLogout: () => void;
   onNavigate: (path: string) => void;
@@ -283,7 +279,6 @@ const AppLayoutView: React.FC<{
   children?: React.ReactNode;
 }> = ({
   isDesktop,
-  account,
   displayName,
   onLogout,
   onNavigate,
@@ -297,59 +292,55 @@ const AppLayoutView: React.FC<{
   <Box sx={{ display: 'flex' }}>
     <AppBar position="fixed" color="default" sx={{ zIndex: (theme) => theme.zIndex.drawer + 1 }}>
       <Container maxWidth="lg">
-        <Toolbar disableGutters sx={{ justifyContent: 'space-between', gap: 2 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            {!isDesktop && (
-              <IconButton
-                color="inherit"
-                aria-label="open drawer"
-                edge="start"
-                onClick={toggleMobileDrawer}
-                sx={{ mr: 0.5 }}
-              >
-                <MenuIcon />
-              </IconButton>
-            )}
-
-            <Box
-              sx={{ display: 'flex', alignItems: 'center', gap: 1, cursor: 'pointer' }}
-              onClick={() => onNavigate('/home')}
+        <Toolbar disableGutters sx={{ gap: 1 }}>
+          {!isDesktop && (
+            <IconButton
+              color="inherit"
+              aria-label="open drawer"
+              edge="start"
+              onClick={toggleMobileDrawer}
+              sx={{ mr: 0.5 }}
             >
-              <Box
-                component="img"
-                src="/logo.svg"
-                alt="KernelWorx mark"
-                sx={{
-                  width: { xs: 28, sm: 32, md: 36 },
-                  height: { xs: 28, sm: 32, md: 36 },
-                }}
-              />
-              <Typography
-                variant="h6"
-                noWrap
-                component="div"
-                sx={{
-                  fontFamily: displayFont,
-                  fontWeight: 700,
-                  fontSize: { xs: '1.25rem', sm: '1.35rem' },
-                  lineHeight: 1,
-                  letterSpacing: '-0.01em',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                <Box component="span" sx={{ color: '#333333' }}>
-                  Kernel
-                </Box>
-                <Box component="span" sx={{ color: 'primary.main' }}>
-                  Worx
-                </Box>
-              </Typography>
-            </Box>
-          </Box>
+              <MenuIcon />
+            </IconButton>
+          )}
 
-          {account && <AccountButton isDesktop={isDesktop} displayName={displayName} onNavigate={onNavigate} />}
+          <Box
+            sx={{ display: 'flex', alignItems: 'center', gap: 1, cursor: 'pointer' }}
+            onClick={() => onNavigate('/home')}
+          >
+            <Box
+              component="img"
+              src="/logo.svg"
+              alt="KernelWorx mark"
+              sx={{
+                width: { xs: 28, sm: 32, md: 36 },
+                height: { xs: 28, sm: 32, md: 36 },
+              }}
+            />
+            <Typography
+              variant="h6"
+              noWrap
+              component="div"
+              sx={{
+                fontFamily: displayFont,
+                fontWeight: 700,
+                fontSize: { xs: '1.25rem', sm: '1.35rem' },
+                lineHeight: 1,
+                letterSpacing: '-0.01em',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              <Box component="span" sx={{ color: '#333333' }}>
+                Kernel
+              </Box>
+              <Box component="span" sx={{ color: 'primary.main' }}>
+                Worx
+              </Box>
+            </Typography>
+          </Box>
         </Toolbar>
       </Container>
     </AppBar>
@@ -412,50 +403,4 @@ const AppLayoutView: React.FC<{
 
     <Toast />
   </Box>
-);
-
-const AccountButton: React.FC<{
-  isDesktop: boolean;
-  displayName: string;
-  onNavigate: (path: string) => void;
-}> = ({ isDesktop, displayName, onNavigate }) => (
-  <Button
-    color="inherit"
-    onClick={() => onNavigate('/account/settings')}
-    sx={{
-      textTransform: 'none',
-      mr: 1,
-      display: 'flex',
-      alignItems: 'center',
-      minWidth: 'auto',
-      px: 1,
-      color: brand.text.primary,
-      borderRadius: brand.radius.md,
-      fontFamily: displayFont,
-      '&:hover': {
-        backgroundColor: brand.fill.tertiary,
-      },
-    }}
-  >
-    <AccountCircleIcon
-      sx={{
-        fontSize: isDesktop ? '1.25rem' : '1.5rem',
-        mr: isDesktop ? 0.5 : 0,
-        color: brand.text.secondary,
-      }}
-    />
-    <Typography
-      variant="body2"
-      noWrap
-      sx={{
-        maxWidth: 120,
-        ml: isDesktop ? 0 : 0.5,
-        display: isDesktop ? 'block' : { xs: 'none', sm: 'block' },
-        fontFamily: displayFont,
-        color: brand.text.primary,
-      }}
-    >
-      {displayName}
-    </Typography>
-  </Button>
 );
