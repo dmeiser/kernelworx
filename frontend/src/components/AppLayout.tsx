@@ -41,18 +41,21 @@ const DRAWER_WIDTH = 240;
 const drawerPaperSx = {
   width: DRAWER_WIDTH,
   boxSizing: 'border-box',
-  backgroundColor: brand.fill.quaternary,
+  backgroundColor: brand.background.container,
   borderRight: `1px solid ${brand.border.main}`,
 };
 
 const navItemSx = {
   borderRadius: brand.radius.md,
   color: brand.text.primary,
+  mx: 1,
+  px: 1.5,
   '& .MuiListItemIcon-root': {
     color: brand.text.secondary,
+    minWidth: 36,
   },
   '&:hover': {
-    backgroundColor: brand.background.container,
+    backgroundColor: brand.fill.tertiary,
   },
   '&.Mui-selected': {
     backgroundColor: brand.primary[6],
@@ -73,8 +76,11 @@ const navItemSx = {
 const adminNavItemSx = {
   borderRadius: brand.radius.md,
   color: brand.error.main,
+  mx: 1,
+  px: 1.5,
   '& .MuiListItemIcon-root': {
     color: brand.error.main,
+    minWidth: 36,
   },
   '&:hover': {
     backgroundColor: brand.error.bg,
@@ -88,16 +94,31 @@ const adminNavItemSx = {
   },
 };
 
+const sectionLabelSx = {
+  px: 2,
+  py: 1,
+  fontSize: '0.6875rem',
+  fontWeight: 700,
+  letterSpacing: '0.12em',
+  textTransform: 'uppercase',
+  color: brand.text.tertiary,
+};
+
 const DrawerContent: React.FC<{
   onNavigate: (path: string) => void;
   isActive: (path: string) => boolean;
   hasSharedCampaigns: boolean;
   isAdmin: boolean;
-}> = ({ onNavigate, isActive, hasSharedCampaigns, isAdmin }) => (
+  displayName: string;
+  onLogout: () => void;
+}> = ({ onNavigate, isActive, hasSharedCampaigns, isAdmin, displayName, onLogout }) => (
   <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
     <Toolbar />
     <Divider sx={{ borderColor: brand.border.secondary }} />
-    <List sx={{ flexGrow: 1 }}>
+    <List sx={{ flexGrow: 1, pt: 1 }}>
+      <Typography component="div" sx={sectionLabelSx}>
+        Your Sale
+      </Typography>
       <ListItemButton onClick={() => onNavigate('/home')} selected={isActive('/home')} sx={navItemSx}>
         <ListItemIcon>
           <HomeIcon />
@@ -109,12 +130,6 @@ const DrawerContent: React.FC<{
           <PersonIcon />
         </ListItemIcon>
         <ListItemText primary="My Scouts" />
-      </ListItemButton>
-      <ListItemButton onClick={() => onNavigate('/accept-invite')} selected={isActive('/accept-invite')} sx={navItemSx}>
-        <ListItemIcon>
-          <CardGiftcardIcon />
-        </ListItemIcon>
-        <ListItemText primary="Accept Invite" />
       </ListItemButton>
       <ListItemButton onClick={() => onNavigate('/catalogs')} selected={isActive('/catalogs')} sx={navItemSx}>
         <ListItemIcon>
@@ -128,6 +143,10 @@ const DrawerContent: React.FC<{
         </ListItemIcon>
         <ListItemText primary="Payment Methods" />
       </ListItemButton>
+
+      <Typography component="div" sx={{ ...sectionLabelSx, mt: 2 }}>
+        Fundraising
+      </Typography>
       <ListItemButton onClick={() => onNavigate('/shared-campaigns')} selected={isActive('/shared-campaigns')} sx={navItemSx}>
         <ListItemIcon>
           <CampaignIcon />
@@ -142,15 +161,26 @@ const DrawerContent: React.FC<{
           <ListItemText primary="Campaign Reports" />
         </ListItemButton>
       )}
+      <ListItemButton onClick={() => onNavigate('/accept-invite')} selected={isActive('/accept-invite')} sx={navItemSx}>
+        <ListItemIcon>
+          <CardGiftcardIcon />
+        </ListItemIcon>
+        <ListItemText primary="Accept Invite" />
+      </ListItemButton>
+
+      <Typography component="div" sx={{ ...sectionLabelSx, mt: 2 }}>
+        Account
+      </Typography>
       <ListItemButton onClick={() => onNavigate('/settings')} selected={isActive('/settings')} sx={navItemSx}>
         <ListItemIcon>
           <SettingsIcon />
         </ListItemIcon>
         <ListItemText primary="Settings" />
       </ListItemButton>
+
       {isAdmin && (
         <>
-          <Divider sx={{ my: 1, borderColor: brand.border.secondary }} />
+          <Divider sx={{ my: 2, mx: 2, borderColor: brand.border.secondary }} />
           <ListItemButton onClick={() => onNavigate('/admin')} selected={isActive('/admin')} sx={adminNavItemSx}>
             <ListItemIcon>
               <AdminPanelSettingsIcon />
@@ -160,6 +190,32 @@ const DrawerContent: React.FC<{
         </>
       )}
     </List>
+
+    <Divider sx={{ borderColor: brand.border.secondary }} />
+    <Box sx={{ p: 2 }}>
+      <ListItemButton
+        onClick={onLogout}
+        sx={{
+          borderRadius: brand.radius.md,
+          color: brand.text.secondary,
+          px: 1.5,
+          '&:hover': {
+            backgroundColor: brand.fill.tertiary,
+            color: brand.error.main,
+          },
+        }}
+      >
+        <ListItemIcon sx={{ color: 'inherit', minWidth: 36 }}>
+          <LogoutIcon />
+        </ListItemIcon>
+        <ListItemText
+          primary="Sign out"
+          secondary={displayName}
+          primaryTypographyProps={{ fontWeight: 600 }}
+          secondaryTypographyProps={{ noWrap: true }}
+        />
+      </ListItemButton>
+    </Box>
   </Box>
 );
 
@@ -298,8 +354,6 @@ const AppLayoutView: React.FC<{
           </Box>
 
           {account && <AccountButton isDesktop={isDesktop} displayName={displayName} onNavigate={onNavigate} />}
-
-          <LogoutButton onLogout={onLogout} />
         </Toolbar>
       </Container>
     </AppBar>
@@ -318,6 +372,8 @@ const AppLayoutView: React.FC<{
           isActive={isActive}
           hasSharedCampaigns={hasSharedCampaigns}
           isAdmin={isAdmin}
+          displayName={displayName}
+          onLogout={onLogout}
         />
       </Drawer>
     ) : (
@@ -336,6 +392,8 @@ const AppLayoutView: React.FC<{
           isActive={isActive}
           hasSharedCampaigns={hasSharedCampaigns}
           isAdmin={isAdmin}
+          displayName={displayName}
+          onLogout={onLogout}
         />
       </Drawer>
     )}
@@ -403,30 +461,5 @@ const AccountButton: React.FC<{
     >
       {displayName}
     </Typography>
-  </Button>
-);
-
-const LogoutButton: React.FC<{ onLogout: () => void }> = ({ onLogout }) => (
-  <Button
-    color="inherit"
-    onClick={onLogout}
-    startIcon={<LogoutIcon sx={{ fontSize: { xs: '1rem', sm: '1.25rem' }, color: brand.text.secondary }} />}
-    sx={{
-      textTransform: 'none',
-      fontWeight: 500,
-      minWidth: { xs: 'auto', sm: 'auto' },
-      px: { xs: 1, sm: 2 },
-      fontSize: { xs: '0.875rem', sm: '1rem' },
-      color: brand.text.primary,
-      borderRadius: brand.radius.md,
-      fontFamily: displayFont,
-      '&:hover': {
-        backgroundColor: brand.fill.tertiary,
-      },
-    }}
-  >
-    <Box component="span" sx={{ display: { xs: 'none', sm: 'inline' }, fontFamily: displayFont }}>
-      Log out
-    </Box>
   </Button>
 );
