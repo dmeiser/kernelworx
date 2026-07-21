@@ -6,9 +6,10 @@
  */
 
 import React from 'react';
-import { Box, Container, Typography, Paper, Divider, List, ListItem, ListItemText } from '@mui/material';
+import { Box, Container, Typography, Card, CardContent, Divider, List, ListItem, ListItemText } from '@mui/material';
 import { Delete as DeleteIcon } from '@mui/icons-material';
 import { LandingHeader } from '../components/LandingHeader';
+import { LandingFooter } from '../components/LandingFooter';
 
 export const PrivacyPolicyPage: React.FC = () => {
   return (
@@ -16,9 +17,23 @@ export const PrivacyPolicyPage: React.FC = () => {
       <LandingHeader />
 
       {/* Main Content */}
-      <Container maxWidth="md" sx={{ py: 4 }}>
-        <Paper elevation={2} sx={{ p: { xs: 2, sm: 4 } }}>
-          <Typography variant="h4" component="h1" gutterBottom fontWeight={600}>
+      <Container maxWidth="md" sx={{ py: { xs: 4, md: 6 } }}>
+        <Card>
+          <CardContent sx={{ p: { xs: 2, sm: 4 } }}>
+          <Typography
+            variant="overline"
+            component="span"
+            sx={{ display: 'block', mb: 1 }}
+          >
+            Legal
+          </Typography>
+          <Typography
+            variant="h4"
+            component="h1"
+            gutterBottom
+            fontWeight={600}
+            sx={{ fontFamily: '"Bricolage Grotesque", "Atkinson Hyperlegible", sans-serif' }}
+          >
             Privacy Policy
           </Typography>
 
@@ -261,8 +276,10 @@ export const PrivacyPolicyPage: React.FC = () => {
               security and privacy, this service is provided "as is" without warranties.
             </Typography>
           </Box>
-        </Paper>
+          </CardContent>
+        </Card>
       </Container>
+      <LandingFooter />
     </Box>
   );
 };

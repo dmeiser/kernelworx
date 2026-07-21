@@ -1,11 +1,11 @@
 /**
  * Tests for LandingPage
  *
- * Tests rendering, login button behavior, branding compliance
+ * Tests rendering, login button behavior, and brand compliance.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { LandingPage } from '../src/pages/LandingPage';
 import { AuthProvider } from '../src/contexts/AuthContext';
@@ -66,67 +66,62 @@ describe('LandingPage', () => {
     mockNavigate.mockClear();
   });
 
-  it('renders the page title with correct branding', async () => {
+  it('renders the brand wordmark', async () => {
     renderWithAuth();
-
     await waitFor(() => {
-      expect(screen.getByText('KernelWorx')).toBeInTheDocument();
-    });
-
-    // Check for Kaushan Script font in header
-    const headerTitle = screen.getAllByText('KernelWorx')[0];
-    expect(headerTitle).toHaveStyle({ fontFamily: '"Kaushan Script", cursive' });
-  });
-
-  it('renders the hero title', async () => {
-    renderWithAuth();
-
-    await waitFor(() => {
-      expect(screen.getByText('Popcorn Sales Made Easy')).toBeInTheDocument();
+      expect(screen.getAllByText(/KernelWorx/i).length).toBeGreaterThan(0);
     });
   });
 
-
-
-  it('renders footer text', async () => {
+  it('renders the hero heading', async () => {
     renderWithAuth();
-
     await waitFor(() => {
-      expect(screen.getByText('Built with ❤️ for Scouting America parents')).toBeInTheDocument();
-      expect(screen.getByText('Free to use • MIT License')).toBeInTheDocument();
+      expect(
+        screen.getByRole('heading', { name: /Use it on your own/i }),
+      ).toBeInTheDocument();
     });
   });
 
+  it('renders the hero dashboard preview', async () => {
+    renderWithAuth();
+    await waitFor(() => {
+      const preview = screen.getByAltText('KernelWorx dashboard preview');
+      expect(preview).toBeInTheDocument();
+      expect(preview).toHaveAttribute('src', '/marketing/home-page.png');
+    });
+  });
 
+  it('shows "Get started" CTA when not authenticated', async () => {
+    renderWithAuth(false);
+    await waitFor(() => {
+      expect(screen.getAllByRole('button', { name: /get started/i }).length).toBeGreaterThan(0);
+    });
+  });
 
-  it('shows "Go to Dashboard" button when authenticated', async () => {
+  it('shows "Go to Dashboard" CTA when authenticated', async () => {
     renderWithAuth(true);
-
     await waitFor(() => {
       expect(screen.getAllByRole('button', { name: /go to dashboard/i }).length).toBeGreaterThan(0);
     });
   });
 
-  it('navigates to /login when Get Started Free button is clicked and user not authenticated', async () => {
+  it('navigates to /login when Get started is clicked and user is not authenticated', async () => {
     const user = userEvent.setup();
-
     renderWithAuth(false);
 
     await waitFor(() => {
-      expect(screen.getAllByRole('button', { name: /get started free/i }).length).toBeGreaterThan(0);
+      expect(screen.getAllByRole('button', { name: /get started/i }).length).toBeGreaterThan(0);
     });
 
-    const getStartedButton = screen.getAllByRole('button', { name: /get started free/i })[0];
-    await user.click(getStartedButton);
+    await user.click(screen.getAllByRole('button', { name: /get started/i })[0]);
 
     await waitFor(() => {
       expect(mockNavigate).toHaveBeenCalledWith('/login');
     });
   });
 
-  it('navigates to /home when dashboard button clicked and user is authenticated', async () => {
+  it('navigates to /home when Go to Dashboard is clicked and user is authenticated', async () => {
     const user = userEvent.setup();
-
     renderWithAuth(true);
 
     await waitFor(() => {
@@ -141,134 +136,33 @@ describe('LandingPage', () => {
     });
   });
 
-  it('shows "Get Started Free" CTA button when not authenticated', async () => {
-    renderWithAuth(false);
-
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: /get started free/i })).toBeInTheDocument();
-    });
-  });
-
-  it('shows "Go to Dashboard" CTA button when authenticated', async () => {
-    renderWithAuth(true);
-
-    await waitFor(() => {
-      expect(screen.getAllByRole('button', { name: /go to dashboard/i }).length).toBeGreaterThan(0);
-    });
-  });
-
-  it('applies correct branding to hero title', async () => {
+  it('renders FAQ accordion', async () => {
     renderWithAuth();
-
     await waitFor(() => {
-      const heroTitle = screen.getByText('Popcorn Sales Made Easy');
-      expect(heroTitle).toHaveStyle({
-        fontFamily: '"Kaushan Script", cursive',
-      });
+      expect(screen.getByRole('button', { name: /What is KernelWorx\?/i })).toBeInTheDocument();
     });
   });
 
-  it('renders logo image in header', async () => {
+  it('renders footer links', async () => {
     renderWithAuth();
-
     await waitFor(() => {
-      const logo = screen.getByAltText('Popcorn kernel');
-      expect(logo).toBeInTheDocument();
-      expect(logo).toHaveAttribute('src', '/logo.svg');
+      const footer = screen.getByRole('contentinfo');
+      expect(within(footer).getByRole('link', { name: /privacy/i })).toBeInTheDocument();
+      expect(within(footer).getByRole('link', { name: /our story/i })).toBeInTheDocument();
+      expect(within(footer).getByRole('link', { name: /sponsor/i })).toHaveAttribute(
+        'href',
+        'https://github.com/sponsors/dmeiser',
+      );
     });
   });
 
-  it('navigates to story page when hero story link clicked', async () => {
-    const user = userEvent.setup();
+  it('renders feature sections', async () => {
     renderWithAuth();
-
     await waitFor(() => {
-      expect(screen.getByText('Read the story behind KernelWorx')).toBeInTheDocument();
-    });
-
-    await user.click(screen.getByText('Read the story behind KernelWorx'));
-
-    await waitFor(() => {
-      expect(mockNavigate).toHaveBeenCalledWith('/story');
-    });
-  });
-
-  it('navigates to story page when footer Our Story button clicked', async () => {
-    const user = userEvent.setup();
-    renderWithAuth();
-
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: /our story/i })).toBeInTheDocument();
-    });
-
-    await user.click(screen.getByRole('button', { name: /our story/i }));
-
-    await waitFor(() => {
-      expect(mockNavigate).toHaveBeenCalledWith('/story');
-    });
-  });
-
-  it('navigates to privacy policy when footer link clicked', async () => {
-    const user = userEvent.setup();
-    renderWithAuth();
-
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: /privacy policy/i })).toBeInTheDocument();
-    });
-
-    const privacyButton = screen.getByRole('button', { name: /privacy policy/i });
-    await user.click(privacyButton);
-
-    await waitFor(() => {
-      expect(mockNavigate).toHaveBeenCalledWith('/privacy');
-    });
-  });
-
-  it('navigates to sponsor page when Sponsor button clicked', async () => {
-    renderWithAuth();
-
-    await waitFor(() => {
-      expect(screen.getByRole('link', { name: /sponsor kernelworx/i })).toBeInTheDocument();
-    });
-
-    const sponsorLink = screen.getByRole('link', { name: /sponsor kernelworx/i });
-    expect(sponsorLink).toHaveAttribute('href', 'https://github.com/sponsors/dmeiser');
-    expect(sponsorLink).toHaveAttribute('target', '_blank');
-  });
-
-  it('switches feature tabs and renders device frame variants', async () => {
-    const user = userEvent.setup();
-    renderWithAuth();
-
-    await waitFor(() => {
-      expect(screen.getByText('Organize Your Sellers')).toBeInTheDocument();
-    });
-
-    await user.click(screen.getByRole('tab', { name: /collaborate/i }));
-    await waitFor(() => {
-      expect(screen.getByText('Share With Your Unit')).toBeInTheDocument();
-    });
-
-    await user.click(screen.getByRole('tab', { name: /report/i }));
-    await waitFor(() => {
-      expect(screen.getByText('Run Reports')).toBeInTheDocument();
-    });
-  });
-
-  it('navigates to /home when authenticated dashboard button is clicked', async () => {
-    const user = userEvent.setup();
-    renderWithAuth(true);
-
-    await waitFor(() => {
-      expect(screen.getAllByRole('button', { name: /go to dashboard/i }).length).toBeGreaterThan(0);
-    });
-
-    // Click the last LandingPage dashboard button (avoid LandingHeader's button)
-    const dashboardButtons = screen.getAllByRole('button', { name: /go to dashboard/i });
-    await user.click(dashboardButtons[dashboardButtons.length - 1]);
-
-    await waitFor(() => {
-      expect(mockNavigate).toHaveBeenCalledWith('/home');
+      expect(screen.getByRole('heading', { name: /Organize your sellers/i })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: /Share with your unit/i })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: /Flexible payments/i })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: /Run reports/i })).toBeInTheDocument();
     });
   });
 });

@@ -6,9 +6,10 @@
  */
 
 import React from 'react';
-import { Box, Button, Container, Typography, Paper, Stack } from '@mui/material';
+import { Box, Button, Container, Typography, Card, CardContent, Stack } from '@mui/material';
 import { Favorite as FavoriteIcon } from '@mui/icons-material';
 import { LandingHeader } from '../components/LandingHeader';
+import { LandingFooter } from '../components/LandingFooter';
 
 export const StoryPage: React.FC = () => {
   return (
@@ -20,14 +21,20 @@ export const StoryPage: React.FC = () => {
         <Stack spacing={{ xs: 4, sm: 5 }}>
           <Box textAlign="center">
             <Typography
+              variant="overline"
+              component="span"
+              sx={{ display: 'block', mb: 1 }}
+            >
+              Our story
+            </Typography>
+            <Typography
               variant="h2"
               component="h1"
               gutterBottom
               sx={{
-                fontFamily: '"Kaushan Script", cursive',
+                fontFamily: '"Bricolage Grotesque", "Atkinson Hyperlegible", sans-serif',
                 color: 'primary.main',
-                fontWeight: 600,
-                letterSpacing: '0.08em',
+                fontWeight: 700,
                 fontSize: { xs: '2rem', sm: '2.75rem', md: '3.25rem' },
               }}
             >
@@ -38,31 +45,32 @@ export const StoryPage: React.FC = () => {
             </Typography>
           </Box>
 
-          <Paper elevation={2} sx={{ p: { xs: 3, sm: 4, md: 5 } }}>
+          <Card>
+            <CardContent>
             <Stack spacing={3}>
               <Typography variant="body1" color="text.primary">
                 As a parent of a Cub Scout and a Den Leader, I never felt like I had a handle on popcorn season. No
-                matter how organized I tried to be, I was still juggling paper sales sheets, payment apps, and a
-                spreadsheet that never matched the actual orders.
+                matter how organized I tried to be, I was juggling paper sales sheets, payment apps, and a spreadsheet
+                that never matched the order forms. My own handwriting didn't make the order forms any clearer.
               </Typography>
 
               <Typography variant="body1" color="text.primary">
                 Out selling door-to-door, I'd write down an order, then pull out my phone and fumble between payment
                 apps trying to find the right QR code while they waited. Then I'd go home and build a spreadsheet
-                because I couldn't keep doing the paper sheets and I needed the numbers. My handwriting didn't help —
-                I'd transpose numbers, lose names, and create more work for myself.
+                because I needed to total up multiple order forms, and the paper sheets made that painful. The
+                spreadsheet helped, but it meant retyping every order while trying to decode my own writing.
               </Typography>
 
               <Typography variant="body1" color="text.primary">
-                I was doing this for one Scout. Our Pack Kernel had to make sense of it for every youth in the pack —
-                paper orders, payments families turned in, and making sure the right products ended up with the right
-                families. It was a lot to ask of a volunteer — and it made selling popcorn harder for both parents and
-                Scouts.
+                I was doing this for one Scout. Our Pack Kernel had to repeat this process for every Scout in the Pack —
+                paper orders, payments turned in by families, and making sure the Pack's final numbers added up across
+                all the individual forms. It was a lot to ask of a volunteer — and it made selling popcorn harder for
+                both parents and Scouts.
               </Typography>
 
               <Typography variant="body1" color="text.primary">
                 I started asking a simple question: How could popcorn season be easier — not just for me, but for the
-                Pack Kernel, the parents, and the Scouts?
+                Pack, the parents, and the Scouts?
               </Typography>
 
               <Typography variant="body1" color="text.primary">
@@ -77,7 +85,8 @@ export const StoryPage: React.FC = () => {
                 development. KernelWorx is not a non-profit, so donations are not tax deductible.
               </Typography>
             </Stack>
-          </Paper>
+            </CardContent>
+          </Card>
 
           <Box textAlign="center">
             <Button
@@ -95,6 +104,7 @@ export const StoryPage: React.FC = () => {
           </Box>
         </Stack>
       </Container>
+      <LandingFooter />
     </Box>
   );
 };

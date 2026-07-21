@@ -1,42 +1,103 @@
 /**
  * LandingHeader - Shared header for public marketing pages
  *
- * Shows the KernelWorx logo and a primary CTA that adapts based on auth state.
+ * Sticky frosted-glass header matching the brand landing system.
+ * Shows the KernelWorx wordmark and auth-aware CTAs.
  */
 
 import React from 'react';
-import { useNavigate } from 'react-router-dom';
-import { AppBar, Toolbar, Box, Typography, Button } from '@mui/material';
-import { Login as LoginIcon } from '@mui/icons-material';
+import { useNavigate, useLocation, Link as RouterLink } from 'react-router-dom';
+import { Box, Button, Container, Typography, Link, useMediaQuery, useTheme } from '@mui/material';
 import { useAuth } from '../contexts/AuthContext';
+
+interface NavLinkProps {
+  href?: string;
+  to?: string;
+  children: React.ReactNode;
+}
+
+const NavLink: React.FC<NavLinkProps> = ({ href, to, children }) => {
+  const commonSx = {
+    color: 'text.secondary',
+    fontWeight: 600,
+    fontSize: '0.875rem',
+    textDecoration: 'none',
+    '&:hover': {
+      color: 'text.primary',
+    },
+  };
+
+  if (to) {
+    return (
+      <Link component={RouterLink} to={to} sx={commonSx}>
+        {children}
+      </Link>
+    );
+  }
+
+  return (
+    <Link href={href} sx={commonSx}>
+      {children}
+    </Link>
+  );
+};
+
+interface DesktopNavProps {
+  isHome: boolean;
+}
+
+const DesktopNav: React.FC<DesktopNavProps> = ({ isHome }) => (
+  <Box sx={{ display: 'flex', gap: 3.5, alignItems: 'center' }}>
+    <NavLink {...(isHome ? { href: '#how-it-works' } : { to: '/#how-it-works' })}>How it works</NavLink>
+    <NavLink {...(isHome ? { href: '#features' } : { to: '/#features' })}>Features</NavLink>
+    <NavLink to="/story">Our story</NavLink>
+    <NavLink {...(isHome ? { href: '#faq' } : { to: '/#faq' })}>FAQ</NavLink>
+  </Box>
+);
 
 export const LandingHeader: React.FC = () => {
   const navigate = useNavigate();
-  const { isAuthenticated } = useAuth();
-
-  const handleLogin = () => {
-    if (isAuthenticated) {
-      navigate('/home');
-    } else {
-      navigate('/login');
-    }
-  };
+  const location = useLocation();
+  const { isAuthenticated, logout } = useAuth();
+  const theme = useTheme();
+  const isDesktop = useMediaQuery(theme.breakpoints.up('md'));
+  const isHome = location.pathname === '/';
 
   return (
-    <AppBar position="static" color="primary" elevation={1}>
-      <Toolbar>
+    <Box
+      component="header"
+      sx={{
+        position: 'sticky',
+        top: 0,
+        zIndex: 20,
+        backgroundColor: 'rgba(255, 255, 255, 0.86)',
+        backdropFilter: 'blur(12px)',
+        borderBottom: '1px solid',
+        borderColor: 'grey.200',
+      }}
+    >
+      <Container
+        maxWidth="lg"
+        sx={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          height: 64,
+          gap: 3,
+        }}
+      >
         <Box
-          sx={{ display: 'flex', alignItems: 'center', flexGrow: 1, cursor: 'pointer' }}
+          sx={{ display: 'flex', alignItems: 'center', gap: 0.5, cursor: 'pointer' }}
           onClick={() => navigate('/')}
         >
           <Box
             component="img"
             src="/logo.svg"
-            alt="Popcorn kernel"
+            alt="KernelWorx mark"
             sx={{
-              width: { xs: '28px', sm: '32px', md: '40px' },
-              height: { xs: '28px', sm: '32px', md: '40px' },
-              mr: { xs: 0.5, sm: 1 },
+              width: { xs: 28, sm: 32, md: 36 },
+              height: { xs: 28, sm: 32, md: 36 },
+              mr: 1,
             }}
           />
           <Typography
@@ -44,26 +105,49 @@ export const LandingHeader: React.FC = () => {
             noWrap
             component="div"
             sx={{
-              fontFamily: '"Kaushan Script", cursive',
-              fontWeight: 600,
-              letterSpacing: '0.08em',
-              fontSize: { xs: '28px', sm: '32px', md: '40px' },
+              fontFamily: '"Bricolage Grotesque", "Atkinson Hyperlegible", sans-serif',
+              fontWeight: 700,
+              fontSize: { xs: '1.25rem', sm: '1.35rem' },
               lineHeight: 1,
-              color: 'white',
-              WebkitTextStroke: '0.8px rgba(255, 255, 255, 0.8)',
-              textShadow: '0 1px 0 rgba(255,255,255,0.12), 0 2px 0 rgba(255,255,255,0.06)',
+              letterSpacing: '-0.01em',
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
             }}
           >
-            KernelWorx
+            <Box component="span" sx={{ color: '#333333' }}>
+              Kernel
+            </Box>
+            <Box component="span" sx={{ color: 'primary.main' }}>
+              Worx
+            </Box>
           </Typography>
         </Box>
-        <Button variant="contained" color="secondary" startIcon={<LoginIcon />} onClick={handleLogin}>
-          {isAuthenticated ? 'Go to Dashboard' : 'Get Started'}
-        </Button>
-      </Toolbar>
-    </AppBar>
+
+        {isDesktop && <DesktopNav isHome={isHome} />}
+
+        <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+          {isAuthenticated ? (
+            <>
+              <Button variant="text" size="small" onClick={() => navigate('/home')}>
+                Dashboard
+              </Button>
+              <Button variant="contained" color="primary" size="small" onClick={logout}>
+                Sign out
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button variant="text" size="small" onClick={() => navigate('/login')}>
+                Sign in
+              </Button>
+              <Button variant="contained" color="primary" size="small" onClick={() => navigate('/login')}>
+                Get started
+              </Button>
+            </>
+          )}
+        </Box>
+      </Container>
+    </Box>
   );
 };
