@@ -13,9 +13,9 @@
 
 import React, { useState } from 'react';
 import { useQuery, useMutation } from '@apollo/client/react';
-import { Box, Typography, Paper, Stack, Button, CircularProgress, Alert, IconButton } from '@mui/material';
-import { Add as AddIcon, ArrowBack as BackIcon } from '@mui/icons-material';
-import { useNavigate } from 'react-router-dom';
+import { Box, Typography, Card, Stack, Button, CircularProgress, Alert } from '@mui/material';
+import { Add as AddIcon } from '@mui/icons-material';
+
 import {
   GET_MY_PAYMENT_METHODS,
   CREATE_PAYMENT_METHOD,
@@ -25,6 +25,7 @@ import {
   CONFIRM_PAYMENT_METHOD_QR_UPLOAD,
   DELETE_PAYMENT_METHOD_QR_CODE,
 } from '../lib/graphql';
+import { PageHeader } from '../components/PageHeader';
 import { PaymentMethodCard } from '../components/PaymentMethodCard';
 import { CreatePaymentMethodDialog } from '../components/CreatePaymentMethodDialog';
 import { EditPaymentMethodDialog } from '../components/EditPaymentMethodDialog';
@@ -88,17 +89,15 @@ const MessageAlerts: React.FC<MessageAlertsProps> = ({ successMessage, error, on
 
 // Empty state component
 const EmptyState: React.FC = () => (
-  <Paper sx={{ p: 3, textAlign: 'center' }}>
+  <Card sx={{ p: 3, textAlign: 'center' }}>
     <Typography color="text.secondary">
       No payment methods yet. Cash and Check are always available. Add custom payment methods above.
     </Typography>
-  </Paper>
+  </Card>
 );
 
 // eslint-disable-next-line complexity -- Complex page component managing multiple dialogs and state
 export const PaymentMethodsPage: React.FC = () => {
-  const navigate = useNavigate();
-
   // Dialog states
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
@@ -324,14 +323,22 @@ export const PaymentMethodsPage: React.FC = () => {
   return (
     <Box>
       {/* Header */}
-      <Box display="flex" alignItems="center" mb={3}>
-        <IconButton onClick={() => navigate('/settings')} sx={{ mr: 1 }} aria-label="Back to settings">
-          <BackIcon />
-        </IconButton>
-        <Typography variant="h4" component="h1">
-          Payment Methods
-        </Typography>
-      </Box>
+      <PageHeader
+        title="Payment Methods"
+        subtitle="Cash and Check are always available. Create custom methods and add QR codes for apps like Venmo or PayPal."
+        action={
+          <Button
+            variant="contained"
+            startIcon={<AddIcon />}
+            onClick={() => {
+              setError(null);
+              setCreateDialogOpen(true);
+            }}
+          >
+            Add Payment Method
+          </Button>
+        }
+      />
 
       {/* Success/Error Messages */}
       <MessageAlerts
@@ -340,28 +347,6 @@ export const PaymentMethodsPage: React.FC = () => {
         onDismissSuccess={() => setSuccessMessage(null)}
         onDismissError={() => setError(null)}
       />
-
-      {/* Info Box */}
-      <Paper sx={{ p: 2, mb: 3, bgcolor: 'info.light' }}>
-        <Typography variant="body2" color="info.contrastText">
-          Cash and Check are always available as payment options. You can create custom payment methods below and
-          optionally add a QR code for each (e.g., Venmo, PayPal).
-        </Typography>
-      </Paper>
-
-      {/* Create Button */}
-      <Box mb={3}>
-        <Button
-          variant="contained"
-          startIcon={<AddIcon />}
-          onClick={() => {
-            setError(null);
-            setCreateDialogOpen(true);
-          }}
-        >
-          Add Payment Method
-        </Button>
-      </Box>
 
       {/* Payment Methods List */}
       <Stack spacing={2}>

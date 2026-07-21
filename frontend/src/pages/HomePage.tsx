@@ -14,6 +14,7 @@ import PersonIcon from '@mui/icons-material/Person';
 import PaymentIcon from '@mui/icons-material/Payment';
 import InventoryIcon from '@mui/icons-material/Inventory';
 import CampaignIcon from '@mui/icons-material/Campaign';
+import { PageHeader } from '../components/PageHeader';
 import { useAuth } from '../contexts/AuthContext';
 
 interface QuickActionTileProps {
@@ -63,9 +64,10 @@ export const HomePage: React.FC = () => {
 
   return (
     <Box>
-      <Typography variant="h4" component="h1" gutterBottom>
-        Welcome back{displayName ? `, ${displayName.split(' ')[0]}` : ''}
-      </Typography>
+      <PageHeader
+        title={`Welcome back${displayName ? `, ${displayName.split(' ')[0]}` : ''}`}
+        subtitle="Here's what's happening with your popcorn sale."
+      />
 
       {/* News & Updates */}
       <Card sx={{ p: { xs: 2, sm: 3 }, mb: { xs: 3, sm: 4 }, borderRadius: 2 }}>
