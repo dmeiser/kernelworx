@@ -205,6 +205,7 @@ export const CampaignSettingsPage: React.FC = () => {
   const [isActive, setIsActive] = useState(true);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [unitChangeConfirmOpen, setUnitChangeConfirmOpen] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   // Fetch campaign
   const {
@@ -264,14 +265,21 @@ export const CampaignSettingsPage: React.FC = () => {
   };
 
   const handleSaveChanges = async () => {
-    setUnitChangeConfirmOpen(false);
+    setSaveError(null);
     const isValid = canSave(campaignId, campaignName, catalogId);
     // Save button is disabled when dbCampaignId is missing
     /* v8 ignore start */
     if (!dbCampaignId) return;
     /* v8 ignore stop */
     const input = buildUpdateInput(dbCampaignId, campaignName, startDate, endDate, catalogId, isActive);
-    await maybeUpdateCampaign(isValid, updateCampaign, input);
+    try {
+      await maybeUpdateCampaign(isValid, updateCampaign, input);
+      setUnitChangeConfirmOpen(false);
+    } catch (err) {
+      console.error('Error saving campaign:', err);
+      setSaveError('Failed to save campaign changes. Please try again.');
+      setUnitChangeConfirmOpen(false);
+    }
   };
 
   const handleDeleteCampaign = async () => {
@@ -295,6 +303,11 @@ export const CampaignSettingsPage: React.FC = () => {
 
   return (
     <Box>
+      {saveError && (
+        <Alert severity="error" sx={{ mb: 3 }} onClose={() => setSaveError(null)}>
+          {saveError}
+        </Alert>
+      )}
       <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 3 }}>
         <Typography variant="h5">Campaign Settings</Typography>
         <Button variant="text" color="primary" onClick={() => navigate(`/scouts/${toUrlId(profileId)}/manage`)}>

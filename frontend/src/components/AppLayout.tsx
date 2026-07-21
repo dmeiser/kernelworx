@@ -307,8 +307,11 @@ const AppLayoutView: React.FC<{
           )}
 
           <Box
-            sx={{ display: 'flex', alignItems: 'center', gap: 1, cursor: 'pointer' }}
+            component="button"
+            tabIndex={0}
+            sx={{ display: 'flex', alignItems: 'center', gap: 1, cursor: 'pointer', background: 'none', border: 'none', padding: 0 }}
             onClick={() => onNavigate('/home')}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onNavigate('/home'); } }}
           >
             <Box
               component="img"

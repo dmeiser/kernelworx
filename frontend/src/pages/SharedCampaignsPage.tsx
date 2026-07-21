@@ -447,11 +447,16 @@ export const SharedCampaignsPage: React.FC = () => {
       return;
     }
     /* v8 ignore stop */
-    await deleteSharedCampaign({
-      variables: {
-        sharedCampaignCode: sharedCampaignToDeactivate.sharedCampaignCode,
-      },
-    });
+    try {
+      await deleteSharedCampaign({
+        variables: {
+          sharedCampaignCode: sharedCampaignToDeactivate.sharedCampaignCode,
+        },
+      });
+    } catch (err) {
+      console.error('Error deactivating shared campaign:', err);
+      showSnackbar('Failed to deactivate shared campaign');
+    }
   };
 
   /* v8 ignore start -- handleSaveEdit requires complex mutation mocking with variable matching */

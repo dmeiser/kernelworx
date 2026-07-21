@@ -27,7 +27,7 @@ const HeaderBackButton: React.FC<HeaderBackButtonProps> = ({ backButton }) => {
       <Button
         startIcon={<BackIcon />}
         onClick={backButton.onClick}
-        aria-label={backButton['aria-label']}
+        {...(backButton['aria-label'] ? { 'aria-label': backButton['aria-label'] } : {})}
         size="small"
         sx={{ mr: 1 }}
       >

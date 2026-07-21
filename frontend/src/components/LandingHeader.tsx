@@ -87,8 +87,11 @@ export const LandingHeader: React.FC = () => {
         }}
       >
         <Box
-          sx={{ display: 'flex', alignItems: 'center', gap: 0.5, cursor: 'pointer' }}
+          component="button"
+          tabIndex={0}
+          sx={{ display: 'flex', alignItems: 'center', gap: 0.5, cursor: 'pointer', background: 'none', border: 'none', padding: 0 }}
           onClick={() => navigate('/')}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate('/'); } }}
         >
           <Box
             component="img"

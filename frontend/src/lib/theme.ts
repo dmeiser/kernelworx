@@ -6,13 +6,10 @@ export const brand = {
     1: '#ebf8ff',
     2: '#c2e9ff',
     3: '#94d0f7',
-    4: '#67b2eb',
     5: '#3e94de',
     6: '#1976d2',
     7: '#0c57ab',
-    8: '#033b85',
     9: '#00265e',
-    10: '#001538',
   },
   success: {
     main: '#388e3c',
@@ -50,39 +47,29 @@ export const brand = {
   background: {
     layout: '#f7f7f7',
     container: '#ffffff',
-    elevated: '#ffffff',
   },
   border: {
     main: '#e0e0e0',
     secondary: '#f3f3f3',
   },
   radius: {
-    xs: '1px',
     sm: '3px',
     md: '4px',
     lg: '6px',
   },
   size: {
-    xxs: 4,
     xs: 8,
     sm: 12,
-    md: 16,
-    lg: 20,
     xl: 24,
-    xxl: 32,
   },
   controlHeight: {
-    xs: 16,
     sm: 24,
     md: 32,
     lg: 40,
   },
   motion: {
-    durationFast: '0.1s',
     durationMid: '0.2s',
-    durationSlow: '0.3s',
     easeInOut: 'cubic-bezier(0.645, 0.045, 0.355, 1)',
-    easeOut: 'cubic-bezier(0.215, 0.61, 0.355, 1)',
   },
 };
 

@@ -573,6 +573,7 @@ export const ScoutManagementPage: React.FC = () => {
     } catch (err) {
       console.error(`Error ${pendingAction.type === 'revoke' ? 'revoking share' : 'transferring ownership'}:`, err);
       setActionError(pendingAction.type === 'revoke' ? 'Failed to revoke access' : 'Failed to transfer ownership');
+      throw err;
     }
   };
   /* v8 ignore stop */
