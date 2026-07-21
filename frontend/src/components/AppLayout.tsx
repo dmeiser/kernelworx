@@ -94,14 +94,10 @@ const adminNavItemSx = {
   },
 };
 
-const sectionLabelSx = {
-  px: 2,
-  py: 1,
-  fontSize: '0.6875rem',
-  fontWeight: 700,
-  letterSpacing: '0.12em',
-  textTransform: 'uppercase',
-  color: brand.text.tertiary,
+const sectionDividerSx = {
+  my: 1.5,
+  mx: 2,
+  borderColor: brand.border.secondary,
 };
 
 const DrawerContent: React.FC<{
@@ -116,9 +112,6 @@ const DrawerContent: React.FC<{
     <Toolbar />
     <Divider sx={{ borderColor: brand.border.secondary }} />
     <List sx={{ flexGrow: 1, pt: 1 }}>
-      <Typography component="div" sx={sectionLabelSx}>
-        Your Sale
-      </Typography>
       <ListItemButton onClick={() => onNavigate('/home')} selected={isActive('/home')} sx={navItemSx}>
         <ListItemIcon>
           <HomeIcon />
@@ -144,9 +137,8 @@ const DrawerContent: React.FC<{
         <ListItemText primary="Payment Methods" />
       </ListItemButton>
 
-      <Typography component="div" sx={{ ...sectionLabelSx, mt: 2 }}>
-        Fundraising
-      </Typography>
+      <Divider sx={sectionDividerSx} />
+
       <ListItemButton onClick={() => onNavigate('/shared-campaigns')} selected={isActive('/shared-campaigns')} sx={navItemSx}>
         <ListItemIcon>
           <CampaignIcon />
@@ -168,9 +160,8 @@ const DrawerContent: React.FC<{
         <ListItemText primary="Accept Invite" />
       </ListItemButton>
 
-      <Typography component="div" sx={{ ...sectionLabelSx, mt: 2 }}>
-        Account
-      </Typography>
+      <Divider sx={sectionDividerSx} />
+
       <ListItemButton onClick={() => onNavigate('/settings')} selected={isActive('/settings')} sx={navItemSx}>
         <ListItemIcon>
           <SettingsIcon />
@@ -180,7 +171,7 @@ const DrawerContent: React.FC<{
 
       {isAdmin && (
         <>
-          <Divider sx={{ my: 2, mx: 2, borderColor: brand.border.secondary }} />
+          <Divider sx={sectionDividerSx} />
           <ListItemButton onClick={() => onNavigate('/admin')} selected={isActive('/admin')} sx={adminNavItemSx}>
             <ListItemIcon>
               <AdminPanelSettingsIcon />
