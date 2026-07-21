@@ -78,10 +78,9 @@ def login_as_readonly(page: Page) -> None:
 def logout(page: Page) -> None:
     """Log out the currently authenticated user.
 
-    Navigates to /settings where the "Sign Out" button lives, clicks it,
-    and waits for the redirect back to /login.
+    Clicks the "Sign out" button in the AppBar and waits for the redirect back
+    to /login.
     """
-    page.goto(f"{_base_url()}/settings")
-    # The SettingsPage renders: <Button ... onClick={handleLogout}>Sign Out</Button>
-    page.get_by_role("button", name="Sign Out").click()
+    page.goto(f"{_base_url()}/home")
+    page.locator("header").get_by_role("button", name="Sign out").click()
     page.wait_for_url("**/login", timeout=10_000)
