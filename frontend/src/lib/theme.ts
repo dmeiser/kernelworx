@@ -606,9 +606,9 @@ export const theme = createTheme({
           fontSize: '0.75rem',
         },
         filledPrimary: {
-          backgroundColor: brand.primary[1],
-          color: brand.primary[6],
-          border: `1px solid ${brand.primary[3]}`,
+          backgroundColor: brand.primary[6],
+          color: '#ffffff',
+          border: `1px solid ${brand.primary[6]}`,
         },
       },
     },

@@ -41,7 +41,7 @@ const DRAWER_WIDTH = 240;
 const drawerPaperSx = {
   width: DRAWER_WIDTH,
   boxSizing: 'border-box',
-  backgroundColor: brand.background.container,
+  backgroundColor: brand.fill.quaternary,
   borderRight: `1px solid ${brand.border.main}`,
 };
 
@@ -52,17 +52,17 @@ const navItemSx = {
     color: brand.text.secondary,
   },
   '&:hover': {
-    backgroundColor: brand.fill.tertiary,
+    backgroundColor: brand.background.container,
   },
   '&.Mui-selected': {
-    backgroundColor: brand.primary[1],
-    color: brand.primary[6],
+    backgroundColor: brand.primary[6],
+    color: '#ffffff',
     '& .MuiListItemIcon-root': {
-      color: brand.primary[6],
+      color: '#ffffff',
     },
   },
   '&.Mui-selected:hover': {
-    backgroundColor: brand.primary[2],
+    backgroundColor: brand.primary[7],
   },
 };
 
