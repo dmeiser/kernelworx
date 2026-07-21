@@ -50,7 +50,7 @@ function buildCatalogMenuItems(
 
   if (myCatalogs.length > 0) {
     items.push(
-      <MenuItem key="my-header" disabled sx={{ fontWeight: 600, backgroundColor: '#f5f5f5', opacity: 1 }}>
+      <MenuItem key="my-header" disabled sx={{ fontWeight: 600, bgcolor: 'grey.100', opacity: 1 }}>
         My Catalogs
       </MenuItem>,
     );
@@ -66,7 +66,7 @@ function buildCatalogMenuItems(
 
   if (publicCatalogs.length > 0) {
     items.push(
-      <MenuItem key="public-header" disabled sx={{ fontWeight: 600, backgroundColor: '#f5f5f5', opacity: 1 }}>
+      <MenuItem key="public-header" disabled sx={{ fontWeight: 600, bgcolor: 'grey.100', opacity: 1 }}>
         Public Catalogs
       </MenuItem>,
     );

@@ -53,7 +53,7 @@ export const CreateProfileDialog: React.FC<CreateProfileDialogProps> = ({ open, 
 
   return (
     <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth>
-      <DialogTitle>Create New Scout</DialogTitle>
+      <DialogTitle sx={{ color: 'primary.main' }}>Create New Scout</DialogTitle>
       <DialogContent>
         <Box pt={1} display="flex" flexDirection="column" gap={2}>
           <TextField

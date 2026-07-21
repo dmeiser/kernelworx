@@ -123,9 +123,7 @@ export const CatalogPreviewPage: React.FC<CatalogPreviewPageProps> = ({
           Back
         </Button>
         <Box sx={{ flex: 1 }}>
-          <Typography variant="h5" sx={{ fontWeight: 600 }}>
-            {catalog.catalogName}
-          </Typography>
+          <Typography variant="h5">{catalog.catalogName}</Typography>
           <Typography variant="body2" color="text.secondary">
             {products.length} product{products.length !== 1 ? 's' : ''}
           </Typography>
@@ -139,7 +137,7 @@ export const CatalogPreviewPage: React.FC<CatalogPreviewPageProps> = ({
             <Chip
               label={catalog.catalogType === 'ADMIN_MANAGED' ? 'Admin-Managed' : 'User-Created'}
               variant="outlined"
-              color={catalog.catalogType === 'ADMIN_MANAGED' ? 'primary' : 'secondary'}
+              color={catalog.catalogType === 'ADMIN_MANAGED' ? 'primary' : 'default'}
             />
             {catalog.isPublic && <Chip label="Public" variant="filled" />}
           </Stack>
@@ -162,7 +160,7 @@ export const CatalogPreviewPage: React.FC<CatalogPreviewPageProps> = ({
       ) : (
         <TableContainer component={Paper}>
           <Table>
-            <TableHead sx={{ backgroundColor: '#f5f5f5' }}>
+            <TableHead sx={{ bgcolor: 'grey.100' }}>
               <TableRow>
                 <TableCell sx={{ fontWeight: 600 }}>Product Name</TableCell>
                 <TableCell sx={{ fontWeight: 600 }}>Description</TableCell>

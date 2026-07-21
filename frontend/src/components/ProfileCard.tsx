@@ -28,7 +28,7 @@ interface ProfileCardProps {
 
 const PermissionChip: React.FC<{ isOwner: boolean; hasWrite: boolean }> = ({ isOwner, hasWrite }) => {
   if (isOwner) return <Chip label="Owner" color="primary" size="small" />;
-  if (hasWrite) return <Chip label="Editor" color="secondary" size="small" />;
+  if (hasWrite) return <Chip label="Editor" color="info" size="small" />;
   return <Chip label="Read-only" color="default" size="small" />;
 };
 
@@ -81,7 +81,22 @@ export const ProfileCard: React.FC<ProfileCardProps> = ({
     : undefined;
 
   return (
-    <Card elevation={2} sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+    <Card
+      elevation={0}
+      sx={{
+        height: '100%',
+        display: 'flex',
+        flexDirection: 'column',
+        transition: (theme) =>
+          theme.transitions.create(['box-shadow', 'transform'], {
+            duration: theme.transitions.duration.standard,
+          }),
+        '&:hover': {
+          boxShadow: (theme) => theme.shadows[2],
+          transform: 'translateY(-2px)',
+        },
+      }}
+    >
       <CardContent sx={{ flexGrow: 1 }}>
         <Stack direction="row" spacing={2} alignItems="flex-start" mb={0.25}>
           <Box

@@ -9,7 +9,7 @@
 
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Box, Typography, Paper, Grid, Card, CardActionArea, CardContent, Stack } from '@mui/material';
+import { Box, Typography, Grid, Card, CardActionArea, CardContent, Stack } from '@mui/material';
 import PersonIcon from '@mui/icons-material/Person';
 import PaymentIcon from '@mui/icons-material/Payment';
 import InventoryIcon from '@mui/icons-material/Inventory';
@@ -24,15 +24,24 @@ interface QuickActionTileProps {
 }
 
 const QuickActionTile: React.FC<QuickActionTileProps> = ({ title, description, icon, onClick }) => (
-  <Card elevation={2}>
-    <CardActionArea onClick={onClick} sx={{ height: '100%' }}>
-      <CardContent>
-        <Stack spacing={1} alignItems="flex-start">
+  <Card
+    sx={{
+      transition: (theme) =>
+        `transform ${theme.transitions.duration.short}ms ${theme.transitions.easing.easeInOut}, box-shadow ${theme.transitions.duration.short}ms ${theme.transitions.easing.easeInOut}`,
+      '&:hover': {
+        transform: 'translateY(-2px)',
+        boxShadow: (theme) => theme.shadows[4],
+      },
+    }}
+  >
+    <CardActionArea onClick={onClick} sx={{ height: '100%', p: 1 }}>
+      <CardContent sx={{ p: 2 }}>
+        <Stack spacing={1.5} alignItems="flex-start">
           <Box sx={{ color: 'primary.main' }}>{icon}</Box>
-          <Typography variant="h6" component="h2" gutterBottom>
+          <Typography variant="h6" component="h2" sx={{ color: 'text.primary' }}>
             {title}
           </Typography>
-          <Typography variant="body2" color="text.secondary">
+          <Typography variant="body2" sx={{ color: 'text.secondary' }}>
             {description}
           </Typography>
         </Stack>
@@ -59,15 +68,15 @@ export const HomePage: React.FC = () => {
       </Typography>
 
       {/* News & Updates */}
-      <Paper sx={{ p: { xs: 2, sm: 3 }, mb: { xs: 3, sm: 4 } }}>
+      <Card sx={{ p: { xs: 2, sm: 3 }, mb: { xs: 3, sm: 4 }, borderRadius: 2 }}>
         <Typography variant="h5" component="h2" gutterBottom>
           News & Updates
         </Typography>
-        <Typography variant="body1" color="text.secondary">
+        <Typography variant="body1" sx={{ color: 'text.secondary' }}>
           Welcome to KernelWorx. Watch this space for announcements, new features, and tips for managing your popcorn
           sales.
         </Typography>
-      </Paper>
+      </Card>
 
       {/* Quick Actions */}
       <Typography variant="h5" component="h2" gutterBottom>

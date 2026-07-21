@@ -53,6 +53,7 @@ import {
   TRANSFER_PROFILE_OWNERSHIP,
 } from '../lib/graphql';
 import { ensureProfileId } from '../lib/ids';
+import { brand } from '../lib/theme';
 import type { SellerProfile, Share, ProfileInvite } from '../types';
 
 // Helper to get display email for a share
@@ -350,13 +351,13 @@ const SharesSection: React.FC<{
       <Typography variant="h6" gutterBottom>
         Who Has Access
       </Typography>
-      <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
         Accounts with access to your profile (via share links or redeemed invites).
       </Typography>
       <TableContainer>
         <Table size="small">
           <TableHead>
-            <TableRow sx={{ backgroundColor: '#f5f5f5' }}>
+            <TableRow sx={{ backgroundColor: 'grey.100' }}>
               <TableCell>User</TableCell>
               <TableCell>Permissions</TableCell>
               <TableCell>Shared</TableCell>
@@ -648,7 +649,7 @@ export const ScoutManagementPage: React.FC = () => {
           <Typography variant="h6" gutterBottom>
             Invite Codes
           </Typography>
-          <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
             Generate invite codes to share this profile with others. Codes expire after 14 days.
           </Typography>
 
@@ -692,7 +693,7 @@ export const ScoutManagementPage: React.FC = () => {
             <TableContainer>
               <Table size="small">
                 <TableHead>
-                  <TableRow sx={{ backgroundColor: '#f5f5f5' }}>
+                  <TableRow sx={{ backgroundColor: 'grey.100' }}>
                     <TableCell>Invite Code</TableCell>
                     <TableCell>Permissions</TableCell>
                     <TableCell>Created</TableCell>
@@ -746,7 +747,7 @@ export const ScoutManagementPage: React.FC = () => {
               </Table>
             </TableContainer>
           ) : (
-            <Typography variant="body2" color="textSecondary">
+            <Typography variant="body2" color="text.secondary">
               No active invites. Create one to share your profile.
             </Typography>
           )}
@@ -760,11 +761,11 @@ export const ScoutManagementPage: React.FC = () => {
         />
 
         {/* Delete Profile Section */}
-        <Paper sx={{ p: 3, backgroundColor: '#fff3cd' }}>
+        <Paper sx={{ p: 3, backgroundColor: brand.warning.bg }}>
           <Typography variant="h6" gutterBottom color="error">
             Danger Zone
           </Typography>
-          <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
             Permanently delete this Scout and all associated campaigns and orders. This action cannot be undone.
           </Typography>
           <Button variant="contained" color="error" onClick={() => setDeleteConfirmOpen(true)}>

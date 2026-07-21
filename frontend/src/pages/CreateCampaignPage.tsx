@@ -35,6 +35,7 @@ import { useCreateCampaignPageSetup } from '../hooks/useCreateCampaignPageSetup'
 import { CatalogSection } from '../components/CatalogSection';
 import { StateAutocomplete } from '../components/StateAutocomplete';
 import { UNIT_TYPES } from '../constants/unitTypes';
+import { brand } from '../lib/theme';
 import type { SharedCampaign, SellerProfile } from '../types';
 
 type Profile = Pick<SellerProfile, 'profileId' | 'sellerName' | 'isOwner'>;
@@ -347,7 +348,7 @@ const ShareWithCreatorSection: React.FC<ShareWithCreatorSectionProps> = ({
   createdByName,
   submitting,
 }) => (
-  <Box sx={{ bgcolor: 'warning.light', p: 2, borderRadius: 1 }}>
+  <Box sx={{ bgcolor: brand.warning.bg, p: 2, borderRadius: 1 }}>
     <FormControlLabel
       control={
         <Checkbox checked={shareWithCreator} onChange={(e) => onShareChange(e.target.checked)} disabled={submitting} />

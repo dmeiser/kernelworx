@@ -29,6 +29,7 @@ import type { Catalog, SharedCampaign, SellerProfile } from '../types';
 import { UNIT_TYPES } from '../constants/unitTypes';
 import { StateAutocomplete } from '../components/StateAutocomplete';
 import { CatalogSection } from '../components/CatalogSection';
+import { brand } from '../lib/theme';
 
 // Local type aliases for convenience
 type Profile = Pick<SellerProfile, 'profileId' | 'sellerName' | 'isOwner'>;
@@ -325,7 +326,7 @@ interface ShareWithCreatorProps {
 }
 
 const ShareWithCreatorSection: React.FC<ShareWithCreatorProps> = ({ formState, sharedCampaign }) => (
-  <Box sx={{ bgcolor: 'warning.light', p: 2, borderRadius: 1 }}>
+  <Box sx={{ bgcolor: brand.warning.bg, p: 2, borderRadius: 1 }}>
     <FormControlLabel
       control={
         <Checkbox

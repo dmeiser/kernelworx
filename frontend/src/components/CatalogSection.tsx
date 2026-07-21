@@ -73,7 +73,7 @@ export const CatalogSection: React.FC<CatalogSectionProps> = ({
           {noCatalogs && <MenuItem disabled>No catalogs available</MenuItem>}
 
           {filteredPublicCatalogs.length > 0 && (
-            <MenuItem disabled sx={{ fontWeight: 'bold', py: 1, opacity: 1, bgcolor: 'action.hover' }}>
+            <MenuItem disabled sx={{ fontWeight: 'bold', py: 1, opacity: 1, bgcolor: 'grey.100' }}>
               Public Catalogs
             </MenuItem>
           )}
@@ -84,7 +84,7 @@ export const CatalogSection: React.FC<CatalogSectionProps> = ({
           ))}
 
           {myCatalogs.length > 0 && (
-            <MenuItem disabled sx={{ fontWeight: 'bold', py: 1, opacity: 1, bgcolor: 'action.hover' }}>
+            <MenuItem disabled sx={{ fontWeight: 'bold', py: 1, opacity: 1, bgcolor: 'grey.100' }}>
               My Catalogs
             </MenuItem>
           )}

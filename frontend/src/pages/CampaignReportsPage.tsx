@@ -378,7 +378,7 @@ const SellerReportSection: React.FC<{
     <TableContainer sx={{ overflowX: 'auto' }}>
       <Table size="small">
         <TableHead>
-          <TableRow sx={{ bgcolor: 'action.hover' }}>
+          <TableRow sx={{ bgcolor: 'grey.100' }}>
             <TableCell>
               <strong>Scout</strong>
             </TableCell>
@@ -426,7 +426,7 @@ const SellerTotalsRow: React.FC<{
 }> = ({ report, productList }) => {
   const { grandTotals, grandTotalItems } = calculateGrandTotals(report, productList);
   return (
-    <TableRow sx={{ bgcolor: 'action.hover' }}>
+    <TableRow sx={{ bgcolor: 'grey.100' }}>
       <TableCell>
         <strong>Total</strong>
       </TableCell>
@@ -468,7 +468,7 @@ const OrderDetailsSection: React.FC<{
     <TableContainer sx={{ overflowX: 'auto' }}>
       <Table size="small">
         <TableHead>
-          <TableRow sx={{ bgcolor: 'action.hover' }}>
+          <TableRow sx={{ bgcolor: 'grey.100' }}>
             <TableCell>
               <strong>Scout</strong>
             </TableCell>
@@ -519,7 +519,7 @@ const OrderTotalsRow: React.FC<{
 }> = ({ report, allOrders, allProducts }) => {
   const productTotals = calculateProductTotalsForOrders(allOrders);
   return (
-    <TableRow sx={{ bgcolor: 'action.hover' }}>
+    <TableRow sx={{ bgcolor: 'grey.100' }}>
       <TableCell colSpan={2}>
         <strong>Total</strong>
       </TableCell>

@@ -1,7 +1,7 @@
 import { createTheme } from '@mui/material/styles';
 
 // KernelWorx brand tokens (from docs/branding/system/variables.css)
-const brand = {
+export const brand = {
   primary: {
     1: '#ebf8ff',
     2: '#c2e9ff',
@@ -99,7 +99,7 @@ const bodyFont = [
   'sans-serif',
 ].join(',');
 
-const displayFont = [
+export const displayFont = [
   '"Bricolage Grotesque"',
   '"Atkinson Hyperlegible"',
   'sans-serif',

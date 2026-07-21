@@ -562,10 +562,10 @@ export const ScoutsPage: React.FC = () => {
       />
 
       {/* Delete Profile Confirmation Dialog */}
-      <Dialog open={deleteConfirmOpen} onClose={handleDeleteDialogDismiss}>
-        <DialogTitle>Delete Profile?</DialogTitle>
+      <Dialog open={deleteConfirmOpen} onClose={handleDeleteDialogDismiss} maxWidth="xs" fullWidth>
+        <DialogTitle sx={{ color: 'primary.main' }}>Delete Profile?</DialogTitle>
         <DialogContent>
-          <Typography>
+          <Typography color="text.secondary">
             Are you sure you want to delete this profile? All campaigns and orders will be permanently deleted. This
             action cannot be undone.
           </Typography>
