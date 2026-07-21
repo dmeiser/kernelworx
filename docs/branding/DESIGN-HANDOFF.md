@@ -151,15 +151,9 @@ For responsive web exports, treat these as a modern breakpoint system for one ad
 - `context/input-DESIGN.md`
 - `context/source-context.md`
 - `DESIGN.md`
-- `fonts/atkinson-hyperlegible-400-italic.woff2`
-- `fonts/atkinson-hyperlegible-400.woff2`
-- `fonts/atkinson-hyperlegible-700-italic.woff2`
-- `fonts/atkinson-hyperlegible-700.woff2`
-- `fonts/bricolage-grotesque-200-800.woff2`
-- `fonts/inter-100-900.woff2`
-- `fonts/kaushan-script-400.woff2`
-- `fonts/lexend-100-900.woff2`
-- `fonts/manifest.json`
+- `fonts/manifest.json` — font binaries (`.woff2`) are intentionally not in git;
+  `fonts.css` and all HTML reference the hosted copies on fonts.gstatic.com,
+  with `manifest.json` recording the source URL for each face
 - `guide.md`
 - `logos/popcorn-logo.png`
 - `system/BRAND-SYSTEM.md`
