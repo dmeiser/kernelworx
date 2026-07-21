@@ -1,8 +1,8 @@
-# Kernelworx — Brand Guide
+# KernelWorx — Brand Guide
 
 *Built for parents and Units. Use it on your own or with the whole pack.*
 
-Kernelworx helps parents of Scouting America Scouts manage their Scout's popcorn sales. Volunteer-run, open-source (MIT). Live at https://kernelworx.app/
+KernelWorx helps parents of Scouting America Scouts manage their Scout's popcorn sales. Volunteer-run, open-source (MIT). Live at https://kernelworx.app/
 
 Extracted from designmd://kernelworx-is-a-website.
 
@@ -17,7 +17,7 @@ Extracted from designmd://kernelworx-is-a-website.
 
 ## Wordmark
 
-The wordmark "Kernelworx" is set in Bricolage Grotesque 700 and is always two-tone: **Kernel** in `#333333`, **worx** in `#1976d2` (see `assets/kernelworx-lockup.svg`). Exception: on blue or other dark/low-contrast backgrounds, use the single-color reversed version (solid white) — two-tone `#1976d2` on `#1976d2` fails contrast. Plain-text mentions of Kernelworx in headings and body copy are not the lockup and stay in the surrounding text color.
+The wordmark "KernelWorx" is set in Bricolage Grotesque 700 and is always two-tone: **Kernel** in `#333333`, **worx** in `#1976d2` (see `assets/kernelworx-lockup.svg`). Exception: on blue or other dark/low-contrast backgrounds, use the single-color reversed version (solid white) — two-tone `#1976d2` on `#1976d2` fails contrast. Plain-text mentions of KernelWorx in headings and body copy are not the lockup and stay in the surrounding text color.
 
 ## Typography
 

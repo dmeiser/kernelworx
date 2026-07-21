@@ -1,5 +1,5 @@
 ---
-name: "Kernelworx"
+name: "KernelWorx"
 category: Brands
 surface: web
 colors:
@@ -11,7 +11,7 @@ colors:
   border-gray: "#e0e0e0"
 ---
 
-# Kernelworx
+# KernelWorx
 
 > Category: Brands
 
@@ -19,7 +19,7 @@ colors:
 
 *Built for parents and Units. Use it on your own or with the whole pack.*
 
-Kernelworx helps parents of Scouting America Scouts manage their Scout's popcorn sales. Volunteer-run, open-source (MIT). Live at https://kernelworx.app/
+KernelWorx helps parents of Scouting America Scouts manage their Scout's popcorn sales. Volunteer-run, open-source (MIT). Live at https://kernelworx.app/
 
 ## Color Palette
 

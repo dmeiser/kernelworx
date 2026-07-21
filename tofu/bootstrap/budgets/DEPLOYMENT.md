@@ -7,7 +7,7 @@
 ## What's Deployed
 
 ### 1. Monthly Budget
-- **Name**: KernelworxProduction-Monthly
+- **Name**: KernelWorxProduction-Monthly
 - **Limit**: $10.00 USD/month
 - **Alert Thresholds**:
   - 50% ($5.00) - Early warning

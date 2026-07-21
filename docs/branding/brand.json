@@ -1,7 +1,7 @@
 {
-  "name": "Kernelworx",
+  "name": "KernelWorx",
   "tagline": "Built for parents and Units. Use it on your own or with the whole pack.",
-  "description": "Kernelworx helps parents of Scouting America Scouts manage their Scout's popcorn sales. Volunteer-run, open-source (MIT). Live at https://kernelworx.app/",
+  "description": "KernelWorx helps parents of Scouting America Scouts manage their Scout's popcorn sales. Volunteer-run, open-source (MIT). Live at https://kernelworx.app/",
   "sourceUrl": "designmd://kernelworx-is-a-website",
   "seed": {
     "colorSuccess": "#388e3c",
@@ -18,7 +18,7 @@
       "logos/popcorn-logo.png",
       "assets/favicon.svg"
     ],
-    "notes": "assets/kernelworx-icon.svg is the source of truth for iconography: the locked popcorn-bucket mark (white heap over a tapered carton with five hairline stripes) in a #1976d2 rounded square (rx 12 on a 64 grid). Wordmark is 'Kernelworx' set in Bricolage Grotesque 700 — 'Kernel' in #333333, 'worx' in #1976d2 (assets/kernelworx-lockup.svg); on blue or dark backgrounds use the reversed single-color (white) version instead, since two-tone fails contrast there. popcorn-logo.svg and the PNGs are legacy assets kept for reference."
+    "notes": "assets/kernelworx-icon.svg is the source of truth for iconography: the locked popcorn-bucket mark (white heap over a tapered carton with five hairline stripes) in a #1976d2 rounded square (rx 12 on a 64 grid). Wordmark is 'KernelWorx' set in Bricolage Grotesque 700 — 'Kernel' in #333333, 'worx' in #1976d2 (assets/kernelworx-lockup.svg); on blue or dark backgrounds use the reversed single-color (white) version instead, since two-tone fails contrast there. popcorn-logo.svg and the PNGs are legacy assets kept for reference."
   },
   "colors": [
     {

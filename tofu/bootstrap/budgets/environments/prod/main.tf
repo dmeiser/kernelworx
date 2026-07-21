@@ -1,4 +1,4 @@
-# Kernelworx Production - AWS Budgets & Cost Monitoring
+# KernelWorx Production - AWS Budgets & Cost Monitoring
 
 terraform {
   required_version = ">= 1.8"
@@ -40,7 +40,7 @@ module "budget" {
   source = "../../modules/budget"
 
   name_prefix           = "kernelworx-prod"
-  budget_name           = "KernelworxProduction-Monthly"
+  budget_name           = "KernelWorxProduction-Monthly"
   limit_amount          = "10.0"
   account_id            = data.aws_caller_identity.current.account_id
   alert_emails          = ["dave@repeatersolutions.com"]
