@@ -3,7 +3,7 @@ import '../setup.ts';
  * Integration tests for createCampaign VTL resolver
  * 
  * Tests cover:
- * - Happy paths (campaigngn creation with required/optional fields)
+ * - Happy paths (campaign creation with required/optional fields)
  * - Authorization (owner, WRITE contributor, READ contributor, non-shared, unauthenticated)
  * - Input validation (missing fields, invalid references)
  * - Data integrity (field presence, GSI attributes)
@@ -169,13 +169,13 @@ describe('createCampaign Integration Tests', () => {
       });
       const testCatalogId = catalogData.createCatalog.catalogId;
 
-      // Act: Create campaigngn
+      // Act: Create campaign
       const { data } = await ownerClient.mutate({
         mutation: CREATE_CAMPAIGN,
         variables: {
           input: {
             profileId: testProfileId,
-            campaignName: `${getTestPrefix()}-Campaigngn`,
+            campaignName: `${getTestPrefix()}-Campaign`,
             campaignYear: 2025,
             startDate: '2025-01-01T00:00:00Z',
             catalogId: testCatalogId,
@@ -187,7 +187,7 @@ describe('createCampaign Integration Tests', () => {
       expect(data.createCampaign).toBeDefined();
       expect(data.createCampaign.campaignId).toBeDefined();
       expect(data.createCampaign.profileId).toBe(testProfileId);
-      expect(data.createCampaign.campaignName).toContain('Campaigngn');
+      expect(data.createCampaign.campaignName).toContain('Campaign');
       expect(data.createCampaign.catalogId).toBe(testCatalogId);
       expect(data.createCampaign.startDate).toBe('2025-01-01T00:00:00Z');
       
@@ -219,7 +219,7 @@ describe('createCampaign Integration Tests', () => {
       });
       const testCatalogId = catalogData.createCatalog.catalogId;
 
-      // Act: Create two campaigngns
+      // Act: Create two campaigns
       const { data: campaign1 } = await ownerClient.mutate({
         mutation: CREATE_CAMPAIGN,
         variables: {
@@ -284,7 +284,7 @@ describe('createCampaign Integration Tests', () => {
         variables: {
           input: {
             profileId: testProfileId,
-            campaignName: `${getTestPrefix()}-Campaigngn`,
+            campaignName: `${getTestPrefix()}-Campaign`,
             campaignYear: 2025,
             startDate: '2025-01-01T00:00:00Z',
             catalogId: testCatalogId,
@@ -333,7 +333,7 @@ describe('createCampaign Integration Tests', () => {
         variables: {
           input: {
             profileId: testProfileId,
-            campaignName: `${getTestPrefix()}-Campaigngn`,
+            campaignName: `${getTestPrefix()}-Campaign`,
             campaignYear: 2025,
             startDate: '2025-01-01T00:00:00Z',
             endDate: '2025-12-31T23:59:59Z',
@@ -355,7 +355,7 @@ describe('createCampaign Integration Tests', () => {
   });
 
   describe('Authorization', () => {
-    it('profile owner can create campaigngns', async () => {
+    it('profile owner can create campaigns', async () => {
       // Arrange
       const { data: profileData } = await ownerClient.mutate({
         mutation: CREATE_PROFILE,
@@ -375,13 +375,13 @@ describe('createCampaign Integration Tests', () => {
       });
       const testCatalogId = catalogData.createCatalog.catalogId;
 
-      // Act: Owner creates campaigngn
+      // Act: Owner creates campaign
       const { data } = await ownerClient.mutate({
         mutation: CREATE_CAMPAIGN,
         variables: {
           input: {
             profileId: testProfileId,
-            campaignName: `${getTestPrefix()}-Campaigngn`,
+            campaignName: `${getTestPrefix()}-Campaign`,
             campaignYear: 2025,
             startDate: '2025-01-01T00:00:00Z',
             catalogId: testCatalogId,
@@ -401,7 +401,7 @@ describe('createCampaign Integration Tests', () => {
       await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId: testProfileId } });
     });
 
-    it('shared user with WRITE can create campaigngns', async () => {
+    it('shared user with WRITE can create campaigns', async () => {
       // Arrange: Owner creates profile and shares with contributor (WRITE)
       const { data: profileData } = await ownerClient.mutate({
         mutation: CREATE_PROFILE,
@@ -432,13 +432,13 @@ describe('createCampaign Integration Tests', () => {
       });
       const testCatalogId = catalogData.createCatalog.catalogId;
 
-      // Act: Contributor creates campaigngn
+      // Act: Contributor creates campaign
       const { data } = await contributorClient.mutate({
         mutation: CREATE_CAMPAIGN,
         variables: {
           input: {
             profileId: testProfileId,
-            campaignName: `${getTestPrefix()}-Campaigngn`,
+            campaignName: `${getTestPrefix()}-Campaign`,
             campaignYear: 2025,
             startDate: '2025-01-01T00:00:00Z',
             catalogId: testCatalogId,
@@ -459,7 +459,7 @@ describe('createCampaign Integration Tests', () => {
       await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId: testProfileId } });
     });
 
-    it('shared user with READ cannot create campaigngns', async () => {
+    it('shared user with READ cannot create campaigns', async () => {
       // Arrange: Owner creates profile and shares with readonly (READ only)
       const { data: profileData } = await ownerClient.mutate({
         mutation: CREATE_PROFILE,
@@ -497,7 +497,7 @@ describe('createCampaign Integration Tests', () => {
           variables: {
             input: {
               profileId: testProfileId,
-              campaignName: `${getTestPrefix()}-Campaigngn`,
+              campaignName: `${getTestPrefix()}-Campaign`,
             campaignYear: 2025,
               startDate: '2025-01-01T00:00:00Z',
               catalogId: testCatalogId,
@@ -512,7 +512,7 @@ describe('createCampaign Integration Tests', () => {
       await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId: testProfileId } });
     });
 
-    it('non-shared user cannot create campaigngns', async () => {
+    it('non-shared user cannot create campaigns', async () => {
       // Arrange: Owner creates profile (no share with contributor)
       const { data: profileData } = await ownerClient.mutate({
         mutation: CREATE_PROFILE,
@@ -539,7 +539,7 @@ describe('createCampaign Integration Tests', () => {
           variables: {
             input: {
               profileId: testProfileId,
-              campaignName: `${getTestPrefix()}-Campaigngn`,
+              campaignName: `${getTestPrefix()}-Campaign`,
             campaignYear: 2025,
               startDate: '2025-01-01T00:00:00Z',
               catalogId: testCatalogId,
@@ -581,7 +581,7 @@ describe('createCampaign Integration Tests', () => {
           variables: {
             input: {
               profileId: testProfileId,
-              campaignName: `${getTestPrefix()}-Campaigngn`,
+              campaignName: `${getTestPrefix()}-Campaign`,
               campaignYear: 2025,
               startDate: '2025-01-01T00:00:00Z',
               catalogId: testCatalogId,
@@ -618,7 +618,7 @@ describe('createCampaign Integration Tests', () => {
           variables: {
             input: {
               // profileId missing
-              campaignName: `${getTestPrefix()}-Campaigngn`,
+              campaignName: `${getTestPrefix()}-Campaign`,
             campaignYear: 2025,
               startDate: '2025-01-01T00:00:00Z',
               catalogId: testCatalogId,
@@ -692,7 +692,7 @@ describe('createCampaign Integration Tests', () => {
       const testCatalogId = catalogData.createCatalog.catalogId;
 
       // Act & Assert
-      // Note: startDate is optional in CreateCampaignInput but required in Campaigngn type
+      // Note: startDate is optional in CreateCampaignInput but required in Campaign type
       // This causes the mutation to potentially succeed in DynamoDB but fail on GraphQL response
       let creationFailed = false;
       try {
@@ -701,7 +701,7 @@ describe('createCampaign Integration Tests', () => {
           variables: {
             input: {
               profileId: testProfileId,
-              campaignName: `${getTestPrefix()}-Campaigngn`,
+              campaignName: `${getTestPrefix()}-Campaign`,
               campaignYear: 2025,
               // startDate missing - may succeed if schema allows optional
               catalogId: testCatalogId,
@@ -715,7 +715,7 @@ describe('createCampaign Integration Tests', () => {
         expect((error as Error).message).toBeDefined();
       }
 
-      // Cleanup: Delete campaigns first (if any were created), then profile (cascades to campaigngns), then catalog
+      // Cleanup: Delete campaigns first (if any were created), then profile (cascades to campaigns), then catalog
       // Get all campaigns for this profile to clean up
       try {
         const { data: campaignsData } = await ownerClient.query({
@@ -740,7 +740,7 @@ describe('createCampaign Integration Tests', () => {
       
       await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId: testProfileId } });
       // Catalog is not deleted here because it's not the focus of this test
-      // and the profile deletion cascades to campaigngns
+      // and the profile deletion cascades to campaigns
     });
 
     it('rejects missing catalogId', async () => {
@@ -758,7 +758,7 @@ describe('createCampaign Integration Tests', () => {
           variables: {
             input: {
               profileId: testProfileId,
-              campaignName: `${getTestPrefix()}-Campaigngn`,
+              campaignName: `${getTestPrefix()}-Campaign`,
             campaignYear: 2025,
               startDate: '2025-01-01T00:00:00Z',
               // catalogId missing
@@ -773,7 +773,7 @@ describe('createCampaign Integration Tests', () => {
   });
 
   describe('Edge Cases and Boundary Tests', () => {
-    it('allows creating campaign with same name as existing campaigngn', async () => {
+    it('allows creating campaign with same name as existing campaign', async () => {
       // Arrange: Create profile and catalog
       const { data: profileData } = await ownerClient.mutate({
         mutation: CREATE_PROFILE,
@@ -795,7 +795,7 @@ describe('createCampaign Integration Tests', () => {
 
       const duplicateName = `${getTestPrefix()}-DuplicateCampaign`;
 
-      // Act: Create first campaigngn
+      // Act: Create first campaign
       const { data: campaign1 } = await ownerClient.mutate({
         mutation: CREATE_CAMPAIGN,
         variables: {
@@ -835,7 +835,7 @@ describe('createCampaign Integration Tests', () => {
       await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId: testProfileId } });
     });
 
-    it('creates campaign without endDate (open-ended campaigngn)', async () => {
+    it('creates campaign without endDate (open-ended campaign)', async () => {
       // Arrange: Create profile and catalog
       const { data: profileData } = await ownerClient.mutate({
         mutation: CREATE_PROFILE,
@@ -870,7 +870,7 @@ describe('createCampaign Integration Tests', () => {
         },
       });
 
-      // Assert: Campaigngn created with null endDate
+      // Assert: Campaign created with null endDate
       expect(data.createCampaign.campaignId).toBeDefined();
       expect(data.createCampaign.endDate).toBeNull();
 
@@ -915,7 +915,7 @@ describe('createCampaign Integration Tests', () => {
         },
       });
 
-      // Assert: Campaigngn created with past startDate
+      // Assert: Campaign created with past startDate
       expect(data.createCampaign.campaignId).toBeDefined();
       expect(data.createCampaign.startDate).toBe(pastDate);
 
@@ -960,7 +960,7 @@ describe('createCampaign Integration Tests', () => {
         },
       });
 
-      // Assert: Campaigngn created with future startDate
+      // Assert: Campaign created with future startDate
       expect(data.createCampaign.campaignId).toBeDefined();
       expect(data.createCampaign.startDate).toBe(futureDate);
 

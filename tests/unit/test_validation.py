@@ -256,11 +256,11 @@ class TestValidateInviteCode:
         assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
 
 
-class TestValidateCampaigngnUpdate:
+class TestValidateCampaignUpdate:
     """Tests for validate_campaign_update function."""
 
     def test_validate_campaign_update_valid(self) -> None:
-        """Test valid campaigngn update."""
+        """Test valid campaign update."""
         updates = {"name": "Fall 2025"}
 
         result = validate_campaign_update(updates)
@@ -303,7 +303,7 @@ class TestValidateCampaigngnUpdate:
         assert result["errorCode"] == "INVALID_INPUT"
 
     def test_validate_campaign_update_empty_end_date(self) -> None:
-        """Test that empty endDate is allowed (open-ended campaigngn)."""
+        """Test that empty endDate is allowed (open-ended campaign)."""
         updates = {"startDate": "2025-09-01", "endDate": ""}
 
         result = validate_campaign_update(updates)

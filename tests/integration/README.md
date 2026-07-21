@@ -74,7 +74,7 @@ tests/integration/
 ├── resolvers/
 │   ├── profileSharing.integration.test.ts    # Share/invite/revoke tests
 │   ├── orderOperations.integration.test.ts   # Create/update/delete order
-│   ├── campaignOperations.integration.test.ts  # Update/delete campaigngn
+│   ├── campaignOperations.integration.test.ts  # Update/delete campaign
 │   └── queries.integration.test.ts           # List queries (VTL resolvers)
 └── workflows/
     └── completeWorkflow.integration.test.ts  # End-to-end scenarios
@@ -131,7 +131,7 @@ describe('ShareProfileDirect Pipeline Resolver', () => {
 All tests MUST clean up after themselves to prevent pollution:
 
 1. **Track created resources** in test context
-2. **Delete in reverse order** of creation (shares → orders → campaigngns → profiles)
+2. **Delete in reverse order** of creation (shares → orders → campaigns → profiles)
 3. **Use try/finally** to ensure cleanup even on test failure
 4. **Global cleanup guideline**: The global teardown process (`globalTeardown.ts`) deletes all data created by test users EXCEPT their user profiles and Account records. This means:
    - ✅ Deletes: Orders, Invites, Shares, Campaigns, Catalogs, Shared Campaigns, SellerProfiles

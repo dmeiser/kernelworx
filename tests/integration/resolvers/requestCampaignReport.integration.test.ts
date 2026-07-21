@@ -18,7 +18,7 @@ const createUnauthenticatedClient = () => {
  * Integration tests for requestCampaignReport mutation (Lambda resolver)
  * 
  * Test Data Setup:
- * - TEST_OWNER_EMAIL: Owner of profile/campaigngn (can request reports)
+ * - TEST_OWNER_EMAIL: Owner of profile/campaign (can request reports)
  * - TEST_CONTRIBUTOR_EMAIL: Has WRITE access (can request reports)
  * - TEST_READONLY_EMAIL: Has READ access (can request reports)
  * 
@@ -26,9 +26,9 @@ const createUnauthenticatedClient = () => {
  * - Report generation for different users with different access levels
  * - Report URL generation and format
  * - Authorization (owner, contributors, and READ users can all request reports)
- * - Error handling (invalid campaigngn, unauthorized access)
+ * - Error handling (invalid campaign, unauthorized access)
  * 
- * Note: These tests create their own test data (profile, campaigngn, catalog, orders)
+ * Note: These tests create their own test data (profile, campaign, catalog, orders)
  * and clean up after themselves.
  */
 
@@ -142,7 +142,7 @@ const REVOKE_SHARE = gql`
 `;
 
 describe('requestCampaignReport Integration Tests', () => {
-  const SUITE_ID = 'request-campaigngn-report';
+  const SUITE_ID = 'request-campaign-report';
   
   let ownerClient: any;
   let contributorClient: any;
@@ -213,13 +213,13 @@ describe('requestCampaignReport Integration Tests', () => {
     productId1 = catalogResponse.data.createCatalog.products[0].productId;
     productId2 = catalogResponse.data.createCatalog.products[1].productId;
 
-    // Create test campaigngn
+    // Create test campaign
     const campaignResponse = await ownerClient.mutate({
       mutation: CREATE_CAMPAIGN,
       variables: {
         input: {
           profileId: testProfileId,
-          campaignName: 'Report Test Campaigngn 2024',
+          campaignName: 'Report Test Campaign 2024',
           campaignYear: 2025,
           catalogId: testCatalogId,
           startDate: '2024-01-01T00:00:00.000Z',
@@ -326,7 +326,7 @@ describe('requestCampaignReport Integration Tests', () => {
         });
       }
       
-      // 3. Delete campaigngn
+      // 3. Delete campaign
       if (testCampaignId) {
         await ownerClient.mutate({
           mutation: DELETE_CAMPAIGN,
@@ -471,7 +471,7 @@ describe('requestCampaignReport Integration Tests', () => {
           mutation: REQUEST_CAMPAIGN_REPORT,
           variables: {
             input: {
-              campaignId: 'CAMPAIGNGN#nonexistent',
+              campaignId: 'CAMPAIGN#nonexistent',
             },
           },
         })
@@ -712,7 +712,7 @@ describe('requestCampaignReport Integration Tests', () => {
         variables: {
           input: {
             profileId: testProfileId,
-            campaignName: 'Performance Test Campaigngn',
+            campaignName: 'Performance Test Campaign',
             campaignYear: 2025,
             catalogId: testCatalogId,
             startDate: '2024-01-01T00:00:00.000Z',
@@ -774,7 +774,7 @@ describe('requestCampaignReport Integration Tests', () => {
         console.log(`Report generation for ${orderCount} orders took ${reportGenerationTime}ms`);
 
       } finally {
-        // Cleanup: Delete orders and campaigngn
+        // Cleanup: Delete orders and campaign
         for (const orderId of orderIds) {
           await ownerClient.mutate({
             mutation: DELETE_ORDER,
@@ -799,7 +799,7 @@ describe('requestCampaignReport Integration Tests', () => {
         variables: {
           input: {
             profileId: testProfileId,
-            campaignName: 'Empty Campaigngn - No Orders',
+            campaignName: 'Empty Campaign - No Orders',
             campaignYear: 2025,
             catalogId: testCatalogId,
             startDate: '2024-01-01T00:00:00.000Z',
@@ -811,7 +811,7 @@ describe('requestCampaignReport Integration Tests', () => {
     });
 
     afterAll(async () => {
-      // Clean up empty campaigngn
+      // Clean up empty campaign
       if (emptyCampaignId) {
         await ownerClient.mutate({
           mutation: DELETE_CAMPAIGN,
@@ -855,7 +855,7 @@ describe('requestCampaignReport Integration Tests', () => {
       expect(result.data.requestCampaignReport.reportUrl).toContain('.csv');
     });
 
-    test('should handle concurrent report requests for same campaigngn', async () => {
+    test('should handle concurrent report requests for same campaign', async () => {
       // Fire off multiple concurrent requests - use different formats to ensure unique S3 keys
       const concurrentRequests = [
         ownerClient.mutate({

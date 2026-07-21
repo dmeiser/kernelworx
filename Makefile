@@ -1,4 +1,4 @@
-.PHONY: help test lint format typecheck integration infra all clean test-e2e test-cleanup
+.PHONY: help test lint format typecheck integration infra all clean test-e2e test-cleanup spellcheck
 
 # Default target
 help:
@@ -16,6 +16,7 @@ help:
 	@echo "  make lint              - Run all linters (Python + TypeScript)"
 	@echo "  make lint-python       - Run Python linters (ruff + mypy)"
 	@echo "  make lint-frontend     - Run TypeScript linters (eslint + tsc)"
+	@echo "  make spellcheck        - Run spell check across the repo"
 	@echo "  make typecheck         - Run type checkers (mypy + tsc)"
 	@echo ""
 	@echo "Formatting:"
@@ -30,7 +31,7 @@ help:
 	@echo ""
 	@echo "Comprehensive:"
 	@echo "  make all               - Run everything (format + lint + typecheck + test)"
-	@echo "  make ci                - Run CI pipeline (lint + typecheck + test)"
+	@echo "  make ci                - Run CI pipeline (spellcheck + lint + typecheck + test)"
 	@echo "  make clean             - Clean generated files"
 
 # Python unit tests
@@ -74,6 +75,11 @@ lint-frontend:
 	cd frontend && npm run lint
 	@echo "Running TypeScript type check..."
 	cd frontend && npm run typecheck
+
+# Spell check across the repository
+spellcheck:
+	@echo "Running cspell..."
+	frontend/node_modules/.bin/cspell '**' --config cspell.json
 
 # All linting
 lint: lint-python lint-frontend
@@ -127,7 +133,7 @@ lint-infra: tflint kics
 all: format lint typecheck test test-frontend
 
 # CI pipeline (no formatting, just validation)
-ci: lint typecheck test test-frontend test-integration
+ci: spellcheck lint typecheck test test-frontend test-integration
 
 # Clean generated files
 clean:

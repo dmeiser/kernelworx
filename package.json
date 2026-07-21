@@ -1,4 +1,7 @@
 {
+  "scripts": {
+    "spellcheck": "frontend/node_modules/.bin/cspell '**' --config cspell.json"
+  },
   "devDependencies": {
     "@aws-sdk/client-appsync": "^3.955.0",
     "@aws-sdk/client-cloudformation": "^3.955.0",
