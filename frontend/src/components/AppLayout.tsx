@@ -297,51 +297,56 @@ const AppLayoutView: React.FC<{
   <Box sx={{ display: 'flex' }}>
     <AppBar position="fixed" color="default" sx={{ zIndex: (theme) => theme.zIndex.drawer + 1 }}>
       <Container maxWidth="lg">
-        <Toolbar disableGutters>
-          {!isDesktop && (
-            <IconButton
-              color="inherit"
-              aria-label="open drawer"
-              edge="start"
-              onClick={toggleMobileDrawer}
-              sx={{ mr: 2 }}
-            >
-              <MenuIcon />
-            </IconButton>
-          )}
+        <Toolbar disableGutters sx={{ justifyContent: 'space-between', gap: 2 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            {!isDesktop && (
+              <IconButton
+                color="inherit"
+                aria-label="open drawer"
+                edge="start"
+                onClick={toggleMobileDrawer}
+                sx={{ mr: 0.5 }}
+              >
+                <MenuIcon />
+              </IconButton>
+            )}
 
-          <Box sx={{ display: 'flex', alignItems: 'center', flexGrow: 1, gap: 1 }}>
             <Box
-              component="img"
-              src="/logo.svg"
-              alt="KernelWorx mark"
-              sx={{
-                width: { xs: 28, sm: 32, md: 36 },
-                height: { xs: 28, sm: 32, md: 36 },
-              }}
-            />
-            <Typography
-              variant="h6"
-              noWrap
-              component="div"
-              sx={{
-                fontFamily: displayFont,
-                fontWeight: 700,
-                fontSize: { xs: '1.25rem', sm: '1.35rem' },
-                lineHeight: 1,
-                letterSpacing: '-0.01em',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-              }}
+              sx={{ display: 'flex', alignItems: 'center', gap: 1, cursor: 'pointer' }}
+              onClick={() => onNavigate('/home')}
             >
-              <Box component="span" sx={{ color: '#333333' }}>
-                Kernel
-              </Box>
-              <Box component="span" sx={{ color: 'primary.main' }}>
-                Worx
-              </Box>
-            </Typography>
+              <Box
+                component="img"
+                src="/logo.svg"
+                alt="KernelWorx mark"
+                sx={{
+                  width: { xs: 28, sm: 32, md: 36 },
+                  height: { xs: 28, sm: 32, md: 36 },
+                }}
+              />
+              <Typography
+                variant="h6"
+                noWrap
+                component="div"
+                sx={{
+                  fontFamily: displayFont,
+                  fontWeight: 700,
+                  fontSize: { xs: '1.25rem', sm: '1.35rem' },
+                  lineHeight: 1,
+                  letterSpacing: '-0.01em',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                <Box component="span" sx={{ color: '#333333' }}>
+                  Kernel
+                </Box>
+                <Box component="span" sx={{ color: 'primary.main' }}>
+                  Worx
+                </Box>
+              </Typography>
+            </Box>
           </Box>
 
           {account && <AccountButton isDesktop={isDesktop} displayName={displayName} onNavigate={onNavigate} />}
