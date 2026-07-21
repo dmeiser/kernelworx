@@ -76,7 +76,6 @@ dialogProps
 dmeiser
 dotenv
 DynamoDB
-efgh
 emailAddress
 emoji
 émoji
@@ -90,11 +89,8 @@ exfiltration
 exportable
 falsey
 favicons
-fdtndataqyw
-fdzcd
 fieldset
 fileName
-findme
 fontSize
 formData
 Frontend
@@ -140,6 +136,7 @@ José's
 jsonify
 kaushan
 kernelworx
+KernelWorx
 keyId
 keyout
 keypair
@@ -180,7 +177,6 @@ Nav
 navigations
 networkidle
 neue
-newcode
 newkey
 newOwnerSearch
 nocat
@@ -194,7 +190,6 @@ noto
 octokit
 officedocument
 oklch
-oldcode
 onboarding
 openpyxl
 OpenTofu
@@ -244,7 +239,6 @@ route53
 RRule
 runtime
 SaaS
-Safelisting
 sameSite
 Scout
 Scouting

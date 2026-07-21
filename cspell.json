@@ -13,6 +13,7 @@
   ],
   "dictionaries": ["kernelworx-words"],
   "flagWords": ["Kernelworx"],
+  "_comment": "Kernelworx (mixed case) is deprecated and flagged; kernelworx (lowercase) is the AWS resource-name token; KernelWorx (PascalCase) is the brand name",
   "ignorePaths": [
     "cspell.json",
     "**/node_modules/**",

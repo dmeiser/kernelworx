@@ -19,14 +19,14 @@
   "colors": [
     {
       "role": "background",
-      "hex": "#f5f5f5",
+      "hex": "#f7f7f7",
       "oklch": "",
       "name": "Background Gray",
       "usage": "page canvas (MUI background.default)"
     },
     {
       "role": "foreground",
-      "hex": "#333333",
+      "hex": "#4b4b4b",
       "oklch": "",
       "name": "Text Primary",
       "usage": "body text and headings"
@@ -36,7 +36,7 @@
       "hex": "#1976d2",
       "oklch": "",
       "name": "Primary Blue",
-      "usage": "primary actions, links, brand emphasis (dark #1565c0, light #42a5f5)"
+      "usage": "primary actions, links, brand emphasis (dark #0c57ab, light #3e94de)"
     },
     {
       "role": "surface",
@@ -47,7 +47,7 @@
     },
     {
       "role": "muted",
-      "hex": "#666666",
+      "hex": "#7a7a7a",
       "oklch": "",
       "name": "Text Secondary",
       "usage": "secondary text and metadata"
@@ -105,12 +105,12 @@
     }
   },
   "imagery": {
-    "style": "Real product/popcorn photography over illustration; light-blue brand tints (#e3f2fd to #bbdefb) behind the logo lockup.",
+    "style": "Real product/popcorn photography over illustration; light-blue brand tints (#ebf8ff to #c2e9ff) behind the logo lockup.",
     "subjects": [
       "popcorn",
       "Scouting fundraising"
     ],
-    "treatment": "Popcorn-bucket mark (white heap over a tapered carton with five hairline stripes) in a #1976d2 rounded square; Bricolage Grotesque 700 wordmark, 'Kernel' in #333333 + 'worx' in #1976d2.",
+    "treatment": "Popcorn-bucket mark (white heap over a tapered carton with five hairline stripes) in a #1976d2 rounded square; Bricolage Grotesque 700 wordmark, 'Kernel' in #4b4b4b + 'worx' in #1976d2.",
     "avoid": [],
     "samples": []
   },
@@ -121,7 +121,7 @@
     "postureRules": [
       "Component kit should cover: Button, Card, Form, Navigation, Dialog, Table.",
       "Buttons: filled primary #1976d2 with white text, outlined secondary (#1976d2 border and text on white), danger #dc004e; 4px radius.",
-      "MUI patterns: white paper cards on a #f5f5f5 canvas, contained elevation, left-border callouts in #e3f2fd with a #1976d2 accent bar.",
+      "MUI patterns: white paper cards on a #f7f7f7 canvas, contained elevation, left-border callouts in #ebf8ff with a #1976d2 accent bar.",
       "Bricolage Grotesque for H1/app title/hero display headings and the wordmark; Atkinson Hyperlegible everywhere else (body, UI, numbers, small labels).",
       "Iconography: the locked popcorn-bucket mark (assets/kernelworx-icon.svg) is the source of truth for app icons and favicons; it replaces the legacy standalone kernel mark."
     ]

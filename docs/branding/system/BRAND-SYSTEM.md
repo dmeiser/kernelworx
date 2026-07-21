@@ -19,7 +19,7 @@ Everything below is *derived* — no token here was hand-authored.
 | `tokens.compact.json` | Same seed, compact (dense) algorithm. |
 | `variables.css` | `:root{}` + `.dark{}` CSS custom properties (`--brand-*`). |
 | `variables.dark.css` | Standalone `:root{}` for the dark theme. |
-| `theme.json` | antd `ConfigProvider` theme (token + algorithm). |
+| `theme.json` | Token source using antd-compatible naming; production app consumes via frontend/src/lib/theme.ts (MUI createTheme). |
 | `kit.html` | Themed component showcase (light). |
 | `kit.dark.html` | Themed component showcase (dark). |
 | `artifacts/landing.html` | Full landing page (hero → features → pricing → FAQ → CTA). |
