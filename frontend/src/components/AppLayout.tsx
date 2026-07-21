@@ -60,6 +60,10 @@ const navItemSx = {
     '& .MuiListItemIcon-root': {
       color: '#ffffff',
     },
+    '& .MuiListItemText-primary': {
+      color: '#ffffff',
+      fontWeight: 600,
+    },
   },
   '&.Mui-selected:hover': {
     backgroundColor: brand.primary[7],
