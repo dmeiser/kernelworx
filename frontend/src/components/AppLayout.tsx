@@ -291,24 +291,23 @@ const AppLayoutView: React.FC<{
 }) => (
   <Box sx={{ display: 'flex' }}>
     <AppBar position="fixed" color="default" sx={{ zIndex: (theme) => theme.zIndex.drawer + 1 }}>
-      <Container maxWidth="lg">
-        <Toolbar disableGutters sx={{ gap: 1 }}>
-          {!isDesktop && (
-            <IconButton
-              color="inherit"
-              aria-label="open drawer"
-              edge="start"
-              onClick={toggleMobileDrawer}
-              sx={{ mr: 0.5 }}
-            >
-              <MenuIcon />
-            </IconButton>
-          )}
-
-          <Box
-            sx={{ display: 'flex', alignItems: 'center', gap: 1, cursor: 'pointer' }}
-            onClick={() => onNavigate('/home')}
+      <Toolbar sx={{ gap: 1, px: { xs: 1, sm: 2, md: 3 } }}>
+        {!isDesktop && (
+          <IconButton
+            color="inherit"
+            aria-label="open drawer"
+            edge="start"
+            onClick={toggleMobileDrawer}
+            sx={{ mr: 0.5 }}
           >
+            <MenuIcon />
+          </IconButton>
+        )}
+
+        <Box
+          sx={{ display: 'flex', alignItems: 'center', gap: 1, cursor: 'pointer' }}
+          onClick={() => onNavigate('/home')}
+        >
             <Box
               component="img"
               src="/logo.svg"
@@ -342,7 +341,6 @@ const AppLayoutView: React.FC<{
             </Typography>
           </Box>
         </Toolbar>
-      </Container>
     </AppBar>
 
     {isDesktop ? (
