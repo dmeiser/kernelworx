@@ -24,7 +24,7 @@ import {
   Container,
 } from '@mui/material';
 import type { SelectChangeEvent } from '@mui/material';
-import { ArrowBack as BackIcon, Save as SaveIcon } from '@mui/icons-material';
+import { Save as SaveIcon } from '@mui/icons-material';
 import {
   LIST_MANAGED_CATALOGS,
   LIST_MY_CATALOGS,
@@ -32,6 +32,7 @@ import {
   LIST_MY_SHARED_CAMPAIGNS,
 } from '../lib/graphql';
 import { StateAutocomplete } from '../components/StateAutocomplete';
+import { PageHeader } from '../components/PageHeader';
 import type { Catalog, SharedCampaign } from '../types';
 
 /* eslint-disable complexity */
@@ -531,14 +532,14 @@ export const CreateSharedCampaignPage: React.FC = () => {
 
   return (
     <Container maxWidth="md" sx={{ py: 3 }}>
-      <Stack direction="row" alignItems="center" spacing={2} sx={{ mb: 3 }}>
-        <Button startIcon={<BackIcon />} onClick={handleBack} disabled={isSubmitting}>
-          Back
-        </Button>
-        <Typography variant="h4" component="h1">
-          Create Shared Campaign
-        </Typography>
-      </Stack>
+      <PageHeader
+        title="Create Shared Campaign"
+        backButton={{
+          onClick: handleBack,
+          label: 'Back',
+          'aria-label': 'Back',
+        }}
+      />
 
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Stack spacing={3}>

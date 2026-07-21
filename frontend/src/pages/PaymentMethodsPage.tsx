@@ -12,8 +12,9 @@
  */
 
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation } from '@apollo/client/react';
-import { Box, Typography, Card, Stack, Button, CircularProgress, Alert } from '@mui/material';
+import { Box, Stack, Button, Alert } from '@mui/material';
 import { Add as AddIcon } from '@mui/icons-material';
 
 import {
@@ -26,6 +27,9 @@ import {
   DELETE_PAYMENT_METHOD_QR_CODE,
 } from '../lib/graphql';
 import { PageHeader } from '../components/PageHeader';
+import { LoadingState } from '../components/LoadingState';
+import { ErrorAlert } from '../components/ErrorAlert';
+import { EmptyState } from '../components/EmptyState';
 import { PaymentMethodCard } from '../components/PaymentMethodCard';
 import { CreatePaymentMethodDialog } from '../components/CreatePaymentMethodDialog';
 import { EditPaymentMethodDialog } from '../components/EditPaymentMethodDialog';
@@ -50,19 +54,7 @@ interface RequestQRUploadData {
 // Import shared validation constants and functions
 import { isReservedName } from '../lib/paymentMethodValidation';
 
-// Loading state component
-const LoadingState: React.FC = () => (
-  <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
-    <CircularProgress />
-  </Box>
-);
 
-// Error state component
-const ErrorState: React.FC<{ message: string }> = ({ message }) => (
-  <Box>
-    <Alert severity="error">Failed to load payment methods: {message}</Alert>
-  </Box>
-);
 
 // Message alerts component
 interface MessageAlertsProps {
@@ -87,17 +79,12 @@ const MessageAlerts: React.FC<MessageAlertsProps> = ({ successMessage, error, on
   </>
 );
 
-// Empty state component
-const EmptyState: React.FC = () => (
-  <Card sx={{ p: 3, textAlign: 'center' }}>
-    <Typography color="text.secondary">
-      No payment methods yet. Cash and Check are always available. Add custom payment methods above.
-    </Typography>
-  </Card>
-);
+
 
 // eslint-disable-next-line complexity -- Complex page component managing multiple dialogs and state
 export const PaymentMethodsPage: React.FC = () => {
+  const navigate = useNavigate();
+
   // Dialog states
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
@@ -317,7 +304,7 @@ export const PaymentMethodsPage: React.FC = () => {
   }
 
   if (queryError) {
-    return <ErrorState message={queryError.message} />;
+    return <ErrorAlert message={`Failed to load payment methods: ${queryError.message}`} />;
   }
 
   return (
@@ -326,6 +313,11 @@ export const PaymentMethodsPage: React.FC = () => {
       <PageHeader
         title="Payment Methods"
         subtitle="Cash and Check are always available. Create custom methods and add QR codes for apps like Venmo or PayPal."
+        backButton={{
+          onClick: () => navigate('/settings'),
+          label: 'Back',
+          'aria-label': 'Back to settings',
+        }}
         action={
           <Button
             variant="contained"
@@ -364,7 +356,12 @@ export const PaymentMethodsPage: React.FC = () => {
           />
         ))}
 
-        {paymentMethods.length === 0 && <EmptyState />}
+        {paymentMethods.length === 0 && (
+          <EmptyState
+            title="No Payment Methods Yet"
+            message="Cash and Check are always available. Add custom methods and QR codes for apps like Venmo or PayPal."
+          />
+        )}
       </Stack>
 
       {/* Dialogs */}

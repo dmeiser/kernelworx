@@ -12,13 +12,8 @@ import {
   Button,
   Grid,
   Alert,
-  CircularProgress,
   Stack,
   Divider,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
   FormControlLabel,
   Switch,
 } from '@mui/material';
@@ -26,6 +21,11 @@ import { Add as AddIcon, CardGiftcard as GiftIcon } from '@mui/icons-material';
 import { ProfileCard } from '../components/ProfileCard';
 import { CreateProfileDialog } from '../components/CreateProfileDialog';
 import { EditProfileDialog } from '../components/EditProfileDialog';
+import { LoadingState } from '../components/LoadingState';
+import { ErrorAlert } from '../components/ErrorAlert';
+import { EmptyState } from '../components/EmptyState';
+import { PageHeader } from '../components/PageHeader';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import {
   LIST_MY_PROFILES,
   LIST_MY_SHARES,
@@ -92,30 +92,11 @@ const getMyProfiles = (data: { listMyProfiles: Profile[] } | undefined): Profile
 const isPageLoading = (profilesLoading: boolean, accountLoading: boolean, bothProfilesLoaded: boolean): boolean =>
   profilesLoading || accountLoading || !bothProfilesLoaded;
 
-// Loading spinner component
-const LoadingSpinner: React.FC = () => (
-  <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
-    <CircularProgress />
-  </Box>
-);
-
-// Error alert component
-const ErrorAlert: React.FC<{ error: Error }> = ({ error }) => (
-  <Alert severity="error" sx={{ mb: 3 }}>
-    Failed to load profiles: {error.message}
-  </Alert>
-);
-
 // Info message alert component
 const InfoMessageAlert: React.FC<{ message: string }> = ({ message }) => (
   <Alert severity="info" sx={{ mb: 3 }}>
     {message}
   </Alert>
-);
-
-// Empty state component
-const EmptyState: React.FC = () => (
-  <Alert severity="info">You don't have any Scouts yet. Click "Create Scout" to get started!</Alert>
 );
 
 // Owned profiles section component
@@ -314,7 +295,7 @@ const combineErrors = (error1: Error | null | undefined, error2: Error | null): 
 
 // Helper component for conditional error display
 const ConditionalErrorAlert: React.FC<{ error: Error | null }> = ({ error }) =>
-  error ? <ErrorAlert error={error} /> : null;
+  error ? <ErrorAlert message={`Failed to load profiles: ${error.message}`} /> : null;
 
 // Helper component for conditional info message
 const ConditionalInfoAlert: React.FC<{ message: string | undefined }> = ({ message }) =>
@@ -326,7 +307,12 @@ const ConditionalEmptyState: React.FC<{
   filteredSharedProfiles: Profile[];
   loading: boolean;
 }> = ({ myProfiles, filteredSharedProfiles, loading }) =>
-  shouldShowEmptyState(myProfiles, filteredSharedProfiles, loading) ? <EmptyState /> : null;
+  shouldShowEmptyState(myProfiles, filteredSharedProfiles, loading) ? (
+    <EmptyState
+      title="No Scouts Yet"
+      message='Click "Create Scout" to add your first seller profile.'
+    />
+  ) : null;
 
 // Helper component for conditional editing dialog
 const ConditionalEditDialog: React.FC<{
@@ -495,42 +481,41 @@ export const ScoutsPage: React.FC = () => {
   const error = combineErrors(myProfilesError, sharedProfilesError);
 
   if (pageLoading) {
-    return <LoadingSpinner />;
+    return <LoadingState />;
   }
 
   /* v8 ignore start -- JSX return block tested via MockedProvider tests, MUI components have limited testability in jsdom */
   return (
     <Box>
-      {/* Header */}
-      <Stack direction="row" justifyContent="space-between" alignItems="center" mb={3}>
-        <Stack direction="row" alignItems="center" spacing={2}>
-          <Typography variant="h4" component="h1">
-            My Scouts
-          </Typography>
-          <FormControlLabel
-            control={
-              <Switch
-                checked={showReadOnlyProfiles}
-                onChange={(e) => handleToggleReadOnly(e.target.checked)}
-                size="small"
-              />
-            }
-            label={
-              <Typography variant="body2" color="text.secondary">
-                Show read-only
-              </Typography>
-            }
-          />
-        </Stack>
-        <Stack direction="row" spacing={2}>
-          <Button variant="outlined" startIcon={<GiftIcon />} onClick={() => navigate('/accept-invite')}>
-            Accept Invite
-          </Button>
-          <Button variant="contained" startIcon={<AddIcon />} onClick={() => setCreateDialogOpen(true)}>
-            Create Scout
-          </Button>
-        </Stack>
-      </Stack>
+      <PageHeader
+        title="My Scouts"
+        action={
+          <Stack direction={{ xs: 'column', sm: 'row' }} alignItems="center" spacing={2}>
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={showReadOnlyProfiles}
+                  onChange={(e) => handleToggleReadOnly(e.target.checked)}
+                  size="small"
+                />
+              }
+              label={
+                <Typography variant="body2" color="text.secondary">
+                  Show read-only
+                </Typography>
+              }
+            />
+            <Stack direction="row" spacing={2}>
+              <Button variant="outlined" startIcon={<GiftIcon />} onClick={() => navigate('/accept-invite')}>
+                Accept Invite
+              </Button>
+              <Button variant="contained" startIcon={<AddIcon />} onClick={() => setCreateDialogOpen(true)}>
+                Create Scout
+              </Button>
+            </Stack>
+          </Stack>
+        }
+      />
 
       <ConditionalErrorAlert error={error} />
       <ConditionalInfoAlert message={infoMessage} />
@@ -561,24 +546,22 @@ export const ScoutsPage: React.FC = () => {
         onSubmit={handleUpdateProfile}
       />
 
-      {/* Delete Profile Confirmation Dialog */}
-      <Dialog open={deleteConfirmOpen} onClose={handleDeleteDialogDismiss} maxWidth="xs" fullWidth>
-        <DialogTitle sx={{ color: 'primary.main' }}>Delete Profile?</DialogTitle>
-        <DialogContent>
-          <Typography color="text.secondary">
-            Are you sure you want to delete this profile? All campaigns and orders will be permanently deleted. This
-            action cannot be undone.
-          </Typography>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setDeleteConfirmOpen(false)} disabled={deletingProfile}>
-            Cancel
-          </Button>
-          <Button onClick={handleDeleteProfile} color="error" variant="contained" disabled={deletingProfile}>
-            {deletingProfile ? 'Deleting...' : 'Delete Permanently'}
-          </Button>
-        </DialogActions>
-      </Dialog>
+      <ConfirmDialog
+        open={deleteConfirmOpen}
+        title="Delete Profile?"
+        onClose={handleDeleteDialogDismiss}
+        onConfirm={handleDeleteProfile}
+        confirmLabel="Delete Permanently"
+        confirmColor="error"
+        isLoading={deletingProfile}
+        loadingLabel="Deleting..."
+        maxWidth="xs"
+      >
+        <Typography color="text.secondary">
+          Are you sure you want to delete this profile? All campaigns and orders will be permanently deleted. This action
+          cannot be undone.
+        </Typography>
+      </ConfirmDialog>
     </Box>
   );
   /* v8 ignore stop */

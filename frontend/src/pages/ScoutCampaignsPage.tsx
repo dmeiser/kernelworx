@@ -10,16 +10,15 @@ import {
   Box,
   Button,
   Grid,
-  Alert,
-  CircularProgress,
-  Stack,
-  IconButton,
-  Breadcrumbs,
-  Link,
   Divider,
 } from '@mui/material';
-import { Add as AddIcon, ArrowBack as ArrowBackIcon } from '@mui/icons-material';
+import { Add as AddIcon } from '@mui/icons-material';
 import { CampaignCard } from '../components/CampaignCard';
+import { LoadingState } from '../components/LoadingState';
+import { ErrorAlert } from '../components/ErrorAlert';
+import { EmptyState } from '../components/EmptyState';
+import { PageHeader } from '../components/PageHeader';
+import { NavBreadcrumbs } from '../components/NavBreadcrumbs';
 import { GET_PROFILE, LIST_CAMPAIGNS_BY_PROFILE } from '../lib/graphql';
 import { ensureProfileId } from '../lib/ids';
 import type { Campaign, SellerProfile } from '../types';
@@ -58,14 +57,8 @@ function canEditProfile(profile: Profile | undefined): boolean {
 
 // --- Sub-Components ---
 
-const LoadingState: React.FC = () => (
-  <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
-    <CircularProgress />
-  </Box>
-);
-
 const ProfileNotFoundState: React.FC = () => (
-  <Alert severity="error">Profile not found or you don't have access to this profile.</Alert>
+  <ErrorAlert message="Profile not found or you don't have access to this profile." />
 );
 
 interface PageBreadcrumbsProps {
@@ -74,61 +67,15 @@ interface PageBreadcrumbsProps {
 }
 
 const PageBreadcrumbs: React.FC<PageBreadcrumbsProps> = ({ sellerName, onNavigateBack }) => (
-  <Breadcrumbs sx={{ mb: 2 }}>
-    <Link
-      component="button"
-      variant="body1"
-      onClick={onNavigateBack}
-      sx={{ textDecoration: 'none', cursor: 'pointer' }}
-    >
-      Profiles
-    </Link>
-    <Typography color="text.primary">{sellerName || 'Loading...'}</Typography>
-  </Breadcrumbs>
+  <NavBreadcrumbs
+    items={[
+      { label: 'Profiles', onClick: onNavigateBack },
+      { label: sellerName || 'Loading...' },
+    ]}
+  />
 );
 
-interface PageHeaderProps {
-  sellerName: string | undefined;
-  canEdit: boolean;
-  onNavigateBack: () => void;
-  onCreateClick: () => void;
-}
 
-const PageHeader: React.FC<PageHeaderProps> = ({ sellerName, canEdit, onNavigateBack, onCreateClick }) => (
-  <Stack direction="row" justifyContent="space-between" alignItems="center" mb={3}>
-    <Stack direction="row" alignItems="center" spacing={2}>
-      <IconButton onClick={onNavigateBack} edge="start" aria-label="Back to profiles">
-        <ArrowBackIcon />
-      </IconButton>
-      <Box>
-        <Typography variant="h4" component="h1">
-          {sellerName}
-        </Typography>
-        <Typography variant="body2" color="text.secondary">
-          Sales Campaigns
-        </Typography>
-      </Box>
-    </Stack>
-    {canEdit && (
-      <Button variant="contained" startIcon={<AddIcon />} onClick={onCreateClick}>
-        New Campaign
-      </Button>
-    )}
-  </Stack>
-);
-
-interface ErrorAlertProps {
-  error: ReturnType<typeof useQuery>['error'];
-}
-
-const ErrorAlert: React.FC<ErrorAlertProps> = ({ error }) => {
-  if (!error) return null;
-  return (
-    <Alert severity="error" sx={{ mb: 3 }}>
-      Failed to load campaigns: {error.message}
-    </Alert>
-  );
-};
 
 interface CampaignsGridProps {
   campaigns: Campaign[];
@@ -163,19 +110,7 @@ const CampaignsGrid: React.FC<CampaignsGridProps> = ({ campaigns, profileId, sec
   );
 };
 
-interface EmptyStateProps {
-  canEdit: boolean;
-  loading: boolean;
-  campaignsCount: number;
-}
 
-const EmptyState: React.FC<EmptyStateProps> = ({ canEdit, loading, campaignsCount }) => {
-  if (campaignsCount > 0 || loading) return null;
-  const message = canEdit
-    ? 'No sales campaigns yet. Click "New Campaign" to get started!'
-    : 'No sales campaigns have been created for this profile yet.';
-  return <Alert severity="info">{message}</Alert>;
-};
 
 // --- Custom Hooks for Data Fetching ---
 
@@ -238,12 +173,18 @@ const ScoutCampaignsContent: React.FC<ScoutCampaignsContentProps> = ({
     <Box>
       <PageBreadcrumbs sellerName={profile?.sellerName} onNavigateBack={handleNavigateBack} />
       <PageHeader
-        sellerName={profile?.sellerName}
-        canEdit={canEdit}
-        onNavigateBack={handleNavigateBack}
-        onCreateClick={handleCreateClick}
+        title={profile?.sellerName ?? 'Loading…'}
+        subtitle="Sales Campaigns"
+        backButton={{ onClick: handleNavigateBack, 'aria-label': 'Back to profiles' }}
+        action={
+          canEdit && (
+            <Button variant="contained" startIcon={<AddIcon />} onClick={handleCreateClick}>
+              New Campaign
+            </Button>
+          )
+        }
       />
-      <ErrorAlert error={error} />
+      {error && <ErrorAlert message={`Failed to load campaigns: ${error.message}`} />}
       <CampaignsGrid
         campaigns={active}
         profileId={profileId}
@@ -251,7 +192,16 @@ const ScoutCampaignsContent: React.FC<ScoutCampaignsContentProps> = ({
       />
       {showDivider && <Divider sx={{ my: 4 }} />}
       <CampaignsGrid campaigns={inactive} profileId={profileId} sectionTitle="Inactive Campaigns" />
-      <EmptyState canEdit={canEdit} loading={loading} campaignsCount={campaigns.length} />
+      {!loading && campaigns.length === 0 && (
+        <EmptyState
+          title="No Sales Campaigns Yet"
+          message={
+            canEdit
+              ? 'Click "New Campaign" to create your first campaign for this Scout.'
+              : 'No sales campaigns have been created for this profile yet.'
+          }
+        />
+      )}
     </Box>
   );
 };

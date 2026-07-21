@@ -13,7 +13,6 @@ import {
   Button,
   Typography,
   Alert,
-  CircularProgress,
   Stack,
   Paper,
   Table,
@@ -26,6 +25,8 @@ import {
 } from '@mui/material';
 import { Add as AddIcon, Share as ShareIcon, ArrowBack as BackIcon } from '@mui/icons-material';
 import { GET_CATALOG } from '../lib/graphql';
+import { LoadingState } from '../components/LoadingState';
+import { ErrorAlert } from '../components/ErrorAlert';
 import type { Catalog, Product } from '../types';
 
 interface CatalogPreviewPageProps {
@@ -33,19 +34,7 @@ interface CatalogPreviewPageProps {
   onCreateSharedCampaign?: (catalogId: string) => void;
 }
 
-// Loading state component
-const LoadingState: React.FC = () => (
-  <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '400px' }}>
-    <CircularProgress />
-  </Box>
-);
 
-// Error state component
-const ErrorState: React.FC<{ message: string }> = ({ message }) => (
-  <Box sx={{ p: 3 }}>
-    <Alert severity="error">Error loading catalog: {message}</Alert>
-  </Box>
-);
 
 // Not found state component
 const NotFoundState: React.FC = () => (
@@ -111,8 +100,8 @@ export const CatalogPreviewPage: React.FC<CatalogPreviewPageProps> = ({
 
   // Render guards - after all hooks
   if (!catalogId) return <NoCatalogIdState />;
-  if (loading) return <LoadingState />;
-  if (error) return <ErrorState message={error.message} />;
+  if (loading) return <LoadingState minHeight="400px" />;
+  if (error) return <ErrorAlert message={`Error loading catalog: ${error.message}`} />;
   if (!catalog) return <NotFoundState />;
 
   return (

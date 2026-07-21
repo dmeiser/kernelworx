@@ -33,8 +33,6 @@ import {
   IconButton,
   TextField,
   InputAdornment,
-  Breadcrumbs,
-  Link,
   Dialog,
   DialogTitle,
   DialogContent,
@@ -58,6 +56,9 @@ import {
   ADMIN_DELETE_SHARE,
   ADMIN_UPDATE_CAMPAIGN_SHARED_CODE,
 } from '../lib/graphql';
+import { LoadingState } from '../components/LoadingState';
+import { NavBreadcrumbs } from '../components/NavBreadcrumbs';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import type { SellerProfile, Catalog, AdminUser } from '../types';
 
 interface Campaign {
@@ -309,19 +310,16 @@ export const UserDataPage: React.FC = () => {
 
   return (
     <Box>
-      {/* Breadcrumbs */}
-      <Breadcrumbs sx={{ mb: 2 }}>
-        <Link
-          component="button"
-          variant="body1"
-          onClick={() => navigate('/admin')}
-          sx={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 0.5 }}
-        >
-          <BackIcon fontSize="small" />
-          Admin Console
-        </Link>
-        <Typography color="text.primary">User Data: {profileIdWithoutPrefix}</Typography>
-      </Breadcrumbs>
+      <NavBreadcrumbs
+        items={[
+          {
+            label: 'Admin Console',
+            onClick: () => navigate('/admin'),
+            icon: <BackIcon fontSize="small" />,
+          },
+          { label: `User Data: ${profileIdWithoutPrefix}` },
+        ]}
+      />
 
       {/* User Info Header */}
       <Paper sx={{ p: 3, mb: 3 }}>
@@ -355,11 +353,7 @@ export const UserDataPage: React.FC = () => {
             Seller Profiles
           </Typography>
 
-          {profilesLoading && (
-            <Box display="flex" justifyContent="center" py={4}>
-              <CircularProgress />
-            </Box>
-          )}
+          {profilesLoading && <LoadingState py={4} />}
 
           {profilesError && <Alert severity="error">Error loading profiles: {profilesError.message}</Alert>}
 
@@ -416,11 +410,7 @@ export const UserDataPage: React.FC = () => {
             Product Catalogs
           </Typography>
 
-          {catalogsLoading && (
-            <Box display="flex" justifyContent="center" py={4}>
-              <CircularProgress />
-            </Box>
-          )}
+          {catalogsLoading && <LoadingState py={4} />}
 
           {catalogsError && <Alert severity="error">Error loading catalogs: {catalogsError.message}</Alert>}
 
@@ -474,14 +464,7 @@ export const UserDataPage: React.FC = () => {
             Select a profile to view and manage its campaigns.
           </Typography>
 
-          {campaignsLoading && (
-            <Box display="flex" justifyContent="center" py={4}>
-              <CircularProgress />
-              <Typography variant="body2" sx={{ ml: 2 }}>
-                Loading campaigns...
-              </Typography>
-            </Box>
-          )}
+          {campaignsLoading && <LoadingState py={4} />}
 
           {campaignsError && <Alert severity="error">Error loading campaigns: {campaignsError.message}</Alert>}
 
@@ -715,11 +698,7 @@ export const UserDataPage: React.FC = () => {
 
               {selectedProfileForShares && (
                 <>
-                  {sharesLoading && (
-                    <Box display="flex" justifyContent="center" py={4}>
-                      <CircularProgress />
-                    </Box>
-                  )}
+                  {sharesLoading && <LoadingState py={4} />}
 
                   {!sharesLoading && shares.length === 0 && (
                     <Alert severity="info">No shares found for this profile.</Alert>
@@ -862,24 +841,18 @@ export const UserDataPage: React.FC = () => {
         </DialogActions>
       </Dialog>
 
-      {/* Revoke Share Confirmation Dialog */}
-      <Dialog open={!!revokeShareTarget} onClose={() => setRevokeShareTarget(null)}>
-        <DialogTitle>Revoke Access?</DialogTitle>
-        <DialogContent>
-          <Typography>Are you sure you want to revoke {revokeShareTarget?.email}'s access to this profile?</Typography>
-          {revokeShareError && (
-            <Alert severity="error" sx={{ mt: 2 }} onClose={() => setRevokeShareError(null)}>
-              {revokeShareError}
-            </Alert>
-          )}
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setRevokeShareTarget(null)}>Cancel</Button>
-          <Button onClick={handleConfirmRevokeShare} color="error">
-            Revoke
-          </Button>
-        </DialogActions>
-      </Dialog>
+      <ConfirmDialog
+        open={!!revokeShareTarget}
+        title="Revoke Access?"
+        onClose={() => setRevokeShareTarget(null)}
+        onConfirm={handleConfirmRevokeShare}
+        confirmLabel="Revoke"
+        confirmColor="error"
+        error={revokeShareError}
+        onDismissError={() => setRevokeShareError(null)}
+      >
+        <Typography>Are you sure you want to revoke {revokeShareTarget?.email}'s access to this profile?</Typography>
+      </ConfirmDialog>
     </Box>
   );
 };

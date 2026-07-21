@@ -15,16 +15,8 @@ import {
   Box,
   Tabs,
   Tab,
-  Typography,
-  Stack,
-  IconButton,
-  Breadcrumbs,
-  Link,
-  CircularProgress,
-  Alert,
 } from '@mui/material';
 import {
-  ArrowBack as ArrowBackIcon,
   ShoppingCart as OrdersIcon,
   Assessment as ReportsIcon,
   Settings as SettingsIcon,
@@ -37,6 +29,10 @@ import { CampaignSettingsPage } from './CampaignSettingsPage';
 import { CampaignSummaryPage } from './CampaignSummaryPage';
 import { GET_CAMPAIGN, GET_PROFILE } from '../lib/graphql';
 import { ensureProfileId, ensureCampaignId, toUrlId } from '../lib/ids';
+import { LoadingState } from '../components/LoadingState';
+import { ErrorAlert } from '../components/ErrorAlert';
+import { PageHeader } from '../components/PageHeader';
+import { NavBreadcrumbs } from '../components/NavBreadcrumbs';
 import type { Campaign, SellerProfile } from '../types';
 
 // --- Helper Functions ---
@@ -81,15 +77,7 @@ function logCampaignError(error: Error): void {
 
 // --- Sub-Components ---
 
-const LoadingState: React.FC = () => (
-  <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
-    <CircularProgress />
-  </Box>
-);
 
-const ErrorState: React.FC = () => (
-  <Alert severity="error">Campaign not found or you don't have access to this campaign.</Alert>
-);
 
 interface CampaignBreadcrumbsProps {
   profileId: string;
@@ -106,27 +94,13 @@ const CampaignBreadcrumbs: React.FC<CampaignBreadcrumbsProps> = ({
   campaignYear,
   onNavigate,
 }) => (
-  <Breadcrumbs sx={{ mb: 2 }}>
-    <Link
-      component="button"
-      variant="body1"
-      onClick={() => onNavigate('/scouts')}
-      sx={{ textDecoration: 'none', cursor: 'pointer' }}
-    >
-      Scouts
-    </Link>
-    <Link
-      component="button"
-      variant="body1"
-      onClick={() => onNavigate(`/scouts/${toUrlId(profileId)}/campaigns`)}
-      sx={{ textDecoration: 'none', cursor: 'pointer' }}
-    >
-      {sellerName}
-    </Link>
-    <Typography color="text.primary">
-      {campaignName} {campaignYear}
-    </Typography>
-  </Breadcrumbs>
+  <NavBreadcrumbs
+    items={[
+      { label: 'Scouts', onClick: () => onNavigate('/scouts') },
+      { label: sellerName, onClick: () => onNavigate(`/scouts/${toUrlId(profileId)}/campaigns`) },
+      { label: `${campaignName} ${campaignYear}` },
+    ]}
+  />
 );
 
 interface CampaignHeaderProps {
@@ -138,21 +112,11 @@ const CampaignHeader: React.FC<CampaignHeaderProps> = ({ campaign, onBack }) => 
   const dateRange = formatDateRange(campaign.startDate, campaign.endDate);
 
   return (
-    <Stack direction="row" alignItems="center" spacing={2} mb={3}>
-      <IconButton edge="start" color="inherit" onClick={onBack} sx={{ mr: 2 }} aria-label="Back to campaigns">
-        <ArrowBackIcon />
-      </IconButton>
-      <Box flexGrow={1}>
-        <Typography variant="h4" component="h1">
-          {campaign.campaignName} {campaign.campaignYear}
-        </Typography>
-        {dateRange && (
-          <Typography variant="body2" color="text.secondary">
-            {dateRange}
-          </Typography>
-        )}
-      </Box>
-    </Stack>
+    <PageHeader
+      title={`${campaign.campaignName} ${campaign.campaignYear}`}
+      subtitle={dateRange ?? undefined}
+      backButton={{ onClick: onBack, 'aria-label': 'Back to campaigns' }}
+    />
   );
 };
 
@@ -287,7 +251,9 @@ export const CampaignLayout: React.FC = () => {
   const navHandlers = useNavigationHandlers(profileId, campaignId);
 
   if (campaignQuery.loading || profileQuery.loading) return <LoadingState />;
-  if (campaignQuery.error || !campaignQuery.campaign) return <ErrorState />;
+  if (campaignQuery.error || !campaignQuery.campaign) {
+    return <ErrorAlert message="Campaign not found or you don't have access to this campaign." />;
+  }
 
   return (
     <CampaignContent

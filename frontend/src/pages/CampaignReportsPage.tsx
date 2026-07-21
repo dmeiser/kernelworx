@@ -28,6 +28,7 @@ import {
   Chip,
 } from '@mui/material';
 import { Download as DownloadIcon, Assessment as ReportIcon } from '@mui/icons-material';
+import { PageHeader } from '../components/PageHeader';
 import * as XLSX from 'xlsx';
 import { GET_UNIT_REPORT, LIST_MY_SHARED_CAMPAIGNS } from '../lib/graphql';
 import type { SharedCampaign, OrderLineItem } from '../types';
@@ -642,7 +643,11 @@ export const CampaignReportsPage: React.FC = () => {
   return (
     <Box sx={{ p: 3 }}>
       <Stack spacing={3}>
-        <PageHeader />
+        <PageHeader
+          title="Shared Campaign Reports"
+          subtitle="View aggregated sales data for all sellers in your shared campaigns"
+          icon={ReportIcon}
+        />
 
         <CampaignSelectorCard
           campaigns={campaigns}
@@ -856,17 +861,7 @@ const useReportActions = ({
   };
 };
 
-const PageHeader: React.FC = () => (
-  <Box>
-    <Typography variant="h4" component="h1" gutterBottom>
-      <ReportIcon sx={{ mr: 1, verticalAlign: 'bottom' }} />
-      Shared Campaign Reports
-    </Typography>
-    <Typography variant="body2" color="text.secondary">
-      View aggregated sales data for all sellers in your shared campaigns
-    </Typography>
-  </Box>
-);
+
 
 const ReportPanels: React.FC<{
   report?: UnitReport;

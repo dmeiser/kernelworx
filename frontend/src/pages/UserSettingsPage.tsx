@@ -10,12 +10,14 @@
 
 import { useEffect } from 'react';
 import { useQuery, useMutation } from '@apollo/client/react';
-import { Box, Typography, Stack, Alert, CircularProgress, IconButton } from '@mui/material';
-import { ArrowBack as BackIcon } from '@mui/icons-material';
+import { Box, Alert } from '@mui/material';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { GET_MY_ACCOUNT, UPDATE_MY_ACCOUNT, DELETE_MY_ACCOUNT } from '../lib/graphql';
 import { usePasswordChange, useMfa, usePasskeys, useEmailUpdate, useProfileEdit } from '../hooks';
+import { LoadingState } from '../components/LoadingState';
+import { ErrorAlert } from '../components/ErrorAlert';
+import { PageHeader } from '../components/PageHeader';
 import {
   PasswordSection,
   MfaSection,
@@ -89,17 +91,7 @@ const getAccountFromData = (data: { getMyAccount: Account } | undefined): Accoun
 // Helper to get email from account
 const getAccountEmail = (account: Account | undefined): string | undefined => account?.email;
 
-// Loading component
-const LoadingState: React.FC = () => (
-  <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
-    <CircularProgress />
-  </Box>
-);
 
-// Error component
-const ErrorState: React.FC<{ message: string }> = ({ message }) => (
-  <Alert severity="error">Failed to load account information: {message}</Alert>
-);
 
 // Conditional success alert component
 const SuccessAlert: React.FC<{ show: boolean }> = ({ show }) =>
@@ -192,20 +184,15 @@ export const UserSettingsPage: React.FC = () => {
   }
 
   if (accountError) {
-    return <ErrorState message={accountError.message} />;
+    return <ErrorAlert message={`Failed to load account information: ${accountError.message}`} />;
   }
 
   return (
-    <Box sx={{ p: 3 }}>
-      {/* Header */}
-      <Stack direction="row" alignItems="center" spacing={2} sx={{ mb: 3 }}>
-        <IconButton onClick={() => navigate('/settings')} edge="start" aria-label="Back to settings">
-          <BackIcon />
-        </IconButton>
-        <Typography variant="h4" component="h1">
-          User Settings
-        </Typography>
-      </Stack>
+    <Box>
+      <PageHeader
+        title="User Settings"
+        backButton={{ onClick: () => navigate('/settings'), label: 'Back', 'aria-label': 'Back to settings' }}
+      />
 
       <SuccessAlert show={profileHook.updateSuccess} />
       <UpdateErrorAlert error={profileHook.updateError} />

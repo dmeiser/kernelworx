@@ -5,8 +5,10 @@
 import React from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery } from '@apollo/client/react';
-import { Box, Grid, Paper, Typography, Stack, CircularProgress, Alert } from '@mui/material';
+import { Box, Grid, Paper, Typography, Stack } from '@mui/material';
 import { ShoppingCart, AttachMoney, People } from '@mui/icons-material';
+import { LoadingState } from '../components/LoadingState';
+import { ErrorAlert } from '../components/ErrorAlert';
 import { LIST_ORDERS_BY_CAMPAIGN, GET_PAYMENT_METHODS_FOR_PROFILE } from '../lib/graphql';
 import { ensureCampaignId, ensureProfileId } from '../lib/ids';
 import type { Order } from '../types';
@@ -207,15 +209,11 @@ export const CampaignSummaryPage: React.FC = () => {
   const topProducts = getTopProducts(productBreakdown, 5);
 
   if (loading) {
-    return (
-      <Box display="flex" justifyContent="center" alignItems="center" minHeight="200px">
-        <CircularProgress />
-      </Box>
-    );
+    return <LoadingState minHeight="200px" />;
   }
 
   if (error) {
-    return <Alert severity="error">Failed to load summary: {error.message}</Alert>;
+    return <ErrorAlert message={`Failed to load summary: ${error.message}`} />;
   }
 
   return (

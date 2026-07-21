@@ -167,7 +167,7 @@ describe('SharedCampaignsPage', () => {
         expect(screen.getByText('No Shared Campaigns Yet')).toBeInTheDocument();
       });
 
-      expect(screen.getByText(/Create a shared campaign to generate shareable links/)).toBeInTheDocument();
+      expect(screen.getByText(/Create a shareable link so unit members can create campaigns/)).toBeInTheDocument();
     });
 
     it('shows shared campaign count in header', async () => {
@@ -370,7 +370,7 @@ describe('SharedCampaignsPage', () => {
       fireEvent.click(deactivateButtons[0]);
 
       await waitFor(() => {
-        expect(screen.getByText('Deactivate Campaign SharedCampaign?')).toBeInTheDocument();
+        expect(screen.getByText('Deactivate Shared Campaign?')).toBeInTheDocument();
       });
 
       expect(screen.getByText(/The link will no longer work for new campaign creation/)).toBeInTheDocument();
@@ -387,14 +387,14 @@ describe('SharedCampaignsPage', () => {
       fireEvent.click(deactivateButtons[0]);
 
       await waitFor(() => {
-        expect(screen.getByText('Deactivate Campaign SharedCampaign?')).toBeInTheDocument();
+        expect(screen.getByText('Deactivate Shared Campaign?')).toBeInTheDocument();
       });
 
       const cancelButton = screen.getByRole('button', { name: 'Cancel' });
       fireEvent.click(cancelButton);
 
       await waitFor(() => {
-        expect(screen.queryByText('Deactivate Campaign SharedCampaign?')).not.toBeInTheDocument();
+        expect(screen.queryByText('Deactivate Shared Campaign?')).not.toBeInTheDocument();
       });
     });
 
@@ -432,7 +432,7 @@ describe('SharedCampaignsPage', () => {
       fireEvent.click(deactivateButtons[0]);
 
       await waitFor(() => {
-        expect(screen.getByText('Deactivate Campaign SharedCampaign?')).toBeInTheDocument();
+        expect(screen.getByText('Deactivate Shared Campaign?')).toBeInTheDocument();
       });
 
       const deactivateButton = screen.getByRole('button', { name: 'Deactivate' });

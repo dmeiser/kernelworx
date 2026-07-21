@@ -7,6 +7,7 @@ import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@apollo/client/react';
 import { Box, Typography, Paper, Stack, Button } from '@mui/material';
 import { Logout as LogoutIcon } from '@mui/icons-material';
+import { PageHeader } from '../components/PageHeader';
 import { useAuth } from '../contexts/AuthContext';
 import { GET_MY_ACCOUNT } from '../lib/graphql';
 
@@ -29,9 +30,7 @@ export const SettingsPage: React.FC = () => {
 
   return (
     <Box>
-      <Typography variant="h4" component="h1" gutterBottom>
-        Account Settings
-      </Typography>
+      <PageHeader title="Account Settings" />
 
       {/* Quick Actions */}
       <Paper sx={{ p: { xs: 2, sm: 3 }, mb: { xs: 2, sm: 3 } }}>

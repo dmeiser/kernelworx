@@ -10,7 +10,6 @@ import {
   Button,
   Typography,
   Alert,
-  CircularProgress,
   Stack,
   Paper,
   Tabs,
@@ -30,6 +29,9 @@ import {
   Delete as DeleteIcon,
   Visibility as VisibilityIcon,
 } from '@mui/icons-material';
+import { LoadingState } from '../components/LoadingState';
+import { ErrorAlert } from '../components/ErrorAlert';
+import { PageHeader } from '../components/PageHeader';
 import { CatalogEditorDialog } from '../components/CatalogEditorDialog';
 import {
   LIST_MANAGED_CATALOGS,
@@ -344,21 +346,7 @@ function useCatalogsPageData(): CatalogsPageData {
   };
 }
 
-// Sub-component: Loading state
-const CatalogsLoading: React.FC = () => (
-  <Box display="flex" justifyContent="center" alignItems="center" minHeight="200px">
-    <CircularProgress />
-  </Box>
-);
 
-// Sub-component: Error state
-interface CatalogsErrorProps {
-  message: string;
-}
-
-const CatalogsError: React.FC<CatalogsErrorProps> = ({ message }) => (
-  <Alert severity="error">Failed to load catalogs: {message}</Alert>
-);
 
 // Sub-component: Main content (tabs + table)
 interface CatalogsContentProps {
@@ -395,7 +383,14 @@ const CatalogsContent: React.FC<CatalogsContentProps> = ({
 
   return (
     <Box>
-      <CatalogsHeader onCreateCatalog={onCreateCatalog} />
+      <PageHeader
+        title="Product Catalogs"
+        action={
+          <Button variant="contained" startIcon={<AddIcon />} onClick={onCreateCatalog}>
+            New Catalog
+          </Button>
+        }
+      />
       <CatalogsInfoAlert />
       <CatalogsTabs currentTab={currentTab} onTabChange={onTabChange} />
 
@@ -463,11 +458,11 @@ export const CatalogsPage: React.FC = () => {
   };
 
   if (isLoading) {
-    return <CatalogsLoading />;
+    return <LoadingState minHeight="200px" />;
   }
 
   if (errorMessage) {
-    return <CatalogsError message={errorMessage} />;
+    return <ErrorAlert message={`Failed to load catalogs: ${errorMessage}`} />;
   }
 
   return (
@@ -517,19 +512,7 @@ async function saveCatalog(
   }
 }
 
-// Sub-component: Page header with title and create button
-interface CatalogsHeaderProps {
-  onCreateCatalog: () => void;
-}
 
-const CatalogsHeader: React.FC<CatalogsHeaderProps> = ({ onCreateCatalog }) => (
-  <Stack direction="row" justifyContent="space-between" alignItems="center" mb={3}>
-    <Typography variant="h4">Product Catalogs</Typography>
-    <Button variant="contained" startIcon={<AddIcon />} onClick={onCreateCatalog}>
-      New Catalog
-    </Button>
-  </Stack>
-);
 
 // Sub-component: Info alert explaining catalog types
 const CatalogsInfoAlert: React.FC = () => (

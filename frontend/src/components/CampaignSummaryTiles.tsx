@@ -9,8 +9,10 @@
 
 import React from 'react';
 import { useQuery } from '@apollo/client/react';
-import { Box, Grid, Paper, Typography, Stack, CircularProgress, Alert } from '@mui/material';
+import { Box, Grid, Paper, Typography, Stack } from '@mui/material';
 import { ShoppingCart, AttachMoney, People, Inventory2 } from '@mui/icons-material';
+import { LoadingState } from './LoadingState';
+import { ErrorAlert } from './ErrorAlert';
 import { LIST_ORDERS_BY_CAMPAIGN } from '../lib/graphql';
 import { ensureCampaignId } from '../lib/ids';
 import type { Order } from '../types';
@@ -49,15 +51,11 @@ export const CampaignSummaryTiles: React.FC<CampaignSummaryTilesProps> = ({ camp
     }).format(amount);
 
   if (loading) {
-    return (
-      <Box display="flex" justifyContent="center" alignItems="center" minHeight="100px">
-        <CircularProgress size={40} />
-      </Box>
-    );
+    return <LoadingState minHeight="100px" />;
   }
 
   if (error) {
-    return <Alert severity="error">Failed to load summary statistics: {error.message}</Alert>;
+    return <ErrorAlert message={`Failed to load summary statistics: ${error.message}`} />;
   }
 
   return (

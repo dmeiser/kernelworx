@@ -190,7 +190,7 @@ describe('ScoutsPage – interactions', () => {
     mockMyProfilesLoading = false;
     renderScoutsPage();
     await waitFor(
-      () => expect(screen.getByText(/You don't have any scouts yet/i)).toBeInTheDocument(),
+      () => expect(screen.getByText(/Click "Create Scout" to add your first seller profile./i)).toBeInTheDocument(),
       { timeout: 5000 },
     );
   }, 10000);

@@ -24,9 +24,6 @@ import {
   Divider,
   Alert,
   Paper,
-  CircularProgress,
-  Breadcrumbs,
-  Link,
   Dialog,
   DialogTitle,
   DialogContent,
@@ -48,6 +45,8 @@ import {
 } from '../lib/graphql';
 import { QrCodeImage } from '../components/QrCodeImage';
 import { StateAutocomplete } from '../components/StateAutocomplete';
+import { LoadingState } from '../components/LoadingState';
+import { NavBreadcrumbs } from '../components/NavBreadcrumbs';
 import { ensureProfileId, ensureCampaignId, ensureOrderId, toUrlId } from '../lib/ids';
 import { useOrderForm, type OrderFormState, type LineItemInput } from '../hooks/useOrderForm';
 import type { Product, Catalog, OrderAddress } from '../types';
@@ -257,30 +256,15 @@ interface OrderBreadcrumbsProps {
 }
 
 const OrderBreadcrumbs: React.FC<OrderBreadcrumbsProps> = ({ profileId, onNavigate, onCancel, isEditing }) => (
-  <Breadcrumbs sx={{ mb: 2 }}>
-    <Link
-      component="button"
-      variant="body2"
-      onClick={() => onNavigate('/scouts')}
-      sx={{ textDecoration: 'none', cursor: 'pointer' }}
-    >
-      Profiles
-    </Link>
-    <Link
-      component="button"
-      variant="body2"
-      onClick={() => onNavigate(`/scouts/${toUrlId(profileId)}/campaigns`)}
-      sx={{ textDecoration: 'none', cursor: 'pointer' }}
-    >
-      Campaigns
-    </Link>
-    <Link component="button" variant="body2" onClick={onCancel} sx={{ textDecoration: 'none', cursor: 'pointer' }}>
-      Orders
-    </Link>
-    <Typography variant="body2" color="text.primary">
-      {isEditing ? 'Edit Order' : 'New Order'}
-    </Typography>
-  </Breadcrumbs>
+  <NavBreadcrumbs
+    variant="body2"
+    items={[
+      { label: 'Profiles', onClick: () => onNavigate('/scouts') },
+      { label: 'Campaigns', onClick: () => onNavigate(`/scouts/${toUrlId(profileId)}/campaigns`) },
+      { label: 'Orders', onClick: onCancel },
+      { label: isEditing ? 'Edit Order' : 'New Order' },
+    ]}
+  />
 );
 
 interface CustomerInfoFormProps {
@@ -873,20 +857,7 @@ function useOrderData(urlParams: ParsedOrderParams): UseOrderDataResult {
 // Loading and Error States
 // ============================================================================
 
-interface LoadingSpinnerProps {
-  show: boolean;
-}
 
-export const LoadingSpinner: React.FC<LoadingSpinnerProps> = ({ show }) => {
-  if (!show) {
-    return null;
-  }
-  return (
-    <Box display="flex" justifyContent="center" py={4}>
-      <CircularProgress />
-    </Box>
-  );
-};
 
 interface PermissionErrorProps {
   hasPermission: boolean;
@@ -977,7 +948,7 @@ export const OrderEditorPage: React.FC = () => {
   };
 
   if (orderLoading) {
-    return <LoadingSpinner show />;
+    return <LoadingState minHeight="200px" />;
   }
 
   if (!hasWritePermission) {
