@@ -7,6 +7,7 @@ import {
   Toolbar,
   Typography,
   IconButton,
+  Button,
   Drawer,
   List,
   ListItemText,
@@ -291,23 +292,24 @@ const AppLayoutView: React.FC<{
 }) => (
   <Box sx={{ display: 'flex' }}>
     <AppBar position="fixed" color="default" sx={{ zIndex: (theme) => theme.zIndex.drawer + 1 }}>
-      <Toolbar sx={{ gap: 1, px: { xs: 1, sm: 2, md: 3 } }}>
-        {!isDesktop && (
-          <IconButton
-            color="inherit"
-            aria-label="open drawer"
-            edge="start"
-            onClick={toggleMobileDrawer}
-            sx={{ mr: 0.5 }}
-          >
-            <MenuIcon />
-          </IconButton>
-        )}
+      <Toolbar sx={{ justifyContent: 'space-between', gap: 1, px: { xs: 1, sm: 2, md: 3 } }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          {!isDesktop && (
+            <IconButton
+              color="inherit"
+              aria-label="open drawer"
+              edge="start"
+              onClick={toggleMobileDrawer}
+              sx={{ mr: 0.5 }}
+            >
+              <MenuIcon />
+            </IconButton>
+          )}
 
-        <Box
-          sx={{ display: 'flex', alignItems: 'center', gap: 1, cursor: 'pointer' }}
-          onClick={() => onNavigate('/home')}
-        >
+          <Box
+            sx={{ display: 'flex', alignItems: 'center', gap: 1, cursor: 'pointer' }}
+            onClick={() => onNavigate('/home')}
+          >
             <Box
               component="img"
               src="/logo.svg"
@@ -340,7 +342,28 @@ const AppLayoutView: React.FC<{
               </Box>
             </Typography>
           </Box>
-        </Toolbar>
+        </Box>
+
+        <Button
+          color="inherit"
+          onClick={onLogout}
+          startIcon={<LogoutIcon sx={{ fontSize: '1.25rem', color: brand.text.secondary }} />}
+          sx={{
+            textTransform: 'none',
+            fontWeight: 600,
+            color: brand.text.primary,
+            borderRadius: brand.radius.md,
+            fontFamily: displayFont,
+            '&:hover': {
+              backgroundColor: brand.fill.tertiary,
+            },
+          }}
+        >
+          <Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>
+            Sign out
+          </Box>
+        </Button>
+      </Toolbar>
     </AppBar>
 
     {isDesktop ? (
