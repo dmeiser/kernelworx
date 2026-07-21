@@ -34,7 +34,7 @@ import warnings
 from collections.abc import Generator
 from pathlib import Path
 
-import boto3
+import json
 import pytest
 from dotenv import load_dotenv
 from playwright.sync_api import Browser, BrowserContext, Page, expect
@@ -91,19 +91,54 @@ def _run_typescript_cleanup() -> None:
 
 
 def _cleanup_unconfirmed_smoke_users(user_pool_id: str) -> None:
-    """Delete UNCONFIRMED Cognito users whose email starts with ``smoke+``."""
-    client = boto3.client("cognito-idp")
-    paginator = client.get_paginator("list_users")
-    for page in paginator.paginate(
-        UserPoolId=user_pool_id,
-        Filter='email ^= "smoke+"',
-    ):
-        for user in page["Users"]:
-            if user["UserStatus"] == "UNCONFIRMED":
-                client.admin_delete_user(
-                    UserPoolId=user_pool_id,
-                    Username=user["Username"],
+    """Delete UNCONFIRMED Cognito users whose email starts with ``smoke+``.
+
+    Uses the AWS CLI instead of boto3 so credentials obtained via ``aws login``
+    (e.g., AWS IAM Identity Center / SSO plugins) are picked up through the
+    standard CLI provider chain.
+    """
+    next_token: str | None = None
+    while True:
+        cmd = [
+            "aws",
+            "cognito-idp",
+            "list-users",
+            "--user-pool-id",
+            user_pool_id,
+            "--filter",
+            'email ^= "smoke+"',
+            "--limit",
+            "60",
+        ]
+        if next_token:
+            cmd.extend(["--next-token", next_token])
+        result = subprocess.run(cmd, check=False, capture_output=True, text=True)
+        if result.returncode != 0:
+            raise RuntimeError(f"aws list-users failed: {result.stderr}")
+
+        page = json.loads(result.stdout)
+        for user in page.get("Users", []):
+            if user.get("UserStatus") == "UNCONFIRMED":
+                delete_cmd = [
+                    "aws",
+                    "cognito-idp",
+                    "admin-delete-user",
+                    "--user-pool-id",
+                    user_pool_id,
+                    "--username",
+                    user["Username"],
+                ]
+                del_result = subprocess.run(
+                    delete_cmd, check=False, capture_output=True, text=True
                 )
+                if del_result.returncode != 0:
+                    raise RuntimeError(
+                        f"aws admin-delete-user failed: {del_result.stderr}"
+                    )
+
+        next_token = page.get("PaginationToken")
+        if not next_token:
+            break
 
 
 # ---------------------------------------------------------------------------
