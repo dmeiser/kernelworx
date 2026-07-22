@@ -1,4 +1,7 @@
 {
+  "engines": {
+    "node": ">=24.0.0"
+  },
   "scripts": {
     "spellcheck": "npm --prefix frontend run spellcheck"
   },

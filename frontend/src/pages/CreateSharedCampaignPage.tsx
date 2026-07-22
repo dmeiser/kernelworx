@@ -538,6 +538,7 @@ export const CreateSharedCampaignPage: React.FC = () => {
           onClick: handleBack,
           label: 'Back',
           'aria-label': 'Back',
+          disabled: isSubmitting,
         }}
       />
 

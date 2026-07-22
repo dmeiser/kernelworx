@@ -3,9 +3,8 @@
 import os
 import pathlib
 
-from playwright.sync_api import Locator, Page
+from playwright.sync_api import Locator, Page, expect
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
-from playwright.sync_api import expect
 
 
 class BasePage:

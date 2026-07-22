@@ -57,7 +57,7 @@ const navItemSx = {
     backgroundColor: brand.fill.tertiary,
   },
   '&.Mui-selected': {
-    backgroundColor: brand.primary[6],
+    backgroundColor: brand.primary[9],
     color: '#ffffff',
     '& .MuiListItemIcon-root': {
       color: '#ffffff',
@@ -74,11 +74,11 @@ const navItemSx = {
 
 const adminNavItemSx = {
   borderRadius: brand.radius.md,
-  color: brand.error.main,
+  color: brand.error.text,
   mx: 1,
   px: 1.5,
   '& .MuiListItemIcon-root': {
-    color: brand.error.main,
+    color: brand.error.text,
     minWidth: 36,
   },
   '&:hover': {
@@ -86,9 +86,9 @@ const adminNavItemSx = {
   },
   '&.Mui-selected': {
     backgroundColor: brand.error.bg,
-    color: brand.error.active,
+    color: brand.error.text,
     '& .MuiListItemIcon-root': {
-      color: brand.error.active,
+      color: brand.error.text,
     },
   },
 };
@@ -349,6 +349,7 @@ const AppLayoutView: React.FC<{
 
         <Button
           color="inherit"
+          aria-label="Sign out"
           onClick={onLogout}
           startIcon={<LogoutIcon sx={{ fontSize: '1.25rem', color: brand.text.secondary }} />}
           sx={{

@@ -9,6 +9,7 @@
 import React, { useState } from 'react';
 import { Dialog, DialogTitle, DialogContent, DialogActions, Button, TextField, Box } from '@mui/material';
 import { useFormState } from '../hooks/useFormState';
+import { brand } from '../lib/theme';
 
 interface CreateProfileDialogProps {
   open: boolean;
@@ -53,7 +54,7 @@ export const CreateProfileDialog: React.FC<CreateProfileDialogProps> = ({ open, 
 
   return (
     <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth>
-      <DialogTitle sx={{ color: 'primary.main' }}>Create New Scout</DialogTitle>
+      <DialogTitle sx={{ color: brand.primary.link }}>Create New Scout</DialogTitle>
       <DialogContent>
         <Box pt={1} display="flex" flexDirection="column" gap={2}>
           <TextField

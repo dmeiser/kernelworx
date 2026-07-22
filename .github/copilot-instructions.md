@@ -1,5 +1,5 @@
 ````instructions
-# Popcorn Sales Manager - GitHub Copilot Instructions
+# KernelWorx - GitHub Copilot Instructions
 
 Essential knowledge for GitHub Copilot when working on this volunteer-run Scouting America popcorn sales management application.
 
@@ -84,7 +84,7 @@ Essential knowledge for GitHub Copilot when working on this volunteer-run Scouti
 **Development Workflow**:
 1. Write code
 2. Write tests (100% coverage)
-3. Run: `uv run isort src/ tests/`
+3. Run: `uv run ruff check --select I --fix src/ tests/`
 4. Run: `uv run ruff format src/ tests/`
 5. Run: `uv run mypy src/` (0 errors)
 6. Run: `uv run pytest tests/unit --cov=src --cov-fail-under=100` (100% coverage, all pass)
@@ -94,9 +94,9 @@ Essential knowledge for GitHub Copilot when working on this volunteer-run Scouti
 [tool.ruff]
 line-length = 120
 
-[tool.isort]
-profile = "black"
-line_length = 120
+[tool.ruff]
+line-length = 120
+lint.select = ["E", "F", "I"]
 
 [tool.mypy]
 strict = true
@@ -404,7 +404,7 @@ def generate_report(profile_id: str, campaign_id: str) -> str:
 uv sync
 
 # Format code
-uv run isort src/ tests/ && uv run ruff format src/ tests/ 
+uv run ruff check --select I --fix src/ tests/ && uv run ruff format src/ tests/ 
 
 # Type check
 uv run mypy src/

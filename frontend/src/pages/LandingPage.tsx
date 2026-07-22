@@ -31,6 +31,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { LandingHeader } from '../components/LandingHeader';
 import { LandingFooter } from '../components/LandingFooter';
 import { DeviceFrame } from '../components/DeviceFrame';
+import { brand } from '../lib/theme';
 
 const SectionHead: React.FC<{ kicker?: string; title: string; subtitle: string }> = ({
   kicker,
@@ -544,7 +545,7 @@ export const LandingPage: React.FC = () => {
         </Box>
 
         {/* Stats band */}
-        <Box sx={{ bgcolor: 'primary.main', py: { xs: 6, md: 8 } }}>
+        <Box sx={{ bgcolor: brand.primary[9], py: { xs: 6, md: 8 } }}>
           <Container maxWidth="lg">
             <Grid container spacing={4}>
               {[
@@ -565,7 +566,7 @@ export const LandingPage: React.FC = () => {
                     >
                       {stat.value}
                     </Typography>
-                    <Typography variant="body2" sx={{ mt: 0.5, color: 'rgba(255,255,255,0.78)' }}>
+                    <Typography variant="body2" sx={{ mt: 0.5, color: 'white' }}>
                       {stat.label}
                     </Typography>
                   </Box>
@@ -612,7 +613,7 @@ export const LandingPage: React.FC = () => {
         <Container maxWidth="lg" sx={{ py: { xs: 8, md: 12 } }}>
           <Box
             sx={{
-              bgcolor: 'primary.main',
+              bgcolor: brand.primary[9],
               borderRadius: { xs: '18px', md: '28px' },
               p: { xs: 5, md: 8 },
               textAlign: 'center',
@@ -661,7 +662,7 @@ export const LandingPage: React.FC = () => {
               <Typography
                 variant="body1"
                 sx={{
-                  color: 'rgba(255,255,255,0.88)',
+                  color: 'white',
                   fontSize: '1.125rem',
                   maxWidth: 540,
                   mx: 'auto',
@@ -686,13 +687,13 @@ export const LandingPage: React.FC = () => {
                   href="https://github.com/sponsors/dmeiser"
                   target="_blank"
                   rel="noopener noreferrer"
-                  sx={{ color: 'rgba(255,255,255,0.92)', '&:hover': { color: 'white', bgcolor: 'transparent' } }}
+                  sx={{ color: 'white', '&:hover': { color: 'white', bgcolor: 'transparent' } }}
                   startIcon={<FavoriteIcon />}
                 >
                   Sponsor KernelWorx
                 </Button>
               </Box>
-              <Typography variant="caption" sx={{ display: 'block', mt: 2, color: 'rgba(255,255,255,0.72)' }}>
+              <Typography variant="caption" sx={{ display: 'block', mt: 2, color: 'white' }}>
                 Always free · Open source
               </Typography>
             </Box>

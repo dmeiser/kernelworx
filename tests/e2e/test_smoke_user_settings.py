@@ -12,7 +12,6 @@ from playwright.sync_api import Page
 
 from tests.e2e.pages.user_settings_page import UserSettingsPage
 
-
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------

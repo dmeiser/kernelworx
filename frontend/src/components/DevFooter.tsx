@@ -33,7 +33,7 @@ export const DevFooter: React.FC = () => {
         <Typography
           variant="caption"
           sx={{
-            color: 'rgba(255, 255, 255, 0.7)',
+            color: 'white',
             cursor: 'help',
             fontFamily: 'monospace',
             fontSize: '0.7rem',

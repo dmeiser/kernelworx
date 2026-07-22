@@ -186,7 +186,6 @@ export const UserDataPage: React.FC = () => {
     targetAccountId: string;
     email: string;
   } | null>(null);
-  const [revokeShareError, setRevokeShareError] = useState<string | null>(null);
   const {
     data: sharesData,
     loading: sharesLoading,
@@ -215,17 +214,7 @@ export const UserDataPage: React.FC = () => {
   });
 
   // Delete share mutation
-  const [deleteShare] = useMutation(ADMIN_DELETE_SHARE, {
-    onCompleted: () => {
-      setRevokeShareTarget(null);
-      setRevokeShareError(null);
-      refetchShares();
-    },
-    onError: (error) => {
-      console.error('Delete share failed:', error);
-      setRevokeShareError(error.message);
-    },
-  });
+  const [deleteShare, { loading: deletingShare }] = useMutation(ADMIN_DELETE_SHARE);
 
   // Update campaign shared code mutation
   const [updateCampaignSharedCode] = useMutation(ADMIN_UPDATE_CAMPAIGN_SHARED_CODE, {
@@ -287,15 +276,15 @@ export const UserDataPage: React.FC = () => {
     setSelectedNewOwner(null);
   };
 
-  const handleConfirmRevokeShare = () => {
+  const handleConfirmRevokeShare = async () => {
     if (!revokeShareTarget) return;
-    setRevokeShareError(null);
-    deleteShare({
+    await deleteShare({
       variables: {
         profileId: revokeShareTarget.profileId,
         targetAccountId: revokeShareTarget.targetAccountId,
       },
     });
+    refetchShares();
   };
 
   if (!accountId) {
@@ -848,8 +837,8 @@ export const UserDataPage: React.FC = () => {
         onConfirm={handleConfirmRevokeShare}
         confirmLabel="Revoke"
         confirmColor="error"
-        error={revokeShareError}
-        onDismissError={() => setRevokeShareError(null)}
+        isLoading={deletingShare}
+        loadingLabel="Revoking..."
       >
         <Typography>Are you sure you want to revoke {revokeShareTarget?.email}'s access to this profile?</Typography>
       </ConfirmDialog>

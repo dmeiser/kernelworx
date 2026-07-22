@@ -15,6 +15,7 @@ interface BackButtonProps {
   onClick: () => void;
   label?: string;
   'aria-label'?: string;
+  disabled?: boolean;
 }
 
 interface HeaderBackButtonProps {
@@ -28,6 +29,7 @@ const HeaderBackButton: React.FC<HeaderBackButtonProps> = ({ backButton }) => {
         startIcon={<BackIcon />}
         onClick={backButton.onClick}
         {...(backButton['aria-label'] ? { 'aria-label': backButton['aria-label'] } : {})}
+        disabled={backButton.disabled}
         size="small"
         sx={{ mr: 1 }}
       >
@@ -41,6 +43,7 @@ const HeaderBackButton: React.FC<HeaderBackButtonProps> = ({ backButton }) => {
       onClick={backButton.onClick}
       edge="start"
       aria-label={backButton['aria-label'] ?? 'Back'}
+      disabled={backButton.disabled}
       size="small"
       sx={{ mr: 1 }}
     >

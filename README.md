@@ -66,7 +66,7 @@ See [TODO.md](TODO.md) for detailed progress and roadmap.
 uv sync
 
 # Format code
-uv run isort src/ tests/
+uv run ruff check --select I --fix src/ tests/
 uv run ruff format src/ tests/
 # or: uv run ruff check src/ tests/ (to only check formatting) 
 
@@ -137,12 +137,12 @@ This is a volunteer-run project. Contributions are welcome! Please read [AGENT.m
 
 1. **Never push directly to main** - always use pull requests
 2. **100% test coverage required** - all tests must pass
-3. **Follow code quality standards** - isort, ruff, mypy (Python); ESLint, Prettier (TypeScript)
+3. **Follow code quality standards** - ruff (linting + import sorting + formatting), mypy (Python); ESLint, Prettier (TypeScript)
 4. **Document your changes** - update README and relevant docs
 
 ## Code Quality
 
-- **Python**: isort + black + mypy + pytest (100% coverage)
+- **Python**: ruff (linting + import sorting + formatting) + mypy + pytest (100% coverage)
 - **TypeScript**: ESLint + Prettier + Vitest (100% coverage)
 - **Git workflow**: Feature branches + pull requests only
 

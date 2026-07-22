@@ -13,6 +13,7 @@ jobs:
   backend:
     name: backend
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     env:
       AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
       AWS_DEFAULT_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
@@ -71,7 +72,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version-file: ".node-version"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
@@ -103,6 +104,7 @@ jobs:
   infra:
     name: Infrastructure linting
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
     steps:

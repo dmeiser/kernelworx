@@ -1,1 +1,1 @@
-"""Test suite for Popcorn Sales Manager."""
+"""Test suite for KernelWorx."""

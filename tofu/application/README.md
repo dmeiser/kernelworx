@@ -1,6 +1,6 @@
 # OpenTofu Infrastructure
 
-This directory contains OpenTofu configurations for the Popcorn Sales Manager infrastructure.
+This directory contains OpenTofu configurations for the KernelWorx infrastructure.
 
 ## Directory Structure
 

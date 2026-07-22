@@ -1,6 +1,6 @@
 ## Developer Workflow Guide
 
-Audience: contributors working on Popcorn Sales Manager. Focuses on day-to-day commands, quality bars, and deployment steps. Infra coverage is intentionally excluded from coverage gates per project policy.
+Audience: contributors working on KernelWorx. Focuses on day-to-day commands, quality bars, and deployment steps. Infra coverage is intentionally excluded from coverage gates per project policy.
 
 ### Testing
 
@@ -44,7 +44,7 @@ uv run pytest tests/e2e/test_smoke_auth.py -v
 **Cleanup**: after each run, a `global_cleanup` fixture deletes all DynamoDB records owned by the test users (profiles, campaigns, orders, shares, invites) while preserving Cognito users and Account records.
 
 ### Code Quality
-- **Python (app)**: `uv run ruff check src tests` • `uv run isort src/ tests/` • `uv run ruff format src/ tests/` • `uv run mypy src`
+- **Python (app)**: `uv run ruff check src tests` • `uv run ruff check --select I --fix src/ tests/` • `uv run ruff format src/ tests/` • `uv run mypy src`
 - **Python (cdk)**: `cd cdk && uv run ruff check cdk tests` • `uv run mypy cdk`
 - **Frontend**: `npm run lint` • `npm run format` • `npm run typecheck`
 - Coverage bars: app code is 100% (src, frontend); CDK infra is excluded from coverage enforcement.

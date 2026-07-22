@@ -504,6 +504,7 @@ export const CreateCampaignPage: React.FC = () => {
           onClick: () => setup.navigate(-1),
           label: 'Back',
           'aria-label': 'Back',
+          disabled: setup.submitting,
         }}
       />
 

@@ -10,20 +10,21 @@ export const brand = {
     6: '#1976d2',
     7: '#0c57ab',
     9: '#00265e',
+    link: '#005a9c',
   },
   success: {
     main: '#388e3c',
     bg: '#c4cfc2',
     border: '#9fb59e',
     hover: '#569c56',
-    active: '#246929',
+    active: '#15431c',
   },
   warning: {
     main: '#f57c00',
     bg: '#fff7e6',
     border: '#ffcb7a',
     hover: '#ff9c29',
-    active: '#cf6200',
+    active: '#8a4200',
   },
   error: {
     main: '#dc004e',
@@ -31,12 +32,13 @@ export const brand = {
     border: '#ff7a9c',
     hover: '#e82564',
     active: '#b50046',
+    text: '#9e0036',
   },
   text: {
     primary: '#4b4b4b',
-    secondary: '#7a7a7a',
-    tertiary: '#a3a3a3',
-    quaternary: '#cccccc',
+    secondary: '#595959',
+    tertiary: '#595959',
+    quaternary: '#757575',
   },
   fill: {
     main: '#e0e0e0',
@@ -265,7 +267,7 @@ export const theme = createTheme({
           color: brand.text.primary,
         },
         a: {
-          color: brand.primary[6],
+          color: brand.primary.link,
           textDecoration: 'none',
         },
       },
@@ -358,15 +360,16 @@ export const theme = createTheme({
           },
         },
         text: {
-          color: brand.primary[6],
+          color: brand.primary.link,
           backgroundColor: 'transparent',
           borderColor: 'transparent',
           '&:hover': {
             backgroundColor: 'transparent',
-            color: brand.primary[5],
+            color: brand.primary.link,
+            textDecoration: 'underline',
           },
           '&:active': {
-            color: brand.primary[7],
+            color: brand.primary[9],
           },
         },
       },
@@ -421,6 +424,9 @@ export const theme = createTheme({
           },
           '&.Mui-error fieldset': {
             borderColor: brand.error.main,
+          },
+          '&.MuiInputBase-multiline': {
+            height: 'auto',
           },
         },
         input: {
@@ -477,12 +483,15 @@ export const theme = createTheme({
     MuiLink: {
       styleOverrides: {
         root: {
-          color: brand.primary[6],
+          color: brand.primary.link,
           textDecoration: 'none',
           fontWeight: 600,
           '&:hover': {
-            color: brand.primary[5],
+            color: brand.primary.link,
             textDecoration: 'underline',
+          },
+          '&:active': {
+            color: brand.primary[9],
           },
         },
       },
@@ -530,7 +539,7 @@ export const theme = createTheme({
         },
         standardError: {
           backgroundColor: brand.error.bg,
-          color: brand.error.main,
+          color: brand.error.text,
           border: `1px solid ${brand.error.border}`,
         },
         standardSuccess: {

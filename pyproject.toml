@@ -1,7 +1,7 @@
 [project]
 name = "kernelworx"
 version = "0.1.0"
-description = "Popcorn Sales Manager - Lambda functions and backend code"
+description = "KernelWorx - Lambda functions and backend code"
 requires-python = ">=3.14"
 dependencies = [
     "aioboto3>=14.3.0",
@@ -13,7 +13,6 @@ dependencies = [
 dev = [
     "ruff>=0.14.10",
     "boto3-stubs[dynamodb,s3,lambda,sns,ses]>=1.41.5",
-    "isort>=7.0.0",
     "moto[dynamodb,s3,lambda,sns,ses]>=5.1.17",
     "mypy>=1.19.0",
     "pytest>=9.0.1",
@@ -28,11 +27,8 @@ dev = [
 
 [tool.ruff]
 line-length = 120
-# Use Ruff for linting and formatting. Run `ruff check` and `ruff format` to apply fixes.
-
-[tool.isort]
-profile = "black"
-line_length = 120
+lint.extend-select = ["I"]
+# Use Ruff for linting, import sorting, and formatting. Run `ruff check` and `ruff format` to apply fixes.
 
 [tool.mypy]
 python_version = "3.14"

@@ -30,6 +30,7 @@ import json
 import os
 import re
 import subprocess
+import time
 import urllib.parse
 import warnings
 from collections.abc import Generator
@@ -82,6 +83,7 @@ def _run_typescript_cleanup() -> None:
         check=False,
         capture_output=True,
         text=True,
+        timeout=120,
     )
     if result.returncode != 0:
         raise RuntimeError(
@@ -96,9 +98,13 @@ def _cleanup_unconfirmed_smoke_users(user_pool_id: str) -> None:
     Uses the AWS CLI instead of boto3 so credentials obtained via ``aws login``
     (e.g., AWS IAM Identity Center / SSO plugins) are picked up through the
     standard CLI provider chain.
+
+    Individual delete failures are collected and reported at the end so one
+    throttled or already-deleted user does not abort the entire cleanup pass.
     """
     region = os.getenv("TEST_REGION")
     next_token: str | None = None
+    failures: list[str] = []
     while True:
         cmd = [
             "aws",
@@ -118,7 +124,9 @@ def _cleanup_unconfirmed_smoke_users(user_pool_id: str) -> None:
             cmd.extend(["--region", region])
         if next_token:
             cmd.extend(["--starting-token", next_token])
-        result = subprocess.run(cmd, check=False, capture_output=True, text=True)
+        result = subprocess.run(
+            cmd, check=False, capture_output=True, text=True, timeout=120
+        )
         if result.returncode != 0:
             raise RuntimeError(f"aws list-users failed: {result.stderr}")
 
@@ -133,20 +141,30 @@ def _cleanup_unconfirmed_smoke_users(user_pool_id: str) -> None:
                     user_pool_id,
                     "--username",
                     user["Username"],
+                    "--output",
+                    "json",
+                    "--no-cli-pager",
                 ]
                 if region:
                     delete_cmd.extend(["--region", region])
                 del_result = subprocess.run(
-                    delete_cmd, check=False, capture_output=True, text=True
+                    delete_cmd, check=False, capture_output=True, text=True, timeout=120
                 )
                 if del_result.returncode != 0:
-                    raise RuntimeError(
-                        f"aws admin-delete-user failed: {del_result.stderr}"
+                    failures.append(
+                        f"admin-delete-user failed for {user['Username']}: {del_result.stderr}"
                     )
+                # Small delay to avoid Cognito API throttling on rapid deletes.
+                time.sleep(0.2)
 
         next_token = page.get("PaginationToken")
         if not next_token:
             break
+
+    if failures:
+        raise RuntimeError(
+            "aws admin-delete-user encountered failures:\n" + "\n".join(failures)
+        )
 
 
 # ---------------------------------------------------------------------------

@@ -1,8 +1,8 @@
-.PHONY: help test lint format typecheck integration infra all clean test-e2e test-cleanup spellcheck
+.PHONY: help test test-frontend test-e2e test-integration test-cleanup test-all lint lint-python lint-frontend lint-infra spellcheck typecheck format format-python format-frontend tflint kics infra all ci clean
 
 # Default target
 help:
-	@echo "Popcorn Sales Manager - Build & Test Commands"
+	@echo "KernelWorx - Build & Test Commands"
 	@echo ""
 	@echo "Testing:"
 	@echo "  make test              - Run Python unit tests (pytest)"
@@ -21,7 +21,7 @@ help:
 	@echo ""
 	@echo "Formatting:"
 	@echo "  make format            - Format all code (Python + TypeScript)"
-	@echo "  make format-python     - Format Python code (isort + ruff)"
+	@echo "  make format-python     - Format Python code (ruff import sort + format)"
 	@echo "  make format-frontend   - Format TypeScript code (prettier)"
 	@echo ""
 	@echo "Infrastructure Scanning:"
@@ -94,7 +94,7 @@ typecheck:
 # Format Python code
 format-python:
 	@echo "Formatting Python code..."
-	uv run isort src/ tests/
+	uv run ruff check --select I --fix src/ tests/
 	uv run ruff format src/ tests/
 
 # Format TypeScript code

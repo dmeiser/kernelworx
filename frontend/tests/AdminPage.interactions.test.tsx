@@ -477,7 +477,7 @@ describe('AdminPage - Reset Password', () => {
     });
   });
 
-  test('shows error snackbar when reset password mutation fails', async () => {
+  test('shows error alert in reset password dialog when mutation fails', async () => {
     const user = userEvent.setup();
     const mocks = baseMocks([
       {
@@ -499,8 +499,9 @@ describe('AdminPage - Reset Password', () => {
     await user.click(screen.getByRole('button', { name: /send reset email/i }));
 
     await waitFor(() => {
-      expect(screen.getByText(/Error: Reset password failed/i)).toBeInTheDocument();
+      expect(screen.getByText(/Reset password failed/i)).toBeInTheDocument();
     });
+    expect(screen.getByRole('button', { name: /send reset email/i })).toBeInTheDocument();
   });
 });
 

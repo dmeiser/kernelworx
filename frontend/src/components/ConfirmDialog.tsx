@@ -4,7 +4,7 @@
  * Use for destructive or irreversible actions like delete, deactivate, or remove.
  */
 
-import React from 'react';
+import React, { useState } from 'react';
 import { Dialog, DialogTitle, DialogContent, DialogActions, Button, Typography, CircularProgress, Alert } from '@mui/material';
 
 interface ConfirmButtonProps {
@@ -59,35 +59,45 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = (props) => {
     maxWidth = 'sm',
   } = props;
 
+  const [internalError, setInternalError] = useState<string | null>(null);
+  const [isPending, setIsPending] = useState(false);
+  const combinedLoading = isLoading || isPending;
+
   const handleConfirm = async () => {
+    setInternalError(null);
+    setIsPending(true);
     try {
       await onConfirm();
       onClose();
-    } catch {
-      // Error handling is done in parent component
+    } catch (err) {
+      setInternalError(err instanceof Error ? err.message : 'An unexpected error occurred');
+    } finally {
+      setIsPending(false);
     }
   };
 
+  const displayError = error ?? internalError;
+
   return (
-    <Dialog open={open} onClose={isLoading ? undefined : onClose} maxWidth={maxWidth} fullWidth>
+    <Dialog open={open} onClose={combinedLoading ? undefined : onClose} maxWidth={maxWidth} fullWidth>
       <DialogTitle>{title}</DialogTitle>
       <DialogContent>
         {children || <Typography>Are you sure you want to {confirmLabel.toLowerCase()}?</Typography>}
-        {error && (
+        {displayError && (
           <Alert severity="error" sx={{ mt: 2 }} onClose={onDismissError}>
-            {error}
+            {displayError}
           </Alert>
         )}
       </DialogContent>
       <DialogActions>
-        <Button onClick={onClose} disabled={isLoading}>
+        <Button onClick={onClose} disabled={combinedLoading}>
           Cancel
         </Button>
         <ConfirmButton
           onClick={handleConfirm}
           label={confirmLabel}
           color={confirmColor}
-          isLoading={isLoading}
+          isLoading={combinedLoading}
           loadingLabel={loadingLabel}
         />
       </DialogActions>

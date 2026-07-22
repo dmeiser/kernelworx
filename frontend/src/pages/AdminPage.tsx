@@ -490,15 +490,7 @@ export const AdminPage: React.FC = () => {
   } = useQuery<{ listManagedCatalogs: Catalog[] }>(LIST_MANAGED_CATALOGS);
 
   // Mutations
-  const [resetPassword, { loading: resettingPassword }] = useMutation(ADMIN_RESET_USER_PASSWORD, {
-    onCompleted: () => {
-      showSnackbar(`Password reset email sent to ${resetPasswordUser?.email}`);
-      setResetPasswordUser(null);
-    },
-    onError: (error) => {
-      showSnackbar(`Error: ${error.message}`);
-    },
-  });
+  const [resetPassword, { loading: resettingPassword }] = useMutation(ADMIN_RESET_USER_PASSWORD);
 
   // Catalog mutations
   const [createManagedCatalog] = useMutation(CREATE_MANAGED_CATALOG, {
@@ -619,11 +611,13 @@ export const AdminPage: React.FC = () => {
     setDeleteUserTarget(user);
   };
 
-  const confirmResetPassword = () => {
+  const confirmResetPassword = async () => {
     /* v8 ignore start -- Reset password dialog only opens when a user is selected */
     if (!resetPasswordUser) return;
     /* v8 ignore stop */
-    resetPassword({ variables: { email: resetPasswordUser.email } });
+    const targetEmail = resetPasswordUser.email;
+    await resetPassword({ variables: { email: targetEmail } });
+    showSnackbar(`Password reset email sent to ${targetEmail}`);
   };
 
   // eslint-disable-next-line complexity -- Cascading delete requires sequential steps
