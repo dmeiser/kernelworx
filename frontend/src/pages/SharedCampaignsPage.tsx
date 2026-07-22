@@ -456,6 +456,7 @@ export const SharedCampaignsPage: React.FC = () => {
     } catch (err) {
       console.error('Error deactivating shared campaign:', err);
       showSnackbar('Failed to deactivate shared campaign');
+      throw err;
     }
   };
 

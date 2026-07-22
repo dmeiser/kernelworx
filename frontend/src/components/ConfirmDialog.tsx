@@ -69,7 +69,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = (props) => {
   };
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth={maxWidth} fullWidth>
+    <Dialog open={open} onClose={isLoading ? undefined : onClose} maxWidth={maxWidth} fullWidth>
       <DialogTitle>{title}</DialogTitle>
       <DialogContent>
         {children || <Typography>Are you sure you want to {confirmLabel.toLowerCase()}?</Typography>}

@@ -65,10 +65,12 @@ export const NavBreadcrumbs: React.FC<NavBreadcrumbsProps> = ({ items, sx, varia
           item.label
         );
 
+        const key = `${index}-${item.label}`;
+
         // Last item or no onClick - render as text
         if (isLast || !isClickable) {
           return (
-            <Typography key={item.label} variant={variant} color={isLast ? 'text.primary' : 'text.secondary'}>
+            <Typography key={key} variant={variant} color={isLast ? 'text.primary' : 'text.secondary'}>
               {content}
             </Typography>
           );
@@ -77,7 +79,7 @@ export const NavBreadcrumbs: React.FC<NavBreadcrumbsProps> = ({ items, sx, varia
         // Clickable link
         return (
           <Link
-            key={item.label}
+            key={key}
             component="button"
             variant={variant}
             onClick={item.onClick}
