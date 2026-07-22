@@ -76,6 +76,7 @@ dialogProps
 dmeiser
 dotenv
 DynamoDB
+EFGH
 emailAddress
 emoji
 émoji
@@ -91,6 +92,7 @@ falsey
 favicons
 fieldset
 fileName
+findme
 fontSize
 formData
 Frontend
@@ -177,6 +179,7 @@ Nav
 navigations
 networkidle
 neue
+NEWCODE
 newkey
 newOwnerSearch
 nocat
@@ -190,6 +193,7 @@ noto
 octokit
 officedocument
 oklch
+OLDCODE
 onboarding
 openpyxl
 OpenTofu
