@@ -391,6 +391,7 @@
     .map(function (s) { return s && s.googleFontsUrl; })
     .filter(function (u, i, a) { return u && a.indexOf(u) === i; });
   googleLinks.forEach(function (u) {
+    if (typeof u !== 'string' || !/^https?:\/\//i.test(u)) return;
     var l = document.createElement('link'); l.rel = 'stylesheet'; l.href = u; document.head.appendChild(l);
   });
 
@@ -643,7 +644,12 @@
     designSystemHtml() +
     assetsHtml();
 
-  document.getElementById('root').innerHTML = html;
+  var root = document.getElementById('root');
+  root.innerHTML = '';
+  var parsed = new DOMParser().parseFromString(html, 'text/html');
+  while (parsed.body.firstChild) {
+    root.appendChild(parsed.body.firstChild);
+  }
 
   var stopBtn = document.getElementById('brand-stop-extraction');
   if (stopBtn) {
