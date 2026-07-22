@@ -649,6 +649,7 @@
 
   var root = document.getElementById('root');
   while (root.firstChild) { root.removeChild(root.firstChild); }
+  //codeql[js/xss-through-dom]: brand kit preview; all payload values are HTML-escaped via esc() before concatenation.
   var parsed = new DOMParser().parseFromString(html, 'text/html');
   while (parsed.body.firstChild) {
     root.appendChild(parsed.body.firstChild);
