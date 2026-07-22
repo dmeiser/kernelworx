@@ -78,19 +78,29 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = (props) => {
 
   const displayError = error ?? internalError;
 
+  const handleClose = () => {
+    setInternalError(null);
+    onClose();
+  };
+
+  const handleDismissError = () => {
+    setInternalError(null);
+    onDismissError?.();
+  };
+
   return (
-    <Dialog open={open} onClose={combinedLoading ? undefined : onClose} maxWidth={maxWidth} fullWidth>
+    <Dialog open={open} onClose={combinedLoading ? undefined : handleClose} maxWidth={maxWidth} fullWidth>
       <DialogTitle>{title}</DialogTitle>
       <DialogContent>
         {children || <Typography>Are you sure you want to {confirmLabel.toLowerCase()}?</Typography>}
         {displayError && (
-          <Alert severity="error" sx={{ mt: 2 }} onClose={onDismissError}>
+          <Alert severity="error" sx={{ mt: 2 }} onClose={handleDismissError}>
             {displayError}
           </Alert>
         )}
       </DialogContent>
       <DialogActions>
-        <Button onClick={onClose} disabled={combinedLoading}>
+        <Button onClick={handleClose} disabled={combinedLoading}>
           Cancel
         </Button>
         <ConfirmButton
