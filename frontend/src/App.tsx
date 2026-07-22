@@ -42,14 +42,16 @@ function ScrollToHash() {
 
   useEffect(() => {
     const timeoutId = setTimeout(() => {
+      const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      const behavior = prefersReducedMotion ? ('auto' as const) : ('smooth' as const);
       if (hash) {
         const id = hash.replace('#', '');
         const element = document.getElementById(id);
         if (element) {
-          element.scrollIntoView({ behavior: 'smooth' });
+          element.scrollIntoView({ behavior });
         }
       } else {
-        window.scrollTo({ top: 0, behavior: 'smooth' });
+        window.scrollTo({ top: 0, behavior });
       }
     }, 0);
     return () => clearTimeout(timeoutId);
