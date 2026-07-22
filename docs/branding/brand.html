@@ -391,8 +391,11 @@
     .map(function (s) { return s && s.googleFontsUrl; })
     .filter(function (u, i, a) { return u && a.indexOf(u) === i; });
   googleLinks.forEach(function (u) {
-    if (typeof u !== 'string' || !/^https?:\/\//i.test(u)) return;
-    var l = document.createElement('link'); l.rel = 'stylesheet'; l.href = u; document.head.appendChild(l);
+    if (typeof u !== 'string') return;
+    var parsedUrl;
+    try { parsedUrl = new URL(u); } catch (e) { return; }
+    if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') return;
+    var l = document.createElement('link'); l.rel = 'stylesheet'; l.href = parsedUrl.href; document.head.appendChild(l);
   });
 
   function sectionTitle(t) { return '<h2 class="sec-title">' + esc(t) + '</h2>'; }
@@ -645,7 +648,7 @@
     assetsHtml();
 
   var root = document.getElementById('root');
-  root.innerHTML = '';
+  while (root.firstChild) { root.removeChild(root.firstChild); }
   var parsed = new DOMParser().parseFromString(html, 'text/html');
   while (parsed.body.firstChild) {
     root.appendChild(parsed.body.firstChild);
