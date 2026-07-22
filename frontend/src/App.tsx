@@ -4,7 +4,8 @@
  * Sets up routing, authentication, Apollo Client, and theme.
  */
 
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { useEffect } from 'react';
 import { CssBaseline, ThemeProvider } from '@mui/material';
 import { ApolloProvider } from '@apollo/client/react';
 import { AuthProvider } from './contexts/AuthContext';
@@ -36,12 +37,36 @@ import { apolloClient } from './lib/apollo';
 import { theme } from './lib/theme';
 import { AppLayout } from './components/AppLayout';
 
+function ScrollToHash() {
+  const { pathname, hash } = useLocation();
+
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      const behavior = prefersReducedMotion ? ('auto' as const) : ('smooth' as const);
+      if (hash) {
+        const id = hash.replace('#', '');
+        const element = document.getElementById(id);
+        if (element) {
+          element.scrollIntoView({ behavior });
+        }
+      } else {
+        window.scrollTo({ top: 0, behavior });
+      }
+    }, 0);
+    return () => clearTimeout(timeoutId);
+  }, [pathname, hash]);
+
+  return null;
+}
+
 function App() {
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
       <ApolloProvider client={apolloClient}>
         <BrowserRouter>
+          <ScrollToHash />
           <AuthProvider>
             <Routes>
               {/* Public routes */}

@@ -6,7 +6,7 @@
  */
 
 import React from 'react';
-import { Breadcrumbs as MuiBreadcrumbs, Link, Typography } from '@mui/material';
+import { Breadcrumbs as MuiBreadcrumbs, Link, Typography, Stack } from '@mui/material';
 import type { SxProps, Theme } from '@mui/material';
 
 /**
@@ -17,6 +17,8 @@ export interface BreadcrumbItem {
   label: string;
   /** Click handler for navigation (if undefined, renders as text) */
   onClick?: () => void;
+  /** Optional icon rendered before the label */
+  icon?: React.ReactNode;
 }
 
 /**
@@ -54,12 +56,22 @@ export const NavBreadcrumbs: React.FC<NavBreadcrumbsProps> = ({ items, sx, varia
       {items.map((item, index) => {
         const isLast = index === items.length - 1;
         const isClickable = item.onClick !== undefined;
+        const content = item.icon ? (
+          <Stack direction="row" alignItems="center" gap={0.5} component="span">
+            {item.icon}
+            {item.label}
+          </Stack>
+        ) : (
+          item.label
+        );
+
+        const key = `${index}-${item.label}`;
 
         // Last item or no onClick - render as text
         if (isLast || !isClickable) {
           return (
-            <Typography key={index} variant={variant} color={isLast ? 'text.primary' : 'text.secondary'}>
-              {item.label}
+            <Typography key={key} variant={variant} color={isLast ? 'text.primary' : 'text.secondary'}>
+              {content}
             </Typography>
           );
         }
@@ -67,13 +79,13 @@ export const NavBreadcrumbs: React.FC<NavBreadcrumbsProps> = ({ items, sx, varia
         // Clickable link
         return (
           <Link
-            key={index}
+            key={key}
             component="button"
             variant={variant}
             onClick={item.onClick}
             sx={{ textDecoration: 'none', cursor: 'pointer' }}
           >
-            {item.label}
+            {content}
           </Link>
         );
       })}

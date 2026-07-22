@@ -15,11 +15,6 @@ import {
   Stack,
   TextField,
   Button,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  CircularProgress,
   FormControl,
   InputLabel,
   Select,
@@ -37,6 +32,8 @@ import {
   LIST_MANAGED_CATALOGS,
   LIST_MY_CATALOGS,
 } from '../lib/graphql';
+import { LoadingState } from '../components/LoadingState';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import { ensureCampaignId, ensureCatalogId, toUrlId } from '../lib/ids';
 import { dateToISO } from '../lib/date-utils';
 import type { Campaign, Catalog } from '../types';
@@ -109,12 +106,7 @@ type SaveAction = 'confirm' | 'save';
 // Helper to determine save action based on changes
 const getSaveAction = (hasUnitRelatedChanges: boolean): SaveAction => (hasUnitRelatedChanges ? 'confirm' : 'save');
 
-// Helper component for loading state
-const LoadingState: React.FC = () => (
-  <Box display="flex" justifyContent="center" alignItems="center" minHeight="200px">
-    <CircularProgress />
-  </Box>
-);
+
 
 // Helper to conditionally update campaign
 const maybeUpdateCampaign = async (
@@ -213,6 +205,7 @@ export const CampaignSettingsPage: React.FC = () => {
   const [isActive, setIsActive] = useState(true);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [unitChangeConfirmOpen, setUnitChangeConfirmOpen] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   // Fetch campaign
   const {
@@ -272,14 +265,21 @@ export const CampaignSettingsPage: React.FC = () => {
   };
 
   const handleSaveChanges = async () => {
-    setUnitChangeConfirmOpen(false);
+    setSaveError(null);
     const isValid = canSave(campaignId, campaignName, catalogId);
     // Save button is disabled when dbCampaignId is missing
     /* v8 ignore start */
     if (!dbCampaignId) return;
     /* v8 ignore stop */
     const input = buildUpdateInput(dbCampaignId, campaignName, startDate, endDate, catalogId, isActive);
-    await maybeUpdateCampaign(isValid, updateCampaign, input);
+    try {
+      await maybeUpdateCampaign(isValid, updateCampaign, input);
+      setUnitChangeConfirmOpen(false);
+    } catch (err) {
+      console.error('Error saving campaign:', err);
+      setSaveError('Failed to save campaign changes. Please try again.');
+      setUnitChangeConfirmOpen(false);
+    }
   };
 
   const handleDeleteCampaign = async () => {
@@ -296,13 +296,18 @@ export const CampaignSettingsPage: React.FC = () => {
   const handleUnitChangeDialogClose = () => setUnitChangeConfirmOpen(false);
 
   if (loading) {
-    return <LoadingState />;
+    return <LoadingState minHeight="200px" />;
   }
 
   const hasChanges = checkFormChanges(campaignName, startDate, endDate, catalogId, isActive, campaign);
 
   return (
     <Box>
+      {saveError && (
+        <Alert severity="error" sx={{ mb: 3 }} onClose={() => setSaveError(null)}>
+          {saveError}
+        </Alert>
+      )}
       <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 3 }}>
         <Typography variant="h5">Campaign Settings</Typography>
         <Button variant="text" color="primary" onClick={() => navigate(`/scouts/${toUrlId(profileId)}/manage`)}>
@@ -391,43 +396,37 @@ export const CampaignSettingsPage: React.FC = () => {
         </Button>
       </Paper>
 
-      {/* Delete Campaign Confirmation Dialog */}
-      <Dialog open={deleteConfirmOpen} onClose={handleDeleteDialogClose}>
-        <DialogTitle>Delete Campaign?</DialogTitle>
-        <DialogContent>
-          <Typography>
-            Are you sure you want to delete "{campaign?.campaignName}"? All orders and data will be permanently deleted.
-            This action cannot be undone.
-          </Typography>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setDeleteConfirmOpen(false)}>Cancel</Button>
-          <Button onClick={handleDeleteCampaign} color="error" variant="contained">
-            Delete Permanently
-          </Button>
-        </DialogActions>
-      </Dialog>
+      <ConfirmDialog
+        open={deleteConfirmOpen}
+        title="Delete Campaign?"
+        onClose={handleDeleteDialogClose}
+        onConfirm={handleDeleteCampaign}
+        confirmLabel="Delete Permanently"
+        confirmColor="error"
+      >
+        <Typography>
+          Are you sure you want to delete &quot;{campaign?.campaignName}&quot;? All orders and data will be permanently
+          deleted. This action cannot be undone.
+        </Typography>
+      </ConfirmDialog>
 
-      {/* Unit-Related Changes Confirmation Dialog */}
-      <Dialog open={unitChangeConfirmOpen} onClose={handleUnitChangeDialogClose}>
-        <DialogTitle>Confirm Changes to Shared Campaign</DialogTitle>
-        <DialogContent>
-          <Alert severity="warning" sx={{ mb: 2 }}>
-            <AlertTitle>This may affect unit reports</AlertTitle>
-            You are changing the campaign name or catalog of a campaign that was created from a campaign link.
-          </Alert>
-          <Typography>
-            These changes may cause this campaign to no longer appear correctly in unit reports for your unit. Are you
-            sure you want to continue?
-          </Typography>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setUnitChangeConfirmOpen(false)}>Cancel</Button>
-          <Button onClick={handleSaveChanges} color="warning" variant="contained">
-            Save Anyway
-          </Button>
-        </DialogActions>
-      </Dialog>
+      <ConfirmDialog
+        open={unitChangeConfirmOpen}
+        title="Confirm Changes to Shared Campaign"
+        onClose={handleUnitChangeDialogClose}
+        onConfirm={handleSaveChanges}
+        confirmLabel="Save Anyway"
+        confirmColor="warning"
+      >
+        <Alert severity="warning" sx={{ mb: 2 }}>
+          <AlertTitle>This may affect unit reports</AlertTitle>
+          You are changing the campaign name or catalog of a campaign that was created from a campaign link.
+        </Alert>
+        <Typography>
+          These changes may cause this campaign to no longer appear correctly in unit reports for your unit. Are you sure
+          you want to continue?
+        </Typography>
+      </ConfirmDialog>
     </Box>
   );
 };

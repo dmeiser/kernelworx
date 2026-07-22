@@ -15,14 +15,14 @@ const createUnauthenticatedClient = () => {
 };
 
 /**
- * Integration tests for Campaigngn Operations (updateCampaign, deleteCampaign)
+ * Integration tests for Campaign Operations (updateCampaign, deleteCampaign)
  * 
  * Test Data Setup:
- * - TEST_OWNER_EMAIL: Owner of profile/campaigngn (can update/deletcampaignaigns)
- * - TEST_CONTRIBUTOR_EMAIL: Has WRITE access (can update/delete campaigngns)
- * - TEST_READONLY_EMAIL: Has READ access (cannot modify campaigngns)
+ * - TEST_OWNER_EMAIL: Owner of profile/campaign (can update/delete campaigns)
+ * - TEST_CONTRIBUTOR_EMAIL: Has WRITE access (can update/delete campaigns)
+ * - TEST_READONLY_EMAIL: Has READ access (cannot modify campaigns)
  * 
- * Note: These tests create their own test data (profile, catalog, campaigngn)
+ * Note: These tests create their own test data (profile, catalog, campaign)
  * and clean up after themselves.
  */
 
@@ -123,8 +123,8 @@ const DELETE_SELLER_PROFILE = gql`
   }
 `;
 
-describe('Campaigngn Operations Integration Tests', () => {
-  const SUITE_ID = 'campaigngn-operations';
+describe('Campaign Operations Integration Tests', () => {
+  const SUITE_ID = 'campaign-operations';
   
   let ownerClient: ApolloClient<NormalizedCacheObject>;
   let contributorClient: ApolloClient<NormalizedCacheObject>;
@@ -140,7 +140,7 @@ describe('Campaigngn Operations Integration Tests', () => {
   let readonlyAccountId: string;
 
   beforeAll(async () => {
-    console.log('Creating test profile, catalog, and campaigngn...');
+    console.log('Creating test profile, catalog, and campaign...');
 
     // Create authenticated clients
     const ownerResult = await createAuthenticatedClient('owner');
@@ -160,7 +160,7 @@ describe('Campaigngn Operations Integration Tests', () => {
       mutation: CREATE_SELLER_PROFILE,
       variables: {
         input: {
-          sellerName: 'Campaigngn Test Seller',
+          sellerName: 'Campaign Test Seller',
         },
       },
     });
@@ -171,7 +171,7 @@ describe('Campaigngn Operations Integration Tests', () => {
       mutation: CREATE_CATALOG,
       variables: {
         input: {
-          catalogName: 'Campaigngn Test Catalog',
+          catalogName: 'Campaign Test Catalog',
           isPublic: false,
           products: [
             {
@@ -187,13 +187,13 @@ describe('Campaigngn Operations Integration Tests', () => {
     testCatalogId = catalogData.createCatalog.catalogId;
     testProductId = catalogData.createCatalog.products[0].productId;
 
-    // 3. Create initial campaigngn
+    // 3. Create initial campaign
     const { data: campaignData } = await ownerClient.mutate({
       mutation: CREATE_CAMPAIGN,
       variables: {
         input: {
           profileId: testProfileId,
-          campaignName: 'Original Campaigngn Name',
+          campaignName: 'Original Campaign Name',
           campaignYear: 2025,
           startDate: new Date('2025-01-01T00:00:00Z').toISOString(),
           endDate: new Date('2025-12-31T23:59:59Z').toISOString(),
@@ -277,7 +277,7 @@ describe('Campaigngn Operations Integration Tests', () => {
       console.log('Cleaning up account records...');
       // await deleteTestAccounts([ownerAccountId, contributorAccountId, readonlyAccountId]);
       
-      console.log('Campaigngn operations test data cleanup complete.');
+      console.log('Campaign operations test data cleanup complete.');
     } catch (error) {
       console.log('Error in cleanup:', error);
     }
@@ -288,7 +288,7 @@ describe('Campaigngn Operations Integration Tests', () => {
     test('updates campaign name', async () => {
       const input = {
         campaignId: testCampaignId,
-        campaignName: 'Updated Campaigngn Name',
+        campaignName: 'Updated Campaign Name',
         campaignYear: 2025,
       };
 
@@ -299,11 +299,11 @@ describe('Campaigngn Operations Integration Tests', () => {
 
       expect(data.updateCampaign).toBeDefined();
       expect(data.updateCampaign.campaignId).toBe(testCampaignId);
-      expect(data.updateCampaign.campaignName).toBe('Updated Campaigngn Name');
+      expect(data.updateCampaign.campaignName).toBe('Updated Campaign Name');
       expect(data.updateCampaign.updatedAt).toBeDefined();
     }, 10000);
 
-    test('contributor with WRITE access can update campaigngn', async () => {
+    test('contributor with WRITE access can update campaign', async () => {
       const input = {
         campaignId: testCampaignId,
         campaignName: 'Contributor Updated Name',
@@ -341,7 +341,7 @@ describe('Campaigngn Operations Integration Tests', () => {
 
     test('rejects update with non-existent campaignId', async () => {
       const input = {
-        campaignId: 'CAMPAIGNGN#non-existencampaignaign',
+        campaignId: 'CAMPAIGN#non-existent',
         campaignName: 'Should Fail',
         campaignYear: 2025,
       };
@@ -361,7 +361,7 @@ describe('Campaigngn Operations Integration Tests', () => {
         variables: {
           input: {
             profileId: testProfileId,
-            campaignName: 'Date Validation Test Campaigngn',
+            campaignName: 'Date Validation Test Campaign',
             campaignYear: 2025,
             startDate: new Date('2030-06-01T00:00:00Z').toISOString(),
             endDate: new Date('2030-12-31T23:59:59Z').toISOString(),
@@ -400,14 +400,14 @@ describe('Campaigngn Operations Integration Tests', () => {
       }
     }, 10000);
 
-    test('can remove endDate (set open-ended campaigngn)', async () => {
+    test('can remove endDate (set open-ended campaign)', async () => {
       // Arrange - Create a campaign with endDate
       const { data: createData } = await ownerClient.mutate({
         mutation: CREATE_CAMPAIGN,
         variables: {
           input: {
             profileId: testProfileId,
-            campaignName: 'Campaigngn To Remove EndDate',
+            campaignName: 'Campaign To Remove EndDate',
             campaignYear: 2025,
             startDate: new Date('2031-01-01T00:00:00Z').toISOString(),
             endDate: new Date('2031-12-31T23:59:59Z').toISOString(),
@@ -430,7 +430,7 @@ describe('Campaigngn Operations Integration Tests', () => {
           },
         });
 
-        // Assert - Campaigngn should now have no endDate
+        // Assert - Campaign should now have no endDate
         expect(data.updateCampaign.endDate).toBeNull();
       } catch (error: any) {
         // If setting null is not allowed, verify it throws appropriate error
@@ -446,14 +446,14 @@ describe('Campaigngn Operations Integration Tests', () => {
   });
 
   describe('deleteCampaign', () => {
-    test('deletes existing campaigngn', async () => {
+    test('deletes existing campaign', async () => {
       // Create a campaign to delete
       const { data: createData } = await ownerClient.mutate({
         mutation: CREATE_CAMPAIGN,
         variables: {
           input: {
             profileId: testProfileId,
-            campaignName: 'Campaigngn to Delete',
+            campaignName: 'Campaign to Delete',
             campaignYear: 2025,
             startDate: new Date('2026-01-01T00:00:00Z').toISOString(),
             endDate: new Date('2026-12-31T23:59:59Z').toISOString(),
@@ -482,14 +482,14 @@ describe('Campaigngn Operations Integration Tests', () => {
       expect(verifyData.getCampaign).toBeNull();
     }, 10000);
 
-    test('contributor with WRITE access can delete campaigngn', async () => {
+    test('contributor with WRITE access can delete campaign', async () => {
       // Create a campaign to delete
       const { data: createData } = await ownerClient.mutate({
         mutation: CREATE_CAMPAIGN,
         variables: {
           input: {
             profileId: testProfileId,
-            campaignName: 'Campaigngn for Contributor to Delete',
+            campaignName: 'Campaign for Contributor to Delete',
             campaignYear: 2025,
             startDate: new Date('2027-01-01T00:00:00Z').toISOString(),
             endDate: new Date('2027-12-31T23:59:59Z').toISOString(),
@@ -512,16 +512,16 @@ describe('Campaigngn Operations Integration Tests', () => {
     test('returns true for non-existent campaign (idempotent)', async () => {
       const { data } = await ownerClient.mutate({
         mutation: DELETE_CAMPAIGN,
-        variables: { campaignId: 'CAMPAIGNGN#non-existencampaignaign' },
+        variables: { campaignId: 'CAMPAIGN#non-existent' },
       });
 
       expect(data.deleteCampaign).toBe(true);
     }, 10000);
 
     test('Data Integrity: Deleting campaign then creating new campaign with same name', async () => {
-      const campaignName = 'Reusable Campaigngn Name';
+      const campaignName = 'Reusable Campaign Name';
       
-      // Create first campaigngn
+      // Create first campaign
       const { data: createData1 } = await ownerClient.mutate({
         mutation: CREATE_CAMPAIGN,
         variables: {
@@ -575,12 +575,12 @@ describe('Campaigngn Operations Integration Tests', () => {
    * Status: FIXED - VerifyProfileWriteAccessFn added to updateCampaign/deleteCampaign pipelines
    */
   describe('updateCampaign authorization', () => {
-    test('readonly user cannot update campaigngn', async () => {
+    test('readonly user cannot update campaign', async () => {
       // First create a campaign as owner
       const createInput = {
         profileId: testProfileId,
         catalogId: testCatalogId,
-        campaignName: 'Protected Campaigngn',
+        campaignName: 'Protected Campaign',
         campaignYear: 2025,
         startDate: new Date().toISOString(),
         endDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
@@ -607,7 +607,7 @@ describe('Campaigngn Operations Integration Tests', () => {
         })
       ).rejects.toThrow(/forbidden|not authorized|unauthorized/i);
       
-      // Cleanup: Owner deletes the campaigngn
+      // Cleanup: Owner deletes the campaign
       await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId } });
     }, 10000);
 
@@ -650,7 +650,7 @@ describe('Campaigngn Operations Integration Tests', () => {
   });
 
   describe('deleteCampaign authorization', () => {
-    test('readonly user cannot delete campaigngn', async () => {
+    test('readonly user cannot delete campaign', async () => {
       // First create a campaign as owner
       const createInput = {
         profileId: testProfileId,
@@ -676,7 +676,7 @@ describe('Campaigngn Operations Integration Tests', () => {
         })
       ).rejects.toThrow(/forbidden|not authorized|unauthorized/i);
       
-      // Cleanup: Owner deletes the campaigngn
+      // Cleanup: Owner deletes the campaign
       await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId } });
     }, 10000);
 
@@ -740,7 +740,7 @@ describe('Campaigngn Operations Integration Tests', () => {
         variables: {
           input: {
             campaignId,
-            campaignName: 'Fully Updated Campaigngn',
+            campaignName: 'Fully Updated Campaign',
             campaignYear: 2025,
             startDate: newStartDate,
             endDate: newEndDate,
@@ -748,7 +748,7 @@ describe('Campaigngn Operations Integration Tests', () => {
         },
       });
 
-      expect(updateData.updateCampaign.campaignName).toBe('Fully Updated Campaigngn');
+      expect(updateData.updateCampaign.campaignName).toBe('Fully Updated Campaign');
       // Verify dates are updated (they should be different from the original)
       expect(updateData.updateCampaign.startDate).toBeDefined();
       expect(updateData.updateCampaign.endDate).toBeDefined();
@@ -762,7 +762,7 @@ describe('Campaigngn Operations Integration Tests', () => {
       const createCampaignInput = {
         profileId: testProfileId,
         catalogId: testCatalogId,
-        campaignName: 'Campaigngn With Orders',
+        campaignName: 'Campaign With Orders',
         campaignYear: 2025,
         startDate: new Date().toISOString(),
       };
@@ -818,7 +818,7 @@ describe('Campaigngn Operations Integration Tests', () => {
       });
       expect(beforeDelete.listOrdersByCampaign.map((o: any) => o.orderId)).toContain(orderId);
 
-      // Act: Delete the campaigngn
+      // Act: Delete the campaign
       const { data: deleteData } = await ownerClient.mutate({
         mutation: DELETE_CAMPAIGN,
         variables: { campaignId: campaignIdToDelete },
@@ -844,7 +844,7 @@ describe('Campaigngn Operations Integration Tests', () => {
     }, 15000);
 
     it('Updating campaign to reference non-existent catalog succeeds (no foreign key validation)', async () => {
-      // Arrange: Create a campaigngn
+      // Arrange: Create a campaign
       const { data: createData } = await ownerClient.mutate({
         mutation: CREATE_CAMPAIGN,
         variables: {
@@ -889,7 +889,7 @@ describe('Campaigngn Operations Integration Tests', () => {
           input: {
             profileId: testProfileId,
             catalogId: testCatalogId,
-            campaignName: 'Campaigngn With Orders For Update',
+            campaignName: 'Campaign With Orders For Update',
             campaignYear: 2025,
             startDate: new Date().toISOString(),
           },
@@ -922,19 +922,19 @@ describe('Campaigngn Operations Integration Tests', () => {
       });
       const orderId = orderData.createOrder.orderId;
 
-      // Act: Update the campaigngn
+      // Act: Update the campaign
       const { data: updateData } = await ownerClient.mutate({
         mutation: UPDATE_CAMPAIGN,
         variables: {
           input: {
             campaignId,
-            campaignName: 'Updated Campaigngn Name With Orders',
+            campaignName: 'Updated Campaign Name With Orders',
             campaignYear: 2025,
           },
         },
       });
 
-      expect(updateData.updateCampaign.campaignName).toBe('Updated Campaigngn Name With Orders');
+      expect(updateData.updateCampaign.campaignName).toBe('Updated Campaign Name With Orders');
 
       // Assert: Order still exists with correct data
       const GET_ORDER = gql`
@@ -955,7 +955,7 @@ describe('Campaigngn Operations Integration Tests', () => {
       expect(orderCheck.getOrder.customerName).toBe('Preserved Customer');
       expect(orderCheck.getOrder.campaignId).toBe(campaignId);
 
-      // Cleanup: Delete order first, then campaigngn
+      // Cleanup: Delete order first, then campaign
       const DELETE_ORDER = gql`
         mutation DeleteOrder($orderId: ID!) {
           deleteOrder(orderId: $orderId)
@@ -966,7 +966,7 @@ describe('Campaigngn Operations Integration Tests', () => {
     }, 15000);
 
     it('Concurrent campaign updates both succeed', async () => {
-      // Arrange: Create campaigngn
+      // Arrange: Create campaign
       const { data: createData } = await ownerClient.mutate({
         mutation: CREATE_CAMPAIGN,
         variables: {
@@ -1013,7 +1013,7 @@ describe('Campaigngn Operations Integration Tests', () => {
     }, 10000);
 
     it('Data Integrity: Concurrent campaign deletion and order creation (race condition)', async () => {
-      // Arrange: Create campaigngn
+      // Arrange: Create campaign
       const { data: createCampaignData } = await ownerClient.mutate({
         mutation: CREATE_CAMPAIGN,
         variables: {

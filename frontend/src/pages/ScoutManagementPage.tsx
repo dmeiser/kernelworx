@@ -40,6 +40,9 @@ import {
   FormControlLabel,
 } from '@mui/material';
 import { Delete as DeleteIcon, ContentCopy as CopyIcon, Add as AddIcon } from '@mui/icons-material';
+import { LoadingState } from '../components/LoadingState';
+import { PageHeader } from '../components/PageHeader';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import {
   GET_PROFILE,
   UPDATE_SELLER_PROFILE,
@@ -53,6 +56,7 @@ import {
   TRANSFER_PROFILE_OWNERSHIP,
 } from '../lib/graphql';
 import { ensureProfileId } from '../lib/ids';
+import { brand } from '../lib/theme';
 import type { SellerProfile, Share, ProfileInvite } from '../types';
 
 // Helper to get display email for a share
@@ -125,14 +129,6 @@ const hasInvites = (invites: ProfileInvite[]): boolean => invites.length > 0;
 
 // Helper to check if shares list is empty
 const hasShares = (shares: Share[]): boolean => shares.length > 0;
-
-// Helper to get delete invite button text
-const getDeleteInviteButtonText = (isDeleting: boolean): string => {
-  /* v8 ignore start -- Apollo loading state for delete invite cannot be reached in jsdom */
-  if (isDeleting) return 'Deleting...';
-  /* v8 ignore stop */
-  return 'Delete';
-};
 
 // Helper to get delete profile button text
 const getDeleteProfileButtonText = (isDeleting: boolean): string => (isDeleting ? 'Deleting...' : 'Delete Permanently');
@@ -238,12 +234,7 @@ const InviteStatusChip: React.FC<{ expiresAt: string }> = ({ expiresAt }) =>
 // Helper to check if new invite code should be shown
 const hasNewInviteCode = (code: string | null): boolean => Boolean(code);
 
-// Helper component for loading state
-const LoadingSpinner: React.FC = () => (
-  <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
-    <CircularProgress />
-  </Box>
-);
+
 
 // Helper component for profile not found error
 const ProfileNotFoundError: React.FC = () => <Alert severity="error">Profile not found</Alert>;
@@ -350,13 +341,13 @@ const SharesSection: React.FC<{
       <Typography variant="h6" gutterBottom>
         Who Has Access
       </Typography>
-      <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
         Accounts with access to your profile (via share links or redeemed invites).
       </Typography>
       <TableContainer>
         <Table size="small">
           <TableHead>
-            <TableRow sx={{ backgroundColor: '#f5f5f5' }}>
+            <TableRow sx={{ backgroundColor: 'grey.100' }}>
               <TableCell>User</TableCell>
               <TableCell>Permissions</TableCell>
               <TableCell>Shared</TableCell>
@@ -582,6 +573,7 @@ export const ScoutManagementPage: React.FC = () => {
     } catch (err) {
       console.error(`Error ${pendingAction.type === 'revoke' ? 'revoking share' : 'transferring ownership'}:`, err);
       setActionError(pendingAction.type === 'revoke' ? 'Failed to revoke access' : 'Failed to transfer ownership');
+      throw err;
     }
   };
   /* v8 ignore stop */
@@ -604,7 +596,7 @@ export const ScoutManagementPage: React.FC = () => {
   };
 
   if (loading) {
-    return <LoadingSpinner />;
+    return <LoadingState />;
   }
 
   if (!profile) {
@@ -612,10 +604,8 @@ export const ScoutManagementPage: React.FC = () => {
   }
 
   return (
-    <Box sx={{ p: 3 }}>
-      <Typography variant="h4" gutterBottom>
-        Scout Management: {profile.sellerName}
-      </Typography>
+    <Box>
+      <PageHeader title={`Scout Management: ${profile.sellerName}`} />
 
       <Stack spacing={4}>
         {/* Profile Settings Section */}
@@ -648,7 +638,7 @@ export const ScoutManagementPage: React.FC = () => {
           <Typography variant="h6" gutterBottom>
             Invite Codes
           </Typography>
-          <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
             Generate invite codes to share this profile with others. Codes expire after 14 days.
           </Typography>
 
@@ -692,7 +682,7 @@ export const ScoutManagementPage: React.FC = () => {
             <TableContainer>
               <Table size="small">
                 <TableHead>
-                  <TableRow sx={{ backgroundColor: '#f5f5f5' }}>
+                  <TableRow sx={{ backgroundColor: 'grey.100' }}>
                     <TableCell>Invite Code</TableCell>
                     <TableCell>Permissions</TableCell>
                     <TableCell>Created</TableCell>
@@ -746,7 +736,7 @@ export const ScoutManagementPage: React.FC = () => {
               </Table>
             </TableContainer>
           ) : (
-            <Typography variant="body2" color="textSecondary">
+            <Typography variant="body2" color="text.secondary">
               No active invites. Create one to share your profile.
             </Typography>
           )}
@@ -760,11 +750,11 @@ export const ScoutManagementPage: React.FC = () => {
         />
 
         {/* Delete Profile Section */}
-        <Paper sx={{ p: 3, backgroundColor: '#fff3cd' }}>
+        <Paper sx={{ p: 3, backgroundColor: brand.warning.bg }}>
           <Typography variant="h6" gutterBottom color="error">
             Danger Zone
           </Typography>
-          <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
             Permanently delete this Scout and all associated campaigns and orders. This action cannot be undone.
           </Typography>
           <Button variant="contained" color="error" onClick={() => setDeleteConfirmOpen(true)}>
@@ -773,30 +763,21 @@ export const ScoutManagementPage: React.FC = () => {
         </Paper>
       </Stack>
 
-      {/* Delete Invite Confirmation Dialog */}
-      <Dialog open={deleteInviteConfirmOpen} onClose={handleInviteDialogDismiss}>
-        <DialogTitle>Delete Invite Code?</DialogTitle>
-        <DialogContent>
-          <Typography>
-            Are you sure you want to delete invite code <strong>{deletingInviteCode}</strong>? This action cannot be
-            undone.
-          </Typography>
-        </DialogContent>
-        <DialogActions>
-          <Button
-            onClick={() => {
-              setDeleteInviteConfirmOpen(false);
-              setDeletingInviteCode(null);
-            }}
-            disabled={deletingInvite}
-          >
-            Cancel
-          </Button>
-          <Button onClick={handleDeleteInvite} color="error" variant="contained" disabled={deletingInvite}>
-            {getDeleteInviteButtonText(deletingInvite)}
-          </Button>
-        </DialogActions>
-      </Dialog>
+      <ConfirmDialog
+        open={deleteInviteConfirmOpen}
+        title="Delete Invite Code?"
+        onClose={handleInviteDialogDismiss}
+        onConfirm={handleDeleteInvite}
+        confirmLabel="Delete"
+        confirmColor="error"
+        isLoading={deletingInvite}
+        loadingLabel="Deleting..."
+      >
+        <Typography>
+          Are you sure you want to delete invite code <strong>{deletingInviteCode}</strong>? This action cannot be
+          undone.
+        </Typography>
+      </ConfirmDialog>
 
       {/* Delete Profile Confirmation Dialog */}
       <Dialog open={deleteConfirmOpen} onClose={handleDeleteDialogDismiss}>
@@ -837,28 +818,22 @@ export const ScoutManagementPage: React.FC = () => {
         </DialogActions>
       </Dialog>
 
-      {/* Share Action Confirmation Dialog */}
-      <Dialog open={!!pendingAction} onClose={() => setPendingAction(null)}>
-        <DialogTitle>{pendingAction?.type === 'revoke' ? 'Revoke Access?' : 'Transfer Ownership?'}</DialogTitle>
-        <DialogContent>
-          <Typography>
-            {pendingAction?.type === 'revoke'
-              ? `Are you sure you want to revoke access for ${pendingAction?.userName}?`
-              : `Are you sure you want to transfer ownership to ${pendingAction?.userName}? This action cannot be undone. You will lose ownership of this profile and all associated campaigns.`}
-          </Typography>
-          {actionError && (
-            <Alert severity="error" sx={{ mt: 2 }} onClose={() => setActionError(null)}>
-              {actionError}
-            </Alert>
-          )}
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setPendingAction(null)}>Cancel</Button>
-          <Button onClick={handleConfirmPendingAction} color="error" variant="contained">
-            {pendingAction?.type === 'revoke' ? 'Revoke' : 'Transfer'}
-          </Button>
-        </DialogActions>
-      </Dialog>
+      <ConfirmDialog
+        open={!!pendingAction}
+        title={pendingAction?.type === 'revoke' ? 'Revoke Access?' : 'Transfer Ownership?'}
+        onClose={() => setPendingAction(null)}
+        onConfirm={handleConfirmPendingAction}
+        confirmLabel={pendingAction?.type === 'revoke' ? 'Revoke' : 'Transfer'}
+        confirmColor="error"
+        error={actionError}
+        onDismissError={() => setActionError(null)}
+      >
+        <Typography>
+          {pendingAction?.type === 'revoke'
+            ? `Are you sure you want to revoke access for ${pendingAction?.userName}?`
+            : `Are you sure you want to transfer ownership to ${pendingAction?.userName}? This action cannot be undone. You will lose ownership of this profile and all associated campaigns.`}
+        </Typography>
+      </ConfirmDialog>
 
       <Snackbar
         open={deleteSuccess}

@@ -1,1 +1,1 @@
-"""Popcorn Sales Manager - Lambda functions and utilities."""
+"""KernelWorx - Lambda functions and utilities."""

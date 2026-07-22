@@ -98,7 +98,7 @@ const OrderTableContent: React.FC<{
     <TableContainer sx={{ overflowX: 'auto' }}>
       <Table size="small">
         <TableHead>
-          <TableRow sx={{ bgcolor: 'action.hover' }}>
+          <TableRow sx={{ bgcolor: 'grey.100' }}>
             <TableCell>
               <strong>Name</strong>
             </TableCell>
@@ -185,11 +185,11 @@ const MobileWarning: React.FC<{ show: boolean }> = ({ show }) => {
       mb={3}
       sx={{
         p: { xs: 1, sm: 2 },
-        bgcolor: '#e3f2fd',
+        bgcolor: 'info.light',
         borderRadius: 1,
       }}
     >
-      <Typography variant="body2" sx={{ color: '#1976d2' }}>
+      <Typography variant="body2" color="info.main">
         💡 <strong>Note:</strong> The order table below is designed for desktop viewing. For the best experience viewing
         and editing detailed order data, please use a larger screen.
       </Typography>

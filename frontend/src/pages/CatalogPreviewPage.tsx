@@ -13,7 +13,6 @@ import {
   Button,
   Typography,
   Alert,
-  CircularProgress,
   Stack,
   Paper,
   Table,
@@ -26,6 +25,8 @@ import {
 } from '@mui/material';
 import { Add as AddIcon, Share as ShareIcon, ArrowBack as BackIcon } from '@mui/icons-material';
 import { GET_CATALOG } from '../lib/graphql';
+import { LoadingState } from '../components/LoadingState';
+import { ErrorAlert } from '../components/ErrorAlert';
 import type { Catalog, Product } from '../types';
 
 interface CatalogPreviewPageProps {
@@ -33,19 +34,7 @@ interface CatalogPreviewPageProps {
   onCreateSharedCampaign?: (catalogId: string) => void;
 }
 
-// Loading state component
-const LoadingState: React.FC = () => (
-  <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '400px' }}>
-    <CircularProgress />
-  </Box>
-);
 
-// Error state component
-const ErrorState: React.FC<{ message: string }> = ({ message }) => (
-  <Box sx={{ p: 3 }}>
-    <Alert severity="error">Error loading catalog: {message}</Alert>
-  </Box>
-);
 
 // Not found state component
 const NotFoundState: React.FC = () => (
@@ -111,8 +100,8 @@ export const CatalogPreviewPage: React.FC<CatalogPreviewPageProps> = ({
 
   // Render guards - after all hooks
   if (!catalogId) return <NoCatalogIdState />;
-  if (loading) return <LoadingState />;
-  if (error) return <ErrorState message={error.message} />;
+  if (loading) return <LoadingState minHeight="400px" />;
+  if (error) return <ErrorAlert message={`Error loading catalog: ${error.message}`} />;
   if (!catalog) return <NotFoundState />;
 
   return (
@@ -123,9 +112,7 @@ export const CatalogPreviewPage: React.FC<CatalogPreviewPageProps> = ({
           Back
         </Button>
         <Box sx={{ flex: 1 }}>
-          <Typography variant="h5" sx={{ fontWeight: 600 }}>
-            {catalog.catalogName}
-          </Typography>
+          <Typography variant="h5">{catalog.catalogName}</Typography>
           <Typography variant="body2" color="text.secondary">
             {products.length} product{products.length !== 1 ? 's' : ''}
           </Typography>
@@ -139,7 +126,7 @@ export const CatalogPreviewPage: React.FC<CatalogPreviewPageProps> = ({
             <Chip
               label={catalog.catalogType === 'ADMIN_MANAGED' ? 'Admin-Managed' : 'User-Created'}
               variant="outlined"
-              color={catalog.catalogType === 'ADMIN_MANAGED' ? 'primary' : 'secondary'}
+              color={catalog.catalogType === 'ADMIN_MANAGED' ? 'primary' : 'default'}
             />
             {catalog.isPublic && <Chip label="Public" variant="filled" />}
           </Stack>
@@ -162,7 +149,7 @@ export const CatalogPreviewPage: React.FC<CatalogPreviewPageProps> = ({
       ) : (
         <TableContainer component={Paper}>
           <Table>
-            <TableHead sx={{ backgroundColor: '#f5f5f5' }}>
+            <TableHead sx={{ bgcolor: 'grey.100' }}>
               <TableRow>
                 <TableCell sx={{ fontWeight: 600 }}>Product Name</TableCell>
                 <TableCell sx={{ fontWeight: 600 }}>Description</TableCell>

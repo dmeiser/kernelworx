@@ -34,7 +34,10 @@ import { ArrowBack as BackIcon, Save as SaveIcon, ExpandMore as ExpandMoreIcon }
 import { useCreateCampaignPageSetup } from '../hooks/useCreateCampaignPageSetup';
 import { CatalogSection } from '../components/CatalogSection';
 import { StateAutocomplete } from '../components/StateAutocomplete';
+import { PageHeader } from '../components/PageHeader';
+import { LoadingState } from '../components/LoadingState';
 import { UNIT_TYPES } from '../constants/unitTypes';
+import { brand } from '../lib/theme';
 import type { SharedCampaign, SellerProfile } from '../types';
 
 type Profile = Pick<SellerProfile, 'profileId' | 'sellerName' | 'isOwner'>;
@@ -43,11 +46,7 @@ type Profile = Pick<SellerProfile, 'profileId' | 'sellerName' | 'isOwner'>;
 // Loading & Error States
 // ============================================================================
 
-const LoadingState: React.FC = () => (
-  <Box display="flex" justifyContent="center" alignItems="center" minHeight="50vh">
-    <CircularProgress />
-  </Box>
-);
+
 
 const CampaignNotFoundError: React.FC<{ onBack: () => void }> = ({ onBack }) => (
   <Container maxWidth="md" sx={{ py: 3 }}>
@@ -347,7 +346,7 @@ const ShareWithCreatorSection: React.FC<ShareWithCreatorSectionProps> = ({
   createdByName,
   submitting,
 }) => (
-  <Box sx={{ bgcolor: 'warning.light', p: 2, borderRadius: 1 }}>
+  <Box sx={{ bgcolor: brand.warning.bg, p: 2, borderRadius: 1 }}>
     <FormControlLabel
       control={
         <Checkbox checked={shareWithCreator} onChange={(e) => onShareChange(e.target.checked)} disabled={submitting} />
@@ -473,7 +472,7 @@ export const CreateCampaignPage: React.FC = () => {
   const sharedCampaignInactive = hasSharedCode && (!setup.sharedCampaign || !setup.sharedCampaign.isActive);
 
   // Handle loading
-  if (sharedCampaignLoading) return <LoadingState />;
+  if (sharedCampaignLoading) return <LoadingState minHeight="50vh" />;
 
   // Handle error
   if (setup.sharedCampaignError) {
@@ -499,15 +498,15 @@ export const CreateCampaignPage: React.FC = () => {
 
   return (
     <Container maxWidth="md" sx={{ py: 3 }}>
-      {/* Header with back button */}
-      <Stack direction="row" alignItems="center" spacing={2} sx={{ mb: 3 }}>
-        <Button startIcon={<BackIcon />} onClick={() => setup.navigate(-1)} disabled={setup.formState.submitting}>
-          Back
-        </Button>
-        <Typography variant="h4" component="h1">
-          Create New Campaign
-        </Typography>
-      </Stack>
+      <PageHeader
+        title="Create New Campaign"
+        backButton={{
+          onClick: () => setup.navigate(-1),
+          label: 'Back',
+          'aria-label': 'Back',
+          disabled: setup.formState.submitting,
+        }}
+      />
 
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Stack spacing={3}>

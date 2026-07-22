@@ -10,7 +10,6 @@ import {
   Button,
   Typography,
   Alert,
-  CircularProgress,
   Stack,
   Paper,
   Table,
@@ -33,6 +32,8 @@ import {
   ExpandLess as ExpandLessIcon,
 } from '@mui/icons-material';
 import { CampaignSummaryTiles } from '../components/CampaignSummaryTiles';
+import { LoadingState } from '../components/LoadingState';
+import { ErrorAlert } from '../components/ErrorAlert';
 import { LIST_ORDERS_BY_CAMPAIGN, DELETE_ORDER, GET_PROFILE } from '../lib/graphql';
 import { ensureProfileId, ensureCampaignId, ensureOrderId, toUrlId } from '../lib/ids';
 import type { SellerProfile, Order, OrderLineItem } from '../types';
@@ -370,15 +371,11 @@ export const OrdersPage: React.FC = () => {
   };
 
   if (loading) {
-    return (
-      <Box display="flex" justifyContent="center" alignItems="center" minHeight="200px">
-        <CircularProgress />
-      </Box>
-    );
+    return <LoadingState minHeight="200px" />;
   }
 
   if (error) {
-    return <Alert severity="error">Failed to load orders: {error.message}</Alert>;
+    return <ErrorAlert message={`Failed to load orders: ${error.message}`} />;
   }
 
   return (

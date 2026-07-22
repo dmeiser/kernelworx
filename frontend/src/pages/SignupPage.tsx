@@ -13,7 +13,8 @@ import {
   Button,
   TextField,
   Typography,
-  Paper,
+  Card,
+  CardContent,
   Stack,
   Alert,
   CircularProgress,
@@ -388,13 +389,29 @@ const PageLayout: React.FC<PageLayoutProps> = ({ maxWidth = 500, children }) => 
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      background: 'linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%)',
+      bgcolor: 'background.default',
       p: 2,
     }}
   >
-    <Paper elevation={6} sx={{ p: 4, maxWidth, width: '100%' }}>
-      {children}
-    </Paper>
+    <Card sx={{ maxWidth, width: '100%' }}>
+      <CardContent sx={{ p: 4 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5, mb: 3 }}>
+          <Box component="img" src="/logo.svg" alt="KernelWorx mark" sx={{ width: 32, height: 32 }} />
+          <Typography
+            variant="h5"
+            sx={{
+              fontFamily: '"Bricolage Grotesque", "Atkinson Hyperlegible", sans-serif',
+              fontWeight: 700,
+              lineHeight: 1,
+            }}
+          >
+            <Box component="span" sx={{ color: '#333333' }}>Kernel</Box>
+            <Box component="span" sx={{ color: 'primary.main' }}>Worx</Box>
+          </Typography>
+        </Box>
+        {children}
+      </CardContent>
+    </Card>
   </Box>
 );
 
@@ -448,7 +465,11 @@ const VerificationView: React.FC<VerificationViewProps> = ({
       variant="h4"
       component="h1"
       gutterBottom
-      sx={{ fontFamily: 'Kaushan Script, cursive', textAlign: 'center' }}
+      sx={{
+        fontFamily: '"Bricolage Grotesque", "Atkinson Hyperlegible", sans-serif',
+        fontWeight: 700,
+        textAlign: 'center',
+      }}
     >
       Verify Email
     </Typography>
@@ -548,7 +569,11 @@ const SignupFormView: React.FC<SignupFormViewProps> = ({
       variant="h4"
       component="h1"
       gutterBottom
-      sx={{ fontFamily: 'Kaushan Script, cursive', textAlign: 'center' }}
+      sx={{
+        fontFamily: '"Bricolage Grotesque", "Atkinson Hyperlegible", sans-serif',
+        fontWeight: 700,
+        textAlign: 'center',
+      }}
     >
       Create Account
     </Typography>

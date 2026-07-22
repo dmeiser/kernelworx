@@ -1108,7 +1108,7 @@ describe('Catalog CRUD Integration Tests', () => {
             input: {
               profileId: ownerProfileId,
               catalogId: catalogId,
-              campaignName: 'Owner Campaigngn',
+              campaignName: 'Owner Campaign',
               campaignYear: 2025,
               startDate: new Date().toISOString(),
             },
@@ -1129,7 +1129,7 @@ describe('Catalog CRUD Integration Tests', () => {
             input: {
               profileId: contributorProfileId,
               catalogId: catalogId,
-              campaignName: 'Contributor Campaigngn',
+              campaignName: 'Contributor Campaign',
               campaignYear: 2025,
               startDate: new Date().toISOString(),
             },
@@ -1196,10 +1196,10 @@ describe('Catalog CRUD Integration Tests', () => {
     });
 
     describe('Data Integrity', () => {
-      it('Data Integrity: Deleting catalog used by active campaigngn', async () => {
-        // Arrange: Create a catalog and use it for a campaigngn
+      it('Data Integrity: Deleting catalog used by active campaign', async () => {
+        // Arrange: Create a catalog and use it for a campaign
         const createCatalogInput = {
-          catalogName: 'Catalog Used By Campaigngn',
+          catalogName: 'Catalog Used By Campaign',
           isPublic: false,
           products: [{ productName: 'Popcorn', price: 25.0, sortOrder: 1 }],
         };
@@ -1249,7 +1249,7 @@ describe('Catalog CRUD Integration Tests', () => {
             input: {
               profileId: profileId,
               catalogId: catalogId,
-              campaignName: 'Campaigngn Using Catalog',
+              campaignName: 'Campaign Using Catalog',
               campaignYear: 2025,
               startDate: new Date().toISOString(),
             },
@@ -1257,10 +1257,10 @@ describe('Catalog CRUD Integration Tests', () => {
         });
         const campaignId = campaignData.createCampaign.campaignId;
 
-        // Act: Try to delete the catalog while it's in use by a campaigngn
+        // Act: Try to delete the catalog while it's in use by a campaign
         // The system should either:
         // - Prevent deletion (throw error)
-        // - Allow deletion (orphan the campaigngn's catalogId reference)
+        // - Allow deletion (orphan the campaign's catalogId reference)
         try {
           const { data: deleteData }: any = await ownerClient.mutate({
             mutation: DELETE_CATALOG,
@@ -1271,7 +1271,7 @@ describe('Catalog CRUD Integration Tests', () => {
           // This means the system allows deletion (orphaning the reference)
           expect(deleteData.deleteCatalog).toBe(true);
           
-          // Campaigngn's catalogId is now orphaned - verify the campaign still exists
+          // Campaign's catalogId is now orphaned - verify the campaign still exists
           const GET_CAMPAIGN = gql`
             query GetCampaign($campaignId: ID!) {
               getCampaign(campaignId: $campaignId) {
@@ -1434,7 +1434,7 @@ describe('Catalog CRUD Integration Tests', () => {
         });
         const catalogId = catalogData.createCatalog.catalogId;
 
-        // Create a profile for creating campaigngns
+        // Create a profile for creating campaigns
         const CREATE_PROFILE = gql`
           mutation CreateSellerProfile($input: CreateSellerProfileInput!) {
             createSellerProfile(input: $input) {
@@ -1480,7 +1480,7 @@ describe('Catalog CRUD Integration Tests', () => {
               input: {
                 profileId: profileId,
                 catalogId: catalogId,
-                campaignName: 'Concurrent Campaigngn',
+                campaignName: 'Concurrent Campaign',
                 campaignYear: 2025,
                 startDate: new Date().toISOString(),
               },
@@ -1492,7 +1492,7 @@ describe('Catalog CRUD Integration Tests', () => {
         // Delete should always be attempted
         expect(['fulfilled', 'rejected']).toContain(deleteResult.status);
         
-        // Campaigngn creation may succeed (if it happens before deletion)
+        // Campaign creation may succeed (if it happens before deletion)
         // or it may succeed with an orphaned catalog reference (if deletion happens first)
         expect(['fulfilled', 'rejected']).toContain(createCampaignResult.status);
 

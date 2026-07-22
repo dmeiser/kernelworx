@@ -1,6 +1,6 @@
 # AGENT.md — Rules and behaviors for AI agents
 
-This file contains repository-specific agent rules. Agents should follow these when making changes to the Popcorn Sales Manager project.
+This file contains repository-specific agent rules. Agents should follow these when making changes to the KernelWorx project.
 
 ## CRITICAL GIT RULES
 
@@ -48,26 +48,23 @@ All code changes must meet the following quality metrics before work is consider
 **Workflow Order**:
 1. Make code changes
 2. Write/update tests
-3. Run formatters: `isort` → `ruff format`
+3. Run formatters: `ruff check --select I --fix` → `ruff format`
 4. Run type checker: `mypy` (fix any errors)
 5. Run tests and validation
 6. **If any code changes are needed after validation, repeat the formatting steps**
 
 **Commands**:
 ```bash
-# 1. Organize imports
-uv run isort src/ tests/
-
-# 2. Format code
+# 1. Organize imports and format code
+uv run ruff check --select I --fix src/ tests/
 uv run ruff format src/ tests/
 
-# 3. Type checking
+# 2. Type checking
 uv run mypy src/
 ```
 
 **Configuration** (in `pyproject.toml`):
-- **ruff**: line-length = 120
-- **isort**: profile = "black" (compatibility)
+- **ruff**: line-length = 120, lint rules include import sorting (`I`)
 - **mypy**: strict mode, ignore missing imports where necessary
 
 The last commits before a successful validation run MUST be formatting/type-checking changes only.
@@ -141,7 +138,7 @@ npm run test -- --watch
 
 Before claiming work is complete:
 
-- [ ] Run `uv run isort src/ tests/`
+- [ ] Run `uv run ruff check --select I --fix src/ tests/`
 - [ ] Run `uv run ruff format src/ tests/`
 - [ ] Run `uv run mypy src/` (0 errors)
 - [ ] Run `uv run pytest tests/unit --cov=src --cov-fail-under=100` (100% coverage, ALL tests pass)
@@ -336,7 +333,7 @@ pipeline = api.create_resolver(
 1. Create function in `src/lambdas/`
 2. Add to OpenTofu lambda module with appropriate IAM permissions
 3. Create unit tests with 100% coverage using `moto` mocks
-4. Run formatters: `isort` → `ruff format` → `mypy`
+4. Run formatters: `ruff check --select I --fix` → `ruff format` → `mypy`
 5. Deploy to dev environment and test
 
 **Add new GraphQL mutation/query**:

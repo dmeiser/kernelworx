@@ -14,7 +14,8 @@ import {
   Button,
   TextField,
   Typography,
-  Paper,
+  Card,
+  CardContent,
   Stack,
   Divider,
   Alert,
@@ -520,30 +521,56 @@ export const LoginPage: React.FC = () => {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        background: 'linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%)',
+        bgcolor: 'background.default',
         p: 2,
       }}
     >
-      <Paper elevation={6} sx={{ p: 4, width: '100%', maxWidth: 450 }}>
-        <Box sx={{ textAlign: 'center', mb: 4 }}>
-          <Typography variant="h4" component="h1" gutterBottom sx={{ fontFamily: 'Kaushan Script, cursive' }}>
-            Welcome Back
-          </Typography>
-          <Typography variant="body2" color="text.secondary">
-            Sign in to your KernelWorx account
-          </Typography>
-        </Box>
+      <Card sx={{ width: '100%', maxWidth: 450 }}>
+        <CardContent sx={{ p: 4 }}>
+          <Box sx={{ textAlign: 'center', mb: 4 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5, mb: 2 }}>
+              <Box
+                component="img"
+                src="/logo.svg"
+                alt="KernelWorx mark"
+                sx={{ width: 32, height: 32 }}
+              />
+              <Typography
+                variant="h5"
+                sx={{
+                  fontFamily: '"Bricolage Grotesque", "Atkinson Hyperlegible", sans-serif',
+                  fontWeight: 700,
+                  lineHeight: 1,
+                }}
+              >
+                <Box component="span" sx={{ color: '#333333' }}>Kernel</Box>
+                <Box component="span" sx={{ color: 'primary.main' }}>Worx</Box>
+              </Typography>
+            </Box>
+            <Typography
+              variant="h4"
+              component="h1"
+              gutterBottom
+              sx={{ fontFamily: '"Bricolage Grotesque", "Atkinson Hyperlegible", sans-serif', fontWeight: 700 }}
+            >
+              Welcome Back
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              Sign in to your KernelWorx account
+            </Typography>
+          </Box>
 
-        <ErrorAlert error={state.error} onClose={clearError} />
-        <PasskeyPrompt show={state.showPasskeyPrompt} />
-        <LoginFormContainer state={state} onForgotPassword={handleForgotPassword} />
-        <OptionalSocialSection
-          showMfa={state.showMfa}
-          loading={state.loading}
-          onSocialLogin={state.handleSocialLogin}
-          onSignup={handleSignup}
-        />
-      </Paper>
+          <ErrorAlert error={state.error} onClose={clearError} />
+          <PasskeyPrompt show={state.showPasskeyPrompt} />
+          <LoginFormContainer state={state} onForgotPassword={handleForgotPassword} />
+          <OptionalSocialSection
+            showMfa={state.showMfa}
+            loading={state.loading}
+            onSocialLogin={state.handleSocialLogin}
+            onSignup={handleSignup}
+          />
+        </CardContent>
+      </Card>
     </Box>
   );
 };

@@ -886,7 +886,7 @@ describe('Profile Operations Integration Tests', () => {
 
     it('SECURITY: Deleted profile becomes immediately inaccessible to all users', async () => {
       // Arrange: Create profile and share it
-      const profileName = `${getTestPrefix()}-ImmediateInaccessTest`;
+      const profileName = `${getTestPrefix()}-ImmediateInaccessibilityTest`;
       const { data: createData } = await ownerClient.mutate({
         mutation: CREATE_PROFILE,
         variables: { input: { sellerName: profileName } },

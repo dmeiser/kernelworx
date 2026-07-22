@@ -37,6 +37,8 @@ import {
   InputAdornment,
 } from '@mui/material';
 import { SwapHoriz as TransferIcon, Close as CloseIcon, Search as SearchIcon } from '@mui/icons-material';
+import { LoadingState } from './LoadingState';
+import { ErrorAlert } from './ErrorAlert';
 import {
   ADMIN_GET_USER_PROFILES,
   ADMIN_GET_USER_CATALOGS,
@@ -170,9 +172,9 @@ export const UserDetailsDialog: React.FC<UserDetailsDialogProps> = ({ open, onCl
         {/* Profiles Tab */}
         <TabPanel value={currentTab} index={0}>
           {profilesLoading ? (
-            <CircularProgress />
+            <LoadingState py={4} />
           ) : profilesError ? (
-            <Alert severity="error">Error loading profiles: {profilesError.message}</Alert>
+            <ErrorAlert message={`Error loading profiles: ${profilesError.message}`} />
           ) : profiles.length === 0 ? (
             <Alert severity="info">No profiles found</Alert>
           ) : (
@@ -216,9 +218,9 @@ export const UserDetailsDialog: React.FC<UserDetailsDialogProps> = ({ open, onCl
         {/* Catalogs Tab */}
         <TabPanel value={currentTab} index={1}>
           {catalogsLoading ? (
-            <CircularProgress />
+            <LoadingState py={4} />
           ) : catalogsError ? (
-            <Alert severity="error">Error loading catalogs: {catalogsError.message}</Alert>
+            <ErrorAlert message={`Error loading catalogs: ${catalogsError.message}`} />
           ) : catalogs.length === 0 ? (
             <Alert severity="info">No catalogs found</Alert>
           ) : (

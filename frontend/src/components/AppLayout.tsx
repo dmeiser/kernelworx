@@ -24,7 +24,6 @@ import PersonIcon from '@mui/icons-material/Person';
 import SettingsIcon from '@mui/icons-material/Settings';
 import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
 import InventoryIcon from '@mui/icons-material/Inventory';
-import AccountCircleIcon from '@mui/icons-material/AccountCircle';
 import LogoutIcon from '@mui/icons-material/Logout';
 import CardGiftcardIcon from '@mui/icons-material/CardGiftcard';
 import AssessmentIcon from '@mui/icons-material/Assessment';
@@ -34,81 +33,179 @@ import { useAuth } from '../contexts/AuthContext';
 import { Toast } from './Toast';
 import { Outlet } from 'react-router-dom';
 import { LIST_MY_SHARED_CAMPAIGNS } from '../lib/graphql';
+import { brand, displayFont } from '../lib/theme';
 
 const DRAWER_WIDTH = 240;
+
+const drawerPaperSx = {
+  width: DRAWER_WIDTH,
+  boxSizing: 'border-box',
+  backgroundColor: brand.background.container,
+  borderRight: `1px solid ${brand.border.main}`,
+};
+
+const navItemSx = {
+  borderRadius: brand.radius.md,
+  color: brand.text.primary,
+  mx: 1,
+  px: 1.5,
+  '& .MuiListItemIcon-root': {
+    color: brand.text.secondary,
+    minWidth: 36,
+  },
+  '&:hover': {
+    backgroundColor: brand.fill.tertiary,
+  },
+  '&.Mui-selected': {
+    backgroundColor: brand.primary[9],
+    color: '#ffffff',
+    '& .MuiListItemIcon-root': {
+      color: '#ffffff',
+    },
+    '& .MuiListItemText-primary': {
+      color: '#ffffff',
+      fontWeight: 600,
+    },
+  },
+  '&.Mui-selected:hover': {
+    backgroundColor: brand.primary[7],
+  },
+};
+
+const adminNavItemSx = {
+  borderRadius: brand.radius.md,
+  color: brand.error.text,
+  mx: 1,
+  px: 1.5,
+  '& .MuiListItemIcon-root': {
+    color: brand.error.text,
+    minWidth: 36,
+  },
+  '&:hover': {
+    backgroundColor: brand.error.bg,
+  },
+  '&.Mui-selected': {
+    backgroundColor: brand.error.bg,
+    color: brand.error.text,
+    '& .MuiListItemIcon-root': {
+      color: brand.error.text,
+    },
+  },
+};
+
+const sectionDividerSx = {
+  my: 1.5,
+  mx: 2,
+  borderColor: brand.border.secondary,
+};
 
 const DrawerContent: React.FC<{
   onNavigate: (path: string) => void;
   isActive: (path: string) => boolean;
   hasSharedCampaigns: boolean;
   isAdmin: boolean;
-}> = ({ onNavigate, isActive, hasSharedCampaigns, isAdmin }) => (
+  displayName: string;
+  onLogout: () => void;
+}> = ({ onNavigate, isActive, hasSharedCampaigns, isAdmin, displayName, onLogout }) => (
   <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
     <Toolbar />
-    <Divider />
-    <List sx={{ flexGrow: 1 }}>
-      <ListItemButton onClick={() => onNavigate('/home')} selected={isActive('/home')}>
+    <Divider sx={{ borderColor: brand.border.secondary }} />
+    <List sx={{ flexGrow: 1, pt: 1 }}>
+      <ListItemButton onClick={() => onNavigate('/home')} selected={isActive('/home')} sx={navItemSx}>
         <ListItemIcon>
           <HomeIcon />
         </ListItemIcon>
         <ListItemText primary="Home" />
       </ListItemButton>
-      <ListItemButton onClick={() => onNavigate('/scouts')} selected={isActive('/scouts')}>
+      <ListItemButton onClick={() => onNavigate('/scouts')} selected={isActive('/scouts')} sx={navItemSx}>
         <ListItemIcon>
           <PersonIcon />
         </ListItemIcon>
         <ListItemText primary="My Scouts" />
       </ListItemButton>
-      <ListItemButton onClick={() => onNavigate('/accept-invite')} selected={isActive('/accept-invite')}>
-        <ListItemIcon>
-          <CardGiftcardIcon />
-        </ListItemIcon>
-        <ListItemText primary="Accept Invite" />
-      </ListItemButton>
-      <ListItemButton onClick={() => onNavigate('/catalogs')} selected={isActive('/catalogs')}>
+      <ListItemButton onClick={() => onNavigate('/catalogs')} selected={isActive('/catalogs')} sx={navItemSx}>
         <ListItemIcon>
           <InventoryIcon />
         </ListItemIcon>
         <ListItemText primary="Catalogs" />
       </ListItemButton>
-      <ListItemButton onClick={() => onNavigate('/payment-methods')} selected={isActive('/payment-methods')}>
+      <ListItemButton onClick={() => onNavigate('/payment-methods')} selected={isActive('/payment-methods')} sx={navItemSx}>
         <ListItemIcon>
           <PaymentIcon />
         </ListItemIcon>
         <ListItemText primary="Payment Methods" />
       </ListItemButton>
-      <ListItemButton onClick={() => onNavigate('/shared-campaigns')} selected={isActive('/shared-campaigns')}>
+
+      <Divider sx={sectionDividerSx} />
+
+      <ListItemButton onClick={() => onNavigate('/shared-campaigns')} selected={isActive('/shared-campaigns')} sx={navItemSx}>
         <ListItemIcon>
           <CampaignIcon />
         </ListItemIcon>
         <ListItemText primary="Shared Campaigns" />
       </ListItemButton>
       {hasSharedCampaigns && (
-        <ListItemButton onClick={() => onNavigate('/campaign-reports')} selected={isActive('/campaign-reports')}>
+        <ListItemButton onClick={() => onNavigate('/campaign-reports')} selected={isActive('/campaign-reports')} sx={navItemSx}>
           <ListItemIcon>
             <AssessmentIcon />
           </ListItemIcon>
           <ListItemText primary="Campaign Reports" />
         </ListItemButton>
       )}
-      <ListItemButton onClick={() => onNavigate('/settings')} selected={isActive('/settings')}>
+      <ListItemButton onClick={() => onNavigate('/accept-invite')} selected={isActive('/accept-invite')} sx={navItemSx}>
+        <ListItemIcon>
+          <CardGiftcardIcon />
+        </ListItemIcon>
+        <ListItemText primary="Accept Invite" />
+      </ListItemButton>
+
+      <Divider sx={sectionDividerSx} />
+
+      <ListItemButton onClick={() => onNavigate('/settings')} selected={isActive('/settings')} sx={navItemSx}>
         <ListItemIcon>
           <SettingsIcon />
         </ListItemIcon>
         <ListItemText primary="Settings" />
       </ListItemButton>
+
       {isAdmin && (
         <>
-          <Divider sx={{ my: 1 }} />
-          <ListItemButton onClick={() => onNavigate('/admin')} selected={isActive('/admin')}>
+          <Divider sx={sectionDividerSx} />
+          <ListItemButton onClick={() => onNavigate('/admin')} selected={isActive('/admin')} sx={adminNavItemSx}>
             <ListItemIcon>
-              <AdminPanelSettingsIcon color="error" />
+              <AdminPanelSettingsIcon />
             </ListItemIcon>
-            <ListItemText primary="Admin Console" primaryTypographyProps={{ color: 'error' }} />
+            <ListItemText primary="Admin Console" />
           </ListItemButton>
         </>
       )}
     </List>
+
+    <Divider sx={{ borderColor: brand.border.secondary }} />
+    <Box sx={{ p: 2 }}>
+      <ListItemButton
+        onClick={onLogout}
+        sx={{
+          borderRadius: brand.radius.md,
+          color: brand.text.secondary,
+          px: 1.5,
+          '&:hover': {
+            backgroundColor: brand.fill.tertiary,
+            color: brand.error.main,
+          },
+        }}
+      >
+        <ListItemIcon sx={{ color: 'inherit', minWidth: 36 }}>
+          <LogoutIcon />
+        </ListItemIcon>
+        <ListItemText
+          primary="Sign out"
+          secondary={displayName}
+          primaryTypographyProps={{ fontWeight: 600 }}
+          secondaryTypographyProps={{ noWrap: true }}
+        />
+      </ListItemButton>
+    </Box>
   </Box>
 );
 
@@ -157,7 +254,6 @@ export const AppLayout: React.FC<{ children?: React.ReactNode }> = ({ children }
   return (
     <AppLayoutView
       isDesktop={isDesktop}
-      account={account}
       displayName={displayName}
       onLogout={logout}
       onNavigate={handleNavigation}
@@ -173,7 +269,6 @@ export const AppLayout: React.FC<{ children?: React.ReactNode }> = ({ children }
 
 const AppLayoutView: React.FC<{
   isDesktop: boolean;
-  account: ReturnType<typeof useAuth>['account'];
   displayName: string;
   onLogout: () => void;
   onNavigate: (path: string) => void;
@@ -185,7 +280,6 @@ const AppLayoutView: React.FC<{
   children?: React.ReactNode;
 }> = ({
   isDesktop,
-  account,
   displayName,
   onLogout,
   onNavigate,
@@ -197,30 +291,35 @@ const AppLayoutView: React.FC<{
   children,
 }) => (
   <Box sx={{ display: 'flex' }}>
-    <AppBar position="fixed" sx={{ zIndex: (theme) => theme.zIndex.drawer + 1 }}>
-      <Container maxWidth="lg">
-        <Toolbar disableGutters>
+    <AppBar position="fixed" color="default" sx={{ zIndex: (theme) => theme.zIndex.drawer + 1 }}>
+      <Toolbar sx={{ justifyContent: 'space-between', gap: 1, px: { xs: 1, sm: 2, md: 3 } }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           {!isDesktop && (
             <IconButton
               color="inherit"
               aria-label="open drawer"
               edge="start"
               onClick={toggleMobileDrawer}
-              sx={{ mr: 2 }}
+              sx={{ mr: 0.5 }}
             >
               <MenuIcon />
             </IconButton>
           )}
 
-          <Box sx={{ display: 'flex', alignItems: 'center', flexGrow: 1 }}>
+          <Box
+            component="button"
+            tabIndex={0}
+            sx={{ display: 'flex', alignItems: 'center', gap: 1, cursor: 'pointer', background: 'none', border: 'none', padding: 0 }}
+            onClick={() => onNavigate('/home')}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onNavigate('/home'); } }}
+          >
             <Box
               component="img"
               src="/logo.svg"
-              alt="Popcorn kernel"
+              alt="KernelWorx mark"
               sx={{
-                width: { xs: '28px', sm: '32px', md: '40px' },
-                height: { xs: '28px', sm: '32px', md: '40px' },
-                mr: { xs: 0.5, sm: 1 },
+                width: { xs: 28, sm: 32, md: 36 },
+                height: { xs: 28, sm: 32, md: 36 },
               }}
             />
             <Typography
@@ -228,27 +327,47 @@ const AppLayoutView: React.FC<{
               noWrap
               component="div"
               sx={{
-                fontFamily: '"Kaushan Script", cursive',
-                fontWeight: 600,
-                letterSpacing: '0.08em',
-                fontSize: { xs: '28px', sm: '32px', md: '40px' },
+                fontFamily: displayFont,
+                fontWeight: 700,
+                fontSize: { xs: '1.25rem', sm: '1.35rem' },
                 lineHeight: 1,
-                WebkitTextStroke: '0.8px rgba(255, 255, 255, 0.8)',
-                textShadow: '0 1px 0 rgba(255,255,255,0.12), 0 2px 0 rgba(255,255,255,0.06)',
+                letterSpacing: '-0.01em',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
               }}
             >
-              KernelWorx
+              <Box component="span" sx={{ color: '#333333' }}>
+                Kernel
+              </Box>
+              <Box component="span" sx={{ color: 'primary.main' }}>
+                Worx
+              </Box>
             </Typography>
           </Box>
+        </Box>
 
-          {account && <AccountButton isDesktop={isDesktop} displayName={displayName} onNavigate={onNavigate} />}
-
-          <LogoutButton onLogout={onLogout} />
-        </Toolbar>
-      </Container>
+        <Button
+          color="inherit"
+          aria-label="Sign out"
+          onClick={onLogout}
+          startIcon={<LogoutIcon sx={{ fontSize: '1.25rem', color: brand.text.secondary }} />}
+          sx={{
+            textTransform: 'none',
+            fontWeight: 600,
+            color: brand.text.primary,
+            borderRadius: brand.radius.md,
+            fontFamily: displayFont,
+            '&:hover': {
+              backgroundColor: brand.fill.tertiary,
+            },
+          }}
+        >
+          <Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>
+            Sign out
+          </Box>
+        </Button>
+      </Toolbar>
     </AppBar>
 
     {isDesktop ? (
@@ -257,10 +376,7 @@ const AppLayoutView: React.FC<{
         sx={{
           width: DRAWER_WIDTH,
           flexShrink: 0,
-          '& .MuiDrawer-paper': {
-            width: DRAWER_WIDTH,
-            boxSizing: 'border-box',
-          },
+          '& .MuiDrawer-paper': drawerPaperSx,
         }}
       >
         <DrawerContent
@@ -268,6 +384,8 @@ const AppLayoutView: React.FC<{
           isActive={isActive}
           hasSharedCampaigns={hasSharedCampaigns}
           isAdmin={isAdmin}
+          displayName={displayName}
+          onLogout={onLogout}
         />
       </Drawer>
     ) : (
@@ -278,10 +396,7 @@ const AppLayoutView: React.FC<{
         onClose={toggleMobileDrawer}
         ModalProps={{ keepMounted: true }}
         sx={{
-          '& .MuiDrawer-paper': {
-            width: DRAWER_WIDTH,
-            boxSizing: 'border-box',
-          },
+          '& .MuiDrawer-paper': drawerPaperSx,
         }}
       >
         <DrawerContent
@@ -289,6 +404,8 @@ const AppLayoutView: React.FC<{
           isActive={isActive}
           hasSharedCampaigns={hasSharedCampaigns}
           isAdmin={isAdmin}
+          displayName={displayName}
+          onLogout={onLogout}
         />
       </Drawer>
     )}
@@ -298,7 +415,7 @@ const AppLayoutView: React.FC<{
       sx={{
         flexGrow: 1,
         width: 0,
-        bgcolor: 'background.default',
+        bgcolor: brand.background.layout,
         minHeight: '100vh',
       }}
     >
@@ -311,60 +428,4 @@ const AppLayoutView: React.FC<{
 
     <Toast />
   </Box>
-);
-
-const AccountButton: React.FC<{
-  isDesktop: boolean;
-  displayName: string;
-  onNavigate: (path: string) => void;
-}> = ({ isDesktop, displayName, onNavigate }) => (
-  <Button
-    color="inherit"
-    onClick={() => onNavigate('/account/settings')}
-    sx={{
-      textTransform: 'none',
-      mr: 1,
-      display: 'flex',
-      alignItems: 'center',
-      minWidth: 'auto',
-      px: 1,
-    }}
-  >
-    <AccountCircleIcon
-      sx={{
-        fontSize: isDesktop ? '1.25rem' : '1.5rem',
-        mr: isDesktop ? 0.5 : 0,
-      }}
-    />
-    <Typography
-      variant="body2"
-      noWrap
-      sx={{
-        maxWidth: 120,
-        ml: isDesktop ? 0 : 0.5,
-        display: isDesktop ? 'block' : { xs: 'none', sm: 'block' },
-      }}
-    >
-      {displayName}
-    </Typography>
-  </Button>
-);
-
-const LogoutButton: React.FC<{ onLogout: () => void }> = ({ onLogout }) => (
-  <Button
-    color="inherit"
-    onClick={onLogout}
-    startIcon={<LogoutIcon sx={{ fontSize: { xs: '1rem', sm: '1.25rem' } }} />}
-    sx={{
-      textTransform: 'none',
-      fontWeight: 500,
-      minWidth: { xs: 'auto', sm: 'auto' },
-      px: { xs: 1, sm: 2 },
-      fontSize: { xs: '0.875rem', sm: '1rem' },
-    }}
-  >
-    <Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>
-      Log out
-    </Box>
-  </Button>
 );

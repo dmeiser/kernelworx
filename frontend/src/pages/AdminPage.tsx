@@ -35,6 +35,11 @@ import {
   TextField,
   InputAdornment,
 } from '@mui/material';
+import { LoadingState } from '../components/LoadingState';
+import { ErrorAlert } from '../components/ErrorAlert';
+import { PageHeader } from '../components/PageHeader';
+import { ConfirmDialog } from '../components/ConfirmDialog';
+import { useSnackbar } from '../hooks/useSnackbar';
 import {
   Inventory as CatalogIcon,
   Info as InfoIcon,
@@ -103,15 +108,7 @@ function TabPanel(props: TabPanelProps) {
   );
 }
 
-const LoadingSpinner: React.FC = () => (
-  <Box display="flex" justifyContent="center" py={4}>
-    <CircularProgress />
-  </Box>
-);
 
-const ErrorAlert: React.FC<{ message: string }> = ({ message }) => (
-  <Alert severity="error">Failed to load: {message}</Alert>
-);
 
 // --- User Status Chip ---
 const UserStatusChip: React.FC<{ status: string; enabled: boolean }> = ({ status, enabled }) => {
@@ -260,7 +257,7 @@ const UsersTabContent: React.FC<UsersTabContentProps> = ({
         </Button>
       </Box>
 
-      {error && <ErrorAlert message={error.message} />}
+      {error && <ErrorAlert message={`Failed to load: ${error.message}`} />}
 
       {!hasSearched && !error && (
         <Alert severity="info">
@@ -369,10 +366,10 @@ const CatalogsTabContent: React.FC<CatalogsTabContentProps> = ({
   onDeleteCatalog,
 }) => {
   if (loading) {
-    return <LoadingSpinner />;
+    return <LoadingState py={4} />;
   }
   if (error) {
-    return <ErrorAlert message={error.message} />;
+    return <ErrorAlert message={`Failed to load: ${error.message}`} />;
   }
 
   return (
@@ -455,7 +452,7 @@ export const AdminPage: React.FC = () => {
   // Dialog states
   const [resetPasswordUser, setResetPasswordUser] = useState<AdminUser | null>(null);
   const [deleteUserTarget, setDeleteUserTarget] = useState<AdminUser | null>(null);
-  const [snackbarMessage, setSnackbarMessage] = useState<string | null>(null);
+  const { message: snackbarMessage, open: snackbarOpen, key: snackbarKey, show: showSnackbar, close: closeSnackbar } = useSnackbar();
 
   // Catalog editor state
   const [catalogEditorOpen, setCatalogEditorOpen] = useState(false);
@@ -493,42 +490,34 @@ export const AdminPage: React.FC = () => {
   } = useQuery<{ listManagedCatalogs: Catalog[] }>(LIST_MANAGED_CATALOGS);
 
   // Mutations
-  const [resetPassword, { loading: resettingPassword }] = useMutation(ADMIN_RESET_USER_PASSWORD, {
-    onCompleted: () => {
-      setSnackbarMessage(`Password reset email sent to ${resetPasswordUser?.email}`);
-      setResetPasswordUser(null);
-    },
-    onError: (error) => {
-      setSnackbarMessage(`Error: ${error.message}`);
-    },
-  });
+  const [resetPassword, { loading: resettingPassword }] = useMutation(ADMIN_RESET_USER_PASSWORD);
 
   // Catalog mutations
   const [createManagedCatalog] = useMutation(CREATE_MANAGED_CATALOG, {
     onCompleted: () => {
-      setSnackbarMessage('Catalog created successfully');
+      showSnackbar('Catalog created successfully');
       refetchCatalogs();
     },
     onError: (error) => {
-      setSnackbarMessage(`Error creating catalog: ${error.message}`);
+      showSnackbar(`Error creating catalog: ${error.message}`);
     },
   });
   const [updateCatalog] = useMutation(UPDATE_CATALOG, {
     onCompleted: () => {
-      setSnackbarMessage('Catalog updated successfully');
+      showSnackbar('Catalog updated successfully');
       refetchCatalogs();
     },
     onError: (error) => {
-      setSnackbarMessage(`Error updating catalog: ${error.message}`);
+      showSnackbar(`Error updating catalog: ${error.message}`);
     },
   });
   const [deleteCatalog] = useMutation(DELETE_CATALOG, {
     onCompleted: () => {
-      setSnackbarMessage('Catalog deleted successfully');
+      showSnackbar('Catalog deleted successfully');
       refetchCatalogs();
     },
     onError: (error) => {
-      setSnackbarMessage(`Error deleting catalog: ${error.message}`);
+      showSnackbar(`Error deleting catalog: ${error.message}`);
     },
   });
 
@@ -622,11 +611,13 @@ export const AdminPage: React.FC = () => {
     setDeleteUserTarget(user);
   };
 
-  const confirmResetPassword = () => {
+  const confirmResetPassword = async () => {
     /* v8 ignore start -- Reset password dialog only opens when a user is selected */
     if (!resetPasswordUser) return;
     /* v8 ignore stop */
-    resetPassword({ variables: { email: resetPasswordUser.email } });
+    const targetEmail = resetPasswordUser.email;
+    await resetPassword({ variables: { email: targetEmail } });
+    showSnackbar(`Password reset email sent to ${targetEmail}`);
   };
 
   // eslint-disable-next-line complexity -- Cascading delete requires sequential steps
@@ -672,7 +663,7 @@ export const AdminPage: React.FC = () => {
       // Success!
       setDeleteProgress(null);
       setDeleteUserTarget(null);
-      setSnackbarMessage(`User ${deleteUserTarget.email} deleted successfully`);
+      showSnackbar(`User ${deleteUserTarget.email} deleted successfully`);
       // Clear the searched users since one has been deleted
       setSearchedUsers([]);
       setHasSearched(false);
@@ -691,17 +682,11 @@ export const AdminPage: React.FC = () => {
     setDeleteProgress(null);
   };
 
-  /* v8 ignore start -- MUI Snackbar auto-hide/clickaway onClose cannot be simulated in jsdom */
-  const handleSnackbarClose = () => setSnackbarMessage(null);
-  /* v8 ignore stop */
-
   const deletingUser = deleteProgress !== null;
 
   return (
     <Box>
-      <Typography variant="h4" component="h1" gutterBottom>
-        Admin Console
-      </Typography>
+      <PageHeader title="Admin Console" />
 
       <Alert severity="warning" sx={{ mb: 3 }}>
         <strong>Administrator Access:</strong> You have elevated privileges. Use this console responsibly.
@@ -794,43 +779,37 @@ export const AdminPage: React.FC = () => {
         initialCatalog={editingCatalog}
       />
 
-      {/* Delete Catalog Confirmation Dialog */}
-      <Dialog open={!!deleteCatalogTarget} onClose={() => setDeleteCatalogTarget(null)}>
-        <DialogTitle>Delete Catalog</DialogTitle>
-        <DialogContent>
-          <DialogContentText>
-            Are you sure you want to delete <strong>{deleteCatalogTarget?.catalogName}</strong>?
-            <br />
-            <br />
-            This catalog will no longer be available for new campaigns, but existing campaigns using it will continue to
-            work.
-          </DialogContentText>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setDeleteCatalogTarget(null)}>Cancel</Button>
-          <Button onClick={confirmDeleteCatalog} color="error">
-            Delete
-          </Button>
-        </DialogActions>
-      </Dialog>
+      <ConfirmDialog
+        open={!!deleteCatalogTarget}
+        title="Delete Catalog"
+        onClose={() => setDeleteCatalogTarget(null)}
+        onConfirm={confirmDeleteCatalog}
+        confirmLabel="Delete"
+        confirmColor="error"
+      >
+        <Typography>
+          Are you sure you want to delete <strong>{deleteCatalogTarget?.catalogName}</strong>?
+          <br />
+          <br />
+          This catalog will no longer be available for new campaigns, but existing campaigns using it will continue to
+          work.
+        </Typography>
+      </ConfirmDialog>
 
-      {/* Reset Password Confirmation Dialog */}
-      <Dialog open={!!resetPasswordUser} onClose={() => setResetPasswordUser(null)}>
-        <DialogTitle>Reset Password</DialogTitle>
-        <DialogContent>
-          <DialogContentText>
-            Send a password reset email to <strong>{resetPasswordUser?.email}</strong>?
-          </DialogContentText>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setResetPasswordUser(null)} disabled={resettingPassword}>
-            Cancel
-          </Button>
-          <Button onClick={confirmResetPassword} color="primary" disabled={resettingPassword}>
-            {resettingPassword ? 'Sending...' : 'Send Reset Email'}
-          </Button>
-        </DialogActions>
-      </Dialog>
+      <ConfirmDialog
+        open={!!resetPasswordUser}
+        title="Reset Password"
+        onClose={() => setResetPasswordUser(null)}
+        onConfirm={confirmResetPassword}
+        confirmLabel="Send Reset Email"
+        confirmColor="primary"
+        isLoading={resettingPassword}
+        loadingLabel="Sending..."
+      >
+        <Typography>
+          Send a password reset email to <strong>{resetPasswordUser?.email}</strong>?
+        </Typography>
+      </ConfirmDialog>
 
       {/* Delete User Confirmation Dialog */}
       <Dialog open={!!deleteUserTarget} onClose={cancelDelete} maxWidth="sm" fullWidth>
@@ -894,14 +873,14 @@ export const AdminPage: React.FC = () => {
         </DialogActions>
       </Dialog>
 
-      {/* Snackbar for notifications */}
       <Snackbar
-        open={!!snackbarMessage}
+        key={snackbarKey}
+        open={snackbarOpen}
         autoHideDuration={6000}
-        onClose={handleSnackbarClose}
+        onClose={closeSnackbar}
         message={snackbarMessage}
         action={
-          <IconButton size="small" aria-label="close" color="inherit" onClick={() => setSnackbarMessage(null)}>
+          <IconButton size="small" aria-label="close" color="inherit" onClick={closeSnackbar}>
             <CloseIcon fontSize="small" />
           </IconButton>
         }

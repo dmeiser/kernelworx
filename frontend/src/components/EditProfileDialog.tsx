@@ -9,6 +9,7 @@
 import React, { useState, useEffect } from 'react';
 import { Dialog, DialogTitle, DialogContent, DialogActions, Button, TextField, Box } from '@mui/material';
 import { useFormState } from '../hooks/useFormState';
+import { brand } from '../lib/theme';
 
 interface EditProfileDialogProps {
   open: boolean;
@@ -67,7 +68,7 @@ export const EditProfileDialog: React.FC<EditProfileDialogProps> = ({
 
   return (
     <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth>
-      <DialogTitle>Edit Scout</DialogTitle>
+      <DialogTitle sx={{ color: brand.primary.link }}>Edit Scout</DialogTitle>
       <DialogContent>
         <Box pt={1} display="flex" flexDirection="column" gap={2}>
           <TextField

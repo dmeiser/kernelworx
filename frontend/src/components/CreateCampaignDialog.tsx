@@ -36,7 +36,7 @@ interface CreateCampaignDialogProps {
 
 const CatalogGroup: React.FC<{ title: string; catalogs: Catalog[] }> = ({ title, catalogs }) => (
   <>
-    <MenuItem key={`${title}-header`} disabled sx={{ fontWeight: 600, backgroundColor: '#f5f5f5', opacity: 1 }}>
+    <MenuItem key={`${title}-header`} disabled sx={{ fontWeight: 600, backgroundColor: 'grey.100', opacity: 1 }}>
       {title}
     </MenuItem>
     {catalogs.map((catalog) => (

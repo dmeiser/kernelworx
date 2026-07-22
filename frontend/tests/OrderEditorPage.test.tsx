@@ -28,7 +28,8 @@ vi.mock('react-router-dom', async () => {
 });
 
 // Import component AFTER mocks
-import { OrderEditorPage, LoadingSpinner, PermissionError, hasWriteInPermissions, getQRModalData, getDefaultPaymentMethodName, trimOrNull } from '../src/pages/OrderEditorPage';
+import { OrderEditorPage, PermissionError, hasWriteInPermissions, getQRModalData, getDefaultPaymentMethodName, trimOrNull } from '../src/pages/OrderEditorPage';
+import { LoadingState } from '../src/components/LoadingState';
 
 // Test constants - use raw IDs (without prefix) since they will be in URL
 // The component calls ensureProfileId/ensureCampaignId which adds the prefix
@@ -307,13 +308,8 @@ describe('OrderEditorPage - Order detail shows name only', () => {
 });
 
 describe('OrderEditorPage helper components', () => {
-  test('LoadingSpinner renders nothing when show is false', () => {
-    const { container } = render(<LoadingSpinner show={false} />);
-    expect(container.firstChild).toBeNull();
-  });
-
-  test('LoadingSpinner renders spinner when show is true', () => {
-    render(<LoadingSpinner show />);
+  test('LoadingState renders spinner', () => {
+    render(<LoadingState />);
     expect(screen.getByRole('progressbar')).toBeInTheDocument();
   });
 

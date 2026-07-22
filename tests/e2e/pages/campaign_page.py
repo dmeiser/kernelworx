@@ -2,7 +2,8 @@
 
 import urllib.parse
 
-from playwright.sync_api import Locator, Page, TimeoutError as PlaywrightTimeoutError, expect
+from playwright.sync_api import Locator, Page, expect
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from .base_page import BasePage
 

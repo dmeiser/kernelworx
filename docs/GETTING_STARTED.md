@@ -1,4 +1,4 @@
-# Getting Started - Popcorn Sales Manager
+# Getting Started - KernelWorx
 
 ## Prerequisites
 
@@ -229,14 +229,14 @@ See [`tests/e2e/README.md`](../tests/e2e/README.md) for full prerequisites, `.en
 
 ```bash
 # Format code
-uv run isort src/ tests/
+uv run ruff check --select I --fix src/ tests/
 uv run ruff format src/ tests/
 
 # Type checking
 uv run mypy src/
 
 # Run all checks
-uv run isort src/ tests/ && \
+uv run ruff check --select I --fix src/ tests/ && \
 uv run ruff format src/ tests/ && \
 uv run mypy src/ && \
 uv run pytest tests/unit --cov=src --cov-fail-under=100

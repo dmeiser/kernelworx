@@ -13,6 +13,7 @@ jobs:
   backend:
     name: backend
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     env:
       AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
       AWS_DEFAULT_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
@@ -71,12 +72,16 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version-file: ".node-version"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Spell check
+        working-directory: .
+        run: ./frontend/node_modules/.bin/cspell --config cspell.json .
 
       - name: ESLint
         run: npm run lint
@@ -99,6 +104,7 @@ jobs:
   infra:
     name: Infrastructure linting
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
     steps:

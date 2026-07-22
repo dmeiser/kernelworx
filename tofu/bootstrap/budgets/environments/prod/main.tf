@@ -1,4 +1,4 @@
-# Kernelworx Production - AWS Budgets & Cost Monitoring
+# KernelWorx Production - AWS Budgets & Cost Monitoring
 
 terraform {
   required_version = ">= 1.8"
@@ -39,8 +39,11 @@ data "aws_caller_identity" "current" {}
 module "budget" {
   source = "../../modules/budget"
 
+  # name_prefix uses lowercase `kernelworx` for AWS resource naming (programmatic
+  # identifiers, e.g. SNS topic names, IAM policies). Display names (budget_name
+  # below) use PascalCase `KernelWorx`. This casing split is intentional.
   name_prefix           = "kernelworx-prod"
-  budget_name           = "KernelworxProduction-Monthly"
+  budget_name           = "KernelWorxProduction-Monthly"
   limit_amount          = "10.0"
   account_id            = data.aws_caller_identity.current.account_id
   alert_emails          = ["dave@repeatersolutions.com"]

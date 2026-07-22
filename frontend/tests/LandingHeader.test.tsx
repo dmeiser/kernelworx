@@ -62,10 +62,10 @@ describe('LandingHeader', () => {
     renderWithAuth();
 
     await waitFor(() => {
-      expect(screen.getByAltText('Popcorn kernel')).toBeInTheDocument();
+      expect(screen.getByAltText('KernelWorx mark')).toBeInTheDocument();
     });
 
-    const logo = screen.getByAltText('Popcorn kernel');
+    const logo = screen.getByAltText('KernelWorx mark');
     await user.click(logo);
 
     await waitFor(() => {
@@ -93,10 +93,10 @@ describe('LandingHeader', () => {
     renderWithAuth(true);
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /go to dashboard/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /dashboard/i })).toBeInTheDocument();
     });
 
-    await user.click(screen.getByRole('button', { name: /go to dashboard/i }));
+    await user.click(screen.getByRole('button', { name: /dashboard/i }));
 
     await waitFor(() => {
       expect(mockNavigate).toHaveBeenCalledWith('/home');

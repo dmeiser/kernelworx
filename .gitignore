@@ -1,4 +1,4 @@
-# Popcorn Sales Manager .gitignore
+# KernelWorx .gitignore
 
 # ============================================================================
 # Python / Backend
@@ -399,3 +399,6 @@ benchmarks/
 # (Add any temporary files you're using during development)
 tofu/kics-results/
 .vscode/settings.json
+
+# Brand fonts are hosted (fonts.gstatic.com), not stored in git
+docs/branding/fonts/*.woff2

@@ -1,4 +1,4 @@
-# Data Schema - Popcorn Sales Manager
+# Data Schema - KernelWorx
 
 Visual schema documentation for the DynamoDB data model.
 

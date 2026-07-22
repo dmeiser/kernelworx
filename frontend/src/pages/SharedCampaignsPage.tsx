@@ -9,8 +9,6 @@ import {
   Box,
   Button,
   Typography,
-  Alert,
-  CircularProgress,
   Stack,
   Paper,
   Table,
@@ -25,7 +23,6 @@ import {
   Dialog,
   DialogTitle,
   DialogContent,
-  DialogContentText,
   DialogActions,
   Snackbar,
 } from '@mui/material';
@@ -41,6 +38,12 @@ import {
 } from '@mui/icons-material';
 import QRCode from 'qrcode';
 import { LIST_MY_SHARED_CAMPAIGNS, UPDATE_SHARED_CAMPAIGN, DELETE_SHARED_CAMPAIGN } from '../lib/graphql';
+import { useSnackbar } from '../hooks/useSnackbar';
+import { PageHeader } from '../components/PageHeader';
+import { LoadingState } from '../components/LoadingState';
+import { ErrorAlert } from '../components/ErrorAlert';
+import { EmptyState } from '../components/EmptyState';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import { EditSharedCampaignDialog } from '../components/EditSharedCampaignDialog';
 import type { SharedCampaign } from '../types';
 
@@ -122,63 +125,7 @@ const generateQRCode = async (
   }
 };
 
-// Loading state component
-const LoadingState: React.FC = () => (
-  <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
-    <CircularProgress />
-  </Box>
-);
 
-// Error state component
-const ErrorState: React.FC<{ message: string }> = ({ message }) => (
-  <Box p={3}>
-    <Alert severity="error">Failed to load shared campaigns: {message}</Alert>
-  </Box>
-);
-
-// Empty state component
-const EmptyState: React.FC<{ onCreateClick: () => void }> = ({ onCreateClick }) => (
-  <Paper sx={{ p: 4, textAlign: 'center' }}>
-    <Typography variant="h6" color="text.secondary" gutterBottom>
-      No Shared Campaigns Yet
-    </Typography>
-    <Typography color="text.secondary" sx={{ mb: 3 }}>
-      Create a shared campaign to generate shareable links that simplify campaign creation for your unit members.
-      members.
-    </Typography>
-    <Button variant="contained" startIcon={<AddIcon />} onClick={onCreateClick}>
-      Create Your First Shared Campaign
-    </Button>
-  </Paper>
-);
-
-// Page header component
-const PageHeader: React.FC<{
-  activeCount: number;
-  canCreate: boolean;
-  onCreateClick: () => void;
-}> = ({ activeCount, canCreate, onCreateClick }) => (
-  <Stack direction="row" justifyContent="space-between" alignItems="center" mb={3}>
-    <Box>
-      <Typography variant="h4" component="h1" gutterBottom>
-        My Shared Campaigns
-      </Typography>
-      <Typography variant="body2" color="text.secondary">
-        Create shareable links that let your unit members create campaigns quickly with preset information for your
-        unit. members. ({activeCount}/{MAX_SHARED_CAMPAIGNS} active)
-      </Typography>
-    </Box>
-    <Tooltip
-      title={!canCreate ? `You have reached the maximum of ${MAX_SHARED_CAMPAIGNS} active shared campaigns` : ''}
-    >
-      <span>
-        <Button variant="contained" startIcon={<AddIcon />} onClick={onCreateClick} disabled={!canCreate}>
-          Create Shared Campaign
-        </Button>
-      </span>
-    </Tooltip>
-  </Stack>
-);
 
 // Helper to check if list has items
 const hasSharedCampaigns = (campaigns: SharedCampaign[]): boolean => campaigns.length > 0;
@@ -287,7 +234,13 @@ const CampaignsList: React.FC<{
       </Table>
     </TableContainer>
   ) : (
-    <EmptyState onCreateClick={onCreateClick} />
+    <EmptyState
+      title="No Shared Campaigns Yet"
+      message="Create a shareable link so unit members can create campaigns quickly with preset information."
+      actionLabel="Create Your First Shared Campaign"
+      actionIcon={AddIcon}
+      onAction={onCreateClick}
+    />
   );
 
 // Edit dialog wrapper component
@@ -401,14 +354,12 @@ export const SharedCampaignsPage: React.FC = () => {
   const [qrDialogOpen, setQrDialogOpen] = useState(false);
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string | null>(null);
   const [qrSharedCampaign, setQrSharedCampaign] = useState<SharedCampaign | null>(null);
-  const [snackbarOpen, setSnackbarOpen] = useState(false);
-  const [snackbarMessage, setSnackbarMessage] = useState('');
+  const { message: snackbarMessage, open: snackbarOpen, key: snackbarKey, show: showSnackbar, close: closeSnackbar } = useSnackbar();
 
   /* v8 ignore start -- Dialog backdrop click and Snackbar auto-hide handlers cannot be simulated in jsdom */
   const handleEditDialogDismiss = () => setEditingSharedCampaign(null);
   const handleDeactivateDialogDismiss = () => setDeactivateDialogOpen(false);
   const handleQrDialogDismiss = () => setQrDialogOpen(false);
-  const handleSnackbarClose = () => setSnackbarOpen(false);
   /* v8 ignore stop */
 
   // Fetch user's campaign  shared campaigns
@@ -441,11 +392,6 @@ export const SharedCampaignsPage: React.FC = () => {
   const activeSharedCampaignCount = countActiveSharedCampaigns(sharedCampaigns);
   const canCreateMore = canCreateMoreSharedCampaigns(activeSharedCampaignCount);
   const handleCreateClick = () => navigate('/shared-campaigns/create');
-
-  const showSnackbar = (message: string) => {
-    setSnackbarMessage(message);
-    setSnackbarOpen(true);
-  };
 
   const getShortLink = (sharedCampaignCode: string) => {
     return `${BASE_URL}/c/${sharedCampaignCode}`;
@@ -501,11 +447,17 @@ export const SharedCampaignsPage: React.FC = () => {
       return;
     }
     /* v8 ignore stop */
-    await deleteSharedCampaign({
-      variables: {
-        sharedCampaignCode: sharedCampaignToDeactivate.sharedCampaignCode,
-      },
-    });
+    try {
+      await deleteSharedCampaign({
+        variables: {
+          sharedCampaignCode: sharedCampaignToDeactivate.sharedCampaignCode,
+        },
+      });
+    } catch (err) {
+      console.error('Error deactivating shared campaign:', err);
+      showSnackbar('Failed to deactivate shared campaign');
+      throw err;
+    }
   };
 
   /* v8 ignore start -- handleSaveEdit requires complex mutation mocking with variable matching */
@@ -533,12 +485,26 @@ export const SharedCampaignsPage: React.FC = () => {
   }
 
   if (error) {
-    return <ErrorState message={error.message} />;
+    return <ErrorAlert message={`Failed to load shared campaigns: ${error.message}`} />;
   }
 
   return (
     <Box>
-      <PageHeader activeCount={activeSharedCampaignCount} canCreate={canCreateMore} onCreateClick={handleCreateClick} />
+      <PageHeader
+        title="My Shared Campaigns"
+        subtitle={`Create shareable links that let your unit members create campaigns quickly with preset information. (${activeSharedCampaignCount}/${MAX_SHARED_CAMPAIGNS} active)`}
+        action={
+          <Tooltip
+            title={!canCreateMore ? `You have reached the maximum of ${MAX_SHARED_CAMPAIGNS} active shared campaigns` : ''}
+          >
+            <span>
+              <Button variant="contained" startIcon={<AddIcon />} onClick={handleCreateClick} disabled={!canCreateMore}>
+                Create Shared Campaign
+              </Button>
+            </span>
+          </Tooltip>
+        }
+      />
 
       <CampaignsList
         campaigns={sharedCampaigns}
@@ -553,22 +519,20 @@ export const SharedCampaignsPage: React.FC = () => {
       <EditDialogWrapper campaign={editingSharedCampaign} onClose={handleEditDialogDismiss} onSave={handleSaveEdit} />
 
       {/* Deactivate Confirmation Dialog */}
-      <Dialog open={deactivateDialogOpen} onClose={handleDeactivateDialogDismiss}>
-        <DialogTitle>Deactivate Campaign SharedCampaign?</DialogTitle>
-        <DialogContent>
-          <DialogContentText>
-            Are you sure you want to deactivate this campaign sharedCampaign? The link will no longer work for new
-            campaign creation, but existing campaigns created from this link will not be affected.
-          </DialogContentText>
-          <DeactivateDetails campaign={sharedCampaignToDeactivate} />
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setDeactivateDialogOpen(false)}>Cancel</Button>
-          <Button onClick={confirmDeactivate} color="error" variant="contained">
-            Deactivate
-          </Button>
-        </DialogActions>
-      </Dialog>
+      <ConfirmDialog
+        open={deactivateDialogOpen}
+        title="Deactivate Shared Campaign?"
+        onClose={handleDeactivateDialogDismiss}
+        onConfirm={confirmDeactivate}
+        confirmLabel="Deactivate"
+        confirmColor="error"
+      >
+        <Typography variant="body1" gutterBottom>
+          Are you sure you want to deactivate this shared campaign? The link will no longer work for new campaign
+          creation, but existing campaigns created from this link will not be affected.
+        </Typography>
+        <DeactivateDetails campaign={sharedCampaignToDeactivate} />
+      </ConfirmDialog>
 
       {/* QR Code Dialog */}
       <Dialog open={qrDialogOpen} onClose={handleQrDialogDismiss} maxWidth="sm" fullWidth>
@@ -590,11 +554,11 @@ export const SharedCampaignsPage: React.FC = () => {
         </DialogActions>
       </Dialog>
 
-      {/* Success Snackbar */}
       <Snackbar
+        key={snackbarKey}
         open={snackbarOpen}
         autoHideDuration={3000}
-        onClose={handleSnackbarClose}
+        onClose={closeSnackbar}
         message={snackbarMessage}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
       />

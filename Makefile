@@ -1,8 +1,8 @@
-.PHONY: help test lint format typecheck integration infra all clean test-e2e test-cleanup
+.PHONY: help test test-frontend test-e2e test-integration test-cleanup test-all lint lint-python lint-frontend lint-infra spellcheck typecheck format format-python format-frontend tflint kics infra all ci clean
 
 # Default target
 help:
-	@echo "Popcorn Sales Manager - Build & Test Commands"
+	@echo "KernelWorx - Build & Test Commands"
 	@echo ""
 	@echo "Testing:"
 	@echo "  make test              - Run Python unit tests (pytest)"
@@ -16,11 +16,12 @@ help:
 	@echo "  make lint              - Run all linters (Python + TypeScript)"
 	@echo "  make lint-python       - Run Python linters (ruff + mypy)"
 	@echo "  make lint-frontend     - Run TypeScript linters (eslint + tsc)"
+	@echo "  make spellcheck        - Run spell check across the repo"
 	@echo "  make typecheck         - Run type checkers (mypy + tsc)"
 	@echo ""
 	@echo "Formatting:"
 	@echo "  make format            - Format all code (Python + TypeScript)"
-	@echo "  make format-python     - Format Python code (isort + ruff)"
+	@echo "  make format-python     - Format Python code (ruff import sort + format)"
 	@echo "  make format-frontend   - Format TypeScript code (prettier)"
 	@echo ""
 	@echo "Infrastructure Scanning:"
@@ -30,7 +31,7 @@ help:
 	@echo ""
 	@echo "Comprehensive:"
 	@echo "  make all               - Run everything (format + lint + typecheck + test)"
-	@echo "  make ci                - Run CI pipeline (lint + typecheck + test)"
+	@echo "  make ci                - Run CI pipeline (spellcheck + lint + typecheck + test)"
 	@echo "  make clean             - Clean generated files"
 
 # Python unit tests
@@ -75,6 +76,11 @@ lint-frontend:
 	@echo "Running TypeScript type check..."
 	cd frontend && npm run typecheck
 
+# Spell check across the repository
+spellcheck:
+	@echo "Running cspell..."
+	frontend/node_modules/.bin/cspell --config cspell.json .
+
 # All linting
 lint: lint-python lint-frontend
 
@@ -88,7 +94,7 @@ typecheck:
 # Format Python code
 format-python:
 	@echo "Formatting Python code..."
-	uv run isort src/ tests/
+	uv run ruff check --select I --fix src/ tests/
 	uv run ruff format src/ tests/
 
 # Format TypeScript code
@@ -127,7 +133,7 @@ lint-infra: tflint kics
 all: format lint typecheck test test-frontend
 
 # CI pipeline (no formatting, just validation)
-ci: lint typecheck test test-frontend test-integration
+ci: lint typecheck spellcheck test test-frontend test-integration
 
 # Clean generated files
 clean:

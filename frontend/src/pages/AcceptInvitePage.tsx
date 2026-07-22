@@ -104,7 +104,29 @@ export const AcceptInvitePage: React.FC = () => {
         <CardContent>
           <Stack spacing={3}>
             <Box>
-              <Typography variant="h4" component="h1" gutterBottom>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5, mb: 2 }}>
+                <Box component="img" src="/logo.svg" alt="KernelWorx mark" sx={{ width: 32, height: 32 }} />
+                <Typography
+                  variant="h5"
+                  sx={{
+                    fontFamily: '"Bricolage Grotesque", "Atkinson Hyperlegible", sans-serif',
+                    fontWeight: 700,
+                    lineHeight: 1,
+                  }}
+                >
+                  <Box component="span" sx={{ color: '#333333' }}>Kernel</Box>
+                  <Box component="span" sx={{ color: 'primary.main' }}>Worx</Box>
+                </Typography>
+              </Box>
+              <Typography
+                variant="h4"
+                component="h1"
+                gutterBottom
+                sx={{
+                  fontFamily: '"Bricolage Grotesque", "Atkinson Hyperlegible", sans-serif',
+                  fontWeight: 700,
+                }}
+              >
                 Accept Scout Profile Invite
               </Typography>
               <Typography variant="body2" color="text.secondary">

@@ -1,0 +1,61 @@
+{
+  "$schema": "https://raw.githubusercontent.com/streetsidesoftware/cspell/main/cspell.schema.json",
+  "version": "0.2",
+  "language": "en",
+  "name": "KernelWorx",
+  "description": "KernelWorx project dictionary",
+  "dictionaryDefinitions": [
+    {
+      "name": "kernelworx-words",
+      "path": ".cspell/kernelworx-words.txt",
+      "addWords": true
+    }
+  ],
+  "dictionaries": ["kernelworx-words"],
+  "flagWords": ["Kernelworx"],
+  "_comment": "Kernelworx (mixed case) is deprecated and flagged; kernelworx (lowercase) is the AWS resource-name token; KernelWorx (PascalCase) is the brand name",
+  "ignorePaths": [
+    "cspell.json",
+    "**/node_modules/**",
+    "frontend/dist/**",
+    "frontend/coverage/**",
+    "frontend/playwright-report/**",
+    "frontend/test-results/**",
+    "frontend/.cert/**",
+    ".venv/**",
+    ".git/**",
+    ".build/**",
+    "**/__pycache__/**",
+    ".pytest_cache/**",
+    ".mypy_cache/**",
+    ".ruff_cache/**",
+    "htmlcov/**",
+    "package-lock.json",
+    "frontend/package-lock.json",
+    "uv.lock",
+    ".env",
+    ".env.*",
+    "frontend/.env",
+    "frontend/.env.*",
+    "tofu/**/.terraform/**",
+    "tofu/**/terraform.tfstate*",
+    "tofu/kics-results/**",
+    "coverage/**",
+    "docs/branding/system/**",
+    "docs/branding/**/*.html",
+    "docs/branding/assets/**"
+  ],
+  "ignoreRegExpList": [
+    "https?://[^\\s]+",
+    "[a-f0-9]{32,}",
+    "CATALOG#[A-Za-z0-9-]+",
+    "PROFILE#[A-Za-z0-9-]+",
+    "CAMPAIGN#[A-Za-z0-9-]+",
+    "ACCOUNT#[A-Za-z0-9-]+",
+    "PROD#[A-Za-z0-9-]+",
+    "CAT~[A-Za-z0-9-]+",
+    "SHARED-[A-Za-z0-9]+",
+    "[A-Za-z0-9_-]+@[A-Za-z0-9.-]+",
+    "\\bZ[0-9A-Z]{10,}\\b"
+  ]
+}

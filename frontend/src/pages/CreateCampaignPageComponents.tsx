@@ -2,8 +2,9 @@
  * Sub-components for CreateCampaignPage to reduce complexity
  */
 import React from 'react';
-import { Box, Alert, AlertTitle, Button, CircularProgress, Card, CardContent, Stack, Typography } from '@mui/material';
+import { Box, Alert, AlertTitle, Button, Card, CardContent, Stack, Typography } from '@mui/material';
 import { Campaign as CampaignIcon } from '@mui/icons-material';
+import { LoadingState as SharedLoadingState } from '../components/LoadingState';
 import type { SharedCampaign } from '../types/entities';
 
 interface ErrorProps {
@@ -11,11 +12,7 @@ interface ErrorProps {
   onReturnClick: () => void;
 }
 
-export const LoadingState: React.FC = () => (
-  <Box display="flex" justifyContent="center" alignItems="center" minHeight="50vh">
-    <CircularProgress />
-  </Box>
-);
+export const LoadingState: React.FC = () => <SharedLoadingState minHeight="50vh" />;
 
 export const CampaignNotFoundError: React.FC<ErrorProps> = ({ onReturnClick }) => (
   <Box maxWidth="md" mx="auto" p={3}>
