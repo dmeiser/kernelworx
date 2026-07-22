@@ -452,7 +452,7 @@ export const AdminPage: React.FC = () => {
   // Dialog states
   const [resetPasswordUser, setResetPasswordUser] = useState<AdminUser | null>(null);
   const [deleteUserTarget, setDeleteUserTarget] = useState<AdminUser | null>(null);
-  const { message: snackbarMessage, open: snackbarOpen, show: showSnackbar, close: closeSnackbar } = useSnackbar();
+  const { message: snackbarMessage, open: snackbarOpen, key: snackbarKey, show: showSnackbar, close: closeSnackbar } = useSnackbar();
 
   // Catalog editor state
   const [catalogEditorOpen, setCatalogEditorOpen] = useState(false);
@@ -880,6 +880,7 @@ export const AdminPage: React.FC = () => {
       </Dialog>
 
       <Snackbar
+        key={snackbarKey}
         open={snackbarOpen}
         autoHideDuration={6000}
         onClose={closeSnackbar}

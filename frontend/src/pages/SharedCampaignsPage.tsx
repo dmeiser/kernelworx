@@ -354,7 +354,7 @@ export const SharedCampaignsPage: React.FC = () => {
   const [qrDialogOpen, setQrDialogOpen] = useState(false);
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string | null>(null);
   const [qrSharedCampaign, setQrSharedCampaign] = useState<SharedCampaign | null>(null);
-  const { message: snackbarMessage, open: snackbarOpen, show: showSnackbar, close: closeSnackbar } = useSnackbar();
+  const { message: snackbarMessage, open: snackbarOpen, key: snackbarKey, show: showSnackbar, close: closeSnackbar } = useSnackbar();
 
   /* v8 ignore start -- Dialog backdrop click and Snackbar auto-hide handlers cannot be simulated in jsdom */
   const handleEditDialogDismiss = () => setEditingSharedCampaign(null);
@@ -555,6 +555,7 @@ export const SharedCampaignsPage: React.FC = () => {
       </Dialog>
 
       <Snackbar
+        key={snackbarKey}
         open={snackbarOpen}
         autoHideDuration={3000}
         onClose={closeSnackbar}

@@ -95,7 +95,7 @@ export const PageHeader: React.FC<PageHeaderProps> = ({
       mb: { xs: 3, sm: 4 },
       borderLeft: `4px solid ${brand.primary[6]}`,
       borderRadius: brand.radius.lg,
-      boxShadow: `0 1px 2px ${brand.fill.quaternary}`,
+      boxShadow: 1,
     }}
   >
     <CardContent sx={{ p: { xs: 2, sm: 3 }, '&:last-child': { pb: { xs: 2, sm: 3 } } }}>

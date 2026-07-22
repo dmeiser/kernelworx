@@ -97,6 +97,7 @@ def _cleanup_unconfirmed_smoke_users(user_pool_id: str) -> None:
     (e.g., AWS IAM Identity Center / SSO plugins) are picked up through the
     standard CLI provider chain.
     """
+    region = os.getenv("TEST_REGION")
     next_token: str | None = None
     while True:
         cmd = [
@@ -109,9 +110,14 @@ def _cleanup_unconfirmed_smoke_users(user_pool_id: str) -> None:
             'email ^= "smoke+"',
             "--limit",
             "60",
+            "--output",
+            "json",
+            "--no-cli-pager",
         ]
+        if region:
+            cmd.extend(["--region", region])
         if next_token:
-            cmd.extend(["--next-token", next_token])
+            cmd.extend(["--starting-token", next_token])
         result = subprocess.run(cmd, check=False, capture_output=True, text=True)
         if result.returncode != 0:
             raise RuntimeError(f"aws list-users failed: {result.stderr}")
@@ -128,6 +134,8 @@ def _cleanup_unconfirmed_smoke_users(user_pool_id: str) -> None:
                     "--username",
                     user["Username"],
                 ]
+                if region:
+                    delete_cmd.extend(["--region", region])
                 del_result = subprocess.run(
                     delete_cmd, check=False, capture_output=True, text=True
                 )
@@ -136,7 +144,7 @@ def _cleanup_unconfirmed_smoke_users(user_pool_id: str) -> None:
                         f"aws admin-delete-user failed: {del_result.stderr}"
                     )
 
-        next_token = page.get("PaginationToken")
+        next_token = page.get("NextToken")
         if not next_token:
             break
 

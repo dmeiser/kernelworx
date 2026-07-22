@@ -5,10 +5,11 @@
  * and a copyright line.
  */
 
+import type { FC } from 'react';
 import { Box, Container, Grid, Typography, Link } from '@mui/material';
 import { Link as RouterLink } from 'react-router-dom';
 
-export const LandingFooter: React.FC = () => (
+export const LandingFooter: FC = () => (
   <Box
     component="footer"
     sx={{

@@ -49,4 +49,4 @@ def test_logout(owner_page: Page) -> None:
     and clicks the *Sign out* button in the AppBar.  The test then confirms the final URL.
     """
     logout(owner_page)
-    assert "/login" in owner_page.url, "Browser must redirect to /login after the owner clicks 'Sign Out'"
+    assert "/login" in owner_page.url, "Browser must redirect to /login after the owner clicks 'Sign out'"

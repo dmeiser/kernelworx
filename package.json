@@ -1,6 +1,6 @@
 {
   "scripts": {
-    "spellcheck": "frontend/node_modules/.bin/cspell '**' --config cspell.json"
+    "spellcheck": "npm --prefix frontend run spellcheck"
   },
   "devDependencies": {
     "@aws-sdk/client-appsync": "^3.955.0",
