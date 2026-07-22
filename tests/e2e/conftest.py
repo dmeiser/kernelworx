@@ -108,7 +108,7 @@ def _cleanup_unconfirmed_smoke_users(user_pool_id: str) -> None:
             user_pool_id,
             "--filter",
             'email ^= "smoke+"',
-            "--limit",
+            "--max-items",
             "60",
             "--output",
             "json",
@@ -144,7 +144,7 @@ def _cleanup_unconfirmed_smoke_users(user_pool_id: str) -> None:
                         f"aws admin-delete-user failed: {del_result.stderr}"
                     )
 
-        next_token = page.get("NextToken")
+        next_token = page.get("PaginationToken")
         if not next_token:
             break
 
