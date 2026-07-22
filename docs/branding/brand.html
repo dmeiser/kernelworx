@@ -333,8 +333,8 @@
     catch (e) { return {}; }
   }
   function esc(s) {
-    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
-      return { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c];
+    return String(s == null ? '' : s).replace(/[<>&"']/g, function (c) {
+      return { '<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;' }[c];
     });
   }
   function arr(v) { return Array.isArray(v) ? v : []; }
