@@ -151,8 +151,13 @@ def _cleanup_unconfirmed_smoke_users(user_pool_id: str) -> None:
                     delete_cmd, check=False, capture_output=True, text=True, timeout=120
                 )
                 if del_result.returncode != 0:
+                    stderr = del_result.stderr
+                    # An already-deleted user between list and delete is benign in
+                    # concurrent runs; report every other failure at the end.
+                    if stderr and "UserNotFoundException" in stderr:
+                        continue
                     failures.append(
-                        f"admin-delete-user failed for {user['Username']}: {del_result.stderr}"
+                        f"admin-delete-user failed for {user['Username']}: {stderr}"
                     )
                 # Small delay to avoid Cognito API throttling on rapid deletes.
                 time.sleep(0.2)
