@@ -251,7 +251,7 @@ export const theme = createTheme({
       letterSpacing: '0.14em',
       lineHeight: 1,
       textTransform: 'uppercase',
-      color: brand.primary[6],
+      color: brand.primary.link,
     },
   },
   shape: {
@@ -302,17 +302,17 @@ export const theme = createTheme({
           fontSize: '1.125rem',
         },
         containedPrimary: {
-          backgroundColor: brand.primary[6],
+          backgroundColor: brand.primary[7],
           color: '#ffffff',
-          border: `1px solid ${brand.primary[6]}`,
+          border: `1px solid ${brand.primary[7]}`,
           boxShadow: `0 2px 0 ${brand.primary[1]}`,
           '&:hover': {
-            backgroundColor: brand.primary[5],
-            borderColor: brand.primary[5],
-          },
-          '&:active': {
             backgroundColor: brand.primary[7],
             borderColor: brand.primary[7],
+          },
+          '&:active': {
+            backgroundColor: brand.primary[9],
+            borderColor: brand.primary[9],
           },
           '&:disabled': {
             backgroundColor: brand.fill.main,
@@ -322,7 +322,18 @@ export const theme = createTheme({
           },
         },
         containedSecondary: {
+          backgroundColor: brand.error.text,
+          color: '#ffffff',
+          border: `1px solid ${brand.error.text}`,
           boxShadow: `0 2px 0 ${brand.error.bg}`,
+          '&:hover': {
+            backgroundColor: brand.error.text,
+            borderColor: brand.error.text,
+          },
+          '&:active': {
+            backgroundColor: brand.error.active,
+            borderColor: brand.error.active,
+          },
           '&:disabled': {
             backgroundColor: brand.fill.main,
             color: brand.text.tertiary,
@@ -332,11 +343,11 @@ export const theme = createTheme({
         },
         outlinedPrimary: {
           backgroundColor: brand.background.container,
-          color: brand.primary[6],
-          border: `1px solid ${brand.primary[6]}`,
+          color: brand.primary.link,
+          border: `1px solid ${brand.primary.link}`,
           '&:hover': {
             backgroundColor: brand.primary[1],
-            borderColor: brand.primary[6],
+            borderColor: brand.primary.link,
           },
           '&:active': {
             backgroundColor: brand.primary[2],
@@ -448,7 +459,7 @@ export const theme = createTheme({
           color: brand.text.secondary,
           fontSize: '0.8125rem',
           '&.Mui-focused': {
-            color: brand.primary[6],
+            color: brand.primary.link,
           },
           '&.Mui-error': {
             color: brand.error.main,
@@ -505,7 +516,7 @@ export const theme = createTheme({
           backdropFilter: 'blur(12px)',
         },
         colorPrimary: {
-          backgroundColor: brand.primary[6],
+          backgroundColor: brand.primary[7],
           color: '#ffffff',
           boxShadow: 'none',
           backdropFilter: 'none',
@@ -602,9 +613,9 @@ export const theme = createTheme({
           fontSize: '0.75rem',
         },
         filledPrimary: {
-          backgroundColor: brand.primary[6],
+          backgroundColor: brand.primary[7],
           color: '#ffffff',
-          border: `1px solid ${brand.primary[6]}`,
+          border: `1px solid ${brand.primary[7]}`,
         },
       },
     },

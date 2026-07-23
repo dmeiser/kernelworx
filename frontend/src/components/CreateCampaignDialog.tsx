@@ -339,7 +339,9 @@ export const CreateCampaignDialog: React.FC<CreateCampaignDialogProps> = ({ open
     const trimmedName = values.campaignName.trim();
     // This guard is defensive: the Create button is disabled while the form is invalid,
     // so this branch cannot be exercised through the UI in jsdom tests.
+    /* v8 ignore start */
     if (!trimmedName || !values.catalogId) return;
+    /* v8 ignore stop */
 
     await withLoading(() => submitCampaign(trimmedName, values.startDate || undefined, values.endDate || undefined));
   };

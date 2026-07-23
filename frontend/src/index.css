@@ -9,17 +9,18 @@
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 
-  /* KernelWorx brand tokens (public surfaces) */
-  --kw-color-primary: #1976d2;
-  --kw-color-primary-dark: #1565c0;
-  --kw-color-primary-light: #42a5f5;
-  --kw-color-text: #333333;
-  --kw-color-text-secondary: #666666;
+  /* KernelWorx brand tokens (public surfaces) — WCAG 2.1 AAA set, keep in sync with src/lib/theme.ts */
+  --kw-color-primary: #1976d2; /* brand mark / non-text accents only (4.6:1) */
+  --kw-color-primary-dark: #0c57ab; /* filled actions with white text (AAA) */
+  --kw-color-primary-light: #3e94de;
+  --kw-color-link: #005a9c; /* text links and text-level accents (AAA) */
+  --kw-color-text: #4b4b4b;
+  --kw-color-text-secondary: #595959;
   --kw-color-surface: #ffffff;
-  --kw-color-background: #f5f5f5;
+  --kw-color-background: #f7f7f7;
   --kw-color-border: #e0e0e0;
-  --kw-color-accent-bg: #e3f2fd;
-  --kw-color-accent-bg-soft: #bbdefb;
+  --kw-color-accent-bg: #ebf8ff;
+  --kw-color-accent-bg-soft: #c2e9ff;
   --kw-font-display: 'Bricolage Grotesque', 'Atkinson Hyperlegible', sans-serif;
   --kw-font-body: 'Atkinson Hyperlegible', 'Lexend', 'Inter', sans-serif;
 }

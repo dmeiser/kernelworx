@@ -280,4 +280,49 @@ describe('CampaignSettingsPage (core flows)', () => {
     // Should navigate back after deletion
     await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith(`/scouts/${mockCampaign.profileId}/campaigns`));
   });
+
+  it('shows error alert when saving campaign fails', async () => {
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const dbCampaignId = `CAMPAIGN#${mockCampaign.campaignId}`;
+    const dbCatalogId = `CATALOG#${mockCampaign.catalogId}`;
+    const mocks = [
+      ...createMocks(),
+      {
+        request: {
+          query: UPDATE_CAMPAIGN,
+          variables: {
+            input: {
+              campaignId: dbCampaignId,
+              campaignName: mockCampaign.campaignName,
+              catalogId: dbCatalogId,
+              isActive: false,
+              startDate: '2025-09-01T00:00:00.000Z',
+              endDate: '2025-12-01T00:00:00.000Z',
+            },
+          },
+        },
+        error: new Error('Update failed'),
+      },
+    ];
+    renderWithMocks(mocks);
+
+    await waitFor(() => expect(screen.getByLabelText('Campaign Name')).toBeTruthy());
+
+    // Toggle active switch to trigger a non-unit-related save
+    const activeSwitch = screen.getByLabelText('Campaign is Active');
+    fireEvent.click(activeSwitch);
+
+    const save = screen.getByRole('button', { name: /save changes/i });
+    fireEvent.click(save);
+
+    await waitFor(() => expect(screen.getByText('Failed to save campaign changes. Please try again.')).toBeTruthy());
+
+    // Close the error alert to cover the onClose handler
+    const alertClose = screen.getByRole('button', { name: /close/i });
+    fireEvent.click(alertClose);
+
+    await waitFor(() => expect(screen.queryByText('Failed to save campaign changes. Please try again.')).not.toBeTruthy());
+
+    consoleSpy.mockRestore();
+  });
 });

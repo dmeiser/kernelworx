@@ -337,7 +337,7 @@ const AppLayoutView: React.FC<{
                 whiteSpace: 'nowrap',
               }}
             >
-              <Box component="span" sx={{ color: '#333333' }}>
+              <Box component="span" sx={{ color: 'text.primary' }}>
                 Kernel
               </Box>
               <Box component="span" sx={{ color: 'primary.main' }}>

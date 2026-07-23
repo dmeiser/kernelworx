@@ -543,7 +543,7 @@ export const LoginPage: React.FC = () => {
                   lineHeight: 1,
                 }}
               >
-                <Box component="span" sx={{ color: '#333333' }}>Kernel</Box>
+                <Box component="span" sx={{ color: 'text.primary' }}>Kernel</Box>
                 <Box component="span" sx={{ color: 'primary.main' }}>Worx</Box>
               </Typography>
             </Box>
