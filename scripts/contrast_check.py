@@ -85,8 +85,8 @@ COLORS = [
     Color("bg-container", "#ffffff"),
     Color("bg-paper", "#ffffff"),
     Color("info-light", "#c2e9ff"),
-    Color("devfooter-bg", "#4d4d4d"),  # rgba(0,0,0,0.7) over white
-    Color("devfooter-text", "#ffffff"),  # opaque white over devfooter-bg
+    Color("DevFooter-bg", "#4d4d4d"),  # rgba(0,0,0,0.7) over white
+    Color("DevFooter-text", "#ffffff"),  # opaque white over DevFooter-bg
     Color("border-main", "#e0e0e0"),
     Color("border-secondary", "#f3f3f3"),
     Color("grey-50", "#fbfbfb"),
@@ -144,7 +144,7 @@ TEXT_USES = [
     ("error-text", "bg-container", "normal", "sidebar admin nav item default"),
     ("primary-link", "white", "normal", "Dialog titles (Edit/Create Scout)"),
     ("text-secondary", "bg-paper", "normal", "LandingHeader nav links"),
-    ("devfooter-text", "devfooter-bg", "normal", "DevFooter over page (assumes white behind)"),
+    ("DevFooter-text", "DevFooter-bg", "normal", "DevFooter over page (assumes white behind)"),
 ]
 
 
