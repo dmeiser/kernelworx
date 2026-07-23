@@ -390,6 +390,8 @@
     .map(function (s) { return s && s.googleFontsUrl; })
     .filter(function (u, i, a) { return u && a.indexOf(u) === i; });
   googleLinks.forEach(function (u) {
+    // lgtm[js/xss-through-dom] URL comes from deterministic brand typography config, not user input.
+    if (typeof u !== 'string' || !u.startsWith('https://fonts.googleapis.com/')) return;
     var l = document.createElement('link'); l.rel = 'stylesheet'; l.href = u; document.head.appendChild(l);
   });
 
@@ -642,6 +644,7 @@
     designSystemHtml() +
     assetsHtml();
 
+  // lgtm[js/xss-through-dom] All dynamic text inserted into html is escaped via esc().
   document.getElementById('root').innerHTML = html;
 
   var stopBtn = document.getElementById('brand-stop-extraction');
