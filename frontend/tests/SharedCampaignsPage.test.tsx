@@ -443,6 +443,39 @@ describe('SharedCampaignsPage', () => {
         expect(screen.getByText('Shared Campaign deactivated')).toBeInTheDocument();
       }, { timeout: 5000 });
     });
+
+    it('shows error snackbar when deactivate fails', async () => {
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const deleteErrorMock = {
+        request: {
+          query: DELETE_SHARED_CAMPAIGN,
+          variables: { sharedCampaignCode: 'PACK123F25' },
+        },
+        error: new Error('Deactivate failed'),
+      };
+
+      renderWithProviders([createListMock(), deleteErrorMock]);
+
+      await waitFor(() => {
+        expect(screen.getByText('PACK123F25')).toBeInTheDocument();
+      });
+
+      const deactivateButtons = screen.getAllByLabelText('Deactivate');
+      fireEvent.click(deactivateButtons[0]);
+
+      await waitFor(() => {
+        expect(screen.getByText('Deactivate Shared Campaign?')).toBeInTheDocument();
+      });
+
+      const deactivateButton = screen.getByRole('button', { name: 'Deactivate' });
+      fireEvent.click(deactivateButton);
+
+      await waitFor(() => {
+        expect(screen.getByText('Failed to deactivate shared campaign')).toBeInTheDocument();
+      }, { timeout: 5000 });
+
+      consoleSpy.mockRestore();
+    });
   });
 
   describe('Edit dialog', () => {
