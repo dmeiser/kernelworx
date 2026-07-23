@@ -1,0 +1,6 @@
+name: "KernelWorx CodeQL config"
+paths-ignore:
+  - 'docs/**'
+  - 'frontend/dist/**'
+  - 'htmlcov/**'
+  - 'tofu/**'
