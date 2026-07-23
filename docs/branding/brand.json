@@ -4,6 +4,8 @@
   "description": "KernelWorx helps parents of Scouting America Scouts manage their Scout's popcorn sales. Volunteer-run, open-source (MIT). Live at https://kernelworx.app/",
   "sourceUrl": "designmd://kernelworx-is-a-website",
   "seed": {
+    "colorLink": "#005a9c",
+    "colorTextBase": "#4b4b4b",
     "colorSuccess": "#388e3c",
     "colorWarning": "#f57c00",
     "colorError": "#dc004e",
@@ -14,7 +16,7 @@
     "alternates": [
       "assets/kernelworx-lockup.svg"
     ],
-    "notes": "assets/kernelworx-icon.svg is the source of truth for iconography: the locked popcorn-bucket mark (white heap over a tapered carton with five hairline stripes) in a #1976d2 rounded square (rx 12 on a 64 grid). Wordmark is 'KernelWorx' set in Bricolage Grotesque 700 — 'Kernel' in #4b4b4b, 'worx' in #1976d2 (assets/kernelworx-lockup.svg); on blue or dark backgrounds use the reversed single-color (white) version instead, since two-tone fails contrast there. Legacy popcorn assets (popcorn-logo.svg, popcorn-banner.png, logos/popcorn-logo.png, favicon.svg) were removed."
+    "notes": "assets/kernelworx-icon.svg is the source of truth for iconography: the locked popcorn-bucket mark (white heap over a tapered carton with five hairline stripes) in a #1976d2 rounded square (rx 12 on a 64 grid). Wordmark is 'KernelWorx' set in Bricolage Grotesque 700 — 'Kernel' in #4b4b4b, 'Worx' in #1976d2 (assets/kernelworx-lockup.svg); on blue or dark backgrounds use the reversed single-color (white) version instead, since two-tone fails contrast there. Legacy popcorn assets (popcorn-logo.svg, popcorn-banner.png, logos/popcorn-logo.png, favicon.svg) were removed."
   },
   "colors": [
     {
@@ -29,14 +31,14 @@
       "hex": "#4b4b4b",
       "oklch": "",
       "name": "Text Primary",
-      "usage": "body text and headings"
+      "usage": "body text and headings (AAA on white and canvas)"
     },
     {
       "role": "accent",
       "hex": "#1976d2",
       "oklch": "",
       "name": "Primary Blue",
-      "usage": "primary actions, links, brand emphasis (dark #0c57ab, light #3e94de)"
+      "usage": "brand mark and non-text emphasis only (4.6:1 — not for text). Text links #005a9c (AAA); filled actions with white text #0c57ab (AAA); darkest #00265e, light #3e94de"
     },
     {
       "role": "surface",
@@ -47,10 +49,10 @@
     },
     {
       "role": "muted",
-      "hex": "#7a7a7a",
+      "hex": "#595959",
       "oklch": "",
       "name": "Text Secondary",
-      "usage": "secondary text and metadata"
+      "usage": "secondary text and metadata (7:1 on white — AAA)"
     },
     {
       "role": "border",
@@ -94,7 +96,7 @@
       "clear",
       "accessible"
     ],
-    "tone": "Popcorn Sales Made Easy — warm and plain-spoken for busy parents; accessibility-first (WCAG 2.1 AAA aspirational).",
+    "tone": "Popcorn Sales Made Easy — warm and plain-spoken for busy parents; accessibility-first (WCAG 2.1 AAA).",
     "messagingPillars": [
       "Popcorn Sales Made Easy",
       "Volunteer-run Scouting America fundraising tool"
@@ -110,7 +112,7 @@
       "popcorn",
       "Scouting fundraising"
     ],
-    "treatment": "Popcorn-bucket mark (white heap over a tapered carton with five hairline stripes) in a #1976d2 rounded square; Bricolage Grotesque 700 wordmark, 'Kernel' in #4b4b4b + 'worx' in #1976d2.",
+    "treatment": "Popcorn-bucket mark (white heap over a tapered carton with five hairline stripes) in a #1976d2 rounded square; Bricolage Grotesque 700 wordmark, 'Kernel' in #4b4b4b + 'Worx' in #1976d2.",
     "avoid": [],
     "samples": []
   },
@@ -120,8 +122,9 @@
     "spacing": "8px baseline grid",
     "postureRules": [
       "Component kit should cover: Button, Card, Form, Navigation, Dialog, Table.",
-      "Buttons: filled primary #1976d2 with white text, outlined secondary (#1976d2 border and text on white), danger #dc004e; 4px radius.",
+      "Buttons: filled primary #0c57ab with white text (AAA 7:1), outlined secondary (#005a9c border and text on white), filled danger #9e0036 with white text; 4px radius. #1976d2 is reserved for the brand mark and non-text accents — never for text or filled text-bearing controls.",
       "MUI patterns: white paper cards on a #f7f7f7 canvas, contained elevation, left-border callouts in #ebf8ff with a #1976d2 accent bar.",
+      "Accessibility: WCAG 2.1 AAA is the bar. Text on light surfaces uses #4b4b4b (primary) or #595959 (secondary); text links #005a9c; status text on tints — error #9e0036 on #ffe6ea, success #15431c on #c4cfc2, warning #8a4200 on #fff7e6; the saturated status mains (#dc004e, #388e3c, #f57c00) are for icons and borders only, never text.",
       "Bricolage Grotesque for H1/app title/hero display headings and the wordmark; Atkinson Hyperlegible everywhere else (body, UI, numbers, small labels).",
       "Iconography: the locked popcorn-bucket mark (assets/kernelworx-icon.svg) is the source of truth for app icons and favicons; it replaces the legacy standalone kernel mark."
     ]

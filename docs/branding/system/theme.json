@@ -5,7 +5,7 @@
     "colorWarning": "#f57c00",
     "colorError": "#dc004e",
     "colorInfo": "#1976d2",
-    "colorTextBase": "#333333",
+    "colorTextBase": "#4b4b4b",
     "colorBgBase": "#ffffff",
     "fontFamily": "'Atkinson Hyperlegible', Lexend, Inter, sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji'",
     "fontFamilyCode": "'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace",
