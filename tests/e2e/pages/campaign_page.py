@@ -119,9 +119,18 @@ class CampaignPage(BasePage):
         expect(profile_listbox).to_be_visible(timeout=5_000)
 
         if profile_id:
-            option = profile_listbox.locator(f'[role="option"][data-value="{profile_id}"]')
-            if option.count() == 0:
-                option = profile_listbox.locator('[role="option"]:not([aria-disabled="true"])').first
+            # The URL exposes the raw UUID, but the dropdown uses the full
+            # PROFILE#{uuid} format for option data-values.
+            candidate_ids = {profile_id}
+            if not profile_id.startswith("PROFILE#"):
+                candidate_ids.add(f"PROFILE#{profile_id}")
+
+            option = profile_listbox.locator('[role="option"]:not([aria-disabled="true"])').first
+            for candidate in candidate_ids:
+                candidate_option = profile_listbox.locator(f'[role="option"][data-value="{candidate}"]')
+                if candidate_option.count() > 0:
+                    option = candidate_option
+                    break
         else:
             option = profile_listbox.locator('[role="option"]:not([aria-disabled="true"])').first
 
