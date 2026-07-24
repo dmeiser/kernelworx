@@ -133,7 +133,7 @@ jobs:
           TF_VAR_google_client_secret: ${{ secrets.TF_VAR_GOOGLE_CLIENT_SECRET }}
           TF_IN_AUTOMATION: "true"
         working-directory: tofu/application/environments/prod
-        run: tofu apply tfplan
+        run: tofu apply -auto-approve tfplan
 
       - name: Extract OpenTofu outputs for frontend
         id: tofu_outputs

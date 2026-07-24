@@ -164,7 +164,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
     if not email:
         logger.warning("No email in federated sign-up, cannot check for duplicates")
-        return event
+        return _auto_confirm_event(event, verify_email=False)
 
     if not _is_email_verified(user_attributes):
         logger.warning("Federated provider did not verify email, skipping auto-link")

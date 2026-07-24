@@ -117,13 +117,14 @@ class TestFederatedSignupNoExistingUser:
         federated_signup_event: dict[str, Any],
         lambda_context: MagicMock,
     ) -> None:
-        """Federated sign-up without email should pass through"""
+        """Federated sign-up without email should still be auto-confirmed."""
         del federated_signup_event["request"]["userAttributes"]["email"]
 
         result = lambda_handler(federated_signup_event, lambda_context)
 
-        # Should return event (can't check for duplicates without email)
-        assert result == federated_signup_event
+        # Can't check for duplicates without email, but don't block the sign-up.
+        assert result["response"]["autoConfirmUser"] is True
+        assert result["response"]["autoVerifyEmail"] is False
 
 
 class TestFederatedSignupExistingUser:

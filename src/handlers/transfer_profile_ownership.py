@@ -8,6 +8,7 @@ have access via a share. The transfer involves:
 4. Deleting the share (since they're now the owner)
 """
 
+import os
 from typing import Any, Dict
 
 import boto3
@@ -67,7 +68,8 @@ def _transfer_ownership(profile: Dict[str, Any], db_profile_id: str, db_new_owne
 
     old_key = {"ownerAccountId": old_owner_id, "profileId": db_profile_id}
 
-    dynamodb_client = boto3.client("dynamodb")
+    endpoint_url = os.getenv("DYNAMODB_ENDPOINT")
+    dynamodb_client = boto3.client("dynamodb", endpoint_url=endpoint_url)
     dynamodb_client.transact_write_items(
         TransactItems=[
             {

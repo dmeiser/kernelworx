@@ -244,10 +244,10 @@ export const PaymentMethodsPage: React.FC = () => {
         },
       });
 
+      await refetch();
       showSuccess('QR code uploaded successfully');
       setQrUploadDialogOpen(false);
       setSelectedMethod(null);
-      await refetch();
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to upload QR code';
       setQrUploadError(message);
