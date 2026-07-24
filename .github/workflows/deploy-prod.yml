@@ -115,17 +115,10 @@ jobs:
         working-directory: tofu/application/environments/prod
         run: tofu plan -out=tfplan
 
-      - name: Upload OpenTofu plan artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: tofu-plan-${{ github.run_id }}
-          path: tofu/application/environments/prod/tfplan
-          retention-days: 30
-          if-no-files-found: error
-
       # ROLLBACK: To revert this deployment, check out the previous release commit,
-      # download the matching plan artifact (or re-run `tofu plan -out=tfplan`),
-      # and apply it with `tofu apply tfplan`. The plan artifact is retained for 30 days.
+      # re-run `tofu plan -out=tfplan` against the previous state, and apply it with
+      # `tofu apply tfplan`. The plan file is not uploaded as an artifact because it
+      # can contain sensitive values derived from TF_VAR_* secrets.
       - name: OpenTofu apply (prod)
         env:
           TF_VAR_encryption_passphrase: ${{ secrets.TF_VAR_ENCRYPTION_PASSPHRASE }}

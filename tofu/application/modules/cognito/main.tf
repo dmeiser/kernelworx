@@ -135,7 +135,7 @@ locals {
 # User Pool
 resource "aws_cognito_user_pool" "main" {
   name                = local.user_pool_name
-  deletion_protection = "ACTIVE"
+  deletion_protection = var.environment == "prod" ? "ACTIVE" : "INACTIVE"
 
   # Username configuration
   username_attributes      = ["email"]
