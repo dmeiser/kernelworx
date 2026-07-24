@@ -83,6 +83,28 @@ describe('update_campaign_fn request', () => {
     const result = request(ctx);
     assert.doesNotMatch(result.update.expression, /unitCampaignKey/);
   });
+
+  it('does not prefix null catalogId with CATALOG#', () => {
+    const ctx = {
+      stash: {
+        campaign: {
+          profileId: 'PROFILE#scout',
+          campaignId: 'CAMPAIGN#c1',
+          campaignName: 'Fall',
+          campaignYear: 2024,
+        },
+      },
+      args: {
+        input: {
+          catalogId: null,
+        },
+      },
+    };
+
+    const result = request(ctx);
+    assert.match(result.update.expression, /catalogId = :catalogId/);
+    assert.strictEqual(result.update.expressionValues[':catalogId'], null);
+  });
 });
 
 describe('update_campaign_fn response', () => {
