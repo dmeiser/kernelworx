@@ -114,7 +114,7 @@ Transport security is properly configured:
 
 ### 5.2 Encryption At-Rest
 Encryption at-rest is configured for all data stores:
-- **DynamoDB:** Server-side encryption is enabled on all tables in [main.tf](file:///home/dm/code/kernelworx/tofu/application/modules/dynamodb/main.tf#L60) using default AWS-managed keys.
+- **DynamoDB:** Server-side encryption is enabled by default on all tables in [main.tf](file:///home/dm/code/kernelworx/tofu/application/modules/dynamodb/main.tf#L60) using AWS-owned keys (no per-request KMS charges).
 - **S3 Buckets:** Both static and exports buckets use server-side encryption with default `SSE-S3` (`AES256`) in [main.tf](file:///home/dm/code/kernelworx/tofu/application/modules/s3/main.tf#L46).
 - **Signed URL Expirations:** Payment method QR codes use a strict 15-minute expiration in [payment_methods.py](file:///home/dm/code/kernelworx/src/utils/payment_methods.py#L686), and export reports expire in 7 days via S3 lifecycle policies in [main.tf](file:///home/dm/code/kernelworx/tofu/application/modules/s3/main.tf#L101).
 

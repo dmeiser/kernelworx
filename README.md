@@ -162,7 +162,7 @@ This project is volunteer-maintained and operated. Operating costs are paid by v
 
 ## Privacy & Compliance
 
-- **Data Encryption**: All data encrypted in-flight (HTTPS) and at-rest (AWS-managed encryption)
+- **Data Encryption**: All data encrypted in-flight (HTTPS) and at-rest (AWS-owned/server-side encryption)
 - **Privacy Policy**: Users are responsible for their own customer data; customer-level privacy requests are handled directly by sellers
 
 ## Support

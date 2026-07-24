@@ -1,19 +1,25 @@
 # DynamoDB Tables Module
 # Schema matches actual existing AWS tables
+#
+# NOTE: server_side_encryption.enabled must be false to use the AWS-owned key.
+# enabled = true (or omitting kms_key_arn inside the block) defaults to the
+# AWS-managed key (alias/aws/dynamodb), which incurs per-request KMS charges.
+# DynamoDB encryption at rest is always on; enabled = false just selects the
+# no-additional-cost AWS-owned key.
 
 variable "environment" {
   description = "Deployment environment (e.g., dev, prod)"
-  type = string
+  type        = string
 }
 
 variable "region_abbrev" {
   description = "Short region code used in table names (e.g., ue1)"
-  type = string
+  type        = string
 }
 
 variable "name_prefix" {
   description = "Global name prefix for DynamoDB tables"
-  type = string
+  type        = string
 }
 
 variable "enable_point_in_time_recovery" {
@@ -63,7 +69,7 @@ resource "aws_dynamodb_table" "accounts" {
   }
 
   server_side_encryption {
-    enabled = true
+    enabled = false
   }
 
   tags = local.tags
@@ -123,7 +129,7 @@ resource "aws_dynamodb_table" "catalogs" {
   }
 
   server_side_encryption {
-    enabled = true
+    enabled = false
   }
 
   tags = local.tags
@@ -166,7 +172,7 @@ resource "aws_dynamodb_table" "profiles" {
   }
 
   server_side_encryption {
-    enabled = true
+    enabled = false
   }
 
   tags = local.tags
@@ -243,7 +249,7 @@ resource "aws_dynamodb_table" "campaigns" {
   }
 
   server_side_encryption {
-    enabled = true
+    enabled = false
   }
 
   tags = local.tags
@@ -303,7 +309,7 @@ resource "aws_dynamodb_table" "orders" {
   }
 
   server_side_encryption {
-    enabled = true
+    enabled = false
   }
 
   tags = local.tags
@@ -346,7 +352,7 @@ resource "aws_dynamodb_table" "shares" {
   }
 
   server_side_encryption {
-    enabled = true
+    enabled = false
   }
 
   tags = local.tags
@@ -394,7 +400,7 @@ resource "aws_dynamodb_table" "invites" {
   }
 
   server_side_encryption {
-    enabled = true
+    enabled = false
   }
 
   tags = local.tags
@@ -454,7 +460,7 @@ resource "aws_dynamodb_table" "shared_campaigns" {
   }
 
   server_side_encryption {
-    enabled = true
+    enabled = false
   }
 
   tags = local.tags

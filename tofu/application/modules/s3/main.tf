@@ -2,22 +2,22 @@
 
 variable "environment" {
   description = "Deployment environment (e.g., dev, prod)"
-  type = string
+  type        = string
 }
 
 variable "region_abbrev" {
   description = "Short region code used in bucket names (e.g., ue1)"
-  type = string
+  type        = string
 }
 
 variable "name_prefix" {
   description = "Global name prefix for S3 buckets"
-  type = string
+  type        = string
 }
 
 variable "site_domain" {
   description = "Fully qualified site domain for CORS allowed origins (e.g., dev.kernelworx.app or kernelworx.app)"
-  type = string
+  type        = string
 }
 
 locals {
@@ -49,6 +49,8 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "static" {
     apply_server_side_encryption_by_default {
       sse_algorithm = "AES256"
     }
+    bucket_key_enabled       = false
+    blocked_encryption_types = ["SSE-C"]
   }
 }
 
@@ -86,6 +88,8 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "exports" {
     apply_server_side_encryption_by_default {
       sse_algorithm = "AES256"
     }
+    bucket_key_enabled       = false
+    blocked_encryption_types = ["SSE-C"]
   }
 }
 
