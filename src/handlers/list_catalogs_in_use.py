@@ -91,7 +91,7 @@ async def _async_get_shared_profile_ids(dynamodb: Any, shares_table_name: str, t
 
 
 async def _async_get_shared_campaign_catalog_ids(
-    dynamodb: Any, campaigns_table_name: str, profile_ids: List[str]
+    dynamodb: Any, campaigns_table_name: str, profile_ids: List[str], request_logger: Any = logger
 ) -> Set[str]:
     """Async: Query campaigns for all profiles in parallel."""
     if not profile_ids:
@@ -109,12 +109,12 @@ async def _async_get_shared_campaign_catalog_ids(
         if isinstance(result, set):
             catalog_ids.update(result)
         elif isinstance(result, BaseException):
-            logger.error("Failed to query campaign catalogs", error=str(result), exc_info=result)
+            request_logger.error("Failed to query campaign catalogs", error=str(result), exc_info=result)
 
     return catalog_ids
 
 
-async def _async_get_all_catalog_ids(account_id: str) -> Tuple[Set[str], List[str], Set[str]]:
+async def _async_get_all_catalog_ids(account_id: str, request_logger: Any = logger) -> Tuple[Set[str], List[str], Set[str]]:
     """
     Run all queries with optimal parallelism.
 
@@ -135,9 +135,11 @@ async def _async_get_all_catalog_ids(account_id: str) -> Tuple[Set[str], List[st
         owned_profile_ids, shared_profile_ids = await asyncio.gather(owned_profiles_task, shared_profiles_task)
 
         # Step 3 & 4: Query campaigns for both owned and shared profiles in parallel
-        owned_catalogs_task = _async_get_shared_campaign_catalog_ids(dynamodb, campaigns_table_name, owned_profile_ids)
+        owned_catalogs_task = _async_get_shared_campaign_catalog_ids(
+            dynamodb, campaigns_table_name, owned_profile_ids, request_logger
+        )
         shared_catalogs_task = _async_get_shared_campaign_catalog_ids(
-            dynamodb, campaigns_table_name, shared_profile_ids
+            dynamodb, campaigns_table_name, shared_profile_ids, request_logger
         )
 
         owned_catalog_ids, shared_catalog_ids = await asyncio.gather(owned_catalogs_task, shared_catalogs_task)
@@ -168,7 +170,7 @@ def handler(event: Dict[str, Any], context: Any) -> List[str]:
         # - owned_catalog_ids and shared_profile_ids run concurrently
         # - shared_catalog_ids waits for shared_profile_ids, then runs N queries in parallel
         owned_catalog_ids, shared_profile_ids, shared_catalog_ids = asyncio.run(
-            _async_get_all_catalog_ids(account_id_with_prefix)
+            _async_get_all_catalog_ids(account_id_with_prefix, request_logger)
         )
 
         request_logger.info("Found owned campaign catalogs", count=len(owned_catalog_ids))
