@@ -1,6 +1,9 @@
 import { describe, test, expect } from "vitest";
 import { readdirSync, readFileSync } from "fs";
 import { join } from "path";
+import { fileURLToPath } from "url";
+
+const __dirname = fileURLToPath(new URL(".", import.meta.url));
 
 const RESOLVERS_DIR = join(
   __dirname,

@@ -102,8 +102,8 @@ variable "google_client_secret" {
 
 variable "alarm_email" {
   type        = string
-  default     = "devops+kernelworx-dev@example.com"
-  description = "Email address for CloudWatch alarm notifications"
+  sensitive   = true
+  description = "Email address for CloudWatch alarm notifications (required; no default to avoid an unconfirmed SNS subscription)"
 }
 
 # Local computed values
