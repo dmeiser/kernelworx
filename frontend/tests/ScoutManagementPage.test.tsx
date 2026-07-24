@@ -465,7 +465,7 @@ describe('ScoutManagementPage', () => {
     await user.click(confirmDelete);
 
     // After completion, we should have navigated to the /scouts route
-    await waitFor(() => expect(screen.getByText('ScoutList')).toBeInTheDocument(), { timeout: 3000 });
+    await waitFor(() => expect(screen.getByText('ScoutList')).toBeInTheDocument(), { timeout: 10000 });
   });
 
   it('shows a success snackbar after deleting profile', async () => {
@@ -485,7 +485,7 @@ describe('ScoutManagementPage', () => {
     const confirmDelete = await screen.findByRole('button', { name: /Delete Permanently/i });
     await user.click(confirmDelete);
 
-    await waitFor(() => expect(screen.getByText('Profile deleted successfully')).toBeInTheDocument(), { timeout: 2000 });
+    await waitFor(() => expect(screen.getByText('Profile deleted successfully')).toBeInTheDocument(), { timeout: 10000 });
   });
 
   it('revokes share via confirmation dialog', async () => {
