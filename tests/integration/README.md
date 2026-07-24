@@ -10,8 +10,7 @@ Integration tests validate AppSync resolvers by making real GraphQL requests aga
 
 1. **Deploy to dev environment:**
    ```bash
-   cd tofu/environments/dev
-   tofu apply
+   ./tofu/application/scripts/deploy.sh dev apply
    ```
 
 2. **Install dependencies:**
@@ -162,7 +161,7 @@ Integration tests run in GitHub Actions against the dev environment:
 
 ### GraphQL Errors
 - Check AppSync logs in CloudWatch
-- Verify resolver configurations in CDK
+- Verify resolver configurations in OpenTofu
 - Test query manually in AppSync console
 
 ### Data Cleanup Issues

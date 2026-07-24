@@ -31,6 +31,7 @@ import { Download as DownloadIcon, Assessment as ReportIcon } from '@mui/icons-m
 import { PageHeader } from '../components/PageHeader';
 import * as XLSX from 'xlsx';
 import { GET_UNIT_REPORT, LIST_MY_SHARED_CAMPAIGNS } from '../lib/graphql';
+import { formatCurrency } from '../lib/api-utils';
 import type { SharedCampaign, OrderLineItem } from '../types';
 
 // Type alias for clarity in this module
@@ -67,12 +68,6 @@ type ReportView = 'summary' | 'detailed' | 'unit';
 type SellerOrder = UnitOrderDetail & { sellerName: string };
 
 type ProductTotals = Record<string, number>;
-
-const formatCurrency = (amount: number) =>
-  new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-  }).format(amount);
 
 const getActiveCampaigns = (data?: { listMySharedCampaigns: SharedCampaign[] }) =>
   data?.listMySharedCampaigns?.filter((campaign) => campaign.isActive) || [];

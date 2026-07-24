@@ -322,7 +322,7 @@ describe('AuthContext', () => {
 
   it('handles signInWithRedirect Hub event', async () => {
     let hubCallback: any;
-    vi.mocked(amplifyUtils.Hub.listen).mockImplementation((channel, callback) => {
+    vi.mocked(amplifyUtils.Hub.listen).mockImplementation((_channel, callback) => {
       hubCallback = callback;
       return vi.fn();
     });
@@ -346,7 +346,7 @@ describe('AuthContext', () => {
 
   it('handles signedOut Hub event', async () => {
     let hubCallback: any;
-    vi.mocked(amplifyUtils.Hub.listen).mockImplementation((channel, callback) => {
+    vi.mocked(amplifyUtils.Hub.listen).mockImplementation((_channel, callback) => {
       hubCallback = callback;
       return vi.fn();
     });
@@ -375,7 +375,7 @@ describe('AuthContext', () => {
 
   it('handles tokenRefresh Hub event', async () => {
     let hubCallback: any;
-    vi.mocked(amplifyUtils.Hub.listen).mockImplementation((channel, callback) => {
+    vi.mocked(amplifyUtils.Hub.listen).mockImplementation((_channel, callback) => {
       hubCallback = callback;
       return vi.fn();
     });
@@ -407,7 +407,7 @@ describe('AuthContext', () => {
   it('handles signInWithRedirect_failure Hub event', async () => {
     let hubCallback: any;
     const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    vi.mocked(amplifyUtils.Hub.listen).mockImplementation((channel, callback) => {
+    vi.mocked(amplifyUtils.Hub.listen).mockImplementation((_channel, callback) => {
       hubCallback = callback;
       return vi.fn();
     });
@@ -434,7 +434,7 @@ describe('AuthContext', () => {
   it('handles tokenRefresh_failure Hub event', async () => {
     let hubCallback: any;
     const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    vi.mocked(amplifyUtils.Hub.listen).mockImplementation((channel, callback) => {
+    vi.mocked(amplifyUtils.Hub.listen).mockImplementation((_channel, callback) => {
       hubCallback = callback;
       return vi.fn();
     });
@@ -523,7 +523,7 @@ describe('AuthContext', () => {
 
   it('handles unknown Hub auth events gracefully', async () => {
     let hubCallback: any;
-    vi.mocked(amplifyUtils.Hub.listen).mockImplementation((channel, callback) => {
+    vi.mocked(amplifyUtils.Hub.listen).mockImplementation((_channel, callback) => {
       hubCallback = callback;
       return vi.fn();
     });

@@ -6,6 +6,7 @@ from typing import Any, Dict, List
 from unittest.mock import MagicMock, patch
 
 import pytest
+from botocore.exceptions import ClientError
 
 from src.handlers import delete_profile_cascade
 from src.handlers.delete_profile_cascade import (
@@ -570,11 +571,11 @@ class TestDeleteProfileCascade:
         second_call_kwargs = mock_table.query.call_args_list[1][1]
         assert "ExclusiveStartKey" in second_call_kwargs
 
-    def test_batch_write_error_continues(
+    def test_batch_write_error_raises_before_deleting_profile(
         self,
         profiles_table: Any,
     ) -> None:
-        """Test that a batch write error does not crash the handler."""
+        """Test that a batch delete failure aborts the cascade before the profile row is removed."""
         owner_id = "owner-123"
         profile_id = "PROFILE#batch-error"
         _create_profile(profiles_table, owner_id, profile_id)
@@ -604,9 +605,45 @@ class TestDeleteProfileCascade:
                 "arguments": {"profileId": profile_id},
                 "identity": {"sub": owner_id},
             }
-            result = lambda_handler(event, None)
-            assert result is True
-            mock_tables.profiles.delete_item.assert_called_once()
+            with pytest.raises(Exception):
+                lambda_handler(event, None)
+
+            # The profile metadata row must not be deleted if related data could not be removed.
+            mock_tables.profiles.delete_item.assert_not_called()
+
+    def test_batch_write_client_error_raises_app_error(
+        self,
+        profiles_table: Any,
+    ) -> None:
+        """Test that a ClientError from batch_writer is surfaced as an AppError."""
+        owner_id = "owner-123"
+        profile_id = "PROFILE#batch-client-error"
+        _create_profile(profiles_table, owner_id, profile_id)
+
+        error_response = {
+            "Error": {"Code": "ProvisionedThroughputExceededException", "Message": "Throttled"},
+            "ResponseMetadata": {"HTTPStatusCode": 400},
+        }
+
+        with patch("src.handlers.delete_profile_cascade.tables") as mock_tables:
+            mock_tables.profiles.query.return_value = {"Items": [{"ownerAccountId": f"ACCOUNT#{owner_id}"}]}
+            mock_tables.profiles.delete_item.return_value = {}
+            mock_tables.shares.query.return_value = {
+                "Items": [{"profileId": profile_id, "targetAccountId": "ACCOUNT#user-1"}]
+            }
+            mock_tables.shares.batch_writer.side_effect = ClientError(error_response, "BatchWriteItem")
+            mock_tables.invites.query.return_value = {"Items": []}
+            mock_tables.campaigns.query.return_value = {"Items": []}
+            mock_tables.orders.query.return_value = {"Items": []}
+
+            event = {
+                "arguments": {"profileId": profile_id},
+                "identity": {"sub": owner_id},
+            }
+            with pytest.raises(Exception):
+                lambda_handler(event, None)
+
+            mock_tables.profiles.delete_item.assert_not_called()
 
     def test_empty_shares_table(self, profiles_table: Any, shares_table: Any) -> None:
         """Test that an empty shares table is handled gracefully."""

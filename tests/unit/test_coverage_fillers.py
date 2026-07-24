@@ -32,9 +32,11 @@ def test_campaign_operations_dynamo_value_for_scalar_fallback():
     result = campaign_operations._dynamo_value_for_scalar(obj)
     assert result == {"S": str(obj)}
 
-    # Set branch for collection conversion
+    # Set branch for collection conversion (sets are now serialized as L, not SS)
     assert campaign_operations._dynamo_value_for_collection({"k": "v"}) == {"M": {"k": {"S": "v"}}}
-    assert campaign_operations._dynamo_value_for_collection({"a", "b"}).get("SS") is not None
+    result = campaign_operations._dynamo_value_for_collection({"a", "b"})
+    assert result.get("L") is not None
+    assert len(result["L"]) == 2
 
 
 def test_pre_signup_handle_signup_exception_returns_event():
@@ -50,21 +52,21 @@ def test_pre_signup_handle_signup_exception_returns_event():
         {"Error": {"Code": "InvalidParameterException", "Message": "Link already exists"}},
         "AdminLinkProviderForUser",
     )
-    with pytest.raises(Exception):
+    with pytest.raises(pre_signup.FederatedIdentityLinkedException):
         pre_signup._handle_signup_exception(client_error, "user@example.com", event)
 
-    with pytest.raises(Exception):
+    with pytest.raises(pre_signup.FederatedIdentityLinkedException):
         pre_signup._handle_signup_exception(
-            Exception("Cannot link federated identity: invalid username format"), "user@example.com", event
+            pre_signup.FederatedIdentityLinkedException(
+                "Cannot link federated identity: invalid username format"
+            ),
+            "user@example.com",
+            event,
         )
 
 
 def test_profile_sharing_deduplicate_and_extract_helpers():
     from src.handlers import profile_sharing
-
-    code = profile_sharing.generate_invite_code()
-    assert len(code) == 10
-    assert code.isupper()
 
     # Deduplicate skips invalid entries and keeps first valid share
     shares = [
@@ -210,7 +212,7 @@ def test_transfer_profile_ownership_success(monkeypatch):
         BillingMode="PAY_PER_REQUEST",
     )
 
-    # Reload module so it binds to moto tables
+    # Reload handler so it binds to the moto tables via the current env vars.
     module_name = "src.handlers.transfer_profile_ownership"
     if module_name in sys.modules:
         del sys.modules[module_name]
@@ -492,3 +494,49 @@ def test_profile_sharing_fetch_batch_with_zero_retries():
 
     result = profile_sharing._fetch_batch_with_retry([], None, DummyLogger(), retries=0)  # type: ignore[arg-type]
     assert result == []
+
+
+def test_admin_operations_get_cognito_user_attributes():
+    from src.handlers.admin_operations import _get_cognito_user_attributes
+
+    account_id, email, email_verified, user_status, enabled = _get_cognito_user_attributes(
+        {
+            "Username": "u1",
+            "Attributes": [
+                {"Name": "sub", "Value": "sub-123"},
+                {"Name": "email", "Value": "user@example.com"},
+                {"Name": "email_verified", "Value": "true"},
+            ],
+            "UserStatus": "CONFIRMED",
+            "Enabled": False,
+        }
+    )
+    assert account_id == "sub-123"
+    assert email == "user@example.com"
+    assert email_verified is True
+    assert user_status == "CONFIRMED"
+    assert enabled is False
+
+
+def test_campaign_operations_normalize_account_id():
+    from src.handlers.campaign_operations import _normalize_account_id
+
+    assert _normalize_account_id("ACCOUNT#abc") == "abc"
+    assert _normalize_account_id("abc") == "abc"
+    assert _normalize_account_id(None) == ""  # type: ignore[arg-type]
+    assert _normalize_account_id("") == ""
+
+
+def test_campaign_reporting_reraises_non_not_found_profile_error(monkeypatch):
+    from src.handlers import campaign_reporting
+    from src.utils.errors import AppError, ErrorCode
+
+    def mock_check_profile_access(*args, **kwargs):
+        raise AppError(ErrorCode.INTERNAL_ERROR, "DynamoDB is unavailable")
+
+    monkeypatch.setattr(campaign_reporting, "check_profile_access", mock_check_profile_access)
+
+    with pytest.raises(AppError) as exc_info:
+        campaign_reporting._get_accessible_profiles(["PROFILE#1"], "ACCOUNT#caller")
+
+    assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR

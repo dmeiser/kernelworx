@@ -130,25 +130,20 @@ def update_my_account(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
 
 def _delete_all_user_data(account_id: str, context: Any, logger: Any) -> None:
-    """Delete all user data from DynamoDB using admin delete functions."""
+    """Delete all user data from DynamoDB using shared deletion internals."""
     from .admin_operations import (
-        admin_delete_user_campaigns,
-        admin_delete_user_catalogs,
-        admin_delete_user_orders,
-        admin_delete_user_profiles,
-        admin_delete_user_shares,
+        _delete_user_campaigns,
+        _delete_user_catalogs,
+        _delete_user_orders,
+        _delete_user_profiles,
+        _delete_user_shares,
     )
 
-    pseudo_event = {
-        "identity": {"sub": account_id, "claims": {"cognito:groups": ["ADMIN"]}},
-        "arguments": {"accountId": account_id},
-    }
-
-    admin_delete_user_orders(pseudo_event, context)
-    admin_delete_user_campaigns(pseudo_event, context)
-    admin_delete_user_shares(pseudo_event, context)
-    admin_delete_user_profiles(pseudo_event, context)
-    admin_delete_user_catalogs(pseudo_event, context)
+    _delete_user_orders(account_id, logger)
+    _delete_user_campaigns(account_id, logger)
+    _delete_user_shares(account_id, logger)
+    _delete_user_profiles(account_id, logger)
+    _delete_user_catalogs(account_id, logger)
 
     account_id_key = f"ACCOUNT#{account_id}"
     tables.accounts.delete_item(Key={"accountId": account_id_key})

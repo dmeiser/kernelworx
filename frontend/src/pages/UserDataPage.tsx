@@ -59,6 +59,7 @@ import {
 import { LoadingState } from '../components/LoadingState';
 import { NavBreadcrumbs } from '../components/NavBreadcrumbs';
 import { ConfirmDialog } from '../components/ConfirmDialog';
+import { formatDisplayDate } from '../lib/date-utils';
 import type { SellerProfile, Catalog, AdminUser } from '../types';
 
 interface Campaign {
@@ -507,8 +508,8 @@ export const UserDataPage: React.FC = () => {
                               <TableCell>{campaign.campaignYear}</TableCell>
                               <TableCell>
                                 <Typography variant="body2">
-                                  {campaign.startDate ? new Date(campaign.startDate).toLocaleDateString() : '—'} -{' '}
-                                  {campaign.endDate ? new Date(campaign.endDate).toLocaleDateString() : '—'}
+                                  {formatDisplayDate(campaign.startDate) || '—'} -{' '}
+                                  {formatDisplayDate(campaign.endDate) || '—'}
                                 </Typography>
                               </TableCell>
                               <TableCell>
@@ -643,10 +644,10 @@ export const UserDataPage: React.FC = () => {
                         </Typography>
                       </TableCell>
                       <TableCell>
-                        {sharedCampaign.startDate ? new Date(sharedCampaign.startDate).toLocaleDateString() : '—'}
+                        {formatDisplayDate(sharedCampaign.startDate) || '—'}
                       </TableCell>
                       <TableCell>
-                        {sharedCampaign.endDate ? new Date(sharedCampaign.endDate).toLocaleDateString() : '—'}
+                        {formatDisplayDate(sharedCampaign.endDate) || '—'}
                       </TableCell>
                     </TableRow>
                   ))}

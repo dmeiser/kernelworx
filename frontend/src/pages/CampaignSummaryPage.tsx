@@ -11,6 +11,7 @@ import { LoadingState } from '../components/LoadingState';
 import { ErrorAlert } from '../components/ErrorAlert';
 import { LIST_ORDERS_BY_CAMPAIGN, GET_PAYMENT_METHODS_FOR_PROFILE } from '../lib/graphql';
 import { ensureCampaignId, ensureProfileId } from '../lib/ids';
+import { formatCurrency } from '../lib/api-utils';
 import type { Order } from '../types';
 import type { GqlPaymentMethod } from '../types/graphql-generated';
 
@@ -77,13 +78,6 @@ const getTopProducts = (
   Object.entries(productBreakdown)
     .sort((a, b) => b[1].revenue - a[1].revenue)
     .slice(0, limit);
-
-// Helper to format currency
-const formatCurrency = (amount: number): string =>
-  new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-  }).format(amount);
 
 // --- Sub-Components ---
 

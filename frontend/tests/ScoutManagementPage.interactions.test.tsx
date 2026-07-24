@@ -239,7 +239,7 @@ describe('ScoutManagementPage – additional interactions', () => {
     const input = (await screen.findByLabelText('Seller Name')) as HTMLInputElement;
 
     await user.clear(input);
-    await user.type(input, 'Updated Scout', { delay: 0 });
+    await user.type(input, 'Updated Scout');
     expect(input.value).toBe('Updated Scout');
 
     const saveBtn = screen.getByRole('button', { name: /Save Changes/i });

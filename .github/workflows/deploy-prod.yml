@@ -78,7 +78,15 @@ jobs:
           TF_VAR_google_client_secret: ${{ secrets.TF_VAR_GOOGLE_CLIENT_SECRET }}
           TF_IN_AUTOMATION: "true"
         working-directory: tofu/application/environments/prod
-        run: tofu plan
+        run: tofu plan -out=tfplan
+
+      - name: Upload OpenTofu plan artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tofu-plan-${{ github.run_id }}
+          path: tofu/application/environments/prod/tfplan
+          retention-days: 30
+          if-no-files-found: error
 
       - name: Check if delete profile migration is needed
         id: check_delete_profile_migration
@@ -114,6 +122,9 @@ jobs:
         run: |
           tofu apply -replace=module.appsync.aws_appsync_resolver.delete_seller_profile -auto-approve
 
+      # ROLLBACK: To revert this deployment, check out the previous release commit,
+      # download the matching plan artifact (or re-run `tofu plan -out=tfplan`),
+      # and apply it with `tofu apply tfplan`. The plan artifact is retained for 30 days.
       - name: OpenTofu apply (prod)
         env:
           TF_VAR_encryption_passphrase: ${{ secrets.TF_VAR_ENCRYPTION_PASSPHRASE }}
@@ -121,7 +132,7 @@ jobs:
           TF_VAR_google_client_secret: ${{ secrets.TF_VAR_GOOGLE_CLIENT_SECRET }}
           TF_IN_AUTOMATION: "true"
         working-directory: tofu/application/environments/prod
-        run: tofu apply -auto-approve
+        run: tofu apply tfplan
 
       - name: Extract OpenTofu outputs for frontend
         id: tofu_outputs
@@ -154,7 +165,11 @@ jobs:
         run: |
           npm ci
           npm run build
-          aws s3 sync dist "s3://${{ steps.tofu_outputs.outputs.static_assets_bucket }}" --delete --region "${{ secrets.AWS_REGION }}"
+          # Do not use --delete: hashed JS/CSS chunks from previous deploys may still
+          # be requested by clients that have an old index.html cached before the
+          # CloudFront invalidation below completes. Keeping old chunks prevents
+          # white-screen errors for open sessions during the deploy window.
+          aws s3 sync dist "s3://${{ steps.tofu_outputs.outputs.static_assets_bucket }}" --region "${{ secrets.AWS_REGION }}"
           aws cloudfront create-invalidation --distribution-id "${{ steps.tofu_outputs.outputs.cloudfront_distribution_id }}" --paths "/*"
 
   smoke-tests-prod:

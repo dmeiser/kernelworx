@@ -9,10 +9,12 @@ try:  # pragma: no cover
     from utils.auth import check_profile_access
     from utils.dynamodb import tables
     from utils.logging import get_logger
+    from utils.pagination import query_all_items
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.auth import check_profile_access
     from ..utils.dynamodb import tables
     from ..utils.logging import get_logger
+    from ..utils.pagination import query_all_items
 
 logger = get_logger(__name__)
 
@@ -32,12 +34,15 @@ def _collect_catalog_ids(profiles: List[Dict[str, Any]], campaign_name: str, cam
     catalog_ids: Set[str] = set()
     for profile in profiles:
         profile_id = profile["profileId"]
-        campaigns_response = tables.campaigns.query(
-            KeyConditionExpression=Key("profileId").eq(profile_id),
-            FilterExpression="campaignName = :name AND campaignYear = :year",
-            ExpressionAttributeValues={":name": campaign_name, ":year": campaign_year},
+        campaigns = query_all_items(
+            tables.campaigns,
+            {
+                "KeyConditionExpression": Key("profileId").eq(profile_id),
+                "FilterExpression": "campaignName = :name AND campaignYear = :year",
+                "ExpressionAttributeValues": {":name": campaign_name, ":year": campaign_year},
+            },
         )
-        for campaign in campaigns_response.get("Items", []):
+        for campaign in campaigns:
             catalog_id = campaign.get("catalogId")
             if catalog_id is not None and isinstance(catalog_id, str):
                 catalog_ids.add(catalog_id)
@@ -82,12 +87,14 @@ def list_unit_catalogs(event: Dict[str, Any], context: Any) -> List[Dict[str, An
 
         logger.info(f"Listing catalogs for {unit_type} {unit_number}, campaign {campaign_name} {campaign_year}")
 
-        # Step 1: Find all profiles in this unit
-        profiles_response = tables.profiles.scan(
-            FilterExpression="unitType = :ut AND unitNumber = :un",
-            ExpressionAttributeValues={":ut": unit_type, ":un": unit_number},
+        # Step 1: Find all profiles in this unit via the unitType-unitNumber-index
+        unit_profiles = query_all_items(
+            tables.profiles,
+            {
+                "IndexName": "unitType-unitNumber-index",
+                "KeyConditionExpression": Key("unitType").eq(unit_type) & Key("unitNumber").eq(unit_number),
+            },
         )
-        unit_profiles = profiles_response.get("Items", [])
         logger.info(f"Found {len(unit_profiles)} profiles")
 
         if not unit_profiles:
@@ -168,11 +175,13 @@ def list_unit_campaign_catalogs(event: Dict[str, Any], context: Any) -> List[Dic
 
         # Step 1: Query unitCampaignKey-index
         unit_campaign_key = _build_unit_campaign_key(unit_type, unit_number, city, state, campaign_name, campaign_year)
-        campaigns_response = tables.campaigns.query(
-            IndexName="unitCampaignKey-index",
-            KeyConditionExpression=Key("unitCampaignKey").eq(unit_campaign_key),
+        unit_campaigns = query_all_items(
+            tables.campaigns,
+            {
+                "IndexName": "unitCampaignKey-index",
+                "KeyConditionExpression": Key("unitCampaignKey").eq(unit_campaign_key),
+            },
         )
-        unit_campaigns = campaigns_response.get("Items", [])
         logger.info(f"Found {len(unit_campaigns)} campaigns")
 
         if not unit_campaigns:

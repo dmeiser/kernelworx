@@ -5,6 +5,7 @@ Handles CRUD operations for custom payment methods (user preferences)
 and S3 QR code management.
 """
 
+import copy
 import os
 import re
 import uuid
@@ -183,6 +184,52 @@ def _get_existing_payment_methods(account_id: str) -> list[Dict[str, Any]]:
     return list(preferences.get("paymentMethods", []))
 
 
+def _save_preferences(
+    account_id_key: str,
+    response: Dict[str, Any],
+    preferences: Dict[str, Any],
+) -> None:
+    """Write preferences back, using a condition expression to detect concurrent writes.
+
+    The condition requires the account to still exist and the preferences attribute to
+    match the value read at call time (or not exist if it was absent). This prevents
+    silent overwrites when two mutations race.
+    """
+    logger = get_logger(__name__)
+    read_prefs = response.get("Item", {}).get("preferences")
+    expression_values: Dict[str, Any] = {":prefs": preferences}
+    if read_prefs is not None:
+        # Existing preferences: require the account to still exist and the stored
+        # preferences to match the value we read (optimistic locking).
+        condition_expression = "attribute_exists(accountId) AND preferences = :read_prefs"
+        # Capture the original preferences value before callers mutate it in-place.
+        expression_values[":read_prefs"] = copy.deepcopy(read_prefs)
+    else:
+        # First-time preferences write: guard against a concurrent write that already
+        # created preferences, but allow the update to create the row if needed.
+        condition_expression = "attribute_not_exists(preferences)"
+
+    try:
+        tables.accounts.update_item(
+            Key={"accountId": account_id_key},
+            UpdateExpression="SET preferences = :prefs",
+            ConditionExpression=condition_expression,
+            ExpressionAttributeValues=expression_values,
+        )
+    except ClientError as e:
+        error_code = e.response.get("Error", {}).get("Code")
+        if error_code == "ConditionalCheckFailedException":
+            logger.warning(
+                "Concurrent modification detected for account",
+                account_id=account_id_key,
+            )
+            raise AppError(
+                ErrorCode.INVALID_INPUT,
+                "Payment methods were modified by another request. Please retry.",
+            ) from e
+        raise
+
+
 def _check_duplicate_name(existing_methods: list[Dict[str, Any]], name: str, exclude_current: Optional[str]) -> None:
     """Check for duplicate payment method names (case-insensitive)."""
     name_lower = name.lower()
@@ -327,10 +374,13 @@ def create_payment_method(account_id: str, name: str) -> Dict[str, Any]:
         account_id_key = f"ACCOUNT#{account_id}"
         response = tables.accounts.get_item(Key={"accountId": account_id_key})
 
-        existing_methods = []
+        existing_methods: list[Dict[str, Any]] = []
+        preferences: Dict[str, Any] = {}
         if "Item" in response:
-            preferences = response["Item"].get("preferences", {})
-            existing_methods = preferences.get("paymentMethods", [])
+            # Deep-copy so mutating preferences doesn't alter the response used by
+            # _save_preferences for its optimistic-lock condition.
+            preferences = copy.deepcopy(response["Item"].get("preferences", {}))
+            existing_methods = list(preferences.get("paymentMethods", []))
 
         # Create new method
         new_method: Dict[str, Any] = {"name": name, "qrCodeUrl": None}
@@ -339,18 +389,15 @@ def create_payment_method(account_id: str, name: str) -> Dict[str, Any]:
         existing_methods.append(new_method)
 
         # Update account with new methods
-        preferences = response.get("Item", {}).get("preferences", {})
         preferences["paymentMethods"] = existing_methods
-        tables.accounts.update_item(
-            Key={"accountId": account_id_key},
-            UpdateExpression="SET preferences = :prefs",
-            ExpressionAttributeValues={":prefs": preferences},
-        )
+        _save_preferences(account_id_key, response, preferences)
 
         logger.info("Created payment method", account_id=account_id, name=name)
 
         return new_method
 
+    except AppError:
+        raise
     except ClientError as e:
         logger.error("Failed to create payment method", error=str(e))
         raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to create payment method")
@@ -397,25 +444,22 @@ def update_payment_method(account_id: str, old_name: str, new_name: str) -> Dict
         if "Item" not in response:
             raise AppError(ErrorCode.NOT_FOUND, f"Payment method '{old_name}' not found")
 
-        preferences = response["Item"].get("preferences", {})
-        existing_methods = preferences.get("paymentMethods", [])
+        preferences = copy.deepcopy(response["Item"].get("preferences", {}))
+        existing_methods = list(preferences.get("paymentMethods", []))
 
         # Find and update method
         updated_method = _find_and_update_method(existing_methods, old_name, new_name)
 
         # Update account with modified methods
-        preferences = response.get("Item", {}).get("preferences", {})
         preferences["paymentMethods"] = existing_methods
-        tables.accounts.update_item(
-            Key={"accountId": account_id_key},
-            UpdateExpression="SET preferences = :prefs",
-            ExpressionAttributeValues={":prefs": preferences},
-        )
+        _save_preferences(account_id_key, response, preferences)
 
         logger.info("Updated payment method", account_id=account_id, old_name=old_name, new_name=new_name)
 
         return updated_method
 
+    except AppError:
+        raise
     except ClientError as e:
         logger.error("Failed to update payment method", error=str(e))
         raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to update payment method")
@@ -474,8 +518,8 @@ def delete_payment_method(account_id: str, name: str) -> None:
         if "Item" not in response:
             raise AppError(ErrorCode.NOT_FOUND, f"Payment method '{name}' not found")
 
-        preferences = response["Item"].get("preferences", {})
-        existing_methods = preferences.get("paymentMethods", [])
+        preferences = copy.deepcopy(response["Item"].get("preferences", {}))
+        existing_methods = list(preferences.get("paymentMethods", []))
 
         # Find and remove method
         new_methods, method_to_delete = _find_and_remove_method(existing_methods, name)
@@ -484,16 +528,13 @@ def delete_payment_method(account_id: str, name: str) -> None:
         _delete_qr_if_exists(logger, account_id, name, method_to_delete)
 
         # Update account with remaining methods (or empty list)
-        preferences = response.get("Item", {}).get("preferences", {})
         preferences["paymentMethods"] = new_methods
-        tables.accounts.update_item(
-            Key={"accountId": account_id_key},
-            UpdateExpression="SET preferences = :prefs",
-            ExpressionAttributeValues={":prefs": preferences},
-        )
+        _save_preferences(account_id_key, response, preferences)
 
         logger.info("Deleted payment method", account_id=account_id, name=name)
 
+    except AppError:
+        raise
     except ClientError as e:
         logger.error("Failed to delete payment method", error=str(e))
         raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to delete payment method")

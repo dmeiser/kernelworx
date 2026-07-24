@@ -1008,11 +1008,12 @@ class TestErrorHandling:
         # First create a method
         payment_methods.create_payment_method(sample_account_id, "Venmo")
 
-        mock_table = MagicMock()
-        # get_item succeeds
         from src.utils.dynamodb import tables
 
+        # Capture the real response before overriding the table.
         real_response = tables.accounts.get_item(Key={"accountId": f"ACCOUNT#{sample_account_id}"})
+
+        mock_table = MagicMock()
         mock_table.get_item.return_value = real_response
         # update_item fails
         mock_table.update_item.side_effect = ClientError(
@@ -1158,6 +1159,87 @@ class TestErrorHandling:
             payment_methods.update_payment_method(sample_account_id, "Venmo", "")
         assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
         assert "required" in exc_info.value.message.lower()
+
+    def test_create_payment_method_detects_concurrent_modification(
+        self, dynamodb_tables: Dict[str, Any], sample_account: Dict[str, Any], sample_account_id: str
+    ) -> None:
+        """Test create_payment_method raises conflict when preferences changed between read and write."""
+        from src.utils.dynamodb import override_table
+
+        mock_table = MagicMock()
+        accounts_table = dynamodb_tables["accounts"]
+        mock_table.get_item.return_value = accounts_table.get_item(
+            Key={"accountId": f"ACCOUNT#{sample_account_id}"}
+        )
+        mock_table.update_item.side_effect = ClientError(
+            {"Error": {"Code": "ConditionalCheckFailedException", "Message": "The conditional request failed"}},
+            "UpdateItem",
+        )
+
+        override_table("accounts", mock_table)
+
+        with pytest.raises(AppError) as exc_info:
+            payment_methods.create_payment_method(sample_account_id, "Venmo")
+        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+        assert "modified by another request" in str(exc_info.value.message)
+
+        override_table("accounts", None)
+
+    def test_update_payment_method_detects_concurrent_modification(
+        self, dynamodb_tables: Dict[str, Any], sample_account: Dict[str, Any], sample_account_id: str
+    ) -> None:
+        """Test update_payment_method raises conflict when preferences changed between read and write."""
+        from src.utils.dynamodb import override_table
+
+        payment_methods.create_payment_method(sample_account_id, "Venmo")
+
+        mock_table = MagicMock()
+        tables_dict = dynamodb_tables
+        accounts_table = tables_dict["accounts"]
+        mock_table.get_item.return_value = accounts_table.get_item(
+            Key={"accountId": f"ACCOUNT#{sample_account_id}"}
+        )
+        mock_table.update_item.side_effect = ClientError(
+            {"Error": {"Code": "ConditionalCheckFailedException", "Message": "The conditional request failed"}},
+            "UpdateItem",
+        )
+
+        override_table("accounts", mock_table)
+
+        with pytest.raises(AppError) as exc_info:
+            payment_methods.update_payment_method(sample_account_id, "Venmo", "Venmo - Tom")
+        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+        assert "modified by another request" in str(exc_info.value.message)
+
+        override_table("accounts", None)
+
+    def test_delete_payment_method_detects_concurrent_modification(
+        self, dynamodb_tables: Dict[str, Any], sample_account: Dict[str, Any], sample_account_id: str
+    ) -> None:
+        """Test delete_payment_method raises conflict when preferences changed between read and write."""
+        from src.utils.dynamodb import override_table
+
+        payment_methods.create_payment_method(sample_account_id, "Venmo")
+
+        mock_table = MagicMock()
+        tables_dict = dynamodb_tables
+        accounts_table = tables_dict["accounts"]
+        mock_table.get_item.return_value = accounts_table.get_item(
+            Key={"accountId": f"ACCOUNT#{sample_account_id}"}
+        )
+        mock_table.update_item.side_effect = ClientError(
+            {"Error": {"Code": "ConditionalCheckFailedException", "Message": "The conditional request failed"}},
+            "UpdateItem",
+        )
+
+        override_table("accounts", mock_table)
+
+        with pytest.raises(AppError) as exc_info:
+            payment_methods.delete_payment_method(sample_account_id, "Venmo")
+        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+        assert "modified by another request" in str(exc_info.value.message)
+
+        override_table("accounts", None)
 
     def test_update_payment_method_reserved_new_name(
         self, dynamodb_tables: Dict[str, Any], sample_account: Dict[str, Any], sample_account_id: str

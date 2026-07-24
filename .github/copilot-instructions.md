@@ -25,7 +25,7 @@ Essential knowledge for GitHub Copilot when working on this volunteer-run Scouti
 - ❌ NEVER run aws cloudformation delete-stack
 - ❌ NEVER create situations where rollback will destroy resources
 - ❌ NEVER perform AWS operations without understanding their impact on stack state
-- ✅ You ARE permitted to deploy to **dev environment only** by running `./deploy.sh dev apply` in the `tofu/application/environments/dev/` folder as part of normal workflow
+- ✅ You ARE permitted to deploy to **dev environment only** by running `./tofu/application/scripts/deploy.sh dev apply` from the repo root as part of normal workflow
 - ✅ ALWAYS use `tofu plan` to preview changes before deploying
 - ✅ ONLY use read-only AWS CLI commands (describe, list, get) for verification
 - ✅ ASK before running any AWS command that modifies infrastructure outside of OpenTofu
@@ -50,13 +50,13 @@ Essential knowledge for GitHub Copilot when working on this volunteer-run Scouti
 - **Frontend**: React + TypeScript + Vite + MUI + Apollo Client
 - **API**: AWS AppSync (GraphQL)
 - **Functions**: AWS Lambda (Python 3.14)
-- **Data**: Amazon DynamoDB (single-table design)
-- **Auth**: Amazon Cognito User Pools (Google/Facebook social login)
+- **Data**: Amazon DynamoDB (eight separate tables)
+- **Auth**: Amazon Cognito User Pools (Google social login and email/password)
 - **Infrastructure**: OpenTofu (Infrastructure as Code)
 - **Package Management**: uv (Python), npm (frontend)
 
 **Key Design Patterns**:
-- **Single-table DynamoDB**: `PK`/`SK` with GSI1, GSI2, GSI3 (see `tofu/application/modules/dynamodb/` and code comments)
+- **Multi-table DynamoDB**: Eight separate tables with named GSIs (see `tofu/application/modules/dynamodb/main.tf`)
 - **GraphQL schema**: See `tofu/application/schema/schema.graphql`
 - **Authorization**: Owner-based + Share-based (READ/WRITE permissions)
 - **100% test coverage**: No exceptions, all tests must pass
@@ -112,7 +112,7 @@ def test_create_profile():
     # Create mock DynamoDB table
     dynamodb = boto3.resource('dynamodb', region_name='us-east-1')
     table = dynamodb.create_table(
-        TableName='PsmApp',
+        TableName='kernelworx-profiles-ue1-dev',
         KeySchema=[
             {'AttributeName': 'PK', 'KeyType': 'HASH'},
             {'AttributeName': 'SK', 'KeyType': 'RANGE'}
@@ -177,27 +177,31 @@ test('renders profile card with owner badge', () => {
 
 **Module Organization**:
 ```hcl
-# tofu/modules/dynamodb/main.tf
-resource "aws_dynamodb_table" "main" {
-  name         = "${var.name_prefix}-app-${var.region_abbrev}-${var.environment}"
+# tofu/application/modules/dynamodb/main.tf
+resource "aws_dynamodb_table" "profiles" {
+  name         = "${var.name_prefix}-profiles-${var.region_abbrev}-${var.environment}"
   billing_mode = "PAY_PER_REQUEST"
-  hash_key     = "PK"
-  range_key    = "SK"
+  hash_key     = "ownerAccountId"
+  range_key    = "profileId"
 
   attribute {
-    name = "PK"
+    name = "ownerAccountId"
     type = "S"
   }
   attribute {
-    name = "SK"
+    name = "profileId"
     type = "S"
+  }
+
+  global_secondary_index {
+    name            = "profileId-index"
+    hash_key        = "profileId"
+    projection_type = "ALL"
   }
 
   point_in_time_recovery {
     enabled = true
   }
-
-  # Add GSI1, GSI2, GSI3...
 }
 ```
 
@@ -249,7 +253,7 @@ def check_profile_access(caller_account_id: str, profile_id: str, action: str) -
 
 ## 7. GraphQL Resolver Pattern - PREFER NON-LAMBDA
 
-**⚠️ IMPORTANT**: Before creating a Lambda resolver, consider alternatives. See `TODO_SIMPLIFY_LAMBDA.md`.
+**⚠️ IMPORTANT**: Before creating a Lambda resolver, consider whether the operation can be expressed as a VTL, JavaScript, or Pipeline resolver first.
 
 **Resolver Type Priority** (use first option that works):
 1. **VTL Resolver** - Simple CRUD, single DynamoDB operation
@@ -309,15 +313,12 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
 ## 8. Common Patterns
 
-**DynamoDB Query Pattern** (single-table):
+**DynamoDB Query Pattern** (multi-table):
 ```python
-# Get all campaigns for a profile
-response = table.query(
-    KeyConditionExpression='PK = :pk AND begins_with(SK, :sk)',
-    ExpressionAttributeValues={
-        ':pk': f'PROFILE#{profile_id}',
-        ':sk': 'CAMPAIGN#'
-    }
+# Get all campaigns for a profile from the campaigns table
+response = tables.campaigns.query(
+    KeyConditionExpression='profileId = :profileId',
+    ExpressionAttributeValues={':profileId': profile_id}
 )
 campaigns = response['Items']
 ```
@@ -369,12 +370,9 @@ def generate_report(profile_id: str, campaign_id: str) -> str:
 
 ## 10. Key Files Reference
 
-- `TODO.md`: Current phase and task tracking
-- `TODO_SIMPLIFY_LAMBDA.md`: Lambda reduction plan (15 → 7 completed, target: 2-3 Lambdas)
 - `AGENT.md`: Detailed AI agent rules and quality standards
 - `docs/DEVELOPER_GUIDE.md`: Development workflow and code patterns
 - `docs/GETTING_STARTED.md`: Setup and deployment instructions
-- `docs/VTL_RESOLVER_NOTES.md`: VTL resolver implementation notes
 - `tofu/application/schema/schema.graphql`: GraphQL API definition
 - `tofu/application/modules/`: Infrastructure modules (DynamoDB, S3, Cognito, etc.)
 
@@ -436,9 +434,8 @@ npm run test -- --coverage
 
 ## 14. When in Doubt
 
-- **Refer to AGENT.md, docs/, and TODO.md** for requirements and architecture
+- **Refer to AGENT.md and docs/** for requirements and architecture
 - **Check AGENT.md** for detailed quality standards
-- **Follow TODO.md** for current phase priorities
 - **Ask the repo owner** before making large design changes
 - **Maintain 100% test coverage** - no exceptions!
 ````

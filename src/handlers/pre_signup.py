@@ -18,7 +18,8 @@ How it works:
 """
 
 import logging
-from typing import Any, Dict, NoReturn
+import re
+from typing import Any, Dict, NoReturn, Optional
 
 import boto3
 from botocore.exceptions import ClientError
@@ -27,19 +28,48 @@ from botocore.exceptions import ClientError
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
+# Conservative email pattern used to validate provider-supplied email before it is
+# interpolated into a Cognito ListUsers filter string. This rejects characters that
+# could break filter syntax or be used for injection (e.g. unescaped quotes/backslashes).
+EMAIL_PATTERN = re.compile(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$")
 
-def _auto_confirm_event(event: Dict[str, Any]) -> Dict[str, Any]:
-    """Auto-confirm and auto-verify email for new federated sign-ups."""
+
+class FederatedIdentityLinkedException(Exception):
+    """Raised when a federated identity is linked to an existing native account."""
+
+    pass
+
+
+def _auto_confirm_event(event: Dict[str, Any], verify_email: bool = True) -> Dict[str, Any]:
+    """Auto-confirm a new federated sign-up and optionally auto-verify the email."""
     event["response"]["autoConfirmUser"] = True
-    event["response"]["autoVerifyEmail"] = True
+    event["response"]["autoVerifyEmail"] = verify_email
     return event
+
+
+def _is_email_verified(user_attributes: Dict[str, Any]) -> bool:
+    """Return True when the federated provider explicitly verified the email address."""
+    email_verified = user_attributes.get("email_verified")
+    return email_verified is True or str(email_verified).lower() == "true"
+
+
+def _validate_email(email: str) -> Optional[str]:
+    """Validate and return a sanitized email, or None if it is unsafe/invalid."""
+    if not isinstance(email, str):
+        return None
+    email = email.strip()
+    if len(email) > 254:
+        return None
+    if EMAIL_PATTERN.fullmatch(email) is None:
+        return None
+    return email
 
 
 def _link_federated_identity(cognito: Any, user_pool_id: str, existing_username: str, username: str) -> NoReturn:
     """Link federated identity to existing user."""
     if "_" not in username:
         logger.error(f"Unexpected federated username format: {username}")
-        raise Exception("Cannot link federated identity: invalid username format")
+        raise FederatedIdentityLinkedException("Cannot link federated identity: invalid username format")
     provider_name, provider_user_id = username.split("_", 1)
     cognito.admin_link_provider_for_user(
         UserPoolId=user_pool_id,
@@ -51,7 +81,7 @@ def _link_federated_identity(cognito: Any, user_pool_id: str, existing_username:
         },
     )
     logger.info(f"Successfully linked {provider_name} identity to user {existing_username}")
-    raise Exception(
+    raise FederatedIdentityLinkedException(
         f"Account with email already exists. Your {provider_name} account has been linked. Please sign in again."
     )
 
@@ -67,15 +97,14 @@ def _handle_existing_user(
 
 def _handle_signup_exception(e: Exception, email: str, event: Dict[str, Any]) -> Dict[str, Any]:
     """Handle exceptions during federated signup processing."""
-    error_msg = str(e)
-    if "already exists" in error_msg or "has been linked" in error_msg:
-        raise
-    if "invalid username format" in error_msg:
-        raise
+    if isinstance(e, FederatedIdentityLinkedException):
+        raise e
     if isinstance(e, ClientError) and e.response.get("Error", {}).get("Code") == "InvalidParameterException":
         logger.warning(f"Link may already exist: {e}")
-        raise Exception(f"Account with email {email} already exists. Please sign in again.")
-    logger.exception(f"Error in pre-signup trigger: {error_msg}")
+        raise FederatedIdentityLinkedException(
+            f"Account with email {email} already exists. Please sign in again."
+        )
+    logger.exception(f"Error in pre-signup trigger: {str(e)}")
     return event
 
 
@@ -83,7 +112,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
     Pre-Sign-Up Lambda Trigger Handler
 
-    Links federated identities to existing users with matching email.
+    Links federated identities to existing native users with matching *verified* email.
 
     Event structure:
     {
@@ -137,7 +166,16 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         logger.warning("No email in federated sign-up, cannot check for duplicates")
         return event
 
-    return _process_federated_signup(event, user_pool_id, username, email)
+    if not _is_email_verified(user_attributes):
+        logger.warning("Federated provider did not verify email, skipping auto-link")
+        return _auto_confirm_event(event, verify_email=False)
+
+    validated_email = _validate_email(email)
+    if not validated_email:
+        logger.warning("Invalid or unsafe email from federated provider, skipping auto-link")
+        return _auto_confirm_event(event, verify_email=False)
+
+    return _process_federated_signup(event, user_pool_id, username, validated_email)
 
 
 def _process_federated_signup(event: Dict[str, Any], user_pool_id: str, username: str, email: str) -> Dict[str, Any]:

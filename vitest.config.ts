@@ -1,10 +1,23 @@
 import { defineConfig } from 'vitest/config';
 import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
   test: {
-    globalSetup: path.resolve(__dirname, './vitest.global.setup.ts'),
-    // Note: globalTeardown removed - integration tests have their own teardown
-    // in tests/integration/vitest.config.ts. Frontend tests don't need AWS cleanup.
+    name: 'guards',
+    root: __dirname,
+    globals: true,
+    environment: 'node',
+    include: [path.resolve(__dirname, 'tests/unit/**/*.test.ts')],
+    exclude: [
+      '**/node_modules/**',
+      '**/dist/**',
+      // Python test support files are not TypeScript tests
+      '**/tests/unit/conftest.py',
+      '**/tests/unit/fixtures.py',
+      '**/tests/unit/table_schemas.py',
+    ],
   },
 });

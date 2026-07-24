@@ -42,12 +42,14 @@ function updateLineItemInArray(
   value: string,
 ): LineItemInput[] {
   const newItems = [...items];
+  const updatedItem = { ...newItems[index] };
   if (field === 'quantity') {
     const parsed = parseInt(value, 10) || 1;
-    newItems[index][field] = Math.min(Math.max(1, parsed), 99999);
+    updatedItem[field] = Math.min(Math.max(1, parsed), 99999);
   } else {
-    newItems[index][field] = value;
+    updatedItem[field] = value;
   }
+  newItems[index] = updatedItem;
   return newItems;
 }
 

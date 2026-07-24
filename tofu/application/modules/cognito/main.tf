@@ -45,6 +45,12 @@ variable "login_certificate_arn" {
   type        = string
 }
 
+variable "login_certificate_validation" {
+  description = "Certificate validation resource for the Cognito login domain"
+  type        = any
+  default     = null
+}
+
 variable "sms_role_arn" {
   description = "IAM role ARN used by Cognito for SMS/MFA delivery"
   type        = string
@@ -128,7 +134,8 @@ locals {
 
 # User Pool
 resource "aws_cognito_user_pool" "main" {
-  name = local.user_pool_name
+  name                = local.user_pool_name
+  deletion_protection = "ACTIVE"
 
   # Username configuration
   username_attributes      = ["email"]
@@ -363,6 +370,12 @@ resource "aws_cognito_user_pool_domain" "custom" {
 
   lifecycle {
     prevent_destroy = true
+    precondition {
+      # Reference the validation resource so the custom domain waits for the login
+      # certificate to validate. The ternary allows dev builds that omit it.
+      condition     = var.login_certificate_validation != null ? length(var.login_certificate_validation.validation_record_fqdns) > 0 : true
+      error_message = "Login certificate validation must complete before creating the Cognito custom domain"
+    }
   }
 }
 

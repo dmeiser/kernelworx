@@ -25,9 +25,10 @@ afterEach(async () => {
   vi.clearAllTimers();
   
   // Force clear any Apollo Client cache
-  if (globalThis.apolloClient) {
+  const apolloClient = (globalThis as { apolloClient?: { clearStore: () => Promise<void> } }).apolloClient;
+  if (apolloClient) {
     try {
-      await globalThis.apolloClient.clearStore();
+      await apolloClient.clearStore();
     } catch (_e) {
       // Ignore errors during cleanup
     }

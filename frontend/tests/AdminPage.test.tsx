@@ -77,7 +77,7 @@ describe('AdminPage', () => {
     ];
 
     render(
-      <MockedProvider mocks={mocks} addTypename={false}>
+      <MockedProvider mocks={mocks}>
         <BrowserRouter>
           <AdminPage />
         </BrowserRouter>
@@ -114,7 +114,7 @@ describe('AdminPage', () => {
     ];
 
     render(
-      <MockedProvider mocks={mocks} addTypename={false}>
+      <MockedProvider mocks={mocks}>
         <BrowserRouter>
           <AdminPage />
         </BrowserRouter>
@@ -151,7 +151,7 @@ describe('AdminPage', () => {
     ];
 
     render(
-      <MockedProvider mocks={mocks} addTypename={false}>
+      <MockedProvider mocks={mocks}>
         <BrowserRouter>
           <AdminPage />
         </BrowserRouter>
@@ -191,7 +191,7 @@ describe('AdminPage', () => {
     ];
 
     render(
-      <MockedProvider mocks={mocks} addTypename={false}>
+      <MockedProvider mocks={mocks}>
         <BrowserRouter>
           <AdminPage />
         </BrowserRouter>
@@ -233,7 +233,7 @@ describe('AdminPage', () => {
     ];
 
     render(
-      <MockedProvider mocks={mocks} addTypename={false}>
+      <MockedProvider mocks={mocks}>
         <BrowserRouter>
           <AdminPage />
         </BrowserRouter>
@@ -275,7 +275,7 @@ describe('AdminPage', () => {
     ];
 
     render(
-      <MockedProvider mocks={mocks} addTypename={false}>
+      <MockedProvider mocks={mocks}>
         <BrowserRouter>
           <AdminPage />
         </BrowserRouter>
@@ -312,7 +312,7 @@ describe('AdminPage', () => {
     ];
 
     render(
-      <MockedProvider mocks={mocks} addTypename={false}>
+      <MockedProvider mocks={mocks}>
         <BrowserRouter>
           <AdminPage />
         </BrowserRouter>
@@ -351,7 +351,7 @@ describe('AdminPage', () => {
     ];
 
     render(
-      <MockedProvider mocks={mocks} addTypename={false}>
+      <MockedProvider mocks={mocks}>
         <BrowserRouter>
           <AdminPage />
         </BrowserRouter>
@@ -392,7 +392,7 @@ describe('AdminPage', () => {
     ];
 
     render(
-      <MockedProvider mocks={mocks} addTypename={false}>
+      <MockedProvider mocks={mocks}>
         <BrowserRouter>
           <AdminPage />
         </BrowserRouter>
@@ -425,7 +425,7 @@ describe('AdminPage', () => {
     ];
 
     render(
-      <MockedProvider mocks={mocks} addTypename={false}>
+      <MockedProvider mocks={mocks}>
         <BrowserRouter>
           <AdminPage />
         </BrowserRouter>
@@ -452,7 +452,7 @@ describe('AdminPage', () => {
     ];
 
     render(
-      <MockedProvider mocks={mocks} addTypename={false}>
+      <MockedProvider mocks={mocks}>
         <BrowserRouter>
           <AdminPage />
         </BrowserRouter>
@@ -481,7 +481,7 @@ describe('AdminPage', () => {
     ];
 
     render(
-      <MockedProvider mocks={mocks} addTypename={false}>
+      <MockedProvider mocks={mocks}>
         <BrowserRouter>
           <AdminPage />
         </BrowserRouter>

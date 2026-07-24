@@ -10,7 +10,9 @@ have access via a share. The transfer involves:
 
 from typing import Any, Dict
 
+import boto3
 from boto3.dynamodb.conditions import Key
+from boto3.dynamodb.types import TypeSerializer
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
@@ -21,6 +23,8 @@ except ModuleNotFoundError:  # pragma: no cover
     from ..utils.auth import is_admin
     from ..utils.dynamodb import tables
     from ..utils.ids import ensure_account_id, ensure_profile_id
+
+_type_serializer = TypeSerializer()
 
 
 def _get_and_verify_profile(db_profile_id: str, db_caller_id: str, event: Dict[str, Any]) -> Dict[str, Any]:
@@ -52,11 +56,37 @@ def _verify_new_owner_has_share(db_profile_id: str, db_new_owner_id: str, caller
 
 
 def _transfer_ownership(profile: Dict[str, Any], db_profile_id: str, db_new_owner_id: str) -> None:
-    """Transfer ownership by deleting and recreating profile with new owner."""
-    old_key = {"ownerAccountId": profile["ownerAccountId"], "profileId": db_profile_id}
-    tables.profiles.delete_item(Key=old_key)
+    """Transfer ownership atomically using a DynamoDB transaction.
+
+    The old profile record is deleted and the new record (with the updated owner)
+    is written in a single transact_write_items call so the profile cannot be lost
+    if one of the operations fails.
+    """
+    old_owner_id = profile["ownerAccountId"]
+    new_profile = {**profile, "ownerAccountId": db_new_owner_id}
+
+    old_key = {"ownerAccountId": old_owner_id, "profileId": db_profile_id}
+
+    dynamodb_client = boto3.client("dynamodb")
+    dynamodb_client.transact_write_items(
+        TransactItems=[
+            {
+                "Delete": {
+                    "TableName": tables.profiles.table_name,
+                    "Key": {k: _type_serializer.serialize(v) for k, v in old_key.items()},
+                }
+            },
+            {
+                "Put": {
+                    "TableName": tables.profiles.table_name,
+                    "Item": {k: _type_serializer.serialize(v) for k, v in new_profile.items()},
+                }
+            },
+        ]
+    )
+
+    # Keep the returned profile dict in sync with the persisted record.
     profile["ownerAccountId"] = db_new_owner_id
-    tables.profiles.put_item(Item=profile)
 
 
 def _delete_share_if_exists(db_profile_id: str, db_new_owner_id: str) -> None:

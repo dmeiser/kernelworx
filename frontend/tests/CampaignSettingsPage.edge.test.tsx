@@ -43,7 +43,7 @@ const mocks = [
 
 const renderPage = () =>
   render(
-    <MockedProvider mocks={mocks} addTypename={false}>
+    <MockedProvider mocks={mocks}>
       <MemoryRouter initialEntries={['/scouts/profile-123/campaigns/campaign-456/settings']}>
         <Routes>
           <Route path="/scouts/:profileId/campaigns/:campaignId/settings" element={<CampaignSettingsPage />} />

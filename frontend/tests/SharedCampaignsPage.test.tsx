@@ -106,7 +106,7 @@ const baseMocks = () => [
   },
 ];
 
-const createListMock = (sharedCampaigns = mockSharedCampaigns) => ({
+const createListMock = (sharedCampaigns: any[] = mockSharedCampaigns) => ({
   request: {
     query: LIST_MY_SHARED_CAMPAIGNS,
   },
@@ -183,7 +183,7 @@ describe('SharedCampaignsPage', () => {
         {
           ...mockSharedCampaigns[0],
           sharedCampaignCode: 'NOCAT123',
-          catalog: null,
+          catalog: null as any,
         },
       ];
       renderWithProviders([createListMock(campaignsWithMissingCatalog)]);

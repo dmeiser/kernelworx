@@ -281,4 +281,38 @@ describe('reportExport utilities', () => {
       expect(() => downloadAsCSV([mockOrder], 'campaign-abc-123-xyz')).not.toThrow();
     });
   });
+
+  describe('CSV escaping and formula injection prevention', () => {
+    function MockBlob(this: { content: string }, parts: BlobPart[]) {
+      this.content = parts.join('');
+    }
+
+    it('should escape embedded double quotes in CSV cells', () => {
+      const orderWithQuote = {
+        ...mockOrder,
+        customerName: 'Robert "Bob" Smith',
+      };
+      const blobSpy = vi.spyOn(global, 'Blob').mockImplementation(MockBlob as unknown as typeof Blob);
+      downloadAsCSV([orderWithQuote], 'campaign-123');
+      const csvContent = (blobSpy.mock.results[0].value as { content: string }).content;
+      expect(csvContent).toContain('Robert ""Bob"" Smith');
+      blobSpy.mockRestore();
+    });
+
+    it('should neutralize formula-triggering characters in CSV cells', () => {
+      const formulaOrder = {
+        ...mockOrder,
+        customerName: "=cmd|'/C calc'!A0",
+        customerPhone: '+123', // short enough that formatPhone leaves the leading +
+        customerAddress: { street: '@SUM(A:A)' },
+      };
+      const blobSpy = vi.spyOn(global, 'Blob').mockImplementation(MockBlob as unknown as typeof Blob);
+      downloadAsCSV([formulaOrder], 'campaign-123');
+      const csvContent = (blobSpy.mock.results[0].value as { content: string }).content;
+      expect(csvContent).toContain("'=cmd|'/C calc'!A0");
+      expect(csvContent).toContain("'+123");
+      expect(csvContent).toContain("'@SUM(A:A)");
+      blobSpy.mockRestore();
+    });
+  });
 });

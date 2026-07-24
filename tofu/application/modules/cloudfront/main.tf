@@ -2,32 +2,32 @@
 
 variable "environment" {
   description = "Deployment environment (e.g., dev, prod)"
-  type = string
+  type        = string
 }
 
 variable "site_domain" {
   description = "Fully qualified site domain (e.g., dev.kernelworx.app or kernelworx.app)"
-  type = string
+  type        = string
 }
 
 variable "site_certificate_arn" {
   description = "ACM certificate ARN for the CloudFront site domain"
-  type = string
+  type        = string
 }
 
 variable "static_bucket_id" {
   description = "ID of the S3 bucket serving static assets"
-  type = string
+  type        = string
 }
 
 variable "static_bucket_arn" {
   description = "ARN of the S3 bucket serving static assets"
-  type = string
+  type        = string
 }
 
 variable "static_bucket_regional_domain" {
   description = "Regional domain name of the S3 bucket for CloudFront origin"
-  type = string
+  type        = string
 }
 
 variable "certificate_validation" {
@@ -57,8 +57,8 @@ resource "aws_s3_bucket_policy" "static" {
     Version = "2012-10-17"
     Statement = [
       {
-        Sid       = "AllowCloudFrontAccess"
-        Effect    = "Allow"
+        Sid    = "AllowCloudFrontAccess"
+        Effect = "Allow"
         Principal = {
           AWS = aws_cloudfront_origin_access_identity.main.iam_arn
         }
@@ -135,7 +135,9 @@ resource "aws_cloudfront_distribution" "site" {
   lifecycle {
     prevent_destroy = true
     precondition {
-      condition     = var.certificate_validation != null ? true : true
+      # When a validation resource is supplied, ensure it has completed before
+      # creating the distribution. Dev builds omit validation entirely.
+      condition     = var.certificate_validation == null ? true : length(var.certificate_validation.validation_record_fqdns) > 0
       error_message = "Certificate validation must complete before creating CloudFront distribution"
     }
   }

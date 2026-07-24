@@ -43,6 +43,21 @@ build_lambda_layer() {
     (cd "$ROOT_DIR" && uv pip install --requirement "$LAYER_REQ" --target "$LAYER_DIR/python")
 }
 
+# Check whether a saved plan is still fresh relative to source/config changes.
+# Returns 0 (true) if the plan exists and no relevant source files are newer.
+plan_is_fresh() {
+    local plan_file="$1"
+    if [ ! -f "$plan_file" ]; then
+        return 1
+    fi
+    local newer_source
+    newer_source=$(find "$ROOT_DIR/src" "$ROOT_DIR/tofu" \
+        -type f \
+        \( -name "*.tf" -o -name "*.py" -o -name "*.js" -o -name "*.graphql" \) \
+        -newer "$plan_file" 2>/dev/null | head -n 1)
+    [ -z "$newer_source" ]
+}
+
 cd "$ENV_DIR"
 
 echo ""
@@ -67,13 +82,20 @@ case "$ACTION" in
         fi
 
         build_lambda_layer
-        if [ -f tfplan ]; then
+        if [ -f tfplan ] && plan_is_fresh tfplan; then
             echo "🚀 Applying saved plan..."
             tofu apply $AUTO_APPROVE_FLAG $EXTRA_FLAGS tfplan
             rm tfplan
         else
+            if [ -f tfplan ]; then
+                echo "⚠️  Saved plan is stale (source/config changed since it was created). Re-planning..."
+                rm tfplan
+            fi
+            echo "📋 Re-planning changes before apply..."
+            tofu plan -out=tfplan $EXTRA_FLAGS
             echo "🚀 Applying changes..."
-            tofu apply $AUTO_APPROVE_FLAG $EXTRA_FLAGS
+            tofu apply $AUTO_APPROVE_FLAG $EXTRA_FLAGS tfplan
+            rm tfplan
         fi
         ;;
     destroy)
@@ -85,10 +107,6 @@ case "$ACTION" in
             echo "Aborted."
         fi
         ;;
-    import)
-        echo "📥 Running import script..."
-        "$SCRIPT_DIR/import-resources.sh" "$ENV"
-        ;;
     validate)
         echo "✅ Validating configuration..."
         tofu validate $EXTRA_FLAGS
@@ -98,14 +116,13 @@ case "$ACTION" in
         tofu fmt -recursive "$SCRIPT_DIR/.."
         ;;
     *)
-        echo "Usage: $0 <env> <init|plan|apply|destroy|import|validate|fmt> [extra-flags]"
+        echo "Usage: $0 <env> <init|plan|apply|destroy|validate|fmt> [extra-flags]"
         echo ""
         echo "Commands:"
         echo "  init      Initialize OpenTofu (download providers)"
-        echo "  plan      Preview changes"
-        echo "  apply     Apply changes"
+        echo "  plan      Preview changes and save a tfplan file"
+        echo "  apply     Apply saved plan if fresh, otherwise re-plan and apply"
         echo "  destroy   Destroy all resources (with confirmation)"
-        echo "  import    Import existing AWS resources"
         echo "  validate  Validate configuration"
         echo "  fmt       Format configuration files"
         echo ""

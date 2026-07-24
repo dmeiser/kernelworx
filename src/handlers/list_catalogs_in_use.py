@@ -18,18 +18,22 @@ Returns: [ID!]! (list of catalog IDs)
 """
 
 import asyncio
-import os
 from typing import Any, Dict, List, Set, Tuple
 
 import aioboto3
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
+    from utils.dynamodb import get_required_env
     from utils.errors import AppError, ErrorCode
-    from utils.logging import StructuredLogger, get_correlation_id
+    from utils.logging import get_correlation_id, get_logger
 except ModuleNotFoundError:  # pragma: no cover
+    from ..utils.dynamodb import get_required_env
     from ..utils.errors import AppError, ErrorCode
-    from ..utils.logging import StructuredLogger, get_correlation_id
+    from ..utils.logging import get_correlation_id, get_logger
+
+
+logger = get_logger(__name__)
 
 
 async def _extract_field_values(items: list[Dict[str, Any]], field_name: str) -> List[str]:
@@ -99,12 +103,13 @@ async def _async_get_shared_campaign_catalog_ids(
     # Run all queries concurrently and collect results
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
-    # Combine results, ignoring any exceptions
+    # Combine results, logging any exceptions without failing the overall operation
     catalog_ids: Set[str] = set()
     for result in results:
         if isinstance(result, set):
             catalog_ids.update(result)
-        # Exceptions are logged but don't fail the overall operation
+        elif isinstance(result, BaseException):
+            logger.error("Failed to query campaign catalogs", error=str(result), exc_info=result)
 
     return catalog_ids
 
@@ -115,11 +120,11 @@ async def _async_get_all_catalog_ids(account_id: str) -> Tuple[Set[str], List[st
 
     Flow:
     - owned_profile_ids and shared_profile_ids run concurrently
-    - owned_catalog_ids and shared_catalog_ids wait for their respective profile_ids, then run N queries in parallel
+    - owned_catalog_ids and shared_catalog_ids wait for their respective profile_ids, then runs N queries in parallel
     """
-    campaigns_table_name = os.environ.get("CAMPAIGNS_TABLE_NAME", "kernelworx-campaigns-ue1-dev")
-    profiles_table_name = os.environ.get("PROFILES_TABLE_NAME", "kernelworx-profiles-ue1-dev")
-    shares_table_name = os.environ.get("SHARES_TABLE_NAME", "kernelworx-shares-ue1-dev")
+    campaigns_table_name = get_required_env("CAMPAIGNS_TABLE_NAME")
+    profiles_table_name = get_required_env("PROFILES_TABLE_NAME")
+    shares_table_name = get_required_env("SHARES_TABLE_NAME")
 
     session = aioboto3.Session()
     async with session.resource("dynamodb") as dynamodb:
@@ -150,13 +155,13 @@ def handler(event: Dict[str, Any], context: Any) -> List[str]:
     Returns:
         List of catalog IDs (deduplicated)
     """
-    logger = StructuredLogger(__name__, get_correlation_id(event))
+    request_logger = get_logger(__name__, get_correlation_id(event))
     caller_sub = event["identity"]["sub"]
 
     # Add ACCOUNT# prefix for consistency with data model
     account_id_with_prefix = f"ACCOUNT#{caller_sub}" if not caller_sub.startswith("ACCOUNT#") else caller_sub
 
-    logger.info("Listing catalogs in use", account_id=account_id_with_prefix)
+    request_logger.info("Listing catalogs in use", account_id=account_id_with_prefix)
 
     try:
         # Run all queries with optimal parallelism:
@@ -166,18 +171,18 @@ def handler(event: Dict[str, Any], context: Any) -> List[str]:
             _async_get_all_catalog_ids(account_id_with_prefix)
         )
 
-        logger.info("Found owned campaign catalogs", count=len(owned_catalog_ids))
-        logger.info("Found shared profiles", count=len(shared_profile_ids))
-        logger.info("Found shared campaign catalogs", count=len(shared_catalog_ids))
+        request_logger.info("Found owned campaign catalogs", count=len(owned_catalog_ids))
+        request_logger.info("Found shared profiles", count=len(shared_profile_ids))
+        request_logger.info("Found shared campaign catalogs", count=len(shared_catalog_ids))
 
         # Combine and deduplicate
         all_catalog_ids = owned_catalog_ids | shared_catalog_ids
-        logger.info("Total unique catalogs in use", count=len(all_catalog_ids))
+        request_logger.info("Total unique catalogs in use", count=len(all_catalog_ids))
 
         return sorted(all_catalog_ids)
 
     except AppError:
         raise
     except Exception as e:
-        logger.error("Failed to list catalogs in use", error=str(e))
+        request_logger.error("Failed to list catalogs in use", error=str(e), exc_info=True)
         raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to list catalogs in use")

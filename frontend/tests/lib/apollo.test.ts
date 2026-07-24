@@ -33,7 +33,7 @@ describe('lib/apollo', () => {
     it('adds Authorization header when token present', async () => {
       (fetchAuthSession as any).mockResolvedValue({ tokens: { idToken: { toString: () => 'jwt-token' } } });
 
-      const result = await getAuthContext(null, { headers: { 'x-test': 'ok' } } as any);
+      const result = await getAuthContext(null as any, { headers: { 'x-test': 'ok' } } as any);
       expect(result).toHaveProperty('headers');
       expect(result.headers).toMatchObject({ 'x-test': 'ok', Authorization: 'Bearer jwt-token' });
     });
@@ -41,7 +41,7 @@ describe('lib/apollo', () => {
     it('throws when token is missing', async () => {
       (fetchAuthSession as any).mockResolvedValue({ tokens: {} });
 
-      await expect(getAuthContext(null, { headers: {} } as any)).rejects.toThrow('No valid auth token available');
+      await expect(getAuthContext(null as any, { headers: {} } as any)).rejects.toThrow('No valid auth token available');
     });
   });
 

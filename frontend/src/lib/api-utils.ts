@@ -240,6 +240,27 @@ export function formatCurrency(amount: number | null | undefined, currency = 'US
 }
 
 /**
+ * Format a phone number for display.
+ *
+ * @param phone - Raw phone number string
+ * @returns Formatted phone number or the original string when unrecognizable
+ */
+export function formatPhoneNumber(phone: string | undefined): string {
+  if (!phone) {
+    return '—';
+  }
+
+  const digits = phone.replace(/\D/g, '');
+  if (digits.length === 11 && digits.startsWith('1')) {
+    return `(${digits.slice(1, 4)}) ${digits.slice(4, 7)}-${digits.slice(7, 11)}`;
+  }
+  if (digits.length === 10) {
+    return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6, 10)}`;
+  }
+  return phone;
+}
+
+/**
  * Safely parse a numeric value from unknown input.
  *
  * @param value - Input value (may be string, number, or undefined)

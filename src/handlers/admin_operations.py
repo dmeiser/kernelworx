@@ -12,7 +12,7 @@ import re
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, cast
 
 import boto3
 from botocore.exceptions import ClientError
@@ -23,11 +23,13 @@ try:  # pragma: no cover
     from utils.dynamodb import tables
     from utils.errors import AppError, ErrorCode
     from utils.logging import get_logger
+    from utils.pagination import query_all_items
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.auth import is_admin
     from ..utils.dynamodb import tables
     from ..utils.errors import AppError, ErrorCode
     from ..utils.logging import get_logger
+    from ..utils.pagination import query_all_items
 
 
 def _get_required_env(name: str) -> str:
@@ -70,53 +72,6 @@ def _get_cognito_user_attributes(cognito_user: Dict[str, Any]) -> tuple[str, str
     enabled = cognito_user.get("Enabled", True)
 
     return account_id, email, email_verified, user_status, enabled
-
-
-def _get_display_name_from_dynamodb(account_id: str, logger: Any) -> str | None:
-    """Try to get display name from DynamoDB account record."""
-    try:
-        db_account_id = f"ACCOUNT#{account_id}"
-        db_response = tables.accounts.get_item(Key={"accountId": db_account_id})
-        if "Item" in db_response:
-            account = db_response["Item"]
-            given_name = str(account.get("givenName", ""))
-            family_name = str(account.get("familyName", ""))
-            if given_name or family_name:
-                return f"{given_name} {family_name}".strip()
-    except ClientError as e:
-        logger.warning("Failed to get DynamoDB account", error=str(e), account_id=account_id)
-    return None
-
-
-def _build_admin_user_dict(
-    cognito_user: Dict[str, Any],
-    cognito: Any,
-    user_pool_id: str,
-    logger: Any,
-) -> Dict[str, Any]:
-    """Build AdminUser dict from Cognito user data and DynamoDB account."""
-    account_id, email, email_verified, user_status, enabled = _get_cognito_user_attributes(cognito_user)
-
-    created_at = cognito_user.get("UserCreateDate")
-    last_modified_at = cognito_user.get("UserLastModifiedDate")
-
-    username = cognito_user.get("Username", "")
-    groups = _get_user_groups(cognito, user_pool_id, username)
-    is_admin_user = "ADMIN" in groups
-
-    display_name = _get_display_name_from_dynamodb(account_id, logger)
-
-    return {
-        "accountId": account_id,
-        "email": email,
-        "displayName": display_name,
-        "status": user_status,
-        "enabled": enabled,
-        "emailVerified": email_verified,
-        "isAdmin": is_admin_user,
-        "createdAt": created_at.isoformat() if created_at else None,
-        "lastModifiedAt": last_modified_at.isoformat() if last_modified_at else None,
-    }
 
 
 def _list_cognito_users(
@@ -168,7 +123,7 @@ def admin_list_users(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
         cognito_users, pagination_token = _list_cognito_users(cognito, user_pool_id, limit, next_token, logger)
         admin_users = [
-            _build_admin_user_dict(cognito_user, cognito, user_pool_id, logger) for cognito_user in cognito_users
+            _build_admin_user(cognito, user_pool_id, cognito_user, logger) for cognito_user in cognito_users
         ]
 
         logger.info("Listed users", count=len(admin_users), has_more=bool(pagination_token))
@@ -816,15 +771,100 @@ def create_managed_catalog(event: Dict[str, Any], context: Any) -> Dict[str, Any
 
 def _delete_orders_for_campaign(campaign_id: str, logger: Any) -> int:
     """Delete all orders for a campaign. Returns count deleted."""
-    orders_response = tables.orders.query(
-        KeyConditionExpression="campaignId = :cid",
-        ExpressionAttributeValues={":cid": campaign_id},
+    orders = query_all_items(
+        tables.orders,
+        {
+            "KeyConditionExpression": "campaignId = :cid",
+            "ExpressionAttributeValues": {":cid": campaign_id},
+        },
     )
 
     deleted_count = 0
-    for order in orders_response.get("Items", []):
+    for order in orders:
         tables.orders.delete_item(Key={"campaignId": campaign_id, "orderId": order["orderId"]})
         deleted_count += 1
+    return deleted_count
+
+
+def _delete_user_orders(account_id: str, logger: Any) -> int:
+    """Delete all orders for all campaigns of all profiles owned by a user. Returns count deleted."""
+    db_account_id = _normalize_account_id(account_id)
+    deleted_count = 0
+
+    profiles = _get_user_profiles(db_account_id, logger)
+    for profile in profiles:
+        profile_id = profile["profileId"]
+        campaigns = query_all_items(
+            tables.campaigns,
+            {
+                "KeyConditionExpression": "profileId = :pid",
+                "ExpressionAttributeValues": {":pid": profile_id},
+            },
+        )
+        for campaign in campaigns:
+            deleted_count += _delete_orders_for_campaign(campaign["campaignId"], logger)
+
+    logger.info("Deleted user orders", account_id=account_id, count=deleted_count)
+    return deleted_count
+
+
+def _delete_user_campaigns(account_id: str, logger: Any) -> int:
+    """Delete all campaigns for all profiles owned by a user. Returns count deleted."""
+    db_account_id = _normalize_account_id(account_id)
+    deleted_count = 0
+
+    profiles = _get_user_profiles(db_account_id, logger)
+    for profile in profiles:
+        profile_id = profile["profileId"]
+        campaigns = query_all_items(
+            tables.campaigns,
+            {
+                "KeyConditionExpression": "profileId = :pid",
+                "ExpressionAttributeValues": {":pid": profile_id},
+            },
+        )
+        for campaign in campaigns:
+            tables.campaigns.delete_item(Key={"profileId": profile_id, "campaignId": campaign["campaignId"]})
+            deleted_count += 1
+
+    logger.info("Deleted user campaigns", account_id=account_id, count=deleted_count)
+    return deleted_count
+
+
+def _delete_user_shares(account_id: str, logger: Any) -> int:
+    """Delete all shares for all profiles owned by a user. Returns count deleted."""
+    db_account_id = _normalize_account_id(account_id)
+    deleted_count = 0
+
+    profiles = _get_user_profiles(db_account_id, logger)
+    for profile in profiles:
+        profile_id = profile["profileId"]
+        shares = query_all_items(
+            tables.shares,
+            {
+                "KeyConditionExpression": "profileId = :pid",
+                "ExpressionAttributeValues": {":pid": profile_id},
+            },
+        )
+        for share in shares:
+            tables.shares.delete_item(Key={"profileId": profile_id, "targetAccountId": share["targetAccountId"]})
+            deleted_count += 1
+
+    logger.info("Deleted user shares", account_id=account_id, count=deleted_count)
+    return deleted_count
+
+
+def _delete_user_profiles(account_id: str, logger: Any) -> int:
+    """Delete all profiles owned by a user. Returns count deleted."""
+    db_account_id = _normalize_account_id(account_id)
+    deleted_count = 0
+
+    profiles = _get_user_profiles(db_account_id, logger)
+    for profile in profiles:
+        tables.profiles.delete_item(Key={"ownerAccountId": db_account_id, "profileId": profile["profileId"]})
+        deleted_count += 1
+
+    logger.info("Deleted user profiles", account_id=account_id, count=deleted_count)
     return deleted_count
 
 
@@ -838,28 +878,7 @@ def admin_delete_user_orders(event: Dict[str, Any], context: Any) -> int:
 
     try:
         account_id = _validate_admin_and_get_account_id(event)
-        db_account_id = _normalize_account_id(account_id)
-        deleted_count = 0
-
-        # Get all profiles owned by this account
-        profiles = _get_user_profiles(db_account_id, logger)
-
-        for profile in profiles:
-            profile_id = profile["profileId"]
-
-            # Get all campaigns for this profile
-            campaigns_response = tables.campaigns.query(
-                KeyConditionExpression="profileId = :pid",
-                ExpressionAttributeValues={":pid": profile_id},
-            )
-
-            for campaign in campaigns_response.get("Items", []):
-                campaign_id = campaign["campaignId"]
-                deleted_count += _delete_orders_for_campaign(campaign_id, logger)
-
-        logger.info("Deleted user orders", account_id=account_id, count=deleted_count)
-        return deleted_count
-
+        return _delete_user_orders(account_id, logger)
     except AppError:
         raise
     except Exception as e:
@@ -877,31 +896,7 @@ def admin_delete_user_campaigns(event: Dict[str, Any], context: Any) -> int:
 
     try:
         account_id = _validate_admin_and_get_account_id(event)
-        db_account_id = _normalize_account_id(account_id)
-        deleted_count = 0
-
-        # Get all profiles owned by this account
-        profiles_response = tables.profiles.query(
-            KeyConditionExpression="ownerAccountId = :owner",
-            ExpressionAttributeValues={":owner": db_account_id},
-        )
-
-        for profile in profiles_response.get("Items", []):
-            profile_id = profile["profileId"]
-
-            # Get all campaigns for this profile
-            campaigns_response = tables.campaigns.query(
-                KeyConditionExpression="profileId = :pid",
-                ExpressionAttributeValues={":pid": profile_id},
-            )
-
-            for campaign in campaigns_response.get("Items", []):
-                tables.campaigns.delete_item(Key={"profileId": profile_id, "campaignId": campaign["campaignId"]})
-                deleted_count += 1
-
-        logger.info("Deleted user campaigns", account_id=account_id, count=deleted_count)
-        return deleted_count
-
+        return _delete_user_campaigns(account_id, logger)
     except AppError:
         raise
     except Exception as e:
@@ -919,31 +914,7 @@ def admin_delete_user_shares(event: Dict[str, Any], context: Any) -> int:
 
     try:
         account_id = _validate_admin_and_get_account_id(event)
-        db_account_id = _normalize_account_id(account_id)
-        deleted_count = 0
-
-        # Get all profiles owned by this account
-        profiles_response = tables.profiles.query(
-            KeyConditionExpression="ownerAccountId = :owner",
-            ExpressionAttributeValues={":owner": db_account_id},
-        )
-
-        for profile in profiles_response.get("Items", []):
-            profile_id = profile["profileId"]
-
-            # Get all shares for this profile
-            shares_response = tables.shares.query(
-                KeyConditionExpression="profileId = :pid",
-                ExpressionAttributeValues={":pid": profile_id},
-            )
-
-            for share in shares_response.get("Items", []):
-                tables.shares.delete_item(Key={"profileId": profile_id, "targetAccountId": share["targetAccountId"]})
-                deleted_count += 1
-
-        logger.info("Deleted user shares", account_id=account_id, count=deleted_count)
-        return deleted_count
-
+        return _delete_user_shares(account_id, logger)
     except AppError:
         raise
     except Exception as e:
@@ -961,22 +932,7 @@ def admin_delete_user_profiles(event: Dict[str, Any], context: Any) -> int:
 
     try:
         account_id = _validate_admin_and_get_account_id(event)
-        db_account_id = _normalize_account_id(account_id)
-        deleted_count = 0
-
-        # Get all profiles owned by this account
-        profiles_response = tables.profiles.query(
-            KeyConditionExpression="ownerAccountId = :owner",
-            ExpressionAttributeValues={":owner": db_account_id},
-        )
-
-        for profile in profiles_response.get("Items", []):
-            tables.profiles.delete_item(Key={"ownerAccountId": db_account_id, "profileId": profile["profileId"]})
-            deleted_count += 1
-
-        logger.info("Deleted user profiles", account_id=account_id, count=deleted_count)
-        return deleted_count
-
+        return _delete_user_profiles(account_id, logger)
     except AppError:
         raise
     except Exception as e:
@@ -1017,6 +973,14 @@ def _scan_and_delete_catalogs(db_account_id: str) -> int:
     return deleted_count
 
 
+def _delete_user_catalogs(account_id: str, logger: Any) -> int:
+    """Soft delete all catalogs owned by a user. Returns count."""
+    db_account_id = _normalize_account_id(account_id)
+    deleted_count = _scan_and_delete_catalogs(db_account_id)
+    logger.info("Soft-deleted user catalogs", account_id=account_id, count=deleted_count)
+    return deleted_count
+
+
 def admin_delete_user_catalogs(event: Dict[str, Any], context: Any) -> int:
     """
     Soft delete all catalogs owned by a user (admin only).
@@ -1028,12 +992,7 @@ def admin_delete_user_catalogs(event: Dict[str, Any], context: Any) -> int:
 
     try:
         account_id = _validate_admin_and_get_account_id(event)
-        db_account_id = _normalize_account_id(account_id)
-
-        deleted_count = _scan_and_delete_catalogs(db_account_id)
-        logger.info("Soft-deleted user catalogs", account_id=account_id, count=deleted_count)
-        return deleted_count
-
+        return _delete_user_catalogs(account_id, logger)
     except AppError:
         raise
     except Exception as e:
@@ -1106,11 +1065,16 @@ def admin_get_user_catalogs(event: Dict[str, Any], context: Any) -> list[Dict[st
 
 def _get_user_profiles(db_account_id: str, logger: Any) -> list[Dict[str, Any]]:
     """Get all profiles owned by an account."""
-    profiles_response = tables.profiles.query(
-        KeyConditionExpression="ownerAccountId = :owner",
-        ExpressionAttributeValues={":owner": db_account_id},
+    return cast(
+        List[Dict[str, Any]],
+        query_all_items(
+            tables.profiles,
+            {
+                "KeyConditionExpression": "ownerAccountId = :owner",
+                "ExpressionAttributeValues": {":owner": db_account_id},
+            },
+        ),
     )
-    return list(profiles_response.get("Items", []))
 
 
 def _get_campaigns_for_profiles(profiles: list[Dict[str, Any]], logger: Any) -> list[Dict[str, Any]]:
@@ -1119,11 +1083,13 @@ def _get_campaigns_for_profiles(profiles: list[Dict[str, Any]], logger: Any) -> 
     for profile in profiles:
         profile_id = profile.get("profileId")
         if profile_id:
-            campaigns_response = tables.campaigns.query(
-                KeyConditionExpression="profileId = :pid",
-                ExpressionAttributeValues={":pid": profile_id},
+            campaigns = query_all_items(
+                tables.campaigns,
+                {
+                    "KeyConditionExpression": "profileId = :pid",
+                    "ExpressionAttributeValues": {":pid": profile_id},
+                },
             )
-            campaigns = campaigns_response.get("Items", [])
             all_campaigns.extend(campaigns)
             logger.info("Retrieved campaigns for profile", profile_id=profile_id, count=len(campaigns))
     return all_campaigns

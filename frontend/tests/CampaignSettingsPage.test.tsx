@@ -10,6 +10,7 @@ import type { MockedResponse } from '@apollo/client/testing';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { CampaignSettingsPage } from '../src/pages/CampaignSettingsPage';
 import { dateToISO } from '../src/lib/date-utils';
+import type { Campaign } from '../src/types';
 import {
   GET_CAMPAIGN,
   UPDATE_CAMPAIGN,
@@ -26,7 +27,15 @@ const CATALOG_ID = `CATALOG#catalog-1`;
 const CATALOG_ID_2 = `CATALOG#catalog-2`;
 const CATALOG_ID_3 = `CATALOG#catalog-3`;
 
-const mockCampaign = {
+type CampaignFixture = Omit<Campaign, 'sharedCampaignCode' | 'catalogId' | 'startDate' | 'endDate'> & {
+  __typename?: string;
+  sharedCampaignCode?: string | null;
+  catalogId?: string | null;
+  startDate?: string | null;
+  endDate?: string | null;
+};
+
+const mockCampaign: CampaignFixture = {
   __typename: 'Campaign',
   campaignId: CAMPAIGN_ID,
   profileId: PROFILE_ID,
@@ -47,7 +56,7 @@ const mockCampaign = {
   updatedAt: '2025-01-01T00:00:00.000Z',
 };
 
-const mockSharedCampaign = {
+const mockSharedCampaign: CampaignFixture = {
   ...mockCampaign,
   sharedCampaignCode: 'SHARED-ABC',
 };
@@ -82,7 +91,7 @@ const mockCatalogs = [
   },
 ];
 
-function createMocks(campaign = mockCampaign, updateMocks: MockedResponse[] = []): MockedResponse[] {
+function createMocks(campaign: CampaignFixture = mockCampaign, updateMocks: MockedResponse[] = []): MockedResponse[] {
   // Provide two GetCampaign mocks: one for the initial load and one for the refetch after update
   return [
     {
@@ -122,7 +131,7 @@ function createMocks(campaign = mockCampaign, updateMocks: MockedResponse[] = []
 function renderPage(mocks: MockedResponse[], initialEntry?: string) {
   const entry = initialEntry ?? `/scouts/${PROFILE_ID_RAW}/campaigns/${CAMPAIGN_ID_RAW}/settings`;
   return render(
-    <MockedProvider mocks={mocks} addTypename={false}>
+    <MockedProvider mocks={mocks}>
       <MemoryRouter initialEntries={[entry]}>
         <Routes>
           <Route path="/scouts/:profileId/campaigns/:campaignId/settings" element={<CampaignSettingsPage />} />

@@ -135,6 +135,15 @@ describe('useOrderForm', () => {
       act(() => result.current.updateLineItem(0, 'quantity', 'abc'));
       expect(result.current.lineItems[0].quantity).toBe(1);
     });
+
+    test('updateLineItem does not mutate previous state item object', () => {
+      const { result } = renderHook(() => useOrderForm());
+      const previousItem = result.current.lineItems[0];
+      act(() => result.current.updateLineItem(0, 'productId', 'PROD~1'));
+      expect(previousItem.productId).toBe('');
+      expect(result.current.lineItems[0]).not.toBe(previousItem);
+      expect(result.current.lineItems[0].productId).toBe('PROD~1');
+    });
   });
 
   describe('loadFromOrder', () => {

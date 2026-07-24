@@ -283,6 +283,42 @@ class TestConfirmQRUpload:
             confirm_qr_upload(event, None)
         assert exc_info.value.error_code == ErrorCode.FORBIDDEN
 
+    def test_confirm_upload_detects_concurrent_modification(
+        self, dynamodb_tables: Dict[str, Any], s3_bucket: Any, sample_account: Dict[str, Any], sample_account_id: str
+    ) -> None:
+        """Test confirm_qr_upload raises conflict when preferences changed between read and write."""
+        from src.utils.dynamodb import override_table
+
+        create_payment_method(sample_account_id, "Venmo")
+        s3_key = f"payment-qr-codes/{sample_account_id}/venmo.png"
+        bucket_name = os.environ.get("EXPORTS_BUCKET", "test-exports-bucket")
+        s3_bucket.put_object(Bucket=bucket_name, Key=s3_key, Body=b"fake-qr-data")
+
+        mock_table = MagicMock()
+        tables_dict = dynamodb_tables
+        accounts_table = tables_dict["accounts"]
+        mock_table.get_item.return_value = accounts_table.get_item(
+            Key={"accountId": f"ACCOUNT#{sample_account_id}"}
+        )
+        mock_table.update_item.side_effect = ClientError(
+            {"Error": {"Code": "ConditionalCheckFailedException", "Message": "The conditional request failed"}},
+            "UpdateItem",
+        )
+
+        override_table("accounts", mock_table)
+
+        event = {
+            "identity": {"sub": sample_account_id},
+            "arguments": {"paymentMethodName": "Venmo", "s3Key": s3_key},
+        }
+
+        with pytest.raises(AppError) as exc_info:
+            confirm_qr_upload(event, None)
+        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+        assert "modified by another request" in str(exc_info.value.message)
+
+        override_table("accounts", None)
+
 
 class TestDeleteQRCode:
     """Test delete_qr_code Lambda handler."""
@@ -401,6 +437,37 @@ class TestDeleteQRCode:
         with pytest.raises(AppError) as exc_info:
             delete_qr_code(event, None)
         assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+
+    def test_delete_qr_detects_concurrent_modification(
+        self, dynamodb_tables: Dict[str, Any], sample_account: Dict[str, Any], sample_account_id: str
+    ) -> None:
+        """Test delete_qr_code raises conflict when preferences changed between read and write."""
+        from src.handlers.payment_methods_handlers import delete_qr_code
+        from src.utils.dynamodb import override_table
+
+        create_payment_method(sample_account_id, "Venmo")
+
+        mock_table = MagicMock()
+        tables_dict = dynamodb_tables
+        accounts_table = tables_dict["accounts"]
+        mock_table.get_item.return_value = accounts_table.get_item(
+            Key={"accountId": f"ACCOUNT#{sample_account_id}"}
+        )
+        mock_table.update_item.side_effect = ClientError(
+            {"Error": {"Code": "ConditionalCheckFailedException", "Message": "The conditional request failed"}},
+            "UpdateItem",
+        )
+
+        override_table("accounts", mock_table)
+
+        event = {"identity": {"sub": sample_account_id}, "arguments": {"paymentMethodName": "Venmo"}}
+
+        with pytest.raises(AppError) as exc_info:
+            delete_qr_code(event, None)
+        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+        assert "modified by another request" in str(exc_info.value.message)
+
+        override_table("accounts", None)
 
 
 class TestExceptionHandling:

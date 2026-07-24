@@ -104,7 +104,7 @@ class TestListUnitCatalogs:
         mock_catalogs = MagicMock()
 
         # Arrange
-        mock_profiles.scan.return_value = {"Items": sample_profiles}
+        mock_profiles.query.return_value = {"Items": sample_profiles}
 
         # Track which profile is being queried
         query_call_count = [0]
@@ -169,7 +169,7 @@ class TestListUnitCatalogs:
         """Test listing when no profiles found in unit."""
         # Create mock tables
         mock_profiles = MagicMock()
-        mock_profiles.scan.return_value = {"Items": []}
+        mock_profiles.query.return_value = {"Items": []}
 
         with patch("src.handlers.list_unit_catalogs.tables") as mock_tables:
             mock_tables.profiles = mock_profiles
@@ -189,7 +189,7 @@ class TestListUnitCatalogs:
         """Test listing when caller has no access to any profiles."""
         # Create mock tables
         mock_profiles = MagicMock()
-        mock_profiles.scan.return_value = {"Items": sample_profiles}
+        mock_profiles.query.return_value = {"Items": sample_profiles}
 
         with (
             patch("src.handlers.list_unit_catalogs.tables") as mock_tables,
@@ -215,7 +215,7 @@ class TestListUnitCatalogs:
         # Create mock tables
         mock_profiles = MagicMock()
         mock_campaigns = MagicMock()
-        mock_profiles.scan.return_value = {"Items": sample_profiles}
+        mock_profiles.query.return_value = {"Items": sample_profiles}
         mock_campaigns.query.return_value = {"Items": []}
 
         with (
@@ -242,7 +242,7 @@ class TestListUnitCatalogs:
         # Create mock tables
         mock_profiles = MagicMock()
         mock_campaigns = MagicMock()
-        mock_profiles.scan.return_value = {"Items": sample_profiles}
+        mock_profiles.query.return_value = {"Items": sample_profiles}
         # Campaign without catalogId
         mock_campaigns.query.return_value = {
             "Items": [{"campaignId": "CAMPAIGN#campaign1", "profileId": "PROFILE#profile1"}]
@@ -274,7 +274,7 @@ class TestListUnitCatalogs:
         mock_profiles = MagicMock()
         mock_campaigns = MagicMock()
         mock_catalogs = MagicMock()
-        mock_profiles.scan.return_value = {"Items": sample_profiles}
+        mock_profiles.query.return_value = {"Items": sample_profiles}
         # Both profiles use the same catalog
         mock_campaigns.query.return_value = {
             "Items": [{"campaignId": "CAMPAIGN#campaign1", "catalogId": "catalog-123"}]
@@ -309,7 +309,7 @@ class TestListUnitCatalogs:
         mock_profiles = MagicMock()
         mock_campaigns = MagicMock()
         mock_catalogs = MagicMock()
-        mock_profiles.scan.return_value = {"Items": sample_profiles[:1]}  # Single profile
+        mock_profiles.query.return_value = {"Items": sample_profiles[:1]}  # Single profile
         mock_campaigns.query.return_value = {
             "Items": [
                 {"campaignId": "CAMPAIGN#campaign1", "catalogId": "catalog-123"},
@@ -353,7 +353,7 @@ class TestListUnitCatalogs:
         mock_profiles = MagicMock()
         mock_campaigns = MagicMock()
         mock_catalogs = MagicMock()
-        mock_profiles.scan.return_value = {"Items": sample_profiles[:1]}
+        mock_profiles.query.return_value = {"Items": sample_profiles[:1]}
         mock_campaigns.query.return_value = {
             "Items": [{"campaignId": "CAMPAIGN#campaign1", "catalogId": "catalog-deleted"}]
         }
@@ -382,7 +382,7 @@ class TestListUnitCatalogs:
         """Test error handling when DynamoDB operation fails."""
         # Create mock tables
         mock_profiles = MagicMock()
-        mock_profiles.scan.side_effect = Exception("DynamoDB error")
+        mock_profiles.query.side_effect = Exception("DynamoDB error")
 
         with patch("src.handlers.list_unit_catalogs.tables") as mock_tables:
             mock_tables.profiles = mock_profiles
@@ -401,7 +401,7 @@ class TestListUnitCatalogs:
         # Create mock tables
         mock_profiles = MagicMock()
         mock_campaigns = MagicMock()
-        mock_profiles.scan.return_value = {"Items": sample_profiles}
+        mock_profiles.query.return_value = {"Items": sample_profiles}
         mock_campaigns.query.return_value = {"Items": []}
 
         # Grant access only to first profile
@@ -434,7 +434,7 @@ class TestListUnitCatalogs:
         mock_profiles = MagicMock()
         mock_campaigns = MagicMock()
         mock_catalogs = MagicMock()
-        mock_profiles.scan.return_value = {"Items": sample_profiles[:1]}
+        mock_profiles.query.return_value = {"Items": sample_profiles[:1]}
         # Campaign with non-string catalogId (should be filtered out)
         mock_campaigns.query.return_value = {
             "Items": [

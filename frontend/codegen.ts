@@ -11,7 +11,7 @@ import type { CodegenConfig } from '@graphql-codegen/cli';
  */
 const config: CodegenConfig = {
   // Path to the GraphQL schema (relative to frontend/)
-  schema: '../cdk/schema/schema.graphql',
+  schema: '../tofu/application/schema/schema.graphql',
 
   // Generate types for operations defined in these files
   documents: ['src/**/*.tsx', 'src/**/*.ts', '!src/types/graphql-generated.ts', '!src/lib/test-*.ts'],

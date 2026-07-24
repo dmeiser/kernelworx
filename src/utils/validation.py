@@ -27,14 +27,14 @@ def validate_unit_number(value: Any, required: bool = False) -> Optional[int]:
     Raises:
         AppError: If validation fails
     """
-    if not value:
+    if value is None or value == "":
         if required:
             raise AppError(ErrorCode.INVALID_INPUT, "unitNumber is required when unitType is provided")
         return None
 
     try:
         return int(value)
-    except ValueError, TypeError:
+    except (ValueError, TypeError):
         raise AppError(ErrorCode.INVALID_INPUT, "unitNumber must be a valid integer")
 
 

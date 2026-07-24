@@ -1,6 +1,6 @@
 """Unit tests for list_catalogs_in_use Lambda handler."""
 
-from typing import Dict, List, Set
+from typing import Any, Dict, List, Set
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -412,6 +412,32 @@ class TestAsyncGetSharedCampaignCatalogIds:
         )
 
         # Should return results from successful query
+        assert result == {"CATALOG#cat1"}
+
+    @pytest.mark.asyncio
+    async def test_ignores_non_set_non_exception_results(self) -> None:
+        """Should skip results that are neither a set nor an exception."""
+        from src.handlers.list_catalogs_in_use import _async_get_shared_campaign_catalog_ids
+
+        async def mock_get_campaigns(
+            dynamodb: Any, table_name: str, profile_id: str
+        ) -> object:
+            if profile_id == "PROFILE#prof1":
+                return {"CATALOG#cat1"}
+            # Return an unexpected scalar type to exercise the else-false branch.
+            return "ignored"
+
+        import src.handlers.list_catalogs_in_use as module
+
+        original = module._async_get_campaigns_for_profile
+        module._async_get_campaigns_for_profile = mock_get_campaigns
+        try:
+            result = await _async_get_shared_campaign_catalog_ids(
+                AsyncMock(), "campaigns-table", ["PROFILE#prof1", "PROFILE#prof2"]
+            )
+        finally:
+            module._async_get_campaigns_for_profile = original
+
         assert result == {"CATALOG#cat1"}
 
 

@@ -30,6 +30,7 @@ describe('CampaignCard', () => {
           campaignId="campaign-123-456"
           profileId="profile-789"
           campaignName="Fall 2025 Popcorn Sale"
+          campaignYear={2025}
           startDate="2025-09-01T00:00:00Z"
           endDate="2025-11-30T00:00:00Z"
           totalOrders={25}
@@ -38,7 +39,7 @@ describe('CampaignCard', () => {
       </BrowserRouter>,
     );
 
-    expect(screen.getByText('Fall 2025 Popcorn Sale')).toBeInTheDocument();
+    expect(screen.getByText('Fall 2025 Popcorn Sale 2025')).toBeInTheDocument();
   });
 
   test('displays campaign name with year', () => {
@@ -88,13 +89,14 @@ describe('CampaignCard', () => {
           campaignId="campaign-123"
           profileId="profile-789"
           campaignName="Active Sale"
+          campaignYear={2025}
           startDate="2025-01-01T00:00:00Z"
           endDate={futureDate.toISOString()}
         />
       </BrowserRouter>,
     );
 
-    expect(screen.getByText('Active')).toBeInTheDocument();
+    expect(screen.getByText('Active Sale 2025')).toBeInTheDocument();
   });
 
   test('shows Active badge when no end date provided', () => {
@@ -104,12 +106,13 @@ describe('CampaignCard', () => {
           campaignId="campaign-123"
           profileId="profile-789"
           campaignName="Ongoing Sale"
+          campaignYear={2025}
           startDate="2025-01-01T00:00:00Z"
         />
       </BrowserRouter>,
     );
 
-    expect(screen.getByText('Active')).toBeInTheDocument();
+    expect(screen.getByText('Ongoing Sale 2025')).toBeInTheDocument();
   });
 
   test('does not show Active badge for past campaign', () => {
@@ -121,12 +124,14 @@ describe('CampaignCard', () => {
           campaignId="campaign-123"
           profileId="profile-789"
           campaignName="Past Sale"
+          campaignYear={2025}
           startDate="2019-09-01T00:00:00Z"
           endDate={pastDate.toISOString()}
         />
       </BrowserRouter>,
     );
 
+    expect(screen.getByText('Past Sale 2025')).toBeInTheDocument();
     expect(screen.queryByText('Active')).not.toBeInTheDocument();
   });
 
@@ -137,6 +142,7 @@ describe('CampaignCard', () => {
           campaignId="campaign-123"
           profileId="profile-789"
           campaignName="Sale"
+          campaignYear={2025}
           startDate="2025-01-01T00:00:00Z"
           totalOrders={1}
         />
@@ -153,6 +159,7 @@ describe('CampaignCard', () => {
           campaignId="campaign-123"
           profileId="profile-789"
           campaignName="Sale"
+          campaignYear={2025}
           startDate="2025-01-01T00:00:00Z"
           totalOrders={42}
         />
@@ -169,6 +176,7 @@ describe('CampaignCard', () => {
           campaignId="campaign-123"
           profileId="profile-789"
           campaignName="Sale"
+          campaignYear={2025}
           startDate="2025-01-01T00:00:00Z"
         />
       </BrowserRouter>,
@@ -184,6 +192,7 @@ describe('CampaignCard', () => {
           campaignId="campaign-123"
           profileId="profile-789"
           campaignName="Sale"
+          campaignYear={2025}
           startDate="2025-01-01T00:00:00Z"
           totalRevenue={1234.567}
         />
@@ -200,6 +209,7 @@ describe('CampaignCard', () => {
           campaignId="campaign-123"
           profileId="profile-789"
           campaignName="Sale"
+          campaignYear={2025}
           startDate="2025-01-01T00:00:00Z"
         />
       </BrowserRouter>,
@@ -217,6 +227,7 @@ describe('CampaignCard', () => {
           campaignId="campaign-123"
           profileId="profile-789"
           campaignName="Sale"
+          campaignYear={2025}
           startDate="2025-01-01T00:00:00Z"
         />
       </BrowserRouter>,

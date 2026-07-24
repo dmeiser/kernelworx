@@ -7,6 +7,8 @@ Provides structured JSON logging with correlation IDs for tracing requests.
 import json
 import logging
 import os
+import sys
+import traceback
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
@@ -16,6 +18,9 @@ class StructuredLogger:
     """
     JSON logger for Lambda functions with correlation ID support.
 
+    Honors the ``LOG_LEVEL`` environment variable and renders exception
+    tracebacks when ``exc_info=True`` is passed.
+
     Example:
         logger = StructuredLogger(__name__)
         logger.info("Processing order", order_id="ORDER#123", profile_id="PROFILE#456")
@@ -23,23 +28,40 @@ class StructuredLogger:
 
     def __init__(self, name: str, correlation_id: Optional[str] = None) -> None:
         self.logger = logging.getLogger(name)
-        self.logger.setLevel(os.getenv("LOG_LEVEL", "INFO"))
+        self.logger.setLevel(os.getenv("LOG_LEVEL", "DEBUG"))
         self.correlation_id = correlation_id or str(uuid.uuid4())
 
     def _log(self, level: str, message: str, **kwargs: Any) -> None:
         """Internal method to emit structured JSON logs."""
+        level_num = logging.getLevelName(level)
+        if not self.logger.isEnabledFor(level_num):
+            return
+
         log_entry: Dict[str, Any] = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "level": level,
             "message": message,
             "correlationId": self.correlation_id,
-            **kwargs,
         }
+
+        exc_info = kwargs.pop("exc_info", None)
+        extra = kwargs.pop("extra", None)
+        if isinstance(extra, dict):
+            log_entry.update(extra)
+        log_entry.update(kwargs)
+
+        if exc_info:
+            if exc_info is True:
+                exc_info = sys.exc_info()
+            elif isinstance(exc_info, BaseException):
+                exc_info = (type(exc_info), exc_info, exc_info.__traceback__)
+            if exc_info and exc_info[0] is not None:
+                log_entry["traceback"] = "".join(traceback.format_exception(*exc_info))
 
         # Remove None values
         log_entry = {k: v for k, v in log_entry.items() if v is not None}
 
-        print(json.dumps(log_entry))
+        print(json.dumps(log_entry), file=sys.stdout, flush=True)
 
     def info(self, message: str, **kwargs: Any) -> None:
         """Log info level message."""

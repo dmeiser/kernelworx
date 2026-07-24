@@ -161,9 +161,26 @@ resource "aws_dynamodb_table" "profiles" {
     type = "S"
   }
 
+  attribute {
+    name = "unitType"
+    type = "S"
+  }
+
+  attribute {
+    name = "unitNumber"
+    type = "N"
+  }
+
   global_secondary_index {
     name            = "profileId-index"
     hash_key        = "profileId"
+    projection_type = "ALL"
+  }
+
+  global_secondary_index {
+    name            = "unitType-unitNumber-index"
+    hash_key        = "unitType"
+    range_key       = "unitNumber"
     projection_type = "ALL"
   }
 

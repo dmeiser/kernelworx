@@ -118,7 +118,7 @@ export const PaymentMethodsPage: React.FC = () => {
     onCompleted: () => {
       showSuccess('Payment method created successfully');
       setCreateDialogOpen(false);
-      refetch();
+      refetch().catch(handleMutationError);
     },
     onError: handleMutationError,
   });
@@ -128,7 +128,7 @@ export const PaymentMethodsPage: React.FC = () => {
       showSuccess('Payment method updated successfully');
       setEditDialogOpen(false);
       setSelectedMethod(null);
-      refetch();
+      refetch().catch(handleMutationError);
     },
     onError: handleMutationError,
   });
@@ -138,7 +138,7 @@ export const PaymentMethodsPage: React.FC = () => {
       showSuccess('Payment method deleted successfully');
       setDeleteDialogOpen(false);
       setSelectedMethod(null);
-      refetch();
+      refetch().catch(handleMutationError);
     },
     onError: handleMutationError,
   });
@@ -151,7 +151,7 @@ export const PaymentMethodsPage: React.FC = () => {
   const [deleteQRCode] = useMutation(DELETE_PAYMENT_METHOD_QR_CODE, {
     onCompleted: () => {
       showSuccess('QR code deleted successfully');
-      refetch();
+      refetch().catch(handleMutationError);
     },
     onError: handleMutationError,
   });
@@ -247,7 +247,7 @@ export const PaymentMethodsPage: React.FC = () => {
       showSuccess('QR code uploaded successfully');
       setQrUploadDialogOpen(false);
       setSelectedMethod(null);
-      refetch();
+      await refetch();
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to upload QR code';
       setQrUploadError(message);

@@ -508,3 +508,94 @@ class TestFormatAddress:
         address = {"zipCode": "12345"}
         result = _format_address(address)
         assert result == "12345"
+
+
+class TestSanitizeReportValue:
+    """Tests for formula-injection sanitization."""
+
+    def test_formula_triggers_are_prefixed(self) -> None:
+        """Values starting with formula triggers get a leading apostrophe."""
+        from src.handlers.report_generation import _sanitize_report_value
+
+        assert _sanitize_report_value("=1+1") == "'=1+1"
+        assert _sanitize_report_value("+1+1") == "'+1+1"
+        assert _sanitize_report_value("-1+1") == "'-1+1"
+        assert _sanitize_report_value("@A1") == "'@A1"
+        assert _sanitize_report_value("\t=1") == "'\t=1"
+        assert _sanitize_report_value("\r=1") == "'\r=1"
+
+    def test_non_formula_values_unchanged(self) -> None:
+        """Normal strings and non-strings are not modified."""
+        from src.handlers.report_generation import _sanitize_report_value
+
+        assert _sanitize_report_value("John Doe") == "John Doe"
+        assert _sanitize_report_value("555-1234") == "555-1234"
+        assert _sanitize_report_value("") == ""
+        assert _sanitize_report_value(42) == 42
+        assert _sanitize_report_value(12.34) == 12.34
+
+    def test_embedded_quotes_escaped_in_csv(self) -> None:
+        """CSV writer naturally quotes values containing quotes; sanity check via report generation."""
+        from src.handlers.report_generation import _generate_csv_report
+
+        campaign = {"campaignId": "CAMPAIGN#c1", "campaignName": "Fall"}
+        orders = [
+            {
+                "orderId": "ORDER#1",
+                "customerName": 'Robert "Bob" Smith',
+                "customerPhone": "555-0000",
+                "customerAddress": {},
+                "paymentMethod": "CASH",
+                "totalAmount": Decimal("10.00"),
+                "lineItems": [],
+            }
+        ]
+        csv_bytes = _generate_csv_report(campaign, orders)
+        csv_content = csv_bytes.decode("utf-8")
+        # csv.writer doubles embedded quotes and wraps the cell
+        assert '"Bob"""' in csv_content or '"Robert ""Bob"" Smith"' in csv_content
+
+    def test_formula_injection_neutralized_in_csv(self) -> None:
+        """Formula-like customer data is prefixed with apostrophe in CSV output."""
+        from src.handlers.report_generation import _generate_csv_report
+
+        campaign = {"campaignId": "CAMPAIGN#c1", "campaignName": "Fall"}
+        orders = [
+            {
+                "orderId": "ORDER#1",
+                "customerName": "=cmd|'/C calc'!A0",
+                "customerPhone": "+1234567890",
+                "customerAddress": {"street": "@SUM(A:A)"},
+                "paymentMethod": "CASH",
+                "totalAmount": Decimal("10.00"),
+                "lineItems": [],
+            }
+        ]
+        csv_bytes = _generate_csv_report(campaign, orders)
+        csv_content = csv_bytes.decode("utf-8")
+        assert "'=cmd|'/C calc'!A0" in csv_content
+        assert "'+1234567890" in csv_content
+        assert "'@SUM(A:A)" in csv_content
+
+    def test_formula_injection_neutralized_in_xlsx(self) -> None:
+        """Formula-like customer data is prefixed with apostrophe in XLSX output."""
+        from src.handlers.report_generation import _generate_excel_report
+
+        campaign = {"campaignId": "CAMPAIGN#c1", "campaignName": "Fall"}
+        orders = [
+            {
+                "orderId": "ORDER#1",
+                "customerName": "=cmd|'/C calc'!A0",
+                "customerPhone": "+1234567890",
+                "customerAddress": {"street": "@SUM(A:A)"},
+                "paymentMethod": "CASH",
+                "totalAmount": Decimal("10.00"),
+                "lineItems": [],
+            }
+        ]
+        xlsx_bytes = _generate_excel_report(campaign, orders)
+        wb = openpyxl.load_workbook(BytesIO(xlsx_bytes))
+        ws = wb.active
+        assert ws.cell(row=2, column=1).value == "'=cmd|'/C calc'!A0"
+        assert ws.cell(row=2, column=2).value == "'+1234567890"
+        assert ws.cell(row=2, column=3).value == "'@SUM(A:A)"

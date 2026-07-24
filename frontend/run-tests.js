@@ -33,9 +33,15 @@ child.stderr.on('data', (data) => {
 });
 
 child.on('exit', (code, signal) => {
-  exitCode = code || 0;
   outputEnded = true;
-  console.log(`\n✅ Tests completed with exit code: ${exitCode}`);
+  if (signal) {
+    console.error(`\n❌ Tests terminated by signal: ${signal}`);
+    exitCode = 1;
+  } else {
+    exitCode = code ?? 1;
+  }
+  const label = exitCode === 0 ? '✅' : '❌';
+  console.log(`\n${label} Tests completed with exit code: ${exitCode}`);
   process.exit(exitCode);
 });
 
@@ -51,8 +57,8 @@ const checkInterval = setInterval(() => {
     setTimeout(() => {
       if (!outputEnded) {
         child.kill('SIGKILL');
-        process.exit(exitCode !== null ? exitCode : 0);
       }
+      process.exit(1);
     }, 2000);
   }
 }, 5000);

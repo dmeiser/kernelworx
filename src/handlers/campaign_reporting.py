@@ -8,11 +8,15 @@ from boto3.dynamodb.conditions import Key
 try:  # pragma: no cover
     from utils.auth import check_profile_access
     from utils.dynamodb import tables
+    from utils.errors import AppError, ErrorCode
     from utils.logging import get_logger
+    from utils.pagination import query_all_items
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.auth import check_profile_access
     from ..utils.dynamodb import tables
+    from ..utils.errors import AppError, ErrorCode
     from ..utils.logging import get_logger
+    from ..utils.pagination import query_all_items
 
 logger = get_logger(__name__)
 
@@ -52,11 +56,18 @@ def _get_accessible_profiles(profile_ids: list[str], caller_account_id: str) -> 
     """Get profiles that caller has READ access to."""
     accessible_profiles: Dict[str, Dict[str, Any]] = {}
     for profile_id in profile_ids:
-        has_access = check_profile_access(
-            caller_account_id=caller_account_id,
-            profile_id=profile_id,
-            required_permission="READ",
-        )
+        try:
+            has_access = check_profile_access(
+                caller_account_id=caller_account_id,
+                profile_id=profile_id,
+                required_permission="READ",
+            )
+        except AppError as e:
+            if e.error_code == ErrorCode.NOT_FOUND:
+                # Profile row was deleted/orphaned; skip it instead of failing the whole report
+                logger.warning(f"Profile {profile_id} not found during unit report, skipping")
+                continue
+            raise
         if has_access:
             profile_response = tables.profiles.query(
                 IndexName="profileId-index",
@@ -98,8 +109,10 @@ def _get_seller_data(profile_id: str, profile: Dict[str, Any], campaigns: List[D
 
     for campaign in campaigns:
         campaign_id = campaign["campaignId"]
-        orders_response = tables.orders.query(KeyConditionExpression=Key("campaignId").eq(campaign_id))
-        orders = orders_response.get("Items", [])
+        orders = query_all_items(
+            tables.orders,
+            {"KeyConditionExpression": Key("campaignId").eq(campaign_id)},
+        )
 
         for order in orders:
             order_detail = _build_order_detail(order)
@@ -181,13 +194,15 @@ def get_unit_report(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
         # Step 1: Query campaigns by unit+campaign key
         unit_campaign_key = _build_unit_campaign_key(unit_type, unit_number, city, state, campaign_name, campaign_year)
-        campaigns_response = tables.campaigns.query(
-            IndexName="unitCampaignKey-index",
-            KeyConditionExpression=Key("unitCampaignKey").eq(unit_campaign_key),
-            FilterExpression="catalogId = :cid",
-            ExpressionAttributeValues={":cid": catalog_id},
+        unit_campaigns = query_all_items(
+            tables.campaigns,
+            {
+                "IndexName": "unitCampaignKey-index",
+                "KeyConditionExpression": Key("unitCampaignKey").eq(unit_campaign_key),
+                "FilterExpression": "catalogId = :cid",
+                "ExpressionAttributeValues": {":cid": catalog_id},
+            },
         )
-        unit_campaigns = campaigns_response.get("Items", [])
         logger.info(f"Found {len(unit_campaigns)} campaigns")
 
         if not unit_campaigns:

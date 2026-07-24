@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.handlers.pre_signup import lambda_handler
+from src.handlers.pre_signup import FederatedIdentityLinkedException, lambda_handler
 
 
 @pytest.fixture
@@ -175,6 +175,7 @@ class TestFederatedSignupExistingUser:
             assert "already exists" in str(exc_info.value)
             assert "Google" in str(exc_info.value)
             assert "linked" in str(exc_info.value)
+            assert isinstance(exc_info.value, FederatedIdentityLinkedException)
 
     def test_facebook_user_linking(
         self,
@@ -271,6 +272,7 @@ class TestErrorHandling:
 
             # Should still raise exception to prevent duplicate
             assert "already exists" in str(exc_info.value)
+            assert isinstance(exc_info.value, FederatedIdentityLinkedException)
 
     def test_cognito_invalid_parameter_without_link_message(
         self,
@@ -299,6 +301,7 @@ class TestErrorHandling:
 
             assert "already exists" in str(exc_info.value)
             assert federated_signup_event["request"]["userAttributes"]["email"] in str(exc_info.value)
+            assert isinstance(exc_info.value, FederatedIdentityLinkedException)
 
     def test_cognito_api_error_allows_signup(
         self,
@@ -335,3 +338,105 @@ class TestErrorHandling:
                 lambda_handler(federated_signup_event, lambda_context)
 
             assert "invalid username format" in str(exc_info.value).lower()
+            assert isinstance(exc_info.value, FederatedIdentityLinkedException)
+
+
+class TestFederatedSignupEmailVerification:
+    """Tests for the email_verified claim requirement and email sanitization."""
+
+    def test_unverified_email_does_not_link(
+        self,
+        federated_signup_event: dict[str, Any],
+        lambda_context: MagicMock,
+    ) -> None:
+        """An unverified provider email must not be linked to an existing account."""
+        federated_signup_event["request"]["userAttributes"]["email_verified"] = "false"
+
+        with patch("boto3.client") as mock_client:
+            result = lambda_handler(federated_signup_event, lambda_context)
+
+        mock_client.assert_not_called()
+        assert result["response"]["autoConfirmUser"] is True
+        assert result["response"]["autoVerifyEmail"] is False
+
+    def test_missing_email_verified_does_not_link(
+        self,
+        federated_signup_event: dict[str, Any],
+        lambda_context: MagicMock,
+    ) -> None:
+        """If the provider supplies no email_verified claim, do not link."""
+        del federated_signup_event["request"]["userAttributes"]["email_verified"]
+
+        with patch("boto3.client") as mock_client:
+            result = lambda_handler(federated_signup_event, lambda_context)
+
+        mock_client.assert_not_called()
+        assert result["response"]["autoConfirmUser"] is True
+        assert result["response"]["autoVerifyEmail"] is False
+
+    def test_invalid_email_does_not_link(
+        self,
+        federated_signup_event: dict[str, Any],
+        lambda_context: MagicMock,
+    ) -> None:
+        """An unsafe/invalid provider email must not be interpolated into ListUsers."""
+        federated_signup_event["request"]["userAttributes"]["email"] = 'user@example.com" OR 1=1'
+
+        with patch("boto3.client") as mock_client:
+            result = lambda_handler(federated_signup_event, lambda_context)
+
+        mock_client.assert_not_called()
+        assert result["response"]["autoConfirmUser"] is True
+        assert result["response"]["autoVerifyEmail"] is False
+
+    def test_list_users_uses_validated_email_filter(
+        self,
+        federated_signup_event: dict[str, Any],
+        lambda_context: MagicMock,
+    ) -> None:
+        """The ListUsers filter must use the validated, sanitized email address."""
+        federated_signup_event["request"]["userAttributes"]["email"] = "  user@example.com  "
+
+        with patch("boto3.client") as mock_client:
+            mock_cognito = MagicMock()
+            mock_cognito.list_users.return_value = {"Users": []}
+            mock_client.return_value = mock_cognito
+
+            lambda_handler(federated_signup_event, lambda_context)
+
+            mock_cognito.list_users.assert_called_once_with(
+                UserPoolId="us-east-1_TEST123",
+                Filter='email = "user@example.com"',
+                Limit=1,
+            )
+
+    def test_non_string_email_does_not_link(
+        self,
+        federated_signup_event: dict[str, Any],
+        lambda_context: MagicMock,
+    ) -> None:
+        """A non-string email attribute must not be interpolated into ListUsers."""
+        federated_signup_event["request"]["userAttributes"]["email"] = 12345
+
+        with patch("boto3.client") as mock_client:
+            result = lambda_handler(federated_signup_event, lambda_context)
+
+        mock_client.assert_not_called()
+        assert result["response"]["autoConfirmUser"] is True
+        assert result["response"]["autoVerifyEmail"] is False
+
+    def test_overlong_email_does_not_link(
+        self,
+        federated_signup_event: dict[str, Any],
+        lambda_context: MagicMock,
+    ) -> None:
+        """An email exceeding 254 characters must not be interpolated into ListUsers."""
+        local = "a" * 250
+        federated_signup_event["request"]["userAttributes"]["email"] = f"{local}@x.co"
+
+        with patch("boto3.client") as mock_client:
+            result = lambda_handler(federated_signup_event, lambda_context)
+
+        mock_client.assert_not_called()
+        assert result["response"]["autoConfirmUser"] is True
+        assert result["response"]["autoVerifyEmail"] is False

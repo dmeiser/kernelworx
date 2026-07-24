@@ -1,5 +1,5 @@
 import React from 'react';
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent, { type UserEvent } from '@testing-library/user-event';
 
@@ -70,7 +70,7 @@ const createMutateFunction = (key: string) => (opts: any) => {
   return Promise.resolve(impl(opts));
 };
 
-const useMutationImpl = (m: any) => {
+const useMutationImpl = (m: any, _opts?: any) => {
   const key = getMutationKey(m);
   const registered = mutationImpls.get(key) || mutationImpls.get('default');
   const mutate = registered ? (opts: any) => registered(opts) : createMutateFunction(key);
@@ -170,12 +170,12 @@ const fillRequiredFields = async (user: UserEvent) => {
 };
 
 describe('CreateSharedCampaignDialog', () => {
-  let onClose: ReturnType<typeof vi.fn>;
-  let onSuccess: ReturnType<typeof vi.fn>;
+  let onClose: Mock<() => void>;
+  let onSuccess: Mock<() => void>;
 
   beforeEach(() => {
-    onClose = vi.fn();
-    onSuccess = vi.fn();
+    onClose = vi.fn<() => void>();
+    onSuccess = vi.fn<() => void>();
     setupQueryMock();
     setupMutationMock(vi.fn().mockResolvedValue({ data: {} }));
   });

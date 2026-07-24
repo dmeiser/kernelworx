@@ -150,7 +150,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
    * Initialize auth state on mount and listen for auth events
    */
   useEffect(() => {
-    checkAuthSession();
+    checkAuthSession().catch(() => {
+      setHasValidTokens(false);
+      setLoading(false);
+    });
 
     const handleEvent = createAuthEventHandler(checkAuthSession, setLoading, {
       onSignedOut: () => {

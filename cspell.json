@@ -43,7 +43,9 @@
     "coverage/**",
     "docs/branding/system/**",
     "docs/branding/**/*.html",
-    "docs/branding/assets/**"
+    "docs/branding/assets/**",
+    "claude-fable-review.md",
+    "kimi-not-handling.md"
   ],
   "ignoreRegExpList": [
     "https?://[^\\s]+",

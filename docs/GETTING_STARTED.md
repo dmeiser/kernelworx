@@ -3,7 +3,7 @@
 ## Prerequisites
 
 - **Python 3.14+** with `uv` package manager
-- **Node.js 20+** with `npm`
+- **Node.js 24+** with `npm`
 - **AWS CLI v2** configured with appropriate credentials
 - **AWS Account** with permissions for IAM, DynamoDB, S3, Cognito, AppSync, ACM, Route 53, CloudFront, Lambda, SNS, CloudFormation, and CloudWatch/Billing
 - **Git** for version control
@@ -94,43 +94,45 @@ aws sts get-caller-identity
 
 ### Quick Start Deployment (Recommended)
 
-The easiest way to deploy is using OpenTofu:
+Use the deployment helper, which builds the Lambda layer and runs OpenTofu:
 
 ```bash
-cd tofu/application/environments/dev
-
 # Initialize OpenTofu (first time only)
-tofu init
+./tofu/application/scripts/deploy.sh dev init
 
 # Preview changes
-tofu plan
+./tofu/application/scripts/deploy.sh dev plan
 
 # Apply changes
-tofu apply
+./tofu/application/scripts/deploy.sh dev apply
 ```
 
-The process will:
-1. Load configuration from the root `.env`
-2. Validate required settings
-3. Deploy the OpenTofu-managed infrastructure
+The helper will:
+1. Source the root `.env` for required `TF_VAR_*` values
+2. Build `.build/lambda-layer` from production Python dependencies
+3. Run `tofu` in `tofu/application/environments/dev`
+
+If you run `tofu` directly, export `TF_VAR_encryption_passphrase` and build the
+layer first; a plain `tofu apply` will fail because the layer archive is missing.
 
 ### Manual Deployment
 
 If you prefer more control:
 
 ```bash
-cd tofu/application/environments/dev
-
 # Set encryption passphrase
 export TF_VAR_encryption_passphrase='your-passphrase'
 
-# Initialize OpenTofu
+# Build the Lambda layer first (required by the lambda module)
+rm -rf .build/lambda-layer
+mkdir -p .build/lambda-layer/python
+uv export --no-dev --format requirements.txt --no-hashes > .build/lambda-layer/requirements.txt
+uv pip install --requirement .build/lambda-layer/requirements.txt --target .build/lambda-layer/python
+
+# Run OpenTofu from the environment directory
+cd tofu/application/environments/dev
 tofu init
-
-# Preview changes
 tofu plan -out=tfplan
-
-# Apply the plan
 tofu apply tfplan
 ```
 
@@ -152,16 +154,16 @@ tofu import 'module.s3.aws_s3_bucket.static_assets' bucket-name
 
 ```bash
 # Find DynamoDB tables
-aws dynamodb list-tables --query 'TableNames[?contains(@, `psm`)]'
+aws dynamodb list-tables --query 'TableNames[?contains(@, `kernelworx`)]'
 
 # Find S3 buckets
 aws s3 ls | grep kernelworx
 
 # Find Cognito User Pools
-aws cognito-idp list-user-pools --max-results 60 | grep popcorn
+aws cognito-idp list-user-pools --max-results 60 | grep kernelworx
 
 # Find AppSync APIs
-aws appsync list-graphql-apis --query 'graphqlApis[?contains(name, `popcorn`)].id'
+aws appsync list-graphql-apis --query 'graphqlApis[?contains(name, `kernelworx`)].id'
 ```
 
 ### Environment-Specific Deployments
@@ -316,15 +318,15 @@ Delete the existing domain or use a different environment name:
 ```bash
 # Delete domain
 aws cognito-idp delete-user-pool-domain \
-  --domain popcorn-sales-dev-750620721302 \
+  --domain login.dev.kernelworx.app \
   --user-pool-id us-east-1_XXXXXXXXX
 ```
 
 ### DynamoDB table already exists
 
 Either:
-1. Import it using context: `-c table_name=psm-app-dev`
-2. Delete it: `aws dynamodb delete-table --table-name psm-app-dev`
+1. Import it using context: `-c table_name=kernelworx-accounts-ue1-dev`
+2. Delete it: `aws dynamodb delete-table --table-name kernelworx-accounts-ue1-dev`
 3. Rename in different environment: `-c environment=prod`
 
 ## Cost Management
@@ -335,7 +337,7 @@ The deployed resources use serverless/on-demand pricing:
 - **S3**: Pay for storage and requests
 - **Cognito**: Essentials tier (~$0.015 per MAU after 50 free MAUs)
 - **AppSync**: Pay per request and data transfer
-- **Lambda**: Pay per invocation (not yet deployed)
+- **Lambda**: Pay per invocation
 
 **Monthly Budget**: $10/month with alerts at 80% and 100% configured in CloudWatch Billing Alerts.
 
@@ -343,7 +345,7 @@ The deployed resources use serverless/on-demand pricing:
 
 1. **Run Backend Tests** - `uv run pytest tests/unit --cov=src --cov-fail-under=100`
 2. **Deploy Frontend** - Build the React SPA and deploy to S3 + CloudFront
-3. **Configure Social Providers** - Set up OAuth apps with Google/Facebook (optional)
+3. **Configure Social Providers** - Set up an OAuth app with Google (optional)
 4. **Create an Admin Catalog** - Required before campaigns can be created
 5. **Create Test Users** - `bash scripts/create-test-users.sh`
 6. **Run E2E Smoke Tests** - `uv run pytest tests/e2e/ --ignore=tests/unit -v`

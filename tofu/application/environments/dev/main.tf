@@ -100,6 +100,12 @@ variable "google_client_secret" {
   description = "Google OAuth client secret"
 }
 
+variable "alarm_email" {
+  type        = string
+  default     = "devops+kernelworx-dev@example.com"
+  description = "Email address for CloudWatch alarm notifications"
+}
+
 # Local computed values
 locals {
   name_prefix  = "kernelworx"
@@ -166,18 +172,19 @@ module "certificates" {
 module "cognito" {
   source = "../../modules/cognito"
 
-  environment           = var.environment
-  region_abbrev         = var.region_abbrev
-  name_prefix           = local.name_prefix
-  site_domain           = local.site_domain
-  login_domain          = local.login_domain
-  google_client_id      = var.google_client_id
-  google_client_secret  = var.google_client_secret
-  login_certificate_arn = module.certificates.login_certificate_arn
-  sms_role_arn          = module.iam.cognito_sms_role_arn
-  enable_google_idp     = true
-  callback_urls         = local.cognito_callback_urls
-  logout_urls           = local.cognito_logout_urls
+  environment                  = var.environment
+  region_abbrev                = var.region_abbrev
+  name_prefix                  = local.name_prefix
+  site_domain                  = local.site_domain
+  login_domain                 = local.login_domain
+  google_client_id             = var.google_client_id
+  google_client_secret         = var.google_client_secret
+  login_certificate_arn        = module.certificates.login_certificate_arn
+  login_certificate_validation = aws_acm_certificate_validation.login
+  sms_role_arn                 = module.iam.cognito_sms_role_arn
+  enable_google_idp            = true
+  callback_urls                = local.cognito_callback_urls
+  logout_urls                  = local.cognito_logout_urls
 
   lambda_execution_role_arn = module.iam.lambda_execution_role_arn
   # Cognito trigger Lambdas (restored from CDK configuration)
@@ -222,6 +229,7 @@ module "appsync" {
   name_prefix              = local.name_prefix
   api_domain               = local.api_domain
   api_certificate_arn      = module.certificates.api_certificate_arn
+  certificate_validation   = aws_acm_certificate_validation.api
   appsync_service_role_arn = module.iam.appsync_service_role_arn
   user_pool_id             = module.cognito.user_pool_id
   aws_region               = var.aws_region
@@ -236,6 +244,7 @@ module "cloudfront" {
   environment                   = var.environment
   site_domain                   = local.site_domain
   site_certificate_arn          = module.certificates.site_certificate_arn
+  certificate_validation        = aws_acm_certificate_validation.site
   static_bucket_id              = module.s3.static_bucket_id
   static_bucket_arn             = module.s3.static_bucket_arn
   static_bucket_regional_domain = module.s3.static_bucket_regional_domain
@@ -255,6 +264,39 @@ module "route53" {
   api_validation_records    = module.certificates.api_validation_records
   login_validation_records  = module.certificates.login_validation_records
   site_validation_records   = module.certificates.site_validation_records
+}
+
+# Certificate validations - wait for DNS records to propagate and certificates to validate
+resource "aws_acm_certificate_validation" "api" {
+  certificate_arn         = module.certificates.api_certificate_arn
+  validation_record_fqdns = [for rec in module.route53.cert_validation_records : rec.fqdn if can(regex("api\\.", rec.name))]
+}
+
+resource "aws_acm_certificate_validation" "login" {
+  certificate_arn         = module.certificates.login_certificate_arn
+  validation_record_fqdns = [for rec in module.route53.cert_validation_records : rec.fqdn if can(regex("login\\.", rec.name))]
+}
+
+resource "aws_acm_certificate_validation" "site" {
+  certificate_arn         = module.certificates.site_certificate_arn
+  validation_record_fqdns = [for rec in module.route53.cert_validation_records : rec.fqdn if !can(regex("(api|login)\\.", rec.name))]
+}
+
+module "monitoring" {
+  source = "../../modules/monitoring"
+
+  environment   = var.environment
+  region_abbrev = var.region_abbrev
+  name_prefix   = local.name_prefix
+  alarm_email   = var.alarm_email
+
+  lambda_function_names = merge(
+    module.lambda.function_names,
+    module.lambda.trigger_function_names,
+  )
+
+  appsync_api_id       = module.appsync.api_id
+  dynamodb_table_names = module.dynamodb.table_names
 }
 
 # Outputs

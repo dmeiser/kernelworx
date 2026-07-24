@@ -2,27 +2,27 @@
 
 variable "environment" {
   description = "Deployment environment (e.g., dev, prod)"
-  type = string
+  type        = string
 }
 
 variable "region_abbrev" {
   description = "Short region code used in API naming (e.g., ue1)"
-  type = string
+  type        = string
 }
 
 variable "name_prefix" {
   description = "Global name prefix for AppSync resources"
-  type = string
+  type        = string
 }
 
 variable "api_domain" {
   description = "Fully qualified API domain (e.g., api.dev.kernelworx.app or api.kernelworx.app)"
-  type = string
+  type        = string
 }
 
 variable "api_certificate_arn" {
   description = "ACM certificate ARN for the AppSync custom domain"
-  type = string
+  type        = string
 }
 
 variable "certificate_validation" {
@@ -33,7 +33,7 @@ variable "certificate_validation" {
 
 variable "appsync_service_role_arn" {
   description = "IAM role ARN used by AppSync to access data sources"
-  type = string
+  type        = string
 }
 
 variable "dynamodb_table_names" {
@@ -60,8 +60,8 @@ locals {
   api_name   = "${var.name_prefix}-api-${var.region_abbrev}-${var.environment}"
   api_domain = var.api_domain
   env_suffix = "_${var.environment}"
-  
+
   # JS resolver code path
-  js_resolvers_dir     = "${path.module}/../../appsync/js-resolvers"
+  js_resolvers_dir      = "${path.module}/../../appsync/js-resolvers"
   mapping_templates_dir = "${path.module}/../../appsync/mapping-templates"
 }

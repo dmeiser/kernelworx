@@ -201,7 +201,7 @@ const errorMock: MockedResponse = {
 
 function renderPage(mocks: MockedResponse[]) {
   return render(
-    <MockedProvider mocks={mocks} addTypename={false}>
+    <MockedProvider mocks={mocks}>
       <BrowserRouter>
         <PaymentMethodsPage />
       </BrowserRouter>

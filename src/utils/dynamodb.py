@@ -18,6 +18,9 @@ if TYPE_CHECKING:
 # Module-level cache for test overrides
 _table_overrides: dict[str, Optional["Table"]] = {}
 
+# Module-level cache for the DynamoDB service resource
+_dynamodb_resource: Optional["DynamoDBServiceResource"] = None
+
 
 def get_required_env(name: str, default: Optional[str] = None) -> str:
     """Get a required environment variable.
@@ -43,7 +46,10 @@ def get_required_env(name: str, default: Optional[str] = None) -> str:
 
 def _get_dynamodb() -> "DynamoDBServiceResource":
     """Get DynamoDB resource with optional endpoint override for LocalStack."""
-    return boto3.resource("dynamodb", endpoint_url=os.getenv("DYNAMODB_ENDPOINT"))
+    global _dynamodb_resource
+    if _dynamodb_resource is None:
+        _dynamodb_resource = boto3.resource("dynamodb", endpoint_url=os.getenv("DYNAMODB_ENDPOINT"))
+    return _dynamodb_resource
 
 
 def get_dynamodb_resource() -> "DynamoDBServiceResource":
@@ -59,75 +65,62 @@ class TableAccessor:
     """Centralized access to DynamoDB tables with environment-based naming."""
 
     _instance: Optional["TableAccessor"] = None
+    _tables: dict[str, "Table"]
 
     def __new__(cls) -> "TableAccessor":
         if cls._instance is None:
             cls._instance = super().__new__(cls)
+            cls._instance._tables = {}
         return cls._instance
+
+    def _get_table(self, table_name_key: str) -> "Table":
+        """Return a cached table, or create and cache it."""
+        if override := _table_overrides.get(table_name_key):
+            return override
+        if table_name_key not in self._tables:
+            table_name = get_required_env(f"{table_name_key.upper()}_TABLE_NAME")
+            self._tables[table_name_key] = _get_dynamodb().Table(table_name)
+        return self._tables[table_name_key]
 
     @property
     def accounts(self) -> "Table":
         """Get accounts table instance."""
-        if override := _table_overrides.get("accounts"):
-            return override
-        table_name = get_required_env("ACCOUNTS_TABLE_NAME")
-        return _get_dynamodb().Table(table_name)
+        return self._get_table("accounts")
 
     @property
     def profiles(self) -> "Table":
         """Get profiles table instance (V2 multi-table design)."""
-        if override := _table_overrides.get("profiles"):
-            return override
-        table_name = get_required_env("PROFILES_TABLE_NAME")
-        return _get_dynamodb().Table(table_name)
+        return self._get_table("profiles")
 
     @property
     def campaigns(self) -> "Table":
         """Get campaigns table instance (V2 multi-table design)."""
-        if override := _table_overrides.get("campaigns"):
-            return override
-        table_name = get_required_env("CAMPAIGNS_TABLE_NAME")
-        return _get_dynamodb().Table(table_name)
+        return self._get_table("campaigns")
 
     @property
     def orders(self) -> "Table":
         """Get orders table instance (V2 multi-table design)."""
-        if override := _table_overrides.get("orders"):
-            return override
-        table_name = get_required_env("ORDERS_TABLE_NAME")
-        return _get_dynamodb().Table(table_name)
+        return self._get_table("orders")
 
     @property
     def shares(self) -> "Table":
         """Get shares table instance."""
-        if override := _table_overrides.get("shares"):
-            return override
-        table_name = get_required_env("SHARES_TABLE_NAME")
-        return _get_dynamodb().Table(table_name)
+        return self._get_table("shares")
 
     @property
     def catalogs(self) -> "Table":
         """Get catalogs table instance."""
-        if override := _table_overrides.get("catalogs"):
-            return override
-        table_name = get_required_env("CATALOGS_TABLE_NAME")
-        return _get_dynamodb().Table(table_name)
+        return self._get_table("catalogs")
 
     @property
     def invites(self) -> "Table":
         """Get invites table instance."""
-        if override := _table_overrides.get("invites"):
-            return override
-        table_name = get_required_env("INVITES_TABLE_NAME")
-        return _get_dynamodb().Table(table_name)
+        return self._get_table("invites")
 
     @property
     def shared_campaigns(self) -> "Table":
         """Get shared campaigns table instance."""
-        if override := _table_overrides.get("shared_campaigns"):
-            return override
-        table_name = get_required_env("SHARED_CAMPAIGNS_TABLE_NAME")
-        return _get_dynamodb().Table(table_name)
+        return self._get_table("shared_campaigns")
 
 
 # Singleton instance for import
@@ -147,4 +140,15 @@ def clear_all_overrides() -> None:
 
 def reset_singleton() -> None:
     """Reset the singleton instance (for testing isolation)."""
+    if TableAccessor._instance is not None:
+        TableAccessor._instance._tables = {}
+    # Also clear the module-level singleton's cache so external imports that
+    # hold a reference to the old instance do not reuse stale tables.
+    tables._tables = {}
     TableAccessor._instance = None
+
+
+def reset_dynamodb_resource() -> None:
+    """Reset the cached DynamoDB resource (for testing isolation)."""
+    global _dynamodb_resource
+    _dynamodb_resource = None

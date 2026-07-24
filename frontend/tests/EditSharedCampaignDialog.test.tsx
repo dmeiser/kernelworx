@@ -1,10 +1,10 @@
-import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { EditSharedCampaignDialog } from '../src/components/EditSharedCampaignDialog';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
+import type { SharedCampaign } from '../src/types';
 
-const baseSharedCampaign = {
+const baseSharedCampaign: SharedCampaign = {
   sharedCampaignCode: 'SC-TEST',
   catalogId: 'CAT#1',
   campaignName: 'Test Campaign',
@@ -27,13 +27,13 @@ const baseSharedCampaign = {
 };
 
 describe('EditSharedCampaignDialog', () => {
-  let onClose: ReturnType<typeof vi.fn>;
-  let onSave: ReturnType<typeof vi.fn>;
+  let onClose: Mock<() => void>;
+  let onSave: Mock<(sharedCampaignCode: string, updates: { description?: string; creatorMessage?: string; isActive?: boolean }) => Promise<void>>;
 
   beforeEach(() => {
     vi.clearAllMocks();
-    onClose = vi.fn();
-    onSave = vi.fn(() => Promise.resolve());
+    onClose = vi.fn<() => void>();
+    onSave = vi.fn<(sharedCampaignCode: string, updates: { description?: string; creatorMessage?: string; isActive?: boolean }) => Promise<void>>(() => Promise.resolve());
   });
 
   it('renders initial values and calls onSave', async () => {
