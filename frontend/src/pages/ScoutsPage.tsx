@@ -506,7 +506,7 @@ export const ScoutsPage: React.FC = () => {
               }
             />
             <Stack direction="row" spacing={2}>
-              <Button variant="outlined" startIcon={<GiftIcon />} onClick={() => navigate('/accept-invite')}>
+              <Button variant="outlined" startIcon={<GiftIcon />} onClick={() => { void navigate('/accept-invite'); }}>
                 Accept Invite
               </Button>
               <Button variant="contained" startIcon={<AddIcon />} onClick={() => setCreateDialogOpen(true)}>

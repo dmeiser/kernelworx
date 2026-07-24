@@ -1,10 +1,5 @@
 # CloudFront Distribution Module
 
-variable "environment" {
-  description = "Deployment environment (e.g., dev, prod)"
-  type        = string
-}
-
 variable "site_domain" {
   description = "Fully qualified site domain (e.g., dev.kernelworx.app or kernelworx.app)"
   type        = string

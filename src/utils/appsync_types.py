@@ -5,46 +5,7 @@ Provides TypedDict definitions for strongly typing AppSync resolver events,
 reducing runtime errors from incorrect event structure assumptions.
 """
 
-from typing import Any, Dict, List, Optional, TypedDict
-
-
-class AppSyncIdentity(TypedDict, total=False):
-    """AppSync Cognito User Pool identity."""
-
-    sub: str  # Cognito user ID
-    username: str
-    claims: Dict[str, Any]
-    sourceIp: List[str]
-    defaultAuthStrategy: str
-
-
-class AppSyncEvent(TypedDict, total=False):
-    """Base AppSync resolver event structure."""
-
-    identity: AppSyncIdentity
-    arguments: Dict[str, Any]
-    source: Dict[str, Any]
-    info: Dict[str, Any]
-    request: Dict[str, Any]
-    prev: Dict[str, Any]  # Pipeline resolver previous result
-
-
-class PipelineContext(TypedDict, total=False):
-    """Pipeline resolver context from previous step."""
-
-    ownerAccountId: str
-    profileId: str
-    campaignId: str
-    permissions: List[str]
-
-
-class PipelineEvent(TypedDict, total=False):
-    """AppSync pipeline resolver event."""
-
-    identity: AppSyncIdentity
-    arguments: Dict[str, Any]
-    prev: Dict[str, Dict[str, Any]]  # Contains 'result' key
-
+from typing import Any, Dict, Optional
 
 # Helper functions for safe extraction
 

@@ -43,12 +43,12 @@ interface Account {
 }
 
 // Helper to create the mutation onCompleted callback
-const createUpdateCompletedHandler = (profileHook: ReturnType<typeof useProfileEdit>, refetch: () => void) => {
+const createUpdateCompletedHandler = (profileHook: ReturnType<typeof useProfileEdit>, refetch: () => Promise<unknown>) => {
   return () => {
     profileHook.setUpdateSuccess(true);
     profileHook.setUpdateError(null);
     profileHook.setEditDialogOpen(false);
-    refetch();
+    void refetch().catch(() => {});
   };
 };
 
@@ -144,8 +144,8 @@ export const UserSettingsPage: React.FC = () => {
 
   // Load MFA and passkey status on mount
   useEffect(() => {
-    checkMfaStatus();
-    loadPasskeys();
+    void checkMfaStatus();
+    void loadPasskeys();
   }, [checkMfaStatus, loadPasskeys]);
 
   // Auto-hide profile update success message after 3 seconds

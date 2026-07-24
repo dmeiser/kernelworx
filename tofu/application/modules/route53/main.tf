@@ -1,11 +1,6 @@
 # Route53 DNS Records Module
 # Manages application-specific DNS records (API, login, etc.)
 
-variable "environment" {
-  description = "Deployment environment (e.g., dev, prod)"
-  type        = string
-}
-
 variable "zone_domain" {
   description = "DNS zone domain to look up (e.g., kernelworx.app for prod, dev.kernelworx.app for dev)"
   type        = string
@@ -18,21 +13,6 @@ variable "cloudfront_domain_name" {
 
 variable "appsync_api_url" {
   description = "AppSync API URL (HTTPS endpoint)"
-  type        = string
-}
-
-variable "cognito_domain" {
-  description = "Cognito custom domain"
-  type        = string
-}
-
-variable "api_certificate_arn" {
-  description = "ARN of the ACM certificate for the API domain"
-  type        = string
-}
-
-variable "login_certificate_arn" {
-  description = "ARN of the ACM certificate for the login domain"
   type        = string
 }
 

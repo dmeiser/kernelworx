@@ -748,28 +748,35 @@ class TestListMyShares:
 
         event = {**appsync_event, "identity": {"sub": another_account_id}}
 
-        # Mock response with unprocessed keys
-        mock_response = {
-            "Responses": {
-                "kernelworx-profiles-v2-ue1-dev": [
-                    {
-                        "ownerAccountId": owner_id,
-                        "profileId": profile_id,
-                        "sellerName": "Test",
-                        "createdAt": "2024-01-01T00:00:00Z",
-                        "updatedAt": "2024-01-01T00:00:00Z",
+        # Mock response with unprocessed keys on first call, then empty
+        mock_responses = [
+            {
+                "Responses": {
+                    "kernelworx-profiles-v2-ue1-dev": [
+                        {
+                            "ownerAccountId": owner_id,
+                            "profileId": profile_id,
+                            "sellerName": "Test",
+                            "createdAt": "2024-01-01T00:00:00Z",
+                            "updatedAt": "2024-01-01T00:00:00Z",
+                        }
+                    ]
+                },
+                "UnprocessedKeys": {
+                    "kernelworx-profiles-v2-ue1-dev": {
+                        "Keys": [{"ownerAccountId": "ACCOUNT#other", "profileId": "PROFILE#other"}]
                     }
-                ]
+                },
             },
-            "UnprocessedKeys": {
-                "kernelworx-profiles-v2-ue1-dev": {
-                    "Keys": [{"ownerAccountId": "ACCOUNT#other", "profileId": "PROFILE#other"}]
-                }
+            {
+                "Responses": {
+                    "kernelworx-profiles-v2-ue1-dev": []
+                },
             },
-        }
+        ]
         with patch(
             "src.handlers.profile_sharing.dynamodb.batch_get_item",
-            return_value=mock_response,
+            side_effect=mock_responses,
         ):
             result = list_my_shares(event, lambda_context)
 

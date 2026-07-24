@@ -105,20 +105,37 @@ def _fetch_batch_with_retry(
     logger: StructuredLogger,
     retries: int = 3,
 ) -> List[Dict[str, Any]]:
-    """Fetch a single batch of profiles with retry logic."""
+    """Fetch a single batch of profiles with retry logic, retrying unprocessed keys."""
+    keys_to_fetch = batch_keys
+    all_profiles: List[Dict[str, Any]] = []
+
     for attempt in range(retries):
+        if not keys_to_fetch:
+            break
         try:
             batch_response = dynamodb.batch_get_item(
                 RequestItems={
                     profiles_table.name: {
-                        "Keys": batch_keys,
+                        "Keys": keys_to_fetch,
                         "ConsistentRead": True,
                     }
                 }
             )
             batch_profiles = _extract_batch_profiles(batch_response, profiles_table.name)
-            _log_unprocessed_keys(batch_response, profiles_table.name, logger)
-            return batch_profiles
+            all_profiles.extend(batch_profiles)
+
+            unprocessed_keys = batch_response.get("UnprocessedKeys", {})
+            unprocessed_table = _get_unprocessed_table(unprocessed_keys, profiles_table.name)
+            keys_to_fetch = (unprocessed_table or {}).get("Keys", [])
+
+            if keys_to_fetch:
+                logger.warning(
+                    "Unprocessed keys remaining, retrying",
+                    attempt=attempt + 1,
+                    count=len(keys_to_fetch),
+                )
+            else:
+                return all_profiles
         except AppError:
             raise
         except Exception as e:
@@ -127,7 +144,11 @@ def _fetch_batch_with_retry(
                 continue
             logger.error("BatchGetItem failed after retries", error=str(e))
             raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to list shared profiles")
-    return []  # Should never reach here due to raise above
+
+    if keys_to_fetch:
+        logger.error("Unprocessed keys still remain after all retries", count=len(keys_to_fetch))
+
+    return all_profiles
 
 
 def _get_unprocessed_table(unprocessed_keys: Dict[str, Any], table_name: str) -> Any:
@@ -139,16 +160,12 @@ def _get_unprocessed_table(unprocessed_keys: Dict[str, Any], table_name: str) ->
     return unprocessed_table
 
 
-def _log_unprocessed_keys(
-    batch_response: "BatchGetItemOutputServiceResourceTypeDef", table_name: str, logger: StructuredLogger
-) -> None:
-    """Log any unprocessed keys from BatchGetItem."""
-    unprocessed_keys = batch_response.get("UnprocessedKeys", {})
+def _log_unprocessed_keys(unprocessed_keys: Dict[str, Any], table_name: str, logger: Any) -> None:
+    """Log unprocessed keys warning."""
     unprocessed_table = _get_unprocessed_table(unprocessed_keys, table_name)
-    if unprocessed_table:
-        unprocessed_key_list = unprocessed_table.get("Keys", [])
-        if unprocessed_key_list:
-            logger.warning("Unprocessed keys in batch", count=len(unprocessed_key_list))
+    keys = (unprocessed_table or {}).get("Keys", [])
+    if keys:
+        logger.warning("Unprocessed keys remain", count=len(keys))
 
 
 def _validate_profile_fields(profile: Dict[str, Any]) -> tuple[str, str, str, str] | None:

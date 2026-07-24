@@ -19,10 +19,12 @@ from boto3.dynamodb.types import TypeSerializer
 try:  # pragma: no cover
     from utils.auth import is_admin
     from utils.dynamodb import tables
+    from utils.errors import AppError, ErrorCode
     from utils.ids import ensure_account_id, ensure_profile_id
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.auth import is_admin
     from ..utils.dynamodb import tables
+    from ..utils.errors import AppError, ErrorCode
     from ..utils.ids import ensure_account_id, ensure_profile_id
 
 _type_serializer = TypeSerializer()
@@ -35,7 +37,7 @@ def _get_and_verify_profile(db_profile_id: str, db_caller_id: str, event: Dict[s
     )
 
     if not profile_response.get("Items"):
-        raise ValueError(f"Profile not found: {db_profile_id}")
+        raise AppError(ErrorCode.NOT_FOUND, f"Profile not found: {db_profile_id}")
 
     profile: Dict[str, Any] = profile_response["Items"][0]
 
@@ -43,7 +45,7 @@ def _get_and_verify_profile(db_profile_id: str, db_caller_id: str, event: Dict[s
     caller_is_admin = is_admin(event)
 
     if not caller_is_owner and not caller_is_admin:
-        raise PermissionError("Only the profile owner or an admin can transfer ownership")
+        raise AppError(ErrorCode.FORBIDDEN, "Only the profile owner or an admin can transfer ownership")
 
     return profile
 
@@ -53,7 +55,7 @@ def _verify_new_owner_has_share(db_profile_id: str, db_new_owner_id: str, caller
     if not caller_is_admin:
         share_response = tables.shares.get_item(Key={"profileId": db_profile_id, "targetAccountId": db_new_owner_id})
         if "Item" not in share_response:
-            raise ValueError("New owner must have existing access to the profile")
+                raise AppError(ErrorCode.INVALID_INPUT, "New owner must have existing access to the profile")
 
 
 def _transfer_ownership(profile: Dict[str, Any], db_profile_id: str, db_new_owner_id: str) -> None:

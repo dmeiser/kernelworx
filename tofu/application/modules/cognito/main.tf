@@ -16,11 +16,6 @@ variable "name_prefix" {
   type        = string
 }
 
-variable "site_domain" {
-  description = "Fully qualified site domain (e.g., dev.kernelworx.app or kernelworx.app)"
-  type        = string
-}
-
 variable "login_domain" {
   description = "Fully qualified login domain (e.g., login.dev.kernelworx.app or login.kernelworx.app)"
   type        = string
@@ -38,6 +33,11 @@ variable "google_client_secret" {
   type        = string
   sensitive   = true
   default     = ""
+}
+
+variable "aws_region" {
+  description = "AWS region"
+  type        = string
 }
 
 variable "login_certificate_arn" {
@@ -162,7 +162,7 @@ resource "aws_cognito_user_pool" "main" {
   sms_configuration {
     external_id    = "kernelworx-sms-role"
     sns_caller_arn = var.sms_role_arn
-    sns_region     = "us-east-1"
+    sns_region     = var.aws_region
   }
 
   # Account recovery

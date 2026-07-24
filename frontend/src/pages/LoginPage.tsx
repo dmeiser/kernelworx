@@ -31,9 +31,9 @@ import { getSafeRedirect } from '../lib/redirect';
 
 // Get error message from unknown error
 function getErrorMessage(err: unknown, fallback: string): string {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const error = err as any;
-  return error?.message || fallback;
+  if (err instanceof Error) return err.message;
+  if (err && typeof err === 'object' && 'message' in err) return String((err as { message: unknown }).message);
+  return fallback;
 }
 
 // Check if step contains WebAuthn

@@ -336,8 +336,6 @@ def _search_accounts_in_dynamodb(query: str, logger: Any) -> list[Dict[str, Any]
 def _looks_like_uuid(value: str) -> bool:
     """Check if a string looks like a UUID."""
     # UUID format: 8-4-4-4-12 hex characters
-    import re
-
     uuid_pattern = r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
     return bool(re.match(uuid_pattern, value.lower()))
 

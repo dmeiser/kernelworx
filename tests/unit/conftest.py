@@ -251,13 +251,13 @@ def sample_campaign(dynamodb_table: Any, sample_profile_id: str, sample_campaign
 
 
 @pytest.fixture
-def sample_order_id() -> str:  # pragma: no cover
+def sample_order_id() -> str:
     """Sample order ID."""
-    return "ORDER#order-456-xyz"  # pragma: no cover
+    return "ORDER#order-456-xyz"
 
 
 @pytest.fixture
-def sample_order(  # pragma: no cover
+def sample_order(
     dynamodb_table: Any, sample_profile_id: str, sample_campaign_id: str, sample_order_id: str
 ) -> Dict[str, Any]:
     """Create sample order in DynamoDB (multi-table design V2: PK=campaignId, SK=orderId)."""

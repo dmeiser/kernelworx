@@ -18,6 +18,9 @@ export default defineConfig([
     languageOptions: {
       ecmaVersion: 2020,
       globals: globals.browser,
+      parserOptions: {
+        project: ['./tsconfig.app.json', './tsconfig.node.json', './tsconfig.test.json'],
+      },
     },
     rules: {
       // Cyclomatic complexity limit - Grade A equivalent (radon: 1-5)
@@ -28,6 +31,9 @@ export default defineConfig([
       'react-hooks/set-state-in-effect': 'off',
       // Allow any in test files (mocking requires flexibility)
       '@typescript-eslint/no-explicit-any': ['error', { ignoreRestArgs: true }],
+      // Type-aware rules for promise handling
+      '@typescript-eslint/no-floating-promises': 'error',
+      '@typescript-eslint/no-misused-promises': 'error',
     },
   },
   // Relaxed rules for test files

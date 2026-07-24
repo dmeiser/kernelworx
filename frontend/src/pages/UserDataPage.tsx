@@ -207,7 +207,7 @@ export const UserDataPage: React.FC = () => {
       setTransferProfileId(null);
       setNewOwnerSearch('');
       setSelectedNewOwner(null);
-      refetchProfiles();
+      void refetchProfiles();
     },
     onError: (error) => {
       console.error('Transfer failed:', error);
@@ -222,7 +222,7 @@ export const UserDataPage: React.FC = () => {
     onCompleted: () => {
       setEditingCampaignId(null);
       setEditingSharedCode('');
-      refetchCampaigns();
+      void refetchCampaigns();
     },
     onError: (error) => {
       console.error('Update shared code failed:', error);
@@ -254,7 +254,7 @@ export const UserDataPage: React.FC = () => {
 
   const handleSearchNewOwner = () => {
     if (newOwnerSearch.trim()) {
-      searchNewOwner({ variables: { query: newOwnerSearch.trim() } });
+      void searchNewOwner({ variables: { query: newOwnerSearch.trim() } });
     }
   };
 
@@ -285,7 +285,7 @@ export const UserDataPage: React.FC = () => {
         targetAccountId: revokeShareTarget.targetAccountId,
       },
     });
-    refetchShares();
+    void refetchShares();
   };
 
   if (!accountId) {
@@ -541,7 +541,7 @@ export const UserDataPage: React.FC = () => {
                                     <Button
                                       size="small"
                                       onClick={() => {
-                                        updateCampaignSharedCode({
+                                        void updateCampaignSharedCode({
                                           variables: {
                                             campaignId: campaign.campaignId,
                                             sharedCampaignCode: editingSharedCode || null,

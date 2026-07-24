@@ -640,6 +640,7 @@ def delete_qr_from_s3(account_id: str, payment_method_name: str) -> None:
     This function remains for backwards compatibility with slug-based keys.
 
     Deletes all possible file extensions (png, jpg, webp) to ensure cleanup.
+    Falls back to UUID-based lookup if slug-based deletion finds no files.
 
     Args:
         account_id: Account ID
@@ -659,6 +660,7 @@ def delete_qr_from_s3(account_id: str, payment_method_name: str) -> None:
     try:
         s3 = _get_s3_client()
 
+        deleted_any = False
         for ext in extensions:  # pragma: no branch
             s3_key = f"payment-qr-codes/{account_id}/{slug}.{ext}"
 
@@ -667,10 +669,28 @@ def delete_qr_from_s3(account_id: str, payment_method_name: str) -> None:
                 logger.info(
                     "Deleted QR code from S3", account_id=account_id, payment_method=payment_method_name, s3_key=s3_key
                 )
+                deleted_any = True
             except ClientError as e:
                 # Ignore 404 errors (file doesn't exist)
                 if e.response.get("Error", {}).get("Code") != "NoSuchKey":
                     logger.warning("Failed to delete QR code variant", s3_key=s3_key, error=str(e))
+
+        # Fallback: try UUID-based key if slug-based deletion found nothing
+        if not deleted_any:
+            uuid_key = f"payment-qr-codes/{account_id}/{payment_method_name}"
+            for ext in extensions:
+                s3_key = f"{uuid_key}.{ext}"
+                try:
+                    s3.delete_object(Bucket=bucket_name, Key=s3_key)
+                    logger.info(
+                        "Deleted QR code via UUID fallback",
+                        account_id=account_id,
+                        payment_method=payment_method_name,
+                        s3_key=s3_key,
+                    )
+                except ClientError as e:
+                    if e.response.get("Error", {}).get("Code") != "NoSuchKey":
+                        logger.warning("Failed to delete QR code variant via UUID fallback", s3_key=s3_key, error=str(e))
 
     except Exception as e:
         logger.error("Failed to delete QR code from S3", error=str(e))

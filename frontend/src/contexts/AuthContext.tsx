@@ -53,7 +53,7 @@ interface AuthEventHandlers {
 
 // Individual event handlers
 const handleSignInWithRedirect = (checkAuthSession: () => Promise<void>) => {
-  checkAuthSession().then(handleOAuthRedirect);
+  checkAuthSession().then(handleOAuthRedirect).catch(() => {});
 };
 
 const handleSignInFailure = (eventData: unknown, setLoading: (loading: boolean) => void) => {
@@ -62,7 +62,7 @@ const handleSignInFailure = (eventData: unknown, setLoading: (loading: boolean) 
 };
 
 const handleTokenRefresh = (checkAuthSession: () => Promise<void>) => {
-  checkAuthSession();
+  void checkAuthSession();
 };
 
 const handleTokenRefreshFailure = (eventData: unknown, handlers: AuthEventHandlers) => {

@@ -207,5 +207,9 @@ def is_admin(event: Dict[str, Any]) -> bool:
         if isinstance(groups, str):
             groups = [groups]
         return "ADMIN" in groups
-    except Exception:
+    except (AttributeError, KeyError, TypeError):
+        return False
+    except Exception as e:
+        logger = get_logger(__name__)
+        logger.warning("Unexpected exception in is_admin", error=str(e))
         return False

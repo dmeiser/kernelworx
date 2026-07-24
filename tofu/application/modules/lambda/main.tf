@@ -318,11 +318,6 @@ output "trigger_function_arns" {
   value       = { for k, v in aws_lambda_function.trigger_functions : k => v.arn }
 }
 
-output "trigger_function_names" {
-  description = "Map of Cognito trigger Lambda function logical names to their function names"
-  value       = { for k, v in aws_lambda_function.trigger_functions : k => v.function_name }
-}
-
 output "layer_arn" {
   description = "ARN of the shared Lambda layer"
   value       = aws_lambda_layer_version.shared.arn

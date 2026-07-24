@@ -91,11 +91,11 @@ def test_profile_sharing_log_unprocessed_and_build_result():
         def __init__(self) -> None:
             self.warned: list[dict[str, int]] = []
 
-        def warning(self, message: str, **kwargs: int) -> None:  # pragma: no cover - exercised
+        def warning(self, message: str, **kwargs: int) -> None:
             self.warned.append(kwargs)
 
     logger = DummyLogger()
-    profile_sharing._log_unprocessed_keys({"UnprocessedKeys": {"Profiles": {"Keys": [1, 2, 3]}}}, "Profiles", logger)
+    profile_sharing._log_unprocessed_keys({"Profiles": {"Keys": [1, 2, 3]}}, "Profiles", logger)
     assert logger.warned == [{"count": 3}]
 
     share = {"profileId": "PROFILE#1", "ownerAccountId": "ACCOUNT#owner", "permissions": ["READ"]}
@@ -124,7 +124,7 @@ def test_profile_sharing_log_unprocessed_and_build_result():
 
     # Unprocessed keys path when table missing
     logger2 = DummyLogger()
-    profile_sharing._log_unprocessed_keys({"UnprocessedKeys": {"Other": {"Keys": [1]}}}, "Profiles", logger2)
+    profile_sharing._log_unprocessed_keys({"Other": {"Keys": [1]}}, "Other", logger2)
     assert logger2.warned == [{"count": 1}]
 
 
@@ -247,6 +247,8 @@ def test_transfer_profile_ownership_success(monkeypatch):
 
 @mock_aws
 def test_transfer_profile_ownership_error_paths():
+    from src.utils.errors import AppError
+
     os.environ["AWS_REGION"] = "us-east-1"
     os.environ["PROFILES_TABLE_NAME"] = "ProfilesTable"
     os.environ["SHARES_TABLE_NAME"] = "SharesTable"
@@ -300,25 +302,25 @@ def test_transfer_profile_ownership_error_paths():
         "arguments": {"input": {"profileId": "PROFILE#abc", "newOwnerAccountId": "new456"}},
     }
 
-    # Missing share triggers ValueError
-    with pytest.raises(ValueError):
+    # Missing share triggers AppError
+    with pytest.raises(AppError):
         transfer_module.lambda_handler(event_base, None)
 
-    # Seed share but wrong caller triggers PermissionError
+    # Seed share but wrong caller triggers AppError
     shares_table.put_item(Item={"profileId": "PROFILE#abc", "targetAccountId": "ACCOUNT#new456"})
     event_bad_owner = {
         "identity": {"sub": "someoneelse"},
         "arguments": {"input": {"profileId": "PROFILE#abc", "newOwnerAccountId": "new456"}},
     }
-    with pytest.raises(PermissionError):
+    with pytest.raises(AppError):
         transfer_module.lambda_handler(event_bad_owner, None)
 
-    # Missing profile triggers ValueError
+    # Missing profile triggers AppError
     event_missing_profile = {
         "identity": {"sub": "owner123"},
         "arguments": {"input": {"profileId": "PROFILE#missing", "newOwnerAccountId": "new456"}},
     }
-    with pytest.raises(ValueError):
+    with pytest.raises(AppError):
         transfer_module.lambda_handler(event_missing_profile, None)
 
 

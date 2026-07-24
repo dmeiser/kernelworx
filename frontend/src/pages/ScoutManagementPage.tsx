@@ -456,7 +456,7 @@ export const ScoutManagementPage: React.FC = () => {
   // Update profile mutation
   const [updateProfile] = useMutation(UPDATE_SELLER_PROFILE, {
     onCompleted: () => {
-      refetch();
+      refetch().catch(() => {});
     },
   });
 

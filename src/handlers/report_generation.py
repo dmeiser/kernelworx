@@ -6,6 +6,7 @@ Implements:
 """
 
 import os
+import uuid
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from typing import TYPE_CHECKING, Any, Dict, List, cast
@@ -109,7 +110,7 @@ def request_campaign_report(event: Dict[str, Any], context: Any) -> Dict[str, An
         report_content, content_type, file_extension = _generate_report_content(campaign, orders, report_format)
 
         # Upload to S3
-        report_id = f"REPORT#{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
+        report_id = f"REPORT#{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}#{uuid.uuid4().hex[:8]}"
         exports_bucket = get_required_env("EXPORTS_BUCKET")
         s3_key = f"reports/{profile_id}/{campaign_id}/{report_id}.{file_extension}"
 

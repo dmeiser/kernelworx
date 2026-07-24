@@ -804,7 +804,7 @@ const useReportDerivatives = (report: UnitReport | undefined) =>
 // Helper: Create generate report handler
 const createGenerateHandler = (canGenerate: boolean, refetch: () => Promise<unknown>) => {
   if (!canGenerate) return;
-  refetch();
+  void refetch();
 };
 
 // Helper: Create export seller report handler

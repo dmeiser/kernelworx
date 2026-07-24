@@ -239,7 +239,7 @@ export const CampaignSettingsPage: React.FC = () => {
   // Update campaign mutation
   const [updateCampaign, { loading: updating }] = useMutation(UPDATE_CAMPAIGN, {
     onCompleted: () => {
-      refetch();
+      refetch().catch(() => {});
     },
   });
 

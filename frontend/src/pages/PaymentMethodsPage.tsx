@@ -11,7 +11,7 @@
  * Authorization: Owner only can create/update/delete. Cash and Check are global and read-only.
  */
 
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation } from '@apollo/client/react';
 import { Box, Stack, Button, Alert } from '@mui/material';
@@ -96,10 +96,19 @@ export const PaymentMethodsPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
+  const successTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (successTimeoutRef.current) clearTimeout(successTimeoutRef.current);
+    };
+  }, []);
+
   // Helper to show success message with auto-dismiss
   const showSuccess = (message: string) => {
     setSuccessMessage(message);
-    setTimeout(() => setSuccessMessage(null), 3000);
+    if (successTimeoutRef.current) clearTimeout(successTimeoutRef.current);
+    successTimeoutRef.current = setTimeout(() => setSuccessMessage(null), 3000);
   };
 
   // Query payment methods
@@ -244,7 +253,7 @@ export const PaymentMethodsPage: React.FC = () => {
         },
       });
 
-      await refetch();
+      await refetch().catch(() => {});
       showSuccess('QR code uploaded successfully');
       setQrUploadDialogOpen(false);
       setSelectedMethod(null);

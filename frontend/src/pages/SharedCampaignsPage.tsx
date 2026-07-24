@@ -371,7 +371,7 @@ export const SharedCampaignsPage: React.FC = () => {
   /* v8 ignore start -- mutation onCompleted callbacks require complex Apollo mocking with refetch */
   const [updateSharedCampaign] = useMutation(UPDATE_SHARED_CAMPAIGN, {
     onCompleted: () => {
-      refetch();
+      refetch().catch(() => {});
       setEditingSharedCampaign(null);
       showSnackbar('Shared Campaign updated successfully');
     },
@@ -381,7 +381,7 @@ export const SharedCampaignsPage: React.FC = () => {
   // Delete mutation (soft delete / deactivate)
   const [deleteSharedCampaign] = useMutation(DELETE_SHARED_CAMPAIGN, {
     onCompleted: () => {
-      refetch();
+      refetch().catch(() => {});
       setDeactivateDialogOpen(false);
       setSharedCampaignToDeactivate(null);
       showSnackbar('Shared Campaign deactivated');
