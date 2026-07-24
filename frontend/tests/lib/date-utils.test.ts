@@ -33,6 +33,13 @@ describe('formatDisplayDate', () => {
     expect(formatDisplayDate('2025/03/01')).toBe('');
   });
 
+  it('returns empty string for out-of-range date components', () => {
+    expect(formatDisplayDate('2026-99-99')).toBe('');
+    expect(formatDisplayDate('2026-09-31')).toBe('');
+    expect(formatDisplayDate('2026-00-15')).toBe('');
+    expect(formatDisplayDate('2026-13-01')).toBe('');
+  });
+
   it('renders UTC midnight dates using the date part only', () => {
     expect(formatDisplayDate('2026-09-01T00:00:00.000Z')).toBe('9/1/2026');
   });

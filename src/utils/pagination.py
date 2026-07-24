@@ -22,15 +22,16 @@ def query_all_items(table: "Table", query_kwargs: Dict[str, Any]) -> List[Dict[s
         All items matching the query, aggregated across pages.
     """
     items: List[Dict[str, Any]] = []
+    kwargs = dict(query_kwargs)
 
     while True:
-        response = table.query(**query_kwargs)
+        response = table.query(**kwargs)
         items.extend(response.get("Items", []))
 
         last_evaluated_key = response.get("LastEvaluatedKey")
         if last_evaluated_key is None:
             break
-        query_kwargs["ExclusiveStartKey"] = last_evaluated_key
+        kwargs["ExclusiveStartKey"] = last_evaluated_key
 
     return items
 
@@ -46,14 +47,15 @@ def scan_all_items(table: "Table", scan_kwargs: Dict[str, Any]) -> List[Dict[str
         All items matching the scan, aggregated across pages.
     """
     items: List[Dict[str, Any]] = []
+    kwargs = dict(scan_kwargs)
 
     while True:
-        response = table.scan(**scan_kwargs)
+        response = table.scan(**kwargs)
         items.extend(response.get("Items", []))
 
         last_evaluated_key = response.get("LastEvaluatedKey")
         if last_evaluated_key is None:
             break
-        scan_kwargs["ExclusiveStartKey"] = last_evaluated_key
+        kwargs["ExclusiveStartKey"] = last_evaluated_key
 
     return items

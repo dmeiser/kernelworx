@@ -53,7 +53,7 @@ def _is_email_verified(user_attributes: Dict[str, Any]) -> bool:
     return email_verified is True or str(email_verified).lower() == "true"
 
 
-def _validate_email(email: str) -> Optional[str]:
+def _validate_email(email: object) -> Optional[str]:
     """Validate and return a sanitized email, or None if it is unsafe/invalid."""
     if not isinstance(email, str):
         return None

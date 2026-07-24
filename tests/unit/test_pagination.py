@@ -113,6 +113,24 @@ class TestQueryAllItems:
             ExpressionAttributeValues={":pk": "value"},
         )
 
+    def test_does_not_mutate_query_kwargs(self) -> None:
+        """Helper must not mutate the caller-provided kwargs dict."""
+        table = MagicMock()
+        table.query.side_effect = [
+            {"Items": [{"pk": "1"}], "LastEvaluatedKey": {"pk": "1"}},
+            {"Items": [{"pk": "2"}]},
+        ]
+
+        kwargs = {
+            "KeyConditionExpression": "pk = :pk",
+            "ExpressionAttributeValues": {":pk": "value"},
+        }
+        original = dict(kwargs)
+
+        query_all_items(table, kwargs)
+
+        assert kwargs == original
+
 
 class TestScanAllItems:
     """Tests for scan_all_items pagination helper."""
@@ -180,3 +198,21 @@ class TestScanAllItems:
         )
 
         assert result == []
+
+    def test_does_not_mutate_scan_kwargs(self) -> None:
+        """Helper must not mutate the caller-provided kwargs dict."""
+        table = MagicMock()
+        table.scan.side_effect = [
+            {"Items": [{"pk": "1"}], "LastEvaluatedKey": {"pk": "1"}},
+            {"Items": [{"pk": "2"}]},
+        ]
+
+        kwargs = {
+            "FilterExpression": "active = :active",
+            "ExpressionAttributeValues": {":active": True},
+        }
+        original = dict(kwargs)
+
+        scan_all_items(table, kwargs)
+
+        assert kwargs == original

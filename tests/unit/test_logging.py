@@ -64,8 +64,9 @@ class TestStructuredLogger:
         assert log_entry["error"] == "details"
 
     def test_debug_logs_json(self, capsys: Any) -> None:
-        """Test debug logging outputs JSON."""
-        logger = StructuredLogger("test", "test-id")
+        """Test debug logging outputs JSON when level is DEBUG."""
+        logger = StructuredLogger("test-debug", "test-id")
+        logger.logger.setLevel("DEBUG")
 
         logger.debug("Debug message", data={"key": "value"})
 
@@ -96,6 +97,17 @@ class TestStructuredLogger:
 
         captured = capsys.readouterr()
         assert captured.out.strip() == ""
+
+    def test_default_level_is_info(self, capsys: Any) -> None:
+        """Test that the default log level is INFO."""
+        logger = StructuredLogger("default-level-test", "test-id")
+
+        logger.debug("Should not appear by default")
+        logger.info("Should appear by default")
+
+        captured = capsys.readouterr()
+        log_entry = json.loads(captured.out.strip())
+        assert log_entry["message"] == "Should appear by default"
 
     def test_extra_dict_merged(self, capsys: Any) -> None:
         """Test that the extra dict is merged into the log entry."""

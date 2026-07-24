@@ -71,23 +71,6 @@ jobs:
         working-directory: tofu/application/environments/prod
         run: tofu init
 
-      - name: OpenTofu plan (prod)
-        env:
-          TF_VAR_encryption_passphrase: ${{ secrets.TF_VAR_ENCRYPTION_PASSPHRASE }}
-          TF_VAR_google_client_id: ${{ secrets.TF_VAR_GOOGLE_CLIENT_ID }}
-          TF_VAR_google_client_secret: ${{ secrets.TF_VAR_GOOGLE_CLIENT_SECRET }}
-          TF_IN_AUTOMATION: "true"
-        working-directory: tofu/application/environments/prod
-        run: tofu plan -out=tfplan
-
-      - name: Upload OpenTofu plan artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: tofu-plan-${{ github.run_id }}
-          path: tofu/application/environments/prod/tfplan
-          retention-days: 30
-          if-no-files-found: error
-
       - name: Check if delete profile migration is needed
         id: check_delete_profile_migration
         env:
@@ -119,8 +102,26 @@ jobs:
         # functions still referenced by a resolver, and the AWS provider has a
         # long-standing issue ordering resolver updates before function deletions.
         # Recreating the resolver first removes the old function references reliably.
+        # This state-changing step must run BEFORE the saved plan so the plan stays valid.
         run: |
           tofu apply -replace=module.appsync.aws_appsync_resolver.delete_seller_profile -auto-approve
+
+      - name: OpenTofu plan (prod)
+        env:
+          TF_VAR_encryption_passphrase: ${{ secrets.TF_VAR_ENCRYPTION_PASSPHRASE }}
+          TF_VAR_google_client_id: ${{ secrets.TF_VAR_GOOGLE_CLIENT_ID }}
+          TF_VAR_google_client_secret: ${{ secrets.TF_VAR_GOOGLE_CLIENT_SECRET }}
+          TF_IN_AUTOMATION: "true"
+        working-directory: tofu/application/environments/prod
+        run: tofu plan -out=tfplan
+
+      - name: Upload OpenTofu plan artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tofu-plan-${{ github.run_id }}
+          path: tofu/application/environments/prod/tfplan
+          retention-days: 30
+          if-no-files-found: error
 
       # ROLLBACK: To revert this deployment, check out the previous release commit,
       # download the matching plan artifact (or re-run `tofu plan -out=tfplan`),

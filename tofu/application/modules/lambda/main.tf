@@ -86,19 +86,13 @@ locals {
       memory_size = 256
     }
     "request-report" = {
-      handler = "handlers.report_generation.request_campaign_report"
-      # AppSync resolvers time out at 30 s; keep Lambda timeout at or below that
-      # ceiling so callers get a clean error instead of a background Lambda that
-      # completes after AppSync has already returned a timeout.
-      timeout     = 30
+      handler     = "handlers.report_generation.request_campaign_report"
+      timeout     = 60
       memory_size = 512
     }
     "unit-reporting" = {
-      handler = "handlers.campaign_reporting.get_unit_report"
-      # AppSync resolvers time out at 30 s; keep Lambda timeout at or below that
-      # ceiling so callers get a clean error instead of a background Lambda that
-      # completes after AppSync has already returned a timeout.
-      timeout     = 30
+      handler     = "handlers.campaign_reporting.get_unit_report"
+      timeout     = 60
       memory_size = 512
     }
     "list-unit-catalogs" = {
@@ -117,11 +111,8 @@ locals {
       memory_size = 512
     }
     "delete-profile-cascade" = {
-      handler = "handlers.delete_profile_cascade.lambda_handler"
-      # AppSync resolvers time out at 30 s; keep Lambda timeout at or below that
-      # ceiling so callers get a clean error instead of a background Lambda that
-      # completes after AppSync has already returned a timeout.
-      timeout     = 30
+      handler     = "handlers.delete_profile_cascade.lambda_handler"
+      timeout     = 60
       memory_size = 512
     }
     "update-account" = {

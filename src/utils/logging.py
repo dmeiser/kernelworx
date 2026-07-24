@@ -28,7 +28,7 @@ class StructuredLogger:
 
     def __init__(self, name: str, correlation_id: Optional[str] = None) -> None:
         self.logger = logging.getLogger(name)
-        self.logger.setLevel(os.getenv("LOG_LEVEL", "DEBUG"))
+        self.logger.setLevel(os.getenv("LOG_LEVEL", "INFO"))
         self.correlation_id = correlation_id or str(uuid.uuid4())
 
     def _log(self, level: str, message: str, **kwargs: Any) -> None:

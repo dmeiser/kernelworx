@@ -15,12 +15,21 @@ interface DateParts {
 }
 
 const parseDatePart = (dateString: string): DateParts | null => {
-  const [yearStr, monthStr, dayStr] = dateString.split('T')[0].split('-');
-  const year = parseInt(yearStr ?? '', 10);
-  const month = parseInt(monthStr ?? '', 10);
-  const day = parseInt(dayStr ?? '', 10);
-  // If any component is missing or non-numeric, the sum is NaN.
-  if (Number.isNaN(year + month + day)) return null;
+  const match = dateString.split('T')[0].match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+
+  const year = parseInt(match[1], 10);
+  const month = parseInt(match[2], 10);
+  const day = parseInt(match[3], 10);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  // Round-trip validation: reject values like 2026-99-99 that Date silently normalizes.
+  if (
+    parsed.getUTCFullYear() !== year ||
+    parsed.getUTCMonth() !== month - 1 ||
+    parsed.getUTCDate() !== day
+  ) {
+    return null;
+  }
 
   return { year, month, day };
 };
