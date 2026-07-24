@@ -76,12 +76,14 @@ def _transfer_ownership(profile: Dict[str, Any], db_profile_id: str, db_new_owne
                 "Delete": {
                     "TableName": tables.profiles.table_name,
                     "Key": {k: _type_serializer.serialize(v) for k, v in old_key.items()},
+                    "ConditionExpression": "attribute_exists(ownerAccountId)",
                 }
             },
             {
                 "Put": {
                     "TableName": tables.profiles.table_name,
                     "Item": {k: _type_serializer.serialize(v) for k, v in new_profile.items()},
+                    "ConditionExpression": "attribute_not_exists(ownerAccountId)",
                 }
             },
         ]

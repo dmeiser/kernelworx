@@ -161,6 +161,18 @@ class TestStructuredLogger:
         assert "traceback" not in log_entry
         assert log_entry["message"] == "Oops"
 
+    def test_non_standard_level_falls_back_to_info(self, capsys: Any) -> None:
+        """Test that unknown level names fall back to INFO and still emit."""
+        logger = StructuredLogger("custom-level-test", "test-id")
+
+        logger._log("CUSTOM", "Custom level message")
+
+        captured = capsys.readouterr()
+        log_entry = json.loads(captured.out.strip())
+
+        assert log_entry["level"] == "CUSTOM"
+        assert log_entry["message"] == "Custom level message"
+
 
 class TestGetCorrelationId:
     """Tests for get_correlation_id function."""

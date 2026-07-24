@@ -53,9 +53,17 @@ plan_is_fresh() {
     local newer_source
     newer_source=$(find "$ROOT_DIR/src" "$ROOT_DIR/tofu" \
         -type f \
-        \( -name "*.tf" -o -name "*.py" -o -name "*.js" -o -name "*.graphql" \) \
+        \( -name "*.tf" -o -name "*.py" -o -name "*.js" -o -name "*.graphql" \
+           -o -name "*.lock.hcl" -o -name "uv.lock" -o -name "pyproject.toml" \) \
         -newer "$plan_file" 2>/dev/null | head -n 1)
-    [ -z "$newer_source" ]
+    if [ -n "$newer_source" ]; then
+        return 1
+    fi
+    # Root .env can carry TF_VAR_* inputs that affect the plan.
+    if [ -f "$ROOT_DIR/.env" ] && [ "$ROOT_DIR/.env" -nt "$plan_file" ]; then
+        return 1
+    fi
+    return 0
 }
 
 cd "$ENV_DIR"

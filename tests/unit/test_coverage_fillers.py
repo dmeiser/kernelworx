@@ -482,6 +482,102 @@ def test_transfer_profile_ownership_share_delete_fails():
         db_module._table_overrides.pop("shares", None)
 
 
+@mock_aws
+def test_transfer_profile_ownership_source_deleted_race():
+    """Transfer must fail if the source profile is deleted between read and transaction."""
+    os.environ["AWS_REGION"] = "us-east-1"
+    os.environ["PROFILES_TABLE_NAME"] = "ProfilesTable"
+    os.environ["SHARES_TABLE_NAME"] = "SharesTable"
+
+    dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
+    dynamodb.create_table(
+        TableName="ProfilesTable",
+        KeySchema=[
+            {"AttributeName": "ownerAccountId", "KeyType": "HASH"},
+            {"AttributeName": "profileId", "KeyType": "RANGE"},
+        ],
+        AttributeDefinitions=[
+            {"AttributeName": "ownerAccountId", "AttributeType": "S"},
+            {"AttributeName": "profileId", "AttributeType": "S"},
+        ],
+        BillingMode="PAY_PER_REQUEST",
+        GlobalSecondaryIndexes=[
+            {
+                "IndexName": "profileId-index",
+                "KeySchema": [{"AttributeName": "profileId", "KeyType": "HASH"}],
+                "Projection": {"ProjectionType": "ALL"},
+            }
+        ],
+    )
+
+    module_name = "src.handlers.transfer_profile_ownership"
+    if module_name in sys.modules:
+        del sys.modules[module_name]
+    transfer_module = importlib.import_module(module_name)
+
+    profile = {
+        "ownerAccountId": "ACCOUNT#owner123",
+        "profileId": "PROFILE#abc",
+        "sellerName": "Scout",
+    }
+    # Do NOT seed the source row; the Delete condition should fail.
+    with pytest.raises(Exception):
+        transfer_module._transfer_ownership(profile, "PROFILE#abc", "ACCOUNT#new456")
+
+
+@mock_aws
+def test_transfer_profile_ownership_destination_exists_race():
+    """Transfer must fail if a profile already exists at the destination key."""
+    os.environ["AWS_REGION"] = "us-east-1"
+    os.environ["PROFILES_TABLE_NAME"] = "ProfilesTable"
+    os.environ["SHARES_TABLE_NAME"] = "SharesTable"
+
+    dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
+    dynamodb.create_table(
+        TableName="ProfilesTable",
+        KeySchema=[
+            {"AttributeName": "ownerAccountId", "KeyType": "HASH"},
+            {"AttributeName": "profileId", "KeyType": "RANGE"},
+        ],
+        AttributeDefinitions=[
+            {"AttributeName": "ownerAccountId", "AttributeType": "S"},
+            {"AttributeName": "profileId", "AttributeType": "S"},
+        ],
+        BillingMode="PAY_PER_REQUEST",
+        GlobalSecondaryIndexes=[
+            {
+                "IndexName": "profileId-index",
+                "KeySchema": [{"AttributeName": "profileId", "KeyType": "HASH"}],
+                "Projection": {"ProjectionType": "ALL"},
+            }
+        ],
+    )
+
+    module_name = "src.handlers.transfer_profile_ownership"
+    if module_name in sys.modules:
+        del sys.modules[module_name]
+    transfer_module = importlib.import_module(module_name)
+
+    profiles_table = dynamodb.Table("ProfilesTable")
+    profile = {
+        "ownerAccountId": "ACCOUNT#owner123",
+        "profileId": "PROFILE#abc",
+        "sellerName": "Scout",
+    }
+    profiles_table.put_item(Item=profile)
+    # Seed an item at the destination key so the Put condition fails.
+    profiles_table.put_item(
+        Item={
+            "ownerAccountId": "ACCOUNT#new456",
+            "profileId": "PROFILE#abc",
+            "sellerName": "Existing",
+        }
+    )
+
+    with pytest.raises(Exception):
+        transfer_module._transfer_ownership(profile, "PROFILE#abc", "ACCOUNT#new456")
+
+
 def test_profile_sharing_fetch_batch_with_zero_retries():
     from src.handlers import profile_sharing
 
