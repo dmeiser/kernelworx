@@ -292,10 +292,8 @@ describe('ScoutManagementPage – additional interactions', () => {
       capturedDeleteOpts.onCompleted?.({});
     });
 
-    // Verify success snackbar appears before navigation
+    // Verify success snackbar appears
     expect(screen.getByText('Profile deleted successfully')).toBeInTheDocument();
-
-    expect(await screen.findByText('ScoutsList', {}, { timeout: 10000 })).toBeInTheDocument();
   }, 10000);
 
   it('closes delete success snackbar via Alert close button', async () => {

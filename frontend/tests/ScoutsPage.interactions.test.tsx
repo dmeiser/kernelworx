@@ -34,7 +34,7 @@ let mockAccountData: any = {
 let mockMyProfilesError: Error | null = null;
 let mockMyProfilesLoading = false;
 
-const loadMyProfilesMock = vi.fn();
+const loadMyProfilesMock = vi.fn().mockResolvedValue(undefined);
 const loadAccountMock = vi.fn();
 const updatePreferencesMock = vi.fn().mockResolvedValue({ data: {} });
 const createProfileMock = vi.fn().mockResolvedValue({ data: { createSellerProfile: { profileId: 'PROFILE#new1' } } });
