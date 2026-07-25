@@ -432,7 +432,7 @@ export const ScoutsPage: React.FC = () => {
     onCompleted: () => {
       void loadMyProfiles().then(() => {
         handleReturnNavigation(returnPath, (path, opts) => { void navigate(path, opts); });
-      });
+      }).catch(() => {});
     },
   });
 
