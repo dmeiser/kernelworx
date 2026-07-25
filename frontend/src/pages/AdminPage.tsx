@@ -505,7 +505,7 @@ export const AdminPage: React.FC = () => {
   const [updateCatalog] = useMutation(UPDATE_CATALOG, {
     onCompleted: () => {
       showSnackbar('Catalog updated successfully');
-      void       void refetchCatalogs();
+      void refetchCatalogs();
     },
     onError: (error) => {
       showSnackbar(`Error updating catalog: ${error.message}`);

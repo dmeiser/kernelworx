@@ -306,18 +306,18 @@ class TestConfirmQRUpload:
         )
 
         override_table("accounts", mock_table)
+        try:
+            event = {
+                "identity": {"sub": sample_account_id},
+                "arguments": {"paymentMethodName": "Venmo", "s3Key": s3_key},
+            }
 
-        event = {
-            "identity": {"sub": sample_account_id},
-            "arguments": {"paymentMethodName": "Venmo", "s3Key": s3_key},
-        }
-
-        with pytest.raises(AppError) as exc_info:
-            confirm_qr_upload(event, None)
-        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
-        assert "modified by another request" in str(exc_info.value.message)
-
-        override_table("accounts", None)
+            with pytest.raises(AppError) as exc_info:
+                confirm_qr_upload(event, None)
+            assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+            assert "modified by another request" in str(exc_info.value.message)
+        finally:
+            override_table("accounts", None)
 
 
 class TestDeleteQRCode:
@@ -459,15 +459,15 @@ class TestDeleteQRCode:
         )
 
         override_table("accounts", mock_table)
+        try:
+            event = {"identity": {"sub": sample_account_id}, "arguments": {"paymentMethodName": "Venmo"}}
 
-        event = {"identity": {"sub": sample_account_id}, "arguments": {"paymentMethodName": "Venmo"}}
-
-        with pytest.raises(AppError) as exc_info:
-            delete_qr_code(event, None)
-        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
-        assert "modified by another request" in str(exc_info.value.message)
-
-        override_table("accounts", None)
+            with pytest.raises(AppError) as exc_info:
+                delete_qr_code(event, None)
+            assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+            assert "modified by another request" in str(exc_info.value.message)
+        finally:
+            override_table("accounts", None)
 
 
 class TestExceptionHandling:

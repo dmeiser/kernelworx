@@ -15,6 +15,7 @@ from src.handlers.delete_profile_cascade import (
     lambda_handler,
 )
 from src.utils.dynamodb import clear_all_overrides
+from src.utils.errors import AppError
 
 
 @pytest.fixture(autouse=True)
@@ -605,7 +606,7 @@ class TestDeleteProfileCascade:
                 "arguments": {"profileId": profile_id},
                 "identity": {"sub": owner_id},
             }
-            with pytest.raises(Exception):
+            with pytest.raises(AppError):
                 lambda_handler(event, None)
 
             # The profile metadata row must not be deleted if related data could not be removed.
@@ -640,7 +641,7 @@ class TestDeleteProfileCascade:
                 "arguments": {"profileId": profile_id},
                 "identity": {"sub": owner_id},
             }
-            with pytest.raises(Exception):
+            with pytest.raises(AppError):
                 lambda_handler(event, None)
 
             mock_tables.profiles.delete_item.assert_not_called()

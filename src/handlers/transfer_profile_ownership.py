@@ -55,7 +55,7 @@ def _verify_new_owner_has_share(db_profile_id: str, db_new_owner_id: str, caller
     if not caller_is_admin:
         share_response = tables.shares.get_item(Key={"profileId": db_profile_id, "targetAccountId": db_new_owner_id})
         if "Item" not in share_response:
-                raise AppError(ErrorCode.INVALID_INPUT, "New owner must have existing access to the profile")
+            raise AppError(ErrorCode.INVALID_INPUT, "New owner must have existing access to the profile")
 
 
 def _transfer_ownership(profile: Dict[str, Any], db_profile_id: str, db_new_owner_id: str) -> None:
