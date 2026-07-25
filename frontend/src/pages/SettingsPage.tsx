@@ -24,7 +24,7 @@ export const SettingsPage: React.FC = () => {
   const account = accountData?.getMyAccount;
 
   const handleLogout = () => {
-    void logout().then(() => navigate('/'));
+    void logout().then(() => navigate('/')).catch(() => {});
   };
 
   return (
