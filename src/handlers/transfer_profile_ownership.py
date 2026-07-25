@@ -14,6 +14,7 @@ from typing import Any, Dict
 import boto3
 from boto3.dynamodb.conditions import Key
 from boto3.dynamodb.types import TypeSerializer
+from botocore.exceptions import ClientError
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
@@ -73,24 +74,30 @@ def _transfer_ownership(profile: Dict[str, Any], db_profile_id: str, db_new_owne
     endpoint_url = os.getenv("DYNAMODB_ENDPOINT")
     dynamodb_client = boto3.client("dynamodb", endpoint_url=endpoint_url)
     table_name = tables.profiles.name
-    dynamodb_client.transact_write_items(
-        TransactItems=[
-            {
-                "Delete": {
-                    "TableName": table_name,
-                    "Key": {k: _type_serializer.serialize(v) for k, v in old_key.items()},
-                    "ConditionExpression": "attribute_exists(ownerAccountId)",
-                }
-            },
-            {
-                "Put": {
-                    "TableName": table_name,
-                    "Item": {k: _type_serializer.serialize(v) for k, v in new_profile.items()},
-                    "ConditionExpression": "attribute_not_exists(ownerAccountId)",
-                }
-            },
-        ]
-    )
+    try:
+        dynamodb_client.transact_write_items(
+            TransactItems=[
+                {
+                    "Delete": {
+                        "TableName": table_name,
+                        "Key": {k: _type_serializer.serialize(v) for k, v in old_key.items()},
+                        "ConditionExpression": "attribute_exists(ownerAccountId)",
+                    }
+                },
+                {
+                    "Put": {
+                        "TableName": table_name,
+                        "Item": {k: _type_serializer.serialize(v) for k, v in new_profile.items()},
+                        "ConditionExpression": "attribute_not_exists(ownerAccountId)",
+                    }
+                },
+            ]
+        )
+    except ClientError as e:
+        raise AppError(
+            ErrorCode.INTERNAL_ERROR,
+            f"Failed to transfer profile ownership: {e}",
+        ) from e
 
     # Keep the returned profile dict in sync with the persisted record.
     profile["ownerAccountId"] = db_new_owner_id

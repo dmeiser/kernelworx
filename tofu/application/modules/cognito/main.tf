@@ -373,7 +373,7 @@ resource "aws_cognito_user_pool_domain" "custom" {
     precondition {
       # Reference the validation resource so the custom domain waits for the login
       # certificate to validate. The ternary allows dev builds that omit it.
-      condition     = var.login_certificate_validation != null ? length(var.login_certificate_validation.validation_record_fqdns) > 0 : true
+      condition     = var.login_certificate_validation != null ? try(length(var.login_certificate_validation.validation_record_fqdns) > 0, false) : true
       error_message = "Login certificate validation must complete before creating the Cognito custom domain"
     }
   }
