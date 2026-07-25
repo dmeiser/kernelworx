@@ -24,7 +24,7 @@ export default defineConfig([
     },
     rules: {
       // Cyclomatic complexity limit - Grade A equivalent (radon: 1-5)
-      'complexity': ['error', { max: 9 }],
+      'complexity': ['error', { max: 5 }],
       // Maximum depth of nested blocks
       'max-depth': ['error', { max: 3 }],
       // Allow setState in useEffect for fetch-on-mount patterns

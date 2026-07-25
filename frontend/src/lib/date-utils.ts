@@ -15,19 +15,18 @@ interface DateParts {
 }
 
 const parseDatePart = (dateString: string): DateParts | null => {
-  const match = dateString.split('T')[0].match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (!match) return null;
+  const dateOnly = dateString.split('T')[0];
+  const [year, month, day] = dateOnly.split('-').map(Number);
+  const parsed = new Date(year, month - 1, day);
 
-  const year = parseInt(match[1], 10);
-  const month = parseInt(match[2], 10);
-  const day = parseInt(match[3], 10);
-
-  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
-
-  const parsed = new Date(Date.UTC(year, month - 1, day));
-  if (parsed.getUTCFullYear() !== year) return null;
-  if (parsed.getUTCMonth() !== month - 1) return null;
-  if (parsed.getUTCDate() !== day) return null;
+  if (
+    Number.isNaN(parsed.getTime()) ||
+    parsed.getFullYear() !== year ||
+    parsed.getMonth() !== month - 1 ||
+    parsed.getDate() !== day
+  ) {
+    return null;
+  }
 
   return { year, month, day };
 };
