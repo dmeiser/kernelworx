@@ -23,9 +23,8 @@ export const SettingsPage: React.FC = () => {
   const { data: accountData } = useQuery<{ getMyAccount: Account }>(GET_MY_ACCOUNT);
   const account = accountData?.getMyAccount;
 
-  const handleLogout = async () => {
-    await logout();
-    navigate('/');
+  const handleLogout = () => {
+    void logout().then(() => navigate('/'));
   };
 
   return (
