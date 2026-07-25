@@ -29,13 +29,26 @@ export async function getAwsConfig(): Promise<AwsConfig> {
 
   const region = process.env.TEST_REGION || 'us-east-1';
 
-  // Look up resources directly from AWS
-  const cognitoConfig = await lookupCognitoConfigByPoolName(region, 'kernelworx');
+  // Use explicit env var override if set, otherwise look up from AWS
+  let userPoolId: string;
+  let userPoolClientId: string;
+
+  if (process.env.TEST_USER_POOL_CLIENT_ID) {
+    userPoolClientId = process.env.TEST_USER_POOL_CLIENT_ID;
+    userPoolId = process.env.TEST_USER_POOL_ID || '';
+    if (!userPoolId) {
+      throw new Error('TEST_USER_POOL_CLIENT_ID is set but TEST_USER_POOL_ID is not');
+    }
+  } else {
+    const cognitoConfig = await lookupCognitoConfigByPoolName(region, 'kernelworx');
+    userPoolId = cognitoConfig.userPoolId;
+    userPoolClientId = cognitoConfig.clientId;
+  }
   const appSyncEndpoint = await lookupAppSyncEndpoint(region, 'kernelworx');
 
   cachedConfig = {
-    userPoolId: cognitoConfig.userPoolId,
-    userPoolClientId: cognitoConfig.clientId,
+    userPoolId,
+    userPoolClientId,
     appSyncEndpoint,
     region,
   };

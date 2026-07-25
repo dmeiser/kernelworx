@@ -127,6 +127,169 @@ def test_profile_sharing_log_unprocessed_and_build_result():
     profile_sharing._log_unprocessed_keys({"Other": {"Keys": [1]}}, "Other", logger2)
     assert logger2.warned == [{"count": 1}]
 
+    # No keys to log (empty branch)
+    logger3 = DummyLogger()
+    profile_sharing._log_unprocessed_keys({}, "Profiles", logger3)
+    assert logger3.warned == []
+
+
+def test_profile_sharing_fetch_batch_retry_edge_cases(monkeypatch):
+    from src.handlers import profile_sharing
+    from src.utils.errors import AppError, ErrorCode
+    from unittest.mock import MagicMock
+
+    # _get_unprocessed_table fallback loop when table not found by name
+    result = profile_sharing._get_unprocessed_table({"OtherTable": {"Keys": [1]}}, "Profiles")
+    assert result == {"Keys": [1]}
+
+    # _get_unprocessed_table with empty unprocessed keys
+    result = profile_sharing._get_unprocessed_table({}, "Profiles")
+    assert result == {}
+
+
+def test_profile_sharing_fetch_batch_exception_retry(monkeypatch):
+    from src.handlers import profile_sharing
+    from src.utils.errors import AppError, ErrorCode
+    from unittest.mock import MagicMock
+
+    mock_table = MagicMock()
+    mock_table.name = "test-table"
+
+    class FakeLogger:
+        def __init__(self):
+            self.warnings = []
+            self.errors = []
+
+        def warning(self, msg, **kwargs):
+            self.warnings.append((msg, kwargs))
+
+        def error(self, msg, **kwargs):
+            self.errors.append((msg, kwargs))
+
+    logger = FakeLogger()
+    keys = [{"profileId": "P#1"}]
+
+    call_count = [0]
+
+    def failing_batch_get(**kwargs):
+        call_count[0] += 1
+        raise Exception("DynamoDB down")
+
+    monkeypatch.setattr(profile_sharing.dynamodb, "batch_get_item", failing_batch_get)
+    with pytest.raises(AppError) as exc_info:
+        profile_sharing._fetch_batch_with_retry(keys, mock_table, logger)
+    assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+    assert call_count[0] == 3
+
+
+def test_profile_sharing_fetch_batch_empty_keys(monkeypatch):
+    from src.handlers import profile_sharing
+    from unittest.mock import MagicMock
+
+    mock_table = MagicMock()
+    mock_table.name = "test-table"
+
+    class FakeLogger:
+        def __init__(self):
+            self.warnings = []
+            self.errors = []
+
+        def warning(self, msg, **kwargs):
+            self.warnings.append((msg, kwargs))
+
+        def error(self, msg, **kwargs):
+            self.errors.append((msg, kwargs))
+
+    logger = FakeLogger()
+
+    # Empty keys list should break immediately and return empty
+    result = profile_sharing._fetch_batch_with_retry([], mock_table, logger)
+    assert result == []
+
+
+def test_profile_sharing_fetch_batch_unprocessed_after_retries(monkeypatch):
+    from src.handlers import profile_sharing
+    from unittest.mock import MagicMock
+
+    mock_table = MagicMock()
+    mock_table.name = "test-table"
+
+    class FakeLogger:
+        def __init__(self):
+            self.warnings = []
+            self.errors = []
+
+        def warning(self, msg, **kwargs):
+            self.warnings.append((msg, kwargs))
+
+        def error(self, msg, **kwargs):
+            self.errors.append((msg, kwargs))
+
+    logger = FakeLogger()
+    keys = [{"profileId": "P#1"}]
+
+    # Mock batch_get_item to always return unprocessed keys
+    def always_unprocessed(**kwargs):
+        return {
+            "Responses": {mock_table.name: []},
+            "UnprocessedKeys": {mock_table.name: {"Keys": keys}},
+        }
+
+    monkeypatch.setattr(profile_sharing.dynamodb, "batch_get_item", always_unprocessed)
+    result = profile_sharing._fetch_batch_with_retry(keys, mock_table, logger)
+    assert result == []
+    assert any("still remain" in e[0] for e in logger.errors)
+
+
+def test_auth_is_admin_unexpected_exception(monkeypatch):
+    from src.utils.auth import is_admin
+
+    # Event where identity.get("claims") raises something other than
+    # AttributeError/KeyError/TypeError — e.g. a claims object whose
+    # .get() method raises a RuntimeError
+    class MisbehavingClaims:
+        def get(self, key, default=None):
+            raise RuntimeError("claims broken")
+
+    result = is_admin({"identity": {"claims": MisbehavingClaims()}})
+    assert result is False
+
+
+def test_payment_methods_delete_qr_uuid_fallback(monkeypatch):
+    from src.utils import payment_methods
+    from unittest.mock import MagicMock
+    from botocore.exceptions import ClientError
+
+    monkeypatch.setenv("EXPORTS_BUCKET", "test-exports-bucket")
+    mock_s3 = MagicMock()
+    # First 3 calls (slug-based) raise NoSuchKey, next 3 (UUID) succeed
+    no_such_key = ClientError({"Error": {"Code": "NoSuchKey", "Message": "Not found"}}, "DeleteObject")
+    mock_s3.delete_object.side_effect = [no_such_key, no_such_key, no_such_key, None, None, None]
+    monkeypatch.setattr(payment_methods, "_get_s3_client", lambda: mock_s3)
+
+    # UUID fallback success path
+    payment_methods.delete_qr_from_s3("ACCOUNT#test", "test-method")
+    assert mock_s3.delete_object.call_count == 6
+
+
+def test_payment_methods_delete_qr_uuid_fallback_error(monkeypatch):
+    from src.utils import payment_methods
+    from unittest.mock import MagicMock
+    from botocore.exceptions import ClientError
+
+    monkeypatch.setenv("EXPORTS_BUCKET", "test-exports-bucket")
+    mock_s3 = MagicMock()
+    no_such_key = ClientError({"Error": {"Code": "NoSuchKey", "Message": "Not found"}}, "DeleteObject")
+    access_denied = ClientError({"Error": {"Code": "AccessDenied", "Message": "Access denied"}}, "DeleteObject")
+    # Slug deletes: NoSuchKey, NoSuchKey, NoSuchKey
+    # UUID deletes: AccessDenied, NoSuchKey, NoSuchKey
+    mock_s3.delete_object.side_effect = [no_such_key, no_such_key, no_such_key, access_denied, no_such_key, no_such_key]
+    monkeypatch.setattr(payment_methods, "_get_s3_client", lambda: mock_s3)
+
+    # UUID fallback with non-NoSuchKey error (should log warning, not raise)
+    payment_methods.delete_qr_from_s3("ACCOUNT#test", "test-method")
+    assert mock_s3.delete_object.call_count == 6
+
 
 def test_report_generation_get_s3_client_default(monkeypatch):
     from src.handlers import report_generation
