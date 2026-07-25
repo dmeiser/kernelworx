@@ -22,17 +22,12 @@ const parseDatePart = (dateString: string): DateParts | null => {
   const month = parseInt(match[2], 10);
   const day = parseInt(match[3], 10);
 
-  if (month < 1 || month > 12) return null;
-  if (day < 1 || day > 31) return null;
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
 
   const parsed = new Date(Date.UTC(year, month - 1, day));
-  if (
-    parsed.getUTCFullYear() !== year ||
-    parsed.getUTCMonth() !== month - 1 ||
-    parsed.getUTCDate() !== day
-  ) {
-    return null;
-  }
+  if (parsed.getUTCFullYear() !== year) return null;
+  if (parsed.getUTCMonth() !== month - 1) return null;
+  if (parsed.getUTCDate() !== day) return null;
 
   return { year, month, day };
 };
