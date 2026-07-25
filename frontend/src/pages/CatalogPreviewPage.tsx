@@ -85,7 +85,7 @@ export const CatalogPreviewPage: React.FC<CatalogPreviewPageProps> = ({
     if (onCreateCampaign) {
       onCreateCampaign(catalogId);
     } else {
-      navigate('/create-campaign', { state: { catalogId } });
+      void navigate('/create-campaign', { state: { catalogId } });
     }
   };
 
@@ -94,7 +94,7 @@ export const CatalogPreviewPage: React.FC<CatalogPreviewPageProps> = ({
     if (onCreateSharedCampaign) {
       onCreateSharedCampaign(catalogId);
     } else {
-      navigate('/shared-campaigns/create', { state: { catalogId } });
+      void navigate('/shared-campaigns/create', { state: { catalogId } });
     }
   };
 

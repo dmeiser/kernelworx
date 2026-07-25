@@ -134,9 +134,8 @@ def test_profile_sharing_log_unprocessed_and_build_result():
 
 
 def test_profile_sharing_fetch_batch_retry_edge_cases(monkeypatch):
+
     from src.handlers import profile_sharing
-    from src.utils.errors import AppError, ErrorCode
-    from unittest.mock import MagicMock
 
     # _get_unprocessed_table fallback loop when table not found by name
     result = profile_sharing._get_unprocessed_table({"OtherTable": {"Keys": [1]}}, "Profiles")
@@ -148,9 +147,10 @@ def test_profile_sharing_fetch_batch_retry_edge_cases(monkeypatch):
 
 
 def test_profile_sharing_fetch_batch_exception_retry(monkeypatch):
+    from unittest.mock import MagicMock
+
     from src.handlers import profile_sharing
     from src.utils.errors import AppError, ErrorCode
-    from unittest.mock import MagicMock
 
     mock_table = MagicMock()
     mock_table.name = "test-table"
@@ -183,8 +183,9 @@ def test_profile_sharing_fetch_batch_exception_retry(monkeypatch):
 
 
 def test_profile_sharing_fetch_batch_empty_keys(monkeypatch):
-    from src.handlers import profile_sharing
     from unittest.mock import MagicMock
+
+    from src.handlers import profile_sharing
 
     mock_table = MagicMock()
     mock_table.name = "test-table"
@@ -208,8 +209,9 @@ def test_profile_sharing_fetch_batch_empty_keys(monkeypatch):
 
 
 def test_profile_sharing_fetch_batch_unprocessed_after_retries(monkeypatch):
-    from src.handlers import profile_sharing
     from unittest.mock import MagicMock
+
+    from src.handlers import profile_sharing
 
     mock_table = MagicMock()
     mock_table.name = "test-table"
@@ -256,9 +258,11 @@ def test_auth_is_admin_unexpected_exception(monkeypatch):
 
 
 def test_payment_methods_delete_qr_uuid_fallback(monkeypatch):
-    from src.utils import payment_methods
     from unittest.mock import MagicMock
+
     from botocore.exceptions import ClientError
+
+    from src.utils import payment_methods
 
     monkeypatch.setenv("EXPORTS_BUCKET", "test-exports-bucket")
     mock_s3 = MagicMock()
@@ -273,9 +277,11 @@ def test_payment_methods_delete_qr_uuid_fallback(monkeypatch):
 
 
 def test_payment_methods_delete_qr_uuid_fallback_error(monkeypatch):
-    from src.utils import payment_methods
     from unittest.mock import MagicMock
+
     from botocore.exceptions import ClientError
+
+    from src.utils import payment_methods
 
     monkeypatch.setenv("EXPORTS_BUCKET", "test-exports-bucket")
     mock_s3 = MagicMock()

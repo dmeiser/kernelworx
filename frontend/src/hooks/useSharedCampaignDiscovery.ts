@@ -72,7 +72,7 @@ export const useSharedCampaignDiscovery = () => {
 
       const variables = toVariables(params);
       timeoutRef.current = setTimeout(() => {
-        findSharedCampaigns({ variables });
+        void findSharedCampaigns({ variables });
       }, SHARED_DISCOVERY_DEBOUNCE_MS);
     },
     [findSharedCampaigns],

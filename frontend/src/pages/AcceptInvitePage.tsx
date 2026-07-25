@@ -59,7 +59,7 @@ export const AcceptInvitePage: React.FC = () => {
     if (redirectTimeoutRef.current) {
       clearTimeout(redirectTimeoutRef.current);
     }
-    redirectTimeoutRef.current = setTimeout(() => navigate('/scouts'), 2000);
+    redirectTimeoutRef.current = setTimeout(() => { void navigate('/scouts'); }, 2000);
   };
 
   const handleError = (err: Error) => {
@@ -150,7 +150,7 @@ export const AcceptInvitePage: React.FC = () => {
 
             {error && <Alert severity="error">{error}</Alert>}
 
-            <form onSubmit={handleSubmit}>
+            <form onSubmit={(e) => { void handleSubmit(e); }}>
               <Stack spacing={2}>
                 <TextField
                   fullWidth

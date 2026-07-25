@@ -391,7 +391,7 @@ export const SharedCampaignsPage: React.FC = () => {
   const sharedCampaigns = getSharedCampaigns(data);
   const activeSharedCampaignCount = countActiveSharedCampaigns(sharedCampaigns);
   const canCreateMore = canCreateMoreSharedCampaigns(activeSharedCampaignCount);
-  const handleCreateClick = () => navigate('/shared-campaigns/create');
+  const handleCreateClick = () => { void navigate('/shared-campaigns/create'); };
 
   const getShortLink = (sharedCampaignCode: string) => {
     return `${BASE_URL}/c/${sharedCampaignCode}`;
@@ -508,11 +508,11 @@ export const SharedCampaignsPage: React.FC = () => {
 
       <CampaignsList
         campaigns={sharedCampaigns}
-        onCreateClick={handleCreateClick}
-        onCopyLink={handleCopyLink}
-        onShowQR={handleShowQRCode}
-        onEdit={handleEdit}
-        onDeactivate={handleDeactivate}
+        onCreateClick={() => { void handleCreateClick(); }}
+        onCopyLink={(code) => { void handleCopyLink(code); }}
+        onShowQR={(campaign) => { void handleShowQRCode(campaign); }}
+        onEdit={(campaign) => { void handleEdit(campaign); }}
+        onDeactivate={(campaign) => { void handleDeactivate(campaign); }}
       />
 
       {/* Edit Dialog */}

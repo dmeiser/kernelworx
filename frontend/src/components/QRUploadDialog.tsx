@@ -255,7 +255,7 @@ export const QRUploadDialog: React.FC<QRUploadDialogProps> = ({
           Cancel
         </Button>
         <Button
-          onClick={handleUpload}
+          onClick={() => { void handleUpload(); }}
           variant="contained"
           disabled={isLoading || !selectedFile}
           startIcon={isLoading ? <CircularProgress size={16} /> : <UploadIcon />}

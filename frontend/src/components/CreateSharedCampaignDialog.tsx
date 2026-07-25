@@ -396,7 +396,7 @@ export const CreateSharedCampaignDialog: React.FC<CreateSharedCampaignDialogProp
           Cancel
         </Button>
         <Button
-          onClick={handleSubmit}
+          onClick={() => { void handleSubmit(); }}
           variant="contained"
           disabled={!isFormValid || isSubmitting || !canCreate}
           startIcon={isSubmitting ? <CircularProgress size={16} /> : undefined}

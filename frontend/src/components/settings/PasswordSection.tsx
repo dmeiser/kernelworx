@@ -33,7 +33,7 @@ export const PasswordSection: React.FC<PasswordSectionProps> = ({ hook }) => {
         </Alert>
       )}
 
-      <form onSubmit={hook.handlePasswordChange}>
+      <form onSubmit={(e) => { void hook.handlePasswordChange(e); }}>
         <Stack spacing={2}>
           <TextField
             label="Current Password"

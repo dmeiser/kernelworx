@@ -184,11 +184,11 @@ function useNavigationHandlers(profileId: string, campaignId: string) {
 
   const handleTabChange = (_event: React.SyntheticEvent, newValue: string) => {
     const url = `/scouts/${toUrlId(profileId)}/campaigns/${toUrlId(campaignId)}/${newValue}`;
-    navigate(url);
+    void navigate(url);
   };
 
   const handleBack = () => {
-    navigate(`/scouts/${toUrlId(profileId)}/campaigns`);
+    void navigate(`/scouts/${toUrlId(profileId)}/campaigns`);
   };
 
   return { navigate, handleTabChange, handleBack };
@@ -221,7 +221,7 @@ const CampaignContent: React.FC<CampaignContentProps> = ({ profileId, tabValue, 
       sellerName={profile?.sellerName || 'Loading...'}
       campaignName={campaign.campaignName}
       campaignYear={campaign.campaignYear}
-      onNavigate={navHandlers.navigate}
+      onNavigate={(path) => { void navHandlers.navigate(path); }}
     />
     <CampaignHeader campaign={campaign} onBack={navHandlers.handleBack} />
     <CampaignTabs

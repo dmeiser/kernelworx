@@ -496,7 +496,7 @@ export const AdminPage: React.FC = () => {
   const [createManagedCatalog] = useMutation(CREATE_MANAGED_CATALOG, {
     onCompleted: () => {
       showSnackbar('Catalog created successfully');
-      refetchCatalogs();
+      void refetchCatalogs();
     },
     onError: (error) => {
       showSnackbar(`Error creating catalog: ${error.message}`);
@@ -505,7 +505,7 @@ export const AdminPage: React.FC = () => {
   const [updateCatalog] = useMutation(UPDATE_CATALOG, {
     onCompleted: () => {
       showSnackbar('Catalog updated successfully');
-      refetchCatalogs();
+      void       void refetchCatalogs();
     },
     onError: (error) => {
       showSnackbar(`Error updating catalog: ${error.message}`);
@@ -514,7 +514,7 @@ export const AdminPage: React.FC = () => {
   const [deleteCatalog] = useMutation(DELETE_CATALOG, {
     onCompleted: () => {
       showSnackbar('Catalog deleted successfully');
-      refetchCatalogs();
+      void refetchCatalogs();
     },
     onError: (error) => {
       showSnackbar(`Error deleting catalog: ${error.message}`);
@@ -552,7 +552,7 @@ export const AdminPage: React.FC = () => {
     /* v8 ignore start -- Search button is disabled and Enter key handler prevents empty queries */
     if (!userSearchQuery.trim()) return;
     /* v8 ignore stop */
-    searchUser({ variables: { query: userSearchQuery.trim() } });
+    void searchUser({ variables: { query: userSearchQuery.trim() } });
   };
 
   // --- Catalog Handlers ---
@@ -738,7 +738,7 @@ export const AdminPage: React.FC = () => {
             hasSearched={hasSearched}
             onResetPassword={handleResetPassword}
             onDeleteUser={handleDeleteUser}
-            onViewDetails={(user) => navigate(`/admin/user-data/${encodeURIComponent(user.accountId)}`)}
+            onViewDetails={(user) => { void navigate(`/admin/user-data/${encodeURIComponent(user.accountId)}`); }}
           />
         </Paper>
       </TabPanel>
@@ -866,7 +866,7 @@ export const AdminPage: React.FC = () => {
             {deleteProgress?.error ? 'Close' : 'Cancel'}
           </Button>
           {!deleteProgress && (
-            <Button onClick={confirmDeleteUser} color="error">
+            <Button onClick={() => { void confirmDeleteUser(); }} color="error">
               Delete User
             </Button>
           )}

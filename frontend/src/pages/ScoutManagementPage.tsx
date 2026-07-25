@@ -103,7 +103,7 @@ const isExpired = (expiresAt: string): boolean => new Date(expiresAt) < new Date
 
 // Helper to copy code to clipboard
 const copyToClipboard = (code: string): void => {
-  navigator.clipboard.writeText(code);
+  void navigator.clipboard.writeText(code);
 };
 
 // Helper to get button text for updating state
@@ -407,7 +407,7 @@ export const ScoutManagementPage: React.FC = () => {
   // Navigate to scouts list after showing a brief success message
   React.useEffect(() => {
     if (!deleteSuccess) return undefined;
-    const timer = setTimeout(() => navigate('/scouts'), 1200);
+    const timer = setTimeout(() => { void navigate('/scouts'); }, 1200);
     return () => clearTimeout(timer);
   }, [deleteSuccess, navigate]);
 
@@ -476,7 +476,7 @@ export const ScoutManagementPage: React.FC = () => {
   }>(CREATE_PROFILE_INVITE, {
     onCompleted: (data) => {
       setInviteCode(data.createProfileInvite.inviteCode);
-      refetchInvites();
+      void refetchInvites();
     },
   });
 
@@ -485,7 +485,7 @@ export const ScoutManagementPage: React.FC = () => {
     onCompleted: () => {
       setDeleteInviteConfirmOpen(false);
       setDeletingInviteCode(null);
-      refetchInvites();
+      void refetchInvites();
     },
   });
 
@@ -498,7 +498,7 @@ export const ScoutManagementPage: React.FC = () => {
   const [transferOwnership] = useMutation(TRANSFER_PROFILE_OWNERSHIP, {
     refetchQueries: [{ query: GET_PROFILE, variables: { profileId: dbProfileId } }],
     onCompleted: () => {
-      navigate('/scouts');
+      void navigate('/scouts');
     },
   });
 
@@ -625,7 +625,7 @@ export const ScoutManagementPage: React.FC = () => {
 
             <Button
               variant="contained"
-              onClick={handleSaveChanges}
+              onClick={() => { void handleSaveChanges(); }}
               disabled={isSaveDisabled(updating, profileName, profile.sellerName)}
             >
               {getSaveButtonText(updating)}
@@ -671,7 +671,7 @@ export const ScoutManagementPage: React.FC = () => {
           <Button
             variant="contained"
             startIcon={<AddIcon />}
-            onClick={handleCreateInvite}
+            onClick={() => { void handleCreateInvite(); }}
             disabled={isCreateInviteDisabled(creatingInvite, invitePermissions)}
             sx={{ mb: 2 }}
           >
@@ -745,8 +745,8 @@ export const ScoutManagementPage: React.FC = () => {
         {/* Shares Section */}
         <SharesSection
           shares={shares}
-          onTransferOwnership={handleTransferOwnership}
-          onRevokeShare={handleRevokeShare}
+          onTransferOwnership={(targetAccountId, email) => { void handleTransferOwnership(targetAccountId, email); }}
+          onRevokeShare={(targetAccountId, email) => { void handleRevokeShare(targetAccountId, email); }}
         />
 
         {/* Delete Profile Section */}
@@ -812,7 +812,7 @@ export const ScoutManagementPage: React.FC = () => {
           <Button onClick={() => setDeleteConfirmOpen(false)} disabled={deletingProfile}>
             Cancel
           </Button>
-          <Button onClick={handleDeleteProfile} color="error" variant="contained" disabled={deletingProfile}>
+          <Button onClick={() => { void handleDeleteProfile(); }} color="error" variant="contained" disabled={deletingProfile}>
             {getDeleteProfileButtonText(deletingProfile)}
           </Button>
         </DialogActions>

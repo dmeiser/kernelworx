@@ -323,7 +323,7 @@ export const PaymentMethodsPage: React.FC = () => {
         title="Payment Methods"
         subtitle="Cash and Check are always available. Create custom methods and add QR codes for apps like Venmo or PayPal."
         backButton={{
-          onClick: () => navigate('/settings'),
+          onClick: () => { void navigate('/settings'); },
           label: 'Back',
           'aria-label': 'Back to settings',
         }}
@@ -359,7 +359,7 @@ export const PaymentMethodsPage: React.FC = () => {
             onEdit={() => handleEdit(method)}
             onDelete={() => handleDeleteClick(method)}
             onUploadQR={() => handleQRUploadClick(method)}
-            onDeleteQR={() => handleDeleteQRCode(method)}
+            onDeleteQR={() => { void handleDeleteQRCode(method); }}
             isDeleting={isAnyMutationLoading || deletingQRMethod === method.name}
             isUploadingQR={uploadingQR && selectedMethod?.name === method.name}
           />

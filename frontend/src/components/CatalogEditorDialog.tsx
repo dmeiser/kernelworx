@@ -260,7 +260,7 @@ export const CatalogEditorDialog: React.FC<CatalogEditorDialogProps> = ({ open, 
         <Button onClick={handleCancel} disabled={saving}>
           Cancel
         </Button>
-        <Button onClick={handleSave} variant="contained" disabled={saving}>
+        <Button onClick={() => { void handleSave(); }} variant="contained" disabled={saving}>
           {saving ? 'Saving...' : 'Save Catalog'}
         </Button>
       </DialogActions>

@@ -926,7 +926,7 @@ export const OrderEditorPage: React.FC = () => {
       urlParams,
       createOrder,
       updateOrder,
-      navigate,
+      navigate: (path) => { void navigate(path); },
     });
   };
 
@@ -946,9 +946,9 @@ export const OrderEditorPage: React.FC = () => {
       paymentMethods={paymentMethods}
       paymentMethodsLoading={paymentMethodsLoading}
       isOwnerOrWrite={isOwnerOrWrite}
-      navigate={navigate}
-      handleCancel={handleCancel}
-      handleSubmit={handleSubmit}
+      navigate={(path) => { void navigate(path); }}
+      handleCancel={() => { void handleCancel(); }}
+      handleSubmit={() => { void handleSubmit(); }}
     />
   );
 };

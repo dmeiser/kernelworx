@@ -259,7 +259,7 @@ const useOrdersData = ({ profileId, campaignId }: UseOrdersDataParams) => {
 
   const [deleteOrder] = useMutation(DELETE_ORDER, {
     onCompleted: () => {
-      refetchOrders();
+      void refetchOrders();
     },
   });
 
@@ -336,11 +336,11 @@ export const OrdersPage: React.FC = () => {
   const hasWritePermission = checkWritePermission(profile);
 
   const handleCreateOrder = () => {
-    navigate(`/scouts/${toUrlId(profileId)}/campaigns/${toUrlId(campaignId)}/orders/new`);
+    void navigate(`/scouts/${toUrlId(profileId)}/campaigns/${toUrlId(campaignId)}/orders/new`);
   };
 
   const handleEditOrder = (orderId: string) => {
-    navigate(`/scouts/${toUrlId(profileId)}/campaigns/${toUrlId(campaignId)}/orders/${toUrlId(orderId)}/edit`);
+    void navigate(`/scouts/${toUrlId(profileId)}/campaigns/${toUrlId(campaignId)}/orders/${toUrlId(orderId)}/edit`);
   };
 
   const handleDeleteOrder = async (orderId: string) => {
@@ -370,7 +370,7 @@ export const OrdersPage: React.FC = () => {
       campaignId={campaignId}
       onCreateOrder={handleCreateOrder}
       onEditOrder={handleEditOrder}
-      onDeleteOrder={handleDeleteOrder}
+      onDeleteOrder={(orderId) => { void handleDeleteOrder(orderId); }}
     />
   );
 };

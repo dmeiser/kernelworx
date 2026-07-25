@@ -339,8 +339,8 @@ export const SignupPage: React.FC = () => {
         success={success}
         loading={loading}
         onVerify={handleVerifyEmail}
-        onResendCode={handleResendCode}
-        onNavigateToLogin={() => navigate('/login')}
+        onResendCode={() => { void handleResendCode(); }}
+        onNavigateToLogin={() => { void navigate('/login'); }}
       />
     );
   }
@@ -371,7 +371,7 @@ export const SignupPage: React.FC = () => {
       success={success}
       loading={loading}
       onSignup={handleSignup}
-      onNavigateToLogin={() => navigate('/login')}
+      onNavigateToLogin={() => { void navigate('/login'); }}
     />
   );
 };
@@ -480,7 +480,7 @@ const VerificationView: React.FC<VerificationViewProps> = ({
 
     <AlertMessages error={error} success={success} />
 
-    <Box component="form" onSubmit={onVerify}>
+    <Box component="form" onSubmit={(e) => { void onVerify(e); }}>
       <TextField
         fullWidth
         label="Verification Code"
@@ -584,7 +584,7 @@ const SignupFormView: React.FC<SignupFormViewProps> = ({
 
     <AlertMessages error={error} success={success} />
 
-    <Box component="form" onSubmit={onSignup}>
+    <Box component="form" onSubmit={(e) => { void onSignup(e); }}>
       <TextField
         fullWidth
         label="Email Address"

@@ -66,7 +66,7 @@ export const CreateProfileDialog: React.FC<CreateProfileDialogProps> = ({ open, 
             onChange={(e) => form.setValue('sellerName', e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && form.values.sellerName.trim()) {
-                handleSubmit();
+                void handleSubmit();
               }
             }}
             disabled={loading}
@@ -78,7 +78,7 @@ export const CreateProfileDialog: React.FC<CreateProfileDialogProps> = ({ open, 
         <Button onClick={handleClose} disabled={loading}>
           Cancel
         </Button>
-        <Button onClick={handleSubmit} variant="contained" disabled={!form.values.sellerName.trim() || loading}>
+        <Button onClick={() => { void handleSubmit(); }} variant="contained" disabled={!form.values.sellerName.trim() || loading}>
           {loading ? 'Creating...' : 'Create Scout'}
         </Button>
       </DialogActions>

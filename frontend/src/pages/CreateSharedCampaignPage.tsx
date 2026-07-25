@@ -519,7 +519,7 @@ export const CreateSharedCampaignPage: React.FC = () => {
       await createSharedCampaign({
         variables: { input: buildMutationInput() },
       });
-      navigate('/shared-campaigns');
+      void navigate('/shared-campaigns');
     } catch (err) {
       handleMutationError(err);
     } finally {
@@ -527,8 +527,8 @@ export const CreateSharedCampaignPage: React.FC = () => {
     }
   };
 
-  const handleCancel = () => navigate(-1);
-  const handleBack = () => navigate(-1);
+  const handleCancel = () => { void navigate(-1); };
+  const handleBack = () => { void navigate(-1); };
 
   return (
     <Container maxWidth="md" sx={{ py: 3 }}>
@@ -595,7 +595,7 @@ export const CreateSharedCampaignPage: React.FC = () => {
 
           <ActionButtonsSection
             onCancel={handleCancel}
-            onSubmit={handleSubmit}
+            onSubmit={() => { void handleSubmit(); }}
             isSubmitting={isSubmitting}
             isValid={formIsValid}
             canCreate={canCreate}

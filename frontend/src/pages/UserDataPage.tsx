@@ -260,7 +260,7 @@ export const UserDataPage: React.FC = () => {
 
   const handleConfirmTransfer = () => {
     if (transferProfileId && selectedNewOwner) {
-      transferOwnership({
+      void transferOwnership({
         variables: {
           input: {
             profileId: transferProfileId,
@@ -304,7 +304,7 @@ export const UserDataPage: React.FC = () => {
         items={[
           {
             label: 'Admin Console',
-            onClick: () => navigate('/admin'),
+            onClick: () => { void navigate('/admin'); },
             icon: <BackIcon fontSize="small" />,
           },
           { label: `User Data: ${profileIdWithoutPrefix}` },

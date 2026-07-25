@@ -182,7 +182,7 @@ export const useCreateCampaignSubmit = () => {
         const createdCampaign = data?.createCampaign;
         if (createdCampaign) {
           onSuccess(getSuccessMessage());
-          navigate(`/scouts/${toUrlId(profileId)}/campaigns/${toUrlId(createdCampaign.campaignId)}`);
+          void navigate(`/scouts/${toUrlId(profileId)}/campaigns/${toUrlId(createdCampaign.campaignId)}`);
         }
       } catch (error) {
         console.error('Failed to create campaign:', error);
