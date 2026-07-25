@@ -8,8 +8,10 @@
  */
 export function isSafeRedirect(path: string): boolean {
   if (typeof path !== 'string') return false;
-  // Reject empty, non-relative, protocol-relative, and backslash-authority paths
-  return path.startsWith('/') && !path.startsWith('//') && !(path.length > 1 && path[1] === '\\') && !path.includes('\\');
+  if (!path.startsWith('/')) return false;
+  if (path.startsWith('//')) return false;
+  if (path.includes('\\')) return false;
+  return true;
 }
 
 /**
