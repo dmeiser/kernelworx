@@ -382,6 +382,8 @@ def test_transfer_profile_ownership_success(monkeypatch):
     )
 
     # Reload handler so it binds to the moto tables via the current env vars.
+    from src.utils.dynamodb import reset_dynamodb_resource
+    reset_dynamodb_resource()
     module_name = "src.handlers.transfer_profile_ownership"
     if module_name in sys.modules:
         del sys.modules[module_name]

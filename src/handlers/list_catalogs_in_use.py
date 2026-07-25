@@ -55,7 +55,9 @@ async def _handle_pagination(table: Any, query_params: Dict[str, Any], field_nam
     return results
 
 
-async def _async_get_owned_profile_ids(dynamodb: Any, profiles_table_name: str, owner_account_id: str) -> List[str]:
+async def _async_get_owned_profile_ids(
+    dynamodb: Any, profiles_table_name: str, owner_account_id: str, request_logger: Any = logger
+) -> List[str]:
     """Async: Query profiles owned by this account."""
     table = await dynamodb.Table(profiles_table_name)
     query_params = {

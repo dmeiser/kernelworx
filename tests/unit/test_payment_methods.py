@@ -924,13 +924,12 @@ class TestErrorHandling:
         )
 
         override_table("accounts", mock_table)
-
-        with pytest.raises(AppError) as exc_info:
-            payment_methods.validate_name_unique(sample_account_id, "Venmo")
-        assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
-
-        # Clean up
-        override_table("accounts", None)
+        try:
+            with pytest.raises(AppError) as exc_info:
+                payment_methods.validate_name_unique(sample_account_id, "Venmo")
+            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+        finally:
+            override_table("accounts", None)
 
     def test_get_payment_methods_dynamodb_error(
         self, dynamodb_tables: Dict[str, Any], sample_account: Dict[str, Any], sample_account_id: str
@@ -945,12 +944,12 @@ class TestErrorHandling:
         )
 
         override_table("accounts", mock_table)
-
-        with pytest.raises(AppError) as exc_info:
-            payment_methods.get_payment_methods(sample_account_id)
-        assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
-
-        override_table("accounts", None)
+        try:
+            with pytest.raises(AppError) as exc_info:
+                payment_methods.get_payment_methods(sample_account_id)
+            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+        finally:
+            override_table("accounts", None)
 
     def test_create_payment_method_dynamodb_error(
         self, dynamodb_tables: Dict[str, Any], sample_account: Dict[str, Any], sample_account_id: str
@@ -968,12 +967,12 @@ class TestErrorHandling:
         )
 
         override_table("accounts", mock_table)
-
-        with pytest.raises(AppError) as exc_info:
-            payment_methods.create_payment_method(sample_account_id, "Venmo")
-        assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
-
-        override_table("accounts", None)
+        try:
+            with pytest.raises(AppError) as exc_info:
+                payment_methods.create_payment_method(sample_account_id, "Venmo")
+            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+        finally:
+            override_table("accounts", None)
 
     def test_update_payment_method_dynamodb_error(
         self, dynamodb_tables: Dict[str, Any], sample_account: Dict[str, Any], sample_account_id: str
@@ -991,12 +990,12 @@ class TestErrorHandling:
         )
 
         override_table("accounts", mock_table)
-
-        with pytest.raises(AppError) as exc_info:
-            payment_methods.update_payment_method(sample_account_id, "Venmo", "Venmo - Tom")
-        assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
-
-        override_table("accounts", None)
+        try:
+            with pytest.raises(AppError) as exc_info:
+                payment_methods.update_payment_method(sample_account_id, "Venmo", "Venmo - Tom")
+            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+        finally:
+            override_table("accounts", None)
 
     def test_update_payment_method_update_item_error(
         self, dynamodb_tables: Dict[str, Any], sample_account: Dict[str, Any], sample_account_id: str
@@ -1021,12 +1020,12 @@ class TestErrorHandling:
         )
 
         override_table("accounts", mock_table)
-
-        with pytest.raises(AppError) as exc_info:
-            payment_methods.update_payment_method(sample_account_id, "Venmo", "Venmo - Tom")
-        assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
-
-        override_table("accounts", None)
+        try:
+            with pytest.raises(AppError) as exc_info:
+                payment_methods.update_payment_method(sample_account_id, "Venmo", "Venmo - Tom")
+            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+        finally:
+            override_table("accounts", None)
 
     def test_delete_payment_method_dynamodb_error(
         self, dynamodb_tables: Dict[str, Any], sample_account: Dict[str, Any], sample_account_id: str
@@ -1041,12 +1040,12 @@ class TestErrorHandling:
         )
 
         override_table("accounts", mock_table)
-
-        with pytest.raises(AppError) as exc_info:
-            payment_methods.delete_payment_method(sample_account_id, "Venmo")
-        assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
-
-        override_table("accounts", None)
+        try:
+            with pytest.raises(AppError) as exc_info:
+                payment_methods.delete_payment_method(sample_account_id, "Venmo")
+            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+        finally:
+            override_table("accounts", None)
 
     def test_upload_qr_s3_error(self, s3_bucket: Any, sample_account_id: str) -> None:
         """Test upload_qr_to_s3 handles S3 errors."""
@@ -1177,13 +1176,13 @@ class TestErrorHandling:
         )
 
         override_table("accounts", mock_table)
-
-        with pytest.raises(AppError) as exc_info:
-            payment_methods.create_payment_method(sample_account_id, "Venmo")
-        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
-        assert "modified by another request" in str(exc_info.value.message)
-
-        override_table("accounts", None)
+        try:
+            with pytest.raises(AppError) as exc_info:
+                payment_methods.create_payment_method(sample_account_id, "Venmo")
+            assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+            assert "modified by another request" in str(exc_info.value.message)
+        finally:
+            override_table("accounts", None)
 
     def test_update_payment_method_detects_concurrent_modification(
         self, dynamodb_tables: Dict[str, Any], sample_account: Dict[str, Any], sample_account_id: str
@@ -1205,13 +1204,13 @@ class TestErrorHandling:
         )
 
         override_table("accounts", mock_table)
-
-        with pytest.raises(AppError) as exc_info:
-            payment_methods.update_payment_method(sample_account_id, "Venmo", "Venmo - Tom")
-        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
-        assert "modified by another request" in str(exc_info.value.message)
-
-        override_table("accounts", None)
+        try:
+            with pytest.raises(AppError) as exc_info:
+                payment_methods.update_payment_method(sample_account_id, "Venmo", "Venmo - Tom")
+            assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+            assert "modified by another request" in str(exc_info.value.message)
+        finally:
+            override_table("accounts", None)
 
     def test_delete_payment_method_detects_concurrent_modification(
         self, dynamodb_tables: Dict[str, Any], sample_account: Dict[str, Any], sample_account_id: str
@@ -1233,13 +1232,13 @@ class TestErrorHandling:
         )
 
         override_table("accounts", mock_table)
-
-        with pytest.raises(AppError) as exc_info:
-            payment_methods.delete_payment_method(sample_account_id, "Venmo")
-        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
-        assert "modified by another request" in str(exc_info.value.message)
-
-        override_table("accounts", None)
+        try:
+            with pytest.raises(AppError) as exc_info:
+                payment_methods.delete_payment_method(sample_account_id, "Venmo")
+            assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+            assert "modified by another request" in str(exc_info.value.message)
+        finally:
+            override_table("accounts", None)
 
     def test_update_payment_method_reserved_new_name(
         self, dynamodb_tables: Dict[str, Any], sample_account: Dict[str, Any], sample_account_id: str

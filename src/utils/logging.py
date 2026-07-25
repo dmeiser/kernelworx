@@ -33,10 +33,10 @@ class StructuredLogger:
 
     def _log(self, level: str, message: str, **kwargs: Any) -> None:
         """Internal method to emit structured JSON logs."""
-        level_num = logging.getLevelName(level)
+        level_num = getattr(logging, level, None)
+        if level_num is None or isinstance(level_num, str):
+            level_num = logging.getLevelName(level)
         if isinstance(level_num, str):
-            # Non-standard level names return a string from getLevelName,
-            # which breaks isEnabledFor. Fall back to INFO for safety.
             level_num = logging.INFO
         if not self.logger.isEnabledFor(level_num):
             return

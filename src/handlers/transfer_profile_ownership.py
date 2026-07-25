@@ -72,18 +72,19 @@ def _transfer_ownership(profile: Dict[str, Any], db_profile_id: str, db_new_owne
 
     endpoint_url = os.getenv("DYNAMODB_ENDPOINT")
     dynamodb_client = boto3.client("dynamodb", endpoint_url=endpoint_url)
+    table_name = tables.profiles.name
     dynamodb_client.transact_write_items(
         TransactItems=[
             {
                 "Delete": {
-                    "TableName": tables.profiles.table_name,
+                    "TableName": table_name,
                     "Key": {k: _type_serializer.serialize(v) for k, v in old_key.items()},
                     "ConditionExpression": "attribute_exists(ownerAccountId)",
                 }
             },
             {
                 "Put": {
-                    "TableName": tables.profiles.table_name,
+                    "TableName": table_name,
                     "Item": {k: _type_serializer.serialize(v) for k, v in new_profile.items()},
                     "ConditionExpression": "attribute_not_exists(ownerAccountId)",
                 }

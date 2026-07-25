@@ -21,8 +21,11 @@ const parseDatePart = (dateString: string): DateParts | null => {
   const year = parseInt(match[1], 10);
   const month = parseInt(match[2], 10);
   const day = parseInt(match[3], 10);
+
+  if (month < 1 || month > 12) return null;
+  if (day < 1 || day > 31) return null;
+
   const parsed = new Date(Date.UTC(year, month - 1, day));
-  // Round-trip validation: reject values like 2026-99-99 that Date silently normalizes.
   if (
     parsed.getUTCFullYear() !== year ||
     parsed.getUTCMonth() !== month - 1 ||
