@@ -73,7 +73,7 @@ export const ProfileCard: React.FC<ProfileCardProps> = ({
   const navigate = useNavigate();
 
   const handleViewCampaigns = () => {
-    navigate(`/scouts/${toUrlId(profileId)}/campaigns`);
+    void navigate(`/scouts/${toUrlId(profileId)}/campaigns`);
   };
 
   const handleViewLatestCampaign = latestCampaign
@@ -133,8 +133,8 @@ export const ProfileCard: React.FC<ProfileCardProps> = ({
         isOwner={isOwner}
         latestCampaignId={latestCampaign?.campaignId}
         onViewAll={handleViewCampaigns}
-        onManage={() => navigate(`/scouts/${toUrlId(profileId)}/manage`)}
-        onViewLatest={handleViewLatestCampaign}
+        onManage={() => { void navigate(`/scouts/${toUrlId(profileId)}/manage`); }}
+        onViewLatest={handleViewLatestCampaign ? () => { void handleViewLatestCampaign(); } : undefined}
       />
     </Card>
   );

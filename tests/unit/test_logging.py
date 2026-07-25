@@ -64,8 +64,9 @@ class TestStructuredLogger:
         assert log_entry["error"] == "details"
 
     def test_debug_logs_json(self, capsys: Any) -> None:
-        """Test debug logging outputs JSON."""
-        logger = StructuredLogger("test", "test-id")
+        """Test debug logging outputs JSON when level is DEBUG."""
+        logger = StructuredLogger("test-debug", "test-id")
+        logger.logger.setLevel("DEBUG")
 
         logger.debug("Debug message", data={"key": "value"})
 
@@ -86,6 +87,91 @@ class TestStructuredLogger:
 
         assert "value" not in log_entry
         assert log_entry["other"] == "present"
+
+    def test_disabled_level_does_not_output(self, capsys: Any) -> None:
+        """Test that messages below the configured level are not emitted."""
+        logger = StructuredLogger("disabled-test", "test-id")
+        logger.logger.setLevel(40)  # ERROR
+
+        logger.info("Should not appear")
+
+        captured = capsys.readouterr()
+        assert captured.out.strip() == ""
+
+    def test_default_level_is_info(self, capsys: Any) -> None:
+        """Test that the default log level is INFO."""
+        logger = StructuredLogger("default-level-test", "test-id")
+
+        logger.debug("Should not appear by default")
+        logger.info("Should appear by default")
+
+        captured = capsys.readouterr()
+        log_entry = json.loads(captured.out.strip())
+        assert log_entry["message"] == "Should appear by default"
+
+    def test_extra_dict_merged(self, capsys: Any) -> None:
+        """Test that the extra dict is merged into the log entry."""
+        logger = StructuredLogger("extra-test", "test-id")
+
+        logger.info("Test", extra={"service": "test-service"})
+
+        captured = capsys.readouterr()
+        log_entry = json.loads(captured.out.strip())
+
+        assert log_entry["service"] == "test-service"
+
+    def test_exc_info_true_adds_traceback(self, capsys: Any) -> None:
+        """Test that exc_info=True renders the active exception traceback."""
+        logger = StructuredLogger("exc-true-test", "test-id")
+
+        try:
+            raise ValueError("boom")
+        except ValueError:
+            logger.error("Oops", exc_info=True)
+
+        captured = capsys.readouterr()
+        log_entry = json.loads(captured.out.strip())
+
+        assert log_entry["message"] == "Oops"
+        assert "traceback" in log_entry
+        assert "ValueError: boom" in log_entry["traceback"]
+
+    def test_exc_info_exception_instance_adds_traceback(self, capsys: Any) -> None:
+        """Test that passing an exception instance renders its traceback."""
+        logger = StructuredLogger("exc-instance-test", "test-id")
+
+        err = ValueError("instance boom")
+        logger.error("Oops", exc_info=err)
+
+        captured = capsys.readouterr()
+        log_entry = json.loads(captured.out.strip())
+
+        assert "traceback" in log_entry
+        assert "ValueError: instance boom" in log_entry["traceback"]
+
+    def test_exc_info_tuple_none_does_not_add_traceback(self, capsys: Any) -> None:
+        """Test that a (None, None, None) exc_info tuple adds no traceback."""
+        logger = StructuredLogger("exc-none-test", "test-id")
+
+        logger.error("Oops", exc_info=(None, None, None))
+
+        captured = capsys.readouterr()
+        log_entry = json.loads(captured.out.strip())
+
+        assert "traceback" not in log_entry
+        assert log_entry["message"] == "Oops"
+
+    def test_non_standard_level_falls_back_to_info(self, capsys: Any) -> None:
+        """Test that unknown level names fall back to INFO and still emit."""
+        logger = StructuredLogger("custom-level-test", "test-id")
+
+        logger._log("CUSTOM", "Custom level message")
+
+        captured = capsys.readouterr()
+        log_entry = json.loads(captured.out.strip())
+
+        assert log_entry["level"] == "CUSTOM"
+        assert log_entry["message"] == "Custom level message"
 
 
 class TestGetCorrelationId:

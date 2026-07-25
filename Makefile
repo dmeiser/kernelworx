@@ -59,8 +59,13 @@ test-cleanup:
 	@echo "Running TypeScript cleanup..."
 	cd tests/integration && npm run cleanup
 
+# TypeScript guard tests (resolver static checks + sanitize unit tests)
+test-guards:
+	@echo "Running TypeScript guard tests..."
+	npm run test:guards
+
 # Run all tests
-test-all: test test-frontend test-integration test-e2e
+test-all: test test-guards test-frontend test-integration test-e2e
 
 # Python linting and type checking
 lint-python:
@@ -132,8 +137,11 @@ lint-infra: tflint kics
 # Run everything (development workflow)
 all: format lint typecheck test test-frontend
 
-# CI pipeline (no formatting, just validation)
-ci: lint typecheck spellcheck test test-frontend test-integration
+# Local CI pipeline (no live AWS required)
+ci: lint typecheck spellcheck test test-frontend test-guards
+
+# Full CI pipeline including integration tests (requires AWS credentials)
+ci-full: ci test-integration
 
 # Clean generated files
 clean:

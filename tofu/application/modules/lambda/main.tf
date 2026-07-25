@@ -2,37 +2,37 @@
 
 variable "environment" {
   description = "Deployment environment (e.g., dev, prod)"
-  type = string
+  type        = string
 }
 
 variable "region_abbrev" {
   description = "Short region code used in function naming (e.g., ue1)"
-  type = string
+  type        = string
 }
 
 variable "name_prefix" {
   description = "Global name prefix for Lambda resources"
-  type = string
+  type        = string
 }
 
 variable "lambda_role_arn" {
   description = "IAM role ARN assumed by the Lambda functions"
-  type = string
+  type        = string
 }
 
 variable "exports_bucket_name" {
   description = "Name of the S3 bucket used for report exports"
-  type = string
+  type        = string
 }
 
 variable "table_names" {
   description = "Map of DynamoDB table names used by the Lambdas"
-  type = map(string)
+  type        = map(string)
 }
 
 variable "user_pool_id" {
   description = "Cognito User Pool ID passed to relevant Lambdas"
-  type = string
+  type        = string
 }
 
 variable "lambda_src_dir" {
@@ -49,11 +49,11 @@ variable "lambda_payload_dir" {
 
 locals {
   func_suffix = "-${var.region_abbrev}-${var.environment}"
-  
+
   # Use provided paths or default to relative paths from module
   src_dir     = var.lambda_src_dir != "" ? var.lambda_src_dir : "${path.module}/../../../../src"
   payload_dir = var.lambda_payload_dir != "" ? var.lambda_payload_dir : "${path.module}/../../../.build/lambda"
-  
+
   common_env = {
     EXPORTS_BUCKET              = var.exports_bucket_name
     POWERTOOLS_SERVICE_NAME     = var.name_prefix
@@ -67,7 +67,7 @@ locals {
     INVITES_TABLE_NAME          = var.table_names.invites
     SHARED_CAMPAIGNS_TABLE_NAME = var.table_names.shared_campaigns
   }
-  
+
   # Lambda functions configuration
   functions = {
     "list-my-shares" = {
@@ -196,9 +196,9 @@ locals {
 
 # Archive the Lambda source code
 data "archive_file" "lambda_payload" {
-  type        = "zip"
-  source_dir  = local.src_dir
-  excludes    = [
+  type       = "zip"
+  source_dir = local.src_dir
+  excludes = [
     "venv",
     "__pycache__",
     "*.pyc",
@@ -227,7 +227,7 @@ resource "aws_lambda_layer_version" "shared" {
   compatible_runtimes      = ["python3.14"]
   compatible_architectures = ["arm64"]
   description              = "Shared Python dependencies for Lambda functions"
-  
+
   # Archive gets regenerated every time (cheap), but layer only updates when the
   # layer zip content changes. Hash must reflect the actual layer archive, not uv.lock.
   filename         = data.archive_file.lambda_layer.output_path

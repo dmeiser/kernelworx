@@ -14,7 +14,7 @@ KernelWorx is an open-source, serverless application designed for Scouting Ameri
 - **Catalog Support**: Use admin-managed catalogs or create custom product catalogs
 - **Sharing & Collaboration**: Share profiles with trusted adults (READ or WRITE permissions)
 - **Reports**: Generate CSV/XLSX reports for unit submission and personal tracking
-- **Social Login**: Sign in with Google or Facebook accounts
+- **Social Login**: Sign in with a Google account
 - **Privacy-First**: All data encrypted in-flight and at-rest
 
 ## Tech Stack
@@ -28,8 +28,8 @@ KernelWorx is an open-source, serverless application designed for Scouting Ameri
 ### Backend
 - **AWS AppSync** (GraphQL API)
 - **AWS Lambda** (Python 3.14)
-- **Amazon DynamoDB** (single-table design)
-- **Amazon Cognito** (authentication with social providers)
+- **Amazon DynamoDB** (eight separate tables)
+- **Amazon Cognito** (Google social login and native email/password)
 - **Amazon S3** (static hosting + report exports)
 - **Amazon CloudFront** (CDN)
 
@@ -40,9 +40,7 @@ KernelWorx is an open-source, serverless application designed for Scouting Ameri
 
 ## Project Status
 
-**Current Phase**: Phase 0 - Infrastructure & Foundation (In Progress)
-
-See [TODO.md](TODO.md) for detailed progress and roadmap.
+**Current Phase**: v1 - Live / Production
 
 ## Getting Started
 
@@ -51,11 +49,17 @@ See [TODO.md](TODO.md) for detailed progress and roadmap.
 - **uv** (Python package manager)
 - **AWS CLI** (configured with credentials)
 - **Docker** (for optional LocalStack testing)
-- **Node.js** v22+ and **npm** v10+
+- **Node.js** 24+ and **npm** v10+
 
 ### Installation
 
-(Coming soon - project is in early development)
+```bash
+# Install Python dependencies
+uv sync
+
+# Install frontend dependencies
+cd frontend && npm install
+```
 
 ## Development
 
@@ -79,7 +83,11 @@ uv run pytest tests/unit --cov=src --cov-fail-under=100
 
 ### Frontend Development
 
+Run frontend commands from the `frontend/` directory:
+
 ```bash
+cd frontend
+
 # Install dependencies
 npm install
 
@@ -99,17 +107,19 @@ npm run test -- --coverage
 
 ### OpenTofu Deployment
 
-```bash
-# Initialize (first time only)
-cd tofu/application/environments/dev
-tofu init
+Use the deployment helper, which builds the Lambda layer and runs OpenTofu:
 
+```bash
 # Preview changes
-tofu plan
+./tofu/application/scripts/deploy.sh dev plan
 
 # Deploy to dev environment
-tofu apply
+./tofu/application/scripts/deploy.sh dev apply
 ```
+
+The helper sources the root `.env` for `TF_VAR_encryption_passphrase` and builds
+`.build/lambda-layer` before invoking `tofu`. If you run `tofu` directly, export
+`TF_VAR_encryption_passphrase` and build the layer first.
 
 ## Architecture
 
@@ -175,4 +185,4 @@ Built for the Scouting America community by volunteers who understand the challe
 
 ---
 
-**Note**: This project is in active development. The initial release (v1) is targeted for fall 2025 popcorn sales campaign.
+**Note**: v1 is live. Development continues incrementally.

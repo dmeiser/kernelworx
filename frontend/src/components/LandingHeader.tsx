@@ -90,8 +90,8 @@ export const LandingHeader: React.FC = () => {
           component="button"
           tabIndex={0}
           sx={{ display: 'flex', alignItems: 'center', gap: 0.5, cursor: 'pointer', background: 'none', border: 'none', padding: 0 }}
-          onClick={() => navigate('/')}
-          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate('/'); } }}
+          onClick={() => { void navigate('/'); }}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); void navigate('/'); } }}
         >
           <Box
             component="img"
@@ -132,19 +132,19 @@ export const LandingHeader: React.FC = () => {
         <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
           {isAuthenticated ? (
             <>
-              <Button variant="text" size="small" onClick={() => navigate('/home')}>
+              <Button variant="text" size="small" onClick={() => { void navigate('/home'); }}>
                 Dashboard
               </Button>
-              <Button variant="contained" color="primary" size="small" onClick={logout}>
+              <Button variant="contained" color="primary" size="small" onClick={() => { void logout(); }}>
                 Sign out
               </Button>
             </>
           ) : (
             <>
-              <Button variant="text" size="small" onClick={() => navigate('/login')}>
+              <Button variant="text" size="small" onClick={() => { void navigate('/login'); }}>
                 Sign in
               </Button>
-              <Button variant="contained" color="primary" size="small" onClick={() => navigate('/login')}>
+              <Button variant="contained" color="primary" size="small" onClick={() => { void navigate('/login'); }}>
                 Get started
               </Button>
             </>

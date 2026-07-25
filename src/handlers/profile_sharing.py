@@ -2,18 +2,11 @@
 Profile sharing Lambda handlers.
 
 Implements:
-- createProfileInvite: Generate invite code for sharing profile
-- redeemProfileInvite: Redeem invite code to gain access
-- shareProfileDirect: Share profile directly with account (no invite)
 - list_my_shares: List profiles shared with the current user (hydrated)
 
-NOTE: Most of these operations have been migrated to AppSync resolvers (pipeline/JS).
-This Lambda code is kept for reference and potential future use.
-See cdk_stack.py for the actual implementations.
+NOTE: Invite/share mutations have been migrated to AppSync resolvers (pipeline/JS).
 """
 
-import secrets
-from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Dict, List, cast
 
 if TYPE_CHECKING:
@@ -22,15 +15,15 @@ if TYPE_CHECKING:
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
-    from utils.auth import is_profile_owner
     from utils.dynamodb import get_dynamodb_resource, tables
     from utils.errors import AppError, ErrorCode
     from utils.logging import StructuredLogger, get_correlation_id
+    from utils.pagination import query_all_items
 except ModuleNotFoundError:  # pragma: no cover
-    from ..utils.auth import is_profile_owner
     from ..utils.dynamodb import get_dynamodb_resource, tables
     from ..utils.errors import AppError, ErrorCode
     from ..utils.logging import StructuredLogger, get_correlation_id
+    from ..utils.pagination import query_all_items
 
 
 # Expose a module-level proxy for test monkeypatching (tests patch ``profile_sharing.dynamodb.batch_get_item``)
@@ -44,11 +37,6 @@ class _DynamoProxy:
 
 # Default module-level proxy instance (tests may monkeypatch methods on this object)
 dynamodb: _DynamoProxy = _DynamoProxy()
-
-
-def generate_invite_code() -> str:
-    """Generate random 10-character alphanumeric invite code."""
-    return secrets.token_urlsafe(8)[:10].upper().replace("-", "X").replace("_", "Y")
 
 
 def _is_valid_share_entry(profile_id: Any, owner_account_id: Any) -> bool:
@@ -117,20 +105,37 @@ def _fetch_batch_with_retry(
     logger: StructuredLogger,
     retries: int = 3,
 ) -> List[Dict[str, Any]]:
-    """Fetch a single batch of profiles with retry logic."""
+    """Fetch a single batch of profiles with retry logic, retrying unprocessed keys."""
+    keys_to_fetch = batch_keys
+    all_profiles: List[Dict[str, Any]] = []
+
     for attempt in range(retries):
+        if not keys_to_fetch:
+            break
         try:
             batch_response = dynamodb.batch_get_item(
                 RequestItems={
                     profiles_table.name: {
-                        "Keys": batch_keys,
+                        "Keys": keys_to_fetch,
                         "ConsistentRead": True,
                     }
                 }
             )
             batch_profiles = _extract_batch_profiles(batch_response, profiles_table.name)
-            _log_unprocessed_keys(batch_response, profiles_table.name, logger)
-            return batch_profiles
+            all_profiles.extend(batch_profiles)
+
+            unprocessed_keys = batch_response.get("UnprocessedKeys", {})
+            unprocessed_table = _get_unprocessed_table(unprocessed_keys, profiles_table.name)
+            keys_to_fetch = (unprocessed_table or {}).get("Keys", [])
+
+            if keys_to_fetch:
+                logger.warning(
+                    "Unprocessed keys remaining, retrying",
+                    attempt=attempt + 1,
+                    count=len(keys_to_fetch),
+                )
+            else:
+                return all_profiles
         except AppError:
             raise
         except Exception as e:
@@ -139,7 +144,11 @@ def _fetch_batch_with_retry(
                 continue
             logger.error("BatchGetItem failed after retries", error=str(e))
             raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to list shared profiles")
-    return []  # Should never reach here due to raise above
+
+    if keys_to_fetch:
+        logger.error("Unprocessed keys still remain after all retries", count=len(keys_to_fetch))
+
+    return all_profiles
 
 
 def _get_unprocessed_table(unprocessed_keys: Dict[str, Any], table_name: str) -> Any:
@@ -151,16 +160,12 @@ def _get_unprocessed_table(unprocessed_keys: Dict[str, Any], table_name: str) ->
     return unprocessed_table
 
 
-def _log_unprocessed_keys(
-    batch_response: "BatchGetItemOutputServiceResourceTypeDef", table_name: str, logger: StructuredLogger
-) -> None:
-    """Log any unprocessed keys from BatchGetItem."""
-    unprocessed_keys = batch_response.get("UnprocessedKeys", {})
+def _log_unprocessed_keys(unprocessed_keys: Dict[str, Any], table_name: str, logger: Any) -> None:
+    """Log unprocessed keys warning."""
     unprocessed_table = _get_unprocessed_table(unprocessed_keys, table_name)
-    if unprocessed_table:
-        unprocessed_key_list = unprocessed_table.get("Keys", [])
-        if unprocessed_key_list:
-            logger.warning("Unprocessed keys in batch", count=len(unprocessed_key_list))
+    keys = (unprocessed_table or {}).get("Keys", [])
+    if keys:
+        logger.warning("Unprocessed keys remain", count=len(keys))
 
 
 def _validate_profile_fields(profile: Dict[str, Any]) -> tuple[str, str, str, str] | None:
@@ -222,12 +227,17 @@ def _normalize_caller_account_id(caller_account_id: str) -> str:
 
 def _query_shares_for_account(target_account_id: str, logger: StructuredLogger) -> List[Dict[str, Any]]:
     """Query shares table GSI to get all shares for this user."""
-    response = tables.shares.query(
-        IndexName="targetAccountId-index",
-        KeyConditionExpression="targetAccountId = :targetAccountId",
-        ExpressionAttributeValues={":targetAccountId": target_account_id},
+    return cast(
+        List[Dict[str, Any]],
+        query_all_items(
+            tables.shares,
+            {
+                "IndexName": "targetAccountId-index",
+                "KeyConditionExpression": "targetAccountId = :targetAccountId",
+                "ExpressionAttributeValues": {":targetAccountId": target_account_id},
+            },
+        ),
     )
-    return list(response.get("Items", []))
 
 
 def _merge_profiles_with_shares(
@@ -304,95 +314,3 @@ def list_my_shares(event: Dict[str, Any], context: Any) -> List[Dict[str, Any]]:
         raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to list shared profiles")
 
 
-def _validate_invite_inputs(profile_id: str, permissions: list[str], caller_account_id: str) -> None:
-    """Validate invite creation inputs."""
-    if not is_profile_owner(caller_account_id, profile_id):
-        raise AppError(ErrorCode.FORBIDDEN, "Only profile owner can create invites")
-
-    valid_permissions = {"READ", "WRITE"}
-    if not set(permissions).issubset(valid_permissions):
-        raise AppError(ErrorCode.INVALID_INPUT, f"Invalid permissions: {permissions}")
-
-
-def create_profile_invite(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
-    """
-    Create profile invite code.
-
-    GraphQL mutation: createProfileInvite(profileId: ID!, permissions: [Permission!]!)
-
-    NOTE: This Lambda is not used by AppSync anymore - the operation is handled by
-    a pipeline resolver (VerifyProfileOwnerForInviteFn → CreateInviteFn).
-    This code is kept for reference and potential future use.
-
-    Returns:
-        {
-          inviteCode: String!
-          profileId: ID!
-          expiresAt: AWSDateTime!
-          permissions: [Permission!]!
-        }
-    """
-    logger = StructuredLogger(__name__, get_correlation_id(event))
-
-    try:
-        # Extract arguments
-        args = event["arguments"]
-        profile_id = args["profileId"]
-        permissions = args["permissions"]
-        caller_account_id = event["identity"]["sub"]
-
-        logger.info(
-            "Creating profile invite",
-            profile_id=profile_id,
-            permissions=permissions,
-            caller_account_id=caller_account_id,
-        )
-
-        # Authorization and validation
-        _validate_invite_inputs(profile_id, permissions, caller_account_id)
-
-        # Generate invite code
-        invite_code = generate_invite_code()
-
-        # Calculate expiration (14 days from now)
-        expires_at = datetime.now(timezone.utc) + timedelta(days=14)
-        expires_at_epoch = int(expires_at.timestamp())
-
-        # Ensure profileId is stored with PROFILE# prefix
-        db_profile_id = profile_id if profile_id.startswith("PROFILE#") else f"PROFILE#{profile_id}"
-
-        # Store invite in DynamoDB (V2 design: invites table with inviteCode as PK)
-        invite_item = {
-            "inviteCode": invite_code,  # PK
-            "profileId": db_profile_id,
-            "permissions": permissions,
-            "createdBy": caller_account_id,
-            "createdAt": datetime.now(timezone.utc).isoformat(),
-            "expiresAt": expires_at_epoch,  # Epoch seconds for TTL
-            "used": False,
-        }
-
-        tables.invites.put_item(Item=invite_item)
-
-        logger.info("Profile invite created", invite_code=invite_code, expires_at=expires_at.isoformat())
-
-        return {
-            "inviteCode": invite_code,
-            "profileId": db_profile_id,
-            "expiresAt": expires_at.isoformat(),
-            "permissions": permissions,
-        }
-
-    except AppError:
-        raise
-    except Exception as e:
-        logger.error("Failed to create profile invite", error=str(e))
-        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to create invite")
-
-
-# NOTE: The following Lambda functions have been migrated to AppSync pipeline resolvers:
-# - redeem_profile_invite: Now a pipeline resolver (LookupInviteFn → CreateShareFn → MarkInviteUsedFn)
-# - share_profile_direct: Now a pipeline resolver (LookupAccountByEmailFn → CreateShareFn)
-# - revoke_share: Now a VTL DynamoDB resolver
-# This operation is now handled by a VTL DynamoDB resolver directly in AppSync
-# See cdk/cdk/cdk_stack.py - RevokeShareResolver

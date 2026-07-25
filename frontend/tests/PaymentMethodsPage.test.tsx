@@ -77,7 +77,7 @@ vi.mock('../src/components/CreatePaymentMethodDialog', () => ({
         Create Payment Method
         <button
           data-testid="mock-create-submit"
-          onClick={() => onCreate('NewMethod').catch(() => {})}
+          onClick={() => { void onCreate('NewMethod').catch(() => {}); }}
         >
           Create
         </button>
@@ -105,7 +105,7 @@ vi.mock('../src/components/EditPaymentMethodDialog', () => ({
         Edit Payment Method: {currentName}
         <button
           data-testid="mock-edit-submit"
-          onClick={() => onUpdate(currentName, 'RenamedMethod')}
+          onClick={() => { void onUpdate(currentName, 'RenamedMethod'); }}
         >
           Update
         </button>
@@ -131,7 +131,7 @@ vi.mock('../src/components/DeletePaymentMethodDialog', () => ({
     open ? (
       <div role="dialog">
         Delete: {methodName}
-        <button data-testid="mock-delete-confirm" onClick={onDelete}>
+        <button data-testid="mock-delete-confirm" onClick={() => { void onDelete(); }}>
           Confirm Delete
         </button>
         <button data-testid="mock-delete-close" onClick={onClose}>
@@ -161,9 +161,9 @@ vi.mock('../src/components/QRUploadDialog', () => ({
         {uploadError && <span data-testid="qr-upload-error">{uploadError}</span>}
         <button
           data-testid="mock-qr-upload"
-          onClick={() =>
-            onUpload(new File(['test'], 'qr.png', { type: 'image/png' })).catch(() => {})
-          }
+          onClick={() => {
+            void onUpload(new File(['test'], 'qr.png', { type: 'image/png' })).catch(() => {});
+          }}
         >
           Upload
         </button>
@@ -201,7 +201,7 @@ const errorMock: MockedResponse = {
 
 function renderPage(mocks: MockedResponse[]) {
   return render(
-    <MockedProvider mocks={mocks} addTypename={false}>
+    <MockedProvider mocks={mocks}>
       <BrowserRouter>
         <PaymentMethodsPage />
       </BrowserRouter>

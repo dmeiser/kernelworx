@@ -48,6 +48,7 @@ import { StateAutocomplete } from '../components/StateAutocomplete';
 import { LoadingState } from '../components/LoadingState';
 import { NavBreadcrumbs } from '../components/NavBreadcrumbs';
 import { ensureProfileId, ensureCampaignId, ensureOrderId, toUrlId } from '../lib/ids';
+import { formatCurrency, formatPhoneNumber } from '../lib/api-utils';
 import { useOrderForm, type OrderFormState, type LineItemInput } from '../hooks/useOrderForm';
 import type { Product, Catalog, OrderAddress } from '../types';
 
@@ -90,24 +91,6 @@ interface OrderData {
 // ============================================================================
 // Helper Functions
 // ============================================================================
-
-function formatCurrency(amount: number): string {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-  }).format(amount);
-}
-
-function formatPhoneNumber(phone: string): string {
-  const digits = phone.replace(/\D/g, '');
-  if (digits.length === 11 && digits.startsWith('1')) {
-    return `(${digits.slice(1, 4)}) ${digits.slice(4, 7)}-${digits.slice(7, 11)}`;
-  }
-  if (digits.length === 10) {
-    return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6, 10)}`;
-  }
-  return phone;
-}
 
 function calculateTotal(lineItems: LineItemInput[], products: Product[]): number {
   return lineItems.reduce((sum, item) => {
@@ -943,7 +926,7 @@ export const OrderEditorPage: React.FC = () => {
       urlParams,
       createOrder,
       updateOrder,
-      navigate,
+      navigate: (path) => { void navigate(path); },
     });
   };
 
@@ -963,9 +946,9 @@ export const OrderEditorPage: React.FC = () => {
       paymentMethods={paymentMethods}
       paymentMethodsLoading={paymentMethodsLoading}
       isOwnerOrWrite={isOwnerOrWrite}
-      navigate={navigate}
-      handleCancel={handleCancel}
-      handleSubmit={handleSubmit}
+      navigate={(path) => { void navigate(path); }}
+      handleCancel={() => { void handleCancel(); }}
+      handleSubmit={() => { void handleSubmit(); }}
     />
   );
 };

@@ -29,6 +29,7 @@ import {
 import { LIST_ORDERS_BY_CAMPAIGN } from '../lib/graphql';
 import { ensureCampaignId } from '../lib/ids';
 import { downloadAsCSV, downloadAsXLSX } from '../lib/reportExport';
+import { formatCurrency, formatPhoneNumber } from '../lib/api-utils';
 import type { Order } from '../types';
 
 // Helper to format city/state/zip into a single string
@@ -132,7 +133,7 @@ const OrderTableContent: React.FC<{
 const OrderRow: React.FC<{ order: Order; allProducts: string[] }> = ({ order, allProducts }) => (
   <TableRow>
     <TableCell>{order.customerName}</TableCell>
-    <TableCell>{formatPhone(order.customerPhone)}</TableCell>
+    <TableCell>{formatPhoneNumber(order.customerPhone)}</TableCell>
     <TableCell>
       <CustomerAddressCell address={order.customerAddress} />
     </TableCell>
@@ -195,27 +196,6 @@ const MobileWarning: React.FC<{ show: boolean }> = ({ show }) => {
       </Typography>
     </Box>
   );
-};
-
-// Helper to format currency
-const formatCurrency = (amount: number): string =>
-  new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-  }).format(amount);
-
-// Helper to format phone number
-const formatPhone = (phone: string | undefined): string => {
-  if (!phone) return '-';
-  const digits = phone.replace(/\D/g, '');
-  if (digits.length === 10) {
-    return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
-  }
-  if (digits.length === 11) {
-    const last10 = digits.slice(-10);
-    return `(${last10.slice(0, 3)}) ${last10.slice(3, 6)}-${last10.slice(6)}`;
-  }
-  return phone;
 };
 
 export const ReportsPage: React.FC = () => {

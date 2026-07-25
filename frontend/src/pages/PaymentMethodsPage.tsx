@@ -11,7 +11,7 @@
  * Authorization: Owner only can create/update/delete. Cash and Check are global and read-only.
  */
 
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation } from '@apollo/client/react';
 import { Box, Stack, Button, Alert } from '@mui/material';
@@ -96,10 +96,19 @@ export const PaymentMethodsPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
+  const successTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (successTimeoutRef.current) clearTimeout(successTimeoutRef.current);
+    };
+  }, []);
+
   // Helper to show success message with auto-dismiss
   const showSuccess = (message: string) => {
     setSuccessMessage(message);
-    setTimeout(() => setSuccessMessage(null), 3000);
+    if (successTimeoutRef.current) clearTimeout(successTimeoutRef.current);
+    successTimeoutRef.current = setTimeout(() => setSuccessMessage(null), 3000);
   };
 
   // Query payment methods
@@ -118,7 +127,7 @@ export const PaymentMethodsPage: React.FC = () => {
     onCompleted: () => {
       showSuccess('Payment method created successfully');
       setCreateDialogOpen(false);
-      refetch();
+      refetch().catch(handleMutationError);
     },
     onError: handleMutationError,
   });
@@ -128,7 +137,7 @@ export const PaymentMethodsPage: React.FC = () => {
       showSuccess('Payment method updated successfully');
       setEditDialogOpen(false);
       setSelectedMethod(null);
-      refetch();
+      refetch().catch(handleMutationError);
     },
     onError: handleMutationError,
   });
@@ -138,7 +147,7 @@ export const PaymentMethodsPage: React.FC = () => {
       showSuccess('Payment method deleted successfully');
       setDeleteDialogOpen(false);
       setSelectedMethod(null);
-      refetch();
+      refetch().catch(handleMutationError);
     },
     onError: handleMutationError,
   });
@@ -151,7 +160,7 @@ export const PaymentMethodsPage: React.FC = () => {
   const [deleteQRCode] = useMutation(DELETE_PAYMENT_METHOD_QR_CODE, {
     onCompleted: () => {
       showSuccess('QR code deleted successfully');
-      refetch();
+      refetch().catch(handleMutationError);
     },
     onError: handleMutationError,
   });
@@ -244,10 +253,10 @@ export const PaymentMethodsPage: React.FC = () => {
         },
       });
 
+      await refetch().catch(() => {});
       showSuccess('QR code uploaded successfully');
       setQrUploadDialogOpen(false);
       setSelectedMethod(null);
-      refetch();
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to upload QR code';
       setQrUploadError(message);
@@ -314,7 +323,7 @@ export const PaymentMethodsPage: React.FC = () => {
         title="Payment Methods"
         subtitle="Cash and Check are always available. Create custom methods and add QR codes for apps like Venmo or PayPal."
         backButton={{
-          onClick: () => navigate('/settings'),
+          onClick: () => { void navigate('/settings'); },
           label: 'Back',
           'aria-label': 'Back to settings',
         }}
@@ -350,7 +359,7 @@ export const PaymentMethodsPage: React.FC = () => {
             onEdit={() => handleEdit(method)}
             onDelete={() => handleDeleteClick(method)}
             onUploadQR={() => handleQRUploadClick(method)}
-            onDeleteQR={() => handleDeleteQRCode(method)}
+            onDeleteQR={() => { void handleDeleteQRCode(method); }}
             isDeleting={isAnyMutationLoading || deletingQRMethod === method.name}
             isUploadingQR={uploadingQR && selectedMethod?.name === method.name}
           />

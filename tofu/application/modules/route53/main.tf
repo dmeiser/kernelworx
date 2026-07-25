@@ -1,11 +1,6 @@
 # Route53 DNS Records Module
 # Manages application-specific DNS records (API, login, etc.)
 
-variable "environment" {
-  description = "Deployment environment (e.g., dev, prod)"
-  type        = string
-}
-
 variable "zone_domain" {
   description = "DNS zone domain to look up (e.g., kernelworx.app for prod, dev.kernelworx.app for dev)"
   type        = string
@@ -18,21 +13,6 @@ variable "cloudfront_domain_name" {
 
 variable "appsync_api_url" {
   description = "AppSync API URL (HTTPS endpoint)"
-  type        = string
-}
-
-variable "cognito_domain" {
-  description = "Cognito custom domain"
-  type        = string
-}
-
-variable "api_certificate_arn" {
-  description = "ARN of the ACM certificate for the API domain"
-  type        = string
-}
-
-variable "login_certificate_arn" {
-  description = "ARN of the ACM certificate for the login domain"
   type        = string
 }
 
@@ -73,7 +53,7 @@ locals {
   zone_name = "${var.zone_domain}."
 
   # Record names relative to the hosted zone
-  site_record_name  = ""      # zone apex for both prod and dev
+  site_record_name  = "" # zone apex for both prod and dev
   api_record_name   = "api"
   login_record_name = "login"
 }
@@ -102,10 +82,10 @@ resource "aws_route53_record" "site" {
 # API subdomain (CNAME to AppSync)
 # Extract domain from AppSync URL (https://xyz.appsync-api.region.amazonaws.com/graphql)
 resource "aws_route53_record" "api" {
-  zone_id = data.aws_route53_zone.main.zone_id
-  name    = local.api_record_name
-  type    = "CNAME"
-  ttl     = 300
+  zone_id         = data.aws_route53_zone.main.zone_id
+  name            = local.api_record_name
+  type            = "CNAME"
+  ttl             = 300
   allow_overwrite = true
 
   records = [
@@ -116,9 +96,9 @@ resource "aws_route53_record" "api" {
 # Login subdomain (Cognito custom domain)
 # This will be an A record with alias to CloudFront if using custom domain
 resource "aws_route53_record" "login" {
-  zone_id = data.aws_route53_zone.main.zone_id
-  name    = local.login_record_name
-  type    = "A"
+  zone_id         = data.aws_route53_zone.main.zone_id
+  name            = local.login_record_name
+  type            = "A"
   allow_overwrite = true
 
   alias {
@@ -129,16 +109,16 @@ resource "aws_route53_record" "login" {
 }
 
 # ACM Certificate validation records
+locals {
+  validation_records = merge(
+    { for rec in var.api_validation_records : "${rec.name}_${rec.type}" => rec },
+    { for rec in var.login_validation_records : "${rec.name}_${rec.type}" => rec },
+    { for rec in var.site_validation_records : "${rec.name}_${rec.type}" => rec },
+  )
+}
+
 resource "aws_route53_record" "cert_validation" {
-  for_each = {
-    for domain in ["api", "login", "site"] :
-    domain => {
-      name   = domain == "api" ? (length(var.api_validation_records) > 0 ? var.api_validation_records[0].name : "") : domain == "login" ? (length(var.login_validation_records) > 0 ? var.login_validation_records[0].name : "") : (length(var.site_validation_records) > 0 ? var.site_validation_records[0].name : "")
-      type   = domain == "api" ? (length(var.api_validation_records) > 0 ? var.api_validation_records[0].type : "") : domain == "login" ? (length(var.login_validation_records) > 0 ? var.login_validation_records[0].type : "") : (length(var.site_validation_records) > 0 ? var.site_validation_records[0].type : "")
-      record = domain == "api" ? (length(var.api_validation_records) > 0 ? var.api_validation_records[0].record : "") : domain == "login" ? (length(var.login_validation_records) > 0 ? var.login_validation_records[0].record : "") : (length(var.site_validation_records) > 0 ? var.site_validation_records[0].record : "")
-    }
-    if domain == "api" ? length(var.api_validation_records) > 0 : domain == "login" ? length(var.login_validation_records) > 0 : length(var.site_validation_records) > 0
-  }
+  for_each = local.validation_records
 
   allow_overwrite = true
 

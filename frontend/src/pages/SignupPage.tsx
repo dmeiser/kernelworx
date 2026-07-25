@@ -166,11 +166,11 @@ async function handlePostVerificationAuth(
     await fetchAuthSession();
     console.log('User is authenticated despite autoSignIn failure');
     await refreshSession();
-    navigate('/home');
+    void navigate('/home');
   } catch {
     console.log('User is not authenticated, redirecting to login');
     setSuccess('Please log in with your new account');
-    scheduleRedirect(() => navigate('/login'));
+    scheduleRedirect(() => void navigate('/login'));
   }
 }
 
@@ -187,7 +187,7 @@ async function processAutoSignIn(
     await autoSignIn();
     await saveOptionalFields(updateMyAccount, optionalFields);
     await refreshSession();
-    navigate('/home');
+    void navigate('/home');
   } catch (autoSignInError) {
     console.log('Auto sign-in failed, checking authentication state:', autoSignInError);
     await handlePostVerificationAuth(refreshSession, navigate, setSuccess, scheduleRedirect);
@@ -284,7 +284,7 @@ export const SignupPage: React.FC = () => {
     }
     if (signUpStep === 'DONE') {
       setSuccess('Account created successfully!');
-      scheduleRedirect(() => navigate('/login'));
+      scheduleRedirect(() => { void navigate('/login'); });
     }
   };
 
@@ -339,8 +339,8 @@ export const SignupPage: React.FC = () => {
         success={success}
         loading={loading}
         onVerify={handleVerifyEmail}
-        onResendCode={handleResendCode}
-        onNavigateToLogin={() => navigate('/login')}
+        onResendCode={() => { void handleResendCode(); }}
+        onNavigateToLogin={() => { void navigate('/login'); }}
       />
     );
   }
@@ -371,7 +371,7 @@ export const SignupPage: React.FC = () => {
       success={success}
       loading={loading}
       onSignup={handleSignup}
-      onNavigateToLogin={() => navigate('/login')}
+      onNavigateToLogin={() => { void navigate('/login'); }}
     />
   );
 };
@@ -444,7 +444,7 @@ interface VerificationViewProps {
   error: string | null;
   success: string | null;
   loading: boolean;
-  onVerify: (e: React.FormEvent) => void;
+  onVerify: (e: React.FormEvent) => void | Promise<void>;
   onResendCode: () => void;
   onNavigateToLogin: () => void;
 }
@@ -480,7 +480,7 @@ const VerificationView: React.FC<VerificationViewProps> = ({
 
     <AlertMessages error={error} success={success} />
 
-    <Box component="form" onSubmit={onVerify}>
+    <Box component="form" onSubmit={(e) => { void onVerify(e); }}>
       <TextField
         fullWidth
         label="Verification Code"
@@ -533,7 +533,7 @@ interface SignupFormViewProps {
   error: string | null;
   success: string | null;
   loading: boolean;
-  onSignup: (e: React.FormEvent) => void;
+  onSignup: (e: React.FormEvent) => void | Promise<void>;
   onNavigateToLogin: () => void;
 }
 
@@ -584,7 +584,7 @@ const SignupFormView: React.FC<SignupFormViewProps> = ({
 
     <AlertMessages error={error} success={success} />
 
-    <Box component="form" onSubmit={onSignup}>
+    <Box component="form" onSubmit={(e) => { void onSignup(e); }}>
       <TextField
         fullWidth
         label="Email Address"

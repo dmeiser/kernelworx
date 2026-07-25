@@ -37,18 +37,8 @@ warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
 ignore_missing_imports = true
-
-[[tool.mypy.overrides]]
-module = "aws_cdk"
-ignore_missing_imports = true
-
-[[tool.mypy.overrides]]
-module = "aws_cdk.*"
-ignore_missing_imports = true
-
-[[tool.mypy.overrides]]
-module = "constructs"
-ignore_missing_imports = true
+# The enforced check is `mypy src/`; keep the config scoped to match reality.
+files = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests/unit"]
@@ -90,9 +80,9 @@ precision = 2
 # F (41+): Very high - error-prone, unstable block
 #
 # POLICY: All functions must be Grade A (complexity <= 5)
-# Run: uv run radon cc src/ cdk/cdk/ -a -s --total-average
-# Check for violations: uv run radon cc src/ cdk/cdk/ -a -nb (shows B or worse)
-# CI check: uv run radon cc src/ cdk/cdk/ --total-average -nb --json | jq 'to_entries | map(select(.value | length > 0)) | length' (should be 0)
+# Run: uv run radon cc src/ -a -s --total-average
+# Check for violations: uv run radon cc src/ -a -nb (shows B or worse)
+# CI check: uv run radon cc src/ --total-average -nb --json | jq 'to_entries | map(select(.value | length > 0)) | length' (should be 0)
 cc_min = "A"
 show_complexity = true
 average = true

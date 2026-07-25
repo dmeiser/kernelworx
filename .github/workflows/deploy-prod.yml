@@ -71,15 +71,6 @@ jobs:
         working-directory: tofu/application/environments/prod
         run: tofu init
 
-      - name: OpenTofu plan (prod)
-        env:
-          TF_VAR_encryption_passphrase: ${{ secrets.TF_VAR_ENCRYPTION_PASSPHRASE }}
-          TF_VAR_google_client_id: ${{ secrets.TF_VAR_GOOGLE_CLIENT_ID }}
-          TF_VAR_google_client_secret: ${{ secrets.TF_VAR_GOOGLE_CLIENT_SECRET }}
-          TF_IN_AUTOMATION: "true"
-        working-directory: tofu/application/environments/prod
-        run: tofu plan
-
       - name: Check if delete profile migration is needed
         id: check_delete_profile_migration
         env:
@@ -111,9 +102,23 @@ jobs:
         # functions still referenced by a resolver, and the AWS provider has a
         # long-standing issue ordering resolver updates before function deletions.
         # Recreating the resolver first removes the old function references reliably.
+        # This state-changing step must run BEFORE the saved plan so the plan stays valid.
         run: |
           tofu apply -replace=module.appsync.aws_appsync_resolver.delete_seller_profile -auto-approve
 
+      - name: OpenTofu plan (prod)
+        env:
+          TF_VAR_encryption_passphrase: ${{ secrets.TF_VAR_ENCRYPTION_PASSPHRASE }}
+          TF_VAR_google_client_id: ${{ secrets.TF_VAR_GOOGLE_CLIENT_ID }}
+          TF_VAR_google_client_secret: ${{ secrets.TF_VAR_GOOGLE_CLIENT_SECRET }}
+          TF_IN_AUTOMATION: "true"
+        working-directory: tofu/application/environments/prod
+        run: tofu plan -out=tfplan
+
+      # ROLLBACK: To revert this deployment, check out the previous release commit,
+      # re-run `tofu plan -out=tfplan` against the previous state, and apply it with
+      # `tofu apply tfplan`. The plan file is not uploaded as an artifact because it
+      # can contain sensitive values derived from TF_VAR_* secrets.
       - name: OpenTofu apply (prod)
         env:
           TF_VAR_encryption_passphrase: ${{ secrets.TF_VAR_ENCRYPTION_PASSPHRASE }}
@@ -121,7 +126,7 @@ jobs:
           TF_VAR_google_client_secret: ${{ secrets.TF_VAR_GOOGLE_CLIENT_SECRET }}
           TF_IN_AUTOMATION: "true"
         working-directory: tofu/application/environments/prod
-        run: tofu apply -auto-approve
+        run: tofu apply -auto-approve tfplan
 
       - name: Extract OpenTofu outputs for frontend
         id: tofu_outputs
@@ -154,7 +159,11 @@ jobs:
         run: |
           npm ci
           npm run build
-          aws s3 sync dist "s3://${{ steps.tofu_outputs.outputs.static_assets_bucket }}" --delete --region "${{ secrets.AWS_REGION }}"
+          # Do not use --delete: hashed JS/CSS chunks from previous deploys may still
+          # be requested by clients that have an old index.html cached before the
+          # CloudFront invalidation below completes. Keeping old chunks prevents
+          # white-screen errors for open sessions during the deploy window.
+          aws s3 sync dist "s3://${{ steps.tofu_outputs.outputs.static_assets_bucket }}" --region "${{ secrets.AWS_REGION }}"
           aws cloudfront create-invalidation --distribution-id "${{ steps.tofu_outputs.outputs.cloudfront_distribution_id }}" --paths "/*"
 
   smoke-tests-prod:

@@ -8,19 +8,27 @@ have access via a share. The transfer involves:
 4. Deleting the share (since they're now the owner)
 """
 
+import os
 from typing import Any, Dict
 
+import boto3
 from boto3.dynamodb.conditions import Key
+from boto3.dynamodb.types import TypeSerializer
+from botocore.exceptions import ClientError
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
     from utils.auth import is_admin
     from utils.dynamodb import tables
+    from utils.errors import AppError, ErrorCode
     from utils.ids import ensure_account_id, ensure_profile_id
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.auth import is_admin
     from ..utils.dynamodb import tables
+    from ..utils.errors import AppError, ErrorCode
     from ..utils.ids import ensure_account_id, ensure_profile_id
+
+_type_serializer = TypeSerializer()
 
 
 def _get_and_verify_profile(db_profile_id: str, db_caller_id: str, event: Dict[str, Any]) -> Dict[str, Any]:
@@ -30,7 +38,7 @@ def _get_and_verify_profile(db_profile_id: str, db_caller_id: str, event: Dict[s
     )
 
     if not profile_response.get("Items"):
-        raise ValueError(f"Profile not found: {db_profile_id}")
+        raise AppError(ErrorCode.NOT_FOUND, f"Profile not found: {db_profile_id}")
 
     profile: Dict[str, Any] = profile_response["Items"][0]
 
@@ -38,7 +46,7 @@ def _get_and_verify_profile(db_profile_id: str, db_caller_id: str, event: Dict[s
     caller_is_admin = is_admin(event)
 
     if not caller_is_owner and not caller_is_admin:
-        raise PermissionError("Only the profile owner or an admin can transfer ownership")
+        raise AppError(ErrorCode.FORBIDDEN, "Only the profile owner or an admin can transfer ownership")
 
     return profile
 
@@ -48,15 +56,51 @@ def _verify_new_owner_has_share(db_profile_id: str, db_new_owner_id: str, caller
     if not caller_is_admin:
         share_response = tables.shares.get_item(Key={"profileId": db_profile_id, "targetAccountId": db_new_owner_id})
         if "Item" not in share_response:
-            raise ValueError("New owner must have existing access to the profile")
+            raise AppError(ErrorCode.INVALID_INPUT, "New owner must have existing access to the profile")
 
 
 def _transfer_ownership(profile: Dict[str, Any], db_profile_id: str, db_new_owner_id: str) -> None:
-    """Transfer ownership by deleting and recreating profile with new owner."""
-    old_key = {"ownerAccountId": profile["ownerAccountId"], "profileId": db_profile_id}
-    tables.profiles.delete_item(Key=old_key)
+    """Transfer ownership atomically using a DynamoDB transaction.
+
+    The old profile record is deleted and the new record (with the updated owner)
+    is written in a single transact_write_items call so the profile cannot be lost
+    if one of the operations fails.
+    """
+    old_owner_id = profile["ownerAccountId"]
+    new_profile = {**profile, "ownerAccountId": db_new_owner_id}
+
+    old_key = {"ownerAccountId": old_owner_id, "profileId": db_profile_id}
+
+    endpoint_url = os.getenv("DYNAMODB_ENDPOINT")
+    dynamodb_client = boto3.client("dynamodb", endpoint_url=endpoint_url)
+    table_name = tables.profiles.name
+    try:
+        dynamodb_client.transact_write_items(
+            TransactItems=[
+                {
+                    "Delete": {
+                        "TableName": table_name,
+                        "Key": {k: _type_serializer.serialize(v) for k, v in old_key.items()},
+                        "ConditionExpression": "attribute_exists(ownerAccountId)",
+                    }
+                },
+                {
+                    "Put": {
+                        "TableName": table_name,
+                        "Item": {k: _type_serializer.serialize(v) for k, v in new_profile.items()},
+                        "ConditionExpression": "attribute_not_exists(ownerAccountId)",
+                    }
+                },
+            ]
+        )
+    except ClientError as e:
+        raise AppError(
+            ErrorCode.INTERNAL_ERROR,
+            f"Failed to transfer profile ownership: {e}",
+        ) from e
+
+    # Keep the returned profile dict in sync with the persisted record.
     profile["ownerAccountId"] = db_new_owner_id
-    tables.profiles.put_item(Item=profile)
 
 
 def _delete_share_if_exists(db_profile_id: str, db_new_owner_id: str) -> None:

@@ -30,3 +30,7 @@ dist-ssr
 scripts/take-home-screenshot.cjs
 scripts/take-mobile-screenshots.cjs
 scripts/take-reports-screenshot.cjs
+
+# Debug artifacts
+debug-width.js
+*.xlsx

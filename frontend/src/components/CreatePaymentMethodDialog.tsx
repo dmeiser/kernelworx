@@ -82,7 +82,7 @@ export const CreatePaymentMethodDialog: React.FC<CreatePaymentMethodDialogProps>
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !isLoading) {
       e.preventDefault();
-      handleSubmit();
+      void handleSubmit();
     }
   };
 
@@ -117,7 +117,7 @@ export const CreatePaymentMethodDialog: React.FC<CreatePaymentMethodDialogProps>
           Cancel
         </Button>
         <Button
-          onClick={handleSubmit}
+          onClick={() => { void handleSubmit(); }}
           variant="contained"
           disabled={isLoading || !name.trim()}
           startIcon={isLoading ? <CircularProgress size={16} /> : undefined}

@@ -58,7 +58,7 @@ beforeAll(async () => {
     console.error('Ensure:');
     console.error('  - E2E_BASE_URL is set (e.g. https://dev.kernelworx.app)');
     console.error('  - AWS credentials are configured (aws configure / AWS_PROFILE)');
-    console.error('  - Infrastructure is deployed: cd tofu/environments/dev && tofu apply');
+    console.error('  - Infrastructure is deployed: ./tofu/application/scripts/deploy.sh dev apply');
     console.error('  - Or set explicit values in .env file');
     process.exit(1);
   }

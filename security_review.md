@@ -6,7 +6,7 @@ This report presents a detailed security audit of the `kernelworx` repository. T
 
 ## Executive Summary
 
-The KernelWorx architecture incorporates robust baseline security controls, including automated encryption at-rest, strict transport encryption, fine-grained IAM roles, and a granular owner-based and shared authorization design. However, this review identified several gaps, notably a critical logic bug in profile cascade deletion that leads to orphaned records, a complete bypass of backend input validation for orders, and minor vulnerabilities related to dependency security, user enumeration, and COPPA compliance.
+The KernelWorx architecture incorporates robust baseline security controls, including automated encryption at-rest, strict transport encryption, fine-grained IAM roles, and a granular owner-based and shared authorization design. This review identified several gaps; as of the latest verification the cascade-deletion and input-validation issues are resolved, the deprecated `xlsx` dependency is updated, and the federated auto-link path now requires a verified email. Live findings that still require attention are the COPPA compliance posture and a partial user-enumeration leak in the share lookup resolver.
 
 ---
 
@@ -21,23 +21,11 @@ This model is enforced consistently across both python backend Lambdas and AppSy
 - **Lambda Verification:** [auth.py](file:///home/dm/code/kernelworx/src/utils/auth.py) implements the logic via direct lookups. The `profiles` table is queried using the `profileId-index` GSI to check the owner, and the `shares` table is queried to check granted permissions.
 - **AppSync JS Verification:** JS resolvers (such as [check_profile_read_auth_fn.js](file:///home/dm/code/kernelworx/tofu/application/appsync/js-resolvers/check_profile_read_auth_fn.js) and [check_share_permissions_fn.js](file:///home/dm/code/kernelworx/tofu/application/appsync/js-resolvers/check_share_permissions_fn.js)) implement the same logic directly in pipeline resolvers, minimizing DynamoDB queries by stashing the profile metadata across functions.
 
-### 1.2 Cascade Deletion Bug (Major / Critical)
-When a Scout profile is deleted, the application is designed to cascade-delete all related shares, invites, campaigns, and orders. However, the JS resolvers responsible for cleanup only delete the *first* record in each collection.
+### 1.2 Cascade Deletion Bug (Major / Critical) — Fixed
+The cascade-deletion logic was moved from the AppSync JS resolvers cited below into the Python Lambda `src/handlers/delete_profile_cascade.py`. The JS resolver files (`delete_profile_shares_fn.js`, `delete_profile_campaigns_fn.js`, `delete_profile_invites_fn.js`) no longer exist in the deployed pipeline.
 
-In [delete_profile_shares_fn.js](file:///home/dm/code/kernelworx/tofu/application/appsync/js-resolvers/delete_profile_shares_fn.js#L11-L16):
-```javascript
-    // Delete first share - datasource knows the table
-    const share = shares[0];
-    return {
-        operation: 'DeleteItem',
-        key: util.dynamodb.toMapValues({ profileId: share.profileId, targetAccountId: share.targetAccountId })
-    };
-```
-Similarly, in [delete_profile_campaigns_fn.js](file:///home/dm/code/kernelworx/tofu/application/appsync/js-resolvers/delete_profile_campaigns_fn.js#L11-L16) and [delete_profile_invites_fn.js](file:///home/dm/code/kernelworx/tofu/application/appsync/js-resolvers/delete_profile_invites_fn.js#L11-L16), only the first item in the stash arrays (`campaignsToDelete` and `invitesToDelete`) is deleted. 
-
-**Impact:** If a profile has more than one shared user, campaign, or invite, the subsequent records are orphaned in DynamoDB. This leaves dangling references, wastes DB storage, and could allow unauthorized access if a profile ID is ever reused or referenced in query operations.
-
-### 1.3 User Enumeration via Share API (Minor)
+**Status:** Resolved. The original first-record-only deletion path has been replaced.
+### 1.3 User Enumeration via Share API (Minor) — Partially Fixed
 The API endpoint for direct sharing ([lookup_account_by_email_fn.js](file:///home/dm/code/kernelworx/tofu/application/appsync/js-resolvers/lookup_account_by_email_fn.js#L20-L22)) queries the accounts table via the `email-index` GSI. If the account does not exist, it throws a specific error:
 ```javascript
     if (!ctx.result.items || ctx.result.items.length === 0) {
@@ -46,6 +34,7 @@ The API endpoint for direct sharing ([lookup_account_by_email_fn.js](file:///hom
 ```
 **Impact:** Any authenticated user can enumerate registered users on the system by calling `shareProfileDirect` with different emails and analyzing the returned errors.
 
+**Status:** Partially fixed. The resolver still distinguishes registered vs. unregistered accounts through success/error responses, so the enumeration channel remains open. A uniform response (e.g., a generic success with no account details) is needed to close it completely.
 ---
 
 ## 2. Secrets Management
@@ -64,25 +53,15 @@ The IAM module ([main.tf](file:///home/dm/code/kernelworx/tofu/application/modul
 
 ## 3. Input Validation
 
-### 3.1 Backend Validation Bypass (Major)
+### 3.1 Backend Validation Bypass (Major) — Fixed
 The Python file [validation.py](file:///home/dm/code/kernelworx/src/utils/validation.py) contains robust input validation rules, including:
 - E.164 phone number formatting via [normalize_phone](file:///home/dm/code/kernelworx/src/utils/validation.py#L92)
 - Detailed ZIP code matching via [validate_address](file:///home/dm/code/kernelworx/src/utils/validation.py#L119)
 - Completeness checks via [validate_customer_input](file:///home/dm/code/kernelworx/src/utils/validation.py#L157)
 
-However, because the `createOrder` and `updateOrder` mutations were migrated to AppSync JS resolvers for performance reasons, **none of these Python validation helpers are actually called**.
+The `createOrder` and `updateOrder` mutations now enforce validation in the AppSync JS resolver path. The raw pass-through snippet shown below has been replaced with validation that normalizes phone numbers and checks address structure before writing to DynamoDB.
 
-In [create_order_fn.js](file:///home/dm/code/kernelworx/tofu/application/appsync/js-resolvers/create_order_fn.js#L106-L115), phone numbers and addresses are stored directly into DynamoDB without formatting or structure checks:
-```javascript
-    if (input.customerPhone) {
-        orderItem.customerPhone = input.customerPhone;
-    }
-    if (input.customerAddress) {
-        orderItem.customerAddress = input.customerAddress;
-    }
-```
-**Impact:** A malicious user can write arbitrary data, injection payloads, or malformed structures directly into the `customerPhone` and `customerAddress` fields in DynamoDB via the GraphQL API, potentially leading to persistent storage corruption or cross-site scripting (XSS) when rendered in the frontend.
-
+**Status:** Resolved. Backend input validation is now enforced for order mutations.
 ### 3.2 Frontend Validation (Minor)
 The frontend validation in [OrderEditorPage.tsx](file:///home/dm/code/kernelworx/frontend/src/pages/OrderEditorPage.tsx#L130-L150) is basic. It validates that a customer name is present and at least one line item is added, but depends entirely on the component's formatting wrapper rather than validating state format constraints (like phone and address components) prior to submission.
 
@@ -90,15 +69,14 @@ The frontend validation in [OrderEditorPage.tsx](file:///home/dm/code/kernelworx
 
 ## 4. Dependency Security
 
-### 4.1 Vulnerable SheetJS Dependency (Minor / Medium)
-The frontend [package.json](file:///home/dm/code/kernelworx/frontend/package.json#L33) specifies SheetJS dependency:
+### 4.1 Vulnerable SheetJS Dependency (Minor / Medium) — Fixed
+The frontend [package.json](file:///home/dm/code/kernelworx/frontend/package.json#L37) now pins the official SheetJS distribution:
 ```json
-    "xlsx": "^0.18.5"
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
 ```
-The public `xlsx` NPM package is deprecated and locked at `0.18.5`. This version contains known vulnerabilities, including high-severity Prototype Pollution (e.g., CVE-2023-30533). 
+Version `0.20.3` is the current official release and replaces the deprecated public `0.18.5` package that was affected by Prototype Pollution (CVE-2023-30533).
 
-**Remediation:** Migrate to the official scoped package `@sheetjs/xlsx` and update to version `0.19.3` or higher.
-
+**Status:** Resolved.
 ### 4.2 Python Dependencies
 Python dependencies in [pyproject.toml](file:///home/dm/code/kernelworx/pyproject.toml#L6-L10) are clean. `openpyxl` is locked at `3.1.5` in [uv.lock](file:///home/dm/code/kernelworx/uv.lock#L878) which is not subject to known critical vulnerabilities.
 
@@ -133,27 +111,37 @@ KernelWorx stores Scout profiles, which represent children, many of whom are und
 1. **Pseudonymization:** Update UI components to explicitly instruct parents to enter only the Scout's first name and last initial (or a pseudonym), preventing the collection of full child names.
 2. **Consent Checkpoint:** Add a checkbox confirmation during Scout profile creation asserting that the user is the child's parent/legal guardian (or has obtained direct parental permission) to enter the name.
 
-### 6.2 Pre-Sign-Up Auto-Link Risk (Minor)
-The Cognito pre-sign-up trigger ([pre_signup.py](file:///home/dm/code/kernelworx/src/handlers/pre_signup.py#L121)) automatically links social identity providers (Google) to native Cognito email accounts when they share the same email address. However, **it does not check if the social provider verified the email**:
+### 6.2 Pre-Sign-Up Auto-Link Risk (Minor) — Fixed
+The Cognito pre-sign-up trigger ([pre_signup.py](file:///home/dm/code/kernelworx/src/handlers/pre_signup.py)) now links social identity providers to native Cognito accounts only when both of the following conditions are met:
+
+1. The federated provider explicitly asserts `email_verified = "true"` (or boolean `True`).
+2. The provider-supplied email passes validation before it is interpolated into the Cognito `ListUsers` filter.
+
+If the email is unverified or invalid/unsafe, the trigger still auto-confirms the new federated account but does **not** link it to an existing native account and does not auto-verify the email.
+
 ```python
-    email = user_attributes.get("email", "")
-    # Only checks if email is present, not if verified
+    if not _is_email_verified(user_attributes):
+        logger.warning("Federated provider did not verify email, skipping auto-link")
+        return _auto_confirm_event(event, verify_email=False)
+
+    validated_email = _validate_email(email)
+    if not validated_email:
+        logger.warning("Invalid or unsafe email from federated provider, skipping auto-link")
+        return _auto_confirm_event(event, verify_email=False)
 ```
-**Impact:** If an attacker can configure a malicious social login provider returning an unverified email address matching a native user's email, the trigger will link the social profile to the victim's account, resulting in an account takeover. 
 
-**Remediation:** Add a check to verify that the provider's `email_verified` claim is explicitly `True` before linking.
-
+**Status:** Resolved.
 ---
 
 ## Summary of Findings
 
-| Severity | ID | Title | File Reference |
-| :--- | :--- | :--- | :--- |
-| **Major** | SEC-01 | Cascade Deletion Logic Bug Leaves Orphaned Campaigns & Shares | [delete_profile_shares_fn.js](file:///home/dm/code/kernelworx/tofu/application/appsync/js-resolvers/delete_profile_shares_fn.js#L11) |
-| **Major** | SEC-02 | Backend Input Validation Bypass for Customer Phone & Address | [create_order_fn.js](file:///home/dm/code/kernelworx/tofu/application/appsync/js-resolvers/create_order_fn.js#L106) |
-| **Major** | SEC-03 | COPPA Compliance Risks for Child (Scout) Personal Information | [PrivacyPolicyPage.tsx](file:///home/dm/code/kernelworx/frontend/src/pages/PrivacyPolicyPage.tsx#L120) |
-| **Minor** | SEC-04 | Deprecated `xlsx` Frontend Dependency (Known Vulnerabilities) | [package.json](file:///home/dm/code/kernelworx/frontend/package.json#L33) |
-| **Minor** | SEC-05 | User Enumeration / Account Existence Leak in Sharing API | [lookup_account_by_email_fn.js](file:///home/dm/code/kernelworx/tofu/application/appsync/js-resolvers/lookup_account_by_email_fn.js#L20) |
-| **Minor** | SEC-06 | Cognito External IdP Auto-Link without Email Verification Check | [pre_signup.py](file:///home/dm/code/kernelworx/src/handlers/pre_signup.py#L140) |
-| **Info** | SEC-07 | AWS WAF Disabled due to Budget Constraints | [ .kics.yml](file:///home/dm/code/kernelworx/tofu/.kics.yml#L5) |
-| **Info** | SEC-08 | Inconsistent Invite Code Generation Logic between JS and Python | [create_invite_fn.js](file:///home/dm/code/kernelworx/tofu/application/appsync/js-resolvers/create_invite_fn.js#L13) |
+| Severity | ID | Title | File Reference | Status |
+| :--- | :--- | :--- | :--- | :--- |
+| **Major** | SEC-01 | Cascade Deletion Logic Bug Leaves Orphaned Campaigns & Shares | `src/handlers/delete_profile_cascade.py` (JS resolvers removed) | Fixed |
+| **Major** | SEC-02 | Backend Input Validation Bypass for Customer Phone & Address | [create_order_fn.js](file:///home/dm/code/kernelworx/tofu/application/appsync/js-resolvers/create_order_fn.js#L106) | Fixed |
+| **Major** | SEC-03 | COPPA Compliance Risks for Child (Scout) Personal Information | [PrivacyPolicyPage.tsx](file:///home/dm/code/kernelworx/frontend/src/pages/PrivacyPolicyPage.tsx#L120) | **Live** |
+| **Minor** | SEC-04 | Deprecated `xlsx` Frontend Dependency (Known Vulnerabilities) | [package.json](file:///home/dm/code/kernelworx/frontend/package.json#L37) | Fixed |
+| **Minor** | SEC-05 | User Enumeration / Account Existence Leak in Sharing API | [lookup_account_by_email_fn.js](file:///home/dm/code/kernelworx/tofu/application/appsync/js-resolvers/lookup_account_by_email_fn.js#L20) | Partially fixed |
+| **Minor** | SEC-06 | Cognito External IdP Auto-Link without Email Verification Check | [pre_signup.py](file:///home/dm/code/kernelworx/src/handlers/pre_signup.py) | Fixed |
+| **Info** | SEC-07 | AWS WAF Disabled due to Budget Constraints | [ .kics.yml](file:///home/dm/code/kernelworx/tofu/.kics.yml#L5) | Unchanged (accepted trade-off) |
+| **Info** | SEC-08 | Inconsistent Invite Code Generation Logic between JS and Python | [create_invite_fn.js](file:///home/dm/code/kernelworx/tofu/application/appsync/js-resolvers/create_invite_fn.js#L13) | Not a live risk (duplicate Python path is dead code; see SF-32) |

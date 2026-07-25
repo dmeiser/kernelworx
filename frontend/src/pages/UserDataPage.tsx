@@ -59,6 +59,7 @@ import {
 import { LoadingState } from '../components/LoadingState';
 import { NavBreadcrumbs } from '../components/NavBreadcrumbs';
 import { ConfirmDialog } from '../components/ConfirmDialog';
+import { formatDisplayDate } from '../lib/date-utils';
 import type { SellerProfile, Catalog, AdminUser } from '../types';
 
 interface Campaign {
@@ -206,7 +207,7 @@ export const UserDataPage: React.FC = () => {
       setTransferProfileId(null);
       setNewOwnerSearch('');
       setSelectedNewOwner(null);
-      refetchProfiles();
+      void refetchProfiles();
     },
     onError: (error) => {
       console.error('Transfer failed:', error);
@@ -221,7 +222,7 @@ export const UserDataPage: React.FC = () => {
     onCompleted: () => {
       setEditingCampaignId(null);
       setEditingSharedCode('');
-      refetchCampaigns();
+      void refetchCampaigns();
     },
     onError: (error) => {
       console.error('Update shared code failed:', error);
@@ -253,13 +254,13 @@ export const UserDataPage: React.FC = () => {
 
   const handleSearchNewOwner = () => {
     if (newOwnerSearch.trim()) {
-      searchNewOwner({ variables: { query: newOwnerSearch.trim() } });
+      void searchNewOwner({ variables: { query: newOwnerSearch.trim() } });
     }
   };
 
   const handleConfirmTransfer = () => {
     if (transferProfileId && selectedNewOwner) {
-      transferOwnership({
+      void transferOwnership({
         variables: {
           input: {
             profileId: transferProfileId,
@@ -284,7 +285,7 @@ export const UserDataPage: React.FC = () => {
         targetAccountId: revokeShareTarget.targetAccountId,
       },
     });
-    refetchShares();
+    void refetchShares();
   };
 
   if (!accountId) {
@@ -303,7 +304,7 @@ export const UserDataPage: React.FC = () => {
         items={[
           {
             label: 'Admin Console',
-            onClick: () => navigate('/admin'),
+            onClick: () => { void navigate('/admin'); },
             icon: <BackIcon fontSize="small" />,
           },
           { label: `User Data: ${profileIdWithoutPrefix}` },
@@ -507,8 +508,8 @@ export const UserDataPage: React.FC = () => {
                               <TableCell>{campaign.campaignYear}</TableCell>
                               <TableCell>
                                 <Typography variant="body2">
-                                  {campaign.startDate ? new Date(campaign.startDate).toLocaleDateString() : '—'} -{' '}
-                                  {campaign.endDate ? new Date(campaign.endDate).toLocaleDateString() : '—'}
+                                  {formatDisplayDate(campaign.startDate) || '—'} -{' '}
+                                  {formatDisplayDate(campaign.endDate) || '—'}
                                 </Typography>
                               </TableCell>
                               <TableCell>
@@ -540,7 +541,7 @@ export const UserDataPage: React.FC = () => {
                                     <Button
                                       size="small"
                                       onClick={() => {
-                                        updateCampaignSharedCode({
+                                        void updateCampaignSharedCode({
                                           variables: {
                                             campaignId: campaign.campaignId,
                                             sharedCampaignCode: editingSharedCode || null,
@@ -643,10 +644,10 @@ export const UserDataPage: React.FC = () => {
                         </Typography>
                       </TableCell>
                       <TableCell>
-                        {sharedCampaign.startDate ? new Date(sharedCampaign.startDate).toLocaleDateString() : '—'}
+                        {formatDisplayDate(sharedCampaign.startDate) || '—'}
                       </TableCell>
                       <TableCell>
-                        {sharedCampaign.endDate ? new Date(sharedCampaign.endDate).toLocaleDateString() : '—'}
+                        {formatDisplayDate(sharedCampaign.endDate) || '—'}
                       </TableCell>
                     </TableRow>
                   ))}

@@ -13,7 +13,7 @@
     "lint:complexity": "eslint . --rule 'complexity: [error, 5]' --rule 'max-depth: [error, 3]'",
     "spellcheck": "cspell '**' --config ../cspell.json",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc -b --noEmit && tsc -p tsconfig.test.json --noEmit",
     "format": "prettier --write \"src/**/*.{ts,tsx}\"",
     "codegen": "graphql-codegen --config codegen.ts",
     "test": "node run-tests.js",

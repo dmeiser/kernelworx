@@ -103,6 +103,7 @@ getters
 giftcard
 GitHub
 GraphQL
+GraphQLAPIId
 Grotesque
 gstatic
 hashable
@@ -224,6 +225,7 @@ pseudonymized
 pycache
 pyproject
 pytest
+QLAPI
 qrcode
 qrCode
 queryable

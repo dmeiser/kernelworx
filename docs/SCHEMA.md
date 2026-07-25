@@ -356,7 +356,7 @@ flowchart TD
 
 ## References
 
-- **GraphQL Schema**: [tofu/schema/schema.graphql](../tofu/schema/schema.graphql)
-- **DynamoDB Infrastructure**: [tofu/modules/dynamodb/main.tf](../tofu/modules/dynamodb/main.tf)
+- **GraphQL Schema**: [tofu/application/schema/schema.graphql](../tofu/application/schema/schema.graphql)
+- **DynamoDB Infrastructure**: [tofu/application/modules/dynamodb/main.tf](../tofu/application/modules/dynamodb/main.tf)
 - **Authorization Rules**: [AGENT.md](AGENT.md#authorization-pattern)
 - **Developer Guide**: [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md)

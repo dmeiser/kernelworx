@@ -652,3 +652,48 @@ class TestGetUnitReport:
             assert result["sellers"] == []
             assert result["totalSales"] == 0.0
             assert result["totalOrders"] == 0
+
+    def test_get_unit_report_orphaned_profile_is_skipped(
+        self,
+        event: Dict[str, Any],
+        sample_campaigns: list[Dict[str, Any]],
+        sample_profiles: Dict[str, Dict[str, Any]],
+        sample_orders: Dict[str, list[Dict[str, Any]]],
+        lambda_context: Any,
+    ) -> None:
+        """Test that one orphaned profile (NOT_FOUND from access check) doesn't kill the whole report."""
+        mock_profiles_table = MagicMock()
+        mock_campaigns_table = MagicMock()
+        mock_orders_table = MagicMock()
+
+        # Arrange - campaigns reference two profiles
+        mock_campaigns_table.query.return_value = {"Items": sample_campaigns}
+
+        from src.utils.errors import AppError, ErrorCode
+
+        def check_access_side_effect(*args: Any, **kwargs: Any) -> bool:
+            # First profile raises NOT_FOUND (orphaned), second is accessible
+            if kwargs["profile_id"] == "PROFILE#profile1":
+                raise AppError(ErrorCode.NOT_FOUND, "Profile not found")
+            return True
+
+        self._setup_profile_query_mock(mock_profiles_table, sample_profiles)
+        mock_orders_table.query.return_value = {"Items": sample_orders["CAMPAIGN#campaign2"]}
+
+        with (
+            patch("src.handlers.campaign_reporting.tables") as mock_tables,
+            patch("src.handlers.campaign_reporting.check_profile_access") as mock_check_access,
+        ):
+            mock_tables.profiles = mock_profiles_table
+            mock_tables.campaigns = mock_campaigns_table
+            mock_tables.orders = mock_orders_table
+            mock_check_access.side_effect = check_access_side_effect
+
+            # Act
+            result = get_unit_report(event, lambda_context)
+
+            # Assert - Report succeeds with the remaining accessible profile
+            assert len(result["sellers"]) == 1
+            assert result["sellers"][0]["sellerName"] == "Scout 2"
+            assert result["totalSales"] == 200.0
+            assert result["totalOrders"] == 1

@@ -43,12 +43,12 @@ interface Account {
 }
 
 // Helper to create the mutation onCompleted callback
-const createUpdateCompletedHandler = (profileHook: ReturnType<typeof useProfileEdit>, refetch: () => void) => {
+const createUpdateCompletedHandler = (profileHook: ReturnType<typeof useProfileEdit>, refetch: () => Promise<unknown>) => {
   return () => {
     profileHook.setUpdateSuccess(true);
     profileHook.setUpdateError(null);
     profileHook.setEditDialogOpen(false);
-    refetch();
+    void refetch().catch(() => {});
   };
 };
 
@@ -144,8 +144,8 @@ export const UserSettingsPage: React.FC = () => {
 
   // Load MFA and passkey status on mount
   useEffect(() => {
-    checkMfaStatus();
-    loadPasskeys();
+    void checkMfaStatus();
+    void loadPasskeys();
   }, [checkMfaStatus, loadPasskeys]);
 
   // Auto-hide profile update success message after 3 seconds
@@ -163,7 +163,7 @@ export const UserSettingsPage: React.FC = () => {
   // Wrapper handlers for email hook (needs access to account email, logout, navigate)
   const handleRequestEmailUpdate = () => emailHook.handleRequestEmailUpdate(getAccountEmail(account));
 
-  const handleConfirmEmailUpdate = () => emailHook.handleConfirmEmailUpdate(logout, navigate);
+  const handleConfirmEmailUpdate = () => { void emailHook.handleConfirmEmailUpdate(logout, (path) => { void navigate(path); }); };
 
   const handleOpenEditDialog = () => profileHook.handleOpenEditDialog(account);
 
@@ -176,7 +176,7 @@ export const UserSettingsPage: React.FC = () => {
   const handleDeleteAccount = async () => {
     await deleteMyAccount();
     await logout();
-    navigate('/');
+    void navigate('/');
   };
 
   if (accountLoading) {
@@ -191,7 +191,7 @@ export const UserSettingsPage: React.FC = () => {
     <Box>
       <PageHeader
         title="User Settings"
-        backButton={{ onClick: () => navigate('/settings'), label: 'Back', 'aria-label': 'Back to settings' }}
+        backButton={{ onClick: () => { void navigate('/settings'); }, label: 'Back', 'aria-label': 'Back to settings' }}
       />
 
       <SuccessAlert show={profileHook.updateSuccess} />
@@ -221,14 +221,14 @@ export const UserSettingsPage: React.FC = () => {
       <DeleteAccountSection onDeleteAccount={handleDeleteAccount} userEmail={account?.email} />
 
       {/* Edit Profile Dialog */}
-      <EditProfileDialog profileHook={profileHook} updating={updating} onSave={handleSaveProfile} />
+      <EditProfileDialog profileHook={profileHook} updating={updating} onSave={() => { void handleSaveProfile(); }} />
 
       {/* Change Email Dialog */}
       <ChangeEmailDialog
         emailHook={emailHook}
         currentEmail={account?.email}
-        onRequestUpdate={handleRequestEmailUpdate}
-        onConfirmUpdate={handleConfirmEmailUpdate}
+        onRequestUpdate={() => { void handleRequestEmailUpdate(); }}
+        onConfirmUpdate={() => { void handleConfirmEmailUpdate(); }}
       />
     </Box>
   );

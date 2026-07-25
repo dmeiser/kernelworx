@@ -29,6 +29,7 @@ import { CampaignSettingsPage } from './CampaignSettingsPage';
 import { CampaignSummaryPage } from './CampaignSummaryPage';
 import { GET_CAMPAIGN, GET_PROFILE } from '../lib/graphql';
 import { ensureProfileId, ensureCampaignId, toUrlId } from '../lib/ids';
+import { formatDisplayDate } from '../lib/date-utils';
 import { LoadingState } from '../components/LoadingState';
 import { ErrorAlert } from '../components/ErrorAlert';
 import { PageHeader } from '../components/PageHeader';
@@ -47,18 +48,10 @@ function getTabValue(pathname: string): string {
   return validTabs.includes(currentPath) ? currentPath : 'orders';
 }
 
-function formatDate(dateString: string): string {
-  return new Date(dateString).toLocaleDateString('en-US', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-  });
-}
-
 function formatDateRange(startDate?: string, endDate?: string): string | null {
   if (!startDate && !endDate) return null;
-  const start = startDate ? formatDate(startDate) : '';
-  const end = endDate ? ` - ${formatDate(endDate)}` : '';
+  const start = startDate ? formatDisplayDate(startDate, { year: 'numeric', month: 'long', day: 'numeric' }) : '';
+  const end = endDate ? ` - ${formatDisplayDate(endDate, { year: 'numeric', month: 'long', day: 'numeric' })}` : '';
   return `${start}${end}`;
 }
 
@@ -191,11 +184,11 @@ function useNavigationHandlers(profileId: string, campaignId: string) {
 
   const handleTabChange = (_event: React.SyntheticEvent, newValue: string) => {
     const url = `/scouts/${toUrlId(profileId)}/campaigns/${toUrlId(campaignId)}/${newValue}`;
-    navigate(url);
+    void navigate(url);
   };
 
   const handleBack = () => {
-    navigate(`/scouts/${toUrlId(profileId)}/campaigns`);
+    void navigate(`/scouts/${toUrlId(profileId)}/campaigns`);
   };
 
   return { navigate, handleTabChange, handleBack };
@@ -228,7 +221,7 @@ const CampaignContent: React.FC<CampaignContentProps> = ({ profileId, tabValue, 
       sellerName={profile?.sellerName || 'Loading...'}
       campaignName={campaign.campaignName}
       campaignYear={campaign.campaignYear}
-      onNavigate={navHandlers.navigate}
+      onNavigate={(path) => { void navHandlers.navigate(path); }}
     />
     <CampaignHeader campaign={campaign} onBack={navHandlers.handleBack} />
     <CampaignTabs

@@ -32,9 +32,11 @@ def test_campaign_operations_dynamo_value_for_scalar_fallback():
     result = campaign_operations._dynamo_value_for_scalar(obj)
     assert result == {"S": str(obj)}
 
-    # Set branch for collection conversion
+    # Set branch for collection conversion (sets are now serialized as L, not SS)
     assert campaign_operations._dynamo_value_for_collection({"k": "v"}) == {"M": {"k": {"S": "v"}}}
-    assert campaign_operations._dynamo_value_for_collection({"a", "b"}).get("SS") is not None
+    result = campaign_operations._dynamo_value_for_collection({"a", "b"})
+    assert result.get("L") is not None
+    assert len(result["L"]) == 2
 
 
 def test_pre_signup_handle_signup_exception_returns_event():
@@ -50,21 +52,21 @@ def test_pre_signup_handle_signup_exception_returns_event():
         {"Error": {"Code": "InvalidParameterException", "Message": "Link already exists"}},
         "AdminLinkProviderForUser",
     )
-    with pytest.raises(Exception):
+    with pytest.raises(pre_signup.FederatedIdentityLinkedException):
         pre_signup._handle_signup_exception(client_error, "user@example.com", event)
 
-    with pytest.raises(Exception):
+    with pytest.raises(pre_signup.FederatedIdentityLinkedException):
         pre_signup._handle_signup_exception(
-            Exception("Cannot link federated identity: invalid username format"), "user@example.com", event
+            pre_signup.FederatedIdentityLinkedException(
+                "Cannot link federated identity: invalid username format"
+            ),
+            "user@example.com",
+            event,
         )
 
 
 def test_profile_sharing_deduplicate_and_extract_helpers():
     from src.handlers import profile_sharing
-
-    code = profile_sharing.generate_invite_code()
-    assert len(code) == 10
-    assert code.isupper()
 
     # Deduplicate skips invalid entries and keeps first valid share
     shares = [
@@ -89,11 +91,11 @@ def test_profile_sharing_log_unprocessed_and_build_result():
         def __init__(self) -> None:
             self.warned: list[dict[str, int]] = []
 
-        def warning(self, message: str, **kwargs: int) -> None:  # pragma: no cover - exercised
+        def warning(self, message: str, **kwargs: int) -> None:
             self.warned.append(kwargs)
 
     logger = DummyLogger()
-    profile_sharing._log_unprocessed_keys({"UnprocessedKeys": {"Profiles": {"Keys": [1, 2, 3]}}}, "Profiles", logger)
+    profile_sharing._log_unprocessed_keys({"Profiles": {"Keys": [1, 2, 3]}}, "Profiles", logger)
     assert logger.warned == [{"count": 3}]
 
     share = {"profileId": "PROFILE#1", "ownerAccountId": "ACCOUNT#owner", "permissions": ["READ"]}
@@ -122,8 +124,177 @@ def test_profile_sharing_log_unprocessed_and_build_result():
 
     # Unprocessed keys path when table missing
     logger2 = DummyLogger()
-    profile_sharing._log_unprocessed_keys({"UnprocessedKeys": {"Other": {"Keys": [1]}}}, "Profiles", logger2)
+    profile_sharing._log_unprocessed_keys({"Other": {"Keys": [1]}}, "Other", logger2)
     assert logger2.warned == [{"count": 1}]
+
+    # No keys to log (empty branch)
+    logger3 = DummyLogger()
+    profile_sharing._log_unprocessed_keys({}, "Profiles", logger3)
+    assert logger3.warned == []
+
+
+def test_profile_sharing_fetch_batch_retry_edge_cases(monkeypatch):
+
+    from src.handlers import profile_sharing
+
+    # _get_unprocessed_table fallback loop when table not found by name
+    result = profile_sharing._get_unprocessed_table({"OtherTable": {"Keys": [1]}}, "Profiles")
+    assert result == {"Keys": [1]}
+
+    # _get_unprocessed_table with empty unprocessed keys
+    result = profile_sharing._get_unprocessed_table({}, "Profiles")
+    assert result == {}
+
+
+def test_profile_sharing_fetch_batch_exception_retry(monkeypatch):
+    from unittest.mock import MagicMock
+
+    from src.handlers import profile_sharing
+    from src.utils.errors import AppError, ErrorCode
+
+    mock_table = MagicMock()
+    mock_table.name = "test-table"
+
+    class FakeLogger:
+        def __init__(self):
+            self.warnings = []
+            self.errors = []
+
+        def warning(self, msg, **kwargs):
+            self.warnings.append((msg, kwargs))
+
+        def error(self, msg, **kwargs):
+            self.errors.append((msg, kwargs))
+
+    logger = FakeLogger()
+    keys = [{"profileId": "P#1"}]
+
+    call_count = [0]
+
+    def failing_batch_get(**kwargs):
+        call_count[0] += 1
+        raise Exception("DynamoDB down")
+
+    monkeypatch.setattr(profile_sharing.dynamodb, "batch_get_item", failing_batch_get)
+    with pytest.raises(AppError) as exc_info:
+        profile_sharing._fetch_batch_with_retry(keys, mock_table, logger)
+    assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+    assert call_count[0] == 3
+
+
+def test_profile_sharing_fetch_batch_empty_keys(monkeypatch):
+    from unittest.mock import MagicMock
+
+    from src.handlers import profile_sharing
+
+    mock_table = MagicMock()
+    mock_table.name = "test-table"
+
+    class FakeLogger:
+        def __init__(self):
+            self.warnings = []
+            self.errors = []
+
+        def warning(self, msg, **kwargs):
+            self.warnings.append((msg, kwargs))
+
+        def error(self, msg, **kwargs):
+            self.errors.append((msg, kwargs))
+
+    logger = FakeLogger()
+
+    # Empty keys list should break immediately and return empty
+    result = profile_sharing._fetch_batch_with_retry([], mock_table, logger)
+    assert result == []
+
+
+def test_profile_sharing_fetch_batch_unprocessed_after_retries(monkeypatch):
+    from unittest.mock import MagicMock
+
+    from src.handlers import profile_sharing
+
+    mock_table = MagicMock()
+    mock_table.name = "test-table"
+
+    class FakeLogger:
+        def __init__(self):
+            self.warnings = []
+            self.errors = []
+
+        def warning(self, msg, **kwargs):
+            self.warnings.append((msg, kwargs))
+
+        def error(self, msg, **kwargs):
+            self.errors.append((msg, kwargs))
+
+    logger = FakeLogger()
+    keys = [{"profileId": "P#1"}]
+
+    # Mock batch_get_item to always return unprocessed keys
+    def always_unprocessed(**kwargs):
+        return {
+            "Responses": {mock_table.name: []},
+            "UnprocessedKeys": {mock_table.name: {"Keys": keys}},
+        }
+
+    monkeypatch.setattr(profile_sharing.dynamodb, "batch_get_item", always_unprocessed)
+    result = profile_sharing._fetch_batch_with_retry(keys, mock_table, logger)
+    assert result == []
+    assert any("still remain" in e[0] for e in logger.errors)
+
+
+def test_auth_is_admin_unexpected_exception(monkeypatch):
+    from src.utils.auth import is_admin
+
+    # Event where identity.get("claims") raises something other than
+    # AttributeError/KeyError/TypeError — e.g. a claims object whose
+    # .get() method raises a RuntimeError
+    class MisbehavingClaims:
+        def get(self, key, default=None):
+            raise RuntimeError("claims broken")
+
+    result = is_admin({"identity": {"claims": MisbehavingClaims()}})
+    assert result is False
+
+
+def test_payment_methods_delete_qr_uuid_fallback(monkeypatch):
+    from unittest.mock import MagicMock
+
+    from botocore.exceptions import ClientError
+
+    from src.utils import payment_methods
+
+    monkeypatch.setenv("EXPORTS_BUCKET", "test-exports-bucket")
+    mock_s3 = MagicMock()
+    # First 3 calls (slug-based) raise NoSuchKey, next 3 (UUID) succeed
+    no_such_key = ClientError({"Error": {"Code": "NoSuchKey", "Message": "Not found"}}, "DeleteObject")
+    mock_s3.delete_object.side_effect = [no_such_key, no_such_key, no_such_key, None, None, None]
+    monkeypatch.setattr(payment_methods, "_get_s3_client", lambda: mock_s3)
+
+    # UUID fallback success path
+    payment_methods.delete_qr_from_s3("ACCOUNT#test", "test-method")
+    assert mock_s3.delete_object.call_count == 6
+
+
+def test_payment_methods_delete_qr_uuid_fallback_error(monkeypatch):
+    from unittest.mock import MagicMock
+
+    from botocore.exceptions import ClientError
+
+    from src.utils import payment_methods
+
+    monkeypatch.setenv("EXPORTS_BUCKET", "test-exports-bucket")
+    mock_s3 = MagicMock()
+    no_such_key = ClientError({"Error": {"Code": "NoSuchKey", "Message": "Not found"}}, "DeleteObject")
+    access_denied = ClientError({"Error": {"Code": "AccessDenied", "Message": "Access denied"}}, "DeleteObject")
+    # Slug deletes: NoSuchKey, NoSuchKey, NoSuchKey
+    # UUID deletes: AccessDenied, NoSuchKey, NoSuchKey
+    mock_s3.delete_object.side_effect = [no_such_key, no_such_key, no_such_key, access_denied, no_such_key, no_such_key]
+    monkeypatch.setattr(payment_methods, "_get_s3_client", lambda: mock_s3)
+
+    # UUID fallback with non-NoSuchKey error (should log warning, not raise)
+    payment_methods.delete_qr_from_s3("ACCOUNT#test", "test-method")
+    assert mock_s3.delete_object.call_count == 6
 
 
 def test_report_generation_get_s3_client_default(monkeypatch):
@@ -210,7 +381,9 @@ def test_transfer_profile_ownership_success(monkeypatch):
         BillingMode="PAY_PER_REQUEST",
     )
 
-    # Reload module so it binds to moto tables
+    # Reload handler so it binds to the moto tables via the current env vars.
+    from src.utils.dynamodb import reset_dynamodb_resource
+    reset_dynamodb_resource()
     module_name = "src.handlers.transfer_profile_ownership"
     if module_name in sys.modules:
         del sys.modules[module_name]
@@ -245,6 +418,8 @@ def test_transfer_profile_ownership_success(monkeypatch):
 
 @mock_aws
 def test_transfer_profile_ownership_error_paths():
+    from src.utils.errors import AppError
+
     os.environ["AWS_REGION"] = "us-east-1"
     os.environ["PROFILES_TABLE_NAME"] = "ProfilesTable"
     os.environ["SHARES_TABLE_NAME"] = "SharesTable"
@@ -298,25 +473,25 @@ def test_transfer_profile_ownership_error_paths():
         "arguments": {"input": {"profileId": "PROFILE#abc", "newOwnerAccountId": "new456"}},
     }
 
-    # Missing share triggers ValueError
-    with pytest.raises(ValueError):
+    # Missing share triggers AppError
+    with pytest.raises(AppError):
         transfer_module.lambda_handler(event_base, None)
 
-    # Seed share but wrong caller triggers PermissionError
+    # Seed share but wrong caller triggers AppError
     shares_table.put_item(Item={"profileId": "PROFILE#abc", "targetAccountId": "ACCOUNT#new456"})
     event_bad_owner = {
         "identity": {"sub": "someoneelse"},
         "arguments": {"input": {"profileId": "PROFILE#abc", "newOwnerAccountId": "new456"}},
     }
-    with pytest.raises(PermissionError):
+    with pytest.raises(AppError):
         transfer_module.lambda_handler(event_bad_owner, None)
 
-    # Missing profile triggers ValueError
+    # Missing profile triggers AppError
     event_missing_profile = {
         "identity": {"sub": "owner123"},
         "arguments": {"input": {"profileId": "PROFILE#missing", "newOwnerAccountId": "new456"}},
     }
-    with pytest.raises(ValueError):
+    with pytest.raises(AppError):
         transfer_module.lambda_handler(event_missing_profile, None)
 
 
@@ -480,6 +655,102 @@ def test_transfer_profile_ownership_share_delete_fails():
         db_module._table_overrides.pop("shares", None)
 
 
+@mock_aws
+def test_transfer_profile_ownership_source_deleted_race():
+    """Transfer must fail if the source profile is deleted between read and transaction."""
+    os.environ["AWS_REGION"] = "us-east-1"
+    os.environ["PROFILES_TABLE_NAME"] = "ProfilesTable"
+    os.environ["SHARES_TABLE_NAME"] = "SharesTable"
+
+    dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
+    dynamodb.create_table(
+        TableName="ProfilesTable",
+        KeySchema=[
+            {"AttributeName": "ownerAccountId", "KeyType": "HASH"},
+            {"AttributeName": "profileId", "KeyType": "RANGE"},
+        ],
+        AttributeDefinitions=[
+            {"AttributeName": "ownerAccountId", "AttributeType": "S"},
+            {"AttributeName": "profileId", "AttributeType": "S"},
+        ],
+        BillingMode="PAY_PER_REQUEST",
+        GlobalSecondaryIndexes=[
+            {
+                "IndexName": "profileId-index",
+                "KeySchema": [{"AttributeName": "profileId", "KeyType": "HASH"}],
+                "Projection": {"ProjectionType": "ALL"},
+            }
+        ],
+    )
+
+    module_name = "src.handlers.transfer_profile_ownership"
+    if module_name in sys.modules:
+        del sys.modules[module_name]
+    transfer_module = importlib.import_module(module_name)
+
+    profile = {
+        "ownerAccountId": "ACCOUNT#owner123",
+        "profileId": "PROFILE#abc",
+        "sellerName": "Scout",
+    }
+    # Do NOT seed the source row; the Delete condition should fail.
+    with pytest.raises(Exception):
+        transfer_module._transfer_ownership(profile, "PROFILE#abc", "ACCOUNT#new456")
+
+
+@mock_aws
+def test_transfer_profile_ownership_destination_exists_race():
+    """Transfer must fail if a profile already exists at the destination key."""
+    os.environ["AWS_REGION"] = "us-east-1"
+    os.environ["PROFILES_TABLE_NAME"] = "ProfilesTable"
+    os.environ["SHARES_TABLE_NAME"] = "SharesTable"
+
+    dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
+    dynamodb.create_table(
+        TableName="ProfilesTable",
+        KeySchema=[
+            {"AttributeName": "ownerAccountId", "KeyType": "HASH"},
+            {"AttributeName": "profileId", "KeyType": "RANGE"},
+        ],
+        AttributeDefinitions=[
+            {"AttributeName": "ownerAccountId", "AttributeType": "S"},
+            {"AttributeName": "profileId", "AttributeType": "S"},
+        ],
+        BillingMode="PAY_PER_REQUEST",
+        GlobalSecondaryIndexes=[
+            {
+                "IndexName": "profileId-index",
+                "KeySchema": [{"AttributeName": "profileId", "KeyType": "HASH"}],
+                "Projection": {"ProjectionType": "ALL"},
+            }
+        ],
+    )
+
+    module_name = "src.handlers.transfer_profile_ownership"
+    if module_name in sys.modules:
+        del sys.modules[module_name]
+    transfer_module = importlib.import_module(module_name)
+
+    profiles_table = dynamodb.Table("ProfilesTable")
+    profile = {
+        "ownerAccountId": "ACCOUNT#owner123",
+        "profileId": "PROFILE#abc",
+        "sellerName": "Scout",
+    }
+    profiles_table.put_item(Item=profile)
+    # Seed an item at the destination key so the Put condition fails.
+    profiles_table.put_item(
+        Item={
+            "ownerAccountId": "ACCOUNT#new456",
+            "profileId": "PROFILE#abc",
+            "sellerName": "Existing",
+        }
+    )
+
+    with pytest.raises(Exception):
+        transfer_module._transfer_ownership(profile, "PROFILE#abc", "ACCOUNT#new456")
+
+
 def test_profile_sharing_fetch_batch_with_zero_retries():
     from src.handlers import profile_sharing
 
@@ -492,3 +763,49 @@ def test_profile_sharing_fetch_batch_with_zero_retries():
 
     result = profile_sharing._fetch_batch_with_retry([], None, DummyLogger(), retries=0)  # type: ignore[arg-type]
     assert result == []
+
+
+def test_admin_operations_get_cognito_user_attributes():
+    from src.handlers.admin_operations import _get_cognito_user_attributes
+
+    account_id, email, email_verified, user_status, enabled = _get_cognito_user_attributes(
+        {
+            "Username": "u1",
+            "Attributes": [
+                {"Name": "sub", "Value": "sub-123"},
+                {"Name": "email", "Value": "user@example.com"},
+                {"Name": "email_verified", "Value": "true"},
+            ],
+            "UserStatus": "CONFIRMED",
+            "Enabled": False,
+        }
+    )
+    assert account_id == "sub-123"
+    assert email == "user@example.com"
+    assert email_verified is True
+    assert user_status == "CONFIRMED"
+    assert enabled is False
+
+
+def test_campaign_operations_normalize_account_id():
+    from src.handlers.campaign_operations import _normalize_account_id
+
+    assert _normalize_account_id("ACCOUNT#abc") == "abc"
+    assert _normalize_account_id("abc") == "abc"
+    assert _normalize_account_id(None) == ""  # type: ignore[arg-type]
+    assert _normalize_account_id("") == ""
+
+
+def test_campaign_reporting_reraises_non_not_found_profile_error(monkeypatch):
+    from src.handlers import campaign_reporting
+    from src.utils.errors import AppError, ErrorCode
+
+    def mock_check_profile_access(*args, **kwargs):
+        raise AppError(ErrorCode.INTERNAL_ERROR, "DynamoDB is unavailable")
+
+    monkeypatch.setattr(campaign_reporting, "check_profile_access", mock_check_profile_access)
+
+    with pytest.raises(AppError) as exc_info:
+        campaign_reporting._get_accessible_profiles(["PROFILE#1"], "ACCOUNT#caller")
+
+    assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR

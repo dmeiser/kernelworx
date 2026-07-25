@@ -211,4 +211,7 @@ export const apolloClient = new ApolloClient({
       errorPolicy: 'all',
     },
   } as unknown as NonNullable<ConstructorParameters<typeof ApolloClient>[0]['defaultOptions']>,
+  // The double cast is required because ApolloClient's constructor type expects
+  // defaultOptions to be a specific shape, but our partial options object satisfies
+  // the runtime contract without matching the exact generic instantiation.
 });

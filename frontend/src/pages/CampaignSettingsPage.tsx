@@ -239,14 +239,14 @@ export const CampaignSettingsPage: React.FC = () => {
   // Update campaign mutation
   const [updateCampaign, { loading: updating }] = useMutation(UPDATE_CAMPAIGN, {
     onCompleted: () => {
-      refetch();
+      refetch().catch(() => {});
     },
   });
 
   // Delete campaign mutation
   const [deleteCampaign] = useMutation(DELETE_CAMPAIGN, {
     onCompleted: () => {
-      navigate(`/scouts/${toUrlId(profileId)}/campaigns`);
+      void navigate(`/scouts/${toUrlId(profileId)}/campaigns`);
     },
   });
 
@@ -259,7 +259,7 @@ export const CampaignSettingsPage: React.FC = () => {
     const action = getSaveAction(hasUnitRelatedChanges);
     const actions: Record<SaveAction, () => void> = {
       confirm: () => setUnitChangeConfirmOpen(true),
-      save: handleSaveChanges,
+      save: () => { void handleSaveChanges(); },
     };
     actions[action]();
   };
@@ -310,7 +310,7 @@ export const CampaignSettingsPage: React.FC = () => {
       )}
       <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 3 }}>
         <Typography variant="h5">Campaign Settings</Typography>
-        <Button variant="text" color="primary" onClick={() => navigate(`/scouts/${toUrlId(profileId)}/manage`)}>
+        <Button variant="text" color="primary" onClick={() => { void navigate(`/scouts/${toUrlId(profileId)}/manage`); }}>
           Manage Scout
         </Button>
       </Stack>

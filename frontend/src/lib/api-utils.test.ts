@@ -16,6 +16,7 @@ import {
   isValidationError,
   formatDate,
   formatCurrency,
+  formatPhoneNumber,
   parseNumber,
   parseInt,
 } from './api-utils';
@@ -445,6 +446,25 @@ describe('formatCurrency', () => {
 
   it('should format negative numbers', () => {
     expect(formatCurrency(-50.5)).toBe('-$50.50');
+  });
+});
+
+describe('formatPhoneNumber', () => {
+  it('should format a 10-digit US number', () => {
+    expect(formatPhoneNumber('5551234567')).toBe('(555) 123-4567');
+  });
+
+  it('should format an 11-digit US number starting with 1', () => {
+    expect(formatPhoneNumber('15551234567')).toBe('(555) 123-4567');
+  });
+
+  it('should leave unrecognized numbers unchanged', () => {
+    expect(formatPhoneNumber('12345')).toBe('12345');
+  });
+
+  it('should return em-dash for empty/undefined input', () => {
+    expect(formatPhoneNumber('')).toBe('—');
+    expect(formatPhoneNumber(undefined)).toBe('—');
   });
 });
 

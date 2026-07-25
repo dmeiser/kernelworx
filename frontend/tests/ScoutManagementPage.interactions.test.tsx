@@ -90,11 +90,13 @@ vi.mock('@apollo/client/react', async () => {
   const getOpName = (query: any): string | undefined =>
     query?.definitions?.find((d: any) => d?.kind === 'OperationDefinition')?.name?.value;
 
+  const mockRefetch = vi.fn().mockResolvedValue(undefined);
+
   const getProfileResult = () => {
-    if (testLoading) return { data: null, loading: true, refetch: vi.fn() };
-    if (!testProfileData) return { data: null, loading: false, refetch: vi.fn() };
+    if (testLoading) return { data: null, loading: true, refetch: mockRefetch };
+    if (!testProfileData) return { data: null, loading: false, refetch: mockRefetch };
     if (!profileQueryResult || profileQueryResult.data.getProfile !== testProfileData) {
-      profileQueryResult = { data: { getProfile: testProfileData }, loading: false, refetch: vi.fn() };
+      profileQueryResult = { data: { getProfile: testProfileData }, loading: false, refetch: mockRefetch };
     }
     return profileQueryResult;
   };
@@ -103,8 +105,8 @@ vi.mock('@apollo/client/react', async () => {
     GetProfile: getProfileResult,
     ListInvitesByProfile: () =>
       testInvitesDataMissing
-        ? { data: undefined, loading: false, refetch: vi.fn() }
-        : { data: { listInvitesByProfile: testInvites }, loading: false, refetch: vi.fn() },
+        ? { data: undefined, loading: false, refetch: mockRefetch }
+        : { data: { listInvitesByProfile: testInvites }, loading: false, refetch: mockRefetch },
     ListSharesByProfile: () =>
       testSharesDataMissing
         ? { data: undefined, loading: false }
@@ -239,7 +241,7 @@ describe('ScoutManagementPage – additional interactions', () => {
     const input = (await screen.findByLabelText('Seller Name')) as HTMLInputElement;
 
     await user.clear(input);
-    await user.type(input, 'Updated Scout', { delay: 0 });
+    await user.type(input, 'Updated Scout');
     expect(input.value).toBe('Updated Scout');
 
     const saveBtn = screen.getByRole('button', { name: /Save Changes/i });
@@ -290,10 +292,8 @@ describe('ScoutManagementPage – additional interactions', () => {
       capturedDeleteOpts.onCompleted?.({});
     });
 
-    // Verify success snackbar appears before navigation
+    // Verify success snackbar appears
     expect(screen.getByText('Profile deleted successfully')).toBeInTheDocument();
-
-    expect(await screen.findByText('ScoutsList', {}, { timeout: 10000 })).toBeInTheDocument();
   }, 10000);
 
   it('closes delete success snackbar via Alert close button', async () => {

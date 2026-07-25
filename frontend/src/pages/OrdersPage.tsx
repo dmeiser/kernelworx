@@ -36,6 +36,7 @@ import { LoadingState } from '../components/LoadingState';
 import { ErrorAlert } from '../components/ErrorAlert';
 import { LIST_ORDERS_BY_CAMPAIGN, DELETE_ORDER, GET_PROFILE } from '../lib/graphql';
 import { ensureProfileId, ensureCampaignId, ensureOrderId, toUrlId } from '../lib/ids';
+import { formatCurrency, formatPhoneNumber } from '../lib/api-utils';
 import type { SellerProfile, Order, OrderLineItem } from '../types';
 
 // Use SellerProfile with only the fields we need for permission checking
@@ -43,30 +44,12 @@ type ProfilePermissions = Pick<SellerProfile, 'profileId' | 'isOwner' | 'permiss
 
 // --- Helper Functions (extracted outside component) ---
 
-const formatCurrency = (amount: number): string => {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-  }).format(amount);
-};
-
 const formatDate = (dateString: string): string => {
   return new Date(dateString).toLocaleDateString('en-US', {
     year: 'numeric',
     month: 'short',
     day: 'numeric',
   });
-};
-
-const formatPhoneNumber = (phone: string): string => {
-  const digits = phone.replace(/\D/g, '');
-  if (digits.length === 11 && digits.startsWith('1')) {
-    const areaCode = digits.slice(1, 4);
-    const prefix = digits.slice(4, 7);
-    const lineNumber = digits.slice(7, 11);
-    return `(${areaCode}) ${prefix}-${lineNumber}`;
-  }
-  return phone;
 };
 
 const getPaymentMethodColor = (method: string): 'default' | 'primary' | 'secondary' | 'success' | 'warning' => {
@@ -276,7 +259,7 @@ const useOrdersData = ({ profileId, campaignId }: UseOrdersDataParams) => {
 
   const [deleteOrder] = useMutation(DELETE_ORDER, {
     onCompleted: () => {
-      refetchOrders();
+      void refetchOrders();
     },
   });
 
@@ -353,11 +336,11 @@ export const OrdersPage: React.FC = () => {
   const hasWritePermission = checkWritePermission(profile);
 
   const handleCreateOrder = () => {
-    navigate(`/scouts/${toUrlId(profileId)}/campaigns/${toUrlId(campaignId)}/orders/new`);
+    void navigate(`/scouts/${toUrlId(profileId)}/campaigns/${toUrlId(campaignId)}/orders/new`);
   };
 
   const handleEditOrder = (orderId: string) => {
-    navigate(`/scouts/${toUrlId(profileId)}/campaigns/${toUrlId(campaignId)}/orders/${toUrlId(orderId)}/edit`);
+    void navigate(`/scouts/${toUrlId(profileId)}/campaigns/${toUrlId(campaignId)}/orders/${toUrlId(orderId)}/edit`);
   };
 
   const handleDeleteOrder = async (orderId: string) => {
@@ -387,7 +370,7 @@ export const OrdersPage: React.FC = () => {
       campaignId={campaignId}
       onCreateOrder={handleCreateOrder}
       onEditOrder={handleEditOrder}
-      onDeleteOrder={handleDeleteOrder}
+      onDeleteOrder={(orderId) => { void handleDeleteOrder(orderId); }}
     />
   );
 };

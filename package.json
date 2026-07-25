@@ -3,12 +3,14 @@
     "node": ">=24.0.0"
   },
   "scripts": {
-    "spellcheck": "npm --prefix frontend run spellcheck"
+    "spellcheck": "npm --prefix frontend run spellcheck",
+    "test:guards": "vitest --run && cd tofu/application/appsync/js-resolvers && node --import ./register-loader.mjs --test"
   },
   "devDependencies": {
     "@aws-sdk/client-appsync": "^3.955.0",
     "@aws-sdk/client-cloudformation": "^3.955.0",
-    "jsdom": "^27.3.0"
+    "jsdom": "^27.3.0",
+    "vitest": "^4.0.15"
   },
   "dependencies": {
     "@playwright/mcp": "^0.0.54"

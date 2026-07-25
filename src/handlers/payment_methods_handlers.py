@@ -5,6 +5,7 @@ These handlers provide S3 pre-signed URL generation for QR code uploads
 and confirmations. They integrate with AppSync pipeline resolvers.
 """
 
+import copy
 import os
 from typing import Any, Dict
 
@@ -17,6 +18,7 @@ try:  # pragma: no cover
     from utils.errors import AppError, ErrorCode
     from utils.logging import get_logger
     from utils.payment_methods import (
+        _save_preferences,
         delete_qr_by_key,
         delete_qr_from_s3,
         generate_qr_code_s3_key,
@@ -29,6 +31,7 @@ except ModuleNotFoundError:  # pragma: no cover
     from ..utils.errors import AppError, ErrorCode
     from ..utils.logging import get_logger
     from ..utils.payment_methods import (
+        _save_preferences,
         delete_qr_by_key,
         delete_qr_from_s3,
         generate_qr_code_s3_key,
@@ -152,7 +155,8 @@ def _update_payment_method_qr_url(caller_id: str, payment_method_name: str, s3_k
     if "Item" not in response:
         raise AppError(ErrorCode.NOT_FOUND, f"Payment method '{payment_method_name}' not found")
 
-    existing_methods = response["Item"].get("preferences", {}).get("paymentMethods", [])
+    preferences = copy.deepcopy(response["Item"].get("preferences", {}))
+    existing_methods = list(preferences.get("paymentMethods", []))
 
     method_updated = None
     for method in existing_methods:
@@ -164,13 +168,8 @@ def _update_payment_method_qr_url(caller_id: str, payment_method_name: str, s3_k
     if not method_updated:
         raise AppError(ErrorCode.NOT_FOUND, f"Payment method '{payment_method_name}' not found")
 
-    preferences = response.get("Item", {}).get("preferences", {})
     preferences["paymentMethods"] = existing_methods
-    tables.accounts.update_item(
-        Key={"accountId": account_id_key},
-        UpdateExpression="SET preferences = :prefs",
-        ExpressionAttributeValues={":prefs": preferences},
-    )
+    _save_preferences(account_id_key, response, preferences)
 
     return dict(method_updated)
 
@@ -251,8 +250,8 @@ def _clear_qr_url_in_payment_method(caller_id: str, payment_method_name: str) ->
     if "Item" not in response:
         raise AppError(ErrorCode.NOT_FOUND, f"Payment method '{payment_method_name}' not found")
 
-    preferences = response["Item"].get("preferences", {})
-    existing_methods = preferences.get("paymentMethods", [])
+    preferences = copy.deepcopy(response["Item"].get("preferences", {}))
+    existing_methods = list(preferences.get("paymentMethods", []))
     updated_methods = []
     for m in existing_methods:
         method_copy = dict(m)
@@ -261,11 +260,7 @@ def _clear_qr_url_in_payment_method(caller_id: str, payment_method_name: str) ->
         updated_methods.append(method_copy)
 
     preferences["paymentMethods"] = updated_methods
-    tables.accounts.update_item(
-        Key={"accountId": account_id_key},
-        UpdateExpression="SET preferences = :prefs",
-        ExpressionAttributeValues={":prefs": preferences},
-    )
+    _save_preferences(account_id_key, response, preferences)
 
 
 def delete_qr_code(event: Dict[str, Any], context: Any) -> bool:

@@ -79,7 +79,7 @@ export const EditProfileDialog: React.FC<EditProfileDialogProps> = ({
             onChange={(e) => form.setValue('sellerName', e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && form.values.sellerName.trim() && form.isDirty) {
-                handleSubmit();
+                void handleSubmit();
               }
             }}
             disabled={loading}
@@ -91,7 +91,7 @@ export const EditProfileDialog: React.FC<EditProfileDialogProps> = ({
           Cancel
         </Button>
         <Button
-          onClick={handleSubmit}
+          onClick={() => { void handleSubmit(); }}
           variant="contained"
           disabled={!form.values.sellerName.trim() || !form.isDirty || loading}
         >

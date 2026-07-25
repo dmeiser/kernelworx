@@ -371,7 +371,7 @@ export const SharedCampaignsPage: React.FC = () => {
   /* v8 ignore start -- mutation onCompleted callbacks require complex Apollo mocking with refetch */
   const [updateSharedCampaign] = useMutation(UPDATE_SHARED_CAMPAIGN, {
     onCompleted: () => {
-      refetch();
+      refetch().catch(() => {});
       setEditingSharedCampaign(null);
       showSnackbar('Shared Campaign updated successfully');
     },
@@ -381,7 +381,7 @@ export const SharedCampaignsPage: React.FC = () => {
   // Delete mutation (soft delete / deactivate)
   const [deleteSharedCampaign] = useMutation(DELETE_SHARED_CAMPAIGN, {
     onCompleted: () => {
-      refetch();
+      refetch().catch(() => {});
       setDeactivateDialogOpen(false);
       setSharedCampaignToDeactivate(null);
       showSnackbar('Shared Campaign deactivated');
@@ -391,7 +391,7 @@ export const SharedCampaignsPage: React.FC = () => {
   const sharedCampaigns = getSharedCampaigns(data);
   const activeSharedCampaignCount = countActiveSharedCampaigns(sharedCampaigns);
   const canCreateMore = canCreateMoreSharedCampaigns(activeSharedCampaignCount);
-  const handleCreateClick = () => navigate('/shared-campaigns/create');
+  const handleCreateClick = () => { void navigate('/shared-campaigns/create'); };
 
   const getShortLink = (sharedCampaignCode: string) => {
     return `${BASE_URL}/c/${sharedCampaignCode}`;
@@ -508,11 +508,11 @@ export const SharedCampaignsPage: React.FC = () => {
 
       <CampaignsList
         campaigns={sharedCampaigns}
-        onCreateClick={handleCreateClick}
-        onCopyLink={handleCopyLink}
-        onShowQR={handleShowQRCode}
-        onEdit={handleEdit}
-        onDeactivate={handleDeactivate}
+        onCreateClick={() => { void handleCreateClick(); }}
+        onCopyLink={(code) => { void handleCopyLink(code); }}
+        onShowQR={(campaign) => { void handleShowQRCode(campaign); }}
+        onEdit={(campaign) => { void handleEdit(campaign); }}
+        onDeactivate={(campaign) => { void handleDeactivate(campaign); }}
       />
 
       {/* Edit Dialog */}

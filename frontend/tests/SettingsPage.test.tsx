@@ -61,7 +61,7 @@ describe('SettingsPage', () => {
 
   test('renders page title and quick actions', async () => {
     render(
-      <MockedProvider mocks={[standardAccountMock]} addTypename={false}>
+      <MockedProvider mocks={[standardAccountMock]}>
         <BrowserRouter>
           <SettingsPage />
         </BrowserRouter>
@@ -76,7 +76,7 @@ describe('SettingsPage', () => {
 
   test('shows Admin Console button for admin users', async () => {
     render(
-      <MockedProvider mocks={[adminAccountMock]} addTypename={false}>
+      <MockedProvider mocks={[adminAccountMock]}>
         <BrowserRouter>
           <SettingsPage />
         </BrowserRouter>
@@ -90,7 +90,7 @@ describe('SettingsPage', () => {
 
   test('hides Admin Console button for non-admin users', async () => {
     render(
-      <MockedProvider mocks={[standardAccountMock]} addTypename={false}>
+      <MockedProvider mocks={[standardAccountMock]}>
         <BrowserRouter>
           <SettingsPage />
         </BrowserRouter>
@@ -107,7 +107,7 @@ describe('SettingsPage', () => {
   test('navigates to user settings when button clicked', async () => {
     const user = userEvent.setup();
     render(
-      <MockedProvider mocks={[standardAccountMock]} addTypename={false}>
+      <MockedProvider mocks={[standardAccountMock]}>
         <BrowserRouter>
           <SettingsPage />
         </BrowserRouter>
@@ -121,7 +121,7 @@ describe('SettingsPage', () => {
   test('navigates to scouts page when Manage My Scouts clicked', async () => {
     const user = userEvent.setup();
     render(
-      <MockedProvider mocks={[standardAccountMock]} addTypename={false}>
+      <MockedProvider mocks={[standardAccountMock]}>
         <BrowserRouter>
           <SettingsPage />
         </BrowserRouter>
@@ -135,7 +135,7 @@ describe('SettingsPage', () => {
   test('navigates to admin page when Admin Console clicked', async () => {
     const user = userEvent.setup();
     render(
-      <MockedProvider mocks={[adminAccountMock]} addTypename={false}>
+      <MockedProvider mocks={[adminAccountMock]}>
         <BrowserRouter>
           <SettingsPage />
         </BrowserRouter>
@@ -150,7 +150,7 @@ describe('SettingsPage', () => {
   test('navigates to payment methods page when Payment Methods clicked', async () => {
     const user = userEvent.setup();
     render(
-      <MockedProvider mocks={[standardAccountMock]} addTypename={false}>
+      <MockedProvider mocks={[standardAccountMock]}>
         <BrowserRouter>
           <SettingsPage />
         </BrowserRouter>
@@ -163,7 +163,7 @@ describe('SettingsPage', () => {
 
   test('displays Data & Privacy section', () => {
     render(
-      <MockedProvider mocks={[standardAccountMock]} addTypename={false}>
+      <MockedProvider mocks={[standardAccountMock]}>
         <BrowserRouter>
           <SettingsPage />
         </BrowserRouter>
@@ -176,7 +176,7 @@ describe('SettingsPage', () => {
 
   test('displays About section with version info', () => {
     render(
-      <MockedProvider mocks={[standardAccountMock]} addTypename={false}>
+      <MockedProvider mocks={[standardAccountMock]}>
         <BrowserRouter>
           <SettingsPage />
         </BrowserRouter>
@@ -188,7 +188,7 @@ describe('SettingsPage', () => {
 
   test('displays Support KernelWorx section with GitHub Sponsors link', () => {
     render(
-      <MockedProvider mocks={[standardAccountMock]} addTypename={false}>
+      <MockedProvider mocks={[standardAccountMock]}>
         <BrowserRouter>
           <SettingsPage />
         </BrowserRouter>
@@ -205,7 +205,7 @@ describe('SettingsPage', () => {
   test('calls logout and navigates home when Sign Out clicked', async () => {
     const user = userEvent.setup();
     render(
-      <MockedProvider mocks={[standardAccountMock]} addTypename={false}>
+      <MockedProvider mocks={[standardAccountMock]}>
         <BrowserRouter>
           <SettingsPage />
         </BrowserRouter>

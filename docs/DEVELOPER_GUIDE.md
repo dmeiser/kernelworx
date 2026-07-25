@@ -10,9 +10,6 @@ Audience: contributors working on KernelWorx. Focuses on day-to-day commands, qu
   uv run pytest tests/unit --cov=src --cov-fail-under=100
   ```
 
-#### Infrastructure/CDK (Python)
-- No unit tests maintained; CDK coverage is intentionally excluded. Optional synth/snapshot checks are allowed locally but are not required.
-
 #### Frontend (TypeScript)
 - Unit/component tests with coverage:
   ```bash
@@ -24,7 +21,7 @@ Audience: contributors working on KernelWorx. Focuses on day-to-day commands, qu
 End-to-end tests run against the **deployed dev environment** (`https://dev.kernelworx.app`) using Playwright for Python (Chromium). See [`tests/e2e/README.md`](../tests/e2e/README.md) for full setup instructions.
 
 **Prerequisites** (one-time):
-1. Dev environment deployed (`tofu apply` from `tofu/environments/dev/`)
+1. Dev environment deployed (`./tofu/application/scripts/deploy.sh dev apply` from the repo root)
 2. Test users created: `bash scripts/create-test-users.sh`
 3. At least one admin-managed catalog exists in the dev app
 4. `.env` populated with e2e credentials and DynamoDB table names (see `.env.example`)
@@ -45,20 +42,19 @@ uv run pytest tests/e2e/test_smoke_auth.py -v
 
 ### Code Quality
 - **Python (app)**: `uv run ruff check src tests` • `uv run ruff check --select I --fix src/ tests/` • `uv run ruff format src/ tests/` • `uv run mypy src`
-- **Python (cdk)**: `cd cdk && uv run ruff check cdk tests` • `uv run mypy cdk`
-- **Frontend**: `npm run lint` • `npm run format` • `npm run typecheck`
-- Coverage bars: app code is 100% (src, frontend); CDK infra is excluded from coverage enforcement.
+- **Frontend**: `cd frontend && npm run lint` • `cd frontend && npm run format` • `cd frontend && npm run typecheck`
+- Coverage bars: app code is 100% (src, frontend).
 
 ### Deployment
 - **Backend/OpenTofu (dev only)**:
-  - From `tofu/environments/dev/`: `tofu apply`
-  - Preview first when making infra changes: `tofu plan` (respect dev-only deployment rule).
+  - From the repo root: `./tofu/application/scripts/deploy.sh dev apply`
+  - Preview first when making infra changes: `./tofu/application/scripts/deploy.sh dev plan` (respect dev-only deployment rule).
 - **Frontend**:
   - From `frontend/`: `./deploy.sh` (ensure build succeeds locally with `npm run build`).
 
 ### Notes & Conventions
 - Always use feature branches and PRs; never push directly to main.
-- When running coverage, exclude CDK by scoping `--cov` to application packages (e.g., `--cov=src`).
+- Scope `--cov` to application packages (e.g., `--cov=src`).
 - Prefer moto for AWS mocks in backend unit tests; LocalStack or AWS dev account for integration as needed.
 
 ---
@@ -94,30 +90,32 @@ All validation functions raise `AppError` with `ErrorCode.INVALID_INPUT` on fail
 
 #### DynamoDB Utilities (`src/utils/dynamodb.py`)
 
-Use the centralized DynamoDB utilities for consistent table access:
+Use the centralized `tables` singleton for table access:
 
 ```python
-from utils.dynamodb import get_table, get_table_name
+from utils.dynamodb import tables
 
-# Get a boto3 Table resource
-table = get_table()
-
-# Get just the table name
-table_name = get_table_name()
+# Access a table by name
+accounts = tables.accounts
+profiles = tables.profiles
 ```
+
+Each table property returns a boto3 `Table` resource. Table names are read from the
+`ACCOUNTS_TABLE_NAME`, `PROFILES_TABLE_NAME`, etc. environment variables. For tests,
+use `override_table()` to inject mock tables.
 
 #### ID Generation (`src/utils/ids.py`)
 
-Use centralized ID generation for consistent formatting:
+Use centralized ID normalization helpers for consistent prefixed IDs:
 
 ```python
-from utils.ids import normalize_id, generate_unique_id
+from utils.ids import ensure_prefix, strip_prefix
 
-# Normalize user-provided IDs
-profile_id = normalize_id(user_input)
+# Ensure an ID has the correct prefix
+profile_id = ensure_prefix("PROFILE", user_input)
 
-# Generate new unique IDs
-new_id = generate_unique_id()
+# Remove the prefix to get the raw UUID
+raw_id = strip_prefix(profile_id)
 ```
 
 #### Error Handling (`src/utils/errors.py`)
@@ -191,21 +189,13 @@ import type { SellerProfile, Campaign, Order, Catalog } from '../types';
 
 ### OpenTofu Infrastructure Patterns
 
-#### Helper Utilities (`tofu/modules/*/`)
+#### Helper Utilities (`tofu/application/modules/*/`)
 
-Use centralized modules for resource configuration:
+Use centralized modules for resource configuration. The application defines eight
+separate DynamoDB tables (not a single-table design); see
+`tofu/application/modules/dynamodb/main.tf` for the current schema and indexes.
 
-```hcl
-# Example from tofu/modules/dynamodb/main.tf
-resource "aws_dynamodb_table" "main" {
-  name         = "${var.name_prefix}-app-${var.region_abbrev}-${var.environment}"
-  billing_mode = "PAY_PER_REQUEST"
-  hash_key     = "PK"
-  range_key    = "SK"
-}
-```
-
-#### AppSync Resolvers (`tofu/modules/appsync/`)
+#### AppSync Resolvers (`tofu/application/modules/appsync/`)
 
 AppSync resolvers are defined in OpenTofu using `aws_appsync_resolver` and `aws_appsync_function` resources:
 

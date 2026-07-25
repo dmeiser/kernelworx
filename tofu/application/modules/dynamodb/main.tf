@@ -60,8 +60,12 @@ resource "aws_dynamodb_table" "accounts" {
 
   global_secondary_index {
     name            = "email-index"
-    hash_key        = "email"
     projection_type = "ALL"
+
+    key_schema {
+      attribute_name = "email"
+      key_type       = "HASH"
+    }
   }
 
   point_in_time_recovery {
@@ -113,15 +117,27 @@ resource "aws_dynamodb_table" "catalogs" {
 
   global_secondary_index {
     name            = "ownerAccountId-index"
-    hash_key        = "ownerAccountId"
     projection_type = "ALL"
+
+    key_schema {
+      attribute_name = "ownerAccountId"
+      key_type       = "HASH"
+    }
   }
 
   global_secondary_index {
     name            = "isPublic-createdAt-index"
-    hash_key        = "isPublicStr"
-    range_key       = "createdAt"
     projection_type = "ALL"
+
+    key_schema {
+      attribute_name = "isPublicStr"
+      key_type       = "HASH"
+    }
+
+    key_schema {
+      attribute_name = "createdAt"
+      key_type       = "RANGE"
+    }
   }
 
   point_in_time_recovery {
@@ -161,10 +177,39 @@ resource "aws_dynamodb_table" "profiles" {
     type = "S"
   }
 
+  attribute {
+    name = "unitType"
+    type = "S"
+  }
+
+  attribute {
+    name = "unitNumber"
+    type = "N"
+  }
+
   global_secondary_index {
     name            = "profileId-index"
-    hash_key        = "profileId"
     projection_type = "ALL"
+
+    key_schema {
+      attribute_name = "profileId"
+      key_type       = "HASH"
+    }
+  }
+
+  global_secondary_index {
+    name            = "unitType-unitNumber-index"
+    projection_type = "ALL"
+
+    key_schema {
+      attribute_name = "unitType"
+      key_type       = "HASH"
+    }
+
+    key_schema {
+      attribute_name = "unitNumber"
+      key_type       = "RANGE"
+    }
   }
 
   point_in_time_recovery {
@@ -221,27 +266,47 @@ resource "aws_dynamodb_table" "campaigns" {
 
   global_secondary_index {
     name            = "campaignId-index"
-    hash_key        = "campaignId"
     projection_type = "ALL"
+
+    key_schema {
+      attribute_name = "campaignId"
+      key_type       = "HASH"
+    }
   }
 
   global_secondary_index {
     name            = "catalogId-index"
-    hash_key        = "catalogId"
     projection_type = "ALL"
+
+    key_schema {
+      attribute_name = "catalogId"
+      key_type       = "HASH"
+    }
   }
 
   global_secondary_index {
     name            = "unitCampaignKey-index"
-    hash_key        = "unitCampaignKey"
     projection_type = "ALL"
+
+    key_schema {
+      attribute_name = "unitCampaignKey"
+      key_type       = "HASH"
+    }
   }
 
   global_secondary_index {
     name            = "profileId-createdAt-index"
-    hash_key        = "profileId"
-    range_key       = "createdAt"
     projection_type = "ALL"
+
+    key_schema {
+      attribute_name = "profileId"
+      key_type       = "HASH"
+    }
+
+    key_schema {
+      attribute_name = "createdAt"
+      key_type       = "RANGE"
+    }
   }
 
   point_in_time_recovery {
@@ -293,15 +358,27 @@ resource "aws_dynamodb_table" "orders" {
 
   global_secondary_index {
     name            = "orderId-index"
-    hash_key        = "orderId"
     projection_type = "ALL"
+
+    key_schema {
+      attribute_name = "orderId"
+      key_type       = "HASH"
+    }
   }
 
   global_secondary_index {
     name            = "profileId-index"
-    hash_key        = "profileId"
-    range_key       = "createdAt"
     projection_type = "ALL"
+
+    key_schema {
+      attribute_name = "profileId"
+      key_type       = "HASH"
+    }
+
+    key_schema {
+      attribute_name = "createdAt"
+      key_type       = "RANGE"
+    }
   }
 
   point_in_time_recovery {
@@ -343,8 +420,12 @@ resource "aws_dynamodb_table" "shares" {
 
   global_secondary_index {
     name            = "targetAccountId-index"
-    hash_key        = "targetAccountId"
     projection_type = "ALL"
+
+    key_schema {
+      attribute_name = "targetAccountId"
+      key_type       = "HASH"
+    }
   }
 
   point_in_time_recovery {
@@ -386,8 +467,12 @@ resource "aws_dynamodb_table" "invites" {
 
   global_secondary_index {
     name            = "profileId-index"
-    hash_key        = "profileId"
     projection_type = "ALL"
+
+    key_schema {
+      attribute_name = "profileId"
+      key_type       = "HASH"
+    }
   }
 
   ttl {
@@ -444,15 +529,27 @@ resource "aws_dynamodb_table" "shared_campaigns" {
 
   global_secondary_index {
     name            = "GSI1"
-    hash_key        = "createdBy"
-    range_key       = "createdAt"
     projection_type = "ALL"
+
+    key_schema {
+      attribute_name = "createdBy"
+      key_type       = "HASH"
+    }
+
+    key_schema {
+      attribute_name = "createdAt"
+      key_type       = "RANGE"
+    }
   }
 
   global_secondary_index {
     name            = "GSI2"
-    hash_key        = "unitCampaignKey"
     projection_type = "ALL"
+
+    key_schema {
+      attribute_name = "unitCampaignKey"
+      key_type       = "HASH"
+    }
   }
 
   point_in_time_recovery {

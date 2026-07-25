@@ -104,7 +104,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = (props) => {
           Cancel
         </Button>
         <ConfirmButton
-          onClick={handleConfirm}
+          onClick={() => { void handleConfirm(); }}
           label={confirmLabel}
           color={confirmColor}
           isLoading={combinedLoading}

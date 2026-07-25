@@ -2,6 +2,8 @@
 
 from typing import TYPE_CHECKING, Any, Dict, List
 
+from botocore.exceptions import ClientError
+
 if TYPE_CHECKING:  # pragma: no cover
     from mypy_boto3_dynamodb.service_resource import Table
 
@@ -55,11 +57,17 @@ def _query_all_items(
 
 
 def _batch_delete_keys(table: "Table", keys: List[Dict[str, Any]], primary_keys: List[str]) -> int:
-    """Delete a list of keys in batches of 25, returning the number deleted."""
+    """Delete a list of keys in batches of 25, returning the number deleted.
+
+    Raises:
+        AppError: If any batch cannot be deleted.
+    """
     if not keys:
         return 0
 
+    table_name = table.name
     deleted_count = 0
+
     for i in range(0, len(keys), BATCH_SIZE):
         batch = keys[i : i + BATCH_SIZE]
         try:
@@ -67,9 +75,19 @@ def _batch_delete_keys(table: "Table", keys: List[Dict[str, Any]], primary_keys:
                 for key in batch:
                     batch_writer.delete_item(Key=key)
             deleted_count += len(batch)
-            logger.info(f"Deleted batch of {len(batch)} items from {table.name}")
+            logger.info(f"Deleted batch of {len(batch)} items from {table_name}")
+        except ClientError as e:
+            logger.error(f"Error deleting batch from {table_name}: {str(e)}")
+            raise AppError(
+                ErrorCode.INTERNAL_ERROR,
+                f"Failed to delete batch from {table_name}",
+            ) from e
         except Exception as e:
-            logger.error(f"Error deleting batch from {table.name}: {str(e)}")
+            logger.error(f"Unexpected error deleting batch from {table_name}: {str(e)}")
+            raise AppError(
+                ErrorCode.INTERNAL_ERROR,
+                f"Failed to delete batch from {table_name}",
+            ) from e
 
     return deleted_count
 

@@ -23,9 +23,8 @@ export const SettingsPage: React.FC = () => {
   const { data: accountData } = useQuery<{ getMyAccount: Account }>(GET_MY_ACCOUNT);
   const account = accountData?.getMyAccount;
 
-  const handleLogout = async () => {
-    await logout();
-    navigate('/');
+  const handleLogout = () => {
+    void logout().then(() => navigate('/')).catch(() => {});
   };
 
   return (
@@ -40,7 +39,7 @@ export const SettingsPage: React.FC = () => {
         <Stack spacing={2}>
           <Button
             variant="outlined"
-            onClick={() => navigate('/account/settings')}
+            onClick={() => { void navigate('/account/settings'); }}
             fullWidth
             sx={{ justifyContent: 'flex-start' }}
           >
@@ -48,7 +47,7 @@ export const SettingsPage: React.FC = () => {
           </Button>
           <Button
             variant="outlined"
-            onClick={() => navigate('/scouts')}
+            onClick={() => { void navigate('/scouts'); }}
             fullWidth
             sx={{ justifyContent: 'flex-start' }}
           >
@@ -56,7 +55,7 @@ export const SettingsPage: React.FC = () => {
           </Button>
           <Button
             variant="outlined"
-            onClick={() => navigate('/payment-methods')}
+            onClick={() => { void navigate('/payment-methods'); }}
             fullWidth
             sx={{ justifyContent: 'flex-start' }}
           >
@@ -66,7 +65,7 @@ export const SettingsPage: React.FC = () => {
             <Button
               variant="outlined"
               color="error"
-              onClick={() => navigate('/admin')}
+              onClick={() => { void navigate('/admin'); }}
               fullWidth
               sx={{ justifyContent: 'flex-start' }}
             >

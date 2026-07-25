@@ -6,4 +6,3 @@ export { useMfa } from './useMfa';
 export { usePasskeys } from './usePasskeys';
 export { useEmailUpdate } from './useEmailUpdate';
 export { useProfileEdit } from './useProfileEdit';
-export { useQRUpload } from './useQRUpload';

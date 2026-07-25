@@ -6,9 +6,10 @@ Implements:
 """
 
 import os
+import uuid
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
-from typing import TYPE_CHECKING, Any, Dict
+from typing import TYPE_CHECKING, Any, Dict, List, cast
 
 import boto3
 
@@ -22,12 +23,14 @@ try:  # pragma: no cover
     from utils.errors import AppError, ErrorCode
     from utils.ids import ensure_campaign_id
     from utils.logging import get_logger
+    from utils.pagination import query_all_items
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.auth import check_profile_access
     from ..utils.dynamodb import get_required_env, tables
     from ..utils.errors import AppError, ErrorCode
     from ..utils.ids import ensure_campaign_id
     from ..utils.logging import get_logger
+    from ..utils.pagination import query_all_items
 
 
 # Module-level proxy that tests can monkeypatch
@@ -107,7 +110,7 @@ def request_campaign_report(event: Dict[str, Any], context: Any) -> Dict[str, An
         report_content, content_type, file_extension = _generate_report_content(campaign, orders, report_format)
 
         # Upload to S3
-        report_id = f"REPORT#{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
+        report_id = f"REPORT#{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}#{uuid.uuid4().hex[:8]}"
         exports_bucket = get_required_env("EXPORTS_BUCKET")
         s3_key = f"reports/{profile_id}/{campaign_id}/{report_id}.{file_extension}"
 
@@ -147,7 +150,7 @@ def request_campaign_report(event: Dict[str, Any], context: Any) -> Dict[str, An
         logger.error("AppError in request_campaign_report", error_code=e.error_code, error_message=e.message)
         raise
     except Exception as e:
-        logger.error("Unexpected error generating report", error=str(e))
+        logger.error("Unexpected error generating report", error=str(e), exc_info=True)
         raise AppError(ErrorCode.INTERNAL_ERROR, f"Failed to generate report: {e}") from e
 
 
@@ -171,15 +174,18 @@ def _get_campaign_orders(table: Any, campaign_id: str) -> list[Dict[str, Any]]:
     """Get all orders for a campaign (V2: Direct PK query since PK=campaignId)."""
     # V2 schema: Orders table has PK=campaignId, SK=orderId
     # No GSI needed - direct query on the partition key
-    response = table.query(
-        KeyConditionExpression="campaignId = :campaign_id",
-        ExpressionAttributeValues={
-            ":campaign_id": campaign_id,
-        },
+    return cast(
+        List[Dict[str, Any]],
+        query_all_items(
+            table,
+            {
+                "KeyConditionExpression": "campaignId = :campaign_id",
+                "ExpressionAttributeValues": {
+                    ":campaign_id": campaign_id,
+                },
+            },
+        ),
     )
-
-    items = response.get("Items", [])
-    return list(items) if items else []
 
 
 def _format_city_state_zip(address: Dict[str, Any]) -> str:
@@ -212,6 +218,17 @@ def _get_unique_products(orders: list[Dict[str, Any]]) -> list[str]:
     )
 
 
+def _sanitize_report_value(value: Any) -> Any:
+    """Neutralize CSV/XLSX formula injection by prefixing leading formula triggers with an apostrophe.
+
+    Spreadsheet applications treat cells starting with =, +, -, @, tab, or carriage return
+    as formulas. Prefixing with a single quote forces text treatment.
+    """
+    if isinstance(value, str) and value and value[0] in {"=", "+", "-", "@", "\t", "\r"}:
+        return f"'{value}"
+    return value
+
+
 def _get_product_quantities(order: Dict[str, Any]) -> dict[str, int]:
     """Get product quantities for an order, summing duplicates."""
     quantities: dict[str, int] = {}
@@ -231,18 +248,21 @@ def _generate_csv_report(campaign: Dict[str, Any], orders: list[Dict[str, Any]])
     writer = csv.writer(output)
 
     all_products = _get_unique_products(orders)
-    headers = ["Name", "Phone", "Address"] + all_products + ["Total"]
+    headers = [
+        _sanitize_report_value(h)
+        for h in (["Name", "Phone", "Address"] + all_products + ["Total"])
+    ]
     writer.writerow(headers)
 
     for order in orders:
         row = [
-            order.get("customerName", ""),
-            order.get("customerPhone", ""),
-            _format_address(order.get("customerAddress", {})),
+            _sanitize_report_value(order.get("customerName", "")),
+            _sanitize_report_value(order.get("customerPhone", "")),
+            _sanitize_report_value(_format_address(order.get("customerAddress", {}))),
         ]
         quantities = _get_product_quantities(order)
         for product in all_products:
-            row.append(quantities.get(product, ""))
+            row.append(_sanitize_report_value(quantities.get(product, "")))
         row.append(order.get("totalAmount", 0))
         writer.writerow(row)
 
@@ -256,7 +276,7 @@ def _write_excel_headers(ws: Any, headers: list[str]) -> None:
     header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
     header_font = Font(bold=True, color="FFFFFF")
     for col, header in enumerate(headers, start=1):
-        cell = ws.cell(row=1, column=col, value=header)
+        cell = ws.cell(row=1, column=col, value=_sanitize_report_value(header))
         cell.fill = header_fill
         cell.font = header_font
 
@@ -265,13 +285,13 @@ def _write_excel_order_row(
     ws: Any, row_idx: int, order: Dict[str, Any], all_products: list[str], headers: list[str]
 ) -> None:
     """Write a single order row to Excel worksheet."""
-    ws.cell(row=row_idx, column=1, value=order.get("customerName", ""))
-    ws.cell(row=row_idx, column=2, value=order.get("customerPhone", ""))
-    ws.cell(row=row_idx, column=3, value=_format_address(order.get("customerAddress", {})))
+    ws.cell(row=row_idx, column=1, value=_sanitize_report_value(order.get("customerName", "")))
+    ws.cell(row=row_idx, column=2, value=_sanitize_report_value(order.get("customerPhone", "")))
+    ws.cell(row=row_idx, column=3, value=_sanitize_report_value(_format_address(order.get("customerAddress", {}))))
 
     quantities = _get_product_quantities(order)
     for col_idx, product in enumerate(all_products, start=4):
-        ws.cell(row=row_idx, column=col_idx, value=quantities.get(product, ""))
+        ws.cell(row=row_idx, column=col_idx, value=_sanitize_report_value(quantities.get(product, "")))
     ws.cell(row=row_idx, column=len(headers), value=float(order.get("totalAmount", 0)))
 
 

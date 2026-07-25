@@ -20,10 +20,9 @@ This file contains repository-specific agent rules. Agents should follow these w
 - **Frontend**: React + TypeScript + Vite + MUI + Apollo Client + react-router
 - **Backend**: AWS AppSync (GraphQL) + Lambda (Python) + DynamoDB
 - **Infrastructure**: OpenTofu (Infrastructure as Code)
-- **Auth**: Amazon Cognito (User Pools with Google/Facebook social login)
+- **Auth**: Amazon Cognito (User Pools with Google social login and email/password)
 - **Storage**: Amazon S3 (static assets, report exports)
-- **Notifications**: Amazon SES/SNS (email)
-- **Audit**: Kinesis Firehose → S3
+- **Notifications**: No application email notifications; SNS is used only for CloudWatch alarm delivery
 - **Package Management**: uv for Python, npm for frontend
 - **License**: MIT (open source)
 - **Context**: Volunteer-run, cost-conscious, targeting Scouting America community
@@ -105,7 +104,7 @@ open htmlcov/index.html
 - **Global cleanup** (integration tests): The global teardown process (`globalTeardown.ts`) deletes all data created by test users EXCEPT their Account records and Cognito user profiles. This allows tests to reuse the same test user accounts across multiple test runs while cleaning up all generated data (campaigns, orders, shares, invites, catalogs, shared campaigns, seller profiles)
 
 **Mocking Strategy**:
-- Use `moto` for mocking AWS services (DynamoDB, S3, SNS/SES, EventBridge)
+- Use `moto` for mocking AWS services (DynamoDB, S3, EventBridge)
 - Use `pytest` fixtures for common test data
 - Mock external API calls (AppSync, Cognito)
 - Create comprehensive test fixtures for accounts, profiles, campaigns, orders
@@ -125,7 +124,7 @@ open htmlcov/index.html
 npm run test -- --coverage
 
 # Run tests in watch mode during development
-npm run test -- --watch
+npm run test:watch
 ```
 
 **Testing Strategy**:
@@ -164,7 +163,7 @@ Before claiming work is complete:
 
 **Unit Tests** (`tests/unit/`):
 - Fast, isolated tests with mocked AWS services
-- Mock DynamoDB, S3, SNS/SES, EventBridge using `moto`
+- Mock DynamoDB, S3, EventBridge using `moto`
 - Test all business logic paths (owner, shared READ/WRITE, admin)
 - Test all error handling and edge cases
 - Test all validation logic (customer input, invite expiration, etc.)
@@ -174,13 +173,12 @@ Before claiming work is complete:
 - Test against AWS dev account or LocalStack Pro (if approved)
 - Validate end-to-end flows (auth, GraphQL, Lambda, DynamoDB)
 - Test report generation and S3 uploads
-- Test email notifications
 
 ### Frontend Testing (React)
 
-**Unit/Component Tests** (`src/**/__tests__/`):
+**Unit/Component Tests** (`frontend/tests/`):
 - Test all pages (LoginPage, ProfilesPage, OrdersPage, etc.)
-- Test all form components (OrderEditorDialog, profile/campaign dialogs)
+- Test all form components (profile/campaign dialogs)
 - Test all list components (ProfileList, CampaignList, OrderList)
 - Test AuthProvider and authentication flows
 - Test Apollo Client error handling
@@ -208,48 +206,10 @@ Before claiming work is complete:
 
 ## Architecture Notes
 
-**GraphQL Schema**: Defined in `tofu/schema/schema.graphql`
-**DynamoDB Schema**: Single-table design with PK/SK + GSI1, GSI2, GSI3 (see code comments in `tofu/modules/dynamodb/`)
+**GraphQL Schema**: Defined in `tofu/application/schema/schema.graphql`
+**DynamoDB Schema**: Eight separate tables (accounts, catalogs, profiles, campaigns, orders, shares, invites, shared_campaigns) with named GSIs; see `tofu/application/modules/dynamodb/main.tf`
 **Authorization Model**: Owner-based + Share-based (READ/WRITE permissions)
 **Auth Flow**: Cognito User Pools → AppSync → Lambda/VTL/JS resolvers
-
-## Lambda Simplification Initiative
-
-**Status**: Phase 2 Complete - 53% reduction achieved (see `TODO_SIMPLIFY_LAMBDA.md`)
-
-The project initially had 15 Lambda functions. After Phase 1 and Phase 2 implementations, it now has 7 Lambda functions (53% reduction). The goal is to reduce to 2-3 functions (only those that truly require Lambda).
-
-### Resolver Types (Prefer in This Order)
-
-1. **VTL Resolvers** - Best for simple GetItem/PutItem/Query/DeleteItem
-2. **JavaScript Resolvers** - Best for computed fields, ID generation, simple logic
-3. **Pipeline Resolvers** - Best for multi-step operations (Query GSI → Update/Delete)
-4. **Lambda Resolvers** - Only for external dependencies (S3, Excel, email) or complex transactions
-
-### Lambda Functions to KEEP (2-3 total)
-
-| Function | Reason |
-|----------|--------|
-| `kernelworx-post-auth` | Cognito trigger (not AppSync) |
-| `kernelworx-request-report` | Requires openpyxl, S3 operations |
-| `kernelworx-create-profile` | DynamoDB transaction (optional - could be pipeline) |
-
-### Lambda Functions to REMOVE (10-12 total)
-
-Replace with VTL/JS/Pipeline resolvers. See `TODO_SIMPLIFY_LAMBDA.md` for detailed migration plan.
-
-**Quick Wins (VTL/JS)** - ✅ COMPLETED:
-- ✅ `list-orders-by-campaign` → VTL Query (DEPLOYED)
-- ✅ `revoke-share` → VTL DeleteItem (DEPLOYED)
-- ⏸️ `create-invite` → JS resolver (DEFERRED - kept as Lambda due to AppSync JS issues)
-
-**Pipeline Resolvers** - ✅ COMPLETED:
-- ✅ `update-campaign` → Query GSI7 → UpdateItem (DEPLOYED)
-- ✅ `update-order` → Query GSI6 → UpdateItem (DEPLOYED)
-- ✅ `delete-campaign` → Query GSI7 → DeleteItem (DEPLOYED)
-- ✅ `delete-order` → Query GSI6 → DeleteItem (DEPLOYED)
-- `delete-order` → Query GSI6 → DeleteItem
-- `create-order` → GetItem catalog → PutItem order (with JS for line item enrichment)
 
 ### AppSync Resolver Patterns
 
@@ -291,14 +251,25 @@ export function response(ctx) {
 
 **Pipeline Resolver Pattern** (use for GSI lookup → mutation):
 ```python
-# In CDK - create pipeline with two functions
-pipeline = api.create_resolver(
-    "UpdateCampaignPipeline",
-    type_name="Mutation",
-    field_name="updateCampaign",
-    pipeline_config=[lookup_function, update_function],
-    # request/response templates pass data between functions
-)
+# In OpenTofu - create a PIPELINE resolver with two functions
+resource "aws_appsync_resolver" "update_campaign" {
+  api_id = aws_appsync_graphql_api.main.id
+  type   = "Mutation"
+  field  = "updateCampaign"
+  kind   = "PIPELINE"
+
+  pipeline_config {
+    functions = [
+      aws_appsync_function.lookup.function_id,
+      aws_appsync_function.update.function_id,
+    ]
+  }
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+}
 ```
 
 ### Key Principle: Avoid Lambda When Possible
@@ -311,11 +282,8 @@ pipeline = api.create_resolver(
 
 ## Key Files
 
-- `TODO.md`: Track progress and current phase
-- `TODO_SIMPLIFY_LAMBDA.md`: Lambda reduction analysis and migration plan
 - `docs/DEVELOPER_GUIDE.md`: Development workflow and code patterns
 - `docs/GETTING_STARTED.md`: Setup and deployment instructions
-- `docs/VTL_RESOLVER_NOTES.md`: VTL resolver capabilities and limitations
 - `AGENT.md`: This file - AI agent rules and guidelines
 - `.github/copilot-instructions.md`: GitHub Copilot specific instructions
 
@@ -330,10 +298,10 @@ pipeline = api.create_resolver(
 ## Common Patterns
 
 **Add new Lambda function**:
-1. Create function in `src/lambdas/`
-2. Add to OpenTofu lambda module with appropriate IAM permissions
+1. Create function in `src/handlers/`
+2. Add to the `functions` map in `tofu/application/modules/lambda/main.tf` with appropriate IAM permissions
 3. Create unit tests with 100% coverage using `moto` mocks
-4. Run formatters: `ruff check --select I --fix` → `ruff format` → `mypy`
+4. Run formatters: `uv run ruff check --select I --fix` → `uv run ruff format` → `uv run mypy src/`
 5. Deploy to dev environment and test
 
 **Add new GraphQL mutation/query**:
@@ -344,7 +312,7 @@ pipeline = api.create_resolver(
 5. Test with Apollo Client in frontend
 
 **Add new React component**:
-1. Create component in `src/components/`
+1. Create component in `frontend/src/components/`
 2. Add TypeScript types
 3. Create unit tests with Vitest
 4. Test accessibility (keyboard nav, ARIA labels)
@@ -354,5 +322,4 @@ pipeline = api.create_resolver(
 
 - **Ask the repo owner** before making large design changes
 - **Refer to planning documents** for requirements and architecture decisions
-- **Follow the TODO.md** for current phase and priorities
 - **Maintain 100% test coverage** - no exceptions

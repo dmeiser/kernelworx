@@ -2,27 +2,27 @@
 
 variable "environment" {
   description = "Deployment environment (e.g., dev, prod)"
-  type = string
+  type        = string
 }
 
 variable "region_abbrev" {
   description = "Short region code used in IAM resource names (e.g., ue1)"
-  type = string
+  type        = string
 }
 
 variable "name_prefix" {
   description = "Global name prefix for IAM roles and policies"
-  type = string
+  type        = string
 }
 
 variable "dynamodb_table_arns" {
   description = "Map of DynamoDB table ARNs used by the application"
-  type = map(string)
+  type        = map(string)
 }
 
 variable "exports_bucket_arn" {
   description = "ARN of the S3 bucket used for report exports"
-  type = string
+  type        = string
 }
 
 # Restrict AppSync's Lambda invoke permissions to only the functions it needs
@@ -41,7 +41,7 @@ locals {
   dynamodb_table_arns = values(var.dynamodb_table_arns)
   dynamodb_index_arns = [for arn in values(var.dynamodb_table_arns) : "${arn}/index/*"]
   # Include both the base function ARN and the qualifier variant (versions/aliases)
-  lambda_invoke_arns  = flatten([for arn in values(var.lambda_function_arns) : [arn, "${arn}:*"]])
+  lambda_invoke_arns = flatten([for arn in values(var.lambda_function_arns) : [arn, "${arn}:*"]])
 }
 
 # =============================================================================
@@ -195,8 +195,8 @@ resource "aws_iam_role_policy" "appsync_dynamodb" {
 # AppSync Lambda Invoke
 data "aws_iam_policy_document" "appsync_lambda" {
   statement {
-    effect    = "Allow"
-    actions   = ["lambda:InvokeFunction"]
+    effect  = "Allow"
+    actions = ["lambda:InvokeFunction"]
     # Principle of least privilege: limit AppSync to specific Lambda functions it calls.
     # KICS recommendation: also allow qualified ARNs (":*") for versions/aliases.
     resources = length(local.lambda_invoke_arns) > 0 ? local.lambda_invoke_arns : ["*"]

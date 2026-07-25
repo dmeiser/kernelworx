@@ -87,11 +87,14 @@ def create_profiles_table_schema() -> dict[str, Any]:
     Schema for profiles table (V2 multi-table design).
 
     Key structure: PK=ownerAccountId, SK=profileId
-    GSI: profileId-index (for direct profile lookups)
+    GSIs:
+    - profileId-index: direct profile lookups
+    - unitType-unitNumber-index: list profiles in a unit without scanning
 
     This enables:
     - Direct query for listMyProfiles (no GSI needed, just query by PK)
     - Lookup by profileId via GSI
+    - Efficient listUnitCatalogs queries by unit
     """
     return {
         "TableName": "kernelworx-profiles-v2-ue1-dev",
@@ -102,12 +105,22 @@ def create_profiles_table_schema() -> dict[str, Any]:
         "AttributeDefinitions": [
             {"AttributeName": "ownerAccountId", "AttributeType": "S"},
             {"AttributeName": "profileId", "AttributeType": "S"},
+            {"AttributeName": "unitType", "AttributeType": "S"},
+            {"AttributeName": "unitNumber", "AttributeType": "N"},
         ],
         "GlobalSecondaryIndexes": [
             {
                 "IndexName": "profileId-index",
                 "KeySchema": [
                     {"AttributeName": "profileId", "KeyType": "HASH"},
+                ],
+                "Projection": {"ProjectionType": "ALL"},
+            },
+            {
+                "IndexName": "unitType-unitNumber-index",
+                "KeySchema": [
+                    {"AttributeName": "unitType", "KeyType": "HASH"},
+                    {"AttributeName": "unitNumber", "KeyType": "RANGE"},
                 ],
                 "Projection": {"ProjectionType": "ALL"},
             },

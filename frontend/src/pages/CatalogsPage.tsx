@@ -302,8 +302,8 @@ function useCatalogQueries(): CatalogQueries {
   } = useQuery<{ listMyCatalogs: Catalog[] }>(LIST_MY_CATALOGS);
 
   const refetchAll = () => {
-    refetchPublic();
-    refetchMy();
+    void refetchPublic();
+    void refetchMy();
   };
 
   return {
@@ -442,7 +442,7 @@ export const CatalogsPage: React.FC = () => {
   const handleViewCatalog = (catalogId: string) => {
     // Strip CATALOG# prefix for URL - will be re-added in preview page
     const catalogUuid = catalogId.replace(/^CATALOG#/, '');
-    navigate(`/catalogs/${catalogUuid}/preview`);
+    void navigate(`/catalogs/${catalogUuid}/preview`);
   };
 
   const handleSaveCatalog = async (catalogData: {
@@ -475,7 +475,7 @@ export const CatalogsPage: React.FC = () => {
         catalogsInUse={catalogsInUse}
         myOwnedCatalogIds={myOwnedCatalogIds}
         onEdit={handleEditCatalog}
-        onDelete={handleDeleteCatalog}
+        onDelete={(catalogId, catalogName) => { void handleDeleteCatalog(catalogId, catalogName); }}
         onCreateCatalog={handleCreateCatalog}
         onView={handleViewCatalog}
       />

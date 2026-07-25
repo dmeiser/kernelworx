@@ -207,7 +207,7 @@ export const LandingPage: React.FC = () => {
   const theme = useTheme();
 
   const primaryCta = isAuthenticated ? 'Go to Dashboard' : 'Get started';
-  const handlePrimaryCta = () => navigate(isAuthenticated ? '/home' : '/login');
+  const handlePrimaryCta = () => { void navigate(isAuthenticated ? '/home' : '/login'); };
 
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: 'background.default' }}>

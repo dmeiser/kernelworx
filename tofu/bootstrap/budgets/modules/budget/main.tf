@@ -41,7 +41,7 @@ resource "aws_budgets_budget" "monthly" {
 # Cost Anomaly Detection - Use existing monitor or create new one
 resource "aws_ce_anomaly_monitor" "main" {
   count = var.create_anomaly_monitor ? 1 : 0
-  
+
   name              = "${var.name_prefix}-anomaly-monitor"
   monitor_type      = "DIMENSIONAL"
   monitor_dimension = "SERVICE"

@@ -5,6 +5,7 @@ import { useCallback } from 'react';
 import { useMutation } from '@apollo/client/react';
 import { useNavigate } from 'react-router-dom';
 import { CREATE_CAMPAIGN, LIST_MY_PROFILES, LIST_CAMPAIGNS_BY_PROFILE } from '../lib/graphql';
+import { dateToISO } from '../lib/date-utils';
 import { ensureProfileId, ensureCatalogId, toUrlId } from '../lib/ids';
 
 interface CreateCampaignInput {
@@ -109,8 +110,8 @@ export const useCreateCampaignSubmit = () => {
     ): CreateCampaignInput => {
       const base: CreateCampaignInput = {
         profileId,
-        startDate: startDate ? new Date(startDate).toISOString() : undefined,
-        endDate: endDate ? new Date(endDate).toISOString() : undefined,
+        startDate: startDate ? dateToISO(startDate) : undefined,
+        endDate: endDate ? dateToISO(endDate) : undefined,
       };
 
       return isSharedCampaignMode
@@ -181,7 +182,7 @@ export const useCreateCampaignSubmit = () => {
         const createdCampaign = data?.createCampaign;
         if (createdCampaign) {
           onSuccess(getSuccessMessage());
-          navigate(`/scouts/${toUrlId(profileId)}/campaigns/${toUrlId(createdCampaign.campaignId)}`);
+          void navigate(`/scouts/${toUrlId(profileId)}/campaigns/${toUrlId(createdCampaign.campaignId)}`);
         }
       } catch (error) {
         console.error('Failed to create campaign:', error);

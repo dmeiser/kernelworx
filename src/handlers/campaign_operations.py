@@ -1,7 +1,7 @@
 """Lambda resolver for campaign operations with shared campaign and share support."""
 
-import os
 import uuid
+from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 import boto3
@@ -15,7 +15,7 @@ try:  # pragma: no cover
     from botocore.exceptions import ClientError
 
     from utils.auth import check_profile_access
-    from utils.dynamodb import tables
+    from utils.dynamodb import get_required_env, tables
     from utils.errors import AppError, ErrorCode
     from utils.ids import ensure_catalog_id, ensure_profile_id
     from utils.logging import get_logger
@@ -24,7 +24,7 @@ except ModuleNotFoundError:  # pragma: no cover
     from botocore.exceptions import ClientError
 
     from ..utils.auth import check_profile_access
-    from ..utils.dynamodb import tables
+    from ..utils.dynamodb import get_required_env, tables
     from ..utils.errors import AppError, ErrorCode
     from ..utils.ids import ensure_catalog_id, ensure_profile_id
     from ..utils.logging import get_logger
@@ -33,29 +33,46 @@ except ModuleNotFoundError:  # pragma: no cover
 logger = get_logger(__name__)
 
 
+_dynamodb_client: Optional["DynamoDBClient"] = None
+
+
 def _get_dynamodb_client() -> "DynamoDBClient":
-    return boto3.client("dynamodb")
+    """Return a lazily-initialized DynamoDB client (cached at module scope)."""
+    global _dynamodb_client
+    if _dynamodb_client is None:
+        _dynamodb_client = boto3.client("dynamodb")
+    return _dynamodb_client
 
 
 # Expose a module-level client proxy so unit tests can patch methods like transact_write_items
 class _DynamoClientProxy:
     def __init__(self) -> None:
-        self._client = _get_dynamodb_client()
-        # Expose the client's exceptions so tests can set exception types
-        self.exceptions = self._client.exceptions
+        self._client: Optional["DynamoDBClient"] = None
+
+    def _get_client(self) -> "DynamoDBClient":
+        if self._client is None:
+            self._client = _get_dynamodb_client()
+        return self._client
+
+    @property
+    def exceptions(self) -> Any:
+        """Expose the underlying client's exceptions namespace."""
+        return self._get_client().exceptions
 
     def transact_write_items(self, *args: Any, **kwargs: Any) -> "TransactWriteItemsOutputTypeDef":
-        return self._client.transact_write_items(*args, **kwargs)
+        return self._get_client().transact_write_items(*args, **kwargs)
 
 
-# Default proxy instance (tests may monkeypatch methods on this object)
+# Default proxy instance (tests may monkeypatch methods on this object).
+# The actual boto3 client is not created until the first method call.
 dynamodb_client: _DynamoClientProxy = _DynamoClientProxy()
 
 # Multi-table design V2 - table names for transact_write_items
-campaigns_table_name = os.environ.get("CAMPAIGNS_TABLE_NAME", "kernelworx-campaigns-v2-ue1-dev")
-shared_campaigns_table_name = os.environ.get("SHARED_CAMPAIGNS_TABLE_NAME", "kernelworx-shared-campaigns-ue1-dev")
-profiles_table_name = os.environ.get("PROFILES_TABLE_NAME", "kernelworx-profiles-v2-ue1-dev")
-shares_table_name = os.environ.get("SHARES_TABLE_NAME", "kernelworx-shares-v2-ue1-dev")
+# Require env vars in production; tests set these in tests/unit/conftest.py.
+campaigns_table_name = get_required_env("CAMPAIGNS_TABLE_NAME")
+shared_campaigns_table_name = get_required_env("SHARED_CAMPAIGNS_TABLE_NAME")
+profiles_table_name = get_required_env("PROFILES_TABLE_NAME")
+shares_table_name = get_required_env("SHARES_TABLE_NAME")
 
 
 def _build_unit_campaign_key(
@@ -179,6 +196,13 @@ def _build_campaign_item(
     return item
 
 
+def _normalize_account_id(account_id: str | None) -> str:
+    """Strip ACCOUNT# prefix if present, returning the raw account id."""
+    if not account_id:
+        return ""
+    return account_id.replace("ACCOUNT#", "")
+
+
 def _build_share_item(
     profile: Dict[str, Any],
     shared_campaign: Dict[str, Any],
@@ -186,9 +210,9 @@ def _build_share_item(
     now: str,
 ) -> Optional[Dict[str, Any]]:
     """Build share item for shared campaign creator if applicable."""
-    creator_account_id = shared_campaign.get("createdBy")
+    creator_account_id = _normalize_account_id(shared_campaign.get("createdBy"))
     owner_account_id = profile.get("ownerAccountId", "")
-    owner_normalized = owner_account_id.replace("ACCOUNT#", "") if owner_account_id else ""
+    owner_normalized = _normalize_account_id(owner_account_id)
 
     if not creator_account_id or creator_account_id == owner_normalized:
         return None
@@ -197,7 +221,7 @@ def _build_share_item(
     return {
         "profileId": profile.get("profileId"),
         "shareId": share_id,
-        "targetAccountId": creator_account_id,
+        "targetAccountId": f"ACCOUNT#{creator_account_id}",
         "permissions": ["READ"],
         "ownerAccountId": owner_account_id,
         "createdAt": now,
@@ -360,7 +384,7 @@ def create_campaign(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         _execute_campaign_transaction(campaign_item, share_item, profile_id)
         return campaign_item
 
-    except AppError, ClientError:
+    except (AppError, ClientError):
         raise
     except Exception as e:
         logger.error(f"Error creating campaign: {str(e)}", exc_info=True)
@@ -368,9 +392,11 @@ def create_campaign(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
 
 def _dynamo_value_for_list(value: list[Any]) -> Dict[str, Any]:
-    """Convert list to DynamoDB format."""
-    if all(isinstance(item, str) for item in value):
-        return {"SS": value}
+    """Convert list to DynamoDB format.
+
+    Always serialize as a List (L) to preserve order, allow duplicates, and avoid
+    DynamoDB's rejection of empty String Sets (SS).
+    """
     return {"L": [_to_dynamo_value(item) for item in value]}
 
 
@@ -389,6 +415,8 @@ def _dynamo_value_for_scalar(value: Any) -> Dict[str, Any]:
         return {"BOOL": value}
     if isinstance(value, str):
         return {"S": value}
+    if isinstance(value, Decimal):
+        return {"N": str(value)}
     if isinstance(value, (int, float)):
         return {"N": str(value)}
     return {"S": str(value)}

@@ -1,5 +1,6 @@
 """Unit tests for campaign_operations Lambda handler."""
 
+from decimal import Decimal
 from typing import Any, Dict
 from unittest.mock import MagicMock, patch
 
@@ -59,6 +60,11 @@ class TestToDynamoValue:
         result = _to_dynamo_value(3.14)
         assert result == {"N": "3.14"}
 
+    def test_to_dynamo_value_decimal(self) -> None:
+        """Test converting a Decimal to a DynamoDB number (not a string)."""
+        result = _to_dynamo_value(Decimal("2024"))
+        assert result == {"N": "2024"}
+
     def test_to_dynamo_value_bool_true(self) -> None:
         """Test converting boolean true."""
         result = _to_dynamo_value(True)
@@ -75,10 +81,14 @@ class TestToDynamoValue:
         assert result == {"NULL": True}
 
     def test_to_dynamo_value_string_list(self) -> None:
-        """Test converting a list of strings to DynamoDB SS type."""
+        """Test converting a list of strings to DynamoDB L type to preserve order/duplicates."""
         result = _to_dynamo_value(["a", "b", "c"])
-        # DynamoDB accepts lists for SS (String Set) type
-        assert result == {"SS": ["a", "b", "c"]}
+        assert result == {"L": [{"S": "a"}, {"S": "b"}, {"S": "c"}]}
+
+    def test_to_dynamo_value_empty_list(self) -> None:
+        """Test converting an empty list to DynamoDB L type (not invalid SS)."""
+        result = _to_dynamo_value([])
+        assert result == {"L": []}
 
     def test_to_dynamo_value_mixed_list(self) -> None:
         """Test converting a list of mixed types."""
@@ -328,6 +338,9 @@ class TestCreateCampaign:
         assert share_put is not None
         # DynamoDB item format uses {'S': '...'} for string attributes
         assert share_put["Item"]["profileId"]["S"] == sample_profile["profileId"]
+        # targetAccountId and GSI1PK must be single-prefixed, never double-prefixed
+        assert share_put["Item"]["targetAccountId"]["S"] == "ACCOUNT#leader-account-456"
+        assert share_put["Item"]["GSI1PK"]["S"] == "ACCOUNT#leader-account-456"
 
     @patch("src.handlers.campaign_operations.dynamodb_client")
     @patch("src.handlers.campaign_operations.check_profile_access")
@@ -360,6 +373,73 @@ class TestCreateCampaign:
         call_args = mock_dynamodb_client.transact_write_items.call_args
         transact_items = call_args.kwargs.get("TransactItems") or call_args[1].get("TransactItems")
         assert len(transact_items) == 1  # Only campaign
+
+    @patch("src.handlers.campaign_operations.dynamodb_client")
+    @patch("src.handlers.campaign_operations.check_profile_access")
+    @patch("src.handlers.campaign_operations._get_shared_campaign")
+    @patch("src.handlers.campaign_operations._get_profile")
+    def test_create_campaign_no_share_when_created_by_has_account_prefix(
+        self,
+        mock_get_profile: MagicMock,
+        mock_get_shared_campaign: MagicMock,
+        mock_check_access: MagicMock,
+        mock_dynamodb_client: MagicMock,
+        event_with_shared_campaign: Dict[str, Any],
+        lambda_context: MagicMock,
+        sample_profile: Dict[str, Any],
+        sample_shared_campaign: Dict[str, Any],
+    ) -> None:
+        """Test share guard still fires when createdBy is stored with ACCOUNT# prefix."""
+        # Arrange - createdBy uses the same prefixed form as ownerAccountId
+        sample_shared_campaign["createdBy"] = sample_profile["ownerAccountId"]
+        mock_check_access.return_value = True
+        mock_get_profile.return_value = sample_profile
+        mock_get_shared_campaign.return_value = sample_shared_campaign
+
+        # Act
+        _ = create_campaign(event_with_shared_campaign, lambda_context)
+
+        # Assert - Transaction only includes campaign, no self-share
+        call_args = mock_dynamodb_client.transact_write_items.call_args
+        transact_items = call_args.kwargs.get("TransactItems") or call_args[1].get("TransactItems")
+        assert len(transact_items) == 1  # Only campaign
+
+    @patch("src.handlers.campaign_operations.dynamodb_client")
+    @patch("src.handlers.campaign_operations.check_profile_access")
+    @patch("src.handlers.campaign_operations._get_shared_campaign")
+    @patch("src.handlers.campaign_operations._get_profile")
+    def test_create_campaign_share_has_single_prefix_when_created_by_prefixed(
+        self,
+        mock_get_profile: MagicMock,
+        mock_get_shared_campaign: MagicMock,
+        mock_check_access: MagicMock,
+        mock_dynamodb_client: MagicMock,
+        event_with_shared_campaign: Dict[str, Any],
+        lambda_context: MagicMock,
+        sample_profile: Dict[str, Any],
+        sample_shared_campaign: Dict[str, Any],
+    ) -> None:
+        """Test targetAccountId/GSI1PK are single-prefixed when createdBy already has ACCOUNT# prefix."""
+        # Arrange - createdBy already includes ACCOUNT# prefix
+        sample_shared_campaign["createdBy"] = "ACCOUNT#leader-account-456"
+        mock_check_access.return_value = True
+        mock_get_profile.return_value = sample_profile
+        mock_get_shared_campaign.return_value = sample_shared_campaign
+
+        # Act
+        _ = create_campaign(event_with_shared_campaign, lambda_context)
+
+        # Assert - Transaction includes campaign and share
+        call_args = mock_dynamodb_client.transact_write_items.call_args
+        transact_items = call_args.kwargs.get("TransactItems") or call_args[1].get("TransactItems")
+        assert len(transact_items) == 2
+
+        share_put = transact_items[1].get("Put")
+        assert share_put is not None
+        # Must not double-prefix
+        assert share_put["Item"]["targetAccountId"]["S"] == "ACCOUNT#leader-account-456"
+        assert share_put["Item"]["GSI1PK"]["S"] == "ACCOUNT#leader-account-456"
+        assert "ACCOUNT#ACCOUNT#" not in share_put["Item"]["GSI1PK"]["S"]
 
     @patch("src.handlers.campaign_operations.check_profile_access")
     @patch("src.handlers.campaign_operations._get_shared_campaign")
@@ -882,3 +962,31 @@ class TestGetProfile:
             result = _get_profile("PROFILE#123")
 
         assert result is None
+
+
+class TestDynamoDBClient:
+    """Tests for the module-level DynamoDB client helper."""
+
+    def test_get_dynamodb_client_initializes_when_none(self) -> None:
+        """Test that _get_dynamodb_client creates a client when cache is empty."""
+        from src.handlers import campaign_operations
+
+        campaign_operations._dynamodb_client = None
+        with patch("src.handlers.campaign_operations.boto3.client") as mock_client:
+            mock_client.return_value = MagicMock()
+            result = campaign_operations._get_dynamodb_client()
+
+        assert result is mock_client.return_value
+        mock_client.assert_called_once_with("dynamodb")
+
+    def test_get_dynamodb_client_returns_cached(self) -> None:
+        """Test that _get_dynamodb_client returns the cached client if present."""
+        from src.handlers import campaign_operations
+
+        cached = MagicMock()
+        campaign_operations._dynamodb_client = cached
+        with patch("src.handlers.campaign_operations.boto3.client") as mock_client:
+            result = campaign_operations._get_dynamodb_client()
+
+        assert result is cached
+        mock_client.assert_not_called()

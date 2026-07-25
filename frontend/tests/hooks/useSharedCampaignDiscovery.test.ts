@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 
 // Mock the lazy query
-const mockFindSharedCampaigns = vi.fn();
+const mockFindSharedCampaigns = vi.fn().mockResolvedValue({ data: undefined });
 
 vi.mock('@apollo/client/react', () => ({
   useLazyQuery: () => [mockFindSharedCampaigns, { data: undefined }],

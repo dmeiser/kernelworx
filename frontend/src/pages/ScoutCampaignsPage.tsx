@@ -163,8 +163,8 @@ const ScoutCampaignsContent: React.FC<ScoutCampaignsContentProps> = ({
   const navigate = useNavigate();
 
   const canEdit = canEditProfile(profile);
-  const handleNavigateBack = () => navigate('/scouts');
-  const handleCreateClick = () => navigate('/create-campaign');
+  const handleNavigateBack = () => { void navigate('/scouts'); };
+  const handleCreateClick = () => { void navigate('/create-campaign'); };
 
   const { active, inactive } = separateCampaigns(campaigns);
   const showDivider = active.length > 0 && inactive.length > 0;

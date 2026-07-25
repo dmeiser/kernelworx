@@ -231,7 +231,7 @@ export const AppLayout: React.FC<{ children?: React.ReactNode }> = ({ children }
 
   const handleNavigation = React.useCallback(
     (path: string) => {
-      navigate(path);
+      void navigate(path);
       if (!isDesktop) {
         setMobileDrawerOpen(false);
       }
@@ -255,7 +255,7 @@ export const AppLayout: React.FC<{ children?: React.ReactNode }> = ({ children }
     <AppLayoutView
       isDesktop={isDesktop}
       displayName={displayName}
-      onLogout={logout}
+      onLogout={() => { void logout(); }}
       onNavigate={handleNavigation}
       isActive={isActive}
       toggleMobileDrawer={toggleMobileDrawer}

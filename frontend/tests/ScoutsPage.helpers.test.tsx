@@ -136,13 +136,13 @@ describe('ScoutsPage helpers', () => {
     const setLoading = vi.fn();
 
     const client = { query: vi.fn().mockResolvedValue({ data: { listMyShares: [{ profileId: 'p' }] } }) };
-    await loadSharedProfilesWithErrorHandling(client as any, {}, setProfiles, setLoaded, setError, setLoading);
+    await loadSharedProfilesWithErrorHandling(client as any, {} as any, setProfiles, setLoaded, setError, setLoading);
     expect(setProfiles).toHaveBeenCalledWith([{ profileId: 'p' }]);
     expect(setLoaded).toHaveBeenCalledWith(true);
 
     // error path
     const failingClient = { query: vi.fn().mockRejectedValue(new Error('fail')) };
-    await loadSharedProfilesWithErrorHandling(failingClient as any, {}, setProfiles, setLoaded, setError, setLoading);
+    await loadSharedProfilesWithErrorHandling(failingClient as any, {} as any, setProfiles, setLoaded, setError, setLoading);
     expect(setError).toHaveBeenCalled();
   });
 

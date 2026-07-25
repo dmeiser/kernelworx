@@ -85,7 +85,7 @@ export const CatalogPreviewPage: React.FC<CatalogPreviewPageProps> = ({
     if (onCreateCampaign) {
       onCreateCampaign(catalogId);
     } else {
-      navigate('/create-campaign', { state: { catalogId } });
+      void navigate('/create-campaign', { state: { catalogId } });
     }
   };
 
@@ -94,7 +94,7 @@ export const CatalogPreviewPage: React.FC<CatalogPreviewPageProps> = ({
     if (onCreateSharedCampaign) {
       onCreateSharedCampaign(catalogId);
     } else {
-      navigate('/shared-campaigns/create', { state: { catalogId } });
+      void navigate('/shared-campaigns/create', { state: { catalogId } });
     }
   };
 
@@ -108,7 +108,7 @@ export const CatalogPreviewPage: React.FC<CatalogPreviewPageProps> = ({
     <Box sx={{ p: 3 }}>
       {/* Back button and header */}
       <Stack direction="row" spacing={2} alignItems="center" sx={{ mb: 3 }}>
-        <Button startIcon={<BackIcon />} onClick={() => navigate('/catalogs')} variant="outlined">
+        <Button startIcon={<BackIcon />} onClick={() => { void navigate('/catalogs'); }} variant="outlined">
           Back
         </Button>
         <Box sx={{ flex: 1 }}>

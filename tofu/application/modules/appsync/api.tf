@@ -32,7 +32,9 @@ resource "aws_appsync_domain_name" "api" {
 
   lifecycle {
     precondition {
-      condition     = var.certificate_validation != null ? true : true
+      # When a validation resource is supplied, ensure it has completed before
+      # creating the custom domain. Dev builds omit validation entirely.
+      condition     = var.certificate_validation == null ? true : try(length(var.certificate_validation.validation_record_fqdns) > 0, false)
       error_message = "Certificate validation must complete before creating AppSync domain"
     }
   }

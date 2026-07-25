@@ -13,14 +13,15 @@ from src.utils.dynamodb import (
     _get_dynamodb,
     clear_all_overrides,
     override_table,
+    reset_dynamodb_resource,
     reset_singleton,
     tables,
 )
 
 
 @pytest.fixture(autouse=True)
-def reset_between_tests() -> Generator[None, None, None]:
-    """Reset singleton and overrides between tests."""
+def reset_between_tests(aws_credentials: None) -> Generator[None, None, None]:
+    """Reset singleton, overrides, and cached DynamoDB resource between tests."""
     # Store original env vars
     table_env_vars = [
         "ACCOUNTS_TABLE_NAME",
@@ -41,9 +42,11 @@ def reset_between_tests() -> Generator[None, None, None]:
 
     clear_all_overrides()
     reset_singleton()
+    reset_dynamodb_resource()
     yield
     clear_all_overrides()
     reset_singleton()
+    reset_dynamodb_resource()
 
     # Restore original env vars
     for k, v in original_values.items():
@@ -51,16 +54,6 @@ def reset_between_tests() -> Generator[None, None, None]:
             os.environ[k] = v
         elif k in os.environ:
             del os.environ[k]
-
-
-@pytest.fixture
-def aws_credentials() -> None:
-    """Set fake AWS credentials for moto."""
-    os.environ["AWS_ACCESS_KEY_ID"] = "testing"
-    os.environ["AWS_SECRET_ACCESS_KEY"] = "testing"
-    os.environ["AWS_SECURITY_TOKEN"] = "testing"
-    os.environ["AWS_SESSION_TOKEN"] = "testing"
-    os.environ["AWS_DEFAULT_REGION"] = "us-east-1"
 
 
 class TestGetDynamoDB:
@@ -76,6 +69,7 @@ class TestGetDynamoDB:
 
     def test_uses_endpoint_override(self) -> None:
         """Test that endpoint URL is used when set."""
+        reset_dynamodb_resource()
         with patch.dict(os.environ, {"DYNAMODB_ENDPOINT": "http://localhost:8000"}):
             with patch("boto3.resource") as mock_resource:
                 mock_resource.return_value = MagicMock()

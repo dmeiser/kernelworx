@@ -30,7 +30,7 @@ export const useProfileEffects = (
   // Redirect to profile creation if user has no profiles in shared campaign mode
   useEffect(() => {
     if (isSharedCampaignMode && !profilesLoading && profiles.length === 0 && effectiveSharedCampaignCode) {
-      navigate('/scouts', {
+      void navigate('/scouts', {
         state: {
           returnTo: `/c/${effectiveSharedCampaignCode}`,
           sharedCampaignCode: effectiveSharedCampaignCode,

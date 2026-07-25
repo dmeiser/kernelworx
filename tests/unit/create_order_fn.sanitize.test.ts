@@ -53,7 +53,7 @@ describe('create_order_fn sanitization', () => {
     input.lineItems[0].productName = {};
     const ctx: any = validCtx(input);
     const req = createOrderFn.request(ctx as any);
-    // When catalog product exists, catalog value takes precedence over client-supplied productName
-    expect(req.attributeValues.lineItems[0].productName).toBe('Item');
+    // Non-string productName values are normalized to null by the resolver
+    expect(req.attributeValues.lineItems[0].productName).toBeNull();
   });
 });

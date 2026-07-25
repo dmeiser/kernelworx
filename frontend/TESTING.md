@@ -29,17 +29,7 @@ This ensures tests complete and CI jobs don't timeout.
 - **Safety**: 10-minute absolute timeout as failsafe
 - **Exit code**: Preserves the original test exit code (0 for success, non-zero for failure)
 
-**Note**: Prior attempts used `vmThreads` pool which has compatibility issues with React Router v7's dual module format (ESM/CJS). The `threads` pool properly handles ES module mocking required for react-router-dom v7.
-
 ### Configuration Files
 - `run-tests.js` - Wrapper script that monitors and controls test execution
-- `vite.config.ts` - Contains vmThreads pool configuration
+- `vite.config.ts` - General Vitest and coverage configuration
 - `package.json` - Test scripts use the wrapper
-
-## Pre-existing Test Failures
-
-There are 2 known test failures in `AuthContext.test.tsx`:
-1. "handles logout failure with fallback redirect"
-2. "redirects to saved URL on OAuth completion"
-
-These failures are NOT related to the hanging issue and existed before the fix.

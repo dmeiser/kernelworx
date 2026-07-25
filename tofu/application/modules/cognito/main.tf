@@ -16,11 +16,6 @@ variable "name_prefix" {
   type        = string
 }
 
-variable "site_domain" {
-  description = "Fully qualified site domain (e.g., dev.kernelworx.app or kernelworx.app)"
-  type        = string
-}
-
 variable "login_domain" {
   description = "Fully qualified login domain (e.g., login.dev.kernelworx.app or login.kernelworx.app)"
   type        = string
@@ -40,9 +35,20 @@ variable "google_client_secret" {
   default     = ""
 }
 
+variable "aws_region" {
+  description = "AWS region"
+  type        = string
+}
+
 variable "login_certificate_arn" {
   description = "ARN of ACM certificate for the Cognito login domain"
   type        = string
+}
+
+variable "login_certificate_validation" {
+  description = "Certificate validation resource for the Cognito login domain"
+  type        = any
+  default     = null
 }
 
 variable "sms_role_arn" {
@@ -128,7 +134,8 @@ locals {
 
 # User Pool
 resource "aws_cognito_user_pool" "main" {
-  name = local.user_pool_name
+  name                = local.user_pool_name
+  deletion_protection = var.environment == "prod" ? "ACTIVE" : "INACTIVE"
 
   # Username configuration
   username_attributes      = ["email"]
@@ -155,7 +162,7 @@ resource "aws_cognito_user_pool" "main" {
   sms_configuration {
     external_id    = "kernelworx-sms-role"
     sns_caller_arn = var.sms_role_arn
-    sns_region     = "us-east-1"
+    sns_region     = var.aws_region
   }
 
   # Account recovery
@@ -363,6 +370,12 @@ resource "aws_cognito_user_pool_domain" "custom" {
 
   lifecycle {
     prevent_destroy = true
+    precondition {
+      # Reference the validation resource so the custom domain waits for the login
+      # certificate to validate. The ternary allows dev builds that omit it.
+      condition     = var.login_certificate_validation != null ? try(length(var.login_certificate_validation.validation_record_fqdns) > 0, false) : true
+      error_message = "Login certificate validation must complete before creating the Cognito custom domain"
+    }
   }
 }
 

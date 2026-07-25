@@ -184,15 +184,15 @@ const shouldTriggerQueries = (authLoading: boolean, isAuthenticated: boolean, qu
 const maybeTriggerQueries = (
   shouldTrigger: boolean,
   queriesTriggeredRef: React.MutableRefObject<boolean>,
-  loadAccount: () => void,
-  loadMyProfiles: () => void,
-  loadSharedProfiles: () => void,
+  loadAccount: () => Promise<unknown>,
+  loadMyProfiles: () => Promise<unknown>,
+  loadSharedProfiles: () => Promise<unknown>,
 ): void => {
   if (shouldTrigger) {
     queriesTriggeredRef.current = true;
-    loadAccount();
-    loadMyProfiles();
-    loadSharedProfiles();
+    void loadAccount();
+    void loadMyProfiles();
+    void loadSharedProfiles();
   }
 };
 
@@ -205,7 +205,7 @@ const handleReturnNavigation = (
     // Longer delay to ensure DynamoDB GSI consistency
     // The backend queries profileId-index GSI which has eventual consistency
     setTimeout(() => {
-      navigate(returnPath, {
+      void navigate(returnPath, {
         replace: true,
         state: { fromProfileCreation: true },
       });
@@ -429,19 +429,18 @@ export const ScoutsPage: React.FC = () => {
   const [createProfile] = useMutation(CREATE_SELLER_PROFILE, {
     refetchQueries: [{ query: LIST_MY_PROFILES }],
     awaitRefetchQueries: true,
-    onCompleted: async () => {
-      // Reload profiles and wait for the result
-      await loadMyProfiles();
-      // If we came from a campaign shared campaign flow, return to it
-      handleReturnNavigation(returnPath, navigate);
+    onCompleted: () => {
+      void loadMyProfiles().then(() => {
+        handleReturnNavigation(returnPath, (path, opts) => { void navigate(path, opts); });
+      }).catch(() => {});
     },
   });
 
   // Update profile mutation
   const [updateProfile] = useMutation(UPDATE_SELLER_PROFILE, {
     onCompleted: () => {
-      loadMyProfiles();
-      loadSharedProfiles();
+      void loadMyProfiles();
+      void loadSharedProfiles();
     },
   });
 
@@ -450,7 +449,7 @@ export const ScoutsPage: React.FC = () => {
     onCompleted: () => {
       setDeleteConfirmOpen(false);
       setDeletingProfileId(null);
-      loadMyProfiles();
+      void loadMyProfiles();
     },
   });
 
@@ -495,7 +494,7 @@ export const ScoutsPage: React.FC = () => {
               control={
                 <Switch
                   checked={showReadOnlyProfiles}
-                  onChange={(e) => handleToggleReadOnly(e.target.checked)}
+                  onChange={(e) => { void handleToggleReadOnly(e.target.checked); }}
                   size="small"
                 />
               }
@@ -506,7 +505,7 @@ export const ScoutsPage: React.FC = () => {
               }
             />
             <Stack direction="row" spacing={2}>
-              <Button variant="outlined" startIcon={<GiftIcon />} onClick={() => navigate('/accept-invite')}>
+              <Button variant="outlined" startIcon={<GiftIcon />} onClick={() => { void navigate('/accept-invite'); }}>
                 Accept Invite
               </Button>
               <Button variant="contained" startIcon={<AddIcon />} onClick={() => setCreateDialogOpen(true)}>

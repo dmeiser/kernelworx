@@ -4,7 +4,7 @@ This guide explains how to develop locally using the domain `local.dev.appworx.a
 
 ## Why use a custom local domain?
 
-- **HTTPS support**: Social OAuth providers (Google, Facebook) require HTTPS
+- **HTTPS support**: Google OAuth requires HTTPS
 - **Cookie consistency**: Matches production cookie domain settings
 - **Realistic testing**: Tests your app in an environment closer to production
 
@@ -73,8 +73,7 @@ sudo update-ca-certificates
 The OpenTofu configuration includes `https://local.dev.appworx.app:5173` in the Cognito callback URLs. Deploy the changes:
 
 ```bash
-cd tofu/environments/dev
-tofu apply
+./tofu/application/scripts/deploy.sh dev apply
 ```
 
 This updates the Cognito User Pool Client to allow redirects to your local domain.
@@ -116,7 +115,7 @@ To use `http://localhost:5173` instead:
 - Trust the certificate (see step 3)
 
 ### OAuth redirect errors
-- Ensure you deployed the CDK changes (step 4)
+- Ensure you deployed the OpenTofu changes (step 4)
 - Check that the callback URLs in Cognito match your local domain
 - Clear your browser cookies and try again
 

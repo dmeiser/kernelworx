@@ -56,7 +56,7 @@ export const useSharedCampaignDiscovery = () => {
     findSharedCampaigns: SharedCampaign[];
   }>(FIND_SHARED_CAMPAIGNS);
 
-  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const discoveredSharedCampaigns = discoveredSharedCampaignsData?.findSharedCampaigns || [];
 
@@ -72,7 +72,7 @@ export const useSharedCampaignDiscovery = () => {
 
       const variables = toVariables(params);
       timeoutRef.current = setTimeout(() => {
-        findSharedCampaigns({ variables });
+        void findSharedCampaigns({ variables }).catch(() => {});
       }, SHARED_DISCOVERY_DEBOUNCE_MS);
     },
     [findSharedCampaigns],

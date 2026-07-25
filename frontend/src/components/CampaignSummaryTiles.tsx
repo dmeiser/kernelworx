@@ -15,6 +15,7 @@ import { LoadingState } from './LoadingState';
 import { ErrorAlert } from './ErrorAlert';
 import { LIST_ORDERS_BY_CAMPAIGN } from '../lib/graphql';
 import { ensureCampaignId } from '../lib/ids';
+import { formatCurrency } from '../lib/api-utils';
 import type { Order } from '../types';
 
 interface CampaignSummaryTilesProps {
@@ -43,12 +44,6 @@ export const CampaignSummaryTiles: React.FC<CampaignSummaryTilesProps> = ({ camp
     (sum, order) => sum + order.lineItems.reduce((itemSum, item) => itemSum + item.quantity, 0),
     0,
   );
-
-  const formatCurrency = (amount: number) =>
-    new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-    }).format(amount);
 
   if (loading) {
     return <LoadingState minHeight="100px" />;

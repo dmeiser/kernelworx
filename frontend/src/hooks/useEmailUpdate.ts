@@ -133,10 +133,9 @@ export const useEmailUpdate = (): UseEmailUpdateReturn => {
       if (emailTimeoutRef.current) {
         clearTimeout(emailTimeoutRef.current);
       }
-      emailTimeoutRef.current = setTimeout(async () => {
+      emailTimeoutRef.current = setTimeout(() => {
         handleCloseEmailDialog();
-        await logout();
-        navigate('/');
+        void logout().then(() => navigate('/')).catch(() => {});
       }, 3000);
     } catch (err: unknown) {
       setEmailUpdateError(getErrorMessage(err, 'Invalid verification code'));

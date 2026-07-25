@@ -4,6 +4,7 @@ Test fixtures for Lambda function tests.
 Provides common test data and mocked AWS resources.
 """
 
+import os
 from datetime import datetime, timezone
 from typing import Any, Dict, Generator
 
@@ -13,29 +14,60 @@ from moto import mock_aws
 
 from tests.unit.table_schemas import create_all_tables
 
+# Set environment variables at module load time so that module-level code in
+# Lambda handlers (e.g. get_required_env calls) sees them during test collection.
+os.environ["AWS_ACCESS_KEY_ID"] = "testing"
+os.environ["AWS_SECRET_ACCESS_KEY"] = "testing"
+os.environ["AWS_SECURITY_TOKEN"] = "testing"
+os.environ["AWS_SESSION_TOKEN"] = "testing"
+os.environ["AWS_DEFAULT_REGION"] = "us-east-1"
+# Multi-table design: set all table names
+os.environ["TABLE_NAME"] = "PsmApp"  # Legacy - kept for backward compat
+os.environ["ACCOUNTS_TABLE_NAME"] = "kernelworx-accounts-ue1-dev"
+os.environ["CATALOGS_TABLE_NAME"] = "kernelworx-catalogs-ue1-dev"
+os.environ["PROFILES_TABLE_NAME"] = "kernelworx-profiles-v2-ue1-dev"
+os.environ["CAMPAIGNS_TABLE_NAME"] = "kernelworx-campaigns-v2-ue1-dev"
+os.environ["ORDERS_TABLE_NAME"] = "kernelworx-orders-v2-ue1-dev"
+os.environ["SHARES_TABLE_NAME"] = "kernelworx-shares-ue1-dev"
+os.environ["INVITES_TABLE_NAME"] = "kernelworx-invites-ue1-dev"
+os.environ["SHARED_CAMPAIGNS_TABLE_NAME"] = "kernelworx-shared-campaigns-ue1-dev"
+# S3 bucket names
+os.environ["EXPORTS_BUCKET"] = "kernelworx-exports-ue1-dev"
 
-@pytest.fixture
-def aws_credentials() -> None:
-    """Set fake AWS credentials for moto."""
-    import os
 
-    os.environ["AWS_ACCESS_KEY_ID"] = "testing"
-    os.environ["AWS_SECRET_ACCESS_KEY"] = "testing"
-    os.environ["AWS_SECURITY_TOKEN"] = "testing"
-    os.environ["AWS_SESSION_TOKEN"] = "testing"
-    os.environ["AWS_DEFAULT_REGION"] = "us-east-1"
-    # Multi-table design: set all table names
-    os.environ["TABLE_NAME"] = "PsmApp"  # Legacy - kept for backward compat
-    os.environ["ACCOUNTS_TABLE_NAME"] = "kernelworx-accounts-ue1-dev"
-    os.environ["CATALOGS_TABLE_NAME"] = "kernelworx-catalogs-ue1-dev"
-    os.environ["PROFILES_TABLE_NAME"] = "kernelworx-profiles-v2-ue1-dev"
-    os.environ["CAMPAIGNS_TABLE_NAME"] = "kernelworx-campaigns-v2-ue1-dev"
-    os.environ["ORDERS_TABLE_NAME"] = "kernelworx-orders-v2-ue1-dev"
-    os.environ["SHARES_TABLE_NAME"] = "kernelworx-shares-ue1-dev"
-    os.environ["INVITES_TABLE_NAME"] = "kernelworx-invites-ue1-dev"
-    os.environ["SHARED_CAMPAIGNS_TABLE_NAME"] = "kernelworx-shared-campaigns-ue1-dev"
-    # S3 bucket names
-    os.environ["EXPORTS_BUCKET"] = "kernelworx-exports-ue1-dev"
+@pytest.fixture(autouse=True)
+def reset_dynamodb_state() -> Generator[None, None, None]:
+    """Reset DynamoDB singleton state after every test to prevent cross-test leaks."""
+    yield
+    from src.utils.dynamodb import clear_all_overrides, reset_dynamodb_resource, reset_singleton
+
+    clear_all_overrides()
+    reset_singleton()
+    reset_dynamodb_resource()
+
+
+@pytest.fixture(autouse=True)
+def aws_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Set fake AWS credentials and table names for every test.
+
+    Uses monkeypatch so values are restored after each test, preventing leaks
+    from tests that mutate os.environ (e.g. coverage filler tests).
+    """
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "testing")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "testing")
+    monkeypatch.setenv("AWS_SECURITY_TOKEN", "testing")
+    monkeypatch.setenv("AWS_SESSION_TOKEN", "testing")
+    monkeypatch.setenv("AWS_DEFAULT_REGION", "us-east-1")
+    monkeypatch.setenv("TABLE_NAME", "PsmApp")
+    monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
+    monkeypatch.setenv("CATALOGS_TABLE_NAME", "kernelworx-catalogs-ue1-dev")
+    monkeypatch.setenv("PROFILES_TABLE_NAME", "kernelworx-profiles-v2-ue1-dev")
+    monkeypatch.setenv("CAMPAIGNS_TABLE_NAME", "kernelworx-campaigns-v2-ue1-dev")
+    monkeypatch.setenv("ORDERS_TABLE_NAME", "kernelworx-orders-v2-ue1-dev")
+    monkeypatch.setenv("SHARES_TABLE_NAME", "kernelworx-shares-ue1-dev")
+    monkeypatch.setenv("INVITES_TABLE_NAME", "kernelworx-invites-ue1-dev")
+    monkeypatch.setenv("SHARED_CAMPAIGNS_TABLE_NAME", "kernelworx-shared-campaigns-ue1-dev")
+    monkeypatch.setenv("EXPORTS_BUCKET", "kernelworx-exports-ue1-dev")
 
 
 @pytest.fixture
@@ -208,6 +240,7 @@ def sample_campaign(dynamodb_table: Any, sample_profile_id: str, sample_campaign
         "profileId": sample_profile_id,  # PK
         "campaignId": sample_campaign_id,  # SK - DynamoDB schema uses campaignId
         "campaignName": "Fall 2025",
+        "campaignYear": 2025,
         "startDate": "2025-09-01",
         "catalogId": "CATALOG#default",
         "createdAt": datetime.now(timezone.utc).isoformat(),
@@ -218,13 +251,13 @@ def sample_campaign(dynamodb_table: Any, sample_profile_id: str, sample_campaign
 
 
 @pytest.fixture
-def sample_order_id() -> str:  # pragma: no cover
+def sample_order_id() -> str:
     """Sample order ID."""
-    return "ORDER#order-456-xyz"  # pragma: no cover
+    return "ORDER#order-456-xyz"
 
 
 @pytest.fixture
-def sample_order(  # pragma: no cover
+def sample_order(
     dynamodb_table: Any, sample_profile_id: str, sample_campaign_id: str, sample_order_id: str
 ) -> Dict[str, Any]:
     """Create sample order in DynamoDB (multi-table design V2: PK=campaignId, SK=orderId)."""

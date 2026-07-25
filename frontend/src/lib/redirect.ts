@@ -8,8 +8,9 @@
  */
 export function isSafeRedirect(path: string): boolean {
   if (typeof path !== 'string') return false;
-  if (!path.startsWith('/') || path.startsWith('//')) return false;
-
+  if (!path.startsWith('/')) return false;
+  if (path.startsWith('//')) return false;
+  if (path.includes('\\')) return false;
   return true;
 }
 

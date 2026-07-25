@@ -1,17 +1,15 @@
 #!/bin/bash
 # Frontend deployment script
-# Fetches configuration from CloudFormation, builds, and deploys to S3/CloudFront
+# Fetches configuration from OpenTofu outputs, builds, and deploys to S3/CloudFront
 
 set -e
 
 # Configuration
 ENVIRONMENT="${ENVIRONMENT:-dev}"
 REGION="${AWS_REGION:-us-east-1}"
-STACK_NAME="kernelworx-ue1-${ENVIRONMENT}"
 
 echo "🚀 Deploying Frontend"
 echo "   Environment: ${ENVIRONMENT}"
-echo "   Stack: ${STACK_NAME}"
 echo "   Region: ${REGION}"
 echo ""
 
@@ -19,27 +17,34 @@ echo ""
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+# OpenTofu environment directory
+TOFU_DIR="$SCRIPT_DIR/../tofu/application/environments/$ENVIRONMENT"
+
 # ============================================================
-# Step 1: Fetch configuration from CloudFormation
+# Helper: fetch an OpenTofu output, returning empty on failure
 # ============================================================
-echo "📡 Fetching configuration from CloudFormation..."
+tofu_output() {
+    local key="$1"
+    (cd "$TOFU_DIR" && tofu output -raw "$key" 2>/dev/null) || echo ""
+}
 
-# Get Cognito User Pool ID (try direct lookup first, then from existing .env)
-USER_POOL_ID=$(aws cloudformation list-stack-resources \
-    --stack-name "$STACK_NAME" \
-    --query "StackResourceSummaries[?LogicalResourceId=='UserPool6BA7E5F2'].PhysicalResourceId" \
-    --output text \
-    --region "$REGION" 2>/dev/null || echo "")
+# ============================================================
+# Step 1: Fetch configuration from OpenTofu outputs
+# ============================================================
+echo "📡 Fetching configuration from OpenTofu outputs..."
 
+USER_POOL_ID=$(tofu_output cognito_user_pool_id)
+CLIENT_ID=$(tofu_output cognito_client_id)
+COGNITO_DOMAIN=$(tofu_output cognito_domain)
+S3_BUCKET=$(tofu_output static_assets_bucket)
+CF_DISTRIBUTION=$(tofu_output cloudfront_distribution_id)
+APPSYNC_API_URL=$(tofu_output appsync_api_url)
+SITE_URL=$(tofu_output site_url)
+
+# ============================================================
+# Fallbacks to AWS CLI when OpenTofu outputs are unavailable
+# ============================================================
 if [ -z "$USER_POOL_ID" ] || [ "$USER_POOL_ID" == "None" ]; then
-    # User Pool might be imported - check existing .env or use known value
-    if [ -f .env ]; then
-        USER_POOL_ID=$(grep VITE_COGNITO_USER_POOL_ID .env | cut -d= -f2)
-    fi
-fi
-
-if [ -z "$USER_POOL_ID" ] || [ "$USER_POOL_ID" == "None" ]; then
-    # Last resort - look up User Pool by name
     POOL_NAME="kernelworx-users-ue1-${ENVIRONMENT}"
     USER_POOL_ID=$(aws cognito-idp list-user-pools --max-results 50 \
         --query "UserPools[?Name=='$POOL_NAME'].Id | [0]" \
@@ -47,30 +52,7 @@ if [ -z "$USER_POOL_ID" ] || [ "$USER_POOL_ID" == "None" ]; then
         --region "$REGION" 2>/dev/null || echo "")
 fi
 
-if [ -z "$USER_POOL_ID" ] || [ "$USER_POOL_ID" == "None" ]; then
-    echo "❌ Error: Could not find Cognito User Pool in stack $STACK_NAME"
-    exit 1
-fi
-echo "   User Pool ID: $USER_POOL_ID"
-
-# Get Cognito App Client ID from CloudFormation outputs
-CLIENT_ID=$(aws cloudformation describe-stacks \
-    --stack-name "$STACK_NAME" \
-    --query "Stacks[0].Outputs[?OutputKey=='UserPoolClientId'].OutputValue" \
-    --output text \
-    --region "$REGION" 2>/dev/null || echo "")
-
 if [ -z "$CLIENT_ID" ] || [ "$CLIENT_ID" == "None" ]; then
-    # Fallback: try to find it as a stack resource (old method)
-    CLIENT_ID=$(aws cloudformation list-stack-resources \
-        --stack-name "$STACK_NAME" \
-        --query "StackResourceSummaries[?LogicalResourceId=='UserPoolAppClientDD0407EC'].PhysicalResourceId" \
-        --output text \
-        --region "$REGION" 2>/dev/null || echo "")
-fi
-
-if [ -z "$CLIENT_ID" ] || [ "$CLIENT_ID" == "None" ]; then
-    # Last resort: look up client from User Pool
     CLIENT_ID=$(aws cognito-idp list-user-pool-clients \
         --user-pool-id "$USER_POOL_ID" \
         --max-results 1 \
@@ -78,28 +60,6 @@ if [ -z "$CLIENT_ID" ] || [ "$CLIENT_ID" == "None" ]; then
         --output text \
         --region "$REGION" 2>/dev/null || echo "")
 fi
-
-if [ -z "$CLIENT_ID" ] || [ "$CLIENT_ID" == "None" ]; then
-    echo "❌ Error: Could not find Cognito App Client in stack $STACK_NAME"
-    exit 1
-fi
-echo "   Client ID: $CLIENT_ID"
-
-# Construct site domain early; needed for fallback construction below
-if [ "$ENVIRONMENT" == "prod" ]; then
-    SITE_DOMAIN="kernelworx.app"
-else
-    SITE_DOMAIN="${ENVIRONMENT}.kernelworx.app"
-fi
-
-# OpenTofu environment directory (for output lookups)
-TOFU_DIR="$SCRIPT_DIR/../tofu/application/environments/$ENVIRONMENT"
-
-# Get Cognito custom domain
-# 1. Prefer OpenTofu output (matches the managed infrastructure config)
-# 2. Fall back to the actual Cognito user pool custom domain via AWS CLI
-# 3. Last resort: construct the expected domain and warn
-COGNITO_DOMAIN=$(cd "$TOFU_DIR" && tofu output -raw cognito_domain 2>/dev/null || echo "")
 
 if [ -z "$COGNITO_DOMAIN" ] || [ "$COGNITO_DOMAIN" == "None" ]; then
     COGNITO_DOMAIN=$(aws cognito-idp describe-user-pool \
@@ -109,40 +69,11 @@ if [ -z "$COGNITO_DOMAIN" ] || [ "$COGNITO_DOMAIN" == "None" ]; then
         --region "$REGION" 2>/dev/null || echo "")
 fi
 
-if [ -z "$COGNITO_DOMAIN" ] || [ "$COGNITO_DOMAIN" == "None" ]; then
-    COGNITO_DOMAIN="login.${SITE_DOMAIN}"
-    echo "⚠️  Warning: Could not discover Cognito custom domain; using constructed value: $COGNITO_DOMAIN"
-fi
-echo "   Cognito Domain: $COGNITO_DOMAIN"
-
-# Get S3 bucket for static assets
-S3_BUCKET=$(aws cloudformation list-stack-resources \
-    --stack-name "$STACK_NAME" \
-    --query "StackResourceSummaries[?LogicalResourceId=='StaticAssetsDDEE9873'].PhysicalResourceId" \
-    --output text \
-    --region "$REGION" 2>/dev/null || echo "")
-
 if [ -z "$S3_BUCKET" ] || [ "$S3_BUCKET" == "None" ]; then
-    # Fallback to naming convention
     S3_BUCKET="kernelworx-static-ue1-${ENVIRONMENT}"
 fi
 
-# Verify bucket exists
-if ! aws s3api head-bucket --bucket "$S3_BUCKET" 2>/dev/null; then
-    echo "❌ Error: S3 bucket $S3_BUCKET does not exist"
-    exit 1
-fi
-echo "   S3 Bucket: $S3_BUCKET"
-
-# Get CloudFront Distribution ID
-CF_DISTRIBUTION=$(aws cloudformation list-stack-resources \
-    --stack-name "$STACK_NAME" \
-    --query "StackResourceSummaries[?ResourceType=='AWS::CloudFront::Distribution'].PhysicalResourceId" \
-    --output text \
-    --region "$REGION" 2>/dev/null || echo "")
-
 if [ -z "$CF_DISTRIBUTION" ] || [ "$CF_DISTRIBUTION" == "None" ]; then
-    # Fallback: Find distribution by domain alias
     if [ "$ENVIRONMENT" == "prod" ]; then
         SITE_ALIAS="kernelworx.app"
     else
@@ -153,16 +84,51 @@ if [ -z "$CF_DISTRIBUTION" ] || [ "$CF_DISTRIBUTION" == "None" ]; then
         --output text 2>/dev/null || echo "")
 fi
 
-if [ -z "$CF_DISTRIBUTION" ] || [ "$CF_DISTRIBUTION" == "None" ]; then
-    echo "❌ Error: Could not find CloudFront distribution for $STACK_NAME"
+if [ "$ENVIRONMENT" == "prod" ]; then
+    SITE_DOMAIN="kernelworx.app"
+else
+    SITE_DOMAIN="${ENVIRONMENT}.kernelworx.app"
+fi
+
+if [ -z "$APPSYNC_API_URL" ] || [ "$APPSYNC_API_URL" == "None" ]; then
+    APPSYNC_API_URL="https://api.${SITE_DOMAIN}/graphql"
+fi
+
+if [ -z "$SITE_URL" ] || [ "$SITE_URL" == "None" ]; then
+    SITE_URL="https://${SITE_DOMAIN}"
+fi
+
+# ============================================================
+# Validate required values
+# ============================================================
+if [ -z "$USER_POOL_ID" ] || [ "$USER_POOL_ID" == "None" ]; then
+    echo "❌ Error: Could not find Cognito User Pool"
     exit 1
 fi
-echo "   CloudFront Distribution: $CF_DISTRIBUTION"
 
-# Construct API endpoint
-API_ENDPOINT="https://api.${SITE_DOMAIN}/graphql"
-echo "   Site Domain: $SITE_DOMAIN"
-echo "   API Endpoint: $API_ENDPOINT"
+if [ -z "$CLIENT_ID" ] || [ "$CLIENT_ID" == "None" ]; then
+    echo "❌ Error: Could not find Cognito App Client"
+    exit 1
+fi
+
+if [ -z "$CF_DISTRIBUTION" ] || [ "$CF_DISTRIBUTION" == "None" ]; then
+    echo "❌ Error: Could not find CloudFront distribution"
+    exit 1
+fi
+
+# Verify bucket exists
+if ! aws s3api head-bucket --bucket "$S3_BUCKET" 2>/dev/null; then
+    echo "❌ Error: S3 bucket $S3_BUCKET does not exist"
+    exit 1
+fi
+
+echo "   User Pool ID: $USER_POOL_ID"
+echo "   Client ID: $CLIENT_ID"
+echo "   Cognito Domain: $COGNITO_DOMAIN"
+echo "   S3 Bucket: $S3_BUCKET"
+echo "   CloudFront Distribution: $CF_DISTRIBUTION"
+echo "   Site URL: $SITE_URL"
+echo "   API Endpoint: $APPSYNC_API_URL"
 
 # ============================================================
 # Step 2: Generate .env.production file (used by Vite for builds)
@@ -173,7 +139,7 @@ echo "📝 Generating .env.production file..."
 cat > .env.production << EOF
 # Auto-generated by deploy.sh - $(date)
 # AppSync GraphQL API
-VITE_APPSYNC_ENDPOINT=${API_ENDPOINT}
+VITE_APPSYNC_ENDPOINT=${APPSYNC_API_URL}
 VITE_APPSYNC_REGION=${REGION}
 
 # Cognito User Pool
@@ -182,8 +148,8 @@ VITE_COGNITO_USER_POOL_CLIENT_ID=${CLIENT_ID}
 VITE_COGNITO_DOMAIN=${COGNITO_DOMAIN}
 
 # OAuth Configuration
-VITE_OAUTH_REDIRECT_SIGNIN=https://${SITE_DOMAIN}
-VITE_OAUTH_REDIRECT_SIGNOUT=https://${SITE_DOMAIN}
+VITE_OAUTH_REDIRECT_SIGNIN=${SITE_URL}
+VITE_OAUTH_REDIRECT_SIGNOUT=${SITE_URL}
 EOF
 
 # Also update .env for local dev consistency
@@ -226,7 +192,7 @@ DEPLOY_TIME=$(date '+%Y-%m-%d %H:%M:%S %Z')
 echo ""
 echo "✅ Deployment complete!"
 echo ""
-echo "   Site URL: https://${SITE_DOMAIN}"
+echo "   Site URL: ${SITE_URL}"
 echo "   CloudFront invalidation may take 1-2 minutes to complete."
 echo "   Deployed at: ${DEPLOY_TIME}"
 echo ""

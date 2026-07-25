@@ -56,9 +56,22 @@ function getUniqueProducts(orders: Order[]): string[] {
   return Array.from(new Set(orders.flatMap((order) => order.lineItems.map((item) => item.productName)))).sort();
 }
 
+// Characters that spreadsheet applications interpret as formula triggers.
+const FORMULA_TRIGGER_RE = /^[=+\-@\t\r]/;
+
+function sanitizeReportValue(value: string | number): string | number {
+  // Force text treatment for cells that would otherwise be interpreted as formulas.
+  if (typeof value === 'string' && FORMULA_TRIGGER_RE.test(value)) {
+    return `'${value}`;
+  }
+  return value;
+}
+
 function prepareReportData(orders: Order[]) {
   const allProducts = getUniqueProducts(orders);
-  const headers: (string | number)[] = ['Name', 'Phone', 'Address', ...allProducts, 'Total'];
+  const headers: (string | number)[] = ['Name', 'Phone', 'Address', ...allProducts, 'Total'].map(
+    sanitizeReportValue,
+  );
 
   const rows = [
     headers,
@@ -74,10 +87,10 @@ function prepareReportData(orders: Order[]) {
       const productCounts = allProducts.map((product) => quantities[product] || '');
 
       return [
-        order.customerName,
-        formatPhone(order.customerPhone),
-        formatAddress(order.customerAddress),
-        ...productCounts,
+        sanitizeReportValue(order.customerName),
+        sanitizeReportValue(formatPhone(order.customerPhone)),
+        sanitizeReportValue(formatAddress(order.customerAddress)),
+        ...productCounts.map(sanitizeReportValue),
         order.totalAmount,
       ];
     }),
@@ -86,11 +99,17 @@ function prepareReportData(orders: Order[]) {
   return { headers, rows, allProducts };
 }
 
+function escapeCsvCell(value: string | number): string {
+  const str = String(value);
+  // Escape embedded double-quotes by doubling them, then wrap the whole cell in quotes.
+  return `"${str.replace(/"/g, '""')}"`;
+}
+
 export function downloadAsCSV(orders: Order[], campaignId: string): void {
   const { rows } = prepareReportData(orders);
 
   // Convert to CSV
-  const csv = rows.map((row) => row.map((cell) => `"${cell}"`).join(',')).join('\n');
+  const csv = rows.map((row) => row.map(escapeCsvCell).join(',')).join('\n');
 
   // Create blob and download
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -104,6 +123,7 @@ export function downloadAsCSV(orders: Order[], campaignId: string): void {
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
+  URL.revokeObjectURL(url);
 }
 
 export function downloadAsXLSX(orders: Order[], campaignId: string): void {
