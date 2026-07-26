@@ -231,9 +231,6 @@ module "apigateway" {
 
   dynamodb_table_names = module.dynamodb.table_names
   lambda_function_arns = module.lambda.function_arns
-  apigateway_execution_role_arn  = module.iam.apigateway_execution_role_arn
-  apigateway_execution_role_name = module.iam.apigateway_execution_role_name
-  authorizer_lambda_arn          = module.lambda.authorizer_arn
 }
 
 module "cloudfront" {

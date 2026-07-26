@@ -333,29 +333,6 @@ resource "aws_lambda_function" "app_functions" {
 }
 
 # kics-scan ignore-line
-resource "aws_lambda_function" "authorizer" {
-  function_name = "${var.name_prefix}-authorizer${local.func_suffix}"
-  role          = var.lambda_role_arn
-  handler       = "handlers.authorizer.handler"
-  runtime       = "python3.14"
-  architectures = ["arm64"]
-  timeout       = 10
-  memory_size   = 256
-
-  filename         = data.archive_file.lambda_payload.output_path
-  source_code_hash = data.archive_file.lambda_payload.output_base64sha256
-
-  layers = [aws_lambda_layer_version.shared.arn]
-
-  environment {
-    variables = local.common_env
-  }
-
-  lifecycle {
-    prevent_destroy = false
-  }
-}
-
 # Outputs
 output "function_arns" {
   description = "Map of all app Lambda function logical names (domain + restored) to their ARNs, keyed by logical name for the apigateway module"
@@ -378,10 +355,6 @@ output "trigger_function_arns" {
   value       = { for k, v in aws_lambda_function.trigger_functions : k => v.arn }
 }
 
-output "authorizer_arn" {
-  description = "ARN of the API Gateway custom authorizer Lambda"
-  value       = aws_lambda_function.authorizer.arn
-}
 
 output "layer_arn" {
   description = "ARN of the shared Lambda layer"

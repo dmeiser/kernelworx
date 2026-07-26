@@ -6,10 +6,8 @@ import os
 from unittest.mock import MagicMock, patch
 
 from src.handlers.auth_domain import (
-    _is_https_request,
     _site_domain,
     api_auth_login_handler,
-    api_auth_session_handler,
     api_auth_signup_handler,
     handler,
     render_landing_handler,
@@ -122,68 +120,6 @@ def test_site_domain_empty_fallback() -> None:
     _os.environ.pop("SITE_DOMAIN", None)
     result = _site_domain({})
     assert result == ""
-
-
-def test_is_https_request_http_proto() -> None:
-    """_is_https_request returns False when X-Forwarded-Proto is http."""
-    event = {"headers": {"X-Forwarded-Proto": "http"}}
-    assert _is_https_request(event) is False
-
-
-def test_is_https_request_https_proto() -> None:
-    """_is_https_request returns True when X-Forwarded-Proto is https."""
-    event = {"headers": {"x-forwarded-proto": "https"}}
-    assert _is_https_request(event) is True
-
-
-def test_is_https_request_no_proto() -> None:
-    """_is_https_request returns True when no proto header (local/internal)."""
-    assert _is_https_request({}) is True
-
-
-def test_api_auth_session_handler_missing_token() -> None:
-    """api_auth_session_handler returns 400 when access_token absent."""
-    res = api_auth_session_handler({"body": "{}"}, None)
-    assert res["statusCode"] == 400
-    assert "access_token is required" in res["body"]
-
-
-def test_api_auth_session_handler_https() -> None:
-    """api_auth_session_handler sets Secure cookie over HTTPS."""
-    event = {
-        "body": '{"access_token": "tok123"}',
-        "headers": {"X-Forwarded-Proto": "https"},
-    }
-    res = api_auth_session_handler(event, None)
-    assert res["statusCode"] == 200
-    assert "Set-Cookie" in res["headers"]
-    assert "Secure" in res["headers"]["Set-Cookie"]
-    assert "kw_access_token=tok123" in res["headers"]["Set-Cookie"]
-
-
-def test_api_auth_session_handler_http() -> None:
-    """api_auth_session_handler omits Secure flag over plain HTTP."""
-    event = {
-        "body": '{"access_token": "tok456"}',
-        "headers": {"X-Forwarded-Proto": "http"},
-    }
-    res = api_auth_session_handler(event, None)
-    assert res["statusCode"] == 200
-    cookie = res["headers"]["Set-Cookie"]
-    assert "kw_access_token=tok456" in cookie
-    assert "Secure" not in cookie
-
-
-def test_handler_session_route() -> None:
-    """handler dispatches POST /api/auth/session correctly."""
-    event = {
-        "httpMethod": "POST",
-        "path": "/api/auth/session",
-        "body": '{"access_token": "t"}',
-        "headers": {},
-    }
-    res = handler(event, None)
-    assert res["statusCode"] == 200
 
 
 def test_handler_unknown_route() -> None:

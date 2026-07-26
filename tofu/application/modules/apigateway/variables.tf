@@ -42,27 +42,12 @@ variable "user_pool_id" {
 
 variable "user_pool_arn" {
   type        = string
-  description = "Cognito User Pool ARN (kept for backwards compatibility; no longer used by the custom authorizer)"
-}
-
-variable "authorizer_lambda_arn" {
-  type        = string
-  description = "ARN of the custom request authorizer Lambda function"
-}
-
-variable "apigateway_execution_role_name" {
-  type        = string
-  description = "Name of the API Gateway execution role that is allowed to invoke the authorizer"
+  description = "Cognito User Pool ARN for the native API Gateway Cognito JWT authorizer"
 }
 
 variable "aws_region" {
   type        = string
   description = "AWS region"
-}
-
-variable "apigateway_execution_role_arn" {
-  type        = string
-  description = "ARN of the API Gateway execution role used as credentials for x-amazon-apigateway-integration"
 }
 
 

@@ -23,12 +23,30 @@ function redirectUri() {
 }
 
 /**
+ * Cookie helpers for the auth token.
+ * Using a Secure (non-HttpOnly) cookie so htmx:configRequest can read it client-side.
+ */
+function setAuthCookie(token) {
+  const secure = window.location.protocol === 'https:' ? '; Secure' : '';
+  document.cookie = `kw_id_token=${encodeURIComponent(token)}; SameSite=Lax; Path=/${secure}`;
+}
+
+function clearAuthCookie() {
+  document.cookie = 'kw_id_token=; SameSite=Lax; Path=/; Max-Age=0';
+}
+
+function getAuthToken() {
+  const match = document.cookie.match(/(?:^|;)\s*kw_id_token=([^;]+)/);
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+/**
  * Inject Authorization header on every HTMX request.
  */
 document.addEventListener('htmx:configRequest', (event) => {
-  const tokens = JSON.parse(sessionStorage.getItem('kw_tokens') || 'null');
-  if (tokens && tokens.access_token) {
-    event.detail.headers['Authorization'] = 'Bearer ' + tokens.access_token;
+  const token = getAuthToken();
+  if (token) {
+    event.detail.headers['Authorization'] = 'Bearer ' + token;
   }
 });
 
@@ -47,35 +65,26 @@ document.addEventListener('htmx:responseError', (event) => {
 function logout() {
   sessionStorage.removeItem('kw_tokens');
   sessionStorage.removeItem('kw_pkce_verifier');
+  clearAuthCookie();
   window.location.href = '/login';
 }
 
 function storeTokens(tokens) {
   if (tokens && tokens.id_token) {
     sessionStorage.setItem('kw_tokens', JSON.stringify(tokens));
+    setAuthCookie(tokens.id_token);
   }
 }
 
 function finishSignIn(tokens) {
-  if (!tokens || !tokens.access_token) {
-    showAuthError('Unable to create session: missing access token.');
+  if (!tokens || !tokens.id_token) {
+    showAuthError('Unable to complete sign-in: missing tokens.');
     return;
   }
-  fetch('/api/auth/session', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ access_token: tokens.access_token }),
-  })
-    .then(async (response) => {
-      const body = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(body.error || 'Failed to create session.');
-      }
-      window.location.href = '/scouts';
-    })
-    .catch((error) => {
-      showAuthError(error.message);
-    });
+  // Tokens already stored in sessionStorage by storeTokens().
+  // Navigate via htmx so the Authorization header is injected by htmx:configRequest.
+  window.history.pushState({}, '', '/home');
+  htmx.ajax('GET', '/home', { target: 'body', swap: 'outerHTML' });
 }
 
 function showAuthError(message) {

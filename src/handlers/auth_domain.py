@@ -143,37 +143,6 @@ def api_auth_signup_handler(event: Dict[str, Any], context: Any) -> Dict[str, An
         }
 
 
-def _is_https_request(event: Dict[str, Any]) -> bool:
-    """Return True if the request reached us over HTTPS (via CloudFront or API Gateway)."""
-    headers = event.get("headers") or {}
-    proto = headers.get("X-Forwarded-Proto") or headers.get("x-forwarded-proto") or ""
-    return proto.lower() == "https" or not proto
-
-
-def api_auth_session_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
-    """Set an HttpOnly session cookie from a Cognito access token.
-
-    The browser sends this cookie automatically on every subsequent request,
-    allowing the API Gateway custom authorizer to validate the user.
-    """
-    body = json.loads(event.get("body") or "{}")
-    access_token = body.get("access_token", "")
-    if not access_token:
-        return {
-            "statusCode": 400,
-            "headers": {"Content-Type": "application/json"},
-            "body": json.dumps({"error": "access_token is required"}),
-        }
-
-    secure_flag = " Secure;" if _is_https_request(event) else ""
-    cookie = f"kw_access_token={access_token};{secure_flag} HttpOnly; SameSite=Lax; Path=/"
-    return {
-        "statusCode": 200,
-        "headers": {"Content-Type": "application/json", "Set-Cookie": cookie},
-        "body": json.dumps({"success": True}),
-    }
-
-
 def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """API Gateway proxy entrypoint. Dispatch by method + path to the auth-domain handlers."""
     method = event.get("httpMethod", "GET")
@@ -192,6 +161,4 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         return api_auth_login_handler(event, context)
     if path == "/api/auth/signup" and method == "POST":
         return api_auth_signup_handler(event, context)
-    if path == "/api/auth/session" and method == "POST":
-        return api_auth_session_handler(event, context)
     return {"statusCode": 404, "headers": {"Content-Type": "text/plain"}, "body": "Not Found"}
