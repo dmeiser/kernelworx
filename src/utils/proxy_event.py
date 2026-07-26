@@ -20,10 +20,9 @@ except ModuleNotFoundError:  # pragma: no cover
 def get_caller_id(event: Dict[str, Any]) -> str:
     """Extract the authenticated caller's Cognito sub from the proxy event.
 
-    Reads ``requestContext.authorizer.claims.sub`` (Cognito authorizer) or
-    ``requestContext.authorizer.sub`` (custom request authorizer) and falls back
-    to the ``x-mock-user-id`` / ``x-test-sub`` headers used by local dev/test
-    servers.
+    Reads ``requestContext.authorizer.claims.sub`` (native Cognito JWT authorizer,
+    present on authenticated /api/* routes) and falls back to the
+    ``x-mock-user-id`` / ``x-test-sub`` headers used by local dev/test servers.
     """
     auth_ctx = event.get("requestContext", {}).get("authorizer", {}) or {}
     claims = auth_ctx.get("claims", {}) if isinstance(auth_ctx.get("claims"), dict) else auth_ctx
