@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+
+{% block title %}{{ campaign_name }} — KernelWorx{% endblock %}
+
+{% block content %}
+
+<nav style="margin-bottom: 16px; font-size: 0.875rem; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+  <a href="/scouts" style="color: var(--brand-color-link); text-decoration: none; font-weight: 600;">Scouts</a>
+  <span style="color: var(--brand-color-text-tertiary);">/</span>
+  <a href="/scouts/{{ profile_id|urlencode }}/campaigns" style="color: var(--brand-color-link); text-decoration: none; font-weight: 600;">{{ profile_name or 'Loading...' }}</a>
+  <span style="color: var(--brand-color-text-tertiary);">/</span>
+  <span style="color: var(--brand-color-text);">{{ campaign_name }} </span>
+</nav>
+
+<div class="card" style="margin-bottom: clamp(12px, 3vw, 24px); border-left: 4px solid var(--brand-primary-palette-6); border-radius: var(--brand-border-radius-lg); box-shadow: 0 1px 2px var(--brand-color-fill-quaternary);">
+  <div style="padding: clamp(16px, 3vw, 24px);">
+    <div style="display: flex; flex-direction: column; justify-content: space-between; align-items: flex-start; gap: 16px;">
+      <div>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <a href="/scouts/{{ profile_id|urlencode }}/campaigns" aria-label="Back to campaigns" style="display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; color: var(--brand-color-text-secondary); text-decoration: none; margin-right: 4px; border-radius: var(--brand-border-radius);">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20z"/></svg>
+          </a>
+          <h1 style="font-family: 'Bricolage Grotesque', 'Atkinson Hyperlegible', sans-serif; font-weight: 600; font-size: 22px; line-height: 1.25; color: var(--brand-color-text); margin: 0;">{{ campaign_name }}</h1>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Campaign Tabs (Orders active) -->
+<div style="border-bottom: 1px solid var(--brand-color-border); margin-bottom: 24px;">
+  <div style="display: flex; gap: 24px;">
+    <a href="/scouts/{{ profile_id|urlencode }}/campaigns/{{ campaign_id|urlencode }}/orders" style="display: inline-flex; align-items: center; gap: 8px; padding: 12px 0; color: var(--brand-color-primary); font-weight: 600; font-size: 0.875rem; text-decoration: none; border-bottom: 2px solid var(--brand-color-primary);">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M7 18c-1.1 0-1.99.9-1.99 2S5.9 22 7 22s2-.9 2-2-.9-2-2-2zM1 2v2h2l3.6 7.59-1.35 2.45c-.16.28-.25.61-.25.96 0 1.1.9 2 2 2h12v-2H7.42c-.14 0-.25-.11-.25-.25l.03-.12.9-1.63h7.45c.75 0 1.41-.41 1.75-1.03l3.58-6.49c.08-.14.12-.31.12-.48 0-.55-.45-1-1-1H5.21l-.94-2zM17 18c-1.1 0-1.99.9-1.99 2s.89 2 1.99 2 2-.9 2-2-.9-2-2-2z"/></svg>
+      Orders
+    </a>
+    <a href="/scouts/{{ profile_id|urlencode }}/campaigns/{{ campaign_id|urlencode }}/summary" style="display: inline-flex; align-items: center; gap: 8px; padding: 12px 0; color: var(--brand-color-text-secondary); font-weight: 600; font-size: 0.875rem; text-decoration: none;">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M3 3v18h18v-2H5V3zm9 14l4-8 4 4-3 4z"/></svg>
+      Summary
+    </a>
+    <a href="/scouts/{{ profile_id|urlencode }}/campaigns/{{ campaign_id|urlencode }}/reports" style="display: inline-flex; align-items: center; gap: 8px; padding: 12px 0; color: var(--brand-color-text-secondary); font-weight: 600; font-size: 0.875rem; text-decoration: none;">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M3 3v18h18v-2H5V3zm9 14l4-8 4 4-3 4z"/></svg>
+      Reports
+    </a>
+    <a href="/scouts/{{ profile_id|urlencode }}/campaigns/{{ campaign_id|urlencode }}/settings" style="display: inline-flex; align-items: center; gap: 8px; padding: 12px 0; color: var(--brand-color-text-secondary); font-weight: 600; font-size: 0.875rem; text-decoration: none;">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
+      Settings
+    </a>
+  </div>
+</div>
+
+<!-- Summary tiles -->
+<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; margin-bottom: 24px;">
+  <div style="background-color: var(--brand-color-bg-container); border: 1px solid var(--brand-color-border-secondary); border-radius: var(--brand-border-radius-lg); padding: 24px; box-shadow: 0 1px 2px var(--brand-color-fill-quaternary);">
+    <div style="display: flex; gap: 16px; align-items: center;">
+      <svg width="40" height="40" viewBox="0 0 24 24" fill="var(--brand-color-primary)"><path d="M7 18c-1.1 0-1.99.9-1.99 2S5.9 22 7 22s2-.9 2-2-.9-2-2-2zM1 2v2h2l3.6 7.59-1.35 2.45c-.16.28-.25.61-.25.96 0 1.1.9 2 2 2h12v-2H7.42c-.14 0-.25-.11-.25-.25l.03-.12.9-1.63h7.45c.75 0 1.41-.41 1.75-1.03l3.58-6.49c.08-.14.12-.31.12-.48 0-.55-.45-1-1-1H5.21l-.94-2zM17 18c-1.1 0-1.99.9-1.99 2s.89 2 1.99 2 2-.9 2-2-.9-2-2-2z"/></svg>
+      <div>
+        <div style="font-family: 'Bricolage Grotesque', 'Atkinson Hyperlegible', sans-serif; font-weight: 600; font-size: 22px; line-height: 1.2; color: var(--brand-color-text);">{{ total_orders }}</div>
+        <div style="font-size: 0.875rem; color: var(--brand-color-text-secondary);">Total Orders</div>
+      </div>
+    </div>
+  </div>
+  <div style="background-color: var(--brand-color-bg-container); border: 1px solid var(--brand-color-border-secondary); border-radius: var(--brand-border-radius-lg); padding: 24px; box-shadow: 0 1px 2px var(--brand-color-fill-quaternary);">
+    <div style="display: flex; gap: 16px; align-items: center;">
+      <svg width="40" height="40" viewBox="0 0 24 24" fill="var(--brand-color-success)"><path d="M11.8 10.9c-2.27-.59-3-1.2-3-2.15 0-1.09 1.01-1.85 2.7-1.85 1.78 0 2.44.85 2.5 2.1h2.21c-.07-1.72-1.12-3.3-3.21-3.81V3h-3v2.16c-1.94.42-3.5 1.68-3.5 3.61 0 2.31 1.91 3.46 4.7 4.13 2.5.6 3 1.48 3 2.41 0 .69-.49 1.79-2.7 1.79-2.06 0-2.87-.92-2.98-2.1h-2.2c.12 2.19 1.76 3.42 3.68 3.83V21h3v-2.15c1.95-.37 3.5-1.5 3.5-3.55 0-2.84-2.43-3.81-4.7-4.4z"/></svg>
+      <div>
+        <div style="font-family: 'Bricolage Grotesque', 'Atkinson Hyperlegible', sans-serif; font-weight: 600; font-size: 22px; line-height: 1.2; color: var(--brand-color-text);">${{ "%.2f"|format(total_revenue or 0) }}</div>
+        <div style="font-size: 0.875rem; color: var(--brand-color-text-secondary);">Total Sales</div>
+      </div>
+    </div>
+  </div>
+  <div style="background-color: var(--brand-color-bg-container); border: 1px solid var(--brand-color-border-secondary); border-radius: var(--brand-border-radius-lg); padding: 24px; box-shadow: 0 1px 2px var(--brand-color-fill-quaternary);">
+    <div style="display: flex; gap: 16px; align-items: center;">
+      <svg width="40" height="40" viewBox="0 0 24 24" fill="var(--brand-color-info)"><path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5C15 13.17 10.33 13 8 13zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg>
+      <div>
+        <div style="font-family: 'Bricolage Grotesque', 'Atkinson Hyperlegible', sans-serif; font-weight: 600; font-size: 22px; line-height: 1.2; color: var(--brand-color-text);">{{ unique_customers }}</div>
+        <div style="font-size: 0.875rem; color: var(--brand-color-text-secondary);">Unique Customers</div>
+      </div>
+    </div>
+  </div>
+  <div style="background-color: var(--brand-color-bg-container); border: 1px solid var(--brand-color-border-secondary); border-radius: var(--brand-border-radius-lg); padding: 24px; box-shadow: 0 1px 2px var(--brand-color-fill-quaternary);">
+    <div style="display: flex; gap: 16px; align-items: center;">
+      <svg width="40" height="40" viewBox="0 0 24 24" fill="var(--brand-color-primary)"><path d="M20 2H4c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 18H4V4h16zM6 12h4v6H6zm6-6h4v12h-4z"/></svg>
+      <div>
+        <div style="font-family: 'Bricolage Grotesque', 'Atkinson Hyperlegible', sans-serif; font-weight: 600; font-size: 22px; line-height: 1.2; color: var(--brand-color-text);">{{ total_items_sold }}</div>
+        <div style="font-size: 0.875rem; color: var(--brand-color-text-secondary);">Items Sold</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Orders header + New Order -->
+<div style="display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 24px; flex-wrap: wrap;">
+  <h2 style="font-family: 'Bricolage Grotesque', 'Atkinson Hyperlegible', sans-serif; font-weight: 600; font-size: 18px; color: var(--brand-color-text); margin: 0;">Orders</h2>
+  <a href="/scouts/{{ profile_id|urlencode }}/campaigns/{{ campaign_id|urlencode }}/new" class="btn btn-primary" style="display: inline-flex; align-items: center; gap: 6px; background-color: var(--brand-primary-palette-7); color: #ffffff; border: 1px solid var(--brand-primary-palette-7); height: 32px; padding: 0 12px; font-size: 0.875rem; font-weight: 600; border-radius: var(--brand-border-radius); text-decoration: none;">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6z"/></svg>
+    New Order
+  </a>
+</div>
+
+{% if orders %}
+  <div style="background-color: var(--brand-color-bg-container); border: 1px solid var(--brand-color-border-secondary); border-radius: var(--brand-border-radius-lg); overflow: hidden; box-shadow: 0 1px 2px var(--brand-color-fill-quaternary);">
+    <table style="width: 100%; border-collapse: collapse; text-align: left;">
+      <thead>
+        <tr style="border-bottom: 1px solid var(--brand-color-border-secondary);">
+          <th style="padding: 8px 16px; font-size: 0.8125rem; font-weight: 600; color: var(--brand-color-text-secondary);">Date</th>
+          <th style="padding: 8px 16px; font-size: 0.8125rem; font-weight: 600; color: var(--brand-color-text-secondary);">Customer</th>
+          <th style="padding: 8px 16px; font-size: 0.8125rem; font-weight: 600; color: var(--brand-color-text-secondary);">Phone</th>
+          <th style="padding: 8px 16px; font-size: 0.8125rem; font-weight: 600; color: var(--brand-color-text-secondary);">Items</th>
+          <th style="padding: 8px 16px; font-size: 0.8125rem; font-weight: 600; color: var(--brand-color-text-secondary);">Payment</th>
+          <th style="padding: 8px 16px; font-size: 0.8125rem; font-weight: 600; color: var(--brand-color-text-secondary); text-align: right;">Total</th>
+          <th style="padding: 8px 16px; font-size: 0.8125rem; font-weight: 600; color: var(--brand-color-text-secondary); text-align: right;">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for order in orders %}
+          <tr id="order-row-{{ order.orderId|replace('#', '-') }}" style="border-bottom: 1px solid var(--brand-color-border-secondary);">
+            <td style="padding: 8px 16px; font-size: 0.875rem; color: var(--brand-color-text);">{{ order.orderDate or '' }}</td>
+            <td style="padding: 8px 16px; font-size: 0.875rem; font-weight: 600; color: var(--brand-color-text);">{{ order.customerName }}</td>
+            <td style="padding: 8px 16px; font-size: 0.875rem; color: var(--brand-color-text-secondary);">{{ order.customerPhone or '—' }}</td>
+            <td style="padding: 8px 16px; font-size: 0.875rem; color: var(--brand-color-text);">{{ order.totalItems|default(0) }}</td>
+            <td style="padding: 8px 16px;">
+              <span style="display: inline-block; padding: 2px 8px; border-radius: var(--brand-border-radius-sm); font-size: 0.75rem; font-weight: 600; background-color: var(--brand-color-fill-tertiary); color: var(--brand-color-text-secondary); border: 1px solid var(--brand-color-border);">{{ (order.paymentMethod or 'OTHER')|replace('_', ' ') }}</span>
+            </td>
+            <td style="padding: 8px 16px; font-size: 0.875rem; font-weight: 600; color: var(--brand-color-text); text-align: right;">${{ "%.2f"|format(order.totalAmount or 0) }}</td>
+            <td style="padding: 8px 16px; text-align: right;">
+              <div style="display: flex; gap: 4px; justify-content: flex-end;">
+                <a href="/scouts/{{ profile_id|urlencode }}/campaigns/{{ campaign_id|urlencode }}/orders/{{ order.orderId|urlencode }}/edit" aria-label="Edit order for {{ order.customerName }}" style="display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; color: var(--brand-color-primary); text-decoration: none; border-radius: var(--brand-border-radius);">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75z"/></svg>
+                </a>
+                <button aria-label="Delete order for {{ order.customerName }}" style="display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; color: var(--brand-color-error); background: none; border: none; cursor: pointer; border-radius: var(--brand-border-radius);"
+                        hx-delete="/api/orders/{{ order.orderId|urlencode }}"
+                        hx-target="closest tr"
+                        hx-swap="outerHTML"
+                        hx-confirm="Are you sure you want to delete this order?">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6zM19 4h-3.5l-1-1h-5l-1 1H5v2h14z"/></svg>
+                </button>
+              </div>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% else %}
+  <div style="background-color: var(--brand-color-primary-bg); color: var(--brand-primary-palette-9); border: 1px solid var(--brand-color-primary-border); border-radius: var(--brand-border-radius); padding: 12px 16px; font-size: 0.875rem;">
+    No orders yet. Click "New Order" to add your first customer order!
+  </div>
+{% endif %}
+
+<script src="/static/js/export.js"></script>
+{% endblock %}

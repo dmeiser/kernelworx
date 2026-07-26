@@ -67,61 +67,58 @@ locals {
     INVITES_TABLE_NAME          = var.table_names.invites
     SHARED_CAMPAIGNS_TABLE_NAME = var.table_names.shared_campaigns
   }
-  
-  # Lambda functions configuration
-  functions = {
-    "list-my-shares" = {
-      handler     = "handlers.profile_sharing.list_my_shares"
+
+  # Domain Lambdas: one per domain, each routes internally by HTTP method + path
+  # via the `handler` entrypoint (API Gateway AWS_PROXY event shape). Mirrors the
+  # routing in tests/e2e/test_server.py.
+  domain_functions = {
+    "auth" = {
+      handler     = "handlers.auth_domain.handler"
       timeout     = 30
       memory_size = 256
     }
-    "list-catalogs-in-use" = {
-      handler     = "handlers.list_catalogs_in_use.handler"
+    "scouts" = {
+      handler     = "handlers.scouts_domain.handler"
       timeout     = 30
       memory_size = 256
     }
-    "create-profile" = {
-      handler     = "handlers.scout_operations.create_seller_profile"
+    "campaigns" = {
+      handler     = "handlers.campaigns_domain.handler"
       timeout     = 30
       memory_size = 256
     }
-    "request-report" = {
-      handler     = "handlers.report_generation.request_campaign_report"
-      timeout     = 60
-      memory_size = 512
-    }
-    "unit-reporting" = {
-      handler     = "handlers.campaign_reporting.get_unit_report"
-      timeout     = 60
-      memory_size = 512
-    }
-    "list-unit-catalogs" = {
-      handler     = "handlers.list_unit_catalogs.list_unit_catalogs"
+    "orders" = {
+      handler     = "handlers.orders_domain.handler"
       timeout     = 30
-      memory_size = 512
-    }
-    "list-unit-campaign-catalogs" = {
-      handler     = "handlers.list_unit_catalogs.list_unit_campaign_catalogs"
-      timeout     = 30
-      memory_size = 512
-    }
-    "campaign-operations" = {
-      handler     = "handlers.campaign_operations.create_campaign"
-      timeout     = 30
-      memory_size = 512
-    }
-    "delete-profile-cascade" = {
-      handler     = "handlers.delete_profile_cascade.lambda_handler"
-      timeout     = 60
-      memory_size = 512
-    }
-    "update-account" = {
-      handler     = "handlers.account_operations.update_my_account"
-      timeout     = 10
       memory_size = 256
     }
-    "delete-account" = {
-      handler     = "handlers.account_operations.delete_my_account"
+    "catalogs" = {
+      handler     = "handlers.catalogs_domain.handler"
+      timeout     = 30
+      memory_size = 256
+    }
+    "payment-methods" = {
+      handler     = "handlers.payment_methods_domain.handler"
+      timeout     = 30
+      memory_size = 256
+    }
+    "sharing" = {
+      handler     = "handlers.sharing_domain.handler"
+      timeout     = 30
+      memory_size = 256
+    }
+    "admin" = {
+      handler     = "handlers.admin_domain.handler"
+      timeout     = 30
+      memory_size = 256
+    }
+  }
+
+  # Restored business-logic handlers adapted to the proxy event shape. Each has
+  # its own `handler` entrypoint that routes its dedicated API path.
+  app_functions = {
+    "account-operations" = {
+      handler     = "handlers.account_operations.handler"
       timeout     = 30
       memory_size = 256
       extra_env = {
@@ -129,42 +126,34 @@ locals {
       }
     }
     "transfer-ownership" = {
-      handler     = "handlers.transfer_profile_ownership.lambda_handler"
+      handler     = "handlers.transfer_profile_ownership.handler"
       timeout     = 10
       memory_size = 256
     }
-    "request-qr-upload" = {
-      handler     = "handlers.payment_methods_handlers.request_qr_upload"
-      timeout     = 10
-      memory_size = 256
-    }
-    "confirm-qr-upload" = {
-      handler     = "handlers.payment_methods_handlers.confirm_qr_upload"
-      timeout     = 10
-      memory_size = 256
-    }
-    "generate-qr-code-presigned-url" = {
-      handler     = "handlers.generate_qr_code_presigned_url.generate_qr_code_presigned_url"
-      timeout     = 3
-      memory_size = 128
-    }
-    "delete-qr-code" = {
-      handler     = "handlers.payment_methods_handlers.delete_qr_code"
-      timeout     = 10
-      memory_size = 256
+    "delete-profile-cascade" = {
+      handler     = "handlers.delete_profile_cascade.handler"
+      timeout     = 60
+      memory_size = 512
     }
     "validate-payment-method" = {
-      handler     = "handlers.validate_payment_method.lambda_handler"
+      handler     = "handlers.validate_payment_method.handler"
       timeout     = 10
       memory_size = 256
     }
-    "admin-operations" = {
-      handler     = "handlers.admin_operations.lambda_handler"
+    "list-catalogs-in-use" = {
+      handler     = "handlers.list_catalogs_in_use.handler"
       timeout     = 30
       memory_size = 256
-      extra_env = {
-        USER_POOL_ID = var.user_pool_id
-      }
+    }
+    "list-unit-catalogs" = {
+      handler     = "handlers.list_unit_catalogs.handler"
+      timeout     = 30
+      memory_size = 512
+    }
+    "generate-qr-presigned-url" = {
+      handler     = "handlers.generate_qr_code_presigned_url.handler"
+      timeout     = 10
+      memory_size = 256
     }
   }
 
@@ -263,22 +252,43 @@ resource "aws_lambda_function" "trigger_functions" {
   }
 }
 
-# State migration: post-auth and pre-signup were previously part of
-# aws_lambda_function.functions and are now in aws_lambda_function.trigger_functions.
-moved {
-  from = aws_lambda_function.functions["post-auth"]
-  to   = aws_lambda_function.trigger_functions["post-auth"]
-}
+# State migration: post-auth and pre-signup were previously part of the
+# legacy aws_lambda_function.functions resource (now removed). No moved block
+# is needed because the resource address changed entirely during the redesign
+# (old functions map was stale and referenced deleted handlers).
 
-moved {
-  from = aws_lambda_function.functions["pre-signup"]
-  to   = aws_lambda_function.trigger_functions["pre-signup"]
-}
-
-# App functions (all functions that may depend on var.user_pool_id via extra_env)
+# App functions (domain + restored business-logic). These may depend on
+# var.user_pool_id via extra_env, so they are separate from the trigger
+# functions to keep the cognito module free of dependency cycles.
 # kics-scan ignore-line
-resource "aws_lambda_function" "functions" {
-  for_each = local.functions
+resource "aws_lambda_function" "domain_functions" {
+  for_each = local.domain_functions
+
+  function_name = "${var.name_prefix}-${each.key}${local.func_suffix}"
+  role          = var.lambda_role_arn
+  handler       = each.value.handler
+  runtime       = "python3.14"
+  architectures = ["arm64"]
+  timeout       = each.value.timeout
+  memory_size   = each.value.memory_size
+
+  filename         = data.archive_file.lambda_payload.output_path
+  source_code_hash = data.archive_file.lambda_payload.output_base64sha256
+
+  layers = [aws_lambda_layer_version.shared.arn]
+
+  environment {
+    variables = local.common_env
+  }
+
+  lifecycle {
+    prevent_destroy = false
+  }
+}
+
+# kics-scan ignore-line
+resource "aws_lambda_function" "app_functions" {
+  for_each = local.app_functions
 
   function_name = "${var.name_prefix}-${each.key}${local.func_suffix}"
   role          = var.lambda_role_arn
@@ -304,13 +314,19 @@ resource "aws_lambda_function" "functions" {
 
 # Outputs
 output "function_arns" {
-  description = "Map of app Lambda function logical names to their ARNs (AppSync-invokable only; excludes Cognito trigger functions to avoid over-broad IAM invoke permissions)"
-  value       = { for k, v in aws_lambda_function.functions : k => v.arn }
+  description = "Map of all app Lambda function logical names (domain + restored) to their ARNs, keyed by logical name for the apigateway module"
+  value = merge(
+    { for k, v in aws_lambda_function.domain_functions : k => v.arn },
+    { for k, v in aws_lambda_function.app_functions : k => v.arn },
+  )
 }
 
 output "function_names" {
-  description = "Map of app Lambda function logical names to their function names (AppSync-invokable only; excludes Cognito trigger functions)"
-  value       = { for k, v in aws_lambda_function.functions : k => v.function_name }
+  description = "Map of all app Lambda function logical names (domain + restored) to their function names"
+  value = merge(
+    { for k, v in aws_lambda_function.domain_functions : k => v.function_name },
+    { for k, v in aws_lambda_function.app_functions : k => v.function_name },
+  )
 }
 
 output "trigger_function_arns" {

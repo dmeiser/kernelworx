@@ -1,0 +1,60 @@
+<dialog id="qr-upload-dialog" open>
+  <h2 style="font-family: 'Bricolage Grotesque', 'Atkinson Hyperlegible', sans-serif; font-weight: 600; font-size: 18px; color: var(--brand-color-text); margin: 0 0 16px 0;">Upload QR Code for {{ name }}</h2>
+
+  <form id="qr-form" onsubmit="handleQrUpload(event)">
+    <input type="hidden" id="pm-name" value="{{ name }}">
+    <div style="display: flex; flex-direction: column; align-items: center; gap: 16px; padding: 16px 0;">
+      <input type="file" id="qr-file" name="file" accept=".png,.jpg,.jpeg,.webp" required aria-label="Select QR code image" style="display: none;">
+
+      <div onclick="document.getElementById('qr-file').click();" style="border: 2px dashed var(--brand-color-border); border-radius: var(--brand-border-radius); padding: 32px; text-align: center; width: 100%; cursor: pointer; box-sizing: border-box;">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="var(--brand-color-text-secondary)" style="margin-bottom: 4px;"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5z"/></svg>
+        <p style="margin: 0; color: var(--brand-color-text); font-size: 0.875rem;">Click to select an image</p>
+        <p style="margin: 4px 0 0 0; color: var(--brand-color-text-secondary); font-size: 0.875rem;">PNG, JPG, or WEBP (max 5MB)</p>
+      </div>
+    </div>
+
+    <div style="display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px;">
+      <button type="button" class="btn" style="height: 32px; padding: 0 12px; font-size: 0.875rem; font-weight: 600; background: var(--brand-color-bg-container); color: var(--brand-color-text); border: 1px solid var(--brand-color-border); border-radius: var(--brand-border-radius); cursor: pointer;" onclick="this.closest('dialog').close(); this.closest('dialog').remove();">Cancel</button>
+      <button type="submit" class="btn btn-primary" style="display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; font-size: 0.875rem; font-weight: 600; background-color: var(--brand-primary-palette-7); color: #ffffff; border: 1px solid var(--brand-primary-palette-7); border-radius: var(--brand-border-radius); cursor: pointer;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5z"/></svg>
+        Upload
+      </button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+async function handleQrUpload(e) {
+  e.preventDefault();
+  const pmName = document.getElementById('pm-name').value;
+  const fileInput = document.getElementById('qr-file');
+  if (!fileInput.files.length) return;
+
+  try {
+    const res = await fetch('/api/payment-methods/qr-upload', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: pmName })
+    });
+    const info = await res.json();
+
+    const formData = new FormData();
+    Object.entries(info.fields || {}).forEach(([k, v]) => formData.append(k, v));
+    formData.append('file', fileInput.files[0]);
+
+    await fetch(info.url, { method: 'POST', body: formData });
+
+    await fetch('/api/payment-methods/qr-confirm', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: pmName, key: info.fields.key })
+    });
+
+    document.getElementById('qr-upload-dialog').close();
+    document.getElementById('qr-upload-dialog').remove();
+    window.location.reload();
+  } catch (err) {
+    alert('Upload failed: ' + err.message);
+  }
+}
+</script>

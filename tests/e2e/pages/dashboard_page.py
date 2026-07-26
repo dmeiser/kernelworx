@@ -1,5 +1,7 @@
 """Dashboard page object — seller profile list (Scouts page)."""
 
+import urllib.parse
+
 from playwright.sync_api import Locator, Page, expect
 
 from .base_page import BasePage
@@ -8,19 +10,22 @@ from .base_page import BasePage
 class DashboardPage(BasePage):
     """Page object for the ``/scouts`` dashboard route.
 
-    The Scouts page shows a grid of :class:`ProfileCard` components — one per
-    seller profile (Scout) the authenticated account owns or has been shared
-    access to.  After login the app lands on ``/home``; tests that need the
-    dashboard should navigate here explicitly.
+    The HTMX Scouts page shows a grid of profile cards (one per seller profile
+    the authenticated account owns).  Profile names are rendered as ``<h3>``
+    inside ``div.card`` elements with ``id="profile-card-{profileId}"``.
 
     Selector notes:
 
-    * Profile names are rendered as ``<h3>`` elements (MUI ``Typography
-      variant="h5" component="h3"``).  No ``data-testid`` is present in the
-      production component.  TODO: add ``data-testid="profile-card"`` to
-      ``ProfileCard`` for more robust targeting.
-    * The *Create Scout* button uses visible text; no ``data-testid``.
-    * The *View All Campaigns* button on each card uses visible text.
+    * Profile cards: ``div.card[id^="profile-card-"]``; the seller name is the
+      ``<h3>`` inside the card.
+    * The *Create Scout* button opens a native ``<dialog>`` (HTMX swap into
+      ``#modal-container``).  There are two buttons labelled *Create Scout*
+      once the dialog is open — the page button and the dialog submit — so
+      callers must scope to the dialog or use ``.first`` for the page button.
+    * The *View All Campaigns* action is an ``<a>`` link, but its ``href``
+      contains a raw ``PROFILE#uuid`` ID whose ``#`` would be treated as a URL
+      fragment by the browser.  ``click_profile`` therefore extracts the
+      profile ID from the card ``id`` and navigates via an URL-encoded path.
     """
 
     PATH: str = "/scouts"
@@ -29,18 +34,14 @@ class DashboardPage(BasePage):
     # Selector constants
     # ------------------------------------------------------------------
 
-    # ProfileCard renders sellerName via Typography variant="h5" component="h3"
-    _PROFILE_NAME_SEL: str = "div.MuiCard-root h3"  # scoped to cards to avoid dialog collisions
-
+    _PROFILE_CARD_SEL: str = "div.card[id^='profile-card-']"
+    _PROFILE_NAME_SEL: str = "div.card[id^='profile-card-'] h3"
     _CREATE_SCOUT_TEXT: str = "Create Scout"
     _VIEW_CAMPAIGNS_TEXT: str = "View All Campaigns"
+    _EMPTY_STATE_TEXT: str = "No Scouts Yet"
 
     def __init__(self, page: Page) -> None:
-        """Store the Playwright Page instance.
-
-        Args:
-            page: Active Playwright :class:`~playwright.sync_api.Page`.
-        """
+        """Store the Playwright Page instance."""
         super().__init__(page)
 
     # ------------------------------------------------------------------
@@ -57,20 +58,25 @@ class DashboardPage(BasePage):
     # ------------------------------------------------------------------
 
     def _create_scout_button(self) -> Locator:
-        """Return locator for the *Create Scout* button."""
-        return self.get_by_role_button(self._CREATE_SCOUT_TEXT)
+        """Return locator for the page-level *Create Scout* button.
+
+        Scoped to the page header (outside any dialog) so the dialog submit
+        button is not matched before the dialog opens.
+        """
+        return (
+            self.page.locator("#profiles-list")
+            .locator("..")
+            .get_by_role("button", name=self._CREATE_SCOUT_TEXT)
+            .or_(self.page.get_by_role("button", name=self._CREATE_SCOUT_TEXT).first)
+        )
 
     def _profile_headings(self) -> Locator:
         """Return locator matching all seller-name headings inside profile cards."""
         return self.page.locator(self._PROFILE_NAME_SEL)
 
     def _profile_card_for(self, name: str) -> Locator:
-        """Return a locator for the profile card that contains *name*.
-
-        Args:
-            name: Seller name text (case-sensitive substring match).
-        """
-        return self.page.locator("div.MuiCard-root").filter(has_text=name)
+        """Return a locator for the profile card that contains *name*."""
+        return self.page.locator(self._PROFILE_CARD_SEL).filter(has_text=name)
 
     # ------------------------------------------------------------------
     # State queries
@@ -83,43 +89,44 @@ class DashboardPage(BasePage):
         distinguish a fully loaded dashboard from a transient loading state.
         """
         url_matches = self.PATH in self.page.url
-        button_visible = self._create_scout_button().is_visible()
+        button_visible = self._create_scout_button().first.is_visible()
         return url_matches and button_visible
 
     def get_profile_names(self) -> list[str]:
-        """Return the text of all visible seller-profile name headings.
-
-        Returns:
-            List of seller name strings in DOM order.
-        """
+        """Return the text of all visible seller-profile name headings."""
         return self._profile_headings().all_inner_texts()
+
+    def get_profile_id(self, name: str) -> str:
+        """Return the raw profile ID (e.g. ``PROFILE#uuid``) for the card matching *name*."""
+        card = self._profile_card_for(name).first
+        expect(card).to_be_visible()
+        card_id = card.get_attribute("id") or ""
+        return urllib.parse.unquote(card_id.removeprefix("profile-card-"))
 
     # ------------------------------------------------------------------
     # Actions
     # ------------------------------------------------------------------
 
     def click_profile(self, name: str) -> None:
-        """Click on the profile card for *name* to navigate to its campaigns.
+        """Navigate to the campaigns page for the profile card matching *name*.
 
-        Clicks the *View All Campaigns* button within the matching card so the
-        action is deterministic even when a *View Latest Campaign* button is
-        also present.
-
-        Args:
-            name: Exact seller name to match (case-sensitive).
+        The card's *View All Campaigns* ``<a>`` link contains a raw
+        ``PROFILE#uuid`` ID whose ``#`` the browser treats as a URL fragment,
+        so clicking it would land on ``/scouts/PROFILE``.  Instead, extract the
+        profile ID from the card ``id`` attribute and navigate via an
+        URL-encoded path (which the local server decodes back to the real ID).
         """
-        card = self._profile_card_for(name).first  # take first matching card
-        expect(card).to_be_visible()
-        card.get_by_role("button", name=self._VIEW_CAMPAIGNS_TEXT, exact=True).click()
+        profile_id = self.get_profile_id(name)
+        encoded = urllib.parse.quote(profile_id, safe="")
+        self.navigate(f"/scouts/{encoded}/campaigns")
         self.wait_for_loading()
 
     def wait_for_profiles_loaded(self) -> None:
         """Block until the dashboard has finished loading profiles.
 
         The dashboard is considered loaded when either at least one profile
-        card heading is visible, or the empty-state alert is visible (e.g.
-        after deleting the last profile).
+        card heading is visible, or the empty-state message is visible.
         """
         profile_heading = self._profile_headings().first
-        empty_alert = self.page.get_by_text("You don't have any Scouts yet")
-        expect(profile_heading.or_(empty_alert)).to_be_visible()
+        empty_alert = self.page.get_by_text(self._EMPTY_STATE_TEXT)
+        expect(profile_heading.or_(empty_alert)).to_be_visible(timeout=15_000)

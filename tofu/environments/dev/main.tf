@@ -25,8 +25,8 @@ terraform {
   }
 
   backend "s3" {
-    bucket       = "kernelworx-tofu-state-ue1"
-    key          = "kernelworx/dev/terraform.tfstate"
+    bucket       = "kernelworx-tofu-state-us-east-1-dev"
+    key          = "application/dev/terraform.tfstate"
     region       = "us-east-1"
     encrypt      = true
     use_lockfile = true
@@ -107,6 +107,19 @@ locals {
   api_domain   = "api.${var.environment}.${var.domain}"
   login_domain = "login.${var.environment}.${var.domain}"
   zone_domain  = "${var.environment}.${var.domain}"
+
+  cognito_callback_urls = [
+    "https://${local.site_domain}",
+    "https://${local.site_domain}/callback",
+    "http://localhost:5173",
+    "https://local.dev.appworx.app:5173",
+  ]
+
+  cognito_logout_urls = [
+    "https://${local.site_domain}",
+    "http://localhost:5173",
+    "https://local.dev.appworx.app:5173",
+  ]
 }
 
 # Module instantiations
@@ -134,9 +147,11 @@ module "iam" {
   region_abbrev = var.region_abbrev
   name_prefix   = local.name_prefix
 
-  dynamodb_table_arns = module.dynamodb.table_arns
-  exports_bucket_arn  = module.s3.exports_bucket_arn
+  dynamodb_table_arns  = module.dynamodb.table_arns
+  exports_bucket_arn   = module.s3.exports_bucket_arn
   lambda_function_arns = module.lambda.function_arns
+
+  cloudfront_distribution_arn = module.cloudfront.distribution_arn
 }
 
 module "certificates" {
@@ -151,16 +166,28 @@ module "certificates" {
 module "cognito" {
   source = "../../application/modules/cognito"
 
-  environment          = var.environment
-  region_abbrev        = var.region_abbrev
-  name_prefix          = local.name_prefix
-  site_domain          = local.site_domain
-  login_domain         = local.login_domain
-  google_client_id     = var.google_client_id
-  google_client_secret = var.google_client_secret
-  login_certificate_arn = module.certificates.login_certificate_arn
-  sms_role_arn         = module.iam.cognito_sms_role_arn
-  enable_google_idp    = false  # Not currently configured in AWS
+  environment                  = var.environment
+  region_abbrev                = var.region_abbrev
+  name_prefix                  = local.name_prefix
+  site_domain                  = local.site_domain
+  login_domain                 = local.login_domain
+  google_client_id             = var.google_client_id
+  google_client_secret         = var.google_client_secret
+  login_certificate_arn        = module.certificates.login_certificate_arn
+  sms_role_arn                 = module.iam.cognito_sms_role_arn
+  enable_google_idp            = true
+
+  callback_urls         = local.cognito_callback_urls
+  logout_urls           = local.cognito_logout_urls
+  lambda_execution_role_arn = module.iam.lambda_execution_role_arn
+
+  enable_lambda_triggers       = true
+  pre_signup_lambda_arn        = module.lambda.trigger_function_arns["pre-signup"]
+  post_auth_lambda_arn         = module.lambda.trigger_function_arns["post-auth"]
+  post_confirmation_lambda_arn = module.lambda.trigger_function_arns["post-auth"]
+
+  enable_webauthn            = true
+  web_authn_relying_party_id = var.domain
 }
 
 module "lambda" {
@@ -186,30 +213,32 @@ module "lambda" {
   user_pool_id = module.cognito.user_pool_id
 }
 
-module "appsync" {
-  source = "../../application/modules/appsync"
+module "apigateway" {
+  source = "../../application/modules/apigateway"
 
-  environment              = var.environment
-  region_abbrev            = var.region_abbrev
-  name_prefix              = local.name_prefix
-  api_domain               = local.api_domain
-  api_certificate_arn      = module.certificates.api_certificate_arn
-  appsync_service_role_arn = module.iam.appsync_service_role_arn
-  user_pool_id             = module.cognito.user_pool_id
-  aws_region               = var.aws_region
-  
+  environment          = var.environment
+  region_abbrev        = var.region_abbrev
+  name_prefix          = local.name_prefix
+  api_domain           = local.api_domain
+  api_certificate_arn  = module.certificates.api_certificate_arn
+  user_pool_id         = module.cognito.user_pool_id
+  user_pool_arn        = module.cognito.user_pool_arn
+  aws_region           = var.aws_region
+
   dynamodb_table_names = module.dynamodb.table_names
   lambda_function_arns = module.lambda.function_arns
+  apigateway_execution_role_arn = module.iam.apigateway_execution_role_arn
 }
 
 module "cloudfront" {
   source = "../../application/modules/cloudfront"
 
-  environment          = var.environment
-  site_domain          = local.site_domain
-  site_certificate_arn = module.certificates.site_certificate_arn
-  static_bucket_id     = module.s3.static_bucket_id
-  static_bucket_arn    = module.s3.static_bucket_arn
+  environment                   = var.environment
+  site_domain                   = local.site_domain
+  site_certificate_arn          = module.certificates.site_certificate_arn
+  certificate_validation        = aws_acm_certificate_validation.site
+  static_bucket_id              = module.s3.static_bucket_id
+  static_bucket_arn             = module.s3.static_bucket_arn
   static_bucket_regional_domain = module.s3.static_bucket_regional_domain
 }
 
@@ -218,7 +247,8 @@ module "route53" {
 
   environment            = var.environment
   zone_domain            = local.zone_domain
-  appsync_api_url        = module.appsync.api_url
+  appsync_api_url        = module.apigateway.api_url
+  api_regional_domain_name = module.apigateway.api_regional_domain_name
   cognito_domain         = module.cognito.domain
   cognito_cloudfront_domain = module.cognito.cloudfront_domain
   cloudfront_domain_name = module.cloudfront.distribution_domain
@@ -227,6 +257,22 @@ module "route53" {
   api_validation_records   = module.certificates.api_validation_records
   login_validation_records = module.certificates.login_validation_records
   site_validation_records  = module.certificates.site_validation_records
+}
+
+# Certificate validations - wait for DNS records to propagate and certificates to validate
+resource "aws_acm_certificate_validation" "api" {
+  certificate_arn         = module.certificates.api_certificate_arn
+  validation_record_fqdns = [for rec in module.route53.cert_validation_records : rec.fqdn if can(regex("api\\.", rec.name))]
+}
+
+resource "aws_acm_certificate_validation" "login" {
+  certificate_arn         = module.certificates.login_certificate_arn
+  validation_record_fqdns = [for rec in module.route53.cert_validation_records : rec.fqdn if can(regex("login\\.", rec.name))]
+}
+
+resource "aws_acm_certificate_validation" "site" {
+  certificate_arn         = module.certificates.site_certificate_arn
+  validation_record_fqdns = [for rec in module.route53.cert_validation_records : rec.fqdn if !can(regex("(api|login)\\.", rec.name))]
 }
 
 # Outputs
@@ -240,9 +286,9 @@ output "cognito_client_id" {
   value       = module.cognito.client_id
 }
 
-output "appsync_api_url" {
-  description = "GraphQL API URL for the AppSync API"
-  value       = module.appsync.api_url
+output "api_gateway_url" {
+  description = "REST API Gateway URL"
+  value       = module.apigateway.api_url
 }
 
 output "cloudfront_distribution_id" {

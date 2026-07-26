@@ -4,13 +4,58 @@ import pytest
 
 from src.utils.errors import AppError, ErrorCode
 from src.utils.validation import (
+    _is_valid_quantity,
     normalize_phone,
     validate_address,
     validate_campaign_update,
     validate_customer_input,
     validate_invite_code,
     validate_order_update,
+    validate_required_fields,
+    validate_unit_fields,
+    validate_unit_number,
 )
+
+
+def test_validate_required_fields() -> None:
+    validate_required_fields({"name": "Alex"}, ["name"])
+    with pytest.raises(AppError):
+        validate_required_fields({"name": ""}, ["name"])
+
+
+def test_is_valid_quantity() -> None:
+    assert _is_valid_quantity({"quantity": 5}) is True
+    assert _is_valid_quantity({}) is False
+    assert _is_valid_quantity({"quantity": "invalid"}) is False
+
+
+class TestValidateUnitFields:
+    """Tests for unit number and unit fields validation."""
+
+    def test_validate_unit_number_valid(self) -> None:
+        assert validate_unit_number("101", required=True) == 101
+        assert validate_unit_number(None, required=False) is None
+
+    def test_validate_unit_number_missing_required(self) -> None:
+        with pytest.raises(AppError):
+            validate_unit_number(None, required=True)
+
+    def test_validate_unit_number_invalid_int(self) -> None:
+        with pytest.raises(AppError):
+            validate_unit_number("abc", required=True)
+
+    def test_validate_unit_fields_valid(self) -> None:
+        result = validate_unit_fields("PACK", 101, "City", "ST")
+        assert result == ("PACK", 101, "City", "ST")
+
+    def test_validate_unit_fields_none(self) -> None:
+        assert validate_unit_fields(None, 101, "City", "ST") is None
+
+    def test_validate_unit_fields_missing_city_or_state(self) -> None:
+        with pytest.raises(AppError):
+            validate_unit_fields("PACK", 101, None, "ST")
+        with pytest.raises(AppError):
+            validate_unit_fields("PACK", 101, "City", None)
 
 
 class TestNormalizePhone:

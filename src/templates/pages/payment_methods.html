@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+
+{% block title %}Payment Methods — KernelWorx{% endblock %}
+
+{% block content %}
+
+<div class="card" style="margin-bottom: clamp(12px, 3vw, 24px); border-left: 4px solid var(--brand-primary-palette-6); border-radius: var(--brand-border-radius-lg); box-shadow: 0 1px 2px var(--brand-color-fill-quaternary);">
+  <div style="padding: clamp(16px, 3vw, 24px);">
+    <div style="display: flex; flex-direction: column; justify-content: space-between; align-items: flex-start; gap: 16px;">
+      <div>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <a href="/settings" aria-label="Back to settings" style="display: inline-flex; align-items: center; gap: 6px; color: var(--brand-color-text-secondary); text-decoration: none; margin-right: 4px; font-size: 0.875rem; font-weight: 600;">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20z"/></svg>
+            Back
+          </a>
+        </div>
+        <h1 style="font-family: 'Bricolage Grotesque', 'Atkinson Hyperlegible', sans-serif; font-weight: 600; font-size: 22px; line-height: 1.25; color: var(--brand-color-text); margin: 4px 0 4px 0;">Payment Methods</h1>
+        <p style="font-size: 1rem; color: var(--brand-color-text-secondary); margin: 0;">Cash and Check are always available. Create custom methods and add QR codes for apps like Venmo or PayPal.</p>
+      </div>
+      <div>
+        <button class="btn btn-primary" style="display: inline-flex; align-items: center; gap: 6px; background-color: var(--brand-primary-palette-7); color: #ffffff; border: 1px solid var(--brand-primary-palette-7); height: 32px; padding: 0 12px; font-size: 0.875rem; font-weight: 600; border-radius: var(--brand-border-radius); cursor: pointer;"
+                hx-get="/api/payment-methods/new-form"
+                hx-target="#modal-container"
+                hx-swap="innerHTML">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6z"/></svg>
+          Add Payment Method
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="payment-methods-list" style="display: flex; flex-direction: column; gap: 16px;">
+  {% if payment_methods %}
+    {% for pm in payment_methods %}
+      {% include "fragments/payment_method_card.html" %}
+    {% endfor %}
+  {% else %}
+    <div class="card" style="text-align: center; border: 1px solid var(--brand-color-border-secondary); border-radius: var(--brand-border-radius-lg);">
+      <div style="padding: clamp(24px, 4vw, 32px);">
+        <h2 style="font-family: 'Bricolage Grotesque', 'Atkinson Hyperlegible', sans-serif; font-weight: 600; font-size: 16px; color: var(--brand-color-text-secondary); margin: 0 0 8px 0;">No Payment Methods Yet</h2>
+        <p style="color: var(--brand-color-text-secondary); font-size: 0.875rem; margin: 0;">Cash and Check are always available. Add custom methods and QR codes for apps like Venmo or PayPal.</p>
+      </div>
+    </div>
+  {% endif %}
+</div>
+
+<div id="modal-container"></div>
+{% endblock %}

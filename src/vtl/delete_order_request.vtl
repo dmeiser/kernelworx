@@ -1,0 +1,8 @@
+#set($orderId = $input.params('id'))
+{
+  "TableName": "$stageVariables.ordersTable",
+  "Key": {
+    "orderId": { "S": "$orderId" }
+  },
+  "ReturnValues": "ALL_OLD"
+}

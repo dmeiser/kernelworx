@@ -1,24 +1,36 @@
-"""Lambda resolver for listing catalogs used in a unit."""
+"""
+List catalogs used in a unit (API Gateway proxy event shape).
 
+Restored from the AppSync-shaped ``main`` version. Reads unit/campaign
+arguments from query string parameters and the caller id from
+``requestContext.authorizer.claims.sub``. Exposes two endpoints:
+- GET /api/unit-catalogs -> list_unit_catalogs
+- GET /api/unit-campaign-catalogs -> list_unit_campaign_catalogs
+Both return a JSON list of Catalog objects.
+"""
+
+import json
 from typing import Any, Dict, List, Set
 
 from boto3.dynamodb.conditions import Key
 
-# Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
     from utils.auth import check_profile_access
     from utils.dynamodb import tables
     from utils.logging import get_logger
+    from utils.pagination import query_all_items
+    from utils.proxy_event import get_caller_id, get_query_param
 except ModuleNotFoundError:  # pragma: no cover
-    from ..utils.auth import check_profile_access
-    from ..utils.dynamodb import tables
-    from ..utils.logging import get_logger
+    from src.utils.auth import check_profile_access
+    from src.utils.dynamodb import tables
+    from src.utils.logging import get_logger
+    from src.utils.pagination import query_all_items
+    from src.utils.proxy_event import get_caller_id, get_query_param
 
 logger = get_logger(__name__)
 
 
 def _filter_accessible_profiles(profiles: List[Dict[str, Any]], caller_account_id: str) -> List[Dict[str, Any]]:
-    """Filter profiles to those the caller has READ access to."""
     accessible = []
     for profile in profiles:
         profile_id = profile["profileId"]
@@ -28,16 +40,18 @@ def _filter_accessible_profiles(profiles: List[Dict[str, Any]], caller_account_i
 
 
 def _collect_catalog_ids(profiles: List[Dict[str, Any]], campaign_name: str, campaign_year: int) -> Set[str]:
-    """Collect unique catalog IDs from campaigns matching criteria."""
     catalog_ids: Set[str] = set()
     for profile in profiles:
         profile_id = profile["profileId"]
-        campaigns_response = tables.campaigns.query(
-            KeyConditionExpression=Key("profileId").eq(profile_id),
-            FilterExpression="campaignName = :name AND campaignYear = :year",
-            ExpressionAttributeValues={":name": campaign_name, ":year": campaign_year},
+        campaigns = query_all_items(
+            tables.campaigns,
+            {
+                "KeyConditionExpression": Key("profileId").eq(profile_id),
+                "FilterExpression": "campaignName = :name AND campaignYear = :year",
+                "ExpressionAttributeValues": {":name": campaign_name, ":year": campaign_year},
+            },
         )
-        for campaign in campaigns_response.get("Items", []):
+        for campaign in campaigns:
             catalog_id = campaign.get("catalogId")
             if catalog_id is not None and isinstance(catalog_id, str):
                 catalog_ids.add(catalog_id)
@@ -45,7 +59,6 @@ def _collect_catalog_ids(profiles: List[Dict[str, Any]], campaign_name: str, cam
 
 
 def _fetch_catalogs(catalog_ids: Set[str]) -> List[Dict[str, Any]]:
-    """Fetch catalog details for given catalog IDs."""
     catalogs: List[Dict[str, Any]] = []
     for catalog_id in catalog_ids:
         try:
@@ -53,79 +66,12 @@ def _fetch_catalogs(catalog_ids: Set[str]) -> List[Dict[str, Any]]:
             if "Item" in catalog_response:
                 catalogs.append(catalog_response["Item"])
         except Exception as e:
-            logger.warning(f"Failed to fetch catalog {catalog_id}: {str(e)}")
+            logger.warning("Failed to fetch catalog", catalog_id=catalog_id, error=str(e))
     catalogs.sort(key=lambda c: c.get("catalogName", ""))
     return catalogs
 
 
-def list_unit_catalogs(event: Dict[str, Any], context: Any) -> List[Dict[str, Any]]:
-    """
-    List all catalogs used by scouts in a unit (that the caller has access to).
-
-    Args:
-        event: AppSync resolver event with arguments:
-            - unitType: String (e.g., "Pack", "Troop")
-            - unitNumber: Int (e.g., 158)
-            - campaignName: String (e.g., "Fall", "Spring")
-            - campaignYear: Int (e.g., 2024)
-        context: Lambda context (unused)
-
-    Returns:
-        List of Catalog objects
-    """
-    try:
-        unit_type = event["arguments"]["unitType"]
-        unit_number = int(event["arguments"]["unitNumber"])
-        campaign_name = event["arguments"]["campaignName"]
-        campaign_year = int(event["arguments"]["campaignYear"])
-        caller_account_id = event["identity"]["sub"]
-
-        logger.info(f"Listing catalogs for {unit_type} {unit_number}, campaign {campaign_name} {campaign_year}")
-
-        # Step 1: Find all profiles in this unit
-        profiles_response = tables.profiles.scan(
-            FilterExpression="unitType = :ut AND unitNumber = :un",
-            ExpressionAttributeValues={":ut": unit_type, ":un": unit_number},
-        )
-        unit_profiles = profiles_response.get("Items", [])
-        logger.info(f"Found {len(unit_profiles)} profiles")
-
-        if not unit_profiles:
-            return []
-
-        # Step 2: Filter to accessible profiles
-        accessible_profiles = _filter_accessible_profiles(unit_profiles, caller_account_id)
-        logger.info(f"Caller has access to {len(accessible_profiles)} of {len(unit_profiles)} profiles")
-
-        if not accessible_profiles:
-            return []
-
-        # Step 3: Collect catalog IDs from matching campaigns
-        catalog_ids = _collect_catalog_ids(accessible_profiles, campaign_name, campaign_year)
-        logger.info(f"Found {len(catalog_ids)} unique catalogs")
-
-        if not catalog_ids:
-            return []
-
-        # Step 4: Fetch and return catalog details
-        catalogs = _fetch_catalogs(catalog_ids)
-        logger.info(f"Returning {len(catalogs)} catalogs")
-        return catalogs
-
-    except Exception as e:
-        logger.error(f"Error listing unit catalogs: {str(e)}", exc_info=True)
-        raise
-
-
-def _build_unit_campaign_key(
-    unit_type: str, unit_number: int, city: str, state: str, campaign_name: str, campaign_year: int
-) -> str:
-    """Build the unitCampaignKey for unit+campaign queries."""
-    return f"{unit_type}#{unit_number}#{city}#{state}#{campaign_name}#{campaign_year}"
-
-
 def _collect_catalog_ids_from_campaigns(campaigns: List[Dict[str, Any]], caller_account_id: str) -> Set[str]:
-    """Collect catalog IDs from campaigns the caller has access to."""
     catalog_ids: Set[str] = set()
     for campaign in campaigns:
         profile_id = campaign["profileId"]
@@ -136,60 +82,134 @@ def _collect_catalog_ids_from_campaigns(campaigns: List[Dict[str, Any]], caller_
     return catalog_ids
 
 
-def list_unit_campaign_catalogs(event: Dict[str, Any], context: Any) -> List[Dict[str, Any]]:
-    """
-    List all catalogs used by scouts in a unit+campaign using unitCampaignKey-index.
-
-    This is the new campaign-based version that uses city+state for unit uniqueness.
-
-    Args:
-        event: AppSync resolver event with arguments:
-            - unitType: String (e.g., "Pack", "Troop")
-            - unitNumber: Int (e.g., 158)
-            - city: String (e.g., "Springfield") - Required for unit uniqueness
-            - state: String (e.g., "IL") - Required for unit uniqueness
-            - campaignName: String (e.g., "Fall", "Spring")
-            - campaignYear: Int (e.g., 2024)
-        context: Lambda context (unused)
-
-    Returns:
-        List of Catalog objects
-    """
+def list_unit_catalogs(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    """List all catalogs used by scouts in a unit (that the caller has access to)."""
+    logger.info("list_unit_catalogs invoked")
     try:
-        unit_type = event["arguments"]["unitType"]
-        unit_number = int(event["arguments"]["unitNumber"])
-        city = event["arguments"]["city"]
-        state = event["arguments"]["state"]
-        campaign_name = event["arguments"]["campaignName"]
-        campaign_year = int(event["arguments"]["campaignYear"])
-        caller_account_id = event["identity"]["sub"]
+        unit_type = get_query_param(event, "unitType") or ""
+        unit_number_raw = get_query_param(event, "unitNumber") or ""
+        campaign_name = get_query_param(event, "campaignName") or ""
+        campaign_year_raw = get_query_param(event, "campaignYear") or ""
+        caller_account_id = get_caller_id(event)
 
-        logger.info(f"Listing catalogs for {unit_type} {unit_number} in {city}, {state}, campaign {campaign_name}")
+        if not unit_type or not unit_number_raw or not campaign_name or not campaign_year_raw:
+            return {
+                "statusCode": 400,
+                "headers": {"Content-Type": "application/json"},
+                "body": json.dumps({"error": "unitType, unitNumber, campaignName, and campaignYear are required"}),
+            }
+        unit_number = int(unit_number_raw)
+        campaign_year = int(campaign_year_raw)
 
-        # Step 1: Query unitCampaignKey-index
-        unit_campaign_key = _build_unit_campaign_key(unit_type, unit_number, city, state, campaign_name, campaign_year)
-        campaigns_response = tables.campaigns.query(
-            IndexName="unitCampaignKey-index",
-            KeyConditionExpression=Key("unitCampaignKey").eq(unit_campaign_key),
+        unit_profiles = query_all_items(
+            tables.profiles,
+            {
+                "IndexName": "unitType-unitNumber-index",
+                "KeyConditionExpression": Key("unitType").eq(unit_type) & Key("unitNumber").eq(unit_number),
+            },
         )
-        unit_campaigns = campaigns_response.get("Items", [])
-        logger.info(f"Found {len(unit_campaigns)} campaigns")
-
-        if not unit_campaigns:
-            return []
-
-        # Step 2: Collect catalog IDs from accessible campaigns
-        catalog_ids = _collect_catalog_ids_from_campaigns(unit_campaigns, caller_account_id)
-        logger.info(f"Found {len(catalog_ids)} unique catalogs in accessible campaigns")
-
+        if not unit_profiles:
+            return {
+                "statusCode": 200,
+                "headers": {"Content-Type": "application/json"},
+                "body": json.dumps([]),
+            }
+        accessible = _filter_accessible_profiles(unit_profiles, caller_account_id)
+        if not accessible:
+            return {
+                "statusCode": 200,
+                "headers": {"Content-Type": "application/json"},
+                "body": json.dumps([]),
+            }
+        catalog_ids = _collect_catalog_ids(accessible, campaign_name, campaign_year)
         if not catalog_ids:
-            return []
-
-        # Step 3: Fetch and return catalog details
-        catalogs = _fetch_catalogs(catalog_ids)
-        logger.info(f"Returning {len(catalogs)} catalogs")
-        return catalogs
-
+            return {
+                "statusCode": 200,
+                "headers": {"Content-Type": "application/json"},
+                "body": json.dumps([]),
+            }
+        return {
+            "statusCode": 200,
+            "headers": {"Content-Type": "application/json"},
+            "body": json.dumps(_fetch_catalogs(catalog_ids), default=str),
+        }
     except Exception as e:
-        logger.error(f"Error listing unit campaign catalogs: {str(e)}", exc_info=True)
-        raise
+        logger.error("Error listing unit catalogs", error=str(e))
+        return {
+            "statusCode": 500,
+            "headers": {"Content-Type": "application/json"},
+            "body": json.dumps({"error": str(e)}),
+        }
+
+
+def _build_unit_campaign_key(unit_type, unit_number, city, state, campaign_name, campaign_year) -> str:
+    return f"{unit_type}#{unit_number}#{city}#{state}#{campaign_name}#{campaign_year}"
+
+
+def list_unit_campaign_catalogs(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    """List all catalogs used by scouts in a unit+campaign using unitCampaignKey-index."""
+    logger.info("list_unit_campaign_catalogs invoked")
+    try:
+        unit_type = get_query_param(event, "unitType") or ""
+        unit_number_raw = get_query_param(event, "unitNumber") or ""
+        city = get_query_param(event, "city") or ""
+        state = get_query_param(event, "state") or ""
+        campaign_name = get_query_param(event, "campaignName") or ""
+        campaign_year_raw = get_query_param(event, "campaignYear") or ""
+        caller_account_id = get_caller_id(event)
+
+        if not all([unit_type, unit_number_raw, city, state, campaign_name, campaign_year_raw]):
+            return {
+                "statusCode": 400,
+                "headers": {"Content-Type": "application/json"},
+                "body": json.dumps(
+                    {"error": "unitType, unitNumber, city, state, campaignName, and campaignYear are required"}
+                ),
+            }
+        unit_number = int(unit_number_raw)
+        campaign_year = int(campaign_year_raw)
+
+        unit_campaign_key = _build_unit_campaign_key(unit_type, unit_number, city, state, campaign_name, campaign_year)
+        unit_campaigns = query_all_items(
+            tables.campaigns,
+            {
+                "IndexName": "unitCampaignKey-index",
+                "KeyConditionExpression": Key("unitCampaignKey").eq(unit_campaign_key),
+            },
+        )
+        if not unit_campaigns:
+            return {
+                "statusCode": 200,
+                "headers": {"Content-Type": "application/json"},
+                "body": json.dumps([]),
+            }
+        catalog_ids = _collect_catalog_ids_from_campaigns(unit_campaigns, caller_account_id)
+        if not catalog_ids:
+            return {
+                "statusCode": 200,
+                "headers": {"Content-Type": "application/json"},
+                "body": json.dumps([]),
+            }
+        return {
+            "statusCode": 200,
+            "headers": {"Content-Type": "application/json"},
+            "body": json.dumps(_fetch_catalogs(catalog_ids), default=str),
+        }
+    except Exception as e:
+        logger.error("Error listing unit campaign catalogs", error=str(e))
+        return {
+            "statusCode": 500,
+            "headers": {"Content-Type": "application/json"},
+            "body": json.dumps({"error": str(e)}),
+        }
+
+
+def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    """API Gateway proxy entrypoint for unit catalog listing endpoints."""
+    method = event.get("httpMethod", "GET")
+    path = event.get("path") or "/"
+    if path == "/api/unit-catalogs" and method == "GET":
+        return list_unit_catalogs(event, context)
+    if path == "/api/unit-campaign-catalogs" and method == "GET":
+        return list_unit_campaign_catalogs(event, context)
+    return {"statusCode": 404, "headers": {"Content-Type": "text/plain"}, "body": "Not Found"}

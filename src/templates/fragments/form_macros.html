@@ -1,0 +1,9 @@
+{% macro render_field(name, label, value='', type='text', error=None, required=false) %}
+  <div class="form-group">
+    <label for="{{ name }}">{{ label }}{% if required %} *{% endif %}</label>
+    <input type="{{ type }}" id="{{ name }}" name="{{ name }}" value="{{ value or '' }}" class="form-control" {% if required %}required{% endif %}>
+    {% if error %}
+      <span class="error">{{ error }}</span>
+    {% endif %}
+  </div>
+{% endmacro %}

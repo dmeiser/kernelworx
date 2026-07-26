@@ -1,4 +1,16 @@
-"""Share page object — profile invite creation, acceptance, and revocation."""
+"""Share page object — profile invite creation, acceptance, and revocation.
+
+Covers the sharing UI on ``/scouts/{profileId}/manage``
+(``scout_management.html``) and the (not-implemented-locally) ``/accept-invite``
+route.
+
+NOTE: The local test server does not wire the invite-generation endpoint at
+the path the HTMX template posts to (``/api/profiles/{id}/invites``) nor an
+``/accept-invite`` page, and there is no second real Cognito user.  The full
+share-create / accept / revoke flow therefore cannot run locally; tests that
+exercise it ``pytest.skip`` with a clear reason.  This page object is retained
+for API compatibility.
+"""
 
 import urllib.parse
 
@@ -8,58 +20,27 @@ from .base_page import BasePage
 
 
 class SharePage(BasePage):
-    """Page object covering the profile-sharing flow.
-
-    Two distinct routes are driven:
-
-    * ``/scouts/{profileId}/manage`` – invite code generation, share list,
-      and revocation (``ScoutManagementPage``).
-    * ``/accept-invite`` – invite code acceptance (``AcceptInvitePage``).
-
-    **Selector notes:**
-
-    * *Generate New Invite* button uses visible text (``getCreateInviteText``
-      helper returns ``"Generate New Invite"``).
-    * The new invite code is shown in an ``<Alert severity="success">`` whose
-      text contains ``"New Invite Code:"``; the actual code follows that prefix.
-    * The shares table uses ``<IconButton title="Revoke access">`` per row.
-    * The accept-invite form has ``label="Invite Code"`` on the ``<TextField>``
-      and a *Accept Invite* ``<Button type="submit">``.
-
-    TODO: add ``data-testid`` attributes to the invite section and share rows
-    for more precise targeting.
-    """
+    """Page object covering the profile-sharing flow."""
 
     _MANAGE_SUFFIX: str = "/manage"
     _ACCEPT_PATH: str = "/accept-invite"
 
-    # Button / label text (verified from component source)
+    # Button / label text from scout_management.html
     _GENERATE_INVITE_BTN: str = "Generate New Invite"
     _INVITE_CODE_LABEL: str = "Invite Code"
     _ACCEPT_BTN: str = "Accept Invite"
     _REVOKE_TITLE: str = "Revoke access"
 
-    # Alert text prefix used by NewInviteCodeAlert
-    _NEW_CODE_PREFIX: str = "New Invite Code:"
+    # Alert text prefix used by the invite-result swap (handler returns
+    # "Invite Code: <code>"; the React original used "New Invite Code:").
+    _NEW_CODE_PREFIX: str = "Invite Code:"
 
     def __init__(self, page: Page) -> None:
-        """Store the Playwright Page instance.
-
-        Args:
-            page: Active Playwright :class:`~playwright.sync_api.Page`.
-        """
+        """Store the Playwright Page instance."""
         super().__init__(page)
 
-    # ------------------------------------------------------------------
-    # Navigation
-    # ------------------------------------------------------------------
-
     def goto(self, profile_id: str) -> None:
-        """Navigate to the management page for *profile_id*.
-
-        Args:
-            profile_id: Raw profile identifier, URL-encoded automatically.
-        """
+        """Navigate to the management page for *profile_id* (URL-encoded)."""
         encoded = urllib.parse.quote(profile_id, safe="")
         self.navigate(f"/scouts/{encoded}{self._MANAGE_SUFFIX}")
         self.wait_for_loading()
@@ -82,19 +63,15 @@ class SharePage(BasePage):
         return self.page.get_by_label(self._INVITE_CODE_LABEL)
 
     def _accept_button(self) -> Locator:
-        """Return locator for the *Accept Invite* submit button scoped to main content."""
-        return self.page.get_by_role("main").get_by_role("button", name=self._ACCEPT_BTN, exact=True)
+        """Return locator for the *Accept Invite* submit button."""
+        return self.page.get_by_role("button", name=self._ACCEPT_BTN, exact=True)
 
     def _new_invite_alert(self) -> Locator:
-        """Return locator for the success alert that displays the new invite code."""
-        return self.page.get_by_role("alert").filter(has_text=self._NEW_CODE_PREFIX)
+        """Return locator for the swap that displays the new invite code."""
+        return self.page.locator("#invite-result")
 
     def _revoke_button_for(self, email: str) -> Locator:
-        """Return locator for the revoke icon button on the share row for *email*.
-
-        Args:
-            email: Email address text visible in the share row.
-        """
+        """Return locator for the revoke icon button on the share row for *email*."""
         row = self.page.get_by_role("row").filter(has_text=email)
         return row.locator(f'[title="{self._REVOKE_TITLE}"]')
 
@@ -103,26 +80,13 @@ class SharePage(BasePage):
     # ------------------------------------------------------------------
 
     def create_invite(self, permission_level: str = "READ") -> None:
-        """Generate a new invite code with the specified *permission_level*.
-
-        The permission checkboxes are pre-checked; this method clicks the
-        *Generate New Invite* button and waits for the success alert to appear.
-
-        Args:
-            permission_level: ``"READ"`` or ``"WRITE"``.  Defaults to
-                ``"READ"``.  The appropriate checkbox is checked before
-                generating the invite.
-        """
+        """Generate a new invite code with the specified *permission_level*."""
         self._ensure_permission_checked(permission_level)
         self._generate_invite_button().click()
         expect(self._new_invite_alert()).to_be_visible(timeout=10_000)
 
     def _ensure_permission_checked(self, permission_level: str) -> None:
-        """Check the checkbox for *permission_level* if it is not already checked.
-
-        Args:
-            permission_level: ``"READ"`` or ``"WRITE"``.
-        """
+        """Check the checkbox for *permission_level* if it is not already checked."""
         label_text = (
             "Read (view campaigns and orders)" if permission_level == "READ" else "Write (edit campaigns and orders)"
         )
@@ -131,15 +95,7 @@ class SharePage(BasePage):
             checkbox.check()
 
     def get_invite_link(self) -> str:
-        """Return the raw invite code from the success alert.
-
-        Parses the text after ``"New Invite Code:"`` to extract the code
-        so callers can pass it to :meth:`accept_invite`.
-
-        Returns:
-            The invite code string (e.g. ``"ABC12345"``), or ``""`` when no
-            success alert is currently visible.
-        """
+        """Return the raw invite code from the invite-result swap."""
         alert = self._new_invite_alert()
         if not alert.is_visible():
             return ""
@@ -148,22 +104,11 @@ class SharePage(BasePage):
 
     @staticmethod
     def _parse_invite_code(alert_text: str) -> str:
-        """Extract the invite code from *alert_text*.
-
-        Looks for the ``"New Invite Code:"`` prefix and returns the following
-        token.
-
-        Args:
-            alert_text: Full inner text of the invite-code Alert.
-
-        Returns:
-            Invite code token, or ``""`` when the prefix is not found.
-        """
-        prefix = "New Invite Code:"
+        """Extract the invite code from *alert_text*."""
+        prefix = "Invite Code:"
         if prefix not in alert_text:
             return ""
         after_prefix = alert_text.split(prefix, 1)[1].strip()
-        # The code is the first whitespace-separated token
         return after_prefix.split()[0] if after_prefix.split() else ""
 
     # ------------------------------------------------------------------
@@ -171,13 +116,7 @@ class SharePage(BasePage):
     # ------------------------------------------------------------------
 
     def accept_invite(self, invite_code: str) -> None:
-        """Navigate to ``/accept-invite``, enter *invite_code*, and submit.
-
-        Waits for the success alert before returning.
-
-        Args:
-            invite_code: The invite code to redeem (e.g. ``"ABC12345"``).
-        """
+        """Navigate to ``/accept-invite``, enter *invite_code*, and submit."""
         self.goto_accept()
         self._invite_code_input().fill(invite_code)
         self._accept_button().click()
@@ -188,18 +127,10 @@ class SharePage(BasePage):
     # ------------------------------------------------------------------
 
     def revoke_access(self, email: str) -> None:
-        """Click the revoke icon button on the share row for *email*.
-
-        The app shows a ``window.confirm`` dialog before revoking; this
-        method accepts it automatically via Playwright's dialog handler.
-
-        Args:
-            email: Email address shown in the share row to revoke.
-        """
+        """Click the revoke icon button on the share row for *email*."""
         self.page.once("dialog", lambda dlg: dlg.accept())
         self._revoke_button_for(email).click()
         self.wait_for_loading()
-        # Wait for the share row to disappear from the table (confirms revocation completed)
         cell = self.page.get_by_role("cell", name=email)
         if cell.first.is_visible():
             expect(cell.first).to_be_hidden(timeout=10_000)
@@ -209,10 +140,6 @@ class SharePage(BasePage):
     # ------------------------------------------------------------------
 
     def has_shared_access(self, email: str) -> bool:
-        """Return ``True`` when *email* appears in the *Current Access* table.
-
-        Args:
-            email: Email address to check for in the shares table.
-        """
+        """Return ``True`` when *email* appears in the *Who Has Access* table."""
         cell = self.page.get_by_role("cell", name=email)
         return cell.first.is_visible()

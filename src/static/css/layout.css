@@ -1,0 +1,100 @@
+/* Layout CSS for KernelWorx Brand System */
+
+:root {
+  --display-family: 'Bricolage Grotesque', 'Atkinson Hyperlegible', sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+body {
+  font-family: var(--brand-font-family);
+  font-size: var(--brand-font-size);
+  line-height: var(--brand-line-height);
+  color: var(--brand-color-text);
+  background-color: var(--brand-color-bg-layout);
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--display-family);
+  line-height: var(--brand-line-height-heading);
+  font-weight: var(--brand-font-weight-strong);
+  color: var(--brand-primary-palette-9);
+  margin-top: 0;
+}
+
+h1 { font-size: var(--brand-font-size-heading-1); }
+h2 { font-size: var(--brand-font-size-heading-2); }
+h3 { font-size: var(--brand-font-size-heading-3); }
+h4 { font-size: var(--brand-font-size-heading-4); }
+
+.app-header {
+  background-color: var(--brand-color-bg-container);
+  border-bottom: 1px solid var(--brand-color-border-secondary);
+  padding: 1rem 2rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.app-header .logo {
+  font-family: var(--display-family);
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--brand-color-primary);
+  text-decoration: none;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.app-header nav ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  gap: 1.5rem;
+  align-items: center;
+}
+
+.app-header nav a {
+  color: var(--brand-color-text-secondary);
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 0.95rem;
+  transition: color var(--brand-motion-duration-fast) ease;
+}
+
+.app-header nav a:hover {
+  color: var(--brand-color-primary);
+}
+
+.app-container {
+  flex: 1;
+  max-width: 1120px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 2rem clamp(20px, 4vw, 40px);
+}
+
+.app-footer {
+  background-color: var(--brand-color-bg-container);
+  border-top: 1px solid var(--brand-color-border-secondary);
+  padding: 1.5rem 2rem;
+  text-align: center;
+  color: var(--brand-color-text-tertiary);
+  font-size: var(--brand-font-size-sm);
+  margin-top: auto;
+}

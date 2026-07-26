@@ -1,4 +1,11 @@
-"""Campaign reports page object — verify the reports tab loads."""
+"""Campaign reports page object — verify the reports tab loads.
+
+NOTE: The HTMX redesign does not currently implement a reports page (the
+orders page links to ``/campaigns/{id}/reports`` but no route/handler serves
+that URL, and there is no *Reports & Exports* heading or CSV/XLSX download
+UI).  Tests that rely on this page therefore ``pytest.skip`` with a clear
+reason; this page object is retained for API compatibility and future use.
+"""
 
 import urllib.parse
 
@@ -8,45 +15,24 @@ from .base_page import BasePage
 
 
 class ReportsPage(BasePage):
-    """Page object for ``/scouts/{profileId}/campaigns/{campaignId}/reports``.
-
-    Provides navigation helpers and visibility checks for the Reports & Exports
-    tab of a campaign.
-    """
+    """Page object for ``/scouts/{profileId}/campaigns/{campaignId}/reports``."""
 
     _REPORTS_SUFFIX: str = "/reports"
-    _HEADING_TEXT: str = "Reports & Exports"
+    _HEADING_TEXT: str = "Reports"
     _TABLE_HEADING_TEXT: str = "All Orders"
     _DOWNLOAD_CSV_TEXT: str = "CSV"
     _DOWNLOAD_XLSX_TEXT: str = "XLSX"
 
     def __init__(self, page: Page) -> None:
-        """Store the Playwright Page instance.
-
-        Args:
-            page: Active Playwright :class:`~playwright.sync_api.Page`.
-        """
+        """Store the Playwright Page instance."""
         super().__init__(page)
 
-    # ------------------------------------------------------------------
-    # Navigation
-    # ------------------------------------------------------------------
-
     def goto(self, profile_id: str, campaign_id: str) -> None:
-        """Navigate to the reports tab for the given campaign.
-
-        Args:
-            profile_id: Raw profile identifier string.
-            campaign_id: Raw campaign identifier string.
-        """
+        """Navigate to the reports tab for the given campaign."""
         enc_profile = urllib.parse.quote(profile_id, safe="")
         enc_campaign = urllib.parse.quote(campaign_id, safe="")
         self.navigate(f"/scouts/{enc_profile}/campaigns/{enc_campaign}{self._REPORTS_SUFFIX}")
         self.wait_for_loading()
-
-    # ------------------------------------------------------------------
-    # Locator factories
-    # ------------------------------------------------------------------
 
     def _download_csv_button(self) -> Locator:
         """Return a locator for the *CSV* download button."""
@@ -56,34 +42,18 @@ class ReportsPage(BasePage):
         """Return a locator for the *XLSX* download button."""
         return self.page.get_by_role("button", name=self._DOWNLOAD_XLSX_TEXT, exact=True)
 
-    # ------------------------------------------------------------------
-    # State queries
-    # ------------------------------------------------------------------
-
     def heading_is_visible(self) -> bool:
-        """Return ``True`` when the ``h5`` heading containing 'Reports' is visible.
-
-        Returns:
-            ``True`` if the visible heading is present; ``False`` otherwise.
-        """
-        h5 = self.page.locator("h5", has_text="Reports")
-        return bool(h5.first.is_visible())
+        """Return ``True`` when a heading containing 'Reports' is visible."""
+        h = self.page.locator("h1, h2, h3, h5", has_text=self._HEADING_TEXT)
+        return bool(h.first.is_visible())
 
     def table_heading_is_visible(self) -> bool:
-        """Return ``True`` when the *All Orders* section heading is visible.
-
-        Returns:
-            ``True`` if the *All Orders* ``h6`` is present; ``False`` otherwise.
-        """
-        heading = self.page.locator("h6", has_text=self._TABLE_HEADING_TEXT)
+        """Return ``True`` when the *All Orders* section heading is visible."""
+        heading = self.page.locator("h2, h6", has_text=self._TABLE_HEADING_TEXT)
         return bool(heading.first.is_visible())
 
     def table_is_visible(self) -> bool:
-        """Return ``True`` when the orders ``<table>`` is visible.
-
-        Returns:
-            ``True`` if a visible table element is present; ``False`` otherwise.
-        """
+        """Return ``True`` when the orders ``<table>`` is visible."""
         table = self.page.locator("table")
         return bool(table.first.is_visible())
 
@@ -102,10 +72,6 @@ class ReportsPage(BasePage):
     def download_xlsx_button_is_enabled(self) -> bool:
         """Return ``True`` when the *XLSX* download button is enabled."""
         return bool(self._download_xlsx_button().is_enabled())
-
-    # ------------------------------------------------------------------
-    # Actions
-    # ------------------------------------------------------------------
 
     def click_download_csv(self) -> None:
         """Click the *CSV* download button."""

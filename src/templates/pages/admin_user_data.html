@@ -1,0 +1,180 @@
+{% extends "base.html" %}
+
+{% block title %}User Data — Admin Console{% endblock %}
+
+{% block content %}
+<div style="max-width: 1200px; margin: 0 auto; padding: 2rem clamp(20px, 4vw, 40px);">
+
+  <!-- NAV BREADCRUMBS (NavBreadcrumbs.tsx) -->
+  <div style="margin-bottom: 1.5rem; display: flex; align-items: center; gap: 0.5rem; font-size: 0.875rem; flex-wrap: wrap;">
+    <a href="/admin" style="display: inline-flex; align-items: center; gap: 0.25rem; color: var(--brand-color-primary); text-decoration: none; font-weight: 600;">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
+      Admin Console
+    </a>
+    <span style="color: var(--brand-color-text-tertiary);">/</span>
+    <span style="color: var(--brand-color-text);">User Data: {{ account_id | replace('ACCOUNT#', '') }}</span>
+  </div>
+
+  <!-- USER INFO HEADER -->
+  <div class="card" style="padding: 1.5rem; margin-bottom: 1.5rem;">
+    <h2 style="margin: 0 0 0.5rem; font-size: 1.5rem; font-weight: 600; color: var(--brand-color-text);">User Data Management</h2>
+    <p style="margin: 0; font-size: 0.875rem; color: var(--brand-color-text-secondary);">
+      Account ID: {{ account_id }}
+    </p>
+  </div>
+
+  <!-- TABS CARD -->
+  <div class="card" style="padding: 0; margin-bottom: 1.5rem;">
+    <div role="tablist" style="display: flex; border-bottom: 1px solid var(--brand-color-border-secondary); overflow-x: auto;">
+      <button id="ud-tab-0" role="tab" aria-controls="ud-tabpanel-0" aria-selected="true"
+              style="padding: 1rem 1.25rem; background: none; border: none; border-bottom: 2px solid var(--brand-color-primary); color: var(--brand-color-primary); font-family: var(--brand-font-family); font-size: 0.875rem; font-weight: 600; cursor: pointer; white-space: nowrap;"
+              onclick="window.__udSwitch && window.__udSwitch(0)">Profiles ({{ profiles|length }})</button>
+      <button id="ud-tab-1" role="tab" aria-controls="ud-tabpanel-1" aria-selected="false"
+              style="padding: 1rem 1.25rem; background: none; border: none; border-bottom: 2px solid transparent; color: var(--brand-color-text-secondary); font-family: var(--brand-font-family); font-size: 0.875rem; font-weight: 600; cursor: pointer; white-space: nowrap;"
+              onclick="window.__udSwitch && window.__udSwitch(1)">Catalogs (0)</button>
+      <button id="ud-tab-2" role="tab" aria-controls="ud-tabpanel-2" aria-selected="false"
+              style="padding: 1rem 1.25rem; background: none; border: none; border-bottom: 2px solid transparent; color: var(--brand-color-text-secondary); font-family: var(--brand-font-family); font-size: 0.875rem; font-weight: 600; cursor: pointer; white-space: nowrap;"
+              onclick="window.__udSwitch && window.__udSwitch(2)">Campaigns (0)</button>
+      <button id="ud-tab-3" role="tab" aria-controls="ud-tabpanel-3" aria-selected="false"
+              style="padding: 1rem 1.25rem; background: none; border: none; border-bottom: 2px solid transparent; color: var(--brand-color-text-secondary); font-family: var(--brand-font-family); font-size: 0.875rem; font-weight: 600; cursor: pointer; white-space: nowrap;"
+              onclick="window.__udSwitch && window.__udSwitch(3)">Shared Campaigns (0)</button>
+      <button id="ud-tab-4" role="tab" aria-controls="ud-tabpanel-4" aria-selected="false"
+              style="padding: 1rem 1.25rem; background: none; border: none; border-bottom: 2px solid transparent; color: var(--brand-color-text-secondary); font-family: var(--brand-font-family); font-size: 0.875rem; font-weight: 600; cursor: pointer; white-space: nowrap;"
+              onclick="window.__udSwitch && window.__udSwitch(4)">Shares</button>
+    </div>
+  </div>
+
+  <!-- TABPANEL 0: PROFILES -->
+  <div id="ud-tabpanel-0" role="tabpanel" aria-labelledby="ud-tab-0" style="padding-top: 1.5rem;">
+    <div class="card" style="padding: 1.5rem; margin-bottom: 0;">
+      <h3 style="margin: 0 0 1rem; font-size: 1.25rem; font-weight: 600; color: var(--brand-color-text);">Seller Profiles</h3>
+      {% if profiles %}
+      <div class="card" style="padding: 0; overflow: hidden; margin-bottom: 0;">
+        <table style="width: 100%; border-collapse: collapse; text-align: left;">
+          <thead>
+            <tr style="background-color: var(--brand-color-fill-tertiary); border-bottom: 2px solid var(--brand-color-border-secondary);">
+              <th style="padding: 1rem 1.25rem;">Profile ID</th>
+              <th style="padding: 1rem 1.25rem;">Seller Name</th>
+              <th style="padding: 1rem 1.25rem;">Created</th>
+              <th style="padding: 1rem 1.25rem; text-align: right;">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for profile in profiles %}
+            <tr style="border-bottom: 1px solid var(--brand-color-border-secondary);">
+              <td style="padding: 1rem 1.25rem; font-family: var(--brand-font-family-code); font-size: 0.875rem;">{{ profile.profileId }}</td>
+              <td style="padding: 1rem 1.25rem;">{{ profile.sellerName }}</td>
+              <td style="padding: 1rem 1.25rem;">{{ profile.createdAt if profile.createdAt else '—' }}</td>
+              <td style="padding: 1rem 1.25rem; text-align: right;">
+                <button class="btn btn-secondary" style="padding: 0.35rem 0.75rem; font-size: 0.8125rem;" onclick="alert('Transfer ownership for {{ profile.profileId }}')">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="margin-right: 0.25rem;"><path d="M6.99 11L3 15l3.99 4v-3H14v-2H6.99v-3zM21 9l-3.99-4v3H10v2h7.01v3L21 9z"/></svg>
+                  Transfer
+                </button>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div style="background: var(--brand-color-info-bg); border: 1px solid var(--brand-color-info-border); padding: 0.75rem 1rem; border-radius: var(--brand-border-radius); color: var(--brand-color-text);">
+        No profiles found for this user.
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- TABPANEL 1: CATALOGS -->
+  <div id="ud-tabpanel-1" role="tabpanel" aria-labelledby="ud-tab-1" hidden style="padding-top: 1.5rem;">
+    <div class="card" style="padding: 1.5rem; margin-bottom: 0;">
+      <h3 style="margin: 0 0 1rem; font-size: 1.25rem; font-weight: 600; color: var(--brand-color-text);">Product Catalogs</h3>
+      <div style="background: var(--brand-color-info-bg); border: 1px solid var(--brand-color-info-border); padding: 0.75rem 1rem; border-radius: var(--brand-border-radius); color: var(--brand-color-text);">
+        No catalogs found for this user.
+      </div>
+    </div>
+  </div>
+
+  <!-- TABPANEL 2: CAMPAIGNS -->
+  <div id="ud-tabpanel-2" role="tabpanel" aria-labelledby="ud-tab-2" hidden style="padding-top: 1.5rem;">
+    <div class="card" style="padding: 1.5rem; margin-bottom: 0;">
+      <h3 style="margin: 0 0 0.5rem; font-size: 1.25rem; font-weight: 600; color: var(--brand-color-text);">Profile Campaigns</h3>
+      <p style="margin: 0 0 1rem; font-size: 0.875rem; color: var(--brand-color-text-secondary);">
+        Select a profile to view and manage its campaigns.
+      </p>
+      {% if profiles %}
+      <div style="background: var(--brand-color-info-bg); border: 1px solid var(--brand-color-info-border); padding: 0.75rem 1rem; border-radius: var(--brand-border-radius); margin-bottom: 1rem; color: var(--brand-color-text);">
+        Total campaigns loaded: 0
+      </div>
+      <div style="margin-bottom: 1.5rem; display: flex; flex-wrap: wrap; gap: 0.5rem;">
+        {% for profile in profiles %}
+        <button class="btn btn-secondary" style="font-size: 0.8125rem;">{{ profile.sellerName }}</button>
+        {% endfor %}
+      </div>
+      <div style="background: var(--brand-color-info-bg); border: 1px solid var(--brand-color-info-border); padding: 0.75rem 1rem; border-radius: var(--brand-border-radius); color: var(--brand-color-text);">
+        No campaigns found for this profile. (Total campaigns in system: 0)
+      </div>
+      {% else %}
+      <div style="background: var(--brand-color-info-bg); border: 1px solid var(--brand-color-info-border); padding: 0.75rem 1rem; border-radius: var(--brand-border-radius); color: var(--brand-color-text);">
+        No profiles to manage campaigns for.
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- TABPANEL 3: SHARED CAMPAIGNS -->
+  <div id="ud-tabpanel-3" role="tabpanel" aria-labelledby="ud-tab-3" hidden style="padding-top: 1.5rem;">
+    <div class="card" style="padding: 1.5rem; margin-bottom: 0;">
+      <h3 style="margin: 0 0 1rem; font-size: 1.25rem; font-weight: 600; color: var(--brand-color-text);">Shared Campaigns Created by User</h3>
+      <div style="background: var(--brand-color-info-bg); border: 1px solid var(--brand-color-info-border); padding: 0.75rem 1rem; border-radius: var(--brand-border-radius); color: var(--brand-color-text);">
+        No shared campaigns found for this user.
+      </div>
+    </div>
+  </div>
+
+  <!-- TABPANEL 4: SHARES -->
+  <div id="ud-tabpanel-4" role="tabpanel" aria-labelledby="ud-tab-4" hidden style="padding-top: 1.5rem;">
+    <div class="card" style="padding: 1.5rem; margin-bottom: 0;">
+      <h3 style="margin: 0 0 0.5rem; font-size: 1.25rem; font-weight: 600; color: var(--brand-color-text);">Profile Shares</h3>
+      <p style="margin: 0 0 1rem; font-size: 0.875rem; color: var(--brand-color-text-secondary);">
+        Select a profile to view and manage who has access to it.
+      </p>
+      {% if profiles %}
+      <div style="margin-bottom: 1.5rem; display: flex; flex-wrap: wrap; gap: 0.5rem;">
+        {% for profile in profiles %}
+        <button class="btn btn-secondary" style="font-size: 0.8125rem;">{{ profile.sellerName }}</button>
+        {% endfor %}
+      </div>
+      <div style="background: var(--brand-color-info-bg); border: 1px solid var(--brand-color-info-border); padding: 0.75rem 1rem; border-radius: var(--brand-border-radius); color: var(--brand-color-text);">
+        No shares found for this profile.
+      </div>
+      {% else %}
+      <div style="background: var(--brand-color-info-bg); border: 1px solid var(--brand-color-info-border); padding: 0.75rem 1rem; border-radius: var(--brand-border-radius); color: var(--brand-color-text);">
+        No profiles to manage shares for.
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+</div>
+
+<script>
+  (function () {
+    var tabs = [
+      { tab: document.getElementById('ud-tab-0'), panel: document.getElementById('ud-tabpanel-0') },
+      { tab: document.getElementById('ud-tab-1'), panel: document.getElementById('ud-tabpanel-1') },
+      { tab: document.getElementById('ud-tab-2'), panel: document.getElementById('ud-tabpanel-2') },
+      { tab: document.getElementById('ud-tab-3'), panel: document.getElementById('ud-tabpanel-3') },
+      { tab: document.getElementById('ud-tab-4'), panel: document.getElementById('ud-tabpanel-4') },
+    ];
+    window.__udSwitch = function (idx) {
+      tabs.forEach(function (t, i) {
+        var active = i === idx;
+        t.panel.hidden = !active;
+        t.tab.setAttribute('aria-selected', String(active));
+        t.tab.style.borderBottom = active ? '2px solid var(--brand-color-primary)' : '2px solid transparent';
+        t.tab.style.color = active ? 'var(--brand-color-primary)' : 'var(--brand-color-text-secondary)';
+      });
+    };
+  })();
+</script>
+{% endblock %}

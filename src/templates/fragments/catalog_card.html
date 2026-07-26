@@ -1,0 +1,22 @@
+<div class="card" id="catalog-card-{{ catalog.catalogId }}">
+  <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+    <div>
+      <h3 style="color: var(--color-primary-9); margin-bottom: 0.25rem;">{{ catalog.name }}</h3>
+      <p style="color: var(--color-text-secondary); font-size: var(--font-size-sm);">
+        Type: {{ catalog.catalogType or 'USER_CREATED' }} | Products: {{ catalog.products|length if catalog.products else 0 }}
+      </p>
+    </div>
+    <div style="display: flex; gap: 0.5rem;">
+      <a href="/catalogs/{{ catalog.catalogId }}/preview" class="btn btn-secondary" style="font-size: var(--font-size-sm);">Preview</a>
+      {% if catalog.catalogType != 'ADMIN_MANAGED' %}
+        <button class="btn btn-danger" style="font-size: var(--font-size-sm);"
+                hx-delete="/api/catalogs/{{ catalog.catalogId }}"
+                hx-target="#catalog-card-{{ catalog.catalogId }}"
+                hx-swap="outerHTML"
+                hx-confirm="Are you sure you want to delete catalog {{ catalog.name }}?">
+          Delete
+        </button>
+      {% endif %}
+    </div>
+  </div>
+</div>

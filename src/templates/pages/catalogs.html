@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+
+{% block title %}Product Catalogs — KernelWorx{% endblock %}
+
+{% block content %}
+
+<div class="card" style="margin-bottom: clamp(12px, 3vw, 24px); border-left: 4px solid var(--brand-primary-palette-6); border-radius: var(--brand-border-radius-lg); box-shadow: 0 1px 2px var(--brand-color-fill-quaternary);">
+  <div style="padding: clamp(16px, 3vw, 24px);">
+    <div style="display: flex; flex-direction: column; justify-content: space-between; align-items: flex-start; gap: 16px;">
+      <div>
+        <h1 style="font-family: 'Bricolage Grotesque', 'Atkinson Hyperlegible', sans-serif; font-weight: 600; font-size: 22px; line-height: 1.25; color: var(--brand-color-text); margin: 0;">Product Catalogs</h1>
+      </div>
+      <div>
+        <button class="btn btn-primary" style="display: inline-flex; align-items: center; gap: 6px; background-color: var(--brand-primary-palette-7); color: #ffffff; border: 1px solid var(--brand-primary-palette-7); height: 32px; padding: 0 12px; font-size: 0.875rem; font-weight: 600; border-radius: var(--brand-border-radius); cursor: pointer;"
+                hx-get="/api/catalogs/new-form"
+                hx-target="#modal-container"
+                hx-swap="innerHTML">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6z"/></svg>
+          New Catalog
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div style="background-color: var(--brand-color-primary-bg); color: var(--brand-primary-palette-9); border: 1px solid var(--brand-color-primary-border); border-radius: var(--brand-border-radius); padding: 12px 16px; font-size: 0.875rem; line-height: 1.5; margin-bottom: 24px;">
+  <strong>Managed catalogs</strong> are admin-maintained catalogs visible to all users. <strong>Private catalogs</strong> are only visible to you and can be used for your owned tracking and use in shared campaigns.
+</div>
+
+<!-- Tabs -->
+<div style="background-color: var(--brand-color-bg-container); border: 1px solid var(--brand-color-border-secondary); border-radius: var(--brand-border-radius-lg); box-shadow: 0 1px 2px var(--brand-color-fill-quaternary); margin-bottom: 24px;">
+  <div style="display: flex;">
+    <a href="#my" id="tab-my" style="flex: 1; text-align: center; padding: 12px 16px; color: var(--brand-color-primary); font-weight: 600; font-size: 0.875rem; text-decoration: none; border-bottom: 2px solid var(--brand-color-primary);">My Catalogs</a>
+    <a href="#managed" id="tab-managed" style="flex: 1; text-align: center; padding: 12px 16px; color: var(--brand-color-text-secondary); font-weight: 600; font-size: 0.875rem; text-decoration: none; border-bottom: 2px solid transparent;">Managed Catalogs</a>
+  </div>
+</div>
+
+<!-- My Catalogs table -->
+<div id="my-catalogs-panel">
+  {% if my_catalogs %}
+    <div style="background-color: var(--brand-color-bg-container); border: 1px solid var(--brand-color-border-secondary); border-radius: var(--brand-border-radius-lg); overflow: hidden; box-shadow: 0 1px 2px var(--brand-color-fill-quaternary);">
+      <table style="width: 100%; border-collapse: collapse; text-align: left;">
+        <thead>
+          <tr style="border-bottom: 1px solid var(--brand-color-border-secondary);">
+            <th style="padding: 8px 16px; font-size: 0.8125rem; font-weight: 600; color: var(--brand-color-text-secondary);">Catalog Name</th>
+            <th style="padding: 8px 16px; font-size: 0.8125rem; font-weight: 600; color: var(--brand-color-text-secondary);">Type</th>
+            <th style="padding: 8px 16px; font-size: 0.8125rem; font-weight: 600; color: var(--brand-color-text-secondary);">Products</th>
+            <th style="padding: 8px 16px; font-size: 0.8125rem; font-weight: 600; color: var(--brand-color-text-secondary);">Created</th>
+            <th style="padding: 8px 16px; font-size: 0.8125rem; font-weight: 600; color: var(--brand-color-text-secondary); text-align: right;">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for catalog in my_catalogs %}
+            <tr id="catalog-row-{{ catalog.catalogId }}" style="border-bottom: 1px solid var(--brand-color-border-secondary);">
+              <td style="padding: 8px 16px; font-size: 0.875rem; font-weight: 600; color: var(--brand-color-text);">{{ catalog.catalogName }}</td>
+              <td style="padding: 8px 16px;">
+                {% if catalog.inUse %}
+                  <span style="display: inline-block; padding: 2px 8px; border-radius: var(--brand-border-radius-sm); font-size: 0.75rem; font-weight: 600; background-color: transparent; color: var(--brand-color-success); border: 1px solid var(--brand-color-success-border);">In Use</span>
+                {% endif %}
+              </td>
+              <td style="padding: 8px 16px; font-size: 0.875rem; color: var(--brand-color-text-secondary);">{{ (catalog.products or [])|length }} items</td>
+              <td style="padding: 8px 16px; font-size: 0.875rem; color: var(--brand-color-text-secondary);">{{ catalog.createdAt or '' }}</td>
+              <td style="padding: 8px 16px; text-align: right;">
+                <div style="display: flex; gap: 8px; justify-content: flex-end; align-items: center;">
+                  <a href="/catalogs/{{ catalog.catalogId|replace('CATALOG#', '') }}/preview" class="btn" style="display: inline-flex; align-items: center; gap: 6px; background: transparent; color: var(--brand-color-link); border: none; text-decoration: none; height: 24px; padding: 0 8px; font-size: 0.75rem; font-weight: 600; cursor: pointer;">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>
+                    View
+                  </a>
+                  {% if catalog.catalogId in my_owned_ids %}
+                    <a href="#" aria-label="Edit {{ catalog.catalogName }}" style="display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; color: var(--brand-color-primary); text-decoration: none; border-radius: var(--brand-border-radius);"
+                       hx-get="/api/catalogs/new-form?catalogId={{ catalog.catalogId }}"
+                       hx-target="#modal-container"
+                       hx-swap="innerHTML">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75z"/></svg>
+                    </a>
+                    <button aria-label="Delete {{ catalog.catalogName }}" style="display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; color: var(--brand-color-error); background: none; border: none; cursor: pointer; border-radius: var(--brand-border-radius);"
+                            hx-delete="/api/catalogs/{{ catalog.catalogId }}"
+                            hx-target="#catalog-row-{{ catalog.catalogId }}"
+                            hx-swap="outerHTML"
+                            hx-confirm="Are you sure you want to delete &quot;{{ catalog.catalogName }}&quot;? This action cannot be undone.">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6zM19 4h-3.5l-1-1h-5l-1 1H5v2h14z"/></svg>
+                    </button>
+                  {% endif %}
+                </div>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <div style="background-color: var(--brand-color-bg-container); border: 1px solid var(--brand-color-border-secondary); border-radius: var(--brand-border-radius-lg); padding: 32px; text-align: center; box-shadow: 0 1px 2px var(--brand-color-fill-quaternary);">
+      <p style="color: var(--brand-color-text-secondary); font-size: 0.875rem; margin: 0;">No catalogs yet. Create your first catalog!</p>
+    </div>
+  {% endif %}
+</div>
+
+<div id="modal-container"></div>
+{% endblock %}

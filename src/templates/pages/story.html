@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+
+{% block title %}Our Story — KernelWorx{% endblock %}
+
+{% block content %}
+<div style="max-width: 800px; margin: 0 auto; padding: clamp(2rem, 5vw, 4rem) 1.5rem;">
+  <div style="display: flex; flex-direction: column; gap: clamp(1.5rem, 4vw, 2.5rem);">
+    <div style="text-align: center;">
+      <span style="text-transform: uppercase; letter-spacing: 0.14em; font-size: 0.75rem; font-weight: 600; color: var(--brand-color-link); display: block; margin-bottom: 0.5rem; line-height: 1;">Our story</span>
+      <h1 style="font-family: var(--display-family); font-weight: 700; font-size: clamp(2rem, 4vw, 3.25rem); letter-spacing: -0.015em; line-height: 1.15; color: var(--brand-color-primary); margin: 0 0 0.5rem;">The Story of KernelWorx</h1>
+      <p style="font-size: 1.125rem; line-height: 1.5; color: var(--brand-color-text-secondary); margin: 0;">Built because popcorn season felt harder than it had to be.</p>
+    </div>
+
+    <div class="card" style="padding: 1.5rem; margin: 0;">
+      <div style="display: flex; flex-direction: column; gap: 1.5rem;">
+        <p style="color: var(--brand-color-text); font-size: 1rem; line-height: 1.57; margin: 0;">
+          As a parent of a Cub Scout and a Den Leader, I never felt like I had a handle on popcorn season. No matter how organized I tried to be, I was juggling paper sales sheets, payment apps, and a spreadsheet that never matched the order forms. My own handwriting didn't make the order forms any clearer.
+        </p>
+        <p style="color: var(--brand-color-text); font-size: 1rem; line-height: 1.57; margin: 0;">
+          Out selling door-to-door, I'd write down an order, then pull out my phone and fumble between payment apps trying to find the right QR code while they waited. Then I'd go home and build a spreadsheet because I needed to total up multiple order forms, and the paper sheets made that painful. The spreadsheet helped, but it meant retyping every order while trying to decode my own writing.
+        </p>
+        <p style="color: var(--brand-color-text); font-size: 1rem; line-height: 1.57; margin: 0;">
+          I was doing this for one Scout. Our Pack Kernel had to repeat this process for every Scout in the Pack — paper orders, payments turned in by families, and making sure the Pack's final numbers added up across all the individual forms. It was a lot to ask of a volunteer — and it made selling popcorn harder for both parents and Scouts.
+        </p>
+        <p style="color: var(--brand-color-text); font-size: 1rem; line-height: 1.57; margin: 0;">
+          I started asking a simple question: How could popcorn season be easier — not just for me, but for the Pack, the parents, and the Scouts?
+        </p>
+        <p style="color: var(--brand-color-text); font-size: 1rem; line-height: 1.57; margin: 0;">
+          KernelWorx is my answer. It brings orders, seller profiles, payments, and reporting into one place so nobody has to juggle paper sheets or rebuild spreadsheets by hand. As an Eagle Scout and Order of the Arrow Brotherhood member, I built it because I care about helping Scouting volunteers succeed.
+        </p>
+        <p style="color: var(--brand-color-text); font-size: 1rem; line-height: 1.57; margin: 0;">
+          The site is free to use — no subscriptions, no paid features. If KernelWorx saves you time or hassle, please consider sponsoring through GitHub Sponsors. Any sponsorship helps defray the cost of hosting and development. KernelWorx is not a non-profit, so donations are not tax deductible.
+        </p>
+      </div>
+    </div>
+
+    <div style="text-align: center;">
+      <a href="https://github.com/sponsors/dmeiser" target="_blank" rel="noopener noreferrer" class="btn btn-primary" style="display: inline-flex; align-items: center; gap: 0.5rem; height: 40px; padding: 0 2rem; font-size: 1.125rem; text-decoration: none;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="m12 21.35-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54z"/></svg>
+        Sponsor KernelWorx
+      </a>
+    </div>
+  </div>
+</div>
+{% endblock %}

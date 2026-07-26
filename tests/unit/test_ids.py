@@ -8,8 +8,22 @@ from src.utils.ids import (
     ensure_prefix,
     ensure_product_id,
     ensure_profile_id,
+    generate_id,
     strip_prefix,
 )
+
+
+def test_generate_id() -> None:
+    """Test generating prefixed and raw IDs."""
+    raw = generate_id()
+    assert len(raw) > 20
+    assert "#" not in raw
+
+    prefixed = generate_id("PROFILE")
+    assert prefixed.startswith("PROFILE#")
+
+    prefixed_hash = generate_id("PROFILE#")
+    assert prefixed_hash.startswith("PROFILE#")
 
 
 class TestEnsurePrefix:

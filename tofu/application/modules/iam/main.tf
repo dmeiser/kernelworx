@@ -143,33 +143,32 @@ resource "aws_iam_role_policy" "lambda_cloudfront" {
 }
 
 # =============================================================================
-# AppSync Service Role
+# API Gateway Execution Role (for VTL Lambda-less Integrations)
 # =============================================================================
 
-resource "aws_iam_role" "appsync_service" {
-  name = "${var.name_prefix}-appsync${local.role_suffix}"
+resource "aws_iam_role" "apigateway_execution" {
+  name = "${var.name_prefix}-apigw-exec${local.role_suffix}"
 
-  assume_role_policy = data.aws_iam_policy_document.appsync_assume_role.json
+  assume_role_policy = data.aws_iam_policy_document.apigateway_assume_role.json
 
   lifecycle {
     prevent_destroy = true
   }
 }
 
-data "aws_iam_policy_document" "appsync_assume_role" {
+data "aws_iam_policy_document" "apigateway_assume_role" {
   statement {
     actions = ["sts:AssumeRole"]
     effect  = "Allow"
 
     principals {
       type        = "Service"
-      identifiers = ["appsync.amazonaws.com"]
+      identifiers = ["apigateway.amazonaws.com"]
     }
   }
 }
 
-# AppSync DynamoDB Access
-data "aws_iam_policy_document" "appsync_dynamodb" {
+data "aws_iam_policy_document" "apigateway_dynamodb" {
   statement {
     effect = "Allow"
     actions = [
@@ -179,34 +178,15 @@ data "aws_iam_policy_document" "appsync_dynamodb" {
       "dynamodb:DeleteItem",
       "dynamodb:Query",
       "dynamodb:Scan",
-      "dynamodb:BatchGetItem",
-      "dynamodb:BatchWriteItem",
     ]
     resources = concat(local.dynamodb_table_arns, local.dynamodb_index_arns)
   }
 }
 
-resource "aws_iam_role_policy" "appsync_dynamodb" {
-  name   = "dynamodb-access"
-  role   = aws_iam_role.appsync_service.id
-  policy = data.aws_iam_policy_document.appsync_dynamodb.json
-}
-
-# AppSync Lambda Invoke
-data "aws_iam_policy_document" "appsync_lambda" {
-  statement {
-    effect    = "Allow"
-    actions   = ["lambda:InvokeFunction"]
-    # Principle of least privilege: limit AppSync to specific Lambda functions it calls.
-    # KICS recommendation: also allow qualified ARNs (":*") for versions/aliases.
-    resources = length(local.lambda_invoke_arns) > 0 ? local.lambda_invoke_arns : ["*"]
-  }
-}
-
-resource "aws_iam_role_policy" "appsync_lambda" {
-  name   = "lambda-invoke"
-  role   = aws_iam_role.appsync_service.id
-  policy = data.aws_iam_policy_document.appsync_lambda.json
+resource "aws_iam_role_policy" "apigateway_dynamodb" {
+  name   = "apigw-dynamodb-access"
+  role   = aws_iam_role.apigateway_execution.id
+  policy = data.aws_iam_policy_document.apigateway_dynamodb.json
 }
 
 # =============================================================================
@@ -272,9 +252,9 @@ output "lambda_execution_role_name" {
   value       = aws_iam_role.lambda_execution.name
 }
 
-output "appsync_service_role_arn" {
-  description = "ARN of the AppSync service role"
-  value       = aws_iam_role.appsync_service.arn
+output "apigateway_execution_role_arn" {
+  description = "ARN of the API Gateway execution role for VTL integrations"
+  value       = aws_iam_role.apigateway_execution.arn
 }
 
 output "cognito_sms_role_arn" {

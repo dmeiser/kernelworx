@@ -12,10 +12,18 @@ from src.utils.dynamodb import (
     TableAccessor,
     _get_dynamodb,
     clear_all_overrides,
+    get_dynamodb_resource,
     override_table,
     reset_singleton,
     tables,
 )
+
+
+def test_get_dynamodb_resource() -> None:
+    """Test get_dynamodb_resource returns a DynamoDB resource."""
+    with mock_aws():
+        res = get_dynamodb_resource()
+        assert res is not None
 
 
 @pytest.fixture(autouse=True)

@@ -1,0 +1,20 @@
+<dialog id="create-profile-dialog" open>
+  <h2 style="font-family: 'Bricolage Grotesque', 'Atkinson Hyperlegible', sans-serif; font-weight: 600; font-size: 18px; color: var(--brand-color-link); margin: 0 0 16px 0;">Create New Scout</h2>
+
+  <form hx-post="/api/profiles"
+        hx-target="#profiles-list"
+        hx-swap="beforeend"
+        hx-on::after-request="document.getElementById('create-profile-dialog').close(); document.getElementById('create-profile-dialog').remove();">
+
+    <div class="form-group" style="padding-top: 8px;">
+      <label for="sellerName" style="display: block; font-size: 0.8125rem; color: var(--brand-color-text-secondary); margin-bottom: 4px;">Scout Name</label>
+      <input type="text" id="sellerName" name="sellerName" autofocus class="form-control" placeholder="e.g., Scout's First and Last Name" style="width: 100%; padding: 0 12px; font-size: 0.875rem; border: 1px solid var(--brand-color-border); border-radius: var(--brand-border-radius); height: 32px; box-sizing: border-box;">
+      <p style="font-size: 0.75rem; color: var(--brand-color-text-tertiary); margin: 4px 0 0 0;">Enter the name of the Scout</p>
+    </div>
+
+    <div style="display: flex; gap: 8px; justify-content: flex-end; margin-top: 24px;">
+      <button type="button" class="btn" style="height: 32px; padding: 0 12px; font-size: 0.875rem; font-weight: 600; background: var(--brand-color-bg-container); color: var(--brand-color-text); border: 1px solid var(--brand-color-border); border-radius: var(--brand-border-radius); cursor: pointer;" onclick="this.closest('dialog').close(); this.closest('dialog').remove();">Cancel</button>
+      <button type="submit" class="btn btn-primary" style="height: 32px; padding: 0 12px; font-size: 0.875rem; font-weight: 600; background-color: var(--brand-primary-palette-7); color: #ffffff; border: 1px solid var(--brand-primary-palette-7); border-radius: var(--brand-border-radius); cursor: pointer;">Create Scout</button>
+    </div>
+  </form>
+</dialog>

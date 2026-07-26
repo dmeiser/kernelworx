@@ -5,7 +5,17 @@ Provides consistent handling of entity ID prefixes (PROFILE#, CAMPAIGN#, etc.)
 across all Lambda handlers and utilities.
 """
 
+import uuid
 from typing import Optional
+
+
+def generate_id(prefix: str = "") -> str:
+    """Generate a unique ID, optionally prefixed (e.g. PROFILE#uuid)."""
+    raw_id = str(uuid.uuid4())
+    if prefix:
+        p = prefix.rstrip("#")
+        return f"{p}#{raw_id}"
+    return raw_id
 
 
 def ensure_prefix(prefix: str, id_value: Optional[str]) -> Optional[str]:

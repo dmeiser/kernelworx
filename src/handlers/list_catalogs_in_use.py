@@ -1,183 +1,123 @@
 """
-List catalogs in use Lambda handler.
+List all catalog IDs in use by campaigns the user has access to (API Gateway proxy event shape).
 
-Returns all catalog IDs used by campaigns for profiles the user owns or has access to via shares.
+Restored from the AppSync-shaped ``main`` version (which used aioboto3). The
+HTMX app calls this synchronously over REST, so the implementation was
+converted to the synchronous boto3 table resource to keep the handler simple
+and to share the existing ``tables`` accessors.
 
-This Lambda is necessary because:
-1. We need to query profiles owned by the account (1 query)
-2. We need to query campaigns for each owned profile (N queries)
-3. We need to query campaigns for shared profiles (1 shares query + N campaign queries)
-4. A pipeline resolver can't dynamically query N profiles
-
-Uses aioboto3 for async parallel queries:
-- owned_profile_ids and shared_profile_ids run concurrently
-- owned_catalog_ids and shared_catalog_ids wait for their respective profile_ids, then run N queries in parallel
-
-GraphQL query: listCatalogsInUse
-Returns: [ID!]! (list of catalog IDs)
+Returns a JSON list of catalog IDs.
 """
 
-import asyncio
-import os
-from typing import Any, Dict, List, Set, Tuple
+import json
+from typing import Any, Dict, List, Set
 
-import aioboto3
-
-# Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
+    from utils.dynamodb import get_required_env, tables
     from utils.errors import AppError, ErrorCode
-    from utils.logging import StructuredLogger, get_correlation_id
+    from utils.logging import get_logger
+    from utils.proxy_event import get_caller_id
 except ModuleNotFoundError:  # pragma: no cover
-    from ..utils.errors import AppError, ErrorCode
-    from ..utils.logging import StructuredLogger, get_correlation_id
+    from src.utils.dynamodb import get_required_env, tables
+    from src.utils.errors import AppError, ErrorCode
+    from src.utils.logging import get_logger
+    from src.utils.proxy_event import get_caller_id
+
+logger = get_logger(__name__)
 
 
-async def _extract_field_values(items: list[Dict[str, Any]], field_name: str) -> List[str]:
-    """Extract field values from DynamoDB items."""
-    return [item[field_name] for item in items if item.get(field_name)]
+def _query_all(table, key_condition, expr_values, index_name=None, projection=None):
+    items: List[Dict[str, Any]] = []
+    last_evaluated_key = None
+    while True:
+        kwargs: Dict[str, Any] = {"KeyConditionExpression": key_condition, "ExpressionAttributeValues": expr_values}
+        if index_name:
+            kwargs["IndexName"] = index_name
+        if projection:
+            kwargs["ProjectionExpression"] = projection
+        if last_evaluated_key:
+            kwargs["ExclusiveStartKey"] = last_evaluated_key
+        res = table.query(**kwargs)
+        items.extend(res.get("Items", []))
+        last_evaluated_key = res.get("LastEvaluatedKey")
+        if not last_evaluated_key:
+            break
+    return items
 
 
-async def _handle_pagination(table: Any, query_params: Dict[str, Any], field_name: str) -> List[str]:
-    """Handle DynamoDB pagination for query operations."""
-    results: List[str] = []
-    response = await table.query(**query_params)
-    results.extend(await _extract_field_values(response.get("Items", []), field_name))
-
-    while response.get("LastEvaluatedKey"):
-        query_params["ExclusiveStartKey"] = response["LastEvaluatedKey"]
-        response = await table.query(**query_params)
-        results.extend(await _extract_field_values(response.get("Items", []), field_name))
-
-    return results
+def _get_owned_profile_ids(profiles_table_name: str, owner_account_id: str) -> List[str]:
+    items = _query_all(
+        tables.profiles,
+        "ownerAccountId = :owner",
+        {":owner": owner_account_id},
+        projection="profileId",
+    )
+    return [i["profileId"] for i in items if i.get("profileId")]
 
 
-async def _async_get_owned_profile_ids(dynamodb: Any, profiles_table_name: str, owner_account_id: str) -> List[str]:
-    """Async: Query profiles owned by this account."""
-    table = await dynamodb.Table(profiles_table_name)
-    query_params = {
-        "KeyConditionExpression": "ownerAccountId = :ownerAccountId",
-        "ExpressionAttributeValues": {":ownerAccountId": owner_account_id},
-        "ProjectionExpression": "profileId",
-    }
-    return await _handle_pagination(table, query_params, "profileId")
+def _get_shared_profile_ids(shares_table_name: str, target_account_id: str) -> List[str]:
+    items = _query_all(
+        tables.shares,
+        "targetAccountId = :target",
+        {":target": target_account_id},
+        index_name="targetAccountId-index",
+        projection="profileId",
+    )
+    return [i["profileId"] for i in items if i.get("profileId")]
 
 
-async def _async_get_campaigns_for_profile(dynamodb: Any, campaigns_table_name: str, profile_id: str) -> Set[str]:
-    """Async: Query campaigns for a specific profile and return catalog IDs."""
-    table = await dynamodb.Table(campaigns_table_name)
-    query_params = {
-        "KeyConditionExpression": "profileId = :profileId",
-        "ExpressionAttributeValues": {":profileId": profile_id},
-        "ProjectionExpression": "catalogId",
-    }
-    catalog_list = await _handle_pagination(table, query_params, "catalogId")
-    return set(catalog_list)
-
-
-async def _async_get_shared_profile_ids(dynamodb: Any, shares_table_name: str, target_account_id: str) -> List[str]:
-    """Async: Get profile IDs that are shared with this account."""
-    table = await dynamodb.Table(shares_table_name)
-    query_params = {
-        "IndexName": "targetAccountId-index",
-        "KeyConditionExpression": "targetAccountId = :targetAccountId",
-        "ExpressionAttributeValues": {":targetAccountId": target_account_id},
-        "ProjectionExpression": "profileId",
-    }
-    return await _handle_pagination(table, query_params, "profileId")
-
-
-async def _async_get_shared_campaign_catalog_ids(
-    dynamodb: Any, campaigns_table_name: str, profile_ids: List[str]
-) -> Set[str]:
-    """Async: Query campaigns for all profiles in parallel."""
-    if not profile_ids:
-        return set()
-
-    # Create tasks for all profile queries
-    tasks = [_async_get_campaigns_for_profile(dynamodb, campaigns_table_name, pid) for pid in profile_ids]
-
-    # Run all queries concurrently and collect results
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-
-    # Combine results, ignoring any exceptions
+def _get_catalog_ids_for_profile(profiles, campaigns_table_name: str) -> Set[str]:
     catalog_ids: Set[str] = set()
-    for result in results:
-        if isinstance(result, set):
-            catalog_ids.update(result)
-        # Exceptions are logged but don't fail the overall operation
-
+    for profile_id in profiles:
+        items = _query_all(
+            tables.campaigns,
+            "profileId = :pid",
+            {":pid": profile_id},
+            projection="catalogId",
+        )
+        for item in items:
+            cid = item.get("catalogId")
+            if cid:
+                catalog_ids.add(cid)
     return catalog_ids
 
 
-async def _async_get_all_catalog_ids(account_id: str) -> Tuple[Set[str], List[str], Set[str]]:
-    """
-    Run all queries with optimal parallelism.
+def _get_all_catalog_ids(account_id: str) -> Set[str]:
+    profiles_table_name = get_required_env("PROFILES_TABLE_NAME")
+    campaigns_table_name = get_required_env("CAMPAIGNS_TABLE_NAME")
+    shares_table_name = get_required_env("SHARES_TABLE_NAME")
 
-    Flow:
-    - owned_profile_ids and shared_profile_ids run concurrently
-    - owned_catalog_ids and shared_catalog_ids wait for their respective profile_ids, then run N queries in parallel
-    """
-    campaigns_table_name = os.environ.get("CAMPAIGNS_TABLE_NAME", "kernelworx-campaigns-ue1-dev")
-    profiles_table_name = os.environ.get("PROFILES_TABLE_NAME", "kernelworx-profiles-ue1-dev")
-    shares_table_name = os.environ.get("SHARES_TABLE_NAME", "kernelworx-shares-ue1-dev")
-
-    session = aioboto3.Session()
-    async with session.resource("dynamodb") as dynamodb:
-        # Step 1 & 2: Run owned profiles and shared profiles queries in parallel
-        owned_profiles_task = _async_get_owned_profile_ids(dynamodb, profiles_table_name, account_id)
-        shared_profiles_task = _async_get_shared_profile_ids(dynamodb, shares_table_name, account_id)
-
-        owned_profile_ids, shared_profile_ids = await asyncio.gather(owned_profiles_task, shared_profiles_task)
-
-        # Step 3 & 4: Query campaigns for both owned and shared profiles in parallel
-        owned_catalogs_task = _async_get_shared_campaign_catalog_ids(dynamodb, campaigns_table_name, owned_profile_ids)
-        shared_catalogs_task = _async_get_shared_campaign_catalog_ids(
-            dynamodb, campaigns_table_name, shared_profile_ids
-        )
-
-        owned_catalog_ids, shared_catalog_ids = await asyncio.gather(owned_catalogs_task, shared_catalogs_task)
-
-        return owned_catalog_ids, shared_profile_ids, shared_catalog_ids
+    owned_profile_ids = _get_owned_profile_ids(profiles_table_name, account_id)
+    shared_profile_ids = _get_shared_profile_ids(shares_table_name, account_id)
+    owned_catalog_ids = _get_catalog_ids_for_profile(owned_profile_ids, campaigns_table_name)
+    shared_catalog_ids = _get_catalog_ids_for_profile(shared_profile_ids, campaigns_table_name)
+    return owned_catalog_ids | shared_catalog_ids
 
 
-def handler(event: Dict[str, Any], context: Any) -> List[str]:
-    """
-    List all catalog IDs in use by campaigns the user has access to.
-
-    Args:
-        event: AppSync event with identity.sub containing Cognito user ID
-
-    Returns:
-        List of catalog IDs (deduplicated)
-    """
-    logger = StructuredLogger(__name__, get_correlation_id(event))
-    caller_sub = event["identity"]["sub"]
-
-    # Add ACCOUNT# prefix for consistency with data model
+def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    """List all catalog IDs in use by campaigns the user has access to."""
+    logger.info("list_catalogs_in_use invoked")
+    caller_sub = get_caller_id(event)
     account_id_with_prefix = f"ACCOUNT#{caller_sub}" if not caller_sub.startswith("ACCOUNT#") else caller_sub
-
     logger.info("Listing catalogs in use", account_id=account_id_with_prefix)
-
     try:
-        # Run all queries with optimal parallelism:
-        # - owned_catalog_ids and shared_profile_ids run concurrently
-        # - shared_catalog_ids waits for shared_profile_ids, then runs N queries in parallel
-        owned_catalog_ids, shared_profile_ids, shared_catalog_ids = asyncio.run(
-            _async_get_all_catalog_ids(account_id_with_prefix)
-        )
-
-        logger.info("Found owned campaign catalogs", count=len(owned_catalog_ids))
-        logger.info("Found shared profiles", count=len(shared_profile_ids))
-        logger.info("Found shared campaign catalogs", count=len(shared_catalog_ids))
-
-        # Combine and deduplicate
-        all_catalog_ids = owned_catalog_ids | shared_catalog_ids
+        all_catalog_ids = _get_all_catalog_ids(account_id_with_prefix)
         logger.info("Total unique catalogs in use", count=len(all_catalog_ids))
-
-        return sorted(all_catalog_ids)
-
-    except AppError:
-        raise
+        return {
+            "statusCode": 200,
+            "headers": {"Content-Type": "application/json"},
+            "body": json.dumps(sorted(all_catalog_ids)),
+        }
+    except AppError as e:
+        return {
+            "statusCode": 500,
+            "headers": {"Content-Type": "application/json"},
+            "body": json.dumps({"error": e.message}),
+        }
     except Exception as e:
         logger.error("Failed to list catalogs in use", error=str(e))
-        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to list catalogs in use")
+        return {
+            "statusCode": 500,
+            "headers": {"Content-Type": "application/json"},
+            "body": json.dumps({"error": "Failed to list catalogs in use"}),
+        }

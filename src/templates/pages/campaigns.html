@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+
+{% block title %}{{ profile_name or 'Loading…' }} — KernelWorx{% endblock %}
+
+{% block content %}
+
+<nav style="margin-bottom: 16px; font-size: 0.875rem; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+  <a href="/scouts" style="color: var(--brand-color-link); text-decoration: none; font-weight: 600; cursor: pointer;">Profiles</a>
+  <span style="color: var(--brand-color-text-tertiary);">/</span>
+  <span style="color: var(--brand-color-text);">{{ profile_name or 'Loading…' }}</span>
+</nav>
+
+<div class="card" style="margin-bottom: clamp(12px, 3vw, 24px); border-left: 4px solid var(--brand-primary-palette-6); border-radius: var(--brand-border-radius-lg); box-shadow: 0 1px 2px var(--brand-color-fill-quaternary);">
+  <div style="padding: clamp(16px, 3vw, 24px);">
+    <div style="display: flex; flex-direction: column; justify-content: space-between; align-items: flex-start; gap: 16px;">
+      <div>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <a href="/scouts" aria-label="Back to profiles" style="display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; color: var(--brand-color-text-secondary); text-decoration: none; margin-right: 4px; border-radius: var(--brand-border-radius);">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20z"/></svg>
+          </a>
+          <h1 style="font-family: 'Bricolage Grotesque', 'Atkinson Hyperlegible', sans-serif; font-weight: 600; font-size: 22px; line-height: 1.25; color: var(--brand-color-text); margin: 0;">{{ profile_name or 'Loading…' }}</h1>
+        </div>
+        <p style="font-size: 1rem; color: var(--brand-color-text-secondary); margin: 4px 0 0 0;">Sales Campaigns</p>
+      </div>
+      <div>
+        <button class="btn btn-primary" style="display: inline-flex; align-items: center; gap: 6px; background-color: var(--brand-primary-palette-7); color: #ffffff; border: 1px solid var(--brand-primary-palette-7); height: 32px; padding: 0 12px; font-size: 0.875rem; font-weight: 600; border-radius: var(--brand-border-radius); cursor: pointer;"
+                hx-get="/api/campaigns/new-form?profileId={{ profile_id|urlencode }}"
+                hx-target="#modal-container"
+                hx-swap="innerHTML">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6z"/></svg>
+          New Campaign
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="campaigns-list">
+  {% if active_campaigns %}
+    <div style="margin-bottom: 32px;">
+      <h2 style="font-family: 'Bricolage Grotesque', 'Atkinson Hyperlegible', sans-serif; font-weight: 600; font-size: 16px; color: var(--brand-color-text); margin: 0 0 8px 0;">{% if inactive_campaigns %}Active Campaigns{% endif %}</h2>
+      <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px;">
+        {% for campaign in active_campaigns %}
+          {% include "fragments/campaign_card.html" %}
+        {% endfor %}
+      </div>
+    </div>
+  {% endif %}
+
+  {% if active_campaigns and inactive_campaigns %}
+    <hr style="border: none; border-top: 1px solid var(--brand-color-border); margin: 32px 0;">
+  {% endif %}
+
+  {% if inactive_campaigns %}
+    <div>
+      <h2 style="font-family: 'Bricolage Grotesque', 'Atkinson Hyperlegible', sans-serif; font-weight: 600; font-size: 16px; color: var(--brand-color-text); margin: 0 0 8px 0;">Inactive Campaigns</h2>
+      <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px;">
+        {% for campaign in inactive_campaigns %}
+          {% include "fragments/campaign_card.html" %}
+        {% endfor %}
+      </div>
+    </div>
+  {% endif %}
+
+  {% if not active_campaigns and not inactive_campaigns %}
+    <div class="card" style="text-align: center; border: 1px solid var(--brand-color-border-secondary); border-radius: var(--brand-border-radius-lg);">
+      <div style="padding: clamp(24px, 4vw, 32px);">
+        <h2 style="font-family: 'Bricolage Grotesque', 'Atkinson Hyperlegible', sans-serif; font-weight: 600; font-size: 16px; color: var(--brand-color-text-secondary); margin: 0 0 8px 0;">No Sales Campaigns Yet</h2>
+        <p style="color: var(--brand-color-text-secondary); font-size: 0.875rem; margin: 0;">Click "New Campaign" to create your first campaign for this Scout.</p>
+      </div>
+    </div>
+  {% endif %}
+</div>
+
+<div id="modal-container"></div>
+{% endblock %}

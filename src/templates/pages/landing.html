@@ -1,0 +1,413 @@
+{% extends "base.html" %}
+
+{% block title %}KernelWorx — Use it on your own. Use it with the Pack.{% endblock %}
+
+{% block content %}
+
+<style>
+  .kw-section-head { max-width: 680px; margin: 0 auto 3rem; text-align: center; }
+  .kw-kicker { text-transform: uppercase; letter-spacing: 0.14em; font-size: 0.75rem; font-weight: 600; color: var(--brand-color-link); display: block; margin-bottom: 0.5rem; line-height: 1; }
+  .kw-h2 { font-family: var(--display-family); font-weight: 600; font-size: clamp(26px, 3.2vw, 38px); letter-spacing: -0.015em; line-height: 1.15; color: var(--brand-color-text); margin: 0 0 0.75rem; }
+  .kw-subtitle { color: var(--brand-color-text-secondary); font-size: 1.125rem; margin: 0; }
+  .kw-device { border: 2px solid var(--brand-color-border); border-radius: 12px; overflow: hidden; background: #ffffff; box-shadow: 0 8px 24px rgba(0,0,0,0.08); }
+  .kw-device-bar { height: 36px; background: #f3f3f3; border-bottom: 1px solid var(--brand-color-border); display: flex; align-items: center; padding: 0 1rem; gap: 0.5rem; }
+  .kw-device-dot { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto; }
+  .kw-device-url { flex: 1; max-width: 320px; margin: 0 auto; background: #ffffff; height: 24px; border-radius: 4px; border: 1px solid var(--brand-color-border); display: flex; align-items: center; padding: 0 0.75rem; font-size: 0.75rem; color: var(--brand-color-text-secondary); }
+  details > summary { list-style: none; cursor: pointer; }
+  details > summary::-webkit-details-marker { display: none; }
+  details[open] .kw-faq-plus { transform: rotate(45deg); }
+  .kw-faq-plus { transition: transform 0.2s ease; }
+  @media (max-width: 900px) {
+    .kw-zig { grid-template-columns: 1fr !important; }
+    .kw-zig-img { order: 1 !important; }
+    .kw-zig-text { order: 2 !important; }
+    .kw-stats { grid-template-columns: repeat(3, 1fr) !important; }
+  }
+  @media (max-width: 600px) {
+    .kw-nav { display: none !important; }
+    .kw-stats { grid-template-columns: repeat(3, 1fr) !important; }
+    .kw-zig-gap { gap: 1.5rem !important; }
+  }
+</style>
+
+<section style="padding: clamp(3rem, 6vw, 6rem) 0 2rem; text-align: center;">
+  <div style="max-width: 860px; margin: 0 auto; padding: 0 1.5rem;">
+    <h1 style="font-family: var(--display-family); font-weight: 600; font-size: clamp(36px, 5.6vw, 64px); letter-spacing: -0.025em; line-height: 1.06; color: var(--brand-color-text); margin: 0 auto 1.25rem; max-width: 24ch;">
+      Use it on your own.<br>Use it with the Pack.
+    </h1>
+    <p style="font-size: 1.375rem; color: var(--brand-color-text-secondary); max-width: 62ch; margin: 0 auto 2rem; line-height: 1.5;">
+      Track orders, manage sellers, and generate reports for your Scouting America popcorn sale — all in one simple, secure place.
+    </p>
+    <div style="display: flex; gap: 1.5rem; justify-content: center; flex-wrap: wrap; margin-bottom: 1rem;">
+      <a href="{% if is_authenticated %}/scouts{% else %}/login{% endif %}" class="btn btn-primary" style="height: 40px; padding: 0 24px; font-size: 1.125rem;">
+        {% if is_authenticated %}Go to Dashboard{% else %}Get started{% endif %}
+      </a>
+      <a href="#how-it-works" class="btn btn-secondary" style="height: 40px; padding: 0 24px; font-size: 1.125rem; border: 1px solid var(--brand-color-link);">
+        See how it works
+      </a>
+    </div>
+    <p style="font-size: 0.75rem; line-height: 1.5; color: var(--brand-color-text-tertiary);">
+      Always free · 2-minute setup
+    </p>
+  </div>
+
+  <div style="max-width: 980px; margin: 2.5rem auto 0; padding: 0 1.5rem;">
+    <div class="kw-device" style="box-shadow: 0 12px 32px rgba(0,0,0,0.12);">
+      <div class="kw-device-bar">
+        <span class="kw-device-dot" style="background: #ff5f57;"></span>
+        <span class="kw-device-dot" style="background: #febc2e;"></span>
+        <span class="kw-device-dot" style="background: #28c840;"></span>
+        <div class="kw-device-url">kernelworx.com</div>
+      </div>
+      <img src="/static/marketing/home-page.png" alt="KernelWorx dashboard preview" style="width: 100%; height: auto; display: block;">
+    </div>
+  </div>
+</section>
+
+<section style="padding: 1rem 0; text-align: center;">
+  <p style="color: var(--brand-color-text-secondary); font-size: 0.875rem; margin: 0;">
+    Made by a Scout parent, for Scout parents.
+  </p>
+</section>
+
+<section style="padding: clamp(4rem, 8vw, 6rem) 0;">
+  <div style="max-width: 1120px; margin: 0 auto; padding: 0 1.5rem;">
+    <div class="kw-section-head">
+      <span class="kw-kicker">Popcorn season</span>
+      <h2 class="kw-h2">It's a lot to keep straight.</h2>
+      <p class="kw-subtitle">Most units still juggle paper forms, mixed payments, and the same question: are we sure these numbers are right?</p>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1rem;">
+      <div class="card" style="height: 100%; margin-bottom: 0;">
+        <div style="display: flex; align-items: flex-start; gap: 1.5rem;">
+          <span style="flex: 0 0 auto; width: 8px; height: 8px; border-radius: 50%; margin-top: 8px; background: var(--brand-color-error);"></span>
+          <div>
+            <h3 style="font-family: var(--display-family); font-weight: 600; font-size: 1.125rem; line-height: 1.3; color: var(--brand-color-text); margin: 0 0 0.5rem;">Orders start on paper</h3>
+            <p style="color: var(--brand-color-text-secondary); font-size: 0.875rem; margin: 0;">Paper forms travel through backpacks, cars, and kitchens before they reach you.</p>
+          </div>
+        </div>
+      </div>
+      <div class="card" style="height: 100%; margin-bottom: 0;">
+        <div style="display: flex; align-items: flex-start; gap: 1.5rem;">
+          <span style="flex: 0 0 auto; width: 8px; height: 8px; border-radius: 50%; margin-top: 8px; background: var(--brand-color-error);"></span>
+          <div>
+            <h3 style="font-family: var(--display-family); font-weight: 600; font-size: 1.125rem; line-height: 1.3; color: var(--brand-color-text); margin: 0 0 0.5rem;">Payments pile up</h3>
+            <p style="color: var(--brand-color-text-secondary); font-size: 0.875rem; margin: 0;">Cash, checks, Venmo, QR codes — every family pays differently, and you have to keep track.</p>
+          </div>
+        </div>
+      </div>
+      <div class="card" style="height: 100%; margin-bottom: 0;">
+        <div style="display: flex; align-items: flex-start; gap: 1.5rem;">
+          <span style="flex: 0 0 auto; width: 8px; height: 8px; border-radius: 50%; margin-top: 8px; background: var(--brand-color-error);"></span>
+          <div>
+            <h3 style="font-family: var(--display-family); font-weight: 600; font-size: 1.125rem; line-height: 1.3; color: var(--brand-color-text); margin: 0 0 0.5rem;">The count never matches</h3>
+            <p style="color: var(--brand-color-text-secondary); font-size: 0.875rem; margin: 0;">You add everything up, and the total is different every time.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section style="padding: clamp(4rem, 8vw, 6rem) 0; background: var(--brand-color-bg-container); border-top: 1px solid var(--brand-color-border-secondary); border-bottom: 1px solid var(--brand-color-border-secondary);">
+  <div style="max-width: 1120px; margin: 0 auto; padding: 0 1.5rem;">
+    <div class="kw-section-head">
+      <span class="kw-kicker">What KernelWorx does</span>
+      <h2 class="kw-h2">One place for the whole sale.</h2>
+      <p class="kw-subtitle">Seller profiles, orders, and payments — together, so you can focus on helping your Scout.</p>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.5rem;">
+      <div class="card" style="display: flex; flex-direction: column; height: 100%; margin-bottom: 0;">
+        <div style="display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border-radius: 12px; background: var(--brand-color-primary); color: #ffffff; margin-bottom: 1rem;">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17 4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+        </div>
+        <h3 style="font-family: var(--display-family); font-weight: 600; font-size: 1.125rem; line-height: 1.3; color: var(--brand-color-text); margin: 0 0 0.5rem;">Seller profiles</h3>
+        <p style="color: var(--brand-color-text-secondary); font-size: 0.875rem; margin: 0;">Create a profile for each Scout. Track orders, payments, and progress without the paper.</p>
+      </div>
+
+      <div class="card" style="display: flex; flex-direction: column; height: 100%; margin-bottom: 0;">
+        <div style="display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border-radius: 12px; background: var(--brand-color-primary); color: #ffffff; margin-bottom: 1rem;">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6z"/></svg>
+        </div>
+        <h3 style="font-family: var(--display-family); font-weight: 600; font-size: 1.125rem; line-height: 1.3; color: var(--brand-color-text); margin: 0 0 0.5rem;">Orders and payments together</h3>
+        <p style="color: var(--brand-color-text-secondary); font-size: 0.875rem; margin: 0;">Record the order, log the payment, and see who paid with cash, check, or an app — all in one place.</p>
+      </div>
+
+      <div class="card" style="display: flex; flex-direction: column; height: 100%; margin-bottom: 0;">
+        <div style="display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border-radius: 12px; background: var(--brand-color-primary); color: #ffffff; margin-bottom: 1rem;">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2M9 17H7v-7h2zm4 0h-2V7h2zm4 0h-2v-4h2z"/></svg>
+        </div>
+        <h3 style="font-family: var(--display-family); font-weight: 600; font-size: 1.125rem; line-height: 1.3; color: var(--brand-color-text); margin: 0 0 0.5rem;">Reports when you need them</h3>
+        <p style="color: var(--brand-color-text-secondary); font-size: 0.875rem; margin: 0;">See totals and payments at a glance. Export to Excel or CSV for your Scout, or work with your unit to run one report for the whole Pack.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="how-it-works" style="padding: clamp(4rem, 8vw, 6rem) 0;">
+  <div style="max-width: 1120px; margin: 0 auto; padding: 0 1.5rem;">
+    <div class="kw-section-head">
+      <span class="kw-kicker">How it works</span>
+      <h2 class="kw-h2">Up and running in three steps</h2>
+      <p class="kw-subtitle">Set up your unit, add your Scouts, and start selling.</p>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 2rem;">
+      <div style="display: flex; flex-direction: column; gap: 1rem;">
+        <div style="aspect-ratio: 124/108; display: flex; align-items: center; justify-content: center;">
+          <svg viewBox="0 0 124 108" width="100%" height="100%" aria-hidden="true">
+            <rect x="14" y="40" width="92" height="9" rx="4.5" fill="var(--brand-color-text-secondary)"/>
+            <rect x="14" y="58" width="58" height="9" rx="4.5" fill="var(--brand-color-text-secondary)"/>
+            <rect x="14" y="80" width="40" height="14" rx="7" fill="var(--brand-color-primary)"/>
+          </svg>
+        </div>
+        <div>
+          <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;">
+            <span style="display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 50%; background: var(--brand-color-primary); color: #ffffff; font-size: 0.75rem; font-weight: 600;">1</span>
+            <h3 style="font-family: var(--display-family); font-weight: 600; font-size: 1.125rem; line-height: 1.3; color: var(--brand-color-text); margin: 0;">Create your unit</h3>
+          </div>
+          <p style="color: var(--brand-color-text-secondary); font-size: 0.875rem; max-width: 34ch; margin: 0;">Sign up, add your Scouts, and set up your first fundraising campaign in minutes.</p>
+        </div>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 1rem;">
+        <div style="aspect-ratio: 124/108; display: flex; align-items: center; justify-content: center;">
+          <svg viewBox="0 0 124 108" width="100%" height="100%" aria-hidden="true">
+            <rect x="14" y="38" width="44" height="38" rx="6" fill="none" stroke="var(--brand-color-text-secondary)" stroke-width="2"/>
+            <rect x="66" y="38" width="44" height="38" rx="6" fill="none" stroke="var(--brand-color-primary)" stroke-width="2"/>
+            <rect x="14" y="84" width="96" height="9" rx="4.5" fill="var(--brand-color-text-secondary)"/>
+          </svg>
+        </div>
+        <div>
+          <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;">
+            <span style="display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 50%; background: var(--brand-color-primary); color: #ffffff; font-size: 0.75rem; font-weight: 600;">2</span>
+            <h3 style="font-family: var(--display-family); font-weight: 600; font-size: 1.125rem; line-height: 1.3; color: var(--brand-color-text); margin: 0;">Take orders</h3>
+          </div>
+          <p style="color: var(--brand-color-text-secondary); font-size: 0.875rem; max-width: 34ch; margin: 0;">Record customer orders, payment methods, and delivery details as sales come in.</p>
+        </div>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 1rem;">
+        <div style="aspect-ratio: 124/108; display: flex; align-items: center; justify-content: center;">
+          <svg viewBox="0 0 124 108" width="100%" height="100%" aria-hidden="true">
+            <path d="M16 70l20 16 28-44" fill="none" stroke="var(--brand-color-primary)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+            <rect x="72" y="44" width="38" height="9" rx="4.5" fill="var(--brand-color-text-secondary)"/>
+            <rect x="72" y="64" width="26" height="9" rx="4.5" fill="var(--brand-color-text-secondary)"/>
+          </svg>
+        </div>
+        <div>
+          <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;">
+            <span style="display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 50%; background: var(--brand-color-primary); color: #ffffff; font-size: 0.75rem; font-weight: 600;">3</span>
+            <h3 style="font-family: var(--display-family); font-weight: 600; font-size: 1.125rem; line-height: 1.3; color: var(--brand-color-text); margin: 0;">Share &amp; report</h3>
+          </div>
+          <p style="color: var(--brand-color-text-secondary); font-size: 0.875rem; max-width: 34ch; margin: 0;">Collaborate with your unit and export reports for unit submission or parent reconciliation.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section style="padding-bottom: clamp(3.5rem, 6vw, 5rem);">
+  <div style="max-width: 1120px; margin: 0 auto; padding: 0 1.5rem;">
+    <div style="background: var(--brand-color-fill-quaternary); border: 1px solid var(--brand-color-border-secondary); border-radius: 20px; padding: clamp(1.5rem, 4vw, 2.5rem); display: flex; align-items: center; justify-content: space-between; gap: 1.5rem; flex-wrap: wrap;">
+      <div style="min-width: 0;">
+        <h3 style="font-family: var(--display-family); font-weight: 600; font-size: clamp(1.25rem, 2vw, 1.625rem); line-height: 1.2; color: var(--brand-color-text); margin: 0 0 0.5rem;">Set up your unit in minutes</h3>
+        <p style="color: var(--brand-color-text-secondary); font-size: 0.875rem; margin: 0;">Always free · 2-minute setup</p>
+      </div>
+      <a href="{% if is_authenticated %}/scouts{% else %}/login{% endif %}" class="btn btn-primary" style="height: 40px; padding: 0 24px; font-size: 1.125rem;">
+        {% if is_authenticated %}Go to Dashboard{% else %}Get started{% endif %}
+      </a>
+    </div>
+  </div>
+</section>
+
+<section id="features" style="padding: clamp(4rem, 8vw, 6rem) 0; background: var(--brand-color-bg-container); border-top: 1px solid var(--brand-color-border-secondary); border-bottom: 1px solid var(--brand-color-border-secondary);">
+  <div style="max-width: 1120px; margin: 0 auto; padding: 0 1.5rem;">
+    <div class="kw-section-head">
+      <span class="kw-kicker">A closer look</span>
+      <h2 class="kw-h2">Built for the way real units work</h2>
+      <p class="kw-subtitle">Designed to save time for parents, Scouts, and Pack volunteers.</p>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: clamp(3rem, 6vw, 5rem);">
+      <div class="kw-zig kw-zig-gap" style="display: grid; grid-template-columns: 1fr 1fr; gap: 3rem; align-items: center;">
+        <div class="kw-zig-text">
+          <span class="kw-kicker" style="display: block; margin-bottom: 0.5rem;">Seller profiles</span>
+          <h3 style="font-family: var(--display-family); font-weight: 600; font-size: clamp(22px, 2.6vw, 30px); letter-spacing: -0.015em; line-height: 1.2; color: var(--brand-color-text); margin: 0 0 0.5rem;">Organize your sellers</h3>
+          <p style="color: var(--brand-color-text-secondary); font-size: 1.125rem; max-width: 46ch; margin: 0;">Create and manage multiple Scout profiles. Track each seller's campaigns, orders, and progress over time.</p>
+        </div>
+        <div class="kw-zig-img kw-device">
+          <div class="kw-device-bar">
+            <span class="kw-device-dot" style="background: #ff5f57;"></span>
+            <span class="kw-device-dot" style="background: #febc2e;"></span>
+            <span class="kw-device-dot" style="background: #28c840;"></span>
+            <div class="kw-device-url">kernelworx.com</div>
+          </div>
+          <img src="/static/marketing/scouts-page.png" alt="My Scouts page showing seller management" style="width: 100%; height: auto; display: block;">
+        </div>
+      </div>
+
+      <div class="kw-zig kw-zig-gap" style="display: grid; grid-template-columns: 1fr 1fr; gap: 3rem; align-items: center;">
+        <div class="kw-zig-img kw-device" style="order: 1;">
+          <div class="kw-device-bar">
+            <span class="kw-device-dot" style="background: #ff5f57;"></span>
+            <span class="kw-device-dot" style="background: #febc2e;"></span>
+            <span class="kw-device-dot" style="background: #28c840;"></span>
+            <div class="kw-device-url">kernelworx.com</div>
+          </div>
+          <img src="/static/marketing/collaborate-page.png" alt="Invite codes for sharing a Scout profile" style="width: 100%; height: auto; display: block;">
+        </div>
+        <div class="kw-zig-text" style="order: 2;">
+          <span class="kw-kicker" style="display: block; margin-bottom: 0.5rem;">Collaboration</span>
+          <h3 style="font-family: var(--display-family); font-weight: 600; font-size: clamp(22px, 2.6vw, 30px); letter-spacing: -0.015em; line-height: 1.2; color: var(--brand-color-text); margin: 0 0 0.5rem;">Share with your unit</h3>
+          <p style="color: var(--brand-color-text-secondary); font-size: 1.125rem; max-width: 46ch; margin: 0;">Share profiles with parents and unit leaders with flexible read or write permissions. Invite codes make it easy.</p>
+        </div>
+      </div>
+
+      <div class="kw-zig kw-zig-gap" style="display: grid; grid-template-columns: 1fr 1fr; gap: 3rem; align-items: center;">
+        <div class="kw-zig-text">
+          <span class="kw-kicker" style="display: block; margin-bottom: 0.5rem;">Payments</span>
+          <h3 style="font-family: var(--display-family); font-weight: 600; font-size: clamp(22px, 2.6vw, 30px); letter-spacing: -0.015em; line-height: 1.2; color: var(--brand-color-text); margin: 0 0 0.5rem;">Flexible payments</h3>
+          <p style="color: var(--brand-color-text-secondary); font-size: 1.125rem; max-width: 46ch; margin: 0;">Set up custom payment methods, add QR codes for easy access, and mark orders as paid so nothing slips through the cracks.</p>
+        </div>
+        <div class="kw-zig-img kw-device">
+          <div class="kw-device-bar">
+            <span class="kw-device-dot" style="background: #ff5f57;"></span>
+            <span class="kw-device-dot" style="background: #febc2e;"></span>
+            <span class="kw-device-dot" style="background: #28c840;"></span>
+            <div class="kw-device-url">kernelworx.com</div>
+          </div>
+          <img src="/static/marketing/payment-methods-page.png" alt="Payment Methods page showing built-in and custom payment options" style="width: 100%; height: auto; display: block;">
+        </div>
+      </div>
+
+      <div class="kw-zig kw-zig-gap" style="display: grid; grid-template-columns: 1fr 1fr; gap: 3rem; align-items: center;">
+        <div class="kw-zig-img kw-device" style="order: 1;">
+          <div class="kw-device-bar">
+            <span class="kw-device-dot" style="background: #ff5f57;"></span>
+            <span class="kw-device-dot" style="background: #febc2e;"></span>
+            <span class="kw-device-dot" style="background: #28c840;"></span>
+            <div class="kw-device-url">kernelworx.com</div>
+          </div>
+          <img src="/static/marketing/reports-page.png" alt="Sales report with CSV and Excel export buttons" style="width: 100%; height: auto; display: block;">
+        </div>
+        <div class="kw-zig-text" style="order: 2;">
+          <span class="kw-kicker" style="display: block; margin-bottom: 0.5rem;">Reports</span>
+          <h3 style="font-family: var(--display-family); font-weight: 600; font-size: clamp(22px, 2.6vw, 30px); letter-spacing: -0.015em; line-height: 1.2; color: var(--brand-color-text); margin: 0 0 0.5rem;">Run reports</h3>
+          <p style="color: var(--brand-color-text-secondary); font-size: 1.125rem; max-width: 46ch; margin: 0;">Generate detailed sales reports in Excel or CSV format. Track totals, payments, and delivery status for any campaign.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section style="background: var(--brand-primary-palette-9); padding: clamp(3rem, 5vw, 4rem) 0;">
+  <div style="max-width: 1120px; margin: 0 auto; padding: 0 1.5rem;">
+    <div class="kw-stats" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem;">
+      <div style="text-align: center;">
+        <div style="font-family: var(--display-family); font-weight: 600; font-size: clamp(1.75rem, 3vw, 2.5rem); color: #ffffff; line-height: 1.05; letter-spacing: -0.02em;">$0</div>
+        <div style="font-size: 0.875rem; color: #ffffff; margin-top: 0.25rem;">Always free</div>
+      </div>
+      <div style="text-align: center;">
+        <div style="font-family: var(--display-family); font-weight: 600; font-size: clamp(1.75rem, 3vw, 2.5rem); color: #ffffff; line-height: 1.05; letter-spacing: -0.02em;">100%</div>
+        <div style="font-size: 0.875rem; color: #ffffff; margin-top: 0.25rem;">Open source (MIT)</div>
+      </div>
+      <div style="text-align: center;">
+        <div style="font-family: var(--display-family); font-weight: 600; font-size: clamp(1.75rem, 3vw, 2.5rem); color: #ffffff; line-height: 1.05; letter-spacing: -0.02em;">2 min</div>
+        <div style="font-size: 0.875rem; color: #ffffff; margin-top: 0.25rem;">Setup time</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="faq" style="padding: clamp(4rem, 8vw, 6rem) 0; background: var(--brand-color-bg-container); border-bottom: 1px solid var(--brand-color-border-secondary);">
+  <div style="max-width: 800px; margin: 0 auto; padding: 0 1.5rem;">
+    <div class="kw-section-head" style="margin-bottom: 0;">
+      <span class="kw-kicker">Before you ask</span>
+      <h2 class="kw-h2">Your questions, answered</h2>
+    </div>
+
+    <div>
+      <details open style="border-bottom: 1px solid var(--brand-color-border); padding: 1rem 0;">
+        <summary style="display: flex; align-items: center; justify-content: space-between; gap: 1rem; font-family: var(--display-family); font-weight: 600; font-size: 1.125rem; color: var(--brand-color-text);">
+          <span>What is KernelWorx?</span>
+          <svg class="kw-faq-plus" width="20" height="20" viewBox="0 0 24 24" fill="var(--brand-color-primary)"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6z"/></svg>
+        </summary>
+        <div style="color: var(--brand-color-text-secondary); font-size: 0.875rem; padding: 0.5rem 0 1.25rem; max-width: 70ch; line-height: 1.57;">
+          KernelWorx helps parents of Scouting America Scouts manage their Scout's popcorn sales. It brings seller profiles, orders, payments, and reporting into one place so nobody has to juggle paper sheets or rebuild spreadsheets by hand.
+        </div>
+      </details>
+
+      <details style="border-bottom: 1px solid var(--brand-color-border); padding: 1rem 0;">
+        <summary style="display: flex; align-items: center; justify-content: space-between; gap: 1rem; font-family: var(--display-family); font-weight: 600; font-size: 1.125rem; color: var(--brand-color-text);">
+          <span>Is KernelWorx really free?</span>
+          <svg class="kw-faq-plus" width="20" height="20" viewBox="0 0 24 24" fill="var(--brand-color-primary)"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6z"/></svg>
+        </summary>
+        <div style="color: var(--brand-color-text-secondary); font-size: 0.875rem; padding: 0.5rem 0 1.25rem; max-width: 70ch; line-height: 1.57;">
+          Yes. The site is free to use — no subscriptions, no paid features. It is volunteer-run and open-source under the MIT license.
+        </div>
+      </details>
+
+      <details style="border-bottom: 1px solid var(--brand-color-border); padding: 1rem 0;">
+        <summary style="display: flex; align-items: center; justify-content: space-between; gap: 1rem; font-family: var(--display-family); font-weight: 600; font-size: 1.125rem; color: var(--brand-color-text);">
+          <span>How do I share a Scout profile with another parent or leader?</span>
+          <svg class="kw-faq-plus" width="20" height="20" viewBox="0 0 24 24" fill="var(--brand-color-primary)"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6z"/></svg>
+        </summary>
+        <div style="color: var(--brand-color-text-secondary); font-size: 0.875rem; padding: 0.5rem 0 1.25rem; max-width: 70ch; line-height: 1.57;">
+          From any seller profile, send an invite code or share the profile directly by email. You choose whether the recipient gets read-only or full write access, and you can revoke access at any time.
+        </div>
+      </details>
+
+      <details style="border-bottom: 1px solid var(--brand-color-border); padding: 1rem 0;">
+        <summary style="display: flex; align-items: center; justify-content: space-between; gap: 1rem; font-family: var(--display-family); font-weight: 600; font-size: 1.125rem; color: var(--brand-color-text);">
+          <span>Is my data secure?</span>
+          <svg class="kw-faq-plus" width="20" height="20" viewBox="0 0 24 24" fill="var(--brand-color-primary)"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6z"/></svg>
+        </summary>
+        <div style="color: var(--brand-color-text-secondary); font-size: 0.875rem; padding: 0.5rem 0 1.25rem; max-width: 70ch; line-height: 1.57;">
+          Your data is stored in AWS with encryption in transit and at rest. KernelWorx does not sell or share your personal information. You can delete your account and all associated data at any time from Account Settings.
+        </div>
+      </details>
+
+      <details style="border-bottom: 1px solid var(--brand-color-border); padding: 1rem 0;">
+        <summary style="display: flex; align-items: center; justify-content: space-between; gap: 1rem; font-family: var(--display-family); font-weight: 600; font-size: 1.125rem; color: var(--brand-color-text);">
+          <span>How do I delete my account and data?</span>
+          <svg class="kw-faq-plus" width="20" height="20" viewBox="0 0 24 24" fill="var(--brand-color-primary)"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6z"/></svg>
+        </summary>
+        <div style="color: var(--brand-color-text-secondary); font-size: 0.875rem; padding: 0.5rem 0 1.25rem; max-width: 70ch; line-height: 1.57;">
+          You can delete your account from <a href="/account/settings" style="color: var(--brand-color-link); font-weight: 600; text-decoration: none;">Account Settings</a>, or email <a href="mailto:privacy@kernelworx.app" style="color: var(--brand-color-link); font-weight: 600; text-decoration: none;">privacy@kernelworx.app</a> for assistance.
+        </div>
+      </details>
+    </div>
+  </div>
+</section>
+
+<section style="padding: clamp(4rem, 8vw, 6rem) 0;">
+  <div style="max-width: 1120px; margin: 0 auto; padding: 0 1.5rem;">
+    <div style="background: var(--brand-primary-palette-9); border-radius: clamp(18px, 3vw, 28px); padding: clamp(2.5rem, 6vw, 4rem); text-align: center; position: relative; overflow: hidden;">
+      <div style="position: absolute; top: -100px; right: -90px; width: 320px; height: 320px; border-radius: 50%; background: var(--brand-color-primary-hover); opacity: 0.5;"></div>
+      <div style="position: absolute; bottom: -120px; left: -80px; width: 260px; height: 260px; border-radius: 50%; background: var(--brand-color-primary-active); opacity: 0.45;"></div>
+      <div style="position: relative;">
+        <h2 style="font-family: var(--display-family); font-weight: 600; font-size: clamp(1.75rem, 4vw, 2.75rem); letter-spacing: -0.015em; line-height: 1.08; color: #ffffff; margin: 0 auto 1rem; max-width: 20ch;">
+          Start selling smarter with KernelWorx today
+        </h2>
+        <p style="font-size: 1.125rem; color: #ffffff; max-width: 540px; margin: 0 auto 2rem; line-height: 1.57;">
+          Built for parents and Units. Use it on your own or with the whole pack.
+        </p>
+        <div style="display: flex; gap: 1.5rem; justify-content: center; flex-wrap: wrap;">
+          <a href="{% if is_authenticated %}/scouts{% else %}/login{% endif %}" style="display: inline-flex; align-items: center; justify-content: center; height: 40px; padding: 0 24px; font-family: var(--brand-font-family); font-size: 1.125rem; font-weight: 600; border-radius: 4px; background: #ffffff; color: var(--brand-color-primary); text-decoration: none; border: 1px solid #ffffff;">
+            {% if is_authenticated %}Go to Dashboard{% else %}Get started{% endif %}
+          </a>
+          <a href="https://github.com/sponsors/dmeiser" target="_blank" rel="noopener noreferrer" style="display: inline-flex; align-items: center; gap: 0.5rem; height: 40px; padding: 0 24px; font-family: var(--brand-font-family); font-size: 1.125rem; font-weight: 600; border-radius: 4px; background: transparent; color: #ffffff; text-decoration: none; border: 1px solid transparent;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="m12 21.35-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54z"/></svg>
+            Sponsor KernelWorx
+          </a>
+        </div>
+        <p style="font-size: 0.75rem; color: #ffffff; margin-top: 1rem;">Always free · Open source</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+{% endblock %}

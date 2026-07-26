@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+
+{% block title %}Create Account — KernelWorx{% endblock %}
+
+{% block content %}
+<div style="min-height: calc(100vh - 64px); display: flex; align-items: center; justify-content: center; background: var(--brand-color-bg-layout); padding: 1rem;">
+  <div class="card" style="width: 100%; max-width: 500px; margin: 0; padding: 2rem;">
+    <div style="display: flex; align-items: center; justify-content: center; gap: 0.5rem; margin-bottom: 1.5rem;">
+      <img src="/static/images/logo.svg" alt="KernelWorx mark" width="32" height="32">
+      <span style="font-family: var(--display-family); font-weight: 700; font-size: 1.5rem; line-height: 1; letter-spacing: -0.01em;">
+        <span style="color: var(--brand-color-text);">Kernel</span><span style="color: var(--brand-color-primary);">Worx</span>
+      </span>
+    </div>
+
+    <h1 style="font-family: var(--display-family); font-weight: 700; font-size: 22px; line-height: 1.25; color: var(--brand-color-text); margin: 0 0 0.5rem; text-align: center;">Create Account</h1>
+    <p style="color: var(--brand-color-text-secondary); font-size: 0.875rem; text-align: center; margin: 0 0 1.5rem;">Join KernelWorx to manage your popcorn sales</p>
+
+    <div id="signup-error" style="display: none; background: var(--brand-color-error-bg); color: var(--brand-color-error-active); border: 1px solid var(--brand-color-error-border); border-radius: 4px; padding: 0.75rem 1rem; font-size: 0.875rem; margin-bottom: 1rem;"></div>
+    <div id="signup-success" style="display: none; background: var(--brand-color-success-bg); color: var(--brand-color-success-active); border: 1px solid var(--brand-color-success-border); border-radius: 4px; padding: 0.75rem 1rem; font-size: 0.875rem; margin-bottom: 1rem;"></div>
+
+    <form id="signup-form" onsubmit="handleSignupSubmit(event); return false;">
+      <div style="margin-bottom: 1rem;">
+        <label for="email" style="display: block; font-size: 0.8125rem; color: var(--brand-color-text-secondary); margin-bottom: 0.35rem;">Email Address</label>
+        <input type="email" id="email" name="email" required class="form-control" autocomplete="email" style="height: 32px; box-sizing: border-box;">
+      </div>
+
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+        <div>
+          <label for="givenName" style="display: block; font-size: 0.8125rem; color: var(--brand-color-text-secondary); margin-bottom: 0.35rem;">First Name</label>
+          <input type="text" id="givenName" name="givenName" class="form-control" style="height: 32px; box-sizing: border-box;">
+          <span style="font-size: 0.75rem; color: var(--brand-color-text-tertiary); margin-top: 4px; display: block;">Optional</span>
+        </div>
+        <div>
+          <label for="familyName" style="display: block; font-size: 0.8125rem; color: var(--brand-color-text-secondary); margin-bottom: 0.35rem;">Last Name</label>
+          <input type="text" id="familyName" name="familyName" class="form-control" style="height: 32px; box-sizing: border-box;">
+          <span style="font-size: 0.75rem; color: var(--brand-color-text-tertiary); margin-top: 4px; display: block;">Optional</span>
+        </div>
+      </div>
+
+      <div style="margin-bottom: 1rem;">
+        <label for="city" style="display: block; font-size: 0.8125rem; color: var(--brand-color-text-secondary); margin-bottom: 0.35rem;">City</label>
+        <input type="text" id="city" name="city" class="form-control" style="height: 32px; box-sizing: border-box;">
+        <span style="font-size: 0.75rem; color: var(--brand-color-text-tertiary); margin-top: 4px; display: block;">Optional</span>
+      </div>
+
+      <div style="margin-bottom: 1rem;">
+        <label for="state" style="display: block; font-size: 0.8125rem; color: var(--brand-color-text-secondary); margin-bottom: 0.35rem;">State</label>
+        <input type="text" id="state" name="state" maxlength="2" oninput="this.value = this.value.toUpperCase();" class="form-control" style="height: 32px; box-sizing: border-box;">
+        <span style="font-size: 0.75rem; color: var(--brand-color-text-tertiary); margin-top: 4px; display: block;">Optional (e.g., CA, TX, NY)</span>
+      </div>
+
+      <div style="margin-bottom: 1rem;">
+        <label for="unitType" style="display: block; font-size: 0.8125rem; color: var(--brand-color-text-secondary); margin-bottom: 0.35rem;">Unit Type (Optional)</label>
+        <select id="unitType" name="unitType" class="form-control" style="height: 32px; box-sizing: border-box;">
+          <option value="">None</option>
+          <option value="Pack">Pack</option>
+          <option value="Troop">Troop</option>
+          <option value="Crew">Crew</option>
+          <option value="Ship">Ship</option>
+          <option value="Post">Post</option>
+          <option value="Club">Club</option>
+        </select>
+        <span style="font-size: 0.75rem; color: var(--brand-color-text-tertiary); margin-top: 4px; display: block;">Select the type of Scouting unit</span>
+      </div>
+
+      <div style="margin-bottom: 1rem;">
+        <label for="unitNumber" style="display: block; font-size: 0.8125rem; color: var(--brand-color-text-secondary); margin-bottom: 0.35rem;">Unit Number (Optional)</label>
+        <input type="number" id="unitNumber" name="unitNumber" min="1" step="1" class="form-control" style="height: 32px; box-sizing: border-box;">
+        <span style="font-size: 0.75rem; color: var(--brand-color-text-tertiary); margin-top: 4px; display: block;">Optional (e.g., 123, 456)</span>
+      </div>
+
+      <div style="margin-bottom: 1rem;">
+        <label for="password" style="display: block; font-size: 0.8125rem; color: var(--brand-color-text-secondary); margin-bottom: 0.35rem;">Password</label>
+        <input type="password" id="password" name="password" required class="form-control" autocomplete="new-password" style="height: 32px; box-sizing: border-box;">
+        <span style="font-size: 0.75rem; color: var(--brand-color-text-tertiary); margin-top: 4px; display: block;">Minimum 8 characters with uppercase, lowercase, numbers, and symbols</span>
+      </div>
+
+      <div style="margin-bottom: 1rem;">
+        <label for="confirmPassword" style="display: block; font-size: 0.8125rem; color: var(--brand-color-text-secondary); margin-bottom: 0.35rem;">Confirm Password</label>
+        <input type="password" id="confirmPassword" name="confirmPassword" required class="form-control" autocomplete="new-password" style="height: 32px; box-sizing: border-box;">
+      </div>
+
+      <label style="display: flex; align-items: center; gap: 0.5rem; margin-top: 1rem; margin-bottom: 1rem; font-size: 0.875rem; color: var(--brand-color-text); cursor: pointer;">
+        <input type="checkbox" id="ageConfirmed" name="ageConfirmed" required style="margin: 0;">
+        <span>I confirm that I am 13 years of age or older</span>
+      </label>
+
+      <button type="submit" class="btn btn-primary" style="width: 100%; height: 40px; font-size: 1.125rem; margin-top: 1rem; margin-bottom: 1rem;">
+        Create Account
+      </button>
+
+      <p style="font-size: 0.875rem; color: var(--brand-color-text-secondary); text-align: center; margin: 0;">
+        Already have an account? <a href="/login" style="color: var(--brand-color-link); font-weight: 600; text-decoration: none;">Sign In</a>
+      </p>
+    </form>
+  </div>
+</div>
+{% endblock %}

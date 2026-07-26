@@ -229,7 +229,7 @@ resource "aws_cognito_user_pool" "main" {
 # count is gated on a static boolean (known at plan time) rather than ARN nullability
 # to avoid unknown count values during greenfield applies.
 resource "aws_lambda_permission" "cognito_pre_signup" {
-  count = var.enable_lambda_triggers && var.pre_signup_lambda_arn != null ? 1 : 0
+  count = var.enable_lambda_triggers ? 1 : 0
 
   statement_id  = "AllowCognitoInvokePreSignup"
   action        = "lambda:InvokeFunction"
@@ -239,7 +239,7 @@ resource "aws_lambda_permission" "cognito_pre_signup" {
 }
 
 resource "aws_lambda_permission" "cognito_post_auth" {
-  count = var.enable_lambda_triggers && var.post_auth_lambda_arn != null ? 1 : 0
+  count = var.enable_lambda_triggers ? 1 : 0
 
   statement_id  = "AllowCognitoInvokePostAuth"
   action        = "lambda:InvokeFunction"
@@ -249,7 +249,7 @@ resource "aws_lambda_permission" "cognito_post_auth" {
 }
 
 resource "aws_lambda_permission" "cognito_post_confirmation" {
-  count = var.enable_lambda_triggers && var.post_confirmation_lambda_arn != null ? 1 : 0
+  count = var.enable_lambda_triggers ? 1 : 0
 
   statement_id  = "AllowCognitoInvokePostConfirmation"
   action        = "lambda:InvokeFunction"

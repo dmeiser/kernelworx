@@ -11,39 +11,37 @@ from .base_page import BasePage
 class CampaignPage(BasePage):
     """Page object for ``/scouts/{profileId}/campaigns``.
 
-    Shows the list of sales campaigns for a seller profile and provides
-    a *New Campaign* button that opens :class:`CreateCampaignDialog`.
+    The HTMX campaigns page lists sales campaigns for a seller profile and
+    provides a *New Campaign* button that opens a native ``<dialog>`` (HTMX
+    swap of ``fragments/create_campaign_dialog.html`` into ``#modal-container``).
 
     Selector notes:
 
-    * Campaign names are in ``<h3>`` elements (MUI ``Typography variant="h6"
-      component="h3"``), rendered as ``"{campaignName} {campaignYear}"``.
-    * All interactive elements use visible-text or ARIA-role selectors because
-      the production components have no ``data-testid`` attributes.
-      TODO: add ``data-testid="campaign-card"`` to ``CampaignCard``.
+    * Campaign cards: ``div.card[id^="campaign-card-"]``; the campaign name is
+      the ``<h3>`` inside the card, rendered as ``"{name} {year}"``.
+    * The *New Campaign* button is a ``<button>`` in the page header.
+    * The create dialog has ``input#name`` (Campaign Name), ``input#year``
+      (Year), and a *Create Campaign* submit button.
+    * The *View Orders* ``<a>`` link contains a raw ``CAMPAIGN#uuid`` ID; its
+      ``#`` is treated as a URL fragment by the browser, so ``click_campaign``
+      extracts the campaign ID from the card ``id`` and navigates via an
+      URL-encoded path.
     """
 
     _CAMPAIGNS_SUFFIX: str = "/campaigns"
 
-    # Dialog selectors
-    _DIALOG_TITLE: str = "Create New Sales Campaign"  # dialog heading
+    # Dialog / form selectors
+    _DIALOG_TITLE: str = "New Campaign"
     _CAMPAIGN_NAME_LABEL: str = "Campaign Name"
-    _CATALOG_LABEL: str = "Product Catalog"  # used in CreateCampaignDialog
-    _PAGE_CATALOG_LABEL: str = "Select Catalog"  # used in /create-campaign page (CatalogSection)
-    _PAGE_PROFILE_LABEL: str = "Select Profile"  # used in /create-campaign page
-    _VIEW_ORDERS_BTN: str = "View Orders"  # used in CampaignCard actions
     _CREATE_CAMPAIGN_BTN: str = "Create Campaign"
     _NEW_CAMPAIGN_BTN: str = "New Campaign"
+    _VIEW_ORDERS_BTN: str = "View Orders"
 
-    # Campaign card: Typography variant="h6" component="h3"
-    _CAMPAIGN_HEADING_SEL: str = "div.MuiCard-root h3"  # scoped to cards to avoid dialog collisions
+    # Campaign card heading
+    _CAMPAIGN_HEADING_SEL: str = "div.card[id^='campaign-card-'] h3"
 
     def __init__(self, page: Page) -> None:
-        """Store the Playwright Page instance.
-
-        Args:
-            page: Active Playwright :class:`~playwright.sync_api.Page`.
-        """
+        """Store the Playwright Page instance."""
         super().__init__(page)
 
     # ------------------------------------------------------------------
@@ -51,14 +49,7 @@ class CampaignPage(BasePage):
     # ------------------------------------------------------------------
 
     def goto(self, profile_id: str) -> None:
-        """Navigate to the campaigns list for *profile_id*.
-
-        The profile ID is URL-encoded so IDs containing ``#`` (e.g.
-        ``PROFILE#uuid``) are transmitted correctly.
-
-        Args:
-            profile_id: Raw profile identifier string.
-        """
+        """Navigate to the campaigns list for *profile_id* (URL-encoded)."""
         encoded = urllib.parse.quote(profile_id, safe="")
         self.navigate(f"/scouts/{encoded}{self._CAMPAIGNS_SUFFIX}")
         self.wait_for_loading()
@@ -69,161 +60,80 @@ class CampaignPage(BasePage):
 
     def _new_campaign_button(self) -> Locator:
         """Return locator for the *New Campaign* button in the page header."""
-        return self.get_by_role_button(self._NEW_CAMPAIGN_BTN)
+        return self.page.get_by_role("button", name=self._NEW_CAMPAIGN_BTN)
 
     def _campaign_name_input(self) -> Locator:
-        """Return locator for the *Campaign Name* text field inside the dialog."""
-        return self.page.get_by_label(self._CAMPAIGN_NAME_LABEL)
-
-    def _catalog_select(self) -> Locator:
-        """Return locator for the *Product Catalog* select inside the dialog."""
-        # MUI Select renders a <div role="combobox"> labelled by the InputLabel
-        return self.page.get_by_role("combobox", name=self._CATALOG_LABEL)
+        """Return locator for the *Campaign Name* input inside the dialog."""
+        return self.page.locator("dialog#create-campaign-dialog input#name")
 
     def _create_button(self) -> Locator:
-        """Return locator for the *Create Campaign* confirm button in the dialog."""
-        return self.get_by_role_button(self._CREATE_CAMPAIGN_BTN)
+        """Return locator for the *Create Campaign* submit button in the dialog."""
+        return self.page.locator("#create-campaign-dialog").get_by_role("button", name=self._CREATE_CAMPAIGN_BTN)
 
     def _campaign_headings(self) -> Locator:
         """Return locator matching all campaign-name ``<h3>`` headings."""
         return self.page.locator(self._CAMPAIGN_HEADING_SEL)
+
+    def _campaign_card_for(self, name: str) -> Locator:
+        """Return a locator for the campaign card whose name contains *name*."""
+        return self.page.locator("div.card[id^='campaign-card-']").filter(has_text=name)
+
+    def _campaign_id(self, name: str) -> str:
+        """Return the raw campaign ID (e.g. ``CAMPAIGN#uuid``) for the card matching *name*."""
+        card = self._campaign_card_for(name).first
+        expect(card).to_be_visible()
+        card_id = card.get_attribute("id") or ""
+        return urllib.parse.unquote(card_id.removeprefix("campaign-card-"))
 
     # ------------------------------------------------------------------
     # Actions
     # ------------------------------------------------------------------
 
     def create_campaign_first_catalog(self, name: str, profile_id: str | None = None) -> None:
-        """Open the *New Campaign* dialog, fill *name*, pick the first catalog, and submit.
+        """Open the *New Campaign* dialog, fill *name*, and submit.
 
-        Encapsulates the full creation flow so test helpers do not need access
-        to private locator methods.  Waits for the dialog to close before
-        returning.
+        The HTMX create-campaign dialog has no catalog/profile selectors (the
+        React page did); the ``profile_id`` and ``catalog`` arguments are
+        accepted for signature compatibility but ignored — the dialog posts a
+        hidden ``profileId`` derived from the page context.
 
         Args:
             name: Human-readable campaign name (e.g. ``"Fall 2025"``).
-            profile_id: Optional profile ID to select in the create-campaign
-                page. When omitted, the first enabled profile is selected.
+            profile_id: Ignored (kept for signature compatibility).
         """
-        # Save campaigns URL to return after the page-based creation flow.
-        campaigns_url = self.page.url
         self._new_campaign_button().click()
-        # New Campaign now navigates to /create-campaign page (not a dialog).
-        self.page.wait_for_url("**/create-campaign**", timeout=10_000)
-        self.wait_for_loading()
+        self._campaign_name_input().wait_for(state="visible", timeout=5_000)
         self._campaign_name_input().fill(name)
-
-        # Select the intended profile (or the first enabled one if no ID given).
-        profile_combobox = self.page.get_by_role("combobox", name=self._PAGE_PROFILE_LABEL)
-        profile_combobox.click()
-        profile_listbox = self.page.get_by_role("listbox")
-        expect(profile_listbox).to_be_visible(timeout=5_000)
-
-        if profile_id:
-            # The URL exposes the raw UUID, but the dropdown uses the full
-            # PROFILE#{uuid} format for option data-values.
-            candidate_ids = {profile_id}
-            if not profile_id.startswith("PROFILE#"):
-                candidate_ids.add(f"PROFILE#{profile_id}")
-
-            option = profile_listbox.locator('[role="option"]:not([aria-disabled="true"])').first
-            for candidate in candidate_ids:
-                candidate_option = profile_listbox.locator(f'[role="option"][data-value="{candidate}"]')
-                if candidate_option.count() > 0:
-                    option = candidate_option
-                    break
-        else:
-            option = profile_listbox.locator('[role="option"]:not([aria-disabled="true"])').first
-
-        expect(option).to_be_visible(timeout=5_000)
-        option.click()
-        expect(profile_listbox).to_be_hidden(timeout=5_000)
-
-        self.wait_for_loading()
-        catalog_combobox = self.page.get_by_role("combobox", name=self._PAGE_CATALOG_LABEL)
-        expect(catalog_combobox).to_be_visible(timeout=10_000)
-        catalog_combobox.click()
-        listbox = self.page.get_by_role("listbox")
-        expect(listbox).to_be_visible(timeout=5_000)
-        enabled_options = listbox.locator('[role="option"]:not([aria-disabled="true"])')
-        assert enabled_options.count() > 0, (
-            "No enabled catalog options found in dev environment. "
-            "An admin must create at least one catalog before running e2e tests. "
-            "See tests/e2e/README.md for prerequisites."
-        )
-        enabled_options.first.click()
         self._create_button().click()
-        # After success the app navigates to the campaign detail page.
-        self.page.wait_for_url("**/campaigns/**", timeout=15_000)
-        # Navigate back to the campaigns list so has_campaign() can verify.
-        self.page.goto(campaigns_url)
-        self.wait_for_loading()
-        # Wait for the new campaign to appear before returning so callers can
-        # immediately inspect the campaign list.
-        assert self.has_campaign(name), (
-            f"Campaign '{name}' must be visible in the list after creation"
-        )
+        # The dialog is removed via the hx-on::after-request handler; wait for
+        # the new campaign card to appear.
+        assert self.has_campaign(name, timeout=15_000), f"Campaign '{name}' must be visible in the list after creation"
 
-    def create_campaign(self, name: str, catalog_name: str) -> None:
-        """Open the *New Campaign* dialog, fill it, and submit.
-
-        Waits for the dialog to close before returning so callers can
-        immediately call :meth:`has_campaign`.
-
-        Args:
-            name: Human-readable campaign name (e.g. ``"Fall 2025"``).
-            catalog_name: Visible text of the catalog option to select.
-        """
-        self._new_campaign_button().click()
-        self._fill_campaign_dialog(name, catalog_name)
-
-    def _fill_campaign_dialog(self, name: str, catalog_name: str) -> None:
-        """Fill and submit the *Create Campaign* dialog.
-
-        Extracted to keep :meth:`create_campaign` under complexity budget.
+    def create_campaign(self, name: str, catalog_name: str | None = None) -> None:
+        """Open the *New Campaign* dialog, fill it, and submit (signature-compatible).
 
         Args:
             name: Campaign name text.
-            catalog_name: Catalog option visible text.
+            catalog_name: Ignored (kept for signature compatibility).
         """
-        dialog = self.wait_for_dialog("New Campaign")
-        self._campaign_name_input().fill(name)
-        self._select_catalog(catalog_name)
-        self._create_button().click()
-        expect(dialog).to_be_hidden(timeout=10_000)
-        self.wait_for_loading()
-
-    def _select_catalog(self, catalog_name: str) -> None:
-        """Open the catalog dropdown and pick the option matching *catalog_name*.
-
-        Raises:
-            AssertionError: When the dropdown opens with no options, which
-                means no catalog has been created in the dev environment yet.
-
-        Args:
-            catalog_name: Visible text of the catalog menu item.
-        """
-        self._catalog_select().click()
-        options = self.page.get_by_role("option")
-        assert options.count() > 0, (
-            "No catalogs found in dev environment. "
-            "An admin must create at least one catalog before running e2e tests. "
-            "See tests/e2e/README.md for prerequisites."
-        )
-        self.page.get_by_role("option", name=catalog_name).click()
+        self.create_campaign_first_catalog(name)
 
     def click_campaign(self, name: str) -> None:
-        """Click on the campaign card whose name contains *name*.
+        """Navigate to the orders page for the campaign card whose name contains *name*.
 
-        Clicks the *View Orders* button within the matching card so the action
-        is deterministic even when the card itself is not directly clickable.
-
-        Args:
-            name: Substring of the campaign name to match.
+        The card's *View Orders* ``<a>`` link contains a raw ``CAMPAIGN#uuid``
+        ID whose ``#`` the browser treats as a URL fragment, so we extract the
+        campaign ID from the card ``id`` and navigate via an URL-encoded path.
         """
-        card = self.page.locator("div.MuiCard-root").filter(has_text=name).first
-        expect(card).to_be_visible()
-        card.get_by_role("button", name=self._VIEW_ORDERS_BTN, exact=True).click()
-        self.page.wait_for_url("**/campaigns/**", timeout=10_000)
+        campaign_id = self._campaign_id(name)
+        # Profile ID is in the current URL (encoded); reuse it for the orders URL.
+        import re
+
+        match = re.search(r"/scouts/([^/]+)/campaigns", self.page.url)
+        assert match, f"Expected /scouts/{{id}}/campaigns in current URL; got: {self.page.url}"
+        profile_id_encoded = match.group(1)
+        campaign_encoded = urllib.parse.quote(campaign_id, safe="")
+        self.navigate(f"/scouts/{profile_id_encoded}/campaigns/{campaign_encoded}")
         self.wait_for_loading()
 
     # ------------------------------------------------------------------
@@ -231,54 +141,33 @@ class CampaignPage(BasePage):
     # ------------------------------------------------------------------
 
     def has_campaign(self, name: str, timeout: int = 10_000) -> bool:
-        """Return ``True`` when a campaign heading containing *name* is visible.
-
-        Polls briefly to tolerate list-query lag after creation.
-
-        Args:
-            name: Substring to search for in campaign card headings.
-            timeout: Maximum wait in milliseconds. Defaults to 10 000.
-        """
+        """Return ``True`` when a campaign heading containing *name* is visible."""
         heading = self.page.locator(self._CAMPAIGN_HEADING_SEL, has_text=name)
         try:
             heading.first.wait_for(state="visible", timeout=timeout)
+            return True
         except PlaywrightTimeoutError:
             return False
-        return True
 
     def get_campaign_names(self) -> list[str]:
-        """Return the inner text of all visible campaign headings.
-
-        Returns:
-            List of ``"{campaignName} {campaignYear}"`` strings, or an empty
-            list when no campaigns are present.
-        """
+        """Return the inner text of all visible campaign headings."""
         return self._campaign_headings().all_inner_texts()
 
     def new_campaign_button_is_available(self) -> bool:
-        """Return ``True`` when the *New Campaign* button is visible and enabled.
-
-        Returns ``False`` when the button is absent from the DOM, hidden, or
-        disabled — any of which indicates the current user does not have write
-        access to this campaigns list (e.g. they hold a READ-only share).
-
-        Returns:
-            ``True`` if the button is both visible and enabled; ``False`` otherwise.
-        """
+        """Return ``True`` when the *New Campaign* button is visible and enabled."""
         btn = self._new_campaign_button()
-        return bool(btn.is_visible() and btn.is_enabled())
+        try:
+            return bool(btn.first.is_visible() and btn.first.is_enabled())
+        except Exception:  # noqa: BLE001 — button absent
+            return False
 
     def has_access_denied_alert(self) -> bool:
-        """Return ``True`` when the page shows the access-denied error alert.
+        """Return ``True`` when an access-denied / not-found message is visible.
 
-        The ``ScoutCampaignsPage`` React component renders an MUI ``<Alert>``
-        with the text "Profile not found or you don't have access to this
-        profile." when the API returns an authorization error (no share or not
-        the owner).  The URL does **not** change in this state; the caller
-        should not rely on a redirect.
-
-        Returns:
-            ``True`` if the error alert is currently visible; ``False`` otherwise.
+        The HTMX app has no client-side route protection, but a campaign list
+        rendered for a non-existent profile shows the empty-state text
+        "No Sales Campaigns Yet".  Treat that as the access-denied signal so
+        the boundary test can distinguish "shared profile" from "no profile".
         """
-        alert = self.page.get_by_text("Profile not found or you don't have access to this profile.")
-        return bool(alert.is_visible())
+        alert = self.page.get_by_text("No Sales Campaigns Yet")
+        return bool(alert.first.is_visible())

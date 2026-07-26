@@ -1,0 +1,45 @@
+<div class="card" id="profile-card-{{ profile.profileId }}" style="height: 100%; display: flex; flex-direction: column;">
+  <div style="flex: 1; padding-bottom: 8px;">
+    <div style="display: flex; gap: 16px; align-items: flex-start; margin-bottom: 2px;">
+      <div style="display: flex; flex-direction: column; align-items: center;">
+        <svg width="40" height="40" viewBox="0 0 24 24" fill="var(--brand-color-primary)"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
+      </div>
+      <div style="flex: 1;">
+        <h3 style="font-family: 'Bricolage Grotesque', 'Atkinson Hyperlegible', sans-serif; font-weight: 600; font-size: 18px; line-height: 1.3; color: var(--brand-color-text); margin: 0 0 4px 0;">{{ profile.sellerName }}</h3>
+        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+          {% if profile.isOwner %}
+            <span style="display: inline-block; background-color: var(--brand-primary-palette-7); color: #ffffff; border: 1px solid var(--brand-primary-palette-7); padding: 2px 8px; border-radius: var(--brand-border-radius-sm); font-size: 0.75rem; font-weight: 600;">Owner</span>
+          {% elif profile.permissions and 'WRITE' in profile.permissions %}
+            <span style="display: inline-block; background-color: var(--brand-color-info-bg); color: var(--brand-primary-palette-9); border: 1px solid var(--brand-color-info-border); padding: 2px 8px; border-radius: var(--brand-border-radius-sm); font-size: 0.75rem; font-weight: 600;">Editor</span>
+          {% else %}
+            <span style="display: inline-block; background-color: var(--brand-color-fill-tertiary); color: var(--brand-color-text-secondary); border: 1px solid var(--brand-color-border); padding: 2px 8px; border-radius: var(--brand-border-radius-sm); font-size: 0.75rem; font-weight: 600;">Read-only</span>
+          {% endif %}
+        </div>
+        {% if profile.latestCampaign %}
+          <div style="margin-top: 12px;">
+            <p style="color: var(--brand-color-text-secondary); font-size: 0.875rem; margin: 0 0 4px 0;">Latest Campaign:</p>
+            <p style="font-size: 0.875rem; font-weight: 500; color: var(--brand-color-text); margin: 0;">{{ profile.latestCampaign.campaignName }} ({{ profile.latestCampaign.campaignYear }})</p>
+          </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  <div style="display: flex; flex-direction: column; gap: 8px;">
+    {% if profile.latestCampaign %}
+      <a href="/scouts/{{ profile.profileId|urlencode }}/campaigns/{{ profile.latestCampaign.campaignId|urlencode }}" class="btn btn-primary" style="display: inline-flex; align-items: center; gap: 6px; justify-content: center; width: 100%; background-color: var(--brand-primary-palette-7); color: #ffffff; text-decoration: none; height: 24px; padding: 0 8px; font-size: 0.75rem; font-weight: 600; border-radius: var(--brand-border-radius);">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M18 11v2h4v-2zm-2-6.5L14 6v3.5l2 1.5 2-1.5V6zM9 21h2v-5H9zm-7-7h4v-2H2zm18.36 4.7l-1.41-1.41-1.41 1.41 1.41 1.41zM5.64 6.7L4.23 5.29 2.82 6.7l1.41 1.41z"/></svg>
+        View Latest Campaign
+      </a>
+    {% endif %}
+    <a href="/scouts/{{ profile.profileId|urlencode }}/campaigns" class="btn" style="display: inline-flex; align-items: center; gap: 6px; justify-content: center; width: 100%; background-color: {% if profile.latestCampaign %}var(--brand-color-bg-container){% else %}var(--brand-primary-palette-7); color: #ffffff;{% endif %} {% if profile.latestCampaign %}color: var(--brand-color-link); border: 1px solid var(--brand-color-link);{% else %}border: 1px solid var(--brand-primary-palette-7);{% endif %} text-decoration: none; height: 24px; padding: 0 8px; font-size: 0.75rem; font-weight: 600; border-radius: var(--brand-border-radius);">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>
+      View All Campaigns
+    </a>
+    {% if profile.isOwner %}
+      <a href="/scouts/{{ profile.profileId|urlencode }}/manage" class="btn" style="display: inline-flex; align-items: center; gap: 6px; justify-content: center; width: 100%; background-color: var(--brand-color-bg-container); color: var(--brand-color-link); border: 1px solid var(--brand-color-link); text-decoration: none; height: 24px; padding: 0 8px; font-size: 0.75rem; font-weight: 600; border-radius: var(--brand-border-radius);">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
+        Manage Scout
+      </a>
+    {% endif %}
+  </div>
+</div>

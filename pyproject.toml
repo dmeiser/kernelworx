@@ -6,6 +6,7 @@ requires-python = ">=3.14"
 dependencies = [
     "aioboto3>=14.3.0",
     "boto3>=1.35.0",
+    "jinja2>=3.1.0",
     "openpyxl>=3.1.0",
 ]
 

@@ -17,7 +17,12 @@ variable "cloudfront_domain_name" {
 }
 
 variable "appsync_api_url" {
-  description = "AppSync API URL (HTTPS endpoint)"
+  description = "API URL (HTTPS endpoint) — legacy name; now the API Gateway custom domain URL"
+  type        = string
+}
+
+variable "api_regional_domain_name" {
+  description = "Regional domain name of the API Gateway custom domain (alias target for the api subdomain)"
   type        = string
 }
 
@@ -99,18 +104,18 @@ resource "aws_route53_record" "site" {
   }
 }
 
-# API subdomain (CNAME to AppSync)
-# Extract domain from AppSync URL (https://xyz.appsync-api.region.amazonaws.com/graphql)
+# API subdomain (alias to API Gateway custom domain regional endpoint)
 resource "aws_route53_record" "api" {
   zone_id = data.aws_route53_zone.main.zone_id
   name    = local.api_record_name
-  type    = "CNAME"
-  ttl     = 300
+  type    = "A"
   allow_overwrite = true
 
-  records = [
-    replace(replace(var.appsync_api_url, "https://", ""), "/graphql", "")
-  ]
+  alias {
+    name                   = var.api_regional_domain_name
+    zone_id                = "Z1UJRXOUMOOFQ8" # API Gateway regional hosted zone (us-east-1)
+    evaluate_target_health = false
+  }
 }
 
 # Login subdomain (Cognito custom domain)

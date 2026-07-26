@@ -1,0 +1,151 @@
+/* Component Styling for KernelWorx Brand System */
+
+/* Cards */
+.card {
+  background: var(--brand-color-bg-container);
+  border: var(--brand-line-width) solid var(--brand-color-border-secondary);
+  border-radius: var(--brand-border-radius-lg);
+  padding: var(--brand-size-xl);
+  margin-bottom: var(--brand-size-lg);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.02);
+  transition: border-color var(--brand-motion-duration-fast) ease, box-shadow var(--brand-motion-duration-fast) ease;
+}
+
+.card:hover {
+  border-color: var(--brand-color-primary-border);
+  box-shadow: 0 4px 12px rgba(25, 118, 210, 0.08);
+}
+
+/* Buttons */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.5rem 1.25rem;
+  font-family: var(--brand-font-family);
+  font-size: var(--brand-font-size);
+  font-weight: 600;
+  border-radius: var(--brand-border-radius);
+  border: 1px solid transparent;
+  cursor: pointer;
+  text-decoration: none;
+  transition: all var(--brand-motion-duration-fast) ease;
+}
+
+.btn-primary {
+  background-color: var(--brand-color-primary);
+  color: #ffffff;
+}
+
+.btn-primary:hover {
+  background-color: var(--brand-color-primary-hover);
+  filter: brightness(1.05);
+}
+
+.btn-secondary {
+  background-color: var(--brand-color-primary-bg);
+  color: var(--brand-color-primary-text);
+  border-color: var(--brand-color-primary-border);
+}
+
+.btn-secondary:hover {
+  background-color: var(--brand-color-primary-bg-hover);
+}
+
+.btn-danger {
+  background-color: var(--brand-color-error-bg);
+  color: var(--brand-color-error-active);
+  border-color: var(--brand-color-error-border);
+}
+
+.btn-danger:hover {
+  background-color: var(--brand-color-error);
+  color: #ffffff;
+}
+
+/* Form Controls */
+.form-group {
+  margin-bottom: 1.25rem;
+}
+
+.form-group label {
+  display: block;
+  font-size: var(--brand-font-size-sm);
+  font-weight: 600;
+  color: var(--brand-color-text-secondary);
+  margin-bottom: 0.35rem;
+}
+
+.form-control {
+  width: 100%;
+  padding: 0.6rem 0.85rem;
+  font-family: var(--brand-font-family);
+  font-size: var(--brand-font-size);
+  border: var(--brand-line-width) solid var(--brand-color-border);
+  border-radius: var(--brand-border-radius);
+  background-color: var(--brand-color-bg-container);
+  color: var(--brand-color-text);
+  transition: border-color var(--brand-motion-duration-fast) ease, box-shadow var(--brand-motion-duration-fast) ease;
+}
+
+.form-control:focus {
+  border-color: var(--brand-color-primary) !important;
+  box-shadow: 0 0 0 3px var(--brand-color-primary-bg);
+  outline: none;
+}
+
+/* HTML5 Dialog Modal */
+dialog {
+  border: var(--brand-line-width) solid var(--brand-color-border-secondary);
+  border-radius: var(--brand-border-radius-lg);
+  padding: 2rem;
+  max-width: 540px;
+  width: 90%;
+  background: var(--brand-color-bg-container);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.15);
+}
+
+dialog::backdrop {
+  background: rgba(0, 38, 94, 0.4);
+  backdrop-filter: blur(2px);
+}
+
+/* Toast Alerts */
+.toast-container {
+  position: fixed;
+  bottom: 2rem;
+  right: 2rem;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.toast {
+  padding: 0.85rem 1.25rem;
+  border-radius: var(--brand-border-radius);
+  font-size: var(--brand-font-size);
+  font-weight: 600;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  animation: slideIn 0.2s ease;
+}
+
+.toast-success {
+  background-color: var(--brand-color-success-bg);
+  color: var(--brand-color-success-active);
+  border: 1px solid var(--brand-color-success-border);
+}
+
+@keyframes slideIn {
+  from { transform: translateY(100%); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+/* HTMX Request Indicator */
+.htmx-indicator {
+  display: none;
+}
+
+.htmx-request .htmx-indicator {
+  display: inline-block;
+}

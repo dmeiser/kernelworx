@@ -1,12 +1,11 @@
-"""Cognito authentication helpers for Playwright e2e tests.
+"""Fake authentication helpers for the local Playwright e2e suite.
 
-The app uses AWS Cognito via aws-amplify with a custom login page at /login.
-Email/password auth is handled by the CredentialsForm component, which renders
-standard MUI TextFields (no data-testid attributes) and a submit button.
-
-Selector strategy (in priority order):
-  1. data-testid attributes (if they exist in the future)
-  2. Standard HTML attribute selectors (input[type="email"], etc.)
+The original helpers performed a real AWS Cognito email/password login against
+a deployed dev environment.  The local WSGI test server treats EVERY request
+as authenticated (it injects a fixed Cognito ``sub`` claim from the
+``x-test-sub`` header, defaulting to ``e2e-test-user-sub``), so no real login
+is needed.  These helpers keep the original names and signatures so the smoke
+tests do not change their call patterns — they simply navigate to the app.
 """
 
 import os
@@ -15,72 +14,60 @@ from playwright.sync_api import Page
 
 from tests.e2e.pages.login_page import LoginPage
 
-
-def _require_env(key: str) -> str:
-    """Get a required environment variable with a helpful error message."""
-    value = os.environ.get(key)
-    if not value:
-        raise EnvironmentError(
-            f"Required environment variable '{key}' is not set. "
-            "Copy .env.example to .env and fill in test user credentials. "
-            "See tests/e2e/README.md for setup instructions."
-        )
-    return value
+#: Base URL of the local WSGI test server.  Set by the ``live_http_server``
+#: session fixture in ``conftest.py``; falls back to port 8888 if unset.
+_DEFAULT_BASE_URL = "http://127.0.0.1:8888"
 
 
 def _base_url() -> str:
-    """Return the configured base URL for the app under test."""
-    return os.getenv("E2E_BASE_URL", "https://localhost:5173").rstrip("/")
+    """Return the configured base URL for the local app under test."""
+    return os.getenv("E2E_BASE_URL", _DEFAULT_BASE_URL).rstrip("/")
 
 
-def login(page: Page, email: str, password: str) -> None:
-    """Navigate to the app login page and authenticate with the given credentials.
+def login(page: Page, email: str | None = None, password: str | None = None) -> None:
+    """Navigate to the local app, “authenticated” via the fake server header.
 
-    Delegates entirely to :class:`~tests.e2e.pages.login_page.LoginPage` so
-    that selector logic lives in exactly one place.
+    The local server injects a Cognito ``sub`` claim on every request, so the
+    page is already authenticated.  Navigating to ``/scouts`` (rather than
+    ``/login``) lands the browser on the authenticated dashboard directly.
+
+    Args:
+        page: Active Playwright Page.
+        email: Ignored (kept for signature compatibility).
+        password: Ignored (kept for signature compatibility).
     """
-    login_page = LoginPage(page)
-    login_page.goto()
-    login_page.login(email, password)
-    login_page.wait_for_redirect()
+    page.goto(f"{_base_url()}/scouts")
 
 
 def login_as_owner(page: Page) -> None:
-    """Navigate to the app and log in as the owner test user.
-
-    Credentials are read from TEST_OWNER_EMAIL / TEST_OWNER_PASSWORD env vars.
-    """
-    email = _require_env("TEST_OWNER_EMAIL")
-    password = _require_env("TEST_OWNER_PASSWORD")
-    login(page, email, password)
+    """Navigate to the local app as the owner role (fake auth)."""
+    login(page)
 
 
 def login_as_contributor(page: Page) -> None:
-    """Navigate to the app and log in as the contributor test user.
-
-    Credentials are read from TEST_CONTRIBUTOR_EMAIL / TEST_CONTRIBUTOR_PASSWORD env vars.
-    """
-    email = _require_env("TEST_CONTRIBUTOR_EMAIL")
-    password = _require_env("TEST_CONTRIBUTOR_PASSWORD")
-    login(page, email, password)
+    """Navigate to the local app as the contributor role (fake auth)."""
+    login(page)
 
 
 def login_as_readonly(page: Page) -> None:
-    """Navigate to the app and log in as the read-only test user.
-
-    Credentials are read from TEST_READONLY_EMAIL / TEST_READONLY_PASSWORD env vars.
-    """
-    email = _require_env("TEST_READONLY_EMAIL")
-    password = _require_env("TEST_READONLY_PASSWORD")
-    login(page, email, password)
+    """Navigate to the local app as the read-only role (fake auth)."""
+    login(page)
 
 
 def logout(page: Page) -> None:
-    """Log out the currently authenticated user.
+    """Click the *Sign out* button in the AppBar and wait for the redirect to /login.
 
-    Clicks the "Sign out" button in the AppBar and waits for the redirect back
-    to /login.
+    The authenticated app chrome (``base.html``) renders a *Sign out* link that
+    calls the ``logout()`` JS helper (``auth.js``), which clears tokens and
+    sets ``window.location.href = '/login'``.
     """
     page.goto(f"{_base_url()}/home")
-    page.locator("header").get_by_role("button", name="Sign out").click()
+    page.get_by_role("link", name="Sign out").click()
     page.wait_for_url("**/login", timeout=10_000)
+
+
+def render_login_page(page: Page) -> LoginPage:
+    """Navigate to the /login page (unauthenticated render) and return its page object."""
+    login_page = LoginPage(page)
+    login_page.goto()
+    return login_page
