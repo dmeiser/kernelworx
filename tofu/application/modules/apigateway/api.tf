@@ -159,7 +159,7 @@ locals {
           "x-amazon-apigateway-authtype" = "custom"
           "x-amazon-apigateway-authorizer" = {
             type             = "request"
-            identitySource   = "method.request.header.Authorization, method.request.header.Cookie"
+            identitySource   = "method.request.header.Cookie"
             resultTtlInSeconds = 0
             authorizerUri    = "arn:aws:apigateway:${var.aws_region}:lambda:path/2015-03-31/functions/${var.authorizer_lambda_arn}/invocations"
             authorizerCredentials = var.apigateway_execution_role_arn
