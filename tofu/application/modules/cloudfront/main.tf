@@ -117,6 +117,27 @@ resource "aws_cloudfront_distribution" "site" {
     }
   }
 
+  # Favicon served from S3 (browsers request /favicon.ico regardless of <link rel="icon">)
+  ordered_cache_behavior {
+    path_pattern     = "/favicon.ico"
+    allowed_methods  = ["GET", "HEAD"]
+    cached_methods   = ["GET", "HEAD"]
+    target_origin_id = "S3-${var.static_bucket_id}"
+    viewer_protocol_policy = "redirect-to-https"
+    compress = true
+
+    forwarded_values {
+      query_string = false
+      cookies {
+        forward = "none"
+      }
+    }
+
+    min_ttl     = 0
+    default_ttl = 86400
+    max_ttl     = 604800
+  }
+
   # Static assets from S3
   ordered_cache_behavior {
     path_pattern     = "/static/*"
