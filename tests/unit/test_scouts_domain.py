@@ -3,10 +3,8 @@ Unit tests for Scouts / Seller Profiles Domain Lambda Handler.
 """
 
 import os
-from typing import Generator
 
 import boto3
-from botocore.exceptions import ClientError
 from moto import mock_aws  # type: ignore[import-untyped]
 
 os.environ["AWS_DEFAULT_REGION"] = "us-east-1"
@@ -21,27 +19,24 @@ os.environ.setdefault("CATALOGS_TABLE_NAME", "kernelworx-catalogs-v2-ue1-dev")
 
 
 def create_mock_table() -> None:
-    """Create DynamoDB profiles table if it does not exist."""
+    """Create DynamoDB profiles table with the multi-table schema."""
     dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
     table_name = os.environ.get("PROFILES_TABLE_NAME", "kernelworx-profiles-v2-ue1-dev")
-    try:
-        dynamodb.create_table(
-            TableName=table_name,
-            KeySchema=[
-                {"AttributeName": "PK", "KeyType": "HASH"},
-                {"AttributeName": "SK", "KeyType": "RANGE"},
-            ],
-            AttributeDefinitions=[
-                {"AttributeName": "PK", "AttributeType": "S"},
-                {"AttributeName": "SK", "AttributeType": "S"},
-            ],
-            BillingMode="PAY_PER_REQUEST",
-        )
-    except ClientError:
-        pass
+    dynamodb.create_table(
+        TableName=table_name,
+        KeySchema=[
+            {"AttributeName": "ownerAccountId", "KeyType": "HASH"},
+            {"AttributeName": "profileId", "KeyType": "RANGE"},
+        ],
+        AttributeDefinitions=[
+            {"AttributeName": "ownerAccountId", "AttributeType": "S"},
+            {"AttributeName": "profileId", "AttributeType": "S"},
+        ],
+        BillingMode="PAY_PER_REQUEST",
+    )
 
 
-from src.handlers.scouts_domain import (
+from src.handlers.scouts_domain import (  # noqa: E402
     api_create_profile_handler,
     api_delete_profile_handler,
     render_create_profile_form_handler,
@@ -60,20 +55,19 @@ def test_render_scouts_handler_empty() -> None:
 
 
 def test_render_scouts_handler_with_items() -> None:
-    """Test rendering scouts list page with items."""
+    """Test rendering scouts list page with items owned by the caller."""
     with mock_aws():
         create_mock_table()
         table_name = os.environ.get("PROFILES_TABLE_NAME", "kernelworx-profiles-v2-ue1-dev")
         table = boto3.resource("dynamodb", region_name="us-east-1").Table(table_name)
         table.put_item(
             Item={
-                "PK": "user-sub-id",
-                "SK": "PROFILE#1",
+                "ownerAccountId": "ACCOUNT#user-sub-id",
                 "profileId": "PROFILE#1",
                 "sellerName": "Alex Smith",
             }
         )
-        event = {"requestContext": {"authorizer": {"claims": {"sub": "user-sub-id"}}}}
+        event = {"requestContext": {"authorizer": {"sub": "user-sub-id"}}}
         res = render_scouts_handler(event, None)
         assert res["statusCode"] == 200
         assert "Alex Smith" in res["body"]
@@ -105,7 +99,7 @@ def test_api_create_profile_json() -> None:
     with mock_aws():
         create_mock_table()
         event = {
-            "requestContext": {"authorizer": {"claims": {"sub": "user-123"}}},
+            "requestContext": {"authorizer": {"sub": "user-123"}},
             "body": '{"sellerName": "Jordan Lee"}',
         }
         res = api_create_profile_handler(event, None)
@@ -129,7 +123,7 @@ def test_api_delete_profile_handler() -> None:
         create_mock_table()
         event = {
             "headers": {"x-mock-user-id": "test-caller"},
-            "pathParameters": {"id": "PROFILE#123"},
+            "pathParameters": {"profileId": "PROFILE#123"},
         }
         res = api_delete_profile_handler(event, None)
         assert res["statusCode"] == 200
@@ -143,26 +137,20 @@ def test_handler_scouts_routes() -> None:
     with mock_aws():
         create_mock_table()
 
-        # /scouts GET
         res = handler({"httpMethod": "GET", "path": "/scouts"}, None)
         assert res["statusCode"] == 200
 
-        # /home GET
         res = handler({"httpMethod": "GET", "path": "/home"}, None)
         assert res["statusCode"] == 200
 
-        # /api/profiles/new-form GET
         res = handler({"httpMethod": "GET", "path": "/api/profiles/new-form"}, None)
         assert res["statusCode"] == 200
 
-        # /api/profiles POST
         res = handler({"httpMethod": "POST", "path": "/api/profiles", "body": ""}, None)
         assert res["statusCode"] == 200
 
-        # /api/profiles/{id} DELETE
         res = handler({"httpMethod": "DELETE", "path": "/api/profiles/PROFILE%231"}, None)
         assert res["statusCode"] == 200
 
-        # unknown → 404
         res = handler({"httpMethod": "GET", "path": "/unknown"}, None)
         assert res["statusCode"] == 404
