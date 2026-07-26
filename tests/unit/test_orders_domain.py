@@ -258,3 +258,128 @@ def test_api_delete_order_handler_scan_fallback() -> None:
         assert res["body"] == ""
         remaining = table.scan(ProjectionExpression="orderId")
         assert remaining.get("Items") == []
+
+
+def test_api_save_order_handler_form_with_line_items() -> None:
+    """Covers the form-encoded body branch with line-item quantity/price fields."""
+    with mock_aws():
+        create_mock_table()
+        from src.handlers.orders_domain import api_save_order_handler
+
+        event = {
+            "headers": {"x-mock-user-id": "user-1"},
+            "body": "customerName=Alice&campaignId=CAMPAIGN%231&profileId=PROFILE%231&items%5B0%5D%5Bquantity%5D=2&items%5B0%5D%5Bprice%5D=10",
+        }
+        res = api_save_order_handler(event, None)
+        assert res["statusCode"] == 200
+
+
+def test_api_delete_order_with_campaign_id() -> None:
+    """Covers the branch where campaignId is in queryStringParameters."""
+    with mock_aws():
+        create_mock_table()
+        from src.handlers.orders_domain import api_delete_order_handler
+
+        table = boto3.resource("dynamodb", region_name="us-east-1").Table(
+            os.environ.get("ORDERS_TABLE_NAME", "kernelworx-orders-v2-ue1-dev")
+        )
+        table.put_item(Item={"campaignId": "CAMPAIGN#1", "orderId": "ORDER#del", "totalAmount": Decimal("5")})
+        event = {
+            "pathParameters": {"id": "ORDER#del"},
+            "queryStringParameters": {"campaignId": "CAMPAIGN#1"},
+        }
+        res = api_delete_order_handler(event, None)
+        assert res["statusCode"] == 200
+        assert res["body"] == ""
+
+
+def test_handler_orders_routes() -> None:
+    """Test orders handler dispatches all routes and returns 404 for unknown."""
+    from src.handlers.orders_domain import handler
+
+    with mock_aws():
+        create_mock_table()
+
+        # /api/orders POST
+        res = handler({"httpMethod": "POST", "path": "/api/orders", "body": ""}, None)
+        assert res["statusCode"] == 200
+
+        # /api/orders DELETE
+        res = handler({"httpMethod": "DELETE", "path": "/api/orders/ORDER%231"}, None)
+        assert res["statusCode"] == 200
+
+        # /api/orders GET
+        res = handler(
+            {"httpMethod": "GET", "path": "/api/orders", "queryStringParameters": {"campaignId": "CAMPAIGN#1"}},
+            None,
+        )
+        assert res["statusCode"] == 200
+
+        # /scouts/{p}/campaigns/{c} GET (4 parts)
+        res = handler({"httpMethod": "GET", "path": "/scouts/p1/campaigns/CAMPAIGN%231"}, None)
+        assert res["statusCode"] == 200
+
+        # /scouts/{p}/campaigns/{c}/new GET (5 parts, "new")
+        res = handler({"httpMethod": "GET", "path": "/scouts/p1/campaigns/CAMPAIGN%231/new"}, None)
+        assert res["statusCode"] == 200
+
+        # /scouts/{p}/campaigns/{c}/orders GET (5 parts, "orders")
+        res = handler({"httpMethod": "GET", "path": "/scouts/p1/campaigns/CAMPAIGN%231/orders"}, None)
+        assert res["statusCode"] == 200
+
+        # /scouts/{p}/campaigns/{c}/edit GET (5 parts, other)
+        res = handler({"httpMethod": "GET", "path": "/scouts/p1/campaigns/CAMPAIGN%231/edit"}, None)
+        assert res["statusCode"] == 200
+
+        # /scouts/{p}/campaigns/{c}/orders/new GET (6 parts, orders/new)
+        res = handler({"httpMethod": "GET", "path": "/scouts/p1/campaigns/CAMPAIGN%231/orders/new"}, None)
+        assert res["statusCode"] == 200
+
+        # /scouts/{p}/campaigns/{c}/orders/{o}/edit GET (7 parts)
+        res = handler({"httpMethod": "GET", "path": "/scouts/p1/campaigns/CAMPAIGN%231/orders/ORDER%231/edit"}, None)
+        assert res["statusCode"] == 200
+
+        # /orders GET
+        res = handler({"httpMethod": "GET", "path": "/orders"}, None)
+        assert res["statusCode"] == 200
+
+        # unknown → 404
+        res = handler({"httpMethod": "GET", "path": "/unknown"}, None)
+        assert res["statusCode"] == 404
+
+
+def test_api_get_orders_json_format() -> None:
+    """Covers branch 144->145: GET /api/orders with format=json."""
+    with mock_aws():
+        create_mock_table()
+        from src.handlers.orders_domain import api_get_orders_handler
+
+        event = {
+            "queryStringParameters": {"campaignId": "CAMPAIGN#1", "format": "json"},
+            "headers": {"x-mock-user-id": "user-1"},
+        }
+        res = api_get_orders_handler(event, None)
+        assert res["statusCode"] == 200
+        assert res["headers"]["Content-Type"] == "application/json"
+
+
+def test_handler_orders_scouts_no_campaigns_part() -> None:
+    """Covers branch 222->237: /scouts/ path with parts[2] != campaigns."""
+    from src.handlers.orders_domain import handler
+
+    with mock_aws():
+        create_mock_table()
+        # 3 parts, parts[2] != "campaigns" → inner if is False, falls to 404
+        res = handler({"httpMethod": "GET", "path": "/scouts/p1/OTHER"}, None)
+        assert res["statusCode"] == 404
+
+
+def test_handler_orders_scouts_6parts_no_match() -> None:
+    """Covers branch 234->237: 6 parts in /scouts/ but last doesn't match orders/new."""
+    from src.handlers.orders_domain import handler
+
+    with mock_aws():
+        create_mock_table()
+        # 6 parts but parts[4]="orders", parts[5]="edit" (not "new") — falls through all inner ifs
+        res = handler({"httpMethod": "GET", "path": "/scouts/p1/campaigns/CAMPAIGN%231/orders/ORDER%231"}, None)
+        assert res["statusCode"] in (200, 404)

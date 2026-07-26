@@ -142,7 +142,9 @@ def list_unit_catalogs(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         }
 
 
-def _build_unit_campaign_key(unit_type, unit_number, city, state, campaign_name, campaign_year) -> str:
+def _build_unit_campaign_key(
+    unit_type: str, unit_number: str, city: str, state: str, campaign_name: str, campaign_year: str
+) -> str:
     return f"{unit_type}#{unit_number}#{city}#{state}#{campaign_name}#{campaign_year}"
 
 
@@ -169,7 +171,9 @@ def list_unit_campaign_catalogs(event: Dict[str, Any], context: Any) -> Dict[str
         unit_number = int(unit_number_raw)
         campaign_year = int(campaign_year_raw)
 
-        unit_campaign_key = _build_unit_campaign_key(unit_type, unit_number, city, state, campaign_name, campaign_year)
+        unit_campaign_key = _build_unit_campaign_key(
+            unit_type, str(unit_number), city, state, campaign_name, str(campaign_year)
+        )
         unit_campaigns = query_all_items(
             tables.campaigns,
             {

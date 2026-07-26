@@ -16,7 +16,7 @@
   <script src="/static/js/htmx.min.js" defer></script>
   <script src="/static/js/auth.js" defer></script>
 </head>
-<body style="min-height: 100vh; display: flex; flex-direction: column; margin: 0;">
+<body style="min-height: 100vh; display: flex; flex-direction: column; margin: 0;" data-site-domain="{{ site_domain }}" data-cognito-domain="{{ cognito_domain }}" data-cognito-client-id="{{ cognito_client_id }}">
 
 {% if is_authenticated %}
 

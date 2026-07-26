@@ -17,8 +17,9 @@ except ModuleNotFoundError:  # pragma: no cover
 
 def get_caller_id(event: Dict[str, Any]) -> str:
     """Extract authenticated caller ID from API Gateway Cognito authorizer claims or mock header."""
-    auth_ctx = event.get("requestContext", {}).get("authorizer", {}).get("claims", {})
-    sub = auth_ctx.get("sub")
+    auth_ctx = event.get("requestContext", {}).get("authorizer", {}) or {}
+    claims = auth_ctx.get("claims", {}) if isinstance(auth_ctx.get("claims"), dict) else auth_ctx
+    sub = claims.get("sub") if isinstance(claims, dict) else auth_ctx.get("sub")
     if sub:
         return str(sub)
     headers = event.get("headers") or {}

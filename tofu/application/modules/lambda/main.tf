@@ -35,6 +35,21 @@ variable "user_pool_id" {
   type = string
 }
 
+variable "cognito_client_id" {
+  description = "Cognito User Pool client ID passed to auth Lambdas"
+  type = string
+}
+
+variable "cognito_domain" {
+  description = "Cognito User Pool custom domain passed to auth Lambdas"
+  type = string
+}
+
+variable "site_domain" {
+  description = "Public site domain used by Lambdas for callbacks and links"
+  type = string
+}
+
 variable "lambda_src_dir" {
   type        = string
   description = "Path to Lambda source code directory"
@@ -66,6 +81,7 @@ locals {
     SHARES_TABLE_NAME           = var.table_names.shares
     INVITES_TABLE_NAME          = var.table_names.invites
     SHARED_CAMPAIGNS_TABLE_NAME = var.table_names.shared_campaigns
+    SITE_DOMAIN                 = var.site_domain
   }
 
   # Domain Lambdas: one per domain, each routes internally by HTTP method + path
@@ -76,6 +92,10 @@ locals {
       handler     = "handlers.auth_domain.handler"
       timeout     = 30
       memory_size = 256
+      extra_env = {
+        COGNITO_CLIENT_ID = var.cognito_client_id
+        COGNITO_DOMAIN    = var.cognito_domain
+      }
     }
     "scouts" = {
       handler     = "handlers.scouts_domain.handler"
@@ -278,7 +298,7 @@ resource "aws_lambda_function" "domain_functions" {
   layers = [aws_lambda_layer_version.shared.arn]
 
   environment {
-    variables = local.common_env
+    variables = merge(local.common_env, lookup(each.value, "extra_env", {}))
   }
 
   lifecycle {
@@ -312,6 +332,30 @@ resource "aws_lambda_function" "app_functions" {
   }
 }
 
+# kics-scan ignore-line
+resource "aws_lambda_function" "authorizer" {
+  function_name = "${var.name_prefix}-authorizer${local.func_suffix}"
+  role          = var.lambda_role_arn
+  handler       = "handlers.authorizer.handler"
+  runtime       = "python3.14"
+  architectures = ["arm64"]
+  timeout       = 10
+  memory_size   = 256
+
+  filename         = data.archive_file.lambda_payload.output_path
+  source_code_hash = data.archive_file.lambda_payload.output_base64sha256
+
+  layers = [aws_lambda_layer_version.shared.arn]
+
+  environment {
+    variables = local.common_env
+  }
+
+  lifecycle {
+    prevent_destroy = false
+  }
+}
+
 # Outputs
 output "function_arns" {
   description = "Map of all app Lambda function logical names (domain + restored) to their ARNs, keyed by logical name for the apigateway module"
@@ -332,6 +376,11 @@ output "function_names" {
 output "trigger_function_arns" {
   description = "Map of Cognito trigger Lambda function names to their ARNs (no user_pool_id dependency)"
   value       = { for k, v in aws_lambda_function.trigger_functions : k => v.arn }
+}
+
+output "authorizer_arn" {
+  description = "ARN of the API Gateway custom authorizer Lambda"
+  value       = aws_lambda_function.authorizer.arn
 }
 
 output "layer_arn" {

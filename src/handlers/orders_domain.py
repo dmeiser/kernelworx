@@ -19,8 +19,9 @@ except ModuleNotFoundError:  # pragma: no cover
 
 def get_caller_id(event: Dict[str, Any]) -> str:
     """Extract authenticated caller ID from API Gateway Cognito authorizer claims or mock header."""
-    auth_ctx = event.get("requestContext", {}).get("authorizer", {}).get("claims", {})
-    sub = auth_ctx.get("sub")
+    auth_ctx = event.get("requestContext", {}).get("authorizer", {}) or {}
+    claims = auth_ctx.get("claims", {}) if isinstance(auth_ctx.get("claims"), dict) else auth_ctx
+    sub = claims.get("sub") if isinstance(claims, dict) else auth_ctx.get("sub")
     if sub:
         return str(sub)
     headers = event.get("headers") or {}
@@ -41,12 +42,12 @@ def render_orders_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]
 
     # Compute summary statistics (mirrors CampaignSummaryTiles)
     total_orders = len(items)
-    total_revenue = sum(float(o.get("totalAmount", 0) or 0) for o in items)  # type: ignore[misc, arg-type]
+    total_revenue = sum(float(o.get("totalAmount", 0) or 0) for o in items)
     unique_customers = len({o.get("customerName") for o in items if o.get("customerName")})
     total_items_sold = 0
     for o in items:
-        for li in o.get("lineItems") or []:  # type: ignore[union-attr]
-            total_items_sold += int(li.get("quantity", 0) or 0)  # type: ignore[union-attr]
+        for li in o.get("lineItems") or []:
+            total_items_sold += int(li.get("quantity", 0) or 0)
 
     # Friendly names (strip prefixes)
     profile_name = profile_id[len("PROFILE#") :] if profile_id.startswith("PROFILE#") else (profile_id or "")
@@ -139,9 +140,6 @@ def api_save_order_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any
         profile_id = parsed.get("profileId", [profile_id])[0]
         # Sum line-item subtotals if provided; fall back to a single totalAmount field.
         total_amount = Decimal("0")
-        for key, values in parsed.items():
-            if key.startswith("items[") and key.endswith("][quantity]"):
-                continue
         # Compute total from line items: quantity * price for each row.
         item_count = 0
         for key in parsed.keys():

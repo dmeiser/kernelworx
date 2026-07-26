@@ -27,7 +27,19 @@ variable "static_bucket_arn" {
 
 variable "static_bucket_regional_domain" {
   description = "Regional domain name of the S3 bucket for CloudFront origin"
-  type = string
+  type        = string
+}
+
+variable "api_gateway_regional_domain" {
+  description = "Regional domain name of the API Gateway custom domain (for routing page requests to Lambda)"
+  type        = string
+  default     = ""
+}
+
+variable "api_gateway_domain" {
+  description = "The API Gateway custom domain name (e.g., api.dev.kernelworx.app) for CloudFront to route page requests"
+  type        = string
+  default     = ""
 }
 
 variable "certificate_validation" {
@@ -38,6 +50,8 @@ variable "certificate_validation" {
 
 locals {
   site_domain = var.site_domain
+  api_origin_id = "ApiGateway-${var.environment}"
+  use_api_origin = var.api_gateway_domain != "" || var.api_gateway_regional_domain != ""
 }
 
 # Origin Access Identity
@@ -75,7 +89,7 @@ resource "aws_s3_bucket_policy" "static" {
 resource "aws_cloudfront_distribution" "site" {
   enabled             = true
   is_ipv6_enabled     = true
-  default_root_object = "index.html"
+  default_root_object = ""
   aliases             = [local.site_domain]
   price_class         = "PriceClass_100"
 
@@ -88,12 +102,29 @@ resource "aws_cloudfront_distribution" "site" {
     }
   }
 
-  default_cache_behavior {
-    allowed_methods        = ["GET", "HEAD", "OPTIONS"]
-    cached_methods         = ["GET", "HEAD"]
-    target_origin_id       = "S3-${var.static_bucket_id}"
+  dynamic "origin" {
+    for_each = local.use_api_origin ? [1] : []
+    content {
+      domain_name = var.api_gateway_domain != "" ? var.api_gateway_domain : var.api_gateway_regional_domain
+      origin_id   = local.api_origin_id
+
+      custom_origin_config {
+        http_port              = 80
+        https_port             = 443
+        origin_protocol_policy = "https-only"
+        origin_ssl_protocols   = ["TLSv1.2"]
+      }
+    }
+  }
+
+  # Static assets from S3
+  ordered_cache_behavior {
+    path_pattern     = "/static/*"
+    allowed_methods  = ["GET", "HEAD", "OPTIONS"]
+    cached_methods   = ["GET", "HEAD"]
+    target_origin_id = "S3-${var.static_bucket_id}"
     viewer_protocol_policy = "redirect-to-https"
-    compress               = true
+    compress = true
 
     forwarded_values {
       query_string = false
@@ -103,21 +134,28 @@ resource "aws_cloudfront_distribution" "site" {
     }
 
     min_ttl     = 0
-    default_ttl = 3600
-    max_ttl     = 86400
+    default_ttl = 86400
+    max_ttl     = 604800
   }
 
-  # SPA routing - return index.html for 404s
-  custom_error_response {
-    error_code         = 404
-    response_code      = 200
-    response_page_path = "/index.html"
-  }
+  default_cache_behavior {
+    allowed_methods        = ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"]
+    cached_methods         = ["GET", "HEAD"]
+    target_origin_id       = local.use_api_origin ? local.api_origin_id : "S3-${var.static_bucket_id}"
+    viewer_protocol_policy = "redirect-to-https"
+    compress               = true
 
-  custom_error_response {
-    error_code         = 403
-    response_code      = 200
-    response_page_path = "/index.html"
+    forwarded_values {
+      query_string = true
+      headers = ["Authorization", "Content-Type", "Accept", "HX-Request", "HX-Target", "HX-Trigger", "HX-Redirect"]
+      cookies {
+        forward = "all"
+      }
+    }
+
+    min_ttl     = 0
+    default_ttl = 0
+    max_ttl     = 0
   }
 
   restrictions {

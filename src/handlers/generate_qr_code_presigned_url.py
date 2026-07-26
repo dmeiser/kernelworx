@@ -27,7 +27,7 @@ def _is_already_presigned(qr_code_url: str) -> bool:
     return "X-Amz-Algorithm" in qr_code_url or "X-Amz-Signature" in qr_code_url
 
 
-def _validate_and_extract_params(event: Dict[str, Any]) -> tuple:
+def _validate_and_extract_params(event: Dict[str, Any]) -> tuple[str, str, Optional[str]]:
     caller_id = get_caller_id(event)
     body = parse_body(event)
     owner_account_id: Optional[str] = body.get("ownerAccountId") or (event.get("pathParameters") or {}).get("id")

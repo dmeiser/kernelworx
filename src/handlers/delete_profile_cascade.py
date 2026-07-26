@@ -6,7 +6,7 @@ Restored from the AppSync-shaped ``main`` version. Reads caller id from
 (``/api/profiles/{id}/cascade-delete``) or request body.
 """
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from botocore.exceptions import ClientError
 
@@ -28,7 +28,13 @@ logger = get_logger(__name__)
 BATCH_SIZE = 25
 
 
-def _query_all_items(table, key_condition, expression_values, index_name=None, projection=None):
+def _query_all_items(
+    table: Any,
+    key_condition: str,
+    expression_values: Dict[str, Any],
+    index_name: Optional[str] = None,
+    projection: Optional[str] = None,
+) -> List[Dict[str, Any]]:
     items: List[Dict[str, Any]] = []
     last_evaluated_key = None
     while True:
@@ -50,7 +56,7 @@ def _query_all_items(table, key_condition, expression_values, index_name=None, p
     return items
 
 
-def _batch_delete_keys(table, keys, primary_keys):
+def _batch_delete_keys(table: Any, keys: List[Dict[str, str]], primary_keys: List[str]) -> int:
     if not keys:
         return 0
     deleted = 0
@@ -80,7 +86,7 @@ def _get_profile_owner_id(profile_id: str) -> str:
     return str(items[0]["ownerAccountId"])
 
 
-def _collect_order_keys(campaigns):
+def _collect_order_keys(campaigns: List[Dict[str, Any]]) -> List[Dict[str, str]]:
     order_keys = []
     for campaign in campaigns:
         campaign_id = campaign.get("campaignId")

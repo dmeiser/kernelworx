@@ -69,3 +69,23 @@ def test_api_delete_catalog_handler() -> None:
         res = api_delete_catalog_handler(event, None)
         assert res["statusCode"] == 200
         assert "Catalog deleted successfully" in res["body"]
+
+
+def test_handler_catalogs_routes() -> None:
+    """Test catalogs handler dispatches known routes and returns 404 for unknown."""
+    from src.handlers.catalogs_domain import handler
+
+    with mock_aws():
+        create_mock_table()
+
+        # /catalogs GET
+        res = handler({"httpMethod": "GET", "path": "/catalogs"}, None)
+        assert res["statusCode"] == 200
+
+        # /api/catalogs/{id} DELETE
+        res = handler({"httpMethod": "DELETE", "path": "/api/catalogs/CATALOG%231"}, None)
+        assert res["statusCode"] == 200
+
+        # unknown → 404
+        res = handler({"httpMethod": "GET", "path": "/unknown"}, None)
+        assert res["statusCode"] == 404

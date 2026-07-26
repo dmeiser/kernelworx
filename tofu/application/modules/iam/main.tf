@@ -253,8 +253,13 @@ output "lambda_execution_role_name" {
 }
 
 output "apigateway_execution_role_arn" {
-  description = "ARN of the API Gateway execution role for VTL integrations"
+  description = "ARN of the API Gateway execution role"
   value       = aws_iam_role.apigateway_execution.arn
+}
+
+output "apigateway_execution_role_name" {
+  description = "Name of the API Gateway execution role"
+  value       = aws_iam_role.apigateway_execution.name
 }
 
 output "cognito_sms_role_arn" {

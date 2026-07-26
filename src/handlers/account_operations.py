@@ -15,7 +15,7 @@ package.
 
 import os
 from datetime import datetime, timezone
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import boto3
 from botocore.exceptions import ClientError
@@ -40,7 +40,9 @@ logger = get_logger(__name__)
 SIMPLE_UPDATE_FIELDS = ["givenName", "familyName", "city", "state", "unitType"]
 
 
-def _build_update_expressions(input_data: Dict[str, Any]):
+def _build_update_expressions(
+    input_data: Dict[str, Any],
+) -> tuple[list[str], Dict[str, str], Dict[str, Any]]:
     update_expressions = []
     expression_attribute_names: Dict[str, str] = {}
     expression_attribute_values: Dict[str, Any] = {}
@@ -129,23 +131,23 @@ def update_my_account(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         }
 
 
-def _get_user_profiles(db_account_id: str):
+def _get_user_profiles(db_account_id: str) -> list[Dict[str, Any]]:
     try:
         res = tables.profiles.query(
-            IndexName="profileId-index",
             KeyConditionExpression="ownerAccountId = :owner",
             ExpressionAttributeValues={":owner": db_account_id},
         )
-        return res.get("Items", [])
+        return list(res.get("Items", []))
     except Exception:
-        # Fallback for schemas without the GSI: scan + filter.
         scan = tables.profiles.scan(
             FilterExpression="ownerAccountId = :owner", ExpressionAttributeValues={":owner": db_account_id}
         )
-        return scan.get("Items", [])
+        return list(scan.get("Items", []))
 
 
-def _query_all(table, key_condition, expr_values, index_name=None):
+def _query_all(
+    table: Any, key_condition: str, expr_values: Dict[str, Any], index_name: Optional[str] = None
+) -> list[Dict[str, Any]]:
     items = []
     kwargs: Dict[str, Any] = {"KeyConditionExpression": key_condition, "ExpressionAttributeValues": expr_values}
     if index_name:
@@ -241,7 +243,7 @@ def _delete_all_user_data(account_id: str) -> None:
     tables.accounts.delete_item(Key={"accountId": db_account_id})
 
 
-def _delete_user_from_cognito(cognito, user_pool_id: str, account_id: str) -> None:
+def _delete_user_from_cognito(cognito: Any, user_pool_id: str, account_id: str) -> None:
     try:
         users_response = cognito.list_users(UserPoolId=user_pool_id, Filter=f'sub = "{account_id}"', Limit=1)
         users = users_response.get("Users", [])

@@ -10,7 +10,7 @@ Returns a JSON list of catalog IDs.
 """
 
 import json
-from typing import Any, Dict, List, Set
+from typing import Any, Dict, List, Optional, Set
 
 try:  # pragma: no cover
     from utils.dynamodb import get_required_env, tables
@@ -26,7 +26,13 @@ except ModuleNotFoundError:  # pragma: no cover
 logger = get_logger(__name__)
 
 
-def _query_all(table, key_condition, expr_values, index_name=None, projection=None):
+def _query_all(
+    table: Any,
+    key_condition: str,
+    expr_values: Dict[str, Any],
+    index_name: Optional[str] = None,
+    projection: Optional[str] = None,
+) -> List[Dict[str, Any]]:
     items: List[Dict[str, Any]] = []
     last_evaluated_key = None
     while True:
@@ -66,7 +72,7 @@ def _get_shared_profile_ids(shares_table_name: str, target_account_id: str) -> L
     return [i["profileId"] for i in items if i.get("profileId")]
 
 
-def _get_catalog_ids_for_profile(profiles, campaigns_table_name: str) -> Set[str]:
+def _get_catalog_ids_for_profile(profiles: List[str], campaigns_table_name: str) -> Set[str]:
     catalog_ids: Set[str] = set()
     for profile_id in profiles:
         items = _query_all(

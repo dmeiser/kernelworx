@@ -134,3 +134,35 @@ def test_api_delete_profile_handler() -> None:
         res = api_delete_profile_handler(event, None)
         assert res["statusCode"] == 200
         assert "Profile deleted successfully" in res["body"]
+
+
+def test_handler_scouts_routes() -> None:
+    """Test scouts handler dispatches all known routes and returns 404 for unknown."""
+    from src.handlers.scouts_domain import handler
+
+    with mock_aws():
+        create_mock_table()
+
+        # /scouts GET
+        res = handler({"httpMethod": "GET", "path": "/scouts"}, None)
+        assert res["statusCode"] == 200
+
+        # /home GET
+        res = handler({"httpMethod": "GET", "path": "/home"}, None)
+        assert res["statusCode"] == 200
+
+        # /api/profiles/new-form GET
+        res = handler({"httpMethod": "GET", "path": "/api/profiles/new-form"}, None)
+        assert res["statusCode"] == 200
+
+        # /api/profiles POST
+        res = handler({"httpMethod": "POST", "path": "/api/profiles", "body": ""}, None)
+        assert res["statusCode"] == 200
+
+        # /api/profiles/{id} DELETE
+        res = handler({"httpMethod": "DELETE", "path": "/api/profiles/PROFILE%231"}, None)
+        assert res["statusCode"] == 200
+
+        # unknown → 404
+        res = handler({"httpMethod": "GET", "path": "/unknown"}, None)
+        assert res["statusCode"] == 404

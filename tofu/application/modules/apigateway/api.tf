@@ -23,6 +23,7 @@ locals {
     { path = "/story",                                     method = "GET",    lambda = "auth",                   auth = false },
     { path = "/api/auth/login",                            method = "POST",   lambda = "auth",                   auth = false },
     { path = "/api/auth/signup",                           method = "POST",   lambda = "auth",                   auth = false },
+    { path = "/api/auth/session",                          method = "POST",   lambda = "auth",                   auth = false },
     { path = "/scouts",                                    method = "GET",    lambda = "scouts",                 auth = true },
     { path = "/home",                                      method = "GET",    lambda = "scouts",                 auth = true },
     { path = "/catalogs",                                  method = "GET",    lambda = "catalogs",               auth = true },
@@ -75,7 +76,7 @@ locals {
       responses = {
         "200" = { description = "200 response" }
       }
-      security = r.auth ? [{ CognitoAuthorizer = [] }] : []
+      security = r.auth ? [{ CustomAuthorizer = [] }] : []
       "x-amazon-apigateway-integration" = {
         type                    = "aws_proxy"
         httpMethod              = "POST"
@@ -151,19 +152,22 @@ locals {
     paths = local.openapi_paths_with_health
     components = {
       securitySchemes = {
-        CognitoAuthorizer = {
-          type                                  = "apiKey"
-          name                                  = "Authorization"
-          in                                    = "header"
-          "x-amazon-apigateway-authtype"        = "cognito_user_pools"
+        CustomAuthorizer = {
+          type                           = "apiKey"
+          name                           = "Unused"
+          in                             = "header"
+          "x-amazon-apigateway-authtype" = "custom"
           "x-amazon-apigateway-authorizer" = {
-            type         = "cognito_user_pools"
-            providerARNs = [var.user_pool_arn]
+            type             = "request"
+            identitySource   = "method.request.header.Authorization, method.request.header.Cookie"
+            resultTtlInSeconds = 0
+            authorizerUri    = "arn:aws:apigateway:${var.aws_region}:lambda:path/2015-03-31/functions/${var.authorizer_lambda_arn}/invocations"
+            authorizerCredentials = var.apigateway_execution_role_arn
           }
         }
       }
     }
-    security = [{ CognitoAuthorizer = [] }]
+    security = [{ CustomAuthorizer = [] }]
   }
 }
 
@@ -200,6 +204,32 @@ resource "aws_lambda_permission" "apigw_invoke" {
   source_arn    = "${aws_api_gateway_rest_api.main.execution_arn}/*/*"
 }
 
+# kics-scan ignore-line
+resource "aws_lambda_permission" "apigw_authorizer_invoke" {
+  statement_id  = "AllowAPIGatewayInvoke-authorizer"
+  action        = "lambda:InvokeFunction"
+  function_name = var.authorizer_lambda_arn
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_api_gateway_rest_api.main.execution_arn}/*/*"
+}
+
+# kics-scan ignore-line
+resource "aws_iam_role_policy" "apigw_authorizer_invoke" {
+  name = "apigw-authorizer-invoke"
+  role = var.apigateway_execution_role_name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = "lambda:InvokeFunction"
+        Resource = var.authorizer_lambda_arn
+      }
+    ]
+  })
+}
+
 # =============================================================================
 # API Deployment & Stage (depends on the REST API body, not individual
 # integrations — API Gateway manages methods/integrations internally from spec)
@@ -221,6 +251,8 @@ resource "aws_api_gateway_deployment" "main" {
 
   depends_on = [
     aws_lambda_permission.apigw_invoke,
+    aws_lambda_permission.apigw_authorizer_invoke,
+    aws_iam_role_policy.apigw_authorizer_invoke,
   ]
 }
 

@@ -211,6 +211,10 @@ module "lambda" {
   }
   
   user_pool_id = module.cognito.user_pool_id
+
+  cognito_client_id = module.cognito.client_id
+  cognito_domain    = module.cognito.domain
+  site_domain       = local.site_domain
 }
 
 module "apigateway" {
@@ -227,7 +231,9 @@ module "apigateway" {
 
   dynamodb_table_names = module.dynamodb.table_names
   lambda_function_arns = module.lambda.function_arns
-  apigateway_execution_role_arn = module.iam.apigateway_execution_role_arn
+  apigateway_execution_role_arn  = module.iam.apigateway_execution_role_arn
+  apigateway_execution_role_name = module.iam.apigateway_execution_role_name
+  authorizer_lambda_arn          = module.lambda.authorizer_arn
 }
 
 module "cloudfront" {
@@ -240,6 +246,8 @@ module "cloudfront" {
   static_bucket_id              = module.s3.static_bucket_id
   static_bucket_arn             = module.s3.static_bucket_arn
   static_bucket_regional_domain = module.s3.static_bucket_regional_domain
+  api_gateway_regional_domain   = module.apigateway.api_regional_domain_name
+  api_gateway_domain            = module.apigateway.api_domain
 }
 
 module "route53" {

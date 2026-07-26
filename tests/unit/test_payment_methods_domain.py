@@ -85,3 +85,39 @@ def test_api_confirm_qr_upload_handler() -> None:
         res = api_confirm_qr_upload_handler(event, None)
         assert res["statusCode"] == 200
         assert "true" in res["body"]
+
+
+def test_handler_payment_methods_routes() -> None:
+    """Test payment_methods handler dispatches known routes and returns 404 for unknown."""
+    from src.handlers.payment_methods_domain import handler
+
+    with mock_aws():
+        create_mock_table()
+
+        # /payment-methods GET
+        res = handler({"httpMethod": "GET", "path": "/payment-methods"}, None)
+        assert res["statusCode"] == 200
+
+        # /api/payment-methods/qr-upload-form GET
+        res = handler({"httpMethod": "GET", "path": "/api/payment-methods/qr-upload-form"}, None)
+        assert res["statusCode"] == 200
+
+        # /api/payment-methods/qr-upload POST
+        res = handler({"httpMethod": "POST", "path": "/api/payment-methods/qr-upload", "body": ""}, None)
+        assert res["statusCode"] == 200
+
+        # /api/payment-methods/qr-confirm POST
+        res = handler(
+            {
+                "httpMethod": "POST",
+                "path": "/api/payment-methods/qr-confirm",
+                "body": '{"key": "qr-codes/user/Venmo.png"}',
+                "requestContext": {"authorizer": {"claims": {"sub": "user-sub-id"}}},
+            },
+            None,
+        )
+        assert res["statusCode"] == 200
+
+        # unknown → 404
+        res = handler({"httpMethod": "GET", "path": "/unknown"}, None)
+        assert res["statusCode"] == 404

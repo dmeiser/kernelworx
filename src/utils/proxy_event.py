@@ -20,12 +20,14 @@ except ModuleNotFoundError:  # pragma: no cover
 def get_caller_id(event: Dict[str, Any]) -> str:
     """Extract the authenticated caller's Cognito sub from the proxy event.
 
-    Reads ``requestContext.authorizer.claims.sub`` (API Gateway Cognito
-    authorizer) and falls back to the ``x-mock-user-id`` / ``x-test-sub``
-    headers used by the local dev/test servers.
+    Reads ``requestContext.authorizer.claims.sub`` (Cognito authorizer) or
+    ``requestContext.authorizer.sub`` (custom request authorizer) and falls back
+    to the ``x-mock-user-id`` / ``x-test-sub`` headers used by local dev/test
+    servers.
     """
-    auth_ctx = event.get("requestContext", {}).get("authorizer", {}).get("claims", {}) or {}
-    sub = auth_ctx.get("sub")
+    auth_ctx = event.get("requestContext", {}).get("authorizer", {}) or {}
+    claims = auth_ctx.get("claims", {}) if isinstance(auth_ctx.get("claims"), dict) else auth_ctx
+    sub = claims.get("sub") if isinstance(claims, dict) else auth_ctx.get("sub")
     if sub:
         return str(sub)
     headers = event.get("headers") or {}
@@ -65,19 +67,29 @@ def parse_body(event: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def get_authorizer_claims(event: Dict[str, Any]) -> Dict[str, Any]:
-    """Return the Cognito authorizer claims dict (compatible with utils.auth.is_admin)."""
-    return event.get("requestContext", {}).get("authorizer", {}).get("claims", {}) or {}
+    """Return the Cognito authorizer claims dict (compatible with utils.auth.is_admin).
+
+    For a custom request authorizer, the context is flattened and only ``sub``
+    is guaranteed; this helper returns a dict containing at least ``sub``.
+    """
+    auth_ctx = event.get("requestContext", {}).get("authorizer", {}) or {}
+    claims = auth_ctx.get("claims", {}) if isinstance(auth_ctx.get("claims"), dict) else auth_ctx
+    if isinstance(claims, dict):
+        return claims
+    return {"sub": auth_ctx.get("sub")} if auth_ctx.get("sub") else {}  # pragma: no cover
 
 
 def is_admin(event: Dict[str, Any]) -> bool:
     """Check whether the caller is in the ADMIN Cognito group.
 
     Mirrors :func:`utils.auth.is_admin` but reads from the API Gateway proxy
-    event shape (``requestContext.authorizer.claims``).
+    event shape. Works with both Cognito authorizer claims and custom request
+    authorizer context.
     """
     try:
-        claims = event.get("requestContext", {}).get("authorizer", {}).get("claims", {}) or {}
-        groups = claims.get("cognito:groups", [])
+        auth_ctx = event.get("requestContext", {}).get("authorizer", {}) or {}
+        claims = auth_ctx.get("claims", {}) if isinstance(auth_ctx.get("claims"), dict) else auth_ctx
+        groups = claims.get("cognito:groups", []) if isinstance(claims, dict) else auth_ctx.get("cognito:groups", [])
         if isinstance(groups, str):
             groups = [groups]
         return "ADMIN" in groups

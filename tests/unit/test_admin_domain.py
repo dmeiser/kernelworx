@@ -114,3 +114,30 @@ def test_render_admin_user_data_handler_claims() -> None:
         }
         res = render_admin_user_data_handler(event, None)
         assert res["statusCode"] == 200
+
+
+def test_handler_routes() -> None:
+    """Test admin handler dispatches known routes and returns 404 for unknown."""
+    from src.handlers.admin_domain import handler
+
+    with mock_aws():
+        create_mock_tables()
+
+        # /admin GET
+        res = handler({"httpMethod": "GET", "path": "/admin"}, None)
+        assert res["statusCode"] == 200
+
+        # /api/admin/search-users GET
+        res = handler({"httpMethod": "GET", "path": "/api/admin/search-users", "queryStringParameters": {}}, None)
+        assert res["statusCode"] == 200
+
+        # /admin/user-data/{accountId} GET
+        res = handler(
+            {"httpMethod": "GET", "path": "/admin/user-data/test-account-id", "pathParameters": {}},
+            None,
+        )
+        assert res["statusCode"] == 200
+
+        # unknown route → 404
+        res = handler({"httpMethod": "GET", "path": "/unknown"}, None)
+        assert res["statusCode"] == 404

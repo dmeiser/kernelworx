@@ -148,3 +148,78 @@ def test_api_delete_campaign_handler() -> None:
         res = api_delete_campaign_handler(event, None)
         assert res["statusCode"] == 200
         assert "Campaign deleted successfully" in res["body"]
+
+
+def test_render_campaigns_handler_bare_profile_id() -> None:
+    """Covers the elif branch: profile_id set but no PROFILE# prefix."""
+    with mock_aws():
+        create_mock_table()
+        from src.handlers.campaigns_domain import render_campaigns_handler
+
+        event = {
+            "headers": {"x-mock-user-id": "user-1"},
+            "pathParameters": {"profileId": "bare-profile-id"},
+        }
+        res = render_campaigns_handler(event, None)
+        assert res["statusCode"] == 200
+        assert "bare-profile-id" in res["body"]
+
+
+def test_handler_campaigns_routes() -> None:
+    """Test campaigns handler dispatches all routes and returns 404 for unknown."""
+    from src.handlers.campaigns_domain import handler
+
+    with mock_aws():
+        create_mock_table()
+
+        # /api/campaigns/new-form GET
+        res = handler({"httpMethod": "GET", "path": "/api/campaigns/new-form"}, None)
+        assert res["statusCode"] == 200
+
+        # /api/campaigns POST
+        res = handler({"httpMethod": "POST", "path": "/api/campaigns", "body": ""}, None)
+        assert res["statusCode"] == 200
+
+        # /api/campaigns/{id} DELETE
+        res = handler({"httpMethod": "DELETE", "path": "/api/campaigns/CAMPAIGN%231"}, None)
+        assert res["statusCode"] == 200
+
+        # /scouts/{profileId} GET (2 parts: scouts + profileId)
+        res = handler({"httpMethod": "GET", "path": "/scouts/PROFILE%231"}, None)
+        assert res["statusCode"] == 200
+
+        # /scouts/{profileId}/campaigns GET (3 parts ending with "campaigns")
+        res = handler({"httpMethod": "GET", "path": "/scouts/PROFILE%231/campaigns"}, None)
+        assert res["statusCode"] == 200
+
+        # /campaigns GET
+        res = handler({"httpMethod": "GET", "path": "/campaigns"}, None)
+        assert res["statusCode"] == 200
+
+        # unknown → 404
+        res = handler({"httpMethod": "GET", "path": "/unknown"}, None)
+        assert res["statusCode"] == 404
+
+
+def test_render_campaigns_handler_no_profile_id() -> None:
+    """Covers branch 44->48: empty profile_id keeps 'Loading...' name."""
+    from unittest.mock import patch
+
+    from src.handlers.campaigns_domain import render_campaigns_handler
+
+    with patch("src.handlers.campaigns_domain.tables") as mock_tables:
+        mock_tables.campaigns.query.return_value = {"Items": []}
+        event = {"headers": {"x-mock-user-id": "user-1"}, "pathParameters": {"profileId": ""}}
+        res = render_campaigns_handler(event, None)
+    assert res["statusCode"] == 200
+
+
+def test_handler_campaigns_scouts_no_match() -> None:
+    """Covers the /scouts/* branch when inner condition doesn't match (3 parts, not campaigns)."""
+    from src.handlers.campaigns_domain import handler
+
+    with mock_aws():
+        create_mock_table()
+        # 3 parts but last part is not "campaigns" → falls through to 404
+        res = handler({"httpMethod": "GET", "path": "/scouts/p1/NOT-campaigns"}, None)
+        assert res["statusCode"] == 404

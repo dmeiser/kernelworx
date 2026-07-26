@@ -37,7 +37,7 @@ def _get_and_verify_profile(db_profile_id: str, db_caller_id: str, event: Dict[s
     )
     if not profile_response.get("Items"):
         raise AppError(ErrorCode.NOT_FOUND, f"Profile not found: {db_profile_id}")
-    profile = profile_response["Items"][0]
+    profile: Dict[str, Any] = profile_response["Items"][0]
     caller_is_owner = profile.get("ownerAccountId") == db_caller_id
     caller_is_admin = is_admin(event)
     if not caller_is_owner and not caller_is_admin:
