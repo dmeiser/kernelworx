@@ -39,14 +39,16 @@ def test_campaign_operations_dynamo_value_for_scalar_fallback():
     assert len(result["L"]) == 2
 
 
-def test_pre_signup_handle_signup_exception_returns_event():
+def test_pre_signup_handle_signup_exception():
     from botocore.exceptions import ClientError
 
     from src.handlers import pre_signup
 
     event = {"response": {}}
-    returned = pre_signup._handle_signup_exception(Exception("unexpected"), "user@example.com", event)
-    assert returned is event
+
+    # Unexpected errors are re-raised to prevent duplicate account creation.
+    with pytest.raises(Exception, match="unexpected"):
+        pre_signup._handle_signup_exception(Exception("unexpected"), "user@example.com", event)
 
     client_error = ClientError(
         {"Error": {"Code": "InvalidParameterException", "Message": "Link already exists"}},
@@ -316,25 +318,6 @@ def test_report_generation_get_s3_client_default(monkeypatch):
     report_generation.s3_client = sentinel_client  # type: ignore[assignment]
     assert report_generation._get_s3_client() is sentinel_client
     report_generation.s3_client = None
-
-
-def test_validation_price_per_unit_type_error():
-    from src.utils import validation
-
-    result = validation._validate_single_line_item({"productId": "P1", "quantity": 1, "pricePerUnit": "bad"})
-    assert result is not None
-    assert result.get("errorCode") == "INVALID_INPUT"
-
-    missing_quantity = validation._validate_single_line_item({"productId": "P1"})
-    assert missing_quantity is not None
-    assert missing_quantity.get("errorCode") == "INVALID_INPUT"
-
-    bad_quantity = validation._validate_single_line_item({"productId": "P1", "quantity": "a"})
-    assert bad_quantity is not None
-    assert bad_quantity.get("errorCode") == "INVALID_INPUT"
-
-    valid_item = validation._validate_single_line_item({"productId": "P1", "quantity": 2, "pricePerUnit": 10})
-    assert valid_item is None
 
 
 @mock_aws

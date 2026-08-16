@@ -37,20 +37,13 @@ import { ErrorAlert } from '../components/ErrorAlert';
 import { LIST_ORDERS_BY_CAMPAIGN, DELETE_ORDER, GET_PROFILE } from '../lib/graphql';
 import { ensureProfileId, ensureCampaignId, ensureOrderId, toUrlId } from '../lib/ids';
 import { formatCurrency, formatPhoneNumber } from '../lib/api-utils';
+import { formatDisplayDate } from '../lib/date-utils';
 import type { SellerProfile, Order, OrderLineItem } from '../types';
 
 // Use SellerProfile with only the fields we need for permission checking
 type ProfilePermissions = Pick<SellerProfile, 'profileId' | 'isOwner' | 'permissions'>;
 
 // --- Helper Functions (extracted outside component) ---
-
-const formatDate = (dateString: string): string => {
-  return new Date(dateString).toLocaleDateString('en-US', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  });
-};
 
 const getPaymentMethodColor = (method: string): 'default' | 'primary' | 'secondary' | 'success' | 'warning' => {
   const colors: Record<string, 'default' | 'primary' | 'secondary' | 'success' | 'warning'> = {
@@ -130,7 +123,7 @@ interface OrderRowProps {
 
 const OrderRow: React.FC<OrderRowProps> = ({ order, hasWritePermission, onEdit, onDelete }) => (
   <TableRow key={order.orderId} hover>
-    <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>{formatDate(order.orderDate ?? '')}</TableCell>
+    <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>{formatDisplayDate(order.orderDate, { year: 'numeric', month: 'short', day: 'numeric' }) || '—'}</TableCell>
     <TableCell>
       <Typography variant="body2" fontWeight="medium">
         {order.customerName}

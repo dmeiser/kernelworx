@@ -34,9 +34,9 @@ export function request(ctx) {
 }
 
 export function response(ctx) {
-    // If owner, pass through
+    // If owner, pass through with write permission set explicitly.
     if (ctx.stash.isOwner) {
-        ctx.stash.hasWritePermission = false; // Not needed
+        ctx.stash.hasWritePermission = true;
         return { authorized: true };
     }
     

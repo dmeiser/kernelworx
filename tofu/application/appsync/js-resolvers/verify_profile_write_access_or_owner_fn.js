@@ -61,7 +61,7 @@ export function response(ctx) {
     
     if (profileOwner === 'ACCOUNT#' + callerSub) {
         ctx.stash.isOwner = true;
-        ctx.stash.hasWritePermission = false; // Not needed when owner
+        ctx.stash.hasWritePermission = true;
         return { authorized: true };
     }
     

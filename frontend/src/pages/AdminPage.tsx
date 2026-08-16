@@ -69,6 +69,7 @@ import {
   DELETE_CATALOG,
 } from '../lib/graphql';
 import { CatalogEditorDialog } from '../components/CatalogEditorDialog';
+import { formatDisplayDate } from '../lib/date-utils';
 import type { Catalog, AdminUser } from '../types';
 import type {
   GqlAdminDeleteUserMutation,
@@ -168,7 +169,7 @@ const UserRow: React.FC<UserRowProps> = ({ user, onResetPassword, onDeleteUser, 
     </TableCell>
     <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>
       <Typography variant="body2" color="text.secondary">
-        {user.createdAt ? new Date(user.createdAt).toLocaleDateString() : '—'}
+        {formatDisplayDate(user.createdAt) || '—'}
       </Typography>
     </TableCell>
     <TableCell align="right">

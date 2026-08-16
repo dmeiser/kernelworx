@@ -21,6 +21,7 @@ import {
   AdminPanelSettings as AdminIcon,
   Info as InfoIcon,
 } from '@mui/icons-material';
+import { formatDisplayDate } from '../../lib/date-utils';
 
 interface Account {
   accountId: string;
@@ -132,13 +133,13 @@ const createTimestampRows = (account: Account | undefined): DetailRow[] => [
     key: 'created',
     icon: <InfoIcon color="primary" />,
     label: 'Account Created',
-    value: account?.createdAt ? formatDate(account.createdAt) : 'Unknown',
+    value: account?.createdAt ? formatDisplayDate(account.createdAt, { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Unknown',
   },
   {
     key: 'updated',
     icon: <InfoIcon color="primary" />,
     label: 'Last Updated',
-    value: account?.updatedAt ? formatDate(account.updatedAt) : 'Unknown',
+    value: account?.updatedAt ? formatDisplayDate(account.updatedAt, { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Unknown',
   },
 ];
 
@@ -177,15 +178,7 @@ const buildDetailRows = (account: Account | undefined, onChangeEmail: () => void
     .map((row) => renderRow(row.key, row.icon, row.label, row.value as React.ReactNode, row.action));
 };
 
-const formatDate = (dateString: string): string => {
-  return new Date(dateString).toLocaleDateString('en-US', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-};
+
 
 const AccountHeader: React.FC<{ onEditProfile: () => void }> = ({ onEditProfile }) => (
   <Stack direction="row" justifyContent="space-between" alignItems="center" mb={2} flexWrap="wrap" gap={1}>

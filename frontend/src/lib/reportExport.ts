@@ -132,19 +132,7 @@ export function downloadAsXLSX(orders: Order[], campaignId: string): void {
   // Create workbook
   const ws = XLSX.utils.aoa_to_sheet(rows);
 
-  // Style header row
-  const headerStyle = {
-    fill: { fgColor: { rgb: '4472C4' } },
-    font: { bold: true, color: { rgb: 'FFFFFF' } },
-    alignment: { horizontal: 'center', vertical: 'center' },
-  };
-
-  for (let i = 0; i < rows[0].length; i++) {
-    const cellAddress = XLSX.utils.encode_cell({ r: 0, c: i });
-    if (ws[cellAddress]) {
-      ws[cellAddress].s = headerStyle;
-    }
-  }
+  // Note: the community build of xlsx does not persist cell styles, so header styling is omitted.
 
   // Auto-size columns
   const colWidths = rows[0].map((_value: string | number, idx: number) => {
