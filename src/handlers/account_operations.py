@@ -4,7 +4,6 @@ Account operations Lambda handlers.
 Handles user account management including updating DynamoDB account metadata.
 """
 
-import json
 import os
 from datetime import datetime, timezone
 from typing import Any, Dict
@@ -107,7 +106,7 @@ def update_my_account(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         )
 
         updated_item = response["Attributes"]
-        logger.info(f"Updated account: {json.dumps(updated_item, default=str)}")
+        logger.info("Updated account fields", account_id=account_id_key, fields=sorted(updated_item.keys()))
 
         return {
             "accountId": updated_item.get("accountId"),

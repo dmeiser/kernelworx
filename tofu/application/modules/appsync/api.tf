@@ -17,12 +17,70 @@ resource "aws_appsync_graphql_api" "main" {
 
   xray_enabled = true
 
+  log_config {
+    cloudwatch_logs_role_arn = aws_iam_role.appsync_logging.arn
+    field_log_level          = "ERROR"
+    exclude_verbose_content  = true
+  }
+
   # Schema loaded from file
   schema = file("${path.module}/../../schema/schema.graphql")
 
   lifecycle {
     prevent_destroy = true
   }
+}
+
+# AppSync-managed CloudWatch log group with explicit retention.
+resource "aws_cloudwatch_log_group" "appsync" {
+  name              = "/aws/appsync/apis/${aws_appsync_graphql_api.main.id}"
+  retention_in_days = var.environment == "prod" ? 30 : 7
+
+  lifecycle {
+    prevent_destroy = false
+  }
+}
+
+# IAM role that permits AppSync to publish logs for this API.
+data "aws_iam_policy_document" "appsync_logging_assume_role" {
+  statement {
+    actions = ["sts:AssumeRole"]
+    effect  = "Allow"
+
+    principals {
+      type        = "Service"
+      identifiers = ["appsync.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role" "appsync_logging" {
+  name               = "${local.api_name}-logs"
+  assume_role_policy = data.aws_iam_policy_document.appsync_logging_assume_role.json
+
+  lifecycle {
+    prevent_destroy = false
+  }
+}
+
+data "aws_iam_policy_document" "appsync_logging" {
+  statement {
+    effect = "Allow"
+
+    actions = [
+      "logs:CreateLogGroup",
+      "logs:CreateLogStream",
+      "logs:PutLogEvents",
+    ]
+
+    resources = [aws_cloudwatch_log_group.appsync.arn]
+  }
+}
+
+resource "aws_iam_role_policy" "appsync_logging" {
+  name   = "appsync-logging"
+  role   = aws_iam_role.appsync_logging.id
+  policy = data.aws_iam_policy_document.appsync_logging.json
 }
 
 # AppSync Custom Domain

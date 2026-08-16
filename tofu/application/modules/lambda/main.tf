@@ -302,6 +302,31 @@ resource "aws_lambda_function" "functions" {
   }
 }
 
+# Managed log groups for Lambda functions so retention is not "never expire".
+# These adopt the names Lambda auto-creates on first invocation; existing groups
+# must be imported into state before the first apply.
+resource "aws_cloudwatch_log_group" "functions" {
+  for_each = aws_lambda_function.functions
+
+  name              = "/aws/lambda/${each.value.function_name}"
+  retention_in_days = var.environment == "prod" ? 30 : 7
+
+  lifecycle {
+    prevent_destroy = false
+  }
+}
+
+resource "aws_cloudwatch_log_group" "trigger_functions" {
+  for_each = aws_lambda_function.trigger_functions
+
+  name              = "/aws/lambda/${each.value.function_name}"
+  retention_in_days = var.environment == "prod" ? 30 : 7
+
+  lifecycle {
+    prevent_destroy = false
+  }
+}
+
 # Outputs
 output "function_arns" {
   description = "Map of app Lambda function logical names to their ARNs (AppSync-invokable only; excludes Cognito trigger functions to avoid over-broad IAM invoke permissions)"
