@@ -6,8 +6,11 @@ original value.  A Cognito admin reset in the ``finally`` block guarantees the
 owner account is restored even if the UI flow fails mid-way.
 """
 
+import json
 import os
 import subprocess
+import tempfile
+from pathlib import Path
 
 import pytest
 from playwright.sync_api import Browser, BrowserContext, Page
@@ -39,26 +42,40 @@ def test_password_change_flow(owner_page: Page, browser: Browser) -> None:
 
         Uses ``aws cognito-idp admin-set-user-password`` instead of boto3 so
         the test inherits the same credential source as the local AWS CLI.
+
+        The password is supplied through ``--cli-input-json`` read from a
+        temporary file so it never appears in the process argument list,
+        preventing leaks if pytest/CalledProcessError echoes the command.
         """
-        subprocess.run(
-            [
-                "aws",
-                "cognito-idp",
-                "admin-set-user-password",
-                "--user-pool-id",
-                user_pool_id,
-                "--username",
-                email,
-                "--password",
-                password,
-                "--permanent",
-                "--region",
-                region,
-            ],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as input_file:
+            json.dump(
+                {
+                    "UserPoolId": user_pool_id,
+                    "Username": email,
+                    "Password": password,
+                    "Permanent": True,
+                },
+                input_file,
+            )
+            input_path = input_file.name
+
+        try:
+            subprocess.run(
+                [
+                    "aws",
+                    "cognito-idp",
+                    "admin-set-user-password",
+                    "--cli-input-json",
+                    f"file://{input_path}",
+                    "--region",
+                    region,
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        finally:
+            Path(input_path).unlink(missing_ok=True)
 
     try:
         # Change password through the UI
@@ -71,9 +88,7 @@ def test_password_change_flow(owner_page: Page, browser: Browser) -> None:
         verify_page: Page = new_context.new_page()
         try:
             login(verify_page, email, new_password)
-            assert "/home" in verify_page.url, (
-                f"Expected redirect to /home with new password; got: {verify_page.url}"
-            )
+            assert "/home" in verify_page.url, f"Expected redirect to /home with new password; got: {verify_page.url}"
         finally:
             # Always attempt to revert the password through the UI after a
             # successful change, even if the verification login failed.
