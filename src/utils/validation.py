@@ -148,27 +148,14 @@ def validate_address(address: Dict[str, Any]) -> None:
         raise AppError(ErrorCode.INVALID_ADDRESS, "ZIP code must be 5 or 9 digits", {"zipCode": zip_code})
 
 
-def _validate_contact_methods(customer: Dict[str, Any]) -> None:
-    """Validate customer has at least one contact method."""
-    has_phone = bool(customer.get("phone"))
-    has_address = bool(customer.get("address"))
-
-    if not has_phone and not has_address:
-        raise AppError(
-            ErrorCode.INVALID_INPUT,
-            "Customer must have at least one contact method (phone or address)",
-        )
-
-
 def validate_customer_input(customer: Dict[str, Any]) -> Dict[str, Any]:
     """
     Validate customer information for orders.
 
     Requirements:
     - Name is required
-    - At least one of phone or address is required
+    - Phone is optional; if provided it must be a valid US format
     - If address provided, all fields must be present
-    - Phone must be valid US format
 
     Args:
         customer: Customer dictionary
@@ -183,14 +170,12 @@ def validate_customer_input(customer: Dict[str, Any]) -> Dict[str, Any]:
     if not customer.get("name", "").strip():
         raise AppError(ErrorCode.INVALID_INPUT, "Customer name is required")
 
-    # At least one contact method required
-    _validate_contact_methods(customer)
-
     # Normalize and validate phone if provided
     validated_customer = {"name": customer["name"].strip()}
 
-    if customer.get("phone"):
-        validated_customer["phone"] = normalize_phone(customer["phone"])
+    phone = customer.get("phone")
+    if phone is not None and str(phone).strip():
+        validated_customer["phone"] = normalize_phone(phone)
 
     # Validate address if provided
     if customer.get("address"):

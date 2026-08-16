@@ -233,15 +233,24 @@ class TestValidateCustomerInput:
 
         assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
 
-    def test_no_contact_method_raises_error(self) -> None:
-        """Test that missing both phone and address raises error."""
+    def test_valid_customer_with_no_contact_method(self) -> None:
+        """Test that phone and address are both optional for orders."""
         customer = {"name": "Test User"}
 
-        with pytest.raises(AppError) as exc_info:
-            validate_customer_input(customer)
+        result = validate_customer_input(customer)
 
-        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
-        assert "contact method" in exc_info.value.message
+        assert result["name"] == "Test User"
+        assert "phone" not in result
+        assert "address" not in result
+
+    def test_empty_phone_is_ignored(self) -> None:
+        """Test that an empty phone string is treated as no phone."""
+        customer = {"name": "Test User", "phone": "   "}
+
+        result = validate_customer_input(customer)
+
+        assert result["name"] == "Test User"
+        assert "phone" not in result
 
     def test_invalid_phone_raises_error(self) -> None:
         """Test that invalid phone raises error."""

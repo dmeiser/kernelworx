@@ -47,14 +47,16 @@ function validateCustomer(input) {
         util.error('Customer name is required', 'BadRequest');
     }
 
-    const hasPhone = input.customerPhone != null;
+    const phoneValue = input.customerPhone != null ? `${input.customerPhone}`.trim() : '';
     const hasAddress = input.customerAddress != null;
+    let customerPhone = undefined;
 
-    if (hasPhone) {
-        const phoneResult = validatePhone(input.customerPhone);
+    if (phoneValue !== '') {
+        const phoneResult = validatePhone(phoneValue);
         if (!phoneResult.valid) {
             util.error(phoneResult.error, 'BadRequest');
         }
+        customerPhone = phoneResult.value;
     }
 
     if (hasAddress) {
@@ -63,6 +65,8 @@ function validateCustomer(input) {
             util.error(addressResult.error, 'BadRequest');
         }
     }
+
+    return { customerPhone };
 }
 
 function validateOrderDate(orderDate) {
@@ -89,7 +93,7 @@ export function request(ctx) {
         campaignId: ctx.stash && ctx.stash.campaign && ctx.stash.campaign.campaignId,
     });
 
-    validateCustomer(input);
+    const { customerPhone } = validateCustomer(input);
     validateOrderDate(input.orderDate);
 
     const profileIdRaw = input.profileId || ctx.stash.profileId;
@@ -170,11 +174,8 @@ export function request(ctx) {
         updatedAt: now
     };
 
-    if (input.customerPhone) {
-        const phoneResult = validatePhone(input.customerPhone);
-        if (phoneResult.valid) {
-            orderItem.customerPhone = phoneResult.value;
-        }
+    if (customerPhone) {
+        orderItem.customerPhone = customerPhone;
     }
     if (input.customerAddress) {
         orderItem.customerAddress = input.customerAddress;
