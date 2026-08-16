@@ -103,6 +103,10 @@ export function request(ctx) {
     }
 
     if (input.lineItems !== undefined) {
+        if (input.lineItems.length === 0) {
+            util.error('Order must have at least one line item', 'BadRequest');
+        }
+
         if (!catalog) {
             util.error('Catalog not loaded for lineItems update', 'InternalError');
         }
