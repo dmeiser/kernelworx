@@ -1248,6 +1248,65 @@ class TestAdminDeleteUser:
             response = accounts_table.get_item(Key={"accountId": f"ACCOUNT#{target_account_id}"})
             assert "Item" not in response
 
+    def test_dynamodb_deleted_before_cognito(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """Test that DynamoDB account is deleted before Cognito user."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
+
+        target_account_id = "target-user-456"
+
+        # Create target account
+        accounts_table = get_accounts_table()
+        accounts_table.put_item(
+            Item={
+                "accountId": f"ACCOUNT#{target_account_id}",
+                "email": "target@example.com",
+                "createdAt": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+
+        event = {
+            **admin_appsync_event,
+            "arguments": {"accountId": target_account_id},
+        }
+
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+            mock_cognito = MagicMock()
+            mock_cognito.list_users.return_value = {
+                "Users": [
+                    {
+                        "Username": "cognito-username-123",
+                        "Attributes": [
+                            {"Name": "sub", "Value": target_account_id},
+                            {"Name": "email", "Value": "target@example.com"},
+                        ],
+                    }
+                ]
+            }
+
+            call_order = []
+
+            def _record_cognito_delete(*args: Any, **kwargs: Any) -> None:
+                call_order.append("cognito")
+
+            mock_cognito.admin_delete_user.side_effect = _record_cognito_delete
+            mock_get_client.return_value = mock_cognito
+
+            def _record_dynamodb_delete(*args: Any, **kwargs: Any) -> None:
+                call_order.append("dynamodb")
+
+            with patch("src.handlers.admin_operations.tables.accounts.delete_item", side_effect=_record_dynamodb_delete):
+                result = admin_delete_user(event, lambda_context)
+
+            assert result is True
+            assert call_order == ["dynamodb", "cognito"]
+
     def test_success_with_account_prefix(
         self,
         dynamodb_table: Any,
@@ -1358,20 +1417,32 @@ class TestAdminDeleteUser:
         assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
         assert "Cannot delete your own account" in exc_info.value.message
 
-    def test_account_not_found(
+    def test_account_not_found_cognito_idempotent(
         self,
         dynamodb_table: Any,
         admin_appsync_event: Dict[str, Any],
         lambda_context: Any,
         monkeypatch: Any,
     ) -> None:
-        """Test that non-existent user (not in Cognito) raises error."""
+        """Test that deletion succeeds when the Cognito user is already gone."""
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
 
+        target_account_id = "nonexistent-user"
+
+        # Create target account (DynamoDB still exists)
+        accounts_table = get_accounts_table()
+        accounts_table.put_item(
+            Item={
+                "accountId": f"ACCOUNT#{target_account_id}",
+                "email": "target@example.com",
+                "createdAt": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+
         event = {
             **admin_appsync_event,
-            "arguments": {"accountId": "nonexistent-user"},
+            "arguments": {"accountId": target_account_id},
         }
 
         with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
@@ -1380,10 +1451,12 @@ class TestAdminDeleteUser:
             mock_cognito.list_users.return_value = {"Users": []}
             mock_get_client.return_value = mock_cognito
 
-            with pytest.raises(AppError) as exc_info:
-                admin_delete_user(event, lambda_context)
+            result = admin_delete_user(event, lambda_context)
 
-            assert exc_info.value.error_code == ErrorCode.NOT_FOUND
+            assert result is True
+            mock_cognito.admin_delete_user.assert_not_called()
+            response = accounts_table.get_item(Key={"accountId": f"ACCOUNT#{target_account_id}"})
+            assert "Item" not in response
 
     def test_cognito_user_not_found_continues(
         self,
@@ -1392,7 +1465,7 @@ class TestAdminDeleteUser:
         lambda_context: Any,
         monkeypatch: Any,
     ) -> None:
-        """Test that if Cognito delete fails with UserNotFoundException, it raises an error."""
+        """Test that UserNotFoundException from Cognito delete is treated as success."""
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
 
@@ -1433,11 +1506,11 @@ class TestAdminDeleteUser:
             )
             mock_get_client.return_value = mock_cognito
 
-            # Now expect an INTERNAL_ERROR because Cognito delete failed
-            with pytest.raises(AppError) as exc_info:
-                admin_delete_user(event, lambda_context)
+            result = admin_delete_user(event, lambda_context)
 
-            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+            assert result is True
+            response = accounts_table.get_item(Key={"accountId": f"ACCOUNT#{target_account_id}"})
+            assert "Item" not in response
 
     def test_cognito_delete_error_raises(
         self,
@@ -1505,18 +1578,14 @@ class TestAdminDeleteUser:
 
         assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
 
-    def test_dynamodb_delete_error_logged_but_continues(
+    def test_dynamodb_delete_error_prevents_cognito_delete(
         self,
         dynamodb_table: Any,
         admin_appsync_event: Dict[str, Any],
         lambda_context: Any,
         monkeypatch: Any,
     ) -> None:
-        """Test that DynamoDB delete errors are logged but deletion succeeds.
-
-        The implementation logs a warning when DynamoDB deletion fails but still
-        returns True because the Cognito user was deleted successfully.
-        """
+        """Test that DynamoDB delete errors stop deletion before Cognito is touched."""
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
 
@@ -1561,21 +1630,20 @@ class TestAdminDeleteUser:
                 )
                 mock_tables.accounts = mock_accounts
 
-                # DynamoDB error is logged but doesn't fail the operation
-                result = admin_delete_user(event, lambda_context)
-                assert result is True
+                with pytest.raises(AppError) as exc_info:
+                    admin_delete_user(event, lambda_context)
 
-    def test_cognito_lookup_error_raises_not_found(
+                assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+                mock_cognito.admin_delete_user.assert_not_called()
+
+    def test_cognito_lookup_error_deletes_dynamodb_idempotently(
         self,
         dynamodb_table: Any,
         admin_appsync_event: Dict[str, Any],
         lambda_context: Any,
         monkeypatch: Any,
     ) -> None:
-        """Test that Cognito lookup error raises NOT_FOUND.
-
-        When Cognito list_users fails, the user cannot be found so we raise NOT_FOUND.
-        """
+        """Test that Cognito lookup errors do not block DynamoDB cleanup."""
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
 
@@ -1603,19 +1671,21 @@ class TestAdminDeleteUser:
             )
             mock_get_client.return_value = mock_cognito
 
-            with pytest.raises(AppError) as exc_info:
-                admin_delete_user(event, lambda_context)
+            result = admin_delete_user(event, lambda_context)
 
-            assert exc_info.value.error_code == ErrorCode.NOT_FOUND
+            assert result is True
+            mock_cognito.admin_delete_user.assert_not_called()
+            response = accounts_table.get_item(Key={"accountId": f"ACCOUNT#{target_account_id}"})
+            assert "Item" not in response
 
-    def test_sub_lookup_error_logs_warning_and_raises_not_found(
+    def test_sub_lookup_error_deletes_dynamodb_idempotently(
         self,
         dynamodb_table: Any,
         admin_appsync_event: Dict[str, Any],
         lambda_context: Any,
         monkeypatch: Any,
     ) -> None:
-        """Test that sub lookup error logs warning and raises NOT_FOUND."""
+        """Test that sub lookup errors do not block DynamoDB cleanup."""
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
 
@@ -1645,20 +1715,20 @@ class TestAdminDeleteUser:
             mock_cognito.admin_delete_user.return_value = {}
             mock_get_client.return_value = mock_cognito
 
-            with pytest.raises(AppError) as exc_info:
-                admin_delete_user(event, lambda_context)
+            result = admin_delete_user(event, lambda_context)
 
-            # User not found because Cognito lookup failed
-            assert exc_info.value.error_code == ErrorCode.NOT_FOUND
+            assert result is True
+            response = accounts_table.get_item(Key={"accountId": f"ACCOUNT#{target_account_id}"})
+            assert "Item" not in response
 
-    def test_empty_cognito_users_raises_not_found(
+    def test_empty_cognito_users_deletes_dynamodb_idempotently(
         self,
         dynamodb_table: Any,
         admin_appsync_event: Dict[str, Any],
         lambda_context: Any,
         monkeypatch: Any,
     ) -> None:
-        """Test that empty user list from Cognito raises NOT_FOUND."""
+        """Test that empty Cognito user list does not block DynamoDB cleanup."""
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
 
@@ -1686,11 +1756,12 @@ class TestAdminDeleteUser:
             mock_cognito.admin_delete_user.return_value = {}
             mock_get_client.return_value = mock_cognito
 
-            with pytest.raises(AppError) as exc_info:
-                admin_delete_user(event, lambda_context)
+            result = admin_delete_user(event, lambda_context)
 
-            # User not found because Cognito returned empty list
-            assert exc_info.value.error_code == ErrorCode.NOT_FOUND
+            assert result is True
+            mock_cognito.admin_delete_user.assert_not_called()
+            response = accounts_table.get_item(Key={"accountId": f"ACCOUNT#{target_account_id}"})
+            assert "Item" not in response
 
     def test_unexpected_exception_handled(
         self,
