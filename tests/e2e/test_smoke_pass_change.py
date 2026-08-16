@@ -17,9 +17,9 @@ from tests.e2e.utils.auth import login
 
 
 @pytest.mark.smoke
-@pytest.mark.xfail(
-    reason="Cognito password-change rate limit on the shared dev account; UI flow is exercised but may be throttled",
-    strict=False,
+@pytest.mark.skipif(
+    not os.environ.get("RUN_PASSWORD_CHANGE"),
+    reason="Mutates the shared dev owner account; set RUN_PASSWORD_CHANGE=1 to opt in",
 )
 def test_password_change_flow(owner_page: Page, browser: Browser) -> None:
     """Change the owner password, authenticate with the new password, then revert.
