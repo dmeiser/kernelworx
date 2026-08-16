@@ -94,7 +94,13 @@ class OrderPage(BasePage):
     # Actions
     # ------------------------------------------------------------------
 
-    def create_order_first_product(self, customer_name: str, qty: int = 2) -> None:
+    def create_order_first_product(
+        self,
+        customer_name: str,
+        qty: int = 2,
+        *,
+        phone: str | None = "5551234567",
+    ) -> None:
         """Click *New Order*, pick the first available product, and submit.
 
         Encapsulates the full creation flow so test helpers do not need access
@@ -104,11 +110,13 @@ class OrderPage(BasePage):
         Args:
             customer_name: Customer full name to enter in the form.
             qty: Quantity for the single line item. Defaults to 2.
+            phone: Phone number to enter, or ``None`` to leave the field blank.
         """
         self._new_order_button().click()
         self.wait_for_loading()
         self._customer_name_input().fill(customer_name)
-        self._customer_phone_input().fill("5551234567")
+        if phone is not None:
+            self._customer_phone_input().fill(phone)
         self._add_product_button().click()
         product_row = self.page.get_by_role("row").nth(1)  # nth(0) is <thead>
         product_row.get_by_role("combobox").click()
@@ -118,6 +126,28 @@ class OrderPage(BasePage):
         # Wait for navigation from /orders/new back to the orders list.
         self.page.wait_for_url("**/orders", timeout=15_000)
         self.wait_for_loading()
+
+    def submit_order_with_invalid_phone(self, customer_name: str, phone: str, qty: int = 2) -> None:
+        """Fill the form with an invalid phone and submit without navigating away.
+
+        Args:
+            customer_name: Customer full name to enter in the form.
+            phone: Invalid phone string to enter.
+            qty: Quantity for the single line item. Defaults to 2.
+        """
+        self._new_order_button().click()
+        self.wait_for_loading()
+        self._customer_name_input().fill(customer_name)
+        self._customer_phone_input().fill(phone)
+        self._add_product_button().click()
+        product_row = self.page.get_by_role("row").nth(1)
+        product_row.get_by_role("combobox").click()
+        self.page.get_by_role("option").first.click()
+        product_row.locator('input[type="number"]').fill(str(qty))
+        self._create_order_button().click()
+        # The form should stay on the creation page and show a validation alert.
+        expect(self.page.get_by_role("alert")).to_be_visible(timeout=10_000)
+        expect(self.page).to_have_url("**/orders/new", timeout=10_000)
 
     def create_order(self, customer_name: str, items: list[dict[str, str | int]]) -> None:
         """Click *New Order*, fill the form, and submit.

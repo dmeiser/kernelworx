@@ -64,8 +64,11 @@ export function request(ctx) {
         updates.push('customerName = :customerName');
         exprValues[':customerName'] = input.customerName;
     }
-    if (input.customerPhone !== undefined && input.customerPhone !== null) {
-        const phoneResult = validatePhone(input.customerPhone);
+    const phoneValue = input.customerPhone !== undefined && input.customerPhone !== null
+        ? String(input.customerPhone).trim()
+        : '';
+    if (phoneValue !== '') {
+        const phoneResult = validatePhone(phoneValue);
         if (!phoneResult.valid) {
             util.error(phoneResult.error, 'BadRequest');
         }

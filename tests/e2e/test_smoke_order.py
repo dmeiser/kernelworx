@@ -197,6 +197,31 @@ def test_create_order(owner_page: Page, _module_state: dict[str, str], ensure_ow
 
 @pytest.mark.smoke
 @pytest.mark.slow
+def test_create_order_without_phone(owner_page: Page, ensure_owner_profile: str) -> None:
+    """Create an order with a blank phone number and verify it is accepted."""
+    order_page, _profile_id, _campaign_id = _navigate_to_orders(owner_page)
+    customer_name = "No Phone Customer"
+    order_page.create_order_first_product(customer_name, 1, phone=None)
+    assert order_page.has_order(customer_name), (
+        f"'{customer_name}' must appear in the orders table when no phone is provided"
+    )
+
+
+@pytest.mark.smoke
+@pytest.mark.slow
+def test_invalid_phone_preserves_form(owner_page: Page, ensure_owner_profile: str) -> None:
+    """Submit with an invalid phone and verify the error appears without losing data."""
+    order_page, _profile_id, _campaign_id = _navigate_to_orders(owner_page)
+    customer_name = "Bad Phone Customer"
+    order_page.submit_order_with_invalid_phone(customer_name, "123-invalid")
+
+    assert "Phone number must be a valid 10-digit US number" in order_page.get_visible_alert_text()
+    expect(owner_page.get_by_label("Customer Name")).to_have_value(customer_name)
+    expect(owner_page).to_have_url("**/orders/new", timeout=10_000)
+
+
+@pytest.mark.smoke
+@pytest.mark.slow
 def test_order_appears_in_list(owner_page: Page, _module_state: dict[str, str], ensure_owner_profile: str) -> None:
     """Verify the order created by test_create_order persists in the orders list.
 

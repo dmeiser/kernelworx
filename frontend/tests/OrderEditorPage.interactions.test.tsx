@@ -123,7 +123,7 @@ const mockExistingOrder = {
     profileId: PROFILE_DB,
     campaignId: CAMPAIGN_DB,
     customerName: 'Jane Smith',
-    customerPhone: '555-9876',
+    customerPhone: '555-987-6543',
     customerAddress: {
       street: '123 Oak St',
       city: 'Springfield',
@@ -491,6 +491,95 @@ describe('OrderEditorPage - Create Order', () => {
     });
   }, 15000);
 
+  test('empty phone number is left blank on blur and accepted', async () => {
+    const createOrderMock: MockedResponse = {
+      request: { query: CREATE_ORDER, variables: () => true },
+      result: { data: { createOrder: mockCreatedOrder } },
+    };
+    renderCreateOrder(baseMocks([createOrderMock]));
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: /create order/i })).toBeInTheDocument();
+    }, { timeout: 10000 });
+
+    await waitFor(() => {
+      const paymentSelect = screen.getByRole('combobox', { name: /payment method/i });
+      expect((paymentSelect as HTMLSelectElement).value).toBe('Cash');
+    }, { timeout: 5000 });
+
+    const phoneInput = screen.getByLabelText(/Phone Number/i);
+    fireEvent.change(phoneInput, { target: { value: '' } });
+    fireEvent.blur(phoneInput);
+
+    await waitFor(() => {
+      expect((phoneInput as HTMLInputElement).value).toBe('');
+    });
+
+    fireEvent.change(screen.getByLabelText(/Customer Name/i), { target: { value: 'John Doe' } });
+
+    const productSelects = screen.getAllByRole('combobox', { name: 'Select' });
+    expect(productSelects.length).toBeGreaterThan(0);
+    fireEvent.change(productSelects[0], { target: { value: 'PROD~A' } });
+
+    const quantityInputs = screen.getAllByRole('spinbutton');
+    expect(quantityInputs.length).toBeGreaterThan(0);
+    fireEvent.change(quantityInputs[0], { target: { value: '2' } });
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /create order/i })).not.toBeDisabled();
+    }, { timeout: 3000 });
+
+    fireEvent.click(screen.getByRole('button', { name: /create order/i }));
+
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith(
+        `/scouts/${encodeURIComponent(PROFILE_RAW)}/campaigns/${encodeURIComponent(CAMPAIGN_RAW)}/orders`,
+      );
+    }, { timeout: 5000 });
+  }, 25000);
+
+  test('invalid phone number shows inline error and preserves form data', async () => {
+    renderCreateOrder(baseMocks());
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: /create order/i })).toBeInTheDocument();
+    }, { timeout: 10000 });
+
+    await waitFor(() => {
+      const paymentSelect = screen.getByRole('combobox', { name: /payment method/i });
+      expect((paymentSelect as HTMLSelectElement).value).toBe('Cash');
+    }, { timeout: 5000 });
+
+    fireEvent.change(screen.getByLabelText(/Customer Name/i), { target: { value: 'John Doe' } });
+
+    const phoneInput = screen.getByLabelText(/Phone Number/i);
+    fireEvent.change(phoneInput, { target: { value: 'not-a-phone' } });
+
+    const productSelects = screen.getAllByRole('combobox', { name: 'Select' });
+    expect(productSelects.length).toBeGreaterThan(0);
+    fireEvent.change(productSelects[0], { target: { value: 'PROD~A' } });
+
+    const quantityInputs = screen.getAllByRole('spinbutton');
+    expect(quantityInputs.length).toBeGreaterThan(0);
+    fireEvent.change(quantityInputs[0], { target: { value: '3' } });
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /create order/i })).not.toBeDisabled();
+    }, { timeout: 3000 });
+
+    fireEvent.click(screen.getByRole('button', { name: /create order/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Phone number must be a valid 10-digit US number/i)).toBeInTheDocument();
+    }, { timeout: 5000 });
+
+    expect(mockNavigate).not.toHaveBeenCalled();
+    expect((screen.getByLabelText(/Customer Name/i) as HTMLInputElement).value).toBe('John Doe');
+    expect((phoneInput as HTMLInputElement).value).toBe('not-a-phone');
+    expect((productSelects[0] as HTMLSelectElement).value).toBe('PROD~A');
+    expect((quantityInputs[0] as HTMLInputElement).value).toBe('3');
+  }, 25000);
+
   test('payment methods loading state shows Loading... option', async () => {
     const neverResolvesMocks: MockedResponse[] = [
       { request: { query: GET_CAMPAIGN, variables: { campaignId: CAMPAIGN_DB } }, result: { data: mockCampaign } },
@@ -750,7 +839,7 @@ describe('OrderEditorPage - Edit Order', () => {
       expect(screen.getByDisplayValue('Jane Smith')).toBeInTheDocument();
     }, { timeout: 5000 });
 
-    expect(screen.getByDisplayValue('555-9876')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('555-987-6543')).toBeInTheDocument();
     expect(screen.getByDisplayValue('Springfield')).toBeInTheDocument();
   }, 15000);
 
@@ -770,7 +859,7 @@ describe('OrderEditorPage - Edit Order', () => {
         profileId: PROFILE_DB,
         campaignId: CAMPAIGN_DB,
         customerName: 'Jane Smith',
-        customerPhone: '555-9876',
+        customerPhone: '555-987-6543',
         customerAddress: { street: '123 Oak St', city: 'Springfield', state: 'IL', zipCode: '62701' },
         paymentMethod: 'Venmo',
         notes: 'Ring doorbell',
@@ -789,7 +878,7 @@ describe('OrderEditorPage - Edit Order', () => {
             input: {
               orderId: ORDER_DB,
               customerName: 'Jane Smith',
-              customerPhone: '555-9876',
+              customerPhone: '555-987-6543',
               customerAddress: { street: '123 Oak St', city: 'Springfield', state: 'IL', zipCode: '62701' },
               paymentMethod: 'Venmo',
               lineItems: [{ productId: 'PROD~A', quantity: 2 }],

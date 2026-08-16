@@ -133,6 +133,20 @@ function validateOrderForm(customerName: string, lineItems: LineItemInput[]): Va
   return { isValid: true, validLineItems };
 }
 
+const PHONE_ERROR_MESSAGE = 'Phone number must be a valid 10-digit US number';
+
+/**
+ * Check whether a phone number looks like a valid US phone.
+ * Accepts 10 digits or 11 digits starting with 1, ignoring formatting chars.
+ */
+function isValidPhoneNumber(phone: string): boolean {
+  if (!phone.trim()) {
+    return true;
+  }
+  const digits = phone.replace(/\D/g, '');
+  return digits.length === 10 || (digits.length === 11 && digits.startsWith('1'));
+}
+
 /**
  * Gets the default payment method name.
  * Prefers "Cash" if available, otherwise uses the first method.
@@ -257,7 +271,8 @@ interface CustomerInfoFormProps {
 
 const CustomerInfoForm: React.FC<CustomerInfoFormProps> = ({ formState, loading }) => {
   const handlePhoneBlur = (e: React.FocusEvent<HTMLInputElement>) => {
-    formState.setCustomerPhone(formatPhoneNumber(e.target.value));
+    const formatted = formatPhoneNumber(e.target.value);
+    formState.setCustomerPhone(formatted === '—' ? '' : formatted);
   };
 
   return (
@@ -416,33 +431,33 @@ const LineItemsTable: React.FC<LineItemsTableProps> = ({
         </Button>
       </Stack>
 
-      <Box sx={{ width: '100%', overflowX: 'auto' }}>
+      <Box sx={{ overflowX: 'auto' }}>
         <Table>
-        <TableHead>
-          <TableRow>
-            <TableCell>Product</TableCell>
-            <TableCell align="right">Quantity</TableCell>
-            <TableCell align="right">Price</TableCell>
-            <TableCell align="right">Subtotal</TableCell>
-            <TableCell align="right">Actions</TableCell>
-          </TableRow>
-        </TableHead>
-        <TableBody>
-          {lineItems.map((item, index) => (
-            <LineItemRow
-              key={index}
-              item={item}
-              index={index}
-              products={products}
-              loading={loading}
-              canRemove={canRemoveItems}
-              onProductChange={(v) => onItemChange(index, 'productId', v)}
-              onQuantityChange={(v) => onItemChange(index, 'quantity', v)}
-              onRemove={() => onRemoveItem(index)}
-            />
-          ))}
-        </TableBody>
-      </Table>
+          <TableHead>
+            <TableRow>
+              <TableCell>Product</TableCell>
+              <TableCell align="right">Quantity</TableCell>
+              <TableCell align="right">Price</TableCell>
+              <TableCell align="right">Subtotal</TableCell>
+              <TableCell align="right">Actions</TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {lineItems.map((item, index) => (
+              <LineItemRow
+                key={index}
+                item={item}
+                index={index}
+                products={products}
+                loading={loading}
+                canRemove={canRemoveItems}
+                onProductChange={(v) => onItemChange(index, 'productId', v)}
+                onQuantityChange={(v) => onItemChange(index, 'quantity', v)}
+                onRemove={() => onRemoveItem(index)}
+              />
+            ))}
+          </TableBody>
+        </Table>
       </Box>
 
       <Divider sx={{ my: 2 }} />
@@ -731,6 +746,11 @@ async function submitOrder({
   const validation = validateOrderForm(formState.customerName, formState.lineItems);
   if (!validation.isValid) {
     formState.setError(validation.error!);
+    return;
+  }
+
+  if (!isValidPhoneNumber(formState.customerPhone)) {
+    formState.setError(PHONE_ERROR_MESSAGE);
     return;
   }
 
