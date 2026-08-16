@@ -17,9 +17,11 @@ from typing import Any, Dict
 try:  # pragma: no cover
     from utils.dynamodb import tables
     from utils.ids import ensure_account_id
+    from utils.logging import mask_email
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.dynamodb import tables
     from ..utils.ids import ensure_account_id
+    from ..utils.logging import mask_email
 
 # Configure logging
 logger = logging.getLogger()
@@ -112,7 +114,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
             tables.accounts.put_item(Item=account_item)
 
-            logger.info(f"Account created successfully: {account_id}, email={email}")
+            logger.info(f"Account created successfully: {account_id}, email={mask_email(email)}")
 
         # IMPORTANT: Must return the event for Cognito to continue
         return event
