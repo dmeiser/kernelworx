@@ -122,9 +122,7 @@ def admin_list_users(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         cognito = _get_cognito_client()
 
         cognito_users, pagination_token = _list_cognito_users(cognito, user_pool_id, limit, next_token, logger)
-        admin_users = [
-            _build_admin_user(cognito, user_pool_id, cognito_user, logger) for cognito_user in cognito_users
-        ]
+        admin_users = [_build_admin_user(cognito, user_pool_id, cognito_user, logger) for cognito_user in cognito_users]
 
         logger.info("Listed users", count=len(admin_users), has_more=bool(pagination_token))
         return {"users": admin_users, "nextToken": pagination_token}
