@@ -9,3 +9,8 @@ export const util = {
     throw new Error(`${type}: ${message}`);
   },
 };
+
+export const runtime = {
+  earlyReturn: (value) => value,
+};
+
