@@ -227,7 +227,6 @@ const CampaignFormFields: React.FC<CampaignFormFieldsProps> = ({
         value={formState.campaignYear}
         onChange={(e) => formSetters.setCampaignYear(parseInt(e.target.value, 10) || 0)}
         required
-        fullWidth
         sx={{ minWidth: { xs: '100%', sm: 120 } }}
         inputProps={{ min: 2020, max: 2100 }}
       />
