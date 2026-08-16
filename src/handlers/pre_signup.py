@@ -102,14 +102,19 @@ def _handle_existing_user(
 
 
 def _handle_signup_exception(e: Exception, email: str, event: Dict[str, Any]) -> Dict[str, Any]:
-    """Handle exceptions during federated signup processing."""
+    """Handle exceptions during federated signup processing.
+
+    Unexpected errors are re-raised so that Cognito does not proceed with a
+    federated signup that could create a duplicate native account (e.g. on a
+    transient ListUsers failure).
+    """
     if isinstance(e, FederatedIdentityLinkedException):
         raise e
     if isinstance(e, ClientError) and e.response.get("Error", {}).get("Code") == "InvalidParameterException":
         logger.warning(f"Link may already exist: {e}")
         raise FederatedIdentityLinkedException(f"Account with email {email} already exists. Please sign in again.")
     logger.exception(f"Error in pre-signup trigger: {str(e)}")
-    return event
+    raise e
 
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:

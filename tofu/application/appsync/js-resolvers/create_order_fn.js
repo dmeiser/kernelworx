@@ -125,6 +125,7 @@ export function request(ctx) {
     }
 
     let enrichedLineItems = [];
+    // TODO(#75): Money is accumulated as JS double; consider integer cents or Decimal to avoid rounding issues.
     let totalAmount = 0.0;
 
     const productsMap = {};

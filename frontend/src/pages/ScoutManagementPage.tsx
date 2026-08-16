@@ -56,6 +56,7 @@ import {
   TRANSFER_PROFILE_OWNERSHIP,
 } from '../lib/graphql';
 import { ensureProfileId } from '../lib/ids';
+import { formatDisplayDate } from '../lib/date-utils';
 import { brand } from '../lib/theme';
 import type { SellerProfile, Share, ProfileInvite } from '../types';
 
@@ -94,9 +95,6 @@ const getUserDisplayName = (email: string | undefined, accountId: string): strin
 
 // Helper to validate save operation
 const canSaveProfile = (profileId: string, profileName: string): boolean => Boolean(profileId && profileName.trim());
-
-// Helper to format date string
-const formatDate = (dateString: string): string => new Date(dateString).toLocaleDateString();
 
 // Helper to check if a date has expired
 const isExpired = (expiresAt: string): boolean => new Date(expiresAt) < new Date();
@@ -304,7 +302,7 @@ const ShareRow: React.FC<{
       <TableCell>
         <Chip label={share.permissions.join(', ')} size="small" variant="outlined" />
       </TableCell>
-      <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>{formatDate(share.createdAt ?? '')}</TableCell>
+      <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>{formatDisplayDate(share.createdAt) || '—'}</TableCell>
       <TableCell align="right">
         <Stack direction="row" spacing={1} justifyContent="flex-end" flexWrap="wrap">
           <Button
@@ -711,8 +709,8 @@ export const ScoutManagementPage: React.FC = () => {
                       <TableCell>
                         <Chip label={invite.permissions.join(', ')} size="small" variant="outlined" />
                       </TableCell>
-                      <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>{formatDate(invite.createdAt)}</TableCell>
-                      <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>{formatDate(invite.expiresAt)}</TableCell>
+                      <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>{formatDisplayDate(invite.createdAt) || '—'}</TableCell>
+                      <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>{formatDisplayDate(invite.expiresAt) || '—'}</TableCell>
                       <TableCell>
                         <InviteStatusChip expiresAt={invite.expiresAt} />
                       </TableCell>

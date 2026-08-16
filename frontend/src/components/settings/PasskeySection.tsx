@@ -21,6 +21,7 @@ import {
   DialogActions,
 } from '@mui/material';
 import { Fingerprint as PasskeyIcon, Delete as DeleteIcon, Add as AddIcon } from '@mui/icons-material';
+import { formatDisplayDate } from '../../lib/date-utils';
 import type { UsePasskeysReturn } from '../../hooks/usePasskeys';
 
 interface PasskeySectionProps {
@@ -76,6 +77,42 @@ const PasskeyStatusAlerts: React.FC<{ hook: UsePasskeysReturn }> = ({ hook }) =>
   </>
 );
 
+const PasskeyItem: React.FC<{
+  passkey: UsePasskeysReturn['passkeys'][number];
+  loading: boolean;
+  onDelete: (credentialId: string) => void;
+}> = ({ passkey, loading, onDelete }) => {
+  const handleDelete = () => {
+    if (passkey.credentialId) {
+      onDelete(passkey.credentialId);
+    }
+  };
+
+  const secondaryText = passkey.createdAt
+    ? `Created: ${formatDisplayDate(passkey.createdAt.toISOString()) || 'Unknown date'}`
+    : 'Unknown date';
+
+  return (
+    <ListItem
+      secondaryAction={
+        <IconButton
+          edge="end"
+          onClick={handleDelete}
+          disabled={loading || !passkey.credentialId}
+          aria-label="Delete passkey"
+        >
+          <DeleteIcon />
+        </IconButton>
+      }
+    >
+      <ListItemIcon>
+        <PasskeyIcon />
+      </ListItemIcon>
+      <ListItemText primary={passkey.friendlyCredentialName || 'Unnamed Passkey'} secondary={secondaryText} />
+    </ListItem>
+  );
+};
+
 const RegisteredPasskeys: React.FC<{ hook: UsePasskeysReturn }> = ({ hook }) => {
   if (!hook.passkeys.length) return null;
 
@@ -86,27 +123,12 @@ const RegisteredPasskeys: React.FC<{ hook: UsePasskeysReturn }> = ({ hook }) => 
       </Typography>
       <List>
         {hook.passkeys.map((pk, index) => (
-          <ListItem
-            key={pk.credentialId || `passkey-${index}`}
-            secondaryAction={
-              <IconButton
-                edge="end"
-                onClick={() => pk.credentialId && hook.handleDeletePasskey(pk.credentialId)}
-                disabled={hook.passkeyLoading || !pk.credentialId}
-                aria-label="Delete passkey"
-              >
-                <DeleteIcon />
-              </IconButton>
-            }
-          >
-            <ListItemIcon>
-              <PasskeyIcon />
-            </ListItemIcon>
-            <ListItemText
-              primary={pk.friendlyCredentialName || 'Unnamed Passkey'}
-              secondary={pk.createdAt ? `Created: ${new Date(pk.createdAt).toLocaleDateString()}` : 'Unknown date'}
-            />
-          </ListItem>
+          <PasskeyItem
+            key={`passkey-${index}`}
+            passkey={pk}
+            loading={hook.passkeyLoading}
+            onDelete={hook.handleDeletePasskey}
+          />
         ))}
       </List>
     </Box>
