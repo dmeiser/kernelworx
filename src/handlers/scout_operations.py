@@ -4,8 +4,6 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict
 
-import boto3
-
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
     from utils.dynamodb import tables
@@ -89,26 +87,7 @@ def create_seller_profile(event: Dict[str, Any], context: Any) -> Dict[str, Any]
         # - PK: ownerAccountId (ACCOUNT#sub) - enables listMyProfiles via PK query
         # - SK: profileId (PROFILE#uuid) - unique profile identifier
         # - GSI: profileId-index - enables getProfile and authorization lookups
-        dynamodb_client = boto3.client("dynamodb")
-        dynamodb_client.transact_write_items(
-            TransactItems=[
-                {
-                    # Profile item: PK=ownerAccountId, SK=profileId
-                    "Put": {
-                        "TableName": tables.profiles.table_name,
-                        "Item": {
-                            "ownerAccountId": {"S": owner_account_id_stored},  # PK
-                            "profileId": {"S": profile_id},  # SK
-                            "sellerName": {"S": seller_name},
-                            **({"unitType": {"S": unit_type}} if unit_type else {}),
-                            **({"unitNumber": {"N": str(unit_number)}} if unit_number else {}),
-                            "createdAt": {"S": now},
-                            "updatedAt": {"S": now},
-                        },
-                    }
-                },
-            ]
-        )
+        tables.profiles.put_item(Item=profile_data)
 
         logger.info(
             "Seller profile created successfully",

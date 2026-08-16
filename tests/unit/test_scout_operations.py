@@ -12,168 +12,78 @@ from src.utils.errors import AppError, ErrorCode
 class TestCreateSellerProfile:
     """Tests for create_seller_profile Lambda handler."""
 
-    @patch("src.handlers.scout_operations.boto3.client")
+    @patch("src.handlers.scout_operations.tables.profiles.put_item")
     @patch("src.handlers.scout_operations.uuid.uuid4")
     def test_create_seller_profile_success(
         self,
         mock_uuid: MagicMock,
-        mock_client: MagicMock,
+        mock_put_item: MagicMock,
         appsync_event: Dict[str, Any],
         lambda_context: Any,
     ) -> None:
         """Test successful seller profile creation."""
-        # Arrange
         mock_uuid.return_value = "test-uuid-123"
-        mock_dynamodb = MagicMock()
-        mock_client.return_value = mock_dynamodb
 
         event = {
             **appsync_event,
             "arguments": {"input": {"sellerName": "Test Scout"}},
         }
 
-        # Act
         result = create_seller_profile(event, lambda_context)
 
-        # Assert
-        assert result["profileId"].startswith("PROFILE#")
+        assert result["profileId"] == "PROFILE#test-uuid-123"
         assert result["sellerName"] == "Test Scout"
-        # ownerAccountId returned with ACCOUNT# prefix per normalization rules
         assert result["ownerAccountId"] == f"ACCOUNT#{event['identity']['sub']}"
         assert "createdAt" in result
         assert "updatedAt" in result
+        mock_put_item.assert_called_once_with(Item=result)
 
-        # Verify transact_write_items was called
-        mock_dynamodb.transact_write_items.assert_called_once()
-        call_args = mock_dynamodb.transact_write_items.call_args
-        assert call_args is not None
-        assert "TransactItems" in call_args.kwargs
-        # Multi-table design: only 1 item (profile metadata in profiles table)
-        assert len(call_args.kwargs["TransactItems"]) == 1
-
-    @patch("src.handlers.scout_operations.boto3.client")
+    @patch("src.handlers.scout_operations.tables.profiles.put_item")
     def test_create_seller_profile_with_special_characters(
         self,
-        mock_client: MagicMock,
+        mock_put_item: MagicMock,
         appsync_event: Dict[str, Any],
         lambda_context: Any,
     ) -> None:
         """Test profile creation with special characters in name."""
-        # Arrange
-        mock_dynamodb = MagicMock()
-        mock_client.return_value = mock_dynamodb
-
         event = {
             **appsync_event,
             "arguments": {"input": {"sellerName": "José's Popcorn & Sales"}},
         }
 
-        # Act
         result = create_seller_profile(event, lambda_context)
 
-        # Assert
         assert result["sellerName"] == "José's Popcorn & Sales"
-        mock_dynamodb.transact_write_items.assert_called_once()
+        mock_put_item.assert_called_once()
 
-    @patch("src.handlers.scout_operations.boto3.client")
-    def test_create_seller_profile_has_metadata_item_with_correct_keys(
-        self,
-        mock_client: MagicMock,
-        appsync_event: Dict[str, Any],
-        lambda_context: Any,
-    ) -> None:
-        """Test that profile item is written correctly with new V2 key structure."""
-        # Arrange
-        mock_dynamodb = MagicMock()
-        mock_client.return_value = mock_dynamodb
-
-        event = {
-            **appsync_event,
-            "arguments": {"input": {"sellerName": "Test Scout"}},
-        }
-
-        # Act
-        create_seller_profile(event, lambda_context)
-
-        # Assert
-        call_args = mock_dynamodb.transact_write_items.call_args
-        assert call_args is not None
-        items = call_args.kwargs["TransactItems"]
-
-        # V2 design: only 1 item - the profile record
-        assert len(items) == 1
-        profile_item = items[0]["Put"]["Item"]
-        # New V2 keys: PK=ownerAccountId, SK=profileId
-        expected_owner = f"ACCOUNT#{event['identity']['sub']}"
-        assert profile_item["ownerAccountId"]["S"] == expected_owner
-        assert profile_item["profileId"]["S"].startswith("PROFILE#")
-
-    @patch("src.handlers.scout_operations.boto3.client")
-    def test_create_seller_profile_has_owner_with_prefix(
-        self,
-        mock_client: MagicMock,
-        appsync_event: Dict[str, Any],
-        lambda_context: Any,
-    ) -> None:
-        """Test that ownerAccountId includes ACCOUNT# prefix for PK (V2 design)."""
-        # Arrange
-        mock_dynamodb = MagicMock()
-        mock_client.return_value = mock_dynamodb
-
-        event = {
-            **appsync_event,
-            "arguments": {"input": {"sellerName": "Test Scout"}},
-        }
-
-        # Act
-        create_seller_profile(event, lambda_context)
-
-        # Assert
-        call_args = mock_dynamodb.transact_write_items.call_args
-        assert call_args is not None
-        items = call_args.kwargs["TransactItems"]
-
-        profile_item = items[0]["Put"]["Item"]
-        # ownerAccountId should have ACCOUNT# prefix (now used as PK in V2 design)
-        expected_owner = f"ACCOUNT#{event['identity']['sub']}"
-        assert profile_item["ownerAccountId"]["S"] == expected_owner
-
-    @patch("src.handlers.scout_operations.boto3.client")
+    @patch("src.handlers.scout_operations.tables.profiles.put_item")
     def test_create_seller_profile_error_handling(
         self,
-        mock_client: MagicMock,
+        mock_put_item: MagicMock,
         appsync_event: Dict[str, Any],
         lambda_context: Any,
     ) -> None:
-        """Test error handling when transact_write_items fails."""
-        # Arrange
-        mock_dynamodb = MagicMock()
-        mock_dynamodb.transact_write_items.side_effect = Exception("DynamoDB error")
-        mock_client.return_value = mock_dynamodb
+        """Test error handling when put_item fails."""
+        mock_put_item.side_effect = Exception("DynamoDB error")
 
         event = {
             **appsync_event,
             "arguments": {"input": {"sellerName": "Test Scout"}},
         }
 
-        # Act & Assert
         with pytest.raises(RuntimeError) as exc_info:
             create_seller_profile(event, lambda_context)
 
         assert "Failed to create seller profile" in str(exc_info.value)
 
-    @patch("src.handlers.scout_operations.boto3.client")
+    @patch("src.handlers.scout_operations.tables.profiles.put_item")
     def test_create_seller_profile_with_unit_type_and_number(
         self,
-        mock_client: MagicMock,
+        mock_put_item: MagicMock,
         appsync_event: Dict[str, Any],
         lambda_context: Any,
     ) -> None:
         """Test profile creation with unit type and number."""
-        # Arrange
-        mock_dynamodb = MagicMock()
-        mock_client.return_value = mock_dynamodb
-
         event = {
             **appsync_event,
             "arguments": {
@@ -185,27 +95,21 @@ class TestCreateSellerProfile:
             },
         }
 
-        # Act
         result = create_seller_profile(event, lambda_context)
 
-        # Assert
         assert result["sellerName"] == "Pack 42 Scout"
         assert result["unitType"] == "PACK"
-        assert result["unitNumber"] == 42  # Should be converted to int
-        mock_dynamodb.transact_write_items.assert_called_once()
+        assert result["unitNumber"] == 42
+        mock_put_item.assert_called_once_with(Item=result)
 
-    @patch("src.handlers.scout_operations.boto3.client")
+    @patch("src.handlers.scout_operations.tables.profiles.put_item")
     def test_create_seller_profile_with_invalid_unit_number(
         self,
-        mock_client: MagicMock,
+        mock_put_item: MagicMock,
         appsync_event: Dict[str, Any],
         lambda_context: Any,
     ) -> None:
         """Test profile creation with invalid (non-numeric) unit number raises an error."""
-        # Arrange
-        mock_dynamodb = MagicMock()
-        mock_client.return_value = mock_dynamodb
-
         event = {
             **appsync_event,
             "arguments": {
@@ -217,24 +121,21 @@ class TestCreateSellerProfile:
             },
         }
 
-        # Act & Assert
         with pytest.raises(AppError) as exc_info:
             create_seller_profile(event, lambda_context)
 
         assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
         assert "unitNumber must be a valid integer" in str(exc_info.value.message)
+        mock_put_item.assert_not_called()
 
-    @patch("src.handlers.scout_operations.boto3.client")
+    @patch("src.handlers.scout_operations.tables.profiles.put_item")
     def test_create_seller_profile_empty_seller_name(
         self,
-        mock_client: MagicMock,
+        mock_put_item: MagicMock,
         appsync_event: Dict[str, Any],
         lambda_context: Any,
     ) -> None:
         """Test profile creation with empty sellerName raises an error."""
-        mock_dynamodb = MagicMock()
-        mock_client.return_value = mock_dynamodb
-
         event = {
             **appsync_event,
             "arguments": {"input": {"sellerName": "   "}},
@@ -245,3 +146,4 @@ class TestCreateSellerProfile:
 
         assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
         assert "sellerName is required" in str(exc_info.value.message)
+        mock_put_item.assert_not_called()

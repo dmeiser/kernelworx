@@ -145,7 +145,7 @@ locals {
     }
     "generate-qr-code-presigned-url" = {
       handler     = "handlers.generate_qr_code_presigned_url.generate_qr_code_presigned_url"
-      timeout     = 3
+      timeout     = 10
       memory_size = 128
     }
     "delete-qr-code" = {
@@ -200,8 +200,9 @@ data "archive_file" "lambda_payload" {
   source_dir = local.src_dir
   excludes = [
     "venv",
-    "__pycache__",
-    "*.pyc",
+    "**/__pycache__",
+    "**/*.pyc",
+    "**/*.pyo",
     ".pytest_cache",
     ".mypy_cache"
   ]
@@ -214,9 +215,9 @@ data "archive_file" "lambda_layer" {
   source_dir  = "${path.module}/../../../../.build/lambda-layer"
   output_path = "${local.payload_dir}/lambda_layer.zip"
   excludes = [
-    "__pycache__",
-    "*.pyc",
-    "*.pyo",
+    "**/__pycache__",
+    "**/*.pyc",
+    "**/*.pyo",
     "*.dist-info",
     "*.egg-info"
   ]

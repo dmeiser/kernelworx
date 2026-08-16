@@ -15,7 +15,7 @@ try:  # pragma: no cover
     from botocore.exceptions import ClientError
 
     from utils.auth import check_profile_access
-    from utils.dynamodb import get_required_env, tables
+    from utils.dynamodb import tables
     from utils.errors import AppError, ErrorCode
     from utils.ids import ensure_catalog_id, ensure_profile_id
     from utils.logging import get_logger
@@ -24,7 +24,7 @@ except ModuleNotFoundError:  # pragma: no cover
     from botocore.exceptions import ClientError
 
     from ..utils.auth import check_profile_access
-    from ..utils.dynamodb import get_required_env, tables
+    from ..utils.dynamodb import tables
     from ..utils.errors import AppError, ErrorCode
     from ..utils.ids import ensure_catalog_id, ensure_profile_id
     from ..utils.logging import get_logger
@@ -66,13 +66,6 @@ class _DynamoClientProxy:
 # Default proxy instance (tests may monkeypatch methods on this object).
 # The actual boto3 client is not created until the first method call.
 dynamodb_client: _DynamoClientProxy = _DynamoClientProxy()
-
-# Multi-table design V2 - table names for transact_write_items
-# Require env vars in production; tests set these in tests/unit/conftest.py.
-campaigns_table_name = get_required_env("CAMPAIGNS_TABLE_NAME")
-shared_campaigns_table_name = get_required_env("SHARED_CAMPAIGNS_TABLE_NAME")
-profiles_table_name = get_required_env("PROFILES_TABLE_NAME")
-shares_table_name = get_required_env("SHARES_TABLE_NAME")
 
 
 def _build_unit_campaign_key(
@@ -234,7 +227,7 @@ def _build_share_item(
 def _build_campaign_transact_item(campaign_item: Dict[str, Any]) -> Dict[str, Any]:
     """Build the campaign Put transaction item."""
     campaign_dynamo = {k: _to_dynamo_value(v) for k, v in campaign_item.items()}
-    return {"Put": {"TableName": campaigns_table_name, "Item": campaign_dynamo}}
+    return {"Put": {"TableName": tables.campaigns.table_name, "Item": campaign_dynamo}}
 
 
 def _build_share_transact_item(share_item: Dict[str, Any]) -> Dict[str, Any]:
@@ -242,7 +235,7 @@ def _build_share_transact_item(share_item: Dict[str, Any]) -> Dict[str, Any]:
     share_dynamo = {k: _to_dynamo_value(v) for k, v in share_item.items()}
     return {
         "Put": {
-            "TableName": shares_table_name,
+            "TableName": tables.shares.table_name,
             "Item": share_dynamo,
             "ConditionExpression": "attribute_not_exists(profileId)",
         }

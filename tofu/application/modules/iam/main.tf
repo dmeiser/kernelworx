@@ -48,6 +48,10 @@ locals {
 # Lambda Execution Role
 # =============================================================================
 
+# TODO(#75): This is a shared execution role used by every Lambda. It currently
+# grants broad DynamoDB/S3 access to all functions. Hardening step: split into
+# per-function roles scoped to the tables/buckets each handler actually needs.
+
 resource "aws_iam_role" "lambda_execution" {
   name = "${var.name_prefix}-lambda-exec${local.role_suffix}"
 

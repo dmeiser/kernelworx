@@ -372,9 +372,7 @@ export const UserDataPage: React.FC = () => {
                         </Typography>
                       </TableCell>
                       <TableCell>{profile.sellerName}</TableCell>
-                      <TableCell>
-                        {profile.createdAt ? new Date(profile.createdAt).toLocaleDateString() : '—'}
-                      </TableCell>
+                      <TableCell>{formatDisplayDate(profile.createdAt) || '—'}</TableCell>
                       <TableCell align="right">
                         <Button
                           size="small"
@@ -722,9 +720,7 @@ export const UserDataPage: React.FC = () => {
                                   <Chip key={perm} label={perm} size="small" sx={{ mr: 0.5 }} />
                                 ))}
                               </TableCell>
-                              <TableCell>
-                                {share.createdAt ? new Date(share.createdAt).toLocaleDateString() : '—'}
-                              </TableCell>
+                              <TableCell>{formatDisplayDate(share.createdAt) || '—'}</TableCell>
                               <TableCell align="right">
                                 <Button
                                   size="small"
