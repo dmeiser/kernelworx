@@ -24,6 +24,12 @@ from typing import Any, Dict, NoReturn, Optional
 import boto3
 from botocore.exceptions import ClientError
 
+# Handle both Lambda (absolute) and unit test (relative) imports
+try:  # pragma: no cover
+    from utils.logging import mask_email
+except ModuleNotFoundError:  # pragma: no cover
+    from ..utils.logging import mask_email
+
 # Configure logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -91,7 +97,7 @@ def _handle_existing_user(
 ) -> NoReturn:
     """Handle linking when an existing user is found."""
     existing_username = existing_user["Username"]
-    logger.info(f"Found existing user {existing_username} for email {email}, linking identity")
+    logger.info(f"Found existing user {existing_username} for email {mask_email(email)}, linking identity")
     _link_federated_identity(cognito, user_pool_id, existing_username, username)
 
 
@@ -101,9 +107,7 @@ def _handle_signup_exception(e: Exception, email: str, event: Dict[str, Any]) ->
         raise e
     if isinstance(e, ClientError) and e.response.get("Error", {}).get("Code") == "InvalidParameterException":
         logger.warning(f"Link may already exist: {e}")
-        raise FederatedIdentityLinkedException(
-            f"Account with email {email} already exists. Please sign in again."
-        )
+        raise FederatedIdentityLinkedException(f"Account with email {email} already exists. Please sign in again.")
     logger.exception(f"Error in pre-signup trigger: {str(e)}")
     return event
 
@@ -156,7 +160,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     user_attributes = event.get("request", {}).get("userAttributes", {})
     email = user_attributes.get("email", "")
 
-    logger.info(f"Pre-signup trigger: source={trigger_source}, username={username}, email={email}")
+    logger.info(f"Pre-signup trigger: source={trigger_source}, username={username}, email={mask_email(email)}")
 
     # Only process federated sign-ups (external providers)
     if trigger_source != "PreSignUp_ExternalProvider":
@@ -186,7 +190,7 @@ def _process_federated_signup(event: Dict[str, Any], user_pool_id: str, username
         existing_users = response.get("Users", [])
 
         if not existing_users:
-            logger.info(f"No existing user for {email}, allowing federated sign-up")
+            logger.info(f"No existing user for {mask_email(email)}, allowing federated sign-up")
             return _auto_confirm_event(event)
 
         _handle_existing_user(cognito, user_pool_id, email, username, existing_users[0])
