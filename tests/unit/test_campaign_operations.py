@@ -1274,3 +1274,24 @@ class TestDeleteCampaignOrders:
             ).get("Item")
             is not None
         )
+
+    def test_delete_campaign_orders_unexpected_error(
+        self,
+        lambda_context: Any,
+    ) -> None:
+        """Test that unexpected errors are wrapped in an INTERNAL_ERROR AppError."""
+        from src.handlers.admin_operations import AppError, ErrorCode
+        from src.handlers.campaign_operations import delete_campaign_orders
+
+        event = {"arguments": {"campaignId": "CAMPAIGN#any"}}
+
+        with patch(
+            "src.handlers.campaign_operations._delete_orders_for_campaign"
+        ) as mock_delete:
+            mock_delete.side_effect = RuntimeError("unexpected failure")
+
+            with pytest.raises(AppError) as exc_info:
+                delete_campaign_orders(event, lambda_context)
+
+            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+            assert "Failed to delete campaign orders" in exc_info.value.message
