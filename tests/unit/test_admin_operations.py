@@ -1234,6 +1234,87 @@ class TestAdminDeleteUser:
             response = accounts_table.get_item(Key={"accountId": f"ACCOUNT#{target_account_id}"})
             assert "Item" not in response
 
+    def test_deletes_invites_and_inbound_shares(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+        profiles_table: Any,
+        invites_table: Any,
+        shares_table: Any,
+    ) -> None:
+        """Test that invites for owned profiles and inbound shares are deleted."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
+        monkeypatch.setenv("PROFILES_TABLE_NAME", "kernelworx-profiles-v2-ue1-dev")
+        monkeypatch.setenv("INVITES_TABLE_NAME", "kernelworx-invites-ue1-dev")
+        monkeypatch.setenv("SHARES_TABLE_NAME", "kernelworx-shares-ue1-dev")
+
+        target_account_id = "target-user-456"
+        account_id_key = f"ACCOUNT#{target_account_id}"
+        profile_id = "PROFILE#target-profile"
+        invite_code = "INVITE#target-invite"
+
+        # Create target account
+        accounts_table = get_accounts_table()
+        accounts_table.put_item(
+            Item={
+                "accountId": account_id_key,
+                "email": "target@example.com",
+                "createdAt": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+
+        # Create profile owned by target account
+        profiles_table.put_item(
+            Item={
+                "ownerAccountId": account_id_key,
+                "profileId": profile_id,
+                "sellerName": "Target Scout",
+            }
+        )
+
+        # Create invite for that profile
+        invites_table.put_item(
+            Item={
+                "inviteCode": invite_code,
+                "profileId": profile_id,
+                "createdAt": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+
+        # Create inbound share where target account is the target
+        shares_table.put_item(
+            Item={
+                "profileId": "PROFILE#someone-else",
+                "targetAccountId": account_id_key,
+                "permissions": ["READ"],
+                "createdAt": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+
+        event = {
+            **admin_appsync_event,
+            "arguments": {"accountId": target_account_id},
+        }
+
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+            mock_cognito = MagicMock()
+            mock_cognito.list_users.return_value = {"Users": []}
+            mock_get_client.return_value = mock_cognito
+
+            result = admin_delete_user(event, lambda_context)
+
+            assert result is True
+            assert invites_table.get_item(Key={"inviteCode": invite_code}).get("Item") is None
+            inbound_response = shares_table.query(
+                IndexName="targetAccountId-index",
+                KeyConditionExpression="targetAccountId = :tid",
+                ExpressionAttributeValues={":tid": account_id_key},
+            )
+            assert len(inbound_response.get("Items", [])) == 0
+
     def test_dynamodb_deleted_before_cognito(
         self,
         dynamodb_table: Any,
@@ -1615,6 +1696,9 @@ class TestAdminDeleteUser:
                     "DeleteItem",
                 )
                 mock_tables.accounts = mock_accounts
+                mock_tables.profiles.query.return_value = {"Items": []}
+                mock_tables.invites.query.return_value = {"Items": []}
+                mock_tables.shares.query.return_value = {"Items": []}
 
                 with pytest.raises(AppError) as exc_info:
                     admin_delete_user(event, lambda_context)
@@ -1756,7 +1840,7 @@ class TestAdminDeleteUser:
         lambda_context: Any,
         monkeypatch: Any,
     ) -> None:
-        """Test that unexpected exceptions are handled."""
+        """Test that unexpected exceptions during DynamoDB cleanup are handled."""
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
 
@@ -1766,7 +1850,7 @@ class TestAdminDeleteUser:
         }
 
         with patch("src.handlers.admin_operations.tables") as mock_tables:
-            mock_tables.accounts.get_item.side_effect = RuntimeError("Unexpected")
+            mock_tables.invites.query.side_effect = RuntimeError("Unexpected")
 
             with pytest.raises(AppError) as exc_info:
                 admin_delete_user(event, lambda_context)
@@ -2649,6 +2733,108 @@ class TestAdminDeleteUserCatalogs:
                 admin_delete_user_catalogs(event, lambda_context)
 
             assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+
+
+class TestAccountDeletionHelpers:
+    """Tests for cascade-deletion helpers used during account deletion."""
+
+    def test_delete_invites_for_owned_profiles(
+        self,
+        dynamodb_table: Any,
+        profiles_table: Any,
+        invites_table: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """Invites for profiles owned by the account are deleted."""
+        monkeypatch.setenv("PROFILES_TABLE_NAME", "kernelworx-profiles-v2-ue1-dev")
+        monkeypatch.setenv("INVITES_TABLE_NAME", "kernelworx-invites-ue1-dev")
+
+        from src.handlers.admin_operations import _delete_invites_for_owned_profiles
+
+        account_id = "owner-account"
+        account_id_key = f"ACCOUNT#{account_id}"
+        profile_id = "PROFILE#owned"
+        invite_code = "INVITE#abc123"
+
+        profiles_table.put_item(
+            Item={
+                "ownerAccountId": account_id_key,
+                "profileId": profile_id,
+                "sellerName": "Test Scout",
+            }
+        )
+        invites_table.put_item(
+            Item={
+                "inviteCode": invite_code,
+                "profileId": profile_id,
+                "createdAt": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+
+        count = _delete_invites_for_owned_profiles(account_id, MagicMock())
+
+        assert count == 1
+        assert invites_table.get_item(Key={"inviteCode": invite_code}).get("Item") is None
+
+    def test_delete_invites_for_owned_profiles_no_profiles(
+        self,
+        dynamodb_table: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """No invites are deleted when the account owns no profiles."""
+        monkeypatch.setenv("PROFILES_TABLE_NAME", "kernelworx-profiles-v2-ue1-dev")
+        monkeypatch.setenv("INVITES_TABLE_NAME", "kernelworx-invites-ue1-dev")
+
+        from src.handlers.admin_operations import _delete_invites_for_owned_profiles
+
+        count = _delete_invites_for_owned_profiles("no-profiles", MagicMock())
+        assert count == 0
+
+    def test_delete_inbound_shares(
+        self,
+        dynamodb_table: Any,
+        shares_table: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """Inbound shares where the account is the target are deleted."""
+        monkeypatch.setenv("SHARES_TABLE_NAME", "kernelworx-shares-ue1-dev")
+
+        from src.handlers.admin_operations import _delete_inbound_shares
+
+        account_id = "target-account"
+        account_id_key = f"ACCOUNT#{account_id}"
+
+        shares_table.put_item(
+            Item={
+                "profileId": "PROFILE#shared-with-me",
+                "targetAccountId": account_id_key,
+                "permissions": ["READ"],
+                "createdAt": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+
+        count = _delete_inbound_shares(account_id, MagicMock())
+
+        assert count == 1
+        response = shares_table.query(
+            IndexName="targetAccountId-index",
+            KeyConditionExpression="targetAccountId = :tid",
+            ExpressionAttributeValues={":tid": account_id_key},
+        )
+        assert len(response.get("Items", [])) == 0
+
+    def test_delete_inbound_shares_no_shares(
+        self,
+        dynamodb_table: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """No shares are deleted when the account has no inbound shares."""
+        monkeypatch.setenv("SHARES_TABLE_NAME", "kernelworx-shares-ue1-dev")
+
+        from src.handlers.admin_operations import _delete_inbound_shares
+
+        count = _delete_inbound_shares("no-shares", MagicMock())
+        assert count == 0
 
 
 class TestGetCognitoClient:
