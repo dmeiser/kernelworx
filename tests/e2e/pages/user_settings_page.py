@@ -35,6 +35,12 @@ class UserSettingsPage(BasePage):
     _DETAIL_ROW_SEL: str = "li"
     _DETAIL_VALUE_SEL: str = ".MuiListItemText-secondary"
 
+    # Change password section
+    _CURRENT_PASSWORD_LABEL: str = "Current Password"
+    _NEW_PASSWORD_LABEL: str = "New Password"
+    _CONFIRM_PASSWORD_LABEL: str = "Confirm New Password"
+    _CHANGE_PASSWORD_BTN: str = "Change Password"
+
     def __init__(self, page: Page) -> None:
         """Store the Playwright Page instance.
 
@@ -141,3 +147,41 @@ class UserSettingsPage(BasePage):
         self._save_changes_button().click()
         expect(dialog).to_be_hidden(timeout=10_000)
         self.wait_for_loading()
+
+    # ------------------------------------------------------------------
+    # Change password helpers
+    # ------------------------------------------------------------------
+
+    def _current_password_input(self) -> Locator:
+        """Return locator for the *Current Password* field."""
+        return self.page.get_by_label(self._CURRENT_PASSWORD_LABEL, exact=True)
+
+    def _new_password_input(self) -> Locator:
+        """Return locator for the *New Password* field."""
+        return self.page.get_by_label(self._NEW_PASSWORD_LABEL, exact=True)
+
+    def _confirm_password_input(self) -> Locator:
+        """Return locator for the *Confirm New Password* field."""
+        return self.page.get_by_label(self._CONFIRM_PASSWORD_LABEL, exact=True)
+
+    def _change_password_button(self) -> Locator:
+        """Return locator for the *Change Password* submit button."""
+        return self.get_by_role_button(self._CHANGE_PASSWORD_BTN)
+
+    def change_password(self, current_password: str, new_password: str) -> None:
+        """Fill and submit the change-password form.
+
+        Args:
+            current_password: Existing account password.
+            new_password: New password that meets Cognito complexity requirements.
+        """
+        self._current_password_input().fill(current_password)
+        self._new_password_input().fill(new_password)
+        self._confirm_password_input().fill(new_password)
+        self._change_password_button().click()
+        self.wait_for_loading()
+
+    def password_change_succeeded(self) -> bool:
+        """Return ``True`` when the success alert is visible after changing password."""
+        alert = self.page.get_by_role("alert").filter(has_text="Password changed successfully")
+        return alert.first.is_visible()
