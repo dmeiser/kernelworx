@@ -64,16 +64,21 @@ export function request(ctx) {
         updates.push('customerName = :customerName');
         exprValues[':customerName'] = input.customerName;
     }
-    const phoneValue = input.customerPhone !== undefined && input.customerPhone !== null
-        ? String(input.customerPhone).trim()
-        : '';
-    if (phoneValue !== '') {
-        const phoneResult = validatePhone(phoneValue);
-        if (!phoneResult.valid) {
-            util.error(phoneResult.error, 'BadRequest');
+    if (input.customerPhone !== undefined) {
+        const phoneValue = input.customerPhone != null ? String(input.customerPhone).trim() : '';
+        if (phoneValue === '') {
+            // Explicitly clear a previously stored phone number when the client sends
+            // null, empty string, or whitespace-only input.
+            updates.push('customerPhone = :customerPhone');
+            exprValues[':customerPhone'] = null;
+        } else {
+            const phoneResult = validatePhone(phoneValue);
+            if (!phoneResult.valid) {
+                util.error(phoneResult.error, 'BadRequest');
+            }
+            updates.push('customerPhone = :customerPhone');
+            exprValues[':customerPhone'] = phoneResult.value;
         }
-        updates.push('customerPhone = :customerPhone');
-        exprValues[':customerPhone'] = phoneResult.value;
     }
     if (input.customerAddress !== undefined && input.customerAddress !== null) {
         const addressResult = validateAddress(input.customerAddress);
