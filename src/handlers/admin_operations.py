@@ -483,24 +483,33 @@ def _find_cognito_user_by_sub(
 
 
 def _delete_user_from_cognito(cognito: Any, user_pool_id: str, username: str, email: str, logger: Any) -> None:
-    """Delete user from Cognito."""
+    """Delete user from Cognito, treating UserNotFoundException as idempotent success."""
     try:
         cognito.admin_delete_user(UserPoolId=user_pool_id, Username=username)
         logger.info("Deleted user from Cognito", username=username, email=email)
     except ClientError as e:
         error_code = e.response.get("Error", {}).get("Code", "")
+        if error_code == "UserNotFoundException":
+            logger.info("Cognito user already deleted", username=username, email=email)
+            return
         logger.error("Cognito admin_delete_user failed", error=str(e), error_code=error_code)
         raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to delete user from Cognito")
 
 
 def _delete_account_from_dynamodb(account_id: str, logger: Any) -> None:
-    """Try to delete account from DynamoDB (may not exist if user never logged in)."""
+    """Delete account from DynamoDB.
+
+    Non-existent items are silently successful (DynamoDB delete_item does not
+    raise for missing keys). Other ClientErrors are propagated so that Cognito
+    deletion is not attempted while account data remains.
+    """
     db_account_id = f"ACCOUNT#{account_id}"
     try:
         tables.accounts.delete_item(Key={"accountId": db_account_id})
         logger.info("Deleted account from DynamoDB", account_id=db_account_id)
     except ClientError as e:
-        logger.warning("Could not delete from DynamoDB (may not exist)", error=str(e), account_id=db_account_id)
+        logger.error("Failed to delete account from DynamoDB", error=str(e), account_id=db_account_id)
+        raise
 
 
 def _find_user_by_email(cognito: Any, user_pool_id: str, email: str, logger: Any) -> str:
@@ -621,11 +630,15 @@ def admin_delete_user(event: Dict[str, Any], context: Any) -> bool:
         cognito = _get_cognito_client()
 
         username, email = _find_cognito_user_by_sub(cognito, user_pool_id, account_id, logger)
-        if not username:
-            raise AppError(ErrorCode.NOT_FOUND, f"User '{account_id}' not found in Cognito")
 
-        _delete_user_from_cognito(cognito, user_pool_id, username, email or "", logger)
+        # Delete DynamoDB data first so a partially-deleted Cognito state does not
+        # leave account records orphaned.
         _delete_account_from_dynamodb(account_id, logger)
+
+        if username:
+            _delete_user_from_cognito(cognito, user_pool_id, username, email or "", logger)
+        else:
+            logger.info("Cognito user already absent; DynamoDB cleanup completed", account_id=account_id)
 
         logger.info("User deleted successfully", account_id=account_id, email=email)
         return True
