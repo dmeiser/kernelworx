@@ -257,35 +257,39 @@ const CampaignFormFields: React.FC<CampaignFormFieldsProps> = ({
     <Typography variant="subtitle2" color="text.secondary">
       Unit Information (Required)
     </Typography>
-    <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
-      <FormControl required sx={{ minWidth: { xs: '100%', sm: 120 } }}>
-        <InputLabel>Unit Type</InputLabel>
-        <Select value={formState.unitType} onChange={(e) => formSetters.setUnitType(e.target.value)} label="Unit Type">
-          {UNIT_TYPES.map((type) => (
-            <MenuItem key={type} value={type}>
-              {type}
-            </MenuItem>
-          ))}
-        </Select>
-      </FormControl>
-      <TextField
-        label="Unit Number"
-        type="number"
-        value={formState.unitNumber}
-        onChange={(e) => formSetters.setUnitNumber(e.target.value)}
-        required
-        fullWidth
-        sx={{ minWidth: { xs: '100%', sm: 120 } }}
-        inputProps={{ min: 1 }}
-      />
-      <TextField
-        label="City"
-        value={formState.city}
-        onChange={(e) => formSetters.setCity(e.target.value)}
-        required
-        fullWidth
-      />
-      <StateAutocomplete value={formState.state} onChange={formSetters.setState} required fullWidth sx={{ minWidth: { xs: '100%', sm: 100 } }} />
+    <Stack spacing={2}>
+      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+        <FormControl required fullWidth sx={{ minWidth: { xs: '100%', sm: 120 } }}>
+          <InputLabel>Unit Type</InputLabel>
+          <Select value={formState.unitType} onChange={(e) => formSetters.setUnitType(e.target.value)} label="Unit Type">
+            {UNIT_TYPES.map((type) => (
+              <MenuItem key={type} value={type}>
+                {type}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+        <TextField
+          label="Unit Number"
+          type="number"
+          value={formState.unitNumber}
+          onChange={(e) => formSetters.setUnitNumber(e.target.value)}
+          required
+          fullWidth
+          sx={{ minWidth: { xs: '100%', sm: 120 } }}
+          inputProps={{ min: 1 }}
+        />
+      </Stack>
+      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+        <TextField
+          label="City"
+          value={formState.city}
+          onChange={(e) => formSetters.setCity(e.target.value)}
+          required
+          fullWidth
+        />
+        <StateAutocomplete value={formState.state} onChange={formSetters.setState} required fullWidth sx={{ minWidth: { xs: '100%', sm: 100 } }} />
+      </Stack>
     </Stack>
 
     {/* Creator Message */}

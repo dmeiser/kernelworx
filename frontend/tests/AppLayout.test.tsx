@@ -198,6 +198,7 @@ describe('AppLayout', () => {
 
     await waitFor(() => {
       expect(mockNavigate).toHaveBeenCalledWith('/scouts');
+      expect(screen.queryByRole('presentation')).not.toBeInTheDocument();
     });
   });
 });
