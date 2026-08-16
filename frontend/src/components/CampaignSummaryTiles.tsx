@@ -57,7 +57,7 @@ export const CampaignSummaryTiles: React.FC<CampaignSummaryTilesProps> = ({ camp
     <Grid container spacing={{ xs: 2, sm: 3 }} mb={{ xs: 2, sm: 4 }}>
       <Grid size={{ xs: 12, sm: 6, md: 3 }}>
         <Paper sx={{ p: 3 }}>
-          <Stack direction="row" spacing={2} alignItems="center">
+          <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap">
             <ShoppingCart color="primary" sx={{ fontSize: 40 }} />
             <Box>
               <Typography variant="h4">{totalOrders}</Typography>
@@ -71,7 +71,7 @@ export const CampaignSummaryTiles: React.FC<CampaignSummaryTilesProps> = ({ camp
 
       <Grid size={{ xs: 12, sm: 6, md: 3 }}>
         <Paper sx={{ p: 3 }}>
-          <Stack direction="row" spacing={2} alignItems="center">
+          <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap">
             <AttachMoney color="success" sx={{ fontSize: 40 }} />
             <Box>
               <Typography variant="h4">{formatCurrency(totalRevenue)}</Typography>
@@ -85,7 +85,7 @@ export const CampaignSummaryTiles: React.FC<CampaignSummaryTilesProps> = ({ camp
 
       <Grid size={{ xs: 12, sm: 6, md: 3 }}>
         <Paper sx={{ p: 3 }}>
-          <Stack direction="row" spacing={2} alignItems="center">
+          <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap">
             <People color="info" sx={{ fontSize: 40 }} />
             <Box>
               <Typography variant="h4">{uniqueCustomers}</Typography>
@@ -99,7 +99,7 @@ export const CampaignSummaryTiles: React.FC<CampaignSummaryTilesProps> = ({ camp
 
       <Grid size={{ xs: 12, sm: 6, md: 3 }}>
         <Paper sx={{ p: 3 }}>
-          <Stack direction="row" spacing={2} alignItems="center">
+          <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap">
             <Inventory2 color="primary" sx={{ fontSize: 40 }} />
             <Box>
               <Typography variant="h4">{totalItemsSold}</Typography>

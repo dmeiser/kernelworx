@@ -116,7 +116,7 @@ const CatalogActions: React.FC<CatalogActionsProps> = ({ catalog, isOwned, onEdi
   };
 
   return (
-    <Stack direction="row" spacing={1} justifyContent="flex-end">
+    <Stack direction="row" spacing={1} justifyContent="flex-end" flexWrap="wrap">
       <Button size="small" startIcon={<VisibilityIcon />} onClick={handleViewClick} variant="text">
         View
       </Button>
@@ -160,11 +160,11 @@ const CatalogRow: React.FC<CatalogRowProps> = ({ catalog, showActions, inUse, is
     <TableCell>
       <Typography fontWeight="medium">{catalog.catalogName}</Typography>
     </TableCell>
-    <TableCell>
+    <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>
       <CatalogTypeChips inUse={inUse} />
     </TableCell>
     <TableCell>{(catalog.products ?? []).length} items</TableCell>
-    <TableCell>{formatDate(catalog.createdAt ?? '')}</TableCell>
+    <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>{formatDate(catalog.createdAt ?? '')}</TableCell>
     {showActions && (
       <TableCell align="right">
         <CatalogActions catalog={catalog} isOwned={isOwned} onEdit={onEdit} onDelete={onDelete} onView={onView} />
@@ -198,14 +198,14 @@ const CatalogTable: React.FC<CatalogTableProps> = ({
   }
 
   return (
-    <TableContainer component={Paper}>
+    <TableContainer component={Paper} sx={{ width: '100%', overflowX: 'auto' }}>
       <Table>
         <TableHead>
           <TableRow>
             <TableCell>Catalog Name</TableCell>
-            <TableCell>Type</TableCell>
+            <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>Type</TableCell>
             <TableCell>Products</TableCell>
-            <TableCell>Created</TableCell>
+            <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>Created</TableCell>
             {showActionsColumn && <TableCell align="right">Actions</TableCell>}
           </TableRow>
         </TableHead>

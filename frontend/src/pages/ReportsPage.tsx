@@ -157,7 +157,7 @@ const OrderRow: React.FC<{ order: Order; allProducts: string[] }> = ({ order, al
 const DownloadButtons: React.FC<{ orders: Order[]; campaignId: string }> = ({ orders, campaignId }) => {
   if (orders.length === 0) return null;
   return (
-    <Stack direction="row" spacing={1}>
+    <Stack direction="row" spacing={1} flexWrap="wrap">
       <Button
         size="small"
         startIcon={<DownloadIcon />}
@@ -280,7 +280,7 @@ export const ReportsPage: React.FC = () => {
           <Box sx={{ width: '100%', overflowX: 'auto' }}>
             {/* Complete Order Table */}
             <Paper sx={{ p: { xs: 1.5, sm: 3 }, mt: 3 }}>
-              <Stack direction="row" justifyContent="space-between" alignItems="center" mb={2}>
+              <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={1} mb={2}>
                 <Typography variant="h6">All Orders</Typography>
                 <DownloadButtons orders={orders} campaignId={campaignId} />
               </Stack>

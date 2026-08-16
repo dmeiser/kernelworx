@@ -107,12 +107,12 @@ export const CatalogPreviewPage: React.FC<CatalogPreviewPageProps> = ({
   return (
     <Box sx={{ p: 3 }}>
       {/* Back button and header */}
-      <Stack direction="row" spacing={2} alignItems="center" sx={{ mb: 3 }}>
+      <Stack direction="row" spacing={2} alignItems="center" sx={{ mb: 3 }} flexWrap="wrap">
         <Button startIcon={<BackIcon />} onClick={() => { void navigate('/catalogs'); }} variant="outlined">
           Back
         </Button>
-        <Box sx={{ flex: 1 }}>
-          <Typography variant="h5">{catalog.catalogName}</Typography>
+        <Box sx={{ flex: 1, minWidth: 0 }}>
+          <Typography variant="h5" sx={{ wordBreak: 'break-word' }}>{catalog.catalogName}</Typography>
           <Typography variant="body2" color="text.secondary">
             {products.length} product{products.length !== 1 ? 's' : ''}
           </Typography>
@@ -121,8 +121,8 @@ export const CatalogPreviewPage: React.FC<CatalogPreviewPageProps> = ({
 
       {/* Catalog info and action buttons */}
       <Paper sx={{ p: 2, mb: 3 }}>
-        <Stack direction="row" spacing={2} alignItems="center" justifyContent="space-between">
-          <Stack direction="row" spacing={2}>
+        <Stack direction="row" spacing={2} alignItems="center" justifyContent="space-between" flexWrap="wrap" gap={1}>
+          <Stack direction="row" spacing={2} flexWrap="wrap">
             <Chip
               label={catalog.catalogType === 'ADMIN_MANAGED' ? 'Admin-Managed' : 'User-Created'}
               variant="outlined"
@@ -130,7 +130,7 @@ export const CatalogPreviewPage: React.FC<CatalogPreviewPageProps> = ({
             />
             {catalog.isPublic && <Chip label="Public" variant="filled" />}
           </Stack>
-          <Stack direction="row" spacing={1}>
+          <Stack direction="row" spacing={1} flexWrap="wrap">
             <Button variant="contained" startIcon={<AddIcon />} onClick={handleCreateCampaign}>
               Create Campaign
             </Button>
@@ -147,7 +147,7 @@ export const CatalogPreviewPage: React.FC<CatalogPreviewPageProps> = ({
           <Typography color="text.secondary">No products in this catalog</Typography>
         </Paper>
       ) : (
-        <TableContainer component={Paper}>
+        <TableContainer component={Paper} sx={{ width: '100%', overflowX: 'auto' }}>
           <Table>
             <TableHead sx={{ bgcolor: 'grey.100' }}>
               <TableRow>
@@ -162,7 +162,7 @@ export const CatalogPreviewPage: React.FC<CatalogPreviewPageProps> = ({
               {products.map((product) => (
                 <TableRow key={product.productId} hover>
                   <TableCell sx={{ fontWeight: 500 }}>{product.productName}</TableCell>
-                  <TableCell sx={{ maxWidth: 300, whiteSpace: 'normal' }}>{product.description || '-'}</TableCell>
+                  <TableCell sx={{ maxWidth: { xs: 150, sm: 300 }, whiteSpace: 'normal', wordBreak: 'break-word' }}>{product.description || '-'}</TableCell>
                   <TableCell align="right">${product.price.toFixed(2)}</TableCell>
                 </TableRow>
               ))}
@@ -172,7 +172,7 @@ export const CatalogPreviewPage: React.FC<CatalogPreviewPageProps> = ({
       )}
 
       {/* Action buttons at bottom */}
-      <Stack direction="row" spacing={2} sx={{ mt: 3, justifyContent: 'center' }}>
+      <Stack direction="row" spacing={2} sx={{ mt: 3, justifyContent: 'center' }} flexWrap="wrap">
         <Button variant="contained" size="large" startIcon={<AddIcon />} onClick={handleCreateCampaign}>
           Create Campaign
         </Button>

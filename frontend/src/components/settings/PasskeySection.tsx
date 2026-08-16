@@ -121,14 +121,14 @@ const RegisterPasskeyForm: React.FC<{
     <Typography variant="subtitle2" gutterBottom>
       Register a New Passkey
     </Typography>
-    <Stack direction="row" spacing={2} alignItems="flex-start">
+    <Stack direction="row" spacing={2} alignItems="flex-start" flexWrap="wrap">
       <TextField
         label="Passkey Name"
         value={hook.passkeyName}
         onChange={(event) => hook.setPasskeyName(event.target.value)}
         placeholder="e.g., My iPhone, Work Laptop"
         disabled={hook.passkeyLoading}
-        sx={{ flex: 1 }}
+        sx={{ flex: 1, minWidth: 0 }}
         helperText="Give this passkey a name to remember which device it's for"
       />
       <Button

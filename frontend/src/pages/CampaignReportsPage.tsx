@@ -328,7 +328,7 @@ const CampaignDetails: React.FC<{ campaign: SharedCampaign }> = ({ campaign }) =
 );
 
 const ReportSummaryChips: React.FC<{ report: UnitReport }> = ({ report }) => (
-  <Stack direction="row" spacing={2}>
+  <Stack direction="row" spacing={2} flexWrap="wrap">
     <Chip label={`${report.sellers.length} Sellers`} color="primary" variant="outlined" />
     <Chip label={`${report.totalOrders} Orders`} color="secondary" variant="outlined" />
     <Chip label={`${formatCurrency(report.totalSales)} Total Sales`} color="success" variant="outlined" />
@@ -339,7 +339,7 @@ const ReportViewSelector: React.FC<{
   view: ReportView;
   onChange: (view: ReportView) => void;
 }> = ({ view, onChange }) => (
-  <Stack direction="row" spacing={1}>
+  <Stack direction="row" spacing={1} flexWrap="wrap">
     <Button variant={view === 'unit' ? 'contained' : 'outlined'} onClick={() => onChange('unit')}>
       Unit Summary
     </Button>
@@ -578,7 +578,7 @@ const UnitSummarySection: React.FC<{
       <Typography variant="h6" sx={{ mt: 2 }}>
         Top Sellers
       </Typography>
-      <TableContainer>
+      <TableContainer sx={{ width: '100%', overflowX: 'auto' }}>
         <Table>
           <TableHead>
             <TableRow>
@@ -912,7 +912,7 @@ const ReportHeaderCard: React.FC<{
 }> = ({ report, hasSellers }) => (
   <Paper sx={{ p: 3 }}>
     <Stack spacing={2}>
-      <Typography variant="h5">
+      <Typography variant="h5" sx={{ wordBreak: 'break-word' }}>
         {report.unitType} {report.unitNumber} - {report.campaignName} {report.campaignYear}
       </Typography>
       <ReportSummaryChips report={report} />

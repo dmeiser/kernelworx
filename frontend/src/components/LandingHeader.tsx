@@ -89,7 +89,7 @@ export const LandingHeader: React.FC = () => {
         <Box
           component="button"
           tabIndex={0}
-          sx={{ display: 'flex', alignItems: 'center', gap: 0.5, cursor: 'pointer', background: 'none', border: 'none', padding: 0 }}
+          sx={{ display: 'flex', alignItems: 'center', gap: 0.5, cursor: 'pointer', background: 'none', border: 'none', padding: 0, minWidth: 0, flex: 1 }}
           onClick={() => { void navigate('/'); }}
           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); void navigate('/'); } }}
         >
@@ -101,6 +101,7 @@ export const LandingHeader: React.FC = () => {
               width: { xs: 28, sm: 32, md: 36 },
               height: { xs: 28, sm: 32, md: 36 },
               mr: 1,
+              flexShrink: 0,
             }}
           />
           <Typography
@@ -116,6 +117,7 @@ export const LandingHeader: React.FC = () => {
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
+              minWidth: 0,
             }}
           >
             <Box component="span" sx={{ color: 'text.primary' }}>
@@ -129,7 +131,7 @@ export const LandingHeader: React.FC = () => {
 
         {isDesktop && <DesktopNav isHome={isHome} />}
 
-        <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+        <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', minWidth: 0 }}>
           {isAuthenticated ? (
             <>
               <Button variant="text" size="small" onClick={() => { void navigate('/home'); }}>

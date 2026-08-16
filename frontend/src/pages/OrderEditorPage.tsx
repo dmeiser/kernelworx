@@ -290,25 +290,26 @@ const CustomerInfoForm: React.FC<CustomerInfoFormProps> = ({ formState, loading 
           onChange={(e) => formState.setStreet(e.target.value)}
           disabled={loading}
         />
-        <Stack direction="row" spacing={2}>
+        <Stack direction="row" spacing={2} flexWrap="wrap">
           <TextField
             fullWidth
             label="City"
             value={formState.city}
             onChange={(e) => formState.setCity(e.target.value)}
             disabled={loading}
+            sx={{ flex: '1 1 140px' }}
           />
           <StateAutocomplete
             value={formState.state}
             onChange={formState.setState}
             disabled={loading}
-            sx={{ width: 100 }}
+            sx={{ width: 100, flex: '0 0 auto' }}
           />
           <TextField
             label="Zip Code"
             value={formState.zipCode}
             onChange={(e) => formState.setZipCode(e.target.value)}
-            sx={{ width: 120 }}
+            sx={{ width: 120, flex: '0 0 auto' }}
             disabled={loading}
           />
         </Stack>
@@ -408,14 +409,15 @@ const LineItemsTable: React.FC<LineItemsTableProps> = ({
 
   return (
     <Paper sx={{ p: 3, mb: 3 }}>
-      <Stack direction="row" justifyContent="space-between" alignItems="center" mb={2}>
+      <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={1} mb={2}>
         <Typography variant="h6">Products</Typography>
         <Button startIcon={<AddIcon />} onClick={onAddItem} disabled={loading}>
           Add Product
         </Button>
       </Stack>
 
-      <Table>
+      <Box sx={{ width: '100%', overflowX: 'auto' }}>
+        <Table>
         <TableHead>
           <TableRow>
             <TableCell>Product</TableCell>
@@ -441,6 +443,7 @@ const LineItemsTable: React.FC<LineItemsTableProps> = ({
           ))}
         </TableBody>
       </Table>
+      </Box>
 
       <Divider sx={{ my: 2 }} />
 
@@ -580,7 +583,7 @@ const PaymentNotesForm: React.FC<PaymentNotesFormProps> = ({
         Payment & Notes
       </Typography>
       <Stack spacing={2}>
-        <Stack direction="row" spacing={1} alignItems="flex-start">
+        <Stack direction="row" spacing={1} alignItems="flex-start" flexWrap="wrap">
           <FormControl fullWidth disabled={isFormDisabled}>
             <InputLabel>Payment Method</InputLabel>
             <Select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)} label="Payment Method">
@@ -609,7 +612,7 @@ interface OrderHeaderProps {
 }
 
 const OrderHeader: React.FC<OrderHeaderProps> = ({ isEditing, onCancel }) => (
-  <Stack direction="row" alignItems="center" spacing={2} mb={3}>
+  <Stack direction="row" alignItems="center" spacing={2} flexWrap="wrap" mb={3}>
     <IconButton onClick={onCancel} edge="start" aria-label="Back to orders">
       <ArrowBackIcon />
     </IconButton>
@@ -653,7 +656,7 @@ const OrderActions: React.FC<OrderActionsProps> = ({
   const submitLabel = getSubmitLabel(isEditing, loading);
   const isDisabled = loading || !customerName.trim() || !hasValidPaymentMethod;
   return (
-    <Stack direction="row" spacing={2} justifyContent="flex-end">
+    <Stack direction="row" spacing={2} justifyContent="flex-end" flexWrap="wrap">
       <Button onClick={onCancel} disabled={loading}>
         Cancel
       </Button>

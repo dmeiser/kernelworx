@@ -395,7 +395,7 @@ const PageLayout: React.FC<PageLayoutProps> = ({ maxWidth = 500, children }) => 
   >
     <Card sx={{ maxWidth, width: '100%' }}>
       <CardContent sx={{ p: 4 }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5, mb: 3 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5, mb: 3, flexWrap: 'wrap' }}>
           <Box component="img" src="/logo.svg" alt="KernelWorx mark" sx={{ width: 32, height: 32 }} />
           <Typography
             variant="h5"
@@ -596,7 +596,7 @@ const SignupFormView: React.FC<SignupFormViewProps> = ({
         autoComplete="email"
       />
 
-      <Stack direction="row" spacing={2}>
+      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
         <TextField
           fullWidth
           label="First Name"
