@@ -14,7 +14,7 @@ vi.mock('@aws-appsync/utils', () => {
 });
 
 // Import the resolver under test AFTER mocking the util
-import * as updateOrderFn from '../../../tofu/application/appsync/js-resolvers/update_order_fn.js';
+import * as updateOrderFn from '../../tofu/application/appsync/js-resolvers/update_order_fn.js';
 
 function validCtx(input?: any) {
   return {

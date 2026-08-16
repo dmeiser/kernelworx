@@ -174,7 +174,7 @@ def validate_customer_input(customer: Dict[str, Any]) -> Dict[str, Any]:
     validated_customer = {"name": customer["name"].strip()}
 
     phone = customer.get("phone")
-    if phone and str(phone).strip():
+    if phone is not None and str(phone).strip():
         validated_customer["phone"] = normalize_phone(phone)
 
     # Validate address if provided

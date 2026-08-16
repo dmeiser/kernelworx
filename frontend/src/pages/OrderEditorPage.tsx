@@ -271,8 +271,12 @@ interface CustomerInfoFormProps {
 
 const CustomerInfoForm: React.FC<CustomerInfoFormProps> = ({ formState, loading }) => {
   const handlePhoneBlur = (e: React.FocusEvent<HTMLInputElement>) => {
-    const formatted = formatPhoneNumber(e.target.value);
-    formState.setCustomerPhone(formatted === '—' ? '' : formatted);
+    const raw = e.target.value;
+    if (!raw.trim()) {
+      formState.setCustomerPhone('');
+      return;
+    }
+    formState.setCustomerPhone(formatPhoneNumber(raw));
   };
 
   return (
