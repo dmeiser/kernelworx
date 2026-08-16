@@ -188,8 +188,8 @@ const formatDate = (dateString: string): string => {
 };
 
 const AccountHeader: React.FC<{ onEditProfile: () => void }> = ({ onEditProfile }) => (
-  <Stack direction="row" justifyContent="space-between" alignItems="center" mb={2}>
-    <Typography variant="h6">Account Information</Typography>
+  <Stack direction="row" justifyContent="space-between" alignItems="center" mb={2} flexWrap="wrap" gap={1}>
+    <Typography variant="h6" sx={{ minWidth: 0 }}>Account Information</Typography>
     <Button variant="outlined" size="small" startIcon={<EditIcon />} onClick={onEditProfile}>
       Edit Profile
     </Button>

@@ -262,7 +262,7 @@ export const theme = createTheme({
       styleOverrides: {
         body: {
           minWidth: 0,
-          overflowX: 'auto',
+          overflowX: 'hidden',
           backgroundColor: brand.background.layout,
           color: brand.text.primary,
         },

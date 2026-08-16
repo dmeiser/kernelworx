@@ -293,7 +293,7 @@ const AppLayoutView: React.FC<{
   <Box sx={{ display: 'flex' }}>
     <AppBar position="fixed" color="default" sx={{ zIndex: (theme) => theme.zIndex.drawer + 1 }}>
       <Toolbar sx={{ justifyContent: 'space-between', gap: 1, px: { xs: 1, sm: 2, md: 3 } }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flex: 1, minWidth: 0 }}>
           {!isDesktop && (
             <IconButton
               color="inherit"
@@ -309,7 +309,7 @@ const AppLayoutView: React.FC<{
           <Box
             component="button"
             tabIndex={0}
-            sx={{ display: 'flex', alignItems: 'center', gap: 1, cursor: 'pointer', background: 'none', border: 'none', padding: 0 }}
+            sx={{ display: 'flex', alignItems: 'center', gap: 1, cursor: 'pointer', background: 'none', border: 'none', padding: 0, minWidth: 0, flex: 1 }}
             onClick={() => onNavigate('/home')}
             onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onNavigate('/home'); } }}
           >
@@ -320,6 +320,7 @@ const AppLayoutView: React.FC<{
               sx={{
                 width: { xs: 28, sm: 32, md: 36 },
                 height: { xs: 28, sm: 32, md: 36 },
+                flexShrink: 0,
               }}
             />
             <Typography
@@ -335,6 +336,7 @@ const AppLayoutView: React.FC<{
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
+                minWidth: 0,
               }}
             >
               <Box component="span" sx={{ color: 'text.primary' }}>
@@ -415,12 +417,20 @@ const AppLayoutView: React.FC<{
       sx={{
         flexGrow: 1,
         width: 0,
+        minWidth: 0,
         bgcolor: brand.background.layout,
         minHeight: '100vh',
       }}
     >
       <Toolbar />
-      <Container maxWidth="lg" sx={{ py: { xs: 2, sm: 3, md: 4 }, px: { xs: 1, sm: 2, md: 3 } }}>
+      <Container
+        maxWidth="lg"
+        sx={{
+          py: { xs: 2, sm: 3, md: 4 },
+          px: { xs: 1, sm: 2, md: 3 },
+          minWidth: 0,
+        }}
+      >
         {children}
         <Outlet />
       </Container>

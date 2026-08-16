@@ -528,7 +528,7 @@ export const LoginPage: React.FC = () => {
       <Card sx={{ width: '100%', maxWidth: 450 }}>
         <CardContent sx={{ p: 4 }}>
           <Box sx={{ textAlign: 'center', mb: 4 }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5, mb: 2 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5, mb: 2, flexWrap: 'wrap' }}>
               <Box
                 component="img"
                 src="/logo.svg"

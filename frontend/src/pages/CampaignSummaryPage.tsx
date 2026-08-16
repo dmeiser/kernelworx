@@ -89,7 +89,7 @@ interface MetricCardProps {
 
 const MetricCard: React.FC<MetricCardProps> = ({ icon, value, label }) => (
   <Paper sx={{ p: 3 }}>
-    <Stack direction="row" spacing={2} alignItems="center">
+    <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap">
       {icon}
       <Box>
         <Typography variant="h4">{value}</Typography>
@@ -132,9 +132,9 @@ interface TopProductItemProps {
 
 const TopProductItem: React.FC<TopProductItemProps> = ({ productName, stats }) => (
   <Box>
-    <Stack direction="row" justifyContent="space-between" alignItems="center">
-      <Typography variant="body1">{productName}</Typography>
-      <Stack direction="row" spacing={3} alignItems="center">
+    <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={1}>
+      <Typography variant="body1" sx={{ wordBreak: 'break-word', minWidth: 0, flex: 1 }}>{productName}</Typography>
+      <Stack direction="row" spacing={3} alignItems="center" flexWrap="wrap">
         <Typography variant="body2" color="text.secondary">
           {stats.quantity} sold
         </Typography>

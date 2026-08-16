@@ -504,7 +504,7 @@ export const ScoutsPage: React.FC = () => {
                 </Typography>
               }
             />
-            <Stack direction="row" spacing={2}>
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} flexWrap="wrap">
               <Button variant="outlined" startIcon={<GiftIcon />} onClick={() => { void navigate('/accept-invite'); }}>
                 Accept Invite
               </Button>

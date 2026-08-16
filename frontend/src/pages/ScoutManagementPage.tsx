@@ -247,8 +247,8 @@ const NewInviteCodeAlert: React.FC<{
 }> = ({ inviteCode, copiedCode, onCopy }) =>
   hasNewInviteCode(inviteCode) && inviteCode ? (
     <Alert severity="success" sx={{ mb: 2 }}>
-      <Stack direction="row" spacing={2} alignItems="center">
-        <Typography variant="body2">
+      <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap">
+        <Typography variant="body2" sx={{ wordBreak: 'break-all' }}>
           <strong>New Invite Code:</strong> {inviteCode}
         </Typography>
         <Button size="small" startIcon={<CopyIcon />} onClick={() => onCopy(inviteCode)}>
@@ -304,9 +304,9 @@ const ShareRow: React.FC<{
       <TableCell>
         <Chip label={share.permissions.join(', ')} size="small" variant="outlined" />
       </TableCell>
-      <TableCell>{formatDate(share.createdAt ?? '')}</TableCell>
+      <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>{formatDate(share.createdAt ?? '')}</TableCell>
       <TableCell align="right">
-        <Stack direction="row" spacing={1} justifyContent="flex-end">
+        <Stack direction="row" spacing={1} justifyContent="flex-end" flexWrap="wrap">
           <Button
             size="small"
             variant="outlined"
@@ -344,13 +344,13 @@ const SharesSection: React.FC<{
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
         Accounts with access to your profile (via share links or redeemed invites).
       </Typography>
-      <TableContainer>
+      <TableContainer sx={{ width: '100%', overflowX: 'auto' }}>
         <Table size="small">
           <TableHead>
             <TableRow sx={{ backgroundColor: 'grey.100' }}>
               <TableCell>User</TableCell>
               <TableCell>Permissions</TableCell>
-              <TableCell>Shared</TableCell>
+              <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>Shared</TableCell>
               <TableCell align="right">Actions</TableCell>
             </TableRow>
           </TableHead>
@@ -646,7 +646,7 @@ export const ScoutManagementPage: React.FC = () => {
 
           <Stack spacing={2} sx={{ mb: 2 }}>
             <Typography variant="subtitle2">Permissions for new invites:</Typography>
-            <Stack direction="row" spacing={2}>
+            <Stack direction="row" spacing={2} flexWrap="wrap">
               <FormControlLabel
                 control={
                   <Checkbox
@@ -679,14 +679,14 @@ export const ScoutManagementPage: React.FC = () => {
           </Button>
 
           {hasInvites(invites) ? (
-            <TableContainer>
+            <TableContainer sx={{ width: '100%', overflowX: 'auto' }}>
               <Table size="small">
                 <TableHead>
                   <TableRow sx={{ backgroundColor: 'grey.100' }}>
                     <TableCell>Invite Code</TableCell>
                     <TableCell>Permissions</TableCell>
-                    <TableCell>Created</TableCell>
-                    <TableCell>Expires</TableCell>
+                    <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>Created</TableCell>
+                    <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>Expires</TableCell>
                     <TableCell>Status</TableCell>
                     <TableCell align="right">Actions</TableCell>
                   </TableRow>
@@ -695,8 +695,8 @@ export const ScoutManagementPage: React.FC = () => {
                   {invites.map((invite) => (
                     <TableRow key={invite.inviteCode}>
                       <TableCell>
-                        <Stack direction="row" spacing={1} alignItems="center">
-                          <Typography variant="body2" fontFamily="monospace">
+                        <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+                          <Typography variant="body2" fontFamily="monospace" sx={{ wordBreak: 'break-all' }}>
                             {invite.inviteCode}
                           </Typography>
                           <IconButton
@@ -711,8 +711,8 @@ export const ScoutManagementPage: React.FC = () => {
                       <TableCell>
                         <Chip label={invite.permissions.join(', ')} size="small" variant="outlined" />
                       </TableCell>
-                      <TableCell>{formatDate(invite.createdAt)}</TableCell>
-                      <TableCell>{formatDate(invite.expiresAt)}</TableCell>
+                      <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>{formatDate(invite.createdAt)}</TableCell>
+                      <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>{formatDate(invite.expiresAt)}</TableCell>
                       <TableCell>
                         <InviteStatusChip expiresAt={invite.expiresAt} />
                       </TableCell>
@@ -784,7 +784,7 @@ export const ScoutManagementPage: React.FC = () => {
         <DialogTitle>Delete Seller Profile?</DialogTitle>
         <DialogContent>
           {deletingProfile ? (
-            <Box display="flex" alignItems="center" gap={2} py={2}>
+            <Box display="flex" alignItems="center" gap={2} py={2} flexWrap="wrap">
               <CircularProgress size={24} />
               <Typography>Deleting profile and all related data...</Typography>
             </Box>

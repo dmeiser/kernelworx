@@ -43,7 +43,7 @@ const MAX_CREATOR_MESSAGE_LENGTH = 300;
 const BASE_URL = window.location.origin;
 
 const DetailRow: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
-  <Box display="flex" alignItems="center" gap={1}>
+  <Box display="flex" alignItems="center" gap={1} flexWrap="wrap" sx={{ minWidth: 0 }}>
     <Typography variant="body2" fontWeight="medium">
       {label}:
     </Typography>

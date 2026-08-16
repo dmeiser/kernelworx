@@ -145,7 +145,7 @@ const MfaSetupSection: React.FC<MfaSetupSectionProps> = ({ hook }) => {
       </Typography>
 
       <form onSubmit={(e) => { void hook.handleVerifyMFA(e); }}>
-        <Stack direction="row" spacing={2} alignItems="flex-start">
+        <Stack direction="row" spacing={2} alignItems="flex-start" flexWrap="wrap">
           <TextField
             label="Verification Code"
             value={hook.mfaVerificationCode}
@@ -154,6 +154,7 @@ const MfaSetupSection: React.FC<MfaSetupSectionProps> = ({ hook }) => {
             disabled={hook.mfaLoading}
             inputProps={{ maxLength: 6, pattern: '[0-9]*' }}
             helperText="Enter the 6-digit code"
+            sx={{ minWidth: 0 }}
           />
           <Button type="submit" variant="contained" disabled={hook.mfaLoading || hook.mfaVerificationCode.length !== 6}>
             {hook.mfaLoading ? <CircularProgress size={24} /> : 'Verify & Enable'}
