@@ -329,12 +329,14 @@ class TestDeleteMyAccount:
         catalogs_table = dynamodb.Table("kernelworx-catalogs-ue1-dev")
         orders_table = dynamodb.Table("kernelworx-orders-v2-ue1-dev")
         shares_table = dynamodb.Table("kernelworx-shares-ue1-dev")
+        invites_table = dynamodb.Table("kernelworx-invites-ue1-dev")
 
         account_id_key = f"ACCOUNT#{sample_account_id}"
         profile_id = "PROFILE#test-profile-123"
         campaign_id = "CAMPAIGN#test-campaign-123"
         catalog_id = "CATALOG#test-catalog-123"
         order_id = "ORDER#test-order-123"
+        invite_code = "INVITE#test-invite-123"
 
         # 1. Create account
         accounts_table.put_item(
@@ -401,6 +403,25 @@ class TestDeleteMyAccount:
             }
         )
 
+        # 7. Create invite for the owned profile
+        invites_table.put_item(
+            Item={
+                "inviteCode": invite_code,
+                "profileId": profile_id,
+                "createdAt": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+
+        # 8. Create inbound share where the deleted account is the target
+        shares_table.put_item(
+            Item={
+                "profileId": "PROFILE#shared-with-me",
+                "targetAccountId": account_id_key,
+                "permissions": ["READ"],
+                "createdAt": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+
         # Verify all data exists before deletion
         assert accounts_table.get_item(Key={"accountId": account_id_key}).get("Item") is not None
         assert (
@@ -414,6 +435,13 @@ class TestDeleteMyAccount:
         assert orders_table.get_item(Key={"campaignId": campaign_id, "orderId": order_id}).get("Item") is not None
         assert (
             shares_table.get_item(Key={"profileId": profile_id, "targetAccountId": "ACCOUNT#other-user"}).get("Item")
+            is not None
+        )
+        assert invites_table.get_item(Key={"inviteCode": invite_code}).get("Item") is not None
+        assert (
+            shares_table.get_item(Key={"profileId": "PROFILE#shared-with-me", "targetAccountId": account_id_key}).get(
+                "Item"
+            )
             is not None
         )
 
@@ -455,14 +483,25 @@ class TestDeleteMyAccount:
         # 5. Order should be gone
         assert orders_table.get_item(Key={"campaignId": campaign_id, "orderId": order_id}).get("Item") is None
 
-        # 6. Share should be gone (check all shares for the profile - should be empty)
+        # 6. Outbound share should be gone (check all shares for the profile - should be empty)
         shares_response = shares_table.query(
             KeyConditionExpression="profileId = :pid",
             ExpressionAttributeValues={":pid": profile_id},
         )
         assert len(shares_response.get("Items", [])) == 0, "All shares should be deleted"
 
-        # 7. Verify Cognito deletion was called
+        # 7. Invite for the owned profile should be gone
+        assert invites_table.get_item(Key={"inviteCode": invite_code}).get("Item") is None
+
+        # 8. Inbound share where the deleted account was the target should be gone
+        inbound_shares_response = shares_table.query(
+            IndexName="targetAccountId-index",
+            KeyConditionExpression="targetAccountId = :tid",
+            ExpressionAttributeValues={":tid": account_id_key},
+        )
+        assert len(inbound_shares_response.get("Items", [])) == 0, "Inbound shares should be deleted"
+
+        # 9. Verify Cognito deletion was called
         mock_cognito.admin_delete_user.assert_called_once_with(
             UserPoolId="us-east-1_test123", Username="testuser@example.com"
         )

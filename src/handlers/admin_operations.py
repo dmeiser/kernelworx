@@ -681,7 +681,13 @@ def admin_delete_user(event: Dict[str, Any], context: Any) -> bool:
 
         # Delete DynamoDB data first so a partially-deleted Cognito state does not
         # leave account records orphaned.
+        _delete_invites_for_owned_profiles(account_id, logger)
+        _delete_inbound_shares(account_id, logger)
         _delete_account_from_dynamodb(account_id, logger)
+
+        # TODO(KW-REVIEW-GLM53-1-decision-qr-code-retention-policy): Payment QR S3
+        # objects are intentionally not deleted here pending the captain decision on
+        # retention policy.
 
         if username:
             _delete_user_from_cognito(cognito, user_pool_id, username, email or "", logger)
@@ -997,6 +1003,56 @@ def admin_delete_user_profiles(event: Dict[str, Any], context: Any) -> int:
     except Exception as e:
         logger.error("Unexpected error in admin_delete_user_profiles", error=str(e))
         raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to delete user profiles")
+
+
+def _delete_invites_for_owned_profiles(account_id: str, logger: Any) -> int:
+    """Delete all invites for profiles owned by the account."""
+    db_account_id = _normalize_account_id(account_id)
+    deleted_count = 0
+
+    profiles = _get_user_profiles(db_account_id, logger)
+    for profile in profiles:
+        profile_id = profile["profileId"]
+        invites = query_all_items(
+            tables.invites,
+            {
+                "KeyConditionExpression": "profileId = :pid",
+                "ExpressionAttributeValues": {":pid": profile_id},
+                "IndexName": "profileId-index",
+            },
+        )
+        for invite in invites:
+            tables.invites.delete_item(Key={"inviteCode": invite["inviteCode"]})
+            deleted_count += 1
+
+    logger.info("Deleted invites for owned profiles", account_id=account_id, count=deleted_count)
+    return deleted_count
+
+
+def _delete_inbound_shares(account_id: str, logger: Any) -> int:
+    """Delete all inbound shares where the account is the target."""
+    db_account_id = _normalize_account_id(account_id)
+    deleted_count = 0
+
+    shares = query_all_items(
+        tables.shares,
+        {
+            "KeyConditionExpression": "targetAccountId = :tid",
+            "ExpressionAttributeValues": {":tid": db_account_id},
+            "IndexName": "targetAccountId-index",
+        },
+    )
+    for share in shares:
+        tables.shares.delete_item(
+            Key={
+                "profileId": share["profileId"],
+                "targetAccountId": share["targetAccountId"],
+            }
+        )
+        deleted_count += 1
+
+    logger.info("Deleted inbound shares", account_id=account_id, count=deleted_count)
+    return deleted_count
 
 
 def _soft_delete_catalog(catalog_id: str) -> None:
