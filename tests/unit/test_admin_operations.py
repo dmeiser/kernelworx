@@ -3573,6 +3573,26 @@ class TestAdminGetUserProfiles:
 
         assert exc_info.value.error_code == ErrorCode.FORBIDDEN
 
+    def test_get_user_profiles_paginates(
+        self,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+    ) -> None:
+        """Test that profile retrieval follows DynamoDB pagination."""
+        with patch("src.handlers.admin_operations.query_all_items") as mock_query_all:
+            mock_query_all.return_value = [
+                {"profileId": f"PROFILE#{i}", "sellerName": f"Scout {i}"}
+                for i in range(3)
+            ]
+
+            admin_appsync_event["info"]["fieldName"] = "adminGetUserProfiles"
+            admin_appsync_event["arguments"] = {"accountId": "paginated-user"}
+
+            result = lambda_handler(admin_appsync_event, lambda_context)
+
+            assert len(result) == 3
+            mock_query_all.assert_called_once()
+
 
 class TestAdminGetUserCatalogs:
     """Tests for admin_get_user_catalogs function."""
@@ -3669,6 +3689,28 @@ class TestAdminGetUserCatalogs:
             lambda_handler(non_admin_appsync_event, lambda_context)
 
         assert exc_info.value.error_code == ErrorCode.FORBIDDEN
+
+    def test_get_user_catalogs_paginates(
+        self,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+    ) -> None:
+        """Test that catalog retrieval follows DynamoDB pagination."""
+        with patch("src.handlers.admin_operations.query_all_items") as mock_query_all:
+            mock_query_all.return_value = [
+                {"catalogId": f"CATALOG#{i}", "catalogName": f"Catalog {i}"}
+                for i in range(3)
+            ]
+
+            admin_appsync_event["info"]["fieldName"] = "adminGetUserCatalogs"
+            admin_appsync_event["arguments"] = {"accountId": "paginated-user"}
+
+            result = lambda_handler(admin_appsync_event, lambda_context)
+
+            assert len(result) == 3
+            mock_query_all.assert_called_once()
+            call_kwargs = mock_query_all.call_args[0][1]
+            assert call_kwargs["IndexName"] == "ownerAccountId-index"
 
 
 class TestAdminGetUserCampaigns:
@@ -3931,6 +3973,28 @@ class TestAdminGetUserSharedCampaigns:
 
         assert exc_info.value.error_code == ErrorCode.FORBIDDEN
 
+    def test_get_user_shared_campaigns_paginates(
+        self,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+    ) -> None:
+        """Test that shared campaign retrieval follows DynamoDB pagination."""
+        with patch("src.handlers.admin_operations.query_all_items") as mock_query_all:
+            mock_query_all.return_value = [
+                {"sharedCampaignCode": f"CODE{i}", "campaignName": f"Campaign {i}"}
+                for i in range(3)
+            ]
+
+            admin_appsync_event["info"]["fieldName"] = "adminGetUserSharedCampaigns"
+            admin_appsync_event["arguments"] = {"accountId": "paginated-user"}
+
+            result = lambda_handler(admin_appsync_event, lambda_context)
+
+            assert len(result) == 3
+            mock_query_all.assert_called_once()
+            call_kwargs = mock_query_all.call_args[0][1]
+            assert call_kwargs["IndexName"] == "GSI1"
+
 
 class TestAdminGetProfileShares:
     """Tests for admin_get_profile_shares function."""
@@ -4090,6 +4154,30 @@ class TestAdminGetProfileShares:
             lambda_handler(non_admin_appsync_event, lambda_context)
 
         assert exc_info.value.error_code == ErrorCode.FORBIDDEN
+
+    def test_get_profile_shares_paginates(
+        self,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+    ) -> None:
+        """Test that share retrieval follows DynamoDB pagination."""
+        with patch("src.handlers.admin_operations.query_all_items") as mock_query_all:
+            mock_query_all.return_value = [
+                {
+                    "profileId": "PROFILE#test",
+                    "targetAccountId": f"ACCOUNT#user-{i}",
+                    "permissions": ["READ"],
+                }
+                for i in range(3)
+            ]
+
+            admin_appsync_event["info"]["fieldName"] = "adminGetProfileShares"
+            admin_appsync_event["arguments"] = {"profileId": "test"}
+
+            result = lambda_handler(admin_appsync_event, lambda_context)
+
+            assert len(result) == 3
+            mock_query_all.assert_called_once()
 
 
 class TestAdminDeleteShare:
