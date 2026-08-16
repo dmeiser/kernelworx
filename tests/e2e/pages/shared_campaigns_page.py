@@ -103,32 +103,42 @@ class SharedCampaignsPage(BasePage):
     # ------------------------------------------------------------------
 
     def _catalog_select(self) -> Locator:
-        """Return locator for the *Select Catalog* combobox."""
-        return self.page.get_by_role("combobox", name=self._SELECT_CATALOG_LABEL)
+        """Return locator for the *Select Catalog* combobox.
+
+        MUI Select does not expose a usable accessible name for this field in
+        the current build, so we scope to the FormControl containing the label.
+        """
+        return self.page.locator("div.MuiFormControl-root").filter(
+            has_text=self._SELECT_CATALOG_LABEL
+        ).get_by_role("combobox")
 
     def _campaign_name_input(self) -> Locator:
         """Return locator for the *Campaign Name* field."""
-        return self.page.get_by_label(self._CAMPAIGN_NAME_LABEL, exact=True)
+        return self.page.get_by_label(self._CAMPAIGN_NAME_LABEL)
 
     def _campaign_year_input(self) -> Locator:
         """Return locator for the *Campaign Year* field."""
-        return self.page.get_by_label(self._CAMPAIGN_YEAR_LABEL, exact=True)
+        return self.page.get_by_label(self._CAMPAIGN_YEAR_LABEL)
 
     def _unit_type_select(self) -> Locator:
         """Return locator for the *Unit Type* select."""
-        return self.page.get_by_role("combobox", name=self._UNIT_TYPE_LABEL)
+        return self.page.locator("div.MuiFormControl-root").filter(
+            has_text=self._UNIT_TYPE_LABEL
+        ).get_by_role("combobox")
 
     def _unit_number_input(self) -> Locator:
         """Return locator for the *Unit Number* field."""
-        return self.page.get_by_label(self._UNIT_NUMBER_LABEL, exact=True)
+        return self.page.get_by_label(self._UNIT_NUMBER_LABEL)
 
     def _city_input(self) -> Locator:
         """Return locator for the *City* field."""
-        return self.page.get_by_label(self._CITY_LABEL, exact=True)
+        return self.page.get_by_label(self._CITY_LABEL)
 
     def _state_input(self) -> Locator:
         """Return locator for the State autocomplete input."""
-        return self.page.get_by_label(self._STATE_LABEL, exact=True)
+        return self.page.locator("div.MuiFormControl-root").filter(
+            has_text=self._STATE_LABEL
+        ).get_by_role("combobox")
 
     def _submit_button(self) -> Locator:
         """Return locator for the *Create Shared Campaign* submit button."""
@@ -140,7 +150,7 @@ class SharedCampaignsPage(BasePage):
 
     def _description_input(self) -> Locator:
         """Return locator for the *Description* field in the edit dialog."""
-        return self.page.get_by_label("Description (For Your Reference)", exact=True)
+        return self.page.get_by_label("Description (For Your Reference)")
 
     def _save_changes_button(self) -> Locator:
         """Return locator for the *Save Changes* button in the edit dialog."""

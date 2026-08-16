@@ -40,6 +40,8 @@ def test_public_pages_header_navigation(page: Page) -> None:
     """Public pages share a header that links between public routes."""
     public = PublicPages(page)
     public.goto_landing()
-    page.get_by_role("link", name="Our story").click()
+    # The header contains the primary desktop nav link; prefer it over any
+    # duplicate mobile-menu link.
+    page.get_by_role("banner").get_by_role("link", name="Our story").first.click()
     page.wait_for_url("**/story", timeout=10_000)
     assert public.story_is_visible(), "Story page must be reachable from the landing header"

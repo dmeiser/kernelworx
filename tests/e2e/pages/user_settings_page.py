@@ -153,16 +153,20 @@ class UserSettingsPage(BasePage):
     # ------------------------------------------------------------------
 
     def _current_password_input(self) -> Locator:
-        """Return locator for the *Current Password* field."""
-        return self.page.get_by_label(self._CURRENT_PASSWORD_LABEL, exact=True)
+        """Return locator for the *Current Password* field.
+
+        Uses ``role=textbox`` with an exact accessible-name match to avoid
+        colliding with the other password fields on the same page.
+        """
+        return self.page.get_by_role("textbox", name=self._CURRENT_PASSWORD_LABEL, exact=True)
 
     def _new_password_input(self) -> Locator:
         """Return locator for the *New Password* field."""
-        return self.page.get_by_label(self._NEW_PASSWORD_LABEL, exact=True)
+        return self.page.get_by_role("textbox", name=self._NEW_PASSWORD_LABEL, exact=True)
 
     def _confirm_password_input(self) -> Locator:
         """Return locator for the *Confirm New Password* field."""
-        return self.page.get_by_label(self._CONFIRM_PASSWORD_LABEL, exact=True)
+        return self.page.get_by_role("textbox", name=self._CONFIRM_PASSWORD_LABEL, exact=True)
 
     def _change_password_button(self) -> Locator:
         """Return locator for the *Change Password* submit button."""

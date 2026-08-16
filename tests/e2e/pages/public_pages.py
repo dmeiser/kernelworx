@@ -42,17 +42,20 @@ class PublicPages(BasePage):
     def landing_is_visible(self) -> bool:
         """Return ``True`` when a landing-page heading is visible."""
         heading = self.page.get_by_role("heading", name="Use it on your own")
-        return heading.first.is_visible()
+        expect(heading).to_be_visible(timeout=10_000)
+        return True
 
     def privacy_is_visible(self) -> bool:
         """Return ``True`` when the privacy policy heading is visible."""
         heading = self.page.get_by_role("heading", name="Privacy Policy")
-        return heading.first.is_visible()
+        expect(heading).to_be_visible(timeout=10_000)
+        return True
 
     def story_is_visible(self) -> bool:
         """Return ``True`` when the story page heading is visible."""
         heading = self.page.get_by_role("heading", name="The Story of KernelWorx")
-        return heading.first.is_visible()
+        expect(heading).to_be_visible(timeout=10_000)
+        return True
 
     def expect_landing_primary_cta(self) -> None:
         """Assert that the landing page primary CTA button is visible."""

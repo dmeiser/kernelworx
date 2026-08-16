@@ -37,10 +37,12 @@ import re
 import urllib.parse
 
 import pytest
-from playwright.sync_api import Page
+from playwright.sync_api import Browser, BrowserContext, Page
 
 from tests.e2e.pages.campaign_page import CampaignPage
 from tests.e2e.pages.dashboard_page import DashboardPage
+from tests.e2e.pages.share_page import SharePage
+from tests.e2e.utils.auth import login_as_owner
 
 
 def _base_url() -> str:
@@ -119,7 +121,9 @@ def test_owner_profile_id_for_boundary(
 
 @pytest.mark.smoke
 def test_contributor_cannot_access_unshared_profile(
-    contributor_page: Page, _auth_boundary_state: dict[str, str]
+    contributor_page: Page,
+    _auth_boundary_state: dict[str, str],
+    browser: Browser,
 ) -> None:
     """Contributor sees an access-denied alert for an owner profile with no share.
 
@@ -127,13 +131,27 @@ def test_contributor_cannot_access_unshared_profile(
     renders an error alert ("Profile not found or you don't have access to this
     profile.") in-place — it does **not** redirect the user to another URL.
 
-    The ``global_setup`` fixture (session-scoped, autouse) runs a full cleanup
-    before any tests execute, ensuring the contributor holds no leftover share
-    from a previous run.
+    Because the TypeScript global cleanup may be unavailable in this
+    environment, the test first logs in as the owner and revokes any existing
+    share for the contributor on the target profile.
     """
     profile_id = _auth_boundary_state.get("profile_id", "")
     if not profile_id:
         pytest.skip("profile_id not set — ensure test_owner_profile_id_for_boundary ran first")
+
+    contributor_email = os.environ.get("TEST_CONTRIBUTOR_EMAIL", "")
+
+    # Ensure the contributor has no share for this profile (cleanup fallback).
+    owner_context: BrowserContext = browser.new_context(ignore_https_errors=True)
+    try:
+        owner_page: Page = owner_context.new_page()
+        login_as_owner(owner_page)
+        share_page = SharePage(owner_page)
+        share_page.goto(profile_id)
+        if share_page.has_shared_access(contributor_email):
+            share_page.revoke_access(contributor_email)
+    finally:
+        owner_context.close()
 
     campaign_page = CampaignPage(contributor_page)
     campaign_page.goto(profile_id)

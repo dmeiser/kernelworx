@@ -7,13 +7,41 @@ joining a campaign via a shared-campaign short link.
 import re
 import time
 import urllib.parse
+import uuid
 
 import pytest
-from playwright.sync_api import Browser, BrowserContext, Page
+from playwright.sync_api import Browser, BrowserContext, Page, expect
 
 from tests.e2e.pages.dashboard_page import DashboardPage
 from tests.e2e.pages.shared_campaigns_page import SharedCampaignsPage
 from tests.e2e.utils.auth import login_as_owner
+
+
+# ---------------------------------------------------------------------------
+# Private helpers
+# ---------------------------------------------------------------------------
+
+
+def _unique_campaign_name(base: str) -> str:
+    """Return a campaign name whose first four characters are unique.
+
+    The shared-campaign code uses the first four characters of the campaign
+    name as an abbreviation, so reuse of the same prefix causes a code
+    collision in the dev environment.  We use three random hex characters so
+    the prefix is unlikely to collide with leftovers from previous runs.
+    """
+    prefix = f"E{uuid.uuid4().hex[:3].upper()}"
+    return f"{prefix} {base} {int(time.time())}"
+
+
+def _code_for_campaign_name(page: Page, campaign_name: str) -> str:
+    """Return the short code for the visible row matching *campaign_name*."""
+    row = page.get_by_role("row").filter(has_text=campaign_name)
+    expect(row).to_be_visible(timeout=10_000)
+    code = row.get_by_role("cell").filter(
+        has_text=re.compile(r"^[A-Z0-9]+(-[A-Z0-9]+)+$")
+    ).inner_text()
+    return code
 
 # ---------------------------------------------------------------------------
 # Private helpers
@@ -60,13 +88,14 @@ def test_create_shared_campaign(owner_page: Page) -> None:
     shared = _navigate_to_shared_campaigns(owner_page)
     shared.click_create()
 
-    campaign_name = f"E2E Shared Create {int(time.time())}"
+    campaign_name = _unique_campaign_name("Shared Create")
     shared.create_shared_campaign(campaign_name=campaign_name)
     assert "/shared-campaigns" in owner_page.url, (
         f"Expected redirect to /shared-campaigns after creation; got: {owner_page.url}"
     )
-    codes = shared.get_visible_codes()
-    assert codes, "At least one shared campaign code must be visible after creation"
+    expect(owner_page.get_by_role("row").filter(has_text=campaign_name)).to_be_visible(
+        timeout=10_000
+    )
 
 
 @pytest.mark.smoke
@@ -75,11 +104,9 @@ def test_edit_shared_campaign(owner_page: Page) -> None:
     shared = _navigate_to_shared_campaigns(owner_page)
     shared.click_create()
 
-    campaign_name = f"E2E Shared Edit {int(time.time())}"
+    campaign_name = _unique_campaign_name("Shared Edit")
     shared.create_shared_campaign(campaign_name=campaign_name)
-    codes = shared.get_visible_codes()
-    assert codes, "A shared campaign code must exist to edit"
-    code = codes[0]
+    code = _code_for_campaign_name(owner_page, campaign_name)
 
     new_description = f"Updated description {int(time.time())}"
     shared.edit_description(code, new_description)
@@ -92,18 +119,13 @@ def test_deactivate_shared_campaign(owner_page: Page) -> None:
     shared = _navigate_to_shared_campaigns(owner_page)
     shared.click_create()
 
-    campaign_name = f"E2E Shared Deactivate {int(time.time())}"
+    campaign_name = _unique_campaign_name("Shared Deactivate")
     shared.create_shared_campaign(campaign_name=campaign_name)
-    codes = shared.get_visible_codes()
-    assert codes, "A shared campaign code must exist to deactivate"
-    code = codes[0]
+    code = _code_for_campaign_name(owner_page, campaign_name)
 
     shared.deactivate_shared_campaign(code)
-    # Status chip should now show "Inactive"
-    row = shared._campaign_row(code)
-    assert row.get_by_text("Inactive").first.is_visible(), (
-        "Deactivated shared campaign must show Inactive status"
-    )
+    # The active list no longer shows deactivated campaigns.
+    expect(shared._campaign_row(code)).to_be_hidden(timeout=10_000)
 
 
 @pytest.mark.smoke
@@ -119,11 +141,9 @@ def test_join_shared_campaign_creates_campaign(owner_page: Page, browser: Browse
     # Step 1: create shared campaign
     shared = _navigate_to_shared_campaigns(owner_page)
     shared.click_create()
-    campaign_name = f"E2E Shared Join {int(time.time())}"
+    campaign_name = _unique_campaign_name("Shared Join")
     shared.create_shared_campaign(campaign_name=campaign_name)
-    codes = shared.get_visible_codes()
-    assert codes, "A shared campaign code must be generated"
-    code = codes[0]
+    code = _code_for_campaign_name(owner_page, campaign_name)
 
     # Step 2: fresh context, same owner, join via short link
     join_context: BrowserContext = browser.new_context(ignore_https_errors=True)

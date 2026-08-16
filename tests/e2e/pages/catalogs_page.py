@@ -77,7 +77,7 @@ class CatalogsPage(BasePage):
 
     def _catalog_name_input(self) -> Locator:
         """Return locator for the catalog name field inside the dialog."""
-        return self.page.get_by_label(self._CATALOG_NAME_LABEL, exact=True)
+        return self.page.get_by_label(self._CATALOG_NAME_LABEL)
 
     def _save_catalog_button(self) -> Locator:
         """Return locator for the *Save Catalog* dialog button."""
@@ -88,12 +88,14 @@ class CatalogsPage(BasePage):
         return self.get_by_role_button(self._ADD_PRODUCT_BTN)
 
     def _catalog_row(self, name: str) -> Locator:
-        """Return a table row locator that contains *name*.
+        """Return a table row locator whose cell text exactly matches *name*.
 
         Args:
             name: Catalog name text to match.
         """
-        return self.page.get_by_role("row").filter(has_text=name)
+        return self.page.get_by_role("row").filter(
+            has=self.page.get_by_role("cell", name=name, exact=True)
+        )
 
     def _product_name_input(self, index: int = 0) -> Locator:
         """Return locator for the *Product Name* field of product *index*.
@@ -101,7 +103,7 @@ class CatalogsPage(BasePage):
         Args:
             index: Zero-based product index in the dialog.
         """
-        return self.page.get_by_label("Product Name", exact=True).nth(index)
+        return self.page.get_by_label("Product Name").nth(index)
 
     def _product_price_input(self, index: int = 0) -> Locator:
         """Return locator for the *Price* field of product *index*.
@@ -109,7 +111,7 @@ class CatalogsPage(BasePage):
         Args:
             index: Zero-based product index in the dialog.
         """
-        return self.page.get_by_label("Price", exact=True).nth(index)
+        return self.page.get_by_label("Price").nth(index)
 
     def _edit_button_for(self, name: str) -> Locator:
         """Return the edit icon button on the row for *name*.
@@ -138,13 +140,12 @@ class CatalogsPage(BasePage):
         return bool(self._new_catalog_button().is_visible())
 
     def has_catalog(self, name: str) -> bool:
-        """Return ``True`` when *name* appears in the catalogs table.
+        """Return ``True`` when a row with the exact catalog name is visible.
 
         Args:
             name: Catalog name text to search for.
         """
-        cell = self.page.get_by_role("cell", name=name)
-        return cell.first.is_visible()
+        return self._catalog_row(name).first.is_visible()
 
     # ------------------------------------------------------------------
     # Actions
@@ -216,3 +217,5 @@ class CatalogsPage(BasePage):
         self.page.once("dialog", lambda dlg: dlg.accept())
         self._delete_button_for(name).click()
         self.wait_for_loading()
+        # Wait for the row to disappear from the list before returning.
+        expect(self._catalog_row(name).first).to_be_hidden(timeout=15_000)

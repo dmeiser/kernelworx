@@ -69,23 +69,29 @@ class AdminPage(BasePage):
 
     def _search_field(self) -> Locator:
         """Return locator for the user search text field."""
-        return self.page.get_by_label(self._SEARCH_FIELD_LABEL, exact=True)
+        return self.page.get_by_label(self._SEARCH_FIELD_LABEL)
 
     def _search_button(self) -> Locator:
         """Return locator for the *Search* button."""
         return self.get_by_role_button(self._SEARCH_BTN)
 
     def _catalog_card(self, name: str) -> Locator:
-        """Return the catalog card/paper containing *name*.
+        """Return the catalog card/paper whose title exactly matches *name*.
+
+        Catalog cards are rendered with ``variant="outlined"`` inside the
+        Catalogs tab panel, so we scope to ``.MuiPaper-outlined`` to avoid
+        matching the surrounding tab panel paper.
 
         Args:
             name: Catalog name text to match.
         """
-        return self.page.locator("div.MuiPaper-root").filter(has_text=name)
+        return self.page.locator("div.MuiPaper-root.MuiPaper-outlined").filter(
+            has=self.page.get_by_text(name, exact=True)
+        )
 
     def _catalog_name_input(self) -> Locator:
         """Return locator for the catalog name field inside the editor dialog."""
-        return self.page.get_by_label(self._CATALOG_NAME_LABEL, exact=True)
+        return self.page.get_by_label(self._CATALOG_NAME_LABEL)
 
     def _add_product_button(self) -> Locator:
         """Return locator for the *Add Product* button inside the dialog."""
@@ -101,7 +107,7 @@ class AdminPage(BasePage):
         Args:
             index: Zero-based product index in the dialog.
         """
-        return self.page.get_by_label("Product Name", exact=True).nth(index)
+        return self.page.get_by_label("Product Name").nth(index)
 
     def _product_price_input(self, index: int = 0) -> Locator:
         """Return locator for the *Price* field of product *index*.
@@ -109,7 +115,7 @@ class AdminPage(BasePage):
         Args:
             index: Zero-based product index in the dialog.
         """
-        return self.page.get_by_label("Price", exact=True).nth(index)
+        return self.page.get_by_label("Price").nth(index)
 
     # ------------------------------------------------------------------
     # State queries

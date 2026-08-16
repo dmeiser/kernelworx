@@ -190,14 +190,15 @@ class SharePage(BasePage):
     def revoke_access(self, email: str) -> None:
         """Click the revoke icon button on the share row for *email*.
 
-        The app shows a ``window.confirm`` dialog before revoking; this
-        method accepts it automatically via Playwright's dialog handler.
+        The app opens a confirmation dialog before revoking; this method
+        confirms the revocation and waits for the share row to disappear.
 
         Args:
             email: Email address shown in the share row to revoke.
         """
-        self.page.once("dialog", lambda dlg: dlg.accept())
         self._revoke_button_for(email).click()
+        dialog = self.wait_for_dialog("Revoke Access?")
+        dialog.get_by_role("button", name="Revoke", exact=True).click()
         self.wait_for_loading()
         # Wait for the share row to disappear from the table (confirms revocation completed)
         cell = self.page.get_by_role("cell", name=email)
