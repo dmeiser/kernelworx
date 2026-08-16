@@ -138,8 +138,10 @@ interface UserRowProps {
 const UserRow: React.FC<UserRowProps> = ({ user, onResetPassword, onDeleteUser, onViewDetails }) => (
   <TableRow hover sx={{ cursor: 'pointer' }} onClick={() => onViewDetails(user)}>
     <TableCell>
-      <Stack direction="row" alignItems="center" spacing={1}>
-        <Typography variant="body2">{user.email}</Typography>
+      <Stack direction="row" alignItems="center" spacing={1} sx={{ minWidth: 0, flexWrap: 'wrap' }}>
+        <Typography variant="body2" sx={{ wordBreak: 'break-word', minWidth: 0 }}>
+          {user.email}
+        </Typography>
         {user.emailVerified ? (
           <Tooltip title="Email verified">
             <VerifiedIcon fontSize="small" color="success" />
@@ -151,20 +153,20 @@ const UserRow: React.FC<UserRowProps> = ({ user, onResetPassword, onDeleteUser, 
         )}
       </Stack>
     </TableCell>
-    <TableCell>
+    <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>
       <Typography variant="body2">{user.displayName ?? '—'}</Typography>
     </TableCell>
     <TableCell>
       <UserStatusChip status={user.status} enabled={user.enabled} />
     </TableCell>
-    <TableCell>
+    <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>
       {user.isAdmin ? (
         <Chip icon={<AdminIcon />} label="Admin" color="primary" size="small" />
       ) : (
         <Chip label="User" color="default" size="small" variant="outlined" />
       )}
     </TableCell>
-    <TableCell>
+    <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>
       <Typography variant="body2" color="text.secondary">
         {user.createdAt ? new Date(user.createdAt).toLocaleDateString() : '—'}
       </Typography>
@@ -234,7 +236,7 @@ const UsersTabContent: React.FC<UsersTabContentProps> = ({
 
   return (
     <>
-      <Box display="flex" gap={2} mb={3}>
+      <Box display="flex" gap={2} mb={3} sx={{ minWidth: 0 }}>
         <TextField
           fullWidth
           label="Search User"
@@ -242,6 +244,7 @@ const UsersTabContent: React.FC<UsersTabContentProps> = ({
           value={searchQuery}
           onChange={(e) => onSearchQueryChange(e.target.value)}
           onKeyDown={handleKeyDown}
+          sx={{ flex: 1, minWidth: 0 }}
           slotProps={{
             input: {
               startAdornment: (
@@ -277,15 +280,15 @@ const UsersTabContent: React.FC<UsersTabContentProps> = ({
               Found {searchedUsers.length} users matching &quot;{searchQuery}&quot;
             </Alert>
           )}
-          <TableContainer>
+          <TableContainer sx={{ width: '100%', overflowX: 'auto' }}>
             <Table>
               <TableHead>
                 <TableRow>
                   <TableCell>Email</TableCell>
-                  <TableCell>Name</TableCell>
+                  <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>Name</TableCell>
                   <TableCell>Status</TableCell>
-                  <TableCell>Role</TableCell>
-                  <TableCell>Created</TableCell>
+                  <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>Role</TableCell>
+                  <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>Created</TableCell>
                   <TableCell align="right">Actions</TableCell>
                 </TableRow>
               </TableHead>
@@ -317,16 +320,16 @@ interface CatalogCardProps {
 
 const CatalogCard: React.FC<CatalogCardProps> = ({ catalog, onEdit, onDelete }) => (
   <Paper variant="outlined" sx={{ p: 2 }}>
-    <Stack direction="row" justifyContent="space-between" alignItems="start">
-      <Box>
-        <Typography variant="subtitle1" fontWeight="medium">
+    <Stack direction="row" justifyContent="space-between" alignItems="start" flexWrap="wrap" gap={1}>
+      <Box sx={{ minWidth: 0, flex: 1 }}>
+        <Typography variant="subtitle1" fontWeight="medium" sx={{ wordBreak: 'break-word' }}>
           {catalog.catalogName ?? 'Unnamed Catalog'}
         </Typography>
         <Typography variant="body2" color="text.secondary">
           {(catalog.products ?? []).length} products
         </Typography>
       </Box>
-      <Stack direction="row" spacing={1} alignItems="center">
+      <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
         <Chip
           label={catalog.catalogType === 'ADMIN_MANAGED' ? 'Managed' : 'User'}
           color={catalog.catalogType === 'ADMIN_MANAGED' ? 'primary' : 'default'}
@@ -694,7 +697,7 @@ export const AdminPage: React.FC = () => {
 
       {/* Tabs */}
       <Paper sx={{ mb: 3 }}>
-        <Tabs value={currentTab} onChange={handleTabChange}>
+        <Tabs value={currentTab} onChange={handleTabChange} variant="fullWidth">
           <Tab
             id="admin-tab-0"
             aria-controls="admin-tabpanel-0"

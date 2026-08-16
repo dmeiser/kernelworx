@@ -68,10 +68,10 @@ export const PaymentMethodCard: React.FC<PaymentMethodCardProps> = ({
     <>
       <Card variant="outlined">
         <CardContent>
-          <Box display="flex" alignItems="center" justifyContent="space-between">
+          <Box display="flex" alignItems="center" justifyContent="space-between" flexWrap="wrap" gap={1}>
             {/* Left side: Name and badges */}
-            <Box display="flex" alignItems="center" gap={1}>
-              <Typography variant="h6" component="span">
+            <Box display="flex" alignItems="center" gap={1} sx={{ minWidth: 0, flex: 1 }}>
+              <Typography variant="h6" component="span" sx={{ wordBreak: 'break-word', minWidth: 0 }}>
                 {method.name}
               </Typography>
               {isReserved && <Chip label="Built-in" size="small" color="default" variant="outlined" />}
@@ -91,7 +91,7 @@ export const PaymentMethodCard: React.FC<PaymentMethodCardProps> = ({
 
             {/* Right side: Actions (only for non-reserved methods) */}
             {!isReserved && (
-              <Box display="flex" gap={0.5}>
+              <Box display="flex" gap={0.5} flexWrap="wrap">
                 {!hasQrCode && (
                   <Tooltip title={isUploadingQR ? 'Uploading...' : 'Upload QR code'}>
                     <IconButton

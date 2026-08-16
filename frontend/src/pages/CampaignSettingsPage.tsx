@@ -308,7 +308,7 @@ export const CampaignSettingsPage: React.FC = () => {
           {saveError}
         </Alert>
       )}
-      <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 3 }}>
+      <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={1} sx={{ mb: 3 }}>
         <Typography variant="h5">Campaign Settings</Typography>
         <Button variant="text" color="primary" onClick={() => { void navigate(`/scouts/${toUrlId(profileId)}/manage`); }}>
           Manage Scout

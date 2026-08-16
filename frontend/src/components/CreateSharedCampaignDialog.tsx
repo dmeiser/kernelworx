@@ -212,7 +212,7 @@ const CampaignFormFields: React.FC<CampaignFormFieldsProps> = ({
     )}
 
     {/* Campaign Information */}
-    <Stack direction="row" spacing={2}>
+    <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
       <TextField
         label="Campaign Name"
         value={formState.campaignName}
@@ -227,13 +227,14 @@ const CampaignFormFields: React.FC<CampaignFormFieldsProps> = ({
         value={formState.campaignYear}
         onChange={(e) => formSetters.setCampaignYear(parseInt(e.target.value, 10) || 0)}
         required
-        sx={{ width: 150 }}
+        fullWidth
+        sx={{ minWidth: { xs: '100%', sm: 120 } }}
         inputProps={{ min: 2020, max: 2100 }}
       />
     </Stack>
 
     {/* Optional Dates */}
-    <Stack direction="row" spacing={2}>
+    <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
       <TextField
         label="Start Date (Optional)"
         type="date"
@@ -256,8 +257,8 @@ const CampaignFormFields: React.FC<CampaignFormFieldsProps> = ({
     <Typography variant="subtitle2" color="text.secondary">
       Unit Information (Required)
     </Typography>
-    <Stack direction="row" spacing={2}>
-      <FormControl required sx={{ minWidth: 150 }}>
+    <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+      <FormControl required sx={{ minWidth: { xs: '100%', sm: 120 } }}>
         <InputLabel>Unit Type</InputLabel>
         <Select value={formState.unitType} onChange={(e) => formSetters.setUnitType(e.target.value)} label="Unit Type">
           {UNIT_TYPES.map((type) => (
@@ -273,7 +274,8 @@ const CampaignFormFields: React.FC<CampaignFormFieldsProps> = ({
         value={formState.unitNumber}
         onChange={(e) => formSetters.setUnitNumber(e.target.value)}
         required
-        sx={{ width: 150 }}
+        fullWidth
+        sx={{ minWidth: { xs: '100%', sm: 120 } }}
         inputProps={{ min: 1 }}
       />
       <TextField
@@ -283,7 +285,7 @@ const CampaignFormFields: React.FC<CampaignFormFieldsProps> = ({
         required
         fullWidth
       />
-      <StateAutocomplete value={formState.state} onChange={formSetters.setState} required sx={{ minWidth: 100 }} />
+      <StateAutocomplete value={formState.state} onChange={formSetters.setState} required fullWidth sx={{ minWidth: { xs: '100%', sm: 100 } }} />
     </Stack>
 
     {/* Creator Message */}

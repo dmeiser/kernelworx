@@ -60,16 +60,20 @@ interface HeaderTitleProps {
 }
 
 const HeaderTitle: React.FC<HeaderTitleProps> = ({ title, subtitle, backButton, icon: Icon }) => (
-  <Box>
-    <Stack direction="row" alignItems="center" spacing={1}>
+  <Box sx={{ minWidth: 0, flex: 1 }}>
+    <Stack direction="row" alignItems="center" spacing={1} sx={{ minWidth: 0 }}>
       {backButton && <HeaderBackButton backButton={backButton} />}
-      {Icon && <Icon sx={{ color: 'text.secondary', verticalAlign: 'bottom', mr: 0.5 }} />}
-      <Typography variant="h4" component="h1" sx={{ mb: subtitle ? 0.5 : 0 }}>
+      {Icon && <Icon sx={{ color: 'text.secondary', verticalAlign: 'bottom', mr: 0.5, flexShrink: 0 }} />}
+      <Typography
+        variant="h4"
+        component="h1"
+        sx={{ mb: subtitle ? 0.5 : 0, wordBreak: 'break-word', minWidth: 0 }}
+      >
         {title}
       </Typography>
     </Stack>
     {subtitle && (
-      <Typography variant="body1" sx={{ color: 'text.secondary', mt: 0.5 }}>
+      <Typography variant="body1" sx={{ color: 'text.secondary', mt: 0.5, wordBreak: 'break-word' }}>
         {subtitle}
       </Typography>
     )}
@@ -107,9 +111,10 @@ export const PageHeader: React.FC<PageHeaderProps> = ({
         justifyContent="space-between"
         alignItems={{ xs: 'flex-start', sm: 'center' }}
         spacing={2}
+        sx={{ minWidth: 0, flexWrap: 'wrap' }}
       >
         <HeaderTitle title={title} subtitle={subtitle} backButton={backButton} icon={icon} />
-        {action && <Box>{action}</Box>}
+        {action && <Box sx={{ minWidth: 0 }}>{action}</Box>}
       </Stack>
       {children}
     </CardContent>

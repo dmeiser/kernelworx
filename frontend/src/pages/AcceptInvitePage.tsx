@@ -104,7 +104,7 @@ export const AcceptInvitePage: React.FC = () => {
         <CardContent>
           <Stack spacing={3}>
             <Box>
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5, mb: 2 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5, mb: 2, flexWrap: 'wrap' }}>
                 <Box component="img" src="/logo.svg" alt="KernelWorx mark" sx={{ width: 32, height: 32 }} />
                 <Typography
                   variant="h5"

@@ -98,7 +98,7 @@ export const ProfileCard: React.FC<ProfileCardProps> = ({
       }}
     >
       <CardContent sx={{ flexGrow: 1 }}>
-        <Stack direction="row" spacing={2} alignItems="flex-start" mb={0.25}>
+        <Stack direction="row" spacing={2} alignItems="flex-start" mb={0.25} flexWrap="wrap">
           <Box
             sx={{
               display: 'flex',
@@ -108,8 +108,8 @@ export const ProfileCard: React.FC<ProfileCardProps> = ({
           >
             <PersonIcon color="primary" sx={{ fontSize: 40 }} />
           </Box>
-          <Box flexGrow={1}>
-            <Typography variant="h5" component="h3" sx={{ fontWeight: 600, mb: 0.5 }}>
+          <Box flexGrow={1} sx={{ minWidth: 0 }}>
+            <Typography variant="h5" component="h3" sx={{ fontWeight: 600, mb: 0.5, wordBreak: 'break-word' }}>
               {sellerName}
             </Typography>
             <Stack direction="row" spacing={1} flexWrap="wrap">

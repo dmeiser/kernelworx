@@ -174,7 +174,7 @@ export const CatalogEditorDialog: React.FC<CatalogEditorDialogProps> = ({ open, 
 
           {/* Products */}
           <Box>
-            <Stack direction="row" justifyContent="space-between" alignItems="center" mb={2}>
+            <Stack direction="row" justifyContent="space-between" alignItems="center" mb={2} flexWrap="wrap" gap={1}>
               <Typography variant="h6">Products</Typography>
               <Button startIcon={<AddIcon />} onClick={handleAddProduct} size="small" variant="outlined">
                 Add Product
@@ -193,7 +193,7 @@ export const CatalogEditorDialog: React.FC<CatalogEditorDialogProps> = ({ open, 
                   }}
                 >
                   <Stack spacing={2}>
-                    <Stack direction="row" justifyContent="space-between" alignItems="center">
+                    <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={1}>
                       <Typography variant="subtitle2" color="text.secondary">
                         Product {index + 1}
                       </Typography>

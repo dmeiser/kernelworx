@@ -18,6 +18,7 @@ import {
   Box,
   Typography,
   Paper,
+  Stack,
   Tab,
   Tabs,
   Table,
@@ -323,7 +324,7 @@ export const UserDataPage: React.FC = () => {
 
       {/* Tabs */}
       <Paper sx={{ mb: 3 }}>
-        <Tabs value={currentTab} onChange={handleTabChange}>
+        <Tabs value={currentTab} onChange={handleTabChange} variant="scrollable" scrollButtons="auto" allowScrollButtonsMobile>
           <Tab id="user-data-tab-0" aria-controls="user-data-tabpanel-0" label={`Profiles (${profiles.length})`} />
           <Tab id="user-data-tab-1" aria-controls="user-data-tabpanel-1" label={`Catalogs (${catalogs.length})`} />
           <Tab id="user-data-tab-2" aria-controls="user-data-tabpanel-2" label={`Campaigns (${campaigns.length})`} />
@@ -352,7 +353,7 @@ export const UserDataPage: React.FC = () => {
           )}
 
           {!profilesLoading && !profilesError && profiles.length > 0 && (
-            <TableContainer>
+            <TableContainer sx={{ overflowX: 'auto' }}>
               <Table>
                 <TableHead>
                   <TableRow>
@@ -409,7 +410,7 @@ export const UserDataPage: React.FC = () => {
           )}
 
           {!catalogsLoading && !catalogsError && catalogs.length > 0 && (
-            <TableContainer>
+            <TableContainer sx={{ overflowX: 'auto' }}>
               <Table>
                 <TableHead>
                   <TableRow>
@@ -489,7 +490,7 @@ export const UserDataPage: React.FC = () => {
                   )}
 
                   {campaigns.length > 0 && (
-                    <TableContainer>
+                    <TableContainer sx={{ overflowX: 'auto' }}>
                       <Table>
                         <TableHead>
                           <TableRow>
@@ -537,7 +538,7 @@ export const UserDataPage: React.FC = () => {
                               </TableCell>
                               <TableCell align="right">
                                 {editingCampaignId === campaign.campaignId ? (
-                                  <>
+                                  <Stack direction="row" spacing={0.5} flexWrap="wrap" justifyContent="flex-end">
                                     <Button
                                       size="small"
                                       onClick={() => {
@@ -565,7 +566,7 @@ export const UserDataPage: React.FC = () => {
                                         Clear
                                       </Button>
                                     )}
-                                  </>
+                                  </Stack>
                                 ) : (
                                   <Button
                                     size="small"
@@ -615,7 +616,7 @@ export const UserDataPage: React.FC = () => {
           )}
 
           {!sharedCampaignsLoading && !sharedCampaignsError && sharedCampaigns.length > 0 && (
-            <TableContainer>
+            <TableContainer sx={{ overflowX: 'auto' }}>
               <Table>
                 <TableHead>
                   <TableRow>
@@ -695,7 +696,7 @@ export const UserDataPage: React.FC = () => {
                   )}
 
                   {!sharesLoading && shares.length > 0 && (
-                    <TableContainer>
+                    <TableContainer sx={{ overflowX: 'auto' }}>
                       <Table>
                         <TableHead>
                           <TableRow>

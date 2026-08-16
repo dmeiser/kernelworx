@@ -206,15 +206,15 @@ const CampaignsList: React.FC<{
   onDeactivate: (campaign: SharedCampaign) => void;
 }> = ({ campaigns, onCreateClick, onCopyLink, onShowQR, onEdit, onDeactivate }) =>
   hasSharedCampaigns(campaigns) ? (
-    <TableContainer component={Paper}>
+    <TableContainer component={Paper} sx={{ width: '100%', overflowX: 'auto' }}>
       <Table>
         <TableHead>
           <TableRow>
             <TableCell>Code</TableCell>
-            <TableCell>Description</TableCell>
-            <TableCell>Catalog</TableCell>
+            <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>Description</TableCell>
+            <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>Catalog</TableCell>
             <TableCell>Campaign</TableCell>
-            <TableCell>Unit</TableCell>
+            <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>Unit</TableCell>
             <TableCell>Status</TableCell>
             <TableCell align="right">Actions</TableCell>
           </TableRow>
@@ -268,7 +268,7 @@ const SharedCampaignActions: React.FC<{
   onEdit: (sharedCampaign: SharedCampaign) => void;
   onDeactivate: (sharedCampaign: SharedCampaign) => void;
 }> = ({ sharedCampaign, onCopyLink, onShowQR, onEdit, onDeactivate }) => (
-  <Stack direction="row" spacing={0.5} justifyContent="flex-end">
+  <Stack direction="row" spacing={0.5} justifyContent="flex-end" flexWrap="wrap">
     <Tooltip title="Copy Link">
       <IconButton size="small" onClick={() => onCopyLink(sharedCampaign.sharedCampaignCode)} aria-label="Copy link">
         <CopyIcon fontSize="small" />
@@ -308,11 +308,11 @@ const SharedCampaignRow: React.FC<{
         {sharedCampaign.sharedCampaignCode}
       </Typography>
     </TableCell>
-    <TableCell>
+    <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>
       <Typography
         variant="body2"
         sx={{
-          maxWidth: 200,
+          maxWidth: { xs: 120, sm: 200 },
           overflow: 'hidden',
           textOverflow: 'ellipsis',
           whiteSpace: 'nowrap',
@@ -321,11 +321,11 @@ const SharedCampaignRow: React.FC<{
         {getDescription(sharedCampaign.description)}
       </Typography>
     </TableCell>
-    <TableCell>{getCatalogName(sharedCampaign.catalog)}</TableCell>
+    <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>{getCatalogName(sharedCampaign.catalog)}</TableCell>
     <TableCell>
       {sharedCampaign.campaignName} {sharedCampaign.campaignYear}
     </TableCell>
-    <TableCell>
+    <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>
       {sharedCampaign.unitType} {sharedCampaign.unitNumber}
       <Typography variant="caption" display="block" color="text.secondary">
         {sharedCampaign.city}, {sharedCampaign.state}
