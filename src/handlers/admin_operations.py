@@ -1011,14 +1011,16 @@ def admin_get_user_profiles(event: Dict[str, Any], context: Any) -> list[Dict[st
         db_account_id = _normalize_account_id(account_id)
 
         # Query profiles by ownerAccountId
-        response = tables.profiles.query(
-            KeyConditionExpression="ownerAccountId = :owner",
-            ExpressionAttributeValues={":owner": db_account_id},
+        profiles = query_all_items(
+            tables.profiles,
+            {
+                "KeyConditionExpression": "ownerAccountId = :owner",
+                "ExpressionAttributeValues": {":owner": db_account_id},
+            },
         )
 
-        profiles = response.get("Items", [])
         logger.info("Retrieved user profiles", account_id=account_id, count=len(profiles))
-        return list(profiles)
+        return profiles
 
     except AppError:
         raise
@@ -1040,19 +1042,21 @@ def admin_get_user_catalogs(event: Dict[str, Any], context: Any) -> list[Dict[st
         db_account_id = _normalize_account_id(account_id)
 
         # Query catalogs by ownerAccountId using GSI
-        response = tables.catalogs.query(
-            IndexName="ownerAccountId-index",
-            KeyConditionExpression="ownerAccountId = :owner",
-            FilterExpression="attribute_not_exists(isDeleted) OR isDeleted = :false",
-            ExpressionAttributeValues={
-                ":owner": db_account_id,
-                ":false": False,
+        catalogs = query_all_items(
+            tables.catalogs,
+            {
+                "IndexName": "ownerAccountId-index",
+                "KeyConditionExpression": "ownerAccountId = :owner",
+                "FilterExpression": "attribute_not_exists(isDeleted) OR isDeleted = :false",
+                "ExpressionAttributeValues": {
+                    ":owner": db_account_id,
+                    ":false": False,
+                },
             },
         )
 
-        catalogs = response.get("Items", [])
         logger.info("Retrieved user catalogs", account_id=account_id, count=len(catalogs))
-        return list(catalogs)
+        return catalogs
 
     except AppError:
         raise
@@ -1134,17 +1138,19 @@ def admin_get_user_shared_campaigns(event: Dict[str, Any], context: Any) -> list
         db_account_id = _normalize_account_id(account_id)
 
         # Query shared campaigns by createdBy using GSI1
-        response = tables.shared_campaigns.query(
-            IndexName="GSI1",
-            KeyConditionExpression="createdBy = :creator",
-            ExpressionAttributeValues={
-                ":creator": db_account_id,
+        campaigns = query_all_items(
+            tables.shared_campaigns,
+            {
+                "IndexName": "GSI1",
+                "KeyConditionExpression": "createdBy = :creator",
+                "ExpressionAttributeValues": {
+                    ":creator": db_account_id,
+                },
             },
         )
 
-        campaigns = response.get("Items", [])
         logger.info("Retrieved user shared campaigns", account_id=account_id, count=len(campaigns))
-        return list(campaigns)
+        return campaigns
 
     except AppError:
         raise
@@ -1162,11 +1168,13 @@ def _convert_permissions_to_lists(shares: list[Dict[str, Any]]) -> None:
 
 def _query_profile_shares(db_profile_id: str) -> list[Dict[str, Any]]:
     """Query all shares for a profile."""
-    response = tables.shares.query(
-        KeyConditionExpression="profileId = :pid",
-        ExpressionAttributeValues={":pid": db_profile_id},
+    return query_all_items(
+        tables.shares,
+        {
+            "KeyConditionExpression": "profileId = :pid",
+            "ExpressionAttributeValues": {":pid": db_profile_id},
+        },
     )
-    return list(response.get("Items", []))
 
 
 def _validate_admin_and_get_profile_id(event: Dict[str, Any]) -> str:
