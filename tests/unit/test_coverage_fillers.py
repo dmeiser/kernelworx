@@ -57,9 +57,7 @@ def test_pre_signup_handle_signup_exception_returns_event():
 
     with pytest.raises(pre_signup.FederatedIdentityLinkedException):
         pre_signup._handle_signup_exception(
-            pre_signup.FederatedIdentityLinkedException(
-                "Cannot link federated identity: invalid username format"
-            ),
+            pre_signup.FederatedIdentityLinkedException("Cannot link federated identity: invalid username format"),
             "user@example.com",
             event,
         )
@@ -383,6 +381,7 @@ def test_transfer_profile_ownership_success(monkeypatch):
 
     # Reload handler so it binds to the moto tables via the current env vars.
     from src.utils.dynamodb import reset_dynamodb_resource
+
     reset_dynamodb_resource()
     module_name = "src.handlers.transfer_profile_ownership"
     if module_name in sys.modules:

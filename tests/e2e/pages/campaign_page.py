@@ -159,9 +159,7 @@ class CampaignPage(BasePage):
         self.wait_for_loading()
         # Wait for the new campaign to appear before returning so callers can
         # immediately inspect the campaign list.
-        assert self.has_campaign(name), (
-            f"Campaign '{name}' must be visible in the list after creation"
-        )
+        assert self.has_campaign(name), f"Campaign '{name}' must be visible in the list after creation"
 
     def create_campaign(self, name: str, catalog_name: str) -> None:
         """Open the *New Campaign* dialog, fill it, and submit.

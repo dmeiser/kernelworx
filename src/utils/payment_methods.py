@@ -690,7 +690,9 @@ def delete_qr_from_s3(account_id: str, payment_method_name: str) -> None:
                     )
                 except ClientError as e:
                     if e.response.get("Error", {}).get("Code") != "NoSuchKey":
-                        logger.warning("Failed to delete QR code variant via UUID fallback", s3_key=s3_key, error=str(e))
+                        logger.warning(
+                            "Failed to delete QR code variant via UUID fallback", s3_key=s3_key, error=str(e)
+                        )
 
     except Exception as e:
         logger.error("Failed to delete QR code from S3", error=str(e))

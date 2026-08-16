@@ -93,9 +93,7 @@ class CatalogsPage(BasePage):
         Args:
             name: Catalog name text to match.
         """
-        return self.page.get_by_role("row").filter(
-            has=self.page.get_by_role("cell", name=name, exact=True)
-        )
+        return self.page.get_by_role("row").filter(has=self.page.get_by_role("cell", name=name, exact=True))
 
     def _product_name_input(self, index: int = 0) -> Locator:
         """Return locator for the *Product Name* field of product *index*.

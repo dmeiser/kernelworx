@@ -124,9 +124,7 @@ def _cleanup_unconfirmed_smoke_users(user_pool_id: str) -> None:
             cmd.extend(["--region", region])
         if next_token:
             cmd.extend(["--starting-token", next_token])
-        result = subprocess.run(
-            cmd, check=False, capture_output=True, text=True, timeout=120
-        )
+        result = subprocess.run(cmd, check=False, capture_output=True, text=True, timeout=120)
         if result.returncode != 0:
             raise RuntimeError(f"aws list-users failed: {result.stderr}")
 
@@ -147,18 +145,14 @@ def _cleanup_unconfirmed_smoke_users(user_pool_id: str) -> None:
                 ]
                 if region:
                     delete_cmd.extend(["--region", region])
-                del_result = subprocess.run(
-                    delete_cmd, check=False, capture_output=True, text=True, timeout=120
-                )
+                del_result = subprocess.run(delete_cmd, check=False, capture_output=True, text=True, timeout=120)
                 if del_result.returncode != 0:
                     stderr = del_result.stderr
                     # An already-deleted user between list and delete is benign in
                     # concurrent runs; report every other failure at the end.
                     if stderr and "UserNotFoundException" in stderr:
                         continue
-                    failures.append(
-                        f"admin-delete-user failed for {user['Username']}: {stderr}"
-                    )
+                    failures.append(f"admin-delete-user failed for {user['Username']}: {stderr}")
                 # Small delay to avoid Cognito API throttling on rapid deletes.
                 time.sleep(0.2)
 
@@ -167,9 +161,7 @@ def _cleanup_unconfirmed_smoke_users(user_pool_id: str) -> None:
             break
 
     if failures:
-        raise RuntimeError(
-            "aws admin-delete-user encountered failures:\n" + "\n".join(failures)
-        )
+        raise RuntimeError("aws admin-delete-user encountered failures:\n" + "\n".join(failures))
 
 
 # ---------------------------------------------------------------------------
