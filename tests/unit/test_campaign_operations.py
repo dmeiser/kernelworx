@@ -1123,3 +1123,154 @@ class TestDynamoDBClient:
 
         assert result is cached
         mock_client.assert_not_called()
+
+
+class TestDeleteCampaignOrders:
+    """Tests for delete_campaign_orders Lambda handler."""
+
+    def test_delete_campaign_orders_success(
+        self,
+        orders_table: Any,
+        lambda_context: Any,
+    ) -> None:
+        """Test deleting all orders for a campaign."""
+        from src.handlers.campaign_operations import delete_campaign_orders
+
+        campaign_id = "CAMPAIGN#campaign-123"
+        for i in range(5):
+            orders_table.put_item(
+                Item={
+                    "campaignId": campaign_id,
+                    "orderId": f"ORDER#{i}",
+                    "customerName": f"Customer {i}",
+                    "totalAmount": Decimal("10.0"),
+                }
+            )
+
+        event = {"arguments": {"campaignId": campaign_id}}
+        result = delete_campaign_orders(event, lambda_context)
+
+        assert result == {"deletedCount": 5}
+        remaining = orders_table.query(
+            KeyConditionExpression="campaignId = :cid",
+            ExpressionAttributeValues={":cid": campaign_id},
+        )
+        assert len(remaining.get("Items", [])) == 0
+
+    def test_delete_campaign_orders_chunks_batches(
+        self,
+        orders_table: Any,
+        lambda_context: Any,
+    ) -> None:
+        """Test deleting more than 25 orders chunks deletes into batches."""
+        from src.handlers.campaign_operations import delete_campaign_orders
+
+        campaign_id = "CAMPAIGN#campaign-many"
+        for i in range(30):
+            orders_table.put_item(
+                Item={
+                    "campaignId": campaign_id,
+                    "orderId": f"ORDER#{i}",
+                    "customerName": f"Customer {i}",
+                    "totalAmount": Decimal("10.0"),
+                }
+            )
+
+        event = {"arguments": {"campaignId": campaign_id}}
+        result = delete_campaign_orders(event, lambda_context)
+
+        assert result == {"deletedCount": 30}
+        remaining = orders_table.query(
+            KeyConditionExpression="campaignId = :cid",
+            ExpressionAttributeValues={":cid": campaign_id},
+        )
+        assert len(remaining.get("Items", [])) == 0
+
+    def test_delete_campaign_orders_empty(
+        self,
+        orders_table: Any,
+        lambda_context: Any,
+    ) -> None:
+        """Test deleting orders for a campaign with no orders."""
+        from src.handlers.campaign_operations import delete_campaign_orders
+
+        campaign_id = "CAMPAIGN#campaign-empty"
+        event = {"arguments": {"campaignId": campaign_id}}
+        result = delete_campaign_orders(event, lambda_context)
+
+        assert result == {"deletedCount": 0}
+
+    def test_delete_campaign_orders_unprefixed_id(
+        self,
+        orders_table: Any,
+        lambda_context: Any,
+    ) -> None:
+        """Test that an unprefixed campaignId is normalized."""
+        from src.handlers.campaign_operations import delete_campaign_orders
+
+        campaign_id = "CAMPAIGN#campaign-raw"
+        orders_table.put_item(
+            Item={
+                "campaignId": campaign_id,
+                "orderId": "ORDER#1",
+                "customerName": "Customer",
+                "totalAmount": Decimal("10.0"),
+            }
+        )
+
+        event = {"arguments": {"campaignId": "campaign-raw"}}
+        result = delete_campaign_orders(event, lambda_context)
+
+        assert result == {"deletedCount": 1}
+
+    def test_delete_campaign_orders_missing_campaign_id(
+        self,
+        lambda_context: Any,
+    ) -> None:
+        """Test that missing campaignId raises an error."""
+        from src.handlers.campaign_operations import delete_campaign_orders
+
+        event = {"arguments": {}}
+        with pytest.raises(AppError) as exc_info:
+            delete_campaign_orders(event, lambda_context)
+
+        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+
+    def test_delete_campaign_orders_only_targets_requested_campaign(
+        self,
+        orders_table: Any,
+        lambda_context: Any,
+    ) -> None:
+        """Test that orders for other campaigns are not deleted."""
+        from src.handlers.campaign_operations import delete_campaign_orders
+
+        target_campaign = "CAMPAIGN#target"
+        other_campaign = "CAMPAIGN#other"
+
+        orders_table.put_item(
+            Item={
+                "campaignId": target_campaign,
+                "orderId": "ORDER#target",
+                "customerName": "Target",
+                "totalAmount": Decimal("10.0"),
+            }
+        )
+        orders_table.put_item(
+            Item={
+                "campaignId": other_campaign,
+                "orderId": "ORDER#other",
+                "customerName": "Other",
+                "totalAmount": Decimal("10.0"),
+            }
+        )
+
+        event = {"arguments": {"campaignId": target_campaign}}
+        result = delete_campaign_orders(event, lambda_context)
+
+        assert result == {"deletedCount": 1}
+        assert (
+            orders_table.get_item(
+                Key={"campaignId": other_campaign, "orderId": "ORDER#other"}
+            ).get("Item")
+            is not None
+        )

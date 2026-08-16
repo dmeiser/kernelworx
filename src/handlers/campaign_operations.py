@@ -19,6 +19,7 @@ try:  # pragma: no cover
     from utils.errors import AppError, ErrorCode
     from utils.ids import ensure_catalog_id, ensure_profile_id
     from utils.logging import get_logger
+    from utils.pagination import query_all_items
     from utils.validation import validate_required_fields, validate_unit_fields
 except ModuleNotFoundError:  # pragma: no cover
     from botocore.exceptions import ClientError
@@ -28,6 +29,7 @@ except ModuleNotFoundError:  # pragma: no cover
     from ..utils.errors import AppError, ErrorCode
     from ..utils.ids import ensure_catalog_id, ensure_profile_id
     from ..utils.logging import get_logger
+    from ..utils.pagination import query_all_items
     from ..utils.validation import validate_required_fields, validate_unit_fields
 
 logger = get_logger(__name__)
@@ -449,3 +451,67 @@ def _to_dynamo_value(value: Any) -> Dict[str, Any]:
     if isinstance(value, (set, list, dict)):
         return _dynamo_value_for_collection(value)
     return _dynamo_value_for_scalar(value)
+
+
+BATCH_DELETE_SIZE = 25
+
+
+def _delete_orders_for_campaign(campaign_id: str) -> int:
+    """Delete all orders for a campaign, paginating the query and chunking deletes.
+
+    Args:
+        campaign_id: The campaign ID (with CAMPAIGN# prefix).
+
+    Returns:
+        Number of orders deleted.
+    """
+    orders = query_all_items(
+        tables.orders,
+        {
+            "KeyConditionExpression": "campaignId = :cid",
+            "ExpressionAttributeValues": {":cid": campaign_id},
+            "ProjectionExpression": "campaignId, orderId",
+        },
+    )
+
+    if not orders:
+        return 0
+
+    deleted_count = 0
+    for i in range(0, len(orders), BATCH_DELETE_SIZE):
+        batch = orders[i : i + BATCH_DELETE_SIZE]
+        with tables.orders.batch_writer(overwrite_by_pkeys=["campaignId", "orderId"]) as writer:
+            for order in batch:
+                writer.delete_item(
+                    Key={
+                        "campaignId": str(order["campaignId"]),
+                        "orderId": str(order["orderId"]),
+                    }
+                )
+        deleted_count += len(batch)
+
+    logger.info("Deleted orders for campaign", campaign_id=campaign_id, count=deleted_count)
+    return deleted_count
+
+
+def delete_campaign_orders(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    """Delete all orders for a campaign (AppSync Lambda resolver).
+
+    Expects event.arguments.campaignId. Returns { deletedCount: int }.
+    """
+    try:
+        campaign_id = event.get("arguments", {}).get("campaignId", "")
+        if not campaign_id:
+            raise AppError(ErrorCode.INVALID_INPUT, "campaignId is required")
+
+        db_campaign_id = (
+            campaign_id if campaign_id.startswith("CAMPAIGN#") else f"CAMPAIGN#{campaign_id}"
+        )
+
+        deleted_count = _delete_orders_for_campaign(db_campaign_id)
+        return {"deletedCount": deleted_count}
+    except AppError:
+        raise
+    except Exception as e:
+        logger.error("Error deleting campaign orders", error=str(e), exc_info=True)
+        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to delete campaign orders") from e

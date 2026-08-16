@@ -154,8 +154,7 @@ resource "aws_appsync_resolver" "delete_campaign" {
       aws_appsync_function.lookup_campaign_for_delete.function_id,
       aws_appsync_function.verify_profile_write_access.function_id,
       aws_appsync_function.check_share_permissions.function_id,
-      aws_appsync_function.query_campaign_orders_for_delete.function_id,
-      aws_appsync_function.delete_campaign_orders.function_id,
+      aws_appsync_function.delete_campaign_orders_lambda.function_id,
       aws_appsync_function.delete_campaign.function_id,
     ]
   }
