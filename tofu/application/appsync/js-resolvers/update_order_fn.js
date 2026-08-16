@@ -65,7 +65,7 @@ export function request(ctx) {
         exprValues[':customerName'] = input.customerName;
     }
     if (input.customerPhone !== undefined) {
-        const phoneValue = input.customerPhone != null ? String(input.customerPhone).trim() : '';
+        const phoneValue = input.customerPhone != null ? `${input.customerPhone}`.trim() : '';
         if (phoneValue === '') {
             // Explicitly clear a previously stored phone number when the client sends
             // null, empty string, or whitespace-only input.

@@ -47,7 +47,7 @@ function validateCustomer(input) {
         util.error('Customer name is required', 'BadRequest');
     }
 
-    const phoneValue = input.customerPhone != null ? String(input.customerPhone).trim() : '';
+    const phoneValue = input.customerPhone != null ? `${input.customerPhone}`.trim() : '';
     const hasAddress = input.customerAddress != null;
     let customerPhone = undefined;
 
