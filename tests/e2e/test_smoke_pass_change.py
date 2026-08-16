@@ -66,7 +66,7 @@ def test_password_change_flow(owner_page: Page, browser: Browser) -> None:
         settings.goto()
         settings.change_password(original_password, new_password)
 
-        # Verify the new password works by logging in with it
+        # Verify the new password works by logging in with it, then revert.
         new_context: BrowserContext = browser.new_context(ignore_https_errors=True)
         verify_page: Page = new_context.new_page()
         try:
@@ -74,12 +74,15 @@ def test_password_change_flow(owner_page: Page, browser: Browser) -> None:
             assert "/home" in verify_page.url, (
                 f"Expected redirect to /home with new password; got: {verify_page.url}"
             )
-
-            # Change password back to the original value through the UI
-            settings = UserSettingsPage(verify_page)
-            settings.goto()
-            settings.change_password(new_password, original_password)
         finally:
+            # Always attempt to revert the password through the UI after a
+            # successful change, even if the verification login failed.
+            try:
+                settings = UserSettingsPage(verify_page)
+                settings.goto()
+                settings.change_password(new_password, original_password)
+            except BaseException:
+                pass
             new_context.close()
 
         # Confirm the original password still works

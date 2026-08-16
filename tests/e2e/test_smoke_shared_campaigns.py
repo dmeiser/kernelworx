@@ -16,7 +16,6 @@ from tests.e2e.pages.dashboard_page import DashboardPage
 from tests.e2e.pages.shared_campaigns_page import SharedCampaignsPage
 from tests.e2e.utils.auth import login_as_owner
 
-
 # ---------------------------------------------------------------------------
 # Private helpers
 # ---------------------------------------------------------------------------

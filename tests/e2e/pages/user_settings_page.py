@@ -188,4 +188,8 @@ class UserSettingsPage(BasePage):
     def password_change_succeeded(self) -> bool:
         """Return ``True`` when the success alert is visible after changing password."""
         alert = self.page.get_by_role("alert").filter(has_text="Password changed successfully")
-        return alert.first.is_visible()
+        try:
+            expect(alert.first).to_be_visible(timeout=10_000)
+            return True
+        except AssertionError:
+            return False

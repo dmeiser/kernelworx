@@ -230,12 +230,15 @@ class SharedCampaignsPage(BasePage):
         listbox = self.page.get_by_role("listbox")
         expect(listbox).to_be_visible(timeout=5_000)
 
+        enabled_options = listbox.locator('[role="option"]:not([aria-disabled="true"])')
+        expect(enabled_options).not_to_have_count(0, timeout=5_000)
+
         if catalog_name:
             option = listbox.get_by_role("option", name=catalog_name)
             if option.count() == 0:
-                option = listbox.locator('[role="option"]:not([aria-disabled="true"])').first
+                option = enabled_options.first
         else:
-            option = listbox.locator('[role="option"]:not([aria-disabled="true"])').first
+            option = enabled_options.first
 
         expect(option).to_be_visible(timeout=5_000)
         option.click()
@@ -313,18 +316,19 @@ class SharedCampaignsPage(BasePage):
         profile_listbox = self.page.get_by_role("listbox")
         expect(profile_listbox).to_be_visible(timeout=5_000)
 
+        enabled_options = profile_listbox.locator('[role="option"]:not([aria-disabled="true"])')
+        expect(enabled_options).not_to_have_count(0, timeout=5_000)
+
+        option = enabled_options.first
         if profile_id:
             candidate_ids = {profile_id}
             if not profile_id.startswith("PROFILE#"):
                 candidate_ids.add(f"PROFILE#{profile_id}")
-            option = profile_listbox.locator('[role="option"]:not([aria-disabled="true"])').first
             for candidate in candidate_ids:
                 candidate_option = profile_listbox.locator(f'[role="option"][data-value="{candidate}"]')
                 if candidate_option.count() > 0:
                     option = candidate_option
                     break
-        else:
-            option = profile_listbox.locator('[role="option"]:not([aria-disabled="true"])').first
 
         expect(option).to_be_visible(timeout=5_000)
         option.click()
