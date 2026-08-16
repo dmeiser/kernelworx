@@ -257,6 +257,21 @@ jobs:
             fi
           done
 
+      - name: Ensure owner test user is in ADMIN group
+        env:
+          TEST_OWNER_EMAIL: ${{ secrets.TEST_OWNER_EMAIL_PROD }}
+          TEST_USER_POOL_ID: ${{ secrets.TEST_USER_POOL_ID_PROD }}
+        run: |
+          test -n "$TEST_OWNER_EMAIL"
+          test -n "$TEST_USER_POOL_ID"
+
+          echo "Ensuring owner test user '$TEST_OWNER_EMAIL' is a member of the ADMIN group..."
+          aws cognito-idp admin-add-user-to-group \
+            --user-pool-id "$TEST_USER_POOL_ID" \
+            --username "$TEST_OWNER_EMAIL" \
+            --group-name ADMIN
+          echo "Owner test user is in the ADMIN group."
+
       - name: Run E2E smoke tests (prod full smoke)
         env:
           E2E_BASE_URL: ${{ vars.E2E_BASE_URL_PROD }}
