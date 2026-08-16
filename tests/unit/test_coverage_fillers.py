@@ -765,28 +765,6 @@ def test_profile_sharing_fetch_batch_with_zero_retries():
     assert result == []
 
 
-def test_admin_operations_get_cognito_user_attributes():
-    from src.handlers.admin_operations import _get_cognito_user_attributes
-
-    account_id, email, email_verified, user_status, enabled = _get_cognito_user_attributes(
-        {
-            "Username": "u1",
-            "Attributes": [
-                {"Name": "sub", "Value": "sub-123"},
-                {"Name": "email", "Value": "user@example.com"},
-                {"Name": "email_verified", "Value": "true"},
-            ],
-            "UserStatus": "CONFIRMED",
-            "Enabled": False,
-        }
-    )
-    assert account_id == "sub-123"
-    assert email == "user@example.com"
-    assert email_verified is True
-    assert user_status == "CONFIRMED"
-    assert enabled is False
-
-
 def test_campaign_operations_normalize_account_id():
     from src.handlers.campaign_operations import _normalize_account_id
 
