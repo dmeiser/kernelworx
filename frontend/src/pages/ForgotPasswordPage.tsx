@@ -1,13 +1,12 @@
 /**
  * Forgot Password Page
  *
- * Provides a branded password-reset flow:
- * - Request a reset code via email using AWS Amplify `resetPassword`
- * - Confirm the code and set a new password using `confirmResetPassword`
- * - Redirect to `/login` after a successful reset
+ * Two-step password reset flow using Cognito:
+ * 1. Enter email and request a reset code.
+ * 2. Enter the code and a new password to confirm the reset.
  */
 
-import { useState, useRef, useEffect } from 'react';
+import { useState } from 'react';
 import {
   Box,
   Button,
@@ -20,78 +19,57 @@ import {
   CircularProgress,
   Link as MuiLink,
 } from '@mui/material';
-import { useNavigate, type NavigateFunction } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { resetPassword, confirmResetPassword } from 'aws-amplify/auth';
-import { useAuth } from '../contexts/AuthContext';
 
 const PASSWORD_REGEX = /^(?=.*[A-Z])(?=.*[a-z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,}$/;
 
 const RESET_ERROR_MESSAGES: Record<string, string> = {
-  UserNotFoundException:
-    'No account found with that email address. Please check the email or sign up.',
-  LimitExceededException:
-    'Too many attempts. Please wait a while before trying again.',
-  InvalidParameterException: 'Invalid email address. Please check and try again.',
+  InvalidParameterException: 'Please check your email address and try again.',
+  LimitExceededException: 'Too many attempts. Please try again later.',
 };
 
 const CONFIRM_ERROR_MESSAGES: Record<string, string> = {
-  CodeMismatchException: 'Invalid confirmation code. Please check and try again.',
-  ExpiredCodeException: 'This code has expired. Please request a new one.',
+  CodeMismatchException: 'Invalid verification code. Please check and try again.',
+  UserNotFoundException: 'Invalid verification code. Please check and try again.',
+  ExpiredCodeException: 'Verification code expired. Please request a new code.',
   InvalidPasswordException:
     'Password does not meet requirements: minimum 8 characters with uppercase, lowercase, numbers, and symbols.',
-  UserNotFoundException:
-    'No account found with that email address. Please start the reset process again.',
 };
 
-function getErrorMessage(
-  err: unknown,
+function getErrorFromTable(
   table: Record<string, string>,
-  fallback: string,
+  errorName: string | undefined,
+  fallbackMessage: string,
 ): string {
-  const typed = err as { name?: string; message?: string };
-  if (typed.name && table[typed.name]) {
-    return table[typed.name];
+  if (errorName && table[errorName]) {
+    return table[errorName];
   }
-  return typed.message || fallback;
+  return fallbackMessage;
 }
 
-function validatePassword(password: string, confirmPassword: string): string | null {
-  if (!password || !confirmPassword) {
-    return 'Password and confirmation are required';
-  }
-  if (!PASSWORD_REGEX.test(password)) {
-    return 'Password must be at least 8 characters and include uppercase, lowercase, number, and symbol';
-  }
-  if (password !== confirmPassword) {
-    return 'Passwords do not match';
-  }
-  return null;
-}
-
-interface ForgotPasswordState {
-  email: string;
-  setEmail: (value: string) => void;
-  code: string;
-  setCode: (value: string) => void;
-  password: string;
-  setPassword: (value: string) => void;
-  confirmPassword: string;
-  setConfirmPassword: (value: string) => void;
+interface AlertMessagesProps {
   error: string | null;
   success: string | null;
-  loading: boolean;
-  codeSent: boolean;
-  handleRequestCode: (e: React.FormEvent) => Promise<void>;
-  handleConfirmReset: (e: React.FormEvent) => Promise<void>;
-  handleBackToEmail: () => void;
-  navigateLogin: () => void;
-  clearError: () => void;
-  clearSuccess: () => void;
 }
 
-function useForgotPasswordState(navigate: NavigateFunction): ForgotPasswordState {
-  const { isAuthenticated } = useAuth();
+const AlertMessages: React.FC<AlertMessagesProps> = ({ error, success }) => (
+  <>
+    {error && (
+      <Alert severity="error" sx={{ mb: 2 }}>
+        {error}
+      </Alert>
+    )}
+    {success && (
+      <Alert severity="success" sx={{ mb: 2 }}>
+        {success}
+      </Alert>
+    )}
+  </>
+);
 
+export const ForgotPasswordPage: React.FC = () => {
+  const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [code, setCode] = useState('');
   const [password, setPassword] = useState('');
@@ -100,59 +78,53 @@ function useForgotPasswordState(navigate: NavigateFunction): ForgotPasswordState
   const [success, setSuccess] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [codeSent, setCodeSent] = useState(false);
-  const redirectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  useEffect(() => {
-    if (isAuthenticated) {
-      void navigate('/home', { replace: true });
+  const validatePassword = (): string | null => {
+    if (!password || !confirmPassword) {
+      return 'Password and confirmation are required';
     }
-  }, [isAuthenticated, navigate]);
-
-  useEffect(() => {
-    return () => {
-      if (redirectTimeoutRef.current) {
-        clearTimeout(redirectTimeoutRef.current);
-      }
-    };
-  }, []);
-
-  const scheduleRedirect = (callback: () => void, delay = 1500) => {
-    if (redirectTimeoutRef.current) {
-      clearTimeout(redirectTimeoutRef.current);
+    if (!PASSWORD_REGEX.test(password)) {
+      return 'Password must be at least 8 characters and include uppercase, lowercase, number, and symbol';
     }
-    redirectTimeoutRef.current = setTimeout(callback, delay);
+    if (password !== confirmPassword) {
+      return 'Passwords do not match';
+    }
+    return null;
   };
 
-  const handleRequestCode = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleRequestCode = async (e?: React.FormEvent) => {
+    e?.preventDefault();
     setError(null);
     setSuccess(null);
 
-    const trimmedEmail = email.trim();
-    if (!trimmedEmail || !trimmedEmail.includes('@')) {
-      setError('Please enter a valid email address');
+    if (!email) {
+      setError('Email is required');
       return;
     }
 
     setLoading(true);
     try {
-      await resetPassword({ username: trimmedEmail });
-      setCodeSent(true);
-      setSuccess(`If an account exists for ${trimmedEmail}, a reset code has been sent.`);
+      await resetPassword({ username: email });
     } catch (err: unknown) {
       console.error('Reset password request failed:', err);
-      setError(getErrorMessage(err, RESET_ERROR_MESSAGES, 'Unable to send reset code. Please try again.'));
-    } finally {
-      setLoading(false);
+      const typedError = err as { name?: string; message?: string };
+      if (typedError.name !== 'UserNotFoundException') {
+        setError(getErrorFromTable(RESET_ERROR_MESSAGES, typedError.name, typedError.message || 'Unable to send reset code'));
+        setLoading(false);
+        return;
+      }
     }
+    setCodeSent(true);
+    setSuccess(`Reset code sent to ${email}`);
+    setLoading(false);
   };
 
-  const handleConfirmReset = async (e: React.FormEvent) => {
+  const handleResetPassword = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setSuccess(null);
 
-    const validationError = validatePassword(password, confirmPassword);
+    const validationError = validatePassword();
     if (validationError) {
       setError(validationError);
       return;
@@ -161,278 +133,22 @@ function useForgotPasswordState(navigate: NavigateFunction): ForgotPasswordState
     setLoading(true);
     try {
       await confirmResetPassword({
-        username: email.trim(),
-        confirmationCode: code.trim(),
+        username: email,
+        confirmationCode: code,
         newPassword: password,
       });
-      setSuccess('Your password has been reset successfully.');
-      scheduleRedirect(() => {
-        void navigate('/login', { replace: true });
-      });
+      setSuccess('Password reset successfully. Redirecting to login...');
+      setTimeout(() => {
+        void navigate('/login');
+      }, 1500);
     } catch (err: unknown) {
       console.error('Confirm reset password failed:', err);
-      setError(getErrorMessage(err, CONFIRM_ERROR_MESSAGES, 'Unable to reset password. Please try again.'));
+      const typedError = err as { name?: string; message?: string };
+      setError(getErrorFromTable(CONFIRM_ERROR_MESSAGES, typedError.name, typedError.message || 'Unable to reset password'));
     } finally {
       setLoading(false);
     }
   };
-
-  const handleBackToEmail = () => {
-    setCodeSent(false);
-    setCode('');
-    setPassword('');
-    setConfirmPassword('');
-    setError(null);
-    setSuccess(null);
-  };
-
-  const navigateLogin = () => {
-    void navigate('/login');
-  };
-
-  return {
-    email,
-    setEmail,
-    code,
-    setCode,
-    password,
-    setPassword,
-    confirmPassword,
-    setConfirmPassword,
-    error,
-    success,
-    loading,
-    codeSent,
-    handleRequestCode,
-    handleConfirmReset,
-    handleBackToEmail,
-    navigateLogin,
-    clearError: () => setError(null),
-    clearSuccess: () => setSuccess(null),
-  };
-}
-
-interface RequestCodeFormProps {
-  email: string;
-  setEmail: (value: string) => void;
-  loading: boolean;
-  onSubmit: (e: React.FormEvent) => Promise<void>;
-  onLogin: () => void;
-}
-
-const RequestCodeForm: React.FC<RequestCodeFormProps> = ({
-  email,
-  setEmail,
-  loading,
-  onSubmit,
-  onLogin,
-}) => (
-  <Box component="form" onSubmit={(e) => { void onSubmit(e); }}>
-    <Stack spacing={2} sx={{ mb: 3 }}>
-      <TextField
-        label="Email"
-        type="email"
-        value={email}
-        onChange={(e) => setEmail(e.target.value)}
-        required
-        fullWidth
-        autoComplete="email"
-        disabled={loading}
-        autoFocus
-      />
-    </Stack>
-
-    <Button
-      type="submit"
-      variant="contained"
-      fullWidth
-      size="large"
-      disabled={loading}
-      sx={{ mb: 2 }}
-    >
-      {loading ? <CircularProgress size={24} /> : 'Send Reset Code'}
-    </Button>
-
-    <Box sx={{ textAlign: 'center' }}>
-      <Typography variant="body2" color="text.secondary">
-        Remember your password?{' '}
-        <MuiLink
-          component="button"
-          type="button"
-          variant="body2"
-          onClick={onLogin}
-          sx={{ cursor: 'pointer', fontWeight: 600 }}
-        >
-          Sign In
-        </MuiLink>
-      </Typography>
-    </Box>
-  </Box>
-);
-
-interface ConfirmResetFormProps {
-  code: string;
-  setCode: (value: string) => void;
-  password: string;
-  setPassword: (value: string) => void;
-  confirmPassword: string;
-  setConfirmPassword: (value: string) => void;
-  loading: boolean;
-  onSubmit: (e: React.FormEvent) => Promise<void>;
-  onBackToEmail: () => void;
-  onLogin: () => void;
-}
-
-const ConfirmResetForm: React.FC<ConfirmResetFormProps> = ({
-  code,
-  setCode,
-  password,
-  setPassword,
-  confirmPassword,
-  setConfirmPassword,
-  loading,
-  onSubmit,
-  onBackToEmail,
-  onLogin,
-}) => (
-  <Box component="form" onSubmit={(e) => { void onSubmit(e); }}>
-    <Stack spacing={2} sx={{ mb: 3 }}>
-      <TextField
-        label="Confirmation Code"
-        type="text"
-        value={code}
-        onChange={(e) => setCode(e.target.value)}
-        required
-        fullWidth
-        autoComplete="one-time-code"
-        disabled={loading}
-        inputProps={{ maxLength: 6, pattern: '[0-9]*' }}
-        autoFocus
-      />
-      <TextField
-        label="New Password"
-        type="password"
-        value={password}
-        onChange={(e) => setPassword(e.target.value)}
-        required
-        fullWidth
-        autoComplete="new-password"
-        disabled={loading}
-        helperText="Minimum 8 characters with uppercase, lowercase, numbers, and symbols"
-      />
-      <TextField
-        label="Confirm New Password"
-        type="password"
-        value={confirmPassword}
-        onChange={(e) => setConfirmPassword(e.target.value)}
-        required
-        fullWidth
-        autoComplete="new-password"
-        disabled={loading}
-      />
-    </Stack>
-
-    <Button
-      type="submit"
-      variant="contained"
-      fullWidth
-      size="large"
-      disabled={loading}
-      sx={{ mb: 2 }}
-    >
-      {loading ? <CircularProgress size={24} /> : 'Reset Password'}
-    </Button>
-
-    <Stack spacing={1}>
-      <Button variant="text" fullWidth onClick={onBackToEmail} disabled={loading}>
-        Back to Email
-      </Button>
-      <Button variant="text" fullWidth onClick={onLogin} disabled={loading}>
-        Back to Login
-      </Button>
-    </Stack>
-  </Box>
-);
-
-interface AlertMessagesProps {
-  error: string | null;
-  success: string | null;
-  onCloseError: () => void;
-  onCloseSuccess: () => void;
-}
-
-const AlertMessages: React.FC<AlertMessagesProps> = ({
-  error,
-  success,
-  onCloseError,
-  onCloseSuccess,
-}) => (
-  <>
-    {error && (
-      <Alert severity="error" sx={{ mb: 3 }} onClose={onCloseError}>
-        {error}
-      </Alert>
-    )}
-    {success && (
-      <Alert severity="success" sx={{ mb: 3 }} onClose={onCloseSuccess}>
-        {success}
-      </Alert>
-    )}
-  </>
-);
-
-const PageHeader: React.FC<{ codeSent: boolean }> = ({ codeSent }) => (
-  <Box sx={{ textAlign: 'center', mb: 4 }}>
-    <Box
-      sx={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 0.5,
-        mb: 2,
-        flexWrap: 'wrap',
-      }}
-    >
-      <Box
-        component="img"
-        src="/logo.svg"
-        alt="KernelWorx mark"
-        sx={{ width: 32, height: 32 }}
-      />
-      <Typography
-        variant="h5"
-        sx={{
-          fontFamily: '"Bricolage Grotesque", "Atkinson Hyperlegible", sans-serif',
-          fontWeight: 700,
-          lineHeight: 1,
-        }}
-      >
-        <Box component="span" sx={{ color: 'text.primary' }}>Kernel</Box>
-        <Box component="span" sx={{ color: 'primary.main' }}>Worx</Box>
-      </Typography>
-    </Box>
-    <Typography
-      variant="h4"
-      component="h1"
-      gutterBottom
-      sx={{
-        fontFamily: '"Bricolage Grotesque", "Atkinson Hyperlegible", sans-serif',
-        fontWeight: 700,
-      }}
-    >
-      Reset Password
-    </Typography>
-    <Typography variant="body2" color="text.secondary">
-      {codeSent
-        ? 'Enter the confirmation code and your new password'
-        : 'Enter your email to receive a reset code'}
-    </Typography>
-  </Box>
-);
-
-export const ForgotPasswordPage: React.FC = () => {
-  const navigate = useNavigate();
-  const state = useForgotPasswordState(navigate);
 
   return (
     <Box
@@ -447,37 +163,104 @@ export const ForgotPasswordPage: React.FC = () => {
     >
       <Card sx={{ width: '100%', maxWidth: 450 }}>
         <CardContent sx={{ p: 4 }}>
-          <PageHeader codeSent={state.codeSent} />
-          <AlertMessages
-            error={state.error}
-            success={state.success}
-            onCloseError={state.clearError}
-            onCloseSuccess={state.clearSuccess}
-          />
-          {state.codeSent ? (
-            <ConfirmResetForm
-              code={state.code}
-              setCode={state.setCode}
-              password={state.password}
-              setPassword={state.setPassword}
-              confirmPassword={state.confirmPassword}
-              setConfirmPassword={state.setConfirmPassword}
-              loading={state.loading}
-              onSubmit={state.handleConfirmReset}
-              onBackToEmail={state.handleBackToEmail}
-              onLogin={state.navigateLogin}
-            />
+          <Box sx={{ textAlign: 'center', mb: 4 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5, mb: 2, flexWrap: 'wrap' }}>
+              <Box component="img" src="/logo.svg" alt="KernelWorx mark" sx={{ width: 32, height: 32 }} />
+              <Typography
+                variant="h5"
+                component="h1"
+                sx={{
+                  fontFamily: '"Bricolage Grotesque", "Atkinson Hyperlegible", sans-serif',
+                  fontWeight: 700,
+                  lineHeight: 1,
+                }}
+              >
+                <Box component="span" sx={{ color: 'text.primary' }}>Kernel</Box>
+                <Box component="span" sx={{ color: 'primary.main' }}>Worx</Box>
+              </Typography>
+            </Box>
+            <Typography variant="body2" color="text.secondary">
+              Reset your password
+            </Typography>
+          </Box>
+
+          <AlertMessages error={error} success={success} />
+
+          {!codeSent ? (
+            <Box component="form" onSubmit={(e) => { void handleRequestCode(e); }}>
+              <TextField
+                fullWidth
+                label="Email Address"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                margin="normal"
+                required
+                autoComplete="email"
+                autoFocus
+              />
+              <Button type="submit" fullWidth variant="contained" sx={{ mt: 3, mb: 2 }} disabled={loading}>
+                {loading ? <CircularProgress size={24} /> : 'Send Reset Code'}
+              </Button>
+              <Typography variant="body2" align="center" color="text.secondary">
+                Remember your password?{' '}
+                <MuiLink component="button" type="button" onClick={() => { void navigate('/login'); }} sx={{ cursor: 'pointer' }}>
+                  Sign In
+                </MuiLink>
+              </Typography>
+            </Box>
           ) : (
-            <RequestCodeForm
-              email={state.email}
-              setEmail={state.setEmail}
-              loading={state.loading}
-              onSubmit={state.handleRequestCode}
-              onLogin={state.navigateLogin}
-            />
+            <Box component="form" onSubmit={(e) => { void handleResetPassword(e); }}>
+              <Typography variant="body2" color="text.secondary" paragraph>
+                Enter the reset code sent to <strong>{email}</strong> and choose a new password.
+              </Typography>
+              <TextField
+                fullWidth
+                label="Reset Code"
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+                margin="normal"
+                required
+                autoFocus
+              />
+              <TextField
+                fullWidth
+                label="New Password"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                margin="normal"
+                required
+                autoComplete="new-password"
+                helperText="Minimum 8 characters with uppercase, lowercase, numbers, and symbols"
+              />
+              <TextField
+                fullWidth
+                label="Confirm New Password"
+                type="password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                margin="normal"
+                required
+                autoComplete="new-password"
+              />
+              <Stack spacing={1} sx={{ mt: 3 }}>
+                <Button type="submit" fullWidth variant="contained" disabled={loading}>
+                  {loading ? <CircularProgress size={24} /> : 'Reset Password'}
+                </Button>
+                <Button fullWidth variant="text" onClick={() => { void handleRequestCode(); }} disabled={loading}>
+                  Resend Code
+                </Button>
+                <Button fullWidth variant="text" onClick={() => { void navigate('/login'); }}>
+                  Back to Login
+                </Button>
+              </Stack>
+            </Box>
           )}
         </CardContent>
       </Card>
     </Box>
   );
 };
+
+export default ForgotPasswordPage;
