@@ -1,7 +1,6 @@
 """Campaign reports page object — verify the reports tab loads."""
 
 import urllib.parse
-from pathlib import Path
 
 from playwright.sync_api import Locator, Page
 
@@ -115,37 +114,3 @@ class ReportsPage(BasePage):
     def click_download_xlsx(self) -> None:
         """Click the *XLSX* download button."""
         self._download_xlsx_button().click()
-
-    def download_csv_to(self, path: str | Path) -> Path:
-        """Click the *CSV* download button and save the file to *path*.
-
-        Args:
-            path: Destination path for the downloaded CSV file.
-
-        Returns:
-            The resolved destination path.
-        """
-        dest = Path(path)
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        with self.page.expect_download() as download_info:
-            self.click_download_csv()
-        download = download_info.value
-        download.save_as(str(dest))
-        return dest
-
-    def download_xlsx_to(self, path: str | Path) -> Path:
-        """Click the *XLSX* download button and save the file to *path*.
-
-        Args:
-            path: Destination path for the downloaded XLSX file.
-
-        Returns:
-            The resolved destination path.
-        """
-        dest = Path(path)
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        with self.page.expect_download() as download_info:
-            self.click_download_xlsx()
-        download = download_info.value
-        download.save_as(str(dest))
-        return dest

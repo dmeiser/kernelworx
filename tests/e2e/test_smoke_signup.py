@@ -19,7 +19,6 @@ Design decisions
   *I confirm that I am 13 years of age or older*.
 """
 
-import os
 import random
 import re
 import string
@@ -105,17 +104,3 @@ def test_signup_shows_verification_prompt(page: Page) -> None:
         .or_(page.get_by_role("alert"))
     )
     expect(verification_text.first).to_be_visible(timeout=20_000)
-
-
-@pytest.mark.smoke
-@pytest.mark.skipif(
-    not os.environ.get("RUN_EMAIL_INBOX"),
-    reason="Requires a configured test email inbox; set RUN_EMAIL_INBOX=1 to opt in",
-)
-def test_signup_completes_with_verification_code(page: Page) -> None:
-    """Gated placeholder for end-to-end signup with a real verification code.
-
-    A test inbox is not configured for this environment, so the test is
-    skipped even when the gate is enabled.
-    """
-    pytest.skip("test inbox not configured")

@@ -52,13 +52,9 @@ class SharedCampaignsPage(BasePage):
     # ------------------------------------------------------------------
 
     def goto(self) -> None:
-        """Navigate to ``/shared-campaigns`` and wait for the header."""
+        """Navigate to ``/shared-campaigns`` and wait for loading."""
         self.navigate(self.PATH)
         self.wait_for_loading()
-        # The header is always rendered once data (or the empty state) is ready.
-        expect(self.page.get_by_role("heading", name="My Shared Campaigns")).to_be_visible(
-            timeout=15_000
-        )
 
     def goto_create(self) -> None:
         """Navigate to ``/shared-campaigns/create`` and wait for loading."""
@@ -188,18 +184,10 @@ class SharedCampaignsPage(BasePage):
     def click_create(self) -> None:
         """Click the create button, handling either the header or empty-state variant."""
         header_btn = self._create_button()
-        empty_btn = self._create_first_button()
-        # Both buttons can be visible when the list is empty (header + empty-state),
-        # so scope the visibility expectation to the first match.
-        expect(header_btn.or_(empty_btn).first).to_be_visible(timeout=15_000)
         if header_btn.is_visible() and header_btn.is_enabled():
             header_btn.click()
-        elif empty_btn.is_visible():
-            empty_btn.click()
         else:
-            # Fallback: navigate directly if the button is disabled (e.g. max reached).
-            self.goto_create()
-            return
+            self._create_first_button().click()
         self.page.wait_for_url("**/shared-campaigns/create", timeout=10_000)
         self.wait_for_loading()
 

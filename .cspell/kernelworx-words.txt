@@ -140,7 +140,6 @@ jsonify
 kaushan
 kernelworx
 KernelWorx
-KHTML
 keyId
 keyout
 keypair
@@ -226,7 +225,6 @@ pseudonymized
 pycache
 pyproject
 pytest
-pytestmark
 QLAPI
 qrcode
 qrCode
@@ -235,7 +233,6 @@ randomising
 readonly
 refetch
 refetches
-refetched
 regionAbbrev
 regularuser
 relogin
