@@ -41,7 +41,9 @@ def test_admin_catalogs_tab_loads(owner_page: Page) -> None:
     admin = AdminPage(owner_page)
     admin.goto()
     admin.switch_to_catalogs()
-    assert admin._new_catalog_button().is_visible(), "New Catalog button must be visible on the Catalogs tab"
+    assert admin._new_catalog_button().is_visible(), (
+        "New Catalog button must be visible on the Catalogs tab"
+    )
 
 
 @pytest.mark.smoke
@@ -53,10 +55,14 @@ def test_admin_create_and_delete_managed_catalog(owner_page: Page) -> None:
 
     catalog_name = f"E2E Admin Catalog {int(time.time())}"
     admin.create_managed_catalog(catalog_name)
-    assert admin.has_catalog(catalog_name), f"Created managed catalog '{catalog_name}' must be visible"
+    assert admin.has_catalog(catalog_name), (
+        f"Created managed catalog '{catalog_name}' must be visible"
+    )
 
     admin.delete_managed_catalog(catalog_name)
-    assert not admin.has_catalog(catalog_name), f"Deleted managed catalog '{catalog_name}' must no longer be visible"
+    assert not admin.has_catalog(catalog_name), (
+        f"Deleted managed catalog '{catalog_name}' must no longer be visible"
+    )
 
 
 @pytest.mark.smoke

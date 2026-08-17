@@ -1,9 +1,9 @@
-"""Placeholder smoke test for the account deletion cascade.
+"""Smoke test that the account-deletion UI is reachable.
 
 Account deletion permanently removes the user and all associated data.  This
 module is gated by ``RUN_ACCOUNT_DELETION`` and does **not** execute the
-destructive action; it only verifies that the deletion UI is reachable and can
-be canceled.
+full deletion cascade; it only verifies that the deletion UI is reachable and
+can be canceled.
 """
 
 import os

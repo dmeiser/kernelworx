@@ -217,20 +217,45 @@ class CampaignSettingsPage(BasePage):
         else:
             switch.check()
 
-    def click_save(self) -> None:
-        """Click the *Save Changes* button and wait for loading to finish."""
-        self.get_by_role_button(self._SAVE_BTN).click()
+    def _wait_for_save_mutation(self) -> None:
+        """Wait for the Save button to enter and leave its saving state.
+
+        The button text changes to ``"Saving..."`` while the GraphQL mutation
+        is in flight.  Waiting for that state to appear and then disappear
+        ensures callers do not reload while an update is still pending.
+        """
+        saving_button = self.page.get_by_role("button", name="Saving...", exact=True)
+        expect(saving_button).to_be_visible(timeout=5_000)
+        save_button = self.get_by_role_button(self._SAVE_BTN)
+        expect(save_button).to_be_visible(timeout=15_000)
         self.wait_for_loading()
+
+    def click_save(self) -> None:
+        """Click the *Save Changes* button and wait for the save to finish.
+
+        For shared campaigns a confirmation dialog opens before the mutation
+        actually runs; in that case we return immediately and let the caller
+        finish the workflow via :meth:`confirm_shared_campaign_changes`.
+        """
+        self.get_by_role_button(self._SAVE_BTN).click()
+
+        saving_button = self.page.get_by_role("button", name="Saving...", exact=True)
+        dialog = self.page.get_by_role("dialog")
+        expect(saving_button.or_(dialog)).to_be_visible(timeout=5_000)
+        if dialog.is_visible():
+            return
+
+        self._wait_for_save_mutation()
 
     def confirm_shared_campaign_changes(self) -> None:
         """Confirm the shared-campaign change warning dialog.
 
         Clicks *Save Anyway* in the ``"Confirm Changes to Shared Campaign"``
-        dialog and waits for loading spinners to clear.
+        dialog and waits for the save mutation to complete.
         """
         dialog = self.wait_for_dialog(self._SHARED_CONFIRM_TITLE)
         dialog.get_by_role("button", name=self._SAVE_ANYWAY_BTN, exact=True).click()
-        self.wait_for_loading()
+        self._wait_for_save_mutation()
 
     def delete_campaign(self) -> None:
         """Open the delete dialog and confirm deletion.

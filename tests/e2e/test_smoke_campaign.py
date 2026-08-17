@@ -297,10 +297,11 @@ def test_reselect_campaign_catalog(owner_page: Page, ensure_owner_profile: str) 
 
 @pytest.mark.smoke
 def test_toggle_campaign_active(owner_page: Page, ensure_owner_profile: str) -> None:
-    """Verify that toggling the campaign active switch persists after saving.
+    """Verify that toggling the campaign active switch persists and hides the campaign.
 
     Creates a campaign, flips the active switch on the settings tab, saves,
-    reloads, and asserts the switch reflects the new state.
+    reloads, asserts the switch reflects the new state, then returns to the
+    campaign list and confirms the deactivated campaign is no longer visible.
     """
     campaign_name = f"Toggle Active Test {int(time.time())}"
     _, profile_id, campaign_page = _navigate_to_first_profile_campaigns(owner_page)
@@ -318,6 +319,12 @@ def test_toggle_campaign_active(owner_page: Page, ensure_owner_profile: str) -> 
     settings.wait_for_loading()
     assert settings.get_is_active() is not original_active, (
         f"Expected active state to change from {original_active}"
+    )
+
+    # Issue #81: deactivation should hide the campaign from the dashboard list.
+    campaign_page.goto(profile_id)
+    assert not campaign_page.has_campaign(campaign_name), (
+        f"Deactivated campaign '{campaign_name}' must not appear in the active campaign list"
     )
 
 
@@ -341,11 +348,11 @@ def test_confirm_shared_campaign_changes(owner_page: Page, ensure_owner_profile:
 
     shared = SharedCampaignsPage(owner_page)
     shared.goto_create()
-    shared.create_shared_campaign(catalog_name=catalog1, campaign_name=f"Shared Base {int(time.time())}")
+    base_name = f"Shared Base {int(time.time())}"
+    shared.create_shared_campaign(catalog_name=catalog1, campaign_name=base_name)
     shared.goto()
-    codes = shared.get_visible_codes()
-    assert codes, "No shared campaign codes found after creation"
-    code = codes[0]
+    code = shared.get_code_by_campaign_name(base_name)
+    assert code, f"Could not find shared campaign code for '{base_name}'"
 
     shared.join_shared_campaign(code, profile_id)
     profile_id, campaign_id = _extract_campaign_ids(owner_page.url)

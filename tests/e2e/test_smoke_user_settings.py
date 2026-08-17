@@ -40,4 +40,6 @@ def test_edit_account_info(owner_page: Page) -> None:
     assert settings.get_given_name() == unique_given_name, (
         f"Expected given name '{unique_given_name}' after edit; got '{settings.get_given_name()}'"
     )
-    assert settings.get_city() == unique_city, f"Expected city '{unique_city}' after edit; got '{settings.get_city()}'"
+    assert settings.get_city() == unique_city, (
+        f"Expected city '{unique_city}' after edit; got '{settings.get_city()}'"
+    )

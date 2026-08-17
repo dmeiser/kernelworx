@@ -2,6 +2,7 @@
 
 import csv
 import re
+import time
 import urllib.parse
 from datetime import datetime
 from pathlib import Path
@@ -185,12 +186,10 @@ def test_download_xlsx(owner_page: Page, ensure_owner_profile: str, tmp_path: Pa
     worksheet = workbook.active
     assert worksheet is not None, "XLSX workbook must have an active worksheet"
     headers = [worksheet.cell(row=1, column=col).value for col in range(1, worksheet.max_column + 1)]
-    assert headers[:3] == ["Name", "Phone", "Address"], f"Unexpected CSV headers: {headers}"
+    assert headers[:3] == ["Name", "Phone", "Address"], f"Unexpected XLSX headers: {headers}"
     assert headers[-1] == "Total", f"Expected 'Total' as last header; got: {headers[-1]}"
 
-    customer_cells = [
-        worksheet.cell(row=row, column=1).value for row in range(2, worksheet.max_row + 1)
-    ]
+    customer_cells = [worksheet.cell(row=row, column=1).value for row in range(2, worksheet.max_row + 1)]
     assert customer_name in customer_cells, "XLSX must contain the smoke-test order row"
 
 
@@ -222,3 +221,66 @@ def test_csv_content_parsed(owner_page: Page, ensure_owner_profile: str, tmp_pat
     assert matching_rows, "CSV must contain the smoke-test order row"
     order_total = matching_rows[0][-1]
     assert order_total, "Smoke-test order row must have a Total value"
+
+
+@pytest.mark.smoke
+@pytest.mark.parametrize("trigger_char", ["=", "+", "-", "@"])
+def test_csv_xlsx_formula_injection_sanitized(
+    owner_page: Page, ensure_owner_profile: str, tmp_path: Path, trigger_char: str
+) -> None:
+    """Create an order with a formula-injection customer name and verify exports sanitize it.
+
+    Spreadsheet applications treat cells starting with ``=``, ``+``, ``-``, or ``@`` as
+    formulas. The report generator neutralizes these by prefixing the value with an
+    apostrophe, which forces text treatment. This test exercises each trigger character
+    and asserts the exported CSV and XLSX cells are sanitized.
+    """
+    profile_id, campaign_id = _ensure_owner_has_campaign(owner_page)
+
+    order_page = OrderPage(owner_page)
+    order_page.goto(profile_id, campaign_id)
+    # Use a payload that would be interpreted as a formula if not sanitized.
+    customer_name = f"{trigger_char}FORMULA{int(time.time())}"
+    order_page.create_order_first_product(customer_name, qty=1)
+
+    reports = ReportsPage(owner_page)
+    reports.goto(profile_id, campaign_id)
+
+    # Verify CSV export sanitizes the customer name.
+    csv_path = reports.download_csv_to(tmp_path / f"report_{trigger_char}.csv")
+    with csv_path.open(newline="") as f:
+        rows = list(csv.reader(f))
+
+    assert rows, "CSV file must contain at least a header row"
+    headers = rows[0]
+    assert headers[:3] == ["Name", "Phone", "Address"], f"Unexpected CSV headers: {headers}"
+
+    matching_csv_rows = [row for row in rows[1:] if row and row[0].lstrip("'") == customer_name]
+    assert matching_csv_rows, f"CSV must contain the sanitized order row for {customer_name!r}; got rows: {rows[1:]}"
+    sanitized_csv_value = matching_csv_rows[0][0]
+    assert sanitized_csv_value.startswith("'") or sanitized_csv_value != customer_name, (
+        f"CSV customer cell must be sanitized for formula injection; got: {sanitized_csv_value!r}"
+    )
+
+    # Verify XLSX export sanitizes the customer name.
+    xlsx_path = reports.download_xlsx_to(tmp_path / f"report_{trigger_char}.xlsx")
+    workbook = load_workbook(xlsx_path)
+    worksheet = workbook.active
+    assert worksheet is not None, "XLSX workbook must have an active worksheet"
+
+    xlsx_headers = [worksheet.cell(row=1, column=col).value for col in range(1, worksheet.max_column + 1)]
+    assert xlsx_headers[:3] == ["Name", "Phone", "Address"], f"Unexpected XLSX headers: {xlsx_headers}"
+
+    customer_cells = [worksheet.cell(row=row, column=1) for row in range(2, worksheet.max_row + 1)]
+    matching_xlsx_cells = [cell for cell in customer_cells if str(cell.value or "").lstrip("'") == customer_name]
+    assert matching_xlsx_cells, (
+        f"XLSX must contain the sanitized order row for {customer_name!r}; got cells: "
+        f"{[c.value for c in customer_cells]}"
+    )
+    sanitized_xlsx_value = str(matching_xlsx_cells[0].value or "")
+    assert sanitized_xlsx_value.startswith("'") or sanitized_xlsx_value != customer_name, (
+        f"XLSX customer cell must be sanitized for formula injection; got: {sanitized_xlsx_value!r}"
+    )
+    assert matching_xlsx_cells[0].data_type == "s", (
+        f"Sanitized XLSX cell must be stored as text; got data_type: {matching_xlsx_cells[0].data_type!r}"
+    )

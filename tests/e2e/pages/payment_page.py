@@ -94,7 +94,9 @@ class PaymentPage(BasePage):
         Args:
             method_type: Exact payment method name (case-sensitive).
         """
-        return self._card_for(method_type).get_by_role("button", name=f"Delete {method_type}", exact=True)
+        return self._card_for(method_type).get_by_role(
+            "button", name=f"Delete {method_type}", exact=True
+        )
 
     def _delete_dialog_confirm_button(self) -> Locator:
         """Return locator for the *Delete* button in the confirmation dialog."""

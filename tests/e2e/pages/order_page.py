@@ -1,6 +1,5 @@
 """Order page object — order list and manual order creation for a campaign."""
 
-import re
 import urllib.parse
 
 from playwright.sync_api import Locator, Page, expect
@@ -112,9 +111,7 @@ class OrderPage(BasePage):
         the label is associated with a hidden input.  We scope the combobox
         to the FormControl that contains the *Payment Method* label.
         """
-        return self.page.locator(
-            '.MuiFormControl-root:has(label:has-text("Payment Method")) [role="combobox"]'
-        )
+        return self.page.locator('.MuiFormControl-root:has(label:has-text("Payment Method")) [role="combobox"]')
 
     def _notes_input(self) -> Locator:
         """Return locator for the *Notes* multiline field in the order form."""
@@ -185,7 +182,7 @@ class OrderPage(BasePage):
         self._create_order_button().click()
         # The form should stay on the creation page and show a validation alert.
         expect(self.page.get_by_role("alert")).to_be_visible(timeout=10_000)
-        expect(self.page).to_have_url(re.compile(r"/orders/new$"), timeout=10_000)
+        self.page.wait_for_url("**/orders/new", timeout=10_000)
 
     def create_order(self, customer_name: str, items: list[dict[str, str | int]]) -> None:
         """Click *New Order*, fill the form, and submit.
@@ -281,6 +278,34 @@ class OrderPage(BasePage):
         row.get_by_role("combobox").click()
         self.page.get_by_role("option").nth(option_index).click()
         row.locator('input[type="number"]').fill(quantity)
+
+    def _set_line_item_quantity(self, index: int, quantity: str) -> None:
+        """Update only the quantity for line-item row *index*.
+
+        Leaves the selected product unchanged so tests can modify a quantity
+        and assert that subtotal/total values recalculate.
+
+        Args:
+            index: Zero-based row index in the line items.
+            quantity: New quantity as a string.
+        """
+        row = self.page.get_by_role("row").nth(index + 1)  # +1 to skip thead
+        row.locator('input[type="number"]').fill(quantity)
+
+    def click_edit_order(self, customer_name: str) -> None:
+        """Click the edit action on the row containing *customer_name*.
+
+        Waits for navigation to the order edit URL and for the page to finish
+        loading before returning.
+
+        Args:
+            customer_name: Customer name used to locate the table row.
+        """
+        row = self.page.get_by_role("row").filter(has_text=customer_name).first
+        expect(row).to_be_visible(timeout=10_000)
+        row.get_by_role("button").first.click()
+        self.page.wait_for_url("**/orders/**/edit", timeout=10_000)
+        self.wait_for_loading()
 
     def _fill_address(self, address: dict[str, str]) -> None:
         """Fill the customer address fields when values are present.
@@ -481,3 +506,15 @@ class OrderPage(BasePage):
         if not tile.is_visible():
             return ""
         return tile.locator("h4").first.inner_text()
+
+    def get_selected_payment_method(self) -> str:
+        """Return the visible text of the selected *Payment Method* option.
+
+        Returns:
+            Selected payment method name, or ``""`` when the select is not
+            visible or no option is selected.
+        """
+        select = self._payment_method_select()
+        if not select.is_visible():
+            return ""
+        return select.inner_text()

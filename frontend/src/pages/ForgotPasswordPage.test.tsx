@@ -142,7 +142,7 @@ describe('ForgotPasswordPage', () => {
       expect(screen.getByLabelText(/^Reset Code/i)).toBeInTheDocument();
     });
 
-    it('displays a mapped error when resetPassword fails with InvalidParameterException', async () => {
+    it('treats InvalidParameterException as success to avoid account enumeration', async () => {
       const user = setupUser();
       vi.mocked(amplifyAuth.resetPassword).mockRejectedValue(
         createNamedError('InvalidParameterException', 'Bad parameter'),
@@ -153,10 +153,11 @@ describe('ForgotPasswordPage', () => {
       await submitRequestForm(user);
 
       await waitFor(() => {
-        expect(screen.getByRole('alert')).toHaveTextContent(
-          'Please check your email address and try again.',
-        );
+        expect(screen.getByRole('alert')).toHaveTextContent('Reset code sent to user@example.com');
       });
+
+      expect(screen.queryByText('InvalidParameterException')).not.toBeInTheDocument();
+      expect(screen.getByLabelText(/^Reset Code/i)).toBeInTheDocument();
     });
 
     it('displays a mapped error when resetPassword fails with LimitExceededException', async () => {
@@ -176,7 +177,7 @@ describe('ForgotPasswordPage', () => {
       });
     });
 
-    it('displays the error message for unmapped resetPassword failures', async () => {
+    it('displays a generic error for unmapped resetPassword failures', async () => {
       const user = setupUser();
       vi.mocked(amplifyAuth.resetPassword).mockRejectedValue(
         createNamedError('UnexpectedException', 'Something went wrong'),
@@ -187,8 +188,12 @@ describe('ForgotPasswordPage', () => {
       await submitRequestForm(user);
 
       await waitFor(() => {
-        expect(screen.getByRole('alert')).toHaveTextContent('Something went wrong');
+        expect(screen.getByRole('alert')).toHaveTextContent(
+          'Unable to send reset code. Please try again later.',
+        );
       });
+
+      expect(screen.queryByText('Something went wrong')).not.toBeInTheDocument();
     });
   });
 
@@ -332,7 +337,7 @@ describe('ForgotPasswordPage', () => {
       });
     });
 
-    it('displays the error message for unmapped confirmResetPassword failures', async () => {
+    it('displays a generic error for unmapped confirmResetPassword failures', async () => {
       const user = setupUser();
       vi.mocked(amplifyAuth.confirmResetPassword).mockRejectedValue(
         createNamedError('UnexpectedException', 'Confirmation failed'),
@@ -342,8 +347,12 @@ describe('ForgotPasswordPage', () => {
       await submitResetForm(user);
 
       await waitFor(() => {
-        expect(screen.getByRole('alert')).toHaveTextContent('Confirmation failed');
+        expect(screen.getByRole('alert')).toHaveTextContent(
+          'Unable to reset password. Please try again later.',
+        );
       });
+
+      expect(screen.queryByText('Confirmation failed')).not.toBeInTheDocument();
     });
   });
 });

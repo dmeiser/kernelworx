@@ -164,12 +164,7 @@ class UserDataPage(BasePage):
         no_campaigns = self.page.get_by_text(self._NO_CAMPAIGNS_FOR_PROFILE_TEXT).first
         table = self._data_table()
         has_profile_buttons = self._active_tabpanel_buttons().count() > 0
-        return bool(
-            no_profiles.is_visible()
-            or no_campaigns.is_visible()
-            or table.is_visible()
-            or has_profile_buttons
-        )
+        return bool(no_profiles.is_visible() or no_campaigns.is_visible() or table.is_visible() or has_profile_buttons)
 
     def shared_campaigns_tab_has_content(self) -> bool:
         """Return ``True`` when the Shared Campaigns tab heading and data/empty state render."""
@@ -188,17 +183,76 @@ class UserDataPage(BasePage):
         no_shares = self.page.get_by_text(self._NO_SHARES_TEXT).first
         table = self._data_table()
         has_profile_buttons = self._active_tabpanel_buttons().count() > 0
-        return bool(
-            no_profiles.is_visible()
-            or no_shares.is_visible()
-            or table.is_visible()
-            or has_profile_buttons
-        )
+        return bool(no_profiles.is_visible() or no_shares.is_visible() or table.is_visible() or has_profile_buttons)
 
     def transfer_dialog_is_visible(self) -> bool:
         """Return ``True`` when the transfer-ownership dialog is open."""
         dialog = self._transfer_dialog()
-        return bool(dialog.is_visible() and dialog.get_by_role("heading", name=self._TRANSFER_DIALOG_TITLE).is_visible())
+        return bool(
+            dialog.is_visible() and dialog.get_by_role("heading", name=self._TRANSFER_DIALOG_TITLE).is_visible()
+        )
+
+    def get_profile_names(self) -> list[str]:
+        """Return seller names from the Profiles tab table.
+
+        Returns:
+            List of ``Seller Name`` cell texts in DOM order.
+        """
+        table = self._data_table()
+        if not table.is_visible():
+            return []
+        return table.locator("tbody tr td:nth-child(2)").all_inner_texts()
+
+    def get_catalog_names(self) -> list[str]:
+        """Return catalog names from the Catalogs tab table.
+
+        Returns:
+            List of ``Catalog Name`` cell texts in DOM order.
+        """
+        table = self._data_table()
+        if not table.is_visible():
+            return []
+        return table.locator("tbody tr td:first-child").all_inner_texts()
+
+    def get_campaign_names(self) -> list[str]:
+        """Return campaign names for the selected profile in the Campaigns tab.
+
+        The Campaigns tab only renders a table after a profile button has been
+        selected; this helper returns the first-column texts of the visible
+        campaigns table.
+
+        Returns:
+            List of ``Campaign Name`` cell texts in DOM order.
+        """
+        table = self._data_table()
+        if not table.is_visible():
+            return []
+        return table.locator("tbody tr td:first-child").all_inner_texts()
+
+    def get_shared_campaign_names(self) -> list[str]:
+        """Return campaign names from the Shared Campaigns tab table.
+
+        Returns:
+            List of ``Campaign Name`` cell texts in DOM order.
+        """
+        table = self._data_table()
+        if not table.is_visible():
+            return []
+        return table.locator("tbody tr td:nth-child(2)").all_inner_texts()
+
+    def get_share_emails(self) -> list[str]:
+        """Return target-account emails from the Shares tab table.
+
+        The Shares tab only renders a table after a profile button has been
+        selected.
+
+        Returns:
+            List of ``User Email`` cell texts in DOM order.
+        """
+        table = self._data_table()
+        if not table.is_visible():
+            return []
+        return table.locator("tbody tr td:first-child").all_inner_texts()
 
     # ------------------------------------------------------------------
     # Actions — tab switching
