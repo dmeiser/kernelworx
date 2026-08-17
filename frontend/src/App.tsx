@@ -15,6 +15,7 @@ import { LandingPage } from './pages/LandingPage';
 import { LoginPage } from './pages/LoginPage';
 import { ForgotPasswordPage } from './pages/ForgotPasswordPage';
 import { SignupPage } from './pages/SignupPage';
+import { ForgotPasswordPage } from './pages/ForgotPasswordPage';
 import { PrivacyPolicyPage } from './pages/PrivacyPolicyPage';
 import { ScoutsPage } from './pages/ScoutsPage';
 import { ScoutCampaignsPage } from './pages/ScoutCampaignsPage';
@@ -75,6 +76,7 @@ function App() {
               <Route path="/login" element={<LoginPage />} />
               <Route path="/forgot-password" element={<ForgotPasswordPage />} />
               <Route path="/signup" element={<SignupPage />} />
+              <Route path="/forgot-password" element={<ForgotPasswordPage />} />
               <Route path="/privacy" element={<PrivacyPolicyPage />} />
               <Route path="/story" element={<StoryPage />} />
 

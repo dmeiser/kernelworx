@@ -1,5 +1,7 @@
 """Payment page object — payment method selection and storage (UI only)."""
 
+import pathlib
+
 from playwright.sync_api import Locator, Page, expect
 
 from .base_page import BasePage
@@ -31,6 +33,23 @@ class PaymentPage(BasePage):
     _DIALOG_SUBMIT_BTN: str = "Create"
     _DELETE_DIALOG_TITLE: str = "Delete Payment Method"
     _DELETE_BTN: str = "Delete"
+
+    # Edit / QR code action labels (verified from PaymentMethodCard.tsx)
+    _EDIT_BTN_TEMPLATE: str = "Edit {name}"
+    _UPLOAD_QR_BTN_TEMPLATE: str = "Upload QR code for {name}"
+    _DELETE_QR_BTN_TEMPLATE: str = "Delete QR code for {name}"
+    _VIEW_QR_BTN_TEMPLATE: str = "View QR code for {name}"
+
+    # Edit dialog
+    _EDIT_DIALOG_TITLE: str = "Edit Payment Method"
+    _EDIT_DIALOG_SUBMIT_BTN: str = "Update"
+
+    # QR upload dialog
+    _UPLOAD_QR_DIALOG_TITLE_TEMPLATE: str = "Upload QR Code for {name}"
+    _UPLOAD_QR_FILE_INPUT_LABEL: str = "Select QR code image"
+    _UPLOAD_QR_UPLOAD_BTN: str = "Upload"
+    _QR_PREVIEW_ALT: str = "QR code preview"
+    _QR_VIEW_ALT_TEMPLATE: str = "QR code for {name}"
 
     def __init__(self, page: Page) -> None:
         """Store the Playwright Page instance.
@@ -85,12 +104,39 @@ class PaymentPage(BasePage):
         """Return a locator for the payment method card matching *method_type*.
 
         ``PaymentMethodCard`` renders the method name as a heading-level
-        ``<span>``; we filter by its text content.
+        ``<span>``; we filter by its exact text content so renamed methods
+        whose new names contain the old name do not collide.
 
         Args:
             method_type: Exact payment method name (case-sensitive).
         """
-        return self.page.locator("div.MuiCard-root").filter(has_text=method_type)
+        return self.page.locator("div.MuiCard-root").filter(
+            has=self.page.get_by_text(method_type, exact=True)
+        )
+
+    def _edit_button(self, method_type: str) -> Locator:
+        """Return the *Edit* button for the card matching *method_type*."""
+        return self._card_for(method_type).get_by_role(
+            "button", name=self._EDIT_BTN_TEMPLATE.format(name=method_type), exact=True
+        )
+
+    def _upload_qr_button(self, method_type: str) -> Locator:
+        """Return the *Upload QR* button for the card matching *method_type*."""
+        return self._card_for(method_type).get_by_role(
+            "button", name=self._UPLOAD_QR_BTN_TEMPLATE.format(name=method_type), exact=True
+        )
+
+    def _delete_qr_button(self, method_type: str) -> Locator:
+        """Return the *Delete QR* button for the card matching *method_type*."""
+        return self._card_for(method_type).get_by_role(
+            "button", name=self._DELETE_QR_BTN_TEMPLATE.format(name=method_type), exact=True
+        )
+
+    def _view_qr_button(self, method_type: str) -> Locator:
+        """Return the *View QR* button for the card matching *method_type*."""
+        return self._card_for(method_type).get_by_role(
+            "button", name=self._VIEW_QR_BTN_TEMPLATE.format(name=method_type), exact=True
+        )
 
     # ------------------------------------------------------------------
     # Actions
@@ -127,6 +173,79 @@ class PaymentPage(BasePage):
         expect(dialog).to_be_hidden(timeout=10_000)
         self.wait_for_loading()
 
+    def rename_payment_method(self, old_name: str, new_name: str) -> None:
+        """Rename a custom payment method through the *Edit Payment Method* dialog.
+
+        Waits for the dialog to close and the list to refetch before returning.
+
+        Args:
+            old_name: Current exact name of the custom payment method.
+            new_name: Desired new name for the payment method.
+        """
+        self._edit_button(old_name).click()
+        dialog = self.wait_for_dialog(self._EDIT_DIALOG_TITLE)
+        self.page.get_by_label(self._DIALOG_FIELD_LABEL).fill(new_name)
+        dialog.get_by_role("button", name=self._EDIT_DIALOG_SUBMIT_BTN, exact=True).click()
+        expect(dialog).to_be_hidden(timeout=10_000)
+        self.wait_for_loading()
+        # Wait for the refetched list to reflect the rename.
+        expect(self._card_for(new_name).first).to_be_visible(timeout=10_000)
+        expect(self._card_for(old_name).first).to_be_hidden(timeout=10_000)
+
+    def upload_qr_code(self, method_type: str, file_path: str | pathlib.Path) -> None:
+        """Upload a QR code image for the payment method matching *method_type*.
+
+        Opens the upload dialog, selects *file_path*, waits for the preview to
+        render, and submits the upload.
+
+        Args:
+            method_type: Exact name of the custom payment method.
+            file_path: Path to a PNG/JPG/WEBP image file.
+        """
+        self._upload_qr_button(method_type).click()
+        dialog = self.wait_for_dialog(
+            self._UPLOAD_QR_DIALOG_TITLE_TEMPLATE.format(name=method_type)
+        )
+        file_input = dialog.get_by_label(self._UPLOAD_QR_FILE_INPUT_LABEL)
+        file_input.set_input_files(file_path)
+        preview = dialog.get_by_alt_text(self._QR_PREVIEW_ALT)
+        expect(preview).to_be_visible(timeout=10_000)
+        dialog.get_by_role("button", name=self._UPLOAD_QR_UPLOAD_BTN, exact=True).click()
+        expect(dialog).to_be_hidden(timeout=20_000)
+        self.wait_for_loading()
+
+    def delete_qr_code(self, method_type: str) -> None:
+        """Delete the QR code associated with *method_type*.
+
+        The front-end performs the deletion immediately (no confirmation dialog),
+        so this helper waits for the list to refetch before returning.
+
+        Args:
+            method_type: Exact name of the custom payment method.
+        """
+        self._delete_qr_button(method_type).click()
+        self.wait_for_loading()
+
+    def view_qr_code(self, method_type: str) -> Locator:
+        """Open the QR code preview dialog for *method_type*.
+
+        Returns the dialog locator after verifying the rendered QR image is
+        visible.  The caller is responsible for closing the dialog.
+
+        Args:
+            method_type: Exact name of the payment method.
+
+        Returns:
+            Locator for the open QR preview dialog.
+        """
+        self._view_qr_button(method_type).click()
+        dialog = self.wait_for_dialog(f"QR Code for {method_type}")
+        image = dialog.get_by_alt_text(
+            self._QR_VIEW_ALT_TEMPLATE.format(name=method_type)
+        )
+        expect(image).to_be_visible(timeout=10_000)
+        return dialog
+
     # ------------------------------------------------------------------
     # State queries
     # ------------------------------------------------------------------
@@ -152,3 +271,18 @@ class PaymentPage(BasePage):
         # Each card has exactly one h6 span (the method name)
         spans = self.page.locator("div.MuiCard-root h6")
         return spans.all_inner_texts()
+
+    def has_qr_code(self, method_type: str) -> bool:
+        """Return ``True`` when the card for *method_type* shows a QR code.
+
+        A visible *View QR* button indicates the payment method has an
+        uploaded QR code. The list refetches after upload, so we wait briefly.
+
+        Args:
+            method_type: Exact payment method name.
+        """
+        try:
+            expect(self._view_qr_button(method_type).first).to_be_visible(timeout=10_000)
+            return True
+        except Exception:  # noqa: BLE001
+            return False

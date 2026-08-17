@@ -6,6 +6,7 @@ import React, { useState } from 'react';
 import { useQuery, useMutation } from '@apollo/client/react';
 import { useNavigate } from 'react-router-dom';
 import {
+  Alert,
   Box,
   Button,
   Typography,
@@ -41,7 +42,6 @@ import { LIST_MY_SHARED_CAMPAIGNS, UPDATE_SHARED_CAMPAIGN, DELETE_SHARED_CAMPAIG
 import { useSnackbar } from '../hooks/useSnackbar';
 import { PageHeader } from '../components/PageHeader';
 import { LoadingState } from '../components/LoadingState';
-import { ErrorAlert } from '../components/ErrorAlert';
 import { EmptyState } from '../components/EmptyState';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { EditSharedCampaignDialog } from '../components/EditSharedCampaignDialog';
@@ -362,10 +362,15 @@ export const SharedCampaignsPage: React.FC = () => {
   const handleQrDialogDismiss = () => setQrDialogOpen(false);
   /* v8 ignore stop */
 
-  // Fetch user's campaign  shared campaigns
+  // Fetch user's campaign  shared campaigns.
+  // Use errorPolicy 'all' so that a stale or partially-deleted catalog does
+  // not block the entire list from rendering.
   const { data, loading, error, refetch } = useQuery<{
     listMySharedCampaigns: SharedCampaign[];
-  }>(LIST_MY_SHARED_CAMPAIGNS);
+  }>(LIST_MY_SHARED_CAMPAIGNS, {
+    errorPolicy: 'all',
+    fetchPolicy: 'network-only',
+  });
 
   // Update mutation (for editing)
   /* v8 ignore start -- mutation onCompleted callbacks require complex Apollo mocking with refetch */
@@ -484,12 +489,13 @@ export const SharedCampaignsPage: React.FC = () => {
     return <LoadingState />;
   }
 
-  if (error) {
-    return <ErrorAlert message={`Failed to load shared campaigns: ${error.message}`} />;
-  }
-
   return (
     <Box>
+      {error && (
+        <Alert severity="warning" sx={{ mb: 3 }}>
+          Some shared campaign data could not be loaded. You can still create and manage shared campaigns.
+        </Alert>
+      )}
       <PageHeader
         title="My Shared Campaigns"
         subtitle={`Create shareable links that let your unit members create campaigns quickly with preset information. (${activeSharedCampaignCount}/${MAX_SHARED_CAMPAIGNS} active)`}

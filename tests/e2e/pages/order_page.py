@@ -37,6 +37,12 @@ class OrderPage(BasePage):
     # Form field labels (OrderEditorPage / CustomerInfoForm)
     _CUSTOMER_NAME_LABEL: str = "Customer Name"
     _CUSTOMER_PHONE_LABEL: str = "Phone Number"
+    _STREET_ADDRESS_LABEL: str = "Street Address"
+    _CITY_LABEL: str = "City"
+    _STATE_LABEL: str = "State"
+    _ZIP_CODE_LABEL: str = "Zip Code"
+    _PAYMENT_METHOD_LABEL: str = "Payment Method"
+    _NOTES_LABEL: str = "Notes"
     _ADD_PRODUCT_BTN: str = "Add Product"
 
     def __init__(self, page: Page) -> None:
@@ -82,6 +88,37 @@ class OrderPage(BasePage):
     def _customer_phone_input(self) -> Locator:
         """Return locator for the *Phone Number* text field in the order form."""
         return self.page.get_by_label(self._CUSTOMER_PHONE_LABEL)
+
+    def _street_address_input(self) -> Locator:
+        """Return locator for the *Street Address* text field in the order form."""
+        return self.page.get_by_label(self._STREET_ADDRESS_LABEL)
+
+    def _city_input(self) -> Locator:
+        """Return locator for the *City* text field in the order form."""
+        return self.page.get_by_label(self._CITY_LABEL)
+
+    def _state_input(self) -> Locator:
+        """Return locator for the *State* autocomplete in the order form."""
+        return self.page.get_by_label(self._STATE_LABEL)
+
+    def _zip_code_input(self) -> Locator:
+        """Return locator for the *Zip Code* text field in the order form."""
+        return self.page.get_by_label(self._ZIP_CODE_LABEL)
+
+    def _payment_method_select(self) -> Locator:
+        """Return locator for the *Payment Method* select in the order form.
+
+        MUI ``Select`` renders a visible combobox without an ``aria-label``;
+        the label is associated with a hidden input.  We scope the combobox
+        to the FormControl that contains the *Payment Method* label.
+        """
+        return self.page.locator(
+            '.MuiFormControl-root:has(label:has-text("Payment Method")) [role="combobox"]'
+        )
+
+    def _notes_input(self) -> Locator:
+        """Return locator for the *Notes* multiline field in the order form."""
+        return self.page.get_by_label(self._NOTES_LABEL)
 
     def _create_order_button(self) -> Locator:
         """Return locator for the *Create Order* submit button."""
@@ -229,6 +266,114 @@ class OrderPage(BasePage):
         # Quantity text field (type="number") inside the same row
         row.locator('input[type="number"]').fill(quantity)
 
+    def _fill_row_by_option_index(self, index: int, option_index: int, quantity: str) -> None:
+        """Select the *option_index* product and set the quantity for row *index*.
+
+        Useful when the test wants to read the displayed price from the row
+        rather than hard-coding a product name.
+
+        Args:
+            index: Zero-based row index in the line items.
+            option_index: Zero-based index in the opened product dropdown.
+            quantity: Quantity as a string.
+        """
+        row = self.page.get_by_role("row").nth(index + 1)  # +1 to skip thead
+        row.get_by_role("combobox").click()
+        self.page.get_by_role("option").nth(option_index).click()
+        row.locator('input[type="number"]').fill(quantity)
+
+    def _fill_address(self, address: dict[str, str]) -> None:
+        """Fill the customer address fields when values are present.
+
+        Args:
+            address: Mapping with optional keys ``street``, ``city``,
+                ``state``, and ``zip``.
+        """
+        if street := address.get("street"):
+            self._street_address_input().fill(street)
+        if city := address.get("city"):
+            self._city_input().fill(city)
+        if state := address.get("state"):
+            self._state_input().fill(state)
+        if zip_code := address.get("zip"):
+            self._zip_code_input().fill(zip_code)
+
+    def _select_payment_method(self, payment_method: str) -> None:
+        """Open the payment method dropdown and select *payment_method*.
+
+        Waits for the option to appear so the helper tolerates the brief
+        GraphQL load window for payment methods.
+
+        Args:
+            payment_method: Visible option text in the dropdown.
+        """
+        select = self._payment_method_select()
+        expect(select).to_be_visible(timeout=10_000)
+        select.click()
+        option = self.page.get_by_role("option", name=payment_method)
+        expect(option).to_be_visible(timeout=10_000)
+        option.click()
+
+    def fill_full_order_form(
+        self,
+        customer_name: str,
+        phone: str | None,
+        items: list[dict[str, str | int]],
+        address: dict[str, str],
+        payment_method: str,
+        notes: str,
+    ) -> None:
+        """Fill the full order editor form without submitting.
+
+        Args:
+            customer_name: Customer full name.
+            phone: Phone number, or ``None`` to leave blank.
+            items: Line items to add (see :meth:`create_order`).
+            address: Customer address with optional ``street``, ``city``,
+                ``state``, and ``zip`` keys.
+            payment_method: Visible payment method option.
+            notes: Free-form order notes.
+        """
+        self._customer_name_input().fill(customer_name)
+        if phone is not None:
+            self._customer_phone_input().fill(phone)
+        self._fill_address(address)
+        self._fill_line_items(items)
+        self._select_payment_method(payment_method)
+        self._notes_input().fill(notes)
+
+    def create_full_order(
+        self,
+        customer_name: str,
+        items: list[dict[str, str | int]],
+        address: dict[str, str],
+        payment_method: str,
+        notes: str,
+        *,
+        phone: str | None = "5551234567",
+    ) -> None:
+        """Click *New Order*, fill the full form, and submit.
+
+        Waits for navigation back to the orders list after a successful
+        submission.
+
+        Args:
+            customer_name: Customer full name.
+            items: Line items to add (see :meth:`create_order`).
+            address: Customer address with optional ``street``, ``city``,
+                ``state``, and ``zip`` keys.
+            payment_method: Visible payment method option.
+            notes: Free-form order notes.
+            phone: Phone number; defaults to a valid 10-digit number. Pass
+                ``None`` to leave the field blank.
+        """
+        self._new_order_button().click()
+        self.wait_for_loading()
+        self.fill_full_order_form(customer_name, phone, items, address, payment_method, notes)
+        self._create_order_button().click()
+        self.page.wait_for_url("**/orders", timeout=15_000)
+        self.wait_for_loading()
+
     # ------------------------------------------------------------------
     # State queries
     # ------------------------------------------------------------------
@@ -259,8 +404,80 @@ class OrderPage(BasePage):
             Raw inner text of the total element (e.g. ``"Total: $12.50"``),
             or ``""`` when the element is not visible.
         """
-        # TODO: verify selector – the total is in a Typography h6 scoped inside the products card
-        total_locator = self.page.locator("div.MuiCard-root h6", has_text="Total:")
+        return self.get_editor_total()
+
+    def get_editor_total(self) -> str:
+        """Return the editor total text (``Total: $X.XX``) from the products card.
+
+        Returns:
+            Raw inner text of the total element, or ``""`` when it is not visible.
+        """
+        total_locator = self.page.locator("h6", has_text="Total:")
         if total_locator.first.is_visible():
             return total_locator.first.inner_text()
         return ""
+
+    def get_line_item_price(self, index: int) -> str:
+        """Return the per-row price cell text for line item *index*.
+
+        Waits for the cell to leave the placeholder ``—`` state so callers can
+        read the price after selecting a product.
+
+        Args:
+            index: Zero-based row index in the line items.
+
+        Returns:
+            Raw price text (e.g. ``"$12.50"``), or ``""`` if the row is missing.
+        """
+        row = self.page.get_by_role("row").nth(index + 1)  # +1 to skip thead
+        price_cell = row.get_by_role("cell").nth(2)
+        try:
+            expect(price_cell).not_to_have_text("—", timeout=5_000)
+        except Exception:  # noqa: BLE001
+            return ""
+        return price_cell.inner_text()
+
+    def get_line_item_subtotal(self, index: int) -> str:
+        """Return the per-row subtotal cell text for line item *index*.
+
+        Args:
+            index: Zero-based row index in the line items.
+
+        Returns:
+            Raw subtotal text (e.g. ``"$25.00"``), or ``""`` if the row is missing.
+        """
+        row = self.page.get_by_role("row").nth(index + 1)  # +1 to skip thead
+        subtotal_cell = row.get_by_role("cell").nth(3)
+        return subtotal_cell.inner_text()
+
+    def get_list_total_for_customer(self, customer_name: str) -> str:
+        """Return the *Total* cell text for the row containing *customer_name*.
+
+        The total cell is identified as the right-aligned cell whose text starts
+        with ``$``.
+
+        Args:
+            customer_name: Customer name used to locate the table row.
+
+        Returns:
+            Raw total text (e.g. ``"$25.00"``), or ``""`` when the row is missing.
+        """
+        row = self.page.get_by_role("row").filter(has_text=customer_name).first
+        if not row.is_visible():
+            return ""
+        for cell in row.get_by_role("cell").all():
+            text = cell.inner_text()
+            if text.startswith("$"):
+                return text
+        return ""
+
+    def get_summary_total_sales(self) -> str:
+        """Return the *Total Sales* value from the campaign summary tiles.
+
+        Returns:
+            Raw currency text (e.g. ``"$25.00"``), or ``""`` when the tile is not visible.
+        """
+        tile = self.page.locator("div.MuiPaper-root").filter(has_text="Total Sales").first
+        if not tile.is_visible():
+            return ""
+        return tile.locator("h4").first.inner_text()

@@ -1,10 +1,13 @@
 """Smoke tests for campaign report generation and download."""
 
+import csv
 import re
 import urllib.parse
 from datetime import datetime
+from pathlib import Path
 
 import pytest
+from openpyxl import load_workbook
 from playwright.sync_api import Page
 
 from tests.e2e.pages.campaign_page import CampaignPage
@@ -63,6 +66,30 @@ def _ensure_campaign_has_orders(page: Page, profile_id: str, campaign_id: str) -
     if no_orders_message.is_visible():
         customer = f"Report Smoke {datetime.now().strftime('%Y%m%d%H%M%S')}"
         order_page.create_order_first_product(customer, qty=1)
+
+
+def _ensure_owner_has_campaign(page: Page) -> tuple[str, str]:
+    """Ensure the owner has a campaign and return its profile/campaign IDs."""
+    dashboard = DashboardPage(page)
+    dashboard.goto()
+    dashboard.wait_for_profiles_loaded()
+    profile_names = dashboard.get_profile_names()
+    assert profile_names, "Owner must have at least one seller profile"
+    dashboard.click_profile(profile_names[0])
+    page.wait_for_url("**/campaigns**", timeout=10_000)
+    profile_id = _get_profile_id_from_url(page.url)
+    campaign_page = CampaignPage(page)
+
+    campaign_names = campaign_page.get_campaign_names()
+    if not campaign_names:
+        campaign_name = f"Reports Download Test {datetime.now().strftime('%Y%m%d%H%M%S')}"
+        campaign_page.create_campaign_first_catalog(campaign_name)
+        campaign_names = campaign_page.get_campaign_names()
+    assert campaign_names, "Need at least one campaign to test reports download"
+
+    campaign_page.click_campaign(campaign_names[0])
+    campaign_id = _get_campaign_id_from_url(page.url)
+    return profile_id, campaign_id
 
 
 # ---------------------------------------------------------------------------
@@ -133,3 +160,65 @@ def test_campaign_reports_download_buttons(owner_page: Page, ensure_owner_profil
         reports.click_download_csv()
     download = download_info.value
     assert download.suggested_filename.endswith(".csv"), f"Expected CSV download; got: {download.suggested_filename}"
+
+
+@pytest.mark.smoke
+def test_download_xlsx(owner_page: Page, ensure_owner_profile: str, tmp_path: Path) -> None:
+    """Create an order, download XLSX, and verify its contents with openpyxl."""
+    profile_id, campaign_id = _ensure_owner_has_campaign(owner_page)
+
+    order_page = OrderPage(owner_page)
+    order_page.goto(profile_id, campaign_id)
+    customer_name = f"XLSX Smoke {datetime.now().strftime('%Y%m%d%H%M%S')}"
+    order_page.create_order_first_product(customer_name, qty=1)
+
+    reports = ReportsPage(owner_page)
+    reports.goto(profile_id, campaign_id)
+    assert reports.download_xlsx_button_is_visible(), "XLSX download button must be visible"
+    assert reports.download_xlsx_button_is_enabled(), "XLSX download button must be enabled"
+
+    xlsx_path = reports.download_xlsx_to(tmp_path / "report.xlsx")
+    assert xlsx_path.suffix == ".xlsx", f"Expected .xlsx file; got: {xlsx_path}"
+    assert xlsx_path.stat().st_size > 0, "Downloaded XLSX file must not be empty"
+
+    workbook = load_workbook(xlsx_path)
+    worksheet = workbook.active
+    assert worksheet is not None, "XLSX workbook must have an active worksheet"
+    headers = [worksheet.cell(row=1, column=col).value for col in range(1, worksheet.max_column + 1)]
+    assert headers[:3] == ["Name", "Phone", "Address"], f"Unexpected CSV headers: {headers}"
+    assert headers[-1] == "Total", f"Expected 'Total' as last header; got: {headers[-1]}"
+
+    customer_cells = [
+        worksheet.cell(row=row, column=1).value for row in range(2, worksheet.max_row + 1)
+    ]
+    assert customer_name in customer_cells, "XLSX must contain the smoke-test order row"
+
+
+@pytest.mark.smoke
+def test_csv_content_parsed(owner_page: Page, ensure_owner_profile: str, tmp_path: Path) -> None:
+    """Download a CSV report and parse it to verify the smoke-test order row."""
+    profile_id, campaign_id = _ensure_owner_has_campaign(owner_page)
+
+    order_page = OrderPage(owner_page)
+    order_page.goto(profile_id, campaign_id)
+    customer_name = f"CSV Smoke {datetime.now().strftime('%Y%m%d%H%M%S')}"
+    order_page.create_order_first_product(customer_name, qty=1)
+
+    reports = ReportsPage(owner_page)
+    reports.goto(profile_id, campaign_id)
+    assert reports.download_csv_button_is_visible(), "CSV download button must be visible"
+    assert reports.download_csv_button_is_enabled(), "CSV download button must be enabled"
+
+    csv_path = reports.download_csv_to(tmp_path / "report.csv")
+    with csv_path.open(newline="") as f:
+        rows = list(csv.reader(f))
+
+    assert rows, "CSV file must contain at least a header row"
+    headers = rows[0]
+    assert headers[:3] == ["Name", "Phone", "Address"], f"Unexpected CSV headers: {headers}"
+    assert headers[-1] == "Total", f"Expected 'Total' as last header; got: {headers[-1]}"
+
+    matching_rows = [row for row in rows[1:] if row and row[0] == customer_name]
+    assert matching_rows, "CSV must contain the smoke-test order row"
+    order_total = matching_rows[0][-1]
+    assert order_total, "Smoke-test order row must have a Total value"
