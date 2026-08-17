@@ -461,8 +461,33 @@ export const CreateSharedCampaignPage: React.FC = () => {
   const canCreate = useCanCreateSharedCampaign();
   const { filteredPublicCatalogs, myCatalogs, catalogsLoading } = useCatalogs();
 
-  // Create mutation
-  const [createSharedCampaign] = useMutation(CREATE_SHARED_CAMPAIGN);
+  // Create mutation. Update the cached list immediately so the newly created
+  // campaign is visible when the user is redirected back to /shared-campaigns.
+  const [createSharedCampaign] = useMutation<{ createSharedCampaign: SharedCampaign }>(
+    CREATE_SHARED_CAMPAIGN,
+    {
+      update: (cache, { data }) => {
+        const created = data?.createSharedCampaign;
+        if (!created) return;
+
+        const existing = cache.readQuery<{ listMySharedCampaigns: SharedCampaign[] }>({
+          query: LIST_MY_SHARED_CAMPAIGNS,
+        });
+
+        const campaigns = existing?.listMySharedCampaigns ?? [];
+        if (campaigns.some((c) => c.sharedCampaignCode === created.sharedCampaignCode)) {
+          return;
+        }
+
+        cache.writeQuery({
+          query: LIST_MY_SHARED_CAMPAIGNS,
+          data: {
+            listMySharedCampaigns: [created, ...campaigns],
+          },
+        });
+      },
+    },
+  );
 
   // Form data for validation
   const formData: FormData = {

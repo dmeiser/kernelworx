@@ -1,5 +1,6 @@
 """Catalogs page object — list, create, edit, and delete product catalogs."""
 
+import re
 import urllib.parse
 import uuid
 
@@ -28,12 +29,20 @@ class CatalogsPage(BasePage):
     _DIALOG_TITLE_CREATE: str = "Create Catalog"
     _DIALOG_TITLE_EDIT: str = "Edit Catalog"
     _CATALOG_NAME_LABEL: str = "Catalog Name"
+    _PRODUCT_NAME_LABEL: str = "Product Name"
+    _DESCRIPTION_LABEL: str = "Description (optional)"
+    _PRICE_LABEL: str = "Price"
     _ADD_PRODUCT_BTN: str = "Add Product"
     _SAVE_CATALOG_BTN: str = "Save Catalog"
 
     # Table columns / actions
     _VIEW_BTN: str = "View"
     _CATALOG_NAME_HEADER: str = "Catalog Name"
+
+    # Preview page
+    _PREVIEW_CATALOG_NAME_SEL: str = "h5"
+    _CREATE_CAMPAIGN_BTN: str = "Create Campaign"
+    _CREATE_SHARED_CAMPAIGN_BTN: str = "Create Shared Campaign"
 
     def __init__(self, page: Page) -> None:
         """Store the Playwright Page instance."""
@@ -103,7 +112,15 @@ class CatalogsPage(BasePage):
         Args:
             index: Zero-based product index in the dialog.
         """
-        return self.page.get_by_label("Product Name").nth(index)
+        return self.page.get_by_label(self._PRODUCT_NAME_LABEL).nth(index)
+
+    def _product_description_input(self, index: int = 0) -> Locator:
+        """Return locator for the *Description (optional)* field of product *index*.
+
+        Args:
+            index: Zero-based product index in the dialog.
+        """
+        return self.page.get_by_label(self._DESCRIPTION_LABEL).nth(index)
 
     def _product_price_input(self, index: int = 0) -> Locator:
         """Return locator for the *Price* field of product *index*.
@@ -111,7 +128,15 @@ class CatalogsPage(BasePage):
         Args:
             index: Zero-based product index in the dialog.
         """
-        return self.page.get_by_label("Price").nth(index)
+        return self.page.get_by_label(self._PRICE_LABEL).nth(index)
+
+    def _remove_product_button(self, index: int = 0) -> Locator:
+        """Return the remove icon button for product *index* in the dialog.
+
+        Args:
+            index: Zero-based product index in the dialog.
+        """
+        return self.page.get_by_role("button", name=re.compile(r"Remove product \d+")).nth(index)
 
     def _edit_button_for(self, name: str) -> Locator:
         """Return the edit icon button on the row for *name*.
@@ -167,7 +192,8 @@ class CatalogsPage(BasePage):
         Args:
             name: Optional catalog name. A unique name is generated when omitted.
             products: Optional list of product dicts with ``productName`` and ``price`` keys.
-                A default single product is created when omitted.
+                An optional ``description`` key is also supported. A default single
+                product is created when omitted.
 
         Returns:
             The catalog name used for creation.
@@ -182,8 +208,13 @@ class CatalogsPage(BasePage):
         for index, product in enumerate(product_list):
             if index > 0:
                 self._add_product_button().click()
+                # Wait for the newly appended product fields to mount before filling.
+                expect(self._product_name_input(index)).to_be_visible(timeout=5_000)
             self._product_name_input(index).fill(str(product["productName"]))
             self._product_price_input(index).fill(str(product["price"]))
+            description = product.get("description")
+            if description is not None:
+                self._product_description_input(index).fill(str(description))
 
         self._save_catalog_button().click()
         expect(dialog).to_be_hidden(timeout=15_000)
@@ -219,3 +250,137 @@ class CatalogsPage(BasePage):
         self.wait_for_loading()
         # Wait for the row to disappear from the list before returning.
         expect(self._catalog_row(name).first).to_be_hidden(timeout=15_000)
+
+    def edit_catalog_product(
+        self,
+        catalog_name: str,
+        index: int,
+        name: str,
+        price: float,
+        description: str | None = None,
+    ) -> None:
+        """Open the edit dialog for *catalog_name* and update product *index*.
+
+        Args:
+            catalog_name: Existing catalog name to edit.
+            index: Zero-based product index in the dialog.
+            name: New product name.
+            price: New product price.
+            description: Optional new product description.
+        """
+        self._edit_button_for(catalog_name).click()
+        dialog = self.wait_for_dialog(self._DIALOG_TITLE_EDIT)
+
+        name_input = self._product_name_input(index)
+        name_input.clear()
+        name_input.fill(name)
+
+        price_input = self._product_price_input(index)
+        price_input.clear()
+        price_input.fill(str(price))
+
+        if description is not None:
+            desc_input = self._product_description_input(index)
+            desc_input.clear()
+            desc_input.fill(description)
+
+        self._save_catalog_button().click()
+        expect(dialog).to_be_hidden(timeout=15_000)
+        self.wait_for_loading()
+
+    def remove_catalog_product(self, catalog_name: str, index: int) -> None:
+        """Open the edit dialog for *catalog_name* and remove product *index*.
+
+        Args:
+            catalog_name: Existing catalog name to edit.
+            index: Zero-based product index in the dialog.
+        """
+        self._edit_button_for(catalog_name).click()
+        dialog = self.wait_for_dialog(self._DIALOG_TITLE_EDIT)
+        self._remove_product_button(index).click()
+        self._save_catalog_button().click()
+        expect(dialog).to_be_hidden(timeout=15_000)
+        self.wait_for_loading()
+
+    # ------------------------------------------------------------------
+    # Catalog preview page
+    # ------------------------------------------------------------------
+
+    def view_catalog(self, name: str) -> None:
+        """Click the *View* button for *name* and wait for the preview page.
+
+        Args:
+            name: Catalog name whose preview should be opened.
+        """
+        row = self._catalog_row(name)
+        row.get_by_role("button", name=self._VIEW_BTN, exact=True).click()
+        self.page.wait_for_url("**/catalogs/**/preview", timeout=10_000)
+        self.wait_for_loading()
+
+    def get_preview_catalog_name(self) -> str:
+        """Return the catalog name displayed on the preview page.
+
+        Returns:
+            Catalog name rendered as the page heading.
+        """
+        return self.page.locator(self._PREVIEW_CATALOG_NAME_SEL).first.inner_text()
+
+    def get_preview_product_count_text(self) -> str:
+        """Return the product count subtitle text (e.g. ``"2 products"``)."""
+        return self.page.get_by_text(re.compile(r"\d+ product")).first.inner_text()
+
+    def get_preview_product_count(self) -> int:
+        """Return the numeric product count shown on the preview page.
+
+        Returns:
+            Number of products parsed from the subtitle, or ``0`` when no
+            count text is present.
+        """
+        text = self.get_preview_product_count_text()
+        match = re.search(r"\d+", text)
+        return int(match.group()) if match else 0
+
+    def get_preview_product_names(self) -> list[str]:
+        """Return the product names listed in the preview page table.
+
+        Returns:
+            List of product name strings in table order.
+        """
+        name_cells = self.page.locator("table tbody tr td:first-child")
+        expect(name_cells.first).to_be_visible(timeout=10_000)
+        # The table can render rows with empty text before Apollo fills them;
+        # poll until at least one cell has non-empty text.
+        for _ in range(15):
+            names = [t.strip() for t in name_cells.all_inner_texts() if t.strip()]
+            if names:
+                return names
+            self.page.wait_for_timeout(200)
+        return name_cells.all_inner_texts()
+
+    def preview_has_product(self, name: str, price: float) -> bool:
+        """Return ``True`` when the preview table contains *name* at *price*.
+
+        Args:
+            name: Product name to match.
+            price: Expected price. Displayed prices are formatted as
+                ``"$xx.xx"``.
+        """
+        price_str = f"${float(price):.2f}"
+        name_cells = self.page.locator("table tbody tr td:first-child")
+        price_cells = self.page.locator("table tbody tr td:last-child")
+        expect(name_cells.first).to_be_visible(timeout=10_000)
+        for _ in range(15):
+            names = [t.strip() for t in name_cells.all_inner_texts()]
+            prices = [t.strip() for t in price_cells.all_inner_texts()]
+            if any(n == name and p == price_str for n, p in zip(names, prices)):
+                return True
+            self.page.wait_for_timeout(200)
+        return False
+
+    def get_preview_create_campaign_button_visible(self) -> bool:
+        """Return ``True`` when the *Create Campaign* button is visible."""
+        return self.page.get_by_role("button", name=self._CREATE_CAMPAIGN_BTN, exact=True).first.is_visible()
+
+    def get_preview_create_shared_campaign_button_visible(self) -> bool:
+        """Return ``True`` when the *Create Shared Campaign* button is visible."""
+        return self.page.get_by_role("button", name=self._CREATE_SHARED_CAMPAIGN_BTN, exact=True).first.is_visible()
