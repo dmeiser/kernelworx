@@ -182,15 +182,16 @@ class CampaignSettingsPage(BasePage):
         date_input.clear()
         date_input.fill(value)
 
-    def select_catalog_by_name(self, name: str) -> None:
+    def select_catalog_by_name(self, name: str, timeout: int = 10_000) -> None:
         """Open the Product Catalog dropdown and select the matching option.
 
-        Matches the visible option text exactly, then falls back to a
-        substring match to account for the ``" (Official)"`` suffix on
-        admin-managed catalogs.
+        Waits for the catalog list to populate so the target option is found
+        even when the ``listMyCatalogs`` / ``listManagedCatalogs`` queries are
+        still loading.
 
         Args:
             name: Catalog name to select.
+            timeout: Maximum wait in milliseconds for the option to appear.
 
         Raises:
             AssertionError: When no matching catalog option is visible.
@@ -199,13 +200,18 @@ class CampaignSettingsPage(BasePage):
         listbox = self.page.get_by_role("listbox")
         expect(listbox).to_be_visible(timeout=5_000)
 
-        option = listbox.get_by_role("option", name=name, exact=True)
-        if option.count() == 0:
-            option = listbox.locator('[role="option"]').filter(
-                has_text=re.compile(re.escape(name))
-            ).first
+        # Wait for the option set to include the requested catalog (exact or
+        # with an admin-managed `` (Official)`` suffix).
+        exact_option = listbox.get_by_role("option", name=name, exact=True)
+        substring_options = listbox.locator('[role="option"]').filter(
+            has_text=re.compile(re.escape(name))
+        )
+        try:
+            expect(exact_option.or_(substring_options)).to_be_visible(timeout=timeout)
+        except AssertionError as exc:
+            raise AssertionError(f"Catalog option '{name}' not found in dropdown") from exc
 
-        assert option.count() > 0, f"Catalog option '{name}' not found in dropdown"
+        option = exact_option if exact_option.count() > 0 else substring_options.first
         option.click()
         expect(listbox).to_be_hidden(timeout=5_000)
 

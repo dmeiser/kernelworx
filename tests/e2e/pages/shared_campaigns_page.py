@@ -185,10 +185,12 @@ class SharedCampaignsPage(BasePage):
         Returns:
             List of short-code strings in DOM order.
         """
-        cells = self.page.get_by_role("cell").filter(has_text=re.compile(r"^[A-Z0-9]+(-[A-Z0-9]+)+$"))
+        cells = self.page.get_by_role("cell").filter(
+            has_text=re.compile(r"^[A-Z0-9][A-Z0-9\s-]*$")
+        )
         try:
             expect(cells.first).to_be_visible(timeout=timeout)
-        except PlaywrightTimeoutError:
+        except AssertionError:
             return []
         return cells.all_inner_texts()
 
@@ -205,7 +207,7 @@ class SharedCampaignsPage(BasePage):
         if row.count() == 0:
             return None
         code_cell = row.first.get_by_role("cell").filter(
-            has_text=re.compile(r"^[A-Z0-9]+(-[A-Z0-9]+)+$")
+            has_text=re.compile(r"^[A-Z0-9][A-Z0-9\s-]*$")
         )
         if code_cell.count() == 0:
             return None
