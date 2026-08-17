@@ -172,13 +172,24 @@ class SharedCampaignsPage(BasePage):
         """
         return self._campaign_row(code).first.is_visible()
 
-    def get_visible_codes(self) -> list[str]:
+    def get_visible_codes(self, timeout: int = 10_000) -> list[str]:
         """Return the visible short codes from the shared campaigns table.
+
+        Waits for at least one short-code cell to appear so callers that create
+        a shared campaign and immediately read the list do not see an empty
+        result while the GraphQL query refetches.
+
+        Args:
+            timeout: Maximum wait in milliseconds. Defaults to 10 000.
 
         Returns:
             List of short-code strings in DOM order.
         """
         cells = self.page.get_by_role("cell").filter(has_text=re.compile(r"^[A-Z0-9]+(-[A-Z0-9]+)+$"))
+        try:
+            expect(cells.first).to_be_visible(timeout=timeout)
+        except PlaywrightTimeoutError:
+            return []
         return cells.all_inner_texts()
 
     def get_code_by_campaign_name(self, campaign_name: str) -> str | None:

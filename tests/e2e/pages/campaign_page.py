@@ -253,12 +253,10 @@ class CampaignPage(BasePage):
             name: Substring to search for in active campaign card headings.
             timeout: Maximum wait in milliseconds. Defaults to 10 000.
         """
-        active_section = self.page.locator("div.MuiPaper-root, section").filter(
-            has=self.page.get_by_role("heading", name="Active Campaigns")
-        )
+        active_heading = self.page.get_by_role("heading", name="Active Campaigns").first
         # Fall back to the whole page when the active section heading is not rendered
         # (e.g. when there are no inactive campaigns).
-        scope = active_section if active_section.is_visible() else self.page
+        scope = active_heading.locator("xpath=..") if active_heading.is_visible() else self.page
         heading = scope.locator(self._CAMPAIGN_HEADING_SEL, has_text=name)
         try:
             heading.first.wait_for(state="visible", timeout=timeout)
@@ -275,18 +273,29 @@ class CampaignPage(BasePage):
         """
         return self._campaign_headings().all_inner_texts()
 
-    def new_campaign_button_is_available(self) -> bool:
+    def new_campaign_button_is_available(self, timeout: int = 10_000) -> bool:
         """Return ``True`` when the *New Campaign* button is visible and enabled.
+
+        Waits briefly for the button to appear so callers do not fail when the
+        page is still loading profile permissions.
 
         Returns ``False`` when the button is absent from the DOM, hidden, or
         disabled — any of which indicates the current user does not have write
         access to this campaigns list (e.g. they hold a READ-only share).
 
+        Args:
+            timeout: Maximum wait in milliseconds. Defaults to 10 000.
+
         Returns:
             ``True`` if the button is both visible and enabled; ``False`` otherwise.
         """
         btn = self._new_campaign_button()
-        return bool(btn.is_visible() and btn.is_enabled())
+        try:
+            expect(btn).to_be_visible(timeout=timeout)
+            expect(btn).to_be_enabled(timeout=timeout)
+        except PlaywrightTimeoutError:
+            return False
+        return True
 
     def has_access_denied_alert(self) -> bool:
         """Return ``True`` when the page shows the access-denied error alert.
