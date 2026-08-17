@@ -2,14 +2,15 @@
 
 These tests verify that the owner can view built-in payment methods (Cash and
 Check), create a custom payment method, rename it, upload and delete a QR code,
-and delete it.
+and delete it.  Custom methods are removed in ``finally`` blocks so the shared
+owner account does not accumulate test data.
 """
 
 import uuid
 from pathlib import Path
 
 import pytest
-from playwright.sync_api import Page
+from playwright.sync_api import Page, expect
 
 from tests.e2e.pages.payment_page import PaymentPage
 
@@ -43,10 +44,14 @@ def test_add_payment_method(owner_page: Page) -> None:
     method_name = _unique_method_name("Venmo")
     payment_page = PaymentPage(owner_page)
     payment_page.goto()
-    payment_page.add_payment_method(method_name)
-    assert payment_page.has_payment_method(method_name), (
-        f"Custom payment method '{method_name}' must appear after creation"
-    )
+    try:
+        payment_page.add_payment_method(method_name)
+        assert payment_page.has_payment_method(method_name), (
+            f"Custom payment method '{method_name}' must appear after creation"
+        )
+    finally:
+        if payment_page.has_payment_method(method_name):
+            payment_page.delete_payment_method(method_name)
 
 
 @pytest.mark.smoke
@@ -56,14 +61,20 @@ def test_delete_payment_method(owner_page: Page) -> None:
     payment_page = PaymentPage(owner_page)
     payment_page.goto()
     payment_page.add_payment_method(method_name)
-    assert payment_page.has_payment_method(method_name), (
-        f"Custom payment method '{method_name}' must be present before deletion"
-    )
+    try:
+        assert payment_page.has_payment_method(method_name), (
+            f"Custom payment method '{method_name}' must be present before deletion"
+        )
 
-    payment_page.delete_payment_method(method_name)
-    assert not payment_page.has_payment_method(method_name), (
-        f"Custom payment method '{method_name}' must not appear after deletion"
-    )
+        payment_page.delete_payment_method(method_name)
+        assert not payment_page.has_payment_method(method_name), (
+            f"Custom payment method '{method_name}' must not appear after deletion"
+        )
+    except Exception:
+        # Ensure cleanup even if the assertion path fails.
+        if payment_page.has_payment_method(method_name):
+            payment_page.delete_payment_method(method_name)
+        raise
 
 
 @pytest.mark.smoke
@@ -74,17 +85,22 @@ def test_rename_payment_method(owner_page: Page) -> None:
     payment_page = PaymentPage(owner_page)
     payment_page.goto()
     payment_page.add_payment_method(method_name)
-    assert payment_page.has_payment_method(method_name), (
-        f"Custom payment method '{method_name}' must be present before rename"
-    )
+    try:
+        assert payment_page.has_payment_method(method_name), (
+            f"Custom payment method '{method_name}' must be present before rename"
+        )
 
-    payment_page.rename_payment_method(method_name, new_name)
-    assert not payment_page.has_payment_method(method_name), (
-        f"Old payment method name '{method_name}' must not appear after rename"
-    )
-    assert payment_page.has_payment_method(new_name), (
-        f"New payment method name '{new_name}' must appear after rename"
-    )
+        payment_page.rename_payment_method(method_name, new_name)
+        assert not payment_page.has_payment_method(method_name), (
+            f"Old payment method name '{method_name}' must not appear after rename"
+        )
+        assert payment_page.has_payment_method(new_name), (
+            f"New payment method name '{new_name}' must appear after rename"
+        )
+    finally:
+        for name in (new_name, method_name):
+            if payment_page.has_payment_method(name):
+                payment_page.delete_payment_method(name)
 
 
 @pytest.mark.smoke
@@ -97,22 +113,31 @@ def test_upload_and_delete_qr_code(owner_page: Page) -> None:
     payment_page = PaymentPage(owner_page)
     payment_page.goto()
     payment_page.add_payment_method(method_name)
-    assert payment_page.has_payment_method(method_name), (
-        f"Custom payment method '{method_name}' must be present before QR upload"
-    )
+    try:
+        assert payment_page.has_payment_method(method_name), (
+            f"Custom payment method '{method_name}' must be present before QR upload"
+        )
 
-    payment_page.upload_qr_code(method_name, str(_QR_FIXTURE_PATH))
-    assert payment_page.has_qr_code(method_name), (
-        f"QR code must be visible for '{method_name}' after upload"
-    )
+        payment_page.upload_qr_code(method_name, str(_QR_FIXTURE_PATH))
+        assert payment_page.has_qr_code(method_name), (
+            f"QR code must be visible for '{method_name}' after upload"
+        )
 
-    payment_page.delete_qr_code(method_name)
-    assert not payment_page.has_qr_code(method_name), (
-        f"QR code must not be visible for '{method_name}' after deletion"
-    )
-    assert payment_page.has_payment_method(method_name), (
-        f"Payment method '{method_name}' must still exist after QR deletion"
-    )
+        # Exercise the QR preview dialog (required by #85).
+        dialog = payment_page.view_qr_code(method_name)
+        dialog.get_by_role("button", name="Close").click()
+        expect(dialog).to_be_hidden(timeout=10_000)
+
+        payment_page.delete_qr_code(method_name)
+        assert not payment_page.has_qr_code(method_name), (
+            f"QR code must not be visible for '{method_name}' after deletion"
+        )
+        assert payment_page.has_payment_method(method_name), (
+            f"Payment method '{method_name}' must still exist after QR deletion"
+        )
+    finally:
+        if payment_page.has_payment_method(method_name):
+            payment_page.delete_payment_method(method_name)
 
 
 @pytest.mark.smoke

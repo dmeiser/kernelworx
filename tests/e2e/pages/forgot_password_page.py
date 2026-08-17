@@ -20,8 +20,8 @@ class ForgotPasswordPage:
 
     def expect_loaded(self) -> None:
         """Verify the reset form is present."""
-        heading = self.page.get_by_role("heading", name="Reset Password")
-        expect(heading).to_be_visible(timeout=10_000)
+        subtitle = self.page.get_by_text("Reset your password")
+        expect(subtitle).to_be_visible(timeout=10_000)
         email_input = self.page.get_by_label("Email")
         expect(email_input).to_be_visible()
         expect(email_input).to_be_editable()

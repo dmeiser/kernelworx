@@ -25,17 +25,16 @@ import { resetPassword, confirmResetPassword } from 'aws-amplify/auth';
 const PASSWORD_REGEX = /^(?=.*[A-Z])(?=.*[a-z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,}$/;
 
 const RESET_ERROR_MESSAGES: Record<string, string> = {
-  UserNotFoundException: 'If this account exists, a reset code has been sent.',
   InvalidParameterException: 'Please check your email address and try again.',
   LimitExceededException: 'Too many attempts. Please try again later.',
 };
 
 const CONFIRM_ERROR_MESSAGES: Record<string, string> = {
   CodeMismatchException: 'Invalid verification code. Please check and try again.',
+  UserNotFoundException: 'Invalid verification code. Please check and try again.',
   ExpiredCodeException: 'Verification code expired. Please request a new code.',
   InvalidPasswordException:
     'Password does not meet requirements: minimum 8 characters with uppercase, lowercase, numbers, and symbols.',
-  UserNotFoundException: 'Unable to reset password. Please start over.',
 };
 
 function getErrorFromTable(
@@ -106,15 +105,18 @@ export const ForgotPasswordPage: React.FC = () => {
     setLoading(true);
     try {
       await resetPassword({ username: email });
-      setCodeSent(true);
-      setSuccess(`Reset code sent to ${email}`);
     } catch (err: unknown) {
       console.error('Reset password request failed:', err);
       const typedError = err as { name?: string; message?: string };
-      setError(getErrorFromTable(RESET_ERROR_MESSAGES, typedError.name, typedError.message || 'Unable to send reset code'));
-    } finally {
-      setLoading(false);
+      if (typedError.name !== 'UserNotFoundException') {
+        setError(getErrorFromTable(RESET_ERROR_MESSAGES, typedError.name, typedError.message || 'Unable to send reset code'));
+        setLoading(false);
+        return;
+      }
     }
+    setCodeSent(true);
+    setSuccess(`Reset code sent to ${email}`);
+    setLoading(false);
   };
 
   const handleResetPassword = async (e: React.FormEvent) => {
