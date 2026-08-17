@@ -41,6 +41,7 @@ from playwright.sync_api import Page, expect
 from tests.e2e.pages.campaign_page import CampaignPage
 from tests.e2e.pages.dashboard_page import DashboardPage
 from tests.e2e.pages.order_page import OrderPage
+from tests.e2e.utils.money import assert_currency, parse_currency
 
 _CUSTOMER_NAME: str = "Jane Smith"
 _ORDER_QTY: str = "2"
@@ -197,6 +198,83 @@ def test_create_order(owner_page: Page, _module_state: dict[str, str], ensure_ow
 
 @pytest.mark.smoke
 @pytest.mark.slow
+def test_full_form_order_lifecycle_with_money(owner_page: Page, ensure_owner_profile: str) -> None:
+    """Create a full order with address, payment, notes and verify money math end-to-end.
+
+    Picks the first two catalog products by dropdown index so the test can read
+    their displayed prices, then asserts that per-row subtotals and the editor
+    total equal ``quantity * price``. After submission it checks the orders list
+    total and the campaign summary *Total Sales* tile (using a baseline delta so
+    prior orders do not cause false negatives).
+    """
+    order_page, profile_id, campaign_id = _navigate_to_orders(owner_page)
+
+    # Capture baseline Total Sales so the assertion is isolated from prior orders.
+    baseline_text = order_page.get_summary_total_sales()
+    baseline_cents = int(parse_currency(baseline_text or "$0.00") * 100)
+
+    customer_name = f"Full Form Customer {uuid4().hex[:8]}"
+    phone = "5559876543"
+    address = {
+        "street": "123 Kernel Lane",
+        "city": "Austin",
+        "state": "TX",
+        "zip": "78701",
+    }
+    payment_method = "Cash"
+    notes = "Deliver to front porch. Leave behind the planter."
+
+    order_page._new_order_button().click()
+    order_page.wait_for_loading()
+
+    # Fill customer info, address, payment, and notes; leave line items empty
+    # so we can select products by index and read their displayed prices.
+    order_page.fill_full_order_form(
+        customer_name=customer_name,
+        phone=phone,
+        items=[],
+        address=address,
+        payment_method=payment_method,
+        notes=notes,
+    )
+
+    # Select the first two catalog products with different quantities.
+    order_page._ensure_row_exists(0)
+    order_page._ensure_row_exists(1)
+    order_page._fill_row_by_option_index(0, 0, "2")
+    order_page._fill_row_by_option_index(1, 1, "3")
+
+    # Read displayed prices and assert subtotals match quantity * price.
+    price_0_text = order_page.get_line_item_price(0)
+    price_1_text = order_page.get_line_item_price(1)
+    price_0_cents = int(parse_currency(price_0_text) * 100)
+    price_1_cents = int(parse_currency(price_1_text) * 100)
+
+    subtotal_0_text = order_page.get_line_item_subtotal(0)
+    subtotal_1_text = order_page.get_line_item_subtotal(1)
+    assert_currency(subtotal_0_text, price_0_cents * 2)
+    assert_currency(subtotal_1_text, price_1_cents * 3)
+
+    expected_total_cents = price_0_cents * 2 + price_1_cents * 3
+    assert_currency(order_page.get_editor_total(), expected_total_cents)
+
+    # Submit and verify the orders list shows the expected total.
+    order_page._create_order_button().click()
+    owner_page.wait_for_url("**/orders", timeout=15_000)
+    order_page.wait_for_loading()
+
+    expect(owner_page.get_by_role("cell", name=customer_name).first).to_be_visible(timeout=10_000)
+    list_total_text = order_page.get_list_total_for_customer(customer_name)
+    assert_currency(list_total_text, expected_total_cents)
+
+    # Reload the orders page and verify the campaign summary reflects the order.
+    order_page.goto(profile_id, campaign_id)
+    summary_total_text = order_page.get_summary_total_sales()
+    assert_currency(summary_total_text, baseline_cents + expected_total_cents)
+
+
+@pytest.mark.smoke
+@pytest.mark.slow
 def test_create_order_without_phone(owner_page: Page, ensure_owner_profile: str) -> None:
     """Create an order with a blank phone number and verify it is accepted."""
     order_page, _profile_id, _campaign_id = _navigate_to_orders(owner_page)
@@ -217,7 +295,7 @@ def test_invalid_phone_preserves_form(owner_page: Page, ensure_owner_profile: st
 
     assert "Phone number must be a valid 10-digit US number" in order_page.get_visible_alert_text()
     expect(owner_page.get_by_label("Customer Name")).to_have_value(customer_name)
-    expect(owner_page).to_have_url("**/orders/new", timeout=10_000)
+    owner_page.wait_for_url("**/orders/new", timeout=10_000)
 
 
 @pytest.mark.smoke
