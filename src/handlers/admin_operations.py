@@ -10,6 +10,7 @@ Provides:
 import os
 import re
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, Dict, List, Optional, cast
@@ -20,13 +21,13 @@ from botocore.exceptions import ClientError
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
     from utils.auth import is_admin
-    from utils.dynamodb import tables
+    from utils.dynamodb import get_dynamodb_resource, tables
     from utils.errors import AppError, ErrorCode
     from utils.logging import get_logger
     from utils.pagination import query_all_items
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.auth import is_admin
-    from ..utils.dynamodb import tables
+    from ..utils.dynamodb import get_dynamodb_resource, tables
     from ..utils.errors import AppError, ErrorCode
     from ..utils.logging import get_logger
     from ..utils.pagination import query_all_items
@@ -60,18 +61,66 @@ def _get_user_groups(cognito: Any, user_pool_id: str, username: str) -> list[str
         return []
 
 
-def _get_cognito_user_attributes(cognito_user: Dict[str, Any]) -> tuple[str, str, bool, str, bool]:
-    """Extract core attributes from a Cognito user dict."""
-    username = cognito_user.get("Username", "")
-    attributes = {attr["Name"]: attr["Value"] for attr in cognito_user.get("Attributes", [])}
+def _batch_get_user_groups(
+    cognito: Any, user_pool_id: str, usernames: list[str], logger: Any
+) -> dict[str, list[str]]:
+    """Fetch Cognito groups for multiple users in parallel.
 
-    account_id = attributes.get("sub", username)
-    email = attributes.get("email", "")
-    email_verified = attributes.get("email_verified", "false").lower() == "true"
-    user_status = cognito_user.get("UserStatus", "UNKNOWN")
-    enabled = cognito_user.get("Enabled", True)
+    Cognito does not expose a batch group-membership API, so we parallelize
+    the per-user calls to avoid the N+1 fan-out.
+    """
+    groups_map: dict[str, list[str]] = {}
+    if not usernames:
+        return groups_map
 
-    return account_id, email, email_verified, user_status, enabled
+    def _fetch(username: str) -> tuple[str, list[str]]:
+        return username, _get_user_groups(cognito, user_pool_id, username)
+
+    try:
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            results = executor.map(_fetch, usernames)
+        for username, groups in results:
+            groups_map[username] = groups
+    except Exception as e:
+        logger.warning("Failed to batch fetch user groups", error=str(e))
+
+    return groups_map
+
+
+def _batch_get_display_names(account_ids: list[str], logger: Any) -> dict[str, str]:
+    """Batch fetch display names from the Accounts table using BatchGetItem."""
+    display_names: dict[str, str] = {}
+    if not account_ids:
+        return display_names
+
+    seen: set[str] = set()
+    keys: list[Dict[str, str]] = []
+    for account_id in account_ids:
+        db_account_id = account_id if account_id.startswith("ACCOUNT#") else f"ACCOUNT#{account_id}"
+        if db_account_id in seen:
+            continue
+        seen.add(db_account_id)
+        keys.append({"accountId": db_account_id})
+
+    accounts_table_name = _get_required_env("ACCOUNTS_TABLE_NAME")
+
+    try:
+        for i in range(0, len(keys), 100):
+            batch = keys[i : i + 100]
+            response = get_dynamodb_resource().batch_get_item(
+                RequestItems={accounts_table_name: {"Keys": batch}}
+            )
+            for item in response.get("Responses", {}).get(accounts_table_name, []):
+                raw_id = item.get("accountId", "")
+                key = raw_id[8:] if raw_id.startswith("ACCOUNT#") else raw_id
+                given_name = str(item.get("givenName", ""))
+                family_name = str(item.get("familyName", ""))
+                if given_name or family_name:
+                    display_names[key] = f"{given_name} {family_name}".strip()
+    except ClientError as e:
+        logger.warning("Failed to batch fetch display names", error=str(e))
+
+    return display_names
 
 
 def _list_cognito_users(
@@ -122,9 +171,18 @@ def admin_list_users(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         cognito = _get_cognito_client()
 
         cognito_users, pagination_token = _list_cognito_users(cognito, user_pool_id, limit, next_token, logger)
-        admin_users = [
-            _build_admin_user(cognito, user_pool_id, cognito_user, logger) for cognito_user in cognito_users
+
+        # Batch DynamoDB display-name lookups and parallelize Cognito group lookups
+        # to avoid the per-user N+1 fan-out.
+        account_ids = [
+            _extract_cognito_attributes(user)[1].get("sub", user.get("Username", ""))
+            for user in cognito_users
         ]
+        usernames = [user.get("Username", "") for user in cognito_users]
+        display_names = _batch_get_display_names(account_ids, logger)
+        groups_map = _batch_get_user_groups(cognito, user_pool_id, usernames, logger)
+
+        admin_users = _build_admin_users_from_cognito(cognito_users, display_names, groups_map)
 
         logger.info("Listed users", count=len(admin_users), has_more=bool(pagination_token))
         return {"users": admin_users, "nextToken": pagination_token}
@@ -182,10 +240,21 @@ def admin_search_user(event: Dict[str, Any], context: Any) -> list[Dict[str, Any
         user_pool_id = _get_required_env("USER_POOL_ID")
         cognito = _get_cognito_client()
 
-        # Determine search strategy based on query format
+        # Determine search strategy based on query format.
+        # The map values are Cognito user dicts so we can batch enrich them.
         results_map = _execute_search_strategy(query, cognito, user_pool_id, logger)
+        cognito_users = list(results_map.values())
 
-        return list(results_map.values())
+        # Batch DynamoDB display-name lookups and parallelize Cognito group lookups.
+        account_ids = [
+            _extract_cognito_attributes(user)[1].get("sub", user.get("Username", ""))
+            for user in cognito_users
+        ]
+        usernames = [user.get("Username", "") for user in cognito_users]
+        display_names = _batch_get_display_names(account_ids, logger)
+        groups_map = _batch_get_user_groups(cognito, user_pool_id, usernames, logger)
+
+        return _build_admin_users_from_cognito(cognito_users, display_names, groups_map)
 
     except AppError:
         raise
@@ -195,21 +264,23 @@ def admin_search_user(event: Dict[str, Any], context: Any) -> list[Dict[str, Any
 
 
 def _search_by_account_prefix(query: str, cognito: Any, user_pool_id: str, logger: Any) -> dict[str, Dict[str, Any]]:
-    """Search by ACCOUNT# prefix and return results map."""
+    """Search by ACCOUNT# prefix and return Cognito-user results map."""
     sub_value = query[8:]  # Remove "ACCOUNT#"
     cognito_user = _search_user_by_sub(cognito, user_pool_id, sub_value, logger)
     if cognito_user:
-        admin_user = _build_admin_user(cognito, user_pool_id, cognito_user, logger)
-        return {admin_user["accountId"]: admin_user}
+        attributes = {attr["Name"]: attr["Value"] for attr in cognito_user.get("Attributes", [])}
+        account_id = attributes.get("sub", cognito_user.get("Username", ""))
+        return {account_id: cognito_user}
     return {}
 
 
 def _search_by_uuid(query: str, cognito: Any, user_pool_id: str, logger: Any) -> dict[str, Dict[str, Any]]:
-    """Search by UUID (sub) and return results map."""
+    """Search by UUID (sub) and return Cognito-user results map."""
     cognito_user = _search_user_by_sub(cognito, user_pool_id, query, logger)
     if cognito_user:
-        admin_user = _build_admin_user(cognito, user_pool_id, cognito_user, logger)
-        return {admin_user["accountId"]: admin_user}
+        attributes = {attr["Name"]: attr["Value"] for attr in cognito_user.get("Attributes", [])}
+        account_id = attributes.get("sub", cognito_user.get("Username", ""))
+        return {account_id: cognito_user}
     return {}
 
 
@@ -235,7 +306,7 @@ def _normalize_account_id(account_id: str) -> str:
 def _add_dynamodb_users_to_map(
     results_map: dict[str, Dict[str, Any]], query: str, cognito: Any, user_pool_id: str, logger: Any
 ) -> None:
-    """Search DynamoDB and add users to results map."""
+    """Search DynamoDB and add matching Cognito users to results map."""
     accounts = _search_accounts_in_dynamodb(query, logger)
     for account in accounts:
         account_id = account.get("accountId", "")
@@ -243,8 +314,9 @@ def _add_dynamodb_users_to_map(
             sub_value = account_id[8:]
             cognito_user = _search_user_by_sub(cognito, user_pool_id, sub_value, logger)
             if cognito_user:
-                admin_user = _build_admin_user(cognito, user_pool_id, cognito_user, logger)
-                results_map[admin_user["accountId"]] = admin_user
+                attributes = {attr["Name"]: attr["Value"] for attr in cognito_user.get("Attributes", [])}
+                key = attributes.get("sub", cognito_user.get("Username", ""))
+                results_map[key] = cognito_user
 
 
 def _add_cognito_users_to_map(
@@ -253,9 +325,10 @@ def _add_cognito_users_to_map(
     """Search Cognito by email and add users to results map."""
     cognito_users = _search_users_in_cognito_by_email_prefix(cognito, user_pool_id, query, logger)
     for cognito_user in cognito_users:
-        admin_user = _build_admin_user(cognito, user_pool_id, cognito_user, logger)
-        if admin_user["accountId"] not in results_map:
-            results_map[admin_user["accountId"]] = admin_user
+        attributes = {attr["Name"]: attr["Value"] for attr in cognito_user.get("Attributes", [])}
+        account_id = attributes.get("sub", cognito_user.get("Username", ""))
+        if account_id not in results_map:
+            results_map[account_id] = cognito_user
 
 
 def _search_by_general_query(query: str, cognito: Any, user_pool_id: str, logger: Any) -> dict[str, Dict[str, Any]]:
@@ -407,58 +480,33 @@ def _extract_cognito_attributes(cognito_user: Dict[str, Any]) -> tuple[str, Dict
     return username, attributes
 
 
-def _get_display_name_from_db(account_id: str, logger: Any) -> Optional[str]:
-    """Try to get display name from DynamoDB Account table."""
-    try:
-        db_account_id = f"ACCOUNT#{account_id}"
-        db_response = tables.accounts.get_item(Key={"accountId": db_account_id})
-        if "Item" in db_response:
-            account = db_response["Item"]
-            given_name = str(account.get("givenName", ""))
-            family_name = str(account.get("familyName", ""))
-            if given_name or family_name:
-                return f"{given_name} {family_name}".strip()
-    except ClientError as e:
-        logger.warning("Failed to get DynamoDB account", error=str(e), account_id=account_id)
-    return None
-
-
-def _build_admin_user(cognito: Any, user_pool_id: str, cognito_user: Dict[str, Any], logger: Any) -> Dict[str, Any]:
-    """Build an AdminUser object from Cognito user data."""
-    # Extract Cognito attributes
-    username, attributes = _extract_cognito_attributes(cognito_user)
-
-    # Get sub (accountId) - this is the unique identifier
-    account_id = attributes.get("sub", username)
-    email = attributes.get("email", "")
-    email_verified = attributes.get("email_verified", "false").lower() == "true"
-
-    # Get user status and enabled state from Cognito
-    user_status = cognito_user.get("UserStatus", "UNKNOWN")
-    enabled = cognito_user.get("Enabled", True)
-
-    # Get timestamps
-    created_at = cognito_user.get("UserCreateDate")
-    last_modified_at = cognito_user.get("UserLastModifiedDate")
-
-    # Check if user is in ADMIN group
-    groups = _get_user_groups(cognito, user_pool_id, username)
-    is_admin_user = "ADMIN" in groups
-
-    # Try to get DynamoDB Account data for display name
-    display_name = _get_display_name_from_db(account_id, logger)
-
-    return {
-        "accountId": account_id,
-        "email": email,
-        "displayName": display_name,
-        "status": user_status,
-        "enabled": enabled,
-        "emailVerified": email_verified,
-        "isAdmin": is_admin_user,
-        "createdAt": created_at.isoformat() if created_at else None,
-        "lastModifiedAt": last_modified_at.isoformat() if last_modified_at else None,
-    }
+def _build_admin_users_from_cognito(
+    cognito_users: list[Dict[str, Any]],
+    display_names: dict[str, str],
+    groups_map: dict[str, list[str]],
+) -> list[Dict[str, Any]]:
+    """Build AdminUser objects from Cognito users plus cached display names and groups."""
+    admin_users = []
+    for cognito_user in cognito_users:
+        username, attributes = _extract_cognito_attributes(cognito_user)
+        account_id = attributes.get("sub", username)
+        groups = groups_map.get(username, [])
+        created_at = cognito_user.get("UserCreateDate")
+        last_modified_at = cognito_user.get("UserLastModifiedDate")
+        admin_users.append(
+            {
+                "accountId": account_id,
+                "email": attributes.get("email", ""),
+                "displayName": display_names.get(account_id),
+                "status": cognito_user.get("UserStatus", "UNKNOWN"),
+                "enabled": cognito_user.get("Enabled", True),
+                "emailVerified": attributes.get("email_verified", "false").lower() == "true",
+                "isAdmin": "ADMIN" in groups,
+                "createdAt": created_at.isoformat() if created_at else None,
+                "lastModifiedAt": last_modified_at.isoformat() if last_modified_at else None,
+            }
+        )
+    return admin_users
 
 
 def _find_cognito_user_by_sub(
@@ -483,24 +531,33 @@ def _find_cognito_user_by_sub(
 
 
 def _delete_user_from_cognito(cognito: Any, user_pool_id: str, username: str, email: str, logger: Any) -> None:
-    """Delete user from Cognito."""
+    """Delete user from Cognito, treating UserNotFoundException as idempotent success."""
     try:
         cognito.admin_delete_user(UserPoolId=user_pool_id, Username=username)
         logger.info("Deleted user from Cognito", username=username, email=email)
     except ClientError as e:
         error_code = e.response.get("Error", {}).get("Code", "")
+        if error_code == "UserNotFoundException":
+            logger.info("Cognito user already deleted", username=username, email=email)
+            return
         logger.error("Cognito admin_delete_user failed", error=str(e), error_code=error_code)
         raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to delete user from Cognito")
 
 
 def _delete_account_from_dynamodb(account_id: str, logger: Any) -> None:
-    """Try to delete account from DynamoDB (may not exist if user never logged in)."""
+    """Delete account from DynamoDB.
+
+    Non-existent items are silently successful (DynamoDB delete_item does not
+    raise for missing keys). Other ClientErrors are propagated so that Cognito
+    deletion is not attempted while account data remains.
+    """
     db_account_id = f"ACCOUNT#{account_id}"
     try:
         tables.accounts.delete_item(Key={"accountId": db_account_id})
         logger.info("Deleted account from DynamoDB", account_id=db_account_id)
     except ClientError as e:
-        logger.warning("Could not delete from DynamoDB (may not exist)", error=str(e), account_id=db_account_id)
+        logger.error("Failed to delete account from DynamoDB", error=str(e), account_id=db_account_id)
+        raise
 
 
 def _find_user_by_email(cognito: Any, user_pool_id: str, email: str, logger: Any) -> str:
@@ -621,11 +678,21 @@ def admin_delete_user(event: Dict[str, Any], context: Any) -> bool:
         cognito = _get_cognito_client()
 
         username, email = _find_cognito_user_by_sub(cognito, user_pool_id, account_id, logger)
-        if not username:
-            raise AppError(ErrorCode.NOT_FOUND, f"User '{account_id}' not found in Cognito")
 
-        _delete_user_from_cognito(cognito, user_pool_id, username, email or "", logger)
+        # Delete DynamoDB data first so a partially-deleted Cognito state does not
+        # leave account records orphaned.
+        _delete_invites_for_owned_profiles(account_id, logger)
+        _delete_inbound_shares(account_id, logger)
         _delete_account_from_dynamodb(account_id, logger)
+
+        # TODO(KW-REVIEW-GLM53-1-decision-qr-code-retention-policy): Payment QR S3
+        # objects are intentionally not deleted here pending the captain decision on
+        # retention policy.
+
+        if username:
+            _delete_user_from_cognito(cognito, user_pool_id, username, email or "", logger)
+        else:
+            logger.info("Cognito user already absent; DynamoDB cleanup completed", account_id=account_id)
 
         logger.info("User deleted successfully", account_id=account_id, email=email)
         return True
@@ -938,6 +1005,56 @@ def admin_delete_user_profiles(event: Dict[str, Any], context: Any) -> int:
         raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to delete user profiles")
 
 
+def _delete_invites_for_owned_profiles(account_id: str, logger: Any) -> int:
+    """Delete all invites for profiles owned by the account."""
+    db_account_id = _normalize_account_id(account_id)
+    deleted_count = 0
+
+    profiles = _get_user_profiles(db_account_id, logger)
+    for profile in profiles:
+        profile_id = profile["profileId"]
+        invites = query_all_items(
+            tables.invites,
+            {
+                "KeyConditionExpression": "profileId = :pid",
+                "ExpressionAttributeValues": {":pid": profile_id},
+                "IndexName": "profileId-index",
+            },
+        )
+        for invite in invites:
+            tables.invites.delete_item(Key={"inviteCode": invite["inviteCode"]})
+            deleted_count += 1
+
+    logger.info("Deleted invites for owned profiles", account_id=account_id, count=deleted_count)
+    return deleted_count
+
+
+def _delete_inbound_shares(account_id: str, logger: Any) -> int:
+    """Delete all inbound shares where the account is the target."""
+    db_account_id = _normalize_account_id(account_id)
+    deleted_count = 0
+
+    shares = query_all_items(
+        tables.shares,
+        {
+            "KeyConditionExpression": "targetAccountId = :tid",
+            "ExpressionAttributeValues": {":tid": db_account_id},
+            "IndexName": "targetAccountId-index",
+        },
+    )
+    for share in shares:
+        tables.shares.delete_item(
+            Key={
+                "profileId": share["profileId"],
+                "targetAccountId": share["targetAccountId"],
+            }
+        )
+        deleted_count += 1
+
+    logger.info("Deleted inbound shares", account_id=account_id, count=deleted_count)
+    return deleted_count
+
+
 def _soft_delete_catalog(catalog_id: str) -> None:
     """Soft delete a catalog by setting isDeleted = true."""
     tables.catalogs.update_item(
@@ -1011,14 +1128,16 @@ def admin_get_user_profiles(event: Dict[str, Any], context: Any) -> list[Dict[st
         db_account_id = _normalize_account_id(account_id)
 
         # Query profiles by ownerAccountId
-        response = tables.profiles.query(
-            KeyConditionExpression="ownerAccountId = :owner",
-            ExpressionAttributeValues={":owner": db_account_id},
+        profiles = query_all_items(
+            tables.profiles,
+            {
+                "KeyConditionExpression": "ownerAccountId = :owner",
+                "ExpressionAttributeValues": {":owner": db_account_id},
+            },
         )
 
-        profiles = response.get("Items", [])
         logger.info("Retrieved user profiles", account_id=account_id, count=len(profiles))
-        return list(profiles)
+        return profiles
 
     except AppError:
         raise
@@ -1040,19 +1159,21 @@ def admin_get_user_catalogs(event: Dict[str, Any], context: Any) -> list[Dict[st
         db_account_id = _normalize_account_id(account_id)
 
         # Query catalogs by ownerAccountId using GSI
-        response = tables.catalogs.query(
-            IndexName="ownerAccountId-index",
-            KeyConditionExpression="ownerAccountId = :owner",
-            FilterExpression="attribute_not_exists(isDeleted) OR isDeleted = :false",
-            ExpressionAttributeValues={
-                ":owner": db_account_id,
-                ":false": False,
+        catalogs = query_all_items(
+            tables.catalogs,
+            {
+                "IndexName": "ownerAccountId-index",
+                "KeyConditionExpression": "ownerAccountId = :owner",
+                "FilterExpression": "attribute_not_exists(isDeleted) OR isDeleted = :false",
+                "ExpressionAttributeValues": {
+                    ":owner": db_account_id,
+                    ":false": False,
+                },
             },
         )
 
-        catalogs = response.get("Items", [])
         logger.info("Retrieved user catalogs", account_id=account_id, count=len(catalogs))
-        return list(catalogs)
+        return catalogs
 
     except AppError:
         raise
@@ -1134,17 +1255,19 @@ def admin_get_user_shared_campaigns(event: Dict[str, Any], context: Any) -> list
         db_account_id = _normalize_account_id(account_id)
 
         # Query shared campaigns by createdBy using GSI1
-        response = tables.shared_campaigns.query(
-            IndexName="GSI1",
-            KeyConditionExpression="createdBy = :creator",
-            ExpressionAttributeValues={
-                ":creator": db_account_id,
+        campaigns = query_all_items(
+            tables.shared_campaigns,
+            {
+                "IndexName": "GSI1",
+                "KeyConditionExpression": "createdBy = :creator",
+                "ExpressionAttributeValues": {
+                    ":creator": db_account_id,
+                },
             },
         )
 
-        campaigns = response.get("Items", [])
         logger.info("Retrieved user shared campaigns", account_id=account_id, count=len(campaigns))
-        return list(campaigns)
+        return campaigns
 
     except AppError:
         raise
@@ -1162,11 +1285,13 @@ def _convert_permissions_to_lists(shares: list[Dict[str, Any]]) -> None:
 
 def _query_profile_shares(db_profile_id: str) -> list[Dict[str, Any]]:
     """Query all shares for a profile."""
-    response = tables.shares.query(
-        KeyConditionExpression="profileId = :pid",
-        ExpressionAttributeValues={":pid": db_profile_id},
+    return query_all_items(
+        tables.shares,
+        {
+            "KeyConditionExpression": "profileId = :pid",
+            "ExpressionAttributeValues": {":pid": db_profile_id},
+        },
     )
-    return list(response.get("Items", []))
 
 
 def _validate_admin_and_get_profile_id(event: Dict[str, Any]) -> str:
