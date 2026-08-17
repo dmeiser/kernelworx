@@ -248,10 +248,7 @@ def _generate_csv_report(campaign: Dict[str, Any], orders: list[Dict[str, Any]])
     writer = csv.writer(output)
 
     all_products = _get_unique_products(orders)
-    headers = [
-        _sanitize_report_value(h)
-        for h in (["Name", "Phone", "Address"] + all_products + ["Total"])
-    ]
+    headers = [_sanitize_report_value(h) for h in (["Name", "Phone", "Address"] + all_products + ["Total"])]
     writer.writerow(headers)
 
     for order in orders:

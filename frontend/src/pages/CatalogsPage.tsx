@@ -41,16 +41,8 @@ import {
   UPDATE_CATALOG,
   DELETE_CATALOG,
 } from '../lib/graphql';
+import { formatDisplayDate } from '../lib/date-utils';
 import type { Catalog } from '../types';
-
-// Helper: Format date for display
-const formatDate = (dateString: string): string => {
-  return new Date(dateString).toLocaleDateString('en-US', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  });
-};
 
 // Helper: Build "My Catalogs" list - includes owned catalogs + used managed catalogs
 const buildMyCatalogs = (
@@ -164,7 +156,7 @@ const CatalogRow: React.FC<CatalogRowProps> = ({ catalog, showActions, inUse, is
       <CatalogTypeChips inUse={inUse} />
     </TableCell>
     <TableCell>{(catalog.products ?? []).length} items</TableCell>
-    <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>{formatDate(catalog.createdAt ?? '')}</TableCell>
+    <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>{formatDisplayDate(catalog.createdAt, { year: 'numeric', month: 'short', day: 'numeric' }) || '—'}</TableCell>
     {showActions && (
       <TableCell align="right">
         <CatalogActions catalog={catalog} isOwned={isOwned} onEdit={onEdit} onDelete={onDelete} onView={onView} />

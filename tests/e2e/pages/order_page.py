@@ -1,5 +1,6 @@
 """Order page object — order list and manual order creation for a campaign."""
 
+import re
 import urllib.parse
 
 from playwright.sync_api import Locator, Page, expect
@@ -147,7 +148,7 @@ class OrderPage(BasePage):
         self._create_order_button().click()
         # The form should stay on the creation page and show a validation alert.
         expect(self.page.get_by_role("alert")).to_be_visible(timeout=10_000)
-        expect(self.page).to_have_url("**/orders/new", timeout=10_000)
+        expect(self.page).to_have_url(re.compile(r"/orders/new$"), timeout=10_000)
 
     def create_order(self, customer_name: str, items: list[dict[str, str | int]]) -> None:
         """Click *New Order*, fill the form, and submit.

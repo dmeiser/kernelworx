@@ -291,7 +291,6 @@ def test_write_share_contributor_can_create_order(
     if not campaign_page_owner.get_campaign_names():
         campaign_page_owner.create_campaign_first_catalog(f"Share Seed Campaign {uuid4().hex[:10]}", profile_id)
 
-
     # Campaign list visibility can lag briefly after creation.
     owner_campaigns: list[str] = []
     for _ in range(12):  # up to ~60s

@@ -769,9 +769,7 @@ class TestListMyShares:
                 },
             },
             {
-                "Responses": {
-                    "kernelworx-profiles-v2-ue1-dev": []
-                },
+                "Responses": {"kernelworx-profiles-v2-ue1-dev": []},
             },
         ]
         with patch(

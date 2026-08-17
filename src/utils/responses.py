@@ -92,7 +92,7 @@ def build_account_response(item: Dict[str, Any]) -> AccountResponse:
     if unit_number is not None:
         try:
             unit_number = int(unit_number)
-        except (ValueError, TypeError):
+        except ValueError, TypeError:
             unit_number = None
 
     return AccountResponse(
@@ -132,7 +132,7 @@ def build_profile_response(
     if unit_number is not None:
         try:
             unit_number = int(unit_number)
-        except (ValueError, TypeError):
+        except ValueError, TypeError:
             unit_number = None
 
     response = ProfileResponse(
@@ -160,7 +160,7 @@ def _parse_int_field(item: Dict[str, Any], field_name: str) -> Optional[int]:
         return None
     try:
         return int(value)
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         return None
 
 
@@ -171,7 +171,7 @@ def _parse_float_field(item: Dict[str, Any], field_name: str) -> Optional[float]
         return None
     try:
         return float(value)
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         return None
 
 
@@ -224,7 +224,7 @@ def build_order_response(item: Dict[str, Any]) -> OrderResponse:
     if total_amount is not None:
         try:
             total_amount = float(total_amount)
-        except (ValueError, TypeError):
+        except ValueError, TypeError:
             total_amount = 0.0
     else:
         total_amount = 0.0

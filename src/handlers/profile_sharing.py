@@ -312,5 +312,3 @@ def list_my_shares(event: Dict[str, Any], context: Any) -> List[Dict[str, Any]]:
     except Exception as e:
         logger.error("Failed to list shared profiles", error=str(e))
         raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to list shared profiles")
-
-

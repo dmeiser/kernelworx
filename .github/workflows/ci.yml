@@ -101,6 +101,88 @@ jobs:
           echo "- TypeScript (type checking)" >> $GITHUB_STEP_SUMMARY
           echo "- Vitest (unit tests with coverage)" >> $GITHUB_STEP_SUMMARY
 
+  guards:
+    name: Guard tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      checks: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: ".node-version"
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Guard tests
+        run: npm run test:guards
+
+  js-resolvers:
+    name: AppSync JS resolver tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      checks: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: ".node-version"
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: JS resolver tests
+        run: npm run test:js-resolvers
+
+  integration:
+    name: Integration tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      checks: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: ".node-version"
+          cache: npm
+          cache-dependency-path: tests/integration/package-lock.json
+
+      - name: Install integration test dependencies
+        working-directory: tests/integration
+        run: npm ci
+
+      - name: Run integration tests
+        working-directory: tests/integration
+        env:
+          E2E_BASE_URL: ${{ secrets.E2E_BASE_URL || 'https://dev.kernelworx.app' }}
+          TEST_OWNER_EMAIL: ${{ secrets.TEST_OWNER_EMAIL }}
+          TEST_OWNER_PASSWORD: ${{ secrets.TEST_OWNER_PASSWORD }}
+          TEST_CONTRIBUTOR_EMAIL: ${{ secrets.TEST_CONTRIBUTOR_EMAIL }}
+          TEST_CONTRIBUTOR_PASSWORD: ${{ secrets.TEST_CONTRIBUTOR_PASSWORD }}
+          TEST_READONLY_EMAIL: ${{ secrets.TEST_READONLY_EMAIL }}
+          TEST_READONLY_PASSWORD: ${{ secrets.TEST_READONLY_PASSWORD }}
+        run: npm test
+
   infra:
     name: Infrastructure linting
     runs-on: ubuntu-latest

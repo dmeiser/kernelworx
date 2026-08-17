@@ -116,7 +116,9 @@ async def _async_get_shared_campaign_catalog_ids(
     return catalog_ids
 
 
-async def _async_get_all_catalog_ids(account_id: str, request_logger: Any = logger) -> Tuple[Set[str], List[str], Set[str]]:
+async def _async_get_all_catalog_ids(
+    account_id: str, request_logger: Any = logger
+) -> Tuple[Set[str], List[str], Set[str]]:
     """
     Run all queries with optimal parallelism.
 

@@ -132,6 +132,4 @@ def test_campaign_reports_download_buttons(owner_page: Page, ensure_owner_profil
     with owner_page.expect_download() as download_info:
         reports.click_download_csv()
     download = download_info.value
-    assert download.suggested_filename.endswith(".csv"), (
-        f"Expected CSV download; got: {download.suggested_filename}"
-    )
+    assert download.suggested_filename.endswith(".csv"), f"Expected CSV download; got: {download.suggested_filename}"
