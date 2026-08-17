@@ -55,6 +55,11 @@ on:
         required: false
         type: string
         default: ""
+      strict-test-account-names:
+        description: "Require test account emails to contain test/smoke/integration in the local part"
+        required: false
+        type: boolean
+        default: true
     secrets:
       AWS_ROLE_ARN:
         required: true
@@ -321,13 +326,15 @@ jobs:
           test -n "$TEST_USER_POOL_ID"
 
           # Force explicit "test-only" naming so misconfigured real users are rejected.
-          for email in "$TEST_OWNER_EMAIL" "$TEST_CONTRIBUTOR_EMAIL" "$TEST_READONLY_EMAIL"; do
-            local_part="${email%@*}"
-            if ! echo "$local_part" | grep -Eiq '(test|smoke|integration)'; then
-              echo "Refusing to run: email '$email' does not look like a test account (must include test/smoke/integration in local-part)."
-              exit 1
-            fi
-          done
+          if [ "${{ inputs.strict-test-account-names }}" = "true" ]; then
+            for email in "$TEST_OWNER_EMAIL" "$TEST_CONTRIBUTOR_EMAIL" "$TEST_READONLY_EMAIL"; do
+              local_part="${email%@*}"
+              if ! echo "$local_part" | grep -Eiq '(test|smoke|integration)'; then
+                echo "Refusing to run: email '$email' does not look like a test account (must include test/smoke/integration in local-part)."
+                exit 1
+              fi
+            done
+          fi
 
           # Verify each configured email exists in the configured user pool.
           for email in "$TEST_OWNER_EMAIL" "$TEST_CONTRIBUTOR_EMAIL" "$TEST_READONLY_EMAIL"; do

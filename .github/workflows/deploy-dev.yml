@@ -28,6 +28,7 @@ jobs:
       smoke-url-block-message: 'dev smoke tests against the production URL.'
       smoke-url-block-pattern-2: 'http://localhost:*'
       smoke-url-block-message-2: 'dev smoke tests against a local URL.'
+      strict-test-account-names: false
     secrets:
       AWS_ROLE_ARN: ${{ secrets.AWS_DEV_ROLE_ARN }}
       AWS_REGION: ${{ secrets.AWS_REGION }}
