@@ -245,6 +245,7 @@ repo
 repr
 reraises
 reusability
+rollup
 route53
 RRule
 runtime
