@@ -113,9 +113,10 @@ def test_signup_shows_verification_prompt(page: Page) -> None:
     reason="Requires a configured test email inbox; set RUN_EMAIL_INBOX=1 to opt in",
 )
 def test_signup_completes_with_verification_code(page: Page) -> None:
-    """Gated placeholder for end-to-end signup with a real verification code.
+    """Gated test for end-to-end signup with a real verification code.
 
-    A test inbox is not configured for this environment, so the test is
-    skipped even when the gate is enabled.
+    The verification-code flow is **not implemented** in this test suite.
+    When ``RUN_EMAIL_INBOX`` is enabled the test fails explicitly so the
+    gate cannot be mistaken for a working implementation.
     """
-    pytest.skip("test inbox not configured")
+    pytest.fail("Email inbox integration is not implemented")

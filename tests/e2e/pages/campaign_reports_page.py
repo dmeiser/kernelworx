@@ -1,5 +1,7 @@
 """Campaign reports page object — aggregated shared-campaign reports."""
 
+from pathlib import Path
+
 from playwright.sync_api import Locator, Page, expect
 
 from .base_page import BasePage
@@ -117,6 +119,63 @@ class CampaignReportsPage(BasePage):
         heading = self._section_heading(self._ALL_ORDERS_HEADING)
         return bool(heading.first.is_visible() and self._data_table().is_visible())
 
+    def get_rollup_value(self, label: str) -> str:
+        """Return the numeric/currency value under a Unit Overview label.
+
+        Args:
+            label: Visible label text in the Unit Overview cards (e.g.
+                ``"Total Sellers"``, ``"Total Orders"``, ``"Total Sales"``).
+
+        Returns:
+            The inner text of the associated value element, or ``""`` when the
+            card is not visible.
+        """
+        card = self.page.locator("div.MuiPaper-root").filter(has_text=label).first
+        if not card.is_visible():
+            return ""
+        return card.locator("h4").first.inner_text()
+
+    def get_top_sellers_row_count(self) -> int:
+        """Return the number of data rows in the Top Sellers table."""
+        section = self.page.locator("div.MuiPaper-root").filter(
+            has=self.page.get_by_role("heading", name=self._TOP_SELLERS_HEADING)
+        )
+        if not section.is_visible():
+            return 0
+        rows = section.locator("table tbody tr")
+        return rows.count()
+
+    def get_active_table_row_count(self) -> int:
+        """Return the number of data rows in the first visible data table."""
+        table = self._data_table()
+        if not table.is_visible():
+            return 0
+        return table.locator("tbody tr").count()
+
+    def get_active_table_cell_texts(self, column_header: str) -> list[str]:
+        """Return all cell texts for the column matching *column_header*.
+
+        Uses a simple heuristic: finds the first visible table, locates the
+        header cell whose text equals *column_header*, and returns the inner
+        text of every body cell in that column.
+
+        Args:
+            column_header: Exact header text (e.g. ``"Customer Name"``).
+
+        Returns:
+            List of body-cell texts for the matching column.
+        """
+        table = self._data_table()
+        if not table.is_visible():
+            return []
+        headers = table.locator("thead th").all_inner_texts()
+        try:
+            col_index = headers.index(column_header)
+        except ValueError:
+            return []
+        cells = table.locator(f"tbody tr td:nth-child({col_index + 1})")
+        return cells.all_inner_texts()
+
     # ------------------------------------------------------------------
     # Actions
     # ------------------------------------------------------------------
@@ -169,3 +228,48 @@ class CampaignReportsPage(BasePage):
             has=self.page.get_by_role("heading", name=self._ALL_ORDERS_HEADING)
         )
         section.get_by_role("button", name=self._EXPORT_TO_EXCEL_BTN, exact=True).click()
+
+    def _export_section_download(self, section_heading: str, dest: str | Path) -> Path:
+        """Click *Export to Excel* inside *section_heading* and save the download.
+
+        Args:
+            section_heading: Heading text of the report section containing the
+                export button (e.g. ``"Seller Report"`` or ``"All Orders"``).
+            dest: Destination path for the downloaded file.
+
+        Returns:
+            The resolved destination path.
+        """
+        path = Path(dest)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        section = self.page.locator("div.MuiPaper-root").filter(
+            has=self.page.get_by_role("heading", name=section_heading)
+        )
+        button = section.get_by_role("button", name=self._EXPORT_TO_EXCEL_BTN, exact=True)
+        with self.page.expect_download() as download_info:
+            button.click()
+        download = download_info.value
+        download.save_as(str(path))
+        return path
+
+    def download_seller_report_to(self, path: str | Path) -> Path:
+        """Download the Seller Report Excel file to *path*.
+
+        Args:
+            path: Destination path for the downloaded file.
+
+        Returns:
+            The resolved destination path.
+        """
+        return self._export_section_download(self._SELLER_REPORT_HEADING, path)
+
+    def download_order_details_to(self, path: str | Path) -> Path:
+        """Download the Order Details Excel file to *path*.
+
+        Args:
+            path: Destination path for the downloaded file.
+
+        Returns:
+            The resolved destination path.
+        """
+        return self._export_section_download(self._ALL_ORDERS_HEADING, path)

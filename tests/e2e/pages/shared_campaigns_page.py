@@ -181,6 +181,25 @@ class SharedCampaignsPage(BasePage):
         cells = self.page.get_by_role("cell").filter(has_text=re.compile(r"^[A-Z0-9]+(-[A-Z0-9]+)+$"))
         return cells.all_inner_texts()
 
+    def get_code_by_campaign_name(self, campaign_name: str) -> str | None:
+        """Return the short code for the shared-campaign row with *campaign_name*.
+
+        Args:
+            campaign_name: Visible campaign name in the shared campaigns table.
+
+        Returns:
+            The short-code string, or ``None`` when no matching row is found.
+        """
+        row = self.page.get_by_role("row").filter(has_text=campaign_name)
+        if row.count() == 0:
+            return None
+        code_cell = row.first.get_by_role("cell").filter(
+            has_text=re.compile(r"^[A-Z0-9]+(-[A-Z0-9]+)+$")
+        )
+        if code_cell.count() == 0:
+            return None
+        return code_cell.first.inner_text().strip()
+
     # ------------------------------------------------------------------
     # Actions — list page
     # ------------------------------------------------------------------
