@@ -1,0 +1,436 @@
+name: Deploy Shared
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: "GitHub environment name (e.g. dev, production)"
+        required: true
+        type: string
+      tofu-directory:
+        description: "Path to the OpenTofu environment directory"
+        required: true
+        type: string
+      aws-role-session-name:
+        description: "AWS role session name for this deployment"
+        required: true
+        type: string
+      run-delete-profile-migration:
+        description: "Whether to run the delete-profile migration workaround"
+        required: false
+        type: boolean
+        default: false
+      e2e-base-url:
+        description: "Base URL for post-deploy smoke tests"
+        required: false
+        type: string
+        default: ""
+      smoke-url-block-pattern:
+        description: "Shell case pattern for rejected smoke-test URLs"
+        required: false
+        type: string
+        default: ""
+      smoke-url-block-message:
+        description: "Error message when a smoke-test URL is rejected"
+        required: false
+        type: string
+        default: ""
+      smoke-url-block-pattern-2:
+        description: "Second shell case pattern for rejected smoke-test URLs"
+        required: false
+        type: string
+        default: ""
+      smoke-url-block-message-2:
+        description: "Second error message when a smoke-test URL is rejected"
+        required: false
+        type: string
+        default: ""
+      smoke-role-session-name:
+        description: "AWS role session name for smoke-test cleanup"
+        required: false
+        type: string
+        default: ""
+      e2e-base-url-var-suffix:
+        description: "Suffix for the E2E_BASE_URL variable name (e.g. DEV, PROD)"
+        required: false
+        type: string
+        default: ""
+      strict-test-account-names:
+        description: "Require test account emails to contain test/smoke/integration in the local part"
+        required: false
+        type: boolean
+        default: true
+      allow-non-test-account-emails:
+        description: "Opt-in to allow smoke tests with non-test email addresses (dev only; use with caution)"
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      AWS_ROLE_ARN:
+        required: true
+      AWS_REGION:
+        required: true
+      TF_VAR_ENCRYPTION_PASSPHRASE:
+        required: true
+      TF_VAR_GOOGLE_CLIENT_ID:
+        required: true
+      TF_VAR_GOOGLE_CLIENT_SECRET:
+        required: true
+      TEST_OWNER_EMAIL:
+        required: false
+      TEST_OWNER_PASSWORD:
+        required: false
+      TEST_CONTRIBUTOR_EMAIL:
+        required: false
+      TEST_CONTRIBUTOR_PASSWORD:
+        required: false
+      TEST_READONLY_EMAIL:
+        required: false
+      TEST_READONLY_PASSWORD:
+        required: false
+      TEST_USER_POOL_ID:
+        required: false
+
+jobs:
+  deploy:
+    name: Plan and deploy to ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment:
+      name: ${{ inputs.environment }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install Python dependencies
+        run: uv sync --locked
+
+      - name: Build Lambda Layer
+        run: |
+          LAYER_DIR=".build/lambda-layer"
+          LAYER_REQ="$LAYER_DIR/requirements.txt"
+          echo "📦 Building Lambda layer dependencies..."
+          rm -rf "$LAYER_DIR"
+          mkdir -p "$LAYER_DIR/python"
+          uv export --no-dev --format requirements.txt --no-hashes > "$LAYER_REQ"
+          uv pip install --requirement "$LAYER_REQ" --target "$LAYER_DIR/python"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: ".node-version"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Set up OpenTofu
+        uses: opentofu/setup-opentofu@v1
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+          role-session-name: ${{ inputs.aws-role-session-name }}
+
+      - name: OpenTofu init
+        env:
+          TF_VAR_encryption_passphrase: ${{ secrets.TF_VAR_ENCRYPTION_PASSPHRASE }}
+          TF_VAR_google_client_id: ${{ secrets.TF_VAR_GOOGLE_CLIENT_ID }}
+          TF_VAR_google_client_secret: ${{ secrets.TF_VAR_GOOGLE_CLIENT_SECRET }}
+          TF_IN_AUTOMATION: "true"
+        working-directory: ${{ inputs.tofu-directory }}
+        run: tofu init
+
+      - name: Check if delete profile migration is needed
+        id: check_delete_profile_migration
+        if: ${{ inputs.run-delete-profile-migration }}
+        env:
+          TF_VAR_encryption_passphrase: ${{ secrets.TF_VAR_ENCRYPTION_PASSPHRASE }}
+          TF_VAR_google_client_id: ${{ secrets.TF_VAR_GOOGLE_CLIENT_ID }}
+          TF_VAR_google_client_secret: ${{ secrets.TF_VAR_GOOGLE_CLIENT_SECRET }}
+          TF_IN_AUTOMATION: "true"
+        working-directory: ${{ inputs.tofu-directory }}
+        run: |
+          old_functions=$(tofu state list 2>/dev/null | grep -E '^module\.appsync\.aws_appsync_function\.(delete_profile_(campaigns|invites|metadata|orders_cascade_appsync|ownership|shares)|query_profile_(shares|invites|campaigns)_for_delete|verify_profile_owner_for_delete)$' || true)
+          if [ -n "$old_functions" ]; then
+            echo "needs_migration=true" >> "$GITHUB_OUTPUT"
+            echo "Old delete-profile pipeline functions still in state; migration required."
+          else
+            echo "needs_migration=false" >> "$GITHUB_OUTPUT"
+            echo "No old delete-profile pipeline functions in state; skipping migration."
+          fi
+
+      - name: OpenTofu apply - migrate delete profile resolver first
+        if: ${{ inputs.run-delete-profile-migration && steps.check_delete_profile_migration.outputs.needs_migration == 'true' }}
+        env:
+          TF_VAR_encryption_passphrase: ${{ secrets.TF_VAR_ENCRYPTION_PASSPHRASE }}
+          TF_VAR_google_client_id: ${{ secrets.TF_VAR_GOOGLE_CLIENT_ID }}
+          TF_VAR_google_client_secret: ${{ secrets.TF_VAR_GOOGLE_CLIENT_SECRET }}
+          TF_IN_AUTOMATION: "true"
+        working-directory: ${{ inputs.tofu-directory }}
+        # One-time migration: the deleteSellerProfile resolver was refactored from
+        # a multi-function pipeline to a single function. AppSync rejects deleting
+        # functions still referenced by a resolver, and the AWS provider has a
+        # long-standing issue ordering resolver updates before function deletions.
+        # Recreating the resolver first removes the old function references reliably.
+        # This state-changing step must run BEFORE the saved plan so the plan stays valid.
+        run: |
+          tofu apply -replace=module.appsync.aws_appsync_resolver.delete_seller_profile -auto-approve
+
+      - name: OpenTofu plan
+        env:
+          TF_VAR_encryption_passphrase: ${{ secrets.TF_VAR_ENCRYPTION_PASSPHRASE }}
+          TF_VAR_google_client_id: ${{ secrets.TF_VAR_GOOGLE_CLIENT_ID }}
+          TF_VAR_google_client_secret: ${{ secrets.TF_VAR_GOOGLE_CLIENT_SECRET }}
+          TF_IN_AUTOMATION: "true"
+        working-directory: ${{ inputs.tofu-directory }}
+        run: tofu plan -out=tfplan
+
+      # ROLLBACK: To revert this deployment, check out the previous release commit,
+      # re-run `tofu plan -out=tfplan` against the previous state, and apply it with
+      # `tofu apply tfplan`. The plan file is not uploaded as an artifact because it
+      # can contain sensitive values derived from TF_VAR_* secrets.
+      - name: OpenTofu apply
+        env:
+          TF_VAR_encryption_passphrase: ${{ secrets.TF_VAR_ENCRYPTION_PASSPHRASE }}
+          TF_VAR_google_client_id: ${{ secrets.TF_VAR_GOOGLE_CLIENT_ID }}
+          TF_VAR_google_client_secret: ${{ secrets.TF_VAR_GOOGLE_CLIENT_SECRET }}
+          TF_IN_AUTOMATION: "true"
+        working-directory: ${{ inputs.tofu-directory }}
+        run: tofu apply -auto-approve tfplan
+
+      - name: Extract OpenTofu outputs for frontend
+        id: tofu_outputs
+        env:
+          TF_VAR_encryption_passphrase: ${{ secrets.TF_VAR_ENCRYPTION_PASSPHRASE }}
+          TF_VAR_google_client_id: ${{ secrets.TF_VAR_GOOGLE_CLIENT_ID }}
+          TF_VAR_google_client_secret: ${{ secrets.TF_VAR_GOOGLE_CLIENT_SECRET }}
+          TF_IN_AUTOMATION: "true"
+        working-directory: ${{ inputs.tofu-directory }}
+        run: |
+          echo "user_pool_id=$(tofu output -raw cognito_user_pool_id)" >> $GITHUB_OUTPUT
+          echo "client_id=$(tofu output -raw cognito_client_id)" >> $GITHUB_OUTPUT
+          echo "cognito_domain=$(tofu output -raw cognito_domain)" >> $GITHUB_OUTPUT
+          echo "api_url=$(tofu output -raw appsync_api_url)" >> $GITHUB_OUTPUT
+          echo "site_url=$(tofu output -raw site_url)" >> $GITHUB_OUTPUT
+          echo "static_assets_bucket=$(tofu output -raw static_assets_bucket)" >> $GITHUB_OUTPUT
+          echo "cloudfront_distribution_id=$(tofu output -raw cloudfront_distribution_id)" >> $GITHUB_OUTPUT
+
+      - name: Build and deploy frontend
+        env:
+          # Vite build-time variables
+          VITE_APPSYNC_ENDPOINT: ${{ steps.tofu_outputs.outputs.api_url }}
+          VITE_APPSYNC_REGION: ${{ secrets.AWS_REGION }}
+          VITE_COGNITO_USER_POOL_ID: ${{ steps.tofu_outputs.outputs.user_pool_id }}
+          VITE_COGNITO_USER_POOL_CLIENT_ID: ${{ steps.tofu_outputs.outputs.client_id }}
+          VITE_COGNITO_DOMAIN: ${{ steps.tofu_outputs.outputs.cognito_domain }}
+          VITE_OAUTH_REDIRECT_SIGNIN: ${{ steps.tofu_outputs.outputs.site_url }}
+          VITE_OAUTH_REDIRECT_SIGNOUT: ${{ steps.tofu_outputs.outputs.site_url }}
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+          # Do not use --delete: hashed JS/CSS chunks from previous deploys may still
+          # be requested by clients that have an old index.html cached before the
+          # CloudFront invalidation below completes. Keeping old chunks prevents
+          # white-screen errors for open sessions during the deploy window.
+          aws s3 sync dist "s3://${{ steps.tofu_outputs.outputs.static_assets_bucket }}" --region "${{ secrets.AWS_REGION }}"
+          aws cloudfront create-invalidation --distribution-id "${{ steps.tofu_outputs.outputs.cloudfront_distribution_id }}" --paths "/*"
+
+  smoke-tests:
+    name: Post-deploy smoke tests (${{ inputs.environment }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs: deploy
+    if: ${{ needs.deploy.result == 'success' && inputs.e2e-base-url != '' }}
+    environment:
+      name: ${{ inputs.environment }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install Python dependencies (including dev/test)
+        run: uv sync --locked --dev
+
+      - name: Install Playwright browser dependencies
+        run: uv run playwright install --with-deps chromium
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: ".node-version"
+          cache: npm
+          cache-dependency-path: tests/integration/package-lock.json
+
+      - name: Install Node.js dependencies for integration cleanup
+        working-directory: tests/integration
+        run: npm ci
+
+      - name: Configure AWS credentials for cleanup
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+          role-session-name: ${{ inputs.smoke-role-session-name }}
+
+      - name: Validate smoke target URL
+        if: ${{ inputs.e2e-base-url != '' }}
+        env:
+          E2E_BASE_URL: ${{ inputs.e2e-base-url }}
+          BLOCK_PATTERN_1: ${{ inputs.smoke-url-block-pattern }}
+          BLOCK_MESSAGE_1: ${{ inputs.smoke-url-block-message }}
+          BLOCK_PATTERN_2: ${{ inputs.smoke-url-block-pattern-2 }}
+          BLOCK_MESSAGE_2: ${{ inputs.smoke-url-block-message-2 }}
+          URL_SUFFIX: ${{ inputs.e2e-base-url-var-suffix }}
+          ENV_NAME: ${{ inputs.environment }}
+        run: |
+          test -n "$E2E_BASE_URL"
+
+          check_block_patterns() {
+            local url="$1"
+            local patterns="$2"
+            local message="$3"
+            if [ -z "$patterns" ]; then
+              return 0
+            fi
+            local pattern
+            # Split on '|' so each shell case pattern is evaluated independently.
+            IFS='|' read -ra pattern_array <<< "$patterns"
+            for pattern in "${pattern_array[@]}"; do
+              case "$url" in
+                $pattern)
+                  echo "Refusing to run $message Set E2E_BASE_URL_${URL_SUFFIX} to your ${ENV_NAME} app URL."
+                  exit 1
+                  ;;
+              esac
+            done
+          }
+
+          check_block_patterns "$E2E_BASE_URL" "$BLOCK_PATTERN_1" "$BLOCK_MESSAGE_1"
+          check_block_patterns "$E2E_BASE_URL" "$BLOCK_PATTERN_2" "$BLOCK_MESSAGE_2"
+
+          echo "Smoke tests target: $E2E_BASE_URL"
+
+      - name: Validate test users
+        env:
+          TEST_OWNER_EMAIL: ${{ secrets.TEST_OWNER_EMAIL }}
+          TEST_CONTRIBUTOR_EMAIL: ${{ secrets.TEST_CONTRIBUTOR_EMAIL }}
+          TEST_READONLY_EMAIL: ${{ secrets.TEST_READONLY_EMAIL }}
+          TEST_USER_POOL_ID: ${{ secrets.TEST_USER_POOL_ID }}
+        run: |
+          test -n "$TEST_OWNER_EMAIL"
+          test -n "$TEST_CONTRIBUTOR_EMAIL"
+          test -n "$TEST_READONLY_EMAIL"
+          test -n "$TEST_USER_POOL_ID"
+
+          # Force explicit "test-only" naming so misconfigured real users are rejected.
+          if [ "${{ inputs.strict-test-account-names }}" = "true" ] && [ "${{ inputs.allow-non-test-account-emails }}" != "true" ]; then
+            for email in "$TEST_OWNER_EMAIL" "$TEST_CONTRIBUTOR_EMAIL" "$TEST_READONLY_EMAIL"; do
+              local_part="${email%@*}"
+              if ! echo "$local_part" | grep -Eiq '(test|smoke|integration)'; then
+                echo "Refusing to run: email '$email' does not look like a test account (must include test/smoke/integration in local-part)."
+                exit 1
+              fi
+            done
+          fi
+
+          if [ "${{ inputs.allow-non-test-account-emails }}" = "true" ]; then
+            if [ "${{ inputs.environment }}" != "dev" ]; then
+              echo "Refusing to run: allow-non-test-account-emails is only permitted for the dev environment (got '${{ inputs.environment }}')."
+              exit 1
+            fi
+            echo "::warning::allow-non-test-account-emails is enabled. Smoke tests are running with non-test account emails; ensure these are dev-only accounts."
+          fi
+
+          # Verify each configured email exists in the configured user pool.
+          for email in "$TEST_OWNER_EMAIL" "$TEST_CONTRIBUTOR_EMAIL" "$TEST_READONLY_EMAIL"; do
+            count=$(aws cognito-idp list-users --user-pool-id "$TEST_USER_POOL_ID" --filter "email = \"$email\"" --query 'length(Users)' --output text)
+            if [ "$count" != "1" ]; then
+              echo "Refusing to run: expected exactly one Cognito user for '$email' in pool '$TEST_USER_POOL_ID', got '$count'."
+              exit 1
+            fi
+          done
+
+      - name: Ensure owner test user is in ADMIN group
+        env:
+          TEST_OWNER_EMAIL: ${{ secrets.TEST_OWNER_EMAIL }}
+          TEST_USER_POOL_ID: ${{ secrets.TEST_USER_POOL_ID }}
+        run: |
+          test -n "$TEST_OWNER_EMAIL"
+          test -n "$TEST_USER_POOL_ID"
+
+          echo "Ensuring owner test user '$TEST_OWNER_EMAIL' is a member of the ADMIN group..."
+          aws cognito-idp admin-add-user-to-group \
+            --user-pool-id "$TEST_USER_POOL_ID" \
+            --username "$TEST_OWNER_EMAIL" \
+            --group-name ADMIN
+          echo "Owner test user is in the ADMIN group."
+
+      - name: Run E2E smoke tests
+        if: ${{ inputs.e2e-base-url != '' }}
+        env:
+          E2E_BASE_URL: ${{ inputs.e2e-base-url }}
+          TEST_OWNER_EMAIL: ${{ secrets.TEST_OWNER_EMAIL }}
+          TEST_OWNER_PASSWORD: ${{ secrets.TEST_OWNER_PASSWORD }}
+          TEST_CONTRIBUTOR_EMAIL: ${{ secrets.TEST_CONTRIBUTOR_EMAIL }}
+          TEST_CONTRIBUTOR_PASSWORD: ${{ secrets.TEST_CONTRIBUTOR_PASSWORD }}
+          TEST_READONLY_EMAIL: ${{ secrets.TEST_READONLY_EMAIL }}
+          TEST_READONLY_PASSWORD: ${{ secrets.TEST_READONLY_PASSWORD }}
+          TEST_USER_POOL_ID: ${{ secrets.TEST_USER_POOL_ID }}
+          TEST_REGION: ${{ secrets.AWS_REGION }}
+          # In CI, fail the job if pre/post cleanup cannot run successfully.
+          E2E_FAIL_ON_CLEANUP_ERROR: "1"
+        run: uv run pytest tests/e2e/ -m smoke -v
+
+      - name: Post deployed-to-dev success status
+        if: ${{ success() && inputs.environment == 'dev' && inputs.e2e-base-url != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/${{ github.repository }}/statuses/${{ github.sha }}" \
+            -f state=success \
+            -f context=deployed-to-dev \
+            -f description="Smoke tests passed on dev" \
+            -f target_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+      - name: Post deployed-to-dev failure status
+        if: ${{ failure() && inputs.environment == 'dev' && inputs.e2e-base-url != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/${{ github.repository }}/statuses/${{ github.sha }}" \
+            -f state=failure \
+            -f context=deployed-to-dev \
+            -f description="Smoke tests failed on dev" \
+            -f target_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+      - name: Post deployed-to-dev error status
+        if: ${{ cancelled() && inputs.environment == 'dev' && inputs.e2e-base-url != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/${{ github.repository }}/statuses/${{ github.sha }}" \
+            -f state=error \
+            -f context=deployed-to-dev \
+            -f description="Smoke tests cancelled on dev" \
+            -f target_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
