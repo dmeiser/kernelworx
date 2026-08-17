@@ -175,9 +175,10 @@ class SharedCampaignsPage(BasePage):
     def get_visible_codes(self, timeout: int = 10_000) -> list[str]:
         """Return the visible short codes from the shared campaigns table.
 
-        Waits for at least one short-code cell to appear so callers that create
-        a shared campaign and immediately read the list do not see an empty
-        result while the GraphQL query refetches.
+        Reads the first cell of each data row (the *Code* column) rather than
+        matching any cell in the table, and waits for at least one data row to
+        appear so callers that create a shared campaign and immediately read the
+        list do not see an empty result while the GraphQL query refetches.
 
         Args:
             timeout: Maximum wait in milliseconds. Defaults to 10 000.
@@ -185,14 +186,17 @@ class SharedCampaignsPage(BasePage):
         Returns:
             List of short-code strings in DOM order.
         """
-        cells = self.page.get_by_role("cell").filter(
-            has_text=re.compile(r"^[A-Z0-9][A-Z0-9\s-]*$")
+        code_re = re.compile(r"^[A-Z0-9]+(-[A-Z0-9]+)+$")
+        # Data rows contain a "Copy link" action; the header row does not.
+        data_rows = self.page.get_by_role("row").filter(
+            has=self.page.get_by_role("button", name="Copy link")
         )
         try:
-            expect(cells.first).to_be_visible(timeout=timeout)
+            expect(data_rows.first).to_be_visible(timeout=timeout)
         except AssertionError:
             return []
-        return cells.all_inner_texts()
+        code_cells = data_rows.locator("td:first-child").filter(has_text=code_re)
+        return code_cells.all_inner_texts()
 
     def get_code_by_campaign_name(self, campaign_name: str) -> str | None:
         """Return the short code for the shared-campaign row with *campaign_name*.
@@ -206,9 +210,7 @@ class SharedCampaignsPage(BasePage):
         row = self.page.get_by_role("row").filter(has_text=campaign_name)
         if row.count() == 0:
             return None
-        code_cell = row.first.get_by_role("cell").filter(
-            has_text=re.compile(r"^[A-Z0-9][A-Z0-9\s-]*$")
-        )
+        code_cell = row.first.locator("td:first-child")
         if code_cell.count() == 0:
             return None
         return code_cell.first.inner_text().strip()
