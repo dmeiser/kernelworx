@@ -306,7 +306,6 @@ logs/
 # Never commit these!
 *secret*
 *password*
-!tests/e2e/pages/forgot_password_page.py
 *credentials*
 *api-key*
 *apikey*

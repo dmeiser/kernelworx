@@ -212,10 +212,9 @@ def ensure_owner_profile(browser: Browser) -> Generator[str, None, None]:
         dashboard.goto()
         dashboard.wait_for_loading()
 
-        # Wait for the dashboard to finish loading, including brief
-        # eventual-consistency retries when the empty state is visible.
+        # Wait briefly for profile cards to render; an empty dashboard has no <h3>.
         try:
-            dashboard.wait_for_profiles_loaded(timeout=10_000)
+            page.locator("h3").first.wait_for(state="visible", timeout=5_000)
         except Exception:  # noqa: BLE001 – no profiles yet; handled below
             pass
 

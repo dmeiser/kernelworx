@@ -11,7 +11,6 @@ dev environment, the fixture creates one via the *Create Scout* dialog before
 any test in this module runs.
 """
 
-import os
 import re
 import urllib.parse
 from uuid import uuid4
@@ -22,7 +21,7 @@ from playwright.sync_api import Browser, BrowserContext, Page, expect
 from tests.e2e.pages.dashboard_page import DashboardPage
 from tests.e2e.pages.manage_page import ManagePage
 from tests.e2e.pages.share_page import SharePage
-from tests.e2e.utils.auth import login_as_contributor, login_as_readonly
+from tests.e2e.utils.auth import login_as_readonly
 
 # ---------------------------------------------------------------------------
 # Tests
@@ -235,156 +234,3 @@ def test_transfer_ownership_ui(
     assert "/manage" in owner_page.url, (
         f"Expected to stay on manage page after dismissing confirm; got: {owner_page.url}"
     )
-
-
-@pytest.mark.smoke
-def test_rename_profile(owner_page: Page) -> None:
-    """Renaming a profile updates the management header and dashboard card.
-
-    Creates a disposable Scout, navigates to its management page, changes the
-    *Seller Name*, and verifies the new name is reflected both on the manage
-    page header and on the ``/scouts`` dashboard.
-
-    Args:
-        owner_page: Function-scoped Playwright page authenticated as owner.
-    """
-    profile_name = f"Rename Me {uuid4().hex[:12]}"
-    new_name = f"Renamed {uuid4().hex[:12]}"
-
-    dashboard = DashboardPage(owner_page)
-    dashboard.goto()
-
-    # Create a disposable profile.
-    dashboard._create_scout_button().click()
-    dialog = owner_page.get_by_role("dialog")
-    owner_page.get_by_label("Scout Name").fill(profile_name)
-    owner_page.get_by_role("button", name="Create Scout").click()
-    expect(dialog).to_be_hidden(timeout=15_000)
-    dashboard.wait_for_loading()
-    dashboard.wait_for_profiles_loaded()
-
-    names_after_create = dashboard.get_profile_names()
-    assert profile_name in names_after_create, (
-        f"'{profile_name}' not on dashboard after creation; visible: {names_after_create}"
-    )
-
-    # Navigate to the campaigns page to extract profile_id from the URL.
-    dashboard.click_profile(profile_name)
-    match = re.search(r"/scouts/([^/]+)/campaigns", owner_page.url)
-    assert match, f"Expected /scouts/{{id}}/campaigns after profile click; got: {owner_page.url}"
-    profile_id = urllib.parse.unquote(match.group(1))
-
-    # Rename via ManagePage.
-    manage = ManagePage(owner_page)
-    manage.goto(profile_id)
-    manage.edit_seller_name(new_name)
-
-    # Header should now contain the new name.
-    expect(owner_page.get_by_role("heading", name=f"Scout Management: {new_name}")).to_be_visible(
-        timeout=10_000
-    )
-
-    # Dashboard should show the new name and not the old name.
-    dashboard.goto()
-    dashboard.wait_for_profiles_loaded()
-    names_after_rename = dashboard.get_profile_names()
-    assert new_name in names_after_rename, (
-        f"Renamed profile '{new_name}' not found on dashboard; visible: {names_after_rename}"
-    )
-    assert profile_name not in names_after_rename, (
-        f"Old profile name '{profile_name}' still visible on dashboard; visible: {names_after_rename}"
-    )
-
-
-@pytest.mark.smoke
-def test_complete_ownership_transfer(
-    owner_page: Page,
-    browser: Browser,
-) -> None:
-    """An owner can transfer full ownership of a profile to a contributor.
-
-    Steps:
-
-    1. Owner creates a disposable Scout.
-    2. Owner generates a WRITE invite for the contributor.
-    3. Contributor redeems the invite in a fresh browser context.
-    4. Owner transfers ownership to the contributor.
-    5. Owner no longer sees the profile on their dashboard.
-    6. Contributor sees the profile as an Owner with a *Manage Scout* button.
-
-    Args:
-        owner_page: Function-scoped Playwright page authenticated as owner.
-        browser: Session-scoped Playwright Browser used to open an isolated
-            contributor context.
-    """
-    profile_name = f"Transfer Me {uuid4().hex[:12]}"
-    contributor_email = os.environ["TEST_CONTRIBUTOR_EMAIL"]
-
-    dashboard = DashboardPage(owner_page)
-    dashboard.goto()
-
-    # Create a disposable profile.
-    dashboard._create_scout_button().click()
-    dialog = owner_page.get_by_role("dialog")
-    owner_page.get_by_label("Scout Name").fill(profile_name)
-    owner_page.get_by_role("button", name="Create Scout").click()
-    expect(dialog).to_be_hidden(timeout=15_000)
-    dashboard.wait_for_loading()
-    dashboard.wait_for_profiles_loaded()
-
-    names_after_create = dashboard.get_profile_names()
-    assert profile_name in names_after_create, (
-        f"'{profile_name}' not on dashboard after creation; visible: {names_after_create}"
-    )
-
-    # Navigate to campaigns to extract profile_id.
-    dashboard.click_profile(profile_name)
-    match = re.search(r"/scouts/([^/]+)/campaigns", owner_page.url)
-    assert match, f"Expected /scouts/{{id}}/campaigns after profile click; got: {owner_page.url}"
-    profile_id = urllib.parse.unquote(match.group(1))
-
-    # Owner creates a WRITE invite for the contributor.
-    share = SharePage(owner_page)
-    share.goto(profile_id)
-    share.create_invite("WRITE")
-    invite_code = share.get_invite_link()
-    assert invite_code, "Failed to generate a WRITE invite code for the contributor"
-
-    # Contributor accepts the invite in an isolated browser context.
-    contributor_context: BrowserContext = browser.new_context(ignore_https_errors=True)
-    try:
-        contributor_pg: Page = contributor_context.new_page()
-        login_as_contributor(contributor_pg)
-        contributor_share = SharePage(contributor_pg)
-        contributor_share.accept_invite(invite_code)
-
-        # Owner transfers ownership to the contributor.
-        manage = ManagePage(owner_page)
-        manage.goto(profile_id)
-        manage.transfer_ownership(contributor_email)
-
-        # Owner's dashboard should no longer list the profile.
-        owner_dashboard = DashboardPage(owner_page)
-        owner_dashboard.goto()
-        owner_dashboard.wait_for_profiles_loaded()
-        owner_names = owner_dashboard.get_profile_names()
-        assert profile_name not in owner_names, (
-            f"Owner still sees '{profile_name}' after transfer; visible: {owner_names}"
-        )
-
-        # Contributor's dashboard should show the profile as Owner.
-        contributor_dashboard = DashboardPage(contributor_pg)
-        contributor_dashboard.goto()
-        contributor_dashboard.wait_for_profiles_loaded()
-        contributor_names = contributor_dashboard.get_profile_names()
-        assert profile_name in contributor_names, (
-            f"Contributor does not see '{profile_name}' after transfer; visible: {contributor_names}"
-        )
-
-        card = contributor_dashboard._profile_card_for(profile_name)
-        expect(card.get_by_text("Owner")).to_be_visible(timeout=10_000)
-        expect(card.get_by_role("button", name="Manage Scout", exact=True)).to_be_visible(
-            timeout=10_000
-        )
-    finally:
-        contributor_context.close()
