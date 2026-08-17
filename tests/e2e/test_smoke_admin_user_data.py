@@ -128,7 +128,7 @@ def _seed_contributor_data(browser: Browser) -> dict[str, str]:
         shared = SharedCampaignsPage(contributor_page)
         shared.goto()
         shared.click_create()
-        shared_campaign_name = f"E2E UserData Shared {int(time.time())}"
+        shared_campaign_name = f"E2EU UserData Shared {int(time.time())}"
         shared.create_shared_campaign(catalog_name, shared_campaign_name)
         visible_codes = shared.get_visible_codes()
         assert visible_codes, "Shared campaign code must be visible after creation"
