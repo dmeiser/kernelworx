@@ -15,14 +15,25 @@ permissions:
   statuses: write
 
 jobs:
+  resolve-vars:
+    name: Resolve dev environment variables
+    runs-on: ubuntu-latest
+    environment: dev
+    outputs:
+      e2e_base_url: ${{ vars.E2E_BASE_URL_DEV }}
+    steps:
+      - name: Export dev E2E base URL
+        run: echo "E2E_BASE_URL_DEV=${{ vars.E2E_BASE_URL_DEV }}"
+
   deploy:
+    needs: resolve-vars
     uses: ./.github/workflows/deploy-shared.yml
     with:
       environment: dev
       tofu-directory: tofu/application/environments/dev
       aws-role-session-name: github-actions-deploy-dev
       smoke-role-session-name: github-actions-smoke-tests-dev
-      # E2E_BASE_URL_DEV is read from the dev environment variables inside deploy-shared.yml.
+      e2e-base-url: ${{ needs.resolve-vars.outputs.e2e_base_url }}
       e2e-base-url-var-suffix: DEV
       smoke-url-block-pattern: 'https://kernelworx.app*|https://www.kernelworx.app*'
       smoke-url-block-message: 'dev smoke tests against the production URL.'
