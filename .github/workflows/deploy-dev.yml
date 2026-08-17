@@ -20,15 +20,17 @@ jobs:
     runs-on: ubuntu-latest
     environment: dev
     outputs:
-      e2e_base_url: ${{ vars.E2E_BASE_URL_DEV }}
+      e2e_base_url: ${{ steps.export.outputs.url }}
     steps:
       - name: Export dev E2E base URL
+        id: export
         run: |
           e2e_url="${{ vars.E2E_BASE_URL_DEV }}"
           if [ -z "$e2e_url" ]; then
             echo "E2E_BASE_URL_DEV is not set in the dev environment. Set it to the dev app URL before running smoke tests."
             exit 1
           fi
+          echo "url=$e2e_url" >> "$GITHUB_OUTPUT"
           echo "E2E_BASE_URL_DEV=$e2e_url"
 
   deploy:

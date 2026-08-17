@@ -43,7 +43,7 @@ jobs:
           echo "base/dev HEAD: $dev_head"
           state=$(gh api "repos/${{ github.repository }}/commits/${dev_head}/status" --jq '[.statuses[] | select(.context == "deployed-to-dev")] | sort_by(.created_at) | last // {} | .state // empty')
           if [ "$state" != "success" ]; then
-            echo "deployed-to-dev status on origin/dev HEAD is not success (state: ${state:-missing})."
+            echo "deployed-to-dev status on base/dev HEAD is not success (state: ${state:-missing})."
             exit 1
           fi
           echo "deployed-to-dev status is success."
