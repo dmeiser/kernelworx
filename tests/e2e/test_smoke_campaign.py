@@ -24,7 +24,9 @@ from playwright.sync_api import Page, expect
 
 from tests.e2e.pages.campaign_page import CampaignPage
 from tests.e2e.pages.campaign_settings_page import CampaignSettingsPage
+from tests.e2e.pages.catalogs_page import CatalogsPage
 from tests.e2e.pages.dashboard_page import DashboardPage
+from tests.e2e.pages.shared_campaigns_page import SharedCampaignsPage
 
 _CAMPAIGN_NAME: str = f"Smoke Test Campaign {uuid.uuid4().hex[:8]}"
 
@@ -66,6 +68,22 @@ def _create_campaign_with_first_catalog(campaign_page: CampaignPage, name: str, 
         profile_id: Optional profile ID to select on the create-campaign page.
     """
     campaign_page.create_campaign_first_catalog(name, profile_id)
+
+
+def _extract_campaign_ids(url: str) -> tuple[str, str]:
+    """Extract profile and campaign IDs from a campaign detail/settings URL.
+
+    Args:
+        url: Current browser URL containing ``/scouts/{profileId}/campaigns/{campaignId}``.
+
+    Returns:
+        Tuple of ``(profile_id, campaign_id)`` with URL decoding applied.
+    """
+    match = re.search(r"/scouts/([^/]+)/campaigns/([^/?#]+)", url)
+    assert match, f"Could not extract campaign IDs from URL: {url}"
+    profile_id = urllib.parse.unquote(match.group(1))
+    campaign_id = urllib.parse.unquote(match.group(2))
+    return profile_id, campaign_id
 
 
 # ---------------------------------------------------------------------------
@@ -209,4 +227,143 @@ def test_delete_campaign(owner_page: Page, ensure_owner_profile: str) -> None:
     names = campaign_page2.get_campaign_names()
     assert campaign_name not in names, (
         f"Deleted campaign '{campaign_name}' must not appear in campaign list; found: {names}"
+    )
+
+
+@pytest.mark.smoke
+def test_edit_campaign_dates(owner_page: Page, ensure_owner_profile: str) -> None:
+    """Verify that campaign start/end dates persist after saving.
+
+    Creates a campaign, sets a start and end date on the settings tab,
+    saves, reloads the page, and asserts both dates are still present.
+    """
+    campaign_name = f"Edit Dates Test {int(time.time())}"
+    _, profile_id, campaign_page = _navigate_to_first_profile_campaigns(owner_page)
+    _create_campaign_with_first_catalog(campaign_page, campaign_name, profile_id)
+    campaign_page.click_campaign(campaign_name)
+    profile_id, campaign_id = _extract_campaign_ids(owner_page.url)
+
+    settings = CampaignSettingsPage(owner_page)
+    settings.goto(profile_id, campaign_id)
+    start_date = "2026-01-01"
+    end_date = "2026-01-31"
+    settings.set_start_date(start_date)
+    settings.set_end_date(end_date)
+    settings.click_save()
+
+    owner_page.reload()
+    settings.wait_for_loading()
+    assert settings.get_start_date() == start_date, (
+        f"Expected start date '{start_date}'; got '{settings.get_start_date()}'"
+    )
+    assert settings.get_end_date() == end_date, (
+        f"Expected end date '{end_date}'; got '{settings.get_end_date()}'"
+    )
+
+
+@pytest.mark.smoke
+def test_reselect_campaign_catalog(owner_page: Page, ensure_owner_profile: str) -> None:
+    """Verify that changing a campaign's catalog persists after saving.
+
+    Creates a campaign and a second catalog, then switches the campaign to
+    the new catalog on the settings tab and confirms the selection survives
+    a page reload.
+    """
+    campaign_name = f"Reselect Catalog Test {int(time.time())}"
+    _, profile_id, campaign_page = _navigate_to_first_profile_campaigns(owner_page)
+    _create_campaign_with_first_catalog(campaign_page, campaign_name, profile_id)
+
+    catalogs = CatalogsPage(owner_page)
+    catalogs.goto()
+    catalogs.switch_to_my_catalogs()
+    new_catalog_name = f"Reselect Catalog {int(time.time())}"
+    catalogs.create_catalog(new_catalog_name, [{"productName": "Widget", "price": 10.0}])
+
+    campaign_page.goto(profile_id)
+    campaign_page.click_campaign(campaign_name)
+    _, campaign_id = _extract_campaign_ids(owner_page.url)
+    settings = CampaignSettingsPage(owner_page)
+    settings.goto(profile_id, campaign_id)
+    settings.select_catalog_by_name(new_catalog_name)
+    settings.click_save()
+
+    owner_page.reload()
+    settings.wait_for_loading()
+    selected = settings.get_selected_catalog_name()
+    assert new_catalog_name in selected, (
+        f"Expected catalog '{new_catalog_name}' to be selected; got '{selected}'"
+    )
+
+
+@pytest.mark.smoke
+def test_toggle_campaign_active(owner_page: Page, ensure_owner_profile: str) -> None:
+    """Verify that toggling the campaign active switch persists after saving.
+
+    Creates a campaign, flips the active switch on the settings tab, saves,
+    reloads, and asserts the switch reflects the new state.
+    """
+    campaign_name = f"Toggle Active Test {int(time.time())}"
+    _, profile_id, campaign_page = _navigate_to_first_profile_campaigns(owner_page)
+    _create_campaign_with_first_catalog(campaign_page, campaign_name, profile_id)
+    campaign_page.click_campaign(campaign_name)
+    _, campaign_id = _extract_campaign_ids(owner_page.url)
+
+    settings = CampaignSettingsPage(owner_page)
+    settings.goto(profile_id, campaign_id)
+    original_active = settings.get_is_active()
+    settings.toggle_active()
+    settings.click_save()
+
+    owner_page.reload()
+    settings.wait_for_loading()
+    assert settings.get_is_active() is not original_active, (
+        f"Expected active state to change from {original_active}"
+    )
+
+
+@pytest.mark.smoke
+def test_confirm_shared_campaign_changes(owner_page: Page, ensure_owner_profile: str) -> None:
+    """Verify the shared-campaign change confirmation dialog when renaming/re-cataloging.
+
+    Creates a shared campaign, joins it to create a derived campaign, then
+    changes the derived campaign's name and catalog. The save triggers a
+    confirmation dialog that must be accepted before the changes persist.
+    """
+    _, profile_id, _campaign_page = _navigate_to_first_profile_campaigns(owner_page)
+
+    catalogs = CatalogsPage(owner_page)
+    catalogs.goto()
+    catalogs.switch_to_my_catalogs()
+    catalog1 = f"Shared Catalog 1 {int(time.time())}"
+    catalog2 = f"Shared Catalog 2 {int(time.time())}"
+    catalogs.create_catalog(catalog1, [{"productName": "A", "price": 5.0}])
+    catalogs.create_catalog(catalog2, [{"productName": "B", "price": 7.0}])
+
+    shared = SharedCampaignsPage(owner_page)
+    shared.goto_create()
+    shared.create_shared_campaign(catalog_name=catalog1, campaign_name=f"Shared Base {int(time.time())}")
+    shared.goto()
+    codes = shared.get_visible_codes()
+    assert codes, "No shared campaign codes found after creation"
+    code = codes[0]
+
+    shared.join_shared_campaign(code, profile_id)
+    profile_id, campaign_id = _extract_campaign_ids(owner_page.url)
+
+    settings = CampaignSettingsPage(owner_page)
+    settings.goto(profile_id, campaign_id)
+    new_name = f"Shared Derived Edited {int(time.time())}"
+    settings.set_campaign_name(new_name)
+    settings.select_catalog_by_name(catalog2)
+    settings.click_save()
+    settings.confirm_shared_campaign_changes()
+
+    owner_page.reload()
+    settings.wait_for_loading()
+    assert settings.get_campaign_name() == new_name, (
+        f"Expected campaign name '{new_name}'; got '{settings.get_campaign_name()}'"
+    )
+    selected = settings.get_selected_catalog_name()
+    assert catalog2 in selected, (
+        f"Expected catalog '{catalog2}' to be selected; got '{selected}'"
     )
