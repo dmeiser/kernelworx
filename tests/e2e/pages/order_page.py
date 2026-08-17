@@ -1,5 +1,6 @@
 """Order page object — order list and manual order creation for a campaign."""
 
+import time
 import urllib.parse
 
 from playwright.sync_api import Locator, Page, expect
@@ -507,8 +508,14 @@ class OrderPage(BasePage):
             return ""
         return tile.locator("h4").first.inner_text()
 
-    def get_selected_payment_method(self) -> str:
+    def get_selected_payment_method(self, timeout: int = 10_000) -> str:
         """Return the visible text of the selected *Payment Method* option.
+
+        Waits for the select to have a non-empty value so callers that read the
+        edit page immediately after navigation do not catch the loading state.
+
+        Args:
+            timeout: Maximum wait in milliseconds. Defaults to 10 000.
 
         Returns:
             Selected payment method name, or ``""`` when the select is not
@@ -517,13 +524,29 @@ class OrderPage(BasePage):
         select = self._payment_method_select()
         if not select.is_visible():
             return ""
-        # MUI Select renders the selected value in the combobox text, but in
-        # some states the inner text is only a zero-width space. Fall back to
-        # the hidden input value (which tracks the Select's ``value`` prop).
-        text = select.inner_text().strip("\u200b\u200c\u200d\ufeff")
-        if text:
-            return text
-        hidden_input = select.locator("xpath=../input[@type='hidden']")
-        if hidden_input.is_visible():
-            return hidden_input.input_value() or ""
-        return select.get_attribute("aria-valuetext") or ""
+
+        deadline = time.monotonic() + (timeout / 1000.0)
+        while True:
+            # MUI Select renders the selected value in the combobox text, but in
+            # some states the inner text is only a zero-width space.
+            text = select.inner_text().strip("\u200b\u200c\u200d\ufeff")
+            if text:
+                return text
+
+            # Fall back to the hidden input value (which tracks the Select's
+            # ``value`` prop). The hidden input is a child of the combobox.
+            hidden_input = select.locator("input[type='hidden']")
+            if hidden_input.count() > 0:
+                value = hidden_input.input_value().strip()
+                if value:
+                    return value
+
+            aria = select.get_attribute("aria-valuetext") or ""
+            if aria.strip():
+                return aria.strip()
+
+            if time.monotonic() > deadline:
+                break
+            self.page.wait_for_timeout(200)
+
+        return ""
