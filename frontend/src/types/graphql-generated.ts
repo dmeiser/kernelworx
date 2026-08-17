@@ -651,7 +651,7 @@ export type GqlSharedCampaign = {
   __typename?: 'SharedCampaign';
   campaignName: Scalars['String']['output'];
   campaignYear: Scalars['Int']['output'];
-  catalog: GqlCatalog;
+  catalog?: Maybe<GqlCatalog>;
   catalogId: Scalars['ID']['output'];
   city: Scalars['String']['output'];
   createdAt: Scalars['AWSDateTime']['output'];

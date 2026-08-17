@@ -366,6 +366,7 @@ def test_full_form_order_lifecycle_with_money(owner_page: Page, ensure_owner_pro
         summary_total_text = order_page.get_summary_total_sales()
         assert_currency(summary_total_text, baseline_cents + updated_total_cents)
     finally:
+        payment_page.goto()
         if payment_page.has_payment_method(payment_method_name):
             payment_page.delete_payment_method(payment_method_name)
 

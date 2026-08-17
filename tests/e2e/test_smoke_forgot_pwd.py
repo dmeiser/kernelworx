@@ -1,9 +1,8 @@
 """Smoke tests for the forgot-password page.
 
-These tests exercise the public ``/forgot-password`` route through the
-``ForgotPasswordPage`` page object.  They do **not** submit real reset requests
-to Cognito; they verify route rendering, form visibility, and front-end
-validation only.
+Verifies that the ``/forgot-password`` route renders the branded reset form
+instead of redirecting to the marketing page (404 catch-all), and that client-
+side validation is exercised.
 """
 
 import pytest
@@ -13,35 +12,32 @@ from tests.e2e.pages.forgot_password_page import ForgotPasswordPage
 
 
 @pytest.mark.smoke
-def test_forgot_password_page_renders(page: Page) -> None:
-    """The forgot-password route loads and renders the reset form.
+def test_forgot_password_page_loads(page: Page) -> None:
+    """The forgot-password page loads with its subtitle and email field."""
+    forgot = ForgotPasswordPage(page)
+    forgot.goto()
 
-    Uses the ``ForgotPasswordPage`` POM to verify:
-    * The browser lands on ``/forgot-password``.
-    * The page subtitle ("Reset your password") is visible.
-    * The email input is visible and editable.
-    * The *Send Reset Code* submit button is present.
-    """
-    forgot_page = ForgotPasswordPage(page)
-    forgot_page.goto()
-    forgot_page.expect_loaded()
+    subtitle = page.get_by_text("Reset your password")
+    expect(subtitle).to_be_visible(timeout=10_000)
 
-    send_code_button = page.get_by_role("button", name="Send Reset Code")
-    expect(send_code_button).to_be_visible(timeout=10_000)
+    email_input = page.get_by_label("Email")
+    expect(email_input).to_be_visible()
+    expect(email_input).to_be_editable()
+
+    expect(page.get_by_role("button", name="Send Reset Code")).to_be_visible()
 
 
 @pytest.mark.smoke
 def test_forgot_password_email_validation(page: Page) -> None:
-    """Submitting the request-code form without an email shows a validation error.
+    """Submitting the empty form triggers the client-side email validation."""
+    forgot = ForgotPasswordPage(page)
+    forgot.goto()
 
-    This exercises the front-end validation path without calling Cognito.
-    """
-    forgot_page = ForgotPasswordPage(page)
-    forgot_page.goto()
-    forgot_page.expect_loaded()
+    # HTML5 constraint validation blocks a plain button click on an empty
+    # required field, so dispatch the submit event directly.
+    form = page.locator("form").first
+    form.evaluate("(el) => el.dispatchEvent(new Event('submit', { bubbles: true }))")
 
-    page.get_by_role("button", name="Send Reset Code").click()
-
-    error_alert = page.get_by_role("alert").first
-    expect(error_alert).to_be_visible(timeout=10_000)
-    expect(error_alert).to_have_text("Email is required")
+    alert = page.get_by_role("alert")
+    expect(alert).to_be_visible(timeout=10_000)
+    expect(alert).to_contain_text("Email is required")

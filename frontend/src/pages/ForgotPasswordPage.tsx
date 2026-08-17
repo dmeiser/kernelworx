@@ -106,9 +106,9 @@ export const ForgotPasswordPage: React.FC = () => {
     try {
       await resetPassword({ username: email });
     } catch (err: unknown) {
-      console.error('Reset password request failed:', err);
       const typedError = err as { name?: string; message?: string };
       if (typedError.name !== 'UserNotFoundException') {
+        console.error('Reset password request failed:', err);
         setError(getErrorFromTable(RESET_ERROR_MESSAGES, typedError.name, typedError.message || 'Unable to send reset code'));
         setLoading(false);
         return;
@@ -142,8 +142,10 @@ export const ForgotPasswordPage: React.FC = () => {
         void navigate('/login');
       }, 1500);
     } catch (err: unknown) {
-      console.error('Confirm reset password failed:', err);
       const typedError = err as { name?: string; message?: string };
+      if (typedError.name !== 'UserNotFoundException') {
+        console.error('Confirm reset password failed:', err);
+      }
       setError(getErrorFromTable(CONFIRM_ERROR_MESSAGES, typedError.name, typedError.message || 'Unable to reset password'));
     } finally {
       setLoading(false);

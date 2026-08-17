@@ -87,12 +87,17 @@ def _seed_contributor_data(browser: Browser) -> dict[str, str]:
         invite_code = share.get_invite_link()
         assert invite_code, "Failed to generate WRITE invite for contributor"
 
+        # Contributor must redeem the invite before ownership can be transferred,
+        # because transfer_ownership looks for an existing share row.
+        login_as_contributor(contributor_page)
+        contrib_share = SharePage(contributor_page)
+        contrib_share.accept_invite(invite_code)
+
         manage = ManagePage(owner_page)
         manage.goto(profile_id)
         manage.transfer_ownership(contributor_email)
 
         # Contributor accepts ownership and seeds data.
-        login_as_contributor(contributor_page)
         contributor_dashboard = DashboardPage(contributor_page)
         contributor_dashboard.goto()
         contributor_dashboard.wait_for_profiles_loaded()

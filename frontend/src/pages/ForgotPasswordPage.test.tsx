@@ -282,6 +282,24 @@ describe('ForgotPasswordPage', () => {
       });
     });
 
+    it('treats confirmation UserNotFoundException as invalid code to avoid account enumeration', async () => {
+      const user = setupUser();
+      vi.mocked(amplifyAuth.confirmResetPassword).mockRejectedValue(
+        createNamedError('UserNotFoundException', 'User does not exist'),
+      );
+
+      await fillResetForm(user, '000000', 'ValidPass1!', 'ValidPass1!');
+      await submitResetForm(user);
+
+      await waitFor(() => {
+        expect(screen.getByRole('alert')).toHaveTextContent(
+          'Invalid verification code. Please check and try again.',
+        );
+      });
+
+      expect(screen.queryByText('UserNotFoundException')).not.toBeInTheDocument();
+    });
+
     it('displays mapped error for expired verification code', async () => {
       const user = setupUser();
       vi.mocked(amplifyAuth.confirmResetPassword).mockRejectedValue(

@@ -22,6 +22,8 @@ permissions:
 
 jobs:
   deploy:
+    # Only deploy from the main branch, even for workflow_dispatch runs.
+    if: github.ref == 'refs/heads/main'
     uses: ./.github/workflows/deploy-shared.yml
     with:
       environment: production

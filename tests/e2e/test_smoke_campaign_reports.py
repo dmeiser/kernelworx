@@ -126,12 +126,18 @@ def test_campaign_reports_generate_and_views(
         )
     assert reports.get_top_sellers_row_count() >= 1, "Top Sellers table must contain at least one row"
 
-    # Step 6 — assert Seller Report table renders and has rows/data.
+    # Step 6 — assert Seller Report table renders, has rows/data, and download it.
     reports.switch_to_seller_report()
     assert reports.seller_report_is_visible(), "Seller Report section and table must render"
     assert reports.get_active_table_row_count() >= 1, "Seller Report table must contain at least one row"
+    seller_report_path = reports.download_seller_report_to(tmp_path / "seller_report.xlsx")
+    assert seller_report_path.suffix == ".xlsx", f"Expected .xlsx seller report; got: {seller_report_path}"
+    assert seller_report_path.stat().st_size > 0, "Downloaded Seller Report must not be empty"
+    seller_workbook = load_workbook(seller_report_path)
+    assert seller_workbook.active is not None, "Seller Report workbook must have an active worksheet"
+    assert seller_workbook.active.max_row >= 2, "Seller Report must contain header and at least one data row"
 
-    # Step 7 — assert Order Details table renders and contains the seeded customer.
+    # Step 7 — assert Order Details table renders, contains the seeded customer, and download it.
     reports.switch_to_order_details()
     assert reports.order_details_is_visible(), "Order Details section and table must render"
     assert reports.get_active_table_row_count() >= 1, "Order Details table must contain at least one row"
@@ -140,14 +146,7 @@ def test_campaign_reports_generate_and_views(
         f"Order Details must include the seeded customer {customer_name!r}; got: {customer_cells}"
     )
 
-    # Step 8 — invoke the export helpers and verify both downloads are non-empty XLSX files.
-    seller_report_path = reports.download_seller_report_to(tmp_path / "seller_report.xlsx")
-    assert seller_report_path.suffix == ".xlsx", f"Expected .xlsx seller report; got: {seller_report_path}"
-    assert seller_report_path.stat().st_size > 0, "Downloaded Seller Report must not be empty"
-    seller_workbook = load_workbook(seller_report_path)
-    assert seller_workbook.active is not None, "Seller Report workbook must have an active worksheet"
-    assert seller_workbook.active.max_row >= 2, "Seller Report must contain header and at least one data row"
-
+    # Step 8 — invoke the export helper and verify the download is a non-empty XLSX file.
     order_details_path = reports.download_order_details_to(tmp_path / "order_details.xlsx")
     assert order_details_path.suffix == ".xlsx", f"Expected .xlsx order details; got: {order_details_path}"
     assert order_details_path.stat().st_size > 0, "Downloaded Order Details must not be empty"

@@ -127,7 +127,7 @@ type Product @aws_cognito_user_pools {
 type SharedCampaign {
   sharedCampaignCode: String!
   catalogId: ID!
-  catalog: Catalog!
+  catalog: Catalog
   campaignName: String!
   campaignYear: Int!
   startDate: AWSDate
