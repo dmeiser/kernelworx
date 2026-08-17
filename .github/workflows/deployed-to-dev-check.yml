@@ -1,0 +1,45 @@
+name: Deployed to Dev Check
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  statuses: read
+
+jobs:
+  deployed-to-dev:
+    name: Check PR is deployed to dev
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify PR head is ancestor of origin/dev
+        run: |
+          git fetch origin dev
+          pr_head="${{ github.event.pull_request.head.sha }}"
+          if git merge-base --is-ancestor "$pr_head" origin/dev; then
+            echo "PR head $pr_head is an ancestor of origin/dev."
+          else
+            echo "PR head $pr_head is NOT an ancestor of origin/dev."
+            exit 1
+          fi
+
+      - name: Check deployed-to-dev status on origin/dev HEAD
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          dev_head=$(git rev-parse origin/dev)
+          echo "origin/dev HEAD: $dev_head"
+          state=$(gh api "repos/${{ github.repository }}/commits/${dev_head}/status" --jq '.statuses[] | select(.context == "deployed-to-dev") | .state')
+          if [ "$state" != "success" ]; then
+            echo "deployed-to-dev status on origin/dev HEAD is not success (state: ${state:-missing})."
+            exit 1
+          fi
+          echo "deployed-to-dev status is success."
