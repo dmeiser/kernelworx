@@ -293,7 +293,7 @@ class CampaignPage(BasePage):
         try:
             expect(btn).to_be_visible(timeout=timeout)
             expect(btn).to_be_enabled(timeout=timeout)
-        except PlaywrightTimeoutError:
+        except AssertionError:
             return False
         return True
 
