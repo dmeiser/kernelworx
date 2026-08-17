@@ -22,7 +22,7 @@ jobs:
       tofu-directory: tofu/application/environments/dev
       aws-role-session-name: github-actions-deploy-dev
       smoke-role-session-name: github-actions-smoke-tests-dev
-      e2e-base-url: ${{ vars.E2E_BASE_URL_DEV }}
+      # E2E_BASE_URL_DEV is read from the dev environment variables inside deploy-shared.yml.
       e2e-base-url-var-suffix: DEV
       smoke-url-block-pattern: 'https://kernelworx.app*|https://www.kernelworx.app*'
       smoke-url-block-message: 'dev smoke tests against the production URL.'
