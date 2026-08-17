@@ -37,7 +37,7 @@ jobs:
         run: |
           dev_head=$(git rev-parse origin/dev)
           echo "origin/dev HEAD: $dev_head"
-          state=$(gh api "repos/${{ github.repository }}/commits/${dev_head}/status" --jq '.statuses[] | select(.context == "deployed-to-dev") | .state')
+          state=$(gh api "repos/${{ github.repository }}/commits/${dev_head}/status" --jq '[.statuses[] | select(.context == "deployed-to-dev")] | sort_by(.created_at) | last // {} | .state // empty')
           if [ "$state" != "success" ]; then
             echo "deployed-to-dev status on origin/dev HEAD is not success (state: ${state:-missing})."
             exit 1

@@ -60,6 +60,11 @@ on:
         required: false
         type: boolean
         default: true
+      allow-non-test-account-emails:
+        description: "Opt-in to allow smoke tests with non-test email addresses (dev only; use with caution)"
+        required: false
+        type: boolean
+        default: false
     secrets:
       AWS_ROLE_ARN:
         required: true
@@ -245,7 +250,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     needs: deploy
-    if: ${{ needs.deploy.result == 'success' }}
+    if: ${{ needs.deploy.result == 'success' && inputs.e2e-base-url != '' }}
     environment:
       name: ${{ inputs.environment }}
     steps:
@@ -273,11 +278,11 @@ jobs:
         with:
           node-version-file: ".node-version"
           cache: npm
-          cache-dependency-path: tests/integration/package.json
+          cache-dependency-path: tests/integration/package-lock.json
 
       - name: Install Node.js dependencies for integration cleanup
         working-directory: tests/integration
-        run: npm install
+        run: npm ci
 
       - name: Configure AWS credentials for cleanup
         uses: aws-actions/configure-aws-credentials@v4
@@ -326,7 +331,7 @@ jobs:
           test -n "$TEST_USER_POOL_ID"
 
           # Force explicit "test-only" naming so misconfigured real users are rejected.
-          if [ "${{ inputs.strict-test-account-names }}" = "true" ]; then
+          if [ "${{ inputs.strict-test-account-names }}" = "true" ] && [ "${{ inputs.allow-non-test-account-emails }}" != "true" ]; then
             for email in "$TEST_OWNER_EMAIL" "$TEST_CONTRIBUTOR_EMAIL" "$TEST_READONLY_EMAIL"; do
               local_part="${email%@*}"
               if ! echo "$local_part" | grep -Eiq '(test|smoke|integration)'; then
@@ -334,6 +339,10 @@ jobs:
                 exit 1
               fi
             done
+          fi
+
+          if [ "${{ inputs.allow-non-test-account-emails }}" = "true" ]; then
+            echo "::warning::allow-non-test-account-emails is enabled. Smoke tests are running with non-test account emails; ensure these are dev-only accounts."
           fi
 
           # Verify each configured email exists in the configured user pool.
@@ -376,8 +385,8 @@ jobs:
           E2E_FAIL_ON_CLEANUP_ERROR: "1"
         run: uv run pytest tests/e2e/ -m smoke -v
 
-      - name: Post deployed-to-dev status
-        if: ${{ success() && inputs.environment == 'dev' }}
+      - name: Post deployed-to-dev success status
+        if: ${{ success() && inputs.environment == 'dev' && inputs.e2e-base-url != '' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -385,4 +394,26 @@ jobs:
             -f state=success \
             -f context=deployed-to-dev \
             -f description="Smoke tests passed on dev" \
+            -f target_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+      - name: Post deployed-to-dev failure status
+        if: ${{ failure() && inputs.environment == 'dev' && inputs.e2e-base-url != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/${{ github.repository }}/statuses/${{ github.sha }}" \
+            -f state=failure \
+            -f context=deployed-to-dev \
+            -f description="Smoke tests failed on dev" \
+            -f target_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+      - name: Post deployed-to-dev error status
+        if: ${{ cancelled() && inputs.environment == 'dev' && inputs.e2e-base-url != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/${{ github.repository }}/statuses/${{ github.sha }}" \
+            -f state=error \
+            -f context=deployed-to-dev \
+            -f description="Smoke tests cancelled on dev" \
             -f target_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
