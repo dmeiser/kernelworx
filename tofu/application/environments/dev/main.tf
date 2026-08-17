@@ -271,6 +271,41 @@ resource "aws_acm_certificate_validation" "site" {
   validation_record_fqdns = [for rec in module.route53.cert_validation_records : rec.fqdn if !can(regex("(api|login)\\.", rec.name))]
 }
 
+# Import existing Lambda CloudWatch log groups that were auto-created by
+# Lambda invocations before these resources were added to the configuration.
+# Without imports, OpenTofu fails with ResourceAlreadyExistsException.
+import {
+  for_each = toset([
+    "list-my-shares",
+    "list-catalogs-in-use",
+    "create-profile",
+    "request-report",
+    "unit-reporting",
+    "list-unit-catalogs",
+    "list-unit-campaign-catalogs",
+    "campaign-operations",
+    "delete-campaign-orders",
+    "delete-profile-cascade",
+    "update-account",
+    "delete-account",
+    "transfer-ownership",
+    "request-qr-upload",
+    "confirm-qr-upload",
+    "generate-qr-code-presigned-url",
+    "delete-qr-code",
+    "validate-payment-method",
+    "admin-operations",
+  ])
+  id = "/aws/lambda/kernelworx-${each.value}-ue1-dev"
+  to = module.lambda.aws_cloudwatch_log_group.functions[each.value]
+}
+
+import {
+  for_each = toset(["post-auth", "pre-signup"])
+  id       = "/aws/lambda/kernelworx-${each.value}-ue1-dev"
+  to       = module.lambda.aws_cloudwatch_log_group.trigger_functions[each.value]
+}
+
 # Outputs
 output "cognito_user_pool_id" {
   description = "ID of the Cognito User Pool for authentication"
