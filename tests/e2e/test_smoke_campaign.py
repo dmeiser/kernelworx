@@ -321,9 +321,9 @@ def test_toggle_campaign_active(owner_page: Page, ensure_owner_profile: str) -> 
         f"Expected active state to change from {original_active}"
     )
 
-    # Issue #81: deactivation should hide the campaign from the dashboard list.
+    # Issue #81: deactivation should move the campaign out of the Active section.
     campaign_page.goto(profile_id)
-    assert not campaign_page.has_campaign(campaign_name), (
+    assert not campaign_page.has_active_campaign(campaign_name), (
         f"Deactivated campaign '{campaign_name}' must not appear in the active campaign list"
     )
 

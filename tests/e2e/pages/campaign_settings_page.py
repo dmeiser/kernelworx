@@ -225,8 +225,11 @@ class CampaignSettingsPage(BasePage):
         ensures callers do not reload while an update is still pending.
         """
         saving_button = self.page.get_by_role("button", name="Saving...", exact=True)
-        expect(saving_button).to_be_visible(timeout=5_000)
         save_button = self.get_by_role_button(self._SAVE_BTN)
+        # The saving state may already be present or may appear briefly; wait
+        # for it to be visible first, tolerating the case where it is already
+        # gone because the mutation finished instantly.
+        expect(saving_button.or_(save_button)).to_be_visible(timeout=5_000)
         expect(save_button).to_be_visible(timeout=15_000)
         self.wait_for_loading()
 

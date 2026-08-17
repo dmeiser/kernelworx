@@ -517,4 +517,13 @@ class OrderPage(BasePage):
         select = self._payment_method_select()
         if not select.is_visible():
             return ""
-        return select.inner_text()
+        # MUI Select renders the selected value in the combobox text, but in
+        # some states the inner text is only a zero-width space. Fall back to
+        # the hidden input value (which tracks the Select's ``value`` prop).
+        text = select.inner_text().strip("\u200b\u200c\u200d\ufeff")
+        if text:
+            return text
+        hidden_input = select.locator("xpath=../input[@type='hidden']")
+        if hidden_input.is_visible():
+            return hidden_input.input_value() or ""
+        return select.get_attribute("aria-valuetext") or ""
