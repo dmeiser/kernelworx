@@ -159,6 +159,8 @@ class PaymentPage(BasePage):
         self._dialog_submit_button().click()
         expect(dialog).to_be_hidden(timeout=10_000)
         self.wait_for_loading()
+        # Wait for the refetched list to render the new card before returning.
+        expect(self._card_for(method_type).first).to_be_visible(timeout=10_000)
 
     def delete_payment_method(self, method_type: str) -> None:
         """Click the delete action on the card and confirm the dialog.

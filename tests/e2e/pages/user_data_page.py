@@ -100,6 +100,17 @@ class UserDataPage(BasePage):
         """Return the first visible data ``<table>`` on the page."""
         return self.page.locator("table").first
 
+    def _wait_for_table_rows(self, timeout: int = 10_000) -> Locator:
+        """Return the first data table after at least one row is visible.
+
+        Admin UserData queries use eventually-consistent DynamoDB reads, so
+        the table can render before its rows populate. Callers that read cell
+        text should wait through this helper to avoid empty lists.
+        """
+        table = self._data_table()
+        expect(table.locator("tbody tr").first).to_be_visible(timeout=timeout)
+        return table
+
     def _profile_button(self, seller_name: str) -> Locator:
         """Return the profile selection button labeled *seller_name*."""
         return self.page.get_by_role("button", name=seller_name, exact=True)
@@ -192,66 +203,74 @@ class UserDataPage(BasePage):
             dialog.is_visible() and dialog.get_by_role("heading", name=self._TRANSFER_DIALOG_TITLE).is_visible()
         )
 
-    def get_profile_names(self) -> list[str]:
+    def get_profile_names(self, timeout: int = 10_000) -> list[str]:
         """Return seller names from the Profiles tab table.
+
+        Waits for at least one row to populate because the underlying admin
+        query is eventually consistent.
+
+        Args:
+            timeout: Maximum wait in milliseconds for rows to appear.
 
         Returns:
             List of ``Seller Name`` cell texts in DOM order.
         """
-        table = self._data_table()
-        if not table.is_visible():
-            return []
+        table = self._wait_for_table_rows(timeout=timeout)
         return table.locator("tbody tr td:nth-child(2)").all_inner_texts()
 
-    def get_catalog_names(self) -> list[str]:
+    def get_catalog_names(self, timeout: int = 10_000) -> list[str]:
         """Return catalog names from the Catalogs tab table.
+
+        Args:
+            timeout: Maximum wait in milliseconds for rows to appear.
 
         Returns:
             List of ``Catalog Name`` cell texts in DOM order.
         """
-        table = self._data_table()
-        if not table.is_visible():
-            return []
+        table = self._wait_for_table_rows(timeout=timeout)
         return table.locator("tbody tr td:first-child").all_inner_texts()
 
-    def get_campaign_names(self) -> list[str]:
+    def get_campaign_names(self, timeout: int = 10_000) -> list[str]:
         """Return campaign names for the selected profile in the Campaigns tab.
 
         The Campaigns tab only renders a table after a profile button has been
         selected; this helper returns the first-column texts of the visible
         campaigns table.
 
+        Args:
+            timeout: Maximum wait in milliseconds for rows to appear.
+
         Returns:
             List of ``Campaign Name`` cell texts in DOM order.
         """
-        table = self._data_table()
-        if not table.is_visible():
-            return []
+        table = self._wait_for_table_rows(timeout=timeout)
         return table.locator("tbody tr td:first-child").all_inner_texts()
 
-    def get_shared_campaign_names(self) -> list[str]:
+    def get_shared_campaign_names(self, timeout: int = 10_000) -> list[str]:
         """Return campaign names from the Shared Campaigns tab table.
+
+        Args:
+            timeout: Maximum wait in milliseconds for rows to appear.
 
         Returns:
             List of ``Campaign Name`` cell texts in DOM order.
         """
-        table = self._data_table()
-        if not table.is_visible():
-            return []
+        table = self._wait_for_table_rows(timeout=timeout)
         return table.locator("tbody tr td:nth-child(2)").all_inner_texts()
 
-    def get_share_emails(self) -> list[str]:
+    def get_share_emails(self, timeout: int = 10_000) -> list[str]:
         """Return target-account emails from the Shares tab table.
 
         The Shares tab only renders a table after a profile button has been
         selected.
 
+        Args:
+            timeout: Maximum wait in milliseconds for rows to appear.
+
         Returns:
             List of ``User Email`` cell texts in DOM order.
         """
-        table = self._data_table()
-        if not table.is_visible():
-            return []
+        table = self._wait_for_table_rows(timeout=timeout)
         return table.locator("tbody tr td:first-child").all_inner_texts()
 
     # ------------------------------------------------------------------
