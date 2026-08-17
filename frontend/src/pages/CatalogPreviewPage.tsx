@@ -65,6 +65,7 @@ export const CatalogPreviewPage: React.FC<CatalogPreviewPageProps> = ({
   const { data, loading, error } = useQuery<{ getCatalog: Catalog }>(GET_CATALOG, {
     variables: { catalogId },
     skip: !catalogId, // Skip the query if no catalogId
+    fetchPolicy: 'network-only',
   });
 
   const catalog: Catalog | undefined = data?.getCatalog;

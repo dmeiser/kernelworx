@@ -117,7 +117,9 @@ export const PaymentMethodsPage: React.FC = () => {
     loading,
     error: queryError,
     refetch,
-  } = useQuery<{ myPaymentMethods: PaymentMethod[] }>(GET_MY_PAYMENT_METHODS);
+  } = useQuery<{ myPaymentMethods: PaymentMethod[] }>(GET_MY_PAYMENT_METHODS, {
+    fetchPolicy: 'network-only',
+  });
 
   // Mutation error handler
   const handleMutationError = (err: Error) => setError(err.message);

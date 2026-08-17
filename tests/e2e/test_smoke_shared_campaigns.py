@@ -128,7 +128,7 @@ def test_deactivate_shared_campaign(owner_page: Page) -> None:
 
 
 @pytest.mark.smoke
-def test_join_shared_campaign_creates_campaign(owner_page: Page, browser: Browser) -> None:
+def test_join_shared_campaign_creates_campaign(owner_page: Page, browser: Browser, ensure_owner_profile: str) -> None:
     """A shared campaign short link creates a campaign on the selected profile.
 
     This test:
