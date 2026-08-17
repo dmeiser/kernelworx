@@ -246,6 +246,26 @@ class CampaignPage(BasePage):
             return False
         return True
 
+    def has_active_campaign(self, name: str, timeout: int = 10_000) -> bool:
+        """Return ``True`` when a campaign heading is visible in the *Active Campaigns* section.
+
+        Args:
+            name: Substring to search for in active campaign card headings.
+            timeout: Maximum wait in milliseconds. Defaults to 10 000.
+        """
+        active_section = self.page.locator("div.MuiPaper-root, section").filter(
+            has=self.page.get_by_role("heading", name="Active Campaigns")
+        )
+        # Fall back to the whole page when the active section heading is not rendered
+        # (e.g. when there are no inactive campaigns).
+        scope = active_section if active_section.is_visible() else self.page
+        heading = scope.locator(self._CAMPAIGN_HEADING_SEL, has_text=name)
+        try:
+            heading.first.wait_for(state="visible", timeout=timeout)
+        except PlaywrightTimeoutError:
+            return False
+        return True
+
     def get_campaign_names(self) -> list[str]:
         """Return the inner text of all visible campaign headings.
 

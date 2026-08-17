@@ -123,7 +123,7 @@ class DashboardPage(BasePage):
         poll when the empty state is visible.
         """
         profile_heading = self._profile_headings().first
-        empty_alert = self.page.get_by_text("You don't have any Scouts yet")
+        empty_alert = self.page.get_by_text("No Scouts Yet")
         expect(profile_heading.or_(empty_alert)).to_be_visible(timeout=timeout)
         # If empty state appeared, give DynamoDB GSIs a few chances to catch up.
         # Reload the page each iteration so the LIST_MY_PROFILES query refetches.
