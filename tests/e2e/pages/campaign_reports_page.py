@@ -128,12 +128,12 @@ class CampaignReportsPage(BasePage):
 
         Returns:
             The inner text of the associated value element, or ``""`` when the
-            card is not visible.
+            label is not visible.
         """
-        card = self.page.locator("div.MuiPaper-root").filter(has_text=label).first
-        if not card.is_visible():
+        label_el = self.page.get_by_text(label, exact=True)
+        if not label_el.is_visible():
             return ""
-        return card.locator("h4").first.inner_text()
+        return label_el.locator("xpath=../h4").inner_text()
 
     def get_top_sellers_row_count(self) -> int:
         """Return the number of data rows in the Top Sellers table."""

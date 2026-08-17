@@ -25,9 +25,10 @@ import { resetPassword, confirmResetPassword } from 'aws-amplify/auth';
 const PASSWORD_REGEX = /^(?=.*[A-Z])(?=.*[a-z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,}$/;
 
 const RESET_ERROR_MESSAGES: Record<string, string> = {
-  InvalidParameterException: 'Please check your email address and try again.',
   LimitExceededException: 'Too many attempts. Please try again later.',
 };
+
+const SENSITIVE_RESET_ERROR_NAMES = new Set(['UserNotFoundException', 'InvalidParameterException']);
 
 const CONFIRM_ERROR_MESSAGES: Record<string, string> = {
   CodeMismatchException: 'Invalid verification code. Please check and try again.',
@@ -107,9 +108,9 @@ export const ForgotPasswordPage: React.FC = () => {
       await resetPassword({ username: email });
     } catch (err: unknown) {
       const typedError = err as { name?: string; message?: string };
-      if (typedError.name !== 'UserNotFoundException') {
+      if (!SENSITIVE_RESET_ERROR_NAMES.has(typedError.name ?? '')) {
         console.error('Reset password request failed:', err);
-        setError(getErrorFromTable(RESET_ERROR_MESSAGES, typedError.name, typedError.message || 'Unable to send reset code'));
+        setError(getErrorFromTable(RESET_ERROR_MESSAGES, typedError.name, 'Unable to send reset code. Please try again later.'));
         setLoading(false);
         return;
       }
@@ -146,7 +147,7 @@ export const ForgotPasswordPage: React.FC = () => {
       if (typedError.name !== 'UserNotFoundException') {
         console.error('Confirm reset password failed:', err);
       }
-      setError(getErrorFromTable(CONFIRM_ERROR_MESSAGES, typedError.name, typedError.message || 'Unable to reset password'));
+      setError(getErrorFromTable(CONFIRM_ERROR_MESSAGES, typedError.name, 'Unable to reset password. Please try again later.'));
     } finally {
       setLoading(false);
     }
