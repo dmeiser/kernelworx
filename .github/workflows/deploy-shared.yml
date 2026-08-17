@@ -118,10 +118,12 @@ jobs:
       - name: Build Lambda Layer
         run: |
           LAYER_DIR=".build/lambda-layer"
+          LAYER_REQ="$LAYER_DIR/requirements.txt"
           echo "📦 Building Lambda layer dependencies..."
           rm -rf "$LAYER_DIR"
-          uv export --no-dev --format requirements-txt -o requirements.txt
-          uv pip install -r requirements.txt --target "$LAYER_DIR/python"
+          mkdir -p "$LAYER_DIR/python"
+          uv export --no-dev --format requirements-txt --no-hashes > "$LAYER_REQ"
+          uv pip install --requirement "$LAYER_REQ" --target "$LAYER_DIR/python"
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -295,26 +297,37 @@ jobs:
         if: ${{ inputs.e2e-base-url != '' }}
         env:
           E2E_BASE_URL: ${{ inputs.e2e-base-url }}
+          BLOCK_PATTERN_1: ${{ inputs.smoke-url-block-pattern }}
+          BLOCK_MESSAGE_1: ${{ inputs.smoke-url-block-message }}
+          BLOCK_PATTERN_2: ${{ inputs.smoke-url-block-pattern-2 }}
+          BLOCK_MESSAGE_2: ${{ inputs.smoke-url-block-message-2 }}
+          URL_SUFFIX: ${{ inputs.e2e-base-url-var-suffix }}
+          ENV_NAME: ${{ inputs.environment }}
         run: |
           test -n "$E2E_BASE_URL"
 
-          if [ -n "${{ inputs.smoke-url-block-pattern }}" ]; then
-            case "$E2E_BASE_URL" in
-              ${{ inputs.smoke-url-block-pattern }})
-                echo "Refusing to run ${{ inputs.smoke-url-block-message }} Set E2E_BASE_URL_${{ inputs.e2e-base-url-var-suffix }} to your ${{ inputs.environment }} app URL."
-                exit 1
-                ;;
-            esac
-          fi
+          check_block_patterns() {
+            local url="$1"
+            local patterns="$2"
+            local message="$3"
+            if [ -z "$patterns" ]; then
+              return 0
+            fi
+            local pattern
+            # Split on '|' so each shell case pattern is evaluated independently.
+            IFS='|' read -ra pattern_array <<< "$patterns"
+            for pattern in "${pattern_array[@]}"; do
+              case "$url" in
+                $pattern)
+                  echo "Refusing to run $message Set E2E_BASE_URL_${URL_SUFFIX} to your ${ENV_NAME} app URL."
+                  exit 1
+                  ;;
+              esac
+            done
+          }
 
-          if [ -n "${{ inputs.smoke-url-block-pattern-2 }}" ]; then
-            case "$E2E_BASE_URL" in
-              ${{ inputs.smoke-url-block-pattern-2 }})
-                echo "Refusing to run ${{ inputs.smoke-url-block-message-2 }} Set E2E_BASE_URL_${{ inputs.e2e-base-url-var-suffix }} to your ${{ inputs.environment }} app URL."
-                exit 1
-                ;;
-            esac
-          fi
+          check_block_patterns "$E2E_BASE_URL" "$BLOCK_PATTERN_1" "$BLOCK_MESSAGE_1"
+          check_block_patterns "$E2E_BASE_URL" "$BLOCK_PATTERN_2" "$BLOCK_MESSAGE_2"
 
           echo "Smoke tests target: $E2E_BASE_URL"
 
@@ -342,6 +355,10 @@ jobs:
           fi
 
           if [ "${{ inputs.allow-non-test-account-emails }}" = "true" ]; then
+            if [ "${{ inputs.environment }}" != "dev" ]; then
+              echo "Refusing to run: allow-non-test-account-emails is only permitted for the dev environment (got '${{ inputs.environment }}')."
+              exit 1
+            fi
             echo "::warning::allow-non-test-account-emails is enabled. Smoke tests are running with non-test account emails; ensure these are dev-only accounts."
           fi
 

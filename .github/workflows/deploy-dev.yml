@@ -23,7 +23,13 @@ jobs:
       e2e_base_url: ${{ vars.E2E_BASE_URL_DEV }}
     steps:
       - name: Export dev E2E base URL
-        run: echo "E2E_BASE_URL_DEV=${{ vars.E2E_BASE_URL_DEV }}"
+        run: |
+          e2e_url="${{ vars.E2E_BASE_URL_DEV }}"
+          if [ -z "$e2e_url" ]; then
+            echo "E2E_BASE_URL_DEV is not set in the dev environment. Set it to the dev app URL before running smoke tests."
+            exit 1
+          fi
+          echo "E2E_BASE_URL_DEV=$e2e_url"
 
   deploy:
     needs: resolve-vars
