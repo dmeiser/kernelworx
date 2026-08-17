@@ -122,7 +122,7 @@ jobs:
           echo "📦 Building Lambda layer dependencies..."
           rm -rf "$LAYER_DIR"
           mkdir -p "$LAYER_DIR/python"
-          uv export --no-dev --format requirements-txt --no-hashes > "$LAYER_REQ"
+          uv export --no-dev --format requirements.txt --no-hashes > "$LAYER_REQ"
           uv pip install --requirement "$LAYER_REQ" --target "$LAYER_DIR/python"
 
       - name: Set up Node.js
