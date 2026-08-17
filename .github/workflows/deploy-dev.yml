@@ -24,11 +24,15 @@ jobs:
       smoke-role-session-name: github-actions-smoke-tests-dev
       e2e-base-url: ${{ vars.E2E_BASE_URL_DEV }}
       e2e-base-url-var-suffix: DEV
-      smoke-url-block-pattern: 'https://kernelworx.app|https://www.kernelworx.app'
+      smoke-url-block-pattern: 'https://kernelworx.app*|https://www.kernelworx.app*'
       smoke-url-block-message: 'dev smoke tests against the production URL.'
       smoke-url-block-pattern-2: 'http://localhost:*'
       smoke-url-block-message-2: 'dev smoke tests against a local URL.'
-      strict-test-account-names: false
+      # SECURITY: dev test emails do not currently follow the test|smoke|integration naming
+      # convention, so we explicitly opt into allowing them. The reusable workflow still
+      # defaults to strict-test-account-names: true; this override is dev-only and must be
+      # reviewed before any prod caller considers copying it.
+      allow-non-test-account-emails: true
     secrets:
       AWS_ROLE_ARN: ${{ secrets.AWS_DEV_ROLE_ARN }}
       AWS_REGION: ${{ secrets.AWS_REGION }}
