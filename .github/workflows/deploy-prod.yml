@@ -285,4 +285,6 @@ jobs:
           TEST_REGION: ${{ secrets.AWS_REGION }}
           # In prod CI, fail the job if pre/post cleanup cannot run successfully.
           E2E_FAIL_ON_CLEANUP_ERROR: "1"
+          # Password-change smoke test is destructive but safe for the dedicated prod test account.
+          RUN_PASSWORD_CHANGE: "1"
         run: uv run pytest tests/e2e/ -m smoke -v
