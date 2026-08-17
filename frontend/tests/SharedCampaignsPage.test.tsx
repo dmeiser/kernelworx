@@ -543,7 +543,7 @@ describe('SharedCampaignsPage', () => {
   });
 
   describe('Error handling', () => {
-    it('displays error message when query fails', async () => {
+    it('displays fatal error message when query fails with no data', async () => {
       const errorMock = {
         request: {
           query: LIST_MY_SHARED_CAMPAIGNS,
@@ -554,7 +554,7 @@ describe('SharedCampaignsPage', () => {
       renderWithProviders([errorMock]);
 
       await waitFor(() => {
-        expect(screen.getByText(/Some shared campaign data could not be loaded/)).toBeInTheDocument();
+        expect(screen.getByText(/Unable to load shared campaigns/)).toBeInTheDocument();
       });
     });
   });

@@ -2,8 +2,10 @@
 
 Navigation strategy
 -------------------
-Both tests navigate from:
+The simple creation/list tests navigate from:
   Dashboard → first profile → first campaign → orders page.
+The full-form lifecycle test seeds its own two-product catalog/campaign so it
+does not depend on the contents of an arbitrary existing campaign.
 
 The owner account must have at least one campaign when these tests run.
 Running ``tests/e2e/test_smoke_campaign.py`` first (which creates
@@ -11,15 +13,18 @@ Running ``tests/e2e/test_smoke_campaign.py`` first (which creates
 
 Product selection
 -----------------
-The exact product name is not hard-coded.  ``_submit_order_first_product``
-opens the product combobox and selects the **first** available option,
-making the tests independent of catalog contents.
+``_submit_order_first_product`` opens the product combobox and selects the
+**first** available option, keeping the simple creation tests independent of
+catalog contents.  ``test_full_form_order_lifecycle_with_money`` seeds a
+dedicated two-product catalog and campaign so it can safely select and modify
+multiple line items.
 
 Payment method
 --------------
-The order editor defaults to *Cash* when the Cash payment method is available
-(confirmed from ``OrderEditorPage.tsx`` — ``getDefaultPaymentMethodName``
-prefers Cash).  No explicit payment selection is needed in these tests.
+The simple creation tests rely on the editor's default payment method.
+``test_full_form_order_lifecycle_with_money`` creates a uniquely named custom
+payment method, selects it for the order, verifies it persists on the edit
+page, and deletes it in a ``finally`` block.
 
 Test ordering
 -------------
@@ -39,8 +44,10 @@ import pytest
 from playwright.sync_api import Page, expect
 
 from tests.e2e.pages.campaign_page import CampaignPage
+from tests.e2e.pages.catalogs_page import CatalogsPage
 from tests.e2e.pages.dashboard_page import DashboardPage
 from tests.e2e.pages.order_page import OrderPage
+from tests.e2e.pages.payment_page import PaymentPage
 from tests.e2e.utils.money import assert_currency, parse_currency
 
 _CUSTOMER_NAME: str = "Jane Smith"
@@ -160,6 +167,78 @@ def _navigate_to_orders(owner_page: Page) -> tuple[OrderPage, str, str]:
     return order_page, profile_id, campaign_id
 
 
+def _create_two_product_campaign(owner_page: Page) -> tuple[OrderPage, str, str]:
+    """Seed a dedicated two-product catalog and campaign for the first profile.
+
+    Creates a fresh catalog with two priced products, opens the catalog preview,
+    creates a campaign from that catalog, and navigates to the campaign's orders
+    page.  This guarantees the full-form order test has at least two distinct
+    product options to select and modify.
+
+    Args:
+        owner_page: Authenticated Playwright page for the owner.
+
+    Returns:
+        3-tuple ``(order_page, profile_id, campaign_id)`` focused on the seeded
+        campaign's orders page.
+    """
+    dashboard = DashboardPage(owner_page)
+    dashboard.goto()
+    dashboard.wait_for_profiles_loaded()
+    profiles = dashboard.get_profile_names()
+    assert profiles, "Owner must have at least one seller profile"
+    dashboard.click_profile(profiles[0])
+
+    profile_match = re.search(r"/scouts/([^/]+)/campaigns", owner_page.url)
+    assert profile_match, f"Expected /scouts/{{id}}/campaigns URL, got: {owner_page.url}"
+    profile_id = urllib.parse.unquote(profile_match.group(1))
+
+    catalog_name = f"Two Product Catalog {uuid4().hex[:8]}"
+    products = [
+        {"productName": "Caramel Popcorn", "price": 10.0},
+        {"productName": "Cheese Popcorn", "price": 15.0},
+    ]
+    catalogs = CatalogsPage(owner_page)
+    catalogs.goto()
+    catalogs.switch_to_my_catalogs()
+    catalogs.create_catalog(catalog_name, products)
+    catalogs.view_catalog(catalog_name)
+
+    owner_page.get_by_role("button", name="Create Campaign", exact=True).first.click()
+    owner_page.wait_for_url("**/create-campaign**", timeout=10_000)
+    OrderPage(owner_page).wait_for_loading()
+
+    # Ensure the intended profile is selected (dropdown uses PROFILE#id values).
+    profile_combobox = owner_page.get_by_role("combobox", name="Select Profile")
+    if profile_combobox.is_visible():
+        profile_combobox.click()
+        listbox = owner_page.get_by_role("listbox")
+        expect(listbox).to_be_visible(timeout=5_000)
+        candidate_ids = {profile_id}
+        if not profile_id.startswith("PROFILE#"):
+            candidate_ids.add(f"PROFILE#{profile_id}")
+        option = listbox.locator('[role="option"]:not([aria-disabled="true"])').first
+        for candidate in candidate_ids:
+            candidate_option = listbox.locator(f'[role="option"][data-value="{candidate}"]')
+            if candidate_option.count() > 0:
+                option = candidate_option
+                break
+        expect(option).to_be_visible(timeout=5_000)
+        option.click()
+        expect(listbox).to_be_hidden(timeout=5_000)
+
+    campaign_name = f"Two Product Campaign {uuid4().hex[:8]}"
+    owner_page.get_by_label("Campaign Name").fill(campaign_name)
+    owner_page.get_by_role("button", name="Create Campaign", exact=True).click()
+    owner_page.wait_for_url("**/campaigns/**", timeout=15_000)
+    OrderPage(owner_page).wait_for_loading()
+
+    profile_id, campaign_id = _extract_profile_and_campaign_ids(owner_page.url)
+    order_page = OrderPage(owner_page)
+    order_page.goto(profile_id, campaign_id)
+    return order_page, profile_id, campaign_id
+
+
 def _submit_order_first_product(order_page: OrderPage, customer_name: str, qty: str) -> None:
     """Delegate to the public POM method that picks the first available product.
 
@@ -199,78 +278,97 @@ def test_create_order(owner_page: Page, _module_state: dict[str, str], ensure_ow
 @pytest.mark.smoke
 @pytest.mark.slow
 def test_full_form_order_lifecycle_with_money(owner_page: Page, ensure_owner_profile: str) -> None:
-    """Create a full order with address, payment, notes and verify money math end-to-end.
+    """Create a full order with a custom payment method and verify money math end-to-end.
 
-    Picks the first two catalog products by dropdown index so the test can read
-    their displayed prices, then asserts that per-row subtotals and the editor
-    total equal ``quantity * price``. After submission it checks the orders list
-    total and the campaign summary *Total Sales* tile (using a baseline delta so
-    prior orders do not cause false negatives).
+    Seeds a dedicated two-product catalog/campaign so the test is not coupled to
+    an arbitrary existing campaign.  It creates a uniquely named custom payment
+    method, selects it for the order, asserts per-row subtotals and the editor
+    total, changes a quantity and verifies the subtotal/total update, submits,
+    checks the orders-list total, confirms the payment method persists on the
+    edit page, and verifies the campaign summary *Total Sales* tile.
     """
-    order_page, profile_id, campaign_id = _navigate_to_orders(owner_page)
+    payment_method_name = f"Custom Pay {uuid4().hex[:8]}"
+    payment_page = PaymentPage(owner_page)
+    payment_page.goto()
 
-    # Capture baseline Total Sales so the assertion is isolated from prior orders.
-    baseline_text = order_page.get_summary_total_sales()
-    baseline_cents = int(parse_currency(baseline_text or "$0.00") * 100)
+    try:
+        payment_page.add_payment_method(payment_method_name)
 
-    customer_name = f"Full Form Customer {uuid4().hex[:8]}"
-    phone = "5559876543"
-    address = {
-        "street": "123 Kernel Lane",
-        "city": "Austin",
-        "state": "TX",
-        "zip": "78701",
-    }
-    payment_method = "Cash"
-    notes = "Deliver to front porch. Leave behind the planter."
+        order_page, profile_id, campaign_id = _create_two_product_campaign(owner_page)
 
-    order_page._new_order_button().click()
-    order_page.wait_for_loading()
+        # Capture baseline Total Sales so the assertion is isolated from prior orders.
+        baseline_text = order_page.get_summary_total_sales()
+        baseline_cents = int(parse_currency(baseline_text or "$0.00") * 100)
 
-    # Fill customer info, address, payment, and notes; leave line items empty
-    # so we can select products by index and read their displayed prices.
-    order_page.fill_full_order_form(
-        customer_name=customer_name,
-        phone=phone,
-        items=[],
-        address=address,
-        payment_method=payment_method,
-        notes=notes,
-    )
+        customer_name = f"Full Form Customer {uuid4().hex[:8]}"
+        phone = "5559876543"
+        address = {
+            "street": "123 Kernel Lane",
+            "city": "Austin",
+            "state": "TX",
+            "zip": "78701",
+        }
+        notes = "Deliver to front porch. Leave behind the planter."
 
-    # Select the first two catalog products with different quantities.
-    order_page._ensure_row_exists(0)
-    order_page._ensure_row_exists(1)
-    order_page._fill_row_by_option_index(0, 0, "2")
-    order_page._fill_row_by_option_index(1, 1, "3")
+        order_page._new_order_button().click()
+        order_page.wait_for_loading()
 
-    # Read displayed prices and assert subtotals match quantity * price.
-    price_0_text = order_page.get_line_item_price(0)
-    price_1_text = order_page.get_line_item_price(1)
-    price_0_cents = int(parse_currency(price_0_text) * 100)
-    price_1_cents = int(parse_currency(price_1_text) * 100)
+        order_page.fill_full_order_form(
+            customer_name=customer_name,
+            phone=phone,
+            items=[
+                {"product_name": "Caramel Popcorn", "quantity": 2},
+                {"product_name": "Cheese Popcorn", "quantity": 3},
+            ],
+            address=address,
+            payment_method=payment_method_name,
+            notes=notes,
+        )
 
-    subtotal_0_text = order_page.get_line_item_subtotal(0)
-    subtotal_1_text = order_page.get_line_item_subtotal(1)
-    assert_currency(subtotal_0_text, price_0_cents * 2)
-    assert_currency(subtotal_1_text, price_1_cents * 3)
+        # Read displayed prices and assert initial subtotals/total match quantity * price.
+        price_0_text = order_page.get_line_item_price(0)
+        price_1_text = order_page.get_line_item_price(1)
+        price_0_cents = int(parse_currency(price_0_text) * 100)
+        price_1_cents = int(parse_currency(price_1_text) * 100)
 
-    expected_total_cents = price_0_cents * 2 + price_1_cents * 3
-    assert_currency(order_page.get_editor_total(), expected_total_cents)
+        assert_currency(order_page.get_line_item_subtotal(0), price_0_cents * 2)
+        assert_currency(order_page.get_line_item_subtotal(1), price_1_cents * 3)
 
-    # Submit and verify the orders list shows the expected total.
-    order_page._create_order_button().click()
-    owner_page.wait_for_url("**/orders", timeout=15_000)
-    order_page.wait_for_loading()
+        initial_total_cents = price_0_cents * 2 + price_1_cents * 3
+        assert_currency(order_page.get_editor_total(), initial_total_cents)
 
-    expect(owner_page.get_by_role("cell", name=customer_name).first).to_be_visible(timeout=10_000)
-    list_total_text = order_page.get_list_total_for_customer(customer_name)
-    assert_currency(list_total_text, expected_total_cents)
+        # Change an existing quantity and verify the subtotal/total update.
+        order_page._set_line_item_quantity(1, "1")
+        updated_subtotal_1_cents = price_1_cents * 1
+        assert_currency(order_page.get_line_item_subtotal(1), updated_subtotal_1_cents)
+        updated_total_cents = price_0_cents * 2 + updated_subtotal_1_cents
+        assert_currency(order_page.get_editor_total(), updated_total_cents)
 
-    # Reload the orders page and verify the campaign summary reflects the order.
-    order_page.goto(profile_id, campaign_id)
-    summary_total_text = order_page.get_summary_total_sales()
-    assert_currency(summary_total_text, baseline_cents + expected_total_cents)
+        # Submit and verify the orders list shows the expected total.
+        order_page._create_order_button().click()
+        owner_page.wait_for_url("**/orders", timeout=15_000)
+        order_page.wait_for_loading()
+
+        expect(owner_page.get_by_role("cell", name=customer_name).first).to_be_visible(timeout=10_000)
+        list_total_text = order_page.get_list_total_for_customer(customer_name)
+        assert_currency(list_total_text, updated_total_cents)
+
+        # Verify the custom payment method persisted by opening the edit page.
+        order_page.click_edit_order(customer_name)
+        expect(owner_page.get_by_role("heading", name="Edit Order")).to_be_visible(timeout=10_000)
+        persisted_payment = order_page.get_selected_payment_method()
+        assert persisted_payment == payment_method_name, (
+            f"Expected payment method '{payment_method_name}' to persist; got '{persisted_payment}'"
+        )
+
+        # Return to the orders page and verify the campaign summary reflects the order.
+        order_page.goto(profile_id, campaign_id)
+        summary_total_text = order_page.get_summary_total_sales()
+        assert_currency(summary_total_text, baseline_cents + updated_total_cents)
+    finally:
+        payment_page.goto()
+        if payment_page.has_payment_method(payment_method_name):
+            payment_page.delete_payment_method(payment_method_name)
 
 
 @pytest.mark.smoke
@@ -295,7 +393,7 @@ def test_invalid_phone_preserves_form(owner_page: Page, ensure_owner_profile: st
 
     assert "Phone number must be a valid 10-digit US number" in order_page.get_visible_alert_text()
     expect(owner_page.get_by_label("Customer Name")).to_have_value(customer_name)
-    expect(owner_page).to_have_url(re.compile(r"/orders/new$"), timeout=10_000)
+    owner_page.wait_for_url("**/orders/new", timeout=10_000)
 
 
 @pytest.mark.smoke

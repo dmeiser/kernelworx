@@ -489,6 +489,14 @@ export const SharedCampaignsPage: React.FC = () => {
     return <LoadingState />;
   }
 
+  if (error && !data) {
+    return (
+      <Alert severity="error" sx={{ mb: 3 }}>
+        Unable to load shared campaigns. Please refresh the page or try again later.
+      </Alert>
+    );
+  }
+
   return (
     <Box>
       {error && (
