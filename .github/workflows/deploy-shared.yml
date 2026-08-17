@@ -250,26 +250,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     needs: deploy
-    if: ${{ needs.deploy.result == 'success' && (inputs.e2e-base-url != '' || vars[format('E2E_BASE_URL_{0}', inputs.e2e-base-url-var-suffix)] != '') }}
+    if: ${{ needs.deploy.result == 'success' && inputs.e2e-base-url != '' }}
     environment:
       name: ${{ inputs.environment }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Resolve E2E base URL
-        id: e2e_url
-        env:
-          EXPLICIT_URL: ${{ inputs.e2e-base-url }}
-          FALLBACK_URL: ${{ vars[format('E2E_BASE_URL_{0}', inputs.e2e-base-url-var-suffix)] }}
-        run: |
-          if [ -n "$EXPLICIT_URL" ]; then
-            resolved="$EXPLICIT_URL"
-          else
-            resolved="$FALLBACK_URL"
-          fi
-          echo "url=$resolved" >> "$GITHUB_OUTPUT"
-          echo "Resolved E2E base URL: $resolved"
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -306,9 +292,9 @@ jobs:
           role-session-name: ${{ inputs.smoke-role-session-name }}
 
       - name: Validate smoke target URL
-        if: ${{ steps.e2e_url.outputs.url != '' }}
+        if: ${{ inputs.e2e-base-url != '' }}
         env:
-          E2E_BASE_URL: ${{ steps.e2e_url.outputs.url }}
+          E2E_BASE_URL: ${{ inputs.e2e-base-url }}
         run: |
           test -n "$E2E_BASE_URL"
 
@@ -384,9 +370,9 @@ jobs:
           echo "Owner test user is in the ADMIN group."
 
       - name: Run E2E smoke tests
-        if: ${{ steps.e2e_url.outputs.url != '' }}
+        if: ${{ inputs.e2e-base-url != '' }}
         env:
-          E2E_BASE_URL: ${{ steps.e2e_url.outputs.url }}
+          E2E_BASE_URL: ${{ inputs.e2e-base-url }}
           TEST_OWNER_EMAIL: ${{ secrets.TEST_OWNER_EMAIL }}
           TEST_OWNER_PASSWORD: ${{ secrets.TEST_OWNER_PASSWORD }}
           TEST_CONTRIBUTOR_EMAIL: ${{ secrets.TEST_CONTRIBUTOR_EMAIL }}
@@ -400,7 +386,7 @@ jobs:
         run: uv run pytest tests/e2e/ -m smoke -v
 
       - name: Post deployed-to-dev success status
-        if: ${{ success() && inputs.environment == 'dev' && steps.e2e_url.outputs.url != '' }}
+        if: ${{ success() && inputs.environment == 'dev' && inputs.e2e-base-url != '' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -411,7 +397,7 @@ jobs:
             -f target_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
       - name: Post deployed-to-dev failure status
-        if: ${{ failure() && inputs.environment == 'dev' && steps.e2e_url.outputs.url != '' }}
+        if: ${{ failure() && inputs.environment == 'dev' && inputs.e2e-base-url != '' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -422,7 +408,7 @@ jobs:
             -f target_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
       - name: Post deployed-to-dev error status
-        if: ${{ cancelled() && inputs.environment == 'dev' && steps.e2e_url.outputs.url != '' }}
+        if: ${{ cancelled() && inputs.environment == 'dev' && inputs.e2e-base-url != '' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
