@@ -16,250 +16,28 @@ permissions:
 
 jobs:
   deploy:
-    name: Plan and deploy to dev
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    environment:
-      name: dev
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.14"
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
-
-      - name: Install Python dependencies
-        run: uv sync --locked
-
-      - name: Build Lambda Layer
-        run: |
-          LAYER_DIR=".build/lambda-layer"
-          echo "📦 Building Lambda layer dependencies..."
-          rm -rf "$LAYER_DIR"
-          uv export --no-dev --format requirements-txt -o requirements.txt
-          uv pip install -r requirements.txt --target "$LAYER_DIR/python"
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version-file: ".node-version"
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Set up OpenTofu
-        uses: opentofu/setup-opentofu@v1
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_DEV_ROLE_ARN }}
-          aws-region: ${{ secrets.AWS_REGION }}
-          role-session-name: github-actions-deploy-dev
-
-      - name: OpenTofu init (dev)
-        env:
-          TF_VAR_encryption_passphrase: ${{ secrets.TF_VAR_ENCRYPTION_PASSPHRASE_DEV }}
-          TF_VAR_google_client_id: ${{ secrets.TF_VAR_GOOGLE_CLIENT_ID_DEV }}
-          TF_VAR_google_client_secret: ${{ secrets.TF_VAR_GOOGLE_CLIENT_SECRET_DEV }}
-          TF_IN_AUTOMATION: "true"
-        working-directory: tofu/application/environments/dev
-        run: tofu init
-
-      - name: OpenTofu plan (dev)
-        env:
-          TF_VAR_encryption_passphrase: ${{ secrets.TF_VAR_ENCRYPTION_PASSPHRASE_DEV }}
-          TF_VAR_google_client_id: ${{ secrets.TF_VAR_GOOGLE_CLIENT_ID_DEV }}
-          TF_VAR_google_client_secret: ${{ secrets.TF_VAR_GOOGLE_CLIENT_SECRET_DEV }}
-          TF_IN_AUTOMATION: "true"
-        working-directory: tofu/application/environments/dev
-        run: tofu plan -out=tfplan
-
-      - name: OpenTofu apply (dev)
-        env:
-          TF_VAR_encryption_passphrase: ${{ secrets.TF_VAR_ENCRYPTION_PASSPHRASE_DEV }}
-          TF_VAR_google_client_id: ${{ secrets.TF_VAR_GOOGLE_CLIENT_ID_DEV }}
-          TF_VAR_google_client_secret: ${{ secrets.TF_VAR_GOOGLE_CLIENT_SECRET_DEV }}
-          TF_IN_AUTOMATION: "true"
-        working-directory: tofu/application/environments/dev
-        run: tofu apply -auto-approve tfplan
-
-      - name: Extract OpenTofu outputs for frontend
-        id: tofu_outputs
-        env:
-          TF_VAR_encryption_passphrase: ${{ secrets.TF_VAR_ENCRYPTION_PASSPHRASE_DEV }}
-          TF_VAR_google_client_id: ${{ secrets.TF_VAR_GOOGLE_CLIENT_ID_DEV }}
-          TF_VAR_google_client_secret: ${{ secrets.TF_VAR_GOOGLE_CLIENT_SECRET_DEV }}
-          TF_IN_AUTOMATION: "true"
-        working-directory: tofu/application/environments/dev
-        run: |
-          echo "user_pool_id=$(tofu output -raw cognito_user_pool_id)" >> $GITHUB_OUTPUT
-          echo "client_id=$(tofu output -raw cognito_client_id)" >> $GITHUB_OUTPUT
-          echo "cognito_domain=$(tofu output -raw cognito_domain)" >> $GITHUB_OUTPUT
-          echo "api_url=$(tofu output -raw appsync_api_url)" >> $GITHUB_OUTPUT
-          echo "site_url=$(tofu output -raw site_url)" >> $GITHUB_OUTPUT
-          echo "static_assets_bucket=$(tofu output -raw static_assets_bucket)" >> $GITHUB_OUTPUT
-          echo "cloudfront_distribution_id=$(tofu output -raw cloudfront_distribution_id)" >> $GITHUB_OUTPUT
-
-      - name: Build and deploy frontend
-        env:
-          # Vite build-time variables
-          VITE_APPSYNC_ENDPOINT: ${{ steps.tofu_outputs.outputs.api_url }}
-          VITE_APPSYNC_REGION: ${{ secrets.AWS_REGION }}
-          VITE_COGNITO_USER_POOL_ID: ${{ steps.tofu_outputs.outputs.user_pool_id }}
-          VITE_COGNITO_USER_POOL_CLIENT_ID: ${{ steps.tofu_outputs.outputs.client_id }}
-          VITE_COGNITO_DOMAIN: ${{ steps.tofu_outputs.outputs.cognito_domain }}
-          VITE_OAUTH_REDIRECT_SIGNIN: ${{ steps.tofu_outputs.outputs.site_url }}
-          VITE_OAUTH_REDIRECT_SIGNOUT: ${{ steps.tofu_outputs.outputs.site_url }}
-        working-directory: frontend
-        run: |
-          npm ci
-          npm run build
-          # Do not use --delete: hashed JS/CSS chunks from previous deploys may still
-          # be requested by clients that have an old index.html cached before the
-          # CloudFront invalidation below completes. Keeping old chunks prevents
-          # white-screen errors for open sessions during the deploy window.
-          aws s3 sync dist "s3://${{ steps.tofu_outputs.outputs.static_assets_bucket }}" --region "${{ secrets.AWS_REGION }}"
-          aws cloudfront create-invalidation --distribution-id "${{ steps.tofu_outputs.outputs.cloudfront_distribution_id }}" --paths "/*"
-
-  smoke-tests-dev:
-    name: Post-deploy smoke tests (dev)
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    needs: deploy
-    if: ${{ needs.deploy.result == 'success' }}
-    environment:
-      name: dev
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.14"
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
-
-      - name: Install Python dependencies (including dev/test)
-        run: uv sync --locked --dev
-
-      - name: Install Playwright browser dependencies
-        run: uv run playwright install --with-deps chromium
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version-file: ".node-version"
-          cache: npm
-          cache-dependency-path: tests/integration/package.json
-
-      - name: Install Node.js dependencies for integration cleanup
-        working-directory: tests/integration
-        run: npm install
-
-      - name: Configure AWS credentials for cleanup
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_DEV_ROLE_ARN }}
-          aws-region: ${{ secrets.AWS_REGION }}
-          role-session-name: github-actions-smoke-tests-dev
-
-      - name: Validate smoke target URL (dev)
-        env:
-          E2E_BASE_URL: ${{ vars.E2E_BASE_URL_DEV }}
-        run: |
-          test -n "$E2E_BASE_URL"
-          case "$E2E_BASE_URL" in
-            https://kernelworx.app|https://www.kernelworx.app)
-              echo "Refusing to run dev smoke tests against the production URL. Set E2E_BASE_URL_DEV to your dev app URL."
-              exit 1
-              ;;
-            http://localhost:*)
-              echo "Refusing to run dev smoke tests against a local URL. Set E2E_BASE_URL_DEV to your dev app URL."
-              exit 1
-              ;;
-            *)
-              echo "Smoke tests target: $E2E_BASE_URL"
-              ;;
-          esac
-
-      - name: Validate dev test users
-        env:
-          TEST_OWNER_EMAIL: ${{ secrets.TEST_OWNER_EMAIL_DEV }}
-          TEST_CONTRIBUTOR_EMAIL: ${{ secrets.TEST_CONTRIBUTOR_EMAIL_DEV }}
-          TEST_READONLY_EMAIL: ${{ secrets.TEST_READONLY_EMAIL_DEV }}
-          TEST_USER_POOL_ID: ${{ secrets.TEST_USER_POOL_ID_DEV }}
-        run: |
-          test -n "$TEST_OWNER_EMAIL"
-          test -n "$TEST_CONTRIBUTOR_EMAIL"
-          test -n "$TEST_READONLY_EMAIL"
-          test -n "$TEST_USER_POOL_ID"
-
-          # Force explicit "test-only" naming so misconfigured real users are rejected.
-          for email in "$TEST_OWNER_EMAIL" "$TEST_CONTRIBUTOR_EMAIL" "$TEST_READONLY_EMAIL"; do
-            local_part="${email%@*}"
-            if ! echo "$local_part" | grep -Eiq '(test|smoke|integration)'; then
-              echo "Refusing to run: email '$email' does not look like a test account (must include test/smoke/integration in local-part)."
-              exit 1
-            fi
-          done
-
-          # Verify each configured email exists in the configured dev user pool.
-          for email in "$TEST_OWNER_EMAIL" "$TEST_CONTRIBUTOR_EMAIL" "$TEST_READONLY_EMAIL"; do
-            count=$(aws cognito-idp list-users --user-pool-id "$TEST_USER_POOL_ID" --filter "email = \"$email\"" --query 'length(Users)' --output text)
-            if [ "$count" != "1" ]; then
-              echo "Refusing to run: expected exactly one Cognito user for '$email' in pool '$TEST_USER_POOL_ID', got '$count'."
-              exit 1
-            fi
-          done
-
-      - name: Ensure owner test user is in ADMIN group
-        env:
-          TEST_OWNER_EMAIL: ${{ secrets.TEST_OWNER_EMAIL_DEV }}
-          TEST_USER_POOL_ID: ${{ secrets.TEST_USER_POOL_ID_DEV }}
-        run: |
-          test -n "$TEST_OWNER_EMAIL"
-          test -n "$TEST_USER_POOL_ID"
-
-          echo "Ensuring owner test user '$TEST_OWNER_EMAIL' is a member of the ADMIN group..."
-          aws cognito-idp admin-add-user-to-group \
-            --user-pool-id "$TEST_USER_POOL_ID" \
-            --username "$TEST_OWNER_EMAIL" \
-            --group-name ADMIN
-          echo "Owner test user is in the ADMIN group."
-
-      - name: Run E2E smoke tests (dev)
-        env:
-          E2E_BASE_URL: ${{ vars.E2E_BASE_URL_DEV }}
-          TEST_OWNER_EMAIL: ${{ secrets.TEST_OWNER_EMAIL_DEV }}
-          TEST_OWNER_PASSWORD: ${{ secrets.TEST_OWNER_PASSWORD_DEV }}
-          TEST_CONTRIBUTOR_EMAIL: ${{ secrets.TEST_CONTRIBUTOR_EMAIL_DEV }}
-          TEST_CONTRIBUTOR_PASSWORD: ${{ secrets.TEST_CONTRIBUTOR_PASSWORD_DEV }}
-          TEST_READONLY_EMAIL: ${{ secrets.TEST_READONLY_EMAIL_DEV }}
-          TEST_READONLY_PASSWORD: ${{ secrets.TEST_READONLY_PASSWORD_DEV }}
-          TEST_USER_POOL_ID: ${{ secrets.TEST_USER_POOL_ID_DEV }}
-          TEST_REGION: ${{ secrets.AWS_REGION }}
-          # In dev CI, fail the job if pre/post cleanup cannot run successfully.
-          E2E_FAIL_ON_CLEANUP_ERROR: "1"
-        run: uv run pytest tests/e2e/ -m smoke -v
-
-      - name: Post deployed-to-dev status
-        if: ${{ success() }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh api "repos/${{ github.repository }}/statuses/${{ github.sha }}" \
-            -f state=success \
-            -f context=deployed-to-dev \
-            -f description="Smoke tests passed on dev" \
-            -f target_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+    uses: ./.github/workflows/deploy-shared.yml
+    with:
+      environment: dev
+      tofu-directory: tofu/application/environments/dev
+      aws-role-session-name: github-actions-deploy-dev
+      smoke-role-session-name: github-actions-smoke-tests-dev
+      e2e-base-url: ${{ vars.E2E_BASE_URL_DEV }}
+      e2e-base-url-var-suffix: DEV
+      smoke-url-block-pattern: 'https://kernelworx.app|https://www.kernelworx.app'
+      smoke-url-block-message: 'dev smoke tests against the production URL.'
+      smoke-url-block-pattern-2: 'http://localhost:*'
+      smoke-url-block-message-2: 'dev smoke tests against a local URL.'
+    secrets:
+      AWS_ROLE_ARN: ${{ secrets.AWS_DEV_ROLE_ARN }}
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      TF_VAR_ENCRYPTION_PASSPHRASE: ${{ secrets.TF_VAR_ENCRYPTION_PASSPHRASE_DEV }}
+      TF_VAR_GOOGLE_CLIENT_ID: ${{ secrets.TF_VAR_GOOGLE_CLIENT_ID_DEV }}
+      TF_VAR_GOOGLE_CLIENT_SECRET: ${{ secrets.TF_VAR_GOOGLE_CLIENT_SECRET_DEV }}
+      TEST_OWNER_EMAIL: ${{ secrets.TEST_OWNER_EMAIL_DEV }}
+      TEST_OWNER_PASSWORD: ${{ secrets.TEST_OWNER_PASSWORD_DEV }}
+      TEST_CONTRIBUTOR_EMAIL: ${{ secrets.TEST_CONTRIBUTOR_EMAIL_DEV }}
+      TEST_CONTRIBUTOR_PASSWORD: ${{ secrets.TEST_CONTRIBUTOR_PASSWORD_DEV }}
+      TEST_READONLY_EMAIL: ${{ secrets.TEST_READONLY_EMAIL_DEV }}
+      TEST_READONLY_PASSWORD: ${{ secrets.TEST_READONLY_PASSWORD_DEV }}
+      TEST_USER_POOL_ID: ${{ secrets.TEST_USER_POOL_ID_DEV }}
