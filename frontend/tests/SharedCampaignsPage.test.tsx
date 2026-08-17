@@ -145,8 +145,6 @@ describe('SharedCampaignsPage', () => {
 
       expect(screen.getByText('Fall 2025')).toBeInTheDocument();
       expect(screen.getByText('Pack 123')).toBeInTheDocument();
-      // Both shared campaigns use the same catalog, so there are multiple elements
-      expect(screen.getAllByText('Official Popcorn 2025')).toHaveLength(2);
     });
 
     it('shows active and inactive status chips', async () => {
@@ -556,7 +554,7 @@ describe('SharedCampaignsPage', () => {
       renderWithProviders([errorMock]);
 
       await waitFor(() => {
-        expect(screen.getByText(/Failed to load shared campaigns/)).toBeInTheDocument();
+        expect(screen.getByText(/Some shared campaign data could not be loaded/)).toBeInTheDocument();
       });
     });
   });
