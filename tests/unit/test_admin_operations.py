@@ -5079,7 +5079,6 @@ class TestAdminOperationExceptionHandlers:
         monkeypatch: Any,
     ) -> None:
         """Test _build_admin_user handles ClientError from get_item (branch coverage 450-451)."""
-        from botocore.exceptions import ClientError
 
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
 

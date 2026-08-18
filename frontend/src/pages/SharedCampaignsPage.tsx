@@ -40,6 +40,7 @@ import {
 } from '@mui/icons-material';
 import QRCode from 'qrcode';
 import { LIST_MY_SHARED_CAMPAIGNS, UPDATE_SHARED_CAMPAIGN, DELETE_SHARED_CAMPAIGN } from '../lib/graphql';
+import { stripPrefix } from '../lib/ids';
 import { useSnackbar } from '../hooks/useSnackbar';
 import { PageHeader } from '../components/PageHeader';
 import { LoadingState } from '../components/LoadingState';
@@ -59,8 +60,6 @@ const StatusChip: React.FC<{ isActive: boolean }> = ({ isActive }) =>
     <Chip icon={<InactiveIcon />} label="Inactive" color="default" size="small" />
   );
 
-// Helper to get catalog name with fallback
-const getCatalogName = (catalog: SharedCampaign['catalog']): string => catalog?.catalogName || 'Unknown Catalog';
 
 // Helper to get description with fallback
 const getDescription = (description: string | undefined): string => description || '-';
@@ -223,7 +222,7 @@ const CampaignsList: React.FC<{
           <TableRow>
             <TableCell>Code</TableCell>
             <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>Description</TableCell>
-            <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>Catalog</TableCell>
+            <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>Catalog ID</TableCell>
             <TableCell>Campaign</TableCell>
             <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>Unit</TableCell>
             <TableCell>Status</TableCell>
@@ -332,7 +331,7 @@ const SharedCampaignRow: React.FC<{
         {getDescription(sharedCampaign.description)}
       </Typography>
     </TableCell>
-    <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>{getCatalogName(sharedCampaign.catalog)}</TableCell>
+    <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>{stripPrefix(sharedCampaign.catalogId)}</TableCell>
     <TableCell>
       {sharedCampaign.campaignName} {sharedCampaign.campaignYear}
     </TableCell>
