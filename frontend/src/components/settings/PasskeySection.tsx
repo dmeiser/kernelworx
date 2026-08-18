@@ -124,7 +124,7 @@ const RegisteredPasskeys: React.FC<{ hook: UsePasskeysReturn }> = ({ hook }) => 
       <List>
         {hook.passkeys.map((pk, index) => (
           <PasskeyItem
-            key={`passkey-${index}`}
+            key={pk.credentialId || `passkey-${index}`}
             passkey={pk}
             loading={hook.passkeyLoading}
             onDelete={hook.handleDeletePasskey}
