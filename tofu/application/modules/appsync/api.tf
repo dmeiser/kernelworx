@@ -64,11 +64,22 @@ resource "aws_iam_role" "appsync_logging" {
 }
 
 data "aws_iam_policy_document" "appsync_logging" {
+  # CreateLogGroup does not support resource-level permissions.
   statement {
     effect = "Allow"
 
     actions = [
       "logs:CreateLogGroup",
+    ]
+
+    resources = ["*"]
+  }
+
+  # Scope stream and event actions to the managed log group and its streams.
+  statement {
+    effect = "Allow"
+
+    actions = [
       "logs:CreateLogStream",
       "logs:PutLogEvents",
     ]

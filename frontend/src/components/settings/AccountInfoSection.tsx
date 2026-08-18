@@ -133,13 +133,13 @@ const createTimestampRows = (account: Account | undefined): DetailRow[] => [
     key: 'created',
     icon: <InfoIcon color="primary" />,
     label: 'Account Created',
-    value: account?.createdAt ? formatDisplayDate(account.createdAt, { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Unknown',
+    value: account?.createdAt ? formatDisplayDate(account.createdAt, { year: 'numeric', month: 'long', day: 'numeric' }) : 'Unknown',
   },
   {
     key: 'updated',
     icon: <InfoIcon color="primary" />,
     label: 'Last Updated',
-    value: account?.updatedAt ? formatDisplayDate(account.updatedAt, { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Unknown',
+    value: account?.updatedAt ? formatDisplayDate(account.updatedAt, { year: 'numeric', month: 'long', day: 'numeric' }) : 'Unknown',
   },
 ];
 
