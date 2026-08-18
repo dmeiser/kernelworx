@@ -37,7 +37,11 @@ jobs:
           cherry_output=$(git cherry base/dev "$pr_head")
           missing=()
           while IFS= read -r commit; do
-            if ! echo "$cherry_output" | grep -q "^- $commit$"; then
+            if git merge-base --is-ancestor "$commit" base/dev; then
+              echo "$commit is an ancestor of base/dev."
+            elif echo "$cherry_output" | grep -q "^- $commit$"; then
+              echo "$commit has an equivalent patch on base/dev."
+            else
               missing+=("$commit")
             fi
           done <<< "$unique_commits"
