@@ -149,8 +149,27 @@ jobs:
       - name: JS resolver tests
         run: npm run test:js-resolvers
 
+  check-integration-secrets:
+    name: Check integration test secrets
+    runs-on: ubuntu-latest
+    outputs:
+      has-secrets: ${{ steps.check.outputs.has-secrets }}
+    steps:
+      - name: Check required secrets
+        id: check
+        env:
+          TEST_OWNER_EMAIL: ${{ secrets.TEST_OWNER_EMAIL }}
+        run: |
+          if [ -n "$TEST_OWNER_EMAIL" ]; then
+            echo "has-secrets=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has-secrets=false" >> "$GITHUB_OUTPUT"
+          fi
+
   integration:
     name: Integration tests
+    needs: check-integration-secrets
+    if: needs.check-integration-secrets.outputs.has-secrets == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
