@@ -7,7 +7,6 @@ from .campaign_reports_page import CampaignReportsPage
 from .campaign_settings_page import CampaignSettingsPage
 from .catalogs_page import CatalogsPage
 from .dashboard_page import DashboardPage
-from .forgot_password_page import ForgotPasswordPage
 from .home_page import HomePage
 from .login_page import LoginPage
 from .manage_page import ManagePage
@@ -28,7 +27,6 @@ __all__ = [
     "CampaignSettingsPage",
     "CatalogsPage",
     "DashboardPage",
-    "ForgotPasswordPage",
     "HomePage",
     "LoginPage",
     "ManagePage",
