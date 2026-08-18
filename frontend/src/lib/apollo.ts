@@ -85,15 +85,17 @@ export const handleApolloError = ({ operation, error }: ErrorLink.ErrorHandlerOp
       const userMessage = mapErrorCodeToMessage(errorCode, message);
 
       // Emit custom event for UI to handle
-      window.dispatchEvent(
-        new CustomEvent('graphql-error', {
-          detail: {
-            errorCode,
-            message: userMessage,
-            operation: operation.operationName,
-          },
-        }),
-      );
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent('graphql-error', {
+            detail: {
+              errorCode,
+              message: userMessage,
+              operation: operation.operationName,
+            },
+          }),
+        );
+      }
     });
   } else {
     // Network or other error
@@ -101,15 +103,17 @@ export const handleApolloError = ({ operation, error }: ErrorLink.ErrorHandlerOp
     console.error(`[Network/Error]: ${networkError.message}`);
 
     // Emit network error event
-    window.dispatchEvent(
-      new CustomEvent('graphql-error', {
-        detail: {
-          errorCode: 'NETWORK_ERROR',
-          message: 'Network error. Please check your connection and try again.',
-          operation: operation.operationName,
-        },
-      }),
-    );
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent('graphql-error', {
+          detail: {
+            errorCode: 'NETWORK_ERROR',
+            message: 'Network error. Please check your connection and try again.',
+            operation: operation.operationName,
+          },
+        }),
+      );
+    }
   }
 };
 
