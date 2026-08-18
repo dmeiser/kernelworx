@@ -57,6 +57,28 @@ describe('update_order_fn request', () => {
     assert.match(result.update.expression, /lineItems = :lineItems/);
   });
 
+  it('rejects a null lineItems value', () => {
+    const ctx = {
+      stash: {
+        order: {
+          campaignId: 'CAMPAIGN#c1',
+          orderId: 'ORDER#o1',
+        },
+        catalog: null,
+      },
+      args: {
+        input: {
+          lineItems: null,
+        },
+      },
+    };
+
+    assert.throws(
+      () => request(ctx),
+      /BadRequest: Order must have at least one line item/
+    );
+  });
+
   it('does not require lineItems when updating other fields', () => {
     const ctx = {
       stash: {

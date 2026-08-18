@@ -103,7 +103,7 @@ export function request(ctx) {
     }
 
     if (input.lineItems !== undefined) {
-        if (input.lineItems.length === 0) {
+        if (!Array.isArray(input.lineItems) || input.lineItems.length === 0) {
             util.error('Order must have at least one line item', 'BadRequest');
         }
 
