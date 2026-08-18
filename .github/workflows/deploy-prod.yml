@@ -21,9 +21,28 @@ permissions:
   id-token: write
 
 jobs:
+  resolve-vars:
+    name: Resolve production environment variables
+    runs-on: ubuntu-latest
+    environment: production
+    outputs:
+      e2e_base_url: ${{ steps.export.outputs.url }}
+    steps:
+      - name: Export production E2E base URL
+        id: export
+        run: |
+          e2e_url="${{ vars.E2E_BASE_URL_PROD }}"
+          if [ -z "$e2e_url" ]; then
+            echo "E2E_BASE_URL_PROD is not set in the production environment. Set it to the production app URL before running smoke tests."
+            exit 1
+          fi
+          echo "url=$e2e_url" >> "$GITHUB_OUTPUT"
+          echo "E2E_BASE_URL_PROD=$e2e_url"
+
   deploy:
     # Only deploy from the main branch, even for workflow_dispatch runs.
     if: github.ref == 'refs/heads/main'
+    needs: resolve-vars
     uses: ./.github/workflows/deploy-shared.yml
     with:
       environment: production
@@ -31,7 +50,7 @@ jobs:
       aws-role-session-name: github-actions-deploy-prod
       smoke-role-session-name: github-actions-smoke-tests-prod
       run-delete-profile-migration: true
-      e2e-base-url: ${{ vars.E2E_BASE_URL_PROD }}
+      e2e-base-url: ${{ needs.resolve-vars.outputs.e2e_base_url }}
       e2e-base-url-var-suffix: PROD
       smoke-url-block-pattern: 'https://dev.*|http://localhost:*'
       smoke-url-block-message: 'prod smoke tests against a dev/local URL.'
