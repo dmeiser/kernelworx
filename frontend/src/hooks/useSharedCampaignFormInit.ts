@@ -17,7 +17,7 @@ export const useSharedCampaignFormInit = (
   setState: (state: string) => void,
 ) => {
   useEffect(() => {
-    if (sharedCampaign && sharedCampaign.isActive) {
+    if (sharedCampaign && sharedCampaign.isActive && sharedCampaign.catalog) {
       setCampaignName(sharedCampaign.campaignName);
       setCampaignYear(sharedCampaign.campaignYear);
       setCatalogId(sharedCampaign.catalogId);

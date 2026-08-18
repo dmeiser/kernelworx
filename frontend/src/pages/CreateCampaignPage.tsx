@@ -469,7 +469,9 @@ export const CreateCampaignPage: React.FC = () => {
   // Guard states
   const hasSharedCode = Boolean(setup.effectiveSharedCampaignCode);
   const sharedCampaignLoading = hasSharedCode && setup.sharedCampaignLoading;
-  const sharedCampaignInactive = hasSharedCode && (!setup.sharedCampaign || !setup.sharedCampaign.isActive);
+  const sharedCampaignInactive =
+    hasSharedCode &&
+    (!setup.sharedCampaign || !setup.sharedCampaign.isActive || !setup.sharedCampaign.catalog);
 
   // Handle loading
   if (sharedCampaignLoading) return <LoadingState minHeight="50vh" />;

@@ -204,6 +204,15 @@ class TestCreateCampaign:
             "isActive": True,
         }
 
+    @pytest.fixture
+    def sample_catalog(self) -> Dict[str, Any]:
+        """Sample catalog referenced by shared campaigns."""
+        return {
+            "catalogId": "CATALOG#catalog-sharedCampaign",
+            "catalogName": "Shared Campaign Catalog",
+            "isDeleted": False,
+        }
+
     @patch("src.handlers.campaign_operations.dynamodb_client")
     @patch("src.handlers.campaign_operations.check_profile_access")
     @patch("src.handlers.campaign_operations._get_profile")
@@ -300,10 +309,12 @@ class TestCreateCampaign:
     @patch("src.handlers.campaign_operations.dynamodb_client")
     @patch("src.handlers.campaign_operations.check_profile_access")
     @patch("src.handlers.campaign_operations._get_shared_campaign")
+    @patch("src.handlers.campaign_operations.tables")
     @patch("src.handlers.campaign_operations._get_profile")
     def test_create_campaign_with_shared_campaign_success(
         self,
         mock_get_profile: MagicMock,
+        mock_tables: MagicMock,
         mock_get_shared_campaign: MagicMock,
         mock_check_access: MagicMock,
         mock_dynamodb_client: MagicMock,
@@ -311,12 +322,14 @@ class TestCreateCampaign:
         lambda_context: MagicMock,
         sample_profile: Dict[str, Any],
         sample_shared_campaign: Dict[str, Any],
+        sample_catalog: Dict[str, Any],
     ) -> None:
         """Test campaign creation from shared campaign with share creation."""
         # Arrange
         mock_check_access.return_value = True
         mock_get_profile.return_value = sample_profile
         mock_get_shared_campaign.return_value = sample_shared_campaign
+        mock_tables.catalogs.get_item.return_value = {"Item": sample_catalog}
 
         # Act
         result = create_campaign(event_with_shared_campaign, lambda_context)
@@ -345,10 +358,12 @@ class TestCreateCampaign:
     @patch("src.handlers.campaign_operations.dynamodb_client")
     @patch("src.handlers.campaign_operations.check_profile_access")
     @patch("src.handlers.campaign_operations._get_shared_campaign")
+    @patch("src.handlers.campaign_operations.tables")
     @patch("src.handlers.campaign_operations._get_profile")
     def test_create_campaign_with_shared_campaign_no_share_if_owner_is_creator(
         self,
         mock_get_profile: MagicMock,
+        mock_tables: MagicMock,
         mock_get_shared_campaign: MagicMock,
         mock_check_access: MagicMock,
         mock_dynamodb_client: MagicMock,
@@ -356,6 +371,7 @@ class TestCreateCampaign:
         lambda_context: MagicMock,
         sample_profile: Dict[str, Any],
         sample_shared_campaign: Dict[str, Any],
+        sample_catalog: Dict[str, Any],
     ) -> None:
         """Test no share created when profile owner is shared campaign creator."""
         # Arrange - Profile owner is the same as Shared Campaign creator
@@ -365,6 +381,7 @@ class TestCreateCampaign:
         mock_check_access.return_value = True
         mock_get_profile.return_value = sample_profile
         mock_get_shared_campaign.return_value = sample_shared_campaign
+        mock_tables.catalogs.get_item.return_value = {"Item": sample_catalog}
 
         # Act
         _ = create_campaign(event_with_shared_campaign, lambda_context)
@@ -377,10 +394,12 @@ class TestCreateCampaign:
     @patch("src.handlers.campaign_operations.dynamodb_client")
     @patch("src.handlers.campaign_operations.check_profile_access")
     @patch("src.handlers.campaign_operations._get_shared_campaign")
+    @patch("src.handlers.campaign_operations.tables")
     @patch("src.handlers.campaign_operations._get_profile")
     def test_create_campaign_no_share_when_created_by_has_account_prefix(
         self,
         mock_get_profile: MagicMock,
+        mock_tables: MagicMock,
         mock_get_shared_campaign: MagicMock,
         mock_check_access: MagicMock,
         mock_dynamodb_client: MagicMock,
@@ -388,6 +407,7 @@ class TestCreateCampaign:
         lambda_context: MagicMock,
         sample_profile: Dict[str, Any],
         sample_shared_campaign: Dict[str, Any],
+        sample_catalog: Dict[str, Any],
     ) -> None:
         """Test share guard still fires when createdBy is stored with ACCOUNT# prefix."""
         # Arrange - createdBy uses the same prefixed form as ownerAccountId
@@ -395,6 +415,7 @@ class TestCreateCampaign:
         mock_check_access.return_value = True
         mock_get_profile.return_value = sample_profile
         mock_get_shared_campaign.return_value = sample_shared_campaign
+        mock_tables.catalogs.get_item.return_value = {"Item": sample_catalog}
 
         # Act
         _ = create_campaign(event_with_shared_campaign, lambda_context)
@@ -407,10 +428,12 @@ class TestCreateCampaign:
     @patch("src.handlers.campaign_operations.dynamodb_client")
     @patch("src.handlers.campaign_operations.check_profile_access")
     @patch("src.handlers.campaign_operations._get_shared_campaign")
+    @patch("src.handlers.campaign_operations.tables")
     @patch("src.handlers.campaign_operations._get_profile")
     def test_create_campaign_share_has_single_prefix_when_created_by_prefixed(
         self,
         mock_get_profile: MagicMock,
+        mock_tables: MagicMock,
         mock_get_shared_campaign: MagicMock,
         mock_check_access: MagicMock,
         mock_dynamodb_client: MagicMock,
@@ -418,6 +441,7 @@ class TestCreateCampaign:
         lambda_context: MagicMock,
         sample_profile: Dict[str, Any],
         sample_shared_campaign: Dict[str, Any],
+        sample_catalog: Dict[str, Any],
     ) -> None:
         """Test targetAccountId/GSI1PK are single-prefixed when createdBy already has ACCOUNT# prefix."""
         # Arrange - createdBy already includes ACCOUNT# prefix
@@ -425,6 +449,7 @@ class TestCreateCampaign:
         mock_check_access.return_value = True
         mock_get_profile.return_value = sample_profile
         mock_get_shared_campaign.return_value = sample_shared_campaign
+        mock_tables.catalogs.get_item.return_value = {"Item": sample_catalog}
 
         # Act
         _ = create_campaign(event_with_shared_campaign, lambda_context)
@@ -487,13 +512,119 @@ class TestCreateCampaign:
         with pytest.raises(AppError, match="Shared Campaign .* is no longer active"):
             create_campaign(event_with_shared_campaign, lambda_context)
 
+    @patch("src.handlers.campaign_operations.check_profile_access")
+    @patch("src.handlers.campaign_operations._get_shared_campaign")
+    @patch("src.handlers.campaign_operations.tables")
+    @patch("src.handlers.campaign_operations._get_profile")
+    def test_create_campaign_shared_campaign_catalog_deleted(
+        self,
+        mock_get_profile: MagicMock,
+        mock_tables: MagicMock,
+        mock_get_shared_campaign: MagicMock,
+        mock_check_access: MagicMock,
+        event_with_shared_campaign: Dict[str, Any],
+        lambda_context: MagicMock,
+        sample_profile: Dict[str, Any],
+        sample_shared_campaign: Dict[str, Any],
+    ) -> None:
+        """Test error when shared campaign's catalog has been deleted."""
+        # Arrange
+        mock_check_access.return_value = True
+        mock_get_profile.return_value = sample_profile
+        mock_get_shared_campaign.return_value = sample_shared_campaign
+        mock_tables.catalogs.get_item.return_value = {
+            "Item": {"catalogId": "CATALOG#catalog-sharedCampaign", "isDeleted": True}
+        }
+
+        # Act & Assert
+        with pytest.raises(AppError, match="Shared Campaign .* is no longer available"):
+            create_campaign(event_with_shared_campaign, lambda_context)
+
+    @patch("src.handlers.campaign_operations.check_profile_access")
+    @patch("src.handlers.campaign_operations._get_shared_campaign")
+    @patch("src.handlers.campaign_operations.tables")
+    @patch("src.handlers.campaign_operations._get_profile")
+    def test_create_campaign_shared_campaign_catalog_missing(
+        self,
+        mock_get_profile: MagicMock,
+        mock_tables: MagicMock,
+        mock_get_shared_campaign: MagicMock,
+        mock_check_access: MagicMock,
+        event_with_shared_campaign: Dict[str, Any],
+        lambda_context: MagicMock,
+        sample_profile: Dict[str, Any],
+        sample_shared_campaign: Dict[str, Any],
+    ) -> None:
+        """Test error when shared campaign's catalog no longer exists."""
+        # Arrange
+        mock_check_access.return_value = True
+        mock_get_profile.return_value = sample_profile
+        mock_get_shared_campaign.return_value = sample_shared_campaign
+        mock_tables.catalogs.get_item.return_value = {}
+
+        # Act & Assert
+        with pytest.raises(AppError, match="Shared Campaign .* is no longer available"):
+            create_campaign(event_with_shared_campaign, lambda_context)
+
+    @patch("src.handlers.campaign_operations.check_profile_access")
+    @patch("src.handlers.campaign_operations._get_shared_campaign")
+    @patch("src.handlers.campaign_operations._get_profile")
+    def test_create_campaign_shared_campaign_catalog_id_missing(
+        self,
+        mock_get_profile: MagicMock,
+        mock_get_shared_campaign: MagicMock,
+        mock_check_access: MagicMock,
+        event_with_shared_campaign: Dict[str, Any],
+        lambda_context: MagicMock,
+        sample_profile: Dict[str, Any],
+        sample_shared_campaign: Dict[str, Any],
+    ) -> None:
+        """Test error when shared campaign has no catalogId."""
+        # Arrange
+        sample_shared_campaign.pop("catalogId", None)
+        mock_check_access.return_value = True
+        mock_get_profile.return_value = sample_profile
+        mock_get_shared_campaign.return_value = sample_shared_campaign
+
+        # Act & Assert
+        with pytest.raises(AppError, match="Shared Campaign .* is no longer available"):
+            create_campaign(event_with_shared_campaign, lambda_context)
+
+    @patch("src.handlers.campaign_operations.tables")
+    @patch("src.handlers.campaign_operations.check_profile_access")
+    @patch("src.handlers.campaign_operations._get_shared_campaign")
+    @patch("src.handlers.campaign_operations._get_profile")
+    def test_create_campaign_shared_campaign_catalog_lookup_fails(
+        self,
+        mock_get_profile: MagicMock,
+        mock_get_shared_campaign: MagicMock,
+        mock_check_access: MagicMock,
+        mock_tables: MagicMock,
+        event_with_shared_campaign: Dict[str, Any],
+        lambda_context: MagicMock,
+        sample_profile: Dict[str, Any],
+        sample_shared_campaign: Dict[str, Any],
+    ) -> None:
+        """Test error when shared campaign's catalog lookup fails."""
+        # Arrange
+        mock_check_access.return_value = True
+        mock_get_profile.return_value = sample_profile
+        mock_get_shared_campaign.return_value = sample_shared_campaign
+        mock_tables.catalogs.get_item.side_effect = Exception("DynamoDB unavailable")
+
+        # Act & Assert
+        with pytest.raises(AppError, match="Shared Campaign .* is no longer available"):
+            create_campaign(event_with_shared_campaign, lambda_context)
+
     @patch("src.handlers.campaign_operations.dynamodb_client")
     @patch("src.handlers.campaign_operations.check_profile_access")
     @patch("src.handlers.campaign_operations._get_shared_campaign")
+    @patch("src.handlers.campaign_operations.tables")
     @patch("src.handlers.campaign_operations._get_profile")
     def test_create_campaign_shared_campaign_duplicate_share_retry(
         self,
         mock_get_profile: MagicMock,
+        mock_tables: MagicMock,
         mock_get_shared_campaign: MagicMock,
         mock_check_access: MagicMock,
         mock_dynamodb_client: MagicMock,
@@ -501,12 +632,14 @@ class TestCreateCampaign:
         lambda_context: MagicMock,
         sample_profile: Dict[str, Any],
         sample_shared_campaign: Dict[str, Any],
+        sample_catalog: Dict[str, Any],
     ) -> None:
         """Test that duplicate share creation is handled by retrying without share."""
         # Arrange
         mock_check_access.return_value = True
         mock_get_profile.return_value = sample_profile
         mock_get_shared_campaign.return_value = sample_shared_campaign
+        mock_tables.catalogs.get_item.return_value = {"Item": sample_catalog}
 
         # Mock the transact_write_items to fail on first call (share already exists)
         # Create a real-like exception

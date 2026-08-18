@@ -289,7 +289,11 @@ def _verify_write_access(caller_account_id: str, profile_id: str) -> None:
 
 
 def _load_shared_campaign(shared_campaign_code: Optional[str]) -> Optional[Dict[str, Any]]:
-    """Load and validate shared campaign if code provided."""
+    """Load and validate shared campaign if code provided.
+
+    Also verifies the referenced catalog still exists and has not been soft
+    deleted so campaigns cannot be created from stale templates.
+    """
     if not shared_campaign_code:
         return None
 
@@ -303,6 +307,22 @@ def _load_shared_campaign(shared_campaign_code: Optional[str]) -> Optional[Dict[
         raise AppError(
             ErrorCode.INVALID_INPUT,
             f"Shared Campaign {shared_campaign_code} is no longer active",
+        )
+
+    catalog_id = shared_campaign.get("catalogId")
+    catalog = None
+    if catalog_id:
+        try:
+            db_catalog_id = ensure_catalog_id(catalog_id)
+            response = tables.catalogs.get_item(Key={"catalogId": db_catalog_id})
+            catalog = response.get("Item")
+        except Exception as e:
+            logger.error(f"Error fetching catalog {catalog_id}: {str(e)}")
+
+    if not catalog or catalog.get("isDeleted"):
+        raise AppError(
+            ErrorCode.INVALID_INPUT,
+            f"Shared Campaign {shared_campaign_code} is no longer available",
         )
 
     logger.info(f"Using shared campaign {shared_campaign_code} from creator {shared_campaign.get('createdBy')}")
