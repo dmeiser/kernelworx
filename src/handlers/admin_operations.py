@@ -12,7 +12,7 @@ import re
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any, Dict, List, Optional, cast
+from typing import Any, Callable, Dict, List, Optional
 
 import boto3
 from botocore.exceptions import ClientError
@@ -23,13 +23,15 @@ try:  # pragma: no cover
     from utils.dynamodb import tables
     from utils.errors import AppError, ErrorCode
     from utils.logging import get_logger
-    from utils.pagination import query_all_items
+    from utils.pagination import query_all_items as _query_all_items
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.auth import is_admin
     from ..utils.dynamodb import tables
     from ..utils.errors import AppError, ErrorCode
     from ..utils.logging import get_logger
-    from ..utils.pagination import query_all_items
+    from ..utils.pagination import query_all_items as _query_all_items
+
+query_all_items: Callable[[Any, Any], List[Dict[str, Any]]] = _query_all_items
 
 
 def _get_required_env(name: str) -> str:
@@ -1061,15 +1063,12 @@ def admin_get_user_catalogs(event: Dict[str, Any], context: Any) -> list[Dict[st
 
 def _get_user_profiles(db_account_id: str, logger: Any) -> list[Dict[str, Any]]:
     """Get all profiles owned by an account."""
-    return cast(
-        List[Dict[str, Any]],
-        query_all_items(
-            tables.profiles,
-            {
-                "KeyConditionExpression": "ownerAccountId = :owner",
-                "ExpressionAttributeValues": {":owner": db_account_id},
-            },
-        ),
+    return query_all_items(
+        tables.profiles,
+        {
+            "KeyConditionExpression": "ownerAccountId = :owner",
+            "ExpressionAttributeValues": {":owner": db_account_id},
+        },
     )
 
 
