@@ -5,6 +5,7 @@ Delete managed catalogs owned by test users
 
 import os
 import sys
+
 import boto3
 
 # Get configuration

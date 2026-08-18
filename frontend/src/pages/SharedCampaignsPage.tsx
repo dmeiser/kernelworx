@@ -4,6 +4,7 @@
 
 import React, { useState } from 'react';
 import { useQuery, useMutation } from '@apollo/client/react';
+import type { ErrorLike } from '@apollo/client';
 import { useNavigate } from 'react-router-dom';
 import {
   Alert,
@@ -79,13 +80,23 @@ const canDownloadQRCode = (qrCodeDataUrl: string | null, qrSharedCampaign: Share
   Boolean(qrCodeDataUrl && qrSharedCampaign);
 
 // Helper to download QR code
-const downloadQRCodeImage = (qrCodeDataUrl: string, sharedCampaignCode: string): void => {
+const downloadQRCodeImage = (
+  qrCodeDataUrl: string | null,
+  sharedCampaign: SharedCampaign | null,
+  showSnackbar: (message: string) => void,
+): void => {
+  /* v8 ignore start -- Download button only enabled after QR data is generated */
+  if (!canDownloadQRCode(qrCodeDataUrl, sharedCampaign)) {
+    return;
+  }
+  /* v8 ignore stop */
   const downloadLink = document.createElement('a');
-  downloadLink.href = qrCodeDataUrl;
-  downloadLink.download = `campaign-${sharedCampaignCode}-qr.png`;
+  downloadLink.href = qrCodeDataUrl!;
+  downloadLink.download = `campaign-${sharedCampaign!.sharedCampaignCode}-qr.png`;
   document.body.appendChild(downloadLink);
   downloadLink.click();
   document.body.removeChild(downloadLink);
+  showSnackbar('QR code downloaded!');
 };
 
 // Helper to copy link to clipboard with error handling
@@ -346,6 +357,146 @@ const SharedCampaignRow: React.FC<{
   </TableRow>
 );
 
+interface SharedCampaignsPageContentProps {
+  error?: ErrorLike | undefined;
+  sharedCampaigns: SharedCampaign[];
+  activeSharedCampaignCount: number;
+  canCreateMore: boolean;
+  onCreateClick: () => void;
+  onCopyLink: (code: string) => void;
+  onShowQR: (campaign: SharedCampaign) => void;
+  onEdit: (campaign: SharedCampaign) => void;
+  onDeactivate: (campaign: SharedCampaign) => void;
+  editingSharedCampaign: SharedCampaign | null;
+  onEditDialogDismiss: () => void;
+  onSaveEdit: (sharedCampaignCode: string, updates: { description?: string; creatorMessage?: string; isActive?: boolean }) => Promise<void>;
+  deactivateDialogOpen: boolean;
+  sharedCampaignToDeactivate: SharedCampaign | null;
+  onDeactivateDialogDismiss: () => void;
+  onConfirmDeactivate: () => Promise<void>;
+  qrDialogOpen: boolean;
+  qrCodeDataUrl: string | null;
+  qrSharedCampaign: SharedCampaign | null;
+  onQrDialogDismiss: () => void;
+  onDownloadQRCode: () => void;
+  snackbarKey: number | undefined;
+  snackbarOpen: boolean;
+  snackbarMessage: string | null;
+  onSnackbarClose: () => void;
+}
+
+const SharedCampaignsPageContent: React.FC<SharedCampaignsPageContentProps> = ({
+  error,
+  sharedCampaigns,
+  activeSharedCampaignCount,
+  canCreateMore,
+  onCreateClick,
+  onCopyLink,
+  onShowQR,
+  onEdit,
+  onDeactivate,
+  editingSharedCampaign,
+  onEditDialogDismiss,
+  onSaveEdit,
+  deactivateDialogOpen,
+  sharedCampaignToDeactivate,
+  onDeactivateDialogDismiss,
+  onConfirmDeactivate,
+  qrDialogOpen,
+  qrCodeDataUrl,
+  qrSharedCampaign,
+  onQrDialogDismiss,
+  onDownloadQRCode,
+  snackbarKey,
+  snackbarOpen,
+  snackbarMessage,
+  onSnackbarClose,
+}) => {
+  const createButtonTooltip = canCreateMore
+    ? ''
+    : `You have reached the maximum of ${MAX_SHARED_CAMPAIGNS} active shared campaigns`;
+
+  return (
+    <Box>
+      {error && (
+        <Alert severity="warning" sx={{ mb: 3 }}>
+          Some shared campaign data could not be loaded. You can still create and manage shared campaigns.
+        </Alert>
+      )}
+      <PageHeader
+        title="My Shared Campaigns"
+        subtitle={`Create shareable links that let your unit members create campaigns quickly with preset information. (${activeSharedCampaignCount}/${MAX_SHARED_CAMPAIGNS} active)`}
+        action={
+          <Tooltip title={createButtonTooltip}>
+            <span>
+              <Button variant="contained" startIcon={<AddIcon />} onClick={onCreateClick} disabled={!canCreateMore}>
+                Create Shared Campaign
+              </Button>
+            </span>
+          </Tooltip>
+        }
+      />
+
+      <CampaignsList
+        campaigns={sharedCampaigns}
+        onCreateClick={onCreateClick}
+        onCopyLink={onCopyLink}
+        onShowQR={onShowQR}
+        onEdit={onEdit}
+        onDeactivate={onDeactivate}
+      />
+
+      {/* Edit Dialog */}
+      <EditDialogWrapper campaign={editingSharedCampaign} onClose={onEditDialogDismiss} onSave={onSaveEdit} />
+
+      {/* Deactivate Confirmation Dialog */}
+      <ConfirmDialog
+        open={deactivateDialogOpen}
+        title="Deactivate Shared Campaign?"
+        onClose={onDeactivateDialogDismiss}
+        onConfirm={() => { void onConfirmDeactivate(); }}
+        confirmLabel="Deactivate"
+        confirmColor="error"
+      >
+        <Typography variant="body1" gutterBottom>
+          Are you sure you want to deactivate this shared campaign? The link will no longer work for new campaign
+          creation, but existing campaigns created from this link will not be affected.
+        </Typography>
+        <DeactivateDetails campaign={sharedCampaignToDeactivate} />
+      </ConfirmDialog>
+
+      {/* QR Code Dialog */}
+      <Dialog open={qrDialogOpen} onClose={onQrDialogDismiss} maxWidth="sm" fullWidth>
+        <DialogTitle>
+          Campaign QR Code
+          <QRDialogTitleSuffix campaign={qrSharedCampaign} />
+        </DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} alignItems="center">
+            <QRCodeImage dataUrl={qrCodeDataUrl} />
+            <QRLinkDisplay campaign={qrSharedCampaign} />
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => { void onQrDialogDismiss(); }}>Close</Button>
+          <Button onClick={() => { void onDownloadQRCode(); }} variant="contained" startIcon={<DownloadIcon />}>
+            Download
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Snackbar
+        key={snackbarKey}
+        open={snackbarOpen}
+        autoHideDuration={3000}
+        onClose={onSnackbarClose}
+        message={snackbarMessage}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      />
+    </Box>
+  );
+};
+
 export const SharedCampaignsPage: React.FC = () => {
   const navigate = useNavigate();
   const [editingSharedCampaign, setEditingSharedCampaign] = useState<SharedCampaign | null>(null);
@@ -426,14 +577,7 @@ export const SharedCampaignsPage: React.FC = () => {
   };
 
   const handleDownloadQRCode = () => {
-    const canDownload = canDownloadQRCode(qrCodeDataUrl, qrSharedCampaign);
-    /* v8 ignore start -- Download button only enabled after QR data is generated */
-    if (!canDownload || !qrCodeDataUrl || !qrSharedCampaign) {
-      return;
-    }
-    /* v8 ignore stop */
-    downloadQRCodeImage(qrCodeDataUrl, qrSharedCampaign.sharedCampaignCode);
-    showSnackbar('QR code downloaded!');
+    downloadQRCodeImage(qrCodeDataUrl, qrSharedCampaign, showSnackbar);
   };
 
   const handleEdit = (sharedCampaign: SharedCampaign) => {
@@ -461,7 +605,6 @@ export const SharedCampaignsPage: React.FC = () => {
     } catch (err) {
       console.error('Error deactivating shared campaign:', err);
       showSnackbar('Failed to deactivate shared campaign');
-      throw err;
     }
   };
 
@@ -498,84 +641,32 @@ export const SharedCampaignsPage: React.FC = () => {
   }
 
   return (
-    <Box>
-      {error && (
-        <Alert severity="warning" sx={{ mb: 3 }}>
-          Some shared campaign data could not be loaded. You can still create and manage shared campaigns.
-        </Alert>
-      )}
-      <PageHeader
-        title="My Shared Campaigns"
-        subtitle={`Create shareable links that let your unit members create campaigns quickly with preset information. (${activeSharedCampaignCount}/${MAX_SHARED_CAMPAIGNS} active)`}
-        action={
-          <Tooltip
-            title={!canCreateMore ? `You have reached the maximum of ${MAX_SHARED_CAMPAIGNS} active shared campaigns` : ''}
-          >
-            <span>
-              <Button variant="contained" startIcon={<AddIcon />} onClick={handleCreateClick} disabled={!canCreateMore}>
-                Create Shared Campaign
-              </Button>
-            </span>
-          </Tooltip>
-        }
-      />
-
-      <CampaignsList
-        campaigns={sharedCampaigns}
-        onCreateClick={() => { void handleCreateClick(); }}
-        onCopyLink={(code) => { void handleCopyLink(code); }}
-        onShowQR={(campaign) => { void handleShowQRCode(campaign); }}
-        onEdit={(campaign) => { void handleEdit(campaign); }}
-        onDeactivate={(campaign) => { void handleDeactivate(campaign); }}
-      />
-
-      {/* Edit Dialog */}
-      <EditDialogWrapper campaign={editingSharedCampaign} onClose={handleEditDialogDismiss} onSave={handleSaveEdit} />
-
-      {/* Deactivate Confirmation Dialog */}
-      <ConfirmDialog
-        open={deactivateDialogOpen}
-        title="Deactivate Shared Campaign?"
-        onClose={handleDeactivateDialogDismiss}
-        onConfirm={confirmDeactivate}
-        confirmLabel="Deactivate"
-        confirmColor="error"
-      >
-        <Typography variant="body1" gutterBottom>
-          Are you sure you want to deactivate this shared campaign? The link will no longer work for new campaign
-          creation, but existing campaigns created from this link will not be affected.
-        </Typography>
-        <DeactivateDetails campaign={sharedCampaignToDeactivate} />
-      </ConfirmDialog>
-
-      {/* QR Code Dialog */}
-      <Dialog open={qrDialogOpen} onClose={handleQrDialogDismiss} maxWidth="sm" fullWidth>
-        <DialogTitle>
-          Campaign QR Code
-          <QRDialogTitleSuffix campaign={qrSharedCampaign} />
-        </DialogTitle>
-        <DialogContent>
-          <Stack spacing={2} alignItems="center">
-            <QRCodeImage dataUrl={qrCodeDataUrl} />
-            <QRLinkDisplay campaign={qrSharedCampaign} />
-          </Stack>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setQrDialogOpen(false)}>Close</Button>
-          <Button onClick={handleDownloadQRCode} variant="contained" startIcon={<DownloadIcon />}>
-            Download
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      <Snackbar
-        key={snackbarKey}
-        open={snackbarOpen}
-        autoHideDuration={3000}
-        onClose={closeSnackbar}
-        message={snackbarMessage}
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-      />
-    </Box>
+    <SharedCampaignsPageContent
+      error={error}
+      sharedCampaigns={sharedCampaigns}
+      activeSharedCampaignCount={activeSharedCampaignCount}
+      canCreateMore={canCreateMore}
+      onCreateClick={() => { void handleCreateClick(); }}
+      onCopyLink={(code) => { void handleCopyLink(code); }}
+      onShowQR={(campaign) => { void handleShowQRCode(campaign); }}
+      onEdit={(campaign) => { void handleEdit(campaign); }}
+      onDeactivate={(campaign) => { void handleDeactivate(campaign); }}
+      editingSharedCampaign={editingSharedCampaign}
+      onEditDialogDismiss={handleEditDialogDismiss}
+      onSaveEdit={handleSaveEdit}
+      deactivateDialogOpen={deactivateDialogOpen}
+      sharedCampaignToDeactivate={sharedCampaignToDeactivate}
+      onDeactivateDialogDismiss={handleDeactivateDialogDismiss}
+      onConfirmDeactivate={confirmDeactivate}
+      qrDialogOpen={qrDialogOpen}
+      qrCodeDataUrl={qrCodeDataUrl}
+      qrSharedCampaign={qrSharedCampaign}
+      onQrDialogDismiss={handleQrDialogDismiss}
+      onDownloadQRCode={handleDownloadQRCode}
+      snackbarKey={snackbarKey}
+      snackbarOpen={snackbarOpen}
+      snackbarMessage={snackbarMessage}
+      onSnackbarClose={closeSnackbar}
+    />
   );
 };

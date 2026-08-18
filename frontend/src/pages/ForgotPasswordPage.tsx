@@ -93,6 +93,16 @@ export const ForgotPasswordPage: React.FC = () => {
     return null;
   };
 
+  const handleRequestError = (err: unknown): boolean => {
+    const typedError = err as { name?: string; message?: string };
+    if (SENSITIVE_RESET_ERROR_NAMES.has(typedError.name ?? '')) {
+      return false;
+    }
+    console.error('Reset password request failed:', err);
+    setError(getErrorFromTable(RESET_ERROR_MESSAGES, typedError.name, 'Unable to send reset code. Please try again later.'));
+    return true;
+  };
+
   const handleRequestCode = async (e?: React.FormEvent) => {
     e?.preventDefault();
     setError(null);
@@ -107,10 +117,7 @@ export const ForgotPasswordPage: React.FC = () => {
     try {
       await resetPassword({ username: email });
     } catch (err: unknown) {
-      const typedError = err as { name?: string; message?: string };
-      if (!SENSITIVE_RESET_ERROR_NAMES.has(typedError.name ?? '')) {
-        console.error('Reset password request failed:', err);
-        setError(getErrorFromTable(RESET_ERROR_MESSAGES, typedError.name, 'Unable to send reset code. Please try again later.'));
+      if (handleRequestError(err)) {
         setLoading(false);
         return;
       }
