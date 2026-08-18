@@ -3995,6 +3995,22 @@ class TestBatchHelpers:
         assert result == {}
         mock_cognito.admin_list_groups_for_user.assert_not_called()
 
+    def test_batch_get_user_groups_filters_falsy_usernames(
+        self,
+    ) -> None:
+        """Falsy usernames are filtered out before invoking Cognito."""
+        mock_cognito = MagicMock()
+        mock_cognito.admin_list_groups_for_user.return_value = {"Groups": []}
+
+        result = _batch_get_user_groups(
+            mock_cognito, "pool-id", ["", "user-1", None, "user-1"], MagicMock()
+        )
+
+        assert result == {"user-1": []}
+        mock_cognito.admin_list_groups_for_user.assert_called_once_with(
+            UserPoolId="pool-id", Username="user-1"
+        )
+
     def test_batch_get_user_groups_parallel(
         self,
     ) -> None:
