@@ -7,6 +7,7 @@ import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { BrowserRouter } from 'react-router-dom';
 import { ForgotPasswordPage } from '../src/pages/ForgotPasswordPage';
 import { useAuth } from '../src/contexts/AuthContext';
+import type { AuthContextValue } from '../src/types/auth';
 import { resetPassword, confirmResetPassword } from 'aws-amplify/auth';
 
 const mockNavigate = vi.fn();
@@ -20,7 +21,7 @@ vi.mock('react-router-dom', async () => {
 });
 
 vi.mock('../src/contexts/AuthContext', () => ({
-  useAuth: vi.fn(() => ({ isAuthenticated: false, loading: false })),
+  useAuth: vi.fn(() => ({ isAuthenticated: false, loading: false } as AuthContextValue)),
 }));
 
 vi.mock('aws-amplify/auth', () => ({
@@ -53,7 +54,7 @@ describe('ForgotPasswordPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    vi.mocked(useAuth).mockReturnValue({ isAuthenticated: false, loading: false });
+    vi.mocked(useAuth).mockReturnValue({ isAuthenticated: false, loading: false } as AuthContextValue);
     vi.mocked(resetPassword).mockResolvedValue({} as any);
     vi.mocked(confirmResetPassword).mockResolvedValue(undefined);
   });
@@ -63,7 +64,7 @@ describe('ForgotPasswordPage', () => {
   });
 
   test('redirects authenticated users to /home', async () => {
-    vi.mocked(useAuth).mockReturnValue({ isAuthenticated: true, loading: false });
+    vi.mocked(useAuth).mockReturnValue({ isAuthenticated: true, loading: false } as AuthContextValue);
     renderPage();
     await waitFor(() => {
       expect(mockNavigate).toHaveBeenCalledWith('/home', { replace: true });
