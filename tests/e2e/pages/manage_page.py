@@ -2,7 +2,7 @@
 
 import urllib.parse
 
-from playwright.sync_api import Locator, Page, expect
+from playwright.sync_api import Locator, Page, PlaywrightTimeoutError, expect
 
 from .base_page import BasePage
 from .dashboard_page import DashboardPage
@@ -71,19 +71,30 @@ class ManagePage(BasePage):
         """
         return self._seller_name_input().input_value()
 
-    def transfer_ownership_button_is_visible(self) -> bool:
+    def transfer_ownership_button_is_visible(self, timeout: int = 10_000) -> bool:
         """Return True when the Transfer Ownership button is visible and enabled.
 
         The button only appears in the share table rows (one per existing
         share), so this method returns False when no shares exist. When multiple
         shares exist, the first Transfer Ownership button is checked.
 
+        Shares can take a moment to appear after an invite is accepted in a
+        separate browser context, so this method polls briefly.
+
+        Args:
+            timeout: Maximum time to wait for the button to appear, in
+                milliseconds. Defaults to 10 000.
+
         Returns:
             ``True`` when at least one visible, enabled Transfer Ownership
             button exists on the page.
         """
         btn = self.page.get_by_role("button", name=self._TRANSFER_BTN, exact=True).first
-        return bool(btn.is_visible() and btn.is_enabled())
+        try:
+            btn.wait_for(state="visible", timeout=timeout)
+        except PlaywrightTimeoutError:
+            return False
+        return btn.is_enabled()
 
     # ------------------------------------------------------------------
     # Actions
