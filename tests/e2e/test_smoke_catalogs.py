@@ -29,9 +29,7 @@ def test_create_catalog(owner_page: Page) -> None:
 
     catalog_name = f"E2E Create Catalog {int(time.time())}"
     catalogs.create_catalog(catalog_name)
-    assert catalogs.has_catalog(catalog_name), (
-        f"Created catalog '{catalog_name}' must appear in the list"
-    )
+    assert catalogs.has_catalog(catalog_name), f"Created catalog '{catalog_name}' must appear in the list"
 
 
 @pytest.mark.smoke
@@ -46,12 +44,8 @@ def test_edit_catalog(owner_page: Page) -> None:
 
     new_name = f"{original_name} Updated"
     catalogs.edit_catalog_name(original_name, new_name)
-    assert catalogs.has_catalog(new_name), (
-        f"Updated catalog name '{new_name}' must appear in the list"
-    )
-    assert not catalogs.has_catalog(original_name), (
-        f"Original catalog name '{original_name}' must no longer appear"
-    )
+    assert catalogs.has_catalog(new_name), f"Updated catalog name '{new_name}' must appear in the list"
+    assert not catalogs.has_catalog(original_name), f"Original catalog name '{original_name}' must no longer appear"
 
 
 @pytest.mark.smoke
@@ -63,14 +57,10 @@ def test_delete_catalog(owner_page: Page) -> None:
 
     catalog_name = f"E2E Delete Catalog {int(time.time())}"
     catalogs.create_catalog(catalog_name)
-    assert catalogs.has_catalog(catalog_name), (
-        f"Catalog '{catalog_name}' must exist before deletion"
-    )
+    assert catalogs.has_catalog(catalog_name), f"Catalog '{catalog_name}' must exist before deletion"
 
     catalogs.delete_catalog(catalog_name)
-    assert not catalogs.has_catalog(catalog_name), (
-        f"Deleted catalog '{catalog_name}' must not appear in the list"
-    )
+    assert not catalogs.has_catalog(catalog_name), f"Deleted catalog '{catalog_name}' must not appear in the list"
 
 
 @pytest.mark.smoke

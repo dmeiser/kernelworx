@@ -73,7 +73,10 @@ data "aws_iam_policy_document" "appsync_logging" {
       "logs:PutLogEvents",
     ]
 
-    resources = [aws_cloudwatch_log_group.appsync.arn]
+    resources = [
+      aws_cloudwatch_log_group.appsync.arn,
+      "${aws_cloudwatch_log_group.appsync.arn}:*",
+    ]
   }
 }
 

@@ -13,7 +13,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any, Callable, Dict, List, Optional, cast
+from typing import Any, Callable, Dict, List, Optional
 
 import boto3
 from botocore.exceptions import ClientError
@@ -32,7 +32,7 @@ except ModuleNotFoundError:  # pragma: no cover
     from ..utils.logging import get_logger
     from ..utils.pagination import query_all_items as _query_all_items
 
-query_all_items = cast(Callable[[Any, Any], List[Dict[str, Any]]], _query_all_items)
+query_all_items: Callable[[Any, Any], List[Dict[str, Any]]] = _query_all_items
 
 
 def _get_required_env(name: str) -> str:
