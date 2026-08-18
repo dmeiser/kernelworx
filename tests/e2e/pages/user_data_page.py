@@ -262,7 +262,8 @@ class UserDataPage(BasePage):
         """Return target-account emails from the Shares tab table.
 
         The Shares tab only renders a table after a profile button has been
-        selected.
+        selected. The first cell also contains a caption with the user's name,
+        so we scope to the first direct child (the email typography).
 
         Args:
             timeout: Maximum wait in milliseconds for rows to appear.
@@ -271,7 +272,7 @@ class UserDataPage(BasePage):
             List of ``User Email`` cell texts in DOM order.
         """
         table = self._wait_for_table_rows(timeout=timeout)
-        return table.locator("tbody tr td:first-child").all_inner_texts()
+        return table.locator("tbody tr td:first-child > *:first-child").all_inner_texts()
 
     # ------------------------------------------------------------------
     # Actions — tab switching
