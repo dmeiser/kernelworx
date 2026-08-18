@@ -21,17 +21,31 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Verify PR head is ancestor of base dev
+      - name: Verify PR changes are deployed to base dev
         env:
           BASE_REPO: ${{ github.event.pull_request.base.repo.full_name }}
         run: |
           git remote add base "https://github.com/${BASE_REPO}.git" || true
           git fetch base dev
+          git fetch base main
           pr_head="${{ github.event.pull_request.head.sha }}"
-          if git merge-base --is-ancestor "$pr_head" base/dev; then
-            echo "PR head $pr_head is an ancestor of base/dev."
+          unique_commits=$(git rev-list base/main.."$pr_head")
+          if [ -z "$unique_commits" ]; then
+            echo "No unique commits found; nothing to deploy."
+            exit 0
+          fi
+          cherry_output=$(git cherry base/dev "$pr_head")
+          missing=()
+          while IFS= read -r commit; do
+            if ! echo "$cherry_output" | grep -q "^- $commit$"; then
+              missing+=("$commit")
+            fi
+          done <<< "$unique_commits"
+          if [ ${#missing[@]} -eq 0 ]; then
+            echo "All PR changes are present on base/dev."
           else
-            echo "PR head $pr_head is NOT an ancestor of base/dev."
+            echo "The following PR commits are missing from base/dev:"
+            printf '%s\n' "${missing[@]}"
             exit 1
           fi
 
