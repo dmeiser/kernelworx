@@ -3121,7 +3121,7 @@ class TestAdminSearchUser:
         }
 
         with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client, \
-             patch("src.handlers.admin_operations.tables") as _mock_tables, \
+             patch("src.handlers.admin_operations.tables"), \
              patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names, \
              patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups:
             mock_client = MagicMock()
@@ -3171,7 +3171,7 @@ class TestAdminSearchUser:
         }
 
         with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client, \
-             patch("src.handlers.admin_operations.tables") as _mock_tables, \
+             patch("src.handlers.admin_operations.tables"), \
              patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names, \
              patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups:
             mock_client = MagicMock()
@@ -3882,6 +3882,107 @@ class TestBatchHelpers:
             result = _batch_get_display_names(["user-1"], MagicMock())
 
             assert result == {}
+
+    def test_batch_get_display_names_unprocessed_keys_retried(
+        self,
+        monkeypatch: Any,
+    ) -> None:
+        """UnprocessedKeys from BatchGetItem are retried before returning results."""
+        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "test-accounts")
+
+        with patch("src.handlers.admin_operations.get_dynamodb_resource") as mock_get_resource:
+            mock_resource = MagicMock()
+            mock_get_resource.return_value = mock_resource
+            mock_resource.batch_get_item.side_effect = [
+                {
+                    "Responses": {"test-accounts": []},
+                    "UnprocessedKeys": {
+                        "test-accounts": {"Keys": [{"accountId": "ACCOUNT#user-1"}]}
+                    },
+                },
+                {
+                    "Responses": {
+                        "test-accounts": [
+                            {"accountId": "ACCOUNT#user-1", "givenName": "John", "familyName": "Doe"}
+                        ]
+                    }
+                },
+            ]
+
+            result = _batch_get_display_names(["user-1"], MagicMock())
+
+            assert result == {"user-1": "John Doe"}
+            assert mock_resource.batch_get_item.call_count == 2
+
+    def test_batch_get_display_names_unprocessed_keys_across_batches(
+        self,
+        monkeypatch: Any,
+    ) -> None:
+        """UnprocessedKeys are retried and the outer batch loop continues."""
+        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "test-accounts")
+
+        ids = [f"user-{i}" for i in range(101)]
+        retry_keys = [{"accountId": "ACCOUNT#user-0"}]
+
+        with patch("src.handlers.admin_operations.get_dynamodb_resource") as mock_get_resource:
+            mock_resource = MagicMock()
+            mock_get_resource.return_value = mock_resource
+            mock_resource.batch_get_item.side_effect = [
+                {
+                    "Responses": {"test-accounts": []},
+                    "UnprocessedKeys": {"test-accounts": {"Keys": retry_keys}},
+                },
+                {
+                    "Responses": {"test-accounts": [{"accountId": "ACCOUNT#user-0", "givenName": "A", "familyName": "B"}]},
+                },
+                {
+                    "Responses": {"test-accounts": [{"accountId": "ACCOUNT#user-100", "givenName": "C", "familyName": "D"}]},
+                },
+            ]
+
+            result = _batch_get_display_names(ids, MagicMock())
+
+            assert result == {
+                "user-0": "A B",
+                "user-100": "C D",
+            }
+            assert mock_resource.batch_get_item.call_count == 3
+
+    def test_batch_get_display_names_unprocessed_keys_exhaust_attempts(
+        self,
+        monkeypatch: Any,
+    ) -> None:
+        """UnprocessedKeys that persist through all attempts let the outer batch loop continue."""
+        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "test-accounts")
+
+        ids = [f"user-{i}" for i in range(101)]
+        first_key = {"accountId": "ACCOUNT#user-0"}
+
+        with patch("src.handlers.admin_operations.get_dynamodb_resource") as mock_get_resource:
+            mock_resource = MagicMock()
+            mock_get_resource.return_value = mock_resource
+            mock_resource.batch_get_item.side_effect = [
+                {
+                    "Responses": {"test-accounts": []},
+                    "UnprocessedKeys": {"test-accounts": {"Keys": [first_key]}},
+                },
+                {
+                    "Responses": {"test-accounts": []},
+                    "UnprocessedKeys": {"test-accounts": {"Keys": [first_key]}},
+                },
+                {
+                    "Responses": {"test-accounts": []},
+                    "UnprocessedKeys": {"test-accounts": {"Keys": [first_key]}},
+                },
+                {
+                    "Responses": {"test-accounts": [{"accountId": "ACCOUNT#user-100", "givenName": "C", "familyName": "D"}]},
+                },
+            ]
+
+            result = _batch_get_display_names(ids, MagicMock())
+
+            assert result == {"user-100": "C D"}
+            assert mock_resource.batch_get_item.call_count == 4
 
     def test_batch_get_user_groups_empty(
         self,
