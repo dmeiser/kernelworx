@@ -160,30 +160,34 @@ async function getTestAccountIds(): Promise<string[]> {
 
 async function cleanupSharedCampaigns(): Promise<number> {
   console.log('  Scanning campaign shared campaigns table...');
-  
+
   const testAccountIds = await getTestAccountIds();
-  
+  // Accept createdBy values with or without the ACCOUNT# prefix.
+  const normalizedTestIds = new Set(
+    testAccountIds.flatMap((id) => [id, id.replace(/^ACCOUNT#/, '')]),
+  );
+
   const scanResult = await dynamodb.send(new ScanCommand({
     TableName: SHARED_CAMPAIGNS_TABLE,
-    ProjectionExpression: 'sharedCampaignCode, SK, createdBy',
+    ProjectionExpression: 'sharedCampaignCode, createdBy',
   }));
-  
+
   const items = scanResult.Items || [];
   let deleted = 0;
-  
+
   for (const item of items) {
     const sharedCampaignCode = item.sharedCampaignCode?.S;
-    const sk = item.SK?.S;
     const createdBy = item.createdBy?.S;
-    
-    // Only delete items created by test accounts
-    if (sharedCampaignCode && sk && testAccountIds.includes(createdBy || '')) {
+    const normalizedCreatedBy = createdBy?.replace(/^ACCOUNT#/, '') || '';
+
+    // Only delete items created by test accounts. The table's primary key is
+    // just sharedCampaignCode; SK is a regular attribute, not part of the key.
+    if (sharedCampaignCode && normalizedTestIds.has(normalizedCreatedBy)) {
       try {
         await dynamodb.send(new DeleteItemCommand({
           TableName: SHARED_CAMPAIGNS_TABLE,
           Key: {
             sharedCampaignCode: { S: sharedCampaignCode },
-            SK: { S: sk },
           },
         }));
         deleted++;
@@ -192,7 +196,7 @@ async function cleanupSharedCampaigns(): Promise<number> {
       }
     }
   }
-  
+
   return deleted;
 }
 

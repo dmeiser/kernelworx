@@ -9,7 +9,7 @@ export function request(ctx) {
     // Convert numbers to strings using template literal (String() not available in APPSYNC_JS)
     const campaignYearStr = '' + input.campaignYear;
     const unitNumStr = '' + input.unitNumber;
-    const campaignAbbrev = input.campaignName.substring(0, 4).toUpperCase();
+    const campaignAbbrev = input.campaignName.substring(0, 4).toUpperCase().trim();
     const yearAbbrev = campaignYearStr.substring(2);
     const sharedCampaignCode = input.unitType.toUpperCase() + unitNumStr + '-' + campaignAbbrev + '-' + input.state.toUpperCase() + '-' + yearAbbrev;
     

@@ -145,8 +145,6 @@ describe('SharedCampaignsPage', () => {
 
       expect(screen.getByText('Fall 2025')).toBeInTheDocument();
       expect(screen.getByText('Pack 123')).toBeInTheDocument();
-      // Both shared campaigns use the same catalog, so there are multiple elements
-      expect(screen.getAllByText('Official Popcorn 2025')).toHaveLength(2);
     });
 
     it('shows active and inactive status chips', async () => {
@@ -178,7 +176,7 @@ describe('SharedCampaignsPage', () => {
       });
     });
 
-    it('shows Unknown Catalog fallback when catalog is missing', async () => {
+    it('shows catalog id when catalog object is missing', async () => {
       const campaignsWithMissingCatalog = [
         {
           ...mockSharedCampaigns[0],
@@ -192,7 +190,7 @@ describe('SharedCampaignsPage', () => {
         expect(screen.getByText('NOCAT123')).toBeInTheDocument();
       });
 
-      expect(screen.getByText('Unknown Catalog')).toBeInTheDocument();
+      expect(screen.getByText('catalog-1')).toBeInTheDocument();
     });
   });
 
@@ -545,7 +543,7 @@ describe('SharedCampaignsPage', () => {
   });
 
   describe('Error handling', () => {
-    it('displays error message when query fails', async () => {
+    it('displays fatal error message when query fails with no data', async () => {
       const errorMock = {
         request: {
           query: LIST_MY_SHARED_CAMPAIGNS,
@@ -556,7 +554,7 @@ describe('SharedCampaignsPage', () => {
       renderWithProviders([errorMock]);
 
       await waitFor(() => {
-        expect(screen.getByText(/Failed to load shared campaigns/)).toBeInTheDocument();
+        expect(screen.getByText(/Unable to load shared campaigns/)).toBeInTheDocument();
       });
     });
   });

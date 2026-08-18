@@ -217,14 +217,20 @@ export const CampaignSettingsPage: React.FC = () => {
     skip: shouldSkipCampaignQuery(dbCampaignId ?? ''),
   });
 
-  // Fetch catalogs
+  // Fetch catalogs. Use network-only so newly created catalogs made on other
+  // pages (e.g. CatalogsPage) are always visible without relying on cache
+  // updates from the createCatalog mutation.
   const { data: publicCatalogsData } = useQuery<{
     listManagedCatalogs: Catalog[];
-  }>(LIST_MANAGED_CATALOGS);
+  }>(LIST_MANAGED_CATALOGS, {
+    fetchPolicy: 'network-only',
+  });
 
   const { data: myCatalogsData } = useQuery<{
     listMyCatalogs: Catalog[];
-  }>(LIST_MY_CATALOGS);
+  }>(LIST_MY_CATALOGS, {
+    fetchPolicy: 'network-only',
+  });
 
   const publicCatalogs = getPublicCatalogs(publicCatalogsData);
   const myCatalogs = getMyCatalogs(myCatalogsData);

@@ -140,6 +140,7 @@ jsonify
 kaushan
 kernelworx
 KernelWorx
+KHTML
 keyId
 keyout
 keypair
@@ -225,6 +226,7 @@ pseudonymized
 pycache
 pyproject
 pytest
+pytestmark
 QLAPI
 qrcode
 qrCode
@@ -233,6 +235,7 @@ randomising
 readonly
 refetch
 refetches
+refetched
 regionAbbrev
 regularuser
 relogin
@@ -241,6 +244,7 @@ repo
 repr
 reraises
 reusability
+rollup
 route53
 RRule
 runtime
@@ -348,6 +352,7 @@ userPool
 userPoolClientId
 useState
 uuidv
+valuetext
 venmo
 venmotom
 venv

@@ -4,6 +4,13 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
+    inputs:
+      run-password-change:
+        description: "Run the destructive password-change smoke test against production"
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
   group: deploy-prod
@@ -15,6 +22,8 @@ permissions:
 
 jobs:
   deploy:
+    # Only deploy from the main branch, even for workflow_dispatch runs.
+    if: github.ref == 'refs/heads/main'
     uses: ./.github/workflows/deploy-shared.yml
     with:
       environment: production
@@ -26,6 +35,7 @@ jobs:
       e2e-base-url-var-suffix: PROD
       smoke-url-block-pattern: 'https://dev.*|http://localhost:*'
       smoke-url-block-message: 'prod smoke tests against a dev/local URL.'
+      run-password-change: ${{ github.event.inputs.run-password-change == 'true' }}
     secrets:
       AWS_ROLE_ARN: ${{ secrets.AWS_PROD_ROLE_ARN }}
       AWS_REGION: ${{ secrets.AWS_REGION }}

@@ -578,6 +578,29 @@ export const SHARED_CAMPAIGN_FRAGMENT = gql`
   }
 `;
 
+// Lightweight list fragment that keeps the nested catalog nullable so a stale
+// or deleted catalog does not prevent the shared-campaign list from rendering.
+export const SHARED_CAMPAIGN_LIST_FRAGMENT = gql`
+  fragment SharedCampaignListFields on SharedCampaign {
+    sharedCampaignCode
+    catalogId
+    campaignName
+    campaignYear
+    startDate
+    endDate
+    unitType
+    unitNumber
+    city
+    state
+    createdBy
+    createdByName
+    creatorMessage
+    description
+    isActive
+    createdAt
+  }
+`;
+
 // ============================================================================
 // Campaign shared campaign Queries
 // ============================================================================
@@ -592,10 +615,10 @@ export const GET_SHARED_CAMPAIGN = gql`
 `;
 
 export const LIST_MY_SHARED_CAMPAIGNS = gql`
-  ${SHARED_CAMPAIGN_FRAGMENT}
+  ${SHARED_CAMPAIGN_LIST_FRAGMENT}
   query ListMySharedCampaigns {
     listMySharedCampaigns {
-      ...SharedCampaignFields
+      ...SharedCampaignListFields
     }
   }
 `;

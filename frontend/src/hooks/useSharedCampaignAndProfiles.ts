@@ -11,7 +11,7 @@ interface SharedCampaign {
   catalog: {
     catalogId: string;
     catalogName: string;
-  };
+  } | null;
   campaignName: string;
   campaignYear: number;
   startDate: string | null;
@@ -58,7 +58,7 @@ export const useSharedCampaignAndProfiles = (effectiveSharedCampaignCode: string
   const profiles = useMemo(() => profilesData?.listMyProfiles ?? [], [profilesData]);
 
   const isSharedCampaignMode = useMemo(
-    () => Boolean(effectiveSharedCampaignCode && sharedCampaign?.isActive),
+    () => Boolean(effectiveSharedCampaignCode && sharedCampaign?.isActive && sharedCampaign?.catalog),
     [effectiveSharedCampaignCode, sharedCampaign],
   );
 

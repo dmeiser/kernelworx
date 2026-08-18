@@ -113,13 +113,24 @@ class DashboardPage(BasePage):
         card.get_by_role("button", name=self._VIEW_CAMPAIGNS_TEXT, exact=True).click()
         self.wait_for_loading()
 
-    def wait_for_profiles_loaded(self) -> None:
+    def wait_for_profiles_loaded(self, timeout: int = 15_000) -> None:
         """Block until the dashboard has finished loading profiles.
 
         The dashboard is considered loaded when either at least one profile
         card heading is visible, or the empty-state alert is visible (e.g.
-        after deleting the last profile).
+        after deleting the last profile).  In shared dev environments the
+        profile list query can have brief eventual-consistency delays, so we
+        poll when the empty state is visible.
         """
         profile_heading = self._profile_headings().first
-        empty_alert = self.page.get_by_text("You don't have any Scouts yet")
-        expect(profile_heading.or_(empty_alert)).to_be_visible()
+        empty_alert = self.page.get_by_text("No Scouts Yet")
+        expect(profile_heading.or_(empty_alert)).to_be_visible(timeout=timeout)
+        # If empty state appeared, give DynamoDB GSIs a few chances to catch up.
+        # Reload the page each iteration so the LIST_MY_PROFILES query refetches.
+        if empty_alert.is_visible():
+            for _ in range(6):
+                self.page.reload()
+                self.wait_for_loading()
+                if profile_heading.is_visible():
+                    break
+                self.page.wait_for_timeout(1_000)

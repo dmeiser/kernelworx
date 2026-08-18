@@ -12,7 +12,7 @@ interface SharedCampaign {
   catalog: {
     catalogId: string;
     catalogName: string;
-  };
+  } | null;
   campaignName: string;
   campaignYear: number;
   startDate: string | null;

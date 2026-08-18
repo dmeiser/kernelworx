@@ -651,7 +651,7 @@ export type GqlSharedCampaign = {
   __typename?: 'SharedCampaign';
   campaignName: Scalars['String']['output'];
   campaignYear: Scalars['Int']['output'];
-  catalog: GqlCatalog;
+  catalog?: Maybe<GqlCatalog>;
   catalogId: Scalars['ID']['output'];
   city: Scalars['String']['output'];
   createdAt: Scalars['AWSDateTime']['output'];
@@ -1698,7 +1698,27 @@ export type GqlSharedCampaignFieldsFragment = {
   description?: string | null | undefined;
   isActive: boolean;
   createdAt: string;
-  catalog: { __typename?: 'Catalog'; catalogId: string; catalogName: string };
+  catalog?: { __typename?: 'Catalog'; catalogId: string; catalogName: string } | null | undefined;
+};
+
+export type GqlSharedCampaignListFieldsFragment = {
+  __typename?: 'SharedCampaign';
+  sharedCampaignCode: string;
+  catalogId: string;
+  campaignName: string;
+  campaignYear: number;
+  startDate?: string | null | undefined;
+  endDate?: string | null | undefined;
+  unitType: string;
+  unitNumber: number;
+  city: string;
+  state: string;
+  createdBy: string;
+  createdByName: string;
+  creatorMessage?: string | null | undefined;
+  description?: string | null | undefined;
+  isActive: boolean;
+  createdAt: string;
 };
 
 export type GqlGetSharedCampaignQueryVariables = Exact<{
@@ -1726,7 +1746,7 @@ export type GqlGetSharedCampaignQuery = {
         description?: string | null | undefined;
         isActive: boolean;
         createdAt: string;
-        catalog: { __typename?: 'Catalog'; catalogId: string; catalogName: string };
+        catalog?: { __typename?: 'Catalog'; catalogId: string; catalogName: string } | null | undefined;
       }
     | null
     | undefined;
@@ -1754,7 +1774,6 @@ export type GqlListMySharedCampaignsQuery = {
     description?: string | null | undefined;
     isActive: boolean;
     createdAt: string;
-    catalog: { __typename?: 'Catalog'; catalogId: string; catalogName: string };
   }>;
 };
 
@@ -1787,7 +1806,7 @@ export type GqlFindSharedCampaignsQuery = {
     description?: string | null | undefined;
     isActive: boolean;
     createdAt: string;
-    catalog: { __typename?: 'Catalog'; catalogId: string; catalogName: string };
+    catalog?: { __typename?: 'Catalog'; catalogId: string; catalogName: string } | null | undefined;
   }>;
 };
 
@@ -1845,7 +1864,7 @@ export type GqlCreateSharedCampaignMutation = {
     description?: string | null | undefined;
     isActive: boolean;
     createdAt: string;
-    catalog: { __typename?: 'Catalog'; catalogId: string; catalogName: string };
+    catalog?: { __typename?: 'Catalog'; catalogId: string; catalogName: string } | null | undefined;
   };
 };
 
@@ -1873,7 +1892,7 @@ export type GqlUpdateSharedCampaignMutation = {
     description?: string | null | undefined;
     isActive: boolean;
     createdAt: string;
-    catalog: { __typename?: 'Catalog'; catalogId: string; catalogName: string };
+    catalog?: { __typename?: 'Catalog'; catalogId: string; catalogName: string } | null | undefined;
   };
 };
 

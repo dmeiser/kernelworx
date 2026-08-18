@@ -52,9 +52,13 @@ class SharedCampaignsPage(BasePage):
     # ------------------------------------------------------------------
 
     def goto(self) -> None:
-        """Navigate to ``/shared-campaigns`` and wait for loading."""
+        """Navigate to ``/shared-campaigns`` and wait for the header."""
         self.navigate(self.PATH)
         self.wait_for_loading()
+        # The header is always rendered once data (or the empty state) is ready.
+        expect(self.page.get_by_role("heading", name="My Shared Campaigns")).to_be_visible(
+            timeout=15_000
+        )
 
     def goto_create(self) -> None:
         """Navigate to ``/shared-campaigns/create`` and wait for loading."""
@@ -168,14 +172,48 @@ class SharedCampaignsPage(BasePage):
         """
         return self._campaign_row(code).first.is_visible()
 
-    def get_visible_codes(self) -> list[str]:
+    def get_visible_codes(self, timeout: int = 10_000) -> list[str]:
         """Return the visible short codes from the shared campaigns table.
+
+        Reads the first cell of each data row (the *Code* column) rather than
+        matching any cell in the table, and waits for at least one data row to
+        appear so callers that create a shared campaign and immediately read the
+        list do not see an empty result while the GraphQL query refetches.
+
+        Args:
+            timeout: Maximum wait in milliseconds. Defaults to 10 000.
 
         Returns:
             List of short-code strings in DOM order.
         """
-        cells = self.page.get_by_role("cell").filter(has_text=re.compile(r"^[A-Z0-9]+(-[A-Z0-9]+)+$"))
-        return cells.all_inner_texts()
+        code_re = re.compile(r"^[A-Z0-9]+(-[A-Z0-9]+)+$")
+        # Data rows contain a "Copy link" action; the header row does not.
+        data_rows = self.page.get_by_role("row").filter(
+            has=self.page.get_by_role("button", name="Copy link")
+        )
+        try:
+            expect(data_rows.first).to_be_visible(timeout=timeout)
+        except AssertionError:
+            return []
+        code_cells = data_rows.locator("td:first-child").filter(has_text=code_re)
+        return code_cells.all_inner_texts()
+
+    def get_code_by_campaign_name(self, campaign_name: str) -> str | None:
+        """Return the short code for the shared-campaign row with *campaign_name*.
+
+        Args:
+            campaign_name: Visible campaign name in the shared campaigns table.
+
+        Returns:
+            The short-code string, or ``None`` when no matching row is found.
+        """
+        row = self.page.get_by_role("row").filter(has_text=campaign_name)
+        if row.count() == 0:
+            return None
+        code_cell = row.first.locator("td:first-child")
+        if code_cell.count() == 0:
+            return None
+        return code_cell.first.inner_text().strip()
 
     # ------------------------------------------------------------------
     # Actions — list page
@@ -184,10 +222,18 @@ class SharedCampaignsPage(BasePage):
     def click_create(self) -> None:
         """Click the create button, handling either the header or empty-state variant."""
         header_btn = self._create_button()
+        empty_btn = self._create_first_button()
+        # Both buttons can be visible when the list is empty (header + empty-state),
+        # so scope the visibility expectation to the first match.
+        expect(header_btn.or_(empty_btn).first).to_be_visible(timeout=15_000)
         if header_btn.is_visible() and header_btn.is_enabled():
             header_btn.click()
+        elif empty_btn.is_visible():
+            empty_btn.click()
         else:
-            self._create_first_button().click()
+            # Fallback: navigate directly if the button is disabled (e.g. max reached).
+            self.goto_create()
+            return
         self.page.wait_for_url("**/shared-campaigns/create", timeout=10_000)
         self.wait_for_loading()
 
