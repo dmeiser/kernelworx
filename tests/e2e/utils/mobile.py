@@ -66,8 +66,17 @@ def navigate_to_first_orders_page(page: Page) -> OrderPage:
         profile_id = urllib.parse.unquote(profile_match.group(1))
         seed_name = f"Mobile Seed Campaign {int(time.time())}"
         campaign_page.create_campaign_first_catalog(seed_name, profile_id)
-        campaign_page.goto(profile_id)
-        campaign_names = campaign_page.get_campaign_names()
+
+        # Campaign list visibility can lag briefly after creation in fresh
+        # environments, so poll with fresh navigations before giving up.
+        campaign_names: list[str] = []
+        for _ in range(12):  # up to ~60s
+            campaign_page.goto(profile_id)
+            campaign_names = campaign_page.get_campaign_names()
+            if campaign_names:
+                break
+            page.wait_for_timeout(5_000)
+
         assert campaign_names, "Failed to seed campaign for mobile order tests"
 
     campaign_page.click_campaign(campaign_names[0])
