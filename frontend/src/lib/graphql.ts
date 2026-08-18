@@ -584,10 +584,6 @@ export const SHARED_CAMPAIGN_LIST_FRAGMENT = gql`
   fragment SharedCampaignListFields on SharedCampaign {
     sharedCampaignCode
     catalogId
-    catalog {
-      catalogId
-      catalogName
-    }
     campaignName
     campaignYear
     startDate
