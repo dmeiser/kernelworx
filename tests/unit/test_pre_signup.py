@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from src.handlers.pre_signup import FederatedIdentityLinkedException, lambda_handler
+from src.utils.logging import mask_email
 
 
 @pytest.fixture
@@ -301,7 +302,7 @@ class TestErrorHandling:
                 lambda_handler(federated_signup_event, lambda_context)
 
             assert "already exists" in str(exc_info.value)
-            assert federated_signup_event["request"]["userAttributes"]["email"] in str(exc_info.value)
+            assert mask_email(federated_signup_event["request"]["userAttributes"]["email"]) in str(exc_info.value)
             assert isinstance(exc_info.value, FederatedIdentityLinkedException)
 
     def test_cognito_api_error_raises(

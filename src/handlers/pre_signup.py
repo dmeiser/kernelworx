@@ -112,7 +112,7 @@ def _handle_signup_exception(e: Exception, email: str, event: Dict[str, Any]) ->
         raise e
     if isinstance(e, ClientError) and e.response.get("Error", {}).get("Code") == "InvalidParameterException":
         logger.warning(f"Link may already exist: {e}")
-        raise FederatedIdentityLinkedException(f"Account with email {email} already exists. Please sign in again.")
+        raise FederatedIdentityLinkedException(f"Account with email {mask_email(email)} already exists. Please sign in again.")
     logger.exception(f"Error in pre-signup trigger: {str(e)}")
     raise e
 
