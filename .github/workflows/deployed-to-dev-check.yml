@@ -29,23 +29,29 @@ jobs:
           git fetch base dev
           git fetch base main
           pr_head="${{ github.event.pull_request.head.sha }}"
-          unique_commits=$(git rev-list base/main.."$pr_head")
-          if [ -z "$unique_commits" ]; then
-            echo "No unique commits found; nothing to deploy."
+
+          changed_files=$(git diff --name-only base/main.."$pr_head")
+          if [ -z "$changed_files" ]; then
+            echo "No changed files found; nothing to deploy."
             exit 0
           fi
-          cherry_output=$(git cherry base/dev "$pr_head")
-          missing=()
-          while IFS= read -r commit; do
-            if ! echo "$cherry_output" | grep -q "^- $commit$"; then
-              missing+=("$commit")
+
+          missing_files=()
+          while IFS= read -r file; do
+            pr_blob=$(git ls-tree "$pr_head" "$file" | awk '{print $3}')
+            dev_blob=$(git ls-tree base/dev "$file" | awk '{print $3}')
+            if [ "$pr_blob" = "$dev_blob" ]; then
+              echo "$file is present on base/dev with matching content."
+            else
+              missing_files+=("$file")
             fi
-          done <<< "$unique_commits"
-          if [ ${#missing[@]} -eq 0 ]; then
+          done <<< "$changed_files"
+
+          if [ ${#missing_files[@]} -eq 0 ]; then
             echo "All PR changes are present on base/dev."
           else
-            echo "The following PR commits are missing from base/dev:"
-            printf '%s\n' "${missing[@]}"
+            echo "The following PR files are missing or differ on base/dev:"
+            printf '%s\n' "${missing_files[@]}"
             exit 1
           fi
 
