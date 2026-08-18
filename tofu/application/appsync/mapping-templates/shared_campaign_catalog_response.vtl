@@ -1,4 +1,10 @@
 #if($ctx.error)
     $util.error($ctx.error.message, $ctx.error.type)
 #end
-$util.toJson($ctx.result)
+## Treat a soft-deleted (or missing) catalog as null so the GraphQL contract
+## matches the nullable schema and consumers can detect stale templates.
+#if(!$ctx.result || $ctx.result.isDeleted == true)
+    $util.toJson(null)
+#else
+    $util.toJson($ctx.result)
+#end
