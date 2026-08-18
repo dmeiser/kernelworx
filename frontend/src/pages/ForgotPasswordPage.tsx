@@ -55,6 +55,11 @@ function getErrorMessage(
   return typed.message || fallback;
 }
 
+function isSafeResetRequestError(err: unknown): boolean {
+  const name = (err as { name?: string }).name;
+  return name === 'UserNotFoundException' || name === 'InvalidParameterException';
+}
+
 function validatePassword(password: string, confirmPassword: string): string | null {
   if (!password || !confirmPassword) {
     return 'Password and confirmation are required';
@@ -140,8 +145,13 @@ function useForgotPasswordState(navigate: NavigateFunction): ForgotPasswordState
       setCodeSent(true);
       setSuccess(`If an account exists for ${trimmedEmail}, a reset code has been sent.`);
     } catch (err: unknown) {
-      console.error('Reset password request failed:', err);
-      setError(getErrorMessage(err, RESET_ERROR_MESSAGES, 'Unable to send reset code. Please try again.'));
+      if (isSafeResetRequestError(err)) {
+        setCodeSent(true);
+        setSuccess(`If an account exists for ${trimmedEmail}, a reset code has been sent.`);
+      } else {
+        console.error('Reset password request failed:', err);
+        setError(getErrorMessage(err, RESET_ERROR_MESSAGES, 'Unable to send reset code. Please try again.'));
+      }
     } finally {
       setLoading(false);
     }
@@ -170,14 +180,23 @@ function useForgotPasswordState(navigate: NavigateFunction): ForgotPasswordState
         void navigate('/login', { replace: true });
       });
     } catch (err: unknown) {
-      console.error('Confirm reset password failed:', err);
-      setError(getErrorMessage(err, CONFIRM_ERROR_MESSAGES, 'Unable to reset password. Please try again.'));
+      const typed = err as { name?: string };
+      if (typed.name === 'UserNotFoundException') {
+        setError('Invalid confirmation code. Please check and try again.');
+      } else {
+        console.error('Confirm reset password failed:', err);
+        setError(getErrorMessage(err, CONFIRM_ERROR_MESSAGES, 'Unable to reset password. Please try again.'));
+      }
     } finally {
       setLoading(false);
     }
   };
 
   const handleBackToEmail = () => {
+    if (redirectTimeoutRef.current) {
+      clearTimeout(redirectTimeoutRef.current);
+      redirectTimeoutRef.current = null;
+    }
     setCodeSent(false);
     setCode('');
     setPassword('');
@@ -319,6 +338,7 @@ const ConfirmResetForm: React.FC<ConfirmResetFormProps> = ({
         autoComplete="new-password"
         disabled={loading}
         helperText="Minimum 8 characters with uppercase, lowercase, numbers, and symbols"
+        inputProps={{ 'data-testid': 'new-password' }}
       />
       <TextField
         label="Confirm New Password"
@@ -329,6 +349,7 @@ const ConfirmResetForm: React.FC<ConfirmResetFormProps> = ({
         fullWidth
         autoComplete="new-password"
         disabled={loading}
+        inputProps={{ 'data-testid': 'confirm-password' }}
       />
     </Stack>
 
