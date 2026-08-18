@@ -27,11 +27,8 @@ import { useAuth } from '../contexts/AuthContext';
 const PASSWORD_REGEX = /^(?=.*[A-Z])(?=.*[a-z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,}$/;
 
 const RESET_ERROR_MESSAGES: Record<string, string> = {
-  UserNotFoundException:
-    'No account found with that email address. Please check the email or sign up.',
   LimitExceededException:
     'Too many attempts. Please wait a while before trying again.',
-  InvalidParameterException: 'Invalid email address. Please check and try again.',
 };
 
 const CONFIRM_ERROR_MESSAGES: Record<string, string> = {
@@ -43,6 +40,11 @@ const CONFIRM_ERROR_MESSAGES: Record<string, string> = {
     'No account found with that email address. Please start the reset process again.',
 };
 
+const SENSITIVE_RESET_ERROR_NAMES = new Set([
+  'UserNotFoundException',
+  'InvalidParameterException',
+]);
+
 function getErrorMessage(
   err: unknown,
   table: Record<string, string>,
@@ -53,11 +55,6 @@ function getErrorMessage(
     return table[typed.name];
   }
   return typed.message || fallback;
-}
-
-function isSafeResetRequestError(err: unknown): boolean {
-  const name = (err as { name?: string }).name;
-  return name === 'UserNotFoundException' || name === 'InvalidParameterException';
 }
 
 function validatePassword(password: string, confirmPassword: string): string | null {
@@ -128,6 +125,22 @@ function useForgotPasswordState(navigate: NavigateFunction): ForgotPasswordState
     redirectTimeoutRef.current = setTimeout(callback, delay);
   };
 
+  const handleRequestError = (err: unknown): boolean => {
+    const typed = err as { name?: string; message?: string };
+    if (SENSITIVE_RESET_ERROR_NAMES.has(typed.name ?? '')) {
+      return false;
+    }
+    console.error('Reset password request failed:', err);
+    setError(
+      getErrorMessage(
+        err,
+        RESET_ERROR_MESSAGES,
+        'Unable to send reset code. Please try again.',
+      ),
+    );
+    return true;
+  };
+
   const handleRequestCode = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -142,19 +155,17 @@ function useForgotPasswordState(navigate: NavigateFunction): ForgotPasswordState
     setLoading(true);
     try {
       await resetPassword({ username: trimmedEmail });
-      setCodeSent(true);
-      setSuccess(`If an account exists for ${trimmedEmail}, a reset code has been sent.`);
     } catch (err: unknown) {
-      if (isSafeResetRequestError(err)) {
-        setCodeSent(true);
-        setSuccess(`If an account exists for ${trimmedEmail}, a reset code has been sent.`);
-      } else {
-        console.error('Reset password request failed:', err);
-        setError(getErrorMessage(err, RESET_ERROR_MESSAGES, 'Unable to send reset code. Please try again.'));
+      if (handleRequestError(err)) {
+        setLoading(false);
+        return;
       }
-    } finally {
-      setLoading(false);
     }
+    setCodeSent(true);
+    setSuccess(
+      `If an account exists for ${trimmedEmail}, a reset code has been sent.`,
+    );
+    setLoading(false);
   };
 
   const handleConfirmReset = async (e: React.FormEvent) => {
@@ -185,7 +196,13 @@ function useForgotPasswordState(navigate: NavigateFunction): ForgotPasswordState
         setError('Invalid confirmation code. Please check and try again.');
       } else {
         console.error('Confirm reset password failed:', err);
-        setError(getErrorMessage(err, CONFIRM_ERROR_MESSAGES, 'Unable to reset password. Please try again.'));
+        setError(
+          getErrorMessage(
+            err,
+            CONFIRM_ERROR_MESSAGES,
+            'Unable to reset password. Please try again.',
+          ),
+        );
       }
     } finally {
       setLoading(false);
