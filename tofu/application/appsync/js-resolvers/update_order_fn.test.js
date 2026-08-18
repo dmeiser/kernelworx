@@ -79,6 +79,28 @@ describe('update_order_fn request', () => {
     );
   });
 
+  it('rejects a non-array lineItems value', () => {
+    const ctx = {
+      stash: {
+        order: {
+          campaignId: 'CAMPAIGN#c1',
+          orderId: 'ORDER#o1',
+        },
+        catalog: null,
+      },
+      args: {
+        input: {
+          lineItems: 'not-an-array',
+        },
+      },
+    };
+
+    assert.throws(
+      () => request(ctx),
+      /BadRequest: Order must have at least one line item/
+    );
+  });
+
   it('does not require lineItems when updating other fields', () => {
     const ctx = {
       stash: {

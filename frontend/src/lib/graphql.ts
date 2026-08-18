@@ -578,8 +578,8 @@ export const SHARED_CAMPAIGN_FRAGMENT = gql`
   }
 `;
 
-// Lightweight list fragment that omits the nested catalog so a stale or
-// deleted catalog does not prevent the shared-campaign list from rendering.
+// Lightweight list fragment that keeps the nested catalog nullable so a stale
+// or deleted catalog does not prevent the shared-campaign list from rendering.
 export const SHARED_CAMPAIGN_LIST_FRAGMENT = gql`
   fragment SharedCampaignListFields on SharedCampaign {
     sharedCampaignCode

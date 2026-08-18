@@ -3121,7 +3121,7 @@ class TestAdminSearchUser:
         }
 
         with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client, \
-             patch("src.handlers.admin_operations.tables") as _mock_tables, \
+             patch("src.handlers.admin_operations.tables"), \
              patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names, \
              patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups:
             mock_client = MagicMock()
@@ -3171,7 +3171,7 @@ class TestAdminSearchUser:
         }
 
         with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client, \
-             patch("src.handlers.admin_operations.tables") as _mock_tables, \
+             patch("src.handlers.admin_operations.tables"), \
              patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names, \
              patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups:
             mock_client = MagicMock()
@@ -3994,6 +3994,22 @@ class TestBatchHelpers:
 
         assert result == {}
         mock_cognito.admin_list_groups_for_user.assert_not_called()
+
+    def test_batch_get_user_groups_filters_falsy_usernames(
+        self,
+    ) -> None:
+        """Falsy usernames are filtered out before invoking Cognito."""
+        mock_cognito = MagicMock()
+        mock_cognito.admin_list_groups_for_user.return_value = {"Groups": []}
+
+        result = _batch_get_user_groups(
+            mock_cognito, "pool-id", ["", "user-1", None, "user-1"], MagicMock()
+        )
+
+        assert result == {"user-1": []}
+        mock_cognito.admin_list_groups_for_user.assert_called_once_with(
+            UserPoolId="pool-id", Username="user-1"
+        )
 
     def test_batch_get_user_groups_parallel(
         self,

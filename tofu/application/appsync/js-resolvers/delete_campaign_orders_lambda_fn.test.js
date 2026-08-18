@@ -28,7 +28,6 @@ describe('delete_campaign_orders_lambda_fn request', () => {
     const result = request(ctx);
 
     assert.deepStrictEqual(result, { deletedCount: 0 });
-    assert.strictEqual(ctx.stash.skipOrderDelete, true);
   });
 });
 

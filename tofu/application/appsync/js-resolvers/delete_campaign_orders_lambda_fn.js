@@ -5,7 +5,6 @@ export function request(ctx) {
 
     // If campaign doesn't exist, skip the Lambda invocation
     if (!campaign) {
-        ctx.stash.skipOrderDelete = true;
         return runtime.earlyReturn({ deletedCount: 0 });
     }
 
