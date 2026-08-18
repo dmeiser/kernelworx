@@ -176,7 +176,7 @@ describe('SharedCampaignsPage', () => {
       });
     });
 
-    it('shows Unknown Catalog fallback when catalog is missing', async () => {
+    it('shows catalog id when catalog object is missing', async () => {
       const campaignsWithMissingCatalog = [
         {
           ...mockSharedCampaigns[0],
@@ -190,7 +190,7 @@ describe('SharedCampaignsPage', () => {
         expect(screen.getByText('NOCAT123')).toBeInTheDocument();
       });
 
-      expect(screen.getByText('Unknown Catalog')).toBeInTheDocument();
+      expect(screen.getByText('catalog-1')).toBeInTheDocument();
     });
   });
 
