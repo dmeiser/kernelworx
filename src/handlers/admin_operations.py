@@ -13,7 +13,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any, Dict, List, Optional, cast
+from typing import Any, Callable, Dict, List, Optional, cast
 
 import boto3
 from botocore.exceptions import ClientError
@@ -24,13 +24,15 @@ try:  # pragma: no cover
     from utils.dynamodb import get_dynamodb_resource, tables
     from utils.errors import AppError, ErrorCode
     from utils.logging import get_logger
-    from utils.pagination import query_all_items
+    from utils.pagination import query_all_items as _query_all_items
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.auth import is_admin
     from ..utils.dynamodb import get_dynamodb_resource, tables
     from ..utils.errors import AppError, ErrorCode
     from ..utils.logging import get_logger
-    from ..utils.pagination import query_all_items
+    from ..utils.pagination import query_all_items as _query_all_items
+
+query_all_items = cast(Callable[[Any, Any], List[Dict[str, Any]]], _query_all_items)
 
 
 def _get_required_env(name: str) -> str:
@@ -70,7 +72,8 @@ def _batch_get_user_groups(
     the per-user calls to avoid the N+1 fan-out.
     """
     groups_map: dict[str, list[str]] = {}
-    if not usernames:
+    unique_usernames = list(dict.fromkeys(u for u in usernames if u))
+    if not unique_usernames:
         return groups_map
 
     def _fetch(username: str) -> tuple[str, list[str]]:
@@ -78,7 +81,7 @@ def _batch_get_user_groups(
 
     try:
         with ThreadPoolExecutor(max_workers=10) as executor:
-            results = executor.map(_fetch, usernames)
+            results = executor.map(_fetch, unique_usernames)
         for username, groups in results:
             groups_map[username] = groups
     except Exception as e:
@@ -107,16 +110,31 @@ def _batch_get_display_names(account_ids: list[str], logger: Any) -> dict[str, s
     try:
         for i in range(0, len(keys), 100):
             batch = keys[i : i + 100]
-            response = get_dynamodb_resource().batch_get_item(
-                RequestItems={accounts_table_name: {"Keys": batch}}
-            )
-            for item in response.get("Responses", {}).get(accounts_table_name, []):
-                raw_id = item.get("accountId", "")
-                key = raw_id[8:] if raw_id.startswith("ACCOUNT#") else raw_id
-                given_name = str(item.get("givenName", ""))
-                family_name = str(item.get("familyName", ""))
-                if given_name or family_name:
-                    display_names[key] = f"{given_name} {family_name}".strip()
+            keys_to_fetch = batch
+            for attempt in range(3):
+                if not keys_to_fetch:
+                    break
+                response = get_dynamodb_resource().batch_get_item(
+                    RequestItems={accounts_table_name: {"Keys": keys_to_fetch}}
+                )
+                for item in response.get("Responses", {}).get(accounts_table_name, []):
+                    raw_id = item.get("accountId", "")
+                    key = raw_id[8:] if raw_id.startswith("ACCOUNT#") else raw_id
+                    given_name = str(item.get("givenName", ""))
+                    family_name = str(item.get("familyName", ""))
+                    if given_name or family_name:
+                        display_names[key] = f"{given_name} {family_name}".strip()
+
+                unprocessed = (
+                    response.get("UnprocessedKeys", {}).get(accounts_table_name, {}).get("Keys", [])
+                )
+                keys_to_fetch = unprocessed
+                if keys_to_fetch and attempt < 2:
+                    logger.warning(
+                        "Unprocessed display-name keys, retrying",
+                        attempt=attempt + 1,
+                        count=len(keys_to_fetch),
+                    )
     except ClientError as e:
         logger.warning("Failed to batch fetch display names", error=str(e))
 
@@ -1184,15 +1202,12 @@ def admin_get_user_catalogs(event: Dict[str, Any], context: Any) -> list[Dict[st
 
 def _get_user_profiles(db_account_id: str, logger: Any) -> list[Dict[str, Any]]:
     """Get all profiles owned by an account."""
-    return cast(
-        List[Dict[str, Any]],
-        query_all_items(
-            tables.profiles,
-            {
-                "KeyConditionExpression": "ownerAccountId = :owner",
-                "ExpressionAttributeValues": {":owner": db_account_id},
-            },
-        ),
+    return query_all_items(
+        tables.profiles,
+        {
+            "KeyConditionExpression": "ownerAccountId = :owner",
+            "ExpressionAttributeValues": {":owner": db_account_id},
+        },
     )
 
 

@@ -3121,7 +3121,7 @@ class TestAdminSearchUser:
         }
 
         with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client, \
-             patch("src.handlers.admin_operations.tables") as mock_tables, \
+             patch("src.handlers.admin_operations.tables") as _mock_tables, \
              patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names, \
              patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups:
             mock_client = MagicMock()
@@ -3171,7 +3171,7 @@ class TestAdminSearchUser:
         }
 
         with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client, \
-             patch("src.handlers.admin_operations.tables") as mock_tables, \
+             patch("src.handlers.admin_operations.tables") as _mock_tables, \
              patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names, \
              patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups:
             mock_client = MagicMock()

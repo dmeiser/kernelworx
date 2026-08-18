@@ -103,7 +103,7 @@ export function request(ctx) {
     }
 
     if (input.lineItems !== undefined) {
-        if (input.lineItems.length === 0) {
+        if (!Array.isArray(input.lineItems) || input.lineItems.length === 0) {
             util.error('Order must have at least one line item', 'BadRequest');
         }
 
@@ -117,7 +117,6 @@ export function request(ctx) {
         }
 
         const enrichedLineItems = [];
-        // TODO(#75): Money is accumulated as JS double; consider integer cents or Decimal to avoid rounding issues.
         let totalAmount = 0.0;
 
         for (const lineItem of input.lineItems) {
