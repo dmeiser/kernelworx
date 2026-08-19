@@ -3,12 +3,13 @@
  */
 
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, act } from '@testing-library/react';
 import { BrowserRouter } from 'react-router-dom';
 import { ForgotPasswordPage } from '../src/pages/ForgotPasswordPage';
 import { useAuth } from '../src/contexts/AuthContext';
 import type { AuthContextValue } from '../src/types/auth';
 import { resetPassword, confirmResetPassword } from 'aws-amplify/auth';
+import type { ResetPasswordOutput } from 'aws-amplify/auth';
 
 const mockNavigate = vi.fn();
 
@@ -55,7 +56,7 @@ describe('ForgotPasswordPage', () => {
     vi.clearAllMocks();
     vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.mocked(useAuth).mockReturnValue({ isAuthenticated: false, loading: false } as AuthContextValue);
-    vi.mocked(resetPassword).mockResolvedValue({} as any);
+    vi.mocked(resetPassword).mockResolvedValue({ isPasswordReset: false } as ResetPasswordOutput);
     vi.mocked(confirmResetPassword).mockResolvedValue(undefined);
   });
 
@@ -375,6 +376,53 @@ describe('ForgotPasswordPage', () => {
       fireEvent.click(screen.getByRole('button', { name: /close/i }));
       await waitFor(() => {
         expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+      });
+    });
+
+    test('shows validation error when confirmation code is empty', async () => {
+      await fillResetForm('', 'Password123!', 'Password123!');
+      forceSubmitForm();
+
+      expect(await screen.findByText('Confirmation code is required')).toBeInTheDocument();
+      expect(confirmResetPassword).not.toHaveBeenCalled();
+    });
+
+    test('shows validation error when confirmation code is not 6 digits', async () => {
+      await fillResetForm('12345', 'Password123!', 'Password123!');
+      fireEvent.click(screen.getByRole('button', { name: 'Reset Password' }));
+
+      expect(await screen.findByText('Confirmation code must be 6 digits')).toBeInTheDocument();
+      expect(confirmResetPassword).not.toHaveBeenCalled();
+    });
+
+    test('renders a resend-code button on the confirmation step', async () => {
+      expect(screen.getByRole('button', { name: 'Resend Code' })).toBeInTheDocument();
+    });
+
+    test('resends the reset code for the stored email', async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Resend Code' }));
+
+      await waitFor(() => {
+        expect(resetPassword).toHaveBeenLastCalledWith({ username: 'user@example.com' });
+      });
+      expect(screen.getByRole('alert')).toHaveTextContent(
+        'If an account exists for user@example.com, a reset code has been sent.',
+      );
+    });
+
+    test('disables resend-code button during cooldown', async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Resend Code' }));
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /Resend code in/i })).toBeDisabled();
+      });
+
+      act(() => {
+        vi.advanceTimersByTime(30000);
+      });
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: 'Resend Code' })).toBeEnabled();
       });
     });
   });

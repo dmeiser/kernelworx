@@ -25,6 +25,9 @@ import { resetPassword, confirmResetPassword } from 'aws-amplify/auth';
 import { useAuth } from '../contexts/AuthContext';
 
 const PASSWORD_REGEX = /^(?=.*[A-Z])(?=.*[a-z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,}$/;
+const CONFIRM_CODE_REGEX = /^\d{6}$/;
+const POST_RESET_REDIRECT_MS = 1500;
+const RESEND_COOLDOWN_MS = 30000;
 
 const RESET_ERROR_MESSAGES: Record<string, string> = {
   LimitExceededException:
@@ -36,8 +39,7 @@ const CONFIRM_ERROR_MESSAGES: Record<string, string> = {
   ExpiredCodeException: 'This code has expired. Please request a new one.',
   InvalidPasswordException:
     'Password does not meet requirements: minimum 8 characters with uppercase, lowercase, numbers, and symbols.',
-  UserNotFoundException:
-    'No account found with that email address. Please start the reset process again.',
+  // UserNotFoundException is handled separately to avoid account enumeration.
 };
 
 const SENSITIVE_RESET_ERROR_NAMES = new Set([
@@ -50,11 +52,11 @@ function getErrorMessage(
   table: Record<string, string>,
   fallback: string,
 ): string {
-  const typed = err as { name?: string; message?: string };
+  const typed = err as { name?: string };
   if (typed.name && table[typed.name]) {
     return table[typed.name];
   }
-  return typed.message || fallback;
+  return fallback;
 }
 
 function validatePassword(password: string, confirmPassword: string): string | null {
@@ -66,6 +68,17 @@ function validatePassword(password: string, confirmPassword: string): string | n
   }
   if (password !== confirmPassword) {
     return 'Passwords do not match';
+  }
+  return null;
+}
+
+function validateConfirmationCode(code: string): string | null {
+  const trimmed = code.trim();
+  if (!trimmed) {
+    return 'Confirmation code is required';
+  }
+  if (!CONFIRM_CODE_REGEX.test(trimmed)) {
+    return 'Confirmation code must be 6 digits';
   }
   return null;
 }
@@ -83,8 +96,10 @@ interface ForgotPasswordState {
   success: string | null;
   loading: boolean;
   codeSent: boolean;
+  resendCooldown: number;
   handleRequestCode: (e: React.FormEvent) => Promise<void>;
   handleConfirmReset: (e: React.FormEvent) => Promise<void>;
+  handleResendCode: () => Promise<void>;
   handleBackToEmail: () => void;
   navigateLogin: () => void;
   clearError: () => void;
@@ -102,7 +117,9 @@ function useForgotPasswordState(navigate: NavigateFunction): ForgotPasswordState
   const [success, setSuccess] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [codeSent, setCodeSent] = useState(false);
+  const [resendCooldown, setResendCooldown] = useState(0);
   const redirectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const resendIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -115,19 +132,45 @@ function useForgotPasswordState(navigate: NavigateFunction): ForgotPasswordState
       if (redirectTimeoutRef.current) {
         clearTimeout(redirectTimeoutRef.current);
       }
+      if (resendIntervalRef.current) {
+        clearInterval(resendIntervalRef.current);
+      }
     };
   }, []);
 
-  const scheduleRedirect = (callback: () => void, delay = 1500) => {
+  const scheduleRedirect = (callback: () => void) => {
     if (redirectTimeoutRef.current) {
       clearTimeout(redirectTimeoutRef.current);
     }
-    redirectTimeoutRef.current = setTimeout(callback, delay);
+    redirectTimeoutRef.current = setTimeout(callback, POST_RESET_REDIRECT_MS);
+  };
+
+  const startResendCooldown = () => {
+    if (resendIntervalRef.current) {
+      clearInterval(resendIntervalRef.current);
+    }
+    setResendCooldown(RESEND_COOLDOWN_MS);
+    resendIntervalRef.current = setInterval(() => {
+      setResendCooldown((prev) => {
+        const next = prev - 1000;
+        if (next <= 0 && resendIntervalRef.current) {
+          clearInterval(resendIntervalRef.current);
+          resendIntervalRef.current = null;
+        }
+        return Math.max(0, next);
+      });
+    }, 1000);
   };
 
   const handleRequestError = (err: unknown): boolean => {
     const typed = err as { name?: string; message?: string };
     if (SENSITIVE_RESET_ERROR_NAMES.has(typed.name ?? '')) {
+      // Keep the user-facing response uniform, but log for operator visibility.
+      console.warn(
+        'Reset password request returned sensitive error; swallowing to avoid account enumeration:',
+        typed.name,
+        typed.message,
+      );
       return false;
     }
     console.error('Reset password request failed:', err);
@@ -168,10 +211,42 @@ function useForgotPasswordState(navigate: NavigateFunction): ForgotPasswordState
     setLoading(false);
   };
 
+  const handleResendCode = async () => {
+    if (resendCooldown > 0) return;
+
+    setError(null);
+    setSuccess(null);
+
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail || !trimmedEmail.includes('@')) {
+      setError('Please enter a valid email address');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await resetPassword({ username: trimmedEmail });
+      setSuccess(
+        `If an account exists for ${trimmedEmail}, a reset code has been sent.`,
+      );
+      startResendCooldown();
+    } catch (err: unknown) {
+      handleRequestError(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleConfirmReset = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setSuccess(null);
+
+    const codeError = validateConfirmationCode(code);
+    if (codeError) {
+      setError(codeError);
+      return;
+    }
 
     const validationError = validatePassword(password, confirmPassword);
     if (validationError) {
@@ -214,6 +289,11 @@ function useForgotPasswordState(navigate: NavigateFunction): ForgotPasswordState
       clearTimeout(redirectTimeoutRef.current);
       redirectTimeoutRef.current = null;
     }
+    if (resendIntervalRef.current) {
+      clearInterval(resendIntervalRef.current);
+      resendIntervalRef.current = null;
+    }
+    setResendCooldown(0);
     setCodeSent(false);
     setCode('');
     setPassword('');
@@ -239,8 +319,10 @@ function useForgotPasswordState(navigate: NavigateFunction): ForgotPasswordState
     success,
     loading,
     codeSent,
+    resendCooldown,
     handleRequestCode,
     handleConfirmReset,
+    handleResendCode,
     handleBackToEmail,
     navigateLogin,
     clearError: () => setError(null),
@@ -284,6 +366,8 @@ const RequestCodeForm: React.FC<RequestCodeFormProps> = ({
       fullWidth
       size="large"
       disabled={loading}
+      aria-label={loading ? 'Sending reset code' : undefined}
+      aria-busy={loading}
       sx={{ mb: 2 }}
     >
       {loading ? <CircularProgress size={24} /> : 'Send Reset Code'}
@@ -314,7 +398,9 @@ interface ConfirmResetFormProps {
   confirmPassword: string;
   setConfirmPassword: (value: string) => void;
   loading: boolean;
+  resendCooldown: number;
   onSubmit: (e: React.FormEvent) => Promise<void>;
+  onResendCode: () => Promise<void>;
   onBackToEmail: () => void;
   onLogin: () => void;
 }
@@ -327,7 +413,9 @@ const ConfirmResetForm: React.FC<ConfirmResetFormProps> = ({
   confirmPassword,
   setConfirmPassword,
   loading,
+  resendCooldown,
   onSubmit,
+  onResendCode,
   onBackToEmail,
   onLogin,
 }) => (
@@ -342,7 +430,7 @@ const ConfirmResetForm: React.FC<ConfirmResetFormProps> = ({
         fullWidth
         autoComplete="one-time-code"
         disabled={loading}
-        inputProps={{ maxLength: 6, pattern: '[0-9]*' }}
+        slotProps={{ htmlInput: { maxLength: 6, pattern: '[0-9]*' } }}
         autoFocus
       />
       <TextField
@@ -355,7 +443,7 @@ const ConfirmResetForm: React.FC<ConfirmResetFormProps> = ({
         autoComplete="new-password"
         disabled={loading}
         helperText="Minimum 8 characters with uppercase, lowercase, numbers, and symbols"
-        inputProps={{ 'data-testid': 'new-password' }}
+        slotProps={{ htmlInput: { 'data-testid': 'new-password' } }}
       />
       <TextField
         label="Confirm New Password"
@@ -366,7 +454,7 @@ const ConfirmResetForm: React.FC<ConfirmResetFormProps> = ({
         fullWidth
         autoComplete="new-password"
         disabled={loading}
-        inputProps={{ 'data-testid': 'confirm-password' }}
+        slotProps={{ htmlInput: { 'data-testid': 'confirm-password' } }}
       />
     </Stack>
 
@@ -376,12 +464,24 @@ const ConfirmResetForm: React.FC<ConfirmResetFormProps> = ({
       fullWidth
       size="large"
       disabled={loading}
+      aria-label={loading ? 'Resetting password' : undefined}
+      aria-busy={loading}
       sx={{ mb: 2 }}
     >
       {loading ? <CircularProgress size={24} /> : 'Reset Password'}
     </Button>
 
     <Stack spacing={1}>
+      <Button
+        variant="text"
+        fullWidth
+        onClick={() => { void onResendCode(); }}
+        disabled={loading || resendCooldown > 0}
+      >
+        {resendCooldown > 0
+          ? `Resend code in ${Math.ceil(resendCooldown / 1000)}s`
+          : 'Resend Code'}
+      </Button>
       <Button variant="text" fullWidth onClick={onBackToEmail} disabled={loading}>
         Back to Email
       </Button>
@@ -501,7 +601,9 @@ export const ForgotPasswordPage: React.FC = () => {
               confirmPassword={state.confirmPassword}
               setConfirmPassword={state.setConfirmPassword}
               loading={state.loading}
+              resendCooldown={state.resendCooldown}
               onSubmit={state.handleConfirmReset}
+              onResendCode={state.handleResendCode}
               onBackToEmail={state.handleBackToEmail}
               onLogin={state.navigateLogin}
             />
