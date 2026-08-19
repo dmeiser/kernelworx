@@ -23,3 +23,6 @@ def test_forgot_password_page_loads(page: Page) -> None:
     email_input = page.get_by_label("Email")
     expect(email_input).to_be_visible()
     expect(email_input).to_be_editable()
+
+    send_code_button = page.get_by_role("button", name="Send Reset Code")
+    expect(send_code_button).to_be_visible()
