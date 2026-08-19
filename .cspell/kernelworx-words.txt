@@ -121,6 +121,7 @@ httpOnly
 hyperlegible
 iconButton
 iconify
+idempotently
 idps
 ie
 ifdef
