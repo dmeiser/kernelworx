@@ -295,13 +295,14 @@ import {
     "validate-payment-method",
     "admin-operations",
   ])
-  id = "/aws/lambda/kernelworx-${each.value}-ue1-dev"
+<<<<<<< HEAD
+  id = "/aws/lambda/${local.name_prefix}-${each.value}-${var.region_abbrev}-${var.environment}"
   to = module.lambda.aws_cloudwatch_log_group.functions[each.value]
 }
 
 import {
   for_each = toset(["post-auth", "pre-signup"])
-  id       = "/aws/lambda/kernelworx-${each.value}-ue1-dev"
+  id       = "/aws/lambda/${local.name_prefix}-${each.value}-${var.region_abbrev}-${var.environment}"
   to       = module.lambda.aws_cloudwatch_log_group.trigger_functions[each.value]
 }
 

@@ -14,14 +14,16 @@ The first `tofu apply` in such an environment will fail with `ResourceAlreadyExi
 
 ## How to import
 
-The module now includes `import` blocks in `tofu/application/modules/lambda/main.tf` for every managed log group. If your OpenTofu/Terraform version supports declarative imports, a single `tofu plan` followed by `tofu apply` will import the existing groups automatically. If you prefer manual imports (or the import blocks have already been removed after the first apply), use the `tofu import` commands below.
+The import blocks live in the environment root configurations (`tofu/application/environments/dev/main.tf` and `tofu/application/environments/prod/main.tf`), not in the Lambda module, because OpenTofu only allows `import` blocks in the root module.
+
+If your OpenTofu/Terraform version supports declarative imports, a single `tofu plan` followed by `tofu apply` from the environment directory will import the existing groups automatically. If you prefer manual imports (or the import blocks have already been removed after the first apply), use the `tofu import` commands below.
 
 ### Declarative import blocks
 
-1. Plan the apply. The import blocks will record the intended imports.
+1. Change to the environment directory and plan the apply. The import blocks will record the intended imports.
 
    ```bash
-   cd tofu/application
+   cd tofu/application/environments/dev   # or prod
    tofu plan -target=module.lambda
    ```
 
@@ -31,14 +33,14 @@ The module now includes `import` blocks in `tofu/application/modules/lambda/main
    tofu apply -target=module.lambda
    ```
 
-   Once the groups are imported, the `import` blocks can be removed from `main.tf`.
+   Once the groups are imported, the `import` blocks can be removed from the environment's `main.tf`.
 
 ### Manual `tofu import`
 
-1. Plan the apply and note which log groups the plan wants to create.
+1. Plan the apply from the environment directory and note which log groups the plan wants to create.
 
    ```bash
-   cd tofu/application
+   cd tofu/application/environments/dev   # or prod
    tofu plan -target=module.lambda
    ```
 
@@ -100,7 +102,7 @@ The current Cognito trigger function keys are:
 - `post-auth`
 - `pre-signup`
 
-> The exact set is defined in `tofu/application/modules/lambda/main.tf` under `local.functions` and `local.trigger_functions`. If those maps change, update this list.
+> The exact set is defined in `tofu/application/modules/lambda/main.tf` under `local.functions` and `local.trigger_functions`. If those maps change, update this list and the corresponding `import` blocks in both environment root configurations.
 
 ## Scripted bulk import
 
@@ -109,7 +111,7 @@ If you have AWS CLI access and the functions already exist, you can generate the
 ```bash
 prefix="kernelworx"
 region_abbrev="ue1"
-environment="prod"
+environment="prod"   # change to "dev" as needed
 
 for key in list-my-shares list-catalogs-in-use create-profile request-report unit-reporting \
            list-unit-catalogs list-unit-campaign-catalogs campaign-operations \
@@ -124,4 +126,4 @@ for key in post-auth pre-signup; do
 done
 ```
 
-Copy the generated commands and run them from `tofu/application`.
+Copy the generated commands and run them from the appropriate environment directory (`tofu/application/environments/dev` or `tofu/application/environments/prod`).
