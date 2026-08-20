@@ -14,7 +14,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import boto3
 from botocore.exceptions import ClientError
@@ -31,10 +31,14 @@ except ModuleNotFoundError:  # pragma: no cover
     from ..utils.errors import AppError, ErrorCode
     from ..utils.logging import get_logger, mask_email
 
+# Import query_all_items with a runtime fallback so it resolves in both the
+# Lambda absolute-import context and the unit-test relative-import context.
 try:  # pragma: no cover
-    from utils.pagination import query_all_items
+    from utils.pagination import query_all_items as _query_all_items
 except ModuleNotFoundError:  # pragma: no cover
-    from ..utils.pagination import query_all_items
+    from ..utils.pagination import query_all_items as _query_all_items
+
+query_all_items: Callable[[Any, Dict[str, Any]], List[Dict[str, Any]]] = _query_all_items
 
 
 def _get_required_env(name: str) -> str:
