@@ -36,9 +36,6 @@ resource "aws_cloudwatch_log_group" "appsync" {
   name              = "/aws/appsync/apis/${aws_appsync_graphql_api.main.id}"
   retention_in_days = var.environment == "prod" ? 30 : 7
 
-  lifecycle {
-    prevent_destroy = false
-  }
 }
 
 # IAM role that permits AppSync to publish logs for this API.
@@ -57,10 +54,6 @@ data "aws_iam_policy_document" "appsync_logging_assume_role" {
 resource "aws_iam_role" "appsync_logging" {
   name               = "${local.api_name}-logs"
   assume_role_policy = data.aws_iam_policy_document.appsync_logging_assume_role.json
-
-  lifecycle {
-    prevent_destroy = false
-  }
 }
 
 data "aws_iam_policy_document" "appsync_logging" {

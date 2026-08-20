@@ -1706,14 +1706,14 @@ class TestAdminDeleteUser:
                 assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
                 mock_cognito.admin_delete_user.assert_not_called()
 
-    def test_cognito_lookup_error_deletes_dynamodb_idempotently(
+    def test_cognito_lookup_error_aborts_deletion(
         self,
         dynamodb_table: Any,
         admin_appsync_event: Dict[str, Any],
         lambda_context: Any,
         monkeypatch: Any,
     ) -> None:
-        """Test that Cognito lookup errors do not block DynamoDB cleanup."""
+        """Test that Cognito lookup errors abort deletion before DynamoDB cleanup."""
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
 
@@ -1741,21 +1741,22 @@ class TestAdminDeleteUser:
             )
             mock_get_client.return_value = mock_cognito
 
-            result = admin_delete_user(event, lambda_context)
+            with pytest.raises(AppError) as exc_info:
+                admin_delete_user(event, lambda_context)
 
-            assert result is True
+            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
             mock_cognito.admin_delete_user.assert_not_called()
             response = accounts_table.get_item(Key={"accountId": f"ACCOUNT#{target_account_id}"})
-            assert "Item" not in response
+            assert "Item" in response
 
-    def test_sub_lookup_error_deletes_dynamodb_idempotently(
+    def test_sub_lookup_error_aborts_deletion(
         self,
         dynamodb_table: Any,
         admin_appsync_event: Dict[str, Any],
         lambda_context: Any,
         monkeypatch: Any,
     ) -> None:
-        """Test that sub lookup errors do not block DynamoDB cleanup."""
+        """Test that sub lookup errors abort deletion before DynamoDB cleanup."""
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
 
@@ -1785,11 +1786,12 @@ class TestAdminDeleteUser:
             mock_cognito.admin_delete_user.return_value = {}
             mock_get_client.return_value = mock_cognito
 
-            result = admin_delete_user(event, lambda_context)
+            with pytest.raises(AppError) as exc_info:
+                admin_delete_user(event, lambda_context)
 
-            assert result is True
+            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
             response = accounts_table.get_item(Key={"accountId": f"ACCOUNT#{target_account_id}"})
-            assert "Item" not in response
+            assert "Item" in response
 
     def test_empty_cognito_users_deletes_dynamodb_idempotently(
         self,

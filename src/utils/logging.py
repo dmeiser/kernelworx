@@ -126,11 +126,14 @@ def mask_email(email: Optional[str]) -> str:
     Examples:
         "user@example.com" -> "u***@example.com"
         "ab@example.com"   -> "a***@example.com"
+        "a@example.com"    -> "***@example.com"
         None or invalid    -> "***"
     """
     if not isinstance(email, str) or "@" not in email:
         return "***"
     local, domain = email.split("@", 1)
     if not local:
+        return f"***@{domain}"
+    if len(local) == 1:
         return f"***@{domain}"
     return f"{local[0]}***@{domain}"

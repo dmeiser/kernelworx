@@ -221,9 +221,9 @@ class TestMaskEmail:
         """Mask everything after the first character of the local part."""
         assert mask_email("user@example.com") == "u***@example.com"
 
-    def test_preserves_short_local_part(self) -> None:
-        """Single-character local parts are still masked."""
-        assert mask_email("a@example.com") == "a***@example.com"
+    def test_masks_single_character_local_part(self) -> None:
+        """Single-character local parts are fully masked."""
+        assert mask_email("a@example.com") == "***@example.com"
 
     def test_returns_masked_for_missing_at(self) -> None:
         """Non-email strings are fully masked."""
