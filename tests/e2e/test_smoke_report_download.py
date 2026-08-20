@@ -202,7 +202,8 @@ def test_campaign_reports_csv_content_matches_table(
 
     def _normalize_table_cell(column: str, value: str) -> str:
         text = value.strip()
-        if text == "-":
+        # The DOM uses em-dashes (and occasionally hyphens) for empty cells.
+        if text in ("", "-", "—", "–"):
             return ""
         if column == "Address":
             # The DOM renders address parts on separate lines; CSV uses ", ".
