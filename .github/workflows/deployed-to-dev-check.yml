@@ -29,6 +29,10 @@ jobs:
           git fetch base dev
           git fetch base main
           pr_head="${{ github.event.pull_request.head.sha }}"
+          if git merge-base --is-ancestor "$pr_head" base/dev; then
+            echo "PR head is already an ancestor of base/dev; all changes are deployed."
+            exit 0
+          fi
           unique_commits=$(git rev-list base/main.."$pr_head")
           if [ -z "$unique_commits" ]; then
             echo "No unique commits found; nothing to deploy."
