@@ -14,6 +14,27 @@ The first `tofu apply` in such an environment will fail with `ResourceAlreadyExi
 
 ## How to import
 
+The module now includes `import` blocks in `tofu/application/modules/lambda/main.tf` for every managed log group. If your OpenTofu/Terraform version supports declarative imports, a single `tofu plan` followed by `tofu apply` will import the existing groups automatically. If you prefer manual imports (or the import blocks have already been removed after the first apply), use the `tofu import` commands below.
+
+### Declarative import blocks
+
+1. Plan the apply. The import blocks will record the intended imports.
+
+   ```bash
+   cd tofu/application
+   tofu plan -target=module.lambda
+   ```
+
+2. Apply. OpenTofu will import each existing group and then set retention.
+
+   ```bash
+   tofu apply -target=module.lambda
+   ```
+
+   Once the groups are imported, the `import` blocks can be removed from `main.tf`.
+
+### Manual `tofu import`
+
 1. Plan the apply and note which log groups the plan wants to create.
 
    ```bash
