@@ -67,23 +67,6 @@ resource "aws_appsync_function" "delete_campaign_orders" {
   })
 }
 
-# Transitionary placeholder: the deleteCampaign resolver no longer includes
-# this function, but the resource must stay in state for one more dev deploy
-# so OpenTofu does not try to destroy it before the resolver update is applied.
-# The data source is NONE, so it does not reference the removed Lambda ARN.
-resource "aws_appsync_function" "delete_campaign_orders_lambda" {
-  api_id      = aws_appsync_graphql_api.main.id
-  data_source = aws_appsync_datasource.delete_campaign_orders.name
-  name        = "DeleteCampaignOrdersLambdaFn${local.env_suffix}"
-
-  runtime {
-    name            = "APPSYNC_JS"
-    runtime_version = "1.0.0"
-  }
-
-  code = file("${local.js_resolvers_dir}/delete_campaign_orders_lambda_fn.js")
-}
-
 resource "aws_appsync_function" "delete_campaign" {
   api_id      = aws_appsync_graphql_api.main.id
   data_source = aws_appsync_datasource.campaigns.name
