@@ -90,6 +90,16 @@ resource "aws_appsync_datasource" "campaign_operations" {
   }
 }
 
+# Transitionary NONE data source: keeps the AppSync data source alive while
+# dev moves off the deleted delete-campaign-orders Lambda. The resolver already
+# uses the JS pipeline, so this data source is no longer invoked.
+resource "aws_appsync_datasource" "delete_campaign_orders" {
+  api_id           = aws_appsync_graphql_api.main.id
+  name             = "DeleteCampaignOrdersDS"
+  type             = "NONE"
+  service_role_arn = var.appsync_service_role_arn
+}
+
 resource "aws_appsync_datasource" "delete_profile_cascade" {
   api_id           = aws_appsync_graphql_api.main.id
   name             = "DeleteProfileCascadeDS"
