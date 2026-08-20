@@ -31,10 +31,11 @@ import {
   DELETE_CAMPAIGN,
   LIST_MANAGED_CATALOGS,
   LIST_MY_CATALOGS,
+  LIST_CAMPAIGNS_BY_PROFILE,
 } from '../lib/graphql';
 import { LoadingState } from '../components/LoadingState';
 import { ConfirmDialog } from '../components/ConfirmDialog';
-import { ensureCampaignId, ensureCatalogId, toUrlId } from '../lib/ids';
+import { ensureCampaignId, ensureCatalogId, ensureProfileId, toUrlId } from '../lib/ids';
 import { dateToISO } from '../lib/date-utils';
 import type { Campaign, Catalog } from '../types';
 
@@ -197,6 +198,7 @@ export const CampaignSettingsPage: React.FC = () => {
   const profileId = decodeUrlParam(encodedProfileId);
   const campaignId = decodeUrlParam(encodedCampaignId);
   const dbCampaignId = ensureCampaignId(campaignId);
+  const dbProfileId = ensureProfileId(profileId);
   const navigate = useNavigate();
   const [campaignName, setCampaignName] = useState('');
   const [startDate, setStartDate] = useState('');
@@ -244,6 +246,9 @@ export const CampaignSettingsPage: React.FC = () => {
 
   // Update campaign mutation
   const [updateCampaign, { loading: updating }] = useMutation(UPDATE_CAMPAIGN, {
+    refetchQueries: dbProfileId
+      ? [{ query: LIST_CAMPAIGNS_BY_PROFILE, variables: { profileId: dbProfileId } }]
+      : [],
     onCompleted: () => {
       refetch().catch(() => {});
     },
