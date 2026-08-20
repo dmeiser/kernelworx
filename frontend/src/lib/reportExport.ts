@@ -59,7 +59,7 @@ function getUniqueProducts(orders: Order[]): string[] {
 // Characters that spreadsheet applications interpret as formula triggers.
 const FORMULA_TRIGGER_RE = /^[=+\-@\t\r]/;
 
-function sanitizeReportValue(value: string | number): string | number {
+export function sanitizeReportValue(value: string | number): string | number {
   // Force text treatment for cells that would otherwise be interpreted as formulas.
   if (typeof value === 'string' && FORMULA_TRIGGER_RE.test(value)) {
     return `'${value}`;

@@ -86,7 +86,7 @@ def _link_federated_identity(cognito: Any, user_pool_id: str, existing_username:
             "ProviderAttributeValue": provider_user_id,
         },
     )
-    logger.info(f"Successfully linked {provider_name} identity to user {existing_username}")
+    logger.info(f"Successfully linked {provider_name} identity to user {mask_email(existing_username)}")
     raise FederatedIdentityLinkedException(
         f"Account with email already exists. Your {provider_name} account has been linked. Please sign in again."
     )
@@ -97,7 +97,7 @@ def _handle_existing_user(
 ) -> NoReturn:
     """Handle linking when an existing user is found."""
     existing_username = existing_user["Username"]
-    logger.info(f"Found existing user {existing_username} for email {mask_email(email)}, linking identity")
+    logger.info(f"Found existing user {mask_email(existing_username)} for email {mask_email(email)}, linking identity")
     _link_federated_identity(cognito, user_pool_id, existing_username, username)
 
 
