@@ -178,8 +178,6 @@ const buildDetailRows = (account: Account | undefined, onChangeEmail: () => void
     .map((row) => renderRow(row.key, row.icon, row.label, row.value as React.ReactNode, row.action));
 };
 
-
-
 const AccountHeader: React.FC<{ onEditProfile: () => void }> = ({ onEditProfile }) => (
   <Stack direction="row" justifyContent="space-between" alignItems="center" mb={2} flexWrap="wrap" gap={1}>
     <Typography variant="h6" sx={{ minWidth: 0 }}>Account Information</Typography>

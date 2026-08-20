@@ -110,11 +110,6 @@ locals {
       timeout     = 30
       memory_size = 512
     }
-    "delete-campaign-orders" = {
-      handler     = "handlers.campaign_operations.delete_campaign_orders"
-      timeout     = 60
-      memory_size = 512
-    }
     "delete-profile-cascade" = {
       handler     = "handlers.delete_profile_cascade.lambda_handler"
       timeout     = 60
@@ -263,10 +258,6 @@ resource "aws_lambda_function" "trigger_functions" {
   environment {
     variables = local.common_env
   }
-
-  lifecycle {
-    prevent_destroy = false
-  }
 }
 
 # State migration: post-auth and pre-signup were previously part of
@@ -302,10 +293,6 @@ resource "aws_lambda_function" "functions" {
   environment {
     variables = merge(local.common_env, lookup(each.value, "extra_env", {}))
   }
-
-  lifecycle {
-    prevent_destroy = false
-  }
 }
 
 # Managed log groups for Lambda functions so retention is not "never expire".
@@ -316,10 +303,6 @@ resource "aws_cloudwatch_log_group" "functions" {
 
   name              = "/aws/lambda/${each.value.function_name}"
   retention_in_days = var.environment == "prod" ? 30 : 7
-
-  lifecycle {
-    prevent_destroy = false
-  }
 }
 
 resource "aws_cloudwatch_log_group" "trigger_functions" {
@@ -327,10 +310,6 @@ resource "aws_cloudwatch_log_group" "trigger_functions" {
 
   name              = "/aws/lambda/${each.value.function_name}"
   retention_in_days = var.environment == "prod" ? 30 : 7
-
-  lifecycle {
-    prevent_destroy = false
-  }
 }
 
 # Outputs

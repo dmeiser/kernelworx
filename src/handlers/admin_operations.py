@@ -9,11 +9,12 @@ Provides:
 
 import os
 import re
+import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any, Callable, Dict, List, Optional, cast
+from typing import Any, Dict, Optional
 
 import boto3
 from botocore.exceptions import ClientError
@@ -23,16 +24,14 @@ try:  # pragma: no cover
     from utils.auth import is_admin
     from utils.dynamodb import get_dynamodb_resource, tables
     from utils.errors import AppError, ErrorCode
-    from utils.logging import get_logger
-    from utils.pagination import query_all_items as _query_all_items
+    from utils.logging import get_logger, mask_email
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.auth import is_admin
     from ..utils.dynamodb import get_dynamodb_resource, tables
     from ..utils.errors import AppError, ErrorCode
-    from ..utils.logging import get_logger
-    from ..utils.pagination import query_all_items as _query_all_items
+    from ..utils.logging import get_logger, mask_email
 
-query_all_items = cast(Callable[[Any, Any], List[Dict[str, Any]]], _query_all_items)
+from ..utils.pagination import query_all_items
 
 
 def _get_required_env(name: str) -> str:
@@ -51,15 +50,16 @@ def _get_cognito_client() -> Any:
     return boto3.client("cognito-idp")
 
 
-def _get_user_groups(cognito: Any, user_pool_id: str, username: str) -> list[str]:
-    """Get the groups a user belongs to."""
+def _get_user_groups(cognito: Any, user_pool_id: str, username: str, logger: Any) -> list[str]:
+    """Get the groups a user belongs to, logging per-user failures distinctly."""
     try:
         response = cognito.admin_list_groups_for_user(
             UserPoolId=user_pool_id,
             Username=username,
         )
         return [group["GroupName"] for group in response.get("Groups", [])]
-    except ClientError:
+    except ClientError as e:
+        logger.warning("Failed to fetch groups for user", username=username, error=str(e))
         return []
 
 
@@ -77,7 +77,7 @@ def _batch_get_user_groups(
         return groups_map
 
     def _fetch(username: str) -> tuple[str, list[str]]:
-        return username, _get_user_groups(cognito, user_pool_id, username)
+        return username, _get_user_groups(cognito, user_pool_id, username, logger)
 
     try:
         with ThreadPoolExecutor(max_workers=10) as executor:
@@ -135,6 +135,7 @@ def _batch_get_display_names(account_ids: list[str], logger: Any) -> dict[str, s
                         attempt=attempt + 1,
                         count=len(keys_to_fetch),
                     )
+                    time.sleep(0.05 * (2 ** attempt))
     except ClientError as e:
         logger.warning("Failed to batch fetch display names", error=str(e))
 
@@ -530,7 +531,13 @@ def _build_admin_users_from_cognito(
 def _find_cognito_user_by_sub(
     cognito: Any, user_pool_id: str, account_id: str, logger: Any
 ) -> tuple[str | None, str | None]:
-    """Find Cognito user by sub and return (username, email)."""
+    """Find Cognito user by sub and return (username, email).
+
+    Only an empty Cognito response indicates the user is already absent.
+    Lookup failures (throttling, InternalErrorException, etc.) raise an
+    AppError so the caller does not proceed to delete DynamoDB data while
+    the Cognito user still exists.
+    """
     try:
         users_response = cognito.list_users(
             UserPoolId=user_pool_id,
@@ -544,19 +551,21 @@ def _find_cognito_user_by_sub(
             email = attributes.get("email", "")
             return username, email
     except ClientError as e:
-        logger.warning("Could not find Cognito user by sub", error=str(e), account_id=account_id)
+        logger.error("Cognito lookup by sub failed", error=str(e), account_id=account_id)
+        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to look up Cognito user")
     return None, None
 
 
 def _delete_user_from_cognito(cognito: Any, user_pool_id: str, username: str, email: str, logger: Any) -> None:
     """Delete user from Cognito, treating UserNotFoundException as idempotent success."""
+    masked_email = mask_email(email)
     try:
         cognito.admin_delete_user(UserPoolId=user_pool_id, Username=username)
-        logger.info("Deleted user from Cognito", username=username, email=email)
+        logger.info("Deleted user from Cognito", username=username, email=masked_email)
     except ClientError as e:
         error_code = e.response.get("Error", {}).get("Code", "")
         if error_code == "UserNotFoundException":
-            logger.info("Cognito user already deleted", username=username, email=email)
+            logger.info("Cognito user already deleted", username=username, email=masked_email)
             return
         logger.error("Cognito admin_delete_user failed", error=str(e), error_code=error_code)
         raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to delete user from Cognito")
@@ -712,7 +721,7 @@ def admin_delete_user(event: Dict[str, Any], context: Any) -> bool:
         else:
             logger.info("Cognito user already absent; DynamoDB cleanup completed", account_id=account_id)
 
-        logger.info("User deleted successfully", account_id=account_id, email=email)
+        logger.info("User deleted successfully", account_id=account_id, email=mask_email(email))
         return True
 
     except AppError:
