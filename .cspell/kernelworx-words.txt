@@ -57,6 +57,9 @@ componentkit
 confirmable
 conftest
 contrib
+COOLDOWN
+Cooldown
+cooldown
 coppa
 costEstimator
 creatorMessage
@@ -79,6 +82,7 @@ DynamoDB
 EFGH
 emailAddress
 emoji
+resends
 émoji
 emojis
 Émojis
@@ -117,6 +121,7 @@ httpOnly
 hyperlegible
 iconButton
 iconify
+idempotently
 idps
 ie
 ifdef
