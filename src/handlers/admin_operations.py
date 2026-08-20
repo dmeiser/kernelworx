@@ -67,7 +67,7 @@ def _get_user_groups(cognito: Any, user_pool_id: str, username: str, logger: Any
         )
         return [group["GroupName"] for group in response.get("Groups", [])]
     except ClientError as e:
-        logger.warning("Failed to fetch groups for user", username=username, error=str(e))
+        logger.warning("Failed to fetch groups for user", username=mask_email(username), error=str(e))
         return []
 
 
@@ -560,7 +560,7 @@ def _find_cognito_user_by_sub(
             return username, email
     except ClientError as e:
         logger.error("Cognito lookup by sub failed", error=str(e), account_id=account_id)
-        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to look up Cognito user")
+        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to look up Cognito user") from e
     return None, None
 
 
@@ -569,14 +569,14 @@ def _delete_user_from_cognito(cognito: Any, user_pool_id: str, username: str, em
     masked_email = mask_email(email)
     try:
         cognito.admin_delete_user(UserPoolId=user_pool_id, Username=username)
-        logger.info("Deleted user from Cognito", username=username, email=masked_email)
+        logger.info("Deleted user from Cognito", username=mask_email(username), email=masked_email)
     except ClientError as e:
         error_code = e.response.get("Error", {}).get("Code", "")
         if error_code == "UserNotFoundException":
-            logger.info("Cognito user already deleted", username=username, email=masked_email)
+            logger.info("Cognito user already deleted", username=mask_email(username), email=masked_email)
             return
         logger.error("Cognito admin_delete_user failed", error=str(e), error_code=error_code)
-        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to delete user from Cognito")
+        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to delete user from Cognito") from e
 
 
 def _delete_account_from_dynamodb(account_id: str, logger: Any) -> None:
@@ -667,7 +667,7 @@ def admin_reset_user_password(event: Dict[str, Any], context: Any) -> bool:
         username = _find_user_by_email(cognito, user_pool_id, email, logger)
         _initiate_password_reset(cognito, user_pool_id, username, email, logger)
 
-        logger.info("Password reset initiated", email=email, username=username)
+        logger.info("Password reset initiated", email=mask_email(email), username=mask_email(username))
         return True
 
     except AppError:
@@ -698,7 +698,8 @@ def admin_delete_user(event: Dict[str, Any], context: Any) -> bool:
         True if user was deleted successfully
 
     Raises:
-        AppError: If not admin, user not found, or deletion error
+        AppError: If not admin, self-deletion is attempted, or a deletion error occurs.
+        An absent Cognito user is treated as idempotent success.
     """
     logger = get_logger(__name__)
 

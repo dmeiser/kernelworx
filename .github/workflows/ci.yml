@@ -160,8 +160,15 @@ jobs:
         id: check
         env:
           TEST_OWNER_EMAIL: ${{ secrets.TEST_OWNER_EMAIL }}
+          TEST_OWNER_PASSWORD: ${{ secrets.TEST_OWNER_PASSWORD }}
+          TEST_CONTRIBUTOR_EMAIL: ${{ secrets.TEST_CONTRIBUTOR_EMAIL }}
+          TEST_CONTRIBUTOR_PASSWORD: ${{ secrets.TEST_CONTRIBUTOR_PASSWORD }}
+          TEST_READONLY_EMAIL: ${{ secrets.TEST_READONLY_EMAIL }}
+          TEST_READONLY_PASSWORD: ${{ secrets.TEST_READONLY_PASSWORD }}
         run: |
-          if [ -n "$TEST_OWNER_EMAIL" ]; then
+          if [ -n "$TEST_OWNER_EMAIL" ] && [ -n "$TEST_OWNER_PASSWORD" ] && \
+             [ -n "$TEST_CONTRIBUTOR_EMAIL" ] && [ -n "$TEST_CONTRIBUTOR_PASSWORD" ] && \
+             [ -n "$TEST_READONLY_EMAIL" ] && [ -n "$TEST_READONLY_PASSWORD" ]; then
             echo "has-secrets=true" >> "$GITHUB_OUTPUT"
           else
             echo "has-secrets=false" >> "$GITHUB_OUTPUT"

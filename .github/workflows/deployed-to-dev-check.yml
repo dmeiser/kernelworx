@@ -21,6 +21,16 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Verify that every unique commit on the PR branch is present on base/dev.
+      #
+      # We use `git merge-base --is-ancestor` as a fast per-commit short-circuit,
+      # then fall back to `git cherry` patch-id matching for commits that were
+      # cherry-picked or rebased onto dev (where the SHA differs).
+      #
+      # Edge case: if a PR commit was merged to dev and later reverted there, the
+      # commit is still an ancestor of dev and this check passes. The repository
+      # flow assumes deploys to dev are merge- or cherry-pick-based; intentional
+      # reverts require manual redeployment oversight.
       - name: Verify PR changes are deployed to base dev
         env:
           BASE_REPO: ${{ github.event.pull_request.base.repo.full_name }}
@@ -41,6 +51,9 @@ jobs:
           cherry_output=$(git cherry base/dev "$pr_head")
           missing=()
           while IFS= read -r commit; do
+            if git merge-base --is-ancestor "$commit" base/dev; then
+              continue
+            fi
             if ! echo "$cherry_output" | grep -q "^- $commit$"; then
               missing+=("$commit")
             fi

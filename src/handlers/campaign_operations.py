@@ -443,5 +443,3 @@ def _to_dynamo_value(value: Any) -> Dict[str, Any]:
         return _dynamo_value_for_collection(value)
     return _dynamo_value_for_scalar(value)
 
-
-

@@ -412,6 +412,12 @@ class TestAdminListUsers:
             assert user["createdAt"] == user_created.isoformat()
             assert user["lastModifiedAt"] == user_modified.isoformat()
 
+            # Verify handler plumbs extracted subs/usernames into the batch helpers.
+            assert mock_batch_names.call_args.args[0] == [user_id]
+            assert mock_batch_groups.call_args.args[0] is mock_cognito
+            assert mock_batch_groups.call_args.args[1] == "test-pool-id"
+            assert mock_batch_groups.call_args.args[2] == [user_id]
+
     def test_success_with_pagination(
         self,
         dynamodb_table: Any,
@@ -2951,6 +2957,12 @@ class TestAdminSearchUser:
                 Limit=50,
             )
 
+            # Verify handler plumbs extracted sub and username into the batch helpers.
+            assert mock_batch_names.call_args.args[0] == ["user-sub-123"]
+            assert mock_batch_groups.call_args.args[0] is mock_client
+            assert mock_batch_groups.call_args.args[1] == "test-pool-id"
+            assert mock_batch_groups.call_args.args[2] == ["user@example.com"]
+
     def test_search_user_multiple_matches(
         self,
         admin_appsync_event: Dict[str, Any],
@@ -5146,7 +5158,7 @@ class TestAdminOperationExceptionHandlers:
         lambda_context: Any,
         monkeypatch: Any,
     ) -> None:
-        """Test _build_admin_user when DynamoDB account has no name fields (branch coverage)."""
+        """Test admin_search_user when DynamoDB account has no name fields (branch coverage)."""
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
 
         event = {
@@ -5197,7 +5209,7 @@ class TestAdminOperationExceptionHandlers:
         lambda_context: Any,
         monkeypatch: Any,
     ) -> None:
-        """Test _build_admin_user handles ClientError from get_item (branch coverage 450-451)."""
+        """Test admin_search_user handles ClientError from DynamoDB get_item (branch coverage 450-451)."""
 
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
 
