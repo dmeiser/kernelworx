@@ -90,17 +90,6 @@ resource "aws_appsync_datasource" "campaign_operations" {
   }
 }
 
-resource "aws_appsync_datasource" "delete_campaign_orders" {
-  api_id           = aws_appsync_graphql_api.main.id
-  name             = "DeleteCampaignOrdersDS"
-  type             = "AWS_LAMBDA"
-  service_role_arn = var.appsync_service_role_arn
-
-  lambda_config {
-    function_arn = var.lambda_function_arns["delete-campaign-orders"]
-  }
-}
-
 resource "aws_appsync_datasource" "delete_profile_cascade" {
   api_id           = aws_appsync_graphql_api.main.id
   name             = "DeleteProfileCascadeDS"
