@@ -14,6 +14,8 @@ The first `tofu apply` in such an environment will fail with `ResourceAlreadyExi
 
 > Only use root-module `import` blocks when the target log groups already exist. If a fresh environment has no existing groups, omit or remove the regular-function `import` block and let OpenTofu create the groups on the first apply. Keep the trigger-function `import` blocks only if those groups already exist.
 
+If a `tofu plan` or `tofu apply` with the `import` blocks fails because the remote object does not exist, but a later apply fails with `ResourceAlreadyExistsException`, Lambda has auto-created the log groups in the meantime. Restore the regular-function `import` block so OpenTofu adopts the existing groups instead of trying to recreate them.
+
 ## How to import
 
 The import blocks live in the environment root configurations (`tofu/application/environments/dev/main.tf` and `tofu/application/environments/prod/main.tf`), not in the Lambda module, because OpenTofu only allows `import` blocks in the root module.
