@@ -268,13 +268,32 @@ resource "aws_acm_certificate_validation" "site" {
   validation_record_fqdns = [for rec in module.route53.cert_validation_records : rec.fqdn if !can(regex("(api|login)\\.", rec.name))]
 }
 
-# Import blocks are only needed when Lambda has already auto-created the log
-# groups in this environment. If the groups do not exist yet, omit the imports
-# and let OpenTofu create the resources on the first apply.
+# Import existing Lambda CloudWatch log groups that were auto-created by
+# Lambda invocations before these resources were added to the configuration.
+# Without imports, OpenTofu fails with ResourceAlreadyExistsException.
 import {
-  for_each = toset(["update-account"])
-  id       = "/aws/lambda/${local.name_prefix}-${each.value}-${var.region_abbrev}-${var.environment}"
-  to       = module.lambda.aws_cloudwatch_log_group.functions[each.value]
+  for_each = toset([
+    "admin-operations",
+    "campaign-operations",
+    "confirm-qr-upload",
+    "create-profile",
+    "delete-account",
+    "delete-profile-cascade",
+    "delete-qr-code",
+    "generate-qr-code-presigned-url",
+    "list-catalogs-in-use",
+    "list-my-shares",
+    "list-unit-campaign-catalogs",
+    "list-unit-catalogs",
+    "request-qr-upload",
+    "request-report",
+    "transfer-ownership",
+    "unit-reporting",
+    "update-account",
+    "validate-payment-method",
+  ])
+  id = "/aws/lambda/${local.name_prefix}-${each.value}-${var.region_abbrev}-${var.environment}"
+  to = module.lambda.aws_cloudwatch_log_group.functions[each.value]
 }
 
 import {
