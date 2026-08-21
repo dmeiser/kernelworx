@@ -12,6 +12,8 @@ In environments where the Lambda functions have already been invoked, AWS has au
 
 The first `tofu apply` in such an environment will fail with `ResourceAlreadyExistsException` unless those groups are imported into OpenTofu/Terraform state first.
 
+> Only use root-module `import` blocks when the target log groups already exist. If a fresh environment has no existing groups, omit or remove the regular-function `import` block and let OpenTofu create the groups on the first apply. Keep the trigger-function `import` blocks only if those groups already exist.
+
 ## How to import
 
 The import blocks live in the environment root configurations (`tofu/application/environments/dev/main.tf` and `tofu/application/environments/prod/main.tf`), not in the Lambda module, because OpenTofu only allows `import` blocks in the root module.
