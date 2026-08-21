@@ -272,6 +272,12 @@ resource "aws_acm_certificate_validation" "site" {
 # groups in this environment. If the groups do not exist yet, omit the imports
 # and let OpenTofu create the resources on the first apply.
 import {
+  for_each = toset(["update-account"])
+  id       = "/aws/lambda/${local.name_prefix}-${each.value}-${var.region_abbrev}-${var.environment}"
+  to       = module.lambda.aws_cloudwatch_log_group.functions[each.value]
+}
+
+import {
   for_each = toset(["post-auth", "pre-signup"])
   id       = "/aws/lambda/${local.name_prefix}-${each.value}-${var.region_abbrev}-${var.environment}"
   to       = module.lambda.aws_cloudwatch_log_group.trigger_functions[each.value]
