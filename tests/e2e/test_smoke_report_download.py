@@ -73,7 +73,7 @@ def _ensure_campaign_has_orders(page: Page, profile_id: str, campaign_id: str) -
 
 
 @pytest.mark.smoke
-def test_campaign_reports_download_buttons(owner_page: Page, ensure_owner_profile: str) -> None:
+def test_campaign_reports_download_buttons(owner_page: Page, ensure_owner_profile: str, ensure_owner_catalog: None) -> None:
     """Verify the Reports tab shows the order table and CSV/XLSX download buttons.
 
     Navigation strategy:
@@ -139,7 +139,7 @@ def test_campaign_reports_download_buttons(owner_page: Page, ensure_owner_profil
 
 @pytest.mark.smoke
 def test_campaign_reports_csv_content_matches_table(
-    owner_page: Page, ensure_owner_profile: str, tmp_path: Path
+    owner_page: Page, ensure_owner_profile: str, ensure_owner_catalog: None, tmp_path: Path
 ) -> None:
     """Verify the exported CSV rows match the web report table.
 

@@ -56,7 +56,7 @@ def _create_or_pick_campaign(owner_page: Page, profile_id: str, campaign_page: C
 
 
 @pytest.mark.smoke
-def test_orders_tab_visible(owner_page: Page, ensure_owner_profile: str) -> None:
+def test_orders_tab_visible(owner_page: Page, ensure_owner_profile: str, ensure_owner_catalog: None) -> None:
     """The Orders tab is visible on the campaign detail page."""
     profile_id, campaign_page = _navigate_to_first_profile_campaigns(owner_page)
     _create_or_pick_campaign(owner_page, profile_id, campaign_page)
@@ -66,7 +66,7 @@ def test_orders_tab_visible(owner_page: Page, ensure_owner_profile: str) -> None
 
 
 @pytest.mark.smoke
-def test_summary_tab_visible(owner_page: Page, ensure_owner_profile: str) -> None:
+def test_summary_tab_visible(owner_page: Page, ensure_owner_profile: str, ensure_owner_catalog: None) -> None:
     """The Summary tab renders campaign summary content."""
     profile_id, campaign_page = _navigate_to_first_profile_campaigns(owner_page)
     _create_or_pick_campaign(owner_page, profile_id, campaign_page)
@@ -78,7 +78,7 @@ def test_summary_tab_visible(owner_page: Page, ensure_owner_profile: str) -> Non
 
 
 @pytest.mark.smoke
-def test_reports_tab_visible(owner_page: Page, ensure_owner_profile: str) -> None:
+def test_reports_tab_visible(owner_page: Page, ensure_owner_profile: str, ensure_owner_catalog: None) -> None:
     """The Reports tab renders campaign reports content."""
     profile_id, campaign_page = _navigate_to_first_profile_campaigns(owner_page)
     _create_or_pick_campaign(owner_page, profile_id, campaign_page)
@@ -90,7 +90,7 @@ def test_reports_tab_visible(owner_page: Page, ensure_owner_profile: str) -> Non
 
 
 @pytest.mark.smoke
-def test_settings_tab_visible(owner_page: Page, ensure_owner_profile: str) -> None:
+def test_settings_tab_visible(owner_page: Page, ensure_owner_profile: str, ensure_owner_catalog: None) -> None:
     """The Settings tab shows the campaign name input."""
     profile_id, campaign_page = _navigate_to_first_profile_campaigns(owner_page)
     campaign_id, _ = _create_or_pick_campaign(owner_page, profile_id, campaign_page)

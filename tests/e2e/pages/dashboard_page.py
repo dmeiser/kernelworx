@@ -35,6 +35,9 @@ class DashboardPage(BasePage):
     _CREATE_SCOUT_TEXT: str = "Create Scout"
     _VIEW_CAMPAIGNS_TEXT: str = "View All Campaigns"
 
+    # Section heading rendered above the grid of profiles owned by the account
+    _OWNED_SECTION_HEADING: str = "Scouts I Own"
+
     def __init__(self, page: Page) -> None:
         """Store the Playwright Page instance.
 
@@ -93,6 +96,23 @@ class DashboardPage(BasePage):
             List of seller name strings in DOM order.
         """
         return self._profile_headings().all_inner_texts()
+
+    def get_owned_profile_names(self) -> list[str]:
+        """Return seller names of profiles under the *Scouts I Own* section only.
+
+        The dashboard splits profile cards into *Scouts I Own* (profiles owned
+        by the authenticated account) and *Scouts Shared With Me*.  Shared
+        profiles may be READ-only, so tests that create campaigns or orders
+        must operate on an owned profile.  The section (including its heading)
+        is not rendered at all when the account owns no profiles.
+
+        Returns:
+            List of owned seller name strings in DOM order; empty when the
+            account owns no profiles.
+        """
+        heading = self.page.get_by_role("heading", name=self._OWNED_SECTION_HEADING, exact=True)
+        section = heading.locator("xpath=..")  # the Box wrapping heading + profile grid
+        return section.locator(self._PROFILE_NAME_SEL).all_inner_texts()
 
     # ------------------------------------------------------------------
     # Actions

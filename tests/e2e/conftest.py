@@ -22,7 +22,8 @@ This conftest adds:
   owner_page           (function scope) – authenticated Page for the owner role
   contributor_page     (function scope) – authenticated Page for the contributor role
   readonly_page        (function scope) – authenticated Page for the read-only role
-  ensure_owner_profile (session scope)  – guarantee owner has at least one seller profile
+  ensure_owner_profile (session scope)  – guarantee owner has an owned seller profile
+  ensure_owner_catalog (session scope)  – guarantee owner can access at least one catalog
     global_cleanup       (session scope, autouse) – post-suite TypeScript cleanup
 """
 
@@ -40,6 +41,7 @@ import pytest
 from dotenv import load_dotenv
 from playwright.sync_api import Browser, BrowserContext, Page, expect
 
+from tests.e2e.pages.catalogs_page import CatalogsPage
 from tests.e2e.pages.dashboard_page import DashboardPage
 from tests.e2e.pages.share_page import SharePage
 from tests.e2e.utils.auth import login_as_contributor, login_as_owner, login_as_readonly
@@ -174,13 +176,17 @@ def _cleanup_unconfirmed_smoke_users(user_pool_id: str) -> None:
 
 @pytest.fixture(scope="session")
 def ensure_owner_profile(browser: Browser) -> Generator[str, None, None]:
-    """Ensure the owner test user has at least one seller profile in the dev environment.
+    """Ensure the owner test user has at least one **owned** seller profile.
 
-    If the owner's ``/scouts`` dashboard shows no profile cards after login,
-    this fixture clicks *Create Scout*, fills the *Scout Name* field with
-    :data:`_OWNER_ENSURE_PROFILE_NAME`, and submits the dialog.  This prevents
-    every campaign/order/sharing test from failing on a freshly seeded dev
-    environment where no profiles have been created yet.
+    Checks only the *Scouts I Own* section of the ``/scouts`` dashboard —
+    profiles shared with the owner (possibly READ-only, e.g. transferred by
+    ``test_smoke_admin_user_data.py``) do not count, because campaign/order
+    tests need edit permission on the profile.
+
+    If the owner has no owned profile, this fixture clicks *Create Scout*,
+    fills the *Scout Name* field with :data:`_OWNER_ENSURE_PROFILE_NAME`, and
+    submits the dialog.  This prevents every campaign/order/sharing test from
+    failing on an environment where the owner only sees shared profiles.
 
     Scope
     -----
@@ -194,7 +200,7 @@ def ensure_owner_profile(browser: Browser) -> Generator[str, None, None]:
     parameter.  Only tests that actually need a profile need this fixture.
 
     Yields:
-        The seller name of the first visible profile on the owner dashboard.
+        The seller name of a verified-owned profile on the owner dashboard.
     """
     context: BrowserContext = browser.new_context(ignore_https_errors=True)
     page: Page = context.new_page()
@@ -211,21 +217,77 @@ def ensure_owner_profile(browser: Browser) -> Generator[str, None, None]:
         except Exception:  # noqa: BLE001 – no profiles yet; handled below
             pass
 
-        names = dashboard.get_profile_names()
+        names = dashboard.get_owned_profile_names()
         if not names:
-            # No profiles — create one via the UI.
+            # No owned profiles — create one via the UI.
             dashboard._create_scout_button().click()
             dialog = page.get_by_role("dialog")
             page.get_by_label("Scout Name").fill(_OWNER_ENSURE_PROFILE_NAME)
             page.get_by_role("button", name="Create Scout").click()
             expect(dialog).to_be_hidden(timeout=15_000)
             dashboard.wait_for_loading()
-            # Wait for the new profile card to appear.
-            dashboard.wait_for_profiles_loaded()
-            names = dashboard.get_profile_names()
-            assert names, "Profile creation failed — no profile cards visible after Create Scout"
+            # Poll until the new profile appears in the owned section; the
+            # LIST_MY_PROFILES query can lag briefly behind the mutation.
+            for _ in range(10):
+                names = dashboard.get_owned_profile_names()
+                if names:
+                    break
+                page.wait_for_timeout(1_000)
+            assert names, "Profile creation failed — no owned profile visible after Create Scout"
 
         yield names[0]
+    finally:
+        context.close()
+
+
+#: Catalog name used when ``ensure_owner_catalog`` must create a catalog from scratch.
+_OWNER_ENSURE_CATALOG_NAME: str = "Smoke Test Catalog"
+
+
+@pytest.fixture(scope="session")
+def ensure_owner_catalog(browser: Browser) -> Generator[None, None, None]:
+    """Ensure at least one catalog is accessible to the owner test user.
+
+    Navigates to ``/catalogs`` as the owner and checks both the *My Catalogs*
+    and *Managed Catalogs* tabs — an existing managed public catalog is
+    sufficient.  When neither tab lists a catalog (e.g. production after a
+    full cleanup), creates a default private catalog named
+    :data:`_OWNER_ENSURE_CATALOG_NAME` with a single product so
+    campaign-creation tests have a catalog to select.
+
+    Scope
+    -----
+    ``session`` — the check and optional creation run only once per pytest
+    session.
+
+    autouse
+    -------
+    ``False`` — tests opt in by declaring ``ensure_owner_catalog`` as a
+    parameter.  Only tests that create campaigns need this fixture.
+
+    Yields:
+        ``None``
+    """
+    context: BrowserContext = browser.new_context(ignore_https_errors=True)
+    page: Page = context.new_page()
+    try:
+        login_as_owner(page)
+        catalogs = CatalogsPage(page)
+        catalogs.goto()
+        catalogs.switch_to_my_catalogs()
+        any_accessible = catalogs.has_any_catalogs()
+        if not any_accessible:
+            catalogs.switch_to_managed_catalogs()
+            any_accessible = catalogs.has_any_catalogs()
+
+        if not any_accessible:
+            catalogs.switch_to_my_catalogs()
+            catalogs.create_catalog(
+                _OWNER_ENSURE_CATALOG_NAME,
+                [{"productName": "Smoke Test Popcorn", "price": 10.0}],
+            )
+
+        yield
     finally:
         context.close()
 

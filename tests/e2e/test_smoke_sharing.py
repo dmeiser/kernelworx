@@ -252,6 +252,7 @@ def test_write_share_contributor_can_create_order(
     owner_page: Page,
     browser: Browser,
     ensure_owner_profile: str,
+    ensure_owner_catalog: None,
 ) -> None:
     """A WRITE-share contributor can create an order on the shared profile's campaign.
 

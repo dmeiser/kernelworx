@@ -92,17 +92,18 @@ def _extract_profile_and_campaign_ids(url: str) -> tuple[str, str]:
     return urllib.parse.unquote(match.group(1)), urllib.parse.unquote(match.group(2))
 
 
-def _navigate_to_orders(owner_page: Page) -> tuple[OrderPage, str, str]:
-    """Navigate from dashboard to the first profile's first campaign orders page.
+def _navigate_to_orders(owner_page: Page, profile_name: str) -> tuple[OrderPage, str, str]:
+    """Navigate from dashboard to the owned profile's first campaign orders page.
 
     Steps:
-    1. Dashboard → click first seller profile.
-    2. Campaigns list → click first campaign.
+    1. Dashboard → click the owned seller profile (from ``ensure_owner_profile``).
+    2. Campaigns list → click first campaign (seeding one if none exist).
     3. Extract profile_id / campaign_id from URL.
     4. Navigate directly to orders sub-page and return :class:`OrderPage`.
 
     Args:
         owner_page: Authenticated Playwright page for the owner.
+        profile_name: Owned seller profile name (from ``ensure_owner_profile``).
 
     Returns:
         3-tuple ``(order_page, profile_id, campaign_id)`` where *order_page* is
@@ -110,46 +111,20 @@ def _navigate_to_orders(owner_page: Page) -> tuple[OrderPage, str, str]:
     """
     dashboard = DashboardPage(owner_page)
     dashboard.goto()
-    dashboard.wait_for_loading()
-    profiles = dashboard.get_profile_names()
-    if not profiles:
-        # Self-heal sparse environments by creating a profile on demand.
-        profile_name = f"Order Seed Profile {uuid4().hex[:10]}"
-        dashboard._create_scout_button().click()
-        dialog = owner_page.get_by_role("dialog")
-        owner_page.get_by_label("Scout Name").fill(profile_name)
-        owner_page.get_by_role("button", name="Create Scout").click()
-        expect(dialog).to_be_hidden(timeout=15_000)
-        dashboard.wait_for_loading()
-        profiles = dashboard.get_profile_names()
-
-    assert profiles, "Owner must have at least one seller profile"
+    dashboard.wait_for_profiles_loaded()
+    dashboard.click_profile(profile_name)
 
     campaign_page = CampaignPage(owner_page)
-    chosen_profile = None
-    campaigns: list[str] = []
-    for profile_name in profiles:
-        dashboard.goto()
-        dashboard.wait_for_profiles_loaded()
-        dashboard.click_profile(profile_name)
-        campaign_page.wait_for_loading()
-        campaigns = campaign_page.get_campaign_names()
-        if campaigns:
-            chosen_profile = profile_name
-            break
-    if chosen_profile is None:
-        # No campaigns found on any profile; seed one for orders smoke tests.
-        dashboard.goto()
-        dashboard.wait_for_loading()
-        dashboard.click_profile(profiles[0])
-        campaign_page.wait_for_loading()
+    campaign_page.wait_for_loading()
+    campaigns = campaign_page.get_campaign_names()
+    if not campaigns:
+        # No campaigns on the owned profile; seed one for orders smoke tests.
         profile_match = re.search(r"/scouts/([^/]+)/campaigns", owner_page.url)
         assert profile_match, f"Expected /scouts/{{id}}/campaigns URL, got: {owner_page.url}"
         seed_profile_id = urllib.parse.unquote(profile_match.group(1))
         seed_name = f"Order Seed Campaign {int(time.time())}"
         campaign_page.create_campaign_first_catalog(seed_name, seed_profile_id)
         # Poll with fresh navigations; campaign visibility can lag briefly.
-        campaigns = []
         for _ in range(12):  # up to ~60s
             campaign_page.goto(seed_profile_id)
             campaigns = campaign_page.get_campaign_names()
@@ -157,7 +132,6 @@ def _navigate_to_orders(owner_page: Page) -> tuple[OrderPage, str, str]:
                 break
             owner_page.wait_for_timeout(5_000)
         assert campaigns, "Failed to seed campaign for order smoke tests"
-        chosen_profile = profiles[0]
 
     campaign_page.click_campaign(campaigns[0])
 
@@ -167,8 +141,8 @@ def _navigate_to_orders(owner_page: Page) -> tuple[OrderPage, str, str]:
     return order_page, profile_id, campaign_id
 
 
-def _create_two_product_campaign(owner_page: Page) -> tuple[OrderPage, str, str]:
-    """Seed a dedicated two-product catalog and campaign for the first profile.
+def _create_two_product_campaign(owner_page: Page, profile_name: str) -> tuple[OrderPage, str, str]:
+    """Seed a dedicated two-product catalog and campaign for the owned profile.
 
     Creates a fresh catalog with two priced products, opens the catalog preview,
     creates a campaign from that catalog, and navigates to the campaign's orders
@@ -177,6 +151,7 @@ def _create_two_product_campaign(owner_page: Page) -> tuple[OrderPage, str, str]
 
     Args:
         owner_page: Authenticated Playwright page for the owner.
+        profile_name: Owned seller profile name (from ``ensure_owner_profile``).
 
     Returns:
         3-tuple ``(order_page, profile_id, campaign_id)`` focused on the seeded
@@ -185,9 +160,7 @@ def _create_two_product_campaign(owner_page: Page) -> tuple[OrderPage, str, str]
     dashboard = DashboardPage(owner_page)
     dashboard.goto()
     dashboard.wait_for_profiles_loaded()
-    profiles = dashboard.get_profile_names()
-    assert profiles, "Owner must have at least one seller profile"
-    dashboard.click_profile(profiles[0])
+    dashboard.click_profile(profile_name)
 
     profile_match = re.search(r"/scouts/([^/]+)/campaigns", owner_page.url)
     assert profile_match, f"Expected /scouts/{{id}}/campaigns URL, got: {owner_page.url}"
@@ -257,7 +230,12 @@ def _submit_order_first_product(order_page: OrderPage, customer_name: str, qty: 
 
 @pytest.mark.smoke
 @pytest.mark.slow
-def test_create_order(owner_page: Page, _module_state: dict[str, str], ensure_owner_profile: str) -> None:
+def test_create_order(
+    owner_page: Page,
+    _module_state: dict[str, str],
+    ensure_owner_profile: str,
+    ensure_owner_catalog: None,
+) -> None:
     """Create an order for Jane Smith with 2 units of the first available product.
 
     Verifies that after submitting the order editor the app returns to the
@@ -267,7 +245,7 @@ def test_create_order(owner_page: Page, _module_state: dict[str, str], ensure_ow
     Stores ``profile_id``, ``campaign_id``, and ``customer_name`` in
     ``_module_state`` for use by ``test_order_appears_in_list``.
     """
-    order_page, profile_id, campaign_id = _navigate_to_orders(owner_page)
+    order_page, profile_id, campaign_id = _navigate_to_orders(owner_page, ensure_owner_profile)
     _submit_order_first_product(order_page, _CUSTOMER_NAME, _ORDER_QTY)
     assert order_page.has_order(_CUSTOMER_NAME), f"'{_CUSTOMER_NAME}' must appear in the orders table after creation"
     _module_state["profile_id"] = profile_id
@@ -277,7 +255,7 @@ def test_create_order(owner_page: Page, _module_state: dict[str, str], ensure_ow
 
 @pytest.mark.smoke
 @pytest.mark.slow
-def test_full_form_order_lifecycle_with_money(owner_page: Page, ensure_owner_profile: str) -> None:
+def test_full_form_order_lifecycle_with_money(owner_page: Page, ensure_owner_profile: str, ensure_owner_catalog: None) -> None:
     """Create a full order with a custom payment method and verify money math end-to-end.
 
     Seeds a dedicated two-product catalog/campaign so the test is not coupled to
@@ -294,7 +272,7 @@ def test_full_form_order_lifecycle_with_money(owner_page: Page, ensure_owner_pro
     try:
         payment_page.add_payment_method(payment_method_name)
 
-        order_page, profile_id, campaign_id = _create_two_product_campaign(owner_page)
+        order_page, profile_id, campaign_id = _create_two_product_campaign(owner_page, ensure_owner_profile)
 
         # Capture baseline Total Sales so the assertion is isolated from prior orders.
         baseline_text = order_page.get_summary_total_sales()
@@ -373,9 +351,9 @@ def test_full_form_order_lifecycle_with_money(owner_page: Page, ensure_owner_pro
 
 @pytest.mark.smoke
 @pytest.mark.slow
-def test_create_order_without_phone(owner_page: Page, ensure_owner_profile: str) -> None:
+def test_create_order_without_phone(owner_page: Page, ensure_owner_profile: str, ensure_owner_catalog: None) -> None:
     """Create an order with a blank phone number and verify it is accepted."""
-    order_page, _profile_id, _campaign_id = _navigate_to_orders(owner_page)
+    order_page, _profile_id, _campaign_id = _navigate_to_orders(owner_page, ensure_owner_profile)
     customer_name = "No Phone Customer"
     order_page.create_order_first_product(customer_name, 1, phone=None)
     assert order_page.has_order(customer_name), (
@@ -385,9 +363,9 @@ def test_create_order_without_phone(owner_page: Page, ensure_owner_profile: str)
 
 @pytest.mark.smoke
 @pytest.mark.slow
-def test_invalid_phone_preserves_form(owner_page: Page, ensure_owner_profile: str) -> None:
+def test_invalid_phone_preserves_form(owner_page: Page, ensure_owner_profile: str, ensure_owner_catalog: None) -> None:
     """Submit with an invalid phone and verify the error appears without losing data."""
-    order_page, _profile_id, _campaign_id = _navigate_to_orders(owner_page)
+    order_page, _profile_id, _campaign_id = _navigate_to_orders(owner_page, ensure_owner_profile)
     customer_name = "Bad Phone Customer"
     order_page.submit_order_with_invalid_phone(customer_name, "123-invalid")
 
@@ -428,7 +406,7 @@ def test_order_appears_in_list(owner_page: Page, _module_state: dict[str, str], 
 
 @pytest.mark.smoke
 @pytest.mark.slow
-def test_edit_order(owner_page: Page, ensure_owner_profile: str) -> None:
+def test_edit_order(owner_page: Page, ensure_owner_profile: str, ensure_owner_catalog: None) -> None:
     """Create an order, edit it via the edit button, and verify the updated name.
 
     Creates a fresh *Edit Target Customer* order, clicks the first (edit) icon
@@ -440,7 +418,7 @@ def test_edit_order(owner_page: Page, ensure_owner_profile: str) -> None:
         owner_page: Authenticated Playwright page for the owner.
         ensure_owner_profile: Session fixture ensuring at least one profile exists.
     """
-    order_page, _profile_id, _campaign_id = _navigate_to_orders(owner_page)
+    order_page, _profile_id, _campaign_id = _navigate_to_orders(owner_page, ensure_owner_profile)
     order_page.create_order_first_product("Edit Target Customer", 1)
     assert order_page.has_order("Edit Target Customer"), (
         "'Edit Target Customer' must appear before attempting to edit it"
@@ -463,7 +441,7 @@ def test_edit_order(owner_page: Page, ensure_owner_profile: str) -> None:
 
 @pytest.mark.smoke
 @pytest.mark.slow
-def test_delete_order(owner_page: Page, ensure_owner_profile: str) -> None:
+def test_delete_order(owner_page: Page, ensure_owner_profile: str, ensure_owner_catalog: None) -> None:
     """Create an order, delete it via the delete button, and verify it disappears.
 
     Creates a fresh *Delete Target Customer* order, registers a ``window.confirm``
@@ -474,7 +452,7 @@ def test_delete_order(owner_page: Page, ensure_owner_profile: str) -> None:
         owner_page: Authenticated Playwright page for the owner.
         ensure_owner_profile: Session fixture ensuring at least one profile exists.
     """
-    order_page, _profile_id, _campaign_id = _navigate_to_orders(owner_page)
+    order_page, _profile_id, _campaign_id = _navigate_to_orders(owner_page, ensure_owner_profile)
     order_page.create_order_first_product("Delete Target Customer", 1)
     assert order_page.has_order("Delete Target Customer"), (
         "'Delete Target Customer' must appear before attempting to delete it"

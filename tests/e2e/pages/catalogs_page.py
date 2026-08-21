@@ -170,6 +170,14 @@ class CatalogsPage(BasePage):
         """
         return self._catalog_row(name).first.is_visible()
 
+    def has_any_catalogs(self) -> bool:
+        """Return ``True`` when the current tab lists at least one catalog.
+
+        The catalogs table renders one ``tbody`` row per catalog; the empty
+        state renders no table rows at all.
+        """
+        return self.page.locator("table tbody tr").count() > 0
+
     # ------------------------------------------------------------------
     # Actions
     # ------------------------------------------------------------------

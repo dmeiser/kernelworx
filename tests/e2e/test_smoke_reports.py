@@ -55,7 +55,7 @@ def _get_campaign_id_from_url(url: str) -> str:
 
 
 @pytest.mark.smoke
-def test_campaign_reports_tab_loads(owner_page: Page, ensure_owner_profile: str) -> None:
+def test_campaign_reports_tab_loads(owner_page: Page, ensure_owner_profile: str, ensure_owner_catalog: None) -> None:
     """Verify the Reports & Exports tab loads and shows the expected heading.
 
     Navigation strategy:
