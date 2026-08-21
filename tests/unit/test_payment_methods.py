@@ -1167,9 +1167,7 @@ class TestErrorHandling:
 
         mock_table = MagicMock()
         accounts_table = dynamodb_tables["accounts"]
-        mock_table.get_item.return_value = accounts_table.get_item(
-            Key={"accountId": f"ACCOUNT#{sample_account_id}"}
-        )
+        mock_table.get_item.return_value = accounts_table.get_item(Key={"accountId": f"ACCOUNT#{sample_account_id}"})
         mock_table.update_item.side_effect = ClientError(
             {"Error": {"Code": "ConditionalCheckFailedException", "Message": "The conditional request failed"}},
             "UpdateItem",
@@ -1195,9 +1193,7 @@ class TestErrorHandling:
         mock_table = MagicMock()
         tables_dict = dynamodb_tables
         accounts_table = tables_dict["accounts"]
-        mock_table.get_item.return_value = accounts_table.get_item(
-            Key={"accountId": f"ACCOUNT#{sample_account_id}"}
-        )
+        mock_table.get_item.return_value = accounts_table.get_item(Key={"accountId": f"ACCOUNT#{sample_account_id}"})
         mock_table.update_item.side_effect = ClientError(
             {"Error": {"Code": "ConditionalCheckFailedException", "Message": "The conditional request failed"}},
             "UpdateItem",
@@ -1223,9 +1219,7 @@ class TestErrorHandling:
         mock_table = MagicMock()
         tables_dict = dynamodb_tables
         accounts_table = tables_dict["accounts"]
-        mock_table.get_item.return_value = accounts_table.get_item(
-            Key={"accountId": f"ACCOUNT#{sample_account_id}"}
-        )
+        mock_table.get_item.return_value = accounts_table.get_item(Key={"accountId": f"ACCOUNT#{sample_account_id}"})
         mock_table.update_item.side_effect = ClientError(
             {"Error": {"Code": "ConditionalCheckFailedException", "Message": "The conditional request failed"}},
             "UpdateItem",

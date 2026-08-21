@@ -38,7 +38,7 @@ class TestGetUnitReport:
                 "state": "IL",
                 "campaignName": "Fall",
                 "campaignYear": 2024,
-                "catalogId": "catalog-123",
+                "catalogId": "CATALOG#catalog-123",
             },
             "identity": {"sub": "test-account-123"},
         }
@@ -68,7 +68,7 @@ class TestGetUnitReport:
                 "profileId": "PROFILE#profile1",
                 "campaignName": "Fall",
                 "campaignYear": 2024,
-                "catalogId": "catalog-123",
+                "catalogId": "CATALOG#catalog-123",
                 "unitCampaignKey": "Pack#158#Springfield#IL#Fall#2024",
             },
             {
@@ -76,7 +76,7 @@ class TestGetUnitReport:
                 "profileId": "PROFILE#profile2",
                 "campaignName": "Fall",
                 "campaignYear": 2024,
-                "catalogId": "catalog-123",
+                "catalogId": "CATALOG#catalog-123",
                 "unitCampaignKey": "Pack#158#Springfield#IL#Fall#2024",
             },
         ]
@@ -387,7 +387,7 @@ class TestGetUnitReport:
                 "state": "IL",
                 "campaignName": "Spring",
                 "campaignYear": 2023,
-                "catalogId": "catalog-123",
+                "catalogId": "CATALOG#catalog-123",
             },
             "identity": {"sub": "test-account-123"},
         }
@@ -425,7 +425,7 @@ class TestGetUnitReport:
                 "profileId": "PROFILE#profile1",
                 "campaignName": "Fall",
                 "campaignYear": 2024,
-                "catalogId": "catalog-123",
+                "catalogId": "CATALOG#catalog-123",
                 "unitCampaignKey": "Pack#158#Springfield#IL#Fall#2024",
             },
             {
@@ -433,7 +433,7 @@ class TestGetUnitReport:
                 "profileId": "PROFILE#profile1",  # Same profile!
                 "campaignName": "Fall",
                 "campaignYear": 2024,
-                "catalogId": "catalog-123",
+                "catalogId": "CATALOG#catalog-123",
                 "unitCampaignKey": "Pack#158#Springfield#IL#Fall#2024",
             },
         ]
@@ -493,7 +493,7 @@ class TestGetUnitReport:
                 "profileId": "PROFILE#profile1",
                 "campaignName": "Fall",
                 "campaignYear": 2024,
-                "catalogId": "catalog-123",
+                "catalogId": "CATALOG#catalog-123",
                 "unitCampaignKey": "Pack#158#Springfield#IL#Fall#2024",
             }
         ]
@@ -585,7 +585,7 @@ class TestGetUnitReport:
                 "unitNumber": 158,
                 "campaignName": "Fall",
                 "campaignYear": 2024,
-                "catalogId": "catalog-123",
+                "catalogId": "CATALOG#catalog-123",
             },
             "identity": {"sub": "test-account-123"},
         }

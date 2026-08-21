@@ -393,7 +393,7 @@ def test_invalid_phone_preserves_form(owner_page: Page, ensure_owner_profile: st
 
     assert "Phone number must be a valid 10-digit US number" in order_page.get_visible_alert_text()
     expect(owner_page.get_by_label("Customer Name")).to_have_value(customer_name)
-    owner_page.wait_for_url("**/orders/new", timeout=10_000)
+    expect(owner_page).to_have_url(re.compile(r"/orders/new$"), timeout=10_000)
 
 
 @pytest.mark.smoke

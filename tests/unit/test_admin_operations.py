@@ -21,6 +21,8 @@ import pytest
 from botocore.exceptions import ClientError
 
 from src.handlers.admin_operations import (
+    _batch_get_display_names,
+    _batch_get_user_groups,
     admin_delete_user,
     admin_list_users,
     admin_reset_user_password,
@@ -360,30 +362,19 @@ class TestAdminListUsers:
     ) -> None:
         """Test successful listing of users with all fields."""
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
-        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
 
         user_id = "user-123"
         user_created = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
         user_modified = datetime(2024, 6, 15, 9, 30, 0, tzinfo=timezone.utc)
-
-        # Create account in DynamoDB for display name
-        accounts_table = get_accounts_table()
-        accounts_table.put_item(
-            Item={
-                "accountId": f"ACCOUNT#{user_id}",
-                "email": "user@example.com",
-                "givenName": "John",
-                "familyName": "Doe",
-                "createdAt": datetime.now(timezone.utc).isoformat(),
-            }
-        )
 
         event = {
             **admin_appsync_event,
             "arguments": {"limit": 20},
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client, \
+             patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names, \
+             patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups:
             mock_cognito = MagicMock()
             mock_cognito.list_users.return_value = {
                 "Users": [
@@ -401,7 +392,8 @@ class TestAdminListUsers:
                     }
                 ],
             }
-            mock_cognito.admin_list_groups_for_user.return_value = {"Groups": [{"GroupName": "ADMIN"}]}
+            mock_batch_names.return_value = {user_id: "John Doe"}
+            mock_batch_groups.return_value = {user_id: ["ADMIN"]}
             mock_get_client.return_value = mock_cognito
 
             result = admin_list_users(event, lambda_context)
@@ -420,6 +412,12 @@ class TestAdminListUsers:
             assert user["createdAt"] == user_created.isoformat()
             assert user["lastModifiedAt"] == user_modified.isoformat()
 
+            # Verify handler plumbs extracted subs/usernames into the batch helpers.
+            assert mock_batch_names.call_args.args[0] == [user_id]
+            assert mock_batch_groups.call_args.args[0] is mock_cognito
+            assert mock_batch_groups.call_args.args[1] == "test-pool-id"
+            assert mock_batch_groups.call_args.args[2] == [user_id]
+
     def test_success_with_pagination(
         self,
         dynamodb_table: Any,
@@ -435,7 +433,9 @@ class TestAdminListUsers:
             "arguments": {"limit": 5, "nextToken": "page1token"},
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client, \
+             patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names, \
+             patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups:
             mock_cognito = MagicMock()
             mock_cognito.list_users.return_value = {
                 "Users": [
@@ -452,7 +452,8 @@ class TestAdminListUsers:
                 ],
                 "PaginationToken": "page2token",
             }
-            mock_cognito.admin_list_groups_for_user.return_value = {"Groups": []}
+            mock_batch_names.return_value = {}
+            mock_batch_groups.return_value = {}
             mock_get_client.return_value = mock_cognito
 
             result = admin_list_users(event, lambda_context)
@@ -479,7 +480,9 @@ class TestAdminListUsers:
             "arguments": {},
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client, \
+             patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names, \
+             patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups:
             mock_cognito = MagicMock()
             mock_cognito.list_users.return_value = {
                 "Users": [
@@ -495,7 +498,8 @@ class TestAdminListUsers:
                     }
                 ],
             }
-            mock_cognito.admin_list_groups_for_user.return_value = {"Groups": []}
+            mock_batch_names.return_value = {}
+            mock_batch_groups.return_value = {}
             mock_get_client.return_value = mock_cognito
 
             result = admin_list_users(event, lambda_context)
@@ -515,27 +519,17 @@ class TestAdminListUsers:
     ) -> None:
         """Test user listing when DynamoDB account exists but has no given/family name."""
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
-        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
 
         user_id = "user-no-name"
-
-        # Create account in DynamoDB WITHOUT givenName or familyName
-        accounts_table = get_accounts_table()
-        accounts_table.put_item(
-            Item={
-                "accountId": f"ACCOUNT#{user_id}",
-                "email": "noname@example.com",
-                "createdAt": datetime.now(timezone.utc).isoformat(),
-                # Note: no givenName or familyName
-            }
-        )
 
         event = {
             **admin_appsync_event,
             "arguments": {},
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client, \
+             patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names, \
+             patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups:
             mock_cognito = MagicMock()
             mock_cognito.list_users.return_value = {
                 "Users": [
@@ -551,14 +545,15 @@ class TestAdminListUsers:
                     }
                 ],
             }
-            mock_cognito.admin_list_groups_for_user.return_value = {"Groups": []}
+            # Account exists but has no name, so displayName should be None
+            mock_batch_names.return_value = {}
+            mock_batch_groups.return_value = {}
             mock_get_client.return_value = mock_cognito
 
             result = admin_list_users(event, lambda_context)
 
             assert len(result["users"]) == 1
             user = result["users"][0]
-            # Account exists but has no name, so displayName should be None
             assert user["displayName"] is None
             assert user["email"] == "noname@example.com"
 
@@ -727,7 +722,9 @@ class TestAdminListUsers:
             "arguments": {},
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client, \
+             patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names, \
+             patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups:
             mock_cognito = MagicMock()
             mock_cognito.list_users.return_value = {
                 "Users": [
@@ -743,11 +740,9 @@ class TestAdminListUsers:
                     }
                 ],
             }
-            # Group lookup fails
-            mock_cognito.admin_list_groups_for_user.side_effect = ClientError(
-                {"Error": {"Code": "InternalErrorException", "Message": "Error"}},
-                "AdminListGroupsForUser",
-            )
+            mock_batch_names.return_value = {}
+            # Group lookup fails; batch helper swallows the error and returns empty map
+            mock_batch_groups.return_value = {}
             mock_get_client.return_value = mock_cognito
 
             result = admin_list_users(event, lambda_context)
@@ -771,12 +766,9 @@ class TestAdminListUsers:
             "arguments": {},
         }
 
-        def mock_groups(UserPoolId: str, Username: str) -> Dict[str, Any]:
-            if Username == "admin-user":
-                return {"Groups": [{"GroupName": "ADMIN"}]}
-            return {"Groups": []}
-
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client, \
+             patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names, \
+             patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups:
             mock_cognito = MagicMock()
             mock_cognito.list_users.return_value = {
                 "Users": [
@@ -802,7 +794,11 @@ class TestAdminListUsers:
                     },
                 ],
             }
-            mock_cognito.admin_list_groups_for_user.side_effect = mock_groups
+            mock_batch_names.return_value = {}
+            mock_batch_groups.return_value = {
+                "admin-user": ["ADMIN"],
+                "regular-user": [],
+            }
             mock_get_client.return_value = mock_cognito
 
             result = admin_list_users(event, lambda_context)
@@ -824,18 +820,19 @@ class TestAdminListUsers:
     ) -> None:
         """Test that DynamoDB lookup errors are handled gracefully.
 
-        When DynamoDB get_item fails with a ClientError, the code logs a warning
-        and continues with displayName=None.
+        When the batched display-name lookup fails, the helper logs a warning
+        and returns an empty map so we continue with displayName=None.
         """
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
-        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
 
         event = {
             **admin_appsync_event,
             "arguments": {},
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client, \
+             patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names, \
+             patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups:
             mock_cognito = MagicMock()
             mock_cognito.list_users.return_value = {
                 "Users": [
@@ -851,22 +848,17 @@ class TestAdminListUsers:
                     }
                 ],
             }
-            mock_cognito.admin_list_groups_for_user.return_value = {"Groups": []}
+            # Simulate batched display-name lookup failing gracefully
+            mock_batch_names.return_value = {}
+            mock_batch_groups.return_value = {}
             mock_get_client.return_value = mock_cognito
 
-            with patch("src.handlers.admin_operations.tables") as mock_tables:
-                # Simulate DynamoDB ClientError
-                mock_tables.accounts.get_item.side_effect = ClientError(
-                    {"Error": {"Code": "InternalServerError", "Message": "DB error"}},
-                    "GetItem",
-                )
+            result = admin_list_users(event, lambda_context)
 
-                result = admin_list_users(event, lambda_context)
-
-                # User should still be returned, but displayName should be None
-                assert len(result["users"]) == 1
-                assert result["users"][0]["displayName"] is None
-                assert result["users"][0]["email"] == "user@example.com"
+            # User should still be returned, but displayName should be None
+            assert len(result["users"]) == 1
+            assert result["users"][0]["displayName"] is None
+            assert result["users"][0]["email"] == "user@example.com"
 
     def test_unexpected_exception_handled(
         self,
@@ -1248,6 +1240,146 @@ class TestAdminDeleteUser:
             response = accounts_table.get_item(Key={"accountId": f"ACCOUNT#{target_account_id}"})
             assert "Item" not in response
 
+    def test_deletes_invites_and_inbound_shares(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+        profiles_table: Any,
+        invites_table: Any,
+        shares_table: Any,
+    ) -> None:
+        """Test that invites for owned profiles and inbound shares are deleted."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
+        monkeypatch.setenv("PROFILES_TABLE_NAME", "kernelworx-profiles-v2-ue1-dev")
+        monkeypatch.setenv("INVITES_TABLE_NAME", "kernelworx-invites-ue1-dev")
+        monkeypatch.setenv("SHARES_TABLE_NAME", "kernelworx-shares-ue1-dev")
+
+        target_account_id = "target-user-456"
+        account_id_key = f"ACCOUNT#{target_account_id}"
+        profile_id = "PROFILE#target-profile"
+        invite_code = "INVITE#target-invite"
+
+        # Create target account
+        accounts_table = get_accounts_table()
+        accounts_table.put_item(
+            Item={
+                "accountId": account_id_key,
+                "email": "target@example.com",
+                "createdAt": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+
+        # Create profile owned by target account
+        profiles_table.put_item(
+            Item={
+                "ownerAccountId": account_id_key,
+                "profileId": profile_id,
+                "sellerName": "Target Scout",
+            }
+        )
+
+        # Create invite for that profile
+        invites_table.put_item(
+            Item={
+                "inviteCode": invite_code,
+                "profileId": profile_id,
+                "createdAt": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+
+        # Create inbound share where target account is the target
+        shares_table.put_item(
+            Item={
+                "profileId": "PROFILE#someone-else",
+                "targetAccountId": account_id_key,
+                "permissions": ["READ"],
+                "createdAt": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+
+        event = {
+            **admin_appsync_event,
+            "arguments": {"accountId": target_account_id},
+        }
+
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+            mock_cognito = MagicMock()
+            mock_cognito.list_users.return_value = {"Users": []}
+            mock_get_client.return_value = mock_cognito
+
+            result = admin_delete_user(event, lambda_context)
+
+            assert result is True
+            assert invites_table.get_item(Key={"inviteCode": invite_code}).get("Item") is None
+            inbound_response = shares_table.query(
+                IndexName="targetAccountId-index",
+                KeyConditionExpression="targetAccountId = :tid",
+                ExpressionAttributeValues={":tid": account_id_key},
+            )
+            assert len(inbound_response.get("Items", [])) == 0
+
+    def test_dynamodb_deleted_before_cognito(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """Test that DynamoDB account is deleted before Cognito user."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
+
+        target_account_id = "target-user-456"
+
+        # Create target account
+        accounts_table = get_accounts_table()
+        accounts_table.put_item(
+            Item={
+                "accountId": f"ACCOUNT#{target_account_id}",
+                "email": "target@example.com",
+                "createdAt": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+
+        event = {
+            **admin_appsync_event,
+            "arguments": {"accountId": target_account_id},
+        }
+
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+            mock_cognito = MagicMock()
+            mock_cognito.list_users.return_value = {
+                "Users": [
+                    {
+                        "Username": "cognito-username-123",
+                        "Attributes": [
+                            {"Name": "sub", "Value": target_account_id},
+                            {"Name": "email", "Value": "target@example.com"},
+                        ],
+                    }
+                ]
+            }
+
+            call_order = []
+
+            def _record_cognito_delete(*args: Any, **kwargs: Any) -> None:
+                call_order.append("cognito")
+
+            mock_cognito.admin_delete_user.side_effect = _record_cognito_delete
+            mock_get_client.return_value = mock_cognito
+
+            def _record_dynamodb_delete(*args: Any, **kwargs: Any) -> None:
+                call_order.append("dynamodb")
+
+            with patch("src.handlers.admin_operations.tables.accounts.delete_item", side_effect=_record_dynamodb_delete):
+                result = admin_delete_user(event, lambda_context)
+
+            assert result is True
+            assert call_order == ["dynamodb", "cognito"]
+
     def test_success_with_account_prefix(
         self,
         dynamodb_table: Any,
@@ -1358,20 +1490,32 @@ class TestAdminDeleteUser:
         assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
         assert "Cannot delete your own account" in exc_info.value.message
 
-    def test_account_not_found(
+    def test_account_not_found_cognito_idempotent(
         self,
         dynamodb_table: Any,
         admin_appsync_event: Dict[str, Any],
         lambda_context: Any,
         monkeypatch: Any,
     ) -> None:
-        """Test that non-existent user (not in Cognito) raises error."""
+        """Test that deletion succeeds when the Cognito user is already gone."""
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
 
+        target_account_id = "nonexistent-user"
+
+        # Create target account (DynamoDB still exists)
+        accounts_table = get_accounts_table()
+        accounts_table.put_item(
+            Item={
+                "accountId": f"ACCOUNT#{target_account_id}",
+                "email": "target@example.com",
+                "createdAt": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+
         event = {
             **admin_appsync_event,
-            "arguments": {"accountId": "nonexistent-user"},
+            "arguments": {"accountId": target_account_id},
         }
 
         with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
@@ -1380,10 +1524,12 @@ class TestAdminDeleteUser:
             mock_cognito.list_users.return_value = {"Users": []}
             mock_get_client.return_value = mock_cognito
 
-            with pytest.raises(AppError) as exc_info:
-                admin_delete_user(event, lambda_context)
+            result = admin_delete_user(event, lambda_context)
 
-            assert exc_info.value.error_code == ErrorCode.NOT_FOUND
+            assert result is True
+            mock_cognito.admin_delete_user.assert_not_called()
+            response = accounts_table.get_item(Key={"accountId": f"ACCOUNT#{target_account_id}"})
+            assert "Item" not in response
 
     def test_cognito_user_not_found_continues(
         self,
@@ -1392,7 +1538,7 @@ class TestAdminDeleteUser:
         lambda_context: Any,
         monkeypatch: Any,
     ) -> None:
-        """Test that if Cognito delete fails with UserNotFoundException, it raises an error."""
+        """Test that UserNotFoundException from Cognito delete is treated as success."""
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
 
@@ -1433,11 +1579,11 @@ class TestAdminDeleteUser:
             )
             mock_get_client.return_value = mock_cognito
 
-            # Now expect an INTERNAL_ERROR because Cognito delete failed
-            with pytest.raises(AppError) as exc_info:
-                admin_delete_user(event, lambda_context)
+            result = admin_delete_user(event, lambda_context)
 
-            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+            assert result is True
+            response = accounts_table.get_item(Key={"accountId": f"ACCOUNT#{target_account_id}"})
+            assert "Item" not in response
 
     def test_cognito_delete_error_raises(
         self,
@@ -1505,18 +1651,14 @@ class TestAdminDeleteUser:
 
         assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
 
-    def test_dynamodb_delete_error_logged_but_continues(
+    def test_dynamodb_delete_error_prevents_cognito_delete(
         self,
         dynamodb_table: Any,
         admin_appsync_event: Dict[str, Any],
         lambda_context: Any,
         monkeypatch: Any,
     ) -> None:
-        """Test that DynamoDB delete errors are logged but deletion succeeds.
-
-        The implementation logs a warning when DynamoDB deletion fails but still
-        returns True because the Cognito user was deleted successfully.
-        """
+        """Test that DynamoDB delete errors stop deletion before Cognito is touched."""
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
 
@@ -1560,22 +1702,24 @@ class TestAdminDeleteUser:
                     "DeleteItem",
                 )
                 mock_tables.accounts = mock_accounts
+                mock_tables.profiles.query.return_value = {"Items": []}
+                mock_tables.invites.query.return_value = {"Items": []}
+                mock_tables.shares.query.return_value = {"Items": []}
 
-                # DynamoDB error is logged but doesn't fail the operation
-                result = admin_delete_user(event, lambda_context)
-                assert result is True
+                with pytest.raises(AppError) as exc_info:
+                    admin_delete_user(event, lambda_context)
 
-    def test_cognito_lookup_error_raises_not_found(
+                assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+                mock_cognito.admin_delete_user.assert_not_called()
+
+    def test_cognito_lookup_error_aborts_deletion(
         self,
         dynamodb_table: Any,
         admin_appsync_event: Dict[str, Any],
         lambda_context: Any,
         monkeypatch: Any,
     ) -> None:
-        """Test that Cognito lookup error raises NOT_FOUND.
-
-        When Cognito list_users fails, the user cannot be found so we raise NOT_FOUND.
-        """
+        """Test that Cognito lookup errors abort deletion before DynamoDB cleanup."""
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
 
@@ -1606,16 +1750,19 @@ class TestAdminDeleteUser:
             with pytest.raises(AppError) as exc_info:
                 admin_delete_user(event, lambda_context)
 
-            assert exc_info.value.error_code == ErrorCode.NOT_FOUND
+            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+            mock_cognito.admin_delete_user.assert_not_called()
+            response = accounts_table.get_item(Key={"accountId": f"ACCOUNT#{target_account_id}"})
+            assert "Item" in response
 
-    def test_sub_lookup_error_logs_warning_and_raises_not_found(
+    def test_sub_lookup_error_aborts_deletion(
         self,
         dynamodb_table: Any,
         admin_appsync_event: Dict[str, Any],
         lambda_context: Any,
         monkeypatch: Any,
     ) -> None:
-        """Test that sub lookup error logs warning and raises NOT_FOUND."""
+        """Test that sub lookup errors abort deletion before DynamoDB cleanup."""
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
 
@@ -1648,17 +1795,18 @@ class TestAdminDeleteUser:
             with pytest.raises(AppError) as exc_info:
                 admin_delete_user(event, lambda_context)
 
-            # User not found because Cognito lookup failed
-            assert exc_info.value.error_code == ErrorCode.NOT_FOUND
+            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+            response = accounts_table.get_item(Key={"accountId": f"ACCOUNT#{target_account_id}"})
+            assert "Item" in response
 
-    def test_empty_cognito_users_raises_not_found(
+    def test_empty_cognito_users_deletes_dynamodb_idempotently(
         self,
         dynamodb_table: Any,
         admin_appsync_event: Dict[str, Any],
         lambda_context: Any,
         monkeypatch: Any,
     ) -> None:
-        """Test that empty user list from Cognito raises NOT_FOUND."""
+        """Test that empty Cognito user list does not block DynamoDB cleanup."""
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
 
@@ -1686,11 +1834,12 @@ class TestAdminDeleteUser:
             mock_cognito.admin_delete_user.return_value = {}
             mock_get_client.return_value = mock_cognito
 
-            with pytest.raises(AppError) as exc_info:
-                admin_delete_user(event, lambda_context)
+            result = admin_delete_user(event, lambda_context)
 
-            # User not found because Cognito returned empty list
-            assert exc_info.value.error_code == ErrorCode.NOT_FOUND
+            assert result is True
+            mock_cognito.admin_delete_user.assert_not_called()
+            response = accounts_table.get_item(Key={"accountId": f"ACCOUNT#{target_account_id}"})
+            assert "Item" not in response
 
     def test_unexpected_exception_handled(
         self,
@@ -1699,7 +1848,7 @@ class TestAdminDeleteUser:
         lambda_context: Any,
         monkeypatch: Any,
     ) -> None:
-        """Test that unexpected exceptions are handled."""
+        """Test that unexpected exceptions during DynamoDB cleanup are handled."""
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
 
@@ -1709,7 +1858,7 @@ class TestAdminDeleteUser:
         }
 
         with patch("src.handlers.admin_operations.tables") as mock_tables:
-            mock_tables.accounts.get_item.side_effect = RuntimeError("Unexpected")
+            mock_tables.invites.query.side_effect = RuntimeError("Unexpected")
 
             with pytest.raises(AppError) as exc_info:
                 admin_delete_user(event, lambda_context)
@@ -2594,6 +2743,108 @@ class TestAdminDeleteUserCatalogs:
             assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
 
 
+class TestAccountDeletionHelpers:
+    """Tests for cascade-deletion helpers used during account deletion."""
+
+    def test_delete_invites_for_owned_profiles(
+        self,
+        dynamodb_table: Any,
+        profiles_table: Any,
+        invites_table: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """Invites for profiles owned by the account are deleted."""
+        monkeypatch.setenv("PROFILES_TABLE_NAME", "kernelworx-profiles-v2-ue1-dev")
+        monkeypatch.setenv("INVITES_TABLE_NAME", "kernelworx-invites-ue1-dev")
+
+        from src.handlers.admin_operations import _delete_invites_for_owned_profiles
+
+        account_id = "owner-account"
+        account_id_key = f"ACCOUNT#{account_id}"
+        profile_id = "PROFILE#owned"
+        invite_code = "INVITE#abc123"
+
+        profiles_table.put_item(
+            Item={
+                "ownerAccountId": account_id_key,
+                "profileId": profile_id,
+                "sellerName": "Test Scout",
+            }
+        )
+        invites_table.put_item(
+            Item={
+                "inviteCode": invite_code,
+                "profileId": profile_id,
+                "createdAt": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+
+        count = _delete_invites_for_owned_profiles(account_id, MagicMock())
+
+        assert count == 1
+        assert invites_table.get_item(Key={"inviteCode": invite_code}).get("Item") is None
+
+    def test_delete_invites_for_owned_profiles_no_profiles(
+        self,
+        dynamodb_table: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """No invites are deleted when the account owns no profiles."""
+        monkeypatch.setenv("PROFILES_TABLE_NAME", "kernelworx-profiles-v2-ue1-dev")
+        monkeypatch.setenv("INVITES_TABLE_NAME", "kernelworx-invites-ue1-dev")
+
+        from src.handlers.admin_operations import _delete_invites_for_owned_profiles
+
+        count = _delete_invites_for_owned_profiles("no-profiles", MagicMock())
+        assert count == 0
+
+    def test_delete_inbound_shares(
+        self,
+        dynamodb_table: Any,
+        shares_table: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """Inbound shares where the account is the target are deleted."""
+        monkeypatch.setenv("SHARES_TABLE_NAME", "kernelworx-shares-ue1-dev")
+
+        from src.handlers.admin_operations import _delete_inbound_shares
+
+        account_id = "target-account"
+        account_id_key = f"ACCOUNT#{account_id}"
+
+        shares_table.put_item(
+            Item={
+                "profileId": "PROFILE#shared-with-me",
+                "targetAccountId": account_id_key,
+                "permissions": ["READ"],
+                "createdAt": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+
+        count = _delete_inbound_shares(account_id, MagicMock())
+
+        assert count == 1
+        response = shares_table.query(
+            IndexName="targetAccountId-index",
+            KeyConditionExpression="targetAccountId = :tid",
+            ExpressionAttributeValues={":tid": account_id_key},
+        )
+        assert len(response.get("Items", [])) == 0
+
+    def test_delete_inbound_shares_no_shares(
+        self,
+        dynamodb_table: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """No shares are deleted when the account has no inbound shares."""
+        monkeypatch.setenv("SHARES_TABLE_NAME", "kernelworx-shares-ue1-dev")
+
+        from src.handlers.admin_operations import _delete_inbound_shares
+
+        count = _delete_inbound_shares("no-shares", MagicMock())
+        assert count == 0
+
+
 class TestGetCognitoClient:
     """Tests for _get_cognito_client helper."""
 
@@ -2654,47 +2905,42 @@ class TestAdminSearchUser:
             "UserCreateDate": datetime(2024, 1, 1, tzinfo=timezone.utc),
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
-            with patch("src.handlers.admin_operations.tables") as mock_tables:
-                mock_client = MagicMock()
-                mock_get_client.return_value = mock_client
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client, \
+             patch("src.handlers.admin_operations.tables") as mock_tables, \
+             patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names, \
+             patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups:
+            mock_client = MagicMock()
+            mock_get_client.return_value = mock_client
 
-                # DynamoDB scan returns matching account
-                mock_tables.accounts.scan.return_value = {
-                    "Items": [
-                        {
-                            "accountId": "ACCOUNT#user-sub-123",
-                            "email": "user@example.com",
-                            "givenName": "Test",
-                            "familyName": "User",
-                        }
-                    ]
-                }
-
-                # Cognito lookup by sub + email prefix search
-                mock_client.list_users.side_effect = [
-                    {"Users": [mock_cognito_user]},  # DynamoDB sub lookup
-                    {"Users": []},  # Cognito email prefix search (returns empty, already found)
-                ]
-                mock_client.admin_list_groups_for_user.return_value = {"Groups": []}
-
-                # For _build_admin_user
-                mock_tables.accounts.get_item.return_value = {
-                    "Item": {
+            # DynamoDB scan returns matching account
+            mock_tables.accounts.scan.return_value = {
+                "Items": [
+                    {
                         "accountId": "ACCOUNT#user-sub-123",
+                        "email": "user@example.com",
                         "givenName": "Test",
                         "familyName": "User",
                     }
-                }
+                ]
+            }
 
-                result = admin_search_user(event, lambda_context)
+            # Cognito lookup by sub + email prefix search
+            mock_client.list_users.side_effect = [
+                {"Users": [mock_cognito_user]},  # DynamoDB sub lookup
+                {"Users": []},  # Cognito email prefix search (returns empty, already found)
+            ]
 
-                # Now returns a list
-                assert isinstance(result, list)
-                assert len(result) == 1
-                assert result[0]["accountId"] == "user-sub-123"
-                assert result[0]["email"] == "user@example.com"
-                assert result[0]["displayName"] == "Test User"
+            mock_batch_names.return_value = {"user-sub-123": "Test User"}
+            mock_batch_groups.return_value = {"user@example.com": []}
+
+            result = admin_search_user(event, lambda_context)
+
+            # Now returns a list
+            assert isinstance(result, list)
+            assert len(result) == 1
+            assert result[0]["accountId"] == "user-sub-123"
+            assert result[0]["email"] == "user@example.com"
+            assert result[0]["displayName"] == "Test User"
 
             # Verify it searched by sub (from DynamoDB result) and email prefix (Cognito)
             assert mock_client.list_users.call_count == 2
@@ -2710,6 +2956,12 @@ class TestAdminSearchUser:
                 Filter='email ^= "user@example"',
                 Limit=50,
             )
+
+            # Verify handler plumbs extracted sub and username into the batch helpers.
+            assert mock_batch_names.call_args.args[0] == ["user-sub-123"]
+            assert mock_batch_groups.call_args.args[0] is mock_client
+            assert mock_batch_groups.call_args.args[1] == "test-pool-id"
+            assert mock_batch_groups.call_args.args[2] == ["user@example.com"]
 
     def test_search_user_multiple_matches(
         self,
@@ -2750,49 +3002,55 @@ class TestAdminSearchUser:
             },
         ]
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
-            with patch("src.handlers.admin_operations.tables") as mock_tables:
-                mock_client = MagicMock()
-                mock_get_client.return_value = mock_client
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client, \
+             patch("src.handlers.admin_operations.tables") as mock_tables, \
+             patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names, \
+             patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups:
+            mock_client = MagicMock()
+            mock_get_client.return_value = mock_client
 
-                # DynamoDB scan returns multiple matching accounts
-                mock_tables.accounts.scan.return_value = {
-                    "Items": [
-                        {
-                            "accountId": "ACCOUNT#dave-sub-123",
-                            "email": "dave@daveandjonee.com",
-                            "givenName": "Dave",
-                            "familyName": "Meiser",
-                        },
-                        {
-                            "accountId": "ACCOUNT#jon-sub-456",
-                            "email": "jondupont@gmail.com",
-                            "givenName": "Jon",
-                            "familyName": "Dupont",
-                        },
-                    ]
-                }
-
-                # Cognito lookup returns the matching user each time
-                mock_client.list_users.side_effect = [
-                    {"Users": [mock_cognito_users[0]]},  # First DynamoDB account lookup
-                    {"Users": [mock_cognito_users[1]]},  # Second DynamoDB account lookup
-                    {"Users": []},  # Cognito email prefix search (returns empty, all users already found)
+            # DynamoDB scan returns multiple matching accounts
+            mock_tables.accounts.scan.return_value = {
+                "Items": [
+                    {
+                        "accountId": "ACCOUNT#dave-sub-123",
+                        "email": "dave@daveandjonee.com",
+                        "givenName": "Dave",
+                        "familyName": "Meiser",
+                    },
+                    {
+                        "accountId": "ACCOUNT#jon-sub-456",
+                        "email": "jondupont@gmail.com",
+                        "givenName": "Jon",
+                        "familyName": "Dupont",
+                    },
                 ]
-                mock_client.admin_list_groups_for_user.return_value = {"Groups": []}
-                mock_tables.accounts.get_item.side_effect = [
-                    {"Item": {"accountId": "ACCOUNT#dave-sub-123", "givenName": "Dave", "familyName": "Meiser"}},
-                    {"Item": {"accountId": "ACCOUNT#jon-sub-456", "givenName": "Jon", "familyName": "Dupont"}},
-                ]
+            }
 
-                result = admin_search_user(event, lambda_context)
+            # Cognito lookup returns the matching user each time
+            mock_client.list_users.side_effect = [
+                {"Users": [mock_cognito_users[0]]},  # First DynamoDB account lookup
+                {"Users": [mock_cognito_users[1]]},  # Second DynamoDB account lookup
+                {"Users": []},  # Cognito email prefix search (returns empty, all users already found)
+            ]
 
-                # Should return both matches
-                assert isinstance(result, list)
-                assert len(result) == 2
-                emails = [r["email"] for r in result]
-                assert "dave@daveandjonee.com" in emails
-                assert "jondupont@gmail.com" in emails
+            mock_batch_names.return_value = {
+                "dave-sub-123": "Dave Meiser",
+                "jon-sub-456": "Jon Dupont",
+            }
+            mock_batch_groups.return_value = {
+                "dave@daveandjonee.com": [],
+                "jondupont@gmail.com": [],
+            }
+
+            result = admin_search_user(event, lambda_context)
+
+            # Should return both matches
+            assert isinstance(result, list)
+            assert len(result) == 2
+            emails = [r["email"] for r in result]
+            assert "dave@daveandjonee.com" in emails
+            assert "jondupont@gmail.com" in emails
 
     def test_search_user_by_name_case_insensitive(
         self,
@@ -2820,38 +3078,35 @@ class TestAdminSearchUser:
             "UserCreateDate": datetime(2024, 1, 1, tzinfo=timezone.utc),
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
-            with patch("src.handlers.admin_operations.tables") as mock_tables:
-                mock_client = MagicMock()
-                mock_get_client.return_value = mock_client
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client, \
+             patch("src.handlers.admin_operations.tables") as mock_tables, \
+             patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names, \
+             patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups:
+            mock_client = MagicMock()
+            mock_get_client.return_value = mock_client
 
-                # DynamoDB scan returns matching account (lowercase name matches uppercase query)
-                mock_tables.accounts.scan.return_value = {
-                    "Items": [
-                        {
-                            "accountId": "ACCOUNT#john-sub-456",
-                            "email": "john@example.com",
-                            "givenName": "John",  # Mixed case
-                            "familyName": "Smith",
-                        }
-                    ]
-                }
-
-                mock_client.list_users.return_value = {"Users": [mock_cognito_user]}
-                mock_client.admin_list_groups_for_user.return_value = {"Groups": []}
-                mock_tables.accounts.get_item.return_value = {
-                    "Item": {
+            # DynamoDB scan returns matching account (lowercase name matches uppercase query)
+            mock_tables.accounts.scan.return_value = {
+                "Items": [
+                    {
                         "accountId": "ACCOUNT#john-sub-456",
-                        "givenName": "John",
+                        "email": "john@example.com",
+                        "givenName": "John",  # Mixed case
                         "familyName": "Smith",
                     }
-                }
+                ]
+            }
 
-                result = admin_search_user(event, lambda_context)
+            mock_client.list_users.return_value = {"Users": [mock_cognito_user]}
 
-                assert isinstance(result, list)
-                assert len(result) == 1
-                assert result[0]["accountId"] == "john-sub-456"
+            mock_batch_names.return_value = {"john-sub-456": "John Smith"}
+            mock_batch_groups.return_value = {"john@example.com": []}
+
+            result = admin_search_user(event, lambda_context)
+
+            assert isinstance(result, list)
+            assert len(result) == 1
+            assert result[0]["accountId"] == "john-sub-456"
 
     def test_search_user_by_uuid_success(
         self,
@@ -2879,26 +3134,29 @@ class TestAdminSearchUser:
             "UserCreateDate": datetime(2024, 1, 1, tzinfo=timezone.utc),
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
-            with patch("src.handlers.admin_operations.tables") as mock_tables:
-                mock_client = MagicMock()
-                mock_get_client.return_value = mock_client
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client, \
+             patch("src.handlers.admin_operations.tables"), \
+             patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names, \
+             patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups:
+            mock_client = MagicMock()
+            mock_get_client.return_value = mock_client
 
-                mock_client.list_users.return_value = {"Users": [mock_cognito_user]}
-                mock_client.admin_list_groups_for_user.return_value = {"Groups": []}
-                mock_tables.accounts.get_item.return_value = {}
+            mock_client.list_users.return_value = {"Users": [mock_cognito_user]}
 
-                result = admin_search_user(event, lambda_context)
+            mock_batch_names.return_value = {}
+            mock_batch_groups.return_value = {"user@example.com": []}
 
-                assert isinstance(result, list)
-                assert len(result) == 1
-                assert result[0]["accountId"] == "123e4567-e89b-12d3-a456-426614174000"
+            result = admin_search_user(event, lambda_context)
 
-                mock_client.list_users.assert_called_once_with(
-                    UserPoolId="test-pool-id",
-                    Filter='sub = "123e4567-e89b-12d3-a456-426614174000"',
-                    Limit=1,
-                )
+            assert isinstance(result, list)
+            assert len(result) == 1
+            assert result[0]["accountId"] == "123e4567-e89b-12d3-a456-426614174000"
+
+            mock_client.list_users.assert_called_once_with(
+                UserPoolId="test-pool-id",
+                Filter='sub = "123e4567-e89b-12d3-a456-426614174000"',
+                Limit=1,
+            )
 
     def test_search_user_by_account_prefixed_uuid(
         self,
@@ -2926,27 +3184,30 @@ class TestAdminSearchUser:
             "UserCreateDate": datetime(2024, 1, 1, tzinfo=timezone.utc),
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
-            with patch("src.handlers.admin_operations.tables") as mock_tables:
-                mock_client = MagicMock()
-                mock_get_client.return_value = mock_client
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client, \
+             patch("src.handlers.admin_operations.tables"), \
+             patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names, \
+             patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups:
+            mock_client = MagicMock()
+            mock_get_client.return_value = mock_client
 
-                mock_client.list_users.return_value = {"Users": [mock_cognito_user]}
-                mock_client.admin_list_groups_for_user.return_value = {"Groups": []}
-                mock_tables.accounts.get_item.return_value = {}
+            mock_client.list_users.return_value = {"Users": [mock_cognito_user]}
 
-                result = admin_search_user(event, lambda_context)
+            mock_batch_names.return_value = {}
+            mock_batch_groups.return_value = {"user@example.com": []}
 
-                assert isinstance(result, list)
-                assert len(result) == 1
-                assert result[0]["accountId"] == "123e4567-e89b-12d3-a456-426614174000"
+            result = admin_search_user(event, lambda_context)
 
-                # Should search by sub with ACCOUNT# prefix stripped
-                mock_client.list_users.assert_called_once_with(
-                    UserPoolId="test-pool-id",
-                    Filter='sub = "123e4567-e89b-12d3-a456-426614174000"',
-                    Limit=1,
-                )
+            assert isinstance(result, list)
+            assert len(result) == 1
+            assert result[0]["accountId"] == "123e4567-e89b-12d3-a456-426614174000"
+
+            # Should search by sub with ACCOUNT# prefix stripped
+            mock_client.list_users.assert_called_once_with(
+                UserPoolId="test-pool-id",
+                Filter='sub = "123e4567-e89b-12d3-a456-426614174000"',
+                Limit=1,
+            )
 
     def test_search_user_not_found(
         self,
@@ -3082,33 +3343,36 @@ class TestAdminSearchUser:
             "UserCreateDate": datetime(2024, 1, 1, tzinfo=timezone.utc),
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
-            with patch("src.handlers.admin_operations.tables") as mock_tables:
-                mock_client = MagicMock()
-                mock_get_client.return_value = mock_client
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client, \
+             patch("src.handlers.admin_operations.tables") as mock_tables, \
+             patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names, \
+             patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups:
+            mock_client = MagicMock()
+            mock_get_client.return_value = mock_client
 
-                # DynamoDB scan returns the account
-                mock_tables.accounts.scan.return_value = {
-                    "Items": [
-                        {
-                            "accountId": "ACCOUNT#admin-sub-123",
-                            "email": "admin@example.com",
-                            "givenName": "Admin",
-                            "familyName": "User",
-                        }
-                    ]
-                }
+            # DynamoDB scan returns the account
+            mock_tables.accounts.scan.return_value = {
+                "Items": [
+                    {
+                        "accountId": "ACCOUNT#admin-sub-123",
+                        "email": "admin@example.com",
+                        "givenName": "Admin",
+                        "familyName": "User",
+                    }
+                ]
+            }
 
-                mock_client.list_users.return_value = {"Users": [mock_cognito_user]}
-                mock_client.admin_list_groups_for_user.return_value = {"Groups": [{"GroupName": "ADMIN"}]}
-                mock_tables.accounts.get_item.return_value = {}
+            mock_client.list_users.return_value = {"Users": [mock_cognito_user]}
 
-                result = admin_search_user(event, lambda_context)
+            mock_batch_names.return_value = {}
+            mock_batch_groups.return_value = {"admin@example.com": ["ADMIN"]}
 
-                # Should return list with admin user
-                assert isinstance(result, list)
-                assert len(result) == 1
-                assert result[0]["isAdmin"] is True
+            result = admin_search_user(event, lambda_context)
+
+            # Should return list with admin user
+            assert isinstance(result, list)
+            assert len(result) == 1
+            assert result[0]["isAdmin"] is True
 
     def test_search_user_via_lambda_handler(
         self,
@@ -3136,33 +3400,36 @@ class TestAdminSearchUser:
             "UserCreateDate": datetime(2024, 1, 1, tzinfo=timezone.utc),
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
-            with patch("src.handlers.admin_operations.tables") as mock_tables:
-                mock_client = MagicMock()
-                mock_get_client.return_value = mock_client
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client, \
+             patch("src.handlers.admin_operations.tables") as mock_tables, \
+             patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names, \
+             patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups:
+            mock_client = MagicMock()
+            mock_get_client.return_value = mock_client
 
-                # DynamoDB scan returns the account
-                mock_tables.accounts.scan.return_value = {
-                    "Items": [
-                        {
-                            "accountId": "ACCOUNT#user-sub-123",
-                            "email": "user@example.com",
-                            "givenName": "Test",
-                            "familyName": "User",
-                        }
-                    ]
-                }
+            # DynamoDB scan returns the account
+            mock_tables.accounts.scan.return_value = {
+                "Items": [
+                    {
+                        "accountId": "ACCOUNT#user-sub-123",
+                        "email": "user@example.com",
+                        "givenName": "Test",
+                        "familyName": "User",
+                    }
+                ]
+            }
 
-                mock_client.list_users.return_value = {"Users": [mock_cognito_user]}
-                mock_client.admin_list_groups_for_user.return_value = {"Groups": []}
-                mock_tables.accounts.get_item.return_value = {}
+            mock_client.list_users.return_value = {"Users": [mock_cognito_user]}
 
-                result = lambda_handler(event, lambda_context)
+            mock_batch_names.return_value = {}
+            mock_batch_groups.return_value = {"user@example.com": []}
 
-                # Returns list now
-                assert isinstance(result, list)
-                assert len(result) == 1
-                assert result[0]["accountId"] == "user-sub-123"
+            result = lambda_handler(event, lambda_context)
+
+            # Returns list now
+            assert isinstance(result, list)
+            assert len(result) == 1
+            assert result[0]["accountId"] == "user-sub-123"
 
     def test_search_user_by_account_prefix_not_found(
         self,
@@ -3284,31 +3551,34 @@ class TestAdminSearchUser:
             "UserCreateDate": datetime(2024, 1, 1, tzinfo=timezone.utc),
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
-            with patch("src.handlers.admin_operations.tables") as mock_tables:
-                mock_client = MagicMock()
-                mock_get_client.return_value = mock_client
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client, \
+             patch("src.handlers.admin_operations.tables") as mock_tables, \
+             patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names, \
+             patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups:
+            mock_client = MagicMock()
+            mock_get_client.return_value = mock_client
 
-                # DynamoDB has the account
-                mock_tables.accounts.scan.return_value = {
-                    "Items": [
-                        {
-                            "accountId": "ACCOUNT#test-sub-123",
-                            "email": "test@example.com",
-                        }
-                    ]
-                }
+            # DynamoDB has the account
+            mock_tables.accounts.scan.return_value = {
+                "Items": [
+                    {
+                        "accountId": "ACCOUNT#test-sub-123",
+                        "email": "test@example.com",
+                    }
+                ]
+            }
 
-                # Both DynamoDB sub lookup and email prefix return same user
-                mock_client.list_users.return_value = {"Users": [mock_cognito_user]}
-                mock_client.admin_list_groups_for_user.return_value = {"Groups": []}
-                mock_tables.accounts.get_item.return_value = {}
+            # Both DynamoDB sub lookup and email prefix return same user
+            mock_client.list_users.return_value = {"Users": [mock_cognito_user]}
 
-                result = admin_search_user(event, lambda_context)
+            mock_batch_names.return_value = {}
+            mock_batch_groups.return_value = {"test@example.com": []}
 
-                # Should only return one result (deduplicated)
-                assert len(result) == 1
-                assert result[0]["accountId"] == "test-sub-123"
+            result = admin_search_user(event, lambda_context)
+
+            # Should only return one result (deduplicated)
+            assert len(result) == 1
+            assert result[0]["accountId"] == "test-sub-123"
 
     def test_search_user_cognito_only_user_added(
         self,
@@ -3337,25 +3607,28 @@ class TestAdminSearchUser:
             "UserCreateDate": datetime(2024, 1, 1, tzinfo=timezone.utc),
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
-            with patch("src.handlers.admin_operations.tables") as mock_tables:
-                mock_client = MagicMock()
-                mock_get_client.return_value = mock_client
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client, \
+             patch("src.handlers.admin_operations.tables") as mock_tables, \
+             patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names, \
+             patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups:
+            mock_client = MagicMock()
+            mock_get_client.return_value = mock_client
 
-                # DynamoDB has NO matching accounts
-                mock_tables.accounts.scan.return_value = {"Items": []}
+            # DynamoDB has NO matching accounts
+            mock_tables.accounts.scan.return_value = {"Items": []}
 
-                # Cognito email prefix search returns user (not found in DynamoDB)
-                mock_client.list_users.return_value = {"Users": [mock_cognito_only_user]}
-                mock_client.admin_list_groups_for_user.return_value = {"Groups": []}
-                mock_tables.accounts.get_item.return_value = {}
+            # Cognito email prefix search returns user (not found in DynamoDB)
+            mock_client.list_users.return_value = {"Users": [mock_cognito_only_user]}
 
-                result = admin_search_user(event, lambda_context)
+            mock_batch_names.return_value = {}
+            mock_batch_groups.return_value = {"cognitoonly@example.com": []}
 
-                # Should return one result from Cognito only search
-                assert len(result) == 1
-                assert result[0]["accountId"] == "cognito-only-sub"
-                assert result[0]["email"] == "cognitoonly@example.com"
+            result = admin_search_user(event, lambda_context)
+
+            # Should return one result from Cognito only search
+            assert len(result) == 1
+            assert result[0]["accountId"] == "cognito-only-sub"
+            assert result[0]["email"] == "cognitoonly@example.com"
 
     def test_search_user_malformed_account_id_skipped(
         self,
@@ -3421,29 +3694,32 @@ class TestAdminSearchUser:
             "UserCreateDate": datetime(2024, 1, 1, tzinfo=timezone.utc),
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
-            with patch("src.handlers.admin_operations.tables") as mock_tables:
-                mock_client = MagicMock()
-                mock_get_client.return_value = mock_client
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client, \
+             patch("src.handlers.admin_operations.tables") as mock_tables, \
+             patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names, \
+             patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups:
+            mock_client = MagicMock()
+            mock_get_client.return_value = mock_client
 
-                # DynamoDB scan returns with pagination (LastEvaluatedKey)
-                mock_tables.accounts.scan.side_effect = [
-                    {
-                        "Items": [{"accountId": "ACCOUNT#multi-sub", "email": "multi@example.com"}],
-                        "LastEvaluatedKey": {"accountId": "ACCOUNT#multi-sub"},
-                    },
-                    {"Items": []},  # Second page is empty
-                ]
+            # DynamoDB scan returns with pagination (LastEvaluatedKey)
+            mock_tables.accounts.scan.side_effect = [
+                {
+                    "Items": [{"accountId": "ACCOUNT#multi-sub", "email": "multi@example.com"}],
+                    "LastEvaluatedKey": {"accountId": "ACCOUNT#multi-sub"},
+                },
+                {"Items": []},  # Second page is empty
+            ]
 
-                mock_client.list_users.return_value = {"Users": [mock_cognito_user]}
-                mock_client.admin_list_groups_for_user.return_value = {"Groups": []}
-                mock_tables.accounts.get_item.return_value = {}
+            mock_client.list_users.return_value = {"Users": [mock_cognito_user]}
 
-                result = admin_search_user(event, lambda_context)
+            mock_batch_names.return_value = {}
+            mock_batch_groups.return_value = {"multi@example.com": []}
 
-                assert len(result) == 1
-                # Verify pagination was used
-                assert mock_tables.accounts.scan.call_count == 2
+            result = admin_search_user(event, lambda_context)
+
+            assert len(result) == 1
+            # Verify pagination was used
+            assert mock_tables.accounts.scan.call_count == 2
 
     def test_search_user_unexpected_exception(
         self,
@@ -3469,6 +3745,335 @@ class TestAdminSearchUser:
 
                 assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
                 assert "Failed to search user" in exc_info.value.message
+
+
+class TestBatchHelpers:
+    """Tests for the batched DynamoDB display-name and Cognito group helpers."""
+
+    def test_batch_get_display_names_empty(
+        self,
+        monkeypatch: Any,
+    ) -> None:
+        """Empty account-id list returns an empty map."""
+        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "test-accounts")
+
+        result = _batch_get_display_names([], MagicMock())
+        assert result == {}
+
+    def test_batch_get_display_names_single(
+        self,
+        monkeypatch: Any,
+    ) -> None:
+        """A single account id is looked up and its display name returned."""
+        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "test-accounts")
+
+        with patch("src.handlers.admin_operations.get_dynamodb_resource") as mock_get_resource:
+            mock_resource = MagicMock()
+            mock_get_resource.return_value = mock_resource
+            mock_resource.batch_get_item.return_value = {
+                "Responses": {
+                    "test-accounts": [
+                        {"accountId": "ACCOUNT#user-1", "givenName": "John", "familyName": "Doe"}
+                    ]
+                }
+            }
+
+            result = _batch_get_display_names(["user-1"], MagicMock())
+
+            assert result == {"user-1": "John Doe"}
+            mock_resource.batch_get_item.assert_called_once_with(
+                RequestItems={"test-accounts": {"Keys": [{"accountId": "ACCOUNT#user-1"}]}}
+            )
+
+    def test_batch_get_display_names_prefix_normalized(
+        self,
+        monkeypatch: Any,
+    ) -> None:
+        """ACCOUNT# prefixed ids are normalized and stripped when building the map."""
+        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "test-accounts")
+
+        with patch("src.handlers.admin_operations.get_dynamodb_resource") as mock_get_resource:
+            mock_resource = MagicMock()
+            mock_get_resource.return_value = mock_resource
+            mock_resource.batch_get_item.return_value = {
+                "Responses": {
+                    "test-accounts": [
+                        {"accountId": "ACCOUNT#user-1", "givenName": "Jane", "familyName": "Doe"}
+                    ]
+                }
+            }
+
+            result = _batch_get_display_names(["ACCOUNT#user-1"], MagicMock())
+
+            assert result == {"user-1": "Jane Doe"}
+
+    def test_batch_get_display_names_chunks_at_100(
+        self,
+        monkeypatch: Any,
+    ) -> None:
+        """BatchGetItem is chunked at DynamoDB's 100-key limit."""
+        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "test-accounts")
+
+        ids = [f"user-{i}" for i in range(150)]
+
+        with patch("src.handlers.admin_operations.get_dynamodb_resource") as mock_get_resource:
+            mock_resource = MagicMock()
+            mock_get_resource.return_value = mock_resource
+            mock_resource.batch_get_item.side_effect = [
+                {"Responses": {"test-accounts": []}},
+                {"Responses": {"test-accounts": []}},
+            ]
+
+            _batch_get_display_names(ids, MagicMock())
+
+            assert mock_resource.batch_get_item.call_count == 2
+            first_keys = mock_resource.batch_get_item.call_args_list[0].kwargs["RequestItems"]["test-accounts"]["Keys"]
+            second_keys = mock_resource.batch_get_item.call_args_list[1].kwargs["RequestItems"]["test-accounts"]["Keys"]
+            assert len(first_keys) == 100
+            assert len(second_keys) == 50
+
+    def test_batch_get_display_names_duplicate_ids_deduped(
+        self,
+        monkeypatch: Any,
+    ) -> None:
+        """Duplicate account ids are deduplicated before calling BatchGetItem."""
+        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "test-accounts")
+
+        with patch("src.handlers.admin_operations.get_dynamodb_resource") as mock_get_resource:
+            mock_resource = MagicMock()
+            mock_get_resource.return_value = mock_resource
+            mock_resource.batch_get_item.return_value = {
+                "Responses": {
+                    "test-accounts": [
+                        {"accountId": "ACCOUNT#user-1", "givenName": "John", "familyName": "Doe"}
+                    ]
+                }
+            }
+
+            result = _batch_get_display_names(["user-1", "ACCOUNT#user-1", "user-1"], MagicMock())
+
+            assert result == {"user-1": "John Doe"}
+            keys = mock_resource.batch_get_item.call_args.kwargs["RequestItems"]["test-accounts"]["Keys"]
+            assert len(keys) == 1
+
+    def test_batch_get_display_names_empty_name_fields_skipped(
+        self,
+        monkeypatch: Any,
+    ) -> None:
+        """Items with neither givenName nor familyName do not populate displayName."""
+        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "test-accounts")
+
+        with patch("src.handlers.admin_operations.get_dynamodb_resource") as mock_get_resource:
+            mock_resource = MagicMock()
+            mock_get_resource.return_value = mock_resource
+            mock_resource.batch_get_item.return_value = {
+                "Responses": {
+                    "test-accounts": [
+                        {"accountId": "ACCOUNT#user-1", "givenName": "", "familyName": ""}
+                    ]
+                }
+            }
+
+            result = _batch_get_display_names(["user-1"], MagicMock())
+
+            assert result == {}
+
+    def test_batch_get_display_names_client_error_handled(
+        self,
+        monkeypatch: Any,
+    ) -> None:
+        """A ClientError during BatchGetItem is logged and returns an empty map."""
+        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "test-accounts")
+
+        with patch("src.handlers.admin_operations.get_dynamodb_resource") as mock_get_resource:
+            mock_resource = MagicMock()
+            mock_get_resource.return_value = mock_resource
+            mock_resource.batch_get_item.side_effect = ClientError(
+                {"Error": {"Code": "InternalServerError", "Message": "boom"}},
+                "BatchGetItem",
+            )
+
+            result = _batch_get_display_names(["user-1"], MagicMock())
+
+            assert result == {}
+
+    def test_batch_get_display_names_unprocessed_keys_retried(
+        self,
+        monkeypatch: Any,
+    ) -> None:
+        """UnprocessedKeys from BatchGetItem are retried before returning results."""
+        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "test-accounts")
+
+        with patch("src.handlers.admin_operations.get_dynamodb_resource") as mock_get_resource:
+            mock_resource = MagicMock()
+            mock_get_resource.return_value = mock_resource
+            mock_resource.batch_get_item.side_effect = [
+                {
+                    "Responses": {"test-accounts": []},
+                    "UnprocessedKeys": {
+                        "test-accounts": {"Keys": [{"accountId": "ACCOUNT#user-1"}]}
+                    },
+                },
+                {
+                    "Responses": {
+                        "test-accounts": [
+                            {"accountId": "ACCOUNT#user-1", "givenName": "John", "familyName": "Doe"}
+                        ]
+                    }
+                },
+            ]
+
+            result = _batch_get_display_names(["user-1"], MagicMock())
+
+            assert result == {"user-1": "John Doe"}
+            assert mock_resource.batch_get_item.call_count == 2
+
+    def test_batch_get_display_names_unprocessed_keys_across_batches(
+        self,
+        monkeypatch: Any,
+    ) -> None:
+        """UnprocessedKeys are retried and the outer batch loop continues."""
+        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "test-accounts")
+
+        ids = [f"user-{i}" for i in range(101)]
+        retry_keys = [{"accountId": "ACCOUNT#user-0"}]
+
+        with patch("src.handlers.admin_operations.get_dynamodb_resource") as mock_get_resource:
+            mock_resource = MagicMock()
+            mock_get_resource.return_value = mock_resource
+            mock_resource.batch_get_item.side_effect = [
+                {
+                    "Responses": {"test-accounts": []},
+                    "UnprocessedKeys": {"test-accounts": {"Keys": retry_keys}},
+                },
+                {
+                    "Responses": {"test-accounts": [{"accountId": "ACCOUNT#user-0", "givenName": "A", "familyName": "B"}]},
+                },
+                {
+                    "Responses": {"test-accounts": [{"accountId": "ACCOUNT#user-100", "givenName": "C", "familyName": "D"}]},
+                },
+            ]
+
+            result = _batch_get_display_names(ids, MagicMock())
+
+            assert result == {
+                "user-0": "A B",
+                "user-100": "C D",
+            }
+            assert mock_resource.batch_get_item.call_count == 3
+
+    def test_batch_get_display_names_unprocessed_keys_exhaust_attempts(
+        self,
+        monkeypatch: Any,
+    ) -> None:
+        """UnprocessedKeys that persist through all attempts let the outer batch loop continue."""
+        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "test-accounts")
+
+        ids = [f"user-{i}" for i in range(101)]
+        first_key = {"accountId": "ACCOUNT#user-0"}
+
+        with patch("src.handlers.admin_operations.get_dynamodb_resource") as mock_get_resource:
+            mock_resource = MagicMock()
+            mock_get_resource.return_value = mock_resource
+            mock_resource.batch_get_item.side_effect = [
+                {
+                    "Responses": {"test-accounts": []},
+                    "UnprocessedKeys": {"test-accounts": {"Keys": [first_key]}},
+                },
+                {
+                    "Responses": {"test-accounts": []},
+                    "UnprocessedKeys": {"test-accounts": {"Keys": [first_key]}},
+                },
+                {
+                    "Responses": {"test-accounts": []},
+                    "UnprocessedKeys": {"test-accounts": {"Keys": [first_key]}},
+                },
+                {
+                    "Responses": {"test-accounts": [{"accountId": "ACCOUNT#user-100", "givenName": "C", "familyName": "D"}]},
+                },
+            ]
+
+            result = _batch_get_display_names(ids, MagicMock())
+
+            assert result == {"user-100": "C D"}
+            assert mock_resource.batch_get_item.call_count == 4
+
+    def test_batch_get_user_groups_empty(
+        self,
+    ) -> None:
+        """Empty username list returns an empty map without calling Cognito."""
+        mock_cognito = MagicMock()
+
+        result = _batch_get_user_groups(mock_cognito, "pool-id", [], MagicMock())
+
+        assert result == {}
+        mock_cognito.admin_list_groups_for_user.assert_not_called()
+
+    def test_batch_get_user_groups_filters_falsy_usernames(
+        self,
+    ) -> None:
+        """Falsy usernames are filtered out before invoking Cognito."""
+        mock_cognito = MagicMock()
+        mock_cognito.admin_list_groups_for_user.return_value = {"Groups": []}
+
+        result = _batch_get_user_groups(
+            mock_cognito, "pool-id", ["", "user-1", None, "user-1"], MagicMock()
+        )
+
+        assert result == {"user-1": []}
+        mock_cognito.admin_list_groups_for_user.assert_called_once_with(
+            UserPoolId="pool-id", Username="user-1"
+        )
+
+    def test_batch_get_user_groups_parallel(
+        self,
+    ) -> None:
+        """Groups are fetched in parallel and mapped by username."""
+        mock_cognito = MagicMock()
+
+        def side_effect(UserPoolId: str, Username: str) -> Dict[str, Any]:
+            if Username == "user-1":
+                return {"Groups": [{"GroupName": "ADMIN"}]}
+            return {"Groups": []}
+
+        mock_cognito.admin_list_groups_for_user.side_effect = side_effect
+
+        result = _batch_get_user_groups(
+            mock_cognito, "pool-id", ["user-1", "user-2"], MagicMock()
+        )
+
+        assert result == {"user-1": ["ADMIN"], "user-2": []}
+
+    def test_batch_get_user_groups_per_user_error_handled(
+        self,
+    ) -> None:
+        """A per-user group lookup failure is logged and treated as no groups."""
+        mock_cognito = MagicMock()
+        mock_cognito.admin_list_groups_for_user.side_effect = ClientError(
+            {"Error": {"Code": "InternalErrorException", "Message": "boom"}},
+            "AdminListGroupsForUser",
+        )
+
+        result = _batch_get_user_groups(mock_cognito, "pool-id", ["user-1"], MagicMock())
+
+        assert result == {"user-1": []}
+
+    def test_batch_get_user_groups_executor_error_handled(
+        self,
+    ) -> None:
+        """A failure inside the parallel executor is logged and returns an empty map."""
+        mock_cognito = MagicMock()
+
+        with patch("src.handlers.admin_operations.ThreadPoolExecutor") as mock_executor_cls:
+            mock_executor = MagicMock()
+            mock_executor_cls.return_value = mock_executor
+            mock_executor.__enter__ = MagicMock(return_value=mock_executor)
+            mock_executor.__exit__ = MagicMock(return_value=False)
+            mock_executor.map.side_effect = RuntimeError("executor failed")
+
+            result = _batch_get_user_groups(mock_cognito, "pool-id", ["user-1"], MagicMock())
+
+            assert result == {}
 
 
 class TestAdminGetUserProfiles:
@@ -3573,6 +4178,26 @@ class TestAdminGetUserProfiles:
 
         assert exc_info.value.error_code == ErrorCode.FORBIDDEN
 
+    def test_get_user_profiles_paginates(
+        self,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+    ) -> None:
+        """Test that profile retrieval follows DynamoDB pagination."""
+        with patch("src.handlers.admin_operations.query_all_items") as mock_query_all:
+            mock_query_all.return_value = [
+                {"profileId": f"PROFILE#{i}", "sellerName": f"Scout {i}"}
+                for i in range(3)
+            ]
+
+            admin_appsync_event["info"]["fieldName"] = "adminGetUserProfiles"
+            admin_appsync_event["arguments"] = {"accountId": "paginated-user"}
+
+            result = lambda_handler(admin_appsync_event, lambda_context)
+
+            assert len(result) == 3
+            mock_query_all.assert_called_once()
+
 
 class TestAdminGetUserCatalogs:
     """Tests for admin_get_user_catalogs function."""
@@ -3669,6 +4294,28 @@ class TestAdminGetUserCatalogs:
             lambda_handler(non_admin_appsync_event, lambda_context)
 
         assert exc_info.value.error_code == ErrorCode.FORBIDDEN
+
+    def test_get_user_catalogs_paginates(
+        self,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+    ) -> None:
+        """Test that catalog retrieval follows DynamoDB pagination."""
+        with patch("src.handlers.admin_operations.query_all_items") as mock_query_all:
+            mock_query_all.return_value = [
+                {"catalogId": f"CATALOG#{i}", "catalogName": f"Catalog {i}"}
+                for i in range(3)
+            ]
+
+            admin_appsync_event["info"]["fieldName"] = "adminGetUserCatalogs"
+            admin_appsync_event["arguments"] = {"accountId": "paginated-user"}
+
+            result = lambda_handler(admin_appsync_event, lambda_context)
+
+            assert len(result) == 3
+            mock_query_all.assert_called_once()
+            call_kwargs = mock_query_all.call_args[0][1]
+            assert call_kwargs["IndexName"] == "ownerAccountId-index"
 
 
 class TestAdminGetUserCampaigns:
@@ -3931,6 +4578,28 @@ class TestAdminGetUserSharedCampaigns:
 
         assert exc_info.value.error_code == ErrorCode.FORBIDDEN
 
+    def test_get_user_shared_campaigns_paginates(
+        self,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+    ) -> None:
+        """Test that shared campaign retrieval follows DynamoDB pagination."""
+        with patch("src.handlers.admin_operations.query_all_items") as mock_query_all:
+            mock_query_all.return_value = [
+                {"sharedCampaignCode": f"CODE{i}", "campaignName": f"Campaign {i}"}
+                for i in range(3)
+            ]
+
+            admin_appsync_event["info"]["fieldName"] = "adminGetUserSharedCampaigns"
+            admin_appsync_event["arguments"] = {"accountId": "paginated-user"}
+
+            result = lambda_handler(admin_appsync_event, lambda_context)
+
+            assert len(result) == 3
+            mock_query_all.assert_called_once()
+            call_kwargs = mock_query_all.call_args[0][1]
+            assert call_kwargs["IndexName"] == "GSI1"
+
 
 class TestAdminGetProfileShares:
     """Tests for admin_get_profile_shares function."""
@@ -4090,6 +4759,30 @@ class TestAdminGetProfileShares:
             lambda_handler(non_admin_appsync_event, lambda_context)
 
         assert exc_info.value.error_code == ErrorCode.FORBIDDEN
+
+    def test_get_profile_shares_paginates(
+        self,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+    ) -> None:
+        """Test that share retrieval follows DynamoDB pagination."""
+        with patch("src.handlers.admin_operations.query_all_items") as mock_query_all:
+            mock_query_all.return_value = [
+                {
+                    "profileId": "PROFILE#test",
+                    "targetAccountId": f"ACCOUNT#user-{i}",
+                    "permissions": ["READ"],
+                }
+                for i in range(3)
+            ]
+
+            admin_appsync_event["info"]["fieldName"] = "adminGetProfileShares"
+            admin_appsync_event["arguments"] = {"profileId": "test"}
+
+            result = lambda_handler(admin_appsync_event, lambda_context)
+
+            assert len(result) == 3
+            mock_query_all.assert_called_once()
 
 
 class TestAdminDeleteShare:
@@ -4465,7 +5158,7 @@ class TestAdminOperationExceptionHandlers:
         lambda_context: Any,
         monkeypatch: Any,
     ) -> None:
-        """Test _build_admin_user when DynamoDB account has no name fields (branch coverage)."""
+        """Test admin_search_user when DynamoDB account has no name fields (branch coverage)."""
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
 
         event = {
@@ -4485,33 +5178,30 @@ class TestAdminOperationExceptionHandlers:
             "UserCreateDate": datetime(2024, 1, 1, tzinfo=timezone.utc),
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
-            with patch("src.handlers.admin_operations.tables") as mock_tables:
-                mock_client = MagicMock()
-                mock_get_client.return_value = mock_client
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client, \
+             patch("src.handlers.admin_operations.tables") as mock_tables, \
+             patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names, \
+             patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups:
+            mock_client = MagicMock()
+            mock_get_client.return_value = mock_client
 
-                # DynamoDB scan returns account
-                mock_tables.accounts.scan.return_value = {
-                    "Items": [{"accountId": "ACCOUNT#noname-sub", "email": "noname@example.com"}]
-                }
+            # DynamoDB scan returns account
+            mock_tables.accounts.scan.return_value = {
+                "Items": [{"accountId": "ACCOUNT#noname-sub", "email": "noname@example.com"}]
+            }
 
-                # Cognito finds user
-                mock_client.list_users.return_value = {"Users": [mock_cognito_user]}
-                mock_client.admin_list_groups_for_user.return_value = {"Groups": []}
+            # Cognito finds user
+            mock_client.list_users.return_value = {"Users": [mock_cognito_user]}
 
-                # DynamoDB account has NO givenName or familyName
-                mock_tables.accounts.get_item.return_value = {
-                    "Item": {
-                        "accountId": "ACCOUNT#noname-sub",
-                        # No givenName or familyName - tests branch 448->453
-                    }
-                }
+            # Account exists but has no name, so displayName should be None
+            mock_batch_names.return_value = {}
+            mock_batch_groups.return_value = {"noname@example.com": []}
 
-                result = admin_search_user(event, lambda_context)
+            result = admin_search_user(event, lambda_context)
 
-                assert len(result) == 1
-                # displayName should be None when no name fields exist
-                assert result[0]["displayName"] is None
+            assert len(result) == 1
+            # displayName should be None when no name fields exist
+            assert result[0]["displayName"] is None
 
     def test_search_user_build_admin_user_get_item_fails(
         self,
@@ -4519,7 +5209,7 @@ class TestAdminOperationExceptionHandlers:
         lambda_context: Any,
         monkeypatch: Any,
     ) -> None:
-        """Test _build_admin_user handles ClientError from get_item (branch coverage 450-451)."""
+        """Test admin_search_user handles ClientError from DynamoDB get_item (branch coverage 450-451)."""
 
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
 
@@ -4540,32 +5230,31 @@ class TestAdminOperationExceptionHandlers:
             "UserCreateDate": datetime(2024, 1, 1, tzinfo=timezone.utc),
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
-            with patch("src.handlers.admin_operations.tables") as mock_tables:
-                mock_client = MagicMock()
-                mock_get_client.return_value = mock_client
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client, \
+             patch("src.handlers.admin_operations.tables") as mock_tables, \
+             patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names, \
+             patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups:
+            mock_client = MagicMock()
+            mock_get_client.return_value = mock_client
 
-                # DynamoDB scan returns account
-                mock_tables.accounts.scan.return_value = {
-                    "Items": [{"accountId": "ACCOUNT#getfail-sub", "email": "getfail@example.com"}]
-                }
+            # DynamoDB scan returns account
+            mock_tables.accounts.scan.return_value = {
+                "Items": [{"accountId": "ACCOUNT#getfail-sub", "email": "getfail@example.com"}]
+            }
 
-                # Cognito finds user
-                mock_client.list_users.return_value = {"Users": [mock_cognito_user]}
-                mock_client.admin_list_groups_for_user.return_value = {"Groups": []}
+            # Cognito finds user
+            mock_client.list_users.return_value = {"Users": [mock_cognito_user]}
 
-                # DynamoDB get_item fails with ClientError (branch 450-451)
-                mock_tables.accounts.get_item.side_effect = ClientError(
-                    {"Error": {"Code": "InternalServerError", "Message": "DynamoDB error"}},
-                    "GetItem",
-                )
+            # Batched display-name lookup fails gracefully and returns empty map
+            mock_batch_names.return_value = {}
+            mock_batch_groups.return_value = {"getfail@example.com": []}
 
-                result = admin_search_user(event, lambda_context)
+            result = admin_search_user(event, lambda_context)
 
-                # Should still return user, but without displayName
-                assert len(result) == 1
-                assert result[0]["displayName"] is None
-                assert result[0]["email"] == "getfail@example.com"
+            # Should still return user, but without displayName
+            assert len(result) == 1
+            assert result[0]["displayName"] is None
+            assert result[0]["email"] == "getfail@example.com"
 
     def test_search_user_cognito_sub_search_fails(
         self,
@@ -4654,41 +5343,44 @@ class TestAdminOperationExceptionHandlers:
             "arguments": {"query": "findme"},
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
-            with patch("src.handlers.admin_operations.tables") as mock_tables:
-                mock_client = MagicMock()
-                mock_get_client.return_value = mock_client
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client, \
+             patch("src.handlers.admin_operations.tables") as mock_tables, \
+             patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names, \
+             patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups:
+            mock_client = MagicMock()
+            mock_get_client.return_value = mock_client
 
-                # DynamoDB returns items where only some match
-                mock_tables.accounts.scan.return_value = {
-                    "Items": [
-                        {"accountId": "ACCOUNT#no-match-1", "email": "other@example.com"},  # No match
-                        {"accountId": "ACCOUNT#match", "email": "findme@example.com"},  # Match
-                        {"accountId": "ACCOUNT#no-match-2", "email": "different@example.com"},  # No match
-                    ]
-                }
+            # DynamoDB returns items where only some match
+            mock_tables.accounts.scan.return_value = {
+                "Items": [
+                    {"accountId": "ACCOUNT#no-match-1", "email": "other@example.com"},  # No match
+                    {"accountId": "ACCOUNT#match", "email": "findme@example.com"},  # Match
+                    {"accountId": "ACCOUNT#no-match-2", "email": "different@example.com"},  # No match
+                ]
+            }
 
-                mock_cognito_user = {
-                    "Username": "findme@example.com",
-                    "Attributes": [
-                        {"Name": "sub", "Value": "match"},
-                        {"Name": "email", "Value": "findme@example.com"},
-                    ],
-                    "Enabled": True,
-                    "UserStatus": "CONFIRMED",
-                    "UserCreateDate": datetime(2024, 1, 1, tzinfo=timezone.utc),
-                }
+            mock_cognito_user = {
+                "Username": "findme@example.com",
+                "Attributes": [
+                    {"Name": "sub", "Value": "match"},
+                    {"Name": "email", "Value": "findme@example.com"},
+                ],
+                "Enabled": True,
+                "UserStatus": "CONFIRMED",
+                "UserCreateDate": datetime(2024, 1, 1, tzinfo=timezone.utc),
+            }
 
-                # Cognito finds only the matching user
-                mock_client.list_users.return_value = {"Users": [mock_cognito_user]}
-                mock_client.admin_list_groups_for_user.return_value = {"Groups": []}
-                mock_tables.accounts.get_item.return_value = {}
+            # Cognito finds only the matching user
+            mock_client.list_users.return_value = {"Users": [mock_cognito_user]}
 
-                result = admin_search_user(event, lambda_context)
+            mock_batch_names.return_value = {}
+            mock_batch_groups.return_value = {"findme@example.com": []}
 
-                # Should only have 1 result (the one that matches)
-                assert len(result) == 1
-                assert result[0]["email"] == "findme@example.com"
+            result = admin_search_user(event, lambda_context)
+
+            # Should only have 1 result (the one that matches)
+            assert len(result) == 1
+            assert result[0]["email"] == "findme@example.com"
 
     def test_search_user_dynamodb_scan_client_error(
         self,
@@ -4743,36 +5435,39 @@ class TestAdminOperationExceptionHandlers:
         # Create 1001 items to exceed max_scan of 1000
         large_items_batch = [{"accountId": f"ACCOUNT#sub-{i}", "email": f"test{i}@example.com"} for i in range(1001)]
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
-            with patch("src.handlers.admin_operations.tables") as mock_tables:
-                mock_client = MagicMock()
-                mock_get_client.return_value = mock_client
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client, \
+             patch("src.handlers.admin_operations.tables") as mock_tables, \
+             patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names, \
+             patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups:
+            mock_client = MagicMock()
+            mock_get_client.return_value = mock_client
 
-                # DynamoDB returns all items in one batch (simulating reaching limit)
-                mock_tables.accounts.scan.return_value = {
-                    "Items": large_items_batch,
-                    "LastEvaluatedKey": {"accountId": "ACCOUNT#sub-1000"},  # More pages exist
-                }
+            # DynamoDB returns all items in one batch (simulating reaching limit)
+            mock_tables.accounts.scan.return_value = {
+                "Items": large_items_batch,
+                "LastEvaluatedKey": {"accountId": "ACCOUNT#sub-1000"},  # More pages exist
+            }
 
-                # Return cognito user for each DynamoDB account
-                mock_cognito_user = {
-                    "Username": "test@example.com",
-                    "Attributes": [
-                        {"Name": "sub", "Value": "test-sub"},
-                        {"Name": "email", "Value": "test@example.com"},
-                    ],
-                    "Enabled": True,
-                    "UserStatus": "CONFIRMED",
-                    "UserCreateDate": datetime(2024, 1, 1, tzinfo=timezone.utc),
-                }
-                mock_client.list_users.return_value = {"Users": [mock_cognito_user]}
-                mock_client.admin_list_groups_for_user.return_value = {"Groups": []}
-                mock_tables.accounts.get_item.return_value = {}
+            # Return cognito user for each DynamoDB account
+            mock_cognito_user = {
+                "Username": "test@example.com",
+                "Attributes": [
+                    {"Name": "sub", "Value": "test-sub"},
+                    {"Name": "email", "Value": "test@example.com"},
+                ],
+                "Enabled": True,
+                "UserStatus": "CONFIRMED",
+                "UserCreateDate": datetime(2024, 1, 1, tzinfo=timezone.utc),
+            }
+            mock_client.list_users.return_value = {"Users": [mock_cognito_user]}
 
-                admin_search_user(event, lambda_context)
+            mock_batch_names.return_value = {}
+            mock_batch_groups.return_value = {"test@example.com": []}
 
-                # Should stop after first batch since scanned_count (1001) >= max_scan (1000)
-                assert mock_tables.accounts.scan.call_count == 1
+            admin_search_user(event, lambda_context)
+
+            # Should stop after first batch since scanned_count (1001) >= max_scan (1000)
+            assert mock_tables.accounts.scan.call_count == 1
 
     def test_search_user_max_results_reached_early(
         self,
@@ -4795,47 +5490,50 @@ class TestAdminOperationExceptionHandlers:
             for i in range(60)  # More than max_results of 50
         ]
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
-            with patch("src.handlers.admin_operations.tables") as mock_tables:
-                mock_client = MagicMock()
-                mock_get_client.return_value = mock_client
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client, \
+             patch("src.handlers.admin_operations.tables") as mock_tables, \
+             patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names, \
+             patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups:
+            mock_client = MagicMock()
+            mock_get_client.return_value = mock_client
 
-                # DynamoDB returns all items
-                mock_tables.accounts.scan.return_value = {
-                    "Items": matching_items,
-                    "LastEvaluatedKey": {"accountId": "ACCOUNT#sub-59"},
-                }
+            # DynamoDB returns all items
+            mock_tables.accounts.scan.return_value = {
+                "Items": matching_items,
+                "LastEvaluatedKey": {"accountId": "ACCOUNT#sub-59"},
+            }
 
-                def mock_list_users(*args: Any, **kwargs: Any) -> Dict[str, Any]:
-                    filter_str = kwargs.get("Filter", "")
-                    if "sub" in filter_str:
-                        # Extract sub value from filter
-                        import re
+            def mock_list_users(*args: Any, **kwargs: Any) -> Dict[str, Any]:
+                filter_str = kwargs.get("Filter", "")
+                if "sub" in filter_str:
+                    # Extract sub value from filter
+                    import re
 
-                        match = re.search(r'sub = "([^"]+)"', filter_str)
-                        if match:
-                            sub_val = match.group(1)
-                            return {
-                                "Users": [
-                                    {
-                                        "Username": f"{sub_val}@example.com",
-                                        "Attributes": [
-                                            {"Name": "sub", "Value": sub_val},
-                                            {"Name": "email", "Value": f"{sub_val}@example.com"},
-                                        ],
-                                        "Enabled": True,
-                                        "UserStatus": "CONFIRMED",
-                                        "UserCreateDate": datetime(2024, 1, 1, tzinfo=timezone.utc),
-                                    }
-                                ]
-                            }
-                    return {"Users": []}
+                    match = re.search(r'sub = "([^"]+)"', filter_str)
+                    if match:
+                        sub_val = match.group(1)
+                        return {
+                            "Users": [
+                                {
+                                    "Username": f"{sub_val}@example.com",
+                                    "Attributes": [
+                                        {"Name": "sub", "Value": sub_val},
+                                        {"Name": "email", "Value": f"{sub_val}@example.com"},
+                                    ],
+                                    "Enabled": True,
+                                    "UserStatus": "CONFIRMED",
+                                    "UserCreateDate": datetime(2024, 1, 1, tzinfo=timezone.utc),
+                                }
+                            ]
+                        }
+                return {"Users": []}
 
-                mock_client.list_users.side_effect = mock_list_users
-                mock_client.admin_list_groups_for_user.return_value = {"Groups": []}
-                mock_tables.accounts.get_item.return_value = {}
+            mock_client.list_users.side_effect = mock_list_users
 
-                result = admin_search_user(event, lambda_context)
+            mock_batch_names.return_value = {}
+            mock_batch_groups.return_value = {}
 
-                # Should have 50 results (max_results limit)
-                assert len(result) == 50
+            result = admin_search_user(event, lambda_context)
+
+            # Should have 50 results (max_results limit)
+            assert len(result) == 50

@@ -1123,3 +1123,4 @@ class TestDynamoDBClient:
 
         assert result is cached
         mock_client.assert_not_called()
+

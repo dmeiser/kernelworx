@@ -4,7 +4,6 @@ Account operations Lambda handlers.
 Handles user account management including updating DynamoDB account metadata.
 """
 
-import json
 import os
 from datetime import datetime, timezone
 from typing import Any, Dict
@@ -107,7 +106,7 @@ def update_my_account(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         )
 
         updated_item = response["Attributes"]
-        logger.info(f"Updated account: {json.dumps(updated_item, default=str)}")
+        logger.info("Updated account fields", account_id=account_id_key, fields=sorted(updated_item.keys()))
 
         return {
             "accountId": updated_item.get("accountId"),
@@ -132,6 +131,8 @@ def update_my_account(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 def _delete_all_user_data(account_id: str, context: Any, logger: Any) -> None:
     """Delete all user data from DynamoDB using shared deletion internals."""
     from .admin_operations import (
+        _delete_inbound_shares,
+        _delete_invites_for_owned_profiles,
         _delete_user_campaigns,
         _delete_user_catalogs,
         _delete_user_orders,
@@ -142,8 +143,14 @@ def _delete_all_user_data(account_id: str, context: Any, logger: Any) -> None:
     _delete_user_orders(account_id, logger)
     _delete_user_campaigns(account_id, logger)
     _delete_user_shares(account_id, logger)
+    _delete_invites_for_owned_profiles(account_id, logger)
+    _delete_inbound_shares(account_id, logger)
     _delete_user_profiles(account_id, logger)
     _delete_user_catalogs(account_id, logger)
+
+    # TODO(KW-REVIEW-GLM53-1-decision-qr-code-retention-policy): Payment QR S3
+    # objects are intentionally not deleted here pending the captain decision on
+    # retention policy.
 
     account_id_key = f"ACCOUNT#{account_id}"
     tables.accounts.delete_item(Key={"accountId": account_id_key})

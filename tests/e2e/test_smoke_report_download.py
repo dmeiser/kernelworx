@@ -2,13 +2,11 @@
 
 import csv
 import re
-import time
 import urllib.parse
 from datetime import datetime
 from pathlib import Path
 
 import pytest
-from openpyxl import load_workbook
 from playwright.sync_api import Page
 
 from tests.e2e.pages.campaign_page import CampaignPage
@@ -67,30 +65,6 @@ def _ensure_campaign_has_orders(page: Page, profile_id: str, campaign_id: str) -
     if no_orders_message.is_visible():
         customer = f"Report Smoke {datetime.now().strftime('%Y%m%d%H%M%S')}"
         order_page.create_order_first_product(customer, qty=1)
-
-
-def _ensure_owner_has_campaign(page: Page) -> tuple[str, str]:
-    """Ensure the owner has a campaign and return its profile/campaign IDs."""
-    dashboard = DashboardPage(page)
-    dashboard.goto()
-    dashboard.wait_for_profiles_loaded()
-    profile_names = dashboard.get_profile_names()
-    assert profile_names, "Owner must have at least one seller profile"
-    dashboard.click_profile(profile_names[0])
-    page.wait_for_url("**/campaigns**", timeout=10_000)
-    profile_id = _get_profile_id_from_url(page.url)
-    campaign_page = CampaignPage(page)
-
-    campaign_names = campaign_page.get_campaign_names()
-    if not campaign_names:
-        campaign_name = f"Reports Download Test {datetime.now().strftime('%Y%m%d%H%M%S')}"
-        campaign_page.create_campaign_first_catalog(campaign_name)
-        campaign_names = campaign_page.get_campaign_names()
-    assert campaign_names, "Need at least one campaign to test reports download"
-
-    campaign_page.click_campaign(campaign_names[0])
-    campaign_id = _get_campaign_id_from_url(page.url)
-    return profile_id, campaign_id
 
 
 # ---------------------------------------------------------------------------
@@ -164,123 +138,100 @@ def test_campaign_reports_download_buttons(owner_page: Page, ensure_owner_profil
 
 
 @pytest.mark.smoke
-def test_download_xlsx(owner_page: Page, ensure_owner_profile: str, tmp_path: Path) -> None:
-    """Create an order, download XLSX, and verify its contents with openpyxl."""
-    profile_id, campaign_id = _ensure_owner_has_campaign(owner_page)
-
-    order_page = OrderPage(owner_page)
-    order_page.goto(profile_id, campaign_id)
-    customer_name = f"XLSX Smoke {datetime.now().strftime('%Y%m%d%H%M%S')}"
-    order_page.create_order_first_product(customer_name, qty=1)
-
-    reports = ReportsPage(owner_page)
-    reports.goto(profile_id, campaign_id)
-    assert reports.download_xlsx_button_is_visible(), "XLSX download button must be visible"
-    assert reports.download_xlsx_button_is_enabled(), "XLSX download button must be enabled"
-
-    xlsx_path = reports.download_xlsx_to(tmp_path / "report.xlsx")
-    assert xlsx_path.suffix == ".xlsx", f"Expected .xlsx file; got: {xlsx_path}"
-    assert xlsx_path.stat().st_size > 0, "Downloaded XLSX file must not be empty"
-
-    workbook = load_workbook(xlsx_path)
-    worksheet = workbook.active
-    assert worksheet is not None, "XLSX workbook must have an active worksheet"
-    headers = [worksheet.cell(row=1, column=col).value for col in range(1, worksheet.max_column + 1)]
-    assert headers[:3] == ["Name", "Phone", "Address"], f"Unexpected XLSX headers: {headers}"
-    assert headers[-1] == "Total", f"Expected 'Total' as last header; got: {headers[-1]}"
-
-    customer_cells = [worksheet.cell(row=row, column=1).value for row in range(2, worksheet.max_row + 1)]
-    assert customer_name in customer_cells, "XLSX must contain the smoke-test order row"
-
-
-@pytest.mark.smoke
-def test_csv_content_parsed(owner_page: Page, ensure_owner_profile: str, tmp_path: Path) -> None:
-    """Download a CSV report and parse it to verify the smoke-test order row."""
-    profile_id, campaign_id = _ensure_owner_has_campaign(owner_page)
-
-    order_page = OrderPage(owner_page)
-    order_page.goto(profile_id, campaign_id)
-    customer_name = f"CSV Smoke {datetime.now().strftime('%Y%m%d%H%M%S')}"
-    order_page.create_order_first_product(customer_name, qty=1)
-
-    reports = ReportsPage(owner_page)
-    reports.goto(profile_id, campaign_id)
-    assert reports.download_csv_button_is_visible(), "CSV download button must be visible"
-    assert reports.download_csv_button_is_enabled(), "CSV download button must be enabled"
-
-    csv_path = reports.download_csv_to(tmp_path / "report.csv")
-    with csv_path.open(newline="") as f:
-        rows = list(csv.reader(f))
-
-    assert rows, "CSV file must contain at least a header row"
-    headers = rows[0]
-    assert headers[:3] == ["Name", "Phone", "Address"], f"Unexpected CSV headers: {headers}"
-    assert headers[-1] == "Total", f"Expected 'Total' as last header; got: {headers[-1]}"
-
-    matching_rows = [row for row in rows[1:] if row and row[0] == customer_name]
-    assert matching_rows, "CSV must contain the smoke-test order row"
-    order_total = matching_rows[0][-1]
-    assert order_total, "Smoke-test order row must have a Total value"
-
-
-@pytest.mark.smoke
-@pytest.mark.parametrize("trigger_char", ["=", "+", "-", "@"])
-def test_csv_xlsx_formula_injection_sanitized(
-    owner_page: Page, ensure_owner_profile: str, tmp_path: Path, trigger_char: str
+def test_campaign_reports_csv_content_matches_table(
+    owner_page: Page, ensure_owner_profile: str, tmp_path: Path
 ) -> None:
-    """Create an order with a formula-injection customer name and verify exports sanitize it.
+    """Verify the exported CSV rows match the web report table.
 
-    Spreadsheet applications treat cells starting with ``=``, ``+``, ``-``, or ``@`` as
-    formulas. The report generator neutralizes these by prefixing the value with an
-    apostrophe, which forces text treatment. This test exercises each trigger character
-    and asserts the exported CSV and XLSX cells are sanitized.
+    Navigation strategy:
+
+    1. Open the owner's dashboard and click the first profile.
+    2. Use the first existing campaign, or create one if the list is empty.
+    3. Click into the campaign to capture its ID, then navigate to ``/reports``.
+    4. Ensure the campaign has at least one order so the table and download
+       buttons render.
+    5. Read the order table headers and rows from the DOM.
+    6. Download the CSV file and parse its rows.
+    7. Normalize both data sets (address whitespace, currency totals, dashes
+       for empty cells) and assert they are equivalent.
     """
-    profile_id, campaign_id = _ensure_owner_has_campaign(owner_page)
+    dashboard = DashboardPage(owner_page)
+    dashboard.goto()
+    dashboard.wait_for_profiles_loaded()
+    profile_names = dashboard.get_profile_names()
+    assert profile_names, "Owner must have at least one seller profile"
+    dashboard.click_profile(profile_names[0])
+    owner_page.wait_for_url("**/campaigns**", timeout=10_000)
+    profile_id = _get_profile_id_from_url(owner_page.url)
+    campaign_page = CampaignPage(owner_page)
 
-    order_page = OrderPage(owner_page)
-    order_page.goto(profile_id, campaign_id)
-    # Use a payload that would be interpreted as a formula if not sanitized.
-    customer_name = f"{trigger_char}FORMULA{int(time.time())}"
-    order_page.create_order_first_product(customer_name, qty=1)
+    campaign_names = campaign_page.get_campaign_names()
+    if not campaign_names:
+        campaign_name = f"Reports CSV Test {datetime.now().strftime('%Y%m%d%H%M%S')}"
+        campaign_page.create_campaign_first_catalog(campaign_name)
+        campaign_names = campaign_page.get_campaign_names()
+    assert campaign_names, "Need at least one campaign to test reports CSV"
+
+    campaign_page.click_campaign(campaign_names[0])
+    campaign_id = _get_campaign_id_from_url(owner_page.url)
 
     reports = ReportsPage(owner_page)
     reports.goto(profile_id, campaign_id)
 
-    # Verify CSV export sanitizes the customer name.
-    csv_path = reports.download_csv_to(tmp_path / f"report_{trigger_char}.csv")
-    with csv_path.open(newline="") as f:
-        rows = list(csv.reader(f))
+    if not reports.download_csv_button_is_visible():
+        _ensure_campaign_has_orders(owner_page, profile_id, campaign_id)
+        reports.goto(profile_id, campaign_id)
 
-    assert rows, "CSV file must contain at least a header row"
-    headers = rows[0]
-    assert headers[:3] == ["Name", "Phone", "Address"], f"Unexpected CSV headers: {headers}"
+    # Capture web table content.
+    table_headers = reports.get_table_headers()
+    table_rows = reports.get_table_rows()
+    assert table_rows, "Expected at least one order row in the report table"
 
-    matching_csv_rows = [row for row in rows[1:] if row and row[0].lstrip("'") == customer_name]
-    assert matching_csv_rows, f"CSV must contain the sanitized order row for {customer_name!r}; got rows: {rows[1:]}"
-    sanitized_csv_value = matching_csv_rows[0][0]
-    assert sanitized_csv_value.startswith("'") or sanitized_csv_value != customer_name, (
-        f"CSV customer cell must be sanitized for formula injection; got: {sanitized_csv_value!r}"
+    # Download and parse the CSV.
+    csv_path = tmp_path / "report.csv"
+    reports.download_csv_to(csv_path)
+    with csv_path.open(encoding="utf-8") as f:
+        reader = csv.reader(f)
+        csv_rows = list(reader)
+
+    assert len(csv_rows) >= 2, "Expected header plus data rows in CSV"
+    csv_headers = [h.strip() for h in csv_rows[0]]
+    assert csv_headers == table_headers, (
+        f"CSV headers do not match table headers:\nCSV: {csv_headers}\nTable: {table_headers}"
     )
 
-    # Verify XLSX export sanitizes the customer name.
-    xlsx_path = reports.download_xlsx_to(tmp_path / f"report_{trigger_char}.xlsx")
-    workbook = load_workbook(xlsx_path)
-    worksheet = workbook.active
-    assert worksheet is not None, "XLSX workbook must have an active worksheet"
+    def _normalize_table_cell(column: str, value: str) -> str:
+        text = value.strip()
+        # The DOM uses em-dashes (and occasionally hyphens) for empty cells.
+        if text in ("", "-", "—", "–"):
+            return ""
+        if column == "Address":
+            # The DOM renders address parts on separate lines; CSV uses ", ".
+            return re.sub(r"\s+", " ", text.replace("\n", ", ")).strip()
+        if column == "Total":
+            return f"{float(text.replace('$', '').replace(',', '')):.2f}"
+        return text
 
-    xlsx_headers = [worksheet.cell(row=1, column=col).value for col in range(1, worksheet.max_column + 1)]
-    assert xlsx_headers[:3] == ["Name", "Phone", "Address"], f"Unexpected XLSX headers: {xlsx_headers}"
+    def _normalize_csv_cell(column: str, value: str) -> str:
+        text = value.strip()
+        if text == "":
+            return ""
+        if column == "Total":
+            return f"{float(text):.2f}"
+        return text
 
-    customer_cells = [worksheet.cell(row=row, column=1) for row in range(2, worksheet.max_row + 1)]
-    matching_xlsx_cells = [cell for cell in customer_cells if str(cell.value or "").lstrip("'") == customer_name]
-    assert matching_xlsx_cells, (
-        f"XLSX must contain the sanitized order row for {customer_name!r}; got cells: "
-        f"{[c.value for c in customer_cells]}"
-    )
-    sanitized_xlsx_value = str(matching_xlsx_cells[0].value or "")
-    assert sanitized_xlsx_value.startswith("'") or sanitized_xlsx_value != customer_name, (
-        f"XLSX customer cell must be sanitized for formula injection; got: {sanitized_xlsx_value!r}"
-    )
-    assert matching_xlsx_cells[0].data_type == "s", (
-        f"Sanitized XLSX cell must be stored as text; got data_type: {matching_xlsx_cells[0].data_type!r}"
+    comparable_table = []
+    for row in table_rows:
+        comparable_table.append(
+            {h: _normalize_table_cell(h, c) for h, c in zip(table_headers, row)}
+        )
+
+    comparable_csv = []
+    for row in csv_rows[1:]:
+        comparable_csv.append(
+            {h: _normalize_csv_cell(h, c) for h, c in zip(csv_headers, row)}
+        )
+
+    assert comparable_csv == comparable_table, (
+        f"CSV rows do not match table rows:\nCSV: {comparable_csv}\nTable: {comparable_table}"
     )

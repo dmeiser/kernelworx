@@ -3,7 +3,7 @@
 import json
 from typing import Any, Dict
 
-from src.utils.logging import StructuredLogger, get_correlation_id
+from src.utils.logging import StructuredLogger, get_correlation_id, mask_email
 
 
 class TestStructuredLogger:
@@ -212,3 +212,27 @@ class TestGetCorrelationId:
         correlation_id = get_correlation_id(event)
 
         assert correlation_id == "appsync-123"
+
+
+class TestMaskEmail:
+    """Tests for mask_email helper."""
+
+    def test_masks_local_part(self) -> None:
+        """Mask everything after the first character of the local part."""
+        assert mask_email("user@example.com") == "u***@example.com"
+
+    def test_masks_single_character_local_part(self) -> None:
+        """Single-character local parts are fully masked."""
+        assert mask_email("a@example.com") == "***@example.com"
+
+    def test_returns_masked_for_missing_at(self) -> None:
+        """Non-email strings are fully masked."""
+        assert mask_email("not-an-email") == "***"
+
+    def test_returns_masked_for_none(self) -> None:
+        """None input is fully masked."""
+        assert mask_email(None) == "***"
+
+    def test_returns_masked_for_empty_local_part(self) -> None:
+        """Email with empty local part is masked safely."""
+        assert mask_email("@example.com") == "***@example.com"

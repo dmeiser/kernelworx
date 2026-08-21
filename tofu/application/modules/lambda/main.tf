@@ -145,7 +145,7 @@ locals {
     }
     "generate-qr-code-presigned-url" = {
       handler     = "handlers.generate_qr_code_presigned_url.generate_qr_code_presigned_url"
-      timeout     = 3
+      timeout     = 10
       memory_size = 128
     }
     "delete-qr-code" = {
@@ -200,8 +200,9 @@ data "archive_file" "lambda_payload" {
   source_dir = local.src_dir
   excludes = [
     "venv",
-    "__pycache__",
-    "*.pyc",
+    "**/__pycache__",
+    "**/*.pyc",
+    "**/*.pyo",
     ".pytest_cache",
     ".mypy_cache"
   ]
@@ -214,9 +215,9 @@ data "archive_file" "lambda_layer" {
   source_dir  = "${path.module}/../../../../.build/lambda-layer"
   output_path = "${local.payload_dir}/lambda_layer.zip"
   excludes = [
-    "__pycache__",
-    "*.pyc",
-    "*.pyo",
+    "**/__pycache__",
+    "**/*.pyc",
+    "**/*.pyo",
     "*.dist-info",
     "*.egg-info"
   ]
@@ -257,10 +258,6 @@ resource "aws_lambda_function" "trigger_functions" {
   environment {
     variables = local.common_env
   }
-
-  lifecycle {
-    prevent_destroy = false
-  }
 }
 
 # State migration: post-auth and pre-signup were previously part of
@@ -296,10 +293,23 @@ resource "aws_lambda_function" "functions" {
   environment {
     variables = merge(local.common_env, lookup(each.value, "extra_env", {}))
   }
+}
 
-  lifecycle {
-    prevent_destroy = false
-  }
+# Managed log groups for Lambda functions so retention is not "never expire".
+# These adopt the names Lambda auto-creates on first invocation; existing groups
+# must be imported into state before the first apply.
+resource "aws_cloudwatch_log_group" "functions" {
+  for_each = aws_lambda_function.functions
+
+  name              = "/aws/lambda/${each.value.function_name}"
+  retention_in_days = var.environment == "prod" ? 30 : 7
+}
+
+resource "aws_cloudwatch_log_group" "trigger_functions" {
+  for_each = aws_lambda_function.trigger_functions
+
+  name              = "/aws/lambda/${each.value.function_name}"
+  retention_in_days = var.environment == "prod" ? 30 : 7
 }
 
 # Outputs
@@ -322,3 +332,5 @@ output "layer_arn" {
   description = "ARN of the shared Lambda layer"
   value       = aws_lambda_layer_version.shared.arn
 }
+
+

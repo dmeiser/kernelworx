@@ -21,6 +21,16 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Verify that every unique commit on the PR branch is present on base/dev.
+      #
+      # We use `git merge-base --is-ancestor` as a fast per-commit short-circuit,
+      # then fall back to `git cherry` patch-id matching for commits that were
+      # cherry-picked or rebased onto dev (where the SHA differs).
+      #
+      # Edge case: if a PR commit was merged to dev and later reverted there, the
+      # commit is still an ancestor of dev and this check passes. The repository
+      # flow assumes deploys to dev are merge- or cherry-pick-based; intentional
+      # reverts require manual redeployment oversight.
       - name: Verify PR changes are deployed to base dev
         env:
           BASE_REPO: ${{ github.event.pull_request.base.repo.full_name }}
@@ -29,29 +39,30 @@ jobs:
           git fetch base dev
           git fetch base main
           pr_head="${{ github.event.pull_request.head.sha }}"
-
-          changed_files=$(git diff --name-only base/main.."$pr_head")
-          if [ -z "$changed_files" ]; then
-            echo "No changed files found; nothing to deploy."
+          if git merge-base --is-ancestor "$pr_head" base/dev; then
+            echo "PR head is already an ancestor of base/dev; all changes are deployed."
             exit 0
           fi
-
-          missing_files=()
-          while IFS= read -r file; do
-            pr_blob=$(git ls-tree "$pr_head" "$file" | awk '{print $3}')
-            dev_blob=$(git ls-tree base/dev "$file" | awk '{print $3}')
-            if [ "$pr_blob" = "$dev_blob" ]; then
-              echo "$file is present on base/dev with matching content."
-            else
-              missing_files+=("$file")
+          unique_commits=$(git rev-list base/main.."$pr_head")
+          if [ -z "$unique_commits" ]; then
+            echo "No unique commits found; nothing to deploy."
+            exit 0
+          fi
+          cherry_output=$(git cherry base/dev "$pr_head")
+          missing=()
+          while IFS= read -r commit; do
+            if git merge-base --is-ancestor "$commit" base/dev; then
+              continue
             fi
-          done <<< "$changed_files"
-
-          if [ ${#missing_files[@]} -eq 0 ]; then
+            if ! echo "$cherry_output" | grep -q "^- $commit$"; then
+              missing+=("$commit")
+            fi
+          done <<< "$unique_commits"
+          if [ ${#missing[@]} -eq 0 ]; then
             echo "All PR changes are present on base/dev."
           else
-            echo "The following PR files are missing or differ on base/dev:"
-            printf '%s\n' "${missing_files[@]}"
+            echo "The following PR commits are missing from base/dev:"
+            printf '%s\n' "${missing[@]}"
             exit 1
           fi
 

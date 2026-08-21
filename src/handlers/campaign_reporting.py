@@ -9,12 +9,14 @@ try:  # pragma: no cover
     from utils.auth import check_profile_access
     from utils.dynamodb import tables
     from utils.errors import AppError, ErrorCode
+    from utils.ids import ensure_catalog_id
     from utils.logging import get_logger
     from utils.pagination import query_all_items
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.auth import check_profile_access
     from ..utils.dynamodb import tables
     from ..utils.errors import AppError, ErrorCode
+    from ..utils.ids import ensure_catalog_id
     from ..utils.logging import get_logger
     from ..utils.pagination import query_all_items
 
@@ -117,6 +119,7 @@ def _get_seller_data(profile_id: str, profile: Dict[str, Any], campaigns: List[D
         for order in orders:
             order_detail = _build_order_detail(order)
             seller_orders.append(order_detail)
+            # TODO(#75): Sales totals use Python floats; consider integer cents or Decimal to avoid rounding drift.
             seller_total_sales += order_detail["totalAmount"]
 
     return {
@@ -136,7 +139,7 @@ def _extract_unit_report_params(event: Dict[str, Any]) -> tuple[str, int, str, s
     state = event["arguments"].get("state", "")
     campaign_name = event["arguments"]["campaignName"]
     campaign_year = int(event["arguments"]["campaignYear"])
-    catalog_id = event["arguments"]["catalogId"]
+    catalog_id = ensure_catalog_id(event["arguments"]["catalogId"]) or ""
     caller_account_id = event["identity"]["sub"]
     return unit_type, unit_number, city, state, campaign_name, campaign_year, catalog_id, caller_account_id
 
@@ -153,6 +156,7 @@ def _aggregate_seller_data(
         seller_data = _get_seller_data(profile_id, profile, profile_campaigns[profile_id])
         if seller_data["orders"] or seller_data["totalSales"] > 0:
             sellers.append(seller_data)
+            # TODO(#75): Unit sales aggregate floats; consider integer cents or Decimal to avoid rounding drift.
             total_unit_sales += seller_data["totalSales"]
             total_unit_orders += seller_data["orderCount"]
 

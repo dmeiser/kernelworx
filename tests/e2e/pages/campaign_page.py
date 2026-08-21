@@ -159,9 +159,7 @@ class CampaignPage(BasePage):
         self.wait_for_loading()
         # Wait for the new campaign to appear before returning so callers can
         # immediately inspect the campaign list.
-        assert self.has_campaign(name), (
-            f"Campaign '{name}' must be visible in the list after creation"
-        )
+        assert self.has_campaign(name), f"Campaign '{name}' must be visible in the list after creation"
 
     def create_campaign(self, name: str, catalog_name: str) -> None:
         """Open the *New Campaign* dialog, fill it, and submit.
@@ -212,15 +210,17 @@ class CampaignPage(BasePage):
         self.page.get_by_role("option", name=catalog_name).click()
 
     def click_campaign(self, name: str) -> None:
-        """Click on the campaign card whose name contains *name*.
+        """Click on the campaign card whose heading contains *name*.
 
         Clicks the *View Orders* button within the matching card so the action
         is deterministic even when the card itself is not directly clickable.
+        The card is scoped to one that contains a campaign heading ``<h3>`` so
+        the page-level header card is not accidentally matched.
 
         Args:
             name: Substring of the campaign name to match.
         """
-        card = self.page.locator("div.MuiCard-root").filter(has_text=name).first
+        card = self.page.locator("div.MuiCard-root").filter(has=self.page.locator("h3", has_text=name)).first
         expect(card).to_be_visible()
         card.get_by_role("button", name=self._VIEW_ORDERS_BTN, exact=True).click()
         self.page.wait_for_url("**/campaigns/**", timeout=10_000)

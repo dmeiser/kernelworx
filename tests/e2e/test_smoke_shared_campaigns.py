@@ -37,10 +37,9 @@ def _code_for_campaign_name(page: Page, campaign_name: str) -> str:
     """Return the short code for the visible row matching *campaign_name*."""
     row = page.get_by_role("row").filter(has_text=campaign_name)
     expect(row).to_be_visible(timeout=10_000)
-    code = row.get_by_role("cell").filter(
-        has_text=re.compile(r"^[A-Z0-9]+(-[A-Z0-9]+)+$")
-    ).inner_text()
+    code = row.get_by_role("cell").filter(has_text=re.compile(r"^[A-Z0-9]+(-[A-Z0-9]+)+$")).inner_text()
     return code
+
 
 # ---------------------------------------------------------------------------
 # Private helpers
@@ -92,9 +91,7 @@ def test_create_shared_campaign(owner_page: Page) -> None:
     assert "/shared-campaigns" in owner_page.url, (
         f"Expected redirect to /shared-campaigns after creation; got: {owner_page.url}"
     )
-    expect(owner_page.get_by_role("row").filter(has_text=campaign_name)).to_be_visible(
-        timeout=10_000
-    )
+    expect(owner_page.get_by_role("row").filter(has_text=campaign_name)).to_be_visible(timeout=10_000)
 
 
 @pytest.mark.smoke
@@ -153,8 +150,6 @@ def test_join_shared_campaign_creates_campaign(owner_page: Page, browser: Browse
 
         join_shared = SharedCampaignsPage(join_page)
         join_shared.join_shared_campaign(code, profile_id)
-        assert "/campaigns/" in join_page.url, (
-            f"Expected campaign detail URL after joining; got: {join_page.url}"
-        )
+        assert "/campaigns/" in join_page.url, f"Expected campaign detail URL after joining; got: {join_page.url}"
     finally:
         join_context.close()

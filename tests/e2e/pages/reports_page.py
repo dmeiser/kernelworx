@@ -149,3 +149,34 @@ class ReportsPage(BasePage):
         download = download_info.value
         download.save_as(str(dest))
         return dest
+
+    # ------------------------------------------------------------------
+    # Table content
+    # ------------------------------------------------------------------
+
+    def expand_order_table(self) -> None:
+        """Expand the order table if it is currently collapsed."""
+        button = self.page.get_by_role("button", name="Show Order Table")
+        if button.is_visible():
+            button.click()
+
+    def get_table_headers(self) -> list[str]:
+        """Return the text of the table header cells.
+
+        Returns:
+            List of header cell strings.
+        """
+        self.expand_order_table()
+        return [h.strip() for h in self.page.locator("table thead th").all_inner_texts()]
+
+    def get_table_rows(self) -> list[list[str]]:
+        """Return the raw text of each data row in the order table.
+
+        Returns:
+            List of rows, where each row is a list of cell strings.
+        """
+        self.expand_order_table()
+        rows: list[list[str]] = []
+        for row in self.page.locator("table tbody tr").all():
+            rows.append(row.locator("td").all_inner_texts())
+        return rows
