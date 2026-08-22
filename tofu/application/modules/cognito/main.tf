@@ -244,10 +244,13 @@ resource "aws_cognito_user_pool" "main" {
 }
 
 # Lambda permissions - allow Cognito to invoke trigger functions
-# count is gated on a static boolean (known at plan time) rather than ARN nullability
-# to avoid unknown count values during greenfield applies.
+# Count is gated on the static enable_lambda_triggers flag only.  ARN nullability
+# is intentionally NOT checked here: on greenfield applies the Lambda ARNs come
+# from module outputs and are unknown during plan, which would make count unknown.
+# The module-level variable validation still requires the ARNs to be non-null when
+# triggers are enabled.
 resource "aws_lambda_permission" "cognito_pre_signup" {
-  count = var.enable_lambda_triggers && var.pre_signup_lambda_arn != null ? 1 : 0
+  count = var.enable_lambda_triggers ? 1 : 0
 
   statement_id  = "AllowCognitoInvokePreSignup"
   action        = "lambda:InvokeFunction"
@@ -257,7 +260,7 @@ resource "aws_lambda_permission" "cognito_pre_signup" {
 }
 
 resource "aws_lambda_permission" "cognito_post_auth" {
-  count = var.enable_lambda_triggers && var.post_auth_lambda_arn != null ? 1 : 0
+  count = var.enable_lambda_triggers ? 1 : 0
 
   statement_id  = "AllowCognitoInvokePostAuth"
   action        = "lambda:InvokeFunction"
@@ -267,7 +270,7 @@ resource "aws_lambda_permission" "cognito_post_auth" {
 }
 
 resource "aws_lambda_permission" "cognito_post_confirmation" {
-  count = var.enable_lambda_triggers && var.post_confirmation_lambda_arn != null ? 1 : 0
+  count = var.enable_lambda_triggers ? 1 : 0
 
   statement_id  = "AllowCognitoInvokePostConfirmation"
   action        = "lambda:InvokeFunction"
