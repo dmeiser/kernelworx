@@ -142,12 +142,13 @@ resource "aws_cognito_user_pool" "main" {
   auto_verified_attributes = ["email"]
 
   # Password policy
+  # Matches client-side validation in ForgotPasswordPage.tsx and SignupPage.tsx.
   password_policy {
     minimum_length                   = 8
     require_lowercase                = true
     require_uppercase                = true
     require_numbers                  = true
-    require_symbols                  = false
+    require_symbols                  = true
     temporary_password_validity_days = 7
   }
 

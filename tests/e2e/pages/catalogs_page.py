@@ -102,9 +102,7 @@ class CatalogsPage(BasePage):
         Args:
             name: Catalog name text to match.
         """
-        return self.page.get_by_role("row").filter(
-            has=self.page.get_by_role("cell", name=name, exact=True)
-        )
+        return self.page.get_by_role("row").filter(has=self.page.get_by_role("cell", name=name, exact=True))
 
     def _product_name_input(self, index: int = 0) -> Locator:
         """Return locator for the *Product Name* field of product *index*.
@@ -171,6 +169,23 @@ class CatalogsPage(BasePage):
             name: Catalog name text to search for.
         """
         return self._catalog_row(name).first.is_visible()
+
+    def has_any_catalogs(self) -> bool:
+        """Return ``True`` when the current tab lists at least one catalog.
+
+        The catalogs table renders one ``tbody`` row per catalog; the empty
+        state renders no table rows at all. Waits for either the table to
+        populate or the empty-state text to appear so the count is not read
+        while the query is still in flight.
+        """
+        table_row = self.page.locator("table tbody tr").first
+        empty_state = self.page.get_by_text(
+            re.compile(
+                r"No catalogs yet\. Create your first catalog!|No managed catalogs available\."
+            )
+        )
+        expect(table_row.or_(empty_state)).to_be_visible(timeout=10_000)
+        return self.page.locator("table tbody tr").count() > 0
 
     # ------------------------------------------------------------------
     # Actions

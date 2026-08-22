@@ -419,9 +419,7 @@ class TestAsyncGetSharedCampaignCatalogIds:
         """Should skip results that are neither a set nor an exception."""
         from src.handlers.list_catalogs_in_use import _async_get_shared_campaign_catalog_ids
 
-        async def mock_get_campaigns(
-            dynamodb: Any, table_name: str, profile_id: str
-        ) -> object:
+        async def mock_get_campaigns(dynamodb: Any, table_name: str, profile_id: str) -> object:
             if profile_id == "PROFILE#prof1":
                 return {"CATALOG#cat1"}
             # Return an unexpected scalar type to exercise the else-false branch.
@@ -557,9 +555,7 @@ class TestHandler:
 
         event = {"identity": {"sub": "test-user-id"}}
 
-        async def mock_get_all(
-            account_id: str, request_logger: Any = None
-        ) -> tuple[Set[str], List[str], Set[str]]:
+        async def mock_get_all(account_id: str, request_logger: Any = None) -> tuple[Set[str], List[str], Set[str]]:
             return (
                 {"CATALOG#cat2", "CATALOG#cat1"},
                 ["PROFILE#prof1"],
@@ -582,9 +578,7 @@ class TestHandler:
 
         captured_account_id: List[str] = []
 
-        async def mock_get_all(
-            account_id: str, request_logger: Any = None
-        ) -> tuple[Set[str], List[str], Set[str]]:
+        async def mock_get_all(account_id: str, request_logger: Any = None) -> tuple[Set[str], List[str], Set[str]]:
             captured_account_id.append(account_id)
             return (set(), [], set())
 
@@ -603,9 +597,7 @@ class TestHandler:
 
         event = {"identity": {"sub": "test-user-id"}}
 
-        async def mock_get_all(
-            account_id: str, request_logger: Any = None
-        ) -> tuple[Set[str], List[str], Set[str]]:
+        async def mock_get_all(account_id: str, request_logger: Any = None) -> tuple[Set[str], List[str], Set[str]]:
             return (set(), [], set())
 
         with patch(
@@ -623,9 +615,7 @@ class TestHandler:
 
         event = {"identity": {"sub": "test-user-id"}}
 
-        async def mock_get_all(
-            account_id: str, request_logger: Any = None
-        ) -> tuple[Set[str], List[str], Set[str]]:
+        async def mock_get_all(account_id: str, request_logger: Any = None) -> tuple[Set[str], List[str], Set[str]]:
             raise RuntimeError("Unexpected error")
 
         with patch(
@@ -645,9 +635,7 @@ class TestHandler:
 
         event = {"identity": {"sub": "test-user-id"}}
 
-        async def mock_get_all(
-            account_id: str, request_logger: Any = None
-        ) -> tuple[Set[str], List[str], Set[str]]:
+        async def mock_get_all(account_id: str, request_logger: Any = None) -> tuple[Set[str], List[str], Set[str]]:
             raise AppError(ErrorCode.NOT_FOUND, "Not found")
 
         with patch(

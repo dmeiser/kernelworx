@@ -22,12 +22,15 @@ try:  # pragma: no cover
     from utils.dynamodb import tables
     from utils.errors import AppError, ErrorCode
     from utils.ids import ensure_account_id, ensure_profile_id
+    from utils.logging import get_logger
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.auth import is_admin
     from ..utils.dynamodb import tables
     from ..utils.errors import AppError, ErrorCode
     from ..utils.ids import ensure_account_id, ensure_profile_id
+    from ..utils.logging import get_logger
 
+logger = get_logger(__name__)
 _type_serializer = TypeSerializer()
 
 
@@ -104,11 +107,20 @@ def _transfer_ownership(profile: Dict[str, Any], db_profile_id: str, db_new_owne
 
 
 def _delete_share_if_exists(db_profile_id: str, db_new_owner_id: str) -> None:
-    """Delete the share if it exists (new owner doesn't need it anymore)."""
+    """Delete the share if it exists (new owner doesn't need it anymore).
+
+    Logs unexpected failures but does not fail the transfer, since the share is
+    best-effort cleanup after ownership has already changed.
+    """
     try:
         tables.shares.delete_item(Key={"profileId": db_profile_id, "targetAccountId": db_new_owner_id})
     except Exception:
-        pass  # Share might not exist for admin transfers
+        logger.error(
+            "Failed to delete share for new owner after ownership transfer",
+            profile_id=db_profile_id,
+            target_account_id=db_new_owner_id,
+            exc_info=True,
+        )
 
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:

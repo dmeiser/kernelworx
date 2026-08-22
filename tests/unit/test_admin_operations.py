@@ -412,6 +412,12 @@ class TestAdminListUsers:
             assert user["createdAt"] == user_created.isoformat()
             assert user["lastModifiedAt"] == user_modified.isoformat()
 
+            # Verify handler plumbs extracted subs/usernames into the batch helpers.
+            assert mock_batch_names.call_args.args[0] == [user_id]
+            assert mock_batch_groups.call_args.args[0] is mock_cognito
+            assert mock_batch_groups.call_args.args[1] == "test-pool-id"
+            assert mock_batch_groups.call_args.args[2] == [user_id]
+
     def test_success_with_pagination(
         self,
         dynamodb_table: Any,
@@ -1706,14 +1712,14 @@ class TestAdminDeleteUser:
                 assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
                 mock_cognito.admin_delete_user.assert_not_called()
 
-    def test_cognito_lookup_error_deletes_dynamodb_idempotently(
+    def test_cognito_lookup_error_aborts_deletion(
         self,
         dynamodb_table: Any,
         admin_appsync_event: Dict[str, Any],
         lambda_context: Any,
         monkeypatch: Any,
     ) -> None:
-        """Test that Cognito lookup errors do not block DynamoDB cleanup."""
+        """Test that Cognito lookup errors abort deletion before DynamoDB cleanup."""
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
 
@@ -1741,21 +1747,22 @@ class TestAdminDeleteUser:
             )
             mock_get_client.return_value = mock_cognito
 
-            result = admin_delete_user(event, lambda_context)
+            with pytest.raises(AppError) as exc_info:
+                admin_delete_user(event, lambda_context)
 
-            assert result is True
+            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
             mock_cognito.admin_delete_user.assert_not_called()
             response = accounts_table.get_item(Key={"accountId": f"ACCOUNT#{target_account_id}"})
-            assert "Item" not in response
+            assert "Item" in response
 
-    def test_sub_lookup_error_deletes_dynamodb_idempotently(
+    def test_sub_lookup_error_aborts_deletion(
         self,
         dynamodb_table: Any,
         admin_appsync_event: Dict[str, Any],
         lambda_context: Any,
         monkeypatch: Any,
     ) -> None:
-        """Test that sub lookup errors do not block DynamoDB cleanup."""
+        """Test that sub lookup errors abort deletion before DynamoDB cleanup."""
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
 
@@ -1785,11 +1792,12 @@ class TestAdminDeleteUser:
             mock_cognito.admin_delete_user.return_value = {}
             mock_get_client.return_value = mock_cognito
 
-            result = admin_delete_user(event, lambda_context)
+            with pytest.raises(AppError) as exc_info:
+                admin_delete_user(event, lambda_context)
 
-            assert result is True
+            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
             response = accounts_table.get_item(Key={"accountId": f"ACCOUNT#{target_account_id}"})
-            assert "Item" not in response
+            assert "Item" in response
 
     def test_empty_cognito_users_deletes_dynamodb_idempotently(
         self,
@@ -2948,6 +2956,12 @@ class TestAdminSearchUser:
                 Filter='email ^= "user@example"',
                 Limit=50,
             )
+
+            # Verify handler plumbs extracted sub and username into the batch helpers.
+            assert mock_batch_names.call_args.args[0] == ["user-sub-123"]
+            assert mock_batch_groups.call_args.args[0] is mock_client
+            assert mock_batch_groups.call_args.args[1] == "test-pool-id"
+            assert mock_batch_groups.call_args.args[2] == ["user@example.com"]
 
     def test_search_user_multiple_matches(
         self,
@@ -5144,7 +5158,7 @@ class TestAdminOperationExceptionHandlers:
         lambda_context: Any,
         monkeypatch: Any,
     ) -> None:
-        """Test _build_admin_user when DynamoDB account has no name fields (branch coverage)."""
+        """Test admin_search_user when DynamoDB account has no name fields (branch coverage)."""
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
 
         event = {
@@ -5195,7 +5209,7 @@ class TestAdminOperationExceptionHandlers:
         lambda_context: Any,
         monkeypatch: Any,
     ) -> None:
-        """Test _build_admin_user handles ClientError from get_item (branch coverage 450-451)."""
+        """Test admin_search_user handles ClientError from DynamoDB get_item (branch coverage 450-451)."""
 
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
 

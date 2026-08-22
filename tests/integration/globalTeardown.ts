@@ -956,106 +956,138 @@ async function cleanupEmptyCampaigns(): Promise<number> {
 
 export default async function globalTeardown(): Promise<void> {
   console.log('\n🧹 Running global test cleanup...');
-  
-  try {
-    const smokeUsersDeleted = await cleanupUnconfirmedSmokeUsers();
 
-    // Step 1: Get test account IDs
-    const testAccountIds = await getTestAccountIds();
+  // Each cleanup stage runs independently: a failure in one stage is recorded
+  // and the remaining stages still run, so partial cleanups are visible. A
+  // composite error is thrown at the end if any stage failed.
+  const failures: string[] = [];
+  const counts: Array<[string, number | null]> = [];
+  const formatCount = (count: number | null): string => (count === null ? 'FAILED' : String(count));
+
+  const runStage = async (name: string, stage: () => Promise<number>): Promise<number | null> => {
+    try {
+      return await stage();
+    } catch (error) {
+      console.error(`❌ Cleanup stage '${name}' failed:`, error);
+      failures.push(`${name}: ${error instanceof Error ? error.message : String(error)}`);
+      return null;
+    }
+  };
+
+  const smokeUsersDeleted = await runStage('cleanupUnconfirmedSmokeUsers', cleanupUnconfirmedSmokeUsers);
+
+  // Step 1: Get test account IDs
+  let testAccountIds: string[] = [];
+  try {
+    testAccountIds = await getTestAccountIds();
     console.log(`  Found ${testAccountIds.length} test account(s)`);
-    
-    if (testAccountIds.length === 0) {
-      console.log('⚠️  No test accounts found, skipping DynamoDB cleanup');
-      console.log('✅ Global cleanup complete:');
-      console.log(`   - Cognito smoke+ UNCONFIRMED users: ${smokeUsersDeleted} deleted`);
-      console.log('   - Account records: preserved (not deleted)');
-      console.log('   - Cognito users: preserved (except smoke+ UNCONFIRMED test users)');
-      return;
-    }
-    
+  } catch (error) {
+    console.error("❌ Cleanup stage 'getTestAccountIds' failed:", error);
+    failures.push(`getTestAccountIds: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  let dryRun = process.env.DRY_RUN !== 'false';
+
+  if (testAccountIds.length === 0) {
+    console.log('⚠️  No test accounts found, skipping DynamoDB cleanup');
+  } else {
     // Step 2: Collect all profile IDs owned by test accounts
-    console.log('  Collecting test user profiles...');
     const profileIds: string[] = [];
-    for (const accountId of testAccountIds) {
-      const queryResult = await dynamodb.send(new QueryCommand({
-        TableName: PROFILES_TABLE,
-        KeyConditionExpression: 'ownerAccountId = :ownerAccountId',
-        ExpressionAttributeValues: {
-          ':ownerAccountId': { S: accountId },
-        },
-        ProjectionExpression: 'profileId',
-      }));
-      const items = queryResult.Items || [];
-      profileIds.push(...items.map(item => item.profileId?.S).filter(Boolean) as string[]);
+    try {
+      console.log('  Collecting test user profiles...');
+      for (const accountId of testAccountIds) {
+        const queryResult = await dynamodb.send(new QueryCommand({
+          TableName: PROFILES_TABLE,
+          KeyConditionExpression: 'ownerAccountId = :ownerAccountId',
+          ExpressionAttributeValues: {
+            ':ownerAccountId': { S: accountId },
+          },
+          ProjectionExpression: 'profileId',
+        }));
+        const items = queryResult.Items || [];
+        profileIds.push(...items.map(item => item.profileId?.S).filter(Boolean) as string[]);
+      }
+      console.log(`    Found ${profileIds.length} profile(s)`);
+    } catch (error) {
+      console.error("❌ Cleanup stage 'collectTestProfiles' failed:", error);
+      failures.push(`collectTestProfiles: ${error instanceof Error ? error.message : String(error)}`);
     }
-    console.log(`    Found ${profileIds.length} profile(s)`);
-    
+
     // Step 3: Collect all campaign IDs from test user profiles
-    console.log('  Collecting test user campaigns...');
     const campaignIds: string[] = [];
-    for (const profileId of profileIds) {
-      const queryResult = await dynamodb.send(new QueryCommand({
-        TableName: CAMPAIGNS_TABLE,
-        KeyConditionExpression: 'profileId = :profileId',
-        ExpressionAttributeValues: {
-          ':profileId': { S: profileId },
-        },
-        ProjectionExpression: 'campaignId',
-      }));
-      const items = queryResult.Items || [];
-      campaignIds.push(...items.map(item => item.campaignId?.S).filter(Boolean) as string[]);
+    try {
+      console.log('  Collecting test user campaigns...');
+      for (const profileId of profileIds) {
+        const queryResult = await dynamodb.send(new QueryCommand({
+          TableName: CAMPAIGNS_TABLE,
+          KeyConditionExpression: 'profileId = :profileId',
+          ExpressionAttributeValues: {
+            ':profileId': { S: profileId },
+          },
+          ProjectionExpression: 'campaignId',
+        }));
+        const items = queryResult.Items || [];
+        campaignIds.push(...items.map(item => item.campaignId?.S).filter(Boolean) as string[]);
+      }
+      console.log(`    Found ${campaignIds.length} campaign(s)`);
+    } catch (error) {
+      console.error("❌ Cleanup stage 'collectTestCampaigns' failed:", error);
+      failures.push(`collectTestCampaigns: ${error instanceof Error ? error.message : String(error)}`);
     }
-    console.log(`    Found ${campaignIds.length} campaign(s)`);
-    
+
     // Step 4: Clean up in order of dependencies (child entities first)
     // NOTE: We delete SellerProfiles (Scouts) but NOT Account records or Cognito users
-    const ordersDeleted = await cleanupTestOrders(campaignIds);
-    const invitesDeleted = await cleanupTestInvites(profileIds, testAccountIds);
-    const sharesDeleted = await cleanupTestShares(profileIds, testAccountIds);
-    const campaignsDeleted = await cleanupTestCampaigns(profileIds);
-    const catalogsDeleted = await cleanupTestCatalogs();
-    const sharedCampaignsDeleted = await cleanupSharedCampaigns();
-    const profilesDeleted = await cleanupTestProfiles();
-    
+    counts.push(['Orders', await runStage('cleanupTestOrders', () => cleanupTestOrders(campaignIds))]);
+    counts.push(['Invites', await runStage('cleanupTestInvites', () => cleanupTestInvites(profileIds, testAccountIds))]);
+    counts.push(['Shares', await runStage('cleanupTestShares', () => cleanupTestShares(profileIds, testAccountIds))]);
+    counts.push(['Campaigns', await runStage('cleanupTestCampaigns', () => cleanupTestCampaigns(profileIds))]);
+    counts.push(['Catalogs', await runStage('cleanupTestCatalogs', cleanupTestCatalogs)]);
+    counts.push(['Shared Campaigns', await runStage('cleanupSharedCampaigns', cleanupSharedCampaigns)]);
+    counts.push(['SellerProfiles', await runStage('cleanupTestProfiles', cleanupTestProfiles)]);
+
     // Step 5: Clean up orphaned records (data integrity issues) - ONLY for test profiles
     console.log('\n  Cleaning up orphaned test data...');
-    const orphanedSharesDeleted = await cleanupOrphanedShares(profileIds);
-    const orphanedOrdersDeleted = await cleanupOrphanedOrders();
-    const orphanedInvitesDeleted = await cleanupOrphanedInvites(profileIds);
-    const emptyCampaignsDeleted = await cleanupEmptyCampaigns();
-    
+    counts.push(['Orphaned Shares (test)', await runStage('cleanupOrphanedShares', () => cleanupOrphanedShares(profileIds))]);
+    counts.push(['Orphaned Orders', await runStage('cleanupOrphanedOrders', cleanupOrphanedOrders)]);
+    counts.push(['Orphaned Invites (test)', await runStage('cleanupOrphanedInvites', () => cleanupOrphanedInvites(profileIds))]);
+    counts.push(['Empty Campaigns', await runStage('cleanupEmptyCampaigns', cleanupEmptyCampaigns)]);
+
     // Step 6: Clean up ALL orphaned shares and invites (DRY RUN by default)
     // Set DRY_RUN=false environment variable to actually delete
-    const dryRun = process.env.DRY_RUN !== 'false';
     const maxDeletions = parseInt(process.env.MAX_DELETIONS || '100', 10);
-    
+
     console.log('\n  Cleaning up ALL orphaned data (not just test data)...');
     if (dryRun) {
       console.log('  ⚠️  DRY RUN MODE - No actual deletions will occur');
       console.log('  ℹ️  Set DRY_RUN=false to actually delete orphaned data');
     }
-    const allOrphanedSharesDeleted = await cleanupAllOrphanedShares(dryRun, maxDeletions);
-    const allOrphanedInvitesDeleted = await cleanupAllOrphanedInvites(dryRun, maxDeletions);
-    
-    console.log('✅ Global cleanup complete:');
-    console.log(`   - Orders: ${ordersDeleted} deleted`);
-    console.log(`   - Invites: ${invitesDeleted} deleted`);
-    console.log(`   - Shares: ${sharesDeleted} deleted`);
-    console.log(`   - Campaigns: ${campaignsDeleted} deleted`);
-    console.log(`   - Catalogs: ${catalogsDeleted} deleted`);
-    console.log(`   - Shared Campaigns: ${sharedCampaignsDeleted} deleted`);
-    console.log(`   - SellerProfiles: ${profilesDeleted} deleted`);
-    console.log(`   - Orphaned Shares (test): ${orphanedSharesDeleted} deleted`);
-    console.log(`   - Orphaned Orders: ${orphanedOrdersDeleted} deleted`);
-    console.log(`   - Orphaned Invites (test): ${orphanedInvitesDeleted} deleted`);
-    console.log(`   - Empty Campaigns: ${emptyCampaignsDeleted} deleted`);
-    console.log(`   - Orphaned Shares (all): ${allOrphanedSharesDeleted} ${dryRun ? 'would be' : ''} deleted`);
-    console.log(`   - Orphaned Invites (all): ${allOrphanedInvitesDeleted} ${dryRun ? 'would be' : ''} deleted`);
-    console.log(`   - Cognito smoke+ UNCONFIRMED users: ${smokeUsersDeleted} deleted`);
-    console.log('   - Account records: preserved (not deleted)');
-    console.log('   - Cognito users: preserved (except smoke+ UNCONFIRMED test users)');
-  } catch (error) {
-    console.error('❌ Global cleanup failed:', error);
-    // Don't throw - we don't want cleanup failures to break CI
+    counts.push(['Orphaned Shares (all)', await runStage('cleanupAllOrphanedShares', () => cleanupAllOrphanedShares(dryRun, maxDeletions))]);
+    counts.push(['Orphaned Invites (all)', await runStage('cleanupAllOrphanedInvites', () => cleanupAllOrphanedInvites(dryRun, maxDeletions))]);
+  }
+
+  console.log(`${failures.length === 0 ? '✅' : '⚠️'} Global cleanup complete:`);
+  for (const [label, count] of counts) {
+    const suffix = label === 'Orphaned Shares (all)' || label === 'Orphaned Invites (all)'
+      ? `${dryRun ? 'would be' : ''} deleted`
+      : 'deleted';
+    console.log(`   - ${label}: ${formatCount(count)} ${suffix}`);
+  }
+  console.log(`   - Cognito smoke+ UNCONFIRMED users: ${formatCount(smokeUsersDeleted)} deleted`);
+  console.log('   - Account records: preserved (not deleted)');
+  console.log('   - Cognito users: preserved (except smoke+ UNCONFIRMED test users)');
+
+  if (failures.length > 0) {
+    const failOnCleanupError = ['1', 'true', 'yes'].includes(
+      (process.env.E2E_FAIL_ON_CLEANUP_ERROR || '').toLowerCase(),
+    );
+    const summary =
+      `Global cleanup incomplete — ${failures.length} stage(s) failed:\n  - ${failures.join('\n  - ')}`;
+    if (failOnCleanupError) {
+      throw new Error(summary);
+    }
+    console.warn(`⚠️  ${summary}`);
+    console.warn(
+      '   E2E_FAIL_ON_CLEANUP_ERROR is not set; treating cleanup failures as warnings.',
+    );
   }
 }

@@ -5,6 +5,9 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.head_ref || github.run_id }}
   cancel-in-progress: true
@@ -100,6 +103,111 @@ jobs:
           echo "- ESLint (linting)" >> $GITHUB_STEP_SUMMARY
           echo "- TypeScript (type checking)" >> $GITHUB_STEP_SUMMARY
           echo "- Vitest (unit tests with coverage)" >> $GITHUB_STEP_SUMMARY
+
+  guards:
+    name: Guard tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: ".node-version"
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Guard tests
+        run: npm run test:guards
+
+  js-resolvers:
+    name: AppSync JS resolver tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: ".node-version"
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: JS resolver tests
+        run: npm run test:js-resolvers
+
+  check-integration-secrets:
+    name: Check integration test secrets
+    runs-on: ubuntu-latest
+    outputs:
+      has-secrets: ${{ steps.check.outputs.has-secrets }}
+    steps:
+      - name: Check required secrets
+        id: check
+        env:
+          TEST_OWNER_EMAIL: ${{ secrets.TEST_OWNER_EMAIL }}
+          TEST_OWNER_PASSWORD: ${{ secrets.TEST_OWNER_PASSWORD }}
+          TEST_CONTRIBUTOR_EMAIL: ${{ secrets.TEST_CONTRIBUTOR_EMAIL }}
+          TEST_CONTRIBUTOR_PASSWORD: ${{ secrets.TEST_CONTRIBUTOR_PASSWORD }}
+          TEST_READONLY_EMAIL: ${{ secrets.TEST_READONLY_EMAIL }}
+          TEST_READONLY_PASSWORD: ${{ secrets.TEST_READONLY_PASSWORD }}
+        run: |
+          if [ -n "$TEST_OWNER_EMAIL" ] && [ -n "$TEST_OWNER_PASSWORD" ] && \
+             [ -n "$TEST_CONTRIBUTOR_EMAIL" ] && [ -n "$TEST_CONTRIBUTOR_PASSWORD" ] && \
+             [ -n "$TEST_READONLY_EMAIL" ] && [ -n "$TEST_READONLY_PASSWORD" ]; then
+            echo "has-secrets=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has-secrets=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  integration:
+    name: Integration tests
+    needs: check-integration-secrets
+    if: needs.check-integration-secrets.outputs.has-secrets == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: ".node-version"
+          cache: npm
+          cache-dependency-path: tests/integration/package-lock.json
+
+      - name: Install integration test dependencies
+        working-directory: tests/integration
+        run: npm ci
+
+      - name: Run integration tests
+        working-directory: tests/integration
+        env:
+          E2E_BASE_URL: ${{ secrets.E2E_BASE_URL || 'https://dev.kernelworx.app' }}
+          TEST_OWNER_EMAIL: ${{ secrets.TEST_OWNER_EMAIL }}
+          TEST_OWNER_PASSWORD: ${{ secrets.TEST_OWNER_PASSWORD }}
+          TEST_CONTRIBUTOR_EMAIL: ${{ secrets.TEST_CONTRIBUTOR_EMAIL }}
+          TEST_CONTRIBUTOR_PASSWORD: ${{ secrets.TEST_CONTRIBUTOR_PASSWORD }}
+          TEST_READONLY_EMAIL: ${{ secrets.TEST_READONLY_EMAIL }}
+          TEST_READONLY_PASSWORD: ${{ secrets.TEST_READONLY_PASSWORD }}
+        run: npm test
 
   infra:
     name: Infrastructure linting

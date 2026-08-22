@@ -23,7 +23,7 @@ vi.stubGlobal('document', {
     removeChild: vi.fn(),
   },
 });
-import { downloadAsCSV, downloadAsXLSX } from '../src/lib/reportExport';
+import { downloadAsCSV, downloadAsXLSX, sanitizeReportValue } from '../src/lib/reportExport';
 
 const mockOrder = {
   orderId: 'order-1',
@@ -312,6 +312,54 @@ describe('reportExport utilities', () => {
       expect(csvContent).toContain("'=cmd|'/C calc'!A0");
       expect(csvContent).toContain("'+123");
       expect(csvContent).toContain("'@SUM(A:A)");
+      blobSpy.mockRestore();
+    });
+  });
+
+  describe('sanitizeReportValue', () => {
+    it('returns non-trigger strings and numbers unchanged', () => {
+      expect(sanitizeReportValue('John Doe')).toBe('John Doe');
+      expect(sanitizeReportValue('')).toBe('');
+      expect(sanitizeReportValue(48.0)).toBe(48.0);
+      expect(sanitizeReportValue('plain text')).toBe('plain text');
+    });
+
+    it('prefixes formula-triggering characters with an apostrophe', () => {
+      expect(sanitizeReportValue('=cmd|"/C calc"!A0')).toBe("'=cmd|\"/C calc\"!A0");
+      expect(sanitizeReportValue('+123')).toBe("'+123");
+      expect(sanitizeReportValue('-SUM(A:A)')).toBe("'-SUM(A:A)");
+      expect(sanitizeReportValue('@SUM(A:A)')).toBe("'@SUM(A:A)");
+      expect(sanitizeReportValue('\t= injection')).toBe("'\t= injection");
+      expect(sanitizeReportValue('\r= injection')).toBe("'\r= injection");
+    });
+  });
+
+  describe('CSV row builder', () => {
+    it('builds rows with one column per unique product sorted alphabetically', () => {
+      function MockBlob(this: { content: string }, parts: BlobPart[]) {
+        this.content = parts.join('');
+      }
+      const blobSpy = vi.spyOn(global, 'Blob').mockImplementation(MockBlob as unknown as typeof Blob);
+      downloadAsCSV([mockOrder, mockOrder2], 'campaign-123');
+      const csvContent = (blobSpy.mock.results[0].value as { content: string }).content;
+      const lines = csvContent.split('\n');
+
+      // Header: Name, Phone, Address, Almond? no — products from both orders sorted
+      const header = lines[0];
+      expect(header).toContain('"Name","Phone","Address","Butter Corn","Caramel Corn","Total"');
+
+      // First order row should include both products
+      const firstRow = lines[1];
+      expect(firstRow).toContain('"John Doe"');
+      expect(firstRow).toMatch(/"5"/); // Caramel Corn quantity
+      expect(firstRow).toMatch(/"3"/); // Butter Corn quantity
+
+      // Second order row should have empty cell for the product it did not include
+      const secondRow = lines[2];
+      expect(secondRow).toContain('"Jane Smith"');
+      expect(secondRow).toMatch(/"2"/); // Caramel Corn quantity
+      expect(secondRow).toMatch(/""/); // Butter Corn absent
+
       blobSpy.mockRestore();
     });
   });

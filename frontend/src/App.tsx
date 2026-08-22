@@ -13,6 +13,7 @@ import { ProtectedRoute } from './components/ProtectedRoute';
 import { DevFooter } from './components/DevFooter';
 import { LandingPage } from './pages/LandingPage';
 import { LoginPage } from './pages/LoginPage';
+import { ForgotPasswordPage } from './pages/ForgotPasswordPage';
 import { SignupPage } from './pages/SignupPage';
 import { PrivacyPolicyPage } from './pages/PrivacyPolicyPage';
 import { ScoutsPage } from './pages/ScoutsPage';
@@ -72,6 +73,7 @@ function App() {
               {/* Public routes */}
               <Route path="/" element={<LandingPage />} />
               <Route path="/login" element={<LoginPage />} />
+              <Route path="/forgot-password" element={<ForgotPasswordPage />} />
               <Route path="/signup" element={<SignupPage />} />
               <Route path="/privacy" element={<PrivacyPolicyPage />} />
               <Route path="/story" element={<StoryPage />} />

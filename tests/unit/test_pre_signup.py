@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from src.handlers.pre_signup import FederatedIdentityLinkedException, lambda_handler
+from src.utils.logging import mask_email
 
 
 @pytest.fixture
@@ -301,15 +302,15 @@ class TestErrorHandling:
                 lambda_handler(federated_signup_event, lambda_context)
 
             assert "already exists" in str(exc_info.value)
-            assert federated_signup_event["request"]["userAttributes"]["email"] in str(exc_info.value)
+            assert mask_email(federated_signup_event["request"]["userAttributes"]["email"]) in str(exc_info.value)
             assert isinstance(exc_info.value, FederatedIdentityLinkedException)
 
-    def test_cognito_api_error_allows_signup(
+    def test_cognito_api_error_raises(
         self,
         federated_signup_event: dict[str, Any],
         lambda_context: MagicMock,
     ) -> None:
-        """Unexpected errors should not block sign-up"""
+        """Unexpected errors should fail the signup to avoid duplicate accounts."""
         with patch("boto3.client") as mock_client:
             mock_cognito = MagicMock()
             mock_cognito.list_users.side_effect = Exception("Network error")
@@ -317,10 +318,8 @@ class TestErrorHandling:
             mock_cognito.exceptions.InvalidParameterException = type("InvalidParameterException", (Exception,), {})
             mock_client.return_value = mock_cognito
 
-            result = lambda_handler(federated_signup_event, lambda_context)
-
-            # Should return event to allow sign-up (fail open)
-            assert result == federated_signup_event
+            with pytest.raises(Exception, match="Network error"):
+                lambda_handler(federated_signup_event, lambda_context)
 
     def test_unexpected_username_format(
         self,
