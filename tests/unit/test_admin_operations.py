@@ -1873,6 +1873,44 @@ class TestAdminDeleteUser:
             response = accounts_table.get_item(Key={"accountId": f"ACCOUNT#{target_account_id}"})
             assert "Item" not in response
 
+    def test_dynamodb_account_lookup_error_aborts_deletion(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """Test that DynamoDB account existence lookup errors abort deletion."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
+
+        target_account_id = "target-user-456"
+
+        event = {
+            **admin_appsync_event,
+            "arguments": {"accountId": target_account_id},
+        }
+
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client, \
+             patch("src.handlers.admin_operations.tables") as mock_tables:
+            mock_cognito = MagicMock()
+            mock_cognito.list_users.return_value = {"Users": []}
+            mock_get_client.return_value = mock_cognito
+
+            mock_accounts = MagicMock()
+            mock_accounts.get_item.side_effect = ClientError(
+                {"Error": {"Code": "InternalServerError", "Message": "DB error"}},
+                "GetItem",
+            )
+            mock_tables.accounts = mock_accounts
+
+            with pytest.raises(AppError) as exc_info:
+                admin_delete_user(event, lambda_context)
+
+            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+            mock_accounts.delete_item.assert_not_called()
+            mock_cognito.admin_delete_user.assert_not_called()
+
     def test_unexpected_exception_handled(
         self,
         dynamodb_table: Any,
