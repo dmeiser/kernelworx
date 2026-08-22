@@ -102,7 +102,7 @@ def test_campaign_reports_download_buttons(owner_page: Page, ensure_owner_profil
     campaign_names = campaign_page.get_campaign_names()
     if not campaign_names:
         campaign_name = f"Reports Download Test {datetime.now().strftime('%Y%m%d%H%M%S')}"
-        campaign_page.create_campaign_first_catalog(campaign_name)
+        campaign_page.create_campaign_first_catalog(campaign_name, profile_id)
         campaign_names = campaign_page.get_campaign_names()
     assert campaign_names, "Need at least one campaign to test reports download"
 
@@ -164,7 +164,7 @@ def test_campaign_reports_csv_content_matches_table(
     campaign_names = campaign_page.get_campaign_names()
     if not campaign_names:
         campaign_name = f"Reports CSV Test {datetime.now().strftime('%Y%m%d%H%M%S')}"
-        campaign_page.create_campaign_first_catalog(campaign_name)
+        campaign_page.create_campaign_first_catalog(campaign_name, profile_id)
         campaign_names = campaign_page.get_campaign_names()
     assert campaign_names, "Need at least one campaign to test reports CSV"
 

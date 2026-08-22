@@ -80,7 +80,7 @@ def test_campaign_reports_tab_loads(owner_page: Page, ensure_owner_profile: str,
     # Step 2 – ensure at least one campaign exists.
     campaign_names = campaign_page.get_campaign_names()
     if not campaign_names:
-        campaign_page.create_campaign_first_catalog("Reports Smoke Test Campaign")
+        campaign_page.create_campaign_first_catalog("Reports Smoke Test Campaign", profile_id)
         campaign_names = campaign_page.get_campaign_names()
     assert campaign_names, "Need at least one campaign to test the reports tab"
 
