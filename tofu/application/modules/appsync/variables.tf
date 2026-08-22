@@ -16,13 +16,15 @@ variable "name_prefix" {
 }
 
 variable "api_domain" {
-  description = "Fully qualified API domain (e.g., api.dev.kernelworx.app or api.kernelworx.app)"
+  description = "Fully qualified API domain (e.g., api.dev.kernelworx.app or api.kernelworx.app). When null, no custom domain is created and the AWS-managed AppSync URL is used."
   type        = string
+  default     = null
 }
 
 variable "api_certificate_arn" {
-  description = "ACM certificate ARN for the AppSync custom domain"
+  description = "ACM certificate ARN for the AppSync custom domain. Required when api_domain is set."
   type        = string
+  default     = null
 }
 
 variable "certificate_validation" {
@@ -54,6 +56,12 @@ variable "user_pool_id" {
 variable "aws_region" {
   type        = string
   description = "AWS region"
+}
+
+variable "prevent_destroy" {
+  description = "Set to false for ephemeral environments that must be destroyed after use."
+  type        = bool
+  default     = true
 }
 
 locals {

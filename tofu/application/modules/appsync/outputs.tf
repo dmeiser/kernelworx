@@ -11,8 +11,8 @@ output "api_url" {
 }
 
 output "api_domain" {
-  value       = aws_appsync_domain_name.api.domain_name
-  description = "AppSync custom domain name"
+  value       = var.api_domain != null ? aws_appsync_domain_name.api[0].domain_name : null
+  description = "AppSync custom domain name (null when using the AWS-managed URL)"
 }
 
 output "api_arn" {

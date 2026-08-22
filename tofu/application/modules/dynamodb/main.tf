@@ -28,6 +28,18 @@ variable "enable_point_in_time_recovery" {
   default     = false
 }
 
+variable "prevent_destroy" {
+  description = "Set to false for ephemeral environments that must be destroyed after use."
+  type        = bool
+  default     = true
+}
+
+variable "enable_deletion_protection" {
+  description = "Enable AWS deletion protection on DynamoDB tables. Disable for ephemeral environments."
+  type        = bool
+  default     = true
+}
+
 locals {
   table_suffix = "-${var.region_abbrev}-${var.environment}"
   tags = {
@@ -46,7 +58,7 @@ resource "aws_dynamodb_table" "accounts" {
   name                        = "${var.name_prefix}-accounts${local.table_suffix}"
   billing_mode                = "PAY_PER_REQUEST"
   hash_key                    = "accountId"
-  deletion_protection_enabled = true
+  deletion_protection_enabled = var.enable_deletion_protection
 
   attribute {
     name = "accountId"
@@ -79,7 +91,7 @@ resource "aws_dynamodb_table" "accounts" {
   tags = local.tags
 
   lifecycle {
-    prevent_destroy = true
+    prevent_destroy = var.prevent_destroy
   }
 }
 
@@ -93,7 +105,7 @@ resource "aws_dynamodb_table" "catalogs" {
   name                        = "${var.name_prefix}-catalogs${local.table_suffix}"
   billing_mode                = "PAY_PER_REQUEST"
   hash_key                    = "catalogId"
-  deletion_protection_enabled = true
+  deletion_protection_enabled = var.enable_deletion_protection
 
   attribute {
     name = "catalogId"
@@ -151,7 +163,7 @@ resource "aws_dynamodb_table" "catalogs" {
   tags = local.tags
 
   lifecycle {
-    prevent_destroy = true
+    prevent_destroy = var.prevent_destroy
   }
 }
 
@@ -165,7 +177,7 @@ resource "aws_dynamodb_table" "profiles" {
   billing_mode                = "PAY_PER_REQUEST"
   hash_key                    = "ownerAccountId"
   range_key                   = "profileId"
-  deletion_protection_enabled = true
+  deletion_protection_enabled = var.enable_deletion_protection
 
   attribute {
     name = "ownerAccountId"
@@ -223,7 +235,7 @@ resource "aws_dynamodb_table" "profiles" {
   tags = local.tags
 
   lifecycle {
-    prevent_destroy = true
+    prevent_destroy = var.prevent_destroy
   }
 }
 
@@ -237,7 +249,7 @@ resource "aws_dynamodb_table" "campaigns" {
   billing_mode                = "PAY_PER_REQUEST"
   hash_key                    = "profileId"
   range_key                   = "campaignId"
-  deletion_protection_enabled = true
+  deletion_protection_enabled = var.enable_deletion_protection
 
   attribute {
     name = "profileId"
@@ -320,7 +332,7 @@ resource "aws_dynamodb_table" "campaigns" {
   tags = local.tags
 
   lifecycle {
-    prevent_destroy = true
+    prevent_destroy = var.prevent_destroy
   }
 }
 
@@ -334,7 +346,7 @@ resource "aws_dynamodb_table" "orders" {
   billing_mode                = "PAY_PER_REQUEST"
   hash_key                    = "campaignId"
   range_key                   = "orderId"
-  deletion_protection_enabled = true
+  deletion_protection_enabled = var.enable_deletion_protection
 
   attribute {
     name = "campaignId"
@@ -392,7 +404,7 @@ resource "aws_dynamodb_table" "orders" {
   tags = local.tags
 
   lifecycle {
-    prevent_destroy = true
+    prevent_destroy = var.prevent_destroy
   }
 }
 
@@ -406,7 +418,7 @@ resource "aws_dynamodb_table" "shares" {
   billing_mode                = "PAY_PER_REQUEST"
   hash_key                    = "profileId"
   range_key                   = "targetAccountId"
-  deletion_protection_enabled = true
+  deletion_protection_enabled = var.enable_deletion_protection
 
   attribute {
     name = "profileId"
@@ -439,7 +451,7 @@ resource "aws_dynamodb_table" "shares" {
   tags = local.tags
 
   lifecycle {
-    prevent_destroy = true
+    prevent_destroy = var.prevent_destroy
   }
 }
 
@@ -453,7 +465,7 @@ resource "aws_dynamodb_table" "invites" {
   name                        = "${var.name_prefix}-invites${local.table_suffix}"
   billing_mode                = "PAY_PER_REQUEST"
   hash_key                    = "inviteCode"
-  deletion_protection_enabled = true
+  deletion_protection_enabled = var.enable_deletion_protection
 
   attribute {
     name = "inviteCode"
@@ -491,7 +503,7 @@ resource "aws_dynamodb_table" "invites" {
   tags = local.tags
 
   lifecycle {
-    prevent_destroy = true
+    prevent_destroy = var.prevent_destroy
   }
 }
 
@@ -505,7 +517,7 @@ resource "aws_dynamodb_table" "shared_campaigns" {
   name                        = "${var.name_prefix}-shared-campaigns${local.table_suffix}"
   billing_mode                = "PAY_PER_REQUEST"
   hash_key                    = "sharedCampaignCode"
-  deletion_protection_enabled = true
+  deletion_protection_enabled = var.enable_deletion_protection
 
   attribute {
     name = "sharedCampaignCode"
@@ -563,7 +575,7 @@ resource "aws_dynamodb_table" "shared_campaigns" {
   tags = local.tags
 
   lifecycle {
-    prevent_destroy = true
+    prevent_destroy = var.prevent_destroy
   }
 }
 
