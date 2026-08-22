@@ -220,3 +220,8 @@ output "cognito_client_id" {
   description = "Client ID for the ephemeral Cognito User Pool web application"
   value       = module.cognito.client_id
 }
+
+output "cognito_domain" {
+  description = "Full Cognito prefix domain hostname (e.g. kernelworx-ue1-pr-123.auth.us-east-1.amazoncognito.com)"
+  value       = "${module.cognito.domain}.auth.${var.aws_region}.amazoncognito.com"
+}

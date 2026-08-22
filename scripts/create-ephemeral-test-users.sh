@@ -58,7 +58,7 @@ create_or_update_user() {
     --message-action SUPPRESS \
     --temporary-password "$password" \
     --region "$REGION" \
-    2>/dev/null || log "  (User may already exist)"
+    >/dev/null 2>&1 || log "  (User may already exist)"
 
   aws cognito-idp admin-set-user-password \
     --user-pool-id "$USER_POOL_ID" \
@@ -66,14 +66,14 @@ create_or_update_user() {
     --password "$password" \
     --permanent \
     --region "$REGION" \
-    2>/dev/null || log "  (Could not set password)"
+    >/dev/null 2>&1 || log "  (Could not set password)"
 
   aws cognito-idp admin-update-user-attributes \
     --user-pool-id "$USER_POOL_ID" \
     --username "$email" \
     --user-attributes Name=email_verified,Value=true \
     --region "$REGION" \
-    2>/dev/null || true
+    >/dev/null 2>&1 || true
 
   log "  ✓ $user_type user ready"
 }
@@ -89,7 +89,7 @@ aws cognito-idp create-group \
   --user-pool-id "$USER_POOL_ID" \
   --group-name ADMIN \
   --region "$REGION" \
-  2>/dev/null || log "  (ADMIN group may already exist)"
+  >/dev/null 2>&1 || log "  (ADMIN group may already exist)"
 
 log "Adding owner to ADMIN group..."
 aws cognito-idp admin-add-user-to-group \
@@ -97,7 +97,7 @@ aws cognito-idp admin-add-user-to-group \
   --username "$OWNER_EMAIL" \
   --group-name ADMIN \
   --region "$REGION" \
-  2>/dev/null || log "  (Group membership may already exist)"
+  >/dev/null 2>&1 || log "  (Group membership may already exist)"
 
 log ""
 echo "export TEST_OWNER_EMAIL=$OWNER_EMAIL"

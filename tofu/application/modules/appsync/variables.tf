@@ -67,7 +67,9 @@ variable "prevent_destroy" {
 locals {
   api_name   = "${var.name_prefix}-api-${var.region_abbrev}-${var.environment}"
   api_domain = var.api_domain
-  env_suffix = "_${var.environment}"
+  # AppSync function names cannot contain hyphens, so sanitize the environment
+  # identifier while keeping it readable.
+  env_suffix = "_${replace(var.environment, "-", "_")}"
 
   # JS resolver code path
   js_resolvers_dir      = "${path.module}/../../appsync/js-resolvers"
