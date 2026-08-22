@@ -36,11 +36,12 @@ _CAMPAIGN_NAME: str = f"Smoke Test Campaign {uuid.uuid4().hex[:8]}"
 # ---------------------------------------------------------------------------
 
 
-def _navigate_to_first_profile_campaigns(owner_page: Page) -> tuple[str, str, CampaignPage]:
-    """Navigate from the dashboard to the first profile's campaigns page.
+def _navigate_to_first_profile_campaigns(owner_page: Page, profile_name: str) -> tuple[str, str, CampaignPage]:
+    """Navigate from the dashboard to the owned profile's campaigns page.
 
     Args:
         owner_page: Authenticated Playwright page for the owner.
+        profile_name: Owned seller profile name (from ``ensure_owner_profile``).
 
     Returns:
         Tuple of ``(profile_name, profile_id, campaign_page)`` where
@@ -49,9 +50,6 @@ def _navigate_to_first_profile_campaigns(owner_page: Page) -> tuple[str, str, Ca
     dashboard = DashboardPage(owner_page)
     dashboard.goto()
     dashboard.wait_for_profiles_loaded()
-    names = dashboard.get_profile_names()
-    assert names, "Owner must have at least one seller profile in the dev environment"
-    profile_name = names[0]
     dashboard.click_profile(profile_name)
     match = re.search(r"/scouts/([^/]+)/campaigns", owner_page.url)
     assert match, f"Expected /scouts/{{id}}/campaigns URL, got: {owner_page.url}"
@@ -100,20 +98,20 @@ def test_campaign_list_visible(owner_page: Page, ensure_owner_profile: str) -> N
     * The *New Campaign* action button is visible, confirming the page is
       fully rendered and not stuck in a loading state.
     """
-    _, _profile_id, campaign_page = _navigate_to_first_profile_campaigns(owner_page)
+    _, _profile_id, campaign_page = _navigate_to_first_profile_campaigns(owner_page, ensure_owner_profile)
     owner_page.wait_for_url("**/campaigns**", timeout=10_000)
     expect(campaign_page._new_campaign_button()).to_be_visible(timeout=10_000)
 
 
 @pytest.mark.smoke
-def test_create_campaign(owner_page: Page, ensure_owner_profile: str) -> None:
+def test_create_campaign(owner_page: Page, ensure_owner_profile: str, ensure_owner_catalog: None) -> None:
     """Create a campaign and verify it appears in the profile's campaign list.
 
     Creates a campaign named ``'Smoke Test Campaign 2026'`` using the first
     available catalog in the dev environment.  Asserts the campaign heading
     is visible in the list after the dialog closes.
     """
-    _, profile_id, campaign_page = _navigate_to_first_profile_campaigns(owner_page)
+    _, profile_id, campaign_page = _navigate_to_first_profile_campaigns(owner_page, ensure_owner_profile)
     _create_campaign_with_first_catalog(campaign_page, _CAMPAIGN_NAME, profile_id)
     assert campaign_page.has_campaign(_CAMPAIGN_NAME), (
         f"Campaign '{_CAMPAIGN_NAME}' must be visible in the list after creation"
@@ -121,7 +119,7 @@ def test_create_campaign(owner_page: Page, ensure_owner_profile: str) -> None:
 
 
 @pytest.mark.smoke
-def test_view_campaign_detail(owner_page: Page, ensure_owner_profile: str) -> None:
+def test_view_campaign_detail(owner_page: Page, ensure_owner_profile: str, ensure_owner_catalog: None) -> None:
     """Verify that clicking a campaign card navigates to the campaign detail page.
 
     Asserts:
@@ -129,7 +127,7 @@ def test_view_campaign_detail(owner_page: Page, ensure_owner_profile: str) -> No
     * Clicking *View Orders* navigates to a URL containing ``/campaigns/``.
     * The Orders tab widget is visible on that page.
     """
-    _, profile_id, campaign_page = _navigate_to_first_profile_campaigns(owner_page)
+    _, profile_id, campaign_page = _navigate_to_first_profile_campaigns(owner_page, ensure_owner_profile)
     names = campaign_page.get_campaign_names()
 
     campaign_to_open = names[0] if names else None
@@ -149,7 +147,7 @@ def test_view_campaign_detail(owner_page: Page, ensure_owner_profile: str) -> No
 
 
 @pytest.mark.smoke
-def test_catalog_selected_in_campaign(owner_page: Page, ensure_owner_profile: str) -> None:
+def test_catalog_selected_in_campaign(owner_page: Page, ensure_owner_profile: str, ensure_owner_catalog: None) -> None:
     """Verify that a newly created campaign has a campaign name saved correctly.
 
     Creates a fresh campaign with the first available catalog, then navigates
@@ -157,7 +155,7 @@ def test_catalog_selected_in_campaign(owner_page: Page, ensure_owner_profile: st
     the creation persisted all fields.
     """
     campaign_name = f"Catalog Check Test {int(time.time())}"
-    _, profile_id, campaign_page = _navigate_to_first_profile_campaigns(owner_page)
+    _, profile_id, campaign_page = _navigate_to_first_profile_campaigns(owner_page, ensure_owner_profile)
     _create_campaign_with_first_catalog(campaign_page, campaign_name, profile_id)
     # After creation we are back on the campaigns list; click into the campaign.
     campaign_page.click_campaign(campaign_name)
@@ -173,14 +171,14 @@ def test_catalog_selected_in_campaign(owner_page: Page, ensure_owner_profile: st
 
 
 @pytest.mark.smoke
-def test_edit_campaign(owner_page: Page, ensure_owner_profile: str) -> None:
+def test_edit_campaign(owner_page: Page, ensure_owner_profile: str, ensure_owner_catalog: None) -> None:
     """Verify that editing a campaign name persists the change.
 
     Creates a campaign, navigates to its settings tab, renames it, then
     re-reads the field to confirm the update was saved.
     """
     original_name = f"Edit Campaign Test {int(time.time())}"
-    _, profile_id, campaign_page = _navigate_to_first_profile_campaigns(owner_page)
+    _, profile_id, campaign_page = _navigate_to_first_profile_campaigns(owner_page, ensure_owner_profile)
     _create_campaign_with_first_catalog(campaign_page, original_name, profile_id)
     campaign_page.click_campaign(original_name)
     url = owner_page.url
@@ -199,14 +197,14 @@ def test_edit_campaign(owner_page: Page, ensure_owner_profile: str) -> None:
 
 
 @pytest.mark.smoke
-def test_delete_campaign(owner_page: Page, ensure_owner_profile: str) -> None:
+def test_delete_campaign(owner_page: Page, ensure_owner_profile: str, ensure_owner_catalog: None) -> None:
     """Verify that a campaign can be deleted and disappears from the list.
 
     Creates a disposable campaign, navigates to its settings, confirms deletion,
     then checks the campaign list no longer contains the campaign name.
     """
     campaign_name = f"Delete Campaign Test {int(time.time())}"
-    _, profile_id, campaign_page = _navigate_to_first_profile_campaigns(owner_page)
+    _, profile_id, campaign_page = _navigate_to_first_profile_campaigns(owner_page, ensure_owner_profile)
     # Capture profile_id from the campaigns list URL before creation.
     campaigns_url = owner_page.url
     match0 = re.search(r"/scouts/([^/]+)/campaigns", campaigns_url)
@@ -231,14 +229,14 @@ def test_delete_campaign(owner_page: Page, ensure_owner_profile: str) -> None:
 
 
 @pytest.mark.smoke
-def test_edit_campaign_dates(owner_page: Page, ensure_owner_profile: str) -> None:
+def test_edit_campaign_dates(owner_page: Page, ensure_owner_profile: str, ensure_owner_catalog: None) -> None:
     """Verify that campaign start/end dates persist after saving.
 
     Creates a campaign, sets a start and end date on the settings tab,
     saves, reloads the page, and asserts both dates are still present.
     """
     campaign_name = f"Edit Dates Test {int(time.time())}"
-    _, profile_id, campaign_page = _navigate_to_first_profile_campaigns(owner_page)
+    _, profile_id, campaign_page = _navigate_to_first_profile_campaigns(owner_page, ensure_owner_profile)
     _create_campaign_with_first_catalog(campaign_page, campaign_name, profile_id)
     campaign_page.click_campaign(campaign_name)
     profile_id, campaign_id = _extract_campaign_ids(owner_page.url)
@@ -262,7 +260,7 @@ def test_edit_campaign_dates(owner_page: Page, ensure_owner_profile: str) -> Non
 
 
 @pytest.mark.smoke
-def test_reselect_campaign_catalog(owner_page: Page, ensure_owner_profile: str) -> None:
+def test_reselect_campaign_catalog(owner_page: Page, ensure_owner_profile: str, ensure_owner_catalog: None) -> None:
     """Verify that changing a campaign's catalog persists after saving.
 
     Creates a campaign and a second catalog, then switches the campaign to
@@ -270,7 +268,7 @@ def test_reselect_campaign_catalog(owner_page: Page, ensure_owner_profile: str) 
     a page reload.
     """
     campaign_name = f"Reselect Catalog Test {int(time.time())}"
-    _, profile_id, campaign_page = _navigate_to_first_profile_campaigns(owner_page)
+    _, profile_id, campaign_page = _navigate_to_first_profile_campaigns(owner_page, ensure_owner_profile)
     _create_campaign_with_first_catalog(campaign_page, campaign_name, profile_id)
 
     catalogs = CatalogsPage(owner_page)
@@ -296,7 +294,7 @@ def test_reselect_campaign_catalog(owner_page: Page, ensure_owner_profile: str) 
 
 
 @pytest.mark.smoke
-def test_toggle_campaign_active(owner_page: Page, ensure_owner_profile: str) -> None:
+def test_toggle_campaign_active(owner_page: Page, ensure_owner_profile: str, ensure_owner_catalog: None) -> None:
     """Verify that toggling the campaign active switch persists and hides the campaign.
 
     Creates a campaign, flips the active switch on the settings tab, saves,
@@ -304,7 +302,7 @@ def test_toggle_campaign_active(owner_page: Page, ensure_owner_profile: str) -> 
     campaign list and confirms the deactivated campaign is no longer visible.
     """
     campaign_name = f"Toggle Active Test {int(time.time())}"
-    _, profile_id, campaign_page = _navigate_to_first_profile_campaigns(owner_page)
+    _, profile_id, campaign_page = _navigate_to_first_profile_campaigns(owner_page, ensure_owner_profile)
     _create_campaign_with_first_catalog(campaign_page, campaign_name, profile_id)
     campaign_page.click_campaign(campaign_name)
     _, campaign_id = _extract_campaign_ids(owner_page.url)
@@ -336,7 +334,7 @@ def test_confirm_shared_campaign_changes(owner_page: Page, ensure_owner_profile:
     changes the derived campaign's name and catalog. The save triggers a
     confirmation dialog that must be accepted before the changes persist.
     """
-    _, profile_id, _campaign_page = _navigate_to_first_profile_campaigns(owner_page)
+    _, profile_id, _campaign_page = _navigate_to_first_profile_campaigns(owner_page, ensure_owner_profile)
 
     catalogs = CatalogsPage(owner_page)
     catalogs.goto()

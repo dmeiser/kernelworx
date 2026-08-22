@@ -33,10 +33,10 @@ def use_mobile_viewport(page: Page) -> None:
     )
 
 
-def navigate_to_first_orders_page(page: Page) -> OrderPage:
-    """Navigate to the orders list for the first available profile and campaign.
+def navigate_to_first_orders_page(page: Page, profile_name: str) -> OrderPage:
+    """Navigate to the orders list for the owned profile's first campaign.
 
-    Starts from the dashboard, selects the first seller profile, then the first
+    Starts from the dashboard, selects the owned seller profile, then the first
     campaign, and finally loads ``/scouts/{profileId}/campaigns/{campaignId}/orders``.
     If the selected profile has no campaigns, a one-off campaign is seeded using
     the first available catalog so mobile order tests can run in freshly cleaned
@@ -44,6 +44,7 @@ def navigate_to_first_orders_page(page: Page) -> OrderPage:
 
     Args:
         page: Authenticated Playwright page.
+        profile_name: Owned seller profile name (from ``ensure_owner_profile``).
 
     Returns:
         OrderPage focused on the orders list of the first campaign found.
@@ -51,10 +52,8 @@ def navigate_to_first_orders_page(page: Page) -> OrderPage:
     dashboard = DashboardPage(page)
     dashboard.goto()
     dashboard.wait_for_profiles_loaded()
-    profile_names = dashboard.get_profile_names()
-    assert profile_names, "At least one seller profile is required for mobile order tests"
 
-    dashboard.click_profile(profile_names[0])
+    dashboard.click_profile(profile_name)
     campaign_page = CampaignPage(page)
     campaign_page.wait_for_loading()
     campaign_names = campaign_page.get_campaign_names()

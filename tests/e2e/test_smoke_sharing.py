@@ -65,16 +65,17 @@ def _module_state() -> dict[str, str]:
 # ---------------------------------------------------------------------------
 
 
-def _navigate_to_share_management(owner_page: Page) -> tuple[SharePage, str]:
-    """Navigate to the share-management page for the owner's first profile.
+def _navigate_to_share_management(owner_page: Page, profile_name: str) -> tuple[SharePage, str]:
+    """Navigate to the share-management page for the owner's owned profile.
 
     Steps:
-    1. Dashboard → click first seller profile → URL contains profile_id.
+    1. Dashboard → click owned seller profile → URL contains profile_id.
     2. Extract and decode profile_id from the URL.
     3. Navigate to ``/scouts/{profile_id}/manage`` via :class:`SharePage`.
 
     Args:
         owner_page: Authenticated Playwright page for the owner.
+        profile_name: Owned seller profile name (from ``ensure_owner_profile``).
 
     Returns:
         Tuple of ``(share_page, profile_id)``.
@@ -82,10 +83,8 @@ def _navigate_to_share_management(owner_page: Page) -> tuple[SharePage, str]:
     dashboard = DashboardPage(owner_page)
     dashboard.goto()
     dashboard.wait_for_profiles_loaded()
-    profiles = dashboard.get_profile_names()
-    assert profiles, "Owner must have at least one seller profile"
 
-    dashboard.click_profile(profiles[0])
+    dashboard.click_profile(profile_name)
     # After clicking, URL is /scouts/{profile_id}/campaigns
     match = re.search(r"/scouts/([^/]+)/campaigns", owner_page.url)
     assert match, f"Expected /scouts/{{id}}/campaigns URL after profile click, got: {owner_page.url}"
@@ -102,14 +101,16 @@ def _navigate_to_share_management(owner_page: Page) -> tuple[SharePage, str]:
 
 
 @pytest.mark.smoke
-def test_create_invite(owner_page: Page, _module_state: dict[str, str]) -> None:
-    """Owner generates a WRITE invite for the first profile; code is non-empty.
+def test_create_invite(
+    owner_page: Page, ensure_owner_profile: str, _module_state: dict[str, str]
+) -> None:
+    """Owner generates a WRITE invite for the owned profile; code is non-empty.
 
     Stores ``invite_code`` and ``profile_id`` in ``_module_state`` so that
     ``test_accept_share``, ``test_shared_profile_visible_to_contributor``, and
     ``test_revoke_share`` can re-use them without duplicating the setup.
     """
-    share_page, profile_id = _navigate_to_share_management(owner_page)
+    share_page, profile_id = _navigate_to_share_management(owner_page, ensure_owner_profile)
     share_page.create_invite("WRITE")
     invite_code = share_page.get_invite_link()
 
@@ -252,6 +253,7 @@ def test_write_share_contributor_can_create_order(
     owner_page: Page,
     browser: Browser,
     ensure_owner_profile: str,
+    ensure_owner_catalog: None,
 ) -> None:
     """A WRITE-share contributor can create an order on the shared profile's campaign.
 
@@ -267,19 +269,19 @@ def test_write_share_contributor_can_create_order(
         owner_page: Authenticated Playwright page for the owner.
         browser: Session-scoped Playwright Browser used to open an isolated
             contributor context without interfering with owner_page.
-        ensure_owner_profile: Session fixture ensuring the owner has at least
-            one seller profile before this test runs.
+        ensure_owner_profile: Session fixture yielding the owner's owned
+            seller profile name.
+        ensure_owner_catalog: Session fixture ensuring a catalog exists for
+            campaign creation.
     """
     # ------------------------------------------------------------------
-    # Owner: navigate to dashboard and extract first profile_id
+    # Owner: navigate to dashboard and extract owned profile_id
     # ------------------------------------------------------------------
     dashboard = DashboardPage(owner_page)
     dashboard.goto()
     dashboard.wait_for_profiles_loaded()
-    profiles = dashboard.get_profile_names()
-    assert profiles, "Owner must have at least one seller profile"
 
-    dashboard.click_profile(profiles[0])
+    dashboard.click_profile(ensure_owner_profile)
     match = re.search(r"/scouts/([^/]+)/campaigns", owner_page.url)
     assert match, f"Expected /scouts/{{id}}/campaigns after clicking profile; got: {owner_page.url}"
     profile_id = urllib.parse.unquote(match.group(1))
