@@ -10,7 +10,6 @@ on:
 
 permissions:
   contents: read
-  id-token: write
 
 concurrency:
   group: ephemeral-${{ github.event.pull_request.number || github.run_id }}
@@ -23,7 +22,7 @@ env:
 jobs:
   ephemeral-test:
     name: Ephemeral tests for PR #${{ github.event.pull_request.number }}
-    # Same-repo branches only: forks do not have access to the OIDC role.
+    # Same-repo branches only: forks do not have access to repository secrets.
     if: github.event_name == 'schedule' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 75
@@ -58,9 +57,7 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_EPHEMERAL_ROLE_ARN }}
           aws-region: ${{ secrets.AWS_REGION }}
-          role-session-name: github-actions-ephemeral-test
 
       - name: Start ephemeral environment
         id: ephemeral_up
@@ -133,7 +130,6 @@ jobs:
     timeout-minutes: 60
     permissions:
       contents: read
-      id-token: write
       pull-requests: read
     steps:
       - name: Checkout repository
@@ -155,9 +151,7 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_EPHEMERAL_ROLE_ARN }}
           aws-region: ${{ secrets.AWS_REGION }}
-          role-session-name: github-actions-ephemeral-sweep
 
       - name: Sweep leaked pr-* environments
         env:
