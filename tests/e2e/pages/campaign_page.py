@@ -1,5 +1,6 @@
 """Campaign page object — campaign list and creation for a seller profile."""
 
+import re
 import urllib.parse
 
 from playwright.sync_api import Locator, Page, expect
@@ -106,6 +107,10 @@ class CampaignPage(BasePage):
         """
         # Save campaigns URL to return after the page-based creation flow.
         campaigns_url = self.page.url
+        if profile_id is None:
+            match = re.search(r"/scouts/([^/]+)/campaigns", campaigns_url)
+            if match:
+                profile_id = urllib.parse.unquote(match.group(1))
         self._new_campaign_button().click()
         # New Campaign now navigates to /create-campaign page (not a dialog).
         self.page.wait_for_url("**/create-campaign**", timeout=10_000)
