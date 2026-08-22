@@ -66,13 +66,9 @@ jobs:
         id: ephemeral_up
         env:
           TF_VAR_encryption_passphrase: ${{ secrets.TF_VAR_ENCRYPTION_PASSPHRASE }}
-        run: scripts/ephemeral-env.sh up "pr-${{ github.event.pull_request.number }}"
-
-      - name: Export ephemeral environment variables
-        if: steps.ephemeral_up.outcome == 'success'
-        env:
-          TF_VAR_encryption_passphrase: ${{ secrets.TF_VAR_ENCRYPTION_PASSPHRASE }}
-        run: scripts/ephemeral-env.sh env "pr-${{ github.event.pull_request.number }}" >> "$GITHUB_ENV"
+        run: |
+          set -o pipefail
+          scripts/ephemeral-env.sh up "pr-${{ github.event.pull_request.number }}" | grep '^export ' >> "$GITHUB_ENV"
 
       - name: Install integration test dependencies
         if: steps.ephemeral_up.outcome == 'success'
