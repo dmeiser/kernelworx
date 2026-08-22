@@ -70,7 +70,7 @@ def test_mobile_landing_page_renders(page: Page) -> None:
 def test_mobile_orders_list_renders(owner_page: Page, ensure_owner_profile: str, ensure_owner_catalog: None) -> None:
     """The campaign orders list renders on a mobile viewport."""
     use_mobile_viewport(owner_page)
-    order_page = navigate_to_first_orders_page(owner_page)
+    order_page = navigate_to_first_orders_page(owner_page, ensure_owner_profile)
     assert order_page._new_order_button().is_visible(), (
         "Orders list must render with the *New Order* action on mobile viewport"
     )
@@ -81,7 +81,7 @@ def test_mobile_orders_list_renders(owner_page: Page, ensure_owner_profile: str,
 def test_mobile_order_editor_submission(owner_page: Page, ensure_owner_profile: str, ensure_owner_catalog: None) -> None:
     """Create an order from the order editor on a mobile viewport."""
     use_mobile_viewport(owner_page)
-    order_page = navigate_to_first_orders_page(owner_page)
+    order_page = navigate_to_first_orders_page(owner_page, ensure_owner_profile)
     customer_name = "Mobile Order Customer"
     order_page.create_order_first_product(customer_name, qty=1)
     assert order_page.has_order(customer_name), (

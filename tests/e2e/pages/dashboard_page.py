@@ -71,9 +71,11 @@ class DashboardPage(BasePage):
         """Return a locator for the profile card that contains *name*.
 
         Args:
-            name: Seller name text (case-sensitive substring match).
+            name: Seller name text (case-sensitive exact match).
         """
-        return self.page.locator("div.MuiCard-root").filter(has_text=name)
+        return self.page.locator("div.MuiCard-root").filter(
+            has=self.page.get_by_text(name, exact=True)
+        )
 
     # ------------------------------------------------------------------
     # State queries

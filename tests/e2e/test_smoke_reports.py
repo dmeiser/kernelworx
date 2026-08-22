@@ -60,7 +60,7 @@ def test_campaign_reports_tab_loads(owner_page: Page, ensure_owner_profile: str,
 
     Navigation strategy:
 
-    1. Open the owner's dashboard and click the first profile.
+    1. Open the owner's dashboard and click the owned profile.
     2. Use the first existing campaign, or create one if the list is empty.
     3. Click *View Orders* to land on the campaign detail page and capture the
        campaign ID from the URL.
@@ -68,13 +68,11 @@ def test_campaign_reports_tab_loads(owner_page: Page, ensure_owner_profile: str,
     5. Assert the URL ends with ``/reports`` and that an ``<h5>`` containing
        "Reports" is visible.
     """
-    # Step 1 – navigate to first profile's campaigns.
+    # Step 1 – navigate to owned profile's campaigns.
     dashboard = DashboardPage(owner_page)
     dashboard.goto()
     dashboard.wait_for_profiles_loaded()
-    profile_names = dashboard.get_profile_names()
-    assert profile_names, "Owner must have at least one seller profile"
-    dashboard.click_profile(profile_names[0])
+    dashboard.click_profile(ensure_owner_profile)
     owner_page.wait_for_url("**/campaigns**", timeout=10_000)
     profile_id = _get_profile_id_from_url(owner_page.url)
     campaign_page = CampaignPage(owner_page)

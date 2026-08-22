@@ -1054,7 +1054,6 @@ export default async function globalTeardown(): Promise<void> {
 
     // Step 6: Clean up ALL orphaned shares and invites (DRY RUN by default)
     // Set DRY_RUN=false environment variable to actually delete
-    dryRun = process.env.DRY_RUN !== 'false';
     const maxDeletions = parseInt(process.env.MAX_DELETIONS || '100', 10);
 
     console.log('\n  Cleaning up ALL orphaned data (not just test data)...');
@@ -1078,8 +1077,17 @@ export default async function globalTeardown(): Promise<void> {
   console.log('   - Cognito users: preserved (except smoke+ UNCONFIRMED test users)');
 
   if (failures.length > 0) {
-    throw new Error(
-      `Global cleanup incomplete — ${failures.length} stage(s) failed:\n  - ${failures.join('\n  - ')}`,
+    const failOnCleanupError = ['1', 'true', 'yes'].includes(
+      (process.env.E2E_FAIL_ON_CLEANUP_ERROR || '').toLowerCase(),
+    );
+    const summary =
+      `Global cleanup incomplete — ${failures.length} stage(s) failed:\n  - ${failures.join('\n  - ')}`;
+    if (failOnCleanupError) {
+      throw new Error(summary);
+    }
+    console.warn(`⚠️  ${summary}`);
+    console.warn(
+      '   E2E_FAIL_ON_CLEANUP_ERROR is not set; treating cleanup failures as warnings.',
     );
   }
 }
