@@ -27,7 +27,7 @@ resource "aws_appsync_graphql_api" "main" {
   schema = file("${path.module}/../../schema/schema.graphql")
 
   lifecycle {
-    prevent_destroy = true
+    prevent_destroy = var.prevent_destroy
   }
 }
 
@@ -90,12 +90,18 @@ resource "aws_iam_role_policy" "appsync_logging" {
   policy = data.aws_iam_policy_document.appsync_logging.json
 }
 
-# AppSync Custom Domain
+# AppSync Custom Domain (optional - omitted for ephemeral environments)
 resource "aws_appsync_domain_name" "api" {
-  domain_name     = local.api_domain
+  count = var.api_domain != null ? 1 : 0
+
+  domain_name     = var.api_domain
   certificate_arn = var.api_certificate_arn
 
   lifecycle {
+    precondition {
+      condition     = var.api_certificate_arn != null
+      error_message = "api_certificate_arn is required when api_domain is set"
+    }
     precondition {
       # When a validation resource is supplied, ensure it has completed before
       # creating the custom domain. Dev builds omit validation entirely.
@@ -106,6 +112,8 @@ resource "aws_appsync_domain_name" "api" {
 }
 
 resource "aws_appsync_domain_name_api_association" "api" {
+  count = var.api_domain != null ? 1 : 0
+
   api_id      = aws_appsync_graphql_api.main.id
-  domain_name = aws_appsync_domain_name.api.domain_name
+  domain_name = aws_appsync_domain_name.api[0].domain_name
 }

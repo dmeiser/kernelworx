@@ -20,6 +20,24 @@ variable "site_domain" {
   type        = string
 }
 
+variable "extra_cors_origins" {
+  description = "Additional allowed origins for the exports bucket CORS policy (e.g. http://localhost:4173 for ephemeral environments)."
+  type        = list(string)
+  default     = []
+}
+
+variable "prevent_destroy" {
+  description = "Set to false for ephemeral environments that must be destroyed after use."
+  type        = bool
+  default     = true
+}
+
+variable "force_destroy" {
+  description = "Force destroy S3 buckets (including non-empty buckets). Enable for ephemeral environments."
+  type        = bool
+  default     = false
+}
+
 locals {
   bucket_suffix = "-${var.region_abbrev}-${var.environment}"
 }
@@ -29,10 +47,11 @@ locals {
 # Logging would incur additional S3 storage costs for log files.
 # kics-scan ignore-line
 resource "aws_s3_bucket" "static" {
-  bucket = "${var.name_prefix}-static${local.bucket_suffix}"
+  bucket        = "${var.name_prefix}-static${local.bucket_suffix}"
+  force_destroy = var.force_destroy
 
   lifecycle {
-    prevent_destroy = true
+    prevent_destroy = var.prevent_destroy
   }
 }
 
@@ -68,10 +87,11 @@ resource "aws_s3_bucket_public_access_block" "static" {
 # Logging would incur additional S3 storage costs for log files.
 # kics-scan ignore-line
 resource "aws_s3_bucket" "exports" {
-  bucket = "${var.name_prefix}-exports${local.bucket_suffix}"
+  bucket        = "${var.name_prefix}-exports${local.bucket_suffix}"
+  force_destroy = var.force_destroy
 
   lifecycle {
-    prevent_destroy = true
+    prevent_destroy = var.prevent_destroy
   }
 }
 
@@ -131,11 +151,15 @@ resource "aws_s3_bucket_cors_configuration" "exports" {
       "Authorization"
     ]
     allowed_methods = ["GET", "PUT", "POST"]
-    # Restrict CORS to our application domain only (not wildcard)
-    allowed_origins = [
-      "https://${var.site_domain}",
-      "https://www.${var.site_domain}"
-    ]
+    # Restrict CORS to our application domain only (not wildcard), plus any
+    # extra origins required for local / ephemeral testing.
+    allowed_origins = concat(
+      [
+        "https://${var.site_domain}",
+        "https://www.${var.site_domain}"
+      ],
+      var.extra_cors_origins
+    )
     max_age_seconds = 3600
   }
 }

@@ -64,7 +64,7 @@ def test_delete_catalog(owner_page: Page) -> None:
 
 
 @pytest.mark.smoke
-def test_managed_catalogs_tab_loads(owner_page: Page) -> None:
+def test_managed_catalogs_tab_loads(owner_page: Page, ensure_managed_catalog) -> None:
     """The Managed Catalogs tab loads without errors."""
     catalogs = CatalogsPage(owner_page)
     catalogs.goto()
