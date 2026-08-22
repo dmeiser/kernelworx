@@ -1531,6 +1531,38 @@ class TestAdminDeleteUser:
             response = accounts_table.get_item(Key={"accountId": f"ACCOUNT#{target_account_id}"})
             assert "Item" not in response
 
+    def test_both_cognito_and_dynamodb_missing_returns_not_found(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """Test that NOT_FOUND is returned when neither Cognito user nor DynamoDB account exists."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
+
+        target_account_id = "totally-nonexistent-user-12345"
+
+        # Neither Cognito user nor DynamoDB account exists
+
+        event = {
+            **admin_appsync_event,
+            "arguments": {"accountId": target_account_id},
+        }
+
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+            mock_cognito = MagicMock()
+            # User not found in Cognito
+            mock_cognito.list_users.return_value = {"Users": []}
+            mock_get_client.return_value = mock_cognito
+
+            with pytest.raises(AppError) as exc_info:
+                admin_delete_user(event, lambda_context)
+
+            assert exc_info.value.error_code == ErrorCode.NOT_FOUND
+            mock_cognito.admin_delete_user.assert_not_called()
+
     def test_cognito_user_not_found_continues(
         self,
         dynamodb_table: Any,

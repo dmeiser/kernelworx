@@ -159,7 +159,8 @@ export function request(ctx) {
         });
     }
 
-    const orderId = `ORDER#${util.autoId()}`;
+    const campaignIdWithoutPrefix = campaignId.startsWith('CAMPAIGN#') ? campaignId.substring(9) : campaignId;
+    const orderId = `ORDER#${campaignIdWithoutPrefix}#${util.autoId()}`;
     const now = util.time.nowISO8601();
 
     const orderItem = {

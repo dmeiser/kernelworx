@@ -579,6 +579,20 @@ def _delete_user_from_cognito(cognito: Any, user_pool_id: str, username: str, em
         raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to delete user from Cognito") from e
 
 
+def _account_exists_in_dynamodb(account_id: str, logger: Any) -> bool:
+    """Check whether an account record exists in DynamoDB."""
+    db_account_id = f"ACCOUNT#{account_id}"
+    try:
+        response = tables.accounts.get_item(Key={"accountId": db_account_id}, ProjectionExpression="accountId")
+        exists = "Item" in response
+        if not exists:
+            logger.info("Account not found in DynamoDB", account_id=db_account_id)
+        return exists
+    except ClientError as e:
+        logger.error("Failed to check account existence in DynamoDB", error=str(e), account_id=db_account_id)
+        raise
+
+
 def _delete_account_from_dynamodb(account_id: str, logger: Any) -> None:
     """Delete account from DynamoDB.
 
@@ -714,6 +728,10 @@ def admin_delete_user(event: Dict[str, Any], context: Any) -> bool:
         cognito = _get_cognito_client()
 
         username, email = _find_cognito_user_by_sub(cognito, user_pool_id, account_id, logger)
+        account_exists = _account_exists_in_dynamodb(account_id, logger)
+
+        if not username and not account_exists:
+            raise AppError(ErrorCode.NOT_FOUND, f"User not found: {account_id}")
 
         # Delete DynamoDB data first so a partially-deleted Cognito state does not
         # leave account records orphaned.
