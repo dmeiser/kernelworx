@@ -62,6 +62,39 @@ build_lambda_layer() {
   (cd "$ROOT_DIR" && uv pip install --requirement "$LAYER_REQ" --target "$LAYER_DIR/python")
 }
 
+cleanup_cloudwatch_log_groups() {
+  log "🧹 Cleaning up pre-existing CloudWatch log groups for run: $RUN_ID"
+  local region="${AWS_REGION:-us-east-1}"
+  local suffix="-${RUN_ID}"
+  local log_groups
+
+  log_groups=$(aws logs describe-log-groups \
+    --log-group-name-prefix "/aws/lambda/kernelworx-" \
+    --region "$region" \
+    --query 'logGroups[*].logGroupName' \
+    --output text)
+
+  if [ -z "$log_groups" ] || [ "$log_groups" = "None" ]; then
+    log "   No existing log groups found."
+    return 0
+  fi
+
+  local found=0
+  for name in $log_groups; do
+    case "$name" in
+      *"$suffix")
+        log "   Deleting log group: $name"
+        aws logs delete-log-group --log-group-name "$name" --region "$region" || true
+        found=1
+        ;;
+    esac
+  done
+
+  if [ "$found" -eq 0 ]; then
+    log "   No existing log groups found for this run."
+  fi
+}
+
 case "$ACTION" in
   up)
     log "🚀 Bringing up ephemeral environment: $RUN_ID"
@@ -75,6 +108,8 @@ case "$ACTION" in
       -backend-config="key=$STATE_KEY" \
       -backend-config="bucket=$STATE_BUCKET" \
       -backend-config="region=$STATE_REGION"
+
+    cleanup_cloudwatch_log_groups
 
     log "📋 Planning and applying ephemeral stack..."
     tofu apply -input=false -auto-approve -var="environment=$RUN_ID"
