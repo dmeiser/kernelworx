@@ -1,0 +1,196 @@
+name: Ephemeral Test Environment
+
+on:
+  pull_request:
+    branches:
+      - main
+  schedule:
+    # Nightly sweep for leaked pr-* environments (06:17 UTC).
+    - cron: "17 6 * * *"
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: ephemeral-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  AWS_DEFAULT_REGION: ${{ secrets.AWS_REGION }}
+
+jobs:
+  ephemeral-test:
+    name: Ephemeral tests for PR #${{ github.event.pull_request.number }}
+    # Same-repo branches only: forks do not have access to the OIDC role.
+    if: github.event_name == 'schedule' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    environment: ephemeral
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install Python dependencies
+        run: uv sync --locked --dev
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: ".node-version"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Set up OpenTofu
+        uses: opentofu/setup-opentofu@v1
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_EPHEMERAL_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+          role-session-name: github-actions-ephemeral-test
+
+      - name: Start ephemeral environment
+        id: ephemeral_up
+        env:
+          TF_VAR_encryption_passphrase: ${{ secrets.TF_VAR_ENCRYPTION_PASSPHRASE }}
+        run: scripts/ephemeral-env.sh up "pr-${{ github.event.pull_request.number }}"
+
+      - name: Export ephemeral environment variables
+        if: steps.ephemeral_up.outcome == 'success'
+        env:
+          TF_VAR_encryption_passphrase: ${{ secrets.TF_VAR_ENCRYPTION_PASSPHRASE }}
+        run: scripts/ephemeral-env.sh env "pr-${{ github.event.pull_request.number }}" >> "$GITHUB_ENV"
+
+      - name: Install integration test dependencies
+        if: steps.ephemeral_up.outcome == 'success'
+        working-directory: tests/integration
+        run: npm ci
+
+      - name: Run integration tests
+        if: steps.ephemeral_up.outcome == 'success'
+        working-directory: tests/integration
+        run: npm run test
+
+      - name: Build frontend and start preview
+        if: steps.ephemeral_up.outcome == 'success'
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+          npm run preview -- --port 4173 &
+          PREVIEW_PID=$!
+          echo "PREVIEW_PID=${PREVIEW_PID}" >> "$GITHUB_ENV"
+          # Wait for the preview server to become ready.
+          for _ in $(seq 1 30); do
+            if curl -sf http://localhost:4173 >/dev/null 2>&1; then
+              echo "✅ Vite preview ready on http://localhost:4173"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "❌ Vite preview failed to start"
+          kill "${PREVIEW_PID}" || true
+          exit 1
+
+      - name: Install Playwright browser dependencies
+        if: steps.ephemeral_up.outcome == 'success'
+        run: uv run playwright install --with-deps chromium
+
+      - name: Run E2E smoke tests
+        if: steps.ephemeral_up.outcome == 'success'
+        env:
+          E2E_FAIL_ON_CLEANUP_ERROR: "1"
+        run: uv run pytest tests/e2e/ -m smoke -v
+
+      - name: Stop Vite preview
+        if: always() && env.PREVIEW_PID != ''
+        run: kill "${PREVIEW_PID}" || true
+        continue-on-error: true
+
+      - name: Tear down ephemeral environment
+        if: always()
+        env:
+          TF_VAR_encryption_passphrase: ${{ secrets.TF_VAR_ENCRYPTION_PASSPHRASE }}
+        run: scripts/ephemeral-env.sh down "pr-${{ github.event.pull_request.number }}" || true
+
+  sweep:
+    name: Sweep stale ephemeral environments
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up OpenTofu
+        uses: opentofu/setup-opentofu@v1
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_EPHEMERAL_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+          role-session-name: github-actions-ephemeral-sweep
+
+      - name: Sweep leaked pr-* environments
+        env:
+          TF_VAR_encryption_passphrase: ${{ secrets.TF_VAR_ENCRYPTION_PASSPHRASE }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          STATE_BUCKET="kernelworx-tofu-state-us-east-1-dev"
+          PR_PREFIX="application/ephemeral/pr-"
+
+          echo "🔍 Listing state objects in s3://${STATE_BUCKET}/${PR_PREFIX}..."
+          keys=$(aws s3 ls "s3://${STATE_BUCKET}/${PR_PREFIX}" --recursive | awk '{print $4}' | grep '/terraform.tfstate$' || true)
+
+          if [ -z "$keys" ]; then
+            echo "✅ No leaked ephemeral state found."
+            exit 0
+          fi
+
+          echo "$keys" | while IFS= read -r key; do
+            pr_num=$(echo "$key" | sed -n "s|^${PR_PREFIX}pr-\([0-9][0-9]*\)/terraform.tfstate$|\1|p")
+            if [ -z "$pr_num" ]; then
+              echo "⚠️  Skipping non-PR state key: $key"
+              continue
+            fi
+
+            echo "Checking PR #${pr_num}..."
+            pr_state=$(gh pr view "$pr_num" --json state -q .state 2>/dev/null || echo "UNKNOWN")
+
+            if [ "$pr_state" = "OPEN" ]; then
+              echo "  PR #${pr_num} is still open; leaving environment intact."
+              continue
+            fi
+
+            echo "  PR #${pr_num} is ${pr_state}; tearing down pr-${pr_num}."
+            scripts/ephemeral-env.sh down "pr-${pr_num}" || true
+          done
