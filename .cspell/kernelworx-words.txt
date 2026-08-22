@@ -309,6 +309,7 @@ testville
 textarea
 textField
 tflint
+tflock
 tfoot
 tfstate
 thead
