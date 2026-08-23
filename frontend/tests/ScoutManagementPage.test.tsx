@@ -448,6 +448,7 @@ describe('ScoutManagementPage', () => {
   });
 
   it('navigates to /scouts after deleting profile', async () => {
+    vi.useFakeTimers();
     render(
       <MemoryRouter initialEntries={[`/scouts/${encodeURIComponent(RAW_ID)}/manage`]}>
         <Routes>
@@ -457,16 +458,19 @@ describe('ScoutManagementPage', () => {
       </MemoryRouter>,
     );
 
-    const user = userEvent.setup();
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     const deleteScoutBtn = await screen.findByRole('button', { name: /Delete Scout/i });
     await user.click(deleteScoutBtn);
 
     const confirmDelete = await screen.findByRole('button', { name: /Delete Permanently/i });
     await user.click(confirmDelete);
 
-    // After completion, we should have navigated to the /scouts route
-    await waitFor(() => expect(screen.getByText('ScoutList')).toBeInTheDocument(), { timeout: 15000 });
-  }, 15000);
+    // The page waits 1200ms before navigating so the success message is visible.
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(screen.getByText('ScoutList')).toBeInTheDocument();
+
+    vi.useRealTimers();
+  });
 
   it('shows a success snackbar after deleting profile', async () => {
     render(
