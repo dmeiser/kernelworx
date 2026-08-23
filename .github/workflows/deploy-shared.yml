@@ -409,35 +409,3 @@ jobs:
           RUN_PASSWORD_CHANGE: ${{ inputs.run-password-change && '1' || '' }}
         run: uv run pytest tests/e2e/ -m smoke -v
 
-      - name: Post deployed-to-dev success status
-        if: ${{ success() && inputs.environment == 'dev' && inputs.e2e-base-url != '' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh api "repos/${{ github.repository }}/statuses/${{ github.sha }}" \
-            -f state=success \
-            -f context=deployed-to-dev \
-            -f description="Smoke tests passed on dev" \
-            -f target_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-
-      - name: Post deployed-to-dev failure status
-        if: ${{ failure() && inputs.environment == 'dev' && inputs.e2e-base-url != '' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh api "repos/${{ github.repository }}/statuses/${{ github.sha }}" \
-            -f state=failure \
-            -f context=deployed-to-dev \
-            -f description="Smoke tests failed on dev" \
-            -f target_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-
-      - name: Post deployed-to-dev error status
-        if: ${{ cancelled() && inputs.environment == 'dev' && inputs.e2e-base-url != '' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh api "repos/${{ github.repository }}/statuses/${{ github.sha }}" \
-            -f state=error \
-            -f context=deployed-to-dev \
-            -f description="Smoke tests cancelled on dev" \
-            -f target_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
