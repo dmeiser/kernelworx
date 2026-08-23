@@ -404,12 +404,16 @@ class TestLambdaLogGroupStaticForEach:
         assert "for_each = aws_lambda_function." not in content
 
     def test_lambda_module_validates(self, repo_root: Path, tmp_path: Path) -> None:
+        tofu_bin = shutil.which("tofu")
+        if tofu_bin is None:
+            pytest.skip("OpenTofu (tofu) is not installed in this environment")
+
         module_dir = repo_root / "tofu" / "application" / "modules" / "lambda"
         # Run init/validate in a temp copy so the worktree is not polluted.
         work_dir = tmp_path / "lambda-module"
         shutil.copytree(module_dir, work_dir)
         result = subprocess.run(
-            ["tofu", "init", "-backend=false", "-input=false"],
+            [tofu_bin, "init", "-backend=false", "-input=false"],
             cwd=work_dir,
             capture_output=True,
             text=True,
@@ -417,7 +421,7 @@ class TestLambdaLogGroupStaticForEach:
         )
         assert result.returncode == 0, f"tofu init failed: {result.stderr}"
         result = subprocess.run(
-            ["tofu", "validate"],
+            [tofu_bin, "validate"],
             cwd=work_dir,
             capture_output=True,
             text=True,
