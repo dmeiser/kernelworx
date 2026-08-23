@@ -41,7 +41,7 @@ from pathlib import Path
 
 import boto3
 import pytest
-from boto3.dynamodb.conditions import Attr
+from boto3.dynamodb.conditions import Attr, Key
 from dotenv import load_dotenv
 from playwright.sync_api import Browser, BrowserContext, Page, expect
 
@@ -334,8 +334,11 @@ def ensure_managed_catalog() -> Generator[None, None, None]:
         dynamodb = boto3.resource("dynamodb", region_name=region)
         table = dynamodb.Table(table_name)
 
-        response = table.scan(
-            FilterExpression=Attr("catalogType").eq("ADMIN_MANAGED"),
+        response = table.query(
+            IndexName="isPublic-createdAt-index",
+            KeyConditionExpression=Key("isPublicStr").eq("true"),
+            FilterExpression=Attr("catalogType").eq("ADMIN_MANAGED")
+            & (Attr("isDeleted").not_exists() | Attr("isDeleted").eq(False)),
             ProjectionExpression="catalogId",
         )
         if response.get("Items"):
