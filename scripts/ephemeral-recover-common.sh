@@ -1,6 +1,6 @@
 #!/bin/bash
 # Common helpers for ephemeral environment recovery workflows.
-# Sourced by recover-deploy.sh and recover-destroy.sh.
+# Sourced by ephemeral-env.sh, recover-deploy.sh, and recover-destroy.sh.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"

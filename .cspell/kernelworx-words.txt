@@ -87,6 +87,7 @@ resends
 emojis
 Émojis
 endregion
+endswith
 env
 errorMessage
 esac
