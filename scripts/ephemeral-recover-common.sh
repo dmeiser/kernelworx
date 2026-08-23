@@ -5,8 +5,8 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 ENV_DIR="$ROOT_DIR/tofu/application/environments/ephemeral"
-STATE_BUCKET="kernelworx-tofu-state-us-east-1-dev"
-STATE_REGION="us-east-1"
+STATE_BUCKET="${STATE_BUCKET:-kernelworx-tofu-state-us-east-1-dev}"
+STATE_REGION="${STATE_REGION:-us-east-1}"
 
 log() {
   echo "$@" >&2
