@@ -10,6 +10,7 @@ from playwright.sync_api import Page, expect
 from tests.e2e.pages.base_page import BasePage
 
 
+@pytest.mark.skip(reason="Disabled pending an email-free password-reset test strategy; see #117")
 @pytest.mark.smoke
 def test_forgot_password_page_loads(page: Page) -> None:
     """The forgot-password page loads with its heading and email field."""
