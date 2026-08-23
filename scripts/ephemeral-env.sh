@@ -178,7 +178,10 @@ case "$ACTION" in
     log "   State: s3://$STATE_BUCKET/$STATE_KEY"
     log ""
 
-    build_lambda_layer
+    # The Lambda layer only needs to exist during `up`. For `down` we just need
+    # an empty directory so the archive_file data source does not fail while
+    # OpenTofu is destroying resources from state.
+    mkdir -p "$ROOT_DIR/.build/lambda-layer/python"
 
     # Re-init is required in case the workspace was cleaned since the up run.
     tofu init -input=false \
