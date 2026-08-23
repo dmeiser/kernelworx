@@ -97,7 +97,7 @@ import_ephemeral_resources() {
     import_resource "$run_id" "module.cognito.aws_cognito_user_pool.main" "$user_pool_id"
 
     local client_id
-    client_id=$(aws cognito-idp list-user-pool-clients --user-pool-id "$user_pool_id" --region "$region" --query 'UserPoolClients[0].ClientId' --output text 2>/dev/null | head -n1)
+    client_id=$(aws cognito-idp list-user-pool-clients --user-pool-id "$user_pool_id" --region "$region" --query "UserPoolClients[?ClientName=='KernelWorx-Web'].ClientId | [0]" --output text 2>/dev/null | head -n1)
     if [ -n "$client_id" ] && [ "$client_id" != "None" ]; then
       import_resource "$run_id" "module.cognito.aws_cognito_user_pool_client.web" "${user_pool_id}/${client_id}"
     fi

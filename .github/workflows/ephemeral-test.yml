@@ -28,7 +28,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: ephemeral-${{ github.event.pull_request.number || github.run_id }}
+  group: ephemeral-${{ github.event.pull_request.number || github.event.inputs.pr_number || github.run_id }}
   cancel-in-progress: true
 
 env:
