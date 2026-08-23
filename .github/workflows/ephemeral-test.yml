@@ -10,6 +10,14 @@ on:
         description: "PR number of the ephemeral environment to destroy"
         required: true
         type: string
+      action:
+        description: "Action to perform"
+        required: true
+        default: "down"
+        type: choice
+        options:
+          - down
+          - cleanup-orphans
   schedule:
     # Nightly sweep for leaked pr-* environments (06:17 UTC).
     - cron: "17 6 * * *"
@@ -168,7 +176,7 @@ jobs:
       - name: Teardown ephemeral environment
         env:
           TF_VAR_encryption_passphrase: ${{ secrets.TF_VAR_ENCRYPTION_PASSPHRASE }}
-        run: scripts/ephemeral-env.sh down "pr-${PR_NUMBER}"
+        run: scripts/ephemeral-env.sh "${{ github.event.inputs.action }}" "pr-${PR_NUMBER}"
 
   sweep:
     name: Sweep stale ephemeral environments

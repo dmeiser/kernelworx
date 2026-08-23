@@ -5,6 +5,7 @@
 #   scripts/ephemeral-env.sh up <run-id>
 #   eval $(scripts/ephemeral-env.sh env <run-id>)
 #   scripts/ephemeral-env.sh down <run-id>
+#   scripts/ephemeral-env.sh cleanup-orphans <run-id>
 #
 # The script sources the repository root .env for AWS credentials/profile and
 # the OpenTofu state encryption passphrase, same as deploy.sh.
@@ -36,7 +37,7 @@ fi
 
 # Validate arguments
 if [ $# -lt 2 ]; then
-  log "Usage: $0 <up|env|down> <run-id>"
+  log "Usage: $0 <up|env|down|cleanup-orphans> <run-id>"
   exit 1
 fi
 
@@ -200,6 +201,113 @@ PY
   log "   ⚠️  Lock appears fresh and from this host; leaving in place."
 }
 
+# Best-effort deletion of AWS resources left behind when the OpenTofu state is
+# missing or corrupt. Resource names follow the conventions used by the
+# ephemeral stack modules. Errors are logged and ignored so one stuck resource
+# does not prevent cleaning the rest.
+cleanup_orphaned_resources() {
+  log "🧹 Cleaning up orphaned AWS resources for run: $RUN_ID"
+  local region="${AWS_REGION:-us-east-1}"
+  local suffix="-ue1-${RUN_ID}"
+
+  # 1. AppSync API
+  log "   Deleting AppSync API..."
+  local appsync_id
+  appsync_id=$(aws appsync list-graphql-apis --region "$region" --query "graphqlApis[?name=='kernelworx-api${suffix}'].apiId" --output text 2>/dev/null | head -n1)
+  if [ -n "$appsync_id" ] && [ "$appsync_id" != "None" ]; then
+    log "     Deleting AppSync API $appsync_id"
+    aws appsync delete-graphql-api --api-id "$appsync_id" --region "$region" || true
+  fi
+
+  # 2. Cognito User Pool
+  log "   Deleting Cognito user pool..."
+  local user_pool_id
+  user_pool_id=$(aws cognito-idp list-user-pools --max-results 60 --region "$region" --query "UserPools[?Name=='kernelworx-users${suffix}'].Id" --output text 2>/dev/null | head -n1)
+  if [ -n "$user_pool_id" ] && [ "$user_pool_id" != "None" ]; then
+    log "     Deleting user pool $user_pool_id"
+    aws cognito-idp delete-user-pool --user-pool-id "$user_pool_id" --region "$region" || true
+  fi
+
+  # 3. Lambda functions
+  log "   Deleting Lambda functions..."
+  local func_names
+  func_names=$(aws lambda list-functions --region "$region" --query "Functions[?ends_with(FunctionName,'${suffix}')].FunctionName" --output text 2>/dev/null)
+  for func_name in $func_names; do
+    log "     Deleting Lambda function $func_name"
+    aws lambda delete-function --function-name "$func_name" --region "$region" || true
+  done
+
+  # 4. Lambda layer versions
+  log "   Deleting Lambda layer versions..."
+  local layer_name="kernelworx-deps${suffix}"
+  local layer_versions
+  layer_versions=$(aws lambda list-layer-versions --layer-name "$layer_name" --region "$region" --query 'LayerVersions[].Version' --output text 2>/dev/null)
+  for version in $layer_versions; do
+    log "     Deleting layer version $layer_name:$version"
+    aws lambda delete-layer-version --layer-name "$layer_name" --version-number "$version" --region "$region" || true
+  done
+
+  # 5. IAM roles (inline policies and managed attachments are removed with the role)
+  log "   Deleting IAM roles..."
+  local role_names=(
+    "kernelworx-lambda-exec${suffix}"
+    "kernelworx-appsync${suffix}"
+    "kernelworx-api${suffix}-logs"
+    "kernelworx${suffix}-UserPoolsmsRole"
+  )
+  for role_name in "${role_names[@]}"; do
+    if aws iam get-role --role-name "$role_name" --region "$region" >/dev/null 2>&1; then
+      log "     Deleting IAM role $role_name"
+      aws iam delete-role --role-name "$role_name" --region "$region" || true
+    fi
+  done
+
+  # 6. S3 buckets (must be emptied first)
+  log "   Deleting S3 buckets..."
+  local bucket_names=(
+    "kernelworx-static${suffix}"
+    "kernelworx-exports${suffix}"
+  )
+  for bucket_name in "${bucket_names[@]}"; do
+    if aws s3api head-bucket --bucket "$bucket_name" --region "$region" 2>/dev/null; then
+      log "     Emptying and deleting bucket $bucket_name"
+      aws s3 rm "s3://${bucket_name}" --recursive --region "$region" || true
+      aws s3api delete-bucket --bucket "$bucket_name" --region "$region" || true
+    fi
+  done
+
+  # 7. DynamoDB tables
+  log "   Deleting DynamoDB tables..."
+  local table_names=(
+    "kernelworx-accounts${suffix}"
+    "kernelworx-catalogs${suffix}"
+    "kernelworx-profiles${suffix}"
+    "kernelworx-campaigns${suffix}"
+    "kernelworx-orders${suffix}"
+    "kernelworx-shares${suffix}"
+    "kernelworx-invites${suffix}"
+    "kernelworx-shared-campaigns${suffix}"
+  )
+  for table_name in "${table_names[@]}"; do
+    if aws dynamodb describe-table --table-name "$table_name" --region "$region" >/dev/null 2>&1; then
+      log "     Deleting DynamoDB table $table_name"
+      aws dynamodb delete-table --table-name "$table_name" --region "$region" || true
+    fi
+  done
+
+  # 8. CloudWatch log groups
+  log "   Deleting CloudWatch log groups..."
+  cleanup_cloudwatch_log_groups
+
+  # 9. State objects (including any leftover lock)
+  log "   Deleting S3 state objects..."
+  aws s3 rm "s3://${STATE_BUCKET}/${STATE_KEY}" --region "$STATE_REGION" || true
+  aws s3 rm "s3://${STATE_BUCKET}/${STATE_KEY}.tflock" --region "$STATE_REGION" || true
+
+  log ""
+  log "✅ Orphan cleanup for $RUN_ID complete."
+}
+
 case "$ACTION" in
   up)
     log "🚀 Bringing up ephemeral environment: $RUN_ID"
@@ -317,8 +425,12 @@ case "$ACTION" in
     fi
     ;;
 
+  cleanup-orphans)
+    cleanup_orphaned_resources
+    ;;
+
   *)
-    log "Usage: $0 <up|env|down> <run-id>"
+    log "Usage: $0 <up|env|down|cleanup-orphans> <run-id>"
     exit 1
     ;;
 esac
