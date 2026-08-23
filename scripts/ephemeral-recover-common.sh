@@ -129,8 +129,35 @@ import_ephemeral_resources() {
 
   # Lambda functions
   log "   Importing Lambda functions..."
-  local func_names
-  func_names=$(aws lambda list-functions --region "$region" --query "Functions[?ends_with(FunctionName,'${suffix}')].FunctionName" --output text 2>/dev/null)
+  local func_names=""
+  local next_marker=""
+  while true; do
+    local args=()
+    args+=(--region "$region" --output json)
+    if [ -n "$next_marker" ]; then
+      args+=(--starting-token "$next_marker")
+    fi
+
+    local page
+    page=$(aws lambda list-functions "${args[@]}" 2>/dev/null)
+    if [ -z "$page" ]; then
+      break
+    fi
+
+    local names
+    names=$(echo "$page" | python3 -c "import sys, json; d=json.load(sys.stdin); print('\n'.join(f['FunctionName'] for f in d.get('Functions', []) if f['FunctionName'].endswith('${suffix}')))")
+    if [ -n "$names" ]; then
+      if [ -n "$func_names" ]; then
+        func_names="$func_names
+$names"
+      else
+        func_names="$names"
+      fi
+    fi
+
+    next_marker=$(echo "$page" | python3 -c "import sys, json; d=json.load(sys.stdin); print(d.get('NextMarker', ''))")
+    [ -z "$next_marker" ] && break
+  done
   for func_name in $func_names; do
     local base_name
     base_name=$(echo "$func_name" | sed "s/^kernelworx-//;s/${suffix}$//")
