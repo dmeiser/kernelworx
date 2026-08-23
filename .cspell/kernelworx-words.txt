@@ -101,6 +101,7 @@ fontSize
 formData
 Frontend
 fullname
+fromisoformat
 fullWidth
 getfail
 getters
