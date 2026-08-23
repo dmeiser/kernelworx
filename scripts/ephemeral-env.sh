@@ -15,10 +15,10 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 ENV_DIR="$ROOT_DIR/tofu/application/environments/ephemeral"
 
-# Allow tests to redirect the Lambda layer build directory so they do not
-# pollute the developer's worktree. In production this defaults to the
-# standard location under the repository root.
-LAYER_DIR="${KERNELWORX_LAYER_DIR:-$ROOT_DIR/.build/lambda-layer}"
+# TEST-ONLY: allow unit tests to redirect the Lambda layer build directory
+# so they do not pollute the developer's worktree. Production runs always use
+# the standard location under the repository root.
+LAYER_DIR="${KERNELWORX_TEST_LAYER_DIR:-$ROOT_DIR/.build/lambda-layer}"
 
 # shellcheck source=/dev/null
 source "$SCRIPT_DIR/ephemeral-recover-common.sh"

@@ -34,6 +34,7 @@ def tmp_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 def write_mock(tmp_env: Path, name: str, body: str) -> Path:
     path = tmp_env / name
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(textwrap.dedent(body).strip() + "\n")
     path.chmod(0o755)
     return path
@@ -202,7 +203,7 @@ class TestRecoverStateIfMissing:
             export STATE_BUCKET="test-bucket"
             export STATE_REGION="us-east-1"
             export TF_VAR_encryption_passphrase="not-used"
-            export KERNELWORX_LAYER_DIR="{build_dir}"
+            export KERNELWORX_TEST_LAYER_DIR="{build_dir}"
             scripts/ephemeral-env.sh down pr-999
         """
         return run_bash(repo_root, script)
@@ -345,7 +346,7 @@ class TestEphemeralEnvDown:
             export STATE_BUCKET="test-bucket"
             export STATE_REGION="us-east-1"
             export TF_VAR_encryption_passphrase="not-used"
-            export KERNELWORX_LAYER_DIR="{build_dir}"
+            export KERNELWORX_TEST_LAYER_DIR="{build_dir}"
             rm -f "{recorded}"
             scripts/ephemeral-env.sh down pr-999
         """
@@ -395,13 +396,46 @@ class TestWorkflowDispatchSurface:
         assert self._if_gates_on_mode(jobs["recover-deploy"]["if"], "recover-deploy")
         assert self._if_gates_on_mode(jobs["recover-destroy"]["if"], "recover-destroy")
 
-    def test_sweep_continues_on_error(self, repo_root: Path) -> None:
+    def test_sweep_continues_on_error(self, repo_root: Path, tmp_env: Path) -> None:
         workflow = self._load_workflow(repo_root)
         sweep_step = workflow["jobs"]["sweep"]["steps"][-1]
         run_script = sweep_step["run"]
-        assert "scripts/ephemeral-env.sh down" in run_script
-        # The teardown must be wrapped so a failure does not abort the sweep loop.
-        assert "if ! scripts/ephemeral-env.sh down" in run_script
+
+        teardown_calls = tmp_env / "teardown_calls.txt"
+        write_mock(
+            tmp_env,
+            "aws",
+            """
+            #!/bin/bash
+            if [ "$1" = "s3" ] && [ "$2" = "ls" ]; then
+                echo "2026-08-23 00:00:00 1234 application/ephemeral/pr-7/terraform.tfstate"
+                echo "2026-08-23 00:00:00 1234 application/ephemeral/pr-42/terraform.tfstate"
+            fi
+            exit 0
+            """,
+        )
+        write_mock(tmp_env, "gh", '#!/bin/bash\necho "CLOSED"')
+        write_mock(
+            tmp_env,
+            "scripts/ephemeral-env.sh",
+            f"""
+            #!/bin/bash
+            echo "$@" >> "{teardown_calls}"
+            exit 1
+            """,
+        )
+
+        result = subprocess.run(
+            ["bash", "-c", run_script],
+            cwd=tmp_env,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "GH_TOKEN": "test-token"},
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        calls = set(teardown_calls.read_text().splitlines())
+        assert calls == {"down pr-7", "down pr-42"}
 
 
 class TestLambdaLogGroupStaticForEach:
