@@ -90,6 +90,7 @@ The current app function keys are:
 - `list-unit-catalogs`
 - `list-unit-campaign-catalogs`
 - `campaign-operations`
+- `delete-campaign-orders`
 - `delete-profile-cascade`
 - `update-account`
 - `delete-account`
@@ -119,9 +120,10 @@ environment="prod"   # change to "dev" as needed
 
 for key in list-my-shares list-catalogs-in-use create-profile request-report unit-reporting \
            list-unit-catalogs list-unit-campaign-catalogs campaign-operations \
-           delete-profile-cascade update-account delete-account transfer-ownership \
-           request-qr-upload confirm-qr-upload generate-qr-code-presigned-url \
-           delete-qr-code validate-payment-method admin-operations; do
+           delete-campaign-orders delete-profile-cascade update-account delete-account \
+           transfer-ownership request-qr-upload confirm-qr-upload \
+           generate-qr-code-presigned-url delete-qr-code validate-payment-method \
+           admin-operations; do
   echo "tofu import 'module.lambda.aws_cloudwatch_log_group.functions[\"$key\"]' '/aws/lambda/$prefix-$key-$region_abbrev-$environment'"
 done
 
