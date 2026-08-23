@@ -180,6 +180,11 @@ class TestCleanupStaleLock:
 class TestRecoverStateIfMissing:
     """recover_state_if_missing is exercised through ephemeral-env.sh down."""
 
+    @pytest.fixture
+    def build_dir(self, tmp_path: Path) -> Path:
+        """Provide an isolated Lambda layer build directory."""
+        return tmp_path / "lambda-layer"
+
     def _run_down(
         self,
         repo_root: Path,
@@ -192,17 +197,17 @@ class TestRecoverStateIfMissing:
         write_mock(tmp_env, "tofu", tofu_body)
         if build_dir.exists():
             shutil.rmtree(build_dir)
-        script = """
+        script = f"""
             set -e
             export STATE_BUCKET="test-bucket"
             export STATE_REGION="us-east-1"
             export TF_VAR_encryption_passphrase="not-used"
+            export KERNELWORX_LAYER_DIR="{build_dir}"
             scripts/ephemeral-env.sh down pr-999
         """
         return run_bash(repo_root, script)
 
-    def test_existing_state_is_not_recovered(self, repo_root: Path, tmp_env: Path) -> None:
-        build_dir = repo_root / ".build" / "lambda-layer"
+    def test_existing_state_is_not_recovered(self, repo_root: Path, tmp_env: Path, build_dir: Path) -> None:
         result = self._run_down(
             repo_root,
             tmp_env,
@@ -232,8 +237,7 @@ class TestRecoverStateIfMissing:
         assert "State object exists" in result.stderr
         assert "No previous state version found" not in result.stderr
 
-    def test_missing_state_restores_latest_version(self, repo_root: Path, tmp_env: Path) -> None:
-        build_dir = repo_root / ".build" / "lambda-layer"
+    def test_missing_state_restores_latest_version(self, repo_root: Path, tmp_env: Path, build_dir: Path) -> None:
         result = self._run_down(
             repo_root,
             tmp_env,
@@ -267,8 +271,7 @@ class TestRecoverStateIfMissing:
         assert result.returncode == 0, result.stderr
         assert "Restoring state from version v123" in result.stderr
 
-    def test_missing_state_no_version_continues(self, repo_root: Path, tmp_env: Path) -> None:
-        build_dir = repo_root / ".build" / "lambda-layer"
+    def test_missing_state_no_version_continues(self, repo_root: Path, tmp_env: Path, build_dir: Path) -> None:
         result = self._run_down(
             repo_root,
             tmp_env,
@@ -301,11 +304,9 @@ class TestRecoverStateIfMissing:
 
 
 class TestEphemeralEnvDown:
-    def test_down_skips_layer_build_and_uses_placeholder(self, repo_root: Path, tmp_env: Path) -> None:
+    def test_down_skips_layer_build_and_uses_placeholder(self, repo_root: Path, tmp_env: Path, tmp_path: Path) -> None:
         recorded = tmp_env / "tofu_calls.txt"
-        build_dir = repo_root / ".build" / "lambda-layer"
-        if build_dir.exists():
-            shutil.rmtree(build_dir)
+        build_dir = tmp_path / "lambda-layer"
 
         write_mock(
             tmp_env,
@@ -344,6 +345,7 @@ class TestEphemeralEnvDown:
             export STATE_BUCKET="test-bucket"
             export STATE_REGION="us-east-1"
             export TF_VAR_encryption_passphrase="not-used"
+            export KERNELWORX_LAYER_DIR="{build_dir}"
             rm -f "{recorded}"
             scripts/ephemeral-env.sh down pr-999
         """
@@ -369,6 +371,15 @@ class TestWorkflowDispatchSurface:
         workflow["on"] = on_value
         return workflow
 
+    @staticmethod
+    def _if_gates_on_mode(expression: str, expected_mode: str) -> bool:
+        """Check that a GitHub Actions `if` expression gates on the expected mode."""
+        normalized = expression.replace("${{", "").replace("}}", "").replace(" ", "")
+        return (
+            f"github.event.inputs.mode=='{expected_mode}'" in normalized
+            or f"inputs.mode=='{expected_mode}'" in normalized
+        )
+
     def test_workflow_has_manual_modes(self, repo_root: Path) -> None:
         workflow = self._load_workflow(repo_root)
         inputs = workflow.get("on", {}).get("workflow_dispatch", {}).get("inputs", {})
@@ -380,17 +391,17 @@ class TestWorkflowDispatchSurface:
         assert "manual-teardown" in jobs
         assert "recover-deploy" in jobs
         assert "recover-destroy" in jobs
-        assert "mode == 'down'" in jobs["manual-teardown"]["if"]
-        assert "mode == 'recover-deploy'" in jobs["recover-deploy"]["if"]
-        assert "mode == 'recover-destroy'" in jobs["recover-destroy"]["if"]
+        assert self._if_gates_on_mode(jobs["manual-teardown"]["if"], "down")
+        assert self._if_gates_on_mode(jobs["recover-deploy"]["if"], "recover-deploy")
+        assert self._if_gates_on_mode(jobs["recover-destroy"]["if"], "recover-destroy")
 
     def test_sweep_continues_on_error(self, repo_root: Path) -> None:
         workflow = self._load_workflow(repo_root)
         sweep_step = workflow["jobs"]["sweep"]["steps"][-1]
         run_script = sweep_step["run"]
         assert "scripts/ephemeral-env.sh down" in run_script
-        assert "Teardown failed" in run_script
-        assert "continuing sweep" in run_script
+        # The teardown must be wrapped so a failure does not abort the sweep loop.
+        assert "if ! scripts/ephemeral-env.sh down" in run_script
 
 
 class TestLambdaLogGroupStaticForEach:
