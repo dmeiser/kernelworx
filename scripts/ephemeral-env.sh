@@ -95,12 +95,84 @@ cleanup_cloudwatch_log_groups() {
   fi
 }
 
+# Remove a stale S3 lockfile left behind by a crashed or cancelled run.
+# OpenTofu's S3 backend uses a .tflock object when use_lockfile=true.
+# A lock from a different host is always considered stale (each CI run gets a
+# fresh runner). A lock from the same host is removed only when it is older
+# than EPHEMERAL_LOCK_STALE_SECONDS (default 10 minutes).
+cleanup_stale_lock() {
+  local lock_key="${STATE_KEY}.tflock"
+  local lock_url="s3://${STATE_BUCKET}/${lock_key}"
+  local stale_threshold_seconds="${EPHEMERAL_LOCK_STALE_SECONDS:-600}"
+
+  log "🔒 Checking for stale state lock: $lock_url"
+
+  if ! aws s3api head-object --bucket "$STATE_BUCKET" --key "$lock_key" --region "$STATE_REGION" >/dev/null 2>&1; then
+    log "   No lock object found."
+    return 0
+  fi
+
+  local lock_info
+  lock_info=$(aws s3 cp "$lock_url" - --region "$STATE_REGION" 2>/dev/null || true)
+  if [ -z "$lock_info" ]; then
+    log "   ⚠️  Lock object exists but content could not be read; leaving it in place."
+    return 0
+  fi
+
+  log "   Lock info: $lock_info"
+
+  local lock_created lock_who lock_host
+  lock_created=$(echo "$lock_info" | python3 -c 'import sys, json; print(json.load(sys.stdin).get("Created", ""))' 2>/dev/null || true)
+  lock_who=$(echo "$lock_info" | python3 -c 'import sys, json; print(json.load(sys.stdin).get("Who", ""))' 2>/dev/null || true)
+  lock_host="${lock_who#*@}"
+  local this_host
+  this_host=$(hostname)
+
+  # A lock created by a different host cannot belong to the current run, so
+  # treat it as stale. This handles CI runners that crash or are cancelled.
+  if [ -n "$lock_host" ] && [ "$lock_host" != "$this_host" ]; then
+    log "   🗑️  Lock belongs to a different host ($lock_host != $this_host); removing as stale."
+    aws s3 rm "$lock_url" --region "$STATE_REGION" || true
+    return 0
+  fi
+
+  # Same host: fall back to age-based check to avoid deleting a lock held by a
+  # concurrent local process.
+  if [ -n "$lock_created" ]; then
+    local lock_age_seconds
+    lock_age_seconds=$(python3 - <<PY
+from datetime import datetime, timezone
+import sys
+try:
+    last = datetime.fromisoformat("${lock_created}".replace('Z', '+00:00'))
+    if last.tzinfo is None:
+        last = last.replace(tzinfo=timezone.utc)
+    print(int((datetime.now(timezone.utc) - last).total_seconds()))
+except Exception:
+    print(-1)
+PY
+    )
+
+    if [ "$lock_age_seconds" -ge 0 ]; then
+      log "   Lock age: ${lock_age_seconds}s (threshold: ${stale_threshold_seconds}s)."
+      if [ "$lock_age_seconds" -gt "$stale_threshold_seconds" ]; then
+        log "   🗑️  Lock is older than threshold; removing as stale."
+        aws s3 rm "$lock_url" --region "$STATE_REGION" || true
+        return 0
+      fi
+    fi
+  fi
+
+  log "   ⚠️  Lock appears fresh and from this host; leaving in place."
+}
+
 case "$ACTION" in
   up)
     log "🚀 Bringing up ephemeral environment: $RUN_ID"
     log "   State: s3://$STATE_BUCKET/$STATE_KEY"
     log ""
 
+    cleanup_stale_lock
     build_lambda_layer
 
     log "📦 Initializing OpenTofu backend..."
@@ -110,6 +182,7 @@ case "$ACTION" in
       -backend-config="region=$STATE_REGION"
 
     cleanup_cloudwatch_log_groups
+    cleanup_stale_lock
 
     log "📋 Planning and applying ephemeral stack..."
     tofu apply -input=false -auto-approve -var="environment=$RUN_ID"
@@ -178,6 +251,8 @@ case "$ACTION" in
     log "   State: s3://$STATE_BUCKET/$STATE_KEY"
     log ""
 
+    cleanup_stale_lock
+
     # The Lambda layer only needs to exist during `up`. For `down` we just need
     # an empty directory so the archive_file data source does not fail while
     # OpenTofu is destroying resources from state.
@@ -188,6 +263,8 @@ case "$ACTION" in
       -backend-config="key=$STATE_KEY" \
       -backend-config="bucket=$STATE_BUCKET" \
       -backend-config="region=$STATE_REGION"
+
+    cleanup_stale_lock
 
     log "💥 Destroying AWS resources..."
     tofu destroy -input=false -auto-approve -var="environment=$RUN_ID" || true
