@@ -285,6 +285,8 @@ resource "aws_appsync_resolver" "update_campaign" {
 - `docs/DEVELOPER_GUIDE.md`: Development workflow and code patterns
 - `docs/GETTING_STARTED.md`: Setup and deployment instructions
 - `AGENT.md`: This file - AI agent rules and guidelines
+- `AGENTS.md`: Project-intrinsic agent memory (build, test, release, architecture, sharp edges)
+- `CLAUDE.md`: Canonical pointer to `AGENTS.md` for Claude Code sessions
 - `.github/copilot-instructions.md`: GitHub Copilot specific instructions
 
 ## Safety Rules

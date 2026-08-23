@@ -89,6 +89,7 @@ emojis
 endregion
 env
 errorMessage
+esac
 eslint
 exfiltration
 exportable
@@ -214,6 +215,7 @@ passwordless
 paymentMethod
 paymentMethods
 picklist
+pipefail
 pkeys
 playwright
 Pool
@@ -371,6 +373,7 @@ Vitest
 wcag
 webauthn
 wordmark
+worktree
 worx
 wrongpassword
 xlarge
