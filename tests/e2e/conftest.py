@@ -350,6 +350,7 @@ def ensure_managed_catalog() -> Generator[None, None, None]:
                 "catalogName": "E2E Managed Smoke Catalog",
                 "catalogType": "ADMIN_MANAGED",
                 "isPublic": True,
+                "isPublicStr": "true",
                 "products": [
                     {
                         "productId": "PRODUCT#e2e-managed-1",

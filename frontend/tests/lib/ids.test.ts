@@ -104,5 +104,12 @@ describe('lib/ids', () => {
     it('returns unchanged if no prefix', () => {
       expect(toUrlId('abc-123')).toBe('abc-123');
     });
+
+    it('strips only up to the first hash, leaving embedded hashes intact', () => {
+      // Order IDs can embed the campaign ID: ORDER#<campaign>#<order>.
+      // toUrlId must not be used for those IDs in URL path segments because
+      // the remaining # would be interpreted as a fragment.
+      expect(toUrlId('ORDER#campaign-uuid#order-uuid')).toBe('campaign-uuid#order-uuid');
+    });
   });
 });
