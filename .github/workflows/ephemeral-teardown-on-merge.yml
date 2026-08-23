@@ -1,0 +1,37 @@
+name: Ephemeral Teardown on Merge
+
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      - main
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  teardown:
+    name: Tear down ephemeral environment for PR #${{ github.event.pull_request.number }}
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: ephemeral
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up OpenTofu
+        uses: opentofu/setup-opentofu@v1
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::750620721302:role/GitHubActionsKernelworxDev
+          aws-region: ${{ secrets.AWS_REGION }}
+          role-session-name: github-actions-ephemeral-teardown
+
+      - name: Tear down ephemeral environment
+        env:
+          TF_VAR_encryption_passphrase: ${{ secrets.TF_VAR_ENCRYPTION_PASSPHRASE }}
+        run: scripts/ephemeral-env.sh down "pr-${{ github.event.pull_request.number }}"

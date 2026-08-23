@@ -1,17 +1,14 @@
 import { util } from '@aws-appsync/utils';
 
 export function request(ctx) {
-    // NEW STRUCTURE: Query profileId-index GSI to find profile
     const profileId = ctx.args.input.profileId;
-    // Normalize profileId for query
+    // Normalize profileId for key
     const dbProfileId = profileId && profileId.startsWith('PROFILE#') ? profileId : `PROFILE#${profileId}`;
+    // Read directly from the base table to avoid profileId-index GSI propagation races.
+    const expectedOwner = 'ACCOUNT#' + ctx.identity.sub;
     return {
-        operation: 'Query',
-        index: 'profileId-index',
-        query: {
-        expression: 'profileId = :profileId',
-        expressionValues: util.dynamodb.toMapValues({ ':profileId': dbProfileId })
-        }
+        operation: 'GetItem',
+        key: util.dynamodb.toMapValues({ ownerAccountId: expectedOwner, profileId: dbProfileId })
     };
 }
 
@@ -19,10 +16,9 @@ export function response(ctx) {
     if (ctx.error) {
         util.error(ctx.error.message, ctx.error.type);
     }
-    // Check ownership - ownerAccountId uses ACCOUNT# prefix now
-    const profile = ctx.result.items && ctx.result.items[0];
-    const expectedOwner = 'ACCOUNT#' + ctx.identity.sub;
-    if (!profile || profile.ownerAccountId !== expectedOwner) {
+    // If the item exists under the caller's partition key, they are the owner.
+    const profile = ctx.result;
+    if (!profile) {
         util.error('Forbidden: Only profile owner can share profiles', 'Unauthorized');
     }
     ctx.stash.profile = profile;

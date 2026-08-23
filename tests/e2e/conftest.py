@@ -24,9 +24,11 @@ This conftest adds:
   readonly_page        (function scope) – authenticated Page for the read-only role
   ensure_owner_profile (session scope)  – guarantee owner has an owned seller profile
   ensure_owner_catalog (session scope)  – guarantee owner can access at least one catalog
-    global_cleanup       (session scope, autouse) – post-suite TypeScript cleanup
+  ensure_managed_catalog (session scope) – guarantee an ADMIN_MANAGED catalog exists
+    global_cleanup     (session scope, autouse) – post-suite TypeScript cleanup
 """
 
+import datetime
 import json
 import os
 import re
@@ -37,7 +39,9 @@ import warnings
 from collections.abc import Generator
 from pathlib import Path
 
+import boto3
 import pytest
+from boto3.dynamodb.conditions import Attr, Key
 from dotenv import load_dotenv
 from playwright.sync_api import Browser, BrowserContext, Page, expect
 
@@ -290,6 +294,84 @@ def ensure_owner_catalog(browser: Browser) -> Generator[None, None, None]:
         yield
     finally:
         context.close()
+
+
+@pytest.fixture(scope="session")
+def ensure_managed_catalog() -> Generator[None, None, None]:
+    """Ensure at least one ``ADMIN_MANAGED`` catalog exists in DynamoDB.
+
+    Fresh ephemeral per-PR environments start with no managed catalogs, which
+    causes the Managed Catalogs tab to render an empty state.  This fixture
+    inserts a minimal ``ADMIN_MANAGED`` catalog directly into DynamoDB only
+    when none already exists, and only in non-production/non-dev tables.
+
+    Environment protection
+    ----------------------
+    The fixture reads ``CATALOGS_TABLE_NAME`` and skips insertion when the
+    table name contains ``-prod`` or ends with ``-dev``.  This protects shared
+    persistent environments even if the variable is misconfigured.
+
+    Scope
+    -----
+    ``session`` — the check and optional insertion run only once per pytest
+    session.
+
+    autouse
+    -------
+    ``False`` — tests opt in by declaring ``ensure_managed_catalog`` as a
+    parameter.
+
+    Yields:
+        ``None``
+    """
+    table_name = os.getenv("CATALOGS_TABLE_NAME", "kernelworx-catalogs-ue1-dev")
+    if "-prod" in table_name or table_name.endswith("-dev"):
+        yield
+        return
+
+    try:
+        region = os.getenv("AWS_REGION", "us-east-1")
+        dynamodb = boto3.resource("dynamodb", region_name=region)
+        table = dynamodb.Table(table_name)
+
+        response = table.query(
+            IndexName="isPublic-createdAt-index",
+            KeyConditionExpression=Key("isPublicStr").eq("true"),
+            FilterExpression=Attr("catalogType").eq("ADMIN_MANAGED")
+            & (Attr("isDeleted").not_exists() | Attr("isDeleted").eq(False)),
+            ProjectionExpression="catalogId",
+        )
+        if response.get("Items"):
+            yield
+            return
+
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        catalog_id = f"CATALOG#e2e-managed-smoke-{int(time.time())}"
+        table.put_item(
+            Item={
+                "catalogId": catalog_id,
+                "catalogName": "E2E Managed Smoke Catalog",
+                "catalogType": "ADMIN_MANAGED",
+                "isPublic": True,
+                "isPublicStr": "true",
+                "products": [
+                    {
+                        "productId": "PRODUCT#e2e-managed-1",
+                        "productName": "E2E Managed Popcorn",
+                        "price": "15",
+                        "sortOrder": 1,
+                    }
+                ],
+                "createdAt": now,
+                "updatedAt": now,
+            }
+        )
+    except Exception as exc:
+        raise RuntimeError(
+            f"Failed to ensure ADMIN_MANAGED catalog exists in {table_name}: {exc}"
+        ) from exc
+
+    yield
 
 
 @pytest.fixture(scope="session")

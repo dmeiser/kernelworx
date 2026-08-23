@@ -16,13 +16,15 @@ variable "name_prefix" {
 }
 
 variable "api_domain" {
-  description = "Fully qualified API domain (e.g., api.dev.kernelworx.app or api.kernelworx.app)"
+  description = "Fully qualified API domain (e.g., api.dev.kernelworx.app or api.kernelworx.app). When null, no custom domain is created and the AWS-managed AppSync URL is used."
   type        = string
+  default     = null
 }
 
 variable "api_certificate_arn" {
-  description = "ACM certificate ARN for the AppSync custom domain"
+  description = "ACM certificate ARN for the AppSync custom domain. Required when api_domain is set."
   type        = string
+  default     = null
 }
 
 variable "certificate_validation" {
@@ -56,10 +58,18 @@ variable "aws_region" {
   description = "AWS region"
 }
 
+variable "prevent_destroy" {
+  description = "Set to false for ephemeral environments that must be destroyed after use."
+  type        = bool
+  default     = true
+}
+
 locals {
   api_name   = "${var.name_prefix}-api-${var.region_abbrev}-${var.environment}"
   api_domain = var.api_domain
-  env_suffix = "_${var.environment}"
+  # AppSync function names cannot contain hyphens, so sanitize the environment
+  # identifier while keeping it readable.
+  env_suffix = "_${replace(var.environment, "-", "_")}"
 
   # JS resolver code path
   js_resolvers_dir      = "${path.module}/../../appsync/js-resolvers"

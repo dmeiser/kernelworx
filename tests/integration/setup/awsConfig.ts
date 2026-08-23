@@ -44,7 +44,7 @@ export async function getAwsConfig(): Promise<AwsConfig> {
     userPoolId = cognitoConfig.userPoolId;
     userPoolClientId = cognitoConfig.clientId;
   }
-  const appSyncEndpoint = await lookupAppSyncEndpoint(region, 'kernelworx');
+  const appSyncEndpoint = process.env.TEST_APPSYNC_ENDPOINT || await lookupAppSyncEndpoint(region, 'kernelworx');
 
   cachedConfig = {
     userPoolId,

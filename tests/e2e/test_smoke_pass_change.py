@@ -20,10 +20,7 @@ from tests.e2e.utils.auth import login
 
 
 @pytest.mark.smoke
-@pytest.mark.skipif(
-    not os.environ.get("RUN_PASSWORD_CHANGE"),
-    reason="Mutates the shared dev owner account; set RUN_PASSWORD_CHANGE=1 to opt in",
-)
+@pytest.mark.skip(reason="Disabled pending an email-free password-change test strategy; see #117")
 def test_password_change_flow(owner_page: Page, browser: Browser) -> None:
     """Change the owner password, authenticate with the new password, then revert.
 

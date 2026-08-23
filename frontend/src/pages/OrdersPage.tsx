@@ -333,7 +333,10 @@ export const OrdersPage: React.FC = () => {
   };
 
   const handleEditOrder = (orderId: string) => {
-    void navigate(`/scouts/${toUrlId(profileId)}/campaigns/${toUrlId(campaignId)}/orders/${toUrlId(orderId)}/edit`);
+    // Order IDs now embed the campaign ID (ORDER#<campaign-uuid>#<order-uuid>),
+    // so stripPrefix/toUrlId would leave a literal # in the path. Encode the
+    // full prefixed ID so React Router decodes it back to the original value.
+    void navigate(`/scouts/${toUrlId(profileId)}/campaigns/${toUrlId(campaignId)}/orders/${encodeURIComponent(orderId)}/edit`);
   };
 
   const handleDeleteOrder = async (orderId: string) => {

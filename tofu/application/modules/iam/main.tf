@@ -32,8 +32,15 @@ variable "lambda_function_arns" {
 }
 
 variable "cloudfront_distribution_arn" {
-  description = "ARN of the CloudFront site distribution to scope invalidations to"
+  description = "ARN of the CloudFront site distribution to scope invalidations to. When null, CloudFront invalidation permissions are omitted."
   type        = string
+  default     = null
+}
+
+variable "prevent_destroy" {
+  description = "Set to false for ephemeral environments that must be destroyed after use."
+  type        = bool
+  default     = true
 }
 
 locals {
@@ -58,7 +65,7 @@ resource "aws_iam_role" "lambda_execution" {
   assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
 
   lifecycle {
-    prevent_destroy = true
+    prevent_destroy = var.prevent_destroy
   }
 }
 
@@ -132,7 +139,10 @@ resource "aws_iam_role_policy" "lambda_s3" {
 
 # Lambda CloudFront Access
 # Scope invalidations to the site distribution used by the application.
+# Omitted when no CloudFront distribution is configured (e.g. ephemeral environments).
 data "aws_iam_policy_document" "lambda_cloudfront" {
+  count = var.cloudfront_distribution_arn != null ? 1 : 0
+
   statement {
     effect    = "Allow"
     actions   = ["cloudfront:CreateInvalidation"]
@@ -141,9 +151,11 @@ data "aws_iam_policy_document" "lambda_cloudfront" {
 }
 
 resource "aws_iam_role_policy" "lambda_cloudfront" {
+  count = var.cloudfront_distribution_arn != null ? 1 : 0
+
   name   = "cloudfront-invalidation"
   role   = aws_iam_role.lambda_execution.id
-  policy = data.aws_iam_policy_document.lambda_cloudfront.json
+  policy = data.aws_iam_policy_document.lambda_cloudfront[0].json
 }
 
 # =============================================================================
@@ -156,7 +168,7 @@ resource "aws_iam_role" "appsync_service" {
   assume_role_policy = data.aws_iam_policy_document.appsync_assume_role.json
 
   lifecycle {
-    prevent_destroy = true
+    prevent_destroy = var.prevent_destroy
   }
 }
 
@@ -223,7 +235,7 @@ resource "aws_iam_role" "cognito_sms" {
   assume_role_policy = data.aws_iam_policy_document.cognito_assume_role.json
 
   lifecycle {
-    prevent_destroy = true
+    prevent_destroy = var.prevent_destroy
   }
 }
 

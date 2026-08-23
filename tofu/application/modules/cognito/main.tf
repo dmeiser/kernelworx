@@ -17,8 +17,9 @@ variable "name_prefix" {
 }
 
 variable "login_domain" {
-  description = "Fully qualified login domain (e.g., login.dev.kernelworx.app or login.kernelworx.app)"
+  description = "Fully qualified login domain (e.g., login.dev.kernelworx.app or login.kernelworx.app). When null, a globally-unique prefix domain is created instead."
   type        = string
+  default     = null
 }
 
 variable "google_client_id" {
@@ -41,8 +42,9 @@ variable "aws_region" {
 }
 
 variable "login_certificate_arn" {
-  description = "ARN of ACM certificate for the Cognito login domain"
+  description = "ARN of ACM certificate for the Cognito login domain. Required when login_domain is set."
   type        = string
+  default     = null
 }
 
 variable "login_certificate_validation" {
@@ -122,9 +124,17 @@ variable "logout_urls" {
   type        = list(string)
 }
 
+variable "prevent_destroy" {
+  description = "Set to false for ephemeral environments that must be destroyed after use."
+  type        = bool
+  default     = true
+}
+
 locals {
-  user_pool_name = "${var.name_prefix}-users-${var.region_abbrev}-${var.environment}"
-  login_domain   = var.login_domain
+  user_pool_name    = "${var.name_prefix}-users-${var.region_abbrev}-${var.environment}"
+  use_custom_domain = var.login_domain != null
+  # Prefix domains must be globally unique across all AWS accounts.
+  prefix_domain = "${var.name_prefix}-${var.region_abbrev}-${var.environment}"
   tags = {
     Environment = var.environment
     ManagedBy   = "opentofu"
@@ -229,15 +239,18 @@ resource "aws_cognito_user_pool" "main" {
   tags = local.tags
 
   lifecycle {
-    prevent_destroy = true
+    prevent_destroy = var.prevent_destroy
   }
 }
 
 # Lambda permissions - allow Cognito to invoke trigger functions
-# count is gated on a static boolean (known at plan time) rather than ARN nullability
-# to avoid unknown count values during greenfield applies.
+# Count is gated on the static enable_lambda_triggers flag only.  ARN nullability
+# is intentionally NOT checked here: on greenfield applies the Lambda ARNs come
+# from module outputs and are unknown during plan, which would make count unknown.
+# The module-level variable validation still requires the ARNs to be non-null when
+# triggers are enabled.
 resource "aws_lambda_permission" "cognito_pre_signup" {
-  count = var.enable_lambda_triggers && var.pre_signup_lambda_arn != null ? 1 : 0
+  count = var.enable_lambda_triggers ? 1 : 0
 
   statement_id  = "AllowCognitoInvokePreSignup"
   action        = "lambda:InvokeFunction"
@@ -247,7 +260,7 @@ resource "aws_lambda_permission" "cognito_pre_signup" {
 }
 
 resource "aws_lambda_permission" "cognito_post_auth" {
-  count = var.enable_lambda_triggers && var.post_auth_lambda_arn != null ? 1 : 0
+  count = var.enable_lambda_triggers ? 1 : 0
 
   statement_id  = "AllowCognitoInvokePostAuth"
   action        = "lambda:InvokeFunction"
@@ -257,7 +270,7 @@ resource "aws_lambda_permission" "cognito_post_auth" {
 }
 
 resource "aws_lambda_permission" "cognito_post_confirmation" {
-  count = var.enable_lambda_triggers && var.post_confirmation_lambda_arn != null ? 1 : 0
+  count = var.enable_lambda_triggers ? 1 : 0
 
   statement_id  = "AllowCognitoInvokePostConfirmation"
   action        = "lambda:InvokeFunction"
@@ -352,7 +365,7 @@ resource "aws_cognito_user_pool_client" "web" {
   # Don't specify token validity - use defaults from imported state
 
   lifecycle {
-    prevent_destroy = true
+    prevent_destroy = var.prevent_destroy
     # Ignore certain attributes that may differ from actual AWS state
     ignore_changes = [
       access_token_validity,
@@ -364,19 +377,38 @@ resource "aws_cognito_user_pool_client" "web" {
 }
 
 # User Pool Domain
+# Custom domain with ACM certificate (dev/prod)
 resource "aws_cognito_user_pool_domain" "custom" {
-  domain          = local.login_domain
+  count = local.use_custom_domain ? 1 : 0
+
+  domain          = var.login_domain
   user_pool_id    = aws_cognito_user_pool.main.id
   certificate_arn = var.login_certificate_arn
 
   lifecycle {
-    prevent_destroy = true
+    prevent_destroy = var.prevent_destroy
+    precondition {
+      condition     = var.login_certificate_arn != null
+      error_message = "login_certificate_arn is required when login_domain is set"
+    }
     precondition {
       # Reference the validation resource so the custom domain waits for the login
       # certificate to validate. The ternary allows dev builds that omit it.
       condition     = var.login_certificate_validation != null ? try(length(var.login_certificate_validation.validation_record_fqdns) > 0, false) : true
       error_message = "Login certificate validation must complete before creating the Cognito custom domain"
     }
+  }
+}
+
+# Prefix domain (ephemeral environments without custom domain / ACM)
+resource "aws_cognito_user_pool_domain" "prefix" {
+  count = local.use_custom_domain ? 0 : 1
+
+  domain       = local.prefix_domain
+  user_pool_id = aws_cognito_user_pool.main.id
+
+  lifecycle {
+    prevent_destroy = var.prevent_destroy
   }
 }
 
@@ -402,16 +434,16 @@ output "client_id" {
 }
 
 output "domain" {
-  description = "Custom domain for Cognito User Pool"
-  value       = aws_cognito_user_pool_domain.custom.domain
+  description = "Cognito User Pool domain (custom domain when configured, otherwise prefix domain)"
+  value       = local.use_custom_domain ? aws_cognito_user_pool_domain.custom[0].domain : aws_cognito_user_pool_domain.prefix[0].domain
 }
 
 output "cloudfront_distribution_arn" {
-  description = "CloudFront distribution ARN backing the Cognito custom domain"
-  value       = aws_cognito_user_pool_domain.custom.cloudfront_distribution_arn
+  description = "CloudFront distribution ARN backing the Cognito custom domain (null for prefix domains)"
+  value       = local.use_custom_domain ? aws_cognito_user_pool_domain.custom[0].cloudfront_distribution_arn : null
 }
 
 output "cloudfront_domain" {
-  description = "CloudFront domain name backing the Cognito custom domain"
-  value       = aws_cognito_user_pool_domain.custom.cloudfront_distribution
+  description = "CloudFront domain name backing the Cognito custom domain (null for prefix domains)"
+  value       = local.use_custom_domain ? aws_cognito_user_pool_domain.custom[0].cloudfront_distribution : null
 }
