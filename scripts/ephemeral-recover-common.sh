@@ -107,8 +107,29 @@ import_ephemeral_resources() {
 
   # AppSync API
   log "   Importing AppSync API..."
-  local appsync_id
-  appsync_id=$(aws appsync list-graphql-apis --region "$region" --query "graphqlApis[?name=='kernelworx-api${suffix}'].apiId" --output text 2>/dev/null | head -n1)
+  local appsync_id=""
+  local api_next_token=""
+  while true; do
+    local api_args=()
+    api_args+=(--region "$region" --output json)
+    if [ -n "$api_next_token" ]; then
+      api_args+=(--starting-token "$api_next_token")
+    fi
+
+    local api_page
+    api_page=$(aws appsync list-graphql-apis "${api_args[@]}" 2>/dev/null)
+    if [ -z "$api_page" ]; then
+      break
+    fi
+
+    appsync_id=$(echo "$api_page" | python3 -c "import sys, json; d=json.load(sys.stdin); apis=[a for a in d.get('graphqlApis', []) if a.get('name')=='kernelworx-api${suffix}']; print(apis[0]['apiId'] if apis else '')")
+    if [ -n "$appsync_id" ]; then
+      break
+    fi
+
+    api_next_token=$(echo "$api_page" | python3 -c "import sys, json; d=json.load(sys.stdin); print(d.get('nextToken', ''))")
+    [ -z "$api_next_token" ] && break
+  done
   if [ -n "$appsync_id" ] && [ "$appsync_id" != "None" ]; then
     import_resource "$run_id" "module.appsync.aws_appsync_graphql_api.main" "$appsync_id"
     import_resource "$run_id" "module.appsync.aws_cloudwatch_log_group.appsync" "/aws/appsync/apis/${appsync_id}"
