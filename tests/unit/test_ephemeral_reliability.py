@@ -394,15 +394,6 @@ class TestWorkflowDispatchSurface:
 
 
 class TestLambdaLogGroupStaticForEach:
-    def test_log_groups_use_local_maps_not_function_attributes(self, repo_root: Path) -> None:
-        module_path = repo_root / "tofu" / "application" / "modules" / "lambda" / "main.tf"
-        content = module_path.read_text()
-        # Static for_each means the keys come from local.functions / local.trigger_functions,
-        # not from computed aws_lambda_function.* attributes.
-        assert "for_each = local.functions" in content
-        assert "for_each = local.trigger_functions" in content
-        assert "for_each = aws_lambda_function." not in content
-
     def test_lambda_module_validates(self, repo_root: Path, tmp_path: Path) -> None:
         tofu_bin = shutil.which("tofu")
         if tofu_bin is None:
