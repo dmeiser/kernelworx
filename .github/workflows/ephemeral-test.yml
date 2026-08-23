@@ -117,12 +117,6 @@ jobs:
         run: kill "${PREVIEW_PID}" || true
         continue-on-error: true
 
-      - name: Tear down ephemeral environment
-        if: always() && steps.e2e.outcome != 'failure'
-        env:
-          TF_VAR_encryption_passphrase: ${{ secrets.TF_VAR_ENCRYPTION_PASSPHRASE }}
-        run: scripts/ephemeral-env.sh down "pr-${{ github.event.pull_request.number }}" || true
-
   sweep:
     name: Sweep stale ephemeral environments
     if: github.event_name == 'schedule'
