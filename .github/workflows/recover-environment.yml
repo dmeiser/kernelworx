@@ -62,8 +62,9 @@ jobs:
           role-session-name: github-actions-ephemeral-recover-deploy
 
       - name: Validate PR number
+        env:
+          PR_NUMBER: ${{ github.event.inputs.pr_number }}
         run: |
-          PR_NUMBER="${{ github.event.inputs.pr_number }}"
           if [[ ! "$PR_NUMBER" =~ ^[0-9]+$ ]]; then
             echo "❌ Invalid PR number: $PR_NUMBER"
             exit 1
@@ -109,8 +110,9 @@ jobs:
           role-session-name: github-actions-ephemeral-recover-destroy
 
       - name: Validate PR number
+        env:
+          PR_NUMBER: ${{ github.event.inputs.pr_number }}
         run: |
-          PR_NUMBER="${{ github.event.inputs.pr_number }}"
           if [[ ! "$PR_NUMBER" =~ ^[0-9]+$ ]]; then
             echo "❌ Invalid PR number: $PR_NUMBER"
             exit 1

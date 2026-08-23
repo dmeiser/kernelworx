@@ -91,8 +91,29 @@ import_ephemeral_resources() {
 
   # Cognito user pool, client, and prefix domain
   log "   Importing Cognito resources..."
-  local user_pool_id
-  user_pool_id=$(aws cognito-idp list-user-pools --max-results 60 --region "$region" --query "UserPools[?Name=='kernelworx-users${suffix}'].Id" --output text 2>/dev/null | head -n1)
+  local user_pool_id=""
+  local cognito_next_token=""
+  while true; do
+    local cognito_args=()
+    cognito_args+=(--region "$region" --output json)
+    if [ -n "$cognito_next_token" ]; then
+      cognito_args+=(--starting-token "$cognito_next_token")
+    fi
+
+    local cognito_page
+    cognito_page=$(aws cognito-idp list-user-pools "${cognito_args[@]}" 2>/dev/null)
+    if [ -z "$cognito_page" ]; then
+      break
+    fi
+
+    user_pool_id=$(echo "$cognito_page" | python3 -c "import sys, json; d=json.load(sys.stdin); pools=[p for p in d.get('UserPools', []) if p.get('Name')=='kernelworx-users${suffix}']; print(pools[0]['Id'] if pools else '')")
+    if [ -n "$user_pool_id" ]; then
+      break
+    fi
+
+    cognito_next_token=$(echo "$cognito_page" | python3 -c "import sys, json; d=json.load(sys.stdin); print(d.get('NextToken', ''))")
+    [ -z "$cognito_next_token" ] && break
+  done
   if [ -n "$user_pool_id" ] && [ "$user_pool_id" != "None" ]; then
     import_resource "$run_id" "module.cognito.aws_cognito_user_pool.main" "$user_pool_id"
 
@@ -200,13 +221,36 @@ cleanup_cloudwatch_log_groups_for_run() {
   log "🧹 Cleaning up CloudWatch log groups for run: $run_id"
   local region="${AWS_REGION:-us-east-1}"
   local suffix="-${run_id}"
-  local log_groups
+  local log_groups=""
+  local log_next_token=""
 
-  log_groups=$(aws logs describe-log-groups \
-    --log-group-name-prefix "/aws/lambda/kernelworx-" \
-    --region "$region" \
-    --query 'logGroups[*].logGroupName' \
-    --output text 2>/dev/null || true)
+  while true; do
+    local log_args=()
+    log_args+=(--log-group-name-prefix "/aws/lambda/kernelworx-" --region "$region" --output json)
+    if [ -n "$log_next_token" ]; then
+      log_args+=(--starting-token "$log_next_token")
+    fi
+
+    local log_page
+    log_page=$(aws logs describe-log-groups "${log_args[@]}" 2>/dev/null || true)
+    if [ -z "$log_page" ] || [ "$log_page" = "None" ]; then
+      break
+    fi
+
+    local names
+    names=$(echo "$log_page" | python3 -c "import sys, json; d=json.load(sys.stdin); print('\n'.join(lg.get('logGroupName', '') for lg in d.get('logGroups', [])))")
+    if [ -n "$names" ]; then
+      if [ -n "$log_groups" ]; then
+        log_groups="$log_groups
+$names"
+      else
+        log_groups="$names"
+      fi
+    fi
+
+    log_next_token=$(echo "$log_page" | python3 -c "import sys, json; d=json.load(sys.stdin); print(d.get('nextToken', ''))")
+    [ -z "$log_next_token" ] && break
+  done
 
   if [ -z "$log_groups" ] || [ "$log_groups" = "None" ]; then
     log "   No existing log groups found."
