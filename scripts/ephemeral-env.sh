@@ -254,9 +254,10 @@ case "$ACTION" in
     cleanup_stale_lock
 
     # The Lambda layer only needs to exist during `up`. For `down` we just need
-    # an empty directory so the archive_file data source does not fail while
+    # a non-empty directory so the archive_file data source does not fail while
     # OpenTofu is destroying resources from state.
     mkdir -p "$ROOT_DIR/.build/lambda-layer/python"
+    echo "# placeholder" > "$ROOT_DIR/.build/lambda-layer/python/.placeholder"
 
     # Re-init is required in case the workspace was cleaned since the up run.
     tofu init -input=false \
@@ -267,14 +268,18 @@ case "$ACTION" in
     cleanup_stale_lock
 
     log "💥 Destroying AWS resources..."
-    tofu destroy -input=false -auto-approve -var="environment=$RUN_ID" || true
+    if tofu destroy -input=false -auto-approve -var="environment=$RUN_ID"; then
+      log "🧹 Deleting state objects..."
+      aws s3 rm "s3://$STATE_BUCKET/$STATE_KEY" --region "$STATE_REGION" || true
+      aws s3 rm "s3://$STATE_BUCKET/${STATE_KEY}.tflock" --region "$STATE_REGION" || true
 
-    log "🧹 Deleting state objects..."
-    aws s3 rm "s3://$STATE_BUCKET/$STATE_KEY" --region "$STATE_REGION" || true
-    aws s3 rm "s3://$STATE_BUCKET/${STATE_KEY}.tflock" --region "$STATE_REGION" || true
-
-    log ""
-    log "✅ Ephemeral environment $RUN_ID torn down."
+      log ""
+      log "✅ Ephemeral environment $RUN_ID torn down."
+    else
+      log ""
+      log "❌ OpenTofu destroy failed for $RUN_ID; state objects left in place for inspection."
+      exit 1
+    fi
     ;;
 
   *)
