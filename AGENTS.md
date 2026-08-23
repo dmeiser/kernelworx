@@ -21,11 +21,11 @@ Ephemeral per-PR stacks live in `tofu/application/environments/ephemeral` and ar
 
 ### Recovery workflows
 
-The same workflow file exposes three `workflow_dispatch` jobs for manual intervention:
+Manual intervention runs through two standalone `workflow_dispatch` workflows (each takes a `pr_number` input):
 
-- **Manual teardown for PR** (`mode: down`): runs `scripts/ephemeral-env.sh down pr-<n>` for an arbitrary PR number. Use this when a PR's merge teardown fails or when you need to clean up a leaked environment safely through Terraform.
-- **Recover deploy for PR** (`mode: recover-deploy`): runs `scripts/recover-deploy.sh pr-<n>`. It discovers existing AWS resources for the run-id and imports them into state with individual `tofu import` commands (each allowed to fail). Use this when a PR test fails to apply because resources already exist from a previous partial run.
-- **Recover destroy for PR** (`mode: recover-destroy`): runs `scripts/recover-destroy.sh pr-<n>`. It imports whatever resources still exist, then runs `tofu destroy` and cleans up leftover state/log groups. Use this when state is missing/corrupt but AWS resources remain.
+- **Manual teardown for PR** (`.github/workflows/manual-teardown.yml`): runs `scripts/ephemeral-env.sh down pr-<n>` for an arbitrary PR number. Use this when a PR's merge teardown fails or when you need to clean up a leaked environment safely through Terraform.
+- **Recover deploy for PR** (`.github/workflows/recover-environment.yml`, `mode: recover-deploy`): runs `scripts/recover-deploy.sh pr-<n>`. It discovers existing AWS resources for the run-id and imports them into state with individual `tofu import` commands (each allowed to fail). Use this when a PR test fails to apply because resources already exist from a previous partial run.
+- **Recover destroy for PR** (`.github/workflows/recover-environment.yml`, `mode: recover-destroy`): runs `scripts/recover-destroy.sh pr-<n>`. It imports whatever resources still exist, then runs `tofu destroy` and cleans up leftover state/log groups. Use this when state is missing/corrupt but AWS resources remain.
 
 Recovery scripts share helpers in `scripts/ephemeral-recover-common.sh`.
 

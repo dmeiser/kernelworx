@@ -361,9 +361,9 @@ class TestEphemeralEnvDown:
 
 
 class TestWorkflowDispatchSurface:
-    def _load_workflow(self, repo_root: Path) -> dict:
+    def _load_workflow(self, repo_root: Path, filename: str = "ephemeral-test.yml") -> dict:
         """Load workflow YAML preserving the ``on`` key as a string."""
-        workflow_path = repo_root / ".github" / "workflows" / "ephemeral-test.yml"
+        workflow_path = repo_root / ".github" / "workflows" / filename
         # PyYAML resolves ``on`` as the boolean True by default.
         workflow = yaml.safe_load(workflow_path.read_text())
         on_value = workflow.pop(True, None)
@@ -381,18 +381,39 @@ class TestWorkflowDispatchSurface:
             or f"inputs.mode=='{expected_mode}'" in normalized
         )
 
-    def test_workflow_has_manual_modes(self, repo_root: Path) -> None:
+    def test_ephemeral_test_has_no_manual_jobs(self, repo_root: Path) -> None:
         workflow = self._load_workflow(repo_root)
+        jobs = workflow.get("jobs", {})
+        assert set(jobs) == {"ephemeral-test", "sweep"}
+        assert "workflow_dispatch" not in (workflow.get("on") or {})
+
+    def test_manual_teardown_workflow(self, repo_root: Path) -> None:
+        workflow = self._load_workflow(repo_root, "manual-teardown.yml")
         inputs = workflow.get("on", {}).get("workflow_dispatch", {}).get("inputs", {})
-        assert "mode" in inputs
-        assert set(inputs["mode"]["options"]) == {"down", "recover-deploy", "recover-destroy"}
         assert "pr_number" in inputs
+        assert inputs["pr_number"]["required"] is True
+
+        concurrency = workflow.get("concurrency", {})
+        assert "manual-teardown-" in concurrency.get("group", "")
+        assert "inputs.pr_number" in concurrency.get("group", "")
 
         jobs = workflow.get("jobs", {})
-        assert "manual-teardown" in jobs
-        assert "recover-deploy" in jobs
-        assert "recover-destroy" in jobs
-        assert self._if_gates_on_mode(jobs["manual-teardown"]["if"], "down")
+        assert set(jobs) == {"manual-teardown"}
+        assert "if" not in jobs["manual-teardown"]
+
+    def test_recover_environment_workflow(self, repo_root: Path) -> None:
+        workflow = self._load_workflow(repo_root, "recover-environment.yml")
+        inputs = workflow.get("on", {}).get("workflow_dispatch", {}).get("inputs", {})
+        assert "pr_number" in inputs
+        assert inputs["pr_number"]["required"] is True
+        assert set(inputs["mode"]["options"]) == {"recover-deploy", "recover-destroy"}
+
+        concurrency = workflow.get("concurrency", {})
+        assert "recover-environment-" in concurrency.get("group", "")
+        assert "inputs.pr_number" in concurrency.get("group", "")
+
+        jobs = workflow.get("jobs", {})
+        assert set(jobs) == {"recover-deploy", "recover-destroy"}
         assert self._if_gates_on_mode(jobs["recover-deploy"]["if"], "recover-deploy")
         assert self._if_gates_on_mode(jobs["recover-destroy"]["if"], "recover-destroy")
 
