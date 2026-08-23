@@ -137,9 +137,11 @@ import_ephemeral_resources() {
     case "$base_name" in
       post-auth|pre-signup)
         import_resource "$run_id" "module.lambda.aws_lambda_function.trigger_functions[\"${base_name}\"]" "$func_name"
+        import_resource "$run_id" "module.lambda.aws_cloudwatch_log_group.trigger_functions[\"${base_name}\"]" "/aws/lambda/${func_name}"
         ;;
       *)
-        import_resource "$run_id" "module.lambda.aws_lambda_function.main[\"${base_name}\"]" "$func_name"
+        import_resource "$run_id" "module.lambda.aws_lambda_function.functions[\"${base_name}\"]" "$func_name"
+        import_resource "$run_id" "module.lambda.aws_cloudwatch_log_group.functions[\"${base_name}\"]" "/aws/lambda/${func_name}"
         ;;
     esac
   done
