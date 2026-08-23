@@ -6,6 +6,7 @@
 #   eval $(scripts/ephemeral-env.sh env <run-id>)
 #   scripts/ephemeral-env.sh down <run-id>
 #   scripts/ephemeral-env.sh cleanup-orphans <run-id>
+#   scripts/ephemeral-env.sh recover-orphans <run-id>
 #
 # The script sources the repository root .env for AWS credentials/profile and
 # the OpenTofu state encryption passphrase, same as deploy.sh.
@@ -37,7 +38,7 @@ fi
 
 # Validate arguments
 if [ $# -lt 2 ]; then
-  log "Usage: $0 <up|env|down|cleanup-orphans> <run-id>"
+  log "Usage: $0 <up|env|down|cleanup-orphans|recover-orphans> <run-id>"
   exit 1
 fi
 
@@ -308,6 +309,139 @@ cleanup_orphaned_resources() {
   log "✅ Orphan cleanup for $RUN_ID complete."
 }
 
+# Discover orphaned AWS resources left behind when state is missing/corrupt,
+# import them into the ephemeral OpenTofu state one by one, then run
+# `tofu destroy` so they are removed through Terraform. Each import is allowed
+# to fail so partial orphan sets are still handled.
+recover_orphans() {
+  log "🔄 Recovering orphaned resources into state for run: $RUN_ID"
+  log "   State: s3://$STATE_BUCKET/$STATE_KEY"
+  log ""
+
+  local region="${AWS_REGION:-us-east-1}"
+  local suffix="-ue1-${RUN_ID}"
+
+  # The Lambda layer data source needs a non-empty directory during init/plan.
+  mkdir -p "$ROOT_DIR/.build/lambda-layer/python"
+  echo "# placeholder" > "$ROOT_DIR/.build/lambda-layer/python/.placeholder"
+
+  log "📦 Initializing OpenTofu backend..."
+  tofu init -input=false \
+    -backend-config="key=$STATE_KEY" \
+    -backend-config="bucket=$STATE_BUCKET" \
+    -backend-config="region=$STATE_REGION"
+
+  # Helper to run tofu import safely
+  import_resource() {
+    local address="$1"
+    local id="$2"
+    if [ -z "$id" ] || [ "$id" = "None" ]; then
+      log "   ⚠️  Skipping import of $address (no id found)"
+      return 0
+    fi
+    log "   📥 Importing $address ($id)"
+    tofu import -input=false -var="environment=$RUN_ID" "$address" "$id" || true
+  }
+
+  # DynamoDB tables
+  log "   Importing DynamoDB tables..."
+  for table in accounts catalogs profiles campaigns orders shares invites shared-campaigns; do
+    table_name="kernelworx-${table}${suffix}"
+    resource_name=$(echo "$table" | tr '-' '_')
+    if aws dynamodb describe-table --table-name "$table_name" --region "$region" >/dev/null 2>&1; then
+      import_resource "module.dynamodb.aws_dynamodb_table.${resource_name}" "$table_name"
+    fi
+  done
+
+  # S3 buckets
+  log "   Importing S3 buckets..."
+  if aws s3api head-bucket --bucket "kernelworx-static${suffix}" --region "$region" 2>/dev/null; then
+    import_resource "module.s3.aws_s3_bucket.static" "kernelworx-static${suffix}"
+  fi
+  if aws s3api head-bucket --bucket "kernelworx-exports${suffix}" --region "$region" 2>/dev/null; then
+    import_resource "module.s3.aws_s3_bucket.exports" "kernelworx-exports${suffix}"
+  fi
+
+  # IAM roles
+  log "   Importing IAM roles..."
+  import_resource "module.iam.aws_iam_role.lambda_execution" "kernelworx-lambda-exec${suffix}"
+  import_resource "module.iam.aws_iam_role.appsync_service" "kernelworx-appsync${suffix}"
+  import_resource "module.appsync.aws_iam_role.appsync_logging" "kernelworx-api${suffix}-logs"
+  import_resource "module.iam.aws_iam_role.cognito_sms" "kernelworx${suffix}-UserPoolsmsRole"
+
+  # Cognito user pool, client, and prefix domain
+  log "   Importing Cognito resources..."
+  local user_pool_id
+  user_pool_id=$(aws cognito-idp list-user-pools --max-results 60 --region "$region" --query "UserPools[?Name=='kernelworx-users${suffix}'].Id" --output text 2>/dev/null | head -n1)
+  if [ -n "$user_pool_id" ] && [ "$user_pool_id" != "None" ]; then
+    import_resource "module.cognito.aws_cognito_user_pool.main" "$user_pool_id"
+
+    local client_id
+    client_id=$(aws cognito-idp list-user-pool-clients --user-pool-id "$user_pool_id" --region "$region" --query 'UserPoolClients[0].ClientId' --output text 2>/dev/null | head -n1)
+    if [ -n "$client_id" ] && [ "$client_id" != "None" ]; then
+      import_resource "module.cognito.aws_cognito_user_pool_client.web" "${user_pool_id}/${client_id}"
+    fi
+
+    import_resource "module.cognito.aws_cognito_user_pool_domain.prefix[0]" "kernelworx${suffix}"
+  fi
+
+  # AppSync API
+  log "   Importing AppSync API..."
+  local appsync_id
+  appsync_id=$(aws appsync list-graphql-apis --region "$region" --query "graphqlApis[?name=='kernelworx-api${suffix}'].apiId" --output text 2>/dev/null | head -n1)
+  if [ -n "$appsync_id" ] && [ "$appsync_id" != "None" ]; then
+    import_resource "module.appsync.aws_appsync_graphql_api.main" "$appsync_id"
+    import_resource "module.appsync.aws_cloudwatch_log_group.appsync" "/aws/appsync/apis/${appsync_id}"
+  fi
+
+  # Lambda layer version
+  log "   Importing Lambda layer version..."
+  local layer_versions
+  layer_versions=$(aws lambda list-layer-versions --layer-name "kernelworx-deps${suffix}" --region "$region" --query 'LayerVersions[].Version' --output text 2>/dev/null)
+  for version in $layer_versions; do
+    local layer_arn
+    layer_arn=$(aws lambda get-layer-version --layer-name "kernelworx-deps${suffix}" --version-number "$version" --region "$region" --query 'LayerVersionArn' --output text 2>/dev/null)
+    if [ -n "$layer_arn" ] && [ "$layer_arn" != "None" ]; then
+      import_resource "module.lambda.aws_lambda_layer_version.shared" "$layer_arn"
+      break
+    fi
+  done
+
+  # Lambda functions
+  log "   Importing Lambda functions..."
+  local func_names
+  func_names=$(aws lambda list-functions --region "$region" --query "Functions[?ends_with(FunctionName,'${suffix}')].FunctionName" --output text 2>/dev/null)
+  for func_name in $func_names; do
+    local base_name
+    base_name=$(echo "$func_name" | sed "s/^kernelworx-//;s/${suffix}$//")
+    case "$base_name" in
+      post-auth|pre-signup)
+        import_resource "module.lambda.aws_lambda_function.trigger_functions[\"${base_name}\"]" "$func_name"
+        ;;
+      *)
+        import_resource "module.lambda.aws_lambda_function.main[\"${base_name}\"]" "$func_name"
+        ;;
+    esac
+  done
+
+  log "💥 Destroying recovered resources..."
+  if tofu destroy -input=false -auto-approve -var="environment=$RUN_ID"; then
+    log "🧹 Deleting state objects..."
+    aws s3 rm "s3://$STATE_BUCKET/$STATE_KEY" --region "$STATE_REGION" || true
+    aws s3 rm "s3://$STATE_BUCKET/${STATE_KEY}.tflock" --region "$STATE_REGION" || true
+
+    # Clean up auto-created CloudWatch log groups too
+    cleanup_cloudwatch_log_groups
+
+    log ""
+    log "✅ Orphan recovery and destroy for $RUN_ID complete."
+  else
+    log ""
+    log "❌ OpenTofu destroy failed for $RUN_ID; state objects left in place for inspection."
+    exit 1
+  fi
+}
+
 case "$ACTION" in
   up)
     log "🚀 Bringing up ephemeral environment: $RUN_ID"
@@ -429,8 +563,12 @@ case "$ACTION" in
     cleanup_orphaned_resources
     ;;
 
+  recover-orphans)
+    recover_orphans
+    ;;
+
   *)
-    log "Usage: $0 <up|env|down|cleanup-orphans> <run-id>"
+    log "Usage: $0 <up|env|down|cleanup-orphans|recover-orphans> <run-id>"
     exit 1
     ;;
 esac

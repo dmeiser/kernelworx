@@ -17,7 +17,7 @@ on:
         type: choice
         options:
           - down
-          - cleanup-orphans
+          - recover-orphans
   schedule:
     # Nightly sweep for leaked pr-* environments (06:17 UTC).
     - cron: "17 6 * * *"
