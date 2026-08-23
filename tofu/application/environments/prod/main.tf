@@ -278,6 +278,7 @@ import {
     "confirm-qr-upload",
     "create-profile",
     "delete-account",
+    "delete-campaign-orders",
     "delete-profile-cascade",
     "delete-qr-code",
     "generate-qr-code-presigned-url",

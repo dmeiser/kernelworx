@@ -302,18 +302,20 @@ resource "aws_lambda_function" "functions" {
 
 # Managed log groups for Lambda functions so retention is not "never expire".
 # These adopt the names Lambda auto-creates on first invocation; existing groups
-# must be imported into state before the first apply.
+# must be imported into state before the first apply. for_each uses the local
+# function maps so the instance keys are known during planning even when the
+# Lambda functions themselves have not been created or imported yet.
 resource "aws_cloudwatch_log_group" "functions" {
-  for_each = aws_lambda_function.functions
+  for_each = local.functions
 
-  name              = "/aws/lambda/${each.value.function_name}"
+  name              = "/aws/lambda/${var.name_prefix}-${each.key}${local.func_suffix}"
   retention_in_days = var.environment == "prod" ? 30 : 7
 }
 
 resource "aws_cloudwatch_log_group" "trigger_functions" {
-  for_each = aws_lambda_function.trigger_functions
+  for_each = local.trigger_functions
 
-  name              = "/aws/lambda/${each.value.function_name}"
+  name              = "/aws/lambda/${var.name_prefix}-${each.key}${local.func_suffix}"
   retention_in_days = var.environment == "prod" ? 30 : 7
 }
 

@@ -14,8 +14,14 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 ENV_DIR="$ROOT_DIR/tofu/application/environments/ephemeral"
-STATE_BUCKET="kernelworx-tofu-state-us-east-1-dev"
-STATE_REGION="us-east-1"
+
+# TEST-ONLY: allow unit tests to redirect the Lambda layer build directory
+# so they do not pollute the developer's worktree. Production runs always use
+# the standard location under the repository root.
+LAYER_DIR="${KERNELWORX_TEST_LAYER_DIR:-$ROOT_DIR/.build/lambda-layer}"
+
+# shellcheck source=/dev/null
+source "$SCRIPT_DIR/ephemeral-recover-common.sh"
 
 log() {
   echo "$@" >&2
@@ -54,7 +60,6 @@ cd "$ENV_DIR"
 
 build_lambda_layer() {
   log "📦 Building Lambda layer dependencies..."
-  LAYER_DIR="$ROOT_DIR/.build/lambda-layer"
   LAYER_REQ="$LAYER_DIR/requirements.txt"
   rm -rf "$LAYER_DIR"
   mkdir -p "$LAYER_DIR/python"
@@ -95,12 +100,48 @@ cleanup_cloudwatch_log_groups() {
   fi
 }
 
+# If the state object has been deleted (e.g. by a previous failed teardown run
+# that removed state before destroy succeeded), restore the latest S3 version
+# so `tofu destroy` can run against the real resource state.
+recover_state_if_missing() {
+  local state_url="s3://${STATE_BUCKET}/${STATE_KEY}"
+
+  log "📦 Checking state object: $state_url"
+  if aws s3api head-object --bucket "$STATE_BUCKET" --key "$STATE_KEY" --region "$STATE_REGION" >/dev/null 2>&1; then
+    log "   State object exists."
+    return 0
+  fi
+
+  log "   State object is missing; searching S3 versions for recoverable state..."
+  local latest_version
+  latest_version=$(aws s3api list-object-versions \
+    --bucket "$STATE_BUCKET" \
+    --prefix "$STATE_KEY" \
+    --region "$STATE_REGION" \
+    --query "sort_by(Versions[?Key=='${STATE_KEY}'], &LastModified)[-1].VersionId" \
+    --output text 2>/dev/null | head -n1)
+
+  if [ -z "$latest_version" ] || [ "$latest_version" = "None" ]; then
+    log "   ⚠️  No previous state version found; continuing with empty state."
+    return 0
+  fi
+
+  log "   🔄 Restoring state from version $latest_version"
+  aws s3api copy-object \
+    --bucket "$STATE_BUCKET" \
+    --key "$STATE_KEY" \
+    --copy-source "${STATE_BUCKET}/${STATE_KEY}?versionId=${latest_version}" \
+    --region "$STATE_REGION"
+}
+
+
 case "$ACTION" in
   up)
     log "🚀 Bringing up ephemeral environment: $RUN_ID"
     log "   State: s3://$STATE_BUCKET/$STATE_KEY"
     log ""
 
+    cleanup_stale_lock "$RUN_ID"
     build_lambda_layer
 
     log "📦 Initializing OpenTofu backend..."
@@ -110,6 +151,7 @@ case "$ACTION" in
       -backend-config="region=$STATE_REGION"
 
     cleanup_cloudwatch_log_groups
+    cleanup_stale_lock "$RUN_ID"
 
     log "📋 Planning and applying ephemeral stack..."
     tofu apply -input=false -auto-approve -var="environment=$RUN_ID"
@@ -178,7 +220,14 @@ case "$ACTION" in
     log "   State: s3://$STATE_BUCKET/$STATE_KEY"
     log ""
 
-    build_lambda_layer
+    recover_state_if_missing
+    cleanup_stale_lock "$RUN_ID"
+
+    # The Lambda layer only needs to exist during `up`. For `down` we just need
+    # a non-empty directory so the archive_file data source does not fail while
+    # OpenTofu is destroying resources from state.
+    mkdir -p "$LAYER_DIR/python"
+    echo "# placeholder" > "$LAYER_DIR/python/.placeholder"
 
     # Re-init is required in case the workspace was cleaned since the up run.
     tofu init -input=false \
@@ -186,15 +235,21 @@ case "$ACTION" in
       -backend-config="bucket=$STATE_BUCKET" \
       -backend-config="region=$STATE_REGION"
 
+    cleanup_stale_lock "$RUN_ID"
+
     log "💥 Destroying AWS resources..."
-    tofu destroy -input=false -auto-approve -var="environment=$RUN_ID" || true
+    if tofu destroy -input=false -auto-approve -var="environment=$RUN_ID"; then
+      log "🧹 Deleting state objects..."
+      aws s3 rm "s3://$STATE_BUCKET/$STATE_KEY" --region "$STATE_REGION" || true
+      aws s3 rm "s3://$STATE_BUCKET/${STATE_KEY}.tflock" --region "$STATE_REGION" || true
 
-    log "🧹 Deleting state objects..."
-    aws s3 rm "s3://$STATE_BUCKET/$STATE_KEY" --region "$STATE_REGION" || true
-    aws s3 rm "s3://$STATE_BUCKET/${STATE_KEY}.tflock" --region "$STATE_REGION" || true
-
-    log ""
-    log "✅ Ephemeral environment $RUN_ID torn down."
+      log ""
+      log "✅ Ephemeral environment $RUN_ID torn down."
+    else
+      log ""
+      log "❌ OpenTofu destroy failed for $RUN_ID; state objects left in place for inspection."
+      exit 1
+    fi
     ;;
 
   *)

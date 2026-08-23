@@ -284,6 +284,7 @@ import {
     "list-unit-catalogs",
     "list-unit-campaign-catalogs",
     "campaign-operations",
+    "delete-campaign-orders",
     "delete-profile-cascade",
     "update-account",
     "delete-account",

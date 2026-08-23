@@ -1,0 +1,125 @@
+name: Recover Environment
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "PR number of the ephemeral environment"
+        required: true
+        type: string
+      mode:
+        description: "Recovery mode"
+        required: true
+        type: choice
+        options:
+          - recover-deploy
+          - recover-destroy
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: recover-environment-${{ github.event.inputs.pr_number }}
+  cancel-in-progress: true
+
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  AWS_DEFAULT_REGION: ${{ secrets.AWS_REGION }}
+
+jobs:
+  recover-deploy:
+    name: Recover deploy for PR #${{ github.event.inputs.pr_number }}
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'recover-deploy'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: ephemeral
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install Python dependencies
+        run: uv sync --locked --dev
+
+      - name: Set up OpenTofu
+        uses: opentofu/setup-opentofu@v1
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::750620721302:role/GitHubActionsKernelworxDev
+          aws-region: ${{ secrets.AWS_REGION }}
+          role-session-name: github-actions-ephemeral-recover-deploy
+
+      - name: Validate PR number
+        env:
+          PR_NUMBER: ${{ github.event.inputs.pr_number }}
+        run: |
+          if [[ ! "$PR_NUMBER" =~ ^[0-9]+$ ]]; then
+            echo "❌ Invalid PR number: $PR_NUMBER"
+            exit 1
+          fi
+          echo "PR_NUMBER=$PR_NUMBER" >> "$GITHUB_ENV"
+
+      - name: Import orphaned resources for deploy
+        env:
+          TF_VAR_encryption_passphrase: ${{ secrets.TF_VAR_ENCRYPTION_PASSPHRASE }}
+        run: scripts/recover-deploy.sh "pr-${PR_NUMBER}"
+
+  recover-destroy:
+    name: Recover destroy for PR #${{ github.event.inputs.pr_number }}
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'recover-destroy'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: ephemeral
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install Python dependencies
+        run: uv sync --locked --dev
+
+      - name: Set up OpenTofu
+        uses: opentofu/setup-opentofu@v1
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::750620721302:role/GitHubActionsKernelworxDev
+          aws-region: ${{ secrets.AWS_REGION }}
+          role-session-name: github-actions-ephemeral-recover-destroy
+
+      - name: Validate PR number
+        env:
+          PR_NUMBER: ${{ github.event.inputs.pr_number }}
+        run: |
+          if [[ ! "$PR_NUMBER" =~ ^[0-9]+$ ]]; then
+            echo "❌ Invalid PR number: $PR_NUMBER"
+            exit 1
+          fi
+          echo "PR_NUMBER=$PR_NUMBER" >> "$GITHUB_ENV"
+
+      - name: Import and destroy orphaned resources
+        env:
+          TF_VAR_encryption_passphrase: ${{ secrets.TF_VAR_ENCRYPTION_PASSPHRASE }}
+        run: scripts/recover-destroy.sh "pr-${PR_NUMBER}"

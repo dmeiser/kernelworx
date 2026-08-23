@@ -168,7 +168,7 @@ jobs:
           fi
 
           echo "$keys" | while IFS= read -r key; do
-            pr_num=$(echo "$key" | sed -n "s|^${PR_PREFIX}pr-\([0-9][0-9]*\)/terraform.tfstate$|\1|p")
+            pr_num=$(echo "$key" | sed -n "s|^${PR_PREFIX}\([0-9][0-9]*\)/terraform.tfstate$|\1|p")
             if [ -z "$pr_num" ]; then
               echo "⚠️  Skipping non-PR state key: $key"
               continue
@@ -183,5 +183,7 @@ jobs:
             fi
 
             echo "  PR #${pr_num} is ${pr_state}; tearing down pr-${pr_num}."
-            scripts/ephemeral-env.sh down "pr-${pr_num}" || true
+            if ! scripts/ephemeral-env.sh down "pr-${pr_num}"; then
+              echo "❌ Teardown failed for pr-${pr_num}; continuing sweep."
+            fi
           done
