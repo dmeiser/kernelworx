@@ -114,7 +114,7 @@ recover_state_if_missing() {
     --bucket "$STATE_BUCKET" \
     --prefix "$STATE_KEY" \
     --region "$STATE_REGION" \
-    --query "Versions[?Key=='${STATE_KEY}'] | [0].VersionId" \
+    --query "sort_by(Versions[?Key=='${STATE_KEY}'], &LastModified)[-1].VersionId" \
     --output text 2>/dev/null | head -n1)
 
   if [ -z "$latest_version" ] || [ "$latest_version" = "None" ]; then
