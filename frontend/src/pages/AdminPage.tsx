@@ -556,6 +556,8 @@ export const AdminPage: React.FC = () => {
     /* v8 ignore start -- Search button is disabled and Enter key handler prevents empty queries */
     if (!userSearchQuery.trim()) return;
     /* v8 ignore stop */
+    setSearchedUsers([]);
+    setHasSearched(false);
     void searchUser({ variables: { query: userSearchQuery.trim() } });
   };
 

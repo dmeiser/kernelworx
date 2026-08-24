@@ -211,6 +211,38 @@ describe('AdminPage - User Search', () => {
     expect(screen.getByText(/Search for a user by email/i)).toBeInTheDocument();
   });
 
+  test('clears stale results when a new search errors', async () => {
+    const user = userEvent.setup();
+    const mocks = baseMocks([
+      {
+        request: { query: ADMIN_SEARCH_USER, variables: { query: 'first' } },
+        result: { data: { adminSearchUser: [mockAdminUser] } },
+      },
+      {
+        request: { query: ADMIN_SEARCH_USER, variables: { query: 'second' } },
+        result: { errors: [new GraphQLError('Search failed')] },
+      },
+    ]);
+    renderAdmin(mocks);
+
+    const searchInput = screen.getByPlaceholderText(/search by email, name/i);
+    await user.type(searchInput, 'first');
+    await user.click(screen.getByRole('button', { name: /search/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('test@example.com')).toBeInTheDocument();
+    });
+
+    await user.clear(searchInput);
+    await user.type(searchInput, 'second');
+    await user.click(screen.getByRole('button', { name: /search/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Search failed/i)).toBeInTheDocument();
+    });
+    expect(screen.queryByText('test@example.com')).not.toBeInTheDocument();
+  });
+
   test('shows user status chips - Active', async () => {
     const user = userEvent.setup();
     const mocks = baseMocks([
