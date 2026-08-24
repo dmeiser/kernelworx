@@ -732,7 +732,8 @@ def generate_presigned_get_url(
         Pre-signed URL or None if QR code doesn't exist
 
     Raises:
-        AppError: If URL generation fails
+        AppError: If URL generation fails, or if a supplied s3_key does not
+            belong to the account
     """
     logger = get_logger(__name__)
 
@@ -741,8 +742,13 @@ def generate_presigned_get_url(
     try:
         s3 = _get_s3_client()
 
-        # If no s3_key provided, try to find existing file
-        if not s3_key:
+        if s3_key:
+            # Never sign a caller-supplied key without proving ownership;
+            # otherwise any authenticated user could read another account's objects.
+            if not validate_qr_s3_key(s3_key, account_id):
+                raise AppError(ErrorCode.FORBIDDEN, "Access denied")
+        else:
+            # If no s3_key provided, try to find existing file
             s3_key = _find_existing_qr_s3_key(s3, bucket_name, account_id, payment_method_name)
             if not s3_key:
                 return None  # No QR code found

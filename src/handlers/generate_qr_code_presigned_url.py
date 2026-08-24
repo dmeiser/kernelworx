@@ -16,11 +16,6 @@ except ModuleNotFoundError:  # pragma: no cover
     from ..utils.payment_methods import generate_presigned_get_url
 
 
-def _is_already_presigned(qr_code_url: str) -> bool:
-    """Check if URL is already a presigned URL."""
-    return "X-Amz-Algorithm" in qr_code_url or "X-Amz-Signature" in qr_code_url
-
-
 def _validate_and_extract_params(event: Dict[str, Any]) -> tuple[str, str, str | None]:
     """Validate event and extract required parameters."""
     identity = event.get("identity", {})
@@ -49,9 +44,9 @@ def generate_qr_code_presigned_url(event: Dict[str, Any], context: Any) -> str |
         if not qr_code_url:
             return None
 
-        if _is_already_presigned(qr_code_url):
-            return qr_code_url
-
+        # Always validate ownership and re-sign from a validated key. Never
+        # short-circuit on an already-presigned stored URL: that would return
+        # another user's QR code URL before the ownership check runs.
         owner_account_id, method_name, s3_key = _validate_and_extract_params(event)
 
         presigned_url: str | None = generate_presigned_get_url(
