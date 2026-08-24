@@ -870,6 +870,22 @@ class TestGeneratePresignedGetURL:
         assert url is not None
         # Moto doesn't include expiry in URL, so just verify it works
 
+    def test_generate_url_rejects_foreign_s3_key(self, s3_bucket: Any, sample_account_id: str) -> None:
+        """Test that a supplied s3_key owned by another account is refused (regression: #123)."""
+        foreign_key = "payment-qr-codes/other-account/venmo.png"
+
+        with pytest.raises(AppError) as exc_info:
+            payment_methods.generate_presigned_get_url(sample_account_id, "Venmo", s3_key=foreign_key)
+
+        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
+
+    def test_generate_url_rejects_malformed_s3_key(self, s3_bucket: Any, sample_account_id: str) -> None:
+        """Test that a supplied s3_key outside the QR prefix is refused (regression: #123)."""
+        with pytest.raises(AppError) as exc_info:
+            payment_methods.generate_presigned_get_url(sample_account_id, "Venmo", s3_key="test.png")
+
+        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
+
 
 class TestEdgeCases:
     """Test edge cases and error handling."""
@@ -1077,7 +1093,9 @@ class TestErrorHandling:
         payment_methods.s3_client = mock_s3
 
         with pytest.raises(AppError) as exc_info:
-            payment_methods.generate_presigned_get_url(sample_account_id, "Venmo", s3_key="test.png")
+            payment_methods.generate_presigned_get_url(
+                sample_account_id, "Venmo", s3_key=f"payment-qr-codes/{sample_account_id}/test.png"
+            )
         assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
 
         payment_methods.s3_client = None
