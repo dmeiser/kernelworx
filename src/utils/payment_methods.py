@@ -486,11 +486,19 @@ def _find_and_remove_method(
 
 def _delete_qr_if_exists(logger: Any, account_id: str, name: str, method_to_delete: Dict[str, Any]) -> None:
     """Delete QR code from S3 if it exists."""
-    if method_to_delete.get("qrCodeUrl"):
-        try:
+    stored_qr_key = method_to_delete.get("qrCodeUrl")
+    if not stored_qr_key:
+        return
+
+    try:
+        if stored_qr_key.startswith(f"{QR_CODE_S3_PREFIX}/"):
+            # Stored value is the actual S3 key (UUID-based uploads store the key directly)
+            delete_qr_by_key(stored_qr_key)
+        else:
+            # Legacy slug-based key or URL value
             delete_qr_from_s3(account_id, name)
-        except Exception as e:
-            logger.warning("Failed to delete QR code, continuing with method deletion", error=str(e))
+    except Exception as e:
+        logger.warning("Failed to delete QR code, continuing with method deletion", error=str(e))
 
 
 def delete_payment_method(account_id: str, name: str) -> None:

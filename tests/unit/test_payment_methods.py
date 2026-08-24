@@ -609,6 +609,39 @@ class TestDeletePaymentMethod:
             s3_bucket.head_object(Bucket=bucket_name, Key=f"payment-qr-codes/{sample_account_id}/venmo.png")
         assert exc_info.value.response["Error"]["Code"] == "404"
 
+    def test_delete_method_with_uuid_qr_key(
+        self, dynamodb_tables: Dict[str, Any], sample_account: Dict[str, Any], s3_bucket: Any, sample_account_id: str
+    ) -> None:
+        """Test deleting a method deletes the stored UUID-based S3 key, not a slug-derived key."""
+        uuid_s3_key = f"payment-qr-codes/{sample_account_id}/{'a' * 32}.png"
+        slug_s3_key = f"payment-qr-codes/{sample_account_id}/venmo.png"
+
+        # Create method whose stored qrCodeUrl is a UUID-based key (as written by confirm_qr_upload)
+        tables_dict = dynamodb_tables
+        accounts_table = tables_dict["accounts"]
+        accounts_table.put_item(
+            Item={
+                "accountId": f"ACCOUNT#{sample_account_id}",
+                "preferences": {"paymentMethods": [{"name": "Venmo", "qrCodeUrl": uuid_s3_key}]},
+            }
+        )
+
+        # Upload the real object at the UUID key, plus a decoy at the legacy slug key
+        bucket_name = os.environ.get("EXPORTS_BUCKET")
+        s3_bucket.put_object(Bucket=bucket_name, Key=uuid_s3_key, Body=b"fake-qr-image")
+        s3_bucket.put_object(Bucket=bucket_name, Key=slug_s3_key, Body=b"decoy")
+
+        # Delete method
+        payment_methods.delete_payment_method(sample_account_id, "Venmo")
+
+        # The stored UUID key object must be deleted
+        with pytest.raises(ClientError) as exc_info:
+            s3_bucket.head_object(Bucket=bucket_name, Key=uuid_s3_key)
+        assert exc_info.value.response["Error"]["Code"] == "404"
+
+        # The unrelated slug-key object must be left alone
+        s3_bucket.head_object(Bucket=bucket_name, Key=slug_s3_key)
+
     def test_delete_nonexistent_method(
         self, dynamodb_tables: Dict[str, Any], sample_account: Dict[str, Any], sample_account_id: str
     ) -> None:

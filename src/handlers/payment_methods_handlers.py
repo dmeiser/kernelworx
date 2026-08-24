@@ -7,7 +7,7 @@ and confirmations. They integrate with AppSync pipeline resolvers.
 
 import copy
 import os
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import boto3
 from botocore.exceptions import ClientError
@@ -147,8 +147,14 @@ def _validate_qr_upload_inputs(payment_method_name: str, s3_key: str, caller_id:
         raise AppError(ErrorCode.FORBIDDEN, "Invalid S3 key - access denied")
 
 
-def _update_payment_method_qr_url(caller_id: str, payment_method_name: str, s3_key: str) -> Dict[str, Any]:
-    """Update payment method with QR code S3 key and return updated method."""
+def _update_payment_method_qr_url(
+    caller_id: str, payment_method_name: str, s3_key: str
+) -> tuple[Dict[str, Any], Optional[str]]:
+    """Update payment method with QR code S3 key.
+
+    Returns (updated_method, previous_qr_key) so the caller can clean up the
+    replaced S3 object.
+    """
     account_id_key = f"ACCOUNT#{caller_id}"
     response = tables.accounts.get_item(Key={"accountId": account_id_key}, ConsistentRead=True)
 
@@ -159,8 +165,10 @@ def _update_payment_method_qr_url(caller_id: str, payment_method_name: str, s3_k
     existing_methods = list(preferences.get("paymentMethods", []))
 
     method_updated = None
+    previous_qr_key: Optional[str] = None
     for method in existing_methods:
         if method.get("name") == payment_method_name:
+            previous_qr_key = method.get("qrCodeUrl")
             method["qrCodeUrl"] = s3_key
             method_updated = method
             break
@@ -171,22 +179,24 @@ def _update_payment_method_qr_url(caller_id: str, payment_method_name: str, s3_k
     preferences["paymentMethods"] = existing_methods
     _save_preferences(account_id_key, response, preferences)
 
-    return dict(method_updated)
+    return dict(method_updated), previous_qr_key
 
 
 def confirm_qr_upload(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
-    Confirm QR code upload and generate pre-signed GET URL.
+    Confirm QR code upload.
 
     AppSync Lambda resolver for confirmPaymentMethodQRCodeUpload mutation.
-    Validates S3 object exists, updates DynamoDB, returns pre-signed GET URL.
+    Validates S3 object exists, updates DynamoDB, and returns payment method with S3 key.
+    The AppSync field resolver for PaymentMethod.qrCodeUrl resolves the key to a
+    pre-signed GET URL.
 
     Args:
         event: AppSync event with identity and arguments
         context: Lambda context
 
     Returns:
-        PaymentMethod with name and qrCodeUrl (pre-signed GET URL)
+        PaymentMethod with name and qrCodeUrl (S3 key)
 
     Raises:
         AppError: If S3 object doesn't exist or update fails
@@ -204,7 +214,11 @@ def confirm_qr_upload(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
         bucket_name = get_required_env("EXPORTS_BUCKET")
         _validate_s3_object_exists(bucket_name, s3_key)
-        _update_payment_method_qr_url(caller_id, payment_method_name, s3_key)
+        _updated_method, previous_qr_key = _update_payment_method_qr_url(caller_id, payment_method_name, s3_key)
+
+        # Delete the replaced QR object so re-uploads don't orphan S3 objects
+        if previous_qr_key and previous_qr_key != s3_key:
+            _delete_qr_from_s3_storage(previous_qr_key, caller_id, payment_method_name, logger)
 
         logger.info(
             "Confirmed QR code upload",
