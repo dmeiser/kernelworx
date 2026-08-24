@@ -177,6 +177,92 @@ class TestConfirmQRUpload:
         # Returns S3 key (field resolver will generate presigned URL)
         assert result["qrCodeUrl"] == s3_key
 
+    def test_confirm_upload_deletes_replaced_qr_object(
+        self, dynamodb_tables: Dict[str, Any], s3_bucket: Any, sample_account: Dict[str, Any], sample_account_id: str
+    ) -> None:
+        """Test re-uploading a QR code deletes the previous S3 object (no orphan)."""
+        from src.utils.dynamodb import tables
+
+        create_payment_method(sample_account_id, "Venmo")
+
+        # Previous upload: old UUID-based object stored on the method
+        old_s3_key = f"payment-qr-codes/{sample_account_id}/{'a' * 32}.png"
+        new_s3_key = f"payment-qr-codes/{sample_account_id}/{'b' * 32}.png"
+        bucket_name = os.environ.get("EXPORTS_BUCKET", "test-exports-bucket")
+        s3_bucket.put_object(Bucket=bucket_name, Key=old_s3_key, Body=b"old-qr-data")
+        s3_bucket.put_object(Bucket=bucket_name, Key=new_s3_key, Body=b"new-qr-data")
+
+        account_id_key = f"ACCOUNT#{sample_account_id}"
+        response = tables.accounts.get_item(Key={"accountId": account_id_key})
+        methods = response["Item"]["preferences"]["paymentMethods"]
+        for m in methods:
+            if m["name"] == "Venmo":
+                m["qrCodeUrl"] = old_s3_key
+        preferences = response["Item"].get("preferences", {})
+        preferences["paymentMethods"] = methods
+        tables.accounts.update_item(
+            Key={"accountId": account_id_key},
+            UpdateExpression="SET preferences = :prefs",
+            ExpressionAttributeValues={":prefs": preferences},
+        )
+
+        event = {
+            "identity": {"sub": sample_account_id},
+            "arguments": {"paymentMethodName": "Venmo", "s3Key": new_s3_key},
+        }
+
+        result = confirm_qr_upload(event, None)
+
+        assert result["qrCodeUrl"] is not None
+        # New object still exists
+        s3_bucket.head_object(Bucket=bucket_name, Key=new_s3_key)
+        # Old object was deleted
+        with pytest.raises(ClientError) as exc_info:
+            s3_bucket.head_object(Bucket=bucket_name, Key=old_s3_key)
+        assert exc_info.value.response["Error"]["Code"] == "404"
+        # Stored qrCodeUrl now points to the new key
+        response = tables.accounts.get_item(Key={"accountId": account_id_key})
+        methods = response["Item"]["preferences"]["paymentMethods"]
+        venmo = next(m for m in methods if m["name"] == "Venmo")
+        assert venmo["qrCodeUrl"] == new_s3_key
+
+    def test_confirm_upload_same_key_keeps_object(
+        self, dynamodb_tables: Dict[str, Any], s3_bucket: Any, sample_account: Dict[str, Any], sample_account_id: str
+    ) -> None:
+        """Test confirming with the same key as stored does not delete the object."""
+        from src.utils.dynamodb import tables
+
+        create_payment_method(sample_account_id, "Venmo")
+
+        s3_key = f"payment-qr-codes/{sample_account_id}/{'c' * 32}.png"
+        bucket_name = os.environ.get("EXPORTS_BUCKET", "test-exports-bucket")
+        s3_bucket.put_object(Bucket=bucket_name, Key=s3_key, Body=b"fake-qr-data")
+
+        account_id_key = f"ACCOUNT#{sample_account_id}"
+        response = tables.accounts.get_item(Key={"accountId": account_id_key})
+        methods = response["Item"]["preferences"]["paymentMethods"]
+        for m in methods:
+            if m["name"] == "Venmo":
+                m["qrCodeUrl"] = s3_key
+        preferences = response["Item"].get("preferences", {})
+        preferences["paymentMethods"] = methods
+        tables.accounts.update_item(
+            Key={"accountId": account_id_key},
+            UpdateExpression="SET preferences = :prefs",
+            ExpressionAttributeValues={":prefs": preferences},
+        )
+
+        event = {
+            "identity": {"sub": sample_account_id},
+            "arguments": {"paymentMethodName": "Venmo", "s3Key": s3_key},
+        }
+
+        result = confirm_qr_upload(event, None)
+
+        assert result["qrCodeUrl"] is not None
+        # Object was NOT deleted when the confirmed key matches the stored key
+        s3_bucket.head_object(Bucket=bucket_name, Key=s3_key)
+
     def test_confirm_upload_nonexistent_s3_object(
         self, dynamodb_tables: Dict[str, Any], s3_bucket: Any, sample_account: Dict[str, Any], sample_account_id: str
     ) -> None:
