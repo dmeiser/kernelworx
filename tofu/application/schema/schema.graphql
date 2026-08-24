@@ -430,7 +430,7 @@ type Query {
   listInvitesByProfile(profileId: ID!): [ProfileInvite!]!
   
   # Shared campaign queries
-  getSharedCampaign(sharedCampaignCode: String!): SharedCampaign
+  getSharedCampaign(sharedCampaignCode: String!): SharedCampaign @aws_cognito_user_pools
   listMySharedCampaigns: [SharedCampaign!]!
   findSharedCampaigns(unitType: String!, unitNumber: Int!, city: String!, state: String!, campaignName: String!, campaignYear: Int!): [SharedCampaign!]!
   

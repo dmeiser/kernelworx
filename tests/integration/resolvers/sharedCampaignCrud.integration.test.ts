@@ -437,6 +437,33 @@ describe('Shared Campaign CRUD Operations', () => {
 
       expect(result.data.getSharedCampaign).toBeNull();
     });
+
+    it('should reject retrieval by unauthenticated user', async () => {
+      const unauthClient = createUnauthenticatedClient();
+
+      await expect(
+        unauthClient.query({
+          query: GET_CAMPAIGN_SHARED_CAMPAIGN,
+          variables: { sharedCampaignCode },
+        })
+      ).rejects.toThrow();
+    });
+
+    it('should allow any authenticated user to retrieve by code (code-as-capability redemption)', async () => {
+      // The shared campaign code is the bearer capability (same model as profile
+      // invites): any authenticated user holding the code may view/redeem it.
+      const otherResult = await createAuthenticatedClient('contributor');
+
+      const result = await otherResult.client.query({
+        query: GET_CAMPAIGN_SHARED_CAMPAIGN,
+        variables: { sharedCampaignCode },
+      });
+
+      expect(result.data.getSharedCampaign).toBeDefined();
+      expect(result.data.getSharedCampaign.sharedCampaignCode).toBe(sharedCampaignCode);
+
+      // NOTE: Do NOT delete test accounts - they are shared across test runs
+    });
   });
 
   describe('ListMySharedCampaigns', () => {
