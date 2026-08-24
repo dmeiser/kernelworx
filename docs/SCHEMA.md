@@ -81,8 +81,8 @@ Global Secondary Indexes:
 | state | String | Unit location |
 | sharedCampaignCode | String | Reference to shared template |
 | isActive | Boolean | Active/inactive flag |
-| totalOrders | Integer | Denormalized count |
-| totalRevenue | Float | Denormalized sum |
+| totalOrders | Integer | Computed count from ORDER query (Select: COUNT) |
+| totalRevenue | Float | Computed sum from ORDER query (projected totalAmount) |
 | unitCampaignKey | String | GSI - Composite lookup key |
 | createdAt | DateTime | GSI - Sorting |
 | updatedAt | DateTime | Timestamp |
@@ -249,15 +249,16 @@ sequenceDiagram
     Frontend->>Recipient: Profile now accessible
 ```
 
-## Denormalization & Caching
+## Campaign Totals
+
+`Campaign.totalOrders` and `Campaign.totalRevenue` are computed on demand from the `ORDER` table.
 
 ```mermaid
 flowchart TD
-    A["Order Created/Updated"] -->|Triggers| B["Update CAMPAIGN"]
-    B -->|Recalculate totalOrders| C["Count all orders for campaign"]
-    C -->|Recalculate totalRevenue| D["Sum all order totalAmount"]
-    D -->|Update CAMPAIGN| E["totalOrders, totalRevenue"]
-    E -->|Enables fast| F["Dashboard queries without ORDER scans"]
+    A["Dashboard queries Campaign"] -->|totalOrders| B["Query ORDER by campaignId<br/>Select: COUNT"]
+    A -->|totalRevenue| C["Query ORDER by campaignId<br/>Project totalAmount only"]
+    C -->|Sum projected values| D["Return totalRevenue"]
+    B -->|Return count| E["Return totalOrders"]
 ```
 
 ## Index Strategy
@@ -336,10 +337,11 @@ stateDiagram-v2
 
 ```mermaid
 graph LR
-    A["Customer places Order<br/>totalAmount = value"] -->|Triggers| B["Update CAMPAIGN<br/>totalOrders++<br/>totalRevenue += amount"]
-    B -->|Denormalized data| C["Dashboard loads instantly<br/>No ORDER table scans"]
-    A -->|Order contains| D["Line items array"]
-    D -->|Product<br/>quantity"] E["Inventory tracking<br/>for reporting"]
+    A["Customer places Order<br/>totalAmount = value"] -->|Stored in| B["ORDER table"]
+    B -->|totalOrders| C["Dashboard queries ORDER<br/>Select: COUNT"]
+    B -->|totalRevenue| D["Dashboard queries ORDER<br/>Project totalAmount"]
+    A -->|Order contains| E["Line items array"]
+    E -->|Product<br/>quantity"] F["Inventory tracking<br/>for reporting"]
 ```
 
 ## TTL: Invite Expiration

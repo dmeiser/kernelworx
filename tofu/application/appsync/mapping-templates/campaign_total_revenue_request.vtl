@@ -6,5 +6,8 @@
         "expressionValues": {
         ":campaignId": $util.dynamodb.toDynamoDBJson($ctx.source.campaignId)
         }
+    },
+    "projection": {
+        "expression": "totalAmount"
     }
 }

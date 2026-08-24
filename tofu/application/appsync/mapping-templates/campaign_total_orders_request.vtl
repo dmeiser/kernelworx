@@ -6,5 +6,6 @@
         "expressionValues": {
         ":campaignId": $util.dynamodb.toDynamoDBJson($ctx.source.campaignId)
         }
-    }
+    },
+    "select": "COUNT"
 }
