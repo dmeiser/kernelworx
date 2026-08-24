@@ -725,7 +725,8 @@ def generate_presigned_get_url(
     Args:
         account_id: Account ID
         payment_method_name: Payment method name
-        s3_key: S3 key (if None, will attempt to find existing file)
+        s3_key: S3 key (if None, will attempt to find existing file;
+            if supplied, it must belong to the account)
         expiry_seconds: URL expiry time in seconds (default: 900 = 15 minutes)
 
     Returns:
