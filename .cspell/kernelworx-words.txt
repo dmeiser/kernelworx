@@ -9,6 +9,9 @@ Actions
 addext
 addopts
 Admin
+AdminDeleteUser
+AdminLinkProviderForUser
+AdminResetUserPassword
 Admins
 adminuser
 Aero
@@ -161,6 +164,7 @@ latestCampaign
 lexend
 Lifecycle
 lineItems
+ListUsers
 listbox
 localstack
 localStorage

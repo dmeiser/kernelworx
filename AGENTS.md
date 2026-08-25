@@ -32,3 +32,7 @@ Recovery scripts share helpers in `scripts/ephemeral-recover-common.sh`.
 ### Lambda log-group `for_each` gotcha
 
 `aws_cloudwatch_log_group` resources for Lambda functions must use static `for_each` keys (e.g. `local.functions`) rather than `aws_lambda_function.*`. Basing keys on computed attributes such as `function_name` makes them unknown during planning, which breaks import-based recovery and can break fresh applies. See commit `f5b4e0e` and `tofu/application/modules/lambda/main.tf`.
+
+### Lambda IAM role isolation for Cognito admin actions (#121)
+
+Destructive Cognito actions (`AdminDeleteUser`, `AdminResetUserPassword`, `AdminLinkProviderForUser`, `ListUsers`) are isolated on a dedicated `aws_iam_role.lambda_admin_execution` role, assigned only to the `admin-operations`, `delete-account`, and `pre-signup` functions. When adding a new handler that needs these APIs, add its logical key to `local.admin_function_keys` or `local.admin_trigger_keys` in `tofu/application/modules/lambda/main.tf` so it receives the admin role. The shared Lambda execution role no longer grants any Cognito admin permissions.
