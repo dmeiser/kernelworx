@@ -245,12 +245,22 @@ def _build_share_transact_item(share_item: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _handle_transaction_failure(e: Any, transact_items: List[Dict[str, Any]]) -> None:
-    """Handle transaction failure, retrying without share if needed."""
+    """Handle transaction failure, retrying without share only when the share condition failed.
+
+    The share is always the last item in ``transact_items``. We only retry without
+    the share if the conditional failure maps to that item; any conditional
+    failure on the campaign Put (or any other item) is re-raised so the real
+    cause is not masked.
+    """
     cancellation_reasons = e.response.get("CancellationReasons", [])
-    for reason in cancellation_reasons:
+    share_index = len(transact_items) - 1
+    for index, reason in enumerate(cancellation_reasons):
         if reason.get("Code") == "ConditionalCheckFailed":
+            if index != share_index:
+                logger.error(f"Conditional check failed on transaction item {index} (not the share); propagating error")
+                raise e
             logger.warning("Share already exists, skipping share creation")
-            dynamodb_client.transact_write_items(TransactItems=transact_items[:1])
+            dynamodb_client.transact_write_items(TransactItems=transact_items[:share_index])
             return
     raise e
 
