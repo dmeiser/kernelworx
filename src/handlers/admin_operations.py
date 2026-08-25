@@ -768,6 +768,11 @@ def admin_delete_user(event: Dict[str, Any], context: Any) -> bool:
 
         username, email = _find_cognito_user_by_sub(cognito, user_pool_id, account_id, logger)
         account_exists = _account_exists_in_dynamodb(account_id, logger)
+        # TODO(#186): admin_delete_user passes the raw accountId to the DynamoDB
+        # and Cognito lookups above, so an ACCOUNT#-prefixed value for a non-self
+        # target yields a spurious NOT_FOUND. Normalize accountId consistently
+        # across this handler in a follow-up; #125 only fixed the self-deletion
+        # guard.
 
         if not username and not account_exists:
             raise AppError(ErrorCode.NOT_FOUND, f"User not found: {account_id}")
