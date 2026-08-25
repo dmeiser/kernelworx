@@ -1578,6 +1578,74 @@ class TestAdminDeleteUser:
         assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
         assert "Cannot delete your own account" in exc_info.value.message
 
+    def test_account_id_with_quote_rejected_before_cognito(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        sample_account_id: str,
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """A quote-containing accountId is rejected before the Cognito sub filter (#124)."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+
+        event = {
+            **admin_appsync_event,
+            "arguments": {"accountId": 'other"user'},
+        }
+
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+            mock_cognito = MagicMock()
+            mock_get_client.return_value = mock_cognito
+
+            with pytest.raises(AppError) as exc_info:
+                admin_delete_user(event, lambda_context)
+
+            assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+            mock_cognito.list_users.assert_not_called()
+
+    def test_account_id_with_whitespace_rejected_before_cognito(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        sample_account_id: str,
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """A whitespace-containing accountId is rejected before the Cognito sub filter (#124)."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+
+        event = {
+            **admin_appsync_event,
+            "arguments": {"accountId": "other user"},
+        }
+
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+            mock_cognito = MagicMock()
+            mock_get_client.return_value = mock_cognito
+
+            with pytest.raises(AppError) as exc_info:
+                admin_delete_user(event, lambda_context)
+
+            assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+            mock_cognito.list_users.assert_not_called()
+
+    def test_oversize_sub_rejected_before_filter(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """A sub longer than 256 chars is rejected by the validator (#124)."""
+        from src.handlers.admin_operations import _validate_sub_for_filter
+
+        long_sub = "a" * 257
+        with pytest.raises(AppError) as exc_info:
+            _validate_sub_for_filter(long_sub)
+
+        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+
     def test_account_not_found_cognito_idempotent(
         self,
         dynamodb_table: Any,

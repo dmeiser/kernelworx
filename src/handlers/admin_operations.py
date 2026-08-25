@@ -462,6 +462,19 @@ def _validate_email_for_filter(email: str) -> None:
         raise AppError(ErrorCode.INVALID_INPUT, "Invalid email")
 
 
+def _validate_sub_for_filter(sub: str) -> None:
+    """Validate a sub/account ID before interpolating it into a Cognito filter.
+
+    Cognito filters are double-quoted, so a value containing a double quote
+    could break the filter or match unintended users. Reject any sub that
+    contains a double quote or whitespace. See issue #124.
+    """
+    if not sub or len(sub) > 256:
+        raise AppError(ErrorCode.INVALID_INPUT, "Account ID is required")
+    if '"' in sub or any(ch.isspace() for ch in sub):
+        raise AppError(ErrorCode.INVALID_INPUT, "Invalid account ID")
+
+
 def _validate_search_query(query: str) -> None:
     """Validate that the admin search query is a safe UUID, email prefix, or ACCOUNT#UUID."""
     if query.startswith("ACCOUNT#"):
@@ -562,6 +575,9 @@ def _find_cognito_user_by_sub(
     AppError so the caller does not proceed to delete DynamoDB data while
     the Cognito user still exists.
     """
+    # Validate before interpolating into the Cognito filter to prevent
+    # quote-injection / filter breakage (#124).
+    _validate_sub_for_filter(account_id)
     try:
         users_response = cognito.list_users(
             UserPoolId=user_pool_id,
