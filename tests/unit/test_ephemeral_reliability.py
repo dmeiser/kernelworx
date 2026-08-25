@@ -304,6 +304,53 @@ class TestRecoverStateIfMissing:
         assert "No previous state version found" in result.stderr
 
 
+class TestRecoverDestroy:
+    """recover-destroy.sh restores S3 state before importing and destroying."""
+
+    def test_recover_destroy_restores_missing_state(
+        self,
+        repo_root: Path,
+        tmp_env: Path,
+    ) -> None:
+        write_mock(
+            tmp_env,
+            "aws",
+            """
+            #!/bin/bash
+            case "$1 $2" in
+              "s3api head-object")
+                exit 1
+                ;;
+              "s3api list-object-versions")
+                echo 'v456'
+                ;;
+              "s3api copy-object")
+                exit 0
+                ;;
+              "s3 rm")
+                exit 0
+                ;;
+              "s3api head-bucket" | "dynamodb describe-table")
+                exit 1
+                ;;
+            esac
+            exit 0
+            """,
+        )
+        write_mock(tmp_env, "tofu", '#!/bin/bash\nexit 0')
+
+        script = """
+            set -e
+            export STATE_BUCKET="test-bucket"
+            export STATE_REGION="us-east-1"
+            export TF_VAR_encryption_passphrase="not-used"
+            scripts/recover-destroy.sh pr-999
+        """
+        result = run_bash(repo_root, script)
+        assert result.returncode == 0, result.stderr
+        assert "Restoring state from version v456" in result.stderr
+
+
 class TestEphemeralEnvDown:
     def test_down_skips_layer_build_and_uses_placeholder(self, repo_root: Path, tmp_env: Path, tmp_path: Path) -> None:
         recorded = tmp_env / "tofu_calls.txt"

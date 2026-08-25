@@ -54,6 +54,42 @@ import_resource() {
   tofu import -input=false -var="environment=$run_id" "$address" "$id" || true
 }
 
+# If the state object has been deleted (e.g. by a previous failed teardown run
+# that removed state before destroy succeeded), restore the latest S3 version
+# so `tofu destroy` can run against the real resource state.
+recover_state_if_missing() {
+  local run_id="$1"
+  local state_key="application/ephemeral/${run_id}/terraform.tfstate"
+  local state_url="s3://${STATE_BUCKET}/${state_key}"
+
+  log "📦 Checking state object: $state_url"
+  if aws s3api head-object --bucket "$STATE_BUCKET" --key "$state_key" --region "$STATE_REGION" >/dev/null 2>&1; then
+    log "   State object exists."
+    return 0
+  fi
+
+  log "   State object is missing; searching S3 versions for recoverable state..."
+  local latest_version
+  latest_version=$(aws s3api list-object-versions \
+    --bucket "$STATE_BUCKET" \
+    --prefix "$state_key" \
+    --region "$STATE_REGION" \
+    --query "sort_by(Versions[?Key=='${state_key}'], &LastModified)[-1].VersionId" \
+    --output text 2>/dev/null | head -n1)
+
+  if [ -z "$latest_version" ] || [ "$latest_version" = "None" ]; then
+    log "   ⚠️  No previous state version found; continuing with empty state."
+    return 0
+  fi
+
+  log "   🔄 Restoring state from version $latest_version"
+  aws s3api copy-object \
+    --bucket "$STATE_BUCKET" \
+    --key "$state_key" \
+    --copy-source "${STATE_BUCKET}/${state_key}?versionId=${latest_version}" \
+    --region "$STATE_REGION"
+}
+
 # Discover and import all known ephemeral resources for a run-id. Each import
 # is allowed to fail so partial orphan sets are still handled.
 import_ephemeral_resources() {

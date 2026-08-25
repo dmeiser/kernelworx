@@ -16,6 +16,7 @@ RUN_ID="$1"
 source "$(cd "$(dirname "$0")" && pwd)/ephemeral-recover-common.sh"
 
 load_env
+recover_state_if_missing "$RUN_ID"
 cleanup_stale_lock "$RUN_ID"
 init_backend "$RUN_ID"
 import_ephemeral_resources "$RUN_ID"
