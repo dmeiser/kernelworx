@@ -100,9 +100,9 @@ function App() {
       <CssBaseline />
       <ApolloProvider client={apolloClient}>
         <BrowserRouter>
-          <ScrollToHash />
           <AuthProvider>
             <Suspense fallback={<PageLoader />}>
+              <ScrollToHash />
               <Routes>
                 {/* Public routes */}
                 <Route path="/" element={<LandingPage />} />

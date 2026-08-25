@@ -20,6 +20,7 @@ import {
   TableRow,
   useMediaQuery,
   useTheme,
+  Snackbar,
 } from '@mui/material';
 import {
   Download as DownloadIcon,
@@ -30,6 +31,7 @@ import { LIST_ORDERS_BY_CAMPAIGN } from '../lib/graphql';
 import { ensureCampaignId } from '../lib/ids';
 import { downloadAsCSV, downloadAsXLSX } from '../lib/reportExport';
 import { formatCurrency, formatPhoneNumber } from '../lib/api-utils';
+import { useSnackbar } from '../hooks/useSnackbar';
 import type { Order } from '../types';
 
 // Helper to format city/state/zip into a single string
@@ -155,7 +157,25 @@ const OrderRow: React.FC<{ order: Order; allProducts: string[] }> = ({ order, al
 
 // Helper component for download buttons
 const DownloadButtons: React.FC<{ orders: Order[]; campaignId: string }> = ({ orders, campaignId }) => {
+  const {
+    message: snackbarMessage,
+    open: snackbarOpen,
+    key: snackbarKey,
+    show: showSnackbar,
+    close: closeSnackbar,
+  } = useSnackbar();
+
   if (orders.length === 0) return null;
+
+  const handleDownloadXLSX = async () => {
+    try {
+      await downloadAsXLSX(orders, campaignId);
+    } catch (err) {
+      console.error('Failed to download XLSX:', err);
+      showSnackbar('Failed to download Excel file. Please try again.');
+    }
+  };
+
   return (
     <Stack direction="row" spacing={1} flexWrap="wrap">
       <Button
@@ -169,11 +189,21 @@ const DownloadButtons: React.FC<{ orders: Order[]; campaignId: string }> = ({ or
       <Button
         size="small"
         startIcon={<DownloadIcon />}
-        onClick={async () => downloadAsXLSX(orders, campaignId)}
+        onClick={() => {
+          void handleDownloadXLSX();
+        }}
         variant="outlined"
       >
         XLSX
       </Button>
+      <Snackbar
+        key={snackbarKey}
+        open={snackbarOpen}
+        autoHideDuration={4000}
+        onClose={closeSnackbar}
+        message={snackbarMessage}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      />
     </Stack>
   );
 };
