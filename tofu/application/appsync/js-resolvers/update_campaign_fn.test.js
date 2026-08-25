@@ -105,6 +105,96 @@ describe('update_campaign_fn request', () => {
     assert.match(result.update.expression, /catalogId = :catalogId/);
     assert.strictEqual(result.update.expressionValues[':catalogId'], null);
   });
+
+  it('recomputes unitCampaignKey when unitNumber changes', () => {
+    const ctx = {
+      stash: {
+        campaign: {
+          profileId: 'PROFILE#scout',
+          campaignId: 'CAMPAIGN#c1',
+          campaignName: 'Fall',
+          campaignYear: 2024,
+          unitType: 'Pack',
+          unitNumber: 158,
+          city: 'Springfield',
+          state: 'IL',
+          unitCampaignKey: 'Pack#158#Springfield#IL#Fall#2024',
+        },
+      },
+      args: {
+        input: {
+          unitNumber: 159,
+        },
+      },
+    };
+
+    const result = request(ctx);
+    assert.match(result.update.expression, /unitCampaignKey = :unitCampaignKey/);
+    assert.strictEqual(
+      result.update.expressionValues[':unitCampaignKey'],
+      'Pack#159#Springfield#IL#Fall#2024'
+    );
+  });
+
+  it('recomputes unitCampaignKey when city changes', () => {
+    const ctx = {
+      stash: {
+        campaign: {
+          profileId: 'PROFILE#scout',
+          campaignId: 'CAMPAIGN#c1',
+          campaignName: 'Fall',
+          campaignYear: 2024,
+          unitType: 'Pack',
+          unitNumber: 158,
+          city: 'Springfield',
+          state: 'IL',
+          unitCampaignKey: 'Pack#158#Springfield#IL#Fall#2024',
+        },
+      },
+      args: {
+        input: {
+          city: 'Decatur',
+        },
+      },
+    };
+
+    const result = request(ctx);
+    assert.match(result.update.expression, /unitCampaignKey = :unitCampaignKey/);
+    assert.strictEqual(
+      result.update.expressionValues[':unitCampaignKey'],
+      'Pack#158#Decatur#IL#Fall#2024'
+    );
+  });
+
+  it('recomputes unitCampaignKey when unitType changes', () => {
+    const ctx = {
+      stash: {
+        campaign: {
+          profileId: 'PROFILE#scout',
+          campaignId: 'CAMPAIGN#c1',
+          campaignName: 'Fall',
+          campaignYear: 2024,
+          unitType: 'Pack',
+          unitNumber: 158,
+          city: 'Springfield',
+          state: 'IL',
+          unitCampaignKey: 'Pack#158#Springfield#IL#Fall#2024',
+        },
+      },
+      args: {
+        input: {
+          unitType: 'Troop',
+        },
+      },
+    };
+
+    const result = request(ctx);
+    assert.match(result.update.expression, /unitCampaignKey = :unitCampaignKey/);
+    assert.strictEqual(
+      result.update.expressionValues[':unitCampaignKey'],
+      'Troop#158#Springfield#IL#Fall#2024'
+    );
+  });
 });
 
 describe('update_campaign_fn response', () => {

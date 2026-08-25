@@ -25,20 +25,6 @@ export function request(ctx) {
     if (input.campaignName !== undefined) {
         updates.push('campaignName = :campaignName');
         exprValues[':campaignName'] = input.campaignName;
-
-        // Recompute unitCampaignKey when name changes so unit reports/catalogs stay consistent
-        if (campaign.unitType !== undefined && campaign.unitNumber !== undefined) {
-            const newKey = buildUnitCampaignKey(
-                campaign.unitType,
-                campaign.unitNumber,
-                campaign.city || '',
-                campaign.state || '',
-                input.campaignName,
-                campaign.campaignYear
-            );
-            updates.push('unitCampaignKey = :unitCampaignKey');
-            exprValues[':unitCampaignKey'] = newKey;
-        }
     }
     if (input.startDate !== undefined) {
         updates.push('startDate = :startDate');
@@ -56,6 +42,34 @@ export function request(ctx) {
     if (input.isActive !== undefined) {
         updates.push('isActive = :isActive');
         exprValues[':isActive'] = input.isActive;
+    }
+
+    // Recompute unitCampaignKey whenever any of its components change so unit
+    // reports/catalogs stay consistent. The key is derived from
+    // unitType#unitNumber#city#state#campaignName#campaignYear. Issue #104
+    // exposes additional editable fields; future schema changes must extend
+    // this guard so the GSI key is never stale. We only emit the SET clause
+    // when the campaign already has the unit fields (otherwise the original
+    // code did not set a key either).
+    const hasUnitContext = campaign.unitType !== undefined && campaign.unitNumber !== undefined;
+    const componentChanged =
+        input.campaignName !== undefined ||
+        input.unitType !== undefined ||
+        input.unitNumber !== undefined ||
+        input.city !== undefined ||
+        input.state !== undefined ||
+        input.campaignYear !== undefined;
+    if (hasUnitContext && componentChanged) {
+        const newKey = buildUnitCampaignKey(
+            input.unitType !== undefined ? input.unitType : campaign.unitType,
+            input.unitNumber !== undefined ? input.unitNumber : campaign.unitNumber,
+            input.city !== undefined ? input.city : campaign.city || '',
+            input.state !== undefined ? input.state : campaign.state || '',
+            input.campaignName !== undefined ? input.campaignName : campaign.campaignName,
+            input.campaignYear !== undefined ? input.campaignYear : campaign.campaignYear
+        );
+        updates.push('unitCampaignKey = :unitCampaignKey');
+        exprValues[':unitCampaignKey'] = newKey;
     }
 
     // Always update updatedAt
@@ -94,18 +108,6 @@ export function response(ctx) {
     // Apply updates
     if (input.campaignName !== undefined) {
         result.campaignName = input.campaignName;
-
-        // Mirror the unitCampaignKey recomputation from request()
-        if (campaign.unitType !== undefined && campaign.unitNumber !== undefined) {
-            result.unitCampaignKey = buildUnitCampaignKey(
-                campaign.unitType,
-                campaign.unitNumber,
-                campaign.city || '',
-                campaign.state || '',
-                input.campaignName,
-                campaign.campaignYear
-            );
-        }
     }
     if (input.startDate !== undefined) {
         result.startDate = input.startDate;
@@ -118,6 +120,28 @@ export function response(ctx) {
     }
     if (input.isActive !== undefined) {
         result.isActive = input.isActive;
+    }
+
+    // Mirror the unitCampaignKey recomputation from request(): whenever any
+    // of the key's components change, recompute against the *post-update*
+    // values so the response matches what was persisted.
+    const hasUnitContext = campaign.unitType !== undefined && campaign.unitNumber !== undefined;
+    const componentChanged =
+        input.campaignName !== undefined ||
+        input.unitType !== undefined ||
+        input.unitNumber !== undefined ||
+        input.city !== undefined ||
+        input.state !== undefined ||
+        input.campaignYear !== undefined;
+    if (hasUnitContext && componentChanged) {
+        result.unitCampaignKey = buildUnitCampaignKey(
+            result.unitType,
+            result.unitNumber,
+            result.city || '',
+            result.state || '',
+            result.campaignName,
+            result.campaignYear
+        );
     }
 
     // Always update updatedAt
