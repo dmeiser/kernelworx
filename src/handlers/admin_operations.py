@@ -446,6 +446,22 @@ def _is_valid_email_prefix(value: str) -> bool:
     return bool(re.match(email_prefix_pattern, value)) and len(value) <= 254
 
 
+def _validate_email_for_filter(email: str) -> None:
+    """Validate an email before interpolating it into a Cognito ListUsers filter.
+
+    Cognito filters are double-quoted, so an email containing a double quote
+    could break the filter or match unintended users. Reject any email that
+    contains a double quote or whitespace, and require a basic local@domain
+    shape. See issue #124.
+    """
+    if not email or len(email) > 254:
+        raise AppError(ErrorCode.INVALID_INPUT, "Email is required")
+    if '"' in email or any(ch.isspace() for ch in email):
+        raise AppError(ErrorCode.INVALID_INPUT, "Invalid email")
+    if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
+        raise AppError(ErrorCode.INVALID_INPUT, "Invalid email")
+
+
 def _validate_search_query(query: str) -> None:
     """Validate that the admin search query is a safe UUID, email prefix, or ACCOUNT#UUID."""
     if query.startswith("ACCOUNT#"):
@@ -611,6 +627,9 @@ def _delete_account_from_dynamodb(account_id: str, logger: Any) -> None:
 
 def _find_user_by_email(cognito: Any, user_pool_id: str, email: str, logger: Any) -> str:
     """Find username by email. Returns username."""
+    # Validate before interpolating into the Cognito filter to prevent
+    # quote-injection / filter breakage (#124).
+    _validate_email_for_filter(email)
     try:
         response = cognito.list_users(
             UserPoolId=user_pool_id,
@@ -692,8 +711,12 @@ def admin_reset_user_password(event: Dict[str, Any], context: Any) -> bool:
 
 
 def _check_not_self_deletion(caller_id: str, account_id: str) -> None:
-    """Prevent admin from deleting their own account."""
-    if account_id == caller_id:
+    """Prevent admin from deleting their own account.
+
+    Normalize both IDs to their canonical ACCOUNT# form before comparing so a
+    caller passing ``ACCOUNT#<own-sub>`` cannot bypass the guard (#125).
+    """
+    if _normalize_account_id(account_id) == _normalize_account_id(caller_id):
         raise AppError(ErrorCode.INVALID_INPUT, "Cannot delete your own account")
 
 

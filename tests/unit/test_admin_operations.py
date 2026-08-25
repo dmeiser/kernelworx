@@ -1178,6 +1178,72 @@ class TestAdminResetUserPassword:
 
             assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
 
+    def test_email_with_quote_rejected_before_filter(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """An email containing a double quote must be rejected before reaching Cognito (#124)."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+
+        event = {
+            **admin_appsync_event,
+            "arguments": {"email": 'evil"@example.com'},
+        }
+
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+            mock_cognito = MagicMock()
+            mock_get_client.return_value = mock_cognito
+
+            with pytest.raises(AppError) as exc_info:
+                admin_reset_user_password(event, lambda_context)
+
+            assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+            mock_cognito.list_users.assert_not_called()
+
+    def test_malformed_email_rejected_before_filter(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """An email without a valid local@domain shape is rejected (#124)."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+
+        event = {
+            **admin_appsync_event,
+            "arguments": {"email": "not-an-email"},
+        }
+
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+            mock_cognito = MagicMock()
+            mock_get_client.return_value = mock_cognito
+
+            with pytest.raises(AppError) as exc_info:
+                admin_reset_user_password(event, lambda_context)
+
+            assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+            mock_cognito.list_users.assert_not_called()
+
+    def test_oversize_email_rejected_before_filter(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """An email longer than 254 chars is rejected by the validator (#124)."""
+        from src.handlers.admin_operations import _validate_email_for_filter
+
+        long_email = "a" * 250 + "@b.co"
+        with pytest.raises(AppError) as exc_info:
+            _validate_email_for_filter(long_email)
+
+        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+
 
 class TestAdminDeleteUser:
     """Tests for admin_delete_user handler."""
@@ -1482,6 +1548,28 @@ class TestAdminDeleteUser:
         event = {
             **admin_appsync_event,
             "arguments": {"accountId": sample_account_id},
+        }
+
+        with pytest.raises(AppError) as exc_info:
+            admin_delete_user(event, lambda_context)
+
+        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+        assert "Cannot delete your own account" in exc_info.value.message
+
+    def test_self_deletion_prevented_with_account_prefix(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        sample_account_id: str,
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """A caller passing ACCOUNT#<own-sub> must still be blocked (#125)."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+
+        event = {
+            **admin_appsync_event,
+            "arguments": {"accountId": f"ACCOUNT#{sample_account_id}"},
         }
 
         with pytest.raises(AppError) as exc_info:
