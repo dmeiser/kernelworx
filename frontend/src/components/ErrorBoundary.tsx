@@ -47,7 +47,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
               Something went wrong
             </Typography>
             <Typography variant="body1" color="text.secondary" sx={{ mb: 4 }}>
-              {this.state.error?.message || 'An unexpected error occurred.'}
+              An unexpected error occurred. Please try again.
             </Typography>
             <Button variant="contained" onClick={this.handleReset}>
               Try again

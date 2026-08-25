@@ -63,14 +63,16 @@ function ScrollToHash() {
 }
 
 function PublicRoute({ children }: { children: React.ReactNode }) {
-  return <ErrorBoundary>{children}</ErrorBoundary>;
+  const { pathname } = useLocation();
+  return <ErrorBoundary key={pathname}>{children}</ErrorBoundary>;
 }
 
 function ProtectedAppRoute({ children, requireAdmin }: { children: React.ReactNode; requireAdmin?: boolean }) {
+  const { pathname } = useLocation();
   return (
     <ProtectedRoute requireAdmin={requireAdmin}>
       <AppLayout>
-        <ErrorBoundary>{children}</ErrorBoundary>
+        <ErrorBoundary key={pathname}>{children}</ErrorBoundary>
       </AppLayout>
     </ProtectedRoute>
   );
