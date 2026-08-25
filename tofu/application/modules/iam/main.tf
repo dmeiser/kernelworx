@@ -58,6 +58,13 @@ locals {
 # TODO(#75): This is a shared execution role used by every Lambda. It currently
 # grants broad DynamoDB/S3 access to all functions. Hardening step: split into
 # per-function roles scoped to the tables/buckets each handler actually needs.
+#
+# #121: Cognito admin/destructive actions (AdminDeleteUser,
+# AdminResetUserPassword, AdminLinkProviderForUser, ListUsers) are isolated on
+# the separate aws_iam_role.lambda_admin_execution role, assigned only to the
+# admin-operations, delete-account, and pre-signup functions. The shared role
+# below no longer grants any Cognito admin permissions, so a buggy or
+# compromised non-admin handler cannot delete users or reset passwords.
 
 resource "aws_iam_role" "lambda_execution" {
   name = "${var.name_prefix}-lambda-exec${local.role_suffix}"
@@ -155,6 +162,53 @@ resource "aws_iam_role_policy" "lambda_cloudfront" {
 
   name   = "cloudfront-invalidation"
   role   = aws_iam_role.lambda_execution.id
+  policy = data.aws_iam_policy_document.lambda_cloudfront[0].json
+}
+
+# =============================================================================
+# Lambda Admin Execution Role
+# =============================================================================
+#
+# Separate role for the small set of Lambda handlers that perform Cognito admin
+# actions (admin-operations, delete-account, pre-signup). It carries the same
+# DynamoDB/S3/CloudFront access as the shared role, plus the Cognito admin
+# policy attached in the cognito module (see lambda_admin_execution_role_arn).
+# Isolating these destructive actions means the other ~16 functions cannot
+# delete Cognito users or reset passwords even if their handler is buggy or
+# compromised. See issue #121.
+
+resource "aws_iam_role" "lambda_admin_execution" {
+  name = "${var.name_prefix}-lambda-admin-exec${local.role_suffix}"
+
+  assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
+
+  lifecycle {
+    prevent_destroy = var.prevent_destroy
+  }
+}
+
+resource "aws_iam_role_policy_attachment" "lambda_admin_basic" {
+  role       = aws_iam_role.lambda_admin_execution.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+resource "aws_iam_role_policy" "lambda_admin_dynamodb" {
+  name   = "dynamodb-access"
+  role   = aws_iam_role.lambda_admin_execution.id
+  policy = data.aws_iam_policy_document.lambda_dynamodb.json
+}
+
+resource "aws_iam_role_policy" "lambda_admin_s3" {
+  name   = "s3-access"
+  role   = aws_iam_role.lambda_admin_execution.id
+  policy = data.aws_iam_policy_document.lambda_s3.json
+}
+
+resource "aws_iam_role_policy" "lambda_admin_cloudfront" {
+  count = var.cloudfront_distribution_arn != null ? 1 : 0
+
+  name   = "cloudfront-invalidation"
+  role   = aws_iam_role.lambda_admin_execution.id
   policy = data.aws_iam_policy_document.lambda_cloudfront[0].json
 }
 
@@ -286,6 +340,16 @@ output "lambda_execution_role_arn" {
 output "lambda_execution_role_name" {
   description = "Name of the Lambda execution role"
   value       = aws_iam_role.lambda_execution.name
+}
+
+output "lambda_admin_execution_role_arn" {
+  description = "ARN of the Lambda admin execution role (Cognito admin actions; assigned only to admin/destructive handlers)"
+  value       = aws_iam_role.lambda_admin_execution.arn
+}
+
+output "lambda_admin_execution_role_name" {
+  description = "Name of the Lambda admin execution role"
+  value       = aws_iam_role.lambda_admin_execution.name
 }
 
 output "appsync_service_role_arn" {

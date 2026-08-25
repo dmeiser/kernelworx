@@ -178,6 +178,9 @@ module "cognito" {
   logout_urls                  = local.cognito_logout_urls
 
   lambda_execution_role_arn = module.iam.lambda_execution_role_arn
+  # #121: attach the Cognito admin policy to the isolated admin role, not the
+  # shared execution role used by every Lambda.
+  lambda_admin_execution_role_arn = module.iam.lambda_admin_execution_role_arn
   # Cognito trigger Lambdas (restored from CDK configuration)
   enable_lambda_triggers       = true
   pre_signup_lambda_arn        = module.lambda.trigger_function_arns["pre-signup"]
@@ -192,11 +195,14 @@ module "cognito" {
 module "lambda" {
   source = "../../modules/lambda"
 
-  environment         = var.environment
-  region_abbrev       = var.region_abbrev
-  name_prefix         = local.name_prefix
-  lambda_role_arn     = module.iam.lambda_execution_role_arn
-  exports_bucket_name = module.s3.exports_bucket_name
+  environment     = var.environment
+  region_abbrev   = var.region_abbrev
+  name_prefix     = local.name_prefix
+  lambda_role_arn = module.iam.lambda_execution_role_arn
+  # #121: admin-operations, delete-account, and pre-signup use the isolated
+  # admin role that carries the Cognito admin policy.
+  lambda_admin_role_arn = module.iam.lambda_admin_execution_role_arn
+  exports_bucket_name   = module.s3.exports_bucket_name
 
   table_names = {
     accounts         = module.dynamodb.accounts_table_name

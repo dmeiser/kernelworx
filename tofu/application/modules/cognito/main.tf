@@ -59,8 +59,14 @@ variable "sms_role_arn" {
 }
 
 variable "lambda_execution_role_arn" {
-  description = "ARN of the Lambda execution role to attach the scoped Cognito admin policy to"
+  description = "ARN of the Lambda execution role. The scoped Cognito admin policy is attached to lambda_admin_execution_role_arn when set, otherwise to this role (legacy)."
   type        = string
+}
+
+variable "lambda_admin_execution_role_arn" {
+  description = "ARN of the dedicated Lambda admin execution role that should receive the Cognito admin policy. When null, the policy falls back to lambda_execution_role_arn for backward compatibility."
+  type        = string
+  default     = null
 }
 
 variable "enable_google_idp" {
@@ -299,8 +305,10 @@ data "aws_iam_policy_document" "lambda_cognito_admin" {
 }
 
 resource "aws_iam_role_policy" "lambda_cognito_admin" {
-  name   = "cognito-admin"
-  role   = regex("^.*/(.+)$", var.lambda_execution_role_arn)[0]
+  name = "cognito-admin"
+  # Attach to the dedicated admin role when configured (#121); otherwise fall
+  # back to the shared execution role for backward compatibility.
+  role   = regex("^.*/(.+)$", coalesce(var.lambda_admin_execution_role_arn, var.lambda_execution_role_arn))[0]
   policy = data.aws_iam_policy_document.lambda_cognito_admin.json
 }
 
