@@ -190,6 +190,18 @@ import_ephemeral_resources() {
 
     import_resource "$run_id" "module.cognito.aws_cognito_user_pool_domain.prefix[0]" "kernelworx${suffix}"
 
+    # Cognito Lambda trigger permissions. These are state-tracked and must be
+    # imported so the following apply does not try to recreate them.
+    local pre_signup_name="kernelworx-pre-signup${suffix}"
+    local post_auth_name="kernelworx-post-auth${suffix}"
+    if aws lambda get-function --function-name "$pre_signup_name" --region "$region" >/dev/null 2>&1; then
+      import_resource "$run_id" "module.cognito.aws_lambda_permission.cognito_pre_signup[0]" "AllowCognitoInvokePreSignup/${pre_signup_name}"
+    fi
+    if aws lambda get-function --function-name "$post_auth_name" --region "$region" >/dev/null 2>&1; then
+      import_resource "$run_id" "module.cognito.aws_lambda_permission.cognito_post_auth[0]" "AllowCognitoInvokePostAuth/${post_auth_name}"
+      import_resource "$run_id" "module.cognito.aws_lambda_permission.cognito_post_confirmation[0]" "AllowCognitoInvokePostConfirmation/${post_auth_name}"
+    fi
+
     # Cognito inline policy attached to the Lambda execution role.
     import_resource "$run_id" "module.cognito.aws_iam_role_policy.lambda_cognito_admin" "${lambda_exec_role}:cognito-admin"
   fi
@@ -223,8 +235,7 @@ import_ephemeral_resources() {
     import_resource "$run_id" "module.appsync.aws_appsync_graphql_api.main" "$appsync_id"
     import_resource "$run_id" "module.appsync.aws_cloudwatch_log_group.appsync" "/aws/appsync/apis/${appsync_id}"
 
-    # AppSync logging inline policy and data layer (datasources, functions, resolvers).
-    import_resource "$run_id" "module.appsync.aws_iam_role_policy.appsync_logging" "kernelworx-api${suffix}-logs:appsync-logging"
+    # AppSync data layer (datasources, functions, resolvers).
     import_ephemeral_appsync_resources "$run_id" "$appsync_id"
   fi
 
@@ -400,7 +411,7 @@ for name, block in res_blocks.items():
         res_map[name] = (rtype, field)
 for rtype in {t for t, _ in res_map.values()}:
     result = _run(
-        ["aws", "appsync", "list-resolvers", "--api-id", appsync_id, "--type", rtype,
+        ["aws", "appsync", "list-resolvers", "--api-id", appsync_id, "--type-name", rtype,
          "--region", region, "--output", "json"]
     )
     if result.returncode != 0 or not result.stdout:
