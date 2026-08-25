@@ -14,6 +14,9 @@ export function request(ctx) {
             arguments: {
                 campaignId: campaign.campaignId,
             },
+            identity: {
+                sub: ctx.identity.sub,
+            },
         },
     };
 }
