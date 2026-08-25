@@ -233,6 +233,29 @@ describe('update_campaign_fn request', () => {
       'Pack#158#Springfield#IL#Fall#2025'
     );
   });
+
+  it('persists campaignYear without unitCampaignKey when no unit context exists', () => {
+    const ctx = {
+      stash: {
+        campaign: {
+          profileId: 'PROFILE#scout',
+          campaignId: 'CAMPAIGN#c1',
+          campaignName: 'Fall',
+          campaignYear: 2024,
+        },
+      },
+      args: {
+        input: {
+          campaignYear: 2025,
+        },
+      },
+    };
+
+    const result = request(ctx);
+    assert.match(result.update.expression, /campaignYear = :campaignYear/);
+    assert.strictEqual(result.update.expressionValues[':campaignYear'], 2025);
+    assert.doesNotMatch(result.update.expression, /unitCampaignKey/);
+  });
 });
 
 describe('update_campaign_fn response', () => {
@@ -374,6 +397,29 @@ describe('update_campaign_fn response', () => {
     const result = response(ctx);
     assert.strictEqual(result.campaignYear, 2025);
     assert.strictEqual(result.unitCampaignKey, 'Pack#158#Springfield#IL#Fall#2025');
+  });
+
+  it('returns updated campaignYear without recomputing unitCampaignKey when no unit context exists', () => {
+    const ctx = {
+      stash: {
+        campaign: {
+          profileId: 'PROFILE#scout',
+          campaignId: 'CAMPAIGN#c1',
+          campaignName: 'Fall',
+          campaignYear: 2024,
+        },
+      },
+      args: {
+        input: {
+          campaignYear: 2025,
+        },
+      },
+      error: null,
+    };
+
+    const result = response(ctx);
+    assert.strictEqual(result.campaignYear, 2025);
+    assert.strictEqual(result.unitCampaignKey, undefined);
   });
 
   it('returns updated unitCampaignKey when state changes', () => {

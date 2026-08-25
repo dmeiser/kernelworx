@@ -26,6 +26,10 @@ export function request(ctx) {
         updates.push('campaignName = :campaignName');
         exprValues[':campaignName'] = input.campaignName;
     }
+    if (input.campaignYear !== undefined) {
+        updates.push('campaignYear = :campaignYear');
+        exprValues[':campaignYear'] = input.campaignYear;
+    }
     if (input.startDate !== undefined) {
         updates.push('startDate = :startDate');
         exprValues[':startDate'] = input.startDate;
@@ -50,8 +54,10 @@ export function request(ctx) {
     // exposes additional editable fields; future schema changes must extend
     // this guard so the GSI key is never stale. We only emit the SET clause
     // when the campaign already has the unit fields (otherwise the original
-    // code did not set a key either). Only campaignName and campaignYear are
-    // present in UpdateCampaignInput today; #104 will expand the input shape.
+    // code did not set a key either). campaignName and campaignYear are
+    // handled unconditionally above because they are present in
+    // UpdateCampaignInput today; #104 will expand the input shape with the
+    // unit fields below.
     const hasUnitContext = campaign.unitType !== undefined && campaign.unitNumber !== undefined;
     const componentChanged =
         input.campaignName !== undefined ||
@@ -72,9 +78,9 @@ export function request(ctx) {
         updates.push('unitCampaignKey = :unitCampaignKey');
         exprValues[':unitCampaignKey'] = newKey;
 
-        // Persist any component values supplied in the input so the stored
-        // fields match the recomputed key. campaignName is already handled
-        // above.
+        // Persist any unit field values supplied in the input so the stored
+        // fields match the recomputed key. campaignName and campaignYear are
+        // already handled above.
         if (input.unitType !== undefined) {
             updates.push('unitType = :unitType');
             exprValues[':unitType'] = input.unitType;
@@ -90,10 +96,6 @@ export function request(ctx) {
         if (input.state !== undefined) {
             updates.push('state = :state');
             exprValues[':state'] = input.state;
-        }
-        if (input.campaignYear !== undefined) {
-            updates.push('campaignYear = :campaignYear');
-            exprValues[':campaignYear'] = input.campaignYear;
         }
     }
 
@@ -134,6 +136,9 @@ export function response(ctx) {
     if (input.campaignName !== undefined) {
         result.campaignName = input.campaignName;
     }
+    if (input.campaignYear !== undefined) {
+        result.campaignYear = input.campaignYear;
+    }
     if (input.startDate !== undefined) {
         result.startDate = input.startDate;
     }
@@ -159,8 +164,9 @@ export function response(ctx) {
         input.state !== undefined ||
         input.campaignYear !== undefined;
     if (hasUnitContext && componentChanged) {
-        // Apply component updates to the result so the recomputed key reflects
-        // the post-update state. campaignName is already applied above.
+        // Apply unit field updates to the result so the recomputed key reflects
+        // the post-update state. campaignName and campaignYear are already
+        // applied above.
         if (input.unitType !== undefined) {
             result.unitType = input.unitType;
         }
@@ -172,9 +178,6 @@ export function response(ctx) {
         }
         if (input.state !== undefined) {
             result.state = input.state;
-        }
-        if (input.campaignYear !== undefined) {
-            result.campaignYear = input.campaignYear;
         }
 
         result.unitCampaignKey = buildUnitCampaignKey(
