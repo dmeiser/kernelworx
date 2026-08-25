@@ -71,7 +71,14 @@ const mockCatalog = {
   ownerAccountId: 'ACCOUNT#admin',
   isPublic: true,
   products: [
-    { __typename: 'Product', productId: 'PROD~1', productName: 'Caramel Corn', price: 20, description: null, sortOrder: 0 },
+    {
+      __typename: 'Product',
+      productId: 'PROD~1',
+      productName: 'Caramel Corn',
+      price: 20,
+      description: null,
+      sortOrder: 0,
+    },
   ],
   createdAt: '2025-01-01T00:00:00Z',
   updatedAt: '2025-01-01T00:00:00Z',
@@ -317,7 +324,12 @@ describe('AdminPage - User Search', () => {
 
   test('shows FORCE_CHANGE_PASSWORD status', async () => {
     const user = userEvent.setup();
-    const forcePwUser = { ...mockAdminUser, status: 'FORCE_CHANGE_PASSWORD', enabled: true, lastModifiedAt: '2025-01-16T00:00:00Z' };
+    const forcePwUser = {
+      ...mockAdminUser,
+      status: 'FORCE_CHANGE_PASSWORD',
+      enabled: true,
+      lastModifiedAt: '2025-01-16T00:00:00Z',
+    };
     const mocks = baseMocks([
       {
         request: { query: ADMIN_SEARCH_USER, variables: { query: 'force' } },
@@ -336,7 +348,12 @@ describe('AdminPage - User Search', () => {
 
   test('shows unknown status as chip label', async () => {
     const user = userEvent.setup();
-    const unknownStatusUser = { ...mockAdminUser, status: 'ARCHIVED', enabled: true, lastModifiedAt: '2025-01-16T00:00:00Z' };
+    const unknownStatusUser = {
+      ...mockAdminUser,
+      status: 'ARCHIVED',
+      enabled: true,
+      lastModifiedAt: '2025-01-16T00:00:00Z',
+    };
     const mocks = baseMocks([
       {
         request: { query: ADMIN_SEARCH_USER, variables: { query: 'archived' } },
@@ -988,9 +1005,7 @@ describe('AdminPage - Catalog Management', () => {
             input: {
               catalogName: 'Updated Test Catalog',
               isPublic: true,
-              products: [
-                { productName: 'Caramel Corn', description: undefined, price: 20, sortOrder: 0 },
-              ],
+              products: [{ productName: 'Caramel Corn', description: undefined, price: 20, sortOrder: 0 }],
             },
           },
         },
@@ -1208,7 +1223,12 @@ describe('AdminPage - Catalog Management', () => {
 describe('AdminPage - UserStatusChip edge cases', () => {
   test('shows UNCONFIRMED status', async () => {
     const user = userEvent.setup();
-    const unconfirmedUser = { ...mockAdminUser, status: 'UNCONFIRMED', enabled: true, lastModifiedAt: '2025-01-16T00:00:00Z' };
+    const unconfirmedUser = {
+      ...mockAdminUser,
+      status: 'UNCONFIRMED',
+      enabled: true,
+      lastModifiedAt: '2025-01-16T00:00:00Z',
+    };
     const mocks = baseMocks([
       {
         request: { query: ADMIN_SEARCH_USER, variables: { query: 'unconfirmed' } },

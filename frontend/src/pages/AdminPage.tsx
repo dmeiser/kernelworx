@@ -109,8 +109,6 @@ function TabPanel(props: TabPanelProps) {
   );
 }
 
-
-
 // --- User Status Chip ---
 const UserStatusChip: React.FC<{ status: string; enabled: boolean }> = ({ status, enabled }) => {
   if (!enabled) {
@@ -456,7 +454,13 @@ export const AdminPage: React.FC = () => {
   // Dialog states
   const [resetPasswordUser, setResetPasswordUser] = useState<AdminUser | null>(null);
   const [deleteUserTarget, setDeleteUserTarget] = useState<AdminUser | null>(null);
-  const { message: snackbarMessage, open: snackbarOpen, key: snackbarKey, show: showSnackbar, close: closeSnackbar } = useSnackbar();
+  const {
+    message: snackbarMessage,
+    open: snackbarOpen,
+    key: snackbarKey,
+    show: showSnackbar,
+    close: closeSnackbar,
+  } = useSnackbar();
 
   // Catalog editor state
   const [catalogEditorOpen, setCatalogEditorOpen] = useState(false);
@@ -744,7 +748,9 @@ export const AdminPage: React.FC = () => {
             hasSearched={hasSearched}
             onResetPassword={handleResetPassword}
             onDeleteUser={handleDeleteUser}
-            onViewDetails={(user) => { void navigate(`/admin/user-data/${encodeURIComponent(user.accountId)}`); }}
+            onViewDetails={(user) => {
+              void navigate(`/admin/user-data/${encodeURIComponent(user.accountId)}`);
+            }}
           />
         </Paper>
       </TabPanel>
@@ -872,7 +878,12 @@ export const AdminPage: React.FC = () => {
             {deleteProgress?.error ? 'Close' : 'Cancel'}
           </Button>
           {!deleteProgress && (
-            <Button onClick={() => { void confirmDeleteUser(); }} color="error">
+            <Button
+              onClick={() => {
+                void confirmDeleteUser();
+              }}
+              color="error"
+            >
               Delete User
             </Button>
           )}
