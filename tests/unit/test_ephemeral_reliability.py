@@ -419,6 +419,81 @@ class TestRecoverDestroy:
         assert any(c.startswith("destroy") for c in tofu_calls), f"tofu destroy should run, got: {tofu_calls}"
 
 
+class TestImportEphemeralResources:
+    """import_ephemeral_resources issues imports for state-tracked sub-resources."""
+
+    def test_static_iam_and_s3_imports_are_issued(
+        self,
+        repo_root: Path,
+        tmp_env: Path,
+    ) -> None:
+        recorded = tmp_env / "tofu_calls.txt"
+        write_mock(
+            tmp_env,
+            "aws",
+            """
+            #!/bin/bash
+            case "$1 $2" in
+              "s3api head-bucket")
+                exit 0
+                ;;
+              "dynamodb describe-table")
+                exit 0
+                ;;
+              "cognito-idp list-user-pools")
+                echo '{"UserPools": [{"Name": "kernelworx-users-ue1-pr-999", "Id": "us-east-1_POOL"}]}'
+                ;;
+              "cognito-idp list-user-pool-clients")
+                echo '{"UserPoolClients": [{"ClientName": "KernelWorx-Web", "ClientId": "client123"}]}'
+                ;;
+              "appsync list-graphql-apis")
+                echo '{"graphqlApis": [{"name": "kernelworx-api-ue1-pr-999", "apiId": "api123"}]}'
+                ;;
+              "appsync list-data-sources" | "appsync list-functions")
+                echo '{"dataSources": [], "functions": []}'
+                ;;
+              "appsync list-resolvers")
+                echo '{"resolvers": []}'
+                ;;
+              "lambda list-layer-versions")
+                echo '{"LayerVersions": []}'
+                ;;
+              "lambda list-functions")
+                echo '{"Functions": []}'
+                ;;
+            esac
+            exit 0
+            """,
+        )
+        write_mock(
+            tmp_env,
+            "tofu",
+            f"""
+            #!/bin/bash
+            echo "$@" >> "{recorded}"
+            exit 0
+            """,
+        )
+
+        script = """
+            set -e
+            export STATE_BUCKET="test-bucket"
+            export STATE_REGION="us-east-1"
+            export TF_VAR_encryption_passphrase="not-used"
+            source scripts/ephemeral-recover-common.sh
+            import_ephemeral_resources pr-999
+        """
+        result = run_bash(repo_root, script)
+        assert result.returncode == 0, result.stderr
+        calls = recorded.read_text()
+        assert "module.iam.aws_iam_role_policy_attachment.lambda_basic" in calls
+        assert "module.iam.aws_iam_role_policy.lambda_dynamodb" in calls
+        assert "module.cognito.aws_iam_role_policy.lambda_cognito_admin" in calls
+        assert "module.appsync.aws_iam_role_policy.appsync_logging" in calls
+        assert "module.s3.aws_s3_bucket_versioning.static" in calls
+        assert "module.s3.aws_s3_bucket_cors_configuration.exports" in calls
+
+
 class TestEphemeralEnvDown:
     def test_down_skips_layer_build_and_uses_placeholder(self, repo_root: Path, tmp_env: Path, tmp_path: Path) -> None:
         recorded = tmp_env / "tofu_calls.txt"

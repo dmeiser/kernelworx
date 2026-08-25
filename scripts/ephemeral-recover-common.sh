@@ -119,12 +119,40 @@ import_ephemeral_resources() {
     import_resource "$run_id" "module.s3.aws_s3_bucket.exports" "kernelworx-exports${suffix}"
   fi
 
+  # S3 bucket sub-resources (versioning, encryption, public access, lifecycle, CORS).
+  log "   Importing S3 bucket sub-resources..."
+  import_resource "$run_id" "module.s3.aws_s3_bucket_versioning.static" "kernelworx-static${suffix}"
+  import_resource "$run_id" "module.s3.aws_s3_bucket_server_side_encryption_configuration.static" "kernelworx-static${suffix}"
+  import_resource "$run_id" "module.s3.aws_s3_bucket_public_access_block.static" "kernelworx-static${suffix}"
+  import_resource "$run_id" "module.s3.aws_s3_bucket_versioning.exports" "kernelworx-exports${suffix}"
+  import_resource "$run_id" "module.s3.aws_s3_bucket_server_side_encryption_configuration.exports" "kernelworx-exports${suffix}"
+  import_resource "$run_id" "module.s3.aws_s3_bucket_public_access_block.exports" "kernelworx-exports${suffix}"
+  import_resource "$run_id" "module.s3.aws_s3_bucket_lifecycle_configuration.exports" "kernelworx-exports${suffix}"
+  import_resource "$run_id" "module.s3.aws_s3_bucket_cors_configuration.exports" "kernelworx-exports${suffix}"
+
   # IAM roles
   log "   Importing IAM roles..."
   import_resource "$run_id" "module.iam.aws_iam_role.lambda_execution" "kernelworx-lambda-exec${suffix}"
   import_resource "$run_id" "module.iam.aws_iam_role.appsync_service" "kernelworx-appsync${suffix}"
   import_resource "$run_id" "module.appsync.aws_iam_role.appsync_logging" "kernelworx-api${suffix}-logs"
   import_resource "$run_id" "module.iam.aws_iam_role.cognito_sms" "kernelworx${suffix}-UserPoolsmsRole"
+
+  # IAM policy attachments and inline policies. These must be in state so that
+  # `tofu destroy` can detach/delete them before removing the parent roles.
+  log "   Importing IAM policies..."
+  local lambda_exec_role="kernelworx-lambda-exec${suffix}"
+  local appsync_role="kernelworx-appsync${suffix}"
+  local cognito_sms_role="kernelworx${suffix}-UserPoolsmsRole"
+  local appsync_logging_role="kernelworx-api${suffix}-logs"
+  import_resource "$run_id" "module.iam.aws_iam_role_policy_attachment.lambda_basic" "${lambda_exec_role}/arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+  import_resource "$run_id" "module.iam.aws_iam_role_policy.lambda_dynamodb" "${lambda_exec_role}:dynamodb-access"
+  import_resource "$run_id" "module.iam.aws_iam_role_policy.lambda_s3" "${lambda_exec_role}:s3-access"
+  import_resource "$run_id" "module.iam.aws_iam_role_policy.cognito_sms" "${cognito_sms_role}:sns-publish"
+  import_resource "$run_id" "module.appsync.aws_iam_role_policy.appsync_logging" "${appsync_logging_role}:appsync-logging"
+  import_resource "$run_id" "module.iam.aws_iam_role_policy.appsync_dynamodb" "${appsync_role}:dynamodb-access"
+  import_resource "$run_id" "module.iam.aws_iam_role_policy.appsync_lambda" "${appsync_role}:lambda-invoke"
+  # CloudFront invalidation policy is only created when a distribution exists.
+  import_resource "$run_id" "module.iam.aws_iam_role_policy.lambda_cloudfront" "${lambda_exec_role}:cloudfront-invalidation"
 
   # Cognito user pool, client, and prefix domain
   log "   Importing Cognito resources..."
@@ -161,6 +189,9 @@ import_ephemeral_resources() {
     fi
 
     import_resource "$run_id" "module.cognito.aws_cognito_user_pool_domain.prefix[0]" "kernelworx${suffix}"
+
+    # Cognito inline policy attached to the Lambda execution role.
+    import_resource "$run_id" "module.cognito.aws_iam_role_policy.lambda_cognito_admin" "${lambda_exec_role}:cognito-admin"
   fi
 
   # AppSync API
@@ -191,6 +222,10 @@ import_ephemeral_resources() {
   if [ -n "$appsync_id" ] && [ "$appsync_id" != "None" ]; then
     import_resource "$run_id" "module.appsync.aws_appsync_graphql_api.main" "$appsync_id"
     import_resource "$run_id" "module.appsync.aws_cloudwatch_log_group.appsync" "/aws/appsync/apis/${appsync_id}"
+
+    # AppSync logging inline policy and data layer (datasources, functions, resolvers).
+    import_resource "$run_id" "module.appsync.aws_iam_role_policy.appsync_logging" "kernelworx-api${suffix}-logs:appsync-logging"
+    import_ephemeral_appsync_resources "$run_id" "$appsync_id"
   fi
 
   # Lambda layer version
@@ -251,6 +286,133 @@ $names"
         ;;
     esac
   done
+}
+
+# Import AppSync datasources, functions, and resolvers for an already-discovered API.
+# The Terraform resource names are parsed from the appsync module so imports stay in
+# sync with configuration changes without maintaining a hand-written lookup table.
+import_ephemeral_appsync_resources() {
+  local run_id="$1"
+  local appsync_id="$2"
+  local region="${AWS_REGION:-us-east-1}"
+  local env_suffix="_${run_id//-/_}"
+  local module_dir="$ROOT_DIR/tofu/application/modules/appsync"
+
+  if [ -z "$appsync_id" ] || [ "$appsync_id" = "None" ]; then
+    return 0
+  fi
+
+  log "   Importing AppSync datasources, functions, and resolvers..."
+
+  python3 - "$module_dir" "$appsync_id" "$env_suffix" "$region" "$run_id" <<'PY'
+import json
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+module_dir = Path(sys.argv[1])
+appsync_id = sys.argv[2]
+env_suffix = sys.argv[3]
+region = sys.argv[4]
+run_id = sys.argv[5]
+
+
+def _run(cmd):
+    return subprocess.run(cmd, capture_output=True, text=True, check=False)
+
+
+def _import(address, resource_id):
+    print(f"   📥 Importing {address} ({resource_id})", file=sys.stderr)
+    subprocess.run(
+        ["tofu", "import", "-input=false", f"-var=environment={run_id}", address, resource_id],
+        check=False,
+    )
+
+
+def _parse_blocks(content, resource_type):
+    pattern = re.compile(r'resource\s+"' + resource_type + r'"\s+"([^"]+)"\s*\{', re.DOTALL)
+    blocks = {}
+    for match in pattern.finditer(content):
+        name = match.group(1)
+        start = match.end() - 1
+        depth = 0
+        i = start
+        while i < len(content):
+            if content[i] == "{":
+                depth += 1
+            elif content[i] == "}":
+                depth -= 1
+                if depth == 0:
+                    blocks[name] = content[start : i + 1]
+                    break
+            i += 1
+    return blocks
+
+
+def _attr(block, key):
+    match = re.search(r"\b" + key + r'\s*=\s*"([^"]+)"', block)
+    return match.group(1) if match else None
+
+
+content = "".join(f.read_text() + "\n" for f in sorted(module_dir.glob("*.tf")))
+
+# Datasources: AWS name -> Terraform resource name.
+ds_blocks = _parse_blocks(content, "aws_appsync_datasource")
+ds_map = {name: _attr(block, "name") for name, block in ds_blocks.items()}
+result = _run(
+    ["aws", "appsync", "list-data-sources", "--api-id", appsync_id, "--region", region, "--output", "json"]
+)
+if result.returncode == 0 and result.stdout:
+    for ds in json.loads(result.stdout).get("dataSources", []):
+        aws_name = ds.get("name")
+        for rname, cfg_name in ds_map.items():
+            if cfg_name == aws_name:
+                _import(f"module.appsync.aws_appsync_datasource.{rname}", f"{appsync_id}-{aws_name}")
+                break
+
+# Functions: AWS function name includes the environment suffix.
+fn_blocks = _parse_blocks(content, "aws_appsync_function")
+fn_map = {}
+for name, block in fn_blocks.items():
+    raw = _attr(block, "name")
+    if raw:
+        fn_map[name] = raw.replace("${local.env_suffix}", env_suffix)
+result = _run(
+    ["aws", "appsync", "list-functions", "--api-id", appsync_id, "--region", region, "--output", "json"]
+)
+if result.returncode == 0 and result.stdout:
+    for fn in json.loads(result.stdout).get("functions", []):
+        aws_name = fn.get("name")
+        fn_id = fn.get("functionId")
+        for rname, cfg_name in fn_map.items():
+            if cfg_name == aws_name:
+                _import(f"module.appsync.aws_appsync_function.{rname}", f"{appsync_id}-{fn_id}")
+                break
+
+# Resolvers: keyed by type + field.
+res_blocks = _parse_blocks(content, "aws_appsync_resolver")
+res_map = {}
+for name, block in res_blocks.items():
+    rtype = _attr(block, "type")
+    field = _attr(block, "field")
+    if rtype and field:
+        res_map[name] = (rtype, field)
+for rtype in {t for t, _ in res_map.values()}:
+    result = _run(
+        ["aws", "appsync", "list-resolvers", "--api-id", appsync_id, "--type", rtype,
+         "--region", region, "--output", "json"]
+    )
+    if result.returncode != 0 or not result.stdout:
+        continue
+    for r in json.loads(result.stdout).get("resolvers", []):
+        rt = r.get("typeName")
+        field = r.get("fieldName")
+        for rname, (ctype, cfield) in res_map.items():
+            if ctype == rt and cfield == field:
+                _import(f"module.appsync.aws_appsync_resolver.{rname}", f"{appsync_id}-{rt}-{field}")
+                break
+PY
 }
 
 cleanup_cloudwatch_log_groups_for_run() {
