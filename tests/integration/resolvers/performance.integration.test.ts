@@ -80,13 +80,15 @@ const DELETE_PROFILE = gql`
 const LIST_ORDERS_BY_CAMPAIGN = gql`
   query ListOrdersByCampaign($campaignId: ID!) {
     listOrdersByCampaign(campaignId: $campaignId) {
-      orderId
-      customerName
-      paymentMethod
-      totalAmount
-      lineItems {
-        productId
-        quantity
+      orders {
+        orderId
+        customerName
+        paymentMethod
+        totalAmount
+        lineItems {
+          productId
+          quantity
+        }
       }
     }
   }

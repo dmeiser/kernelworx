@@ -62,8 +62,8 @@ const CustomerAddressCell: React.FC<{
 const decodeUrlParam = (encoded: string | undefined): string => (encoded ? decodeURIComponent(encoded) : '');
 
 // Helper to get orders from query data
-const getOrdersFromData = (data: { listOrdersByCampaign: Order[] } | undefined): Order[] =>
-  data?.listOrdersByCampaign || [];
+const getOrdersFromData = (data: { listOrdersByCampaign: { orders: Order[] } } | undefined): Order[] =>
+  data?.listOrdersByCampaign.orders || [];
 
 // Helper to determine if query should be skipped
 const shouldSkipQuery = (id: string): boolean => !id;
@@ -218,7 +218,7 @@ export const ReportsPage: React.FC = () => {
   void reportFormat; // Used for future report format selection
 
   const { data: ordersData, loading: ordersLoading } = useQuery<{
-    listOrdersByCampaign: Order[];
+    listOrdersByCampaign: { orders: Order[] };
   }>(LIST_ORDERS_BY_CAMPAIGN, {
     variables: { campaignId: dbCampaignId },
     skip: shouldSkipQuery(dbCampaignId ?? ''),
