@@ -50,7 +50,8 @@ export function request(ctx) {
     // exposes additional editable fields; future schema changes must extend
     // this guard so the GSI key is never stale. We only emit the SET clause
     // when the campaign already has the unit fields (otherwise the original
-    // code did not set a key either).
+    // code did not set a key either). Only campaignName and campaignYear are
+    // present in UpdateCampaignInput today; #104 will expand the input shape.
     const hasUnitContext = campaign.unitType !== undefined && campaign.unitNumber !== undefined;
     const componentChanged =
         input.campaignName !== undefined ||
@@ -70,6 +71,30 @@ export function request(ctx) {
         );
         updates.push('unitCampaignKey = :unitCampaignKey');
         exprValues[':unitCampaignKey'] = newKey;
+
+        // Persist any component values supplied in the input so the stored
+        // fields match the recomputed key. campaignName is already handled
+        // above.
+        if (input.unitType !== undefined) {
+            updates.push('unitType = :unitType');
+            exprValues[':unitType'] = input.unitType;
+        }
+        if (input.unitNumber !== undefined) {
+            updates.push('unitNumber = :unitNumber');
+            exprValues[':unitNumber'] = input.unitNumber;
+        }
+        if (input.city !== undefined) {
+            updates.push('city = :city');
+            exprValues[':city'] = input.city;
+        }
+        if (input.state !== undefined) {
+            updates.push('state = :state');
+            exprValues[':state'] = input.state;
+        }
+        if (input.campaignYear !== undefined) {
+            updates.push('campaignYear = :campaignYear');
+            exprValues[':campaignYear'] = input.campaignYear;
+        }
     }
 
     // Always update updatedAt
@@ -134,6 +159,24 @@ export function response(ctx) {
         input.state !== undefined ||
         input.campaignYear !== undefined;
     if (hasUnitContext && componentChanged) {
+        // Apply component updates to the result so the recomputed key reflects
+        // the post-update state. campaignName is already applied above.
+        if (input.unitType !== undefined) {
+            result.unitType = input.unitType;
+        }
+        if (input.unitNumber !== undefined) {
+            result.unitNumber = input.unitNumber;
+        }
+        if (input.city !== undefined) {
+            result.city = input.city;
+        }
+        if (input.state !== undefined) {
+            result.state = input.state;
+        }
+        if (input.campaignYear !== undefined) {
+            result.campaignYear = input.campaignYear;
+        }
+
         result.unitCampaignKey = buildUnitCampaignKey(
             result.unitType,
             result.unitNumber,
