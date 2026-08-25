@@ -56,7 +56,8 @@ import_resource() {
 
 # If the state object has been deleted (e.g. by a previous failed teardown run
 # that removed state before destroy succeeded), restore the latest S3 version
-# so `tofu destroy` can run against the real resource state.
+# so the next `tofu` operation (import, plan/apply, or destroy) can run against
+# the real resource state.
 recover_state_if_missing() {
   local run_id="$1"
   local state_key="application/ephemeral/${run_id}/terraform.tfstate"
