@@ -91,19 +91,6 @@ resource "aws_appsync_function" "get_campaign_for_order" {
   code = file("${local.js_resolvers_dir}/get_campaign_for_order_fn.js")
 }
 
-resource "aws_appsync_function" "ensure_catalog_for_order" {
-  api_id      = aws_appsync_graphql_api.main.id
-  data_source = aws_appsync_datasource.campaigns.name
-  name        = "EnsureCatalogForOrderFn${local.env_suffix}"
-
-  runtime {
-    name            = "APPSYNC_JS"
-    runtime_version = "1.0.0"
-  }
-
-  code = file("${local.js_resolvers_dir}/ensure_catalog_for_order_fn.js")
-}
-
 resource "aws_appsync_function" "get_catalog" {
   api_id      = aws_appsync_graphql_api.main.id
   data_source = aws_appsync_datasource.catalogs.name
@@ -115,45 +102,6 @@ resource "aws_appsync_function" "get_catalog" {
   }
 
   code = file("${local.js_resolvers_dir}/get_catalog_fn.js")
-}
-
-resource "aws_appsync_function" "get_catalog_try_raw" {
-  api_id      = aws_appsync_graphql_api.main.id
-  data_source = aws_appsync_datasource.catalogs.name
-  name        = "GetCatalogTryRawFn${local.env_suffix}"
-
-  runtime {
-    name            = "APPSYNC_JS"
-    runtime_version = "1.0.0"
-  }
-
-  code = file("${local.js_resolvers_dir}/get_catalog_try_raw_fn.js")
-}
-
-resource "aws_appsync_function" "get_catalog_try_prefixed" {
-  api_id      = aws_appsync_graphql_api.main.id
-  data_source = aws_appsync_datasource.catalogs.name
-  name        = "GetCatalogTryPrefixedFn${local.env_suffix}"
-
-  runtime {
-    name            = "APPSYNC_JS"
-    runtime_version = "1.0.0"
-  }
-
-  code = file("${local.js_resolvers_dir}/get_catalog_try_prefixed_fn.js")
-}
-
-resource "aws_appsync_function" "ensure_catalog_final" {
-  api_id      = aws_appsync_graphql_api.main.id
-  data_source = aws_appsync_datasource.campaigns.name
-  name        = "EnsureCatalogFinalFn${local.env_suffix}"
-
-  runtime {
-    name            = "APPSYNC_JS"
-    runtime_version = "1.0.0"
-  }
-
-  code = file("${local.js_resolvers_dir}/ensure_catalog_final_fn.js")
 }
 
 resource "aws_appsync_function" "create_order" {

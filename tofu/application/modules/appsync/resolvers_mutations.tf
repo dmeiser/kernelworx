@@ -240,10 +240,6 @@ resource "aws_appsync_resolver" "create_order" {
       aws_appsync_function.check_share_permissions.function_id,
       aws_appsync_function.validate_payment_method_appsync.function_id,
       aws_appsync_function.get_campaign_for_order.function_id,
-      aws_appsync_function.ensure_catalog_for_order.function_id,
-      aws_appsync_function.get_catalog_try_raw.function_id,
-      aws_appsync_function.get_catalog_try_prefixed.function_id,
-      aws_appsync_function.ensure_catalog_final.function_id,
       aws_appsync_function.get_catalog.function_id,
       aws_appsync_function.create_order.function_id,
     ]
