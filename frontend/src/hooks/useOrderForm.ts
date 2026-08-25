@@ -2,7 +2,7 @@
  * Custom hook for managing order form state
  */
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, type Dispatch, type SetStateAction } from 'react';
 
 export interface LineItemInput {
   productId: string;
@@ -110,7 +110,7 @@ export interface OrderFormState {
 
   // Payment
   paymentMethod: string;
-  setPaymentMethod: (value: string) => void;
+  setPaymentMethod: Dispatch<SetStateAction<string>>;
   notes: string;
   setNotes: (value: string) => void;
 
