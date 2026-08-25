@@ -1309,9 +1309,7 @@ class TestDeleteCampaignOrders:
         from src.handlers.campaign_operations import delete_campaign_orders
 
         with pytest.raises(AppError) as exc_info:
-            delete_campaign_orders(
-                self._event("CAMPAIGN#ghost", self._OWNER_SUB), lambda_context
-            )
+            delete_campaign_orders(self._event("CAMPAIGN#ghost", self._OWNER_SUB), lambda_context)
 
         assert exc_info.value.error_code == ErrorCode.NOT_FOUND
 
@@ -1402,10 +1400,7 @@ class TestDeleteCampaignOrders:
 
         assert result == {"deletedCount": 1}
         assert (
-            orders_table.get_item(
-                Key={"campaignId": other_campaign, "orderId": "ORDER#other"}
-            ).get("Item")
-            is not None
+            orders_table.get_item(Key={"campaignId": other_campaign, "orderId": "ORDER#other"}).get("Item") is not None
         )
 
     def test_delete_campaign_orders_unexpected_error(
@@ -1422,9 +1417,7 @@ class TestDeleteCampaignOrders:
         profile_id = "PROFILE#any"
         self._seed_owned_campaign(profiles_table, campaigns_table, profile_id, campaign_id, self._OWNER_SUB)
 
-        with patch(
-            "src.handlers.campaign_operations._delete_orders_for_campaign"
-        ) as mock_delete:
+        with patch("src.handlers.campaign_operations._delete_orders_for_campaign") as mock_delete:
             mock_delete.side_effect = RuntimeError("unexpected failure")
 
             with pytest.raises(AppError) as exc_info:

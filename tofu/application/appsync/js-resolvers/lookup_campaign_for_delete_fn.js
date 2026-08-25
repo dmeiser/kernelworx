@@ -26,8 +26,10 @@ export function response(ctx) {
         return null;
     }
     
-    // Note: Authorization is simplified - relies on Cognito authentication
-    // Full share-based authorization would require additional pipeline functions
+    // WRITE access to the campaign's profile is enforced by the pipeline's
+    // verify_profile_write_access / check_share_permissions functions and is
+    // also re-checked inside the delete_campaign_orders Lambda as defense in
+    // depth, so this lookup only needs to return the campaign row.
     ctx.stash.campaign = ctx.result.items[0];
     return ctx.result.items[0];
 }

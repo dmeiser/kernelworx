@@ -399,7 +399,7 @@ def create_campaign(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         _execute_campaign_transaction(campaign_item, share_item, profile_id)
         return campaign_item
 
-    except (AppError, ClientError):
+    except (AppError, ClientError):  # fmt: skip
         raise
     except Exception as e:
         logger.error(f"Error creating campaign: {str(e)}", exc_info=True)
