@@ -169,7 +169,7 @@ const DownloadButtons: React.FC<{ orders: Order[]; campaignId: string }> = ({ or
       <Button
         size="small"
         startIcon={<DownloadIcon />}
-        onClick={() => downloadAsXLSX(orders, campaignId)}
+        onClick={async () => downloadAsXLSX(orders, campaignId)}
         variant="outlined"
       >
         XLSX
