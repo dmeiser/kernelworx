@@ -158,22 +158,6 @@ export function getDefaultPaymentMethodName(paymentMethods: PaymentMethodOption[
   return paymentMethods[0]?.name ?? '';
 }
 
-/**
- * Sets the default payment method when payment methods load.
- * Only sets default if no existing payment method is selected.
- */
-function setDefaultPaymentMethod(
-  paymentMethods: PaymentMethodOption[],
-  orderData: OrderData | undefined,
-  currentPaymentMethod: string,
-  setPaymentMethod: (value: string) => void,
-): void {
-  const shouldSetDefault = paymentMethods.length > 0 && !orderData && !currentPaymentMethod;
-  if (!shouldSetDefault) return;
-
-  setPaymentMethod(getDefaultPaymentMethodName(paymentMethods));
-}
-
 // ============================================================================
 // Input Builders
 // ============================================================================
@@ -920,7 +904,7 @@ export const OrderEditorPage: React.FC = () => {
     },
   });
 
-  const { loadFromOrder, paymentMethod, setPaymentMethod } = formState;
+  const { loadFromOrder, setPaymentMethod } = formState;
   const loadedOrderIdRef = useRef<string | undefined>(undefined);
 
   // Only load order data into the form when the order ID changes. Apollo can re-emit the same
@@ -937,10 +921,13 @@ export const OrderEditorPage: React.FC = () => {
     loadFromOrder(orderData);
   }, [orderData, loadFromOrder]);
 
-  // Set default payment method to "Cash" when payment methods load
+  // Set default payment method to "Cash" when payment methods load for a new order.
+  // Uses a functional update so a stale closure value cannot clobber a payment method
+  // that was already set from a loaded order or by the user.
   useEffect(() => {
-    setDefaultPaymentMethod(paymentMethods, orderData, paymentMethod, setPaymentMethod);
-  }, [paymentMethods, orderData, paymentMethod, setPaymentMethod]);
+    if (paymentMethods.length === 0 || orderData) return;
+    setPaymentMethod((current) => current || getDefaultPaymentMethodName(paymentMethods));
+  }, [paymentMethods, orderData, setPaymentMethod]);
 
   const handleCancel = () => navigate(urlParams.ordersUrl);
 
