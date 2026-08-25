@@ -446,18 +446,33 @@ def _is_valid_email_prefix(value: str) -> bool:
     return bool(re.match(email_prefix_pattern, value)) and len(value) <= 254
 
 
+_COGNITO_FILTER_METACHARS = frozenset('"\\')
+
+
+def _reject_cognito_filter_metachars(value: str, field_label: str) -> None:
+    """Reject characters that can break a Cognito ListUsers filter literal.
+
+    Cognito filters are double-quoted and use backslash as the escape
+    character for inner double quotes. A value containing a quote or a
+    trailing backslash can escape the terminating quote and break the
+    filter. Reject double quotes, backslashes, and whitespace consistently
+    for any value that will be interpolated into a filter.
+    """
+    if any(ch in _COGNITO_FILTER_METACHARS for ch in value):
+        raise AppError(ErrorCode.INVALID_INPUT, f"Invalid {field_label}")
+    if any(ch.isspace() for ch in value):
+        raise AppError(ErrorCode.INVALID_INPUT, f"Invalid {field_label}")
+
+
 def _validate_email_for_filter(email: str) -> None:
     """Validate an email before interpolating it into a Cognito ListUsers filter.
 
-    Cognito filters are double-quoted, so an email containing a double quote
-    could break the filter or match unintended users. Reject any email that
-    contains a double quote or whitespace, and require a basic local@domain
-    shape. See issue #124.
+    Reject Cognito filter metacharacters (double quotes, backslashes,
+    whitespace) and require a basic local@domain shape. See issue #124.
     """
     if not email or len(email) > 254:
         raise AppError(ErrorCode.INVALID_INPUT, "Email is required")
-    if '"' in email or any(ch.isspace() for ch in email):
-        raise AppError(ErrorCode.INVALID_INPUT, "Invalid email")
+    _reject_cognito_filter_metachars(email, "email")
     if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
         raise AppError(ErrorCode.INVALID_INPUT, "Invalid email")
 
@@ -465,14 +480,12 @@ def _validate_email_for_filter(email: str) -> None:
 def _validate_sub_for_filter(sub: str) -> None:
     """Validate a sub/account ID before interpolating it into a Cognito filter.
 
-    Cognito filters are double-quoted, so a value containing a double quote
-    could break the filter or match unintended users. Reject any sub that
-    contains a double quote or whitespace. See issue #124.
+    Reject Cognito filter metacharacters (double quotes, backslashes,
+    whitespace). See issue #124.
     """
     if not sub or len(sub) > 256:
         raise AppError(ErrorCode.INVALID_INPUT, "Account ID is required")
-    if '"' in sub or any(ch.isspace() for ch in sub):
-        raise AppError(ErrorCode.INVALID_INPUT, "Invalid account ID")
+    _reject_cognito_filter_metachars(sub, "account ID")
 
 
 def _validate_search_query(query: str) -> None:

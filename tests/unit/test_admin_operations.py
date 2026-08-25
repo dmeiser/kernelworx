@@ -1203,6 +1203,31 @@ class TestAdminResetUserPassword:
             assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
             mock_cognito.list_users.assert_not_called()
 
+    def test_email_with_backslash_rejected_before_filter(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """An email containing a backslash must be rejected before reaching Cognito (#124)."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+
+        event = {
+            **admin_appsync_event,
+            "arguments": {"email": "evil\\@example.com\\"},
+        }
+
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+            mock_cognito = MagicMock()
+            mock_get_client.return_value = mock_cognito
+
+            with pytest.raises(AppError) as exc_info:
+                admin_reset_user_password(event, lambda_context)
+
+            assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+            mock_cognito.list_users.assert_not_called()
+
     def test_malformed_email_rejected_before_filter(
         self,
         dynamodb_table: Any,
@@ -1592,6 +1617,32 @@ class TestAdminDeleteUser:
         event = {
             **admin_appsync_event,
             "arguments": {"accountId": 'other"user'},
+        }
+
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+            mock_cognito = MagicMock()
+            mock_get_client.return_value = mock_cognito
+
+            with pytest.raises(AppError) as exc_info:
+                admin_delete_user(event, lambda_context)
+
+            assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+            mock_cognito.list_users.assert_not_called()
+
+    def test_account_id_with_backslash_rejected_before_cognito(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        sample_account_id: str,
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """A backslash-containing accountId is rejected before the Cognito sub filter (#124)."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+
+        event = {
+            **admin_appsync_event,
+            "arguments": {"accountId": "other\\user\\"},
         }
 
         with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
