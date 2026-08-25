@@ -1128,15 +1128,53 @@ class TestDynamoDBClient:
 class TestDeleteCampaignOrders:
     """Tests for delete_campaign_orders Lambda handler."""
 
+    _OWNER_SUB = "owner-sub-001"
+
+    @staticmethod
+    def _seed_owned_campaign(
+        profiles_table: Any,
+        campaigns_table: Any,
+        profile_id: str,
+        campaign_id: str,
+        owner_sub: str,
+    ) -> None:
+        """Seed a profile owned by owner_sub and a campaign on that profile."""
+        profiles_table.put_item(
+            Item={
+                "ownerAccountId": f"ACCOUNT#{owner_sub}",
+                "profileId": profile_id,
+                "profileName": f"Profile {profile_id}",
+            }
+        )
+        campaigns_table.put_item(
+            Item={
+                "profileId": profile_id,
+                "campaignId": campaign_id,
+                "campaignName": "Test Campaign",
+                "campaignYear": 2024,
+            }
+        )
+
+    @staticmethod
+    def _event(campaign_id: str, caller_sub: str) -> Dict[str, Any]:
+        return {
+            "arguments": {"campaignId": campaign_id},
+            "identity": {"sub": caller_sub},
+        }
+
     def test_delete_campaign_orders_success(
         self,
         orders_table: Any,
+        campaigns_table: Any,
+        profiles_table: Any,
         lambda_context: Any,
     ) -> None:
-        """Test deleting all orders for a campaign."""
+        """Test deleting all orders for a campaign owned by the caller."""
         from src.handlers.campaign_operations import delete_campaign_orders
 
         campaign_id = "CAMPAIGN#campaign-123"
+        profile_id = "PROFILE#profile-123"
+        self._seed_owned_campaign(profiles_table, campaigns_table, profile_id, campaign_id, self._OWNER_SUB)
         for i in range(5):
             orders_table.put_item(
                 Item={
@@ -1147,8 +1185,7 @@ class TestDeleteCampaignOrders:
                 }
             )
 
-        event = {"arguments": {"campaignId": campaign_id}}
-        result = delete_campaign_orders(event, lambda_context)
+        result = delete_campaign_orders(self._event(campaign_id, self._OWNER_SUB), lambda_context)
 
         assert result == {"deletedCount": 5}
         remaining = orders_table.query(
@@ -1160,12 +1197,16 @@ class TestDeleteCampaignOrders:
     def test_delete_campaign_orders_chunks_batches(
         self,
         orders_table: Any,
+        campaigns_table: Any,
+        profiles_table: Any,
         lambda_context: Any,
     ) -> None:
         """Test deleting more than 25 orders chunks deletes into batches."""
         from src.handlers.campaign_operations import delete_campaign_orders
 
         campaign_id = "CAMPAIGN#campaign-many"
+        profile_id = "PROFILE#profile-many"
+        self._seed_owned_campaign(profiles_table, campaigns_table, profile_id, campaign_id, self._OWNER_SUB)
         for i in range(30):
             orders_table.put_item(
                 Item={
@@ -1176,8 +1217,7 @@ class TestDeleteCampaignOrders:
                 }
             )
 
-        event = {"arguments": {"campaignId": campaign_id}}
-        result = delete_campaign_orders(event, lambda_context)
+        result = delete_campaign_orders(self._event(campaign_id, self._OWNER_SUB), lambda_context)
 
         assert result == {"deletedCount": 30}
         remaining = orders_table.query(
@@ -1188,27 +1228,34 @@ class TestDeleteCampaignOrders:
 
     def test_delete_campaign_orders_empty(
         self,
-        orders_table: Any,
+        campaigns_table: Any,
+        profiles_table: Any,
         lambda_context: Any,
     ) -> None:
         """Test deleting orders for a campaign with no orders."""
         from src.handlers.campaign_operations import delete_campaign_orders
 
         campaign_id = "CAMPAIGN#campaign-empty"
-        event = {"arguments": {"campaignId": campaign_id}}
-        result = delete_campaign_orders(event, lambda_context)
+        profile_id = "PROFILE#profile-empty"
+        self._seed_owned_campaign(profiles_table, campaigns_table, profile_id, campaign_id, self._OWNER_SUB)
+
+        result = delete_campaign_orders(self._event(campaign_id, self._OWNER_SUB), lambda_context)
 
         assert result == {"deletedCount": 0}
 
     def test_delete_campaign_orders_unprefixed_id(
         self,
         orders_table: Any,
+        campaigns_table: Any,
+        profiles_table: Any,
         lambda_context: Any,
     ) -> None:
         """Test that an unprefixed campaignId is normalized."""
         from src.handlers.campaign_operations import delete_campaign_orders
 
         campaign_id = "CAMPAIGN#campaign-raw"
+        profile_id = "PROFILE#profile-raw"
+        self._seed_owned_campaign(profiles_table, campaigns_table, profile_id, campaign_id, self._OWNER_SUB)
         orders_table.put_item(
             Item={
                 "campaignId": campaign_id,
@@ -1218,8 +1265,7 @@ class TestDeleteCampaignOrders:
             }
         )
 
-        event = {"arguments": {"campaignId": "campaign-raw"}}
-        result = delete_campaign_orders(event, lambda_context)
+        result = delete_campaign_orders(self._event("campaign-raw", self._OWNER_SUB), lambda_context)
 
         assert result == {"deletedCount": 1}
 
@@ -1230,15 +1276,99 @@ class TestDeleteCampaignOrders:
         """Test that missing campaignId raises an error."""
         from src.handlers.campaign_operations import delete_campaign_orders
 
-        event = {"arguments": {}}
+        event = {"arguments": {}, "identity": {"sub": self._OWNER_SUB}}
         with pytest.raises(AppError) as exc_info:
             delete_campaign_orders(event, lambda_context)
 
         assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
 
+    def test_delete_campaign_orders_missing_identity(
+        self,
+        campaigns_table: Any,
+        profiles_table: Any,
+        lambda_context: Any,
+    ) -> None:
+        """Test that missing caller identity raises UNAUTHORIZED."""
+        from src.handlers.campaign_operations import delete_campaign_orders
+
+        campaign_id = "CAMPAIGN#no-identity"
+        profile_id = "PROFILE#no-identity"
+        self._seed_owned_campaign(profiles_table, campaigns_table, profile_id, campaign_id, self._OWNER_SUB)
+
+        with pytest.raises(AppError) as exc_info:
+            delete_campaign_orders({"arguments": {"campaignId": campaign_id}}, lambda_context)
+
+        assert exc_info.value.error_code == ErrorCode.UNAUTHORIZED
+
+    def test_delete_campaign_orders_campaign_not_found(
+        self,
+        campaigns_table: Any,
+        lambda_context: Any,
+    ) -> None:
+        """Test that deleting a nonexistent campaign raises NOT_FOUND."""
+        from src.handlers.campaign_operations import delete_campaign_orders
+
+        with pytest.raises(AppError) as exc_info:
+            delete_campaign_orders(
+                self._event("CAMPAIGN#ghost", self._OWNER_SUB), lambda_context
+            )
+
+        assert exc_info.value.error_code == ErrorCode.NOT_FOUND
+
+    def test_delete_campaign_orders_campaign_missing_profile_id(
+        self,
+        lambda_context: Any,
+    ) -> None:
+        """Test that a campaign row with no profileId raises NOT_FOUND."""
+        from src.handlers.campaign_operations import delete_campaign_orders
+
+        campaign_id = "CAMPAIGN#no-profile"
+        with patch(
+            "src.handlers.campaign_operations._get_campaign_by_id",
+            return_value={"campaignId": campaign_id, "campaignName": "Orphan"},
+        ):
+            with pytest.raises(AppError) as exc_info:
+                delete_campaign_orders(self._event(campaign_id, self._OWNER_SUB), lambda_context)
+
+        assert exc_info.value.error_code == ErrorCode.NOT_FOUND
+
+    def test_delete_campaign_orders_denied_non_owner(
+        self,
+        orders_table: Any,
+        campaigns_table: Any,
+        profiles_table: Any,
+        lambda_context: Any,
+    ) -> None:
+        """Test that a non-owner caller without a WRITE share is denied."""
+        from src.handlers.campaign_operations import delete_campaign_orders
+
+        campaign_id = "CAMPAIGN#owned-by-other"
+        profile_id = "PROFILE#owned-by-other"
+        self._seed_owned_campaign(profiles_table, campaigns_table, profile_id, campaign_id, self._OWNER_SUB)
+        orders_table.put_item(
+            Item={
+                "campaignId": campaign_id,
+                "orderId": "ORDER#1",
+                "customerName": "Customer",
+                "totalAmount": Decimal("10.0"),
+            }
+        )
+
+        with pytest.raises(AppError) as exc_info:
+            delete_campaign_orders(self._event(campaign_id, "intruder-sub"), lambda_context)
+
+        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
+        remaining = orders_table.query(
+            KeyConditionExpression="campaignId = :cid",
+            ExpressionAttributeValues={":cid": campaign_id},
+        )
+        assert len(remaining.get("Items", [])) == 1
+
     def test_delete_campaign_orders_only_targets_requested_campaign(
         self,
         orders_table: Any,
+        campaigns_table: Any,
+        profiles_table: Any,
         lambda_context: Any,
     ) -> None:
         """Test that orders for other campaigns are not deleted."""
@@ -1246,6 +1376,10 @@ class TestDeleteCampaignOrders:
 
         target_campaign = "CAMPAIGN#target"
         other_campaign = "CAMPAIGN#other"
+        target_profile = "PROFILE#target"
+        other_profile = "PROFILE#other"
+        self._seed_owned_campaign(profiles_table, campaigns_table, target_profile, target_campaign, self._OWNER_SUB)
+        self._seed_owned_campaign(profiles_table, campaigns_table, other_profile, other_campaign, self._OWNER_SUB)
 
         orders_table.put_item(
             Item={
@@ -1264,8 +1398,7 @@ class TestDeleteCampaignOrders:
             }
         )
 
-        event = {"arguments": {"campaignId": target_campaign}}
-        result = delete_campaign_orders(event, lambda_context)
+        result = delete_campaign_orders(self._event(target_campaign, self._OWNER_SUB), lambda_context)
 
         assert result == {"deletedCount": 1}
         assert (
@@ -1277,13 +1410,17 @@ class TestDeleteCampaignOrders:
 
     def test_delete_campaign_orders_unexpected_error(
         self,
+        campaigns_table: Any,
+        profiles_table: Any,
         lambda_context: Any,
     ) -> None:
         """Test that unexpected errors are wrapped in an INTERNAL_ERROR AppError."""
         from src.handlers.admin_operations import AppError, ErrorCode
         from src.handlers.campaign_operations import delete_campaign_orders
 
-        event = {"arguments": {"campaignId": "CAMPAIGN#any"}}
+        campaign_id = "CAMPAIGN#any"
+        profile_id = "PROFILE#any"
+        self._seed_owned_campaign(profiles_table, campaigns_table, profile_id, campaign_id, self._OWNER_SUB)
 
         with patch(
             "src.handlers.campaign_operations._delete_orders_for_campaign"
@@ -1291,7 +1428,7 @@ class TestDeleteCampaignOrders:
             mock_delete.side_effect = RuntimeError("unexpected failure")
 
             with pytest.raises(AppError) as exc_info:
-                delete_campaign_orders(event, lambda_context)
+                delete_campaign_orders(self._event(campaign_id, self._OWNER_SUB), lambda_context)
 
             assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
             assert "Failed to delete campaign orders" in exc_info.value.message
