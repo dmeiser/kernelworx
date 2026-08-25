@@ -2,7 +2,7 @@
  * OrderEditorPage - Page for creating or editing an order
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation } from '@apollo/client/react';
 import {
@@ -923,11 +923,16 @@ export const OrderEditorPage: React.FC = () => {
   });
 
   const { loadFromOrder, paymentMethod, setPaymentMethod } = formState;
+  const loadedOrderIdRef = useRef<string | undefined>(undefined);
 
   useEffect(() => {
     if (!orderData) {
       return;
     }
+    if (loadedOrderIdRef.current === orderData.orderId) {
+      return;
+    }
+    loadedOrderIdRef.current = orderData.orderId;
     loadFromOrder(orderData);
   }, [orderData, loadFromOrder]);
 

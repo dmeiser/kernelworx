@@ -8,6 +8,9 @@ import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MockedProvider } from '@apollo/client/testing/react';
 import type { MockedResponse } from '@apollo/client/testing';
+import { MockLink } from '@apollo/client/testing';
+import { ApolloClient, InMemoryCache } from '@apollo/client';
+import { ApolloProvider } from '@apollo/client/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import {
   GET_CAMPAIGN,
@@ -202,6 +205,25 @@ function renderEditOrder(mocks: MockedResponse[]) {
       </MemoryRouter>
     </MockedProvider>,
   );
+}
+
+function renderEditOrderWithClient(mocks: MockedResponse[]) {
+  const path = `/scouts/${encodeURIComponent(PROFILE_RAW)}/campaigns/${encodeURIComponent(CAMPAIGN_RAW)}/orders/${encodeURIComponent(ORDER_RAW)}/edit`;
+  const link = new MockLink(mocks);
+  const cache = new InMemoryCache();
+  const client = new ApolloClient({ link, cache });
+  return {
+    client,
+    ...render(
+      <ApolloProvider client={client}>
+        <MemoryRouter initialEntries={[path]}>
+          <Routes>
+            <Route path="/scouts/:profileId/campaigns/:campaignId/orders/:orderId/edit" element={<OrderEditorPage />} />
+          </Routes>
+        </MemoryRouter>
+      </ApolloProvider>,
+    ),
+  };
 }
 
 describe('OrderEditorPage - Create Order', () => {
@@ -842,6 +864,37 @@ describe('OrderEditorPage - Edit Order', () => {
     expect(screen.getByDisplayValue('555-987-6543')).toBeInTheDocument();
     expect(screen.getByDisplayValue('Springfield')).toBeInTheDocument();
   }, 15000);
+
+  test('preserves user edits when Apollo cache re-emits the same order', async () => {
+    const { client } = renderEditOrderWithClient(editMocks());
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: /edit order/i })).toBeInTheDocument();
+    }, { timeout: 10000 });
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('Jane Smith')).toBeInTheDocument();
+    }, { timeout: 5000 });
+
+    fireEvent.change(screen.getByLabelText(/Customer Name/i), { target: { value: 'Edited Name' } });
+    expect(screen.getByDisplayValue('Edited Name')).toBeInTheDocument();
+
+    // Simulate an Apollo cache re-emit with a new object identity for the same order
+    client.cache.writeQuery({
+      query: GET_ORDER,
+      variables: { orderId: ORDER_DB },
+      data: {
+        getOrder: {
+          ...mockExistingOrder.getOrder,
+        },
+      },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('Edited Name')).toBeInTheDocument();
+    }, { timeout: 3000 });
+    expect(screen.queryByDisplayValue('Jane Smith')).not.toBeInTheDocument();
+  }, 20000);
 
   test('renders Update Order button for edit mode', async () => {
     renderEditOrder(editMocks());
