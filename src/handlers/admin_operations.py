@@ -1496,17 +1496,6 @@ def _get_campaign_profile_id(db_campaign_id: str, campaign_id: str) -> str:
     return str(items[0]["profileId"])
 
 
-def _get_campaign_by_primary_key(profile_id: str, db_campaign_id: str) -> Dict[str, Any]:
-    """Fetch a campaign directly from the base table by its primary key."""
-    response = tables.campaigns.get_item(
-        Key={"profileId": profile_id, "campaignId": db_campaign_id},
-        ConsistentRead=True,
-    )
-    item = response.get("Item")
-    if not item:
-        raise AppError(ErrorCode.NOT_FOUND, f"Campaign not found: {db_campaign_id}")
-    return cast(Dict[str, Any], item)
-
 
 def _update_campaign_shared_code(profile_id: str, db_campaign_id: str, shared_campaign_code: Optional[str]) -> Dict[str, Any]:
     """Update campaign's sharedCampaignCode field and return the stored item."""
