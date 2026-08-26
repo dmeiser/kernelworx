@@ -88,7 +88,7 @@ tofu plan -input=false -out="$PLAN_FILE" "${EXTRA_TOFU_ARGS[@]}"
 # The jq query selects resource_changes where type is aws_appsync_function and
 # the actions array contains "delete".
 deletions=$(tofu show -json "$PLAN_FILE" 2>/dev/null | \
-  jq -r '.resource_changes[]? | select(.type == "aws_appsync_function" and (.change.actions | index("delete"))) | .address' || true)
+  jq -r '.resource_changes[]? | select(.type == "aws_appsync_function" and (.change.actions | index("delete"))) | .address')
 
 if [ -z "$deletions" ]; then
   log "   No AppSync function deletions planned; resolver ordering guard not needed."
