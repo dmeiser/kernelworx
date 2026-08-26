@@ -813,7 +813,12 @@ def admin_delete_user(event: Dict[str, Any], context: Any) -> bool:
 
 
 def _validate_and_process_product(product: Dict[str, Any]) -> Dict[str, Any]:
-    """Validate and process a catalog product, returning processed product dict."""
+    """Validate and process a catalog product, returning processed product dict.
+
+    Price may arrive as a number or a numeric string (e.g. from AppSync JSON
+    deserialization); it is converted to Decimal before validation and storage.
+    Non-numeric or unparseable values raise INVALID_INPUT.
+    """
     product_name = product.get("productName", "").strip()
     price = product.get("price")
     sort_order = product.get("sortOrder", 0)
@@ -825,7 +830,7 @@ def _validate_and_process_product(product: Dict[str, Any]) -> Dict[str, Any]:
 
     try:
         price_decimal = Decimal(str(price))
-    except (InvalidOperation, ValueError, TypeError):
+    except InvalidOperation, ValueError, TypeError:
         raise AppError(ErrorCode.INVALID_INPUT, "Product price must be a valid number")
 
     if price_decimal < 0:
