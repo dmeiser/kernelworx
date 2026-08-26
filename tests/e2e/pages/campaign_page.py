@@ -277,9 +277,14 @@ class CampaignPage(BasePage):
             timeout: Maximum wait in milliseconds. Defaults to 10 000.
         """
         active_heading = self.page.get_by_role("heading", name="Active Campaigns").first
-        # Fall back to the whole page when the active section heading is not rendered
-        # (e.g. when there are no inactive campaigns).
-        scope = active_heading.locator("xpath=..") if active_heading.is_visible() else self.page
+        # When there are no active campaigns the heading is not rendered. In that
+        # case the campaign cannot be in the active list, so return False instead
+        # of falling back to the whole page and matching the inactive section.
+        try:
+            active_heading.wait_for(state="visible", timeout=timeout)
+        except PlaywrightTimeoutError:
+            return False
+        scope = active_heading.locator("xpath=..")
         heading = scope.locator(self._CAMPAIGN_HEADING_SEL, has_text=name)
         try:
             heading.first.wait_for(state="visible", timeout=timeout)
