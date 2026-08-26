@@ -13,14 +13,67 @@ function normalizeCatalogId(catalogId) {
         : 'CATALOG#' + catalogId;
 }
 
+function hasUnitUpdate(input) {
+    return (
+        input.unitType !== undefined ||
+        input.unitNumber !== undefined ||
+        input.city !== undefined ||
+        input.state !== undefined
+    );
+}
+
+function validateUnitUpdate(input, campaign) {
+    if (!hasUnitUpdate(input)) {
+        return;
+    }
+
+    if (campaign.sharedCampaignCode) {
+        util.error('Unit information cannot be changed for campaigns created from a shared campaign link.', 'InvalidInput');
+        return;
+    }
+
+    const unitType = input.unitType !== undefined ? input.unitType : campaign.unitType;
+    const unitNumber = input.unitNumber !== undefined ? input.unitNumber : campaign.unitNumber;
+    const city = input.city !== undefined ? input.city : campaign.city;
+    const state = input.state !== undefined ? input.state : campaign.state;
+
+    if (unitType) {
+        if (unitNumber === undefined || unitNumber === null || unitNumber === '') {
+            util.error('unitNumber is required when unitType is provided', 'InvalidInput');
+            return;
+        }
+        if (!city) {
+            util.error('city is required when unitType is provided', 'InvalidInput');
+            return;
+        }
+        if (!state) {
+            util.error('state is required when unitType is provided', 'InvalidInput');
+            return;
+        }
+    }
+}
+
+function getUpdatedUnitField(input, campaign, field) {
+    return input[field] !== undefined ? input[field] : campaign[field];
+}
+
 export function request(ctx) {
     const campaign = ctx.stash.campaign;
     const input = ctx.args.input || ctx.args;
+
+    validateUnitUpdate(input, campaign);
 
     // Build update expression dynamically
     const updates = [];
     const exprValues = {};
     const exprNames = {};
+
+    const unitType = getUpdatedUnitField(input, campaign, 'unitType');
+    const unitNumber = getUpdatedUnitField(input, campaign, 'unitNumber');
+    const city = getUpdatedUnitField(input, campaign, 'city');
+    const state = getUpdatedUnitField(input, campaign, 'state');
+    const campaignName = getUpdatedUnitField(input, campaign, 'campaignName');
+    const campaignYear = getUpdatedUnitField(input, campaign, 'campaignYear');
 
     if (input.campaignName !== undefined) {
         updates.push('campaignName = :campaignName');
@@ -46,6 +99,45 @@ export function request(ctx) {
     if (input.isActive !== undefined) {
         updates.push('isActive = :isActive');
         exprValues[':isActive'] = input.isActive;
+    }
+    if (input.unitType !== undefined) {
+        updates.push('unitType = :unitType');
+        exprValues[':unitType'] = input.unitType;
+    }
+    if (input.unitNumber !== undefined) {
+        updates.push('unitNumber = :unitNumber');
+        exprValues[':unitNumber'] = input.unitNumber;
+    }
+    if (input.city !== undefined) {
+        updates.push('city = :city');
+        exprValues[':city'] = input.city;
+    }
+    if (input.state !== undefined) {
+        updates.push('state = :state');
+        exprValues[':state'] = input.state;
+    }
+
+    // Recompute unitCampaignKey whenever unit fields, name, or year change and unit info is present
+    if (
+        (input.campaignName !== undefined ||
+            input.campaignYear !== undefined ||
+            hasUnitUpdate(input)) &&
+        unitType &&
+        unitNumber !== undefined &&
+        unitNumber !== null &&
+        city &&
+        state
+    ) {
+        const newKey = buildUnitCampaignKey(
+            unitType,
+            unitNumber,
+            city,
+            state,
+            campaignName,
+            campaignYear,
+        );
+        updates.push('unitCampaignKey = :unitCampaignKey');
+        exprValues[':unitCampaignKey'] = newKey;
     }
 
     // Recompute unitCampaignKey whenever any of its components change so unit
@@ -150,6 +242,42 @@ export function response(ctx) {
     }
     if (input.isActive !== undefined) {
         result.isActive = input.isActive;
+    }
+    if (input.unitType !== undefined) {
+        result.unitType = input.unitType;
+    }
+    if (input.unitNumber !== undefined) {
+        result.unitNumber = input.unitNumber;
+    }
+    if (input.city !== undefined) {
+        result.city = input.city;
+    }
+    if (input.state !== undefined) {
+        result.state = input.state;
+    }
+
+    // Mirror the unitCampaignKey recomputation from request()
+    const unitType = result.unitType;
+    const unitNumber = result.unitNumber;
+    const city = result.city;
+    const state = result.state;
+    const campaignName = result.campaignName;
+    const campaignYear = result.campaignYear;
+    if (
+        unitType &&
+        unitNumber !== undefined &&
+        unitNumber !== null &&
+        city &&
+        state
+    ) {
+        result.unitCampaignKey = buildUnitCampaignKey(
+            unitType,
+            unitNumber,
+            city,
+            state,
+            campaignName,
+            campaignYear,
+        );
     }
 
     // Mirror the unitCampaignKey recomputation from request(): whenever any

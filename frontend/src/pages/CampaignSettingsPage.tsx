@@ -35,6 +35,7 @@ import {
 } from '../lib/graphql';
 import { LoadingState } from '../components/LoadingState';
 import { ConfirmDialog } from '../components/ConfirmDialog';
+import { UnitInfoSection } from '../components/UnitInfoSection';
 import { ensureCampaignId, ensureCatalogId, ensureProfileId, toUrlId } from '../lib/ids';
 import { dateToISO } from '../lib/date-utils';
 import type { Campaign, Catalog } from '../types';
@@ -57,14 +58,45 @@ const getMyCatalogs = (data: { listMyCatalogs?: Catalog[] } | undefined): Catalo
 const getCampaign = (data: { getCampaign: Campaign } | undefined): Campaign | undefined => data?.getCampaign;
 
 // Helper to check if unit-related fields have changed
-const hasUnitFieldsChanged = (campaign: Campaign | undefined, formName: string, formCatalog: string): boolean => {
-  if (!campaign?.sharedCampaignCode) return false;
-  return formName !== campaign.campaignName || formCatalog !== campaign.catalogId;
+const hasUnitFieldsChanged = (
+  campaign: Campaign | undefined,
+  formName: string,
+  formCatalog: string,
+  formUnitType: string,
+  formUnitNumber: string,
+  formCity: string,
+  formState: string,
+): boolean => {
+  if (!campaign) return false;
+  const baseChanged = formName !== campaign.campaignName || formCatalog !== campaign.catalogId;
+  const unitChanged =
+    formUnitType !== (campaign.unitType ?? '') ||
+    formUnitNumber !== String(campaign.unitNumber ?? '') ||
+    formCity !== (campaign.city ?? '') ||
+    formState !== (campaign.state ?? '');
+  if (campaign.sharedCampaignCode) {
+    return baseChanged;
+  }
+  return baseChanged || unitChanged;
 };
 
 // Helper to validate save inputs
 const canSave = (campaignId: string, campaignName: string, catalogId: string): boolean =>
   Boolean(campaignId && campaignName.trim() && catalogId);
+
+// Helper to validate unit fields when a unit type is selected
+const validateUnitFields = (
+  unitType: string,
+  unitNumber: string,
+  city: string,
+  state: string,
+): string | null => {
+  if (!unitType) return null;
+  if (!unitNumber || Number(unitNumber) < 1) return 'Unit number is required when unit type is selected';
+  if (!city.trim()) return 'City is required when unit type is selected';
+  if (!state.trim()) return 'State is required when unit type is selected';
+  return null;
+};
 
 // Helper to build update input
 const buildUpdateInput = (
@@ -74,8 +106,12 @@ const buildUpdateInput = (
   endDate: string,
   catalogId: string,
   isActive: boolean,
-): Record<string, string | boolean> => {
-  const input: Record<string, string | boolean> = {
+  unitType: string,
+  unitNumber: string,
+  city: string,
+  state: string,
+): Record<string, string | boolean | number | null> => {
+  const input: Record<string, string | boolean | number | null> = {
     campaignId: dbCampaignId,
     campaignName: campaignName.trim(),
     catalogId: ensureCatalogId(catalogId) ?? catalogId,
@@ -88,6 +124,20 @@ const buildUpdateInput = (
   }
   if (endDate && endDate.trim() !== '') {
     input.endDate = dateToISO(endDate);
+  }
+
+  // Include unit fields only when a unit type is selected
+  if (unitType) {
+    input.unitType = unitType;
+    input.unitNumber = Number(unitNumber);
+    input.city = city.trim();
+    input.state = state.trim();
+  } else {
+    // Explicitly clear unit fields when no unit type is selected
+    input.unitType = null;
+    input.unitNumber = null;
+    input.city = null;
+    input.state = null;
   }
 
   return input;
@@ -105,7 +155,8 @@ const hasSharedCampaignCode = (campaign: Campaign | undefined): boolean => Boole
 type SaveAction = 'confirm' | 'save';
 
 // Helper to determine save action based on changes
-const getSaveAction = (hasUnitRelatedChanges: boolean): SaveAction => (hasUnitRelatedChanges ? 'confirm' : 'save');
+const getSaveAction = (hasUnitRelatedChanges: boolean, isShared: boolean): SaveAction =>
+  hasUnitRelatedChanges && isShared ? 'confirm' : 'save';
 
 // Helper to conditionally update campaign
 const maybeUpdateCampaign = async (
@@ -152,6 +203,10 @@ const checkFormChanges = (
   formEnd: string,
   formCatalog: string,
   formIsActive: boolean,
+  formUnitType: string,
+  formUnitNumber: string,
+  formCity: string,
+  formState: string,
   campaign: Campaign | undefined,
 ): boolean => {
   if (!campaign) return false;
@@ -162,7 +217,11 @@ const checkFormChanges = (
     formStart !== origStart ||
     formEnd !== origEnd ||
     formCatalog !== campaign.catalogId ||
-    formIsActive !== campaign.isActive
+    formIsActive !== campaign.isActive ||
+    formUnitType !== (campaign.unitType ?? '') ||
+    formUnitNumber !== String(campaign.unitNumber ?? '') ||
+    formCity !== (campaign.city ?? '') ||
+    formState !== (campaign.state ?? '')
   );
 };
 
@@ -178,6 +237,11 @@ const initializeFormFromCampaign = (
   setEndDate: (v: string) => void,
   setCatalogId: (v: string) => void,
   setIsActive: (v: boolean) => void,
+  setUnitType: (v: string) => void,
+  setUnitNumber: (v: string) => void,
+  setCity: (v: string) => void,
+  setState: (v: string) => void,
+  setUnitExpanded: (v: boolean) => void,
 ): void => {
   if (campaign) {
     setCampaignName(campaign.campaignName);
@@ -185,6 +249,11 @@ const initializeFormFromCampaign = (
     setEndDate(extractDatePart(campaign.endDate));
     setCatalogId(campaign.catalogId);
     setIsActive(campaign.isActive ?? true);
+    setUnitType(campaign.unitType ?? '');
+    setUnitNumber(campaign.unitNumber !== undefined && campaign.unitNumber !== null ? String(campaign.unitNumber) : '');
+    setCity(campaign.city ?? '');
+    setState(campaign.state ?? '');
+    setUnitExpanded(Boolean(campaign.unitType));
   }
 };
 
@@ -203,6 +272,11 @@ export const CampaignSettingsPage: React.FC = () => {
   const [endDate, setEndDate] = useState('');
   const [catalogId, setCatalogId] = useState('');
   const [isActive, setIsActive] = useState(true);
+  const [unitType, setUnitType] = useState('');
+  const [unitNumber, setUnitNumber] = useState('');
+  const [city, setCity] = useState('');
+  const [state, setState] = useState('');
+  const [unitExpanded, setUnitExpanded] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [unitChangeConfirmOpen, setUnitChangeConfirmOpen] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -239,7 +313,19 @@ export const CampaignSettingsPage: React.FC = () => {
   // Initialize form when campaign loads
   React.useEffect(() => {
     const c = getCampaign(campaignData);
-    initializeFormFromCampaign(c, setCampaignName, setStartDate, setEndDate, setCatalogId, setIsActive);
+    initializeFormFromCampaign(
+      c,
+      setCampaignName,
+      setStartDate,
+      setEndDate,
+      setCatalogId,
+      setIsActive,
+      setUnitType,
+      setUnitNumber,
+      setCity,
+      setState,
+      setUnitExpanded,
+    );
   }, [campaignData]);
 
   // Update campaign mutation
@@ -259,11 +345,19 @@ export const CampaignSettingsPage: React.FC = () => {
 
   const campaign = getCampaign(campaignData);
 
-  // Check if unit-related fields have changed (campaignName, catalogId)
-  const hasUnitRelatedChanges = hasUnitFieldsChanged(campaign, campaignName, catalogId);
+  // Check if unit-related fields have changed (campaignName, catalogId, or unit fields)
+  const hasUnitRelatedChanges = hasUnitFieldsChanged(
+    campaign,
+    campaignName,
+    catalogId,
+    unitType,
+    unitNumber,
+    city,
+    state,
+  );
 
   const handleSaveClick = () => {
-    const action = getSaveAction(hasUnitRelatedChanges);
+    const action = getSaveAction(hasUnitRelatedChanges, hasSharedCampaignCode(campaign));
     const actions: Record<SaveAction, () => void> = {
       confirm: () => setUnitChangeConfirmOpen(true),
       save: () => {
@@ -275,12 +369,29 @@ export const CampaignSettingsPage: React.FC = () => {
 
   const handleSaveChanges = async () => {
     setSaveError(null);
+    const unitError = validateUnitFields(unitType, unitNumber, city, state);
+    if (unitError) {
+      setSaveError(unitError);
+      setUnitChangeConfirmOpen(false);
+      return;
+    }
     const isValid = canSave(campaignId, campaignName, catalogId);
     // Save button is disabled when dbCampaignId is missing
     /* v8 ignore start */
     if (!dbCampaignId) return;
     /* v8 ignore stop */
-    const input = buildUpdateInput(dbCampaignId, campaignName, startDate, endDate, catalogId, isActive);
+    const input = buildUpdateInput(
+      dbCampaignId,
+      campaignName,
+      startDate,
+      endDate,
+      catalogId,
+      isActive,
+      unitType,
+      unitNumber,
+      city,
+      state,
+    );
     try {
       await maybeUpdateCampaign(isValid, updateCampaign, input);
       setUnitChangeConfirmOpen(false);
@@ -308,7 +419,18 @@ export const CampaignSettingsPage: React.FC = () => {
     return <LoadingState minHeight="200px" />;
   }
 
-  const hasChanges = checkFormChanges(campaignName, startDate, endDate, catalogId, isActive, campaign);
+  const hasChanges = checkFormChanges(
+    campaignName,
+    startDate,
+    endDate,
+    catalogId,
+    isActive,
+    unitType,
+    unitNumber,
+    city,
+    state,
+    campaign,
+  );
 
   return (
     <Box>
@@ -389,6 +511,27 @@ export const CampaignSettingsPage: React.FC = () => {
             {updating ? 'Saving...' : 'Save Changes'}
           </Button>
         </Stack>
+      </Paper>
+
+      {/* Unit Information */}
+      <Paper sx={{ p: 3, mb: 3 }}>
+        <Typography variant="h6" gutterBottom>
+          Unit Information
+        </Typography>
+        <UnitInfoSection
+          unitType={unitType}
+          onUnitTypeChange={setUnitType}
+          unitNumber={unitNumber}
+          onUnitNumberChange={setUnitNumber}
+          city={city}
+          onCityChange={setCity}
+          state={state}
+          onStateChange={setState}
+          submitting={updating}
+          expanded={unitExpanded}
+          onExpandChange={setUnitExpanded}
+          readOnly={hasSharedCampaignCode(campaign)}
+        />
       </Paper>
 
       {/* Danger Zone */}
