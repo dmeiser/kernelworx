@@ -207,8 +207,8 @@ flowchart TD
 ### Find Unit's Campaign
 ```mermaid
 flowchart TD
-    A["Search Unit Campaign"] -->|unitType + unitNumber + city + state + year| B["Build unitCampaignKey"]
-    B -->|unitCampaignKey = Troop#123#Denver#CO#2025| C["Query CAMPAIGN unitCampaignKey-index"]
+    A["Search Unit Campaign"] -->|unitType + unitNumber + city + state + campaignName + campaignYear| B["Build unitCampaignKey"]
+    B -->|unitCampaignKey = Troop#123#Denver#CO#Fall#2025| C["Query CAMPAIGN unitCampaignKey-index"]
     C -->|Returns Campaign| D["Found!"]
 ```
 
