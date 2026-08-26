@@ -2,6 +2,7 @@
 
 import os
 import pathlib
+import time
 
 from playwright.sync_api import Locator, Page, expect
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
@@ -59,18 +60,33 @@ class BasePage:
     # ------------------------------------------------------------------
 
     def wait_for_loading(self, timeout: int = 15_000) -> None:
-        """Wait until all MUI CircularProgress spinners have disappeared.
+        """Wait until all MUI CircularProgress spinners have disappeared and remain hidden.
 
-        If no spinner is ever rendered the function returns immediately.
+        Lazy-loaded route components introduce an extra Suspense fallback
+        (CircularProgress) after auth state resolves.  A naïve "spinner hidden"
+        check can return in the brief gap between the auth spinner disappearing
+        and the route spinner appearing.  This helper polls until no spinner is
+        visible for a short grace period.
 
         Args:
             timeout: Maximum wait in milliseconds. Defaults to 15 000.
         """
         spinner = self.page.locator(self._SPINNER)
-        try:
-            spinner.first.wait_for(state="hidden", timeout=timeout)
-        except PlaywrightTimeoutError:
-            pass  # spinner never appeared — that is fine
+        deadline = time.monotonic() + timeout / 1000
+        while time.monotonic() < deadline:
+            try:
+                spinner.first.wait_for(state="hidden", timeout=500)
+            except PlaywrightTimeoutError:
+                # Spinner is still visible; keep polling.
+                continue
+            # Spinner disappeared.  Wait a short grace period to confirm React
+            # has not committed a new Suspense fallback before declaring loading
+            # complete.
+            self.page.wait_for_timeout(200)
+            if not spinner.first.is_visible():
+                return
+        # Timeout: loading spinner may still be visible, but proceed so the caller
+        # can fail with a meaningful assertion instead of hanging here.
 
     def wait_for_dialog(self, title: str, timeout: int = 5_000) -> Locator:
         """Wait for a MUI Dialog with the given title to become visible.
