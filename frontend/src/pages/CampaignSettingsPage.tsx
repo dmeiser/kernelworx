@@ -92,7 +92,8 @@ const validateUnitFields = (
   state: string,
 ): string | null => {
   if (!unitType) return null;
-  if (!unitNumber || Number(unitNumber) < 1) return 'Unit number is required when unit type is selected';
+  const unitNum = Number(unitNumber);
+  if (!unitNumber || !Number.isFinite(unitNum) || unitNum < 1) return 'Unit number is required when unit type is selected';
   if (!city.trim()) return 'City is required when unit type is selected';
   if (!state.trim()) return 'State is required when unit type is selected';
   return null;
@@ -110,6 +111,7 @@ const buildUpdateInput = (
   unitNumber: string,
   city: string,
   state: string,
+  campaign: Campaign | undefined,
 ): Record<string, string | boolean | number | null> => {
   const input: Record<string, string | boolean | number | null> = {
     campaignId: dbCampaignId,
@@ -126,18 +128,28 @@ const buildUpdateInput = (
     input.endDate = dateToISO(endDate);
   }
 
-  // Include unit fields only when a unit type is selected
-  if (unitType) {
-    input.unitType = unitType;
-    input.unitNumber = Number(unitNumber);
-    input.city = city.trim();
-    input.state = state.trim();
-  } else {
-    // Explicitly clear unit fields when no unit type is selected
-    input.unitType = null;
-    input.unitNumber = null;
-    input.city = null;
-    input.state = null;
+  // Only include unit fields for non-shared campaigns when they have actually changed
+  if (!campaign?.sharedCampaignCode) {
+    const unitChanged =
+      unitType !== (campaign?.unitType ?? '') ||
+      unitNumber !== String(campaign?.unitNumber ?? '') ||
+      city !== (campaign?.city ?? '') ||
+      state !== (campaign?.state ?? '');
+
+    if (unitChanged) {
+      if (unitType) {
+        input.unitType = unitType;
+        input.unitNumber = Number(unitNumber);
+        input.city = city.trim();
+        input.state = state.trim();
+      } else {
+        // Explicitly clear unit fields when no unit type is selected
+        input.unitType = null;
+        input.unitNumber = null;
+        input.city = null;
+        input.state = null;
+      }
+    }
   }
 
   return input;
@@ -391,6 +403,7 @@ export const CampaignSettingsPage: React.FC = () => {
       unitNumber,
       city,
       state,
+      campaign,
     );
     try {
       await maybeUpdateCampaign(isValid, updateCampaign, input);
