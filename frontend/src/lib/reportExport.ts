@@ -2,7 +2,6 @@
  * Report export utilities for generating CSV/XLSX files from order data
  */
 
-
 interface LineItem {
   productId: string;
   productName: string;

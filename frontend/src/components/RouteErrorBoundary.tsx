@@ -18,10 +18,7 @@ interface RouteErrorBoundaryState {
   error: Error | null;
 }
 
-export class RouteErrorBoundary extends React.Component<
-  RouteErrorBoundaryProps,
-  RouteErrorBoundaryState
-> {
+export class RouteErrorBoundary extends React.Component<RouteErrorBoundaryProps, RouteErrorBoundaryState> {
   constructor(props: RouteErrorBoundaryProps) {
     super(props);
     this.state = { hasError: false, error: null };
