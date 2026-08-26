@@ -154,6 +154,15 @@ case "$ACTION" in
     cleanup_stale_lock "$RUN_ID"
 
     log "📋 Planning and applying ephemeral stack..."
+
+    # AppSync rejects deleting pipeline functions that are still referenced by a
+    # resolver. If the plan would destroy any AppSync functions, update the
+    # affected pipeline resolver(s) first so the full apply can delete them.
+    "$ROOT_DIR/scripts/appsync-ensure-resolver-order.sh" \
+      -d "$ENV_DIR" \
+      -t module.appsync.aws_appsync_resolver.create_order \
+      -- -var="environment=$RUN_ID"
+
     tofu apply -input=false -auto-approve -var="environment=$RUN_ID"
 
     log ""
