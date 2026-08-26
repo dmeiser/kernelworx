@@ -178,6 +178,7 @@ md5
 meiser
 menuItem
 menuItems
+metachars
 middleware
 millis
 minLength
