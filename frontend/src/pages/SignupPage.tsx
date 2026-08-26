@@ -52,6 +52,8 @@ const SIGNUP_ERROR_MESSAGES: Record<string, string> = {
 const VERIFICATION_ERROR_MESSAGES: Record<string, string> = {
   CodeMismatchException: 'Invalid verification code. Please check and try again',
   ExpiredCodeException: 'Verification code expired. Please request a new one',
+  LimitExceededException: 'Too many attempts. Please try again later',
+  UserNotFoundException: 'No account found with this email address',
 };
 
 // Helper: Get error message from dispatch table with fallback
@@ -334,8 +336,9 @@ export const SignupPage: React.FC = () => {
       await resendSignUpCode({ username: email });
       setSuccess('Verification code resent. Please check your email.');
     } catch (err: unknown) {
+      console.error('Resend verification code failed:', err);
       const typedError = err as { name?: string; message?: string };
-      setError(typedError.message ?? 'Failed to resend verification code.');
+      setError(getVerificationErrorMessage(typedError));
     } finally {
       setLoading(false);
     }
