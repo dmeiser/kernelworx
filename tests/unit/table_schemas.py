@@ -17,7 +17,9 @@ def create_accounts_table_schema() -> dict[str, Any]:
     Schema for accounts table.
 
     Key structure: PK=accountId
-    GSI: email-index (for account lookup by email)
+    GSIs:
+    - email-index (for account lookup by email)
+    - lowercaseEmail-index (for case-insensitive email prefix search)
     """
     return {
         "TableName": "kernelworx-accounts-ue1-dev",
@@ -27,12 +29,20 @@ def create_accounts_table_schema() -> dict[str, Any]:
         "AttributeDefinitions": [
             {"AttributeName": "accountId", "AttributeType": "S"},
             {"AttributeName": "email", "AttributeType": "S"},
+            {"AttributeName": "lowercaseEmail", "AttributeType": "S"},
         ],
         "GlobalSecondaryIndexes": [
             {
                 "IndexName": "email-index",
                 "KeySchema": [
                     {"AttributeName": "email", "KeyType": "HASH"},
+                ],
+                "Projection": {"ProjectionType": "ALL"},
+            },
+            {
+                "IndexName": "lowercaseEmail-index",
+                "KeySchema": [
+                    {"AttributeName": "lowercaseEmail", "KeyType": "HASH"},
                 ],
                 "Projection": {"ProjectionType": "ALL"},
             },

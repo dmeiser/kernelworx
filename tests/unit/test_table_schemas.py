@@ -38,6 +38,12 @@ class TestAccountsTableSchema:
         gsi_names = [gsi["IndexName"] for gsi in schema["GlobalSecondaryIndexes"]]
         assert "email-index" in gsi_names
 
+    def test_has_lowercase_email_index(self):
+        """Schema includes lowercaseEmail GSI for case-insensitive prefix search."""
+        schema = create_accounts_table_schema()
+        gsi_names = [gsi["IndexName"] for gsi in schema["GlobalSecondaryIndexes"]]
+        assert "lowercaseEmail-index" in gsi_names
+
 
 class TestCatalogsTableSchema:
     """Tests for catalogs table schema."""

@@ -86,9 +86,10 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             logger.info(f"Updating existing account: {account_id}")
             tables.accounts.update_item(
                 Key={"accountId": account_id_key},
-                UpdateExpression="SET email = :email, updatedAt = :updated",
+                UpdateExpression="SET email = :email, lowercaseEmail = :lowercaseEmail, updatedAt = :updated",
                 ExpressionAttributeValues={
                     ":email": email,
+                    ":lowercaseEmail": email.lower(),
                     ":updated": timestamp,
                 },
             )
@@ -100,6 +101,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             account_item = {
                 "accountId": account_id_key,  # PK: ACCOUNT#uuid
                 "email": email,  # GSI: email
+                "lowercaseEmail": email.lower(),  # GSI: lowercaseEmail-index
                 "givenName": user_attributes.get("given_name", ""),  # Optional metadata
                 "familyName": user_attributes.get("family_name", ""),  # Optional metadata
                 "city": "",  # Will be set via updateMyAccount if provided

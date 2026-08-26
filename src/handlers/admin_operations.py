@@ -366,65 +366,39 @@ def _search_by_general_query(query: str, cognito: Any, user_pool_id: str, logger
     return results_map
 
 
-def _matches_query(item: Dict[str, Any], query_lower: str) -> bool:
-    """Check if account item matches query (case-insensitive)."""
-    email = str(item.get("email", "")).lower()
-    given_name = str(item.get("givenName", "")).lower()
-    family_name = str(item.get("familyName", "")).lower()
-    return query_lower in email or query_lower in given_name or query_lower in family_name
-
-
-def _filter_matching_accounts(
-    items: list[Dict[str, Any]], query_lower: str, matches: list[Dict[str, Any]], max_results: int
-) -> None:
-    """Filter accounts that match the query and add to matches list."""
-    for item in items:
-        if len(matches) >= max_results:
-            break
-        if _matches_query(item, query_lower):
-            matches.append(item)
-
-
-def _scan_accounts_page(paginator_params: Dict[str, Any]) -> tuple[list[Dict[str, Any]], Dict[str, Any] | None]:
-    """Scan one page of accounts. Returns (items, last_evaluated_key)."""
-    response = tables.accounts.scan(**paginator_params)
-    items = response.get("Items", [])
-    last_key = response.get("LastEvaluatedKey")
-    return items, last_key
-
-
 def _search_accounts_in_dynamodb(query: str, logger: Any) -> list[Dict[str, Any]]:
     """
-    Search DynamoDB Accounts table with case-insensitive partial matching.
+    Search DynamoDB Accounts table by exact lowercase email.
 
-    Searches email, givenName, and familyName fields.
-    Returns all matching accounts (up to max_results limit).
+    Uses the lowercaseEmail-index GSI with an equality key condition to avoid
+    scanning the entire Accounts table. Results are capped at max_results.
 
-    Note: For small user bases (<10k), scanning and filtering in Python is acceptable.
-    For larger scale, consider adding lowercase GSI fields or using OpenSearch.
+    Email prefix matching is intentionally delegated to Cognito's email ^=
+    filter; this lookup only finds accounts whose full email equals the query.
+    Name search is not implemented here; use OpenSearch for name-based lookups.
     """
     query_lower = query.lower()
-    matches: list[Dict[str, Any]] = []
     max_results = 50  # Limit results to prevent overwhelming responses
+    matches: list[Dict[str, Any]] = []
 
     try:
-        # Scan accounts and filter in Python for case-insensitive matching
-        paginator_params: Dict[str, Any] = {}
-        scanned_count = 0
-        max_scan = 1000  # Safety limit
+        query_params: Dict[str, Any] = {
+            "IndexName": "lowercaseEmail-index",
+            "KeyConditionExpression": "lowercaseEmail = :q",
+            "ExpressionAttributeValues": {":q": query_lower},
+            "Limit": max_results,
+        }
 
-        while scanned_count < max_scan and len(matches) < max_results:
-            items, last_key = _scan_accounts_page(paginator_params)
+        while len(matches) < max_results:
+            response = tables.accounts.query(**query_params)
+            items = response.get("Items", [])
+            remaining = max_results - len(matches)
+            matches.extend(items[:remaining])
 
-            _filter_matching_accounts(items, query_lower, matches, max_results)
-
-            scanned_count += len(items)
-
-            # Check for more pages
-            if last_key:
-                paginator_params["ExclusiveStartKey"] = last_key
-            else:
+            last_key = response.get("LastEvaluatedKey")
+            if not last_key:
                 break
+            query_params["ExclusiveStartKey"] = last_key
 
         return matches
 

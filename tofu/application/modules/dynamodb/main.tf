@@ -70,12 +70,27 @@ resource "aws_dynamodb_table" "accounts" {
     type = "S"
   }
 
+  attribute {
+    name = "lowercaseEmail"
+    type = "S"
+  }
+
   global_secondary_index {
     name            = "email-index"
     projection_type = "ALL"
 
     key_schema {
       attribute_name = "email"
+      key_type       = "HASH"
+    }
+  }
+
+  global_secondary_index {
+    name            = "lowercaseEmail-index"
+    projection_type = "ALL"
+
+    key_schema {
+      attribute_name = "lowercaseEmail"
       key_type       = "HASH"
     }
   }

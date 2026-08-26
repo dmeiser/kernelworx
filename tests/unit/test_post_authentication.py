@@ -80,6 +80,7 @@ def test_create_new_account_admin_user(
     account = response["Item"]
     assert account["accountId"] == "ACCOUNT#a1b2c3d4-e5f6-7890-abcd-ef1234567890"
     assert account["email"] == "user@example.com"
+    assert account["lowercaseEmail"] == "user@example.com"
     # Note: isAdmin is NOT stored in DynamoDB - comes from JWT cognito:groups claim
     assert "createdAt" in account
     assert "updatedAt" in account
@@ -109,6 +110,7 @@ def test_create_new_account_regular_user(
     assert "Item" in response
     account = response["Item"]
     assert account["email"] == "user@example.com"
+    assert account["lowercaseEmail"] == "user@example.com"
     # Note: isAdmin is NOT stored in DynamoDB - comes from JWT cognito:groups claim
 
 
@@ -146,6 +148,7 @@ def test_update_existing_account(
 
     account = response["Item"]
     assert account["email"] == "user@example.com"  # Updated email
+    assert account["lowercaseEmail"] == "user@example.com"  # Updated lowercase email
     assert account["updatedAt"] > original_timestamp  # Updated timestamp
     assert account["createdAt"] == original_timestamp  # Created unchanged
 
@@ -200,6 +203,28 @@ def test_email_gsi_available(
     response = accounts_table.query(
         IndexName="email-index",
         KeyConditionExpression="email = :email",
+        ExpressionAttributeValues={":email": "user@example.com"},
+    )
+
+    assert response["Count"] == 1
+    account = response["Items"][0]
+    assert account["accountId"] == "ACCOUNT#a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+
+
+def test_lowercase_email_gsi_available(
+    cognito_event: dict[str, Any],
+    lambda_context: MagicMock,
+    dynamodb_table: Any,
+    monkeypatch: Any,
+) -> None:
+    """Test that lowercaseEmail is properly set for case-insensitive exact lookup."""
+    monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
+    lambda_handler(cognito_event, lambda_context)
+
+    accounts_table = get_accounts_table()
+    response = accounts_table.query(
+        IndexName="lowercaseEmail-index",
+        KeyConditionExpression="lowercaseEmail = :email",
         ExpressionAttributeValues={":email": "user@example.com"},
     )
 

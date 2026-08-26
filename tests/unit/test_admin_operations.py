@@ -2948,19 +2948,19 @@ class TestGetCognitoClient:
 class TestAdminSearchUser:
     """Tests for admin_search_user function."""
 
-    def test_search_user_by_email_partial_match(
+    def test_search_user_by_email_exact_match(
         self,
         admin_appsync_event: Dict[str, Any],
         lambda_context: Any,
         monkeypatch: Any,
     ) -> None:
-        """Test successful search by partial email address (fuzzy, case-insensitive)."""
+        """Test successful search by exact email address (case-insensitive)."""
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
 
         event = {
             **admin_appsync_event,
             "info": {"fieldName": "adminSearchUser"},
-            "arguments": {"query": "user@example"},  # Partial email
+            "arguments": {"query": "user@example.com"},  # Exact email
         }
 
         mock_cognito_user = {
@@ -2982,12 +2982,13 @@ class TestAdminSearchUser:
             mock_client = MagicMock()
             mock_get_client.return_value = mock_client
 
-            # DynamoDB scan returns matching account
-            mock_tables.accounts.scan.return_value = {
+            # DynamoDB query returns matching account by exact lowercase email
+            mock_tables.accounts.query.return_value = {
                 "Items": [
                     {
                         "accountId": "ACCOUNT#user-sub-123",
                         "email": "user@example.com",
+                        "lowercaseEmail": "user@example.com",
                         "givenName": "Test",
                         "familyName": "User",
                     }
@@ -3012,6 +3013,14 @@ class TestAdminSearchUser:
             assert result[0]["email"] == "user@example.com"
             assert result[0]["displayName"] == "Test User"
 
+            # Verify DynamoDB used the lowercaseEmail-index GSI with equality.
+            mock_tables.accounts.query.assert_called_once_with(
+                IndexName="lowercaseEmail-index",
+                KeyConditionExpression="lowercaseEmail = :q",
+                ExpressionAttributeValues={":q": "user@example.com"},
+                Limit=50,
+            )
+
             # Verify it searched by sub (from DynamoDB result) and email prefix (Cognito)
             assert mock_client.list_users.call_count == 2
             # First call: DynamoDB sub lookup
@@ -3023,7 +3032,7 @@ class TestAdminSearchUser:
             # Second call: Cognito email prefix search
             assert mock_client.list_users.call_args_list[1] == call(
                 UserPoolId="test-pool-id",
-                Filter='email ^= "user@example"',
+                Filter='email ^= "user@example.com"',
                 Limit=50,
             )
 
@@ -3039,32 +3048,32 @@ class TestAdminSearchUser:
         lambda_context: Any,
         monkeypatch: Any,
     ) -> None:
-        """Test search returns multiple matches when multiple users match."""
+        """Test search returns multiple matches when multiple emails share the prefix."""
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "test-table")
 
         event = {
             **admin_appsync_event,
             "info": {"fieldName": "adminSearchUser"},
-            "arguments": {"query": "jon"},  # Should match both "jon" accounts
+            "arguments": {"query": "jon"},  # Prefix shared by both accounts
         }
 
         mock_cognito_users = [
             {
-                "Username": "dave@daveandjonee.com",
+                "Username": "jon.doe@example.com",
                 "Attributes": [
-                    {"Name": "sub", "Value": "dave-sub-123"},
-                    {"Name": "email", "Value": "dave@daveandjonee.com"},
+                    {"Name": "sub", "Value": "jon-sub-123"},
+                    {"Name": "email", "Value": "jon.doe@example.com"},
                 ],
                 "Enabled": True,
                 "UserStatus": "CONFIRMED",
                 "UserCreateDate": datetime(2024, 1, 1, tzinfo=timezone.utc),
             },
             {
-                "Username": "jondupont@gmail.com",
+                "Username": "jon.dupont@example.com",
                 "Attributes": [
                     {"Name": "sub", "Value": "jon-sub-456"},
-                    {"Name": "email", "Value": "jondupont@gmail.com"},
+                    {"Name": "email", "Value": "jon.dupont@example.com"},
                 ],
                 "Enabled": True,
                 "UserStatus": "CONFIRMED",
@@ -3079,18 +3088,20 @@ class TestAdminSearchUser:
             mock_client = MagicMock()
             mock_get_client.return_value = mock_client
 
-            # DynamoDB scan returns multiple matching accounts
-            mock_tables.accounts.scan.return_value = {
+            # DynamoDB query returns multiple matching accounts by email prefix
+            mock_tables.accounts.query.return_value = {
                 "Items": [
                     {
-                        "accountId": "ACCOUNT#dave-sub-123",
-                        "email": "dave@daveandjonee.com",
-                        "givenName": "Dave",
-                        "familyName": "Meiser",
+                        "accountId": "ACCOUNT#jon-sub-123",
+                        "email": "jon.doe@example.com",
+                        "lowercaseEmail": "jon.doe@example.com",
+                        "givenName": "Jon",
+                        "familyName": "Doe",
                     },
                     {
                         "accountId": "ACCOUNT#jon-sub-456",
-                        "email": "jondupont@gmail.com",
+                        "email": "jon.dupont@example.com",
+                        "lowercaseEmail": "jon.dupont@example.com",
                         "givenName": "Jon",
                         "familyName": "Dupont",
                     },
@@ -3105,12 +3116,12 @@ class TestAdminSearchUser:
             ]
 
             mock_batch_names.return_value = {
-                "dave-sub-123": "Dave Meiser",
+                "jon-sub-123": "Jon Doe",
                 "jon-sub-456": "Jon Dupont",
             }
             mock_batch_groups.return_value = {
-                "dave@daveandjonee.com": [],
-                "jondupont@gmail.com": [],
+                "jon.doe@example.com": [],
+                "jon.dupont@example.com": [],
             }
 
             result = admin_search_user(event, lambda_context)
@@ -3119,22 +3130,22 @@ class TestAdminSearchUser:
             assert isinstance(result, list)
             assert len(result) == 2
             emails = [r["email"] for r in result]
-            assert "dave@daveandjonee.com" in emails
-            assert "jondupont@gmail.com" in emails
+            assert "jon.doe@example.com" in emails
+            assert "jon.dupont@example.com" in emails
 
-    def test_search_user_by_name_case_insensitive(
+    def test_search_user_by_email_case_insensitive(
         self,
         admin_appsync_event: Dict[str, Any],
         lambda_context: Any,
         monkeypatch: Any,
     ) -> None:
-        """Test search by name is case-insensitive."""
+        """Test email search is case-insensitive."""
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
 
         event = {
             **admin_appsync_event,
             "info": {"fieldName": "adminSearchUser"},
-            "arguments": {"query": "JOHN"},  # Uppercase search
+            "arguments": {"query": "JOHN@EXAMPLE.COM"},  # Uppercase search
         }
 
         mock_cognito_user = {
@@ -3155,13 +3166,14 @@ class TestAdminSearchUser:
             mock_client = MagicMock()
             mock_get_client.return_value = mock_client
 
-            # DynamoDB scan returns matching account (lowercase name matches uppercase query)
-            mock_tables.accounts.scan.return_value = {
+            # DynamoDB query returns matching account (lowercase email matches uppercase query)
+            mock_tables.accounts.query.return_value = {
                 "Items": [
                     {
                         "accountId": "ACCOUNT#john-sub-456",
                         "email": "john@example.com",
-                        "givenName": "John",  # Mixed case
+                        "lowercaseEmail": "john@example.com",
+                        "givenName": "John",
                         "familyName": "Smith",
                     }
                 ]
@@ -3299,8 +3311,8 @@ class TestAdminSearchUser:
                 mock_client = MagicMock()
                 mock_get_client.return_value = mock_client
 
-                # DynamoDB scan returns no matches
-                mock_tables.accounts.scan.return_value = {"Items": []}
+                # DynamoDB query returns no matches
+                mock_tables.accounts.query.return_value = {"Items": []}
 
                 result = admin_search_user(event, lambda_context)
 
@@ -3420,12 +3432,13 @@ class TestAdminSearchUser:
             mock_client = MagicMock()
             mock_get_client.return_value = mock_client
 
-            # DynamoDB scan returns the account
-            mock_tables.accounts.scan.return_value = {
+            # DynamoDB query returns the account by email prefix
+            mock_tables.accounts.query.return_value = {
                 "Items": [
                     {
                         "accountId": "ACCOUNT#admin-sub-123",
                         "email": "admin@example.com",
+                        "lowercaseEmail": "admin@example.com",
                         "givenName": "Admin",
                         "familyName": "User",
                     }
@@ -3477,12 +3490,13 @@ class TestAdminSearchUser:
             mock_client = MagicMock()
             mock_get_client.return_value = mock_client
 
-            # DynamoDB scan returns the account
-            mock_tables.accounts.scan.return_value = {
+            # DynamoDB query returns the account by email prefix
+            mock_tables.accounts.query.return_value = {
                 "Items": [
                     {
                         "accountId": "ACCOUNT#user-sub-123",
                         "email": "user@example.com",
+                        "lowercaseEmail": "user@example.com",
                         "givenName": "Test",
                         "familyName": "User",
                     }
@@ -3578,11 +3592,12 @@ class TestAdminSearchUser:
                 mock_get_client.return_value = mock_client
 
                 # DynamoDB has orphaned account (Cognito user deleted)
-                mock_tables.accounts.scan.return_value = {
+                mock_tables.accounts.query.return_value = {
                     "Items": [
                         {
                             "accountId": "ACCOUNT#orphan-user",
                             "email": "orphan@example.com",
+                            "lowercaseEmail": "orphan@example.com",
                         }
                     ]
                 }
@@ -3629,11 +3644,12 @@ class TestAdminSearchUser:
             mock_get_client.return_value = mock_client
 
             # DynamoDB has the account
-            mock_tables.accounts.scan.return_value = {
+            mock_tables.accounts.query.return_value = {
                 "Items": [
                     {
                         "accountId": "ACCOUNT#test-sub-123",
                         "email": "test@example.com",
+                        "lowercaseEmail": "test@example.com",
                     }
                 ]
             }
@@ -3685,7 +3701,7 @@ class TestAdminSearchUser:
             mock_get_client.return_value = mock_client
 
             # DynamoDB has NO matching accounts
-            mock_tables.accounts.scan.return_value = {"Items": []}
+            mock_tables.accounts.query.return_value = {"Items": []}
 
             # Cognito email prefix search returns user (not found in DynamoDB)
             mock_client.list_users.return_value = {"Users": [mock_cognito_only_user]}
@@ -3721,11 +3737,12 @@ class TestAdminSearchUser:
                 mock_get_client.return_value = mock_client
 
                 # DynamoDB returns account without ACCOUNT# prefix (malformed data)
-                mock_tables.accounts.scan.return_value = {
+                mock_tables.accounts.query.return_value = {
                     "Items": [
                         {
                             "accountId": "malformed-no-prefix",  # Missing ACCOUNT# prefix
                             "email": "malformed@example.com",
+                            "lowercaseEmail": "malformed@example.com",
                         }
                     ]
                 }
@@ -3744,7 +3761,7 @@ class TestAdminSearchUser:
         lambda_context: Any,
         monkeypatch: Any,
     ) -> None:
-        """Test DynamoDB scan pagination in search."""
+        """Test DynamoDB query pagination in search."""
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
 
         event = {
@@ -3771,11 +3788,17 @@ class TestAdminSearchUser:
             mock_client = MagicMock()
             mock_get_client.return_value = mock_client
 
-            # DynamoDB scan returns with pagination (LastEvaluatedKey)
-            mock_tables.accounts.scan.side_effect = [
+            # DynamoDB query returns with pagination (LastEvaluatedKey)
+            mock_tables.accounts.query.side_effect = [
                 {
-                    "Items": [{"accountId": "ACCOUNT#multi-sub", "email": "multi@example.com"}],
-                    "LastEvaluatedKey": {"accountId": "ACCOUNT#multi-sub"},
+                    "Items": [
+                        {
+                            "accountId": "ACCOUNT#multi-sub",
+                            "email": "multi@example.com",
+                            "lowercaseEmail": "multi@example.com",
+                        }
+                    ],
+                    "LastEvaluatedKey": {"lowercaseEmail": "multi@example.com", "accountId": "ACCOUNT#multi-sub"},
                 },
                 {"Items": []},  # Second page is empty
             ]
@@ -3789,7 +3812,7 @@ class TestAdminSearchUser:
 
             assert len(result) == 1
             # Verify pagination was used
-            assert mock_tables.accounts.scan.call_count == 2
+            assert mock_tables.accounts.query.call_count == 2
 
     def test_search_user_unexpected_exception(
         self,
@@ -5255,9 +5278,15 @@ class TestAdminOperationExceptionHandlers:
             mock_client = MagicMock()
             mock_get_client.return_value = mock_client
 
-            # DynamoDB scan returns account
-            mock_tables.accounts.scan.return_value = {
-                "Items": [{"accountId": "ACCOUNT#noname-sub", "email": "noname@example.com"}]
+            # DynamoDB query returns account
+            mock_tables.accounts.query.return_value = {
+                "Items": [
+                    {
+                        "accountId": "ACCOUNT#noname-sub",
+                        "email": "noname@example.com",
+                        "lowercaseEmail": "noname@example.com",
+                    }
+                ]
             }
 
             # Cognito finds user
@@ -5307,9 +5336,15 @@ class TestAdminOperationExceptionHandlers:
             mock_client = MagicMock()
             mock_get_client.return_value = mock_client
 
-            # DynamoDB scan returns account
-            mock_tables.accounts.scan.return_value = {
-                "Items": [{"accountId": "ACCOUNT#getfail-sub", "email": "getfail@example.com"}]
+            # DynamoDB query returns account
+            mock_tables.accounts.query.return_value = {
+                "Items": [
+                    {
+                        "accountId": "ACCOUNT#getfail-sub",
+                        "email": "getfail@example.com",
+                        "lowercaseEmail": "getfail@example.com",
+                    }
+                ]
             }
 
             # Cognito finds user
@@ -5349,8 +5384,14 @@ class TestAdminOperationExceptionHandlers:
                 mock_get_client.return_value = mock_client
 
                 # DynamoDB returns account with sub
-                mock_tables.accounts.scan.return_value = {
-                    "Items": [{"accountId": "ACCOUNT#test-sub-123", "email": "test@example.com"}]
+                mock_tables.accounts.query.return_value = {
+                    "Items": [
+                        {
+                            "accountId": "ACCOUNT#test-sub-123",
+                            "email": "test@example.com",
+                            "lowercaseEmail": "test@example.com",
+                        }
+                    ]
                 }
 
                 # Cognito sub search fails with ClientError
@@ -5386,7 +5427,7 @@ class TestAdminOperationExceptionHandlers:
                 mock_get_client.return_value = mock_client
 
                 # DynamoDB returns no accounts
-                mock_tables.accounts.scan.return_value = {"Items": []}
+                mock_tables.accounts.query.return_value = {"Items": []}
 
                 # Cognito email prefix search fails with ClientError
                 mock_client.list_users.side_effect = ClientError(
@@ -5404,7 +5445,7 @@ class TestAdminOperationExceptionHandlers:
         lambda_context: Any,
         monkeypatch: Any,
     ) -> None:
-        """Test DynamoDB scan filters out non-matching items (branch 351->343)."""
+        """Test DynamoDB query only returns prefix-matching items."""
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
 
         event = {
@@ -5420,12 +5461,14 @@ class TestAdminOperationExceptionHandlers:
             mock_client = MagicMock()
             mock_get_client.return_value = mock_client
 
-            # DynamoDB returns items where only some match
-            mock_tables.accounts.scan.return_value = {
+            # DynamoDB KeyConditionExpression already filters to the email prefix
+            mock_tables.accounts.query.return_value = {
                 "Items": [
-                    {"accountId": "ACCOUNT#no-match-1", "email": "other@example.com"},  # No match
-                    {"accountId": "ACCOUNT#match", "email": "findme@example.com"},  # Match
-                    {"accountId": "ACCOUNT#no-match-2", "email": "different@example.com"},  # No match
+                    {
+                        "accountId": "ACCOUNT#match",
+                        "email": "findme@example.com",
+                        "lowercaseEmail": "findme@example.com",
+                    },
                 ]
             }
 
@@ -5452,7 +5495,7 @@ class TestAdminOperationExceptionHandlers:
             assert len(result) == 1
             assert result[0]["email"] == "findme@example.com"
 
-    def test_search_user_dynamodb_scan_client_error(
+    def test_search_user_dynamodb_query_client_error(
         self,
         admin_appsync_event: Dict[str, Any],
         lambda_context: Any,
@@ -5474,10 +5517,10 @@ class TestAdminOperationExceptionHandlers:
                 mock_client = MagicMock()
                 mock_get_client.return_value = mock_client
 
-                # DynamoDB scan fails with ClientError
-                mock_tables.accounts.scan.side_effect = ClientError(
+                # DynamoDB query fails with ClientError
+                mock_tables.accounts.query.side_effect = ClientError(
                     {"Error": {"Code": "InternalErrorException", "Message": "Service error"}},
-                    "Scan",
+                    "Query",
                 )
 
                 # Cognito returns empty
@@ -5487,13 +5530,13 @@ class TestAdminOperationExceptionHandlers:
                 result = admin_search_user(event, lambda_context)
                 assert result == []
 
-    def test_search_user_max_scan_limit_reached(
+    def test_search_user_query_stops_at_max_results(
         self,
         admin_appsync_event: Dict[str, Any],
         lambda_context: Any,
         monkeypatch: Any,
     ) -> None:
-        """Test DynamoDB scan stops at max_scan limit."""
+        """Test DynamoDB query stops once max_results is collected."""
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
 
         event = {
@@ -5502,8 +5545,15 @@ class TestAdminOperationExceptionHandlers:
             "arguments": {"query": "test"},
         }
 
-        # Create 1001 items to exceed max_scan of 1000
-        large_items_batch = [{"accountId": f"ACCOUNT#sub-{i}", "email": f"test{i}@example.com"} for i in range(1001)]
+        # Create more items than max_results
+        large_items_batch = [
+            {
+                "accountId": f"ACCOUNT#sub-{i}",
+                "email": f"test{i}@example.com",
+                "lowercaseEmail": f"test{i}@example.com",
+            }
+            for i in range(1001)
+        ]
 
         with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client, \
              patch("src.handlers.admin_operations.tables") as mock_tables, \
@@ -5512,10 +5562,10 @@ class TestAdminOperationExceptionHandlers:
             mock_client = MagicMock()
             mock_get_client.return_value = mock_client
 
-            # DynamoDB returns all items in one batch (simulating reaching limit)
-            mock_tables.accounts.scan.return_value = {
+            # DynamoDB returns all items in one batch (more pages exist)
+            mock_tables.accounts.query.return_value = {
                 "Items": large_items_batch,
-                "LastEvaluatedKey": {"accountId": "ACCOUNT#sub-1000"},  # More pages exist
+                "LastEvaluatedKey": {"lowercaseEmail": "test1000@example.com", "accountId": "ACCOUNT#sub-1000"},
             }
 
             # Return cognito user for each DynamoDB account
@@ -5536,8 +5586,8 @@ class TestAdminOperationExceptionHandlers:
 
             admin_search_user(event, lambda_context)
 
-            # Should stop after first batch since scanned_count (1001) >= max_scan (1000)
-            assert mock_tables.accounts.scan.call_count == 1
+            # Should stop after first batch since max_results (50) is reached
+            assert mock_tables.accounts.query.call_count == 1
 
     def test_search_user_max_results_reached_early(
         self,
@@ -5545,7 +5595,7 @@ class TestAdminOperationExceptionHandlers:
         lambda_context: Any,
         monkeypatch: Any,
     ) -> None:
-        """Test DynamoDB scan stops when max_results (50) is reached."""
+        """Test DynamoDB query stops when max_results (50) is reached."""
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
 
         event = {
@@ -5554,9 +5604,13 @@ class TestAdminOperationExceptionHandlers:
             "arguments": {"query": "match"},
         }
 
-        # Create items that all match the query
+        # Create items that all match the email-prefix query
         matching_items = [
-            {"accountId": f"ACCOUNT#sub-{i}", "email": f"match{i}@example.com"}
+            {
+                "accountId": f"ACCOUNT#sub-{i}",
+                "email": f"match{i}@example.com",
+                "lowercaseEmail": f"match{i}@example.com",
+            }
             for i in range(60)  # More than max_results of 50
         ]
 
@@ -5568,7 +5622,7 @@ class TestAdminOperationExceptionHandlers:
             mock_get_client.return_value = mock_client
 
             # DynamoDB returns all items
-            mock_tables.accounts.scan.return_value = {
+            mock_tables.accounts.query.return_value = {
                 "Items": matching_items,
                 "LastEvaluatedKey": {"accountId": "ACCOUNT#sub-59"},
             }
