@@ -47,6 +47,7 @@ cancelable
 capsys
 catalogId
 Catalogs
+cfield
 changelog
 chdir
 checkmarx
@@ -66,6 +67,7 @@ cooldown
 coppa
 costEstimator
 creatorMessage
+ctype
 Cub
 Dataloader
 dateutils
@@ -80,6 +82,7 @@ dev
 Device
 dialogProps
 dmeiser
+DOTALL
 dotenv
 DynamoDB
 EFGH
@@ -101,6 +104,7 @@ falsey
 favicons
 fieldset
 fileName
+finditer
 findme
 fontSize
 formData
@@ -217,6 +221,7 @@ ownerAccountId
 pageProps
 Paper
 passwordless
+pathlib
 paymentMethod
 paymentMethods
 picklist
@@ -256,10 +261,13 @@ renderer
 repo
 repr
 reraises
+returncode
 reusability
+rname
 rollup
 route53
 RRule
+rtype
 runtime
 SaaS
 sameSite
