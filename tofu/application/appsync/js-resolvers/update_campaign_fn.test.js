@@ -251,7 +251,8 @@ describe('update_campaign_fn request', () => {
     const result = request(ctx);
 
     assert.match(result.update.expression, /unitType = :unitType/);
-    assert.doesNotMatch(result.update.expression, /unitCampaignKey/);
+    assert.doesNotMatch(result.update.expression, /unitCampaignKey = :unitCampaignKey/);
+    assert.match(result.update.expression, /REMOVE unitCampaignKey/);
   });
 
   it('does not prefix null catalogId with CATALOG#', () => {

@@ -65,6 +65,7 @@ export function request(ctx) {
 
     // Build update expression dynamically
     const updates = [];
+    const removes = [];
     const exprValues = {};
     const exprNames = {};
 
@@ -140,15 +141,24 @@ export function request(ctx) {
         exprValues[':unitCampaignKey'] = newKey;
     }
 
+    // Remove unitCampaignKey when unit info is cleared so the item no longer
+    // appears in unit-scoped queries/reports.
+    if (input.unitType !== undefined && input.unitType === null) {
+        removes.push('unitCampaignKey');
+    }
+
     // Always update updatedAt
     updates.push('updatedAt = :updatedAt');
     exprValues[':updatedAt'] = util.time.nowISO8601();
 
-    if (updates.length === 0) {
+    if (updates.length === 0 && removes.length === 0) {
         return campaign; // No updates, return original
     }
 
-    const updateExpression = 'SET ' + updates.join(', ');
+    let updateExpression = 'SET ' + updates.join(', ');
+    if (removes.length > 0) {
+        updateExpression += ' REMOVE ' + removes.join(', ');
+    }
 
     // V2: Use composite key (profileId, campaignId) - campaignId is the SK
     return {
@@ -227,6 +237,11 @@ export function response(ctx) {
             campaignName,
             campaignYear,
         );
+    }
+
+    // Remove unitCampaignKey from the response when unit info is cleared.
+    if (input.unitType !== undefined && input.unitType === null) {
+        delete result.unitCampaignKey;
     }
 
     // Always update updatedAt
