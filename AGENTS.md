@@ -40,3 +40,7 @@ Destructive Cognito actions (`AdminDeleteUser`, `AdminResetUserPassword`, `Admin
 ### AppSync pipeline function deletion ordering (#198)
 
 AWS rejects deleting an AppSync pipeline function that is still referenced by a resolver. The AWS provider does not always order resolver updates before function deletions, so deployments that remove functions from a pipeline can fail with `BadRequestException: Cannot delete a function which is currently used by a resolver`. The deploy paths use `scripts/appsync-ensure-resolver-order.sh` to detect planned function deletions and apply the affected resolver(s) first. When collapsing or removing functions from a pipeline, add the resolver target to the script invocations in `scripts/ephemeral-env.sh` and `.github/workflows/deploy-shared.yml`.
+
+### AppSync JS resolvers must not log mutation arguments or PII (#142)
+
+AppSync JavaScript resolvers run with `console.log` output sent to CloudWatch. Do not use `console.log` for debug output in production resolver code: it can leak customer PII, caller identity details, and mutation arguments into CloudWatch logs. Keep diagnostics in code comments or rely on AppSync's built-in request/response logging instead. The regression test in `tofu/application/appsync/js-resolvers/no_production_logs.test.js` guards the resolvers that previously had production logs.
