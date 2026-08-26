@@ -1496,8 +1496,9 @@ def _get_campaign_profile_id(db_campaign_id: str, campaign_id: str) -> str:
     return str(items[0]["profileId"])
 
 
-
-def _update_campaign_shared_code(profile_id: str, db_campaign_id: str, shared_campaign_code: Optional[str]) -> Dict[str, Any]:
+def _update_campaign_shared_code(
+    profile_id: str, db_campaign_id: str, shared_campaign_code: Optional[str]
+) -> Dict[str, Any]:
     """Update campaign's sharedCampaignCode field and return the stored item."""
     updated_at = datetime.now(timezone.utc).isoformat()
 
@@ -1535,7 +1536,7 @@ def _validate_admin_and_get_campaign_id(event: Dict[str, Any]) -> tuple[str, Opt
 
 def admin_update_campaign_shared_code(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
-    Update a campaign's sharedCampaignCode field.
+    Update a campaign's sharedCampaignCode field and return the stored campaign item.
 
     Admin-only operation. Allows associating a campaign with a shared campaign.
     """
