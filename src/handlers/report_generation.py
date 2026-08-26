@@ -122,8 +122,8 @@ def request_campaign_report(event: Dict[str, Any], context: Any) -> Dict[str, An
             ContentType=content_type,
         )
 
-        # Generate pre-signed URL (valid for 7 days)
-        expiration = 7 * 24 * 60 * 60  # 7 days in seconds
+        # Generate pre-signed URL (valid for 3 hours)
+        expiration = 3 * 60 * 60  # 3 hours in seconds
         report_url = s3.generate_presigned_url(
             "get_object",
             Params={"Bucket": exports_bucket, "Key": s3_key},
@@ -131,7 +131,7 @@ def request_campaign_report(event: Dict[str, Any], context: Any) -> Dict[str, An
         )
 
         now = datetime.now(timezone.utc)
-        expires_at = now + timedelta(days=7)
+        expires_at = now + timedelta(hours=3)
 
         result = {
             "reportId": report_id,
