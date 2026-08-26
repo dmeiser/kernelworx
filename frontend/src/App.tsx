@@ -14,54 +14,66 @@ import { DevFooter } from './components/DevFooter';
 import { apolloClient } from './lib/apollo';
 import { theme } from './lib/theme';
 import { AppLayout } from './components/AppLayout';
+import { RouteErrorBoundary } from './components/RouteErrorBoundary';
 
-const LandingPage = lazy(() => import('./pages/LandingPage').then((m) => ({ default: m.LandingPage })));
-const LoginPage = lazy(() => import('./pages/LoginPage').then((m) => ({ default: m.LoginPage })));
-const ForgotPasswordPage = lazy(() =>
+function lazyRoute(factory: () => Promise<{ default: React.ComponentType }>): React.FC {
+  const LazyComponent = lazy(factory);
+  return function LazyRouteWrapper() {
+    return (
+      <RouteErrorBoundary>
+        <LazyComponent />
+      </RouteErrorBoundary>
+    );
+  };
+}
+
+const LandingPage = lazyRoute(() => import('./pages/LandingPage').then((m) => ({ default: m.LandingPage })));
+const LoginPage = lazyRoute(() => import('./pages/LoginPage').then((m) => ({ default: m.LoginPage })));
+const ForgotPasswordPage = lazyRoute(() =>
   import('./pages/ForgotPasswordPage').then((m) => ({ default: m.ForgotPasswordPage })),
 );
-const SignupPage = lazy(() => import('./pages/SignupPage').then((m) => ({ default: m.SignupPage })));
-const PrivacyPolicyPage = lazy(() =>
+const SignupPage = lazyRoute(() => import('./pages/SignupPage').then((m) => ({ default: m.SignupPage })));
+const PrivacyPolicyPage = lazyRoute(() =>
   import('./pages/PrivacyPolicyPage').then((m) => ({ default: m.PrivacyPolicyPage })),
 );
-const ScoutsPage = lazy(() => import('./pages/ScoutsPage').then((m) => ({ default: m.ScoutsPage })));
-const ScoutCampaignsPage = lazy(() =>
+const ScoutsPage = lazyRoute(() => import('./pages/ScoutsPage').then((m) => ({ default: m.ScoutsPage })));
+const ScoutCampaignsPage = lazyRoute(() =>
   import('./pages/ScoutCampaignsPage').then((m) => ({ default: m.ScoutCampaignsPage })),
 );
-const ScoutManagementPage = lazy(() =>
+const ScoutManagementPage = lazyRoute(() =>
   import('./pages/ScoutManagementPage').then((m) => ({ default: m.ScoutManagementPage })),
 );
-const CampaignLayout = lazy(() => import('./pages/CampaignLayout').then((m) => ({ default: m.CampaignLayout })));
-const SettingsPage = lazy(() => import('./pages/SettingsPage').then((m) => ({ default: m.SettingsPage })));
-const UserSettingsPage = lazy(() =>
+const CampaignLayout = lazyRoute(() => import('./pages/CampaignLayout').then((m) => ({ default: m.CampaignLayout })));
+const SettingsPage = lazyRoute(() => import('./pages/SettingsPage').then((m) => ({ default: m.SettingsPage })));
+const UserSettingsPage = lazyRoute(() =>
   import('./pages/UserSettingsPage').then((m) => ({ default: m.UserSettingsPage })),
 );
-const AcceptInvitePage = lazy(() =>
+const AcceptInvitePage = lazyRoute(() =>
   import('./pages/AcceptInvitePage').then((m) => ({ default: m.AcceptInvitePage })),
 );
-const AdminPage = lazy(() => import('./pages/AdminPage').then((m) => ({ default: m.AdminPage })));
-const UserDataPage = lazy(() => import('./pages/UserDataPage').then((m) => ({ default: m.UserDataPage })));
-const CatalogsPage = lazy(() => import('./pages/CatalogsPage').then((m) => ({ default: m.CatalogsPage })));
-const CatalogPreviewPage = lazy(() =>
+const AdminPage = lazyRoute(() => import('./pages/AdminPage').then((m) => ({ default: m.AdminPage })));
+const UserDataPage = lazyRoute(() => import('./pages/UserDataPage').then((m) => ({ default: m.UserDataPage })));
+const CatalogsPage = lazyRoute(() => import('./pages/CatalogsPage').then((m) => ({ default: m.CatalogsPage })));
+const CatalogPreviewPage = lazyRoute(() =>
   import('./pages/CatalogPreviewPage').then((m) => ({ default: m.CatalogPreviewPage })),
 );
-const CampaignReportsPage = lazy(() =>
+const CampaignReportsPage = lazyRoute(() =>
   import('./pages/CampaignReportsPage').then((m) => ({ default: m.CampaignReportsPage })),
 );
-const CreateCampaignPage = lazy(() =>
+const CreateCampaignPage = lazyRoute(() =>
   import('./pages/CreateCampaignPage').then((m) => ({ default: m.CreateCampaignPage })),
 );
-const SharedCampaignsPage = lazy(() =>
+const SharedCampaignsPage = lazyRoute(() =>
   import('./pages/SharedCampaignsPage').then((m) => ({ default: m.SharedCampaignsPage })),
 );
-const CreateSharedCampaignPage = lazy(() =>
+const CreateSharedCampaignPage = lazyRoute(() =>
   import('./pages/CreateSharedCampaignPage').then((m) => ({ default: m.CreateSharedCampaignPage })),
 );
-const PaymentMethodsPage = lazy(() =>
+const PaymentMethodsPage = lazyRoute(() =>
   import('./pages/PaymentMethodsPage').then((m) => ({ default: m.PaymentMethodsPage })),
 );
-const HomePage = lazy(() => import('./pages/HomePage').then((m) => ({ default: m.HomePage })));
-const StoryPage = lazy(() => import('./pages/StoryPage').then((m) => ({ default: m.StoryPage })));
+const HomePage = lazyRoute(() => import('./pages/HomePage').then((m) => ({ default: m.HomePage })));
+const StoryPage = lazyRoute(() => import('./pages/StoryPage').then((m) => ({ default: m.StoryPage })));
 
 function ScrollToHash() {
   const { pathname, hash } = useLocation();
