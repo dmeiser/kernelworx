@@ -36,3 +36,7 @@ Recovery scripts share helpers in `scripts/ephemeral-recover-common.sh`.
 ### Lambda IAM role isolation for Cognito admin actions (#121)
 
 Destructive Cognito actions (`AdminDeleteUser`, `AdminResetUserPassword`, `AdminLinkProviderForUser`, `ListUsers`) are isolated on a dedicated `aws_iam_role.lambda_admin_execution` role, assigned only to the `admin-operations`, `delete-account`, and `pre-signup` functions. When adding a new handler that needs these APIs, add its logical key to `local.admin_function_keys` or `local.admin_trigger_keys` in `tofu/application/modules/lambda/main.tf` so it receives the admin role. The shared Lambda execution role no longer grants any Cognito admin permissions.
+
+### AppSync pipeline function deletion ordering (#198)
+
+AWS rejects deleting an AppSync pipeline function that is still referenced by a resolver. The AWS provider does not always order resolver updates before function deletions, so deployments that remove functions from a pipeline can fail with `BadRequestException: Cannot delete a function which is currently used by a resolver`. The deploy paths use `scripts/appsync-ensure-resolver-order.sh` to detect planned function deletions and apply the affected resolver(s) first. When collapsing or removing functions from a pipeline, add the resolver target to the script invocations in `scripts/ephemeral-env.sh` and `.github/workflows/deploy-shared.yml`.
