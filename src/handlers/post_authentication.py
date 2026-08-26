@@ -81,7 +81,8 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         timestamp = datetime.now(timezone.utc).isoformat()
 
         if existing_account:
-            # Update existing account (email might have changed, update timestamp)
+            # Update existing account timestamp; preserve stored email when the trigger
+            # omits it (e.g. phone-only or social sign-in), otherwise update it
             # Note: isAdmin is NOT stored in DynamoDB - it comes from JWT cognito:groups claim
             logger.info(f"Updating existing account: {account_id}")
             update_expression = "SET updatedAt = :updated"
