@@ -1719,7 +1719,7 @@ class TestAdminDeleteUser:
 
         assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
 
-    def test_malformed_sub_rejected_before_filter(
+    def test_safe_non_uuid_account_id_returns_not_found(
         self,
         dynamodb_table: Any,
         admin_appsync_event: Dict[str, Any],
@@ -1727,8 +1727,9 @@ class TestAdminDeleteUser:
         lambda_context: Any,
         monkeypatch: Any,
     ) -> None:
-        """A sub that does not look like a UUID is rejected before reaching Cognito."""
+        """A safe sub that does not look like a UUID reaches Cognito and resolves to NOT_FOUND."""
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
 
         event = {
             **admin_appsync_event,
@@ -1737,13 +1738,14 @@ class TestAdminDeleteUser:
 
         with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
             mock_cognito = MagicMock()
+            mock_cognito.list_users.return_value = {"Users": []}
             mock_get_client.return_value = mock_cognito
 
             with pytest.raises(AppError) as exc_info:
                 admin_delete_user(event, lambda_context)
 
-            assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
-            mock_cognito.list_users.assert_not_called()
+            assert exc_info.value.error_code == ErrorCode.NOT_FOUND
+            mock_cognito.list_users.assert_called_once()
 
     def test_account_not_found_cognito_idempotent(
         self,
