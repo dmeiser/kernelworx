@@ -59,7 +59,6 @@ const handleSignInWithRedirect = (checkAuthSession: () => Promise<void>) => {
 };
 
 const handleSignInFailure = (eventData: unknown, setLoading: (loading: boolean) => void) => {
-  console.error('Sign in failed:', eventData);
   setLoading(false);
 };
 
@@ -68,7 +67,6 @@ const handleTokenRefresh = (checkAuthSession: () => Promise<void>) => {
 };
 
 const handleTokenRefreshFailure = (eventData: unknown, handlers: AuthEventHandlers) => {
-  console.error('Token refresh failed:', eventData);
   handlers.onTokenRefreshFailure();
 };
 
@@ -108,7 +106,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       });
       return data?.getMyAccount ?? null;
     } catch (error) {
-      console.error('Failed to fetch account data:', error);
       return null;
     }
   }, []);
@@ -136,11 +133,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         setAccount(mergeAccountWithAdminStatus(accountData, isAdminFromToken));
       } else {
         // User is authenticated but account record doesn't exist yet
-        console.warn('User has valid tokens but no account record yet');
         setAccount(null);
       }
     } catch (error) {
-      console.error('Auth session check failed:', error);
       setHasValidTokens(false);
       setAccount(null);
     } finally {
@@ -195,7 +190,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       // Redirect to Cognito Hosted UI (shows all login options)
       await signInWithRedirect();
     } catch (error) {
-      console.error('Login failed:', error);
       throw error;
     }
   }, []);
@@ -224,7 +218,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
         return result;
       } catch (error) {
-        console.error('Email/password login failed:', error);
         throw error;
       }
     },
@@ -239,7 +232,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
    */
   const logout = useCallback(async () => {
     try {
-      console.log('Starting logout...');
       setAccount(null);
       setHasValidTokens(false);
       // signOut with global:true will redirect to Cognito's /logout endpoint
@@ -247,7 +239,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       await signOut({ global: true });
       // Note: The redirect happens automatically, we won't reach this line
     } catch (error) {
-      console.error('Logout failed:', error);
       // If signOut fails, clear local state and do manual redirect
       setAccount(null);
       // Build the Cognito logout URL manually as fallback

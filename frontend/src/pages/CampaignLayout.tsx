@@ -51,19 +51,6 @@ function formatDateRange(startDate?: string, endDate?: string): string | null {
   return `${start}${end}`;
 }
 
-function logCampaignError(error: Error): void {
-  console.error('Campaign query error:', error);
-  const apolloError = error as {
-    graphQLErrors?: unknown;
-    networkError?: unknown;
-  };
-  console.log('Campaign error details:', {
-    message: error.message,
-    graphQLErrors: apolloError.graphQLErrors,
-    networkError: apolloError.networkError,
-  });
-}
-
 // --- Sub-Components ---
 
 interface CampaignBreadcrumbsProps {
@@ -149,10 +136,6 @@ function useCampaignQuery(dbCampaignId: string | null) {
     variables: { campaignId: dbCampaignId },
     skip: !dbCampaignId,
   });
-
-  if (result.error) {
-    logCampaignError(result.error);
-  }
 
   return {
     campaign: result.data?.getCampaign,
