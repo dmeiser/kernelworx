@@ -141,7 +141,7 @@ export function useOrderForm(): OrderFormState {
   const [state, setState] = useState('');
   const [zipCode, setZipCode] = useState('');
 
-  // Payment - default empty, set to 'Cash' by OrderEditorPage when payment methods load
+  // Payment - default empty, set to the default payment method by OrderEditorPage when payment methods load
   const [paymentMethod, setPaymentMethod] = useState('');
   const [notes, setNotes] = useState('');
 

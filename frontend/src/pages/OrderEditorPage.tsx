@@ -921,7 +921,7 @@ export const OrderEditorPage: React.FC = () => {
     loadFromOrder(orderData);
   }, [orderData, loadFromOrder]);
 
-  // Set default payment method to "Cash" when payment methods load for a new order.
+  // Set default payment method when payment methods load for a new order.
   // Uses a functional update so a stale closure value cannot clobber a payment method
   // that was already set from a loaded order or by the user.
   useEffect(() => {
