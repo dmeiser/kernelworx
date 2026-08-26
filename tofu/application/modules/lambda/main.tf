@@ -20,6 +20,12 @@ variable "lambda_role_arn" {
   type        = string
 }
 
+variable "lambda_admin_role_arn" {
+  description = "IAM role ARN for the small set of handlers that perform Cognito admin/destructive actions (admin-operations, delete-account, pre-signup). When null, those functions use lambda_role_arn. See issue #121."
+  type        = string
+  default     = null
+}
+
 variable "exports_bucket_name" {
   description = "Name of the S3 bucket used for report exports"
   type        = string
@@ -194,6 +200,26 @@ locals {
       memory_size = 256
     }
   }
+
+  # Functions that perform Cognito admin/destructive actions and therefore use
+  # the isolated admin execution role when lambda_admin_role_arn is set (#121).
+  # pre-signup uses AdminLinkProviderForUser; admin-operations uses AdminDeleteUser
+  # / AdminResetUserPassword / ListUsers; delete-account uses AdminDeleteUser.
+  admin_function_keys = ["admin-operations", "delete-account"]
+  admin_trigger_keys  = ["pre-signup"]
+}
+
+# Returns the admin role ARN when configured and the function is an admin
+# handler, otherwise the shared role ARN.
+locals {
+  app_role_arn = {
+    for k in keys(local.functions) :
+    k => (var.lambda_admin_role_arn != null && contains(local.admin_function_keys, k) ? var.lambda_admin_role_arn : var.lambda_role_arn)
+  }
+  trigger_role_arn = {
+    for k in keys(local.trigger_functions) :
+    k => (var.lambda_admin_role_arn != null && contains(local.admin_trigger_keys, k) ? var.lambda_admin_role_arn : var.lambda_role_arn)
+  }
 }
 
 # Note: Lambda layer and functions would be created here
@@ -248,7 +274,7 @@ resource "aws_lambda_function" "trigger_functions" {
   for_each = local.trigger_functions
 
   function_name = "${var.name_prefix}-${each.key}${local.func_suffix}"
-  role          = var.lambda_role_arn
+  role          = local.trigger_role_arn[each.key]
   handler       = each.value.handler
   runtime       = "python3.14"
   architectures = ["arm64"]
@@ -283,7 +309,7 @@ resource "aws_lambda_function" "functions" {
   for_each = local.functions
 
   function_name = "${var.name_prefix}-${each.key}${local.func_suffix}"
-  role          = var.lambda_role_arn
+  role          = local.app_role_arn[each.key]
   handler       = each.value.handler
   runtime       = "python3.14"
   architectures = ["arm64"]
