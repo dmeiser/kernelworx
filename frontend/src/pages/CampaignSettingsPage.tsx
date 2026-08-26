@@ -139,7 +139,7 @@ const buildUpdateInput = (
     if (unitChanged) {
       if (unitType) {
         input.unitType = unitType;
-        input.unitNumber = parseInt(unitNumber, 10);
+        input.unitNumber = Number(unitNumber);
         input.city = city.trim();
         input.state = state.trim();
       } else {
