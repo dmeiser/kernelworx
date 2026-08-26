@@ -32,6 +32,7 @@ import { PageHeader } from '../components/PageHeader';
 import * as XLSX from 'xlsx';
 import { GET_UNIT_REPORT, LIST_MY_SHARED_CAMPAIGNS } from '../lib/graphql';
 import { formatCurrency } from '../lib/api-utils';
+import { sanitizeReportValue } from '../lib/reportExport';
 import type { SharedCampaign, OrderLineItem } from '../types';
 
 // Type alias for clarity in this module
@@ -153,16 +154,21 @@ const getTopSellers = (report?: UnitReport) => {
 const buildSellerReportWorkbook = (report: UnitReport, productList: string[]) => {
   const wb = XLSX.utils.book_new();
 
-  const headerRow = ['Scout Name', ...productList, 'Total Items', 'Total Sales'];
+  const headerRow = ['Scout Name', ...productList, 'Total Items', 'Total Sales'].map(sanitizeReportValue);
 
   const dataRows = report.sellers.map((seller) => {
     const { totals, totalItems } = calculateSellerProductTotals(seller, productList);
-    return [seller.sellerName, ...productList.map((product) => totals[product] || 0), totalItems, seller.totalSales];
+    return [
+      sanitizeReportValue(seller.sellerName),
+      ...productList.map((product) => totals[product] || 0),
+      totalItems,
+      seller.totalSales,
+    ];
   });
 
   const { grandTotals, grandTotalItems } = calculateGrandTotals(report, productList);
   const totalsRow = [
-    'Total',
+    sanitizeReportValue('Total'),
     ...productList.map((product) => grandTotals[product] || 0),
     grandTotalItems,
     report.totalSales,
@@ -179,7 +185,7 @@ const buildSellerReportWorkbook = (report: UnitReport, productList: string[]) =>
 const buildOrderDetailsWorkbook = (report: UnitReport, allOrders: SellerOrder[], allProducts: string[]) => {
   const wb = XLSX.utils.book_new();
 
-  const headerRow = ['Scout', 'Customer', ...allProducts, 'Total'];
+  const headerRow = ['Scout', 'Customer', ...allProducts, 'Total'].map(sanitizeReportValue);
 
   const dataRows = allOrders.map((order) => {
     const productQuantities = allProducts.map((product) => {
@@ -189,11 +195,21 @@ const buildOrderDetailsWorkbook = (report: UnitReport, allOrders: SellerOrder[],
       return totalQuantity || '';
     });
 
-    return [order.sellerName, order.customerName, ...productQuantities, order.totalAmount];
+    return [
+      sanitizeReportValue(order.sellerName),
+      sanitizeReportValue(order.customerName),
+      ...productQuantities,
+      order.totalAmount,
+    ];
   });
 
   const productTotals = calculateProductTotalsForOrders(allOrders);
-  const totalsRow = ['Total', '', ...allProducts.map((product) => productTotals[product] || 0), report.totalSales];
+  const totalsRow = [
+    sanitizeReportValue('Total'),
+    sanitizeReportValue(''),
+    ...allProducts.map((product) => productTotals[product] || 0),
+    report.totalSales,
+  ];
 
   const sheetData = [headerRow, ...dataRows, totalsRow];
   const sheet = XLSX.utils.aoa_to_sheet(sheetData);
