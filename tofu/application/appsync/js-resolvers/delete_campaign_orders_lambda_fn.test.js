@@ -3,12 +3,15 @@ import assert from 'node:assert';
 import { request, response } from './delete_campaign_orders_lambda_fn.js';
 
 describe('delete_campaign_orders_lambda_fn request', () => {
-  it('invokes the Lambda with the campaignId from stash', () => {
+  it('invokes the Lambda with the campaignId and caller identity', () => {
     const ctx = {
       stash: {
         campaign: {
           campaignId: 'CAMPAIGN#c1',
         },
+      },
+      identity: {
+        sub: 'user-123',
       },
     };
 
@@ -16,6 +19,7 @@ describe('delete_campaign_orders_lambda_fn request', () => {
 
     assert.strictEqual(result.operation, 'Invoke');
     assert.strictEqual(result.payload.arguments.campaignId, 'CAMPAIGN#c1');
+    assert.strictEqual(result.payload.identity.sub, 'user-123');
   });
 
   it('early-returns when campaign is missing', () => {

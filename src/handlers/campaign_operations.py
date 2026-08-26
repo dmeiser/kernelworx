@@ -14,20 +14,20 @@ if TYPE_CHECKING:  # pragma: no cover
 try:  # pragma: no cover
     from botocore.exceptions import ClientError
 
-    from utils.auth import check_profile_access
+    from utils.auth import check_profile_access, require_profile_access
     from utils.dynamodb import tables
     from utils.errors import AppError, ErrorCode
-    from utils.ids import ensure_catalog_id, ensure_profile_id
+    from utils.ids import ensure_campaign_id, ensure_catalog_id, ensure_profile_id
     from utils.logging import get_logger
     from utils.pagination import query_all_items
     from utils.validation import validate_required_fields, validate_unit_fields
 except ModuleNotFoundError:  # pragma: no cover
     from botocore.exceptions import ClientError
 
-    from ..utils.auth import check_profile_access
+    from ..utils.auth import check_profile_access, require_profile_access
     from ..utils.dynamodb import tables
     from ..utils.errors import AppError, ErrorCode
-    from ..utils.ids import ensure_catalog_id, ensure_profile_id
+    from ..utils.ids import ensure_campaign_id, ensure_catalog_id, ensure_profile_id
     from ..utils.logging import get_logger
     from ..utils.pagination import query_all_items
     from ..utils.validation import validate_required_fields, validate_unit_fields
@@ -399,7 +399,7 @@ def create_campaign(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         _execute_campaign_transaction(campaign_item, share_item, profile_id)
         return campaign_item
 
-    except (AppError, ClientError):
+    except (AppError, ClientError):  # fmt: skip
         raise
     except Exception as e:
         logger.error(f"Error creating campaign: {str(e)}", exc_info=True)
@@ -449,6 +449,25 @@ def _to_dynamo_value(value: Any) -> Dict[str, Any]:
 BATCH_DELETE_SIZE = 25
 
 
+def _get_campaign_by_id(campaign_id: str) -> Optional[Dict[str, Any]]:
+    """Retrieve a campaign by its campaignId via the campaignId-index GSI.
+
+    Args:
+        campaign_id: The campaign ID (with CAMPAIGN# prefix).
+
+    Returns:
+        The campaign item or None if not found.
+    """
+    response = tables.campaigns.query(
+        IndexName="campaignId-index",
+        KeyConditionExpression="campaignId = :campaignId",
+        ExpressionAttributeValues={":campaignId": campaign_id},
+        Limit=1,
+    )
+    items = response.get("Items", [])
+    return items[0] if items else None
+
+
 def _delete_orders_for_campaign(campaign_id: str) -> int:
     """Delete all orders for a campaign, paginating the query and chunking deletes.
 
@@ -491,15 +510,32 @@ def delete_campaign_orders(event: Dict[str, Any], context: Any) -> Dict[str, Any
     """Delete all orders for a campaign (AppSync Lambda resolver).
 
     Expects event.arguments.campaignId. Returns { deletedCount: int }.
+
+    Authorization: the caller must have WRITE access to the profile that owns the
+    campaign. This is enforced here in the handler so a resolver rewire or a
+    second datasource cannot bypass it.
     """
     try:
-        campaign_id = event.get("arguments", {}).get("campaignId", "")
-        if not campaign_id:
+        campaign_id_arg = event.get("arguments", {}).get("campaignId", "")
+        if not campaign_id_arg:
             raise AppError(ErrorCode.INVALID_INPUT, "campaignId is required")
 
-        db_campaign_id = (
-            campaign_id if campaign_id.startswith("CAMPAIGN#") else f"CAMPAIGN#{campaign_id}"
-        )
+        caller_account_id = event.get("identity", {}).get("sub")
+        if not caller_account_id:
+            raise AppError(ErrorCode.UNAUTHORIZED, "Caller identity is required")
+
+        db_campaign_id = ensure_campaign_id(campaign_id_arg)
+        assert db_campaign_id is not None
+
+        campaign = _get_campaign_by_id(db_campaign_id)
+        if not campaign:
+            raise AppError(ErrorCode.NOT_FOUND, f"Campaign {campaign_id_arg} not found")
+
+        profile_id = campaign.get("profileId")
+        if not profile_id:
+            raise AppError(ErrorCode.NOT_FOUND, f"Campaign {campaign_id_arg} has no profile")
+
+        require_profile_access(caller_account_id, profile_id, "WRITE")
 
         deleted_count = _delete_orders_for_campaign(db_campaign_id)
         return {"deletedCount": deleted_count}
