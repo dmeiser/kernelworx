@@ -84,13 +84,15 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             # Update existing account (email might have changed, update timestamp)
             # Note: isAdmin is NOT stored in DynamoDB - it comes from JWT cognito:groups claim
             logger.info(f"Updating existing account: {account_id}")
+            update_expression = "SET updatedAt = :updated"
+            expression_values = {":updated": timestamp}
+            if email:
+                update_expression += ", email = :email"
+                expression_values[":email"] = email
             tables.accounts.update_item(
                 Key={"accountId": account_id_key},
-                UpdateExpression="SET email = :email, updatedAt = :updated",
-                ExpressionAttributeValues={
-                    ":email": email,
-                    ":updated": timestamp,
-                },
+                UpdateExpression=update_expression,
+                ExpressionAttributeValues=expression_values,
             )
         else:
             # Create new Account record (multi-table design: simpler schema)
