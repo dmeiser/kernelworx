@@ -2,7 +2,7 @@
  * OrderEditorPage - Page for creating or editing an order
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation } from '@apollo/client/react';
 import {
@@ -867,8 +867,6 @@ function useOrderData(urlParams: ParsedOrderParams): UseOrderDataResult {
 // Loading and Error States
 // ============================================================================
 
-
-
 interface PermissionErrorProps {
   hasPermission: boolean;
 }
@@ -923,11 +921,19 @@ export const OrderEditorPage: React.FC = () => {
   });
 
   const { loadFromOrder, paymentMethod, setPaymentMethod } = formState;
+  const loadedOrderIdRef = useRef<string | undefined>(undefined);
 
+  // Only load order data into the form when the order ID changes. Apollo can re-emit the same
+  // order with a new object identity (for example, after a cache write), and reloading would
+  // overwrite any in-progress edits the user has made.
   useEffect(() => {
     if (!orderData) {
       return;
     }
+    if (loadedOrderIdRef.current === orderData.orderId) {
+      return;
+    }
+    loadedOrderIdRef.current = orderData.orderId;
     loadFromOrder(orderData);
   }, [orderData, loadFromOrder]);
 
@@ -953,7 +959,9 @@ export const OrderEditorPage: React.FC = () => {
       urlParams,
       createOrder,
       updateOrder,
-      navigate: (path) => { void navigate(path); },
+      navigate: (path) => {
+        void navigate(path);
+      },
     });
   };
 
@@ -973,9 +981,15 @@ export const OrderEditorPage: React.FC = () => {
       paymentMethods={paymentMethods}
       paymentMethodsLoading={paymentMethodsLoading}
       isOwnerOrWrite={isOwnerOrWrite}
-      navigate={(path) => { void navigate(path); }}
-      handleCancel={() => { void handleCancel(); }}
-      handleSubmit={() => { void handleSubmit(); }}
+      navigate={(path) => {
+        void navigate(path);
+      }}
+      handleCancel={() => {
+        void handleCancel();
+      }}
+      handleSubmit={() => {
+        void handleSubmit();
+      }}
     />
   );
 };
