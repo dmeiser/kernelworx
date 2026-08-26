@@ -24,7 +24,7 @@ import {
   MenuItem,
 } from '@mui/material';
 import { useNavigate, type NavigateFunction } from 'react-router-dom';
-import { signUp, confirmSignUp, autoSignIn, fetchAuthSession } from 'aws-amplify/auth';
+import { signUp, confirmSignUp, autoSignIn, fetchAuthSession, resendSignUpCode } from 'aws-amplify/auth';
 import { useMutation } from '@apollo/client/react';
 import { UPDATE_MY_ACCOUNT } from '../lib/graphql';
 import { useAuth } from '../contexts/AuthContext';
@@ -327,8 +327,18 @@ export const SignupPage: React.FC = () => {
   };
 
   const handleResendCode = async () => {
-    // TODO: Implement resend verification code
-    setSuccess('Resend code functionality coming soon');
+    setError(null);
+    setSuccess(null);
+    setLoading(true);
+    try {
+      await resendSignUpCode({ username: email });
+      setSuccess('Verification code resent. Please check your email.');
+    } catch (err: unknown) {
+      const typedError = err as { name?: string; message?: string };
+      setError(typedError.message ?? 'Failed to resend verification code.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   if (showVerification) {
