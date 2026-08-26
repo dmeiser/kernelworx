@@ -475,11 +475,14 @@ def _validate_sub_for_filter(sub: str) -> None:
     """Validate a sub/account ID before interpolating it into a Cognito filter.
 
     Reject Cognito filter metacharacters (double quotes, backslashes,
-    whitespace). See issue #124.
+    whitespace) and require a UUID shape so malformed values surface as
+    INVALID_INPUT instead of a Cognito parse error. See issue #124.
     """
     if not sub or len(sub) > 256:
         raise AppError(ErrorCode.INVALID_INPUT, "Account ID is required")
     _reject_cognito_filter_metachars(sub, "account ID")
+    if not _looks_like_uuid(sub):
+        raise AppError(ErrorCode.INVALID_INPUT, "Invalid account ID")
 
 
 def _validate_search_query(query: str) -> None:
