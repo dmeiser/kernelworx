@@ -19,6 +19,7 @@
 #     -- -var="environment=pr-123"
 
 set -e
+set -o pipefail
 
 log() {
   echo "$@" >&2
@@ -87,7 +88,7 @@ tofu plan -input=false -out="$PLAN_FILE" "${EXTRA_TOFU_ARGS[@]}"
 # Check whether the plan would destroy any aws_appsync_function resources.
 # The jq query selects resource_changes where type is aws_appsync_function and
 # the actions array contains "delete".
-deletions=$(tofu show -json "$PLAN_FILE" 2>/dev/null | \
+deletions=$(tofu show -json "$PLAN_FILE" | \
   jq -r '.resource_changes[]? | select(.type == "aws_appsync_function" and (.change.actions | index("delete"))) | .address')
 
 if [ -z "$deletions" ]; then
