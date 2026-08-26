@@ -119,8 +119,8 @@ export function request(ctx) {
     }
 
     let enrichedLineItems = [];
-    // TODO(#75): Money is accumulated as JS double; consider integer cents or Decimal to avoid rounding issues.
-    let totalAmount = 0.0;
+    // Accumulate money in integer cents to avoid floating-point drift.
+    let totalAmountCents = 0;
 
     const productsMap = {};
     for (const product of catalog.products || []) {
@@ -141,8 +141,10 @@ export function request(ctx) {
 
         const product = productsMap[productId];
         const pricePerUnit = product.price;
-        const subtotal = pricePerUnit * quantity;
-        totalAmount += subtotal;
+        const pricePerUnitCents = Math.round(pricePerUnit * 100);
+        const subtotalCents = pricePerUnitCents * quantity;
+        totalAmountCents += subtotalCents;
+        const subtotal = subtotalCents / 100;
 
         enrichedLineItems.push({
             productId: productId,
@@ -152,6 +154,8 @@ export function request(ctx) {
             subtotal: subtotal
         });
     }
+
+    const totalAmount = totalAmountCents / 100;
 
     const campaignIdWithoutPrefix = campaignId.startsWith('CAMPAIGN#') ? campaignId.substring(9) : campaignId;
     const orderId = `ORDER#${campaignIdWithoutPrefix}#${util.autoId()}`;

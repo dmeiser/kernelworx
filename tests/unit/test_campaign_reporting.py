@@ -694,3 +694,70 @@ class TestGetUnitReport:
             assert result["sellers"][0]["sellerName"] == "Scout 2"
             assert result["totalSales"] == 200.0
             assert result["totalOrders"] == 1
+
+    def test_get_unit_report_decimal_precision_drift(
+        self,
+        event: Dict[str, Any],
+        lambda_context: Any,
+    ) -> None:
+        """Test that accumulating many orders does not suffer from float precision drift."""
+        mock_profiles_table = MagicMock()
+        mock_campaigns_table = MagicMock()
+        mock_orders_table = MagicMock()
+
+        campaigns = [
+            {
+                "campaignId": "CAMPAIGN#campaign1",
+                "profileId": "PROFILE#profile1",
+                "campaignName": "Fall",
+                "campaignYear": 2024,
+                "catalogId": "CATALOG#catalog-123",
+                "unitCampaignKey": "Pack#158#Springfield#IL#Fall#2024",
+            }
+        ]
+        profiles = {
+            "PROFILE#profile1": {
+                "profileId": "PROFILE#profile1",
+                "ownerAccountId": "test-account-123",
+                "sellerName": "Scout 1",
+            }
+        }
+        orders = [
+            {
+                "orderId": f"ORDER#order_{i}",
+                "campaignId": "CAMPAIGN#campaign1",
+                "customerName": f"Customer {i}",
+                "orderDate": "2024-10-01T12:00:00Z",
+                "totalAmount": "1.99",
+                "lineItems": [
+                    {
+                        "productId": "PROD#1",
+                        "productName": "Popcorn",
+                        "quantity": 1,
+                        "pricePerUnit": "1.99",
+                        "subtotal": "1.99",
+                    }
+                ],
+            }
+            for i in range(100)
+        ]
+
+        mock_campaigns_table.query.return_value = {"Items": campaigns}
+        self._setup_profile_query_mock(mock_profiles_table, profiles)
+        mock_orders_table.query.return_value = {"Items": orders}
+
+        with (
+            patch("src.handlers.campaign_reporting.tables") as mock_tables,
+            patch("src.handlers.campaign_reporting.batch_check_profile_access") as mock_check_access,
+        ):
+            mock_tables.profiles = mock_profiles_table
+            mock_tables.campaigns = mock_campaigns_table
+            mock_tables.orders = mock_orders_table
+            mock_check_access.return_value = {"PROFILE#profile1"}
+
+            result = get_unit_report(event, lambda_context)
+
+            assert len(result["sellers"]) == 1
+            assert result["sellers"][0]["totalSales"] == 199.0
+            assert result["totalSales"] == 199.0
+            assert result["totalOrders"] == 100
