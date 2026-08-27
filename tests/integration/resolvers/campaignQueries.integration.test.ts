@@ -7,7 +7,7 @@ import '../setup.ts';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { ApolloClient, gql, HttpLink, InMemoryCache } from '@apollo/client';
 import { createAuthenticatedClient, AuthenticatedClientResult } from '../setup/apolloClient';
-import { deleteTestAccounts } from '../setup/testData';
+import { deleteCatalogWithRetry, deleteTestAccounts } from '../setup/testData';
 
 // Helper to create unauthenticated client
 const createUnauthenticatedClient = () => {
@@ -70,12 +70,6 @@ const SHARE_DIRECT = gql`
 const DELETE_PROFILE = gql`
   mutation DeleteProfile($profileId: ID!) {
     deleteSellerProfile(profileId: $profileId)
-  }
-`;
-
-const DELETE_CATALOG = gql`
-  mutation DeleteCatalog($catalogId: ID!) {
-    deleteCatalog(catalogId: $catalogId)
   }
 `;
 
@@ -212,7 +206,7 @@ describe('Campaign Query Resolvers Integration Tests', () => {
         
         // Cleanup
         await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId } });
-        await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId } });
+        await deleteCatalogWithRetry(ownerClient, catalogId);
         await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
       }, 15000); // Extended timeout for GSI consistency
 
@@ -277,7 +271,7 @@ describe('Campaign Query Resolvers Integration Tests', () => {
         
         // Cleanup
         await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId } });
-        await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId } });
+        await deleteCatalogWithRetry(ownerClient, catalogId);
         await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
       });
 
@@ -341,7 +335,7 @@ describe('Campaign Query Resolvers Integration Tests', () => {
         // Cleanup
         await ownerClient.mutate({ mutation: REVOKE_SHARE, variables: { input: { profileId, targetAccountId: readonlyAccountId } } });
         await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId } });
-        await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId } });
+        await deleteCatalogWithRetry(ownerClient, catalogId);
         await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
       });
 
@@ -391,7 +385,7 @@ describe('Campaign Query Resolvers Integration Tests', () => {
         
         // Cleanup
         await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId } });
-        await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId } });
+        await deleteCatalogWithRetry(ownerClient, catalogId);
         await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
       });
 
@@ -441,7 +435,7 @@ describe('Campaign Query Resolvers Integration Tests', () => {
         
         // Cleanup
         await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId } });
-        await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId } });
+        await deleteCatalogWithRetry(ownerClient, catalogId);
         await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
       });
     });
@@ -515,7 +509,7 @@ describe('Campaign Query Resolvers Integration Tests', () => {
         // Cleanup
         await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId: campaignId1 } });
         await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId: campaignId2 } });
-        await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId } });
+        await deleteCatalogWithRetry(ownerClient, catalogId);
         await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
       });
 
@@ -636,7 +630,7 @@ describe('Campaign Query Resolvers Integration Tests', () => {
 
         // Cleanup
         await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId: campaignIdToKeep } });
-        await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId } });
+        await deleteCatalogWithRetry(ownerClient, catalogId);
         await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
       }, 15000);
     });
@@ -689,7 +683,7 @@ describe('Campaign Query Resolvers Integration Tests', () => {
         
         // Cleanup
         await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId } });
-        await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId } });
+        await deleteCatalogWithRetry(ownerClient, catalogId);
         await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
       });
 
@@ -753,7 +747,7 @@ describe('Campaign Query Resolvers Integration Tests', () => {
         // Cleanup
         await ownerClient.mutate({ mutation: REVOKE_SHARE, variables: { input: { profileId, targetAccountId: readonlyAccountId } } });
         await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId } });
-        await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId } });
+        await deleteCatalogWithRetry(ownerClient, catalogId);
         await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
       });
 
@@ -803,7 +797,7 @@ describe('Campaign Query Resolvers Integration Tests', () => {
         
         // Cleanup
         await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId } });
-        await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId } });
+        await deleteCatalogWithRetry(ownerClient, catalogId);
         await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
       });
 
@@ -853,7 +847,7 @@ describe('Campaign Query Resolvers Integration Tests', () => {
         
         // Cleanup
         await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId } });
-        await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId } });
+        await deleteCatalogWithRetry(ownerClient, catalogId);
         await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
       });
     });
@@ -909,7 +903,7 @@ describe('Campaign Query Resolvers Integration Tests', () => {
 
       // Cleanup
       await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId } });
-      await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId } });
+      await deleteCatalogWithRetry(ownerClient, catalogId);
       await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
     });
 
@@ -961,7 +955,7 @@ describe('Campaign Query Resolvers Integration Tests', () => {
 
       // Cleanup
       await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId } });
-      await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId } });
+      await deleteCatalogWithRetry(ownerClient, catalogId);
       await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
     });
   });
@@ -1031,7 +1025,7 @@ describe('Campaign Query Resolvers Integration Tests', () => {
 
       // Cleanup
       await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId: campaignId2 } });
-      await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId } });
+      await deleteCatalogWithRetry(ownerClient, catalogId);
       await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
     });
   });
@@ -1184,7 +1178,7 @@ describe('Campaign Query Resolvers Integration Tests', () => {
       await ownerClient.mutate({ mutation: DELETE_ORDER, variables: { orderId: orderId1 } });
       await ownerClient.mutate({ mutation: DELETE_ORDER, variables: { orderId: orderId2 } });
       await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId } });
-      await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId } });
+      await deleteCatalogWithRetry(ownerClient, catalogId);
       await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
     });
 
@@ -1241,7 +1235,7 @@ describe('Campaign Query Resolvers Integration Tests', () => {
 
       // Cleanup
       await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId } });
-      await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId } });
+      await deleteCatalogWithRetry(ownerClient, catalogId);
       await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
     });
 
@@ -1292,7 +1286,7 @@ describe('Campaign Query Resolvers Integration Tests', () => {
 
       // Cleanup
       await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId } });
-      await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId } });
+      await deleteCatalogWithRetry(ownerClient, catalogId);
       await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
     });
   });
@@ -1371,7 +1365,7 @@ describe('Campaign Query Resolvers Integration Tests', () => {
       for (const campaignId of campaignIds) {
         await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId } });
       }
-      await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId } });
+      await deleteCatalogWithRetry(ownerClient, catalogId);
       await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
     }, 60000);
 
@@ -1488,7 +1482,7 @@ describe('Campaign Query Resolvers Integration Tests', () => {
       await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId: pastCampaignId } });
       await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId: activeCampaignId } });
       await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId: futureCampaignId } });
-      await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId } });
+      await deleteCatalogWithRetry(ownerClient, catalogId);
       await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
     }, 60000);
   });

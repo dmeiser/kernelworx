@@ -777,11 +777,19 @@ describe('Profile Query Operations Integration Tests', () => {
       const targetAccountId = shareData.shareProfileDirect.targetAccountId;
 
       // Verify share appears in list
-      const { data: beforeRevoke } = await contributorClient.query({
-        query: LIST_MY_SHARES,
-        fetchPolicy: 'network-only',
-      });
-      expect(beforeRevoke.listMyShares.some((p: any) => p.profileId === profileId)).toBe(true);
+      const beforeRevokeShares = await waitForGSIConsistency(
+        async () => {
+          const { data } = await contributorClient.query({
+            query: LIST_MY_SHARES,
+            fetchPolicy: 'network-only',
+          });
+          return data.listMyShares;
+        },
+        (shares: any[]) => shares.some((p: any) => p.profileId === profileId),
+        20,
+        1000
+      );
+      expect(beforeRevokeShares.some((p: any) => p.profileId === profileId)).toBe(true);
 
       // Revoke the share
       await ownerClient.mutate({

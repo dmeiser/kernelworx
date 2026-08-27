@@ -283,6 +283,46 @@ export async function deleteTestProfile(
 }
 
 /**
+ * GraphQL mutation to delete a catalog.
+ */
+const DELETE_CATALOG = gql`
+  mutation DeleteCatalog($catalogId: ID!) {
+    deleteCatalog(catalogId: $catalogId)
+  }
+`;
+
+/**
+ * Delete a catalog via GraphQL, retrying when the catalog is still in use.
+ * Workaround for GSI eventual consistency: the catalogId-index may still
+ * report campaigns as using the catalog immediately after they were deleted.
+ */
+export async function deleteCatalogWithRetry(
+  client: ApolloClient<any>,
+  catalogId: string,
+  maxAttempts: number = 15,
+  delayMs: number = 1000
+): Promise<void> {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      await client.mutate({
+        mutation: DELETE_CATALOG,
+        variables: { catalogId },
+      });
+      return;
+    } catch (error: any) {
+      const message = error?.message ?? String(error);
+      const isLastAttempt = attempt === maxAttempts;
+      const isCatalogInUse = /Cannot delete catalog/i.test(message);
+      if (!isCatalogInUse || isLastAttempt) {
+        throw error;
+      }
+      console.log(`⏳ Catalog ${catalogId} still in use, retrying delete (${attempt}/${maxAttempts})...`);
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+}
+
+/**
  * Create unique test data prefix to avoid collisions.
  */
 export function getTestPrefix(): string {
