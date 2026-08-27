@@ -135,7 +135,9 @@ class CampaignPage(BasePage):
                 candidate_ids.add(f"PROFILE#{profile_id}")
             option = None
             for candidate in candidate_ids:
-                candidate_option = profile_listbox.locator(f"[role=\"option\"][data-value=\"{candidate}\"]")
+                candidate_option = profile_listbox.locator(
+                    f"[role=\"option\"]:not([aria-disabled=\"true\"])[data-value=\"{candidate}\"]"
+                )
                 if candidate_option.count() > 0:
                     option = candidate_option
                     break
