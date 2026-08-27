@@ -969,6 +969,118 @@ class TestCreateCampaign:
         # Assert
         assert result["endDate"] == "2024-12-31T00:00:00Z"
 
+    @patch("src.handlers.campaign_operations.dynamodb_client")
+    @patch("src.handlers.campaign_operations.check_profile_access")
+    @patch("src.handlers.campaign_operations._get_profile")
+    def test_create_campaign_rejects_end_date_before_start_date(
+        self,
+        mock_get_profile: MagicMock,
+        mock_check_access: MagicMock,
+        mock_dynamodb_client: MagicMock,
+        lambda_context: MagicMock,
+        sample_profile: Dict[str, Any],
+    ) -> None:
+        """Test that campaign creation rejects an endDate before startDate."""
+        # Arrange
+        mock_check_access.return_value = True
+        mock_get_profile.return_value = sample_profile
+
+        event = {
+            "arguments": {
+                "input": {
+                    "profileId": "PROFILE#profile-123",
+                    "campaignName": "Fall",
+                    "campaignYear": 2024,
+                    "startDate": "2024-12-31T00:00:00Z",
+                    "endDate": "2024-01-01T00:00:00Z",
+                    "catalogId": "catalog-abc",
+                }
+            },
+            "identity": {"sub": "test-account-123"},
+        }
+
+        # Act & Assert
+        with pytest.raises(AppError) as exc_info:
+            create_campaign(event, lambda_context)
+
+        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+        assert "before" in str(exc_info.value.message).lower()
+        mock_dynamodb_client.transact_write_items.assert_not_called()
+
+    @patch("src.handlers.campaign_operations.dynamodb_client")
+    @patch("src.handlers.campaign_operations.check_profile_access")
+    @patch("src.handlers.campaign_operations._get_profile")
+    def test_create_campaign_rejects_invalid_date_format(
+        self,
+        mock_get_profile: MagicMock,
+        mock_check_access: MagicMock,
+        mock_dynamodb_client: MagicMock,
+        lambda_context: MagicMock,
+        sample_profile: Dict[str, Any],
+    ) -> None:
+        """Test that campaign creation rejects malformed ISO dates."""
+        # Arrange
+        mock_check_access.return_value = True
+        mock_get_profile.return_value = sample_profile
+
+        event = {
+            "arguments": {
+                "input": {
+                    "profileId": "PROFILE#profile-123",
+                    "campaignName": "Fall",
+                    "campaignYear": 2024,
+                    "startDate": "2024-09-01T00:00:00Z",
+                    "endDate": "not-a-date",
+                    "catalogId": "catalog-abc",
+                }
+            },
+            "identity": {"sub": "test-account-123"},
+        }
+
+        # Act & Assert
+        with pytest.raises(AppError) as exc_info:
+            create_campaign(event, lambda_context)
+
+        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+        mock_dynamodb_client.transact_write_items.assert_not_called()
+
+    @patch("src.handlers.campaign_operations.dynamodb_client")
+    @patch("src.handlers.campaign_operations.check_profile_access")
+    @patch("src.handlers.campaign_operations._get_profile")
+    def test_create_campaign_rejects_non_string_date(
+        self,
+        mock_get_profile: MagicMock,
+        mock_check_access: MagicMock,
+        mock_dynamodb_client: MagicMock,
+        lambda_context: MagicMock,
+        sample_profile: Dict[str, Any],
+    ) -> None:
+        """Test that campaign creation rejects non-string date values."""
+        # Arrange
+        mock_check_access.return_value = True
+        mock_get_profile.return_value = sample_profile
+
+        event = {
+            "arguments": {
+                "input": {
+                    "profileId": "PROFILE#profile-123",
+                    "campaignName": "Fall",
+                    "campaignYear": 2024,
+                    "startDate": 12345,
+                    "endDate": "2024-12-31T00:00:00Z",
+                    "catalogId": "catalog-abc",
+                }
+            },
+            "identity": {"sub": "test-account-123"},
+        }
+
+        # Act & Assert
+        with pytest.raises(AppError) as exc_info:
+            create_campaign(event, lambda_context)
+
+        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+        mock_dynamodb_client.transact_write_items.assert_not_called()
+
     @pytest.mark.skip(reason="TODO: Fix mock setup for shared_campaigns_table - mocking not working as expected")
     @patch("src.handlers.campaign_operations.dynamodb_client")
     @patch("src.handlers.campaign_operations.check_profile_access")
