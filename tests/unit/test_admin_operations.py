@@ -2725,14 +2725,14 @@ class TestAdminDeleteUserCatalogs:
         }
 
         with patch("src.handlers.admin_operations.tables") as mock_tables:
-            # Mock catalogs scan - simulate pagination
-            mock_tables.catalogs.scan.side_effect = [
+            # Mock catalogs GSI query - simulate pagination
+            mock_tables.catalogs.query.side_effect = [
                 {
                     "Items": [
                         {"catalogId": "catalog-1", "ownerAccountId": db_account_id},
                         {"catalogId": "catalog-2", "ownerAccountId": db_account_id},
                     ],
-                    "LastEvaluatedKey": {"catalogId": "catalog-2"},
+                    "LastEvaluatedKey": {"ownerAccountId": db_account_id, "catalogId": "catalog-2"},
                 },
                 {
                     "Items": [
@@ -2748,6 +2748,40 @@ class TestAdminDeleteUserCatalogs:
             assert mock_tables.catalogs.update_item.call_count == 3
             # Verify delete_item was NOT called
             assert mock_tables.catalogs.delete_item.call_count == 0
+
+    def test_queries_gsi_instead_of_scan(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """Test that catalog deletion queries the ownerAccountId GSI instead of scanning."""
+        monkeypatch.setenv("CATALOGS_TABLE_NAME", "kernelworx-catalogs-ue1-dev")
+
+        from src.handlers.admin_operations import admin_delete_user_catalogs
+
+        target_account_id = "target-user-123"
+        db_account_id = f"ACCOUNT#{target_account_id}"
+
+        event = {
+            **admin_appsync_event,
+            "arguments": {"accountId": target_account_id},
+        }
+
+        with patch("src.handlers.admin_operations.tables") as mock_tables:
+            mock_tables.catalogs.query.return_value = {
+                "Items": [{"catalogId": "catalog-1", "ownerAccountId": db_account_id}],
+            }
+
+            admin_delete_user_catalogs(event, lambda_context)
+
+            assert mock_tables.catalogs.scan.call_count == 0
+            assert mock_tables.catalogs.query.call_count == 1
+            call_kwargs = mock_tables.catalogs.query.call_args[1]
+            assert call_kwargs["IndexName"] == "ownerAccountId-index"
+            assert "ownerAccountId = :owner" in call_kwargs["KeyConditionExpression"]
+            assert call_kwargs["ExpressionAttributeValues"][":owner"] == db_account_id
 
     def test_non_admin_forbidden(
         self,
@@ -2805,7 +2839,7 @@ class TestAdminDeleteUserCatalogs:
         }
 
         with patch("src.handlers.admin_operations.tables") as mock_tables:
-            mock_tables.catalogs.scan.side_effect = RuntimeError("Unexpected")
+            mock_tables.catalogs.query.side_effect = RuntimeError("Unexpected")
 
             with pytest.raises(AppError) as exc_info:
                 admin_delete_user_catalogs(event, lambda_context)
