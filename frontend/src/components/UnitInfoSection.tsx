@@ -150,7 +150,7 @@ export const UnitInfoSection: React.FC<UnitInfoSectionProps> = ({
   onExpandChange,
   readOnly = false,
 }) => (
-  <Accordion expanded={expanded} onChange={(_, isExpanded) => onExpandChange(isExpanded)} disabled={readOnly}>
+  <Accordion expanded={expanded} onChange={(_, isExpanded) => onExpandChange(isExpanded)}>
     <AccordionSummary expandIcon={<ExpandMoreIcon />}>
       <UnitInfoHeader unitType={unitType} unitNumber={unitNumber} />
     </AccordionSummary>

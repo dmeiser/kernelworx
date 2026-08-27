@@ -22,6 +22,10 @@ function hasUnitUpdate(input) {
     );
 }
 
+function isNonEmptyUnitField(value) {
+    return value !== undefined && value !== null && value !== '';
+}
+
 function validateUnitUpdate(input, campaign) {
     if (!hasUnitUpdate(input)) {
         return;
@@ -38,18 +42,26 @@ function validateUnitUpdate(input, campaign) {
     const state = input.state !== undefined ? input.state : campaign.state;
 
     if (unitType) {
-        if (unitNumber === undefined || unitNumber === null || unitNumber === '') {
+        if (!isNonEmptyUnitField(unitNumber)) {
             util.error('unitNumber is required when unitType is provided', 'InvalidInput');
             return;
         }
-        if (!city) {
+        const num = Number(unitNumber);
+        if (!Number.isInteger(num) || num < 1) {
+            util.error('unitNumber must be a positive integer', 'InvalidInput');
+            return;
+        }
+        if (!isNonEmptyUnitField(city)) {
             util.error('city is required when unitType is provided', 'InvalidInput');
             return;
         }
-        if (!state) {
+        if (!isNonEmptyUnitField(state)) {
             util.error('state is required when unitType is provided', 'InvalidInput');
             return;
         }
+    } else if (isNonEmptyUnitField(unitNumber) || isNonEmptyUnitField(city) || isNonEmptyUnitField(state)) {
+        util.error('unitType is required when unit fields are present', 'InvalidInput');
+        return;
     }
 }
 
