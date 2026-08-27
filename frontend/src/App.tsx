@@ -88,12 +88,54 @@ function App() {
           <AuthProvider>
             <Routes>
               {/* Public routes */}
-              <Route path="/" element={<PublicRoute><LandingPage /></PublicRoute>} />
-              <Route path="/login" element={<PublicRoute><LoginPage /></PublicRoute>} />
-              <Route path="/forgot-password" element={<PublicRoute><ForgotPasswordPage /></PublicRoute>} />
-              <Route path="/signup" element={<PublicRoute><SignupPage /></PublicRoute>} />
-              <Route path="/privacy" element={<PublicRoute><PrivacyPolicyPage /></PublicRoute>} />
-              <Route path="/story" element={<PublicRoute><StoryPage /></PublicRoute>} />
+              <Route
+                path="/"
+                element={
+                  <PublicRoute>
+                    <LandingPage />
+                  </PublicRoute>
+                }
+              />
+              <Route
+                path="/login"
+                element={
+                  <PublicRoute>
+                    <LoginPage />
+                  </PublicRoute>
+                }
+              />
+              <Route
+                path="/forgot-password"
+                element={
+                  <PublicRoute>
+                    <ForgotPasswordPage />
+                  </PublicRoute>
+                }
+              />
+              <Route
+                path="/signup"
+                element={
+                  <PublicRoute>
+                    <SignupPage />
+                  </PublicRoute>
+                }
+              />
+              <Route
+                path="/privacy"
+                element={
+                  <PublicRoute>
+                    <PrivacyPolicyPage />
+                  </PublicRoute>
+                }
+              />
+              <Route
+                path="/story"
+                element={
+                  <PublicRoute>
+                    <StoryPage />
+                  </PublicRoute>
+                }
+              />
 
               {/* Shared Campaign short-link route */}
               <Route

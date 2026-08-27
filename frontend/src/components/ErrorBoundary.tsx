@@ -27,10 +27,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     return { hasError: true, error };
   }
 
-  static getDerivedStateFromProps(
-    props: ErrorBoundaryProps,
-    state: ErrorBoundaryState,
-  ): ErrorBoundaryState | null {
+  static getDerivedStateFromProps(props: ErrorBoundaryProps, state: ErrorBoundaryState): ErrorBoundaryState | null {
     if (props.resetKey !== undefined && props.resetKey !== state.prevResetKey) {
       return { hasError: false, error: null, prevResetKey: props.resetKey };
     }
@@ -38,7 +35,6 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
   }
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo): void {
-    // eslint-disable-next-line no-console
     console.error('ErrorBoundary caught an error:', error, errorInfo);
   }
 
