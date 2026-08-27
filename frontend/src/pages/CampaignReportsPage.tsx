@@ -29,7 +29,6 @@ import {
 } from '@mui/material';
 import { Download as DownloadIcon, Assessment as ReportIcon } from '@mui/icons-material';
 import { PageHeader } from '../components/PageHeader';
-import * as XLSX from 'xlsx';
 import { GET_UNIT_REPORT, LIST_MY_SHARED_CAMPAIGNS } from '../lib/graphql';
 import { formatCurrency } from '../lib/api-utils';
 import { sanitizeReportValue } from '../lib/reportExport';
@@ -151,7 +150,9 @@ const getTopSellers = (report?: UnitReport) => {
   return [...report.sellers].sort((a, b) => b.totalSales - a.totalSales).slice(0, 5);
 };
 
-const buildSellerReportWorkbook = (report: UnitReport, productList: string[]) => {
+const buildSellerReportWorkbook = async (report: UnitReport, productList: string[]) => {
+  const XLSX = await import('xlsx');
+
   const wb = XLSX.utils.book_new();
 
   const headerRow = ['Scout Name', ...productList, 'Total Items', 'Total Sales'].map(sanitizeReportValue);
@@ -182,7 +183,9 @@ const buildSellerReportWorkbook = (report: UnitReport, productList: string[]) =>
   XLSX.writeFile(wb, fileName);
 };
 
-const buildOrderDetailsWorkbook = (report: UnitReport, allOrders: SellerOrder[], allProducts: string[]) => {
+const buildOrderDetailsWorkbook = async (report: UnitReport, allOrders: SellerOrder[], allProducts: string[]) => {
+  const XLSX = await import('xlsx');
+
   const wb = XLSX.utils.book_new();
 
   const headerRow = ['Scout', 'Customer', ...allProducts, 'Total'].map(sanitizeReportValue);
@@ -824,15 +827,19 @@ const createGenerateHandler = (canGenerate: boolean, refetch: () => Promise<unkn
 };
 
 // Helper: Create export seller report handler
-const createExportSellerHandler = (report: UnitReport | undefined, productList: string[]) => {
+const createExportSellerHandler = async (report: UnitReport | undefined, productList: string[]) => {
   if (!report || !productList.length) return;
-  buildSellerReportWorkbook(report, productList);
+  await buildSellerReportWorkbook(report, productList);
 };
 
 // Helper: Create export order details handler
-const createExportOrderHandler = (report: UnitReport | undefined, allOrders: SellerOrder[], allProducts: string[]) => {
+const createExportOrderHandler = async (
+  report: UnitReport | undefined,
+  allOrders: SellerOrder[],
+  allProducts: string[],
+) => {
   if (!report || !allOrders.length || !allProducts.length) return;
-  buildOrderDetailsWorkbook(report, allOrders, allProducts);
+  await buildOrderDetailsWorkbook(report, allOrders, allProducts);
 };
 
 const useReportActions = ({
@@ -855,15 +862,13 @@ const useReportActions = ({
     [canGenerateReport, refetch],
   );
 
-  const handleExportSellerReport = useCallback(
-    () => createExportSellerHandler(report, productList),
-    [productList, report],
-  );
+  const handleExportSellerReport = useCallback(() => {
+    void createExportSellerHandler(report, productList);
+  }, [productList, report]);
 
-  const handleExportOrderDetails = useCallback(
-    () => createExportOrderHandler(report, allOrders, allProducts),
-    [allOrders, allProducts, report],
-  );
+  const handleExportOrderDetails = useCallback(() => {
+    void createExportOrderHandler(report, allOrders, allProducts);
+  }, [allOrders, allProducts, report]);
 
   return {
     handleGenerateReport,
