@@ -93,7 +93,7 @@ class CampaignPage(BasePage):
     # ------------------------------------------------------------------
 
     def create_campaign_first_catalog(self, name: str, profile_id: str | None = None) -> None:
-        """Open the *New Campaign* dialog, fill *name*, pick the first catalog, and submit.
+        """Open the *New Campaign* page, fill *name*, pick the first catalog, and submit.
 
         Encapsulates the full creation flow so test helpers do not need access
         to private locator methods.  After submission the app navigates to the
@@ -123,8 +123,8 @@ class CampaignPage(BasePage):
         expect(profile_listbox).to_be_visible(timeout=5_000)
 
         # Wait for the profile list to finish loading before matching.
-        loading_option = profile_listbox.locator("[role=\"option\"]", has_text="Loading profiles...")
-        enabled_options = profile_listbox.locator("[role=\"option\"]:not([aria-disabled=\"true\"])")
+        loading_option = profile_listbox.locator('[role="option"]', has_text="Loading profiles...")
+        enabled_options = profile_listbox.locator('[role="option"]:not([aria-disabled="true"])')
         if loading_option.count() > 0:
             expect(loading_option).to_have_count(0, timeout=5_000)
         expect(enabled_options.first).to_be_visible(timeout=5_000)
@@ -136,7 +136,7 @@ class CampaignPage(BasePage):
             option = None
             for candidate in candidate_ids:
                 candidate_option = profile_listbox.locator(
-                    f"[role=\"option\"]:not([aria-disabled=\"true\"])[data-value=\"{candidate}\"]"
+                    f'[role="option"]:not([aria-disabled="true"])[data-value="{candidate}"]'
                 )
                 if candidate_option.count() > 0:
                     option = candidate_option
