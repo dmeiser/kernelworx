@@ -641,10 +641,11 @@ class TestCreateCampaign:
         mock_get_shared_campaign.return_value = sample_shared_campaign
         mock_tables.catalogs.get_item.return_value = {"Item": sample_catalog}
 
-        # Mock the transact_write_items to fail on first call (share already exists)
-        # Create a real-like exception
+        # Mock the transact_write_items to fail on first call (share already exists).
+        # The share is at index 1 of the 2-item transaction; campaign at index 0
+        # succeeded, so the share's conditional check (attribute_not_exists) failed.
         mock_exception = Exception("TransactionCanceledException")
-        mock_exception.response = {"CancellationReasons": [{"Code": "ConditionalCheckFailed"}]}
+        mock_exception.response = {"CancellationReasons": [{"Code": "None"}, {"Code": "ConditionalCheckFailed"}]}
 
         # Create a proper exception type mock
         exception_type = type("TransactionCanceledException", (Exception,), {})
@@ -652,7 +653,7 @@ class TestCreateCampaign:
 
         # Create instance that looks like the exception
         instance = exception_type("Transaction cancelled")
-        instance.response = {"CancellationReasons": [{"Code": "ConditionalCheckFailed"}]}
+        instance.response = {"CancellationReasons": [{"Code": "None"}, {"Code": "ConditionalCheckFailed"}]}
 
         # First call raises exception, second call succeeds
         mock_dynamodb_client.transact_write_items.side_effect = [instance, None]
@@ -1123,6 +1124,59 @@ class TestDynamoDBClient:
 
         assert result is cached
         mock_client.assert_not_called()
+
+
+class TestHandleTransactionFailure:
+    """Tests for _handle_transaction_failure conditional-retry logic (Closes #134)."""
+
+    def _build_exception(self, reasons: list) -> Exception:
+        exception_type = type("TransactionCanceledException", (Exception,), {})
+        instance = exception_type("Transaction cancelled")
+        instance.response = {"CancellationReasons": reasons}
+        return instance
+
+    def _share_item(self) -> Dict[str, Any]:
+        return {"Put": {"TableName": "shares", "Item": {"id": {"S": "x"}}}}
+
+    def _campaign_item(self) -> Dict[str, Any]:
+        return {"Put": {"TableName": "campaigns", "Item": {"id": {"S": "y"}}}}
+
+    @patch("src.handlers.campaign_operations.dynamodb_client")
+    def test_retries_without_share_when_share_condition_fails(self, mock_dynamodb_client: MagicMock) -> None:
+        from src.handlers.campaign_operations import _handle_transaction_failure
+
+        transact_items = [self._campaign_item(), self._share_item()]
+        exc = self._build_exception([{"Code": "None"}, {"Code": "ConditionalCheckFailed"}])
+
+        _handle_transaction_failure(exc, transact_items)
+
+        mock_dynamodb_client.transact_write_items.assert_called_once_with(TransactItems=[self._campaign_item()])
+
+    @patch("src.handlers.campaign_operations.dynamodb_client")
+    def test_does_not_retry_when_campaign_condition_fails(self, mock_dynamodb_client: MagicMock) -> None:
+        from src.handlers.campaign_operations import _handle_transaction_failure
+
+        transact_items = [self._campaign_item(), self._share_item()]
+        exc = self._build_exception([{"Code": "ConditionalCheckFailed"}, {"Code": "None"}])
+
+        with pytest.raises(Exception) as exc_info:
+            _handle_transaction_failure(exc, transact_items)
+
+        assert exc_info.value is exc
+        mock_dynamodb_client.transact_write_items.assert_not_called()
+
+    @patch("src.handlers.campaign_operations.dynamodb_client")
+    def test_raises_when_no_conditional_failure(self, mock_dynamodb_client: MagicMock) -> None:
+        from src.handlers.campaign_operations import _handle_transaction_failure
+
+        transact_items = [self._campaign_item(), self._share_item()]
+        exc = self._build_exception([{"Code": "ThrottlingError"}, {"Code": "None"}])
+
+        with pytest.raises(Exception) as exc_info:
+            _handle_transaction_failure(exc, transact_items)
+
+        assert exc_info.value is exc
+        mock_dynamodb_client.transact_write_items.assert_not_called()
 
 
 class TestDeleteCampaignOrders:
