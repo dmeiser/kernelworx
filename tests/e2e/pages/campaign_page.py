@@ -26,9 +26,8 @@ class CampaignPage(BasePage):
 
     _CAMPAIGNS_SUFFIX: str = "/campaigns"
 
-    # Dialog selectors
+    # Page selectors
     _CAMPAIGN_NAME_LABEL: str = "Campaign Name"
-    _CATALOG_LABEL: str = "Product Catalog"  # used in CreateCampaignDialog
     _PAGE_CATALOG_LABEL: str = "Select Catalog"  # used in /create-campaign page (CatalogSection)
     _PAGE_PROFILE_LABEL: str = "Select Profile"  # used in /create-campaign page
     _VIEW_ORDERS_BTN: str = "View Orders"  # used in CampaignCard actions
@@ -72,16 +71,11 @@ class CampaignPage(BasePage):
         return self.get_by_role_button(self._NEW_CAMPAIGN_BTN)
 
     def _campaign_name_input(self) -> Locator:
-        """Return locator for the *Campaign Name* text field inside the dialog."""
+        """Return locator for the *Campaign Name* text field."""
         return self.page.get_by_label(self._CAMPAIGN_NAME_LABEL)
 
-    def _catalog_select(self) -> Locator:
-        """Return locator for the *Product Catalog* select inside the dialog."""
-        # MUI Select renders a <div role="combobox"> labelled by the InputLabel
-        return self.page.get_by_role("combobox", name=self._CATALOG_LABEL)
-
     def _create_button(self) -> Locator:
-        """Return locator for the *Create Campaign* confirm button in the dialog."""
+        """Return locator for the *Create Campaign* submit button."""
         return self.get_by_role_button(self._CREATE_CAMPAIGN_BTN)
 
     def _campaign_headings(self) -> Locator:
@@ -157,13 +151,14 @@ class CampaignPage(BasePage):
         catalog_combobox.click()
         listbox = self.page.get_by_role("listbox")
         expect(listbox).to_be_visible(timeout=5_000)
-        enabled_options = listbox.locator('[role="option"]:not([aria-disabled="true"])')
-        assert enabled_options.count() > 0, (
-            "No enabled catalog options found in dev environment. "
-            "An admin must create at least one catalog before running e2e tests. "
-            "See tests/e2e/README.md for prerequisites."
-        )
-        enabled_options.first.click()
+
+        # Wait for the catalog list to finish loading before matching.
+        catalog_loading_option = listbox.locator('[role="option"]', has_text="Loading catalogs...")
+        catalog_enabled_options = listbox.locator('[role="option"]:not([aria-disabled="true"])')
+        if catalog_loading_option.count() > 0:
+            expect(catalog_loading_option).to_have_count(0, timeout=5_000)
+        expect(catalog_enabled_options.first).to_be_visible(timeout=5_000)
+        catalog_enabled_options.first.click()
         self._create_button().click()
         # After success the app navigates to the campaign detail page.
         self.page.wait_for_url("**/campaigns/**", timeout=15_000)
@@ -182,54 +177,6 @@ class CampaignPage(BasePage):
             self.page.reload()
             self.wait_for_loading()
             time.sleep(1)
-
-    def create_campaign(self, name: str, catalog_name: str) -> None:
-        """Open the *New Campaign* dialog, fill it, and submit.
-
-        Waits for the dialog to close before returning so callers can
-        immediately call :meth:`has_campaign`.
-
-        Args:
-            name: Human-readable campaign name (e.g. ``"Fall 2025"``).
-            catalog_name: Visible text of the catalog option to select.
-        """
-        self._new_campaign_button().click()
-        self._fill_campaign_dialog(name, catalog_name)
-
-    def _fill_campaign_dialog(self, name: str, catalog_name: str) -> None:
-        """Fill and submit the *Create Campaign* dialog.
-
-        Extracted to keep :meth:`create_campaign` under complexity budget.
-
-        Args:
-            name: Campaign name text.
-            catalog_name: Catalog option visible text.
-        """
-        dialog = self.wait_for_dialog("New Campaign")
-        self._campaign_name_input().fill(name)
-        self._select_catalog(catalog_name)
-        self._create_button().click()
-        expect(dialog).to_be_hidden(timeout=10_000)
-        self.wait_for_loading()
-
-    def _select_catalog(self, catalog_name: str) -> None:
-        """Open the catalog dropdown and pick the option matching *catalog_name*.
-
-        Raises:
-            AssertionError: When the dropdown opens with no options, which
-                means no catalog has been created in the dev environment yet.
-
-        Args:
-            catalog_name: Visible text of the catalog menu item.
-        """
-        self._catalog_select().click()
-        options = self.page.get_by_role("option")
-        assert options.count() > 0, (
-            "No catalogs found in dev environment. "
-            "An admin must create at least one catalog before running e2e tests. "
-            "See tests/e2e/README.md for prerequisites."
-        )
-        self.page.get_by_role("option", name=catalog_name).click()
 
     def click_campaign(self, name: str) -> None:
         """Click on the campaign card whose heading contains *name*.
