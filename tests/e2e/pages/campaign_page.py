@@ -155,9 +155,16 @@ class CampaignPage(BasePage):
         # Wait for the catalog list to finish loading before matching.
         catalog_loading_option = listbox.locator('[role="option"]', has_text="Loading catalogs...")
         catalog_enabled_options = listbox.locator('[role="option"]:not([aria-disabled="true"])')
-        if catalog_loading_option.count() > 0:
-            expect(catalog_loading_option).to_have_count(0, timeout=5_000)
-        expect(catalog_enabled_options.first).to_be_visible(timeout=5_000)
+        try:
+            if catalog_loading_option.count() > 0:
+                expect(catalog_loading_option).to_have_count(0, timeout=5_000)
+            expect(catalog_enabled_options.first).to_be_visible(timeout=5_000)
+        except AssertionError as exc:
+            raise AssertionError(
+                "No enabled catalog options found in dev environment. "
+                "An admin must create at least one catalog before running e2e tests. "
+                "See tests/e2e/README.md for prerequisites."
+            ) from exc
         catalog_enabled_options.first.click()
         self._create_button().click()
         # After success the app navigates to the campaign detail page.
