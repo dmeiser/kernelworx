@@ -32,6 +32,16 @@ logger = get_logger(__name__)
 BATCH_SIZE = 25
 
 
+def _raise_delete_error(table_name: str, exc: Exception) -> None:
+    """Log and re-raise a batch deletion failure as an AppError."""
+    label = "Error" if isinstance(exc, ClientError) else "Unexpected error"
+    logger.error(f"{label} deleting batch from {table_name}: {str(exc)}")
+    raise AppError(
+        ErrorCode.INTERNAL_ERROR,
+        f"Failed to delete batch from {table_name}",
+    ) from exc
+
+
 def _batch_delete_keys(table: "Table", keys: List[Dict[str, Any]], primary_keys: List[str]) -> int:
     """Delete a list of keys in batches of 25, returning the number deleted.
 
@@ -52,18 +62,8 @@ def _batch_delete_keys(table: "Table", keys: List[Dict[str, Any]], primary_keys:
                     batch_writer.delete_item(Key=key)
             deleted_count += len(batch)
             logger.info(f"Deleted batch of {len(batch)} items from {table_name}")
-        except ClientError as e:
-            logger.error(f"Error deleting batch from {table_name}: {str(e)}")
-            raise AppError(
-                ErrorCode.INTERNAL_ERROR,
-                f"Failed to delete batch from {table_name}",
-            ) from e
         except Exception as e:
-            logger.error(f"Unexpected error deleting batch from {table_name}: {str(e)}")
-            raise AppError(
-                ErrorCode.INTERNAL_ERROR,
-                f"Failed to delete batch from {table_name}",
-            ) from e
+            _raise_delete_error(table_name, e)
 
     return deleted_count
 

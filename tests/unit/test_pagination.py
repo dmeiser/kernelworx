@@ -297,6 +297,40 @@ class TestQueryRetry:
 
         table.query.assert_called_once()
 
+    def test_does_not_retry_non_client_error(self) -> None:
+        """A plain exception is raised immediately."""
+        table = MagicMock()
+        table.query.side_effect = ValueError("not a ClientError")
+
+        with pytest.raises(ValueError):
+            query_all_items(
+                table,
+                {
+                    "KeyConditionExpression": "pk = :pk",
+                    "ExpressionAttributeValues": {":pk": "value"},
+                },
+            )
+
+        table.query.assert_called_once()
+
+    def test_does_not_retry_client_error_with_non_dict_response(self) -> None:
+        """ClientError without a dict response is raised immediately."""
+        table = MagicMock()
+        exc = ClientError({"Error": {"Code": "ProvisionedThroughputExceededException"}}, "Query")
+        exc.response = None  # type: ignore[assignment]
+        table.query.side_effect = exc
+
+        with pytest.raises(ClientError):
+            query_all_items(
+                table,
+                {
+                    "KeyConditionExpression": "pk = :pk",
+                    "ExpressionAttributeValues": {":pk": "value"},
+                },
+            )
+
+        table.query.assert_called_once()
+
 
 class TestScanRetry:
     """Tests for retry behavior on scan throughput errors."""
