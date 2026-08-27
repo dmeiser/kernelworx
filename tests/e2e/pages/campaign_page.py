@@ -13,7 +13,7 @@ class CampaignPage(BasePage):
     """Page object for ``/scouts/{profileId}/campaigns``.
 
     Shows the list of sales campaigns for a seller profile and provides
-    a *New Campaign* button that opens :class:`CreateCampaignDialog`.
+    a *New Campaign* button that navigates to the ``/create-campaign`` page.
 
     Selector notes:
 
@@ -27,7 +27,6 @@ class CampaignPage(BasePage):
     _CAMPAIGNS_SUFFIX: str = "/campaigns"
 
     # Dialog selectors
-    _DIALOG_TITLE: str = "Create New Sales Campaign"  # dialog heading
     _CAMPAIGN_NAME_LABEL: str = "Campaign Name"
     _CATALOG_LABEL: str = "Product Catalog"  # used in CreateCampaignDialog
     _PAGE_CATALOG_LABEL: str = "Select Catalog"  # used in /create-campaign page (CatalogSection)
