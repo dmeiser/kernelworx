@@ -1,5 +1,6 @@
 """Campaign page object — campaign list and creation for a seller profile."""
 
+import time
 import urllib.parse
 
 from playwright.sync_api import Locator, Page, expect
@@ -97,11 +98,9 @@ class CampaignPage(BasePage):
 
         Encapsulates the full creation flow so test helpers do not need access
         to private locator methods.  After submission the app navigates to the
-        campaign detail page; this method returns to the campaigns list but does
-        **not** wait for the new campaign to appear there, because the list query
-        is eventually consistent and can take longer than a helper timeout in
-        production.  Callers that need a post-creation visibility guarantee should
-        poll :meth:`has_campaign` themselves.
+        campaign detail page; this method returns to the campaigns list and
+        polls until the new campaign appears, restoring the helper's post-
+        creation visibility guarantee for callers that read the list immediately.
 
         Args:
             name: Human-readable campaign name (e.g. ``"Fall 2025"``).
@@ -169,13 +168,21 @@ class CampaignPage(BasePage):
         self._create_button().click()
         # After success the app navigates to the campaign detail page.
         self.page.wait_for_url("**/campaigns/**", timeout=15_000)
-        # Navigate back to the campaigns list so callers can verify visibility.
-        # Do not assert visibility here: the campaigns list query is eventually
-        # consistent and can take longer than a helper timeout in production.
-        # Callers that need a post-creation guarantee should poll has_campaign()
-        # themselves (see test_smoke_sharing.py for an example).
+        # Navigate back to the campaigns list and poll until the new campaign
+        # appears, restoring the helper's post-creation visibility guarantee.
         self.page.goto(campaigns_url)
         self.wait_for_loading()
+        deadline = time.monotonic() + 30
+        while True:
+            if self.has_campaign(name, timeout=1_000):
+                break
+            if time.monotonic() >= deadline:
+                raise AssertionError(
+                    f"Campaign {name!r} did not appear in the campaigns list within 30s after creation."
+                )
+            self.page.reload()
+            self.wait_for_loading()
+            time.sleep(1)
 
     def create_campaign(self, name: str, catalog_name: str) -> None:
         """Open the *New Campaign* dialog, fill it, and submit.

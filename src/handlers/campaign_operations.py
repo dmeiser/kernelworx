@@ -379,10 +379,16 @@ def _validate_campaign_dates(start_date: Any, end_date: Any) -> None:
             "Invalid date format for startDate or endDate",
         ) from e
 
+    # Mixed timezone-aware and timezone-naive datetimes are not comparable.
+    if start.tzinfo is None and end.tzinfo is not None:
+        start = start.replace(tzinfo=timezone.utc)
+    elif start.tzinfo is not None and end.tzinfo is None:
+        end = end.replace(tzinfo=timezone.utc)
+
     if end <= start:
         raise AppError(
             ErrorCode.INVALID_INPUT,
-            "endDate cannot be before startDate",
+            "endDate must be after startDate",
         )
 
 
