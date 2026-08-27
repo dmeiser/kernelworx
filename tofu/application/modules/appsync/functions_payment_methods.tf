@@ -89,10 +89,6 @@ resource "aws_appsync_function" "validate_payment_method_appsync" {
   }
 
   code = file("${local.js_resolvers_dir}/lambda_passthrough_resolver.js")
-
-  lifecycle {
-    replace_triggered_by = [terraform_data.validate_payment_method_appsync_code]
-  }
 }
 
 resource "aws_appsync_function" "validate_create_payment_method" {

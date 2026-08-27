@@ -200,12 +200,7 @@ jobs:
           # the affected pipeline resolver(s) first so the saved plan can delete
           # them without hitting BadRequestException.
           "$GITHUB_WORKSPACE/scripts/appsync-ensure-resolver-order.sh" \
-            -t module.appsync.aws_appsync_resolver.create_order \
-            -t module.appsync.aws_appsync_resolver.share_profile_direct \
-            -t module.appsync.aws_appsync_resolver.update_campaign \
-            -t module.appsync.aws_appsync_resolver.delete_campaign \
-            -t module.appsync.aws_appsync_resolver.update_order \
-            -t module.appsync.aws_appsync_resolver.delete_order
+            -t module.appsync.aws_appsync_resolver.create_order
 
       - name: OpenTofu plan
         env:
