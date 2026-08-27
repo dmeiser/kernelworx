@@ -5,7 +5,6 @@ import pathlib
 import time
 
 from playwright.sync_api import Locator, Page, expect
-from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 
 class BasePage:
@@ -65,26 +64,25 @@ class BasePage:
         Lazy-loaded route components introduce an extra Suspense fallback
         (CircularProgress) after auth state resolves.  A naïve "spinner hidden"
         check can return in the brief gap between the auth spinner disappearing
-        and the route spinner appearing.  This helper polls until no spinner is
-        visible for a short grace period.
+        and the route spinner appearing, or while a page-level data fetch is
+        still in progress.  This helper polls until no spinner is visible for a
+        short grace period.
 
         Args:
             timeout: Maximum wait in milliseconds. Defaults to 15 000.
         """
         spinner = self.page.locator(self._SPINNER)
         deadline = time.monotonic() + timeout / 1000
+        hidden_ms = 0
         while time.monotonic() < deadline:
-            try:
-                spinner.first.wait_for(state="hidden", timeout=500)
-            except PlaywrightTimeoutError:
-                # Spinner is still visible; keep polling.
-                continue
-            # Spinner disappeared.  Wait a short grace period to confirm React
-            # has not committed a new Suspense fallback before declaring loading
-            # complete.
-            self.page.wait_for_timeout(200)
-            if not spinner.first.is_visible():
-                return
+            any_visible = any(element.is_visible() for element in spinner.all())
+            if any_visible:
+                hidden_ms = 0
+            else:
+                hidden_ms += 100
+                if hidden_ms >= 300:
+                    return
+            self.page.wait_for_timeout(100)
         # Timeout: loading spinner may still be visible, but proceed so the caller
         # can fail with a meaningful assertion instead of hanging here.
 
