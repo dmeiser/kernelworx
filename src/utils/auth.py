@@ -146,13 +146,29 @@ def batch_check_profile_access(
     profile_keys = [{"ownerAccountId": db_caller_id, "profileId": pid} for pid in db_profile_ids]
     profiles_table_name = tables.profiles.table_name
 
-    response = get_dynamodb_resource().batch_get_item(
-        RequestItems={profiles_table_name: {"Keys": profile_keys}}
-    )
-    for item in response.get("Responses", {}).get(profiles_table_name, []):
-        db_pid = item.get("profileId")
-        if db_pid:
-            owned_db_ids.add(cast(str, db_pid))
+    for i in range(0, len(profile_keys), 100):
+        batch = profile_keys[i : i + 100]
+        keys_to_fetch = batch
+        for attempt in range(3):
+            if not keys_to_fetch:
+                break
+            response = get_dynamodb_resource().batch_get_item(
+                RequestItems={profiles_table_name: {"Keys": keys_to_fetch}}
+            )
+            for item in response.get("Responses", {}).get(profiles_table_name, []):
+                db_pid = item.get("profileId")
+                if db_pid:
+                    owned_db_ids.add(cast(str, db_pid))
+
+            unprocessed = response.get("UnprocessedKeys", {}).get(profiles_table_name, {}).get("Keys", [])
+            keys_to_fetch = unprocessed
+            if keys_to_fetch and attempt < 2:
+                logger.warning(
+                    "Unprocessed profile ownership keys, retrying",
+                    attempt=attempt + 1,
+                    count=len(keys_to_fetch),
+                )
+                time.sleep(0.05 * (2**attempt))
 
     accessible_db_ids = set(owned_db_ids)
 
@@ -162,29 +178,31 @@ def batch_check_profile_access(
         share_keys = [{"profileId": pid, "targetAccountId": db_caller_id} for pid in remaining_ids]
         shares_table_name = tables.shares.table_name
 
-        keys_to_fetch = share_keys
-        for attempt in range(3):
-            if not keys_to_fetch:
-                break
-            response = get_dynamodb_resource().batch_get_item(
-                RequestItems={shares_table_name: {"Keys": keys_to_fetch}}
-            )
-            for share in response.get("Responses", {}).get(shares_table_name, []):
-                permissions = _normalize_permissions(share.get("permissions", []))
-                if _has_required_permission(permissions, required_permission):
-                    db_pid = share.get("profileId")
-                    if db_pid:
-                        accessible_db_ids.add(cast(str, db_pid))
-
-            unprocessed = response.get("UnprocessedKeys", {}).get(shares_table_name, {}).get("Keys", [])
-            keys_to_fetch = unprocessed
-            if keys_to_fetch and attempt < 2:
-                logger.warning(
-                    "Unprocessed share keys, retrying",
-                    attempt=attempt + 1,
-                    count=len(keys_to_fetch),
+        for i in range(0, len(share_keys), 100):
+            batch = share_keys[i : i + 100]
+            keys_to_fetch = batch
+            for attempt in range(3):
+                if not keys_to_fetch:
+                    break
+                response = get_dynamodb_resource().batch_get_item(
+                    RequestItems={shares_table_name: {"Keys": keys_to_fetch}}
                 )
-                time.sleep(0.05 * (2**attempt))
+                for share in response.get("Responses", {}).get(shares_table_name, []):
+                    permissions = _normalize_permissions(share.get("permissions", []))
+                    if _has_required_permission(permissions, required_permission):
+                        db_pid = share.get("profileId")
+                        if db_pid:
+                            accessible_db_ids.add(cast(str, db_pid))
+
+                unprocessed = response.get("UnprocessedKeys", {}).get(shares_table_name, {}).get("Keys", [])
+                keys_to_fetch = unprocessed
+                if keys_to_fetch and attempt < 2:
+                    logger.warning(
+                        "Unprocessed share keys, retrying",
+                        attempt=attempt + 1,
+                        count=len(keys_to_fetch),
+                    )
+                    time.sleep(0.05 * (2**attempt))
 
     return {profile_id_map[db_pid] for db_pid in accessible_db_ids if db_pid in profile_id_map}
 
