@@ -1119,6 +1119,44 @@ class TestCreateCampaign:
         assert result["endDate"] == "2024-12-31T00:00:00Z"
         mock_dynamodb_client.transact_write_items.assert_called_once()
 
+    @patch("src.handlers.campaign_operations.dynamodb_client")
+    @patch("src.handlers.campaign_operations.check_profile_access")
+    @patch("src.handlers.campaign_operations._get_profile")
+    def test_create_campaign_accepts_mixed_timezone_aware_start_and_naive_end(
+        self,
+        mock_get_profile: MagicMock,
+        mock_check_access: MagicMock,
+        mock_dynamodb_client: MagicMock,
+        lambda_context: MagicMock,
+        sample_profile: Dict[str, Any],
+    ) -> None:
+        """Test that mixed timezone-aware start and timezone-naive end dates validate cleanly."""
+        # Arrange
+        mock_check_access.return_value = True
+        mock_get_profile.return_value = sample_profile
+
+        event = {
+            "arguments": {
+                "input": {
+                    "profileId": "PROFILE#profile-123",
+                    "campaignName": "Fall",
+                    "campaignYear": 2024,
+                    "startDate": "2024-01-01T00:00:00Z",
+                    "endDate": "2024-12-31T00:00:00",
+                    "catalogId": "catalog-abc",
+                }
+            },
+            "identity": {"sub": "test-account-123"},
+        }
+
+        # Act
+        result = create_campaign(event, lambda_context)
+
+        # Assert
+        assert result["startDate"] == "2024-01-01T00:00:00Z"
+        assert result["endDate"] == "2024-12-31T00:00:00"
+        mock_dynamodb_client.transact_write_items.assert_called_once()
+
     @pytest.mark.skip(reason="TODO: Fix mock setup for shared_campaigns_table - mocking not working as expected")
     @patch("src.handlers.campaign_operations.dynamodb_client")
     @patch("src.handlers.campaign_operations.check_profile_access")
