@@ -19,41 +19,17 @@ except ModuleNotFoundError:  # pragma: no cover
     from ..utils.ids import ensure_account_id, ensure_profile_id
     from ..utils.logging import get_logger
 
+if TYPE_CHECKING:  # pragma: no cover
+    from ..utils.pagination import query_all_items
+else:  # pragma: no cover
+    try:
+        from utils.pagination import query_all_items
+    except ModuleNotFoundError:
+        from ..utils.pagination import query_all_items
+
 logger = get_logger(__name__)
 
 BATCH_SIZE = 25
-
-
-def _query_all_items(
-    table: "Table",
-    key_condition: str,
-    expression_values: Dict[str, Any],
-    index_name: str | None = None,
-    projection: str | None = None,
-) -> List[Dict[str, Any]]:
-    """Query all items for a given key condition, handling pagination."""
-    items: List[Dict[str, Any]] = []
-    last_evaluated_key: Dict[str, Any] | None = None
-
-    while True:
-        query_kwargs: Dict[str, Any] = {
-            "KeyConditionExpression": key_condition,
-            "ExpressionAttributeValues": expression_values,
-        }
-        if index_name is not None:
-            query_kwargs["IndexName"] = index_name
-        if projection is not None:
-            query_kwargs["ProjectionExpression"] = projection
-        if last_evaluated_key is not None:
-            query_kwargs["ExclusiveStartKey"] = last_evaluated_key
-
-        response = table.query(**query_kwargs)
-        items.extend(response.get("Items", []))
-        last_evaluated_key = response.get("LastEvaluatedKey")
-        if last_evaluated_key is None:
-            break
-
-    return items
 
 
 def _batch_delete_keys(table: "Table", keys: List[Dict[str, Any]], primary_keys: List[str]) -> int:
@@ -114,11 +90,13 @@ def _collect_order_keys(campaigns: List[Dict[str, Any]]) -> List[Dict[str, str]]
         if not campaign_id:
             logger.warning("Campaign missing campaignId, skipping order query")
             continue
-        orders = _query_all_items(
+        orders = query_all_items(
             tables.orders,
-            "campaignId = :cid",
-            {":cid": campaign_id},
-            projection="campaignId, orderId",
+            {
+                "KeyConditionExpression": "campaignId = :cid",
+                "ExpressionAttributeValues": {":cid": campaign_id},
+                "ProjectionExpression": "campaignId, orderId",
+            },
         )
         for order in orders:
             order_keys.append(
@@ -204,21 +182,27 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> bool:
 
     logger.info(f"Starting cascade delete for profile {db_profile_id}")
 
-    shares = _query_all_items(
+    shares = query_all_items(
         tables.shares,
-        "profileId = :pid",
-        {":pid": db_profile_id},
+        {
+            "KeyConditionExpression": "profileId = :pid",
+            "ExpressionAttributeValues": {":pid": db_profile_id},
+        },
     )
-    invites = _query_all_items(
+    invites = query_all_items(
         tables.invites,
-        "profileId = :pid",
-        {":pid": db_profile_id},
-        index_name="profileId-index",
+        {
+            "IndexName": "profileId-index",
+            "KeyConditionExpression": "profileId = :pid",
+            "ExpressionAttributeValues": {":pid": db_profile_id},
+        },
     )
-    campaigns = _query_all_items(
+    campaigns = query_all_items(
         tables.campaigns,
-        "profileId = :pid",
-        {":pid": db_profile_id},
+        {
+            "KeyConditionExpression": "profileId = :pid",
+            "ExpressionAttributeValues": {":pid": db_profile_id},
+        },
     )
 
     order_keys = _collect_order_keys(campaigns)

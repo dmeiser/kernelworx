@@ -38,8 +38,50 @@ def _is_throughput_error(exc: BaseException) -> bool:
 
 
 def _calculate_backoff(attempt: int) -> float:
-    """Exponential backoff with jitter placeholder (deterministic for tests)."""
+    """Return deterministic exponential backoff for the given retry attempt."""
     return _BASE_BACKOFF_SECONDS * (2**attempt)
+
+
+def _paginated(
+    table: "Table",
+    method_name: str,
+    kwargs: Dict[str, Any],
+    max_items: Optional[int] = None,
+    log_label: str = "query",
+) -> Iterable[Dict[str, Any]]:
+    """Yield items from a DynamoDB operation, following pagination and retrying throughput errors."""
+    method = getattr(table, method_name)
+    query_kwargs = dict(kwargs)
+    yielded = 0
+    attempt = 0
+
+    while True:
+        try:
+            response = method(**query_kwargs)
+            attempt = 0
+        except ClientError as exc:
+            if _is_throughput_error(exc) and attempt < _MAX_RETRIES:
+                attempt += 1
+                backoff = _calculate_backoff(attempt)
+                logger.warning(
+                    f"DynamoDB {log_label} throttled, retrying",
+                    attempt=attempt,
+                    backoff=backoff,
+                )
+                time.sleep(backoff)
+                continue
+            raise
+
+        for item in response.get("Items", []):
+            if max_items is not None and yielded >= max_items:
+                return
+            yield item
+            yielded += 1
+
+        last_evaluated_key = response.get("LastEvaluatedKey")
+        if last_evaluated_key is None:
+            break
+        query_kwargs["ExclusiveStartKey"] = last_evaluated_key
 
 
 def _paginated_query(
@@ -48,37 +90,7 @@ def _paginated_query(
     max_items: Optional[int] = None,
 ) -> Iterable[Dict[str, Any]]:
     """Yield items from a DynamoDB query, following pagination and retrying throughput errors."""
-    kwargs = dict(query_kwargs)
-    yielded = 0
-    attempt = 0
-
-    while True:
-        try:
-            response = table.query(**kwargs)
-            attempt = 0
-        except ClientError as exc:
-            if _is_throughput_error(exc) and attempt < _MAX_RETRIES:
-                attempt += 1
-                backoff = _calculate_backoff(attempt)
-                logger.warning(
-                    "DynamoDB query throttled, retrying",
-                    attempt=attempt,
-                    backoff=backoff,
-                )
-                time.sleep(backoff)
-                continue
-            raise
-
-        for item in response.get("Items", []):
-            if max_items is not None and yielded >= max_items:
-                return
-            yield item
-            yielded += 1
-
-        last_evaluated_key = response.get("LastEvaluatedKey")
-        if last_evaluated_key is None:
-            break
-        kwargs["ExclusiveStartKey"] = last_evaluated_key
+    yield from _paginated(table, "query", query_kwargs, max_items=max_items, log_label="query")
 
 
 def _paginated_scan(
@@ -87,37 +99,7 @@ def _paginated_scan(
     max_items: Optional[int] = None,
 ) -> Iterable[Dict[str, Any]]:
     """Yield items from a DynamoDB scan, following pagination and retrying throughput errors."""
-    kwargs = dict(scan_kwargs)
-    yielded = 0
-    attempt = 0
-
-    while True:
-        try:
-            response = table.scan(**kwargs)
-            attempt = 0
-        except ClientError as exc:
-            if _is_throughput_error(exc) and attempt < _MAX_RETRIES:
-                attempt += 1
-                backoff = _calculate_backoff(attempt)
-                logger.warning(
-                    "DynamoDB scan throttled, retrying",
-                    attempt=attempt,
-                    backoff=backoff,
-                )
-                time.sleep(backoff)
-                continue
-            raise
-
-        for item in response.get("Items", []):
-            if max_items is not None and yielded >= max_items:
-                return
-            yield item
-            yielded += 1
-
-        last_evaluated_key = response.get("LastEvaluatedKey")
-        if last_evaluated_key is None:
-            break
-        kwargs["ExclusiveStartKey"] = last_evaluated_key
+    yield from _paginated(table, "scan", scan_kwargs, max_items=max_items, log_label="scan")
 
 
 def query_all_items(
