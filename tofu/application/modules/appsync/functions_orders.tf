@@ -89,6 +89,10 @@ resource "aws_appsync_function" "get_campaign_for_order" {
   }
 
   code = file("${local.js_resolvers_dir}/get_campaign_for_order_fn.js")
+
+  lifecycle {
+    replace_triggered_by = [terraform_data.get_campaign_for_order_code]
+  }
 }
 
 resource "aws_appsync_function" "get_catalog" {
@@ -102,6 +106,10 @@ resource "aws_appsync_function" "get_catalog" {
   }
 
   code = file("${local.js_resolvers_dir}/get_catalog_fn.js")
+
+  lifecycle {
+    replace_triggered_by = [terraform_data.get_catalog_code]
+  }
 }
 
 resource "aws_appsync_function" "create_order" {
@@ -115,6 +123,10 @@ resource "aws_appsync_function" "create_order" {
   }
 
   code = file("${local.js_resolvers_dir}/create_order_fn.js")
+
+  lifecycle {
+    replace_triggered_by = [terraform_data.create_order_function_code]
+  }
 }
 
 resource "aws_appsync_function" "query_order" {

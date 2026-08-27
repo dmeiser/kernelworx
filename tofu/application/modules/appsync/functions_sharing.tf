@@ -89,6 +89,10 @@ resource "aws_appsync_function" "verify_profile_write_access" {
   }
 
   code = file("${local.js_resolvers_dir}/verify_profile_write_access_fn.js")
+
+  lifecycle {
+    replace_triggered_by = [terraform_data.verify_profile_write_access_code]
+  }
 }
 
 resource "aws_appsync_function" "check_share_permissions" {
@@ -102,6 +106,10 @@ resource "aws_appsync_function" "check_share_permissions" {
   }
 
   code = file("${local.js_resolvers_dir}/check_share_permissions_fn.js")
+
+  lifecycle {
+    replace_triggered_by = [terraform_data.check_share_permissions_code]
+  }
 }
 
 resource "aws_appsync_function" "verify_profile_read_access" {
