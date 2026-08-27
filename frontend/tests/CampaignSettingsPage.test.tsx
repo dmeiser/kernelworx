@@ -703,7 +703,7 @@ describe('CampaignSettingsPage', () => {
                 endDate: '2025-03-31T00:00:00.000Z',
                 unitType: 'Troop',
                 unitNumber: 42,
-                city: 'Shelbyville',
+                city: 'Anytown',
                 state: 'KY',
               },
             },
@@ -714,7 +714,7 @@ describe('CampaignSettingsPage', () => {
                 ...mockCampaign,
                 unitType: 'Troop',
                 unitNumber: 42,
-                city: 'Shelbyville',
+                city: 'Anytown',
                 state: 'KY',
               },
             },
@@ -749,7 +749,7 @@ describe('CampaignSettingsPage', () => {
     fireEvent.change(unitNumberInput, { target: { value: '42' } });
 
     const cityInput = screen.getByLabelText(/City/i);
-    fireEvent.change(cityInput, { target: { value: 'Shelbyville' } });
+    fireEvent.change(cityInput, { target: { value: 'Anytown' } });
 
     const stateLabel =
       (await screen.findAllByText(/State/i)).find((el) => el.tagName === 'LABEL') ||
