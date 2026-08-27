@@ -5,7 +5,7 @@ Implements owner-based and share-based authorization model.
 """
 
 import time
-from typing import TYPE_CHECKING, Any, Dict, Optional, cast
+from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, cast
 
 if TYPE_CHECKING:
     from mypy_boto3_dynamodb.service_resource import Table
@@ -80,6 +80,44 @@ def _check_share_permissions(
     return _has_required_permission(permissions, required_permission)
 
 
+def _batch_get_all_items(
+    table_name: str,
+    keys: list[Dict[str, str]],
+    on_item: Callable[[Dict[str, Any]], None],
+) -> None:
+    """Batch-get keys in 100-item chunks, retrying UnprocessedKeys.
+
+    Calls on_item for every returned item. Raises AppError(INTERNAL_ERROR)
+    if any keys are still unprocessed after retries.
+    """
+    for i in range(0, len(keys), 100):
+        batch = keys[i : i + 100]
+        keys_to_fetch = batch
+        for attempt in range(3):
+            if not keys_to_fetch:
+                break
+            response = get_dynamodb_resource().batch_get_item(RequestItems={table_name: {"Keys": keys_to_fetch}})
+            for item in response.get("Responses", {}).get(table_name, []):
+                on_item(item)
+
+            unprocessed = response.get("UnprocessedKeys", {}).get(table_name, {}).get("Keys", [])
+            keys_to_fetch = unprocessed
+            if keys_to_fetch and attempt < 2:
+                logger.warning(
+                    "Unprocessed keys, retrying",
+                    table_name=table_name,
+                    attempt=attempt + 1,
+                    count=len(keys_to_fetch),
+                )
+                time.sleep(0.05 * (2**attempt))
+
+        if keys_to_fetch:
+            raise AppError(
+                ErrorCode.INTERNAL_ERROR,
+                f"DynamoDB BatchGetItem failed to return {len(keys_to_fetch)} keys after retries",
+            )
+
+
 def check_profile_access(caller_account_id: str, profile_id: str, required_permission: str = "READ") -> bool:
     """
     Check if caller has access to profile.
@@ -146,29 +184,12 @@ def batch_check_profile_access(
     profile_keys = [{"ownerAccountId": db_caller_id, "profileId": pid} for pid in db_profile_ids]
     profiles_table_name = tables.profiles.table_name
 
-    for i in range(0, len(profile_keys), 100):
-        batch = profile_keys[i : i + 100]
-        keys_to_fetch = batch
-        for attempt in range(3):
-            if not keys_to_fetch:
-                break
-            response = get_dynamodb_resource().batch_get_item(
-                RequestItems={profiles_table_name: {"Keys": keys_to_fetch}}
-            )
-            for item in response.get("Responses", {}).get(profiles_table_name, []):
-                db_pid = item.get("profileId")
-                if db_pid:
-                    owned_db_ids.add(cast(str, db_pid))
+    def _on_owned_item(item: Dict[str, Any]) -> None:
+        db_pid = item.get("profileId")
+        if db_pid:
+            owned_db_ids.add(cast(str, db_pid))
 
-            unprocessed = response.get("UnprocessedKeys", {}).get(profiles_table_name, {}).get("Keys", [])
-            keys_to_fetch = unprocessed
-            if keys_to_fetch and attempt < 2:
-                logger.warning(
-                    "Unprocessed profile ownership keys, retrying",
-                    attempt=attempt + 1,
-                    count=len(keys_to_fetch),
-                )
-                time.sleep(0.05 * (2**attempt))
+    _batch_get_all_items(profiles_table_name, profile_keys, _on_owned_item)
 
     accessible_db_ids = set(owned_db_ids)
 
@@ -178,31 +199,14 @@ def batch_check_profile_access(
         share_keys = [{"profileId": pid, "targetAccountId": db_caller_id} for pid in remaining_ids]
         shares_table_name = tables.shares.table_name
 
-        for i in range(0, len(share_keys), 100):
-            batch = share_keys[i : i + 100]
-            keys_to_fetch = batch
-            for attempt in range(3):
-                if not keys_to_fetch:
-                    break
-                response = get_dynamodb_resource().batch_get_item(
-                    RequestItems={shares_table_name: {"Keys": keys_to_fetch}}
-                )
-                for share in response.get("Responses", {}).get(shares_table_name, []):
-                    permissions = _normalize_permissions(share.get("permissions", []))
-                    if _has_required_permission(permissions, required_permission):
-                        db_pid = share.get("profileId")
-                        if db_pid:
-                            accessible_db_ids.add(cast(str, db_pid))
+        def _on_share_item(share: Dict[str, Any]) -> None:
+            permissions = _normalize_permissions(share.get("permissions", []))
+            if _has_required_permission(permissions, required_permission):
+                db_pid = share.get("profileId")
+                if db_pid:
+                    accessible_db_ids.add(cast(str, db_pid))
 
-                unprocessed = response.get("UnprocessedKeys", {}).get(shares_table_name, {}).get("Keys", [])
-                keys_to_fetch = unprocessed
-                if keys_to_fetch and attempt < 2:
-                    logger.warning(
-                        "Unprocessed share keys, retrying",
-                        attempt=attempt + 1,
-                        count=len(keys_to_fetch),
-                    )
-                    time.sleep(0.05 * (2**attempt))
+        _batch_get_all_items(shares_table_name, share_keys, _on_share_item)
 
     return {profile_id_map[db_pid] for db_pid in accessible_db_ids if db_pid in profile_id_map}
 
