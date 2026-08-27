@@ -161,6 +161,11 @@ case "$ACTION" in
     "$ROOT_DIR/scripts/appsync-ensure-resolver-order.sh" \
       -d "$ENV_DIR" \
       -t module.appsync.aws_appsync_resolver.create_order \
+      -t module.appsync.aws_appsync_resolver.share_profile_direct \
+      -t module.appsync.aws_appsync_resolver.update_campaign \
+      -t module.appsync.aws_appsync_resolver.delete_campaign \
+      -t module.appsync.aws_appsync_resolver.update_order \
+      -t module.appsync.aws_appsync_resolver.delete_order \
       -- -var="environment=$RUN_ID"
 
     tofu apply -input=false -auto-approve -var="environment=$RUN_ID"
