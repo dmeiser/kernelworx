@@ -774,6 +774,91 @@ class TestBatchCheckProfileAccess:
 
         assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
 
+    def test_batch_owned_item_missing_profile_id_is_ignored(
+        self,
+        dynamodb_table: Any,
+        sample_account_id: str,
+        monkeypatch: Any,
+    ) -> None:
+        """Ownership items without a profileId are ignored rather than crashing."""
+        profile_id = "PROFILE#missing-owned-id"
+        dynamodb_table.put_item(
+            Item={
+                "ownerAccountId": f"ACCOUNT#{sample_account_id}",
+                "profileId": profile_id,
+            }
+        )
+
+        resource = get_dynamodb_resource()
+        original_batch_get_item = resource.batch_get_item
+        profiles_table_name = dynamodb_table.table_name
+
+        def patched_batch_get_item(RequestItems: Dict[str, Any]) -> Dict[str, Any]:
+            table_name = next(iter(RequestItems))
+            if table_name == profiles_table_name:
+                return {
+                    "Responses": {
+                        table_name: [
+                            {"ownerAccountId": f"ACCOUNT#{sample_account_id}", "profileId": profile_id},
+                            {"ownerAccountId": f"ACCOUNT#{sample_account_id}"},  # missing profileId
+                        ]
+                    },
+                    "UnprocessedKeys": {},
+                }
+            return original_batch_get_item(RequestItems=RequestItems)
+
+        monkeypatch.setattr(resource, "batch_get_item", patched_batch_get_item)
+        monkeypatch.setattr("src.utils.auth.get_dynamodb_resource", lambda: resource)
+
+        result = batch_check_profile_access(sample_account_id, [profile_id])
+
+        assert result == {profile_id}
+
+    def test_batch_share_item_missing_profile_id_is_ignored(
+        self,
+        dynamodb_table: Any,
+        shares_table: Any,
+        sample_account_id: str,
+        another_account_id: str,
+        monkeypatch: Any,
+    ) -> None:
+        """Share items without a profileId are ignored rather than crashing."""
+        profile_id = "PROFILE#missing-share-id"
+        dynamodb_table.put_item(
+            Item={
+                "ownerAccountId": f"ACCOUNT#{another_account_id}",
+                "profileId": profile_id,
+            }
+        )
+
+        resource = get_dynamodb_resource()
+        original_batch_get_item = resource.batch_get_item
+        shares_table_name = shares_table.table_name
+
+        def patched_batch_get_item(RequestItems: Dict[str, Any]) -> Dict[str, Any]:
+            table_name = next(iter(RequestItems))
+            if table_name == shares_table_name:
+                return {
+                    "Responses": {
+                        table_name: [
+                            {
+                                "targetAccountId": f"ACCOUNT#{sample_account_id}",
+                                "permissions": ["READ"],
+                                # missing profileId
+                            }
+                        ]
+                    },
+                    "UnprocessedKeys": {},
+                }
+            return original_batch_get_item(RequestItems=RequestItems)
+
+        monkeypatch.setattr(resource, "batch_get_item", patched_batch_get_item)
+        monkeypatch.setattr("src.utils.auth.get_dynamodb_resource", lambda: resource)
+
+        result = batch_check_profile_access(sample_account_id, [profile_id])
+
+        assert result == set()
+
 
 class TestRequireProfileAccess:
     """Tests for require_profile_access function."""
