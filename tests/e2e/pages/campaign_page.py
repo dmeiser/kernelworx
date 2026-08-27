@@ -96,8 +96,12 @@ class CampaignPage(BasePage):
         """Open the *New Campaign* dialog, fill *name*, pick the first catalog, and submit.
 
         Encapsulates the full creation flow so test helpers do not need access
-        to private locator methods.  Waits for the dialog to close before
-        returning.
+        to private locator methods.  After submission the app navigates to the
+        campaign detail page; this method returns to the campaigns list but does
+        **not** wait for the new campaign to appear there, because the list query
+        is eventually consistent and can take longer than a helper timeout in
+        production.  Callers that need a post-creation visibility guarantee should
+        poll :meth:`has_campaign` themselves.
 
         Args:
             name: Human-readable campaign name (e.g. ``"Fall 2025"``).
@@ -118,21 +122,30 @@ class CampaignPage(BasePage):
         profile_listbox = self.page.get_by_role("listbox")
         expect(profile_listbox).to_be_visible(timeout=5_000)
 
+        # Wait for the profile list to finish loading before matching.
+        loading_option = profile_listbox.locator("[role=\"option\"]", has_text="Loading profiles...")
+        enabled_options = profile_listbox.locator("[role=\"option\"]:not([aria-disabled=\"true\"])")
+        if loading_option.count() > 0:
+            expect(loading_option).to_have_count(0, timeout=5_000)
+        expect(enabled_options.first).to_be_visible(timeout=5_000)
+
         if profile_id:
-            # The URL exposes the raw UUID, but the dropdown uses the full
-            # PROFILE#{uuid} format for option data-values.
             candidate_ids = {profile_id}
             if not profile_id.startswith("PROFILE#"):
                 candidate_ids.add(f"PROFILE#{profile_id}")
-
-            option = profile_listbox.locator('[role="option"]:not([aria-disabled="true"])').first
+            option = None
             for candidate in candidate_ids:
-                candidate_option = profile_listbox.locator(f'[role="option"][data-value="{candidate}"]')
+                candidate_option = profile_listbox.locator(f"[role=\"option\"][data-value=\"{candidate}\"]")
                 if candidate_option.count() > 0:
                     option = candidate_option
                     break
+            available = [el.get_attribute("data-value") for el in enabled_options.all()]
+            assert option is not None, (
+                f"Profile option for {profile_id!r} not found in create-campaign dropdown; "
+                f"available data-values: {available}"
+            )
         else:
-            option = profile_listbox.locator('[role="option"]:not([aria-disabled="true"])').first
+            option = enabled_options.first
 
         expect(option).to_be_visible(timeout=5_000)
         option.click()
@@ -154,12 +167,13 @@ class CampaignPage(BasePage):
         self._create_button().click()
         # After success the app navigates to the campaign detail page.
         self.page.wait_for_url("**/campaigns/**", timeout=15_000)
-        # Navigate back to the campaigns list so has_campaign() can verify.
+        # Navigate back to the campaigns list so callers can verify visibility.
+        # Do not assert visibility here: the campaigns list query is eventually
+        # consistent and can take longer than a helper timeout in production.
+        # Callers that need a post-creation guarantee should poll has_campaign()
+        # themselves (see test_smoke_sharing.py for an example).
         self.page.goto(campaigns_url)
         self.wait_for_loading()
-        # Wait for the new campaign to appear before returning so callers can
-        # immediately inspect the campaign list.
-        assert self.has_campaign(name), f"Campaign '{name}' must be visible in the list after creation"
 
     def create_campaign(self, name: str, catalog_name: str) -> None:
         """Open the *New Campaign* dialog, fill it, and submit.
