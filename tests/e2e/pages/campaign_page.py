@@ -1,5 +1,6 @@
 """Campaign page object — campaign list and creation for a seller profile."""
 
+import time
 import urllib.parse
 
 from playwright.sync_api import Locator, Page, expect
@@ -93,11 +94,13 @@ class CampaignPage(BasePage):
     # ------------------------------------------------------------------
 
     def create_campaign_first_catalog(self, name: str, profile_id: str | None = None) -> None:
-        """Open the *New Campaign* dialog, fill *name*, pick the first catalog, and submit.
+        """Open the *New Campaign* page, fill *name*, pick the first catalog, and submit.
 
         Encapsulates the full creation flow so test helpers do not need access
-        to private locator methods.  Waits for the dialog to close before
-        returning.
+        to private locator methods.  After submission the app navigates to the
+        campaign detail page; this method returns to the campaigns list and
+        polls until the new campaign appears, restoring the helper's post-
+        creation visibility guarantee for callers that read the list immediately.
 
         Args:
             name: Human-readable campaign name (e.g. ``"Fall 2025"``).
@@ -118,23 +121,34 @@ class CampaignPage(BasePage):
         profile_listbox = self.page.get_by_role("listbox")
         expect(profile_listbox).to_be_visible(timeout=5_000)
 
+        # Wait for the profile list to finish loading before matching.
+        loading_option = profile_listbox.locator('[role="option"]', has_text="Loading profiles...")
+        enabled_options = profile_listbox.locator('[role="option"]:not([aria-disabled="true"])')
+        if loading_option.count() > 0:
+            expect(loading_option).to_have_count(0, timeout=5_000)
+        expect(enabled_options.first).to_be_visible(timeout=5_000)
+
         if profile_id:
-            # The URL exposes the raw UUID, but the dropdown uses the full
-            # PROFILE#{uuid} format for option data-values.
             candidate_ids = {profile_id}
             if not profile_id.startswith("PROFILE#"):
                 candidate_ids.add(f"PROFILE#{profile_id}")
 
-            option = profile_listbox.locator('[role="option"]:not([aria-disabled="true"])').first
-            for candidate in candidate_ids:
-                candidate_option = profile_listbox.locator(f'[role="option"][data-value="{candidate}"]')
-                if candidate_option.count() > 0:
-                    option = candidate_option
-                    break
+            # Wait for the intended enabled profile option to appear instead of
+            # using count(), which can race with the dropdown's async render.
+            value_selectors = ", ".join(f'[data-value="{candidate}"]' for candidate in candidate_ids)
+            option = profile_listbox.locator(f'[role="option"]:not([aria-disabled="true"]):is({value_selectors})')
+            try:
+                expect(option).to_be_visible(timeout=5_000)
+            except AssertionError as exc:
+                available = [el.get_attribute("data-value") for el in enabled_options.all()]
+                raise AssertionError(
+                    f"Profile option for {profile_id!r} not found in create-campaign dropdown; "
+                    f"available data-values: {available}"
+                ) from exc
         else:
-            option = profile_listbox.locator('[role="option"]:not([aria-disabled="true"])').first
+            option = enabled_options.first
+            expect(option).to_be_visible(timeout=5_000)
 
-        expect(option).to_be_visible(timeout=5_000)
         option.click()
         expect(profile_listbox).to_be_hidden(timeout=5_000)
 
@@ -154,12 +168,21 @@ class CampaignPage(BasePage):
         self._create_button().click()
         # After success the app navigates to the campaign detail page.
         self.page.wait_for_url("**/campaigns/**", timeout=15_000)
-        # Navigate back to the campaigns list so has_campaign() can verify.
+        # Navigate back to the campaigns list and poll until the new campaign
+        # appears, restoring the helper's post-creation visibility guarantee.
         self.page.goto(campaigns_url)
         self.wait_for_loading()
-        # Wait for the new campaign to appear before returning so callers can
-        # immediately inspect the campaign list.
-        assert self.has_campaign(name), f"Campaign '{name}' must be visible in the list after creation"
+        deadline = time.monotonic() + 30
+        while True:
+            if self.has_campaign(name, timeout=1_000):
+                break
+            if time.monotonic() >= deadline:
+                raise AssertionError(
+                    f"Campaign {name!r} did not appear in the campaigns list within 30s after creation."
+                )
+            self.page.reload()
+            self.wait_for_loading()
+            time.sleep(1)
 
     def create_campaign(self, name: str, catalog_name: str) -> None:
         """Open the *New Campaign* dialog, fill it, and submit.

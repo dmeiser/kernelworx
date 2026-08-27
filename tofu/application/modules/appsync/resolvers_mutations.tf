@@ -251,6 +251,10 @@ resource "aws_appsync_resolver" "create_order" {
   }
 
   code = file("${local.js_resolvers_dir}/create_order_pipeline_resolver.js")
+
+  lifecycle {
+    replace_triggered_by = [terraform_data.create_order_resolver_code]
+  }
 }
 
 # === CATALOG MUTATIONS ===

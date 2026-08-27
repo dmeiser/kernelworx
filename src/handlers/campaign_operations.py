@@ -1,6 +1,7 @@
 """Lambda resolver for campaign operations with shared campaign and share support."""
 
 import uuid
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
@@ -358,11 +359,46 @@ def _get_verified_profile(caller_account_id: str, profile_id: str) -> Dict[str, 
     return profile
 
 
+def _validate_campaign_dates(start_date: Any, end_date: Any) -> None:
+    """Ensure endDate is after startDate when both are provided."""
+    if not start_date or not end_date:
+        return
+
+    def _parse_iso(value: Any) -> datetime:
+        if not isinstance(value, str):
+            raise ValueError("date must be a string")
+        # Python's fromisoformat does not accept trailing 'Z' before 3.11
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+    try:
+        start = _parse_iso(start_date)
+        end = _parse_iso(end_date)
+    except ValueError as e:
+        raise AppError(
+            ErrorCode.INVALID_INPUT,
+            "Invalid date format for startDate or endDate",
+        ) from e
+
+    # Mixed timezone-aware and timezone-naive datetimes are not comparable.
+    if start.tzinfo is None and end.tzinfo is not None:
+        start = start.replace(tzinfo=timezone.utc)
+    elif start.tzinfo is not None and end.tzinfo is None:
+        end = end.replace(tzinfo=timezone.utc)
+
+    if end <= start:
+        raise AppError(
+            ErrorCode.INVALID_INPUT,
+            "endDate must be after startDate",
+        )
+
+
 def _prepare_campaign_values(values: Dict[str, Any]) -> None:
     """Normalize and validate campaign values in place."""
     values["catalog_id"] = ensure_catalog_id(values["catalog_id"])
     # Validate required campaign fields
     validate_required_fields(values, ["campaign_name", "campaign_year", "catalog_id"])
+    # Validate date range when both dates are present
+    _validate_campaign_dates(values.get("start_date"), values.get("end_date"))
     # Validate unit fields and extract unit_number
     unit_result = validate_unit_fields(values["unit_type"], values["unit_number"], values["city"], values["state"])
     values["unit_number"] = unit_result[1] if unit_result else None
@@ -383,8 +419,6 @@ def _maybe_build_share_item(
 
 def create_campaign(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """Create a new campaign with optional shared campaign support."""
-    from datetime import datetime, timezone
-
     try:
         inp = event["arguments"]["input"]
         caller_account_id = event["identity"]["sub"]
