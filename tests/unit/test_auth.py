@@ -5,6 +5,7 @@ from typing import Any, Dict
 import pytest
 
 from src.utils.auth import (
+    batch_check_profile_access,
     check_profile_access,
     get_account,
     is_admin,
@@ -417,6 +418,91 @@ class TestCheckProfileAccess:
         result = check_profile_access(another_account_id, sample_profile_id, "READ")
 
         assert result is False
+
+
+class TestBatchCheckProfileAccess:
+    """Tests for batch_check_profile_access function."""
+
+    def test_batch_owner_and_shared_access(
+        self,
+        dynamodb_table: Any,
+        shares_table: Any,
+        sample_profile: Any,
+        sample_profile_id: str,
+        sample_account_id: str,
+        another_account_id: str,
+    ) -> None:
+        """Batch check returns owned profile and shared profile in one call."""
+        # Create an extra profile owned by another_account_id and share it with sample_account_id
+        shared_profile_id = "PROFILE#shared-profile"
+        dynamodb_table.put_item(
+            Item={
+                "ownerAccountId": f"ACCOUNT#{another_account_id}",
+                "profileId": shared_profile_id,
+                "sellerName": "Shared Profile",
+            }
+        )
+        shares_table.put_item(
+            Item={
+                "profileId": shared_profile_id,
+                "targetAccountId": f"ACCOUNT#{sample_account_id}",
+                "permissions": ["READ"],
+            }
+        )
+
+        result = batch_check_profile_access(
+            sample_account_id,
+            [sample_profile_id, shared_profile_id, "PROFILE#no-access"],
+        )
+
+        assert sample_profile_id in result
+        assert shared_profile_id in result
+        assert "PROFILE#no-access" not in result
+
+    def test_batch_write_permission_filtering(
+        self,
+        dynamodb_table: Any,
+        shares_table: Any,
+        sample_profile: Any,
+        sample_profile_id: str,
+        another_account_id: str,
+    ) -> None:
+        """Batch check respects required_permission for shared profiles."""
+        # sample_profile is owned by sample_account_id; another_account_id has READ share
+        shares_table.put_item(
+            Item={
+                "profileId": sample_profile_id,
+                "targetAccountId": f"ACCOUNT#{another_account_id}",
+                "permissions": ["READ"],
+            }
+        )
+
+        read_result = batch_check_profile_access(another_account_id, [sample_profile_id], "READ")
+        write_result = batch_check_profile_access(another_account_id, [sample_profile_id], "WRITE")
+
+        assert sample_profile_id in read_result
+        assert sample_profile_id not in write_result
+
+    def test_batch_empty_input(self, dynamodb_table: Any) -> None:
+        """Batch check with empty profile IDs returns empty set."""
+        result = batch_check_profile_access("any-account", [])
+
+        assert result == set()
+
+    def test_batch_ignores_duplicates(
+        self,
+        dynamodb_table: Any,
+        sample_profile: Any,
+        sample_profile_id: str,
+        sample_account_id: str,
+    ) -> None:
+        """Batch check deduplicates repeated profile IDs."""
+        result = batch_check_profile_access(
+            sample_account_id,
+            [sample_profile_id, sample_profile_id, sample_profile_id],
+        )
+
+        assert result == {sample_profile_id}
 
 
 class TestRequireProfileAccess:

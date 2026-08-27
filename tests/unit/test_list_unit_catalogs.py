@@ -145,12 +145,12 @@ class TestListUnitCatalogs:
 
         with (
             patch("src.handlers.list_unit_catalogs.tables") as mock_tables,
-            patch("src.handlers.list_unit_catalogs.check_profile_access") as mock_check_access,
+            patch("src.handlers.list_unit_catalogs.batch_check_profile_access") as mock_check_access,
         ):
             mock_tables.profiles = mock_profiles
             mock_tables.campaigns = mock_campaigns
             mock_tables.catalogs = mock_catalogs
-            mock_check_access.return_value = True
+            mock_check_access.side_effect = lambda caller_account_id, profile_ids, required_permission="READ": set(profile_ids)
 
             # Act
             result = list_unit_catalogs(event, lambda_context)
@@ -193,17 +193,17 @@ class TestListUnitCatalogs:
 
         with (
             patch("src.handlers.list_unit_catalogs.tables") as mock_tables,
-            patch("src.handlers.list_unit_catalogs.check_profile_access") as mock_check_access,
+            patch("src.handlers.list_unit_catalogs.batch_check_profile_access") as mock_check_access,
         ):
             mock_tables.profiles = mock_profiles
-            mock_check_access.return_value = False
+            mock_check_access.return_value = set()
 
             # Act
             result = list_unit_catalogs(event, lambda_context)
 
             # Assert
             assert result == []
-            assert mock_check_access.call_count == 2  # Called for each profile
+            assert mock_check_access.call_count == 1  # Called once for all profiles
 
     def test_list_unit_catalogs_no_campaigns(
         self,
@@ -220,11 +220,11 @@ class TestListUnitCatalogs:
 
         with (
             patch("src.handlers.list_unit_catalogs.tables") as mock_tables,
-            patch("src.handlers.list_unit_catalogs.check_profile_access") as mock_check_access,
+            patch("src.handlers.list_unit_catalogs.batch_check_profile_access") as mock_check_access,
         ):
             mock_tables.profiles = mock_profiles
             mock_tables.campaigns = mock_campaigns
-            mock_check_access.return_value = True
+            mock_check_access.side_effect = lambda caller_account_id, profile_ids, required_permission="READ": set(profile_ids)
 
             # Act
             result = list_unit_catalogs(event, lambda_context)
@@ -250,11 +250,11 @@ class TestListUnitCatalogs:
 
         with (
             patch("src.handlers.list_unit_catalogs.tables") as mock_tables,
-            patch("src.handlers.list_unit_catalogs.check_profile_access") as mock_check_access,
+            patch("src.handlers.list_unit_catalogs.batch_check_profile_access") as mock_check_access,
         ):
             mock_tables.profiles = mock_profiles
             mock_tables.campaigns = mock_campaigns
-            mock_check_access.return_value = True
+            mock_check_access.side_effect = lambda caller_account_id, profile_ids, required_permission="READ": set(profile_ids)
 
             # Act
             result = list_unit_catalogs(event, lambda_context)
@@ -283,12 +283,12 @@ class TestListUnitCatalogs:
 
         with (
             patch("src.handlers.list_unit_catalogs.tables") as mock_tables,
-            patch("src.handlers.list_unit_catalogs.check_profile_access") as mock_check_access,
+            patch("src.handlers.list_unit_catalogs.batch_check_profile_access") as mock_check_access,
         ):
             mock_tables.profiles = mock_profiles
             mock_tables.campaigns = mock_campaigns
             mock_tables.catalogs = mock_catalogs
-            mock_check_access.return_value = True
+            mock_check_access.side_effect = lambda caller_account_id, profile_ids, required_permission="READ": set(profile_ids)
 
             # Act
             result = list_unit_catalogs(event, lambda_context)
@@ -328,12 +328,12 @@ class TestListUnitCatalogs:
 
         with (
             patch("src.handlers.list_unit_catalogs.tables") as mock_tables,
-            patch("src.handlers.list_unit_catalogs.check_profile_access") as mock_check_access,
+            patch("src.handlers.list_unit_catalogs.batch_check_profile_access") as mock_check_access,
         ):
             mock_tables.profiles = mock_profiles
             mock_tables.campaigns = mock_campaigns
             mock_tables.catalogs = mock_catalogs
-            mock_check_access.return_value = True
+            mock_check_access.side_effect = lambda caller_account_id, profile_ids, required_permission="READ": set(profile_ids)
 
             # Act
             result = list_unit_catalogs(event, lambda_context)
@@ -361,12 +361,12 @@ class TestListUnitCatalogs:
 
         with (
             patch("src.handlers.list_unit_catalogs.tables") as mock_tables,
-            patch("src.handlers.list_unit_catalogs.check_profile_access") as mock_check_access,
+            patch("src.handlers.list_unit_catalogs.batch_check_profile_access") as mock_check_access,
         ):
             mock_tables.profiles = mock_profiles
             mock_tables.campaigns = mock_campaigns
             mock_tables.catalogs = mock_catalogs
-            mock_check_access.return_value = True
+            mock_check_access.side_effect = lambda caller_account_id, profile_ids, required_permission="READ": set(profile_ids)
 
             # Act
             result = list_unit_catalogs(event, lambda_context)
@@ -405,12 +405,12 @@ class TestListUnitCatalogs:
         mock_campaigns.query.return_value = {"Items": []}
 
         # Grant access only to first profile
-        def check_access_side_effect(caller_account_id: str, profile_id: str, required_permission: str) -> bool:
-            return profile_id == "PROFILE#profile1"
+        def check_access_side_effect(caller_account_id: str, profile_ids: list[str], required_permission: str) -> set[str]:
+            return {pid for pid in profile_ids if pid == "PROFILE#profile1"}
 
         with (
             patch("src.handlers.list_unit_catalogs.tables") as mock_tables,
-            patch("src.handlers.list_unit_catalogs.check_profile_access") as mock_check_access,
+            patch("src.handlers.list_unit_catalogs.batch_check_profile_access") as mock_check_access,
         ):
             mock_tables.profiles = mock_profiles
             mock_tables.campaigns = mock_campaigns
@@ -420,7 +420,7 @@ class TestListUnitCatalogs:
             result = list_unit_catalogs(event, lambda_context)
 
             # Verify both profiles checked but only one accessible
-            assert mock_check_access.call_count == 2
+            assert mock_check_access.call_count == 1  # Called once for all profiles
             assert result == []  # No campaigns found for accessible profile
 
     def test_list_unit_catalogs_campaign_with_non_string_catalog_id(
@@ -445,12 +445,12 @@ class TestListUnitCatalogs:
 
         with (
             patch("src.handlers.list_unit_catalogs.tables") as mock_tables,
-            patch("src.handlers.list_unit_catalogs.check_profile_access") as mock_check_access,
+            patch("src.handlers.list_unit_catalogs.batch_check_profile_access") as mock_check_access,
         ):
             mock_tables.profiles = mock_profiles
             mock_tables.campaigns = mock_campaigns
             mock_tables.catalogs = mock_catalogs
-            mock_check_access.return_value = True
+            mock_check_access.side_effect = lambda caller_account_id, profile_ids, required_permission="READ": set(profile_ids)
 
             # Act
             result = list_unit_catalogs(event, lambda_context)
@@ -548,11 +548,11 @@ class TestListUnitCampaignCatalogs:
 
         with (
             patch("src.handlers.list_unit_catalogs.tables") as mock_tables,
-            patch("src.handlers.list_unit_catalogs.check_profile_access") as mock_check_access,
+            patch("src.handlers.list_unit_catalogs.batch_check_profile_access") as mock_check_access,
         ):
             mock_tables.campaigns = mock_campaigns
             mock_tables.catalogs = mock_catalogs
-            mock_check_access.return_value = True
+            mock_check_access.side_effect = lambda caller_account_id, profile_ids, required_permission="READ": set(profile_ids)
 
             # Act
             result = list_unit_campaign_catalogs(event, lambda_context)
@@ -603,17 +603,17 @@ class TestListUnitCampaignCatalogs:
 
         with (
             patch("src.handlers.list_unit_catalogs.tables") as mock_tables,
-            patch("src.handlers.list_unit_catalogs.check_profile_access") as mock_check_access,
+            patch("src.handlers.list_unit_catalogs.batch_check_profile_access") as mock_check_access,
         ):
             mock_tables.campaigns = mock_campaigns
-            mock_check_access.return_value = False
+            mock_check_access.return_value = set()
 
             # Act
             result = list_unit_campaign_catalogs(event, lambda_context)
 
             # Assert
             assert result == []
-            assert mock_check_access.call_count == 2
+            assert mock_check_access.call_count == 1  # Called once for all profiles
 
     def test_list_unit_campaign_catalogs_partial_access(
         self,
@@ -632,12 +632,12 @@ class TestListUnitCampaignCatalogs:
         mock_catalogs.get_item.return_value = {"Item": sample_catalogs["catalog-123"]}
 
         # Grant access only to first profile
-        def check_access_side_effect(caller_account_id: str, profile_id: str, required_permission: str) -> bool:
-            return profile_id == "PROFILE#profile1"
+        def check_access_side_effect(caller_account_id: str, profile_ids: list[str], required_permission: str) -> set[str]:
+            return {pid for pid in profile_ids if pid == "PROFILE#profile1"}
 
         with (
             patch("src.handlers.list_unit_catalogs.tables") as mock_tables,
-            patch("src.handlers.list_unit_catalogs.check_profile_access") as mock_check_access,
+            patch("src.handlers.list_unit_catalogs.batch_check_profile_access") as mock_check_access,
         ):
             mock_tables.campaigns = mock_campaigns
             mock_tables.catalogs = mock_catalogs
@@ -681,11 +681,11 @@ class TestListUnitCampaignCatalogs:
 
         with (
             patch("src.handlers.list_unit_catalogs.tables") as mock_tables,
-            patch("src.handlers.list_unit_catalogs.check_profile_access") as mock_check_access,
+            patch("src.handlers.list_unit_catalogs.batch_check_profile_access") as mock_check_access,
         ):
             mock_tables.campaigns = mock_campaigns
             mock_tables.catalogs = mock_catalogs
-            mock_check_access.return_value = True
+            mock_check_access.side_effect = lambda caller_account_id, profile_ids, required_permission="READ": set(profile_ids)
 
             # Act
             result = list_unit_campaign_catalogs(event, lambda_context)
@@ -720,11 +720,11 @@ class TestListUnitCampaignCatalogs:
 
         with (
             patch("src.handlers.list_unit_catalogs.tables") as mock_tables,
-            patch("src.handlers.list_unit_catalogs.check_profile_access") as mock_check_access,
+            patch("src.handlers.list_unit_catalogs.batch_check_profile_access") as mock_check_access,
         ):
             mock_tables.campaigns = mock_campaigns
             mock_tables.catalogs = mock_catalogs
-            mock_check_access.return_value = True
+            mock_check_access.side_effect = lambda caller_account_id, profile_ids, required_permission="READ": set(profile_ids)
 
             # Act
             result = list_unit_campaign_catalogs(event, lambda_context)
@@ -771,10 +771,10 @@ class TestListUnitCampaignCatalogs:
 
         with (
             patch("src.handlers.list_unit_catalogs.tables") as mock_tables,
-            patch("src.handlers.list_unit_catalogs.check_profile_access") as mock_check_access,
+            patch("src.handlers.list_unit_catalogs.batch_check_profile_access") as mock_check_access,
         ):
             mock_tables.campaigns = mock_campaigns
-            mock_check_access.return_value = True
+            mock_check_access.side_effect = lambda caller_account_id, profile_ids, required_permission="READ": set(profile_ids)
 
             # Act
             result = list_unit_campaign_catalogs(event, lambda_context)
@@ -800,11 +800,11 @@ class TestListUnitCampaignCatalogs:
 
         with (
             patch("src.handlers.list_unit_catalogs.tables") as mock_tables,
-            patch("src.handlers.list_unit_catalogs.check_profile_access") as mock_check_access,
+            patch("src.handlers.list_unit_catalogs.batch_check_profile_access") as mock_check_access,
         ):
             mock_tables.campaigns = mock_campaigns
             mock_tables.catalogs = mock_catalogs
-            mock_check_access.return_value = True
+            mock_check_access.side_effect = lambda caller_account_id, profile_ids, required_permission="READ": set(profile_ids)
 
             # Act
             result = list_unit_campaign_catalogs(event, lambda_context)

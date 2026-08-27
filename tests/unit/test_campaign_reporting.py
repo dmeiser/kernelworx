@@ -150,12 +150,12 @@ class TestGetUnitReport:
 
         with (
             patch("src.handlers.campaign_reporting.tables") as mock_tables,
-            patch("src.handlers.campaign_reporting.check_profile_access") as mock_check_access,
+            patch("src.handlers.campaign_reporting.batch_check_profile_access") as mock_check_access,
         ):
             mock_tables.profiles = mock_profiles_table
             mock_tables.campaigns = mock_campaigns_table
             mock_tables.orders = mock_orders_table
-            mock_check_access.return_value = True
+            mock_check_access.return_value = {"PROFILE#profile1", "PROFILE#profile2"}
 
             # Act
             result = get_unit_report(event, lambda_context)
@@ -214,10 +214,10 @@ class TestGetUnitReport:
 
         with (
             patch("src.handlers.campaign_reporting.tables") as mock_tables,
-            patch("src.handlers.campaign_reporting.check_profile_access") as mock_check_access,
+            patch("src.handlers.campaign_reporting.batch_check_profile_access") as mock_check_access,
         ):
             mock_tables.campaigns = mock_campaigns_table
-            mock_check_access.return_value = False
+            mock_check_access.return_value = set()
 
             # Act
             result = get_unit_report(event, lambda_context)
@@ -244,8 +244,9 @@ class TestGetUnitReport:
         mock_campaigns_table.query.return_value = {"Items": sample_campaigns}
 
         # Grant access only to profile1
-        def check_access_side_effect(*args: Any, **kwargs: Any) -> bool:
-            return kwargs["profile_id"] == "PROFILE#profile1"
+        def check_access_side_effect(*args: Any, **kwargs: Any) -> set[str]:
+            profile_ids = args[1] if len(args) > 1 else kwargs.get("profile_ids", [])
+            return {"PROFILE#profile1"} if "PROFILE#profile1" in profile_ids else set()
 
         # Mock profile lookups using query on profileId-index
         self._setup_profile_query_mock(mock_profiles_table, sample_profiles)
@@ -254,7 +255,7 @@ class TestGetUnitReport:
 
         with (
             patch("src.handlers.campaign_reporting.tables") as mock_tables,
-            patch("src.handlers.campaign_reporting.check_profile_access") as mock_check_access,
+            patch("src.handlers.campaign_reporting.batch_check_profile_access") as mock_check_access,
         ):
             mock_tables.profiles = mock_profiles_table
             mock_tables.campaigns = mock_campaigns_table
@@ -291,12 +292,12 @@ class TestGetUnitReport:
 
         with (
             patch("src.handlers.campaign_reporting.tables") as mock_tables,
-            patch("src.handlers.campaign_reporting.check_profile_access") as mock_check_access,
+            patch("src.handlers.campaign_reporting.batch_check_profile_access") as mock_check_access,
         ):
             mock_tables.profiles = mock_profiles_table
             mock_tables.campaigns = mock_campaigns_table
             mock_tables.orders = mock_orders_table
-            mock_check_access.return_value = True
+            mock_check_access.return_value = {"PROFILE#profile1", "PROFILE#profile2"}
 
             # Act
             result = get_unit_report(event, lambda_context)
@@ -337,12 +338,12 @@ class TestGetUnitReport:
 
         with (
             patch("src.handlers.campaign_reporting.tables") as mock_tables,
-            patch("src.handlers.campaign_reporting.check_profile_access") as mock_check_access,
+            patch("src.handlers.campaign_reporting.batch_check_profile_access") as mock_check_access,
         ):
             mock_tables.profiles = mock_profiles_table
             mock_tables.campaigns = mock_campaigns_table
             mock_tables.orders = mock_orders_table
-            mock_check_access.return_value = True
+            mock_check_access.return_value = {"PROFILE#profile1", "PROFILE#profile2"}
 
             # Act
             result = get_unit_report(event, lambda_context)
@@ -458,12 +459,12 @@ class TestGetUnitReport:
 
         with (
             patch("src.handlers.campaign_reporting.tables") as mock_tables,
-            patch("src.handlers.campaign_reporting.check_profile_access") as mock_check_access,
+            patch("src.handlers.campaign_reporting.batch_check_profile_access") as mock_check_access,
         ):
             mock_tables.profiles = mock_profiles_table
             mock_tables.campaigns = mock_campaigns_table
             mock_tables.orders = mock_orders_table
-            mock_check_access.return_value = True
+            mock_check_access.return_value = {"PROFILE#profile1"}
 
             # Act
             result = get_unit_report(event, lambda_context)
@@ -547,12 +548,12 @@ class TestGetUnitReport:
 
         with (
             patch("src.handlers.campaign_reporting.tables") as mock_tables,
-            patch("src.handlers.campaign_reporting.check_profile_access") as mock_check_access,
+            patch("src.handlers.campaign_reporting.batch_check_profile_access") as mock_check_access,
         ):
             mock_tables.profiles = mock_profiles_table
             mock_tables.campaigns = mock_campaigns_table
             mock_tables.orders = mock_orders_table
-            mock_check_access.return_value = True
+            mock_check_access.return_value = {"PROFILE#profile1"}
 
             # Act
             result = get_unit_report(event, lambda_context)
@@ -607,12 +608,12 @@ class TestGetUnitReport:
 
         with (
             patch("src.handlers.campaign_reporting.tables") as mock_tables,
-            patch("src.handlers.campaign_reporting.check_profile_access") as mock_check_access,
+            patch("src.handlers.campaign_reporting.batch_check_profile_access") as mock_check_access,
         ):
             mock_tables.profiles = mock_profiles_table
             mock_tables.campaigns = mock_campaigns_table
             mock_tables.orders = mock_orders_table
-            mock_check_access.return_value = True
+            mock_check_access.return_value = {"PROFILE#profile1", "PROFILE#profile2"}
 
             # Act
             result = get_unit_report(event, lambda_context)
@@ -639,11 +640,11 @@ class TestGetUnitReport:
 
         with (
             patch("src.handlers.campaign_reporting.tables") as mock_tables,
-            patch("src.handlers.campaign_reporting.check_profile_access") as mock_check_access,
+            patch("src.handlers.campaign_reporting.batch_check_profile_access") as mock_check_access,
         ):
             mock_tables.profiles = mock_profiles_table
             mock_tables.campaigns = mock_campaigns_table
-            mock_check_access.return_value = True
+            mock_check_access.return_value = {"PROFILE#profile1", "PROFILE#profile2"}
 
             # Act
             result = get_unit_report(event, lambda_context)
@@ -669,20 +670,16 @@ class TestGetUnitReport:
         # Arrange - campaigns reference two profiles
         mock_campaigns_table.query.return_value = {"Items": sample_campaigns}
 
-        from src.utils.errors import AppError, ErrorCode
-
-        def check_access_side_effect(*args: Any, **kwargs: Any) -> bool:
-            # First profile raises NOT_FOUND (orphaned), second is accessible
-            if kwargs["profile_id"] == "PROFILE#profile1":
-                raise AppError(ErrorCode.NOT_FOUND, "Profile not found")
-            return True
+        def check_access_side_effect(*args: Any, **kwargs: Any) -> set[str]:
+            # Orphaned profile is simply not accessible; second profile is accessible.
+            return {"PROFILE#profile2"}
 
         self._setup_profile_query_mock(mock_profiles_table, sample_profiles)
         mock_orders_table.query.return_value = {"Items": sample_orders["CAMPAIGN#campaign2"]}
 
         with (
             patch("src.handlers.campaign_reporting.tables") as mock_tables,
-            patch("src.handlers.campaign_reporting.check_profile_access") as mock_check_access,
+            patch("src.handlers.campaign_reporting.batch_check_profile_access") as mock_check_access,
         ):
             mock_tables.profiles = mock_profiles_table
             mock_tables.campaigns = mock_campaigns_table

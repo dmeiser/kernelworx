@@ -4,12 +4,13 @@ Authorization utilities for checking profile and resource access.
 Implements owner-based and share-based authorization model.
 """
 
-from typing import TYPE_CHECKING, Any, Dict, Optional
+import time
+from typing import TYPE_CHECKING, Any, Dict, Optional, cast
 
 if TYPE_CHECKING:
     from mypy_boto3_dynamodb.service_resource import Table
 
-from .dynamodb import tables
+from .dynamodb import get_dynamodb_resource, tables
 from .errors import AppError, ErrorCode
 from .ids import ensure_account_id, ensure_profile_id
 from .logging import get_logger
@@ -112,6 +113,80 @@ def check_profile_access(caller_account_id: str, profile_id: str, required_permi
     # ensure_account_id returns Optional[str], but we know caller_account_id is not None here
     assert db_caller_id is not None
     return _check_share_permissions(tables.shares, db_profile_id, db_caller_id, required_permission)
+
+
+def batch_check_profile_access(
+    caller_account_id: str, profile_ids: list[str], required_permission: str = "READ"
+) -> set[str]:
+    """
+    Check access for multiple profiles using two BatchGetItem calls.
+
+    Returns the set of original profile IDs the caller is allowed to access.
+    Owner checks and share checks are batched so a unit with N scouts no longer
+    triggers up to 3*N individual DynamoDB reads.
+    """
+    required_permission = required_permission.upper()
+    db_caller_id = ensure_account_id(caller_account_id)
+    assert db_caller_id is not None
+
+    # Map normalized profile IDs back to the caller's original values.
+    profile_id_map: dict[str, str] = {}
+    for pid in profile_ids:
+        db_pid = ensure_profile_id(pid)
+        if db_pid and db_pid not in profile_id_map:
+            profile_id_map[db_pid] = pid
+
+    if not profile_id_map:
+        return set()
+
+    db_profile_ids = list(profile_id_map.keys())
+
+    # 1. Batch check ownership via the profiles table PK.
+    owned_db_ids: set[str] = set()
+    profile_keys = [{"ownerAccountId": db_caller_id, "profileId": pid} for pid in db_profile_ids]
+    profiles_table_name = tables.profiles.table_name
+
+    response = get_dynamodb_resource().batch_get_item(
+        RequestItems={profiles_table_name: {"Keys": profile_keys}}
+    )
+    for item in response.get("Responses", {}).get(profiles_table_name, []):
+        db_pid = item.get("profileId")
+        if db_pid:
+            owned_db_ids.add(cast(str, db_pid))
+
+    accessible_db_ids = set(owned_db_ids)
+
+    # 2. Batch check shares for profiles the caller does not own.
+    remaining_ids = [pid for pid in db_profile_ids if pid not in owned_db_ids]
+    if remaining_ids:
+        share_keys = [{"profileId": pid, "targetAccountId": db_caller_id} for pid in remaining_ids]
+        shares_table_name = tables.shares.table_name
+
+        keys_to_fetch = share_keys
+        for attempt in range(3):
+            if not keys_to_fetch:
+                break
+            response = get_dynamodb_resource().batch_get_item(
+                RequestItems={shares_table_name: {"Keys": keys_to_fetch}}
+            )
+            for share in response.get("Responses", {}).get(shares_table_name, []):
+                permissions = _normalize_permissions(share.get("permissions", []))
+                if _has_required_permission(permissions, required_permission):
+                    db_pid = share.get("profileId")
+                    if db_pid:
+                        accessible_db_ids.add(cast(str, db_pid))
+
+            unprocessed = response.get("UnprocessedKeys", {}).get(shares_table_name, {}).get("Keys", [])
+            keys_to_fetch = unprocessed
+            if keys_to_fetch and attempt < 2:
+                logger.warning(
+                    "Unprocessed share keys, retrying",
+                    attempt=attempt + 1,
+                    count=len(keys_to_fetch),
+                )
+                time.sleep(0.05 * (2**attempt))
+
+    return {profile_id_map[db_pid] for db_pid in accessible_db_ids if db_pid in profile_id_map}
 
 
 def require_profile_access(caller_account_id: str, profile_id: str, required_permission: str = "READ") -> None:
