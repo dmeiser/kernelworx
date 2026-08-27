@@ -85,15 +85,11 @@ const canSave = (campaignId: string, campaignName: string, catalogId: string): b
   Boolean(campaignId && campaignName.trim() && catalogId);
 
 // Helper to validate unit fields when a unit type is selected
-const validateUnitFields = (
-  unitType: string,
-  unitNumber: string,
-  city: string,
-  state: string,
-): string | null => {
+const validateUnitFields = (unitType: string, unitNumber: string, city: string, state: string): string | null => {
   if (!unitType) return null;
   const unitNum = Number(unitNumber);
-  if (!unitNumber || !Number.isFinite(unitNum) || !Number.isInteger(unitNum) || unitNum < 1) return 'Unit number is required when unit type is selected';
+  if (!unitNumber || !Number.isFinite(unitNum) || !Number.isInteger(unitNum) || unitNum < 1)
+    return 'Unit number is required when unit type is selected';
   if (!city.trim()) return 'City is required when unit type is selected';
   if (!state.trim()) return 'State is required when unit type is selected';
   return null;

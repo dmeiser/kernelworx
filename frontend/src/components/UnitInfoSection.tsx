@@ -39,20 +39,14 @@ interface UnitInfoSectionProps {
 
 const UnitInfoAlert: React.FC<{ readOnly: boolean }> = ({ readOnly }) =>
   readOnly ? (
-    <Alert severity="info">
-      Unit information cannot be changed for campaigns created from a shared campaign link.
-    </Alert>
+    <Alert severity="info">Unit information cannot be changed for campaigns created from a shared campaign link.</Alert>
   ) : (
     <Alert severity="info">
-      Adding unit information enables participation in unit reports and allows coordination with
-      other unit members.
+      Adding unit information enables participation in unit reports and allows coordination with other unit members.
     </Alert>
   );
 
-const UnitInfoHeader: React.FC<{ unitType: string; unitNumber: string }> = ({
-  unitType,
-  unitNumber,
-}) => (
+const UnitInfoHeader: React.FC<{ unitType: string; unitNumber: string }> = ({ unitType, unitNumber }) => (
   <Typography>
     Unit Information (Optional)
     {unitType && (
@@ -64,8 +58,7 @@ const UnitInfoHeader: React.FC<{ unitType: string; unitNumber: string }> = ({
   </Typography>
 );
 
-const getUnitNumberHelper = (unitType: string): string =>
-  unitType ? 'Required' : 'Select unit type first';
+const getUnitNumberHelper = (unitType: string): string => (unitType ? 'Required' : 'Select unit type first');
 
 const getCityHelper = (unitType: string): string => (unitType ? 'Required for unit identification' : '');
 

@@ -455,27 +455,24 @@ describe('CampaignSettingsPage', () => {
 
   it('saves campaign with empty dates omitted from input', async () => {
     const user = userEvent.setup();
-    const mocks = createMocks(
-      { ...mockCampaign, startDate: undefined, endDate: undefined },
-      [
-        {
-          request: {
-            query: UPDATE_CAMPAIGN,
-            variables: {
-              input: {
-                campaignId: CAMPAIGN_ID,
-                campaignName: 'Updated Sale',
-                catalogId: CATALOG_ID,
-                isActive: true,
-              },
+    const mocks = createMocks({ ...mockCampaign, startDate: undefined, endDate: undefined }, [
+      {
+        request: {
+          query: UPDATE_CAMPAIGN,
+          variables: {
+            input: {
+              campaignId: CAMPAIGN_ID,
+              campaignName: 'Updated Sale',
+              catalogId: CATALOG_ID,
+              isActive: true,
             },
           },
-          result: {
-            data: { updateCampaign: { ...mockCampaign, campaignName: 'Updated Sale' } },
-          },
         },
-      ],
-    );
+        result: {
+          data: { updateCampaign: { ...mockCampaign, campaignName: 'Updated Sale' } },
+        },
+      },
+    ]);
     renderPage(mocks);
 
     await waitFor(() => {
@@ -691,7 +688,7 @@ describe('CampaignSettingsPage', () => {
   it('updates unit information and saves', async () => {
     const user = userEvent.setup();
     const mocks = createMocks(
-      { ...mockCampaign, unitType: null, unitNumber: null, city: null, state: null },
+      { ...mockCampaign, unitType: undefined, unitNumber: undefined, city: undefined, state: undefined },
       [
         {
           request: {
@@ -733,8 +730,7 @@ describe('CampaignSettingsPage', () => {
 
     // Expand the unit section (no unit type, so collapsed by default)
     const unitHeaders = await screen.findAllByText(/Unit Information/i);
-    const accordionHeader =
-      unitHeaders.find((el) => el.closest('.MuiAccordionSummary-root')) || unitHeaders[0];
+    const accordionHeader = unitHeaders.find((el) => el.closest('.MuiAccordionSummary-root')) || unitHeaders[0];
     await user.click(accordionHeader);
 
     // Select unit type via the form control combobox
@@ -778,15 +774,16 @@ describe('CampaignSettingsPage', () => {
 
   it('shows validation error when unit type is selected but fields are missing', async () => {
     const user = userEvent.setup();
-    renderPage(createMocks({ ...mockCampaign, unitType: null, unitNumber: null, city: null, state: null }));
+    renderPage(
+      createMocks({ ...mockCampaign, unitType: undefined, unitNumber: undefined, city: undefined, state: undefined }),
+    );
 
     await waitFor(() => {
       expect(screen.getByDisplayValue('Spring Sale')).toBeInTheDocument();
     });
 
     const unitHeaders2 = await screen.findAllByText(/Unit Information/i);
-    const accordionHeader2 =
-      unitHeaders2.find((el) => el.closest('.MuiAccordionSummary-root')) || unitHeaders2[0];
+    const accordionHeader2 = unitHeaders2.find((el) => el.closest('.MuiAccordionSummary-root')) || unitHeaders2[0];
     await user.click(accordionHeader2);
 
     const unitTypeLabel2 =
@@ -818,7 +815,9 @@ describe('CampaignSettingsPage', () => {
       expect(screen.getByDisplayValue('Spring Sale')).toBeInTheDocument();
     });
 
-    expect(screen.getByText(/Unit information cannot be changed for campaigns created from a shared campaign link/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Unit information cannot be changed for campaigns created from a shared campaign link/i),
+    ).toBeInTheDocument();
   });
 
   describe('dateToISO helper', () => {
