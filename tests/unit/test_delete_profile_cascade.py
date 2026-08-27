@@ -120,8 +120,34 @@ class TestDeleteProfileCascade:
 
     def test_get_profile_owner_id_not_found(self, profiles_table: Any) -> None:
         """Test _get_profile_owner_id raises when profile is missing from GSI."""
-        with pytest.raises(Exception):
-            _get_profile_owner_id("PROFILE#nonexistent")
+        with patch("src.handlers.delete_profile_cascade.time.sleep"):
+            with pytest.raises(Exception):
+                _get_profile_owner_id("PROFILE#nonexistent")
+
+    def test_get_profile_owner_id_retries_on_eventual_consistency(self) -> None:
+        """Test _get_profile_owner_id retries when GSI is not yet consistent."""
+        with patch("src.handlers.delete_profile_cascade.tables.profiles.query") as mock_query:
+            mock_query.side_effect = [
+                {"Items": []},
+                {"Items": [{"ownerAccountId": "ACCOUNT#owner-123"}]},
+            ]
+            with patch("src.handlers.delete_profile_cascade.time.sleep") as mock_sleep:
+                owner_id = _get_profile_owner_id("PROFILE#test")
+
+        assert owner_id == "ACCOUNT#owner-123"
+        assert mock_query.call_count == 2
+        mock_sleep.assert_called_once()
+
+    def test_get_profile_owner_id_raises_after_exhausting_retries(self) -> None:
+        """Test _get_profile_owner_id raises after all GSI lookup retries fail."""
+        with patch("src.handlers.delete_profile_cascade.tables.profiles.query") as mock_query:
+            mock_query.return_value = {"Items": []}
+            with patch("src.handlers.delete_profile_cascade.time.sleep") as mock_sleep:
+                with pytest.raises(Exception):
+                    _get_profile_owner_id("PROFILE#test")
+
+        assert mock_query.call_count == 3
+        assert mock_sleep.call_count == 2
 
     def test_unauthorized_call_raises_forbidden(self, profiles_table: Any) -> None:
         """Test that a non-owner without WRITE access is rejected."""

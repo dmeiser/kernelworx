@@ -1,5 +1,6 @@
 """Lambda resolver to cascade-delete a profile and all related data."""
 
+import time
 from typing import TYPE_CHECKING, Any, Dict, List
 
 from botocore.exceptions import ClientError
@@ -30,6 +31,8 @@ else:  # pragma: no cover
 logger = get_logger(__name__)
 
 BATCH_SIZE = 25
+_PROFILE_LOOKUP_RETRIES = 3
+_PROFILE_LOOKUP_DELAY_SECONDS = 0.1
 
 
 def _raise_delete_error(table_name: str, exc: Exception) -> None:
@@ -69,17 +72,25 @@ def _batch_delete_keys(table: "Table", keys: List[Dict[str, Any]], primary_keys:
 
 
 def _get_profile_owner_id(profile_id: str) -> str:
-    """Look up the owner account ID for a profile via its GSI."""
-    response = tables.profiles.query(
-        IndexName="profileId-index",
-        KeyConditionExpression="profileId = :pid",
-        ExpressionAttributeValues={":pid": profile_id},
-        Limit=1,
-    )
-    items = response.get("Items", [])
-    if not items:
-        raise AppError(ErrorCode.NOT_FOUND, f"Profile {profile_id} not found")
-    return str(items[0]["ownerAccountId"])
+    """Look up the owner account ID for a profile via its GSI.
+
+    GSIs are eventually consistent, so the lookup retries briefly when the
+    profile is not yet visible after creation.
+    """
+    for attempt in range(1, _PROFILE_LOOKUP_RETRIES + 1):
+        response = tables.profiles.query(
+            IndexName="profileId-index",
+            KeyConditionExpression="profileId = :pid",
+            ExpressionAttributeValues={":pid": profile_id},
+            Limit=1,
+        )
+        items = response.get("Items", [])
+        if items:
+            return str(items[0]["ownerAccountId"])
+        if attempt < _PROFILE_LOOKUP_RETRIES:
+            time.sleep(_PROFILE_LOOKUP_DELAY_SECONDS)
+
+    raise AppError(ErrorCode.NOT_FOUND, f"Profile {profile_id} not found")
 
 
 def _collect_order_keys(campaigns: List[Dict[str, Any]]) -> List[Dict[str, str]]:

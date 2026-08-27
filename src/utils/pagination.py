@@ -31,8 +31,6 @@ _THROUGHPUT_ERROR: str = "ProvisionedThroughputExceededException"
 
 def _is_throughput_error(exc: BaseException) -> bool:
     """Return True if the exception is a DynamoDB throughput error."""
-    if not isinstance(exc, ClientError):
-        return False
     response = getattr(exc, "response", None)
     if not isinstance(response, dict):
         return False
