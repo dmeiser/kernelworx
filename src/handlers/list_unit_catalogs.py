@@ -128,6 +128,16 @@ def _build_unit_campaign_key(
     return f"{unit_type}#{unit_number}#{city}#{state}#{campaign_name}#{campaign_year}"
 
 
+def _add_catalog_id_if_accessible(catalog_ids: Set[str], campaign: Dict[str, Any], accessible_ids: set[str]) -> None:
+    """Add a campaign's catalog ID if the profile is accessible and catalogId is a string."""
+    profile_id = campaign["profileId"]
+    if profile_id not in accessible_ids:
+        return
+    catalog_id = campaign.get("catalogId")
+    if catalog_id is not None and isinstance(catalog_id, str):
+        catalog_ids.add(catalog_id)
+
+
 def _collect_catalog_ids_from_campaigns(campaigns: List[Dict[str, Any]], caller_account_id: str) -> Set[str]:
     """Collect catalog IDs from campaigns the caller has access to, using batched authorization."""
     profile_ids = [campaign["profileId"] for campaign in campaigns]
@@ -135,11 +145,7 @@ def _collect_catalog_ids_from_campaigns(campaigns: List[Dict[str, Any]], caller_
 
     catalog_ids: Set[str] = set()
     for campaign in campaigns:
-        profile_id = campaign["profileId"]
-        if profile_id in accessible_ids:
-            catalog_id = campaign.get("catalogId")
-            if catalog_id is not None and isinstance(catalog_id, str):
-                catalog_ids.add(catalog_id)
+        _add_catalog_id_if_accessible(catalog_ids, campaign, accessible_ids)
     return catalog_ids
 
 
