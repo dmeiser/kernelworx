@@ -150,7 +150,9 @@ class TestListUnitCatalogs:
             mock_tables.profiles = mock_profiles
             mock_tables.campaigns = mock_campaigns
             mock_tables.catalogs = mock_catalogs
-            mock_check_access.side_effect = lambda caller_account_id, profile_ids, required_permission="READ": set(profile_ids)
+            mock_check_access.side_effect = lambda caller_account_id, profile_ids, required_permission="READ": set(
+                profile_ids
+            )
 
             # Act
             result = list_unit_catalogs(event, lambda_context)
@@ -224,7 +226,9 @@ class TestListUnitCatalogs:
         ):
             mock_tables.profiles = mock_profiles
             mock_tables.campaigns = mock_campaigns
-            mock_check_access.side_effect = lambda caller_account_id, profile_ids, required_permission="READ": set(profile_ids)
+            mock_check_access.side_effect = lambda caller_account_id, profile_ids, required_permission="READ": set(
+                profile_ids
+            )
 
             # Act
             result = list_unit_catalogs(event, lambda_context)
@@ -254,7 +258,9 @@ class TestListUnitCatalogs:
         ):
             mock_tables.profiles = mock_profiles
             mock_tables.campaigns = mock_campaigns
-            mock_check_access.side_effect = lambda caller_account_id, profile_ids, required_permission="READ": set(profile_ids)
+            mock_check_access.side_effect = lambda caller_account_id, profile_ids, required_permission="READ": set(
+                profile_ids
+            )
 
             # Act
             result = list_unit_catalogs(event, lambda_context)
@@ -288,7 +294,9 @@ class TestListUnitCatalogs:
             mock_tables.profiles = mock_profiles
             mock_tables.campaigns = mock_campaigns
             mock_tables.catalogs = mock_catalogs
-            mock_check_access.side_effect = lambda caller_account_id, profile_ids, required_permission="READ": set(profile_ids)
+            mock_check_access.side_effect = lambda caller_account_id, profile_ids, required_permission="READ": set(
+                profile_ids
+            )
 
             # Act
             result = list_unit_catalogs(event, lambda_context)
@@ -333,7 +341,9 @@ class TestListUnitCatalogs:
             mock_tables.profiles = mock_profiles
             mock_tables.campaigns = mock_campaigns
             mock_tables.catalogs = mock_catalogs
-            mock_check_access.side_effect = lambda caller_account_id, profile_ids, required_permission="READ": set(profile_ids)
+            mock_check_access.side_effect = lambda caller_account_id, profile_ids, required_permission="READ": set(
+                profile_ids
+            )
 
             # Act
             result = list_unit_catalogs(event, lambda_context)
@@ -366,7 +376,9 @@ class TestListUnitCatalogs:
             mock_tables.profiles = mock_profiles
             mock_tables.campaigns = mock_campaigns
             mock_tables.catalogs = mock_catalogs
-            mock_check_access.side_effect = lambda caller_account_id, profile_ids, required_permission="READ": set(profile_ids)
+            mock_check_access.side_effect = lambda caller_account_id, profile_ids, required_permission="READ": set(
+                profile_ids
+            )
 
             # Act
             result = list_unit_catalogs(event, lambda_context)
@@ -405,7 +417,9 @@ class TestListUnitCatalogs:
         mock_campaigns.query.return_value = {"Items": []}
 
         # Grant access only to first profile
-        def check_access_side_effect(caller_account_id: str, profile_ids: list[str], required_permission: str) -> set[str]:
+        def check_access_side_effect(
+            caller_account_id: str, profile_ids: list[str], required_permission: str
+        ) -> set[str]:
             return {pid for pid in profile_ids if pid == "PROFILE#profile1"}
 
         with (
@@ -450,7 +464,9 @@ class TestListUnitCatalogs:
             mock_tables.profiles = mock_profiles
             mock_tables.campaigns = mock_campaigns
             mock_tables.catalogs = mock_catalogs
-            mock_check_access.side_effect = lambda caller_account_id, profile_ids, required_permission="READ": set(profile_ids)
+            mock_check_access.side_effect = lambda caller_account_id, profile_ids, required_permission="READ": set(
+                profile_ids
+            )
 
             # Act
             result = list_unit_catalogs(event, lambda_context)
@@ -552,7 +568,9 @@ class TestListUnitCampaignCatalogs:
         ):
             mock_tables.campaigns = mock_campaigns
             mock_tables.catalogs = mock_catalogs
-            mock_check_access.side_effect = lambda caller_account_id, profile_ids, required_permission="READ": set(profile_ids)
+            mock_check_access.side_effect = lambda caller_account_id, profile_ids, required_permission="READ": set(
+                profile_ids
+            )
 
             # Act
             result = list_unit_campaign_catalogs(event, lambda_context)
@@ -632,7 +650,9 @@ class TestListUnitCampaignCatalogs:
         mock_catalogs.get_item.return_value = {"Item": sample_catalogs["catalog-123"]}
 
         # Grant access only to first profile
-        def check_access_side_effect(caller_account_id: str, profile_ids: list[str], required_permission: str) -> set[str]:
+        def check_access_side_effect(
+            caller_account_id: str, profile_ids: list[str], required_permission: str
+        ) -> set[str]:
             return {pid for pid in profile_ids if pid == "PROFILE#profile1"}
 
         with (
@@ -685,7 +705,9 @@ class TestListUnitCampaignCatalogs:
         ):
             mock_tables.campaigns = mock_campaigns
             mock_tables.catalogs = mock_catalogs
-            mock_check_access.side_effect = lambda caller_account_id, profile_ids, required_permission="READ": set(profile_ids)
+            mock_check_access.side_effect = lambda caller_account_id, profile_ids, required_permission="READ": set(
+                profile_ids
+            )
 
             # Act
             result = list_unit_campaign_catalogs(event, lambda_context)
@@ -724,7 +746,9 @@ class TestListUnitCampaignCatalogs:
         ):
             mock_tables.campaigns = mock_campaigns
             mock_tables.catalogs = mock_catalogs
-            mock_check_access.side_effect = lambda caller_account_id, profile_ids, required_permission="READ": set(profile_ids)
+            mock_check_access.side_effect = lambda caller_account_id, profile_ids, required_permission="READ": set(
+                profile_ids
+            )
 
             # Act
             result = list_unit_campaign_catalogs(event, lambda_context)
@@ -774,7 +798,9 @@ class TestListUnitCampaignCatalogs:
             patch("src.handlers.list_unit_catalogs.batch_check_profile_access") as mock_check_access,
         ):
             mock_tables.campaigns = mock_campaigns
-            mock_check_access.side_effect = lambda caller_account_id, profile_ids, required_permission="READ": set(profile_ids)
+            mock_check_access.side_effect = lambda caller_account_id, profile_ids, required_permission="READ": set(
+                profile_ids
+            )
 
             # Act
             result = list_unit_campaign_catalogs(event, lambda_context)
@@ -804,7 +830,9 @@ class TestListUnitCampaignCatalogs:
         ):
             mock_tables.campaigns = mock_campaigns
             mock_tables.catalogs = mock_catalogs
-            mock_check_access.side_effect = lambda caller_account_id, profile_ids, required_permission="READ": set(profile_ids)
+            mock_check_access.side_effect = lambda caller_account_id, profile_ids, required_permission="READ": set(
+                profile_ids
+            )
 
             # Act
             result = list_unit_campaign_catalogs(event, lambda_context)
