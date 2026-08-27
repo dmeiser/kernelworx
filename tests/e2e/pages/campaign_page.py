@@ -133,23 +133,23 @@ class CampaignPage(BasePage):
             candidate_ids = {profile_id}
             if not profile_id.startswith("PROFILE#"):
                 candidate_ids.add(f"PROFILE#{profile_id}")
-            option = None
-            for candidate in candidate_ids:
-                candidate_option = profile_listbox.locator(
-                    f'[role="option"]:not([aria-disabled="true"])[data-value="{candidate}"]'
-                )
-                if candidate_option.count() > 0:
-                    option = candidate_option
-                    break
-            available = [el.get_attribute("data-value") for el in enabled_options.all()]
-            assert option is not None, (
-                f"Profile option for {profile_id!r} not found in create-campaign dropdown; "
-                f"available data-values: {available}"
-            )
+
+            # Wait for the intended enabled profile option to appear instead of
+            # using count(), which can race with the dropdown's async render.
+            value_selectors = ", ".join(f'[data-value="{candidate}"]' for candidate in candidate_ids)
+            option = profile_listbox.locator(f'[role="option"]:not([aria-disabled="true"]):is({value_selectors})')
+            try:
+                expect(option).to_be_visible(timeout=5_000)
+            except AssertionError as exc:
+                available = [el.get_attribute("data-value") for el in enabled_options.all()]
+                raise AssertionError(
+                    f"Profile option for {profile_id!r} not found in create-campaign dropdown; "
+                    f"available data-values: {available}"
+                ) from exc
         else:
             option = enabled_options.first
+            expect(option).to_be_visible(timeout=5_000)
 
-        expect(option).to_be_visible(timeout=5_000)
         option.click()
         expect(profile_listbox).to_be_hidden(timeout=5_000)
 
