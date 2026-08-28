@@ -440,6 +440,51 @@ def _is_valid_email_prefix(value: str) -> bool:
     return bool(re.match(email_prefix_pattern, value)) and len(value) <= 254
 
 
+_COGNITO_FILTER_METACHARS = frozenset('"\\')
+
+
+def _reject_cognito_filter_metachars(value: str, field_label: str) -> None:
+    """Reject characters that can break a Cognito ListUsers filter literal.
+
+    Cognito filters are double-quoted and use backslash as the escape
+    character for inner double quotes. A value containing a quote or a
+    trailing backslash can escape the terminating quote and break the
+    filter. Reject double quotes, backslashes, and whitespace consistently
+    for any value that will be interpolated into a filter.
+    """
+    if any(ch in _COGNITO_FILTER_METACHARS for ch in value):
+        raise AppError(ErrorCode.INVALID_INPUT, f"Invalid {field_label}")
+    if any(ch.isspace() for ch in value):
+        raise AppError(ErrorCode.INVALID_INPUT, f"Invalid {field_label}")
+
+
+def _validate_email_for_filter(email: str) -> None:
+    """Validate an email before interpolating it into a Cognito ListUsers filter.
+
+    Reject Cognito filter metacharacters (double quotes, backslashes,
+    whitespace) and require a basic local@domain shape. See issue #124.
+    """
+    if not email or len(email) > 254:
+        raise AppError(ErrorCode.INVALID_INPUT, "Email is required")
+    _reject_cognito_filter_metachars(email, "email")
+    if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
+        raise AppError(ErrorCode.INVALID_INPUT, "Invalid email")
+
+
+def _validate_sub_for_filter(sub: str) -> None:
+    """Validate a sub/account ID before interpolating it into a Cognito filter.
+
+    Reject Cognito filter metacharacters (double quotes, backslashes,
+    whitespace) and oversized values so malformed values surface as
+    INVALID_INPUT instead of a Cognito parse error. See issue #124.
+    Non-UUID account IDs are allowed through so that deletion requests for
+    non-existent users resolve to NOT_FOUND rather than INVALID_INPUT.
+    """
+    if not sub or len(sub) > 256:
+        raise AppError(ErrorCode.INVALID_INPUT, "Account ID is required")
+    _reject_cognito_filter_metachars(sub, "account ID")
+
+
 def _validate_search_query(query: str) -> None:
     """Validate that the admin search query is a safe UUID, email prefix, or ACCOUNT#UUID."""
     if query.startswith("ACCOUNT#"):
@@ -540,6 +585,9 @@ def _find_cognito_user_by_sub(
     AppError so the caller does not proceed to delete DynamoDB data while
     the Cognito user still exists.
     """
+    # Validate before interpolating into the Cognito filter to prevent
+    # quote-injection / filter breakage (#124).
+    _validate_sub_for_filter(account_id)
     try:
         users_response = cognito.list_users(
             UserPoolId=user_pool_id,
@@ -605,6 +653,9 @@ def _delete_account_from_dynamodb(account_id: str, logger: Any) -> None:
 
 def _find_user_by_email(cognito: Any, user_pool_id: str, email: str, logger: Any) -> str:
     """Find username by email. Returns username."""
+    # Validate before interpolating into the Cognito filter to prevent
+    # quote-injection / filter breakage (#124).
+    _validate_email_for_filter(email)
     try:
         response = cognito.list_users(
             UserPoolId=user_pool_id,
@@ -686,8 +737,12 @@ def admin_reset_user_password(event: Dict[str, Any], context: Any) -> bool:
 
 
 def _check_not_self_deletion(caller_id: str, account_id: str) -> None:
-    """Prevent admin from deleting their own account."""
-    if account_id == caller_id:
+    """Prevent admin from deleting their own account.
+
+    Normalize both IDs to their canonical ACCOUNT# form before comparing so a
+    caller passing ``ACCOUNT#<own-sub>`` cannot bypass the guard (#125).
+    """
+    if _normalize_account_id(account_id) == _normalize_account_id(caller_id):
         raise AppError(ErrorCode.INVALID_INPUT, "Cannot delete your own account")
 
 
@@ -723,6 +778,11 @@ def admin_delete_user(event: Dict[str, Any], context: Any) -> bool:
 
         username, email = _find_cognito_user_by_sub(cognito, user_pool_id, account_id, logger)
         account_exists = _account_exists_in_dynamodb(account_id, logger)
+        # TODO(#186): admin_delete_user passes the raw accountId to the DynamoDB
+        # and Cognito lookups above, so an ACCOUNT#-prefixed value for a non-self
+        # target yields a spurious NOT_FOUND. Normalize accountId consistently
+        # across this handler in a follow-up; #125 only fixed the self-deletion
+        # guard.
 
         if not username and not account_exists:
             raise AppError(ErrorCode.NOT_FOUND, f"User not found: {account_id}")

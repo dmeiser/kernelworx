@@ -46,6 +46,12 @@ def get_catalogs_table() -> Any:
 
 
 @pytest.fixture
+def sample_account_id() -> str:
+    """Sample account ID (Cognito sub) as a valid UUID."""
+    return "22222222-2222-2222-2222-222222222222"
+
+
+@pytest.fixture
 def admin_appsync_event(sample_account_id: str) -> Dict[str, Any]:
     """Base AppSync event structure for admin user."""
     return {
@@ -128,7 +134,7 @@ class TestLambdaHandler:
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
 
-        target_account_id = "target-user-456"
+        target_account_id = "11111111-1111-1111-1111-111111111111"
 
         # Create target account
         accounts_table = get_accounts_table()
@@ -149,7 +155,7 @@ class TestLambdaHandler:
         # Mock Cognito
         with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
             mock_cognito = MagicMock()
-            mock_cognito.list_users.return_value = {"Users": [{"Username": "target-user-456"}]}
+            mock_cognito.list_users.return_value = {"Users": [{"Username": "11111111-1111-1111-1111-111111111111"}]}
             mock_cognito.admin_delete_user.return_value = {}
             mock_get_client.return_value = mock_cognito
 
@@ -1192,6 +1198,97 @@ class TestAdminResetUserPassword:
 
             assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
 
+    def test_email_with_quote_rejected_before_filter(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """An email containing a double quote must be rejected before reaching Cognito (#124)."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+
+        event = {
+            **admin_appsync_event,
+            "arguments": {"email": 'evil"@example.com'},
+        }
+
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+            mock_cognito = MagicMock()
+            mock_get_client.return_value = mock_cognito
+
+            with pytest.raises(AppError) as exc_info:
+                admin_reset_user_password(event, lambda_context)
+
+            assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+            mock_cognito.list_users.assert_not_called()
+
+    def test_email_with_backslash_rejected_before_filter(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """An email containing a backslash must be rejected before reaching Cognito (#124)."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+
+        event = {
+            **admin_appsync_event,
+            "arguments": {"email": "evil\\@example.com\\"},
+        }
+
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+            mock_cognito = MagicMock()
+            mock_get_client.return_value = mock_cognito
+
+            with pytest.raises(AppError) as exc_info:
+                admin_reset_user_password(event, lambda_context)
+
+            assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+            mock_cognito.list_users.assert_not_called()
+
+    def test_malformed_email_rejected_before_filter(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """An email without a valid local@domain shape is rejected (#124)."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+
+        event = {
+            **admin_appsync_event,
+            "arguments": {"email": "not-an-email"},
+        }
+
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+            mock_cognito = MagicMock()
+            mock_get_client.return_value = mock_cognito
+
+            with pytest.raises(AppError) as exc_info:
+                admin_reset_user_password(event, lambda_context)
+
+            assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+            mock_cognito.list_users.assert_not_called()
+
+    def test_oversize_email_rejected_before_filter(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """An email longer than 254 chars is rejected by the validator (#124)."""
+        from src.handlers.admin_operations import _validate_email_for_filter
+
+        long_email = "a" * 250 + "@b.co"
+        with pytest.raises(AppError) as exc_info:
+            _validate_email_for_filter(long_email)
+
+        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+
 
 class TestAdminDeleteUser:
     """Tests for admin_delete_user handler."""
@@ -1207,7 +1304,7 @@ class TestAdminDeleteUser:
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
 
-        target_account_id = "target-user-456"
+        target_account_id = "11111111-1111-1111-1111-111111111111"
 
         # Create target account
         accounts_table = get_accounts_table()
@@ -1271,7 +1368,7 @@ class TestAdminDeleteUser:
         monkeypatch.setenv("INVITES_TABLE_NAME", "kernelworx-invites-ue1-dev")
         monkeypatch.setenv("SHARES_TABLE_NAME", "kernelworx-shares-ue1-dev")
 
-        target_account_id = "target-user-456"
+        target_account_id = "11111111-1111-1111-1111-111111111111"
         account_id_key = f"ACCOUNT#{target_account_id}"
         profile_id = "PROFILE#target-profile"
         invite_code = "INVITE#target-invite"
@@ -1346,7 +1443,7 @@ class TestAdminDeleteUser:
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
 
-        target_account_id = "target-user-456"
+        target_account_id = "11111111-1111-1111-1111-111111111111"
 
         # Create target account
         accounts_table = get_accounts_table()
@@ -1408,7 +1505,7 @@ class TestAdminDeleteUser:
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
 
         # accountId in GraphQL is the UUID (without ACCOUNT# prefix)
-        target_account_id = "target-user-789"
+        target_account_id = "33333333-3333-3333-3333-333333333333"
 
         # Don't create Account in DynamoDB (user never logged in)
 
@@ -1455,7 +1552,7 @@ class TestAdminDeleteUser:
 
         event = {
             **non_admin_appsync_event,
-            "arguments": {"accountId": "target-user-456"},
+            "arguments": {"accountId": "11111111-1111-1111-1111-111111111111"},
         }
 
         with pytest.raises(AppError) as exc_info:
@@ -1506,6 +1603,150 @@ class TestAdminDeleteUser:
         assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
         assert "Cannot delete your own account" in exc_info.value.message
 
+    def test_self_deletion_prevented_with_account_prefix(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        sample_account_id: str,
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """A caller passing ACCOUNT#<own-sub> must still be blocked (#125)."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+
+        event = {
+            **admin_appsync_event,
+            "arguments": {"accountId": f"ACCOUNT#{sample_account_id}"},
+        }
+
+        with pytest.raises(AppError) as exc_info:
+            admin_delete_user(event, lambda_context)
+
+        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+        assert "Cannot delete your own account" in exc_info.value.message
+
+    def test_account_id_with_quote_rejected_before_cognito(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        sample_account_id: str,
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """A quote-containing accountId is rejected before the Cognito sub filter (#124)."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+
+        event = {
+            **admin_appsync_event,
+            "arguments": {"accountId": 'other"user'},
+        }
+
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+            mock_cognito = MagicMock()
+            mock_get_client.return_value = mock_cognito
+
+            with pytest.raises(AppError) as exc_info:
+                admin_delete_user(event, lambda_context)
+
+            assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+            mock_cognito.list_users.assert_not_called()
+
+    def test_account_id_with_backslash_rejected_before_cognito(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        sample_account_id: str,
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """A backslash-containing accountId is rejected before the Cognito sub filter (#124)."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+
+        event = {
+            **admin_appsync_event,
+            "arguments": {"accountId": "other\\user\\"},
+        }
+
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+            mock_cognito = MagicMock()
+            mock_get_client.return_value = mock_cognito
+
+            with pytest.raises(AppError) as exc_info:
+                admin_delete_user(event, lambda_context)
+
+            assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+            mock_cognito.list_users.assert_not_called()
+
+    def test_account_id_with_whitespace_rejected_before_cognito(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        sample_account_id: str,
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """A whitespace-containing accountId is rejected before the Cognito sub filter (#124)."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+
+        event = {
+            **admin_appsync_event,
+            "arguments": {"accountId": "other user"},
+        }
+
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+            mock_cognito = MagicMock()
+            mock_get_client.return_value = mock_cognito
+
+            with pytest.raises(AppError) as exc_info:
+                admin_delete_user(event, lambda_context)
+
+            assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+            mock_cognito.list_users.assert_not_called()
+
+    def test_oversize_sub_rejected_before_filter(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """A sub longer than 256 chars is rejected by the validator (#124)."""
+        from src.handlers.admin_operations import _validate_sub_for_filter
+
+        long_sub = "a" * 257
+        with pytest.raises(AppError) as exc_info:
+            _validate_sub_for_filter(long_sub)
+
+        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+
+    def test_safe_non_uuid_account_id_returns_not_found(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        sample_account_id: str,
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """A safe sub that does not look like a UUID reaches Cognito and resolves to NOT_FOUND."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
+
+        event = {
+            **admin_appsync_event,
+            "arguments": {"accountId": "not-a-uuid"},
+        }
+
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+            mock_cognito = MagicMock()
+            mock_cognito.list_users.return_value = {"Users": []}
+            mock_get_client.return_value = mock_cognito
+
+            with pytest.raises(AppError) as exc_info:
+                admin_delete_user(event, lambda_context)
+
+            assert exc_info.value.error_code == ErrorCode.NOT_FOUND
+            mock_cognito.list_users.assert_called_once()
+
     def test_account_not_found_cognito_idempotent(
         self,
         dynamodb_table: Any,
@@ -1517,7 +1758,7 @@ class TestAdminDeleteUser:
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
 
-        target_account_id = "nonexistent-user"
+        target_account_id = "44444444-4444-4444-4444-444444444444"
 
         # Create target account (DynamoDB still exists)
         accounts_table = get_accounts_table()
@@ -1558,7 +1799,7 @@ class TestAdminDeleteUser:
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
 
-        target_account_id = "totally-nonexistent-user-12345"
+        target_account_id = "55555555-5555-5555-5555-555555555555"
 
         # Neither Cognito user nor DynamoDB account exists
 
@@ -1590,7 +1831,7 @@ class TestAdminDeleteUser:
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
 
-        target_account_id = "target-user-456"
+        target_account_id = "11111111-1111-1111-1111-111111111111"
 
         # Create target account
         accounts_table = get_accounts_table()
@@ -1613,7 +1854,7 @@ class TestAdminDeleteUser:
             mock_cognito.list_users.return_value = {
                 "Users": [
                     {
-                        "Username": "target-user-456",
+                        "Username": "11111111-1111-1111-1111-111111111111",
                         "Attributes": [
                             {"Name": "sub", "Value": target_account_id},
                             {"Name": "email", "Value": "target@example.com"},
@@ -1644,7 +1885,7 @@ class TestAdminDeleteUser:
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
 
-        target_account_id = "target-user-456"
+        target_account_id = "11111111-1111-1111-1111-111111111111"
 
         event = {
             **admin_appsync_event,
@@ -1691,7 +1932,7 @@ class TestAdminDeleteUser:
         # Try to delete own account (caller ID matches target)
         event = {
             **admin_appsync_event,
-            "arguments": {"accountId": "user-123-456"},  # Same as caller in fixture
+            "arguments": {"accountId": "22222222-2222-2222-2222-222222222222"},  # Same as caller in fixture
         }
 
         with pytest.raises(AppError) as exc_info:
@@ -1710,7 +1951,7 @@ class TestAdminDeleteUser:
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
 
-        target_account_id = "target-user-456"
+        target_account_id = "11111111-1111-1111-1111-111111111111"
 
         # Create target account
         accounts_table = get_accounts_table()
@@ -1732,7 +1973,7 @@ class TestAdminDeleteUser:
             mock_cognito.list_users.return_value = {
                 "Users": [
                     {
-                        "Username": "target-user-456",
+                        "Username": "11111111-1111-1111-1111-111111111111",
                         "Attributes": [
                             {"Name": "sub", "Value": target_account_id},
                             {"Name": "email", "Value": "target@example.com"},
@@ -1771,7 +2012,7 @@ class TestAdminDeleteUser:
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
 
-        target_account_id = "target-user-456"
+        target_account_id = "11111111-1111-1111-1111-111111111111"
 
         # Create target account (but Cognito lookup will fail)
         accounts_table = get_accounts_table()
@@ -1814,7 +2055,7 @@ class TestAdminDeleteUser:
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
 
-        target_account_id = "target-user-456"
+        target_account_id = "11111111-1111-1111-1111-111111111111"
 
         # Create target account
         accounts_table = get_accounts_table()
@@ -1858,7 +2099,7 @@ class TestAdminDeleteUser:
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
 
-        target_account_id = "target-user-456"
+        target_account_id = "11111111-1111-1111-1111-111111111111"
 
         # Create target account with email
         accounts_table = get_accounts_table()
@@ -1900,7 +2141,7 @@ class TestAdminDeleteUser:
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
 
-        target_account_id = "target-user-456"
+        target_account_id = "11111111-1111-1111-1111-111111111111"
 
         event = {
             **admin_appsync_event,
@@ -1942,7 +2183,7 @@ class TestAdminDeleteUser:
 
         event = {
             **admin_appsync_event,
-            "arguments": {"accountId": "target-user-456"},
+            "arguments": {"accountId": "11111111-1111-1111-1111-111111111111"},
         }
 
         with patch("src.handlers.admin_operations.tables") as mock_tables:
