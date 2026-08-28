@@ -147,6 +147,11 @@ const fillSignupForm = (overrides?: FormOverrides) => {
   applyOptionalFormValues(overrides);
 };
 
+const submitForm = (buttonName = 'Create Account') => {
+  const button = screen.getByRole('button', { name: buttonName });
+  fireEvent.submit(button.closest('form')!);
+};
+
 const submitSignupForm = async (
   overrides?: FormOverrides,
   signUpResult: Awaited<ReturnType<typeof signUp>> = {
@@ -157,7 +162,7 @@ const submitSignupForm = async (
   vi.mocked(signUp).mockResolvedValue(signUpResult);
 
   fillSignupForm(overrides);
-  fireEvent.click(screen.getByRole('button', { name: 'Create Account' }));
+  submitForm('Create Account');
 
   if (signUpResult.nextStep?.signUpStep === 'CONFIRM_SIGN_UP') {
     await waitFor(() => {
@@ -232,7 +237,7 @@ describe('SignupPage', () => {
     test('shows error when required fields are missing', async () => {
       renderPage();
 
-      fireEvent.click(screen.getByRole('button', { name: 'Create Account' }));
+      submitForm('Create Account');
       expect(await screen.findByText('Email and password are required')).toBeInTheDocument();
       expect(signUp).not.toHaveBeenCalled();
     });
@@ -241,7 +246,7 @@ describe('SignupPage', () => {
       renderPage();
 
       fillSignupForm({ email: 'invalid-email' });
-      fireEvent.click(screen.getByRole('button', { name: 'Create Account' }));
+      submitForm('Create Account');
 
       expect(await screen.findByText('Please enter a valid email address')).toBeInTheDocument();
       expect(signUp).not.toHaveBeenCalled();
@@ -251,7 +256,7 @@ describe('SignupPage', () => {
       renderPage();
 
       fillSignupForm({ password: 'simple', confirmPassword: 'simple' });
-      fireEvent.click(screen.getByRole('button', { name: 'Create Account' }));
+      submitForm('Create Account');
 
       expect(
         await screen.findByText(
@@ -265,7 +270,7 @@ describe('SignupPage', () => {
       renderPage();
 
       fillSignupForm({ password: 'Password123!', confirmPassword: 'DifferentPassword123!' });
-      fireEvent.click(screen.getByRole('button', { name: 'Create Account' }));
+      submitForm('Create Account');
 
       expect(await screen.findByText('Passwords do not match')).toBeInTheDocument();
       expect(signUp).not.toHaveBeenCalled();
@@ -275,8 +280,7 @@ describe('SignupPage', () => {
       renderPage();
 
       fillSignupForm({ ageConfirmed: false });
-      const button = screen.getByRole('button', { name: 'Create Account' });
-      fireEvent.submit(button.closest('form')!);
+      submitForm('Create Account');
 
       expect(await screen.findByText('You must be 13 years or older to create an account')).toBeInTheDocument();
       expect(signUp).not.toHaveBeenCalled();
@@ -331,7 +335,7 @@ describe('SignupPage', () => {
 
       renderPage();
       fillSignupForm();
-      fireEvent.click(screen.getByRole('button', { name: 'Create Account' }));
+      submitForm('Create Account');
 
       expect(await screen.findByText('An account with this email already exists')).toBeInTheDocument();
     });
@@ -341,7 +345,7 @@ describe('SignupPage', () => {
 
       renderPage();
       fillSignupForm();
-      fireEvent.click(screen.getByRole('button', { name: 'Create Account' }));
+      submitForm('Create Account');
 
       expect(
         await screen.findByText(
@@ -355,7 +359,7 @@ describe('SignupPage', () => {
 
       renderPage();
       fillSignupForm();
-      fireEvent.click(screen.getByRole('button', { name: 'Create Account' }));
+      submitForm('Create Account');
 
       expect(await screen.findByText('Invalid input. Please check your information')).toBeInTheDocument();
     });
@@ -365,7 +369,7 @@ describe('SignupPage', () => {
 
       renderPage();
       fillSignupForm();
-      fireEvent.click(screen.getByRole('button', { name: 'Create Account' }));
+      submitForm('Create Account');
 
       expect(await screen.findByText('Network connectivity lost')).toBeInTheDocument();
     });
@@ -375,7 +379,7 @@ describe('SignupPage', () => {
 
       renderPage();
       fillSignupForm();
-      fireEvent.click(screen.getByRole('button', { name: 'Create Account' }));
+      submitForm('Create Account');
 
       expect(await screen.findByText('Signup failed. Please try again')).toBeInTheDocument();
     });
@@ -404,7 +408,7 @@ describe('SignupPage', () => {
       fireEvent.change(screen.getByRole('textbox', { name: 'Verification Code' }), {
         target: { value: '123456' },
       });
-      fireEvent.click(screen.getByRole('button', { name: 'Verify Email' }));
+      submitForm('Verify Email');
 
       await waitFor(() => {
         expect(confirmSignUp).toHaveBeenCalledWith({
@@ -441,7 +445,7 @@ describe('SignupPage', () => {
       fireEvent.change(screen.getByRole('textbox', { name: 'Verification Code' }), {
         target: { value: '123456' },
       });
-      fireEvent.click(screen.getByRole('button', { name: 'Verify Email' }));
+      submitForm('Verify Email');
 
       await waitFor(() => {
         expect(confirmSignUp).toHaveBeenCalled();
@@ -466,7 +470,7 @@ describe('SignupPage', () => {
       fireEvent.change(screen.getByRole('textbox', { name: 'Verification Code' }), {
         target: { value: '123456' },
       });
-      fireEvent.click(screen.getByRole('button', { name: 'Verify Email' }));
+      submitForm('Verify Email');
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(1000);
@@ -486,7 +490,7 @@ describe('SignupPage', () => {
       fireEvent.change(screen.getByRole('textbox', { name: 'Verification Code' }), {
         target: { value: '123456' },
       });
-      fireEvent.click(screen.getByRole('button', { name: 'Verify Email' }));
+      submitForm('Verify Email');
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(1000);
@@ -507,7 +511,7 @@ describe('SignupPage', () => {
       fireEvent.change(screen.getByRole('textbox', { name: 'Verification Code' }), {
         target: { value: '123456' },
       });
-      fireEvent.click(screen.getByRole('button', { name: 'Verify Email' }));
+      submitForm('Verify Email');
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(1000);
@@ -533,7 +537,7 @@ describe('SignupPage', () => {
       fireEvent.change(screen.getByRole('textbox', { name: 'Verification Code' }), {
         target: { value: '123456' },
       });
-      fireEvent.click(screen.getByRole('button', { name: 'Verify Email' }));
+      submitForm('Verify Email');
 
       await waitFor(() => {
         expect(confirmSignUp).toHaveBeenCalled();
@@ -552,7 +556,7 @@ describe('SignupPage', () => {
       fireEvent.change(screen.getByRole('textbox', { name: 'Verification Code' }), {
         target: { value: '000000' },
       });
-      fireEvent.click(screen.getByRole('button', { name: 'Verify Email' }));
+      submitForm('Verify Email');
 
       expect(
         await screen.findByText('Invalid verification code. Please check and try again'),
@@ -568,7 +572,7 @@ describe('SignupPage', () => {
       fireEvent.change(screen.getByRole('textbox', { name: 'Verification Code' }), {
         target: { value: '000000' },
       });
-      fireEvent.click(screen.getByRole('button', { name: 'Verify Email' }));
+      submitForm('Verify Email');
 
       expect(
         await screen.findByText('Verification code expired. Please request a new one'),
@@ -584,7 +588,7 @@ describe('SignupPage', () => {
       fireEvent.change(screen.getByRole('textbox', { name: 'Verification Code' }), {
         target: { value: '000000' },
       });
-      fireEvent.click(screen.getByRole('button', { name: 'Verify Email' }));
+      submitForm('Verify Email');
 
       expect(await screen.findByText('Verification failed. Please try again')).toBeInTheDocument();
     });
@@ -730,7 +734,7 @@ describe('SignupPage', () => {
 
       // Submit again to trigger a second scheduleRedirect
       fillSignupForm();
-      fireEvent.click(screen.getByRole('button', { name: 'Create Account' }));
+      submitForm('Create Account');
       await waitFor(() => {
         expect(screen.getByRole('button', { name: 'Create Account' })).toBeInTheDocument();
       });
