@@ -817,7 +817,7 @@ def _validate_and_process_product(product: Dict[str, Any]) -> Dict[str, Any]:
 
     Price may arrive as a number or a numeric string (e.g. from AppSync JSON
     deserialization); it is converted to Decimal before validation and storage.
-    Non-numeric or unparseable values raise INVALID_INPUT.
+    Non-numeric or unparsable values raise INVALID_INPUT.
     """
     product_name = product.get("productName", "").strip()
     price = product.get("price")
