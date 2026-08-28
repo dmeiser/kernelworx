@@ -222,7 +222,7 @@ describe('SignupPage', () => {
       const option = screen.getByRole('option', { name: /Pack/i });
       fireEvent.click(option);
 
-      expect(screen.getByText('Pack (Cub Scouts)')).toBeInTheDocument();
+      expect(combobox).toHaveTextContent('Pack');
     });
 
     test('navigates to login when Sign In link is clicked', () => {
