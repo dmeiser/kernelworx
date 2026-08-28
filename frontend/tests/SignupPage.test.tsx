@@ -275,7 +275,8 @@ describe('SignupPage', () => {
       renderPage();
 
       fillSignupForm({ ageConfirmed: false });
-      fireEvent.click(screen.getByRole('button', { name: 'Create Account' }));
+      const button = screen.getByRole('button', { name: 'Create Account' });
+      fireEvent.submit(button.closest('form')!);
 
       expect(await screen.findByText('You must be 13 years or older to create an account')).toBeInTheDocument();
       expect(signUp).not.toHaveBeenCalled();
