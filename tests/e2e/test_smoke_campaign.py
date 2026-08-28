@@ -9,7 +9,7 @@ visible profile on the dashboard is used for all campaign operations.
 Catalog selection
 -----------------
 The dev environment's product catalog name is not hard-coded here.
-``_create_campaign_with_first_catalog`` opens the *New Campaign* dialog and
+``_create_campaign_with_first_catalog`` navigates to the *New Campaign* page and
 programmatically picks the **first** available option from the catalog
 dropdown, making the test independent of the exact catalog name.
 """
@@ -62,7 +62,7 @@ def _create_campaign_with_first_catalog(campaign_page: CampaignPage, name: str, 
 
     Args:
         campaign_page: :class:`CampaignPage` instance for the current profile.
-        name: Campaign name to enter in the dialog form.
+        name: Campaign name to enter in the create-campaign page form.
         profile_id: Optional profile ID to select on the create-campaign page.
     """
     campaign_page.create_campaign_first_catalog(name, profile_id)
@@ -109,7 +109,7 @@ def test_create_campaign(owner_page: Page, ensure_owner_profile: str, ensure_own
 
     Creates a campaign named ``'Smoke Test Campaign 2026'`` using the first
     available catalog in the dev environment.  Asserts the campaign heading
-    is visible in the list after the dialog closes.
+    is visible in the list after creation.
     """
     _, profile_id, campaign_page = _navigate_to_first_profile_campaigns(owner_page, ensure_owner_profile)
     _create_campaign_with_first_catalog(campaign_page, _CAMPAIGN_NAME, profile_id)
@@ -254,9 +254,7 @@ def test_edit_campaign_dates(owner_page: Page, ensure_owner_profile: str, ensure
     assert settings.get_start_date() == start_date, (
         f"Expected start date '{start_date}'; got '{settings.get_start_date()}'"
     )
-    assert settings.get_end_date() == end_date, (
-        f"Expected end date '{end_date}'; got '{settings.get_end_date()}'"
-    )
+    assert settings.get_end_date() == end_date, f"Expected end date '{end_date}'; got '{settings.get_end_date()}'"
 
 
 @pytest.mark.smoke
@@ -288,9 +286,7 @@ def test_reselect_campaign_catalog(owner_page: Page, ensure_owner_profile: str, 
     owner_page.reload()
     settings.wait_for_loading()
     selected = settings.get_selected_catalog_name()
-    assert new_catalog_name in selected, (
-        f"Expected catalog '{new_catalog_name}' to be selected; got '{selected}'"
-    )
+    assert new_catalog_name in selected, f"Expected catalog '{new_catalog_name}' to be selected; got '{selected}'"
 
 
 @pytest.mark.smoke
@@ -315,9 +311,7 @@ def test_toggle_campaign_active(owner_page: Page, ensure_owner_profile: str, ens
 
     owner_page.reload()
     settings.wait_for_loading()
-    assert settings.get_is_active() is not original_active, (
-        f"Expected active state to change from {original_active}"
-    )
+    assert settings.get_is_active() is not original_active, f"Expected active state to change from {original_active}"
 
     # Issue #81: deactivation should move the campaign out of the Active section.
     campaign_page.goto(profile_id)
@@ -369,6 +363,4 @@ def test_confirm_shared_campaign_changes(owner_page: Page, ensure_owner_profile:
         f"Expected campaign name '{new_name}'; got '{settings.get_campaign_name()}'"
     )
     selected = settings.get_selected_catalog_name()
-    assert catalog2 in selected, (
-        f"Expected catalog '{catalog2}' to be selected; got '{selected}'"
-    )
+    assert catalog2 in selected, f"Expected catalog '{catalog2}' to be selected; got '{selected}'"
