@@ -53,7 +53,9 @@ interface AuthEventHandlers {
 
 // Individual event handlers
 const handleSignInWithRedirect = (checkAuthSession: () => Promise<void>) => {
-  checkAuthSession().then(handleOAuthRedirect).catch(() => {});
+  checkAuthSession()
+    .then(handleOAuthRedirect)
+    .catch(() => {});
 };
 
 const handleSignInFailure = (eventData: unknown, setLoading: (loading: boolean) => void) => {

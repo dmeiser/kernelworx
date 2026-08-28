@@ -133,13 +133,17 @@ const createTimestampRows = (account: Account | undefined): DetailRow[] => [
     key: 'created',
     icon: <InfoIcon color="primary" />,
     label: 'Account Created',
-    value: account?.createdAt ? formatDisplayDate(account.createdAt, { year: 'numeric', month: 'long', day: 'numeric' }) : 'Unknown',
+    value: account?.createdAt
+      ? formatDisplayDate(account.createdAt, { year: 'numeric', month: 'long', day: 'numeric' })
+      : 'Unknown',
   },
   {
     key: 'updated',
     icon: <InfoIcon color="primary" />,
     label: 'Last Updated',
-    value: account?.updatedAt ? formatDisplayDate(account.updatedAt, { year: 'numeric', month: 'long', day: 'numeric' }) : 'Unknown',
+    value: account?.updatedAt
+      ? formatDisplayDate(account.updatedAt, { year: 'numeric', month: 'long', day: 'numeric' })
+      : 'Unknown',
   },
 ];
 
@@ -180,7 +184,9 @@ const buildDetailRows = (account: Account | undefined, onChangeEmail: () => void
 
 const AccountHeader: React.FC<{ onEditProfile: () => void }> = ({ onEditProfile }) => (
   <Stack direction="row" justifyContent="space-between" alignItems="center" mb={2} flexWrap="wrap" gap={1}>
-    <Typography variant="h6" sx={{ minWidth: 0 }}>Account Information</Typography>
+    <Typography variant="h6" sx={{ minWidth: 0 }}>
+      Account Information
+    </Typography>
     <Button variant="outlined" size="small" startIcon={<EditIcon />} onClick={onEditProfile}>
       Edit Profile
     </Button>

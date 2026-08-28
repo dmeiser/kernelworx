@@ -34,8 +34,6 @@ interface CatalogPreviewPageProps {
   onCreateSharedCampaign?: (catalogId: string) => void;
 }
 
-
-
 // Not found state component
 const NotFoundState: React.FC = () => (
   <Box sx={{ p: 3 }}>
@@ -109,11 +107,19 @@ export const CatalogPreviewPage: React.FC<CatalogPreviewPageProps> = ({
     <Box sx={{ p: 3 }}>
       {/* Back button and header */}
       <Stack direction="row" spacing={2} alignItems="center" sx={{ mb: 3 }} flexWrap="wrap">
-        <Button startIcon={<BackIcon />} onClick={() => { void navigate('/catalogs'); }} variant="outlined">
+        <Button
+          startIcon={<BackIcon />}
+          onClick={() => {
+            void navigate('/catalogs');
+          }}
+          variant="outlined"
+        >
           Back
         </Button>
         <Box sx={{ flex: 1, minWidth: 0 }}>
-          <Typography variant="h5" sx={{ wordBreak: 'break-word' }}>{catalog.catalogName}</Typography>
+          <Typography variant="h5" sx={{ wordBreak: 'break-word' }}>
+            {catalog.catalogName}
+          </Typography>
           <Typography variant="body2" color="text.secondary">
             {products.length} product{products.length !== 1 ? 's' : ''}
           </Typography>
@@ -163,7 +169,9 @@ export const CatalogPreviewPage: React.FC<CatalogPreviewPageProps> = ({
               {products.map((product) => (
                 <TableRow key={product.productId} hover>
                   <TableCell sx={{ fontWeight: 500 }}>{product.productName}</TableCell>
-                  <TableCell sx={{ maxWidth: { xs: 150, sm: 300 }, whiteSpace: 'normal', wordBreak: 'break-word' }}>{product.description || '-'}</TableCell>
+                  <TableCell sx={{ maxWidth: { xs: 150, sm: 300 }, whiteSpace: 'normal', wordBreak: 'break-word' }}>
+                    {product.description || '-'}
+                  </TableCell>
                   <TableCell align="right">${product.price.toFixed(2)}</TableCell>
                 </TableRow>
               ))}

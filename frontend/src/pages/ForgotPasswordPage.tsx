@@ -30,8 +30,7 @@ const POST_RESET_REDIRECT_MS = 1500;
 const RESEND_COOLDOWN_MS = 30000;
 
 const RESET_ERROR_MESSAGES: Record<string, string> = {
-  LimitExceededException:
-    'Too many attempts. Please wait a while before trying again.',
+  LimitExceededException: 'Too many attempts. Please wait a while before trying again.',
 };
 
 const CONFIRM_ERROR_MESSAGES: Record<string, string> = {
@@ -42,16 +41,9 @@ const CONFIRM_ERROR_MESSAGES: Record<string, string> = {
   // UserNotFoundException is handled separately to avoid account enumeration.
 };
 
-const SENSITIVE_RESET_ERROR_NAMES = new Set([
-  'UserNotFoundException',
-  'InvalidParameterException',
-]);
+const SENSITIVE_RESET_ERROR_NAMES = new Set(['UserNotFoundException', 'InvalidParameterException']);
 
-function getErrorMessage(
-  err: unknown,
-  table: Record<string, string>,
-  fallback: string,
-): string {
+function getErrorMessage(err: unknown, table: Record<string, string>, fallback: string): string {
   const typed = err as { name?: string };
   if (typed.name && table[typed.name]) {
     return table[typed.name];
@@ -174,13 +166,7 @@ function useForgotPasswordState(navigate: NavigateFunction): ForgotPasswordState
       return false;
     }
     console.error('Reset password request failed:', err);
-    setError(
-      getErrorMessage(
-        err,
-        RESET_ERROR_MESSAGES,
-        'Unable to send reset code. Please try again.',
-      ),
-    );
+    setError(getErrorMessage(err, RESET_ERROR_MESSAGES, 'Unable to send reset code. Please try again.'));
     return true;
   };
 
@@ -205,9 +191,7 @@ function useForgotPasswordState(navigate: NavigateFunction): ForgotPasswordState
       }
     }
     setCodeSent(true);
-    setSuccess(
-      `If an account exists for ${trimmedEmail}, a reset code has been sent.`,
-    );
+    setSuccess(`If an account exists for ${trimmedEmail}, a reset code has been sent.`);
     setLoading(false);
   };
 
@@ -226,9 +210,7 @@ function useForgotPasswordState(navigate: NavigateFunction): ForgotPasswordState
     setLoading(true);
     try {
       await resetPassword({ username: trimmedEmail });
-      setSuccess(
-        `If an account exists for ${trimmedEmail}, a reset code has been sent.`,
-      );
+      setSuccess(`If an account exists for ${trimmedEmail}, a reset code has been sent.`);
       startResendCooldown();
     } catch (err: unknown) {
       handleRequestError(err);
@@ -271,13 +253,7 @@ function useForgotPasswordState(navigate: NavigateFunction): ForgotPasswordState
         setError('Invalid confirmation code. Please check and try again.');
       } else {
         console.error('Confirm reset password failed:', err);
-        setError(
-          getErrorMessage(
-            err,
-            CONFIRM_ERROR_MESSAGES,
-            'Unable to reset password. Please try again.',
-          ),
-        );
+        setError(getErrorMessage(err, CONFIRM_ERROR_MESSAGES, 'Unable to reset password. Please try again.'));
       }
     } finally {
       setLoading(false);
@@ -338,14 +314,13 @@ interface RequestCodeFormProps {
   onLogin: () => void;
 }
 
-const RequestCodeForm: React.FC<RequestCodeFormProps> = ({
-  email,
-  setEmail,
-  loading,
-  onSubmit,
-  onLogin,
-}) => (
-  <Box component="form" onSubmit={(e) => { void onSubmit(e); }}>
+const RequestCodeForm: React.FC<RequestCodeFormProps> = ({ email, setEmail, loading, onSubmit, onLogin }) => (
+  <Box
+    component="form"
+    onSubmit={(e) => {
+      void onSubmit(e);
+    }}
+  >
     <Stack spacing={2} sx={{ mb: 3 }}>
       <TextField
         label="Email"
@@ -419,7 +394,12 @@ const ConfirmResetForm: React.FC<ConfirmResetFormProps> = ({
   onBackToEmail,
   onLogin,
 }) => (
-  <Box component="form" onSubmit={(e) => { void onSubmit(e); }}>
+  <Box
+    component="form"
+    onSubmit={(e) => {
+      void onSubmit(e);
+    }}
+  >
     <Stack spacing={2} sx={{ mb: 3 }}>
       <TextField
         label="Confirmation Code"
@@ -475,12 +455,12 @@ const ConfirmResetForm: React.FC<ConfirmResetFormProps> = ({
       <Button
         variant="text"
         fullWidth
-        onClick={() => { void onResendCode(); }}
+        onClick={() => {
+          void onResendCode();
+        }}
         disabled={loading || resendCooldown > 0}
       >
-        {resendCooldown > 0
-          ? `Resend code in ${Math.ceil(resendCooldown / 1000)}s`
-          : 'Resend Code'}
+        {resendCooldown > 0 ? `Resend code in ${Math.ceil(resendCooldown / 1000)}s` : 'Resend Code'}
       </Button>
       <Button variant="text" fullWidth onClick={onBackToEmail} disabled={loading}>
         Back to Email
@@ -499,12 +479,7 @@ interface AlertMessagesProps {
   onCloseSuccess: () => void;
 }
 
-const AlertMessages: React.FC<AlertMessagesProps> = ({
-  error,
-  success,
-  onCloseError,
-  onCloseSuccess,
-}) => (
+const AlertMessages: React.FC<AlertMessagesProps> = ({ error, success, onCloseError, onCloseSuccess }) => (
   <>
     {error && (
       <Alert severity="error" sx={{ mb: 3 }} onClose={onCloseError}>
@@ -531,12 +506,7 @@ const PageHeader: React.FC<{ codeSent: boolean }> = ({ codeSent }) => (
         flexWrap: 'wrap',
       }}
     >
-      <Box
-        component="img"
-        src="/logo.svg"
-        alt="KernelWorx mark"
-        sx={{ width: 32, height: 32 }}
-      />
+      <Box component="img" src="/logo.svg" alt="KernelWorx mark" sx={{ width: 32, height: 32 }} />
       <Typography
         variant="h5"
         sx={{
@@ -545,8 +515,12 @@ const PageHeader: React.FC<{ codeSent: boolean }> = ({ codeSent }) => (
           lineHeight: 1,
         }}
       >
-        <Box component="span" sx={{ color: 'text.primary' }}>Kernel</Box>
-        <Box component="span" sx={{ color: 'primary.main' }}>Worx</Box>
+        <Box component="span" sx={{ color: 'text.primary' }}>
+          Kernel
+        </Box>
+        <Box component="span" sx={{ color: 'primary.main' }}>
+          Worx
+        </Box>
       </Typography>
     </Box>
     <Typography
@@ -561,9 +535,7 @@ const PageHeader: React.FC<{ codeSent: boolean }> = ({ codeSent }) => (
       Reset Password
     </Typography>
     <Typography variant="body2" color="text.secondary">
-      {codeSent
-        ? 'Enter the confirmation code and your new password'
-        : 'Enter your email to receive a reset code'}
+      {codeSent ? 'Enter the confirmation code and your new password' : 'Enter your email to receive a reset code'}
     </Typography>
   </Box>
 );

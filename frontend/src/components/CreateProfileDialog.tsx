@@ -78,7 +78,13 @@ export const CreateProfileDialog: React.FC<CreateProfileDialogProps> = ({ open, 
         <Button onClick={handleClose} disabled={loading}>
           Cancel
         </Button>
-        <Button onClick={() => { void handleSubmit(); }} variant="contained" disabled={!form.values.sellerName.trim() || loading}>
+        <Button
+          onClick={() => {
+            void handleSubmit();
+          }}
+          variant="contained"
+          disabled={!form.values.sellerName.trim() || loading}
+        >
           {loading ? 'Creating...' : 'Create Scout'}
         </Button>
       </DialogActions>

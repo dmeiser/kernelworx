@@ -68,7 +68,14 @@ export const CampaignCard: React.FC<CampaignCardProps> = ({
         <Stack spacing={2}>
           {/* Campaign Name & Status */}
           <Box>
-            <Stack direction="row" justifyContent="space-between" alignItems="start" mb={1} flexWrap="wrap" sx={{ minWidth: 0 }}>
+            <Stack
+              direction="row"
+              justifyContent="space-between"
+              alignItems="start"
+              mb={1}
+              flexWrap="wrap"
+              sx={{ minWidth: 0 }}
+            >
               <Typography variant="h6" component="h3" sx={{ wordBreak: 'break-word', minWidth: 0, flex: 1 }}>
                 {campaignName} {campaignYear}
               </Typography>

@@ -107,8 +107,6 @@ type SaveAction = 'confirm' | 'save';
 // Helper to determine save action based on changes
 const getSaveAction = (hasUnitRelatedChanges: boolean): SaveAction => (hasUnitRelatedChanges ? 'confirm' : 'save');
 
-
-
 // Helper to conditionally update campaign
 const maybeUpdateCampaign = async (
   isValid: boolean,
@@ -246,9 +244,7 @@ export const CampaignSettingsPage: React.FC = () => {
 
   // Update campaign mutation
   const [updateCampaign, { loading: updating }] = useMutation(UPDATE_CAMPAIGN, {
-    refetchQueries: dbProfileId
-      ? [{ query: LIST_CAMPAIGNS_BY_PROFILE, variables: { profileId: dbProfileId } }]
-      : [],
+    refetchQueries: dbProfileId ? [{ query: LIST_CAMPAIGNS_BY_PROFILE, variables: { profileId: dbProfileId } }] : [],
     onCompleted: () => {
       refetch().catch(() => {});
     },
@@ -270,7 +266,9 @@ export const CampaignSettingsPage: React.FC = () => {
     const action = getSaveAction(hasUnitRelatedChanges);
     const actions: Record<SaveAction, () => void> = {
       confirm: () => setUnitChangeConfirmOpen(true),
-      save: () => { void handleSaveChanges(); },
+      save: () => {
+        void handleSaveChanges();
+      },
     };
     actions[action]();
   };
@@ -321,7 +319,13 @@ export const CampaignSettingsPage: React.FC = () => {
       )}
       <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={1} sx={{ mb: 3 }}>
         <Typography variant="h5">Campaign Settings</Typography>
-        <Button variant="text" color="primary" onClick={() => { void navigate(`/scouts/${toUrlId(profileId)}/manage`); }}>
+        <Button
+          variant="text"
+          color="primary"
+          onClick={() => {
+            void navigate(`/scouts/${toUrlId(profileId)}/manage`);
+          }}
+        >
           Manage Scout
         </Button>
       </Stack>
@@ -434,8 +438,8 @@ export const CampaignSettingsPage: React.FC = () => {
           You are changing the campaign name or catalog of a campaign that was created from a campaign link.
         </Alert>
         <Typography>
-          These changes may cause this campaign to no longer appear correctly in unit reports for your unit. Are you sure
-          you want to continue?
+          These changes may cause this campaign to no longer appear correctly in unit reports for your unit. Are you
+          sure you want to continue?
         </Typography>
       </ConfirmDialog>
     </Box>

@@ -54,8 +54,6 @@ interface RequestQRUploadData {
 // Import shared validation constants and functions
 import { isReservedName } from '../lib/paymentMethodValidation';
 
-
-
 // Message alerts component
 interface MessageAlertsProps {
   successMessage: string | null;
@@ -78,8 +76,6 @@ const MessageAlerts: React.FC<MessageAlertsProps> = ({ successMessage, error, on
     )}
   </>
 );
-
-
 
 // eslint-disable-next-line complexity -- Complex page component managing multiple dialogs and state
 export const PaymentMethodsPage: React.FC = () => {
@@ -325,7 +321,9 @@ export const PaymentMethodsPage: React.FC = () => {
         title="Payment Methods"
         subtitle="Cash and Check are always available. Create custom methods and add QR codes for apps like Venmo or PayPal."
         backButton={{
-          onClick: () => { void navigate('/settings'); },
+          onClick: () => {
+            void navigate('/settings');
+          },
           label: 'Back',
           'aria-label': 'Back to settings',
         }}
@@ -361,7 +359,9 @@ export const PaymentMethodsPage: React.FC = () => {
             onEdit={() => handleEdit(method)}
             onDelete={() => handleDeleteClick(method)}
             onUploadQR={() => handleQRUploadClick(method)}
-            onDeleteQR={() => { void handleDeleteQRCode(method); }}
+            onDeleteQR={() => {
+              void handleDeleteQRCode(method);
+            }}
             isDeleting={isAnyMutationLoading || deletingQRMethod === method.name}
             isUploadingQR={uploadingQR && selectedMethod?.name === method.name}
           />

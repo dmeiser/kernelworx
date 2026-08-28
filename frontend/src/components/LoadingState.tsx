@@ -13,18 +13,8 @@ interface LoadingStateProps {
   py?: number;
 }
 
-export const LoadingState: React.FC<LoadingStateProps> = ({
-  minHeight = '400px',
-  size = 40,
-  py = 0,
-}) => (
-  <Box
-    display="flex"
-    justifyContent="center"
-    alignItems="center"
-    minHeight={minHeight}
-    py={py}
-  >
+export const LoadingState: React.FC<LoadingStateProps> = ({ minHeight = '400px', size = 40, py = 0 }) => (
+  <Box display="flex" justifyContent="center" alignItems="center" minHeight={minHeight} py={py}>
     <CircularProgress size={size} />
   </Box>
 );

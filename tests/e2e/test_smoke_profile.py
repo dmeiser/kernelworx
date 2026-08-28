@@ -280,9 +280,7 @@ def test_rename_profile(owner_page: Page) -> None:
     manage.edit_seller_name(new_name)
 
     # Header should now contain the new name.
-    expect(owner_page.get_by_role("heading", name=f"Scout Management: {new_name}")).to_be_visible(
-        timeout=10_000
-    )
+    expect(owner_page.get_by_role("heading", name=f"Scout Management: {new_name}")).to_be_visible(timeout=10_000)
 
     # Dashboard should show the new name and not the old name.
     dashboard.goto()
@@ -383,8 +381,6 @@ def test_complete_ownership_transfer(
 
         card = contributor_dashboard._profile_card_for(profile_name)
         expect(card.get_by_text("Owner")).to_be_visible(timeout=10_000)
-        expect(card.get_by_role("button", name="Manage Scout", exact=True)).to_be_visible(
-            timeout=10_000
-        )
+        expect(card.get_by_role("button", name="Manage Scout", exact=True)).to_be_visible(timeout=10_000)
     finally:
         contributor_context.close()

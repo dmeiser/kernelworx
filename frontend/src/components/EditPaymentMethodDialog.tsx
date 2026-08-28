@@ -119,7 +119,9 @@ export const EditPaymentMethodDialog: React.FC<EditPaymentMethodDialogProps> = (
           Cancel
         </Button>
         <Button
-          onClick={() => { void handleSubmit(); }}
+          onClick={() => {
+            void handleSubmit();
+          }}
           variant="contained"
           disabled={isLoading || !name.trim()}
           startIcon={isLoading ? <CircularProgress size={16} /> : undefined}

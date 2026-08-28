@@ -110,9 +110,7 @@ class PaymentPage(BasePage):
         Args:
             method_type: Exact payment method name (case-sensitive).
         """
-        return self.page.locator("div.MuiCard-root").filter(
-            has=self.page.get_by_text(method_type, exact=True)
-        )
+        return self.page.locator("div.MuiCard-root").filter(has=self.page.get_by_text(method_type, exact=True))
 
     def _edit_button(self, method_type: str) -> Locator:
         """Return the *Edit* button for the card matching *method_type*."""
@@ -205,9 +203,7 @@ class PaymentPage(BasePage):
             file_path: Path to a PNG/JPG/WEBP image file.
         """
         self._upload_qr_button(method_type).click()
-        dialog = self.wait_for_dialog(
-            self._UPLOAD_QR_DIALOG_TITLE_TEMPLATE.format(name=method_type)
-        )
+        dialog = self.wait_for_dialog(self._UPLOAD_QR_DIALOG_TITLE_TEMPLATE.format(name=method_type))
         file_input = dialog.get_by_label(self._UPLOAD_QR_FILE_INPUT_LABEL)
         file_input.set_input_files(file_path)
         preview = dialog.get_by_alt_text(self._QR_PREVIEW_ALT)
@@ -242,9 +238,7 @@ class PaymentPage(BasePage):
         """
         self._view_qr_button(method_type).click()
         dialog = self.wait_for_dialog(f"QR Code for {method_type}")
-        image = dialog.get_by_alt_text(
-            self._QR_VIEW_ALT_TEMPLATE.format(name=method_type)
-        )
+        image = dialog.get_by_alt_text(self._QR_VIEW_ALT_TEMPLATE.format(name=method_type))
         expect(image).to_be_visible(timeout=10_000)
         return dialog
 

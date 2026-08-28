@@ -46,8 +46,6 @@ type Profile = Pick<SellerProfile, 'profileId' | 'sellerName' | 'isOwner'>;
 // Loading & Error States
 // ============================================================================
 
-
-
 const CampaignNotFoundError: React.FC<{ onBack: () => void }> = ({ onBack }) => (
   <Container maxWidth="md" sx={{ py: 3 }}>
     <Button startIcon={<BackIcon />} onClick={onBack} sx={{ mb: 2 }}>
@@ -374,7 +372,9 @@ const ActionButtonsSection: React.FC<ActionButtonsSectionProps> = ({ onBack, onS
       Cancel
     </Button>
     <Button
-      onClick={() => { void onSubmit(); }}
+      onClick={() => {
+        void onSubmit();
+      }}
       variant="contained"
       disabled={!isFormValid || isSubmitting}
       startIcon={isSubmitting ? <CircularProgress size={16} /> : <SaveIcon />}
@@ -469,9 +469,7 @@ export const CreateCampaignPage: React.FC = () => {
   // Guard states
   const hasSharedCode = Boolean(setup.effectiveSharedCampaignCode);
   const sharedCampaignLoading = hasSharedCode && setup.sharedCampaignLoading;
-  const sharedCampaignInactive =
-    hasSharedCode &&
-    (!setup.sharedCampaign || !setup.sharedCampaign.isActive);
+  const sharedCampaignInactive = hasSharedCode && (!setup.sharedCampaign || !setup.sharedCampaign.isActive);
 
   // Handle loading
   if (sharedCampaignLoading) return <LoadingState minHeight="50vh" />;
@@ -482,12 +480,25 @@ export const CreateCampaignPage: React.FC = () => {
       setup.sharedCampaignError instanceof Error
         ? setup.sharedCampaignError
         : new Error(String(setup.sharedCampaignError));
-    return <CampaignErrorState error={error} onBack={() => { void setup.navigate(-1); }} />;
+    return (
+      <CampaignErrorState
+        error={error}
+        onBack={() => {
+          void setup.navigate(-1);
+        }}
+      />
+    );
   }
 
   // Handle inactive campaign
   if (sharedCampaignInactive) {
-    return <CampaignNotFoundError onBack={() => { void setup.navigate(-1); }} />;
+    return (
+      <CampaignNotFoundError
+        onBack={() => {
+          void setup.navigate(-1);
+        }}
+      />
+    );
   }
 
   const handleSubmitClick = async () => {
@@ -503,7 +514,9 @@ export const CreateCampaignPage: React.FC = () => {
       <PageHeader
         title="Create New Campaign"
         backButton={{
-          onClick: () => { void setup.navigate(-1); },
+          onClick: () => {
+            void setup.navigate(-1);
+          },
           label: 'Back',
           'aria-label': 'Back',
           disabled: setup.formState.submitting,
@@ -547,7 +560,9 @@ export const CreateCampaignPage: React.FC = () => {
 
           {/* Action Buttons */}
           <ActionButtonsSection
-            onBack={() => { void setup.navigate(-1); }}
+            onBack={() => {
+              void setup.navigate(-1);
+            }}
             onSubmit={handleSubmitClick}
             isSubmitting={setup.formState.submitting}
             isFormValid={setup.isFormValid}

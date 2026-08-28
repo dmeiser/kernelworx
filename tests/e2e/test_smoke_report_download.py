@@ -73,7 +73,9 @@ def _ensure_campaign_has_orders(page: Page, profile_id: str, campaign_id: str) -
 
 
 @pytest.mark.smoke
-def test_campaign_reports_download_buttons(owner_page: Page, ensure_owner_profile: str, ensure_owner_catalog: None) -> None:
+def test_campaign_reports_download_buttons(
+    owner_page: Page, ensure_owner_profile: str, ensure_owner_catalog: None
+) -> None:
     """Verify the Reports tab shows the order table and CSV/XLSX download buttons.
 
     Navigation strategy:
@@ -218,15 +220,11 @@ def test_campaign_reports_csv_content_matches_table(
 
     comparable_table = []
     for row in table_rows:
-        comparable_table.append(
-            {h: _normalize_table_cell(h, c) for h, c in zip(table_headers, row)}
-        )
+        comparable_table.append({h: _normalize_table_cell(h, c) for h, c in zip(table_headers, row)})
 
     comparable_csv = []
     for row in csv_rows[1:]:
-        comparable_csv.append(
-            {h: _normalize_csv_cell(h, c) for h, c in zip(csv_headers, row)}
-        )
+        comparable_csv.append({h: _normalize_csv_cell(h, c) for h, c in zip(csv_headers, row)})
 
     assert comparable_csv == comparable_table, (
         f"CSV rows do not match table rows:\nCSV: {comparable_csv}\nTable: {comparable_table}"

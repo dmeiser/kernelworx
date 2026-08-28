@@ -258,7 +258,9 @@ const DialogView: React.FC<DialogViewProps> = ({ open, onClose, sharedCampaign, 
         Cancel
       </Button>
       <Button
-        onClick={() => { void submitState.handleSubmit(); }}
+        onClick={() => {
+          void submitState.handleSubmit();
+        }}
         variant="contained"
         disabled={!formState.hasChanges || submitState.isSubmitting}
         startIcon={submitState.isSubmitting ? <CircularProgress size={16} /> : undefined}

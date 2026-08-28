@@ -232,8 +232,6 @@ const InviteStatusChip: React.FC<{ expiresAt: string }> = ({ expiresAt }) =>
 // Helper to check if new invite code should be shown
 const hasNewInviteCode = (code: string | null): boolean => Boolean(code);
 
-
-
 // Helper component for profile not found error
 const ProfileNotFoundError: React.FC = () => <Alert severity="error">Profile not found</Alert>;
 
@@ -302,7 +300,9 @@ const ShareRow: React.FC<{
       <TableCell>
         <Chip label={share.permissions.join(', ')} size="small" variant="outlined" />
       </TableCell>
-      <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>{formatDisplayDate(share.createdAt) || '—'}</TableCell>
+      <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>
+        {formatDisplayDate(share.createdAt) || '—'}
+      </TableCell>
       <TableCell align="right">
         <Stack direction="row" spacing={1} justifyContent="flex-end" flexWrap="wrap">
           <Button
@@ -405,7 +405,9 @@ export const ScoutManagementPage: React.FC = () => {
   // Navigate to scouts list after showing a brief success message
   React.useEffect(() => {
     if (!deleteSuccess) return undefined;
-    const timer = setTimeout(() => { void navigate('/scouts'); }, 1200);
+    const timer = setTimeout(() => {
+      void navigate('/scouts');
+    }, 1200);
     return () => clearTimeout(timer);
   }, [deleteSuccess, navigate]);
 
@@ -623,7 +625,9 @@ export const ScoutManagementPage: React.FC = () => {
 
             <Button
               variant="contained"
-              onClick={() => { void handleSaveChanges(); }}
+              onClick={() => {
+                void handleSaveChanges();
+              }}
               disabled={isSaveDisabled(updating, profileName, profile.sellerName)}
             >
               {getSaveButtonText(updating)}
@@ -669,7 +673,9 @@ export const ScoutManagementPage: React.FC = () => {
           <Button
             variant="contained"
             startIcon={<AddIcon />}
-            onClick={() => { void handleCreateInvite(); }}
+            onClick={() => {
+              void handleCreateInvite();
+            }}
             disabled={isCreateInviteDisabled(creatingInvite, invitePermissions)}
             sx={{ mb: 2 }}
           >
@@ -709,8 +715,12 @@ export const ScoutManagementPage: React.FC = () => {
                       <TableCell>
                         <Chip label={invite.permissions.join(', ')} size="small" variant="outlined" />
                       </TableCell>
-                      <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>{formatDisplayDate(invite.createdAt) || '—'}</TableCell>
-                      <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>{formatDisplayDate(invite.expiresAt) || '—'}</TableCell>
+                      <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>
+                        {formatDisplayDate(invite.createdAt) || '—'}
+                      </TableCell>
+                      <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>
+                        {formatDisplayDate(invite.expiresAt) || '—'}
+                      </TableCell>
                       <TableCell>
                         <InviteStatusChip expiresAt={invite.expiresAt} />
                       </TableCell>
@@ -743,8 +753,12 @@ export const ScoutManagementPage: React.FC = () => {
         {/* Shares Section */}
         <SharesSection
           shares={shares}
-          onTransferOwnership={(targetAccountId, email) => { void handleTransferOwnership(targetAccountId, email); }}
-          onRevokeShare={(targetAccountId, email) => { void handleRevokeShare(targetAccountId, email); }}
+          onTransferOwnership={(targetAccountId, email) => {
+            void handleTransferOwnership(targetAccountId, email);
+          }}
+          onRevokeShare={(targetAccountId, email) => {
+            void handleRevokeShare(targetAccountId, email);
+          }}
         />
 
         {/* Delete Profile Section */}
@@ -810,7 +824,14 @@ export const ScoutManagementPage: React.FC = () => {
           <Button onClick={() => setDeleteConfirmOpen(false)} disabled={deletingProfile}>
             Cancel
           </Button>
-          <Button onClick={() => { void handleDeleteProfile(); }} color="error" variant="contained" disabled={deletingProfile}>
+          <Button
+            onClick={() => {
+              void handleDeleteProfile();
+            }}
+            color="error"
+            variant="contained"
+            disabled={deletingProfile}
+          >
             {getDeleteProfileButtonText(deletingProfile)}
           </Button>
         </DialogActions>

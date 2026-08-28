@@ -75,9 +75,7 @@ class CampaignSettingsPage(BasePage):
         the label is associated with a hidden input.  Scope the combobox to
         the FormControl containing the *Product Catalog* label.
         """
-        return self.page.locator(
-            '.MuiFormControl-root:has(label:has-text("Product Catalog")) [role="combobox"]'
-        )
+        return self.page.locator('.MuiFormControl-root:has(label:has-text("Product Catalog")) [role="combobox"]')
 
     def _active_switch(self) -> Locator:
         """Return locator for the *Campaign is Active* switch."""
@@ -123,7 +121,7 @@ class CampaignSettingsPage(BasePage):
         # the campaign query finishes; wait for real text to appear.
         for _ in range(15):
             text = select.inner_text()
-            if text and text.strip().replace('\u200b', ''):
+            if text and text.strip().replace("\u200b", ""):
                 return text
             self.page.wait_for_timeout(200)
         return select.inner_text()
@@ -203,9 +201,7 @@ class CampaignSettingsPage(BasePage):
         # Wait for the option set to include the requested catalog (exact or
         # with an admin-managed `` (Official)`` suffix).
         exact_option = listbox.get_by_role("option", name=name, exact=True)
-        substring_options = listbox.locator('[role="option"]').filter(
-            has_text=re.compile(re.escape(name))
-        )
+        substring_options = listbox.locator('[role="option"]').filter(has_text=re.compile(re.escape(name)))
         try:
             expect(exact_option.or_(substring_options)).to_be_visible(timeout=timeout)
         except AssertionError as exc:
