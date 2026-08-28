@@ -150,6 +150,39 @@ def test_update_existing_account(
     assert account["createdAt"] == original_timestamp  # Created unchanged
 
 
+def test_update_existing_account_preserves_email_when_missing(
+    cognito_event: dict[str, Any],
+    lambda_context: MagicMock,
+    dynamodb_table: Any,
+    monkeypatch: Any,
+) -> None:
+    """Test that existing account email is not overwritten when Cognito omits it."""
+    monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
+
+    original_timestamp = "2024-01-01T00:00:00+00:00"
+    accounts_table = get_accounts_table()
+    accounts_table.put_item(
+        Item={
+            "accountId": "ACCOUNT#a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+            "email": "old@example.com",
+            "createdAt": original_timestamp,
+            "updatedAt": original_timestamp,
+        }
+    )
+
+    # Simulate a phone-only or social sign-in that does not provide email
+    cognito_event["request"]["userAttributes"].pop("email", None)
+
+    result = lambda_handler(cognito_event, lambda_context)
+
+    assert result == cognito_event
+
+    response = accounts_table.get_item(Key={"accountId": "ACCOUNT#a1b2c3d4-e5f6-7890-abcd-ef1234567890"})
+    account = response["Item"]
+    assert account["email"] == "old@example.com"  # Preserved
+    assert account["updatedAt"] > original_timestamp
+
+
 def test_missing_sub_in_event(lambda_context: MagicMock, dynamodb_table: Any, monkeypatch: Any) -> None:
     """Test graceful handling of malformed event"""
     monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
