@@ -1172,26 +1172,22 @@ def _soft_delete_catalog(catalog_id: str) -> None:
     )
 
 
-def _scan_and_delete_catalogs(db_account_id: str) -> int:
-    """Scan for user's catalogs and soft delete them. Returns count."""
+def _query_and_delete_catalogs(db_account_id: str) -> int:
+    """Query for user's catalogs via the ownerAccountId GSI and soft delete them. Returns count."""
+    catalogs = query_all_items(
+        tables.catalogs,
+        {
+            "IndexName": "ownerAccountId-index",
+            "KeyConditionExpression": "ownerAccountId = :owner",
+            "FilterExpression": "attribute_not_exists(isDeleted) OR isDeleted = :false",
+            "ExpressionAttributeValues": {":owner": db_account_id, ":false": False},
+        },
+    )
+
     deleted_count = 0
-    scan_kwargs: Dict[str, Any] = {
-        "FilterExpression": "ownerAccountId = :owner AND (attribute_not_exists(isDeleted) OR isDeleted = :false)",
-        "ExpressionAttributeValues": {":owner": db_account_id, ":false": False},
-    }
-
-    while True:
-        response = tables.catalogs.scan(**scan_kwargs)
-
-        for catalog in response.get("Items", []):
-            _soft_delete_catalog(catalog["catalogId"])
-            deleted_count += 1
-
-        # Handle pagination
-        if "LastEvaluatedKey" in response:
-            scan_kwargs["ExclusiveStartKey"] = response["LastEvaluatedKey"]
-        else:
-            break
+    for catalog in catalogs:
+        _soft_delete_catalog(catalog["catalogId"])
+        deleted_count += 1
 
     return deleted_count
 
@@ -1199,7 +1195,7 @@ def _scan_and_delete_catalogs(db_account_id: str) -> int:
 def _delete_user_catalogs(account_id: str, logger: Any) -> int:
     """Soft delete all catalogs owned by a user. Returns count."""
     db_account_id = _normalize_account_id(account_id)
-    deleted_count = _scan_and_delete_catalogs(db_account_id)
+    deleted_count = _query_and_delete_catalogs(db_account_id)
     logger.info("Soft-deleted user catalogs", account_id=account_id, count=deleted_count)
     return deleted_count
 

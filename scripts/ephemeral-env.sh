@@ -100,40 +100,6 @@ cleanup_cloudwatch_log_groups() {
   fi
 }
 
-# If the state object has been deleted (e.g. by a previous failed teardown run
-# that removed state before destroy succeeded), restore the latest S3 version
-# so `tofu destroy` can run against the real resource state.
-recover_state_if_missing() {
-  local state_url="s3://${STATE_BUCKET}/${STATE_KEY}"
-
-  log "📦 Checking state object: $state_url"
-  if aws s3api head-object --bucket "$STATE_BUCKET" --key "$STATE_KEY" --region "$STATE_REGION" >/dev/null 2>&1; then
-    log "   State object exists."
-    return 0
-  fi
-
-  log "   State object is missing; searching S3 versions for recoverable state..."
-  local latest_version
-  latest_version=$(aws s3api list-object-versions \
-    --bucket "$STATE_BUCKET" \
-    --prefix "$STATE_KEY" \
-    --region "$STATE_REGION" \
-    --query "sort_by(Versions[?Key=='${STATE_KEY}'], &LastModified)[-1].VersionId" \
-    --output text 2>/dev/null | head -n1)
-
-  if [ -z "$latest_version" ] || [ "$latest_version" = "None" ]; then
-    log "   ⚠️  No previous state version found; continuing with empty state."
-    return 0
-  fi
-
-  log "   🔄 Restoring state from version $latest_version"
-  aws s3api copy-object \
-    --bucket "$STATE_BUCKET" \
-    --key "$STATE_KEY" \
-    --copy-source "${STATE_BUCKET}/${STATE_KEY}?versionId=${latest_version}" \
-    --region "$STATE_REGION"
-}
-
 
 case "$ACTION" in
   up)
@@ -229,7 +195,7 @@ case "$ACTION" in
     log "   State: s3://$STATE_BUCKET/$STATE_KEY"
     log ""
 
-    recover_state_if_missing
+    recover_state_if_missing "$RUN_ID"
     cleanup_stale_lock "$RUN_ID"
 
     # The Lambda layer only needs to exist during `up`. For `down` we just need

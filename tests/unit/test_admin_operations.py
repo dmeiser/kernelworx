@@ -332,7 +332,7 @@ class TestLambdaHandler:
         }
 
         with patch("src.handlers.admin_operations.tables") as mock_tables:
-            mock_tables.catalogs.scan.return_value = {"Items": []}
+            mock_tables.catalogs.query.return_value = {"Items": []}
 
             result = lambda_handler(event, lambda_context)
 
@@ -2984,14 +2984,14 @@ class TestAdminDeleteUserCatalogs:
         }
 
         with patch("src.handlers.admin_operations.tables") as mock_tables:
-            # Mock catalogs scan - simulate pagination
-            mock_tables.catalogs.scan.side_effect = [
+            # Mock catalogs GSI query - simulate pagination
+            mock_tables.catalogs.query.side_effect = [
                 {
                     "Items": [
                         {"catalogId": "catalog-1", "ownerAccountId": db_account_id},
                         {"catalogId": "catalog-2", "ownerAccountId": db_account_id},
                     ],
-                    "LastEvaluatedKey": {"catalogId": "catalog-2"},
+                    "LastEvaluatedKey": {"ownerAccountId": db_account_id, "catalogId": "catalog-2"},
                 },
                 {
                     "Items": [
@@ -3007,6 +3007,60 @@ class TestAdminDeleteUserCatalogs:
             assert mock_tables.catalogs.update_item.call_count == 3
             # Verify delete_item was NOT called
             assert mock_tables.catalogs.delete_item.call_count == 0
+
+    def test_success_soft_deletes_via_gsi_query(
+        self,
+        dynamodb_table: Any,
+        catalogs_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """Test that catalog deletion only soft-deletes the target user's catalogs."""
+        monkeypatch.setenv("CATALOGS_TABLE_NAME", "kernelworx-catalogs-ue1-dev")
+
+        from src.handlers.admin_operations import admin_delete_user_catalogs
+
+        target_account_id = "target-user-123"
+        db_account_id = f"ACCOUNT#{target_account_id}"
+        other_account_id = "ACCOUNT#other-user-456"
+
+        # Seed catalogs for the target user
+        for catalog_id in ("catalog-1", "catalog-2"):
+            catalogs_table.put_item(
+                Item={
+                    "catalogId": catalog_id,
+                    "ownerAccountId": db_account_id,
+                    "catalogName": f"Catalog {catalog_id}",
+                }
+            )
+
+        # Seed a catalog for another user that should remain untouched
+        catalogs_table.put_item(
+            Item={
+                "catalogId": "catalog-3",
+                "ownerAccountId": other_account_id,
+                "catalogName": "Other catalog",
+            }
+        )
+
+        event = {
+            **admin_appsync_event,
+            "arguments": {"accountId": target_account_id},
+        }
+
+        result = admin_delete_user_catalogs(event, lambda_context)
+
+        assert result == 2
+
+        # Verify target user's catalogs are soft-deleted
+        for catalog_id in ("catalog-1", "catalog-2"):
+            item = catalogs_table.get_item(Key={"catalogId": catalog_id}).get("Item", {})
+            assert item.get("isDeleted") is True
+
+        # Verify the other user's catalog was not modified
+        other_item = catalogs_table.get_item(Key={"catalogId": "catalog-3"}).get("Item", {})
+        assert other_item.get("isDeleted") is not True
 
     def test_non_admin_forbidden(
         self,
@@ -3064,7 +3118,7 @@ class TestAdminDeleteUserCatalogs:
         }
 
         with patch("src.handlers.admin_operations.tables") as mock_tables:
-            mock_tables.catalogs.scan.side_effect = RuntimeError("Unexpected")
+            mock_tables.catalogs.query.side_effect = RuntimeError("Unexpected")
 
             with pytest.raises(AppError) as exc_info:
                 admin_delete_user_catalogs(event, lambda_context)
