@@ -1,5 +1,6 @@
 """Lambda resolver to cascade-delete a profile and all related data."""
 
+import time
 from typing import TYPE_CHECKING, Any, Dict, List
 
 from botocore.exceptions import ClientError
@@ -19,41 +20,29 @@ except ModuleNotFoundError:  # pragma: no cover
     from ..utils.ids import ensure_account_id, ensure_profile_id
     from ..utils.logging import get_logger
 
+if TYPE_CHECKING:  # pragma: no cover
+    from ..utils.pagination import query_all_items
+else:  # pragma: no cover
+    try:
+        from utils.pagination import query_all_items
+    except ModuleNotFoundError:
+        from ..utils.pagination import query_all_items
+
 logger = get_logger(__name__)
 
 BATCH_SIZE = 25
+_PROFILE_LOOKUP_RETRIES = 3
+_PROFILE_LOOKUP_DELAY_SECONDS = 0.1
 
 
-def _query_all_items(
-    table: "Table",
-    key_condition: str,
-    expression_values: Dict[str, Any],
-    index_name: str | None = None,
-    projection: str | None = None,
-) -> List[Dict[str, Any]]:
-    """Query all items for a given key condition, handling pagination."""
-    items: List[Dict[str, Any]] = []
-    last_evaluated_key: Dict[str, Any] | None = None
-
-    while True:
-        query_kwargs: Dict[str, Any] = {
-            "KeyConditionExpression": key_condition,
-            "ExpressionAttributeValues": expression_values,
-        }
-        if index_name is not None:
-            query_kwargs["IndexName"] = index_name
-        if projection is not None:
-            query_kwargs["ProjectionExpression"] = projection
-        if last_evaluated_key is not None:
-            query_kwargs["ExclusiveStartKey"] = last_evaluated_key
-
-        response = table.query(**query_kwargs)
-        items.extend(response.get("Items", []))
-        last_evaluated_key = response.get("LastEvaluatedKey")
-        if last_evaluated_key is None:
-            break
-
-    return items
+def _raise_delete_error(table_name: str, exc: Exception) -> None:
+    """Log and re-raise a batch deletion failure as an AppError."""
+    label = "Error" if isinstance(exc, ClientError) else "Unexpected error"
+    logger.error(f"{label} deleting batch from {table_name}: {str(exc)}")
+    raise AppError(
+        ErrorCode.INTERNAL_ERROR,
+        f"Failed to delete batch from {table_name}",
+    ) from exc
 
 
 def _batch_delete_keys(table: "Table", keys: List[Dict[str, Any]], primary_keys: List[str]) -> int:
@@ -76,34 +65,32 @@ def _batch_delete_keys(table: "Table", keys: List[Dict[str, Any]], primary_keys:
                     batch_writer.delete_item(Key=key)
             deleted_count += len(batch)
             logger.info(f"Deleted batch of {len(batch)} items from {table_name}")
-        except ClientError as e:
-            logger.error(f"Error deleting batch from {table_name}: {str(e)}")
-            raise AppError(
-                ErrorCode.INTERNAL_ERROR,
-                f"Failed to delete batch from {table_name}",
-            ) from e
         except Exception as e:
-            logger.error(f"Unexpected error deleting batch from {table_name}: {str(e)}")
-            raise AppError(
-                ErrorCode.INTERNAL_ERROR,
-                f"Failed to delete batch from {table_name}",
-            ) from e
+            _raise_delete_error(table_name, e)
 
     return deleted_count
 
 
 def _get_profile_owner_id(profile_id: str) -> str:
-    """Look up the owner account ID for a profile via its GSI."""
-    response = tables.profiles.query(
-        IndexName="profileId-index",
-        KeyConditionExpression="profileId = :pid",
-        ExpressionAttributeValues={":pid": profile_id},
-        Limit=1,
-    )
-    items = response.get("Items", [])
-    if not items:
-        raise AppError(ErrorCode.NOT_FOUND, f"Profile {profile_id} not found")
-    return str(items[0]["ownerAccountId"])
+    """Look up the owner account ID for a profile via its GSI.
+
+    GSIs are eventually consistent, so the lookup retries briefly when the
+    profile is not yet visible after creation.
+    """
+    for attempt in range(1, _PROFILE_LOOKUP_RETRIES + 1):
+        response = tables.profiles.query(
+            IndexName="profileId-index",
+            KeyConditionExpression="profileId = :pid",
+            ExpressionAttributeValues={":pid": profile_id},
+            Limit=1,
+        )
+        items = response.get("Items", [])
+        if items:
+            return str(items[0]["ownerAccountId"])
+        if attempt < _PROFILE_LOOKUP_RETRIES:
+            time.sleep(_PROFILE_LOOKUP_DELAY_SECONDS)
+
+    raise AppError(ErrorCode.NOT_FOUND, f"Profile {profile_id} not found")
 
 
 def _collect_order_keys(campaigns: List[Dict[str, Any]]) -> List[Dict[str, str]]:
@@ -114,11 +101,13 @@ def _collect_order_keys(campaigns: List[Dict[str, Any]]) -> List[Dict[str, str]]
         if not campaign_id:
             logger.warning("Campaign missing campaignId, skipping order query")
             continue
-        orders = _query_all_items(
+        orders = query_all_items(
             tables.orders,
-            "campaignId = :cid",
-            {":cid": campaign_id},
-            projection="campaignId, orderId",
+            {
+                "KeyConditionExpression": "campaignId = :cid",
+                "ExpressionAttributeValues": {":cid": campaign_id},
+                "ProjectionExpression": "campaignId, orderId",
+            },
         )
         for order in orders:
             order_keys.append(
@@ -204,21 +193,27 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> bool:
 
     logger.info(f"Starting cascade delete for profile {db_profile_id}")
 
-    shares = _query_all_items(
+    shares = query_all_items(
         tables.shares,
-        "profileId = :pid",
-        {":pid": db_profile_id},
+        {
+            "KeyConditionExpression": "profileId = :pid",
+            "ExpressionAttributeValues": {":pid": db_profile_id},
+        },
     )
-    invites = _query_all_items(
+    invites = query_all_items(
         tables.invites,
-        "profileId = :pid",
-        {":pid": db_profile_id},
-        index_name="profileId-index",
+        {
+            "IndexName": "profileId-index",
+            "KeyConditionExpression": "profileId = :pid",
+            "ExpressionAttributeValues": {":pid": db_profile_id},
+        },
     )
-    campaigns = _query_all_items(
+    campaigns = query_all_items(
         tables.campaigns,
-        "profileId = :pid",
-        {":pid": db_profile_id},
+        {
+            "KeyConditionExpression": "profileId = :pid",
+            "ExpressionAttributeValues": {":pid": db_profile_id},
+        },
     )
 
     order_keys = _collect_order_keys(campaigns)

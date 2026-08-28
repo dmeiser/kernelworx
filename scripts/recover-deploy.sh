@@ -1,6 +1,7 @@
 #!/bin/bash
-# recover-deploy: import existing AWS resources for a run-id into OpenTofu state
-# so that a subsequent `tofu apply` can succeed. Does NOT destroy anything.
+# recover-deploy: restore missing S3 state if needed, then import existing AWS
+# resources for a run-id into OpenTofu state so that a subsequent `tofu apply`
+# can succeed. Does NOT destroy anything.
 # Usage: scripts/recover-deploy.sh <run-id>
 
 set -e
@@ -16,6 +17,7 @@ RUN_ID="$1"
 source "$(cd "$(dirname "$0")" && pwd)/ephemeral-recover-common.sh"
 
 load_env
+recover_state_if_missing "$RUN_ID"
 cleanup_stale_lock "$RUN_ID"
 init_backend "$RUN_ID"
 import_ephemeral_resources "$RUN_ID"

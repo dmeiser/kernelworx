@@ -46,6 +46,12 @@ def get_catalogs_table() -> Any:
 
 
 @pytest.fixture
+def sample_account_id() -> str:
+    """Sample account ID (Cognito sub) as a valid UUID."""
+    return "22222222-2222-2222-2222-222222222222"
+
+
+@pytest.fixture
 def admin_appsync_event(sample_account_id: str) -> Dict[str, Any]:
     """Base AppSync event structure for admin user."""
     return {
@@ -128,7 +134,7 @@ class TestLambdaHandler:
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
 
-        target_account_id = "target-user-456"
+        target_account_id = "11111111-1111-1111-1111-111111111111"
 
         # Create target account
         accounts_table = get_accounts_table()
@@ -149,7 +155,7 @@ class TestLambdaHandler:
         # Mock Cognito
         with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
             mock_cognito = MagicMock()
-            mock_cognito.list_users.return_value = {"Users": [{"Username": "target-user-456"}]}
+            mock_cognito.list_users.return_value = {"Users": [{"Username": "11111111-1111-1111-1111-111111111111"}]}
             mock_cognito.admin_delete_user.return_value = {}
             mock_get_client.return_value = mock_cognito
 
@@ -326,7 +332,7 @@ class TestLambdaHandler:
         }
 
         with patch("src.handlers.admin_operations.tables") as mock_tables:
-            mock_tables.catalogs.scan.return_value = {"Items": []}
+            mock_tables.catalogs.query.return_value = {"Items": []}
 
             result = lambda_handler(event, lambda_context)
 
@@ -372,9 +378,11 @@ class TestAdminListUsers:
             "arguments": {"limit": 20},
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client, \
-             patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names, \
-             patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups:
+        with (
+            patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client,
+            patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names,
+            patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups,
+        ):
             mock_cognito = MagicMock()
             mock_cognito.list_users.return_value = {
                 "Users": [
@@ -433,9 +441,11 @@ class TestAdminListUsers:
             "arguments": {"limit": 5, "nextToken": "page1token"},
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client, \
-             patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names, \
-             patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups:
+        with (
+            patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client,
+            patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names,
+            patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups,
+        ):
             mock_cognito = MagicMock()
             mock_cognito.list_users.return_value = {
                 "Users": [
@@ -480,9 +490,11 @@ class TestAdminListUsers:
             "arguments": {},
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client, \
-             patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names, \
-             patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups:
+        with (
+            patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client,
+            patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names,
+            patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups,
+        ):
             mock_cognito = MagicMock()
             mock_cognito.list_users.return_value = {
                 "Users": [
@@ -527,9 +539,11 @@ class TestAdminListUsers:
             "arguments": {},
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client, \
-             patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names, \
-             patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups:
+        with (
+            patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client,
+            patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names,
+            patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups,
+        ):
             mock_cognito = MagicMock()
             mock_cognito.list_users.return_value = {
                 "Users": [
@@ -722,9 +736,11 @@ class TestAdminListUsers:
             "arguments": {},
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client, \
-             patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names, \
-             patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups:
+        with (
+            patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client,
+            patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names,
+            patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups,
+        ):
             mock_cognito = MagicMock()
             mock_cognito.list_users.return_value = {
                 "Users": [
@@ -766,9 +782,11 @@ class TestAdminListUsers:
             "arguments": {},
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client, \
-             patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names, \
-             patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups:
+        with (
+            patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client,
+            patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names,
+            patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups,
+        ):
             mock_cognito = MagicMock()
             mock_cognito.list_users.return_value = {
                 "Users": [
@@ -830,9 +848,11 @@ class TestAdminListUsers:
             "arguments": {},
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client, \
-             patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names, \
-             patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups:
+        with (
+            patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client,
+            patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names,
+            patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups,
+        ):
             mock_cognito = MagicMock()
             mock_cognito.list_users.return_value = {
                 "Users": [
@@ -1178,6 +1198,97 @@ class TestAdminResetUserPassword:
 
             assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
 
+    def test_email_with_quote_rejected_before_filter(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """An email containing a double quote must be rejected before reaching Cognito (#124)."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+
+        event = {
+            **admin_appsync_event,
+            "arguments": {"email": 'evil"@example.com'},
+        }
+
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+            mock_cognito = MagicMock()
+            mock_get_client.return_value = mock_cognito
+
+            with pytest.raises(AppError) as exc_info:
+                admin_reset_user_password(event, lambda_context)
+
+            assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+            mock_cognito.list_users.assert_not_called()
+
+    def test_email_with_backslash_rejected_before_filter(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """An email containing a backslash must be rejected before reaching Cognito (#124)."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+
+        event = {
+            **admin_appsync_event,
+            "arguments": {"email": "evil\\@example.com\\"},
+        }
+
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+            mock_cognito = MagicMock()
+            mock_get_client.return_value = mock_cognito
+
+            with pytest.raises(AppError) as exc_info:
+                admin_reset_user_password(event, lambda_context)
+
+            assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+            mock_cognito.list_users.assert_not_called()
+
+    def test_malformed_email_rejected_before_filter(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """An email without a valid local@domain shape is rejected (#124)."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+
+        event = {
+            **admin_appsync_event,
+            "arguments": {"email": "not-an-email"},
+        }
+
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+            mock_cognito = MagicMock()
+            mock_get_client.return_value = mock_cognito
+
+            with pytest.raises(AppError) as exc_info:
+                admin_reset_user_password(event, lambda_context)
+
+            assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+            mock_cognito.list_users.assert_not_called()
+
+    def test_oversize_email_rejected_before_filter(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """An email longer than 254 chars is rejected by the validator (#124)."""
+        from src.handlers.admin_operations import _validate_email_for_filter
+
+        long_email = "a" * 250 + "@b.co"
+        with pytest.raises(AppError) as exc_info:
+            _validate_email_for_filter(long_email)
+
+        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+
 
 class TestAdminDeleteUser:
     """Tests for admin_delete_user handler."""
@@ -1193,7 +1304,7 @@ class TestAdminDeleteUser:
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
 
-        target_account_id = "target-user-456"
+        target_account_id = "11111111-1111-1111-1111-111111111111"
 
         # Create target account
         accounts_table = get_accounts_table()
@@ -1257,7 +1368,7 @@ class TestAdminDeleteUser:
         monkeypatch.setenv("INVITES_TABLE_NAME", "kernelworx-invites-ue1-dev")
         monkeypatch.setenv("SHARES_TABLE_NAME", "kernelworx-shares-ue1-dev")
 
-        target_account_id = "target-user-456"
+        target_account_id = "11111111-1111-1111-1111-111111111111"
         account_id_key = f"ACCOUNT#{target_account_id}"
         profile_id = "PROFILE#target-profile"
         invite_code = "INVITE#target-invite"
@@ -1332,7 +1443,7 @@ class TestAdminDeleteUser:
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
 
-        target_account_id = "target-user-456"
+        target_account_id = "11111111-1111-1111-1111-111111111111"
 
         # Create target account
         accounts_table = get_accounts_table()
@@ -1374,7 +1485,9 @@ class TestAdminDeleteUser:
             def _record_dynamodb_delete(*args: Any, **kwargs: Any) -> None:
                 call_order.append("dynamodb")
 
-            with patch("src.handlers.admin_operations.tables.accounts.delete_item", side_effect=_record_dynamodb_delete):
+            with patch(
+                "src.handlers.admin_operations.tables.accounts.delete_item", side_effect=_record_dynamodb_delete
+            ):
                 result = admin_delete_user(event, lambda_context)
 
             assert result is True
@@ -1392,7 +1505,7 @@ class TestAdminDeleteUser:
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
 
         # accountId in GraphQL is the UUID (without ACCOUNT# prefix)
-        target_account_id = "target-user-789"
+        target_account_id = "33333333-3333-3333-3333-333333333333"
 
         # Don't create Account in DynamoDB (user never logged in)
 
@@ -1439,7 +1552,7 @@ class TestAdminDeleteUser:
 
         event = {
             **non_admin_appsync_event,
-            "arguments": {"accountId": "target-user-456"},
+            "arguments": {"accountId": "11111111-1111-1111-1111-111111111111"},
         }
 
         with pytest.raises(AppError) as exc_info:
@@ -1490,6 +1603,150 @@ class TestAdminDeleteUser:
         assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
         assert "Cannot delete your own account" in exc_info.value.message
 
+    def test_self_deletion_prevented_with_account_prefix(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        sample_account_id: str,
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """A caller passing ACCOUNT#<own-sub> must still be blocked (#125)."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+
+        event = {
+            **admin_appsync_event,
+            "arguments": {"accountId": f"ACCOUNT#{sample_account_id}"},
+        }
+
+        with pytest.raises(AppError) as exc_info:
+            admin_delete_user(event, lambda_context)
+
+        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+        assert "Cannot delete your own account" in exc_info.value.message
+
+    def test_account_id_with_quote_rejected_before_cognito(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        sample_account_id: str,
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """A quote-containing accountId is rejected before the Cognito sub filter (#124)."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+
+        event = {
+            **admin_appsync_event,
+            "arguments": {"accountId": 'other"user'},
+        }
+
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+            mock_cognito = MagicMock()
+            mock_get_client.return_value = mock_cognito
+
+            with pytest.raises(AppError) as exc_info:
+                admin_delete_user(event, lambda_context)
+
+            assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+            mock_cognito.list_users.assert_not_called()
+
+    def test_account_id_with_backslash_rejected_before_cognito(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        sample_account_id: str,
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """A backslash-containing accountId is rejected before the Cognito sub filter (#124)."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+
+        event = {
+            **admin_appsync_event,
+            "arguments": {"accountId": "other\\user\\"},
+        }
+
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+            mock_cognito = MagicMock()
+            mock_get_client.return_value = mock_cognito
+
+            with pytest.raises(AppError) as exc_info:
+                admin_delete_user(event, lambda_context)
+
+            assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+            mock_cognito.list_users.assert_not_called()
+
+    def test_account_id_with_whitespace_rejected_before_cognito(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        sample_account_id: str,
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """A whitespace-containing accountId is rejected before the Cognito sub filter (#124)."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+
+        event = {
+            **admin_appsync_event,
+            "arguments": {"accountId": "other user"},
+        }
+
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+            mock_cognito = MagicMock()
+            mock_get_client.return_value = mock_cognito
+
+            with pytest.raises(AppError) as exc_info:
+                admin_delete_user(event, lambda_context)
+
+            assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+            mock_cognito.list_users.assert_not_called()
+
+    def test_oversize_sub_rejected_before_filter(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """A sub longer than 256 chars is rejected by the validator (#124)."""
+        from src.handlers.admin_operations import _validate_sub_for_filter
+
+        long_sub = "a" * 257
+        with pytest.raises(AppError) as exc_info:
+            _validate_sub_for_filter(long_sub)
+
+        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+
+    def test_safe_non_uuid_account_id_returns_not_found(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        sample_account_id: str,
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """A safe sub that does not look like a UUID reaches Cognito and resolves to NOT_FOUND."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
+
+        event = {
+            **admin_appsync_event,
+            "arguments": {"accountId": "not-a-uuid"},
+        }
+
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+            mock_cognito = MagicMock()
+            mock_cognito.list_users.return_value = {"Users": []}
+            mock_get_client.return_value = mock_cognito
+
+            with pytest.raises(AppError) as exc_info:
+                admin_delete_user(event, lambda_context)
+
+            assert exc_info.value.error_code == ErrorCode.NOT_FOUND
+            mock_cognito.list_users.assert_called_once()
+
     def test_account_not_found_cognito_idempotent(
         self,
         dynamodb_table: Any,
@@ -1501,7 +1758,7 @@ class TestAdminDeleteUser:
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
 
-        target_account_id = "nonexistent-user"
+        target_account_id = "44444444-4444-4444-4444-444444444444"
 
         # Create target account (DynamoDB still exists)
         accounts_table = get_accounts_table()
@@ -1542,7 +1799,7 @@ class TestAdminDeleteUser:
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
 
-        target_account_id = "totally-nonexistent-user-12345"
+        target_account_id = "55555555-5555-5555-5555-555555555555"
 
         # Neither Cognito user nor DynamoDB account exists
 
@@ -1574,7 +1831,7 @@ class TestAdminDeleteUser:
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
 
-        target_account_id = "target-user-456"
+        target_account_id = "11111111-1111-1111-1111-111111111111"
 
         # Create target account
         accounts_table = get_accounts_table()
@@ -1597,7 +1854,7 @@ class TestAdminDeleteUser:
             mock_cognito.list_users.return_value = {
                 "Users": [
                     {
-                        "Username": "target-user-456",
+                        "Username": "11111111-1111-1111-1111-111111111111",
                         "Attributes": [
                             {"Name": "sub", "Value": target_account_id},
                             {"Name": "email", "Value": "target@example.com"},
@@ -1628,7 +1885,7 @@ class TestAdminDeleteUser:
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
 
-        target_account_id = "target-user-456"
+        target_account_id = "11111111-1111-1111-1111-111111111111"
 
         event = {
             **admin_appsync_event,
@@ -1675,7 +1932,7 @@ class TestAdminDeleteUser:
         # Try to delete own account (caller ID matches target)
         event = {
             **admin_appsync_event,
-            "arguments": {"accountId": "user-123-456"},  # Same as caller in fixture
+            "arguments": {"accountId": "22222222-2222-2222-2222-222222222222"},  # Same as caller in fixture
         }
 
         with pytest.raises(AppError) as exc_info:
@@ -1694,7 +1951,7 @@ class TestAdminDeleteUser:
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
 
-        target_account_id = "target-user-456"
+        target_account_id = "11111111-1111-1111-1111-111111111111"
 
         # Create target account
         accounts_table = get_accounts_table()
@@ -1716,7 +1973,7 @@ class TestAdminDeleteUser:
             mock_cognito.list_users.return_value = {
                 "Users": [
                     {
-                        "Username": "target-user-456",
+                        "Username": "11111111-1111-1111-1111-111111111111",
                         "Attributes": [
                             {"Name": "sub", "Value": target_account_id},
                             {"Name": "email", "Value": "target@example.com"},
@@ -1755,7 +2012,7 @@ class TestAdminDeleteUser:
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
 
-        target_account_id = "target-user-456"
+        target_account_id = "11111111-1111-1111-1111-111111111111"
 
         # Create target account (but Cognito lookup will fail)
         accounts_table = get_accounts_table()
@@ -1798,7 +2055,7 @@ class TestAdminDeleteUser:
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
 
-        target_account_id = "target-user-456"
+        target_account_id = "11111111-1111-1111-1111-111111111111"
 
         # Create target account
         accounts_table = get_accounts_table()
@@ -1842,7 +2099,7 @@ class TestAdminDeleteUser:
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
 
-        target_account_id = "target-user-456"
+        target_account_id = "11111111-1111-1111-1111-111111111111"
 
         # Create target account with email
         accounts_table = get_accounts_table()
@@ -1884,15 +2141,17 @@ class TestAdminDeleteUser:
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
 
-        target_account_id = "target-user-456"
+        target_account_id = "11111111-1111-1111-1111-111111111111"
 
         event = {
             **admin_appsync_event,
             "arguments": {"accountId": target_account_id},
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client, \
-             patch("src.handlers.admin_operations.tables") as mock_tables:
+        with (
+            patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client,
+            patch("src.handlers.admin_operations.tables") as mock_tables,
+        ):
             mock_cognito = MagicMock()
             mock_cognito.list_users.return_value = {"Users": []}
             mock_get_client.return_value = mock_cognito
@@ -1924,7 +2183,7 @@ class TestAdminDeleteUser:
 
         event = {
             **admin_appsync_event,
-            "arguments": {"accountId": "target-user-456"},
+            "arguments": {"accountId": "11111111-1111-1111-1111-111111111111"},
         }
 
         with patch("src.handlers.admin_operations.tables") as mock_tables:
@@ -2725,14 +2984,14 @@ class TestAdminDeleteUserCatalogs:
         }
 
         with patch("src.handlers.admin_operations.tables") as mock_tables:
-            # Mock catalogs scan - simulate pagination
-            mock_tables.catalogs.scan.side_effect = [
+            # Mock catalogs GSI query - simulate pagination
+            mock_tables.catalogs.query.side_effect = [
                 {
                     "Items": [
                         {"catalogId": "catalog-1", "ownerAccountId": db_account_id},
                         {"catalogId": "catalog-2", "ownerAccountId": db_account_id},
                     ],
-                    "LastEvaluatedKey": {"catalogId": "catalog-2"},
+                    "LastEvaluatedKey": {"ownerAccountId": db_account_id, "catalogId": "catalog-2"},
                 },
                 {
                     "Items": [
@@ -2748,6 +3007,60 @@ class TestAdminDeleteUserCatalogs:
             assert mock_tables.catalogs.update_item.call_count == 3
             # Verify delete_item was NOT called
             assert mock_tables.catalogs.delete_item.call_count == 0
+
+    def test_success_soft_deletes_via_gsi_query(
+        self,
+        dynamodb_table: Any,
+        catalogs_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """Test that catalog deletion only soft-deletes the target user's catalogs."""
+        monkeypatch.setenv("CATALOGS_TABLE_NAME", "kernelworx-catalogs-ue1-dev")
+
+        from src.handlers.admin_operations import admin_delete_user_catalogs
+
+        target_account_id = "target-user-123"
+        db_account_id = f"ACCOUNT#{target_account_id}"
+        other_account_id = "ACCOUNT#other-user-456"
+
+        # Seed catalogs for the target user
+        for catalog_id in ("catalog-1", "catalog-2"):
+            catalogs_table.put_item(
+                Item={
+                    "catalogId": catalog_id,
+                    "ownerAccountId": db_account_id,
+                    "catalogName": f"Catalog {catalog_id}",
+                }
+            )
+
+        # Seed a catalog for another user that should remain untouched
+        catalogs_table.put_item(
+            Item={
+                "catalogId": "catalog-3",
+                "ownerAccountId": other_account_id,
+                "catalogName": "Other catalog",
+            }
+        )
+
+        event = {
+            **admin_appsync_event,
+            "arguments": {"accountId": target_account_id},
+        }
+
+        result = admin_delete_user_catalogs(event, lambda_context)
+
+        assert result == 2
+
+        # Verify target user's catalogs are soft-deleted
+        for catalog_id in ("catalog-1", "catalog-2"):
+            item = catalogs_table.get_item(Key={"catalogId": catalog_id}).get("Item", {})
+            assert item.get("isDeleted") is True
+
+        # Verify the other user's catalog was not modified
+        other_item = catalogs_table.get_item(Key={"catalogId": "catalog-3"}).get("Item", {})
+        assert other_item.get("isDeleted") is not True
 
     def test_non_admin_forbidden(
         self,
@@ -2805,7 +3118,7 @@ class TestAdminDeleteUserCatalogs:
         }
 
         with patch("src.handlers.admin_operations.tables") as mock_tables:
-            mock_tables.catalogs.scan.side_effect = RuntimeError("Unexpected")
+            mock_tables.catalogs.query.side_effect = RuntimeError("Unexpected")
 
             with pytest.raises(AppError) as exc_info:
                 admin_delete_user_catalogs(event, lambda_context)
@@ -2975,10 +3288,12 @@ class TestAdminSearchUser:
             "UserCreateDate": datetime(2024, 1, 1, tzinfo=timezone.utc),
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client, \
-             patch("src.handlers.admin_operations.tables") as mock_tables, \
-             patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names, \
-             patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups:
+        with (
+            patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client,
+            patch("src.handlers.admin_operations.tables") as mock_tables,
+            patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names,
+            patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups,
+        ):
             mock_client = MagicMock()
             mock_get_client.return_value = mock_client
 
@@ -3072,10 +3387,12 @@ class TestAdminSearchUser:
             },
         ]
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client, \
-             patch("src.handlers.admin_operations.tables") as mock_tables, \
-             patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names, \
-             patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups:
+        with (
+            patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client,
+            patch("src.handlers.admin_operations.tables") as mock_tables,
+            patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names,
+            patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups,
+        ):
             mock_client = MagicMock()
             mock_get_client.return_value = mock_client
 
@@ -3148,10 +3465,12 @@ class TestAdminSearchUser:
             "UserCreateDate": datetime(2024, 1, 1, tzinfo=timezone.utc),
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client, \
-             patch("src.handlers.admin_operations.tables") as mock_tables, \
-             patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names, \
-             patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups:
+        with (
+            patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client,
+            patch("src.handlers.admin_operations.tables") as mock_tables,
+            patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names,
+            patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups,
+        ):
             mock_client = MagicMock()
             mock_get_client.return_value = mock_client
 
@@ -3204,10 +3523,12 @@ class TestAdminSearchUser:
             "UserCreateDate": datetime(2024, 1, 1, tzinfo=timezone.utc),
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client, \
-             patch("src.handlers.admin_operations.tables"), \
-             patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names, \
-             patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups:
+        with (
+            patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client,
+            patch("src.handlers.admin_operations.tables"),
+            patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names,
+            patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups,
+        ):
             mock_client = MagicMock()
             mock_get_client.return_value = mock_client
 
@@ -3254,10 +3575,12 @@ class TestAdminSearchUser:
             "UserCreateDate": datetime(2024, 1, 1, tzinfo=timezone.utc),
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client, \
-             patch("src.handlers.admin_operations.tables"), \
-             patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names, \
-             patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups:
+        with (
+            patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client,
+            patch("src.handlers.admin_operations.tables"),
+            patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names,
+            patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups,
+        ):
             mock_client = MagicMock()
             mock_get_client.return_value = mock_client
 
@@ -3413,10 +3736,12 @@ class TestAdminSearchUser:
             "UserCreateDate": datetime(2024, 1, 1, tzinfo=timezone.utc),
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client, \
-             patch("src.handlers.admin_operations.tables") as mock_tables, \
-             patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names, \
-             patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups:
+        with (
+            patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client,
+            patch("src.handlers.admin_operations.tables") as mock_tables,
+            patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names,
+            patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups,
+        ):
             mock_client = MagicMock()
             mock_get_client.return_value = mock_client
 
@@ -3470,10 +3795,12 @@ class TestAdminSearchUser:
             "UserCreateDate": datetime(2024, 1, 1, tzinfo=timezone.utc),
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client, \
-             patch("src.handlers.admin_operations.tables") as mock_tables, \
-             patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names, \
-             patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups:
+        with (
+            patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client,
+            patch("src.handlers.admin_operations.tables") as mock_tables,
+            patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names,
+            patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups,
+        ):
             mock_client = MagicMock()
             mock_get_client.return_value = mock_client
 
@@ -3621,10 +3948,12 @@ class TestAdminSearchUser:
             "UserCreateDate": datetime(2024, 1, 1, tzinfo=timezone.utc),
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client, \
-             patch("src.handlers.admin_operations.tables") as mock_tables, \
-             patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names, \
-             patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups:
+        with (
+            patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client,
+            patch("src.handlers.admin_operations.tables") as mock_tables,
+            patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names,
+            patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups,
+        ):
             mock_client = MagicMock()
             mock_get_client.return_value = mock_client
 
@@ -3677,10 +4006,12 @@ class TestAdminSearchUser:
             "UserCreateDate": datetime(2024, 1, 1, tzinfo=timezone.utc),
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client, \
-             patch("src.handlers.admin_operations.tables") as mock_tables, \
-             patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names, \
-             patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups:
+        with (
+            patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client,
+            patch("src.handlers.admin_operations.tables") as mock_tables,
+            patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names,
+            patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups,
+        ):
             mock_client = MagicMock()
             mock_get_client.return_value = mock_client
 
@@ -3764,10 +4095,12 @@ class TestAdminSearchUser:
             "UserCreateDate": datetime(2024, 1, 1, tzinfo=timezone.utc),
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client, \
-             patch("src.handlers.admin_operations.tables") as mock_tables, \
-             patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names, \
-             patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups:
+        with (
+            patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client,
+            patch("src.handlers.admin_operations.tables") as mock_tables,
+            patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names,
+            patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups,
+        ):
             mock_client = MagicMock()
             mock_get_client.return_value = mock_client
 
@@ -3842,9 +4175,7 @@ class TestBatchHelpers:
             mock_get_resource.return_value = mock_resource
             mock_resource.batch_get_item.return_value = {
                 "Responses": {
-                    "test-accounts": [
-                        {"accountId": "ACCOUNT#user-1", "givenName": "John", "familyName": "Doe"}
-                    ]
+                    "test-accounts": [{"accountId": "ACCOUNT#user-1", "givenName": "John", "familyName": "Doe"}]
                 }
             }
 
@@ -3867,9 +4198,7 @@ class TestBatchHelpers:
             mock_get_resource.return_value = mock_resource
             mock_resource.batch_get_item.return_value = {
                 "Responses": {
-                    "test-accounts": [
-                        {"accountId": "ACCOUNT#user-1", "givenName": "Jane", "familyName": "Doe"}
-                    ]
+                    "test-accounts": [{"accountId": "ACCOUNT#user-1", "givenName": "Jane", "familyName": "Doe"}]
                 }
             }
 
@@ -3914,9 +4243,7 @@ class TestBatchHelpers:
             mock_get_resource.return_value = mock_resource
             mock_resource.batch_get_item.return_value = {
                 "Responses": {
-                    "test-accounts": [
-                        {"accountId": "ACCOUNT#user-1", "givenName": "John", "familyName": "Doe"}
-                    ]
+                    "test-accounts": [{"accountId": "ACCOUNT#user-1", "givenName": "John", "familyName": "Doe"}]
                 }
             }
 
@@ -3937,11 +4264,7 @@ class TestBatchHelpers:
             mock_resource = MagicMock()
             mock_get_resource.return_value = mock_resource
             mock_resource.batch_get_item.return_value = {
-                "Responses": {
-                    "test-accounts": [
-                        {"accountId": "ACCOUNT#user-1", "givenName": "", "familyName": ""}
-                    ]
-                }
+                "Responses": {"test-accounts": [{"accountId": "ACCOUNT#user-1", "givenName": "", "familyName": ""}]}
             }
 
             result = _batch_get_display_names(["user-1"], MagicMock())
@@ -3980,15 +4303,11 @@ class TestBatchHelpers:
             mock_resource.batch_get_item.side_effect = [
                 {
                     "Responses": {"test-accounts": []},
-                    "UnprocessedKeys": {
-                        "test-accounts": {"Keys": [{"accountId": "ACCOUNT#user-1"}]}
-                    },
+                    "UnprocessedKeys": {"test-accounts": {"Keys": [{"accountId": "ACCOUNT#user-1"}]}},
                 },
                 {
                     "Responses": {
-                        "test-accounts": [
-                            {"accountId": "ACCOUNT#user-1", "givenName": "John", "familyName": "Doe"}
-                        ]
+                        "test-accounts": [{"accountId": "ACCOUNT#user-1", "givenName": "John", "familyName": "Doe"}]
                     }
                 },
             ]
@@ -4017,10 +4336,14 @@ class TestBatchHelpers:
                     "UnprocessedKeys": {"test-accounts": {"Keys": retry_keys}},
                 },
                 {
-                    "Responses": {"test-accounts": [{"accountId": "ACCOUNT#user-0", "givenName": "A", "familyName": "B"}]},
+                    "Responses": {
+                        "test-accounts": [{"accountId": "ACCOUNT#user-0", "givenName": "A", "familyName": "B"}]
+                    },
                 },
                 {
-                    "Responses": {"test-accounts": [{"accountId": "ACCOUNT#user-100", "givenName": "C", "familyName": "D"}]},
+                    "Responses": {
+                        "test-accounts": [{"accountId": "ACCOUNT#user-100", "givenName": "C", "familyName": "D"}]
+                    },
                 },
             ]
 
@@ -4059,7 +4382,9 @@ class TestBatchHelpers:
                     "UnprocessedKeys": {"test-accounts": {"Keys": [first_key]}},
                 },
                 {
-                    "Responses": {"test-accounts": [{"accountId": "ACCOUNT#user-100", "givenName": "C", "familyName": "D"}]},
+                    "Responses": {
+                        "test-accounts": [{"accountId": "ACCOUNT#user-100", "givenName": "C", "familyName": "D"}]
+                    },
                 },
             ]
 
@@ -4086,14 +4411,10 @@ class TestBatchHelpers:
         mock_cognito = MagicMock()
         mock_cognito.admin_list_groups_for_user.return_value = {"Groups": []}
 
-        result = _batch_get_user_groups(
-            mock_cognito, "pool-id", ["", "user-1", None, "user-1"], MagicMock()
-        )
+        result = _batch_get_user_groups(mock_cognito, "pool-id", ["", "user-1", None, "user-1"], MagicMock())
 
         assert result == {"user-1": []}
-        mock_cognito.admin_list_groups_for_user.assert_called_once_with(
-            UserPoolId="pool-id", Username="user-1"
-        )
+        mock_cognito.admin_list_groups_for_user.assert_called_once_with(UserPoolId="pool-id", Username="user-1")
 
     def test_batch_get_user_groups_parallel(
         self,
@@ -4108,9 +4429,7 @@ class TestBatchHelpers:
 
         mock_cognito.admin_list_groups_for_user.side_effect = side_effect
 
-        result = _batch_get_user_groups(
-            mock_cognito, "pool-id", ["user-1", "user-2"], MagicMock()
-        )
+        result = _batch_get_user_groups(mock_cognito, "pool-id", ["user-1", "user-2"], MagicMock())
 
         assert result == {"user-1": ["ADMIN"], "user-2": []}
 
@@ -4255,10 +4574,7 @@ class TestAdminGetUserProfiles:
     ) -> None:
         """Test that profile retrieval follows DynamoDB pagination."""
         with patch("src.handlers.admin_operations.query_all_items") as mock_query_all:
-            mock_query_all.return_value = [
-                {"profileId": f"PROFILE#{i}", "sellerName": f"Scout {i}"}
-                for i in range(3)
-            ]
+            mock_query_all.return_value = [{"profileId": f"PROFILE#{i}", "sellerName": f"Scout {i}"} for i in range(3)]
 
             admin_appsync_event["info"]["fieldName"] = "adminGetUserProfiles"
             admin_appsync_event["arguments"] = {"accountId": "paginated-user"}
@@ -4373,8 +4689,7 @@ class TestAdminGetUserCatalogs:
         """Test that catalog retrieval follows DynamoDB pagination."""
         with patch("src.handlers.admin_operations.query_all_items") as mock_query_all:
             mock_query_all.return_value = [
-                {"catalogId": f"CATALOG#{i}", "catalogName": f"Catalog {i}"}
-                for i in range(3)
+                {"catalogId": f"CATALOG#{i}", "catalogName": f"Catalog {i}"} for i in range(3)
             ]
 
             admin_appsync_event["info"]["fieldName"] = "adminGetUserCatalogs"
@@ -4656,8 +4971,7 @@ class TestAdminGetUserSharedCampaigns:
         """Test that shared campaign retrieval follows DynamoDB pagination."""
         with patch("src.handlers.admin_operations.query_all_items") as mock_query_all:
             mock_query_all.return_value = [
-                {"sharedCampaignCode": f"CODE{i}", "campaignName": f"Campaign {i}"}
-                for i in range(3)
+                {"sharedCampaignCode": f"CODE{i}", "campaignName": f"Campaign {i}"} for i in range(3)
             ]
 
             admin_appsync_event["info"]["fieldName"] = "adminGetUserSharedCampaigns"
@@ -5248,10 +5562,12 @@ class TestAdminOperationExceptionHandlers:
             "UserCreateDate": datetime(2024, 1, 1, tzinfo=timezone.utc),
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client, \
-             patch("src.handlers.admin_operations.tables") as mock_tables, \
-             patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names, \
-             patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups:
+        with (
+            patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client,
+            patch("src.handlers.admin_operations.tables") as mock_tables,
+            patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names,
+            patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups,
+        ):
             mock_client = MagicMock()
             mock_get_client.return_value = mock_client
 
@@ -5300,10 +5616,12 @@ class TestAdminOperationExceptionHandlers:
             "UserCreateDate": datetime(2024, 1, 1, tzinfo=timezone.utc),
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client, \
-             patch("src.handlers.admin_operations.tables") as mock_tables, \
-             patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names, \
-             patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups:
+        with (
+            patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client,
+            patch("src.handlers.admin_operations.tables") as mock_tables,
+            patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names,
+            patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups,
+        ):
             mock_client = MagicMock()
             mock_get_client.return_value = mock_client
 
@@ -5413,10 +5731,12 @@ class TestAdminOperationExceptionHandlers:
             "arguments": {"query": "findme"},
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client, \
-             patch("src.handlers.admin_operations.tables") as mock_tables, \
-             patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names, \
-             patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups:
+        with (
+            patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client,
+            patch("src.handlers.admin_operations.tables") as mock_tables,
+            patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names,
+            patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups,
+        ):
             mock_client = MagicMock()
             mock_get_client.return_value = mock_client
 
@@ -5505,10 +5825,12 @@ class TestAdminOperationExceptionHandlers:
         # Create 1001 items to exceed max_scan of 1000
         large_items_batch = [{"accountId": f"ACCOUNT#sub-{i}", "email": f"test{i}@example.com"} for i in range(1001)]
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client, \
-             patch("src.handlers.admin_operations.tables") as mock_tables, \
-             patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names, \
-             patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups:
+        with (
+            patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client,
+            patch("src.handlers.admin_operations.tables") as mock_tables,
+            patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names,
+            patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups,
+        ):
             mock_client = MagicMock()
             mock_get_client.return_value = mock_client
 
@@ -5560,10 +5882,12 @@ class TestAdminOperationExceptionHandlers:
             for i in range(60)  # More than max_results of 50
         ]
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client, \
-             patch("src.handlers.admin_operations.tables") as mock_tables, \
-             patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names, \
-             patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups:
+        with (
+            patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client,
+            patch("src.handlers.admin_operations.tables") as mock_tables,
+            patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names,
+            patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups,
+        ):
             mock_client = MagicMock()
             mock_get_client.return_value = mock_client
 
