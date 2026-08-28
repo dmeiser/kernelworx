@@ -71,9 +71,7 @@ def _get_user_groups(cognito: Any, user_pool_id: str, username: str, logger: Any
         return []
 
 
-def _batch_get_user_groups(
-    cognito: Any, user_pool_id: str, usernames: list[str], logger: Any
-) -> dict[str, list[str]]:
+def _batch_get_user_groups(cognito: Any, user_pool_id: str, usernames: list[str], logger: Any) -> dict[str, list[str]]:
     """Fetch Cognito groups for multiple users in parallel.
 
     Cognito does not expose a batch group-membership API, so we parallelize
@@ -133,9 +131,7 @@ def _batch_get_display_names(account_ids: list[str], logger: Any) -> dict[str, s
                     if given_name or family_name:
                         display_names[key] = f"{given_name} {family_name}".strip()
 
-                unprocessed = (
-                    response.get("UnprocessedKeys", {}).get(accounts_table_name, {}).get("Keys", [])
-                )
+                unprocessed = response.get("UnprocessedKeys", {}).get(accounts_table_name, {}).get("Keys", [])
                 keys_to_fetch = unprocessed
                 if keys_to_fetch and attempt < 2:
                     logger.warning(
@@ -143,7 +139,7 @@ def _batch_get_display_names(account_ids: list[str], logger: Any) -> dict[str, s
                         attempt=attempt + 1,
                         count=len(keys_to_fetch),
                     )
-                    time.sleep(0.05 * (2 ** attempt))
+                    time.sleep(0.05 * (2**attempt))
     except ClientError as e:
         logger.warning("Failed to batch fetch display names", error=str(e))
 
@@ -202,8 +198,7 @@ def admin_list_users(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         # Batch DynamoDB display-name lookups and parallelize Cognito group lookups
         # to avoid the per-user N+1 fan-out.
         account_ids = [
-            _extract_cognito_attributes(user)[1].get("sub", user.get("Username", ""))
-            for user in cognito_users
+            _extract_cognito_attributes(user)[1].get("sub", user.get("Username", "")) for user in cognito_users
         ]
         usernames = [user.get("Username", "") for user in cognito_users]
         display_names = _batch_get_display_names(account_ids, logger)
@@ -274,8 +269,7 @@ def admin_search_user(event: Dict[str, Any], context: Any) -> list[Dict[str, Any
 
         # Batch DynamoDB display-name lookups and parallelize Cognito group lookups.
         account_ids = [
-            _extract_cognito_attributes(user)[1].get("sub", user.get("Username", ""))
-            for user in cognito_users
+            _extract_cognito_attributes(user)[1].get("sub", user.get("Username", "")) for user in cognito_users
         ]
         usernames = [user.get("Username", "") for user in cognito_users]
         display_names = _batch_get_display_names(account_ids, logger)
@@ -1118,26 +1112,22 @@ def _soft_delete_catalog(catalog_id: str) -> None:
     )
 
 
-def _scan_and_delete_catalogs(db_account_id: str) -> int:
-    """Scan for user's catalogs and soft delete them. Returns count."""
+def _query_and_delete_catalogs(db_account_id: str) -> int:
+    """Query for user's catalogs via the ownerAccountId GSI and soft delete them. Returns count."""
+    catalogs = query_all_items(
+        tables.catalogs,
+        {
+            "IndexName": "ownerAccountId-index",
+            "KeyConditionExpression": "ownerAccountId = :owner",
+            "FilterExpression": "attribute_not_exists(isDeleted) OR isDeleted = :false",
+            "ExpressionAttributeValues": {":owner": db_account_id, ":false": False},
+        },
+    )
+
     deleted_count = 0
-    scan_kwargs: Dict[str, Any] = {
-        "FilterExpression": "ownerAccountId = :owner AND (attribute_not_exists(isDeleted) OR isDeleted = :false)",
-        "ExpressionAttributeValues": {":owner": db_account_id, ":false": False},
-    }
-
-    while True:
-        response = tables.catalogs.scan(**scan_kwargs)
-
-        for catalog in response.get("Items", []):
-            _soft_delete_catalog(catalog["catalogId"])
-            deleted_count += 1
-
-        # Handle pagination
-        if "LastEvaluatedKey" in response:
-            scan_kwargs["ExclusiveStartKey"] = response["LastEvaluatedKey"]
-        else:
-            break
+    for catalog in catalogs:
+        _soft_delete_catalog(catalog["catalogId"])
+        deleted_count += 1
 
     return deleted_count
 
@@ -1145,7 +1135,7 @@ def _scan_and_delete_catalogs(db_account_id: str) -> int:
 def _delete_user_catalogs(account_id: str, logger: Any) -> int:
     """Soft delete all catalogs owned by a user. Returns count."""
     db_account_id = _normalize_account_id(account_id)
-    deleted_count = _scan_and_delete_catalogs(db_account_id)
+    deleted_count = _query_and_delete_catalogs(db_account_id)
     logger.info("Soft-deleted user catalogs", account_id=account_id, count=deleted_count)
     return deleted_count
 
