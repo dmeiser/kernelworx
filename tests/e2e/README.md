@@ -68,10 +68,10 @@ bash scripts/create-test-users.sh
 ### 4. Admin-managed catalog
 
 At least one product catalog must exist before campaign-creation tests run.
-Without one the *New Campaign* dialog's catalog dropdown is empty and tests
-fail with:
+The smoke tests use the `/create-campaign` page flow; without an admin catalog
+its catalog dropdown is empty and tests fail with:
 
-> `AssertionError: No catalogs found in dev environment.`
+> `AssertionError: No enabled catalog options found in dev environment.`
 
 **To create a catalog:** log in to the dev app as an admin user, navigate to
 **Admin → Catalogs**, and click **Create Catalog**.  This is a one-time
@@ -187,7 +187,7 @@ cleanup is skipped with a warning.
 | Symptom | Likely cause | Fix |
 |---|---|---|
 | `AssertionError: Owner must have at least one seller profile` | Profile fixture failed | Check screenshot in `test-results/`; verify Cognito login credentials |
-| `AssertionError: No catalogs found` | No admin catalog in dev | Follow prerequisite step 4 above |
+| `AssertionError: No enabled catalog options found` | No admin catalog in dev | Follow prerequisite step 4 above |
 | `TimeoutError` navigating to app | Dev environment not deployed | Run `./tofu/application/scripts/deploy.sh dev apply` from the repo root |
 | Tests skip with `campaign_id not set` | `test_create_order` was not run | Run the full `test_smoke_order.py` file (tests must run in order) |
 | Cleanup skipped with warning | No active AWS credentials | Run `aws sts get-caller-identity` to verify; re-authenticate if needed |
