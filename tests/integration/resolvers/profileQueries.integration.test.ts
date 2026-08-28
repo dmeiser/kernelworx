@@ -573,17 +573,28 @@ describe('Profile Query Operations Integration Tests', () => {
       });
       createdShares.push({ profileId: profileId2, targetAccountId: share2Data.shareProfileDirect.targetAccountId });
 
-      // Act: Contributor queries shared profiles
-      const { data } = await contributorClient.query({
-        query: LIST_MY_SHARES,
-        fetchPolicy: 'network-only',
-      });
+      // Act: Poll until both shares are visible (GSI eventual consistency)
+      const shares = await waitForGSIConsistency(
+        async () => {
+          const { data } = await contributorClient.query({
+            query: LIST_MY_SHARES,
+            fetchPolicy: 'network-only',
+          });
+          return data.listMyShares;
+        },
+        (items: any[]) => {
+          const profileIds = items.map((p: any) => p.profileId);
+          return profileIds.includes(profileId1) && profileIds.includes(profileId2);
+        },
+        20,
+        1000
+      );
 
       // Assert
-      expect(data.listMyShares).toBeDefined();
-      expect(Array.isArray(data.listMyShares)).toBe(true);
-      
-      const profileIds = data.listMyShares.map((p: any) => p.profileId);
+      expect(shares).toBeDefined();
+      expect(Array.isArray(shares)).toBe(true);
+
+      const profileIds = shares.map((p: any) => p.profileId);
       expect(profileIds).toContain(profileId1);
       expect(profileIds).toContain(profileId2);
     });
@@ -622,14 +633,22 @@ describe('Profile Query Operations Integration Tests', () => {
       });
       createdShares.push({ profileId, targetAccountId: shareData.shareProfileDirect.targetAccountId });
 
-      // Act
-      const { data } = await contributorClient.query({
-        query: LIST_MY_SHARES,
-        fetchPolicy: 'network-only',
-      });
+      // Act: Poll until the share is visible (GSI eventual consistency)
+      const shares = await waitForGSIConsistency(
+        async () => {
+          const { data } = await contributorClient.query({
+            query: LIST_MY_SHARES,
+            fetchPolicy: 'network-only',
+          });
+          return data.listMyShares;
+        },
+        (items: any[]) => items.some((p: any) => p.profileId === profileId),
+        20,
+        1000
+      );
 
       // Assert: Share items have full profile data and permissions
-      const profile = data.listMyShares.find((p: any) => p.profileId === profileId);
+      const profile = shares.find((p: any) => p.profileId === profileId);
       expect(profile).toBeDefined();
       expect(profile.permissions).toContain('READ');
       expect(profile.permissions).toContain('WRITE');
@@ -685,14 +704,22 @@ describe('Profile Query Operations Integration Tests', () => {
       });
       createdShares.push({ profileId, targetAccountId: shareData.shareProfileDirect.targetAccountId });
 
-      // Act
-      const { data } = await contributorClient.query({
-        query: LIST_MY_SHARES,
-        fetchPolicy: 'network-only',
-      });
+      // Act: Poll until the share is visible (GSI eventual consistency)
+      const shares = await waitForGSIConsistency(
+        async () => {
+          const { data } = await contributorClient.query({
+            query: LIST_MY_SHARES,
+            fetchPolicy: 'network-only',
+          });
+          return data.listMyShares;
+        },
+        (items: any[]) => items.some((p: any) => p.profileId === profileId),
+        20,
+        1000
+      );
 
       // Assert
-      const profile = data.listMyShares.find((p: any) => p.profileId === profileId);
+      const profile = shares.find((p: any) => p.profileId === profileId);
       expect(profile).toBeDefined();
       expect(profile.permissions).toEqual(['READ']);
     });
@@ -719,14 +746,22 @@ describe('Profile Query Operations Integration Tests', () => {
       });
       createdShares.push({ profileId, targetAccountId: shareData.shareProfileDirect.targetAccountId });
 
-      // Act
-      const { data } = await contributorClient.query({
-        query: LIST_MY_SHARES,
-        fetchPolicy: 'network-only',
-      });
+      // Act: Poll until the share is visible (GSI eventual consistency)
+      const shares = await waitForGSIConsistency(
+        async () => {
+          const { data } = await contributorClient.query({
+            query: LIST_MY_SHARES,
+            fetchPolicy: 'network-only',
+          });
+          return data.listMyShares;
+        },
+        (items: any[]) => items.some((p: any) => p.profileId === profileId),
+        20,
+        1000
+      );
 
       // Assert
-      const profile = data.listMyShares.find((p: any) => p.profileId === profileId);
+      const profile = shares.find((p: any) => p.profileId === profileId);
       expect(profile).toBeDefined();
       expect(profile.permissions).toEqual(['WRITE']);
     });
@@ -851,15 +886,25 @@ describe('Profile Query Operations Integration Tests', () => {
       });
       createdShares.push({ profileId: profile2Id, targetAccountId: share2Data.shareProfileDirect.targetAccountId });
 
-      // Act: List shared profiles
-      const { data } = await contributorClient.query({
-        query: LIST_MY_SHARES,
-        fetchPolicy: 'network-only',
-      });
+      // Act: Poll until both shares are visible (GSI eventual consistency)
+      const shares = await waitForGSIConsistency(
+        async () => {
+          const { data } = await contributorClient.query({
+            query: LIST_MY_SHARES,
+            fetchPolicy: 'network-only',
+          });
+          return data.listMyShares;
+        },
+        (items: any[]) =>
+          items.some((p: any) => p.profileId === profile1Id) &&
+          items.some((p: any) => p.profileId === profile2Id),
+        20,
+        1000
+      );
 
       // Assert: Both profiles appear with correct permissions
-      const readProfile = data.listMyShares.find((p: any) => p.profileId === profile1Id);
-      const writeProfile = data.listMyShares.find((p: any) => p.profileId === profile2Id);
+      const readProfile = shares.find((p: any) => p.profileId === profile1Id);
+      const writeProfile = shares.find((p: any) => p.profileId === profile2Id);
 
       expect(readProfile).toBeDefined();
       expect(readProfile.permissions).toEqual(['READ']);
