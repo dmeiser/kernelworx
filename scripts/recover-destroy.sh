@@ -1,6 +1,7 @@
 #!/bin/bash
-# recover-destroy: destroy orphaned AWS resources for a run-id when state is
-# missing or corrupt. Imports whatever still exists, then runs `tofu destroy`.
+# recover-destroy: restore missing S3 state from the latest version if needed,
+# then destroy orphaned AWS resources for a run-id. Imports whatever still
+# exists, then runs `tofu destroy`.
 # Usage: scripts/recover-destroy.sh <run-id>
 
 set -e
@@ -16,6 +17,7 @@ RUN_ID="$1"
 source "$(cd "$(dirname "$0")" && pwd)/ephemeral-recover-common.sh"
 
 load_env
+recover_state_if_missing "$RUN_ID"
 cleanup_stale_lock "$RUN_ID"
 init_backend "$RUN_ID"
 import_ephemeral_resources "$RUN_ID"

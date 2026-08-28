@@ -179,7 +179,8 @@ class TestCleanupStaleLock:
 
 
 class TestRecoverStateIfMissing:
-    """recover_state_if_missing is exercised through ephemeral-env.sh down."""
+    """recover_state_if_missing is exercised through ephemeral-env.sh down,
+    recover-deploy.sh, and recover-destroy.sh."""
 
     @pytest.fixture
     def build_dir(self, tmp_path: Path) -> Path:
@@ -302,6 +303,195 @@ class TestRecoverStateIfMissing:
         )
         assert result.returncode == 0, result.stderr
         assert "No previous state version found" in result.stderr
+
+
+class TestRecoverDeploy:
+    """recover-deploy.sh restores S3 state before importing resources."""
+
+    def test_recover_deploy_restores_missing_state_before_import(
+        self,
+        repo_root: Path,
+        tmp_env: Path,
+    ) -> None:
+        recorded = tmp_env / "tofu_calls.txt"
+        write_mock(
+            tmp_env,
+            "aws",
+            """
+            #!/bin/bash
+            case "$1 $2" in
+              "s3api head-object")
+                exit 1
+                ;;
+              "s3api list-object-versions")
+                echo 'v789'
+                ;;
+              "s3api copy-object")
+                exit 0
+                ;;
+              "s3api head-bucket" | "dynamodb describe-table")
+                exit 1
+                ;;
+            esac
+            exit 0
+            """,
+        )
+        write_mock(
+            tmp_env,
+            "tofu",
+            f"""
+            #!/bin/bash
+            echo "$@" >> "{recorded}"
+            exit 0
+            """,
+        )
+
+        script = """
+            set -e
+            export STATE_BUCKET="test-bucket"
+            export STATE_REGION="us-east-1"
+            export TF_VAR_encryption_passphrase="not-used"
+            scripts/recover-deploy.sh pr-999
+        """
+        result = run_bash(repo_root, script)
+        assert result.returncode == 0, result.stderr
+        assert "Restoring state from version v789" in result.stderr
+        tofu_calls = recorded.read_text().splitlines()
+        assert tofu_calls and tofu_calls[0].startswith("init"), f"tofu init should be first, got: {tofu_calls}"
+
+
+class TestRecoverDestroy:
+    """recover-destroy.sh restores S3 state before importing and destroying."""
+
+    def test_recover_destroy_restores_missing_state(
+        self,
+        repo_root: Path,
+        tmp_env: Path,
+    ) -> None:
+        recorded = tmp_env / "tofu_calls.txt"
+        write_mock(
+            tmp_env,
+            "aws",
+            """
+            #!/bin/bash
+            case "$1 $2" in
+              "s3api head-object")
+                exit 1
+                ;;
+              "s3api list-object-versions")
+                echo 'v456'
+                ;;
+              "s3api copy-object")
+                exit 0
+                ;;
+              "s3 rm")
+                exit 0
+                ;;
+              "s3api head-bucket" | "dynamodb describe-table")
+                exit 1
+                ;;
+            esac
+            exit 0
+            """,
+        )
+        write_mock(
+            tmp_env,
+            "tofu",
+            f"""
+            #!/bin/bash
+            echo "$@" >> "{recorded}"
+            exit 0
+            """,
+        )
+
+        script = """
+            set -e
+            export STATE_BUCKET="test-bucket"
+            export STATE_REGION="us-east-1"
+            export TF_VAR_encryption_passphrase="not-used"
+            scripts/recover-destroy.sh pr-999
+        """
+        result = run_bash(repo_root, script)
+        assert result.returncode == 0, result.stderr
+        assert "Restoring state from version v456" in result.stderr
+        tofu_calls = recorded.read_text().splitlines()
+        assert tofu_calls and tofu_calls[0].startswith("init"), f"tofu init should be first, got: {tofu_calls}"
+        assert any(c.startswith("destroy") for c in tofu_calls), f"tofu destroy should run, got: {tofu_calls}"
+
+
+class TestImportEphemeralResources:
+    """import_ephemeral_resources issues imports for state-tracked sub-resources."""
+
+    def test_static_iam_and_s3_imports_are_issued(
+        self,
+        repo_root: Path,
+        tmp_env: Path,
+    ) -> None:
+        recorded = tmp_env / "tofu_calls.txt"
+        write_mock(
+            tmp_env,
+            "aws",
+            """
+            #!/bin/bash
+            case "$1 $2" in
+              "s3api head-bucket")
+                exit 0
+                ;;
+              "dynamodb describe-table")
+                exit 0
+                ;;
+              "cognito-idp list-user-pools")
+                echo '{"UserPools": [{"Name": "kernelworx-users-ue1-pr-999", "Id": "us-east-1_POOL"}]}'
+                ;;
+              "cognito-idp list-user-pool-clients")
+                echo '{"UserPoolClients": [{"ClientName": "KernelWorx-Web", "ClientId": "client123"}]}'
+                ;;
+              "appsync list-graphql-apis")
+                echo '{"graphqlApis": [{"name": "kernelworx-api-ue1-pr-999", "apiId": "api123"}]}'
+                ;;
+              "appsync list-data-sources" | "appsync list-functions")
+                echo '{"dataSources": [], "functions": []}'
+                ;;
+              "appsync list-resolvers")
+                echo '{"resolvers": []}'
+                ;;
+              "lambda list-layer-versions")
+                echo '{"LayerVersions": []}'
+                ;;
+              "lambda list-functions")
+                echo '{"Functions": []}'
+                ;;
+            esac
+            exit 0
+            """,
+        )
+        write_mock(
+            tmp_env,
+            "tofu",
+            f"""
+            #!/bin/bash
+            echo "$@" >> "{recorded}"
+            exit 0
+            """,
+        )
+
+        script = """
+            set -e
+            export STATE_BUCKET="test-bucket"
+            export STATE_REGION="us-east-1"
+            export TF_VAR_encryption_passphrase="not-used"
+            source scripts/ephemeral-recover-common.sh
+            import_ephemeral_resources pr-999
+        """
+        result = run_bash(repo_root, script)
+        assert result.returncode == 0, result.stderr
+        calls = recorded.read_text()
+        assert "module.iam.aws_iam_role_policy_attachment.lambda_basic" in calls
+        assert "module.iam.aws_iam_role_policy.lambda_dynamodb" in calls
+        assert "module.cognito.aws_iam_role_policy.lambda_cognito_admin" in calls
+        assert "module.appsync.aws_iam_role_policy.appsync_logging" in calls
+        assert "module.s3.aws_s3_bucket_versioning.static" in calls
+        assert "module.s3.aws_s3_bucket_cors_configuration.exports" in calls
 
 
 class TestEphemeralEnvDown:

@@ -11,7 +11,6 @@ from botocore.exceptions import ClientError
 from src.handlers import delete_profile_cascade
 from src.handlers.delete_profile_cascade import (
     _get_profile_owner_id,
-    _query_all_items,
     lambda_handler,
 )
 from src.utils.dynamodb import clear_all_overrides
@@ -121,8 +120,34 @@ class TestDeleteProfileCascade:
 
     def test_get_profile_owner_id_not_found(self, profiles_table: Any) -> None:
         """Test _get_profile_owner_id raises when profile is missing from GSI."""
-        with pytest.raises(Exception):
-            _get_profile_owner_id("PROFILE#nonexistent")
+        with patch("src.handlers.delete_profile_cascade.time.sleep"):
+            with pytest.raises(Exception):
+                _get_profile_owner_id("PROFILE#nonexistent")
+
+    def test_get_profile_owner_id_retries_on_eventual_consistency(self) -> None:
+        """Test _get_profile_owner_id retries when GSI is not yet consistent."""
+        with patch("src.handlers.delete_profile_cascade.tables.profiles.query") as mock_query:
+            mock_query.side_effect = [
+                {"Items": []},
+                {"Items": [{"ownerAccountId": "ACCOUNT#owner-123"}]},
+            ]
+            with patch("src.handlers.delete_profile_cascade.time.sleep") as mock_sleep:
+                owner_id = _get_profile_owner_id("PROFILE#test")
+
+        assert owner_id == "ACCOUNT#owner-123"
+        assert mock_query.call_count == 2
+        mock_sleep.assert_called_once()
+
+    def test_get_profile_owner_id_raises_after_exhausting_retries(self) -> None:
+        """Test _get_profile_owner_id raises after all GSI lookup retries fail."""
+        with patch("src.handlers.delete_profile_cascade.tables.profiles.query") as mock_query:
+            mock_query.return_value = {"Items": []}
+            with patch("src.handlers.delete_profile_cascade.time.sleep") as mock_sleep:
+                with pytest.raises(Exception):
+                    _get_profile_owner_id("PROFILE#test")
+
+        assert mock_query.call_count == 3
+        assert mock_sleep.call_count == 2
 
     def test_unauthorized_call_raises_forbidden(self, profiles_table: Any) -> None:
         """Test that a non-owner without WRITE access is rejected."""
@@ -429,23 +454,19 @@ class TestDeleteProfileCascade:
         _create_profile(profiles_table, owner_id, profile_id)
         _create_campaign(campaigns_table, profile_id, campaign_id)
 
-        original_query_all_items = delete_profile_cascade._query_all_items
-
         def _mock_query_all_items(
             table: Any,
-            key_condition: str,
-            expression_values: Dict[str, Any],
-            index_name: str | None = None,
-            projection: str | None = None,
+            query_kwargs: Dict[str, Any],
+            max_items: int | None = None,
         ) -> List[Dict[str, Any]]:
             if table.name == delete_profile_cascade.tables.campaigns.name:
                 return [
                     {"profileId": profile_id, "campaignName": "Malformed"},
                     {"profileId": profile_id, "campaignId": campaign_id},
                 ]
-            return original_query_all_items(table, key_condition, expression_values, index_name, projection)
+            return []
 
-        monkeypatch.setattr(delete_profile_cascade, "_query_all_items", _mock_query_all_items)
+        monkeypatch.setattr(delete_profile_cascade, "query_all_items", _mock_query_all_items)
 
         event = {
             "arguments": {"profileId": profile_id},
@@ -552,22 +573,6 @@ class TestDeleteProfileCascade:
             assert result is True
 
         # Verify the query was called twice (pagination)
-        assert mock_table.query.call_count == 2
-        second_call_kwargs = mock_table.query.call_args_list[1][1]
-        assert "ExclusiveStartKey" in second_call_kwargs
-
-    def test_query_all_items_pagination(self) -> None:
-        """Test _query_all_items handles pagination directly."""
-        mock_table = MagicMock()
-        mock_table.name = "test"
-        mock_table.query.side_effect = [
-            {"Items": [{"pk": "1"}], "LastEvaluatedKey": {"pk": "1"}},
-            {"Items": [{"pk": "2"}]},
-        ]
-
-        items = _query_all_items(mock_table, "pk = :pk", {":pk": "x"})
-
-        assert len(items) == 2
         assert mock_table.query.call_count == 2
         second_call_kwargs = mock_table.query.call_args_list[1][1]
         assert "ExclusiveStartKey" in second_call_kwargs

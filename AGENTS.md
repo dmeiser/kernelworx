@@ -17,15 +17,15 @@ Ephemeral per-PR stacks live in `tofu/application/environments/ephemeral` and ar
 
 - `scripts/ephemeral-env.sh up <run-id>` creates/updates a stack; `down <run-id>` destroys it. State is stored in S3 under `s3://kernelworx-tofu-state-us-east-1-dev/application/ephemeral/<run-id>/terraform.tfstate`.
 - The script detects and removes stale S3 `.tflock` objects left by crashed or cancelled CI runners (different hostname = always stale; same hostname = stale after `EPHEMERAL_LOCK_STALE_SECONDS`, default 600).
-- If `down` finds the state object missing but a previous S3 version exists, it restores the latest version before destroying so resources are tracked.
+- If the current state object is missing but a previous S3 version exists, `ephemeral-env.sh down`, `recover-deploy.sh`, and `recover-destroy.sh` restore the latest version before proceeding, so resources are tracked.
 
 ### Recovery workflows
 
 Manual intervention runs through two standalone `workflow_dispatch` workflows:
 
 - **Manual teardown for PR** (`.github/workflows/manual-teardown.yml`, `pr_number` input): runs `scripts/ephemeral-env.sh down pr-<n>` for an arbitrary PR number. Use this when a PR's merge teardown fails or when you need to clean up a leaked environment safely through Terraform.
-- **Recover deploy for PR** (`.github/workflows/recover-environment.yml`, `pr_number` and `mode: recover-deploy` inputs): runs `scripts/recover-deploy.sh pr-<n>`. It discovers existing AWS resources for the run-id and imports them into state with individual `tofu import` commands (each allowed to fail). Use this when a PR test fails to apply because resources already exist from a previous partial run.
-- **Recover destroy for PR** (`.github/workflows/recover-environment.yml`, `pr_number` and `mode: recover-destroy` inputs): runs `scripts/recover-destroy.sh pr-<n>`. It imports whatever resources still exist, then runs `tofu destroy` and cleans up leftover state/log groups. Use this when state is missing/corrupt but AWS resources remain.
+- **Recover deploy for PR** (`.github/workflows/recover-environment.yml`, `pr_number` and `mode: recover-deploy` inputs): runs `scripts/recover-deploy.sh pr-<n>`. It restores the latest S3 state version if the current object is missing, then discovers existing AWS resources for the run-id and imports them into state with individual `tofu import` commands (each allowed to fail). Use this when a PR test fails to apply because resources already exist from a previous partial run.
+- **Recover destroy for PR** (`.github/workflows/recover-environment.yml`, `pr_number` and `mode: recover-destroy` inputs): runs `scripts/recover-destroy.sh pr-<n>`. It restores the latest S3 state version if the current object is missing, then imports whatever resources still exist, then runs `tofu destroy` and cleans up leftover state/log groups. Use this when state is missing/corrupt but AWS resources remain.
 
 Recovery scripts share helpers in `scripts/ephemeral-recover-common.sh`.
 
@@ -40,3 +40,5 @@ Destructive Cognito actions (`AdminDeleteUser`, `AdminResetUserPassword`, `Admin
 ### AppSync pipeline function deletion ordering (#198)
 
 AWS rejects deleting an AppSync pipeline function that is still referenced by a resolver. The AWS provider does not always order resolver updates before function deletions, so deployments that remove functions from a pipeline can fail with `BadRequestException: Cannot delete a function which is currently used by a resolver`. The deploy paths use `scripts/appsync-ensure-resolver-order.sh` to detect planned function deletions and apply the affected resolver(s) first. When collapsing or removing functions from a pipeline, add the resolver target to the script invocations in `scripts/ephemeral-env.sh` and `.github/workflows/deploy-shared.yml`.
+
+Tainting shared pipeline functions via `lifecycle { replace_triggered_by = ... }` hits the same ordering problem, because a shared function may be referenced by several resolvers at once. The current pilot taints only the `createOrder` resolver itself (via its pipeline JS code hash in `tofu/application/modules/appsync/resolver_code_hashes.tf` and `resolvers_mutations.tf`); do not add function-level taint for shared functions without also updating the resolver ordering targets.
