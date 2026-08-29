@@ -71,12 +71,13 @@ const filterSharedProfiles = (profiles: Profile[], showReadOnlyProfiles: boolean
 
 // Helper to check if both profile sets are loaded
 const areBothProfilesLoaded = (
-  myProfilesData: { listMyProfiles: Profile[] } | undefined,
+  myProfilesData: { listMyProfiles: { profiles: Profile[] } } | undefined,
   sharedProfilesLoaded: boolean,
 ): boolean => myProfilesData !== undefined && sharedProfilesLoaded;
 
 // Helper to get my profiles from data
-const getMyProfiles = (data: { listMyProfiles: Profile[] } | undefined): Profile[] => data?.listMyProfiles || [];
+const getMyProfiles = (data: { listMyProfiles: { profiles: Profile[] } } | undefined): Profile[] =>
+  data?.listMyProfiles.profiles || [];
 
 // Helper to check if page is still loading
 const isPageLoading = (profilesLoading: boolean, accountLoading: boolean, bothProfilesLoaded: boolean): boolean =>
@@ -378,7 +379,7 @@ export const ScoutsPage: React.FC = () => {
 
   // Fetch owned profiles
   const [loadMyProfiles, { data: myProfilesData, loading: myProfilesLoading, error: myProfilesError }] = useLazyQuery<{
-    listMyProfiles: Profile[];
+    listMyProfiles: { profiles: Profile[] };
   }>(LIST_MY_PROFILES, {
     fetchPolicy: 'network-only',
     notifyOnNetworkStatusChange: true,
