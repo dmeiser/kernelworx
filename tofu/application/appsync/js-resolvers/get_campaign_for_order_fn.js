@@ -2,7 +2,6 @@ import { util } from '@aws-appsync/utils';
 
 export function request(ctx) {
     const campaignId = ctx.args.input.campaignId;
-    console.log('GetCampaignForOrder: request for campaignId=', campaignId, 'args=', JSON.stringify(ctx.args || {}));
     // Query campaignId-index GSI to find campaign (V2 schema)
     return {
         operation: 'Query',
@@ -43,7 +42,6 @@ export function response(ctx) {
     // Store campaign and normalized catalogId in stash for next function
     ctx.stash.campaign = campaign;
     ctx.stash.catalogId = normalizedCatalogId;
-    console.log('GetCampaignForOrder: Set stash.catalogId to', ctx.stash.catalogId);
-    
+
     return campaign;
 }

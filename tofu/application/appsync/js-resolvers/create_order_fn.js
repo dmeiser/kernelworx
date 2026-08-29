@@ -87,12 +87,6 @@ export function request(ctx) {
     const campaign = ctx.stash.campaign;
     const catalog = ctx.stash.catalog;
 
-    console.log('CreateOrder: stash summary', {
-        catalogId: ctx.stash && ctx.stash.catalogId,
-        catalogPresent: !!ctx.stash && !!ctx.stash.catalog,
-        campaignId: ctx.stash && ctx.stash.campaign && ctx.stash.campaign.campaignId,
-    });
-
     const { customerPhone } = validateCustomer(input);
     validateOrderDate(input.orderDate);
 
@@ -198,8 +192,6 @@ export function request(ctx) {
             li.productName = null;
         }
     }
-
-    console.log('CreateOrder: PutItem keys', { campaignId: campaignId, orderId: orderId });
 
     return {
         operation: 'PutItem',
