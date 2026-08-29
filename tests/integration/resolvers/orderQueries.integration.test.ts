@@ -138,24 +138,27 @@ const GET_ORDER = gql`
 `;
 
 const LIST_ORDERS_BY_CAMPAIGN = gql`
-  query ListOrdersByCampaign($campaignId: ID!) {
-    listOrdersByCampaign(campaignId: $campaignId) {
-      orderId
-      profileId
-      campaignId
-      customerName
-      totalAmount
-      paymentMethod
-      notes
-      lineItems {
-        productId
-        productName
-        quantity
-        pricePerUnit
-        subtotal
+  query ListOrdersByCampaign($campaignId: ID!, $limit: Int, $nextToken: String) {
+    listOrdersByCampaign(campaignId: $campaignId, limit: $limit, nextToken: $nextToken) {
+      orders {
+        orderId
+        profileId
+        campaignId
+        customerName
+        totalAmount
+        paymentMethod
+        notes
+        lineItems {
+          productId
+          productName
+          quantity
+          pricePerUnit
+          subtotal
+        }
+        createdAt
+        updatedAt
       }
-      createdAt
-      updatedAt
+      nextToken
     }
   }
 `;
@@ -191,25 +194,28 @@ const REVOKE_SHARE = gql`
 `;
 
 const LIST_ORDERS_BY_PROFILE = gql`
-  query ListOrdersByProfile($profileId: ID!) {
-    listOrdersByProfile(profileId: $profileId) {
-      orderId
-      profileId
-      campaignId
-      customerName
-      customerPhone
-      orderDate
-      paymentMethod
-      lineItems {
-        productId
-        productName
-        quantity
-        pricePerUnit
-        subtotal
+  query ListOrdersByProfile($profileId: ID!, $limit: Int, $nextToken: String) {
+    listOrdersByProfile(profileId: $profileId, limit: $limit, nextToken: $nextToken) {
+      orders {
+        orderId
+        profileId
+        campaignId
+        customerName
+        customerPhone
+        orderDate
+        paymentMethod
+        lineItems {
+          productId
+          productName
+          quantity
+          pricePerUnit
+          subtotal
+        }
+        totalAmount
+        createdAt
+        updatedAt
       }
-      totalAmount
-      createdAt
-      updatedAt
+      nextToken
     }
   }
 `;
@@ -700,10 +706,10 @@ describe('Order Query Operations Integration Tests', () => {
         fetchPolicy: 'network-only',
       });
 
-      expect(data.listOrdersByCampaign).toBeDefined();
-      expect(data.listOrdersByCampaign.length).toBeGreaterThanOrEqual(2);
+      expect(data.listOrdersByCampaign.orders).toBeDefined();
+      expect(data.listOrdersByCampaign.orders.length).toBeGreaterThanOrEqual(2);
       
-      const orderIds = data.listOrdersByCampaign.map((o: any) => o.orderId);
+      const orderIds = data.listOrdersByCampaign.orders.map((o: any) => o.orderId);
       expect(orderIds).toContain(testOrderId1);
       expect(orderIds).toContain(testOrderId2);
     });
@@ -715,8 +721,8 @@ describe('Order Query Operations Integration Tests', () => {
         fetchPolicy: 'network-only',
       });
 
-      expect(data.listOrdersByCampaign).toBeDefined();
-      expect(data.listOrdersByCampaign).toEqual([]);
+      expect(data.listOrdersByCampaign.orders).toBeDefined();
+      expect(data.listOrdersByCampaign.orders).toEqual([]);
     });
 
     test('Happy Path: Includes all order fields', async () => {
@@ -727,7 +733,7 @@ describe('Order Query Operations Integration Tests', () => {
         fetchPolicy: 'network-only',
       });
 
-      const order = data.listOrdersByCampaign[0];
+      const order = data.listOrdersByCampaign.orders[0];
       expect(order).toHaveProperty('orderId');
       expect(order).toHaveProperty('profileId');
       expect(order).toHaveProperty('campaignId');
@@ -745,8 +751,8 @@ describe('Order Query Operations Integration Tests', () => {
         fetchPolicy: 'network-only',
       });
 
-      expect(data.listOrdersByCampaign).toBeDefined();
-      expect(data.listOrdersByCampaign.length).toBeGreaterThan(0);
+      expect(data.listOrdersByCampaign.orders).toBeDefined();
+      expect(data.listOrdersByCampaign.orders.length).toBeGreaterThan(0);
     });
 
     test('Authorization: Shared user can list orders', async () => {
@@ -757,8 +763,8 @@ describe('Order Query Operations Integration Tests', () => {
         fetchPolicy: 'network-only',
       });
 
-      expect(data.listOrdersByCampaign).toBeDefined();
-      expect(data.listOrdersByCampaign.length).toBeGreaterThan(0);
+      expect(data.listOrdersByCampaign.orders).toBeDefined();
+      expect(data.listOrdersByCampaign.orders.length).toBeGreaterThan(0);
     });
 
     test('Authorization: Non-shared user cannot list orders', async () => {
@@ -772,7 +778,7 @@ describe('Order Query Operations Integration Tests', () => {
         fetchPolicy: 'network-only',
       });
       
-      expect(data.listOrdersByCampaign).toEqual([]);
+      expect(data.listOrdersByCampaign.orders).toEqual([]);
     });
 
     test('Authorization: Unauthenticated user cannot list orders by campaign', async () => {
@@ -797,7 +803,7 @@ describe('Order Query Operations Integration Tests', () => {
         fetchPolicy: 'network-only',
       });
 
-      expect(data.listOrdersByCampaign).toEqual([]);
+      expect(data.listOrdersByCampaign.orders).toEqual([]);
     });
   });
 
@@ -814,10 +820,10 @@ describe('Order Query Operations Integration Tests', () => {
         fetchPolicy: 'network-only',
       });
 
-      expect(data.listOrdersByProfile).toBeDefined();
-      expect(data.listOrdersByProfile.length).toBeGreaterThanOrEqual(2);
+      expect(data.listOrdersByProfile.orders).toBeDefined();
+      expect(data.listOrdersByProfile.orders.length).toBeGreaterThanOrEqual(2);
       
-      const orderIds = data.listOrdersByProfile.map((o: any) => o.orderId);
+      const orderIds = data.listOrdersByProfile.orders.map((o: any) => o.orderId);
       expect(orderIds).toContain(testOrderId1);
       expect(orderIds).toContain(testOrderId2);
     });
@@ -829,8 +835,8 @@ describe('Order Query Operations Integration Tests', () => {
         fetchPolicy: 'network-only',
       });
 
-      expect(data.listOrdersByProfile).toBeDefined();
-      expect(data.listOrdersByProfile).toEqual([]);
+      expect(data.listOrdersByProfile.orders).toBeDefined();
+      expect(data.listOrdersByProfile.orders).toEqual([]);
     });
 
     test('Happy Path: Includes all order fields', async () => {
@@ -841,7 +847,7 @@ describe('Order Query Operations Integration Tests', () => {
         fetchPolicy: 'network-only',
       });
 
-      const order = data.listOrdersByProfile[0];
+      const order = data.listOrdersByProfile.orders[0];
       expect(order).toHaveProperty('orderId');
       expect(order).toHaveProperty('profileId');
       expect(order).toHaveProperty('campaignId');
@@ -859,8 +865,8 @@ describe('Order Query Operations Integration Tests', () => {
         fetchPolicy: 'network-only',
       });
 
-      expect(data.listOrdersByProfile).toBeDefined();
-      expect(data.listOrdersByProfile.length).toBeGreaterThan(0);
+      expect(data.listOrdersByProfile.orders).toBeDefined();
+      expect(data.listOrdersByProfile.orders.length).toBeGreaterThan(0);
     });
 
     test('Authorization: Shared user can list orders', async () => {
@@ -871,8 +877,8 @@ describe('Order Query Operations Integration Tests', () => {
         fetchPolicy: 'network-only',
       });
 
-      expect(data.listOrdersByProfile).toBeDefined();
-      expect(data.listOrdersByProfile.length).toBeGreaterThan(0);
+      expect(data.listOrdersByProfile.orders).toBeDefined();
+      expect(data.listOrdersByProfile.orders.length).toBeGreaterThan(0);
     });
 
     test('Authorization: Non-shared user cannot list orders', async () => {
@@ -886,7 +892,7 @@ describe('Order Query Operations Integration Tests', () => {
         fetchPolicy: 'network-only',
       });
       
-      expect(data.listOrdersByProfile).toEqual([]);
+      expect(data.listOrdersByProfile.orders).toEqual([]);
     });
 
     test('Authorization: Unauthenticated user cannot list orders by profile', async () => {
@@ -911,7 +917,7 @@ describe('Order Query Operations Integration Tests', () => {
         fetchPolicy: 'network-only',
       });
 
-      expect(data.listOrdersByProfile).toEqual([]);
+      expect(data.listOrdersByProfile.orders).toEqual([]);
     });
   });
 
@@ -1199,7 +1205,7 @@ describe('Order Query Operations Integration Tests', () => {
       });
 
       // Assert: All created orders should be in the result
-      const returnedOrderIds = data.listOrdersByCampaign.map((o: any) => o.orderId);
+      const returnedOrderIds = data.listOrdersByCampaign.orders.map((o: any) => o.orderId);
       for (const orderId of createdOrderIds) {
         expect(returnedOrderIds).toContain(orderId);
       }
@@ -1264,12 +1270,12 @@ describe('Order Query Operations Integration Tests', () => {
         fetchPolicy: 'network-only',
       });
 
-      const orderIds = data.listOrdersByProfile.map((o: any) => o.orderId);
+      const orderIds = data.listOrdersByProfile.orders.map((o: any) => o.orderId);
       expect(orderIds).toContain(order1Id);
       expect(orderIds).toContain(order2Id);
 
       // Verify both campaigns are represented
-      const campaignIds = data.listOrdersByProfile.map((o: any) => o.campaignId);
+      const campaignIds = data.listOrdersByProfile.orders.map((o: any) => o.campaignId);
       expect(campaignIds).toContain(testCampaignId);
       expect(campaignIds).toContain(campaign2Id);
 
@@ -1314,13 +1320,13 @@ describe('Order Query Operations Integration Tests', () => {
       });
 
       // Verify all our orders are in the results
-      const returnedOrderIds = data.listOrdersByCampaign.map((o: any) => o.orderId);
+      const returnedOrderIds = data.listOrdersByCampaign.orders.map((o: any) => o.orderId);
       for (const orderId of createdOrderIds) {
         expect(returnedOrderIds).toContain(orderId);
       }
 
       // Verify order dates are present
-      const ourOrders = data.listOrdersByCampaign.filter((o: any) => 
+      const ourOrders = data.listOrdersByCampaign.orders.filter((o: any) => 
         createdOrderIds.includes(o.orderId)
       );
       expect(ourOrders.length).toBe(orderDates.length);

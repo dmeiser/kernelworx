@@ -154,7 +154,9 @@ const REVOKE_SHARE = gql`
 const LIST_ORDERS_BY_CAMPAIGN = gql`
   query ListOrdersByCampaign($campaignId: ID!) {
     listOrdersByCampaign(campaignId: $campaignId) {
-      orderId
+      orders {
+        orderId
+      }
     }
   }
 `;
@@ -328,7 +330,7 @@ describe('Order Operations Integration Tests', () => {
         variables: { campaignId: testCampaignId },
         fetchPolicy: 'network-only',
       });
-      for (const order of ordersData.listOrdersByCampaign || []) {
+      for (const order of ordersData.listOrdersByCampaign.orders || []) {
         await ownerClient.mutate({
           mutation: DELETE_ORDER,
           variables: { orderId: order.orderId },
@@ -742,7 +744,7 @@ describe('Order Operations Integration Tests', () => {
         variables: { campaignId: testCampaignId },
         fetchPolicy: 'network-only',
       });
-      const beforeOrderIds = listBeforeData.listOrdersByCampaign.map((o: any) => o.orderId);
+      const beforeOrderIds = listBeforeData.listOrdersByCampaign.orders.map((o: any) => o.orderId);
       expect(beforeOrderIds).toContain(orderId);
 
       // Delete it
@@ -757,7 +759,7 @@ describe('Order Operations Integration Tests', () => {
         variables: { campaignId: testCampaignId },
         fetchPolicy: 'network-only',
       });
-      const afterOrderIds = listAfterData.listOrdersByCampaign.map((o: any) => o.orderId);
+      const afterOrderIds = listAfterData.listOrdersByCampaign.orders.map((o: any) => o.orderId);
       expect(afterOrderIds).not.toContain(orderId);
     }, 15000);
 

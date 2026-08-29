@@ -807,7 +807,9 @@ describe('Campaign Operations Integration Tests', () => {
       const LIST_ORDERS = gql`
         query ListOrdersByCampaign($campaignId: ID!) {
           listOrdersByCampaign(campaignId: $campaignId) {
-            orderId
+            orders {
+              orderId
+            }
           }
         }
       `;
@@ -816,7 +818,7 @@ describe('Campaign Operations Integration Tests', () => {
         variables: { campaignId: campaignIdToDelete },
         fetchPolicy: 'network-only',
       });
-      expect(beforeDelete.listOrdersByCampaign.map((o: any) => o.orderId)).toContain(orderId);
+      expect(beforeDelete.listOrdersByCampaign.orders.map((o: any) => o.orderId)).toContain(orderId);
 
       // Act: Delete the campaign
       const { data: deleteData } = await ownerClient.mutate({
