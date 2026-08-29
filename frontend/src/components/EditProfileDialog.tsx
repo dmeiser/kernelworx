@@ -91,7 +91,9 @@ export const EditProfileDialog: React.FC<EditProfileDialogProps> = ({
           Cancel
         </Button>
         <Button
-          onClick={() => { void handleSubmit(); }}
+          onClick={() => {
+            void handleSubmit();
+          }}
           variant="contained"
           disabled={!form.values.sellerName.trim() || !form.isDirty || loading}
         >

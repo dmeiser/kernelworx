@@ -6,17 +6,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useLazyQuery, useMutation, useApolloClient } from '@apollo/client/react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import {
-  Typography,
-  Box,
-  Button,
-  Grid,
-  Alert,
-  Stack,
-  Divider,
-  FormControlLabel,
-  Switch,
-} from '@mui/material';
+import { Typography, Box, Button, Grid, Alert, Stack, Divider, FormControlLabel, Switch } from '@mui/material';
 import { Add as AddIcon, CardGiftcard as GiftIcon } from '@mui/icons-material';
 import { ProfileCard } from '../components/ProfileCard';
 import { CreateProfileDialog } from '../components/CreateProfileDialog';
@@ -308,10 +298,7 @@ const ConditionalEmptyState: React.FC<{
   loading: boolean;
 }> = ({ myProfiles, filteredSharedProfiles, loading }) =>
   shouldShowEmptyState(myProfiles, filteredSharedProfiles, loading) ? (
-    <EmptyState
-      title="No Scouts Yet"
-      message='Click "Create Scout" to add your first seller profile.'
-    />
+    <EmptyState title="No Scouts Yet" message='Click "Create Scout" to add your first seller profile.' />
   ) : null;
 
 // Helper component for conditional editing dialog
@@ -430,9 +417,13 @@ export const ScoutsPage: React.FC = () => {
     refetchQueries: [{ query: LIST_MY_PROFILES }],
     awaitRefetchQueries: true,
     onCompleted: () => {
-      void loadMyProfiles().then(() => {
-        handleReturnNavigation(returnPath, (path, opts) => { void navigate(path, opts); });
-      }).catch(() => {});
+      void loadMyProfiles()
+        .then(() => {
+          handleReturnNavigation(returnPath, (path, opts) => {
+            void navigate(path, opts);
+          });
+        })
+        .catch(() => {});
     },
   });
 
@@ -494,7 +485,9 @@ export const ScoutsPage: React.FC = () => {
               control={
                 <Switch
                   checked={showReadOnlyProfiles}
-                  onChange={(e) => { void handleToggleReadOnly(e.target.checked); }}
+                  onChange={(e) => {
+                    void handleToggleReadOnly(e.target.checked);
+                  }}
                   size="small"
                 />
               }
@@ -505,7 +498,13 @@ export const ScoutsPage: React.FC = () => {
               }
             />
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} flexWrap="wrap">
-              <Button variant="outlined" startIcon={<GiftIcon />} onClick={() => { void navigate('/accept-invite'); }}>
+              <Button
+                variant="outlined"
+                startIcon={<GiftIcon />}
+                onClick={() => {
+                  void navigate('/accept-invite');
+                }}
+              >
                 Accept Invite
               </Button>
               <Button variant="contained" startIcon={<AddIcon />} onClick={() => setCreateDialogOpen(true)}>
@@ -557,8 +556,8 @@ export const ScoutsPage: React.FC = () => {
         maxWidth="xs"
       >
         <Typography color="text.secondary">
-          Are you sure you want to delete this profile? All campaigns and orders will be permanently deleted. This action
-          cannot be undone.
+          Are you sure you want to delete this profile? All campaigns and orders will be permanently deleted. This
+          action cannot be undone.
         </Typography>
       </ConfirmDialog>
     </Box>

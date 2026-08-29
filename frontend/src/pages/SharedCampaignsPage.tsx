@@ -60,7 +60,6 @@ const StatusChip: React.FC<{ isActive: boolean }> = ({ isActive }) =>
     <Chip icon={<InactiveIcon />} label="Inactive" color="default" size="small" />
   );
 
-
 // Helper to get description with fallback
 const getDescription = (description: string | undefined): string => description || '-';
 
@@ -134,8 +133,6 @@ const generateQRCode = async (
     onError(err);
   }
 };
-
-
 
 // Helper to check if list has items
 const hasSharedCampaigns = (campaigns: SharedCampaign[]): boolean => campaigns.length > 0;
@@ -368,7 +365,10 @@ interface SharedCampaignsPageContentProps {
   onDeactivate: (campaign: SharedCampaign) => void;
   editingSharedCampaign: SharedCampaign | null;
   onEditDialogDismiss: () => void;
-  onSaveEdit: (sharedCampaignCode: string, updates: { description?: string; creatorMessage?: string; isActive?: boolean }) => Promise<void>;
+  onSaveEdit: (
+    sharedCampaignCode: string,
+    updates: { description?: string; creatorMessage?: string; isActive?: boolean },
+  ) => Promise<void>;
   deactivateDialogOpen: boolean;
   sharedCampaignToDeactivate: SharedCampaign | null;
   onDeactivateDialogDismiss: () => void;
@@ -453,7 +453,9 @@ const SharedCampaignsPageContent: React.FC<SharedCampaignsPageContentProps> = ({
         open={deactivateDialogOpen}
         title="Deactivate Shared Campaign?"
         onClose={onDeactivateDialogDismiss}
-        onConfirm={() => { void onConfirmDeactivate(); }}
+        onConfirm={() => {
+          void onConfirmDeactivate();
+        }}
         confirmLabel="Deactivate"
         confirmColor="error"
       >
@@ -477,8 +479,20 @@ const SharedCampaignsPageContent: React.FC<SharedCampaignsPageContentProps> = ({
           </Stack>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => { void onQrDialogDismiss(); }}>Close</Button>
-          <Button onClick={() => { void onDownloadQRCode(); }} variant="contained" startIcon={<DownloadIcon />}>
+          <Button
+            onClick={() => {
+              void onQrDialogDismiss();
+            }}
+          >
+            Close
+          </Button>
+          <Button
+            onClick={() => {
+              void onDownloadQRCode();
+            }}
+            variant="contained"
+            startIcon={<DownloadIcon />}
+          >
             Download
           </Button>
         </DialogActions>
@@ -504,7 +518,13 @@ export const SharedCampaignsPage: React.FC = () => {
   const [qrDialogOpen, setQrDialogOpen] = useState(false);
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string | null>(null);
   const [qrSharedCampaign, setQrSharedCampaign] = useState<SharedCampaign | null>(null);
-  const { message: snackbarMessage, open: snackbarOpen, key: snackbarKey, show: showSnackbar, close: closeSnackbar } = useSnackbar();
+  const {
+    message: snackbarMessage,
+    open: snackbarOpen,
+    key: snackbarKey,
+    show: showSnackbar,
+    close: closeSnackbar,
+  } = useSnackbar();
 
   /* v8 ignore start -- Dialog backdrop click and Snackbar auto-hide handlers cannot be simulated in jsdom */
   const handleEditDialogDismiss = () => setEditingSharedCampaign(null);
@@ -546,7 +566,9 @@ export const SharedCampaignsPage: React.FC = () => {
   const sharedCampaigns = getSharedCampaigns(data);
   const activeSharedCampaignCount = countActiveSharedCampaigns(sharedCampaigns);
   const canCreateMore = canCreateMoreSharedCampaigns(activeSharedCampaignCount);
-  const handleCreateClick = () => { void navigate('/shared-campaigns/create'); };
+  const handleCreateClick = () => {
+    void navigate('/shared-campaigns/create');
+  };
 
   const getShortLink = (sharedCampaignCode: string) => {
     return `${BASE_URL}/c/${sharedCampaignCode}`;
@@ -645,11 +667,21 @@ export const SharedCampaignsPage: React.FC = () => {
       sharedCampaigns={sharedCampaigns}
       activeSharedCampaignCount={activeSharedCampaignCount}
       canCreateMore={canCreateMore}
-      onCreateClick={() => { void handleCreateClick(); }}
-      onCopyLink={(code) => { void handleCopyLink(code); }}
-      onShowQR={(campaign) => { void handleShowQRCode(campaign); }}
-      onEdit={(campaign) => { void handleEdit(campaign); }}
-      onDeactivate={(campaign) => { void handleDeactivate(campaign); }}
+      onCreateClick={() => {
+        void handleCreateClick();
+      }}
+      onCopyLink={(code) => {
+        void handleCopyLink(code);
+      }}
+      onShowQR={(campaign) => {
+        void handleShowQRCode(campaign);
+      }}
+      onEdit={(campaign) => {
+        void handleEdit(campaign);
+      }}
+      onDeactivate={(campaign) => {
+        void handleDeactivate(campaign);
+      }}
       editingSharedCampaign={editingSharedCampaign}
       onEditDialogDismiss={handleEditDialogDismiss}
       onSaveEdit={handleSaveEdit}

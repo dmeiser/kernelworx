@@ -24,7 +24,9 @@ export const SettingsPage: React.FC = () => {
   const account = accountData?.getMyAccount;
 
   const handleLogout = () => {
-    void logout().then(() => navigate('/')).catch(() => {});
+    void logout()
+      .then(() => navigate('/'))
+      .catch(() => {});
   };
 
   return (
@@ -39,7 +41,9 @@ export const SettingsPage: React.FC = () => {
         <Stack spacing={2}>
           <Button
             variant="outlined"
-            onClick={() => { void navigate('/account/settings'); }}
+            onClick={() => {
+              void navigate('/account/settings');
+            }}
             fullWidth
             sx={{ justifyContent: 'flex-start' }}
           >
@@ -47,7 +51,9 @@ export const SettingsPage: React.FC = () => {
           </Button>
           <Button
             variant="outlined"
-            onClick={() => { void navigate('/scouts'); }}
+            onClick={() => {
+              void navigate('/scouts');
+            }}
             fullWidth
             sx={{ justifyContent: 'flex-start' }}
           >
@@ -55,7 +61,9 @@ export const SettingsPage: React.FC = () => {
           </Button>
           <Button
             variant="outlined"
-            onClick={() => { void navigate('/payment-methods'); }}
+            onClick={() => {
+              void navigate('/payment-methods');
+            }}
             fullWidth
             sx={{ justifyContent: 'flex-start' }}
           >
@@ -65,7 +73,9 @@ export const SettingsPage: React.FC = () => {
             <Button
               variant="outlined"
               color="error"
-              onClick={() => { void navigate('/admin'); }}
+              onClick={() => {
+                void navigate('/admin');
+              }}
               fullWidth
               sx={{ justifyContent: 'flex-start' }}
             >

@@ -33,18 +33,10 @@ import { LandingFooter } from '../components/LandingFooter';
 import { DeviceFrame } from '../components/DeviceFrame';
 import { brand } from '../lib/theme';
 
-const SectionHead: React.FC<{ kicker?: string; title: string; subtitle: string }> = ({
-  kicker,
-  title,
-  subtitle,
-}) => (
+const SectionHead: React.FC<{ kicker?: string; title: string; subtitle: string }> = ({ kicker, title, subtitle }) => (
   <Box sx={{ maxWidth: 680, mx: 'auto', mb: 6, textAlign: 'center' }}>
     {kicker && (
-      <Typography
-        variant="overline"
-        component="span"
-        sx={{ display: 'block', mb: 1 }}
-      >
+      <Typography variant="overline" component="span" sx={{ display: 'block', mb: 1 }}>
         {kicker}
       </Typography>
     )}
@@ -169,7 +161,7 @@ const faqs = [
   {
     question: 'What is KernelWorx?',
     answer:
-      'KernelWorx helps parents of Scouting America Scouts manage their Scout\'s popcorn sales. It brings seller profiles, orders, payments, and reporting into one place so nobody has to juggle paper sheets or rebuild spreadsheets by hand.',
+      "KernelWorx helps parents of Scouting America Scouts manage their Scout's popcorn sales. It brings seller profiles, orders, payments, and reporting into one place so nobody has to juggle paper sheets or rebuild spreadsheets by hand.",
   },
   {
     question: 'Is KernelWorx really free?',
@@ -194,8 +186,7 @@ const faqs = [
         <Link component={RouterLink} to="/account/settings">
           Account Settings
         </Link>
-        , or email{' '}
-        <Link href="mailto:privacy@kernelworx.app">privacy@kernelworx.app</Link> for assistance.
+        , or email <Link href="mailto:privacy@kernelworx.app">privacy@kernelworx.app</Link> for assistance.
       </>
     ),
   },
@@ -207,7 +198,9 @@ export const LandingPage: React.FC = () => {
   const theme = useTheme();
 
   const primaryCta = isAuthenticated ? 'Go to Dashboard' : 'Get started';
-  const handlePrimaryCta = () => { void navigate(isAuthenticated ? '/home' : '/login'); };
+  const handlePrimaryCta = () => {
+    void navigate(isAuthenticated ? '/home' : '/login');
+  };
 
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: 'background.default' }}>
@@ -247,13 +240,7 @@ export const LandingPage: React.FC = () => {
               <Button variant="contained" color="primary" size="large" onClick={handlePrimaryCta}>
                 {primaryCta}
               </Button>
-              <Button
-                variant="outlined"
-                color="primary"
-                size="large"
-                component="a"
-                href="#how-it-works"
-              >
+              <Button variant="outlined" color="primary" size="large" component="a" href="#how-it-works">
                 See how it works
               </Button>
             </Box>
@@ -587,11 +574,7 @@ export const LandingPage: React.FC = () => {
           }}
         >
           <Container maxWidth="md">
-            <SectionHead
-              kicker="Before you ask"
-              title="Your questions, answered"
-              subtitle=""
-            />
+            <SectionHead kicker="Before you ask" title="Your questions, answered" subtitle="" />
             {faqs.map((faq, index) => (
               <Accordion key={index} defaultExpanded={index === 0}>
                 <AccordionSummary expandIcon={<AddIcon sx={{ color: 'primary.main' }} />}>

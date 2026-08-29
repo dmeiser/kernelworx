@@ -255,7 +255,9 @@ def test_create_order(
 
 @pytest.mark.smoke
 @pytest.mark.slow
-def test_full_form_order_lifecycle_with_money(owner_page: Page, ensure_owner_profile: str, ensure_owner_catalog: None) -> None:
+def test_full_form_order_lifecycle_with_money(
+    owner_page: Page, ensure_owner_profile: str, ensure_owner_catalog: None
+) -> None:
     """Create a full order with a custom payment method and verify money math end-to-end.
 
     Seeds a dedicated two-product catalog/campaign so the test is not coupled to

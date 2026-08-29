@@ -119,9 +119,7 @@ def test_upload_and_delete_qr_code(owner_page: Page) -> None:
         )
 
         payment_page.upload_qr_code(method_name, str(_QR_FIXTURE_PATH))
-        assert payment_page.has_qr_code(method_name), (
-            f"QR code must be visible for '{method_name}' after upload"
-        )
+        assert payment_page.has_qr_code(method_name), f"QR code must be visible for '{method_name}' after upload"
 
         # Exercise the QR preview dialog (required by #85).
         dialog = payment_page.view_qr_code(method_name)
@@ -147,13 +145,11 @@ def test_built_in_methods_read_only(owner_page: Page) -> None:
     payment_page.goto()
 
     for method_name in ("Cash", "Check"):
-        assert payment_page.has_payment_method(method_name), (
-            f"Built-in method '{method_name}' must be visible"
-        )
+        assert payment_page.has_payment_method(method_name), f"Built-in method '{method_name}' must be visible"
         card = payment_page._card_for(method_name)
-        assert card.get_by_role(
-            "button", name=f"Edit {method_name}", exact=True
-        ).count() == 0, f"Built-in method '{method_name}' must not have an Edit button"
-        assert card.get_by_role(
-            "button", name=f"Delete {method_name}", exact=True
-        ).count() == 0, f"Built-in method '{method_name}' must not have a Delete button"
+        assert card.get_by_role("button", name=f"Edit {method_name}", exact=True).count() == 0, (
+            f"Built-in method '{method_name}' must not have an Edit button"
+        )
+        assert card.get_by_role("button", name=f"Delete {method_name}", exact=True).count() == 0, (
+            f"Built-in method '{method_name}' must not have a Delete button"
+        )

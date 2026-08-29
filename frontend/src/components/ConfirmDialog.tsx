@@ -5,7 +5,16 @@
  */
 
 import React, { useState } from 'react';
-import { Dialog, DialogTitle, DialogContent, DialogActions, Button, Typography, CircularProgress, Alert } from '@mui/material';
+import {
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Button,
+  Typography,
+  CircularProgress,
+  Alert,
+} from '@mui/material';
 
 interface ConfirmButtonProps {
   onClick: () => void;
@@ -104,7 +113,9 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = (props) => {
           Cancel
         </Button>
         <ConfirmButton
-          onClick={() => { void handleConfirm(); }}
+          onClick={() => {
+            void handleConfirm();
+          }}
           label={confirmLabel}
           color={confirmColor}
           isLoading={combinedLoading}

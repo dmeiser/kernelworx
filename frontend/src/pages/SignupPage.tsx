@@ -284,7 +284,9 @@ export const SignupPage: React.FC = () => {
     }
     if (signUpStep === 'DONE') {
       setSuccess('Account created successfully!');
-      scheduleRedirect(() => { void navigate('/login'); });
+      scheduleRedirect(() => {
+        void navigate('/login');
+      });
     }
   };
 
@@ -339,8 +341,12 @@ export const SignupPage: React.FC = () => {
         success={success}
         loading={loading}
         onVerify={handleVerifyEmail}
-        onResendCode={() => { void handleResendCode(); }}
-        onNavigateToLogin={() => { void navigate('/login'); }}
+        onResendCode={() => {
+          void handleResendCode();
+        }}
+        onNavigateToLogin={() => {
+          void navigate('/login');
+        }}
       />
     );
   }
@@ -371,7 +377,9 @@ export const SignupPage: React.FC = () => {
       success={success}
       loading={loading}
       onSignup={handleSignup}
-      onNavigateToLogin={() => { void navigate('/login'); }}
+      onNavigateToLogin={() => {
+        void navigate('/login');
+      }}
     />
   );
 };
@@ -395,7 +403,9 @@ const PageLayout: React.FC<PageLayoutProps> = ({ maxWidth = 500, children }) => 
   >
     <Card sx={{ maxWidth, width: '100%' }}>
       <CardContent sx={{ p: 4 }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5, mb: 3, flexWrap: 'wrap' }}>
+        <Box
+          sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5, mb: 3, flexWrap: 'wrap' }}
+        >
           <Box component="img" src="/logo.svg" alt="KernelWorx mark" sx={{ width: 32, height: 32 }} />
           <Typography
             variant="h5"
@@ -405,8 +415,12 @@ const PageLayout: React.FC<PageLayoutProps> = ({ maxWidth = 500, children }) => 
               lineHeight: 1,
             }}
           >
-            <Box component="span" sx={{ color: 'text.primary' }}>Kernel</Box>
-            <Box component="span" sx={{ color: 'primary.main' }}>Worx</Box>
+            <Box component="span" sx={{ color: 'text.primary' }}>
+              Kernel
+            </Box>
+            <Box component="span" sx={{ color: 'primary.main' }}>
+              Worx
+            </Box>
           </Typography>
         </Box>
         {children}
@@ -480,7 +494,12 @@ const VerificationView: React.FC<VerificationViewProps> = ({
 
     <AlertMessages error={error} success={success} />
 
-    <Box component="form" onSubmit={(e) => { void onVerify(e); }}>
+    <Box
+      component="form"
+      onSubmit={(e) => {
+        void onVerify(e);
+      }}
+    >
       <TextField
         fullWidth
         label="Verification Code"
@@ -584,7 +603,12 @@ const SignupFormView: React.FC<SignupFormViewProps> = ({
 
     <AlertMessages error={error} success={success} />
 
-    <Box component="form" onSubmit={(e) => { void onSignup(e); }}>
+    <Box
+      component="form"
+      onSubmit={(e) => {
+        void onSignup(e);
+      }}
+    >
       <TextField
         fullWidth
         label="Email Address"

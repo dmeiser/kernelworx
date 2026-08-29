@@ -156,7 +156,9 @@ const CatalogRow: React.FC<CatalogRowProps> = ({ catalog, showActions, inUse, is
       <CatalogTypeChips inUse={inUse} />
     </TableCell>
     <TableCell>{(catalog.products ?? []).length} items</TableCell>
-    <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>{formatDisplayDate(catalog.createdAt, { year: 'numeric', month: 'short', day: 'numeric' }) || '—'}</TableCell>
+    <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>
+      {formatDisplayDate(catalog.createdAt, { year: 'numeric', month: 'short', day: 'numeric' }) || '—'}
+    </TableCell>
     {showActions && (
       <TableCell align="right">
         <CatalogActions catalog={catalog} isOwned={isOwned} onEdit={onEdit} onDelete={onDelete} onView={onView} />
@@ -338,8 +340,6 @@ function useCatalogsPageData(): CatalogsPageData {
   };
 }
 
-
-
 // Sub-component: Main content (tabs + table)
 interface CatalogsContentProps {
   currentTab: number;
@@ -467,7 +467,9 @@ export const CatalogsPage: React.FC = () => {
         catalogsInUse={catalogsInUse}
         myOwnedCatalogIds={myOwnedCatalogIds}
         onEdit={handleEditCatalog}
-        onDelete={(catalogId, catalogName) => { void handleDeleteCatalog(catalogId, catalogName); }}
+        onDelete={(catalogId, catalogName) => {
+          void handleDeleteCatalog(catalogId, catalogName);
+        }}
         onCreateCatalog={handleCreateCatalog}
         onView={handleViewCatalog}
       />
@@ -503,8 +505,6 @@ async function saveCatalog(
     await mutations.createCatalog({ variables: { input: catalogData } });
   }
 }
-
-
 
 // Sub-component: Info alert explaining catalog types
 const CatalogsInfoAlert: React.FC = () => (

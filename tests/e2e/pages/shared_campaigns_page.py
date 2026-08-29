@@ -56,9 +56,7 @@ class SharedCampaignsPage(BasePage):
         self.navigate(self.PATH)
         self.wait_for_loading()
         # The header is always rendered once data (or the empty state) is ready.
-        expect(self.page.get_by_role("heading", name="My Shared Campaigns")).to_be_visible(
-            timeout=15_000
-        )
+        expect(self.page.get_by_role("heading", name="My Shared Campaigns")).to_be_visible(timeout=15_000)
 
     def goto_create(self) -> None:
         """Navigate to ``/shared-campaigns/create`` and wait for loading."""
@@ -188,9 +186,7 @@ class SharedCampaignsPage(BasePage):
         """
         code_re = re.compile(r"^[A-Z0-9]+(-[A-Z0-9]+)+$")
         # Data rows contain a "Copy link" action; the header row does not.
-        data_rows = self.page.get_by_role("row").filter(
-            has=self.page.get_by_role("button", name="Copy link")
-        )
+        data_rows = self.page.get_by_role("row").filter(has=self.page.get_by_role("button", name="Copy link"))
         try:
             expect(data_rows.first).to_be_visible(timeout=timeout)
         except AssertionError:
