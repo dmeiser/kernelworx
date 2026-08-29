@@ -19,7 +19,8 @@ import type { GqlPaymentMethod } from '../types/graphql-generated';
 const decodeUrlParam = (encoded: string | undefined): string => (encoded ? decodeURIComponent(encoded) : '');
 
 // Helper to get orders from query data
-const getOrders = (data: { listOrdersByCampaign: Order[] } | undefined): Order[] => data?.listOrdersByCampaign || [];
+const getOrders = (data: { listOrdersByCampaign: { orders: Order[] } } | undefined): Order[] =>
+  data?.listOrdersByCampaign.orders || [];
 
 // Helper to get active payment method names (lowercase for comparison)
 const getActiveMethodNames = (methods: GqlPaymentMethod[]): Set<string> =>
@@ -155,7 +156,7 @@ function useCampaignSummaryData(dbCampaignId: string | null, dbProfileId: string
     data: ordersData,
     loading: ordersLoading,
     error: ordersError,
-  } = useQuery<{ listOrdersByCampaign: Order[] }>(LIST_ORDERS_BY_CAMPAIGN, {
+  } = useQuery<{ listOrdersByCampaign: { orders: Order[] } }>(LIST_ORDERS_BY_CAMPAIGN, {
     variables: { campaignId: dbCampaignId },
     skip: !dbCampaignId,
   });

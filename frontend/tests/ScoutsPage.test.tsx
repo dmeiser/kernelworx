@@ -48,19 +48,22 @@ const baseMocks = [
     request: { query: LIST_MY_PROFILES },
     result: {
       data: {
-        listMyProfiles: [
-          {
-            profileId: 'PROFILE#p1',
-            sellerName: 'Scout Alpha',
-            accountId: 'test-account-id',
-            ownerAccountId: 'test-account-id',
-            createdAt: '2024-01-01T00:00:00Z',
-            updatedAt: '2024-01-01T00:00:00Z',
-            isOwner: true,
-            permissions: [],
-            __typename: 'SellerProfile',
-          },
-        ],
+        listMyProfiles: {
+          profiles: [
+            {
+              profileId: 'PROFILE#p1',
+              sellerName: 'Scout Alpha',
+              accountId: 'test-account-id',
+              ownerAccountId: 'test-account-id',
+              createdAt: '2024-01-01T00:00:00Z',
+              updatedAt: '2024-01-01T00:00:00Z',
+              isOwner: true,
+              permissions: [],
+              __typename: 'SellerProfile',
+            },
+          ],
+          nextToken: null,
+        },
       },
     },
   },

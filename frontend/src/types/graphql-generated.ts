@@ -415,6 +415,12 @@ export type GqlOrder = {
   updatedAt: Scalars['AWSDateTime']['output'];
 };
 
+export type GqlOrderConnection = {
+  __typename?: 'OrderConnection';
+  nextToken?: Maybe<Scalars['String']['output']>;
+  orders: Array<GqlOrder>;
+};
+
 export type GqlPaymentMethod = {
   __typename?: 'PaymentMethod';
   name: Scalars['String']['output'];
@@ -471,11 +477,11 @@ export type GqlQuery = {
   listInvitesByProfile: Array<GqlProfileInvite>;
   listManagedCatalogs: Array<GqlCatalog>;
   listMyCatalogs: Array<GqlCatalog>;
-  listMyProfiles: Array<GqlSellerProfile>;
+  listMyProfiles: GqlSellerProfileConnection;
   listMySharedCampaigns: Array<GqlSharedCampaign>;
   listMyShares: Array<GqlSharedProfile>;
-  listOrdersByCampaign: Array<GqlOrder>;
-  listOrdersByProfile: Array<GqlOrder>;
+  listOrdersByCampaign: GqlOrderConnection;
+  listOrdersByProfile: GqlOrderConnection;
   listSharesByProfile: Array<GqlShare>;
   listUnitCampaignCatalogs: Array<GqlCatalog>;
   listUnitCatalogs: Array<GqlCatalog>;
@@ -559,11 +565,20 @@ export type GqlQuery_ListInvitesByProfileArgs = {
   profileId: Scalars['ID']['input'];
 };
 
+export type GqlQuery_ListMyProfilesArgs = {
+  limit?: InputMaybe<Scalars['Int']['input']>;
+  nextToken?: InputMaybe<Scalars['String']['input']>;
+};
+
 export type GqlQuery_ListOrdersByCampaignArgs = {
   campaignId: Scalars['ID']['input'];
+  limit?: InputMaybe<Scalars['Int']['input']>;
+  nextToken?: InputMaybe<Scalars['String']['input']>;
 };
 
 export type GqlQuery_ListOrdersByProfileArgs = {
+  limit?: InputMaybe<Scalars['Int']['input']>;
+  nextToken?: InputMaybe<Scalars['String']['input']>;
   profileId: Scalars['ID']['input'];
 };
 
@@ -622,6 +637,12 @@ export type GqlSellerProfile = {
   profileId: Scalars['ID']['output'];
   sellerName: Scalars['String']['output'];
   updatedAt: Scalars['AWSDateTime']['output'];
+};
+
+export type GqlSellerProfileConnection = {
+  __typename?: 'SellerProfileConnection';
+  nextToken?: Maybe<Scalars['String']['output']>;
+  profiles: Array<GqlSellerProfile>;
 };
 
 export type GqlShare = {
@@ -914,24 +935,31 @@ export type GqlUpdateMyPreferencesMutation = {
   };
 };
 
-export type GqlListMyProfilesQueryVariables = Exact<{ [key: string]: never }>;
+export type GqlListMyProfilesQueryVariables = Exact<{
+  limit?: InputMaybe<Scalars['Int']['input']>;
+  nextToken?: InputMaybe<Scalars['String']['input']>;
+}>;
 
 export type GqlListMyProfilesQuery = {
   __typename?: 'Query';
-  listMyProfiles: Array<{
-    __typename?: 'SellerProfile';
-    profileId: string;
-    ownerAccountId: string;
-    sellerName: string;
-    createdAt: string;
-    updatedAt: string;
-    isOwner: boolean;
-    permissions?: Array<GqlPermissionType> | null | undefined;
-    latestCampaign?:
-      | { __typename?: 'Campaign'; campaignId: string; campaignName: string; campaignYear: number; isActive: boolean }
-      | null
-      | undefined;
-  }>;
+  listMyProfiles: {
+    __typename?: 'SellerProfileConnection';
+    nextToken?: string | null | undefined;
+    profiles: Array<{
+      __typename?: 'SellerProfile';
+      profileId: string;
+      ownerAccountId: string;
+      sellerName: string;
+      createdAt: string;
+      updatedAt: string;
+      isOwner: boolean;
+      permissions?: Array<GqlPermissionType> | null | undefined;
+      latestCampaign?:
+        | { __typename?: 'Campaign'; campaignId: string; campaignName: string; campaignYear: number; isActive: boolean }
+        | null
+        | undefined;
+    }>;
+  };
 };
 
 export type GqlListMySharesQueryVariables = Exact<{ [key: string]: never }>;
@@ -1054,42 +1082,48 @@ export type GqlGetCampaignQuery = {
 
 export type GqlListOrdersByCampaignQueryVariables = Exact<{
   campaignId: Scalars['ID']['input'];
+  limit?: InputMaybe<Scalars['Int']['input']>;
+  nextToken?: InputMaybe<Scalars['String']['input']>;
 }>;
 
 export type GqlListOrdersByCampaignQuery = {
   __typename?: 'Query';
-  listOrdersByCampaign: Array<{
-    __typename?: 'Order';
-    orderId: string;
-    profileId: string;
-    campaignId: string;
-    customerName: string;
-    customerPhone?: string | null | undefined;
-    orderDate: string;
-    paymentMethod: string;
-    totalAmount: number;
-    notes?: string | null | undefined;
-    createdAt: string;
-    updatedAt: string;
-    customerAddress?:
-      | {
-          __typename?: 'Address';
-          street?: string | null | undefined;
-          city?: string | null | undefined;
-          state?: string | null | undefined;
-          zipCode?: string | null | undefined;
-        }
-      | null
-      | undefined;
-    lineItems: Array<{
-      __typename?: 'LineItem';
-      productId: string;
-      productName: string;
-      quantity: number;
-      pricePerUnit: number;
-      subtotal: number;
+  listOrdersByCampaign: {
+    __typename?: 'OrderConnection';
+    nextToken?: string | null | undefined;
+    orders: Array<{
+      __typename?: 'Order';
+      orderId: string;
+      profileId: string;
+      campaignId: string;
+      customerName: string;
+      customerPhone?: string | null | undefined;
+      orderDate: string;
+      paymentMethod: string;
+      totalAmount: number;
+      notes?: string | null | undefined;
+      createdAt: string;
+      updatedAt: string;
+      customerAddress?:
+        | {
+            __typename?: 'Address';
+            street?: string | null | undefined;
+            city?: string | null | undefined;
+            state?: string | null | undefined;
+            zipCode?: string | null | undefined;
+          }
+        | null
+        | undefined;
+      lineItems: Array<{
+        __typename?: 'LineItem';
+        productId: string;
+        productName: string;
+        quantity: number;
+        pricePerUnit: number;
+        subtotal: number;
+      }>;
     }>;
-  }>;
+  };
 };
 
 export type GqlGetOrderQueryVariables = Exact<{
