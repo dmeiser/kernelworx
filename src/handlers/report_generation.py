@@ -33,6 +33,9 @@ except ModuleNotFoundError:  # pragma: no cover
     from ..utils.pagination import query_all_items
 
 
+# Report pre-signed URL lifetime in seconds (3 hours)
+REPORT_URL_EXPIRATION_SECONDS = 3 * 60 * 60
+
 # Module-level proxy that tests can monkeypatch
 s3_client: "S3Client | None" = None
 
@@ -122,16 +125,15 @@ def request_campaign_report(event: Dict[str, Any], context: Any) -> Dict[str, An
             ContentType=content_type,
         )
 
-        # Generate pre-signed URL (valid for 7 days)
-        expiration = 7 * 24 * 60 * 60  # 7 days in seconds
+        # Generate pre-signed URL (valid for 3 hours)
         report_url = s3.generate_presigned_url(
             "get_object",
             Params={"Bucket": exports_bucket, "Key": s3_key},
-            ExpiresIn=expiration,
+            ExpiresIn=REPORT_URL_EXPIRATION_SECONDS,
         )
 
         now = datetime.now(timezone.utc)
-        expires_at = now + timedelta(days=7)
+        expires_at = now + timedelta(seconds=REPORT_URL_EXPIRATION_SECONDS)
 
         result = {
             "reportId": report_id,

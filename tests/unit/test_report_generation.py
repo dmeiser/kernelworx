@@ -327,7 +327,7 @@ class TestRequestCampaignReport:
         lines = csv_content.strip().split("\n")
         assert len(lines) == 1  # Only header row
 
-    def test_presigned_url_expiration_is_7_days(
+    def test_presigned_url_expiration_is_3_hours(
         self,
         dynamodb_table: Any,
         s3_bucket: Any,
@@ -338,7 +338,7 @@ class TestRequestCampaignReport:
         appsync_event: Dict[str, Any],
         lambda_context: Any,
     ) -> None:
-        """Test that pre-signed URL expires in 7 days."""
+        """Test that pre-signed URL expires in 3 hours."""
         event = {
             **appsync_event,
             "arguments": {"input": {"campaignId": sample_campaign_id, "format": "xlsx"}},
@@ -347,14 +347,50 @@ class TestRequestCampaignReport:
         # Act
         result = request_campaign_report(event, lambda_context)
 
-        # Assert - verify expiresAt is approximately 7 days from now
+        # Assert - verify expiresAt is approximately 3 hours from now
         expires_at = datetime.fromisoformat(result["expiresAt"].replace("Z", "+00:00"))
         now = datetime.now(timezone.utc)
         time_diff = (expires_at - now).total_seconds()
 
-        # Should be approximately 7 days (604800 seconds)
+        # Should be approximately 3 hours (10800 seconds)
         # Allow 60 second tolerance for test execution time
-        assert 604740 <= time_diff <= 604860
+        assert 10740 <= time_diff <= 10860
+
+    def test_presigned_url_s3_expires_in_is_3_hours(
+        self,
+        dynamodb_table: Any,
+        s3_bucket: Any,
+        sample_profile: Dict[str, Any],
+        sample_campaign: Dict[str, Any],
+        sample_orders: list[Dict[str, Any]],
+        sample_campaign_id: str,
+        appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """Test that S3 generate_presigned_url is called with a 3-hour ExpiresIn."""
+        from unittest.mock import MagicMock
+
+        mock_s3 = MagicMock()
+        captured: Dict[str, Any] = {}
+
+        def fake_generate_presigned_url(*_args: Any, **kwargs: Any) -> str:
+            captured["expires_in"] = kwargs.get("ExpiresIn")
+            return "https://example.com/presigned-report-url"
+
+        mock_s3.generate_presigned_url = fake_generate_presigned_url
+
+        monkeypatch.setattr("src.handlers.report_generation._get_s3_client", lambda: mock_s3)
+
+        event = {
+            **appsync_event,
+            "arguments": {"input": {"campaignId": sample_campaign_id, "format": "xlsx"}},
+        }
+
+        result = request_campaign_report(event, lambda_context)
+
+        assert result["reportUrl"] == "https://example.com/presigned-report-url"
+        assert captured["expires_in"] == 3 * 60 * 60
 
     def test_generic_exception_returns_internal_error(
         self,
