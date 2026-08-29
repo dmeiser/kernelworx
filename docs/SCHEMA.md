@@ -360,5 +360,5 @@ flowchart TD
 
 - **GraphQL Schema**: [tofu/application/schema/schema.graphql](../tofu/application/schema/schema.graphql)
 - **DynamoDB Infrastructure**: [tofu/application/modules/dynamodb/main.tf](../tofu/application/modules/dynamodb/main.tf)
-- **Authorization Rules**: [AGENT.md](AGENT.md#authorization-pattern)
+- **Authorization Rules**: [AGENTS.md](../AGENTS.md#appsync-resolver-only-authorization-posture-71)
 - **Developer Guide**: [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md)

@@ -42,3 +42,20 @@ Destructive Cognito actions (`AdminDeleteUser`, `AdminResetUserPassword`, `Admin
 AWS rejects deleting an AppSync pipeline function that is still referenced by a resolver. The AWS provider does not always order resolver updates before function deletions, so deployments that remove functions from a pipeline can fail with `BadRequestException: Cannot delete a function which is currently used by a resolver`. The deploy paths use `scripts/appsync-ensure-resolver-order.sh` to detect planned function deletions and apply the affected resolver(s) first. When collapsing or removing functions from a pipeline, add the resolver target to the script invocations in `scripts/ephemeral-env.sh` and `.github/workflows/deploy-shared.yml`.
 
 Tainting shared pipeline functions via `lifecycle { replace_triggered_by = ... }` hits the same ordering problem, because a shared function may be referenced by several resolvers at once. The current pilot taints only the `createOrder` resolver itself (via its pipeline JS code hash in `tofu/application/modules/appsync/resolver_code_hashes.tf` and `resolvers_mutations.tf`); do not add function-level taint for shared functions without also updating the resolver ordering targets.
+
+### AppSync resolver-only authorization posture (#71)
+
+KernelWorx uses Amazon Cognito User Pools for AppSync authentication and `default_action = "ALLOW"` on the user pool config. AppSync therefore admits any authenticated Cognito user to every field by default; schema-level directives do not enforce ownership or share-based access control.
+
+The schema currently uses `@aws_cognito_user_pools` only to require Cognito authentication on selected types and fields (for example `Catalog`, `Product`, and a few queries). It does not perform owner, share, or admin authorization. All such authorization is implemented in resolvers:
+
+- VTL/JS direct data-source resolvers in `tofu/application/appsync/js-resolvers/` and VTL mapping templates in `tofu/application/appsync/mapping-templates/`
+- Lambda resolvers in `src/handlers/`
+
+Consequences for new resolvers:
+
+- Every new query, mutation, or field that returns sensitive data or performs a mutation must implement its own owner/share/admin check.
+- There is no schema-level safety net; a resolver that omits its check exposes the field to all authenticated users.
+- Do not rely on `@aws_cognito_user_pools` for authorization; use it only to require a Cognito-authenticated caller.
+
+This is a conscious, documented security posture. If schema-level owner authorization is added later, update this entry and the API comment in `tofu/application/modules/appsync/api.tf` accordingly.
