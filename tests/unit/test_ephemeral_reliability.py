@@ -965,8 +965,8 @@ class TestEphemeralResourceImportCoverage:
             re.DOTALL,
         )
         resolvers_by_type: dict[str, list[dict]] = {}
-        for _, rtype, rfield in res_matches:
-            resolvers_by_type.setdefault(rtype, []).append({"typeName": rtype, "fieldName": rfield})
+        for _, type_name, field_name in res_matches:
+            resolvers_by_type.setdefault(type_name, []).append({"typeName": type_name, "fieldName": field_name})
 
         resolvers_map_file = tmp_env / "resolvers.json"
         resolvers_map_file.write_text(json.dumps(resolvers_by_type))

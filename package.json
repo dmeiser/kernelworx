@@ -3,7 +3,7 @@
     "node": ">=24.0.0"
   },
   "scripts": {
-    "spellcheck": "npm --prefix frontend run spellcheck",
+    "spellcheck": "./frontend/node_modules/.bin/cspell --config cspell.json .",
     "test:guards": "vitest --run",
     "test:js-resolvers": "cd tofu/application/appsync/js-resolvers && node --import ./register-loader.mjs --test"
   },
