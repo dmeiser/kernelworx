@@ -808,6 +808,68 @@ describe('CampaignSettingsPage', () => {
     });
   });
 
+  it('clears unit information when unit type is changed to None and saves', async () => {
+    const user = userEvent.setup();
+    const mocks = createMocks(mockCampaign, [
+      {
+        request: {
+          query: UPDATE_CAMPAIGN,
+          variables: {
+            input: {
+              campaignId: CAMPAIGN_ID,
+              campaignName: 'Spring Sale',
+              catalogId: CATALOG_ID,
+              isActive: true,
+              startDate: '2025-03-01T00:00:00.000Z',
+              endDate: '2025-03-31T00:00:00.000Z',
+              unitType: null,
+              unitNumber: null,
+              city: null,
+              state: null,
+            },
+          },
+        },
+        result: {
+          data: {
+            updateCampaign: {
+              ...mockCampaign,
+              unitType: null,
+              unitNumber: null,
+              city: null,
+              state: null,
+            },
+          },
+        },
+      },
+    ]);
+    renderPage(mocks);
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('Spring Sale')).toBeInTheDocument();
+    });
+
+    const unitTypeLabel =
+      (await screen.findAllByText(/Unit Type/i)).find((el) => el.tagName === 'LABEL') ||
+      (await screen.findAllByText(/Unit Type/i))[0];
+    const unitForm = unitTypeLabel.closest('.MuiFormControl-root') as HTMLElement;
+    const unitCombo = unitForm.querySelector('[role="combobox"]') as HTMLElement;
+    await user.click(unitCombo);
+    await waitFor(() => {
+      expect(screen.getByRole('option', { name: 'None' })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole('option', { name: 'None' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /save changes/i })).not.toBeDisabled();
+    });
+
+    await user.click(screen.getByRole('button', { name: /save changes/i }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+    });
+  });
+
   it('disables unit information editing for shared campaigns', async () => {
     renderPage(createMocks(mockSharedCampaign));
 
