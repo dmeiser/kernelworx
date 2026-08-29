@@ -1,5 +1,5 @@
 /**
- * End-to-end behavior test for CampaignReportsPage XLSX sanitization.
+ * End-to-end behavior test for CampaignReportsPage XLSX sanitization and reports page views.
  *
  * Verifies that user-controlled seller and customer names are neutralized
  * in the generated Seller Report and Order Details Excel workbooks before
@@ -12,8 +12,6 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { MockedProvider } from '@apollo/client/testing/react';
 import type { MockedResponse } from '@apollo/client/testing';
-import fs from 'node:fs';
-import path from 'node:path';
 
 vi.mock('xlsx', async (importOriginal) => {
   const mod = await importOriginal<typeof import('xlsx')>();
@@ -26,8 +24,6 @@ vi.mock('xlsx', async (importOriginal) => {
 import * as XLSX from 'xlsx';
 import { CampaignReportsPage } from '../src/pages/CampaignReportsPage';
 import { GET_UNIT_REPORT, LIST_MY_SHARED_CAMPAIGNS } from '../src/lib/graphql';
-
-const EVIDENCE_DIR = '/tmp/no-mistakes-evidence/01M0Z2DY7179BRQ3XMQRNZ9ZVX';
 
 const TEST_CAMPAIGN = {
   __typename: 'SharedCampaign' as const,
@@ -44,9 +40,29 @@ const TEST_CAMPAIGN = {
   createdBy: 'owner-1',
   createdByName: 'Owner One',
   creatorMessage: '',
-  description: '',
+  description: 'Annual popcorn sale',
   isActive: true,
   createdAt: '2025-01-01T00:00:00Z',
+};
+
+const SECOND_CAMPAIGN = {
+  __typename: 'SharedCampaign' as const,
+  sharedCampaignCode: 'shared-xyz',
+  catalogId: 'catalog-2',
+  campaignName: 'Spring Fundraiser',
+  campaignYear: 2025,
+  startDate: '2025-03-01',
+  endDate: '2025-05-31',
+  unitType: 'Pack',
+  unitNumber: 202,
+  city: 'Springfield',
+  state: 'IL',
+  createdBy: 'owner-1',
+  createdByName: 'Owner One',
+  creatorMessage: '',
+  description: '',
+  isActive: true,
+  createdAt: '2025-03-01T00:00:00Z',
 };
 
 // Formula-triggering names simulate a malicious seller/customer trying to
@@ -135,7 +151,18 @@ const UNIT_REPORT = {
   ],
 };
 
-function createMocks(): MockedResponse[] {
+const EMPTY_UNIT_REPORT = {
+  __typename: 'UnitReport' as const,
+  unitType: 'Troop',
+  unitNumber: 101,
+  campaignName: 'Fall Fundraiser',
+  campaignYear: 2025,
+  totalSales: 0,
+  totalOrders: 0,
+  sellers: [],
+};
+
+function createMocks(report = UNIT_REPORT, campaigns = [TEST_CAMPAIGN]): MockedResponse[] {
   return [
     {
       request: {
@@ -144,7 +171,7 @@ function createMocks(): MockedResponse[] {
       result: {
         data: {
           __typename: 'Query',
-          listMySharedCampaigns: [TEST_CAMPAIGN],
+          listMySharedCampaigns: campaigns,
         },
       },
     },
@@ -164,7 +191,27 @@ function createMocks(): MockedResponse[] {
       result: () => ({
         data: {
           __typename: 'Query',
-          getUnitReport: UNIT_REPORT,
+          getUnitReport: report,
+        },
+      }),
+    },
+    {
+      request: {
+        query: GET_UNIT_REPORT,
+        variables: {
+          unitType: TEST_CAMPAIGN.unitType,
+          unitNumber: TEST_CAMPAIGN.unitNumber,
+          city: TEST_CAMPAIGN.city,
+          state: TEST_CAMPAIGN.state,
+          campaignName: TEST_CAMPAIGN.campaignName,
+          campaignYear: TEST_CAMPAIGN.campaignYear,
+          catalogId: TEST_CAMPAIGN.catalogId,
+        },
+      },
+      result: () => ({
+        data: {
+          __typename: 'Query',
+          getUnitReport: report,
         },
       }),
     },
@@ -173,7 +220,7 @@ function createMocks(): MockedResponse[] {
 
 function renderPage(mocks: MockedResponse[]) {
   return render(
-    <MockedProvider mocks={mocks} addTypename={false}>
+    <MockedProvider mocks={mocks}>
       <MemoryRouter initialEntries={['/reports']}>
         <Routes>
           <Route path="/reports" element={<CampaignReportsPage />} />
@@ -191,13 +238,12 @@ function rowsFromWorkbook(wb: XLSX.WorkBook, sheetName: string) {
   return XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' }) as unknown[][];
 }
 
-describe('CampaignReportsPage XLSX formula injection sanitization', () => {
+describe('CampaignReportsPage XLSX formula injection sanitization and report views', () => {
   const writeFileMock = vi.mocked(XLSX.writeFile);
 
   beforeEach(() => {
     writeFileMock.mockImplementation(() => undefined);
     writeFileMock.mockClear();
-    fs.mkdirSync(EVIDENCE_DIR, { recursive: true });
   });
 
   afterEach(() => {
@@ -208,7 +254,6 @@ describe('CampaignReportsPage XLSX formula injection sanitization', () => {
     const user = userEvent.setup();
     renderPage(createMocks());
 
-    // Wait for campaign auto-selection and generate the report.
     const generateButton = await screen.findByRole('button', { name: /Generate Report/i });
     await waitFor(() => expect(generateButton).not.toBeDisabled());
     await user.click(generateButton);
@@ -222,19 +267,10 @@ describe('CampaignReportsPage XLSX formula injection sanitization', () => {
     expect(workbook).toBeDefined();
 
     const rows = rowsFromWorkbook(workbook, 'Seller Report');
-
-    // First data row is the malicious seller; cell A2 should be text, not a formula.
     const sellerCell = rows[1][0];
     expect(sellerCell).toBe(`'${MALICIOUS_SELLER_NAME}`);
-
-    // Static header and total labels are safe and pass through unchanged.
     expect(rows[0][0]).toBe('Scout Name');
     expect(rows[3][0]).toBe('Total');
-
-    // Write an artifact so reviewers can open the generated file.
-    const buffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'buffer' });
-    const artifactPath = path.join(EVIDENCE_DIR, 'seller-report-sanitized.xlsx');
-    fs.writeFileSync(artifactPath, Buffer.from(buffer));
   });
 
   test('order details report neutralizes formula-triggering seller and customer names', async () => {
@@ -254,20 +290,113 @@ describe('CampaignReportsPage XLSX formula injection sanitization', () => {
     expect(workbook).toBeDefined();
 
     const rows = rowsFromWorkbook(workbook, 'Order Details');
-
-    // Malicious seller and customer names should be prefixed with an apostrophe.
     const sellerCell = rows[1][0];
     const customerCell = rows[1][1];
     expect(sellerCell).toBe(`'${MALICIOUS_SELLER_NAME}`);
     expect(customerCell).toBe(`'${MALICIOUS_CUSTOMER_NAME}`);
 
-    // Safe names pass through unchanged.
     const safeRow = rows.find((row) => row[0] === SAFE_SELLER_NAME);
     expect(safeRow).toBeDefined();
     expect(safeRow![1]).toBe('Plain Customer');
+  });
 
-    const buffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'buffer' });
-    const artifactPath = path.join(EVIDENCE_DIR, 'order-details-report-sanitized.xlsx');
-    fs.writeFileSync(artifactPath, Buffer.from(buffer));
+  test('renders empty state when no active shared campaigns exist', async () => {
+    const mocks: MockedResponse[] = [
+      {
+        request: {
+          query: LIST_MY_SHARED_CAMPAIGNS,
+        },
+        result: {
+          data: {
+            __typename: 'Query',
+            listMySharedCampaigns: [],
+          },
+        },
+      },
+    ];
+
+    renderPage(mocks);
+
+    expect(await screen.findByText(/You don't have any active shared campaigns yet/i)).toBeInTheDocument();
+  });
+
+  test('allows selecting different shared campaign from dropdown and switching views', async () => {
+    const user = userEvent.setup();
+    const mocks = createMocks(UNIT_REPORT, [TEST_CAMPAIGN, SECOND_CAMPAIGN]);
+    renderPage(mocks);
+
+    await screen.findByText('Select Shared Campaign');
+
+    const select = await screen.findByRole('combobox');
+    await user.click(select);
+
+    const option = await screen.findByRole('option', {
+      name: /Troop 101 - Fall Fundraiser 2025/i,
+    });
+    await user.click(option);
+
+    const generateButton = await screen.findByRole('button', { name: /Generate Report/i });
+    await waitFor(() => expect(generateButton).not.toBeDisabled());
+    await user.click(generateButton);
+
+    await screen.findByText('Unit Overview');
+
+    // Switch to Seller Report
+    await user.click(screen.getByRole('button', { name: /Seller Report/i }));
+    expect(screen.getByRole('heading', { name: /Seller Report/i })).toBeInTheDocument();
+
+    // Switch to Order Details
+    await user.click(screen.getByRole('button', { name: /Order Details/i }));
+    expect(screen.getByRole('heading', { name: /All Orders/i })).toBeInTheDocument();
+
+    // Switch back to Unit Summary
+    await user.click(screen.getByRole('button', { name: /Unit Summary/i }));
+    expect(screen.getByText('Unit Overview')).toBeInTheDocument();
+  });
+
+  test('displays info alert when report has no sellers', async () => {
+    const user = userEvent.setup();
+    renderPage(createMocks(EMPTY_UNIT_REPORT));
+
+    const generateButton = await screen.findByRole('button', { name: /Generate Report/i });
+    await waitFor(() => expect(generateButton).not.toBeDisabled());
+    await user.click(generateButton);
+
+    expect(await screen.findByText(/No sales data found for this unit in 2025/i)).toBeInTheDocument();
+  });
+
+  test('displays error alert when report query fails', async () => {
+    const mocks: MockedResponse[] = [
+      {
+        request: {
+          query: LIST_MY_SHARED_CAMPAIGNS,
+        },
+        result: {
+          data: {
+            __typename: 'Query',
+            listMySharedCampaigns: [TEST_CAMPAIGN],
+          },
+        },
+      },
+      {
+        request: {
+          query: GET_UNIT_REPORT,
+          variables: {
+            unitType: TEST_CAMPAIGN.unitType,
+            unitNumber: TEST_CAMPAIGN.unitNumber,
+            city: TEST_CAMPAIGN.city,
+            state: TEST_CAMPAIGN.state,
+            campaignName: TEST_CAMPAIGN.campaignName,
+            campaignYear: TEST_CAMPAIGN.campaignYear,
+            catalogId: TEST_CAMPAIGN.catalogId,
+          },
+        },
+        error: new Error('Backend failed to generate report'),
+      },
+    ];
+
+    renderPage(mocks);
+
+    expect(await screen.findByText(/Error loading report: Backend failed to generate report/i)).toBeInTheDocument();
   });
 });

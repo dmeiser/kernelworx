@@ -69,9 +69,7 @@ export function sanitizeReportValue(value: string | number): string | number {
 
 function prepareReportData(orders: Order[]) {
   const allProducts = getUniqueProducts(orders);
-  const headers: (string | number)[] = ['Name', 'Phone', 'Address', ...allProducts, 'Total'].map(
-    sanitizeReportValue,
-  );
+  const headers: (string | number)[] = ['Name', 'Phone', 'Address', ...allProducts, 'Total'].map(sanitizeReportValue);
 
   const rows = [
     headers,
