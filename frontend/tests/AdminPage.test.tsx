@@ -60,7 +60,7 @@ describe('AdminPage', () => {
         },
         result: {
           data: {
-            listMyProfiles: [],
+            listMyProfiles: { profiles: [], nextToken: null },
           },
         },
       },
@@ -97,7 +97,7 @@ describe('AdminPage', () => {
         },
         result: {
           data: {
-            listMyProfiles: [],
+            listMyProfiles: { profiles: [], nextToken: null },
           },
         },
       },
@@ -134,7 +134,7 @@ describe('AdminPage', () => {
         },
         result: {
           data: {
-            listMyProfiles: mockProfiles,
+            listMyProfiles: { profiles: mockProfiles, nextToken: null },
           },
         },
       },
@@ -174,7 +174,7 @@ describe('AdminPage', () => {
         },
         result: {
           data: {
-            listMyProfiles: [],
+            listMyProfiles: { profiles: [], nextToken: null },
           },
         },
       },
@@ -216,7 +216,7 @@ describe('AdminPage', () => {
         },
         result: {
           data: {
-            listMyProfiles: [],
+            listMyProfiles: { profiles: [], nextToken: null },
           },
         },
       },
@@ -257,7 +257,7 @@ describe('AdminPage', () => {
         },
         result: {
           data: {
-            listMyProfiles: [],
+            listMyProfiles: { profiles: [], nextToken: null },
           },
         },
         delay: Infinity, // Never resolves
@@ -334,7 +334,7 @@ describe('AdminPage', () => {
         },
         result: {
           data: {
-            listMyProfiles: mockProfiles,
+            listMyProfiles: { profiles: mockProfiles, nextToken: null },
           },
         },
       },
@@ -375,7 +375,7 @@ describe('AdminPage', () => {
         },
         result: {
           data: {
-            listMyProfiles: [],
+            listMyProfiles: { profiles: [], nextToken: null },
           },
         },
       },
@@ -415,7 +415,7 @@ describe('AdminPage', () => {
     const mocks = [
       {
         request: { query: LIST_MY_PROFILES },
-        result: { data: { listMyProfiles: [] } },
+        result: { data: { listMyProfiles: { profiles: [], nextToken: null } } },
       },
       {
         request: { query: LIST_MANAGED_CATALOGS },
@@ -443,7 +443,7 @@ describe('AdminPage', () => {
     const mocks = [
       {
         request: { query: LIST_MY_PROFILES },
-        result: { data: { listMyProfiles: [] } },
+        result: { data: { listMyProfiles: { profiles: [], nextToken: null } } },
       },
       {
         request: { query: LIST_MANAGED_CATALOGS },
@@ -472,7 +472,7 @@ describe('AdminPage', () => {
     const mocks = [
       {
         request: { query: LIST_MY_PROFILES },
-        result: { data: { listMyProfiles: [] } },
+        result: { data: { listMyProfiles: { profiles: [], nextToken: null } } },
       },
       {
         request: { query: LIST_MANAGED_CATALOGS },

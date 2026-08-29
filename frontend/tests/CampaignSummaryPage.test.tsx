@@ -28,7 +28,8 @@ const TEST_CAMPAIGN_ID = `CAMPAIGN#${TEST_CAMPAIGN_ID_RAW}`;
 
 // Mock orders with different payment methods and amounts
 const mockOrdersData = {
-  listOrdersByCampaign: [
+  listOrdersByCampaign: {
+    orders: [
     {
       __typename: 'Order',
       orderId: 'ORDER#1',
@@ -129,7 +130,9 @@ const mockOrdersData = {
       createdAt: '2024-01-04T00:00:00Z',
       updatedAt: '2024-01-04T00:00:00Z',
     },
-  ],
+    ],
+    nextToken: null,
+  },
 };
 
 // Mock payment methods - note: Zelle is NOT included (simulating a deleted method)
@@ -300,7 +303,7 @@ describe('CampaignSummaryPage - Payment Method Totals', () => {
 
   describe('No orders state', () => {
     test('shows "No orders yet" when there are no orders', async () => {
-      const emptyOrders = { listOrdersByCampaign: [] };
+      const emptyOrders = { listOrdersByCampaign: { orders: [], nextToken: null } };
       const mocks = createMocks(emptyOrders);
       renderWithRouter(mocks);
 

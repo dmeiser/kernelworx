@@ -57,11 +57,14 @@ const GET_PROFILE = gql`
 const LIST_MY_PROFILES = gql`
   query ListMyProfiles {
     listMyProfiles {
-      profileId
-      sellerName
-      ownerAccountId
-      createdAt
-      updatedAt
+      profiles {
+        profileId
+        sellerName
+        ownerAccountId
+        createdAt
+        updatedAt
+      }
+      nextToken
     }
   }
 `;

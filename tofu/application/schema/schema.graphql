@@ -73,6 +73,11 @@ type AdminUserConnection {
   nextToken: String
 }
 
+type SellerProfileConnection {
+  profiles: [SellerProfile!]!
+  nextToken: String
+}
+
 type SellerProfile {
   profileId: ID!
   ownerAccountId: ID!
@@ -158,6 +163,11 @@ type Order {
   notes: String
   createdAt: AWSDateTime!
   updatedAt: AWSDateTime!
+}
+
+type OrderConnection {
+  orders: [Order!]!
+  nextToken: String
 }
 
 type LineItem {
@@ -407,7 +417,7 @@ type Query {
   
   # Profile queries
   getProfile(profileId: ID!): SellerProfile
-  listMyProfiles: [SellerProfile!]!
+  listMyProfiles(limit: Int, nextToken: String): SellerProfileConnection!
   listMyShares: [SharedProfile!]!
   
   # Campaign queries
@@ -422,8 +432,8 @@ type Query {
   
   # Order queries
   getOrder(orderId: ID!): Order
-  listOrdersByCampaign(campaignId: ID!): [Order!]!
-  listOrdersByProfile(profileId: ID!): [Order!]!
+  listOrdersByCampaign(campaignId: ID!, limit: Int, nextToken: String): OrderConnection!
+  listOrdersByProfile(profileId: ID!, limit: Int, nextToken: String): OrderConnection!
   
   # Share queries
   listSharesByProfile(profileId: ID!): [Share!]!
