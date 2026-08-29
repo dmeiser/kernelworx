@@ -211,6 +211,7 @@ case "$ACTION" in
       -backend-config="region=$STATE_REGION"
 
     cleanup_stale_lock "$RUN_ID"
+    empty_ephemeral_s3_buckets "$RUN_ID"
 
     log "💥 Destroying AWS resources..."
     if tofu destroy -input=false -auto-approve -var="environment=$RUN_ID"; then
