@@ -19,7 +19,7 @@ export function request(ctx) {
     // Normalize profileId to PROFILE# for query
     const dbProfileId = profileId && profileId.startsWith('PROFILE#') ? profileId : `PROFILE#${profileId}`;
     // Query orders table using profileId-index GSI
-    return {
+    const request = {
         operation: 'Query',
         index: 'profileId-index',
         query: {
@@ -29,6 +29,16 @@ export function request(ctx) {
         })
         }
     };
+
+    const limit = ctx.args.limit;
+    if (typeof limit === 'number' && limit > 0) {
+        request.limit = limit;
+    }
+    if (ctx.args.nextToken) {
+        request.nextToken = ctx.args.nextToken;
+    }
+
+    return request;
 }
 
 export function response(ctx) {
@@ -37,11 +47,8 @@ export function response(ctx) {
     }
     
     const orders = ctx.result.items || [];
-    // Map DynamoDB field campaignId to GraphQL field campaignId for each order
-    return orders.map(order => {
-        if (order && order.campaignId) {
-            order.campaignId = order.campaignId;
-        }
-        return order;
-    });
+    return {
+        orders,
+        nextToken: ctx.result.nextToken || null
+    };
 }

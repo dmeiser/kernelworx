@@ -45,12 +45,15 @@ const GET_PROFILE = gql`
 const LIST_MY_PROFILES = gql`
   query ListMyProfiles {
     listMyProfiles {
-      profileId
-      sellerName
-      ownerAccountId
-      isOwner
-      createdAt
-      updatedAt
+      profiles {
+        profileId
+        sellerName
+        ownerAccountId
+        isOwner
+        createdAt
+        updatedAt
+      }
+      nextToken
     }
   }
 `;
@@ -381,7 +384,7 @@ describe('Profile Query Operations Integration Tests', () => {
             query: LIST_MY_PROFILES,
             fetchPolicy: 'network-only',
           });
-          return data.listMyProfiles;
+          return data.listMyProfiles.profiles;
         },
         (items: any[]) => {
           const profileIds = items.map((p: any) => p.profileId);
@@ -405,8 +408,8 @@ describe('Profile Query Operations Integration Tests', () => {
       });
 
       // Assert
-      expect(data.listMyProfiles).toBeDefined();
-      expect(Array.isArray(data.listMyProfiles)).toBe(true);
+      expect(data.listMyProfiles.profiles).toBeDefined();
+      expect(Array.isArray(data.listMyProfiles.profiles)).toBe(true);
     });
 
     // NOTE: This test may take 60-120+ seconds due to GSI eventual consistency issues (Bug #21)
@@ -431,7 +434,7 @@ describe('Profile Query Operations Integration Tests', () => {
             query: LIST_MY_PROFILES,
             fetchPolicy: 'network-only',
           });
-          return data.listMyProfiles;
+          return data.listMyProfiles.profiles;
         },
         (items: any[]) => items.some((p: any) => p.profileId === profileId),
         120, // maxAttempts (2 minutes of polling)
@@ -467,7 +470,7 @@ describe('Profile Query Operations Integration Tests', () => {
       });
 
       // Assert: Owner's profile should not appear
-      const profileIds = data.listMyProfiles.map((p: any) => p.profileId);
+      const profileIds = data.listMyProfiles.profiles.map((p: any) => p.profileId);
       expect(profileIds).not.toContain(profileId);
     });
 
@@ -500,7 +503,7 @@ describe('Profile Query Operations Integration Tests', () => {
       });
 
       // Assert: Shared profile should not appear in listMyProfiles
-      const profileIds = data.listMyProfiles.map((p: any) => p.profileId);
+      const profileIds = data.listMyProfiles.profiles.map((p: any) => p.profileId);
       expect(profileIds).not.toContain(profileId);
     });
 
@@ -512,8 +515,8 @@ describe('Profile Query Operations Integration Tests', () => {
       });
 
       // Assert
-      expect(data.listMyProfiles).toBeDefined();
-      expect(Array.isArray(data.listMyProfiles)).toBe(true);
+      expect(data.listMyProfiles.profiles).toBeDefined();
+      expect(Array.isArray(data.listMyProfiles.profiles)).toBe(true);
     });
 
     it('unauthenticated user cannot list profiles', async () => {
@@ -939,12 +942,12 @@ describe('Profile Query Operations Integration Tests', () => {
       const queryTime = endTime - startTime;
 
       // Assert: All profiles are returned
-      expect(data.listMyProfiles.length).toBeGreaterThanOrEqual(profileCount);
+      expect(data.listMyProfiles.profiles.length).toBeGreaterThanOrEqual(profileCount);
       
       // Performance check: Query should complete quickly
       expect(queryTime).toBeLessThan(5000); // Less than 5 seconds
       
-      console.log(`Listing ${data.listMyProfiles.length} profiles took ${queryTime}ms`);
+      console.log(`Listing ${data.listMyProfiles.profiles.length} profiles took ${queryTime}ms`);
     }, 90000);
 
     it('Performance: Listing profiles ordered by createdAt', async () => {
@@ -969,15 +972,15 @@ describe('Profile Query Operations Integration Tests', () => {
 
       // Assert: Profiles are returned (order may vary by implementation)
       // Note: listMyProfiles may not guarantee a specific order currently
-      expect(data.listMyProfiles.length).toBeGreaterThanOrEqual(5);
+      expect(data.listMyProfiles.profiles.length).toBeGreaterThanOrEqual(5);
       
       // Verify createdAt fields are present for ordering
-      for (const profile of data.listMyProfiles) {
+      for (const profile of data.listMyProfiles.profiles) {
         expect(profile.createdAt).toBeDefined();
       }
       
       // Check if profiles are ordered by createdAt (ascending or descending)
-      const createdTimes = data.listMyProfiles.map((p: any) => new Date(p.createdAt).getTime());
+      const createdTimes = data.listMyProfiles.profiles.map((p: any) => new Date(p.createdAt).getTime());
       const sortedAsc = [...createdTimes].sort((a, b) => a - b);
       const sortedDesc = [...createdTimes].sort((a, b) => b - a);
       
@@ -987,7 +990,7 @@ describe('Profile Query Operations Integration Tests', () => {
       // Document the actual ordering behavior
       console.log(`Profiles are ordered: ascending=${isAscending}, descending=${isDescending}`);
       // At minimum, profiles should be returned in a consistent order
-      expect(data.listMyProfiles.length).toBeGreaterThan(0);
+      expect(data.listMyProfiles.profiles.length).toBeGreaterThan(0);
     }, 60000);
   });
 

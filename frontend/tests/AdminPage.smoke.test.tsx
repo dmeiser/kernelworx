@@ -16,7 +16,7 @@ describe('AdminPage (smoke test)', () => {
 
   it('renders admin console header', async () => {
     const mocks = [
-      { request: { query: LIST_MY_PROFILES }, result: { data: { listMyProfiles: [] } } },
+      { request: { query: LIST_MY_PROFILES }, result: { data: { listMyProfiles: { profiles: [], nextToken: null } } } },
       { request: { query: LIST_MANAGED_CATALOGS }, result: { data: { listManagedCatalogs: [] } } },
       {
         request: { query: ADMIN_LIST_USERS, variables: { limit: 20 } },

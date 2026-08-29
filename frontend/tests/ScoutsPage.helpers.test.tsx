@@ -51,9 +51,11 @@ describe('ScoutsPage helpers', () => {
 
   it('areBothProfilesLoaded and getMyProfiles behave correctly', () => {
     expect(areBothProfilesLoaded(undefined, false)).toBe(false);
-    expect(areBothProfilesLoaded({ listMyProfiles: [] }, true)).toBe(true);
+    expect(areBothProfilesLoaded({ listMyProfiles: { profiles: [] } }, true)).toBe(true);
     expect(getMyProfiles(undefined)).toEqual([]);
-    expect(getMyProfiles({ listMyProfiles: [{ profileId: 'x' }] } as any)).toEqual([{ profileId: 'x' }]);
+    expect(getMyProfiles({ listMyProfiles: { profiles: [{ profileId: 'x' }] } } as any)).toEqual([
+      { profileId: 'x' },
+    ]);
   });
 
   it('isPageLoading works with combinations', () => {
