@@ -74,6 +74,7 @@ dateutils
 ddee
 dedup
 Deduplicate
+defval
 delenv
 Delete
 Deregister
