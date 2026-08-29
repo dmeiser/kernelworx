@@ -1,7 +1,9 @@
 import { util } from '@aws-appsync/utils';
 
 function buildUnitCampaignKey(unitType, unitNumber, city, state, campaignName, campaignYear) {
-    return [unitType, unitNumber, city, state, campaignName, campaignYear].join('#');
+    const unitNumStr = '' + unitNumber;
+    const yearStr = '' + campaignYear;
+    return unitType + '#' + unitNumStr + '#' + (city || '') + '#' + (state || '') + '#' + campaignName + '#' + yearStr;
 }
 
 function normalizeCatalogId(catalogId) {
@@ -46,8 +48,7 @@ function validateUnitUpdate(input, campaign) {
             util.error('unitNumber is required when unitType is provided', 'InvalidInput');
             return;
         }
-        const num = Number(unitNumber);
-        if (!Number.isInteger(num) || num < 1) {
+        if (unitNumber < 1 || Math.floor(unitNumber) !== unitNumber) {
             util.error('unitNumber must be a positive integer', 'InvalidInput');
             return;
         }
@@ -79,7 +80,6 @@ export function request(ctx) {
     const updates = [];
     const removes = [];
     const exprValues = {};
-    const exprNames = {};
 
     const unitType = getUpdatedUnitField(input, campaign, 'unitType');
     const unitNumber = getUpdatedUnitField(input, campaign, 'unitNumber');
@@ -147,7 +147,7 @@ export function request(ctx) {
             city,
             state,
             campaignName,
-            campaignYear,
+            campaignYear
         );
         updates.push('unitCampaignKey = :unitCampaignKey');
         exprValues[':unitCampaignKey'] = newKey;
@@ -177,9 +177,8 @@ export function request(ctx) {
         operation: 'UpdateItem',
         key: util.dynamodb.toMapValues({ profileId: campaign.profileId, campaignId: campaign.campaignId }),
         update: {
-        expression: updateExpression,
-        expressionNames: Object.keys(exprNames).length > 0 ? exprNames : undefined,
-        expressionValues: util.dynamodb.toMapValues(exprValues)
+            expression: updateExpression,
+            expressionValues: util.dynamodb.toMapValues(exprValues)
         }
     };
 }
@@ -247,13 +246,13 @@ export function response(ctx) {
             city,
             state,
             campaignName,
-            campaignYear,
+            campaignYear
         );
     }
 
     // Remove unitCampaignKey from the response when unit info is cleared.
     if (input.unitType !== undefined && input.unitType === null) {
-        delete result.unitCampaignKey;
+        result.unitCampaignKey = null;
     }
 
     // Always update updatedAt
