@@ -50,12 +50,12 @@ export const useSharedCampaignAndProfiles = (effectiveSharedCampaignCode: string
     loading: profilesLoading,
     refetch: refetchProfiles,
   } = useQuery<{
-    listMyProfiles: SellerProfile[];
+    listMyProfiles: { profiles: SellerProfile[] };
   }>(LIST_MY_PROFILES);
 
   const sharedCampaign = useMemo(() => sharedCampaignData?.getSharedCampaign ?? null, [sharedCampaignData]);
 
-  const profiles = useMemo(() => profilesData?.listMyProfiles ?? [], [profilesData]);
+  const profiles = useMemo(() => profilesData?.listMyProfiles.profiles ?? [], [profilesData]);
 
   const isSharedCampaignMode = useMemo(
     () => Boolean(effectiveSharedCampaignCode && sharedCampaign?.isActive && sharedCampaign?.catalog),

@@ -2,7 +2,7 @@
  * Custom hook for managing order form state
  */
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, type Dispatch, type SetStateAction } from 'react';
 
 export interface LineItemInput {
   productId: string;
@@ -110,7 +110,7 @@ export interface OrderFormState {
 
   // Payment
   paymentMethod: string;
-  setPaymentMethod: (value: string) => void;
+  setPaymentMethod: Dispatch<SetStateAction<string>>;
   notes: string;
   setNotes: (value: string) => void;
 
@@ -141,7 +141,7 @@ export function useOrderForm(): OrderFormState {
   const [state, setState] = useState('');
   const [zipCode, setZipCode] = useState('');
 
-  // Payment - default empty, set to 'Cash' by OrderEditorPage when payment methods load
+  // Payment - default empty, set to the default payment method by OrderEditorPage when payment methods load
   const [paymentMethod, setPaymentMethod] = useState('');
   const [notes, setNotes] = useState('');
 

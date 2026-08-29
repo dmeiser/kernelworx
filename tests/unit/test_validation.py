@@ -4,10 +4,14 @@ import pytest
 
 from src.utils.errors import AppError, ErrorCode
 from src.utils.validation import (
+    MAX_SELLER_NAME_LENGTH,
+    VALID_UNIT_TYPES,
     normalize_phone,
     validate_address,
     validate_invite_code,
+    validate_seller_name,
     validate_unit_number,
+    validate_unit_type,
 )
 
 
@@ -214,3 +218,70 @@ class TestValidateInviteCode:
             validate_invite_code("ABC-12345")
 
         assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+
+
+class TestValidateSellerName:
+    """Tests for validate_seller_name function."""
+
+    def test_valid_seller_name(self) -> None:
+        """Test that a valid seller name is returned trimmed."""
+        assert validate_seller_name("  Scout Name  ") == "Scout Name"
+
+    def test_none_seller_name_raises_error(self) -> None:
+        """Test that None raises AppError."""
+        with pytest.raises(AppError) as exc_info:
+            validate_seller_name(None)
+        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+        assert "sellerName is required" in exc_info.value.message
+
+    def test_empty_seller_name_raises_error(self) -> None:
+        """Test that empty or whitespace-only seller name raises AppError."""
+        with pytest.raises(AppError) as exc_info:
+            validate_seller_name("")
+        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+        assert "sellerName is required" in exc_info.value.message
+
+        with pytest.raises(AppError) as exc_info:
+            validate_seller_name("   ")
+        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+        assert "sellerName is required" in exc_info.value.message
+
+    def test_max_length_seller_name(self) -> None:
+        """Test that seller name at maximum length is accepted."""
+        name = "a" * MAX_SELLER_NAME_LENGTH
+        assert validate_seller_name(name) == name
+
+    def test_seller_name_exceeding_max_length_raises_error(self) -> None:
+        """Test that seller name exceeding max length raises AppError."""
+        name = "a" * (MAX_SELLER_NAME_LENGTH + 1)
+        with pytest.raises(AppError) as exc_info:
+            validate_seller_name(name)
+        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+        assert f"must not exceed {MAX_SELLER_NAME_LENGTH} characters" in exc_info.value.message
+
+
+class TestValidateUnitType:
+    """Tests for validate_unit_type function."""
+
+    def test_valid_unit_types(self) -> None:
+        """Test all valid unit types are accepted."""
+        for unit_type in sorted(VALID_UNIT_TYPES):
+            assert validate_unit_type(unit_type) == unit_type
+
+    def test_none_unit_type(self) -> None:
+        """Test that None returns None."""
+        assert validate_unit_type(None) is None
+
+    def test_non_string_unit_type_raises_error(self) -> None:
+        """Test that non-string unit type raises AppError."""
+        with pytest.raises(AppError) as exc_info:
+            validate_unit_type(123)  # type: ignore[arg-type]
+        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+        assert "unitType must be a string" in exc_info.value.message
+
+    def test_invalid_unit_type_raises_error(self) -> None:
+        """Test that invalid unit type raises AppError."""
+        with pytest.raises(AppError) as exc_info:
+            validate_unit_type("InvalidType")
+        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+        assert "unitType must be one of:" in exc_info.value.message

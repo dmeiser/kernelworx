@@ -51,7 +51,7 @@ const buildLazyQueryResult = (name: string | undefined) => {
     ListMyProfiles: () => [
       loadMyProfilesMock,
       {
-        data: { listMyProfiles: mockMyProfilesError ? [] : mockMyProfiles },
+        data: { listMyProfiles: { profiles: mockMyProfilesError ? [] : mockMyProfiles } },
         loading: mockMyProfilesLoading,
         error: mockMyProfilesError ?? undefined,
       },

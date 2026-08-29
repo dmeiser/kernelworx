@@ -56,19 +56,22 @@ const baseMocks = [
     },
     result: {
       data: {
-        listMyProfiles: [
-          {
-            profileId: 'profile-1',
-            sellerName: 'Scout Alpha',
-            accountId: 'test-account-id',
-            ownerAccountId: 'test-account-id',
-            createdAt: '2024-01-01T00:00:00Z',
-            updatedAt: '2024-01-01T00:00:00Z',
-            isOwner: true,
-            permissions: [],
-            __typename: 'SellerProfile',
-          },
-        ],
+        listMyProfiles: {
+          profiles: [
+            {
+              profileId: 'profile-1',
+              sellerName: 'Scout Alpha',
+              accountId: 'test-account-id',
+              ownerAccountId: 'test-account-id',
+              createdAt: '2024-01-01T00:00:00Z',
+              updatedAt: '2024-01-01T00:00:00Z',
+              isOwner: true,
+              permissions: [],
+              __typename: 'SellerProfile',
+            },
+          ],
+          nextToken: null,
+        },
       },
     },
   },
@@ -549,7 +552,7 @@ describe('CreateCampaignPage', () => {
 
     const noProfilesMock = {
       request: { query: LIST_MY_PROFILES },
-      result: { data: { listMyProfiles: [] } },
+      result: { data: { listMyProfiles: { profiles: [], nextToken: null } } },
     };
 
     // Place the no-profiles mock first so it is used instead of the base mock
@@ -736,7 +739,12 @@ describe('CreateCampaignPage', () => {
     const oneProfileMock = {
       request: { query: LIST_MY_PROFILES },
       result: {
-        data: { listMyProfiles: [{ profileId: 'profile-9', sellerName: 'Solo', isOwner: true, permissions: [] }] },
+        data: {
+          listMyProfiles: {
+            profiles: [{ profileId: 'profile-9', sellerName: 'Solo', isOwner: true, permissions: [] }],
+            nextToken: null,
+          },
+        },
       },
     };
 
@@ -877,7 +885,12 @@ describe('CreateCampaignPage', () => {
       {
         request: { query: LIST_MY_PROFILES },
         result: {
-          data: { listMyProfiles: [{ profileId: 'profile-9', sellerName: 'Solo', isOwner: true, permissions: [] }] },
+          data: {
+            listMyProfiles: {
+              profiles: [{ profileId: 'profile-9', sellerName: 'Solo', isOwner: true, permissions: [] }],
+              nextToken: null,
+            },
+          },
         },
       },
       // Catalog queries may still be executed by other components; provide safe empty responses

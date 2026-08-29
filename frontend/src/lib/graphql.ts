@@ -164,9 +164,12 @@ export const UPDATE_MY_PREFERENCES = gql`
 
 export const LIST_MY_PROFILES = gql`
   ${SELLER_PROFILE_WITH_LATEST_CAMPAIGN_FRAGMENT}
-  query ListMyProfiles {
-    listMyProfiles {
-      ...SellerProfileWithLatestCampaignFields
+  query ListMyProfiles($limit: Int, $nextToken: String) {
+    listMyProfiles(limit: $limit, nextToken: $nextToken) {
+      profiles {
+        ...SellerProfileWithLatestCampaignFields
+      }
+      nextToken
     }
   }
 `;
@@ -233,9 +236,12 @@ export const GET_CAMPAIGN = gql`
 
 export const LIST_ORDERS_BY_CAMPAIGN = gql`
   ${ORDER_FRAGMENT}
-  query ListOrdersByCampaign($campaignId: ID!) {
-    listOrdersByCampaign(campaignId: $campaignId) {
-      ...OrderFields
+  query ListOrdersByCampaign($campaignId: ID!, $limit: Int, $nextToken: String) {
+    listOrdersByCampaign(campaignId: $campaignId, limit: $limit, nextToken: $nextToken) {
+      orders {
+        ...OrderFields
+      }
+      nextToken
     }
   }
 `;

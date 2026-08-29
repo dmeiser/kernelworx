@@ -71,10 +71,11 @@ class TestCreateSellerProfile:
             "arguments": {"input": {"sellerName": "Test Scout"}},
         }
 
-        with pytest.raises(RuntimeError) as exc_info:
+        with pytest.raises(AppError) as exc_info:
             create_seller_profile(event, lambda_context)
 
-        assert "Failed to create seller profile" in str(exc_info.value)
+        assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+        assert "Failed to create seller profile" in str(exc_info.value.message)
 
     @patch("src.handlers.scout_operations.tables.profiles.put_item")
     def test_create_seller_profile_with_unit_type_and_number(
@@ -89,7 +90,7 @@ class TestCreateSellerProfile:
             "arguments": {
                 "input": {
                     "sellerName": "Pack 42 Scout",
-                    "unitType": "PACK",
+                    "unitType": "Pack",
                     "unitNumber": "42",
                 }
             },
@@ -98,7 +99,7 @@ class TestCreateSellerProfile:
         result = create_seller_profile(event, lambda_context)
 
         assert result["sellerName"] == "Pack 42 Scout"
-        assert result["unitType"] == "PACK"
+        assert result["unitType"] == "Pack"
         assert result["unitNumber"] == 42
         mock_put_item.assert_called_once_with(Item=result)
 
@@ -115,7 +116,7 @@ class TestCreateSellerProfile:
             "arguments": {
                 "input": {
                     "sellerName": "Pack Invalid Scout",
-                    "unitType": "PACK",
+                    "unitType": "Pack",
                     "unitNumber": "not-a-number",
                 }
             },
@@ -146,4 +147,50 @@ class TestCreateSellerProfile:
 
         assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
         assert "sellerName is required" in str(exc_info.value.message)
+        mock_put_item.assert_not_called()
+
+    @patch("src.handlers.scout_operations.tables.profiles.put_item")
+    def test_create_seller_profile_seller_name_too_long(
+        self,
+        mock_put_item: MagicMock,
+        appsync_event: Dict[str, Any],
+        lambda_context: Any,
+    ) -> None:
+        """Test profile creation with a sellerName exceeding the length limit raises an error."""
+        event = {
+            **appsync_event,
+            "arguments": {"input": {"sellerName": "x" * 101}},
+        }
+
+        with pytest.raises(AppError) as exc_info:
+            create_seller_profile(event, lambda_context)
+
+        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+        assert "must not exceed" in str(exc_info.value.message)
+        mock_put_item.assert_not_called()
+
+    @patch("src.handlers.scout_operations.tables.profiles.put_item")
+    def test_create_seller_profile_invalid_unit_type(
+        self,
+        mock_put_item: MagicMock,
+        appsync_event: Dict[str, Any],
+        lambda_context: Any,
+    ) -> None:
+        """Test profile creation with an unsupported unitType raises an error."""
+        event = {
+            **appsync_event,
+            "arguments": {
+                "input": {
+                    "sellerName": "Test Scout",
+                    "unitType": "INVALID",
+                    "unitNumber": "42",
+                }
+            },
+        }
+
+        with pytest.raises(AppError) as exc_info:
+            create_seller_profile(event, lambda_context)
+
+        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+        assert "unitType must be one of" in str(exc_info.value.message)
         mock_put_item.assert_not_called()
