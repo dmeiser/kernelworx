@@ -383,12 +383,12 @@ describe('requestCampaignReport Integration Tests', () => {
       expect(result.data.requestCampaignReport.createdAt).toBeDefined();
       expect(result.data.requestCampaignReport.expiresAt).toBeDefined();
 
-      // Verify URL expiration is ~7 days from now
+      // Verify URL expiration is ~3 hours from now
       const createdAt = new Date(result.data.requestCampaignReport.createdAt);
       const expiresAt = new Date(result.data.requestCampaignReport.expiresAt);
-      const diffDays = (expiresAt.getTime() - createdAt.getTime()) / (1000 * 60 * 60 * 24);
-      expect(diffDays).toBeGreaterThan(6.9);
-      expect(diffDays).toBeLessThan(7.1);
+      const diffHours = (expiresAt.getTime() - createdAt.getTime()) / (1000 * 60 * 60);
+      expect(diffHours).toBeGreaterThan(2.9);
+      expect(diffHours).toBeLessThan(3.1);
     });
 
     test('should allow owner to request campaign report with explicit xlsx format', async () => {
