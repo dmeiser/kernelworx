@@ -261,7 +261,7 @@ describe('ForgotPasswordPage', () => {
         });
       });
 
-      expect(screen.getByRole('alert')).toHaveTextContent(
+      expect(await screen.findByRole('alert')).toHaveTextContent(
         'Your password has been reset successfully.',
       );
 

@@ -5295,6 +5295,10 @@ class TestAdminUpdateCampaignSharedCode:
 
         assert result["sharedCampaignCode"] == "NEWCODE"
         assert "updatedAt" in result
+        # The returned object must be the actual stored item, not fabricated.
+        assert result["campaignName"] == "Test Campaign"
+        assert result["campaignId"] == "CAMPAIGN#c1"
+        assert result["profileId"] == "PROFILE#p1"
 
     def test_update_campaign_shared_code_remove(
         self,
@@ -5321,7 +5325,11 @@ class TestAdminUpdateCampaignSharedCode:
 
         result = lambda_handler(admin_appsync_event, lambda_context)
 
-        assert result["sharedCampaignCode"] is None
+        assert result.get("sharedCampaignCode") is None
+        assert "updatedAt" in result
+        # The returned object must be the actual stored item, not fabricated.
+        assert result["campaignName"] == "Test Campaign 2"
+        assert result["campaignId"] == "CAMPAIGN#c2"
 
     def test_update_campaign_shared_code_with_prefix(
         self,

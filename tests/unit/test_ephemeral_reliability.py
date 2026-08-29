@@ -486,12 +486,157 @@ class TestImportEphemeralResources:
         result = run_bash(repo_root, script)
         assert result.returncode == 0, result.stderr
         calls = recorded.read_text()
+        assert "module.iam.aws_iam_role.lambda_execution" in calls
+        assert "module.iam.aws_iam_role.lambda_admin_execution" in calls
         assert "module.iam.aws_iam_role_policy_attachment.lambda_basic" in calls
+        assert "module.iam.aws_iam_role_policy_attachment.lambda_admin_basic" in calls
         assert "module.iam.aws_iam_role_policy.lambda_dynamodb" in calls
+        assert "module.iam.aws_iam_role_policy.lambda_admin_dynamodb" in calls
+        assert "module.iam.aws_iam_role_policy.lambda_admin_s3" in calls
+        assert "module.iam.aws_iam_role_policy.lambda_admin_cloudfront" in calls
         assert "module.cognito.aws_iam_role_policy.lambda_cognito_admin" in calls
+        assert "kernelworx-lambda-admin-exec-ue1-pr-999:cognito-admin" in calls
         assert "module.appsync.aws_iam_role_policy.appsync_logging" in calls
         assert "module.s3.aws_s3_bucket_versioning.static" in calls
         assert "module.s3.aws_s3_bucket_cors_configuration.exports" in calls
+
+    def test_import_continues_on_error(
+        self,
+        repo_root: Path,
+        tmp_env: Path,
+    ) -> None:
+        recorded = tmp_env / "tofu_calls.txt"
+        write_mock(
+            tmp_env,
+            "aws",
+            """
+            #!/bin/bash
+            case "$1 $2" in
+              "s3api head-bucket")
+                exit 0
+                ;;
+              "dynamodb describe-table")
+                exit 0
+                ;;
+              "cognito-idp list-user-pools")
+                exit 1
+                ;;
+              "appsync list-graphql-apis")
+                exit 1
+                ;;
+              "lambda list-layer-versions" | "lambda list-functions")
+                exit 1
+                ;;
+            esac
+            exit 0
+            """,
+        )
+        write_mock(
+            tmp_env,
+            "tofu",
+            f"""
+            #!/bin/bash
+            echo "$@" >> "{recorded}"
+            # Fail the first import, succeed on others
+            if echo "$@" | grep -q "module.dynamodb.aws_dynamodb_table.accounts"; then
+                exit 1
+            fi
+            exit 0
+            """,
+        )
+
+        script = """
+            set -e
+            export STATE_BUCKET="test-bucket"
+            export STATE_REGION="us-east-1"
+            export TF_VAR_encryption_passphrase="not-used"
+            source scripts/ephemeral-recover-common.sh
+            import_ephemeral_resources pr-999
+        """
+        result = run_bash(repo_root, script)
+        assert result.returncode == 0, result.stderr
+        assert "Import of module.dynamodb.aws_dynamodb_table.accounts" in result.stderr
+        calls = recorded.read_text()
+        # Despite accounts failing, subsequent tables and resources should still have been imported
+        assert "module.dynamodb.aws_dynamodb_table.catalogs" in calls
+        assert "module.iam.aws_iam_role.lambda_execution" in calls
+
+
+class TestEmptyEphemeralS3Buckets:
+    def test_empty_s3_buckets_deletes_versions_and_markers(
+        self,
+        repo_root: Path,
+        tmp_env: Path,
+    ) -> None:
+        recorded_aws = tmp_env / "aws_calls.txt"
+        write_mock(
+            tmp_env,
+            "aws",
+            f"""
+            #!/bin/bash
+            echo "$@" >> "{recorded_aws}"
+            case "$1 $2" in
+              "s3api head-bucket")
+                exit 0
+                ;;
+              "s3api list-object-versions")
+                echo '{{"Versions": [{{"Key": "file1.txt", "VersionId": "v1"}}], "DeleteMarkers": [{{"Key": "file2.txt", "VersionId": "v2"}}]}}'
+                ;;
+              "s3api delete-objects")
+                exit 0
+                ;;
+              "s3 rm")
+                exit 0
+                ;;
+            esac
+            exit 0
+            """,
+        )
+
+        script = """
+            set -e
+            export STATE_BUCKET="test-bucket"
+            export STATE_REGION="us-east-1"
+            export TF_VAR_encryption_passphrase="not-used"
+            source scripts/ephemeral-recover-common.sh
+            empty_ephemeral_s3_buckets pr-999
+        """
+        result = run_bash(repo_root, script)
+        assert result.returncode == 0, result.stderr
+        assert "Emptying S3 buckets for run: pr-999" in result.stderr
+        calls = recorded_aws.read_text()
+        assert "s3api delete-objects" in calls
+        assert "s3 rm s3://kernelworx-static-ue1-pr-999" in calls
+        assert "s3 rm s3://kernelworx-exports-ue1-pr-999" in calls
+
+    def test_empty_s3_buckets_skips_nonexistent_buckets(
+        self,
+        repo_root: Path,
+        tmp_env: Path,
+    ) -> None:
+        write_mock(
+            tmp_env,
+            "aws",
+            """
+            #!/bin/bash
+            if [ "$1" = "s3api" ] && [ "$2" = "head-bucket" ]; then
+                exit 1
+            fi
+            exit 0
+            """,
+        )
+
+        script = """
+            set -e
+            export STATE_BUCKET="test-bucket"
+            export STATE_REGION="us-east-1"
+            export TF_VAR_encryption_passphrase="not-used"
+            source scripts/ephemeral-recover-common.sh
+            empty_ephemeral_s3_buckets pr-999
+        """
+        result = run_bash(repo_root, script)
+        assert result.returncode == 0, result.stderr
+        assert "Emptying S3 buckets for run: pr-999" in result.stderr
 
 
 class TestEphemeralEnvDown:
@@ -510,6 +655,9 @@ class TestEphemeralEnvDown:
                 ;;
               "s3api list-object-versions")
                 echo 'None'
+                ;;
+              "s3api head-bucket")
+                exit 1
                 ;;
               "s3 rm")
                 exit 0
@@ -675,3 +823,238 @@ class TestLambdaLogGroupStaticForEach:
             check=False,
         )
         assert result.returncode == 0, f"tofu validate failed: {result.stderr}"
+
+
+class TestEphemeralResourceImportCoverage:
+    """Dynamic test ensuring every resource declared in OpenTofu for ephemeral
+    environments is covered by the recovery import logic in scripts/ephemeral-recover-common.sh."""
+
+    @staticmethod
+    def _extract_map_keys(content: str, map_name: str) -> list[str]:
+        import re
+
+        pattern = re.compile(r"\b" + map_name + r"\s*=\s*\{")
+        m = pattern.search(content)
+        if not m:
+            return []
+        start = m.end() - 1
+        depth = 0
+        i = start
+        block = ""
+        while i < len(content):
+            if content[i] == "{":
+                depth += 1
+            elif content[i] == "}":
+                depth -= 1
+                if depth == 0:
+                    block = content[start + 1 : i]
+                    break
+            i += 1
+        return re.findall(r'^\s*"([a-z0-9-]+)"\s*=', block, re.MULTILINE)
+
+    @classmethod
+    def get_declared_ephemeral_resources(cls, repo_root: Path) -> set[str]:
+        import re
+
+        modules_dir = repo_root / "tofu" / "application" / "modules"
+
+        # 1. DynamoDB
+        dynamodb_tf = (modules_dir / "dynamodb" / "main.tf").read_text()
+        tables = re.findall(r'resource\s+"aws_dynamodb_table"\s+"([^"]+)"', dynamodb_tf)
+        dynamodb_res = {f"module.dynamodb.aws_dynamodb_table.{t}" for t in tables}
+
+        # 2. S3
+        s3_tf = (modules_dir / "s3" / "main.tf").read_text()
+        s3_res = set()
+        for m in re.finditer(r'resource\s+"([^"]+)"\s+"([^"]+)"', s3_tf):
+            s3_res.add(f"module.s3.{m.group(1)}.{m.group(2)}")
+
+        # 3. IAM (ephemeral stack has cloudfront_distribution_arn = null, so cloudfront invalidation policies are omitted)
+        iam_tf = (modules_dir / "iam" / "main.tf").read_text()
+        iam_res = set()
+        for m in re.finditer(r'resource\s+"([^"]+)"\s+"([^"]+)"', iam_tf):
+            rtype, rname = m.group(1), m.group(2)
+            if "cloudfront" in rname:
+                continue
+            iam_res.add(f"module.iam.{rtype}.{rname}")
+
+        # 4. Cognito (ephemeral uses prefix domain and lambda triggers)
+        cognito_tf = (modules_dir / "cognito" / "main.tf").read_text()
+        cognito_res = set()
+        for m in re.finditer(r'resource\s+"([^"]+)"\s+"([^"]+)"', cognito_tf):
+            rtype, rname = m.group(1), m.group(2)
+            if "custom" in rname or "google" in rname:
+                continue
+            if rtype == "aws_cognito_user_pool_domain" and rname == "prefix":
+                cognito_res.add(f"module.cognito.{rtype}.{rname}[0]")
+            elif rtype == "aws_lambda_permission":
+                cognito_res.add(f"module.cognito.{rtype}.{rname}[0]")
+            else:
+                cognito_res.add(f"module.cognito.{rtype}.{rname}")
+
+        # 5. Lambda (shared layer, plus functions and log groups for functions and trigger_functions)
+        lambda_tf = (modules_dir / "lambda" / "main.tf").read_text()
+        func_keys = cls._extract_map_keys(lambda_tf, "functions")
+        trigger_func_keys = cls._extract_map_keys(lambda_tf, "trigger_functions")
+
+        lambda_res = {"module.lambda.aws_lambda_layer_version.shared"}
+        for fk in func_keys:
+            lambda_res.add(f'module.lambda.aws_lambda_function.functions["{fk}"]')
+            lambda_res.add(f'module.lambda.aws_cloudwatch_log_group.functions["{fk}"]')
+        for tfk in trigger_func_keys:
+            lambda_res.add(f'module.lambda.aws_lambda_function.trigger_functions["{tfk}"]')
+            lambda_res.add(f'module.lambda.aws_cloudwatch_log_group.trigger_functions["{tfk}"]')
+
+        # 6. AppSync (static: api, logging role, logging policy, cloudwatch log group; dynamic: datasources, functions, resolvers)
+        appsync_res = {
+            "module.appsync.aws_appsync_graphql_api.main",
+            "module.appsync.aws_iam_role.appsync_logging",
+            "module.appsync.aws_iam_role_policy.appsync_logging",
+            "module.appsync.aws_cloudwatch_log_group.appsync",
+        }
+        for tf_file in sorted((modules_dir / "appsync").glob("*.tf")):
+            content = tf_file.read_text()
+            for m in re.finditer(
+                r'resource\s+"(aws_appsync_datasource|aws_appsync_function|aws_appsync_resolver)"\s+"([^"]+)"', content
+            ):
+                appsync_res.add(f"module.appsync.{m.group(1)}.{m.group(2)}")
+
+        return dynamodb_res | s3_res | iam_res | cognito_res | lambda_res | appsync_res
+
+    def test_dynamic_resource_import_coverage(self, repo_root: Path, tmp_env: Path) -> None:
+        import re
+
+        declared_resources = self.get_declared_ephemeral_resources(repo_root)
+        assert len(declared_resources) > 0, "Declared ephemeral resources must not be empty"
+
+        recorded = tmp_env / "tofu_calls.txt"
+
+        lambda_tf = (repo_root / "tofu" / "application" / "modules" / "lambda" / "main.tf").read_text()
+        func_keys = self._extract_map_keys(lambda_tf, "functions")
+        trigger_func_keys = self._extract_map_keys(lambda_tf, "trigger_functions")
+
+        all_func_names = [f"kernelworx-{fk}-ue1-pr-coverage" for fk in func_keys] + [
+            f"kernelworx-{tfk}-ue1-pr-coverage" for tfk in trigger_func_keys
+        ]
+        functions_json = json.dumps({"Functions": [{"FunctionName": fn} for fn in all_func_names]})
+
+        appsync_dir = repo_root / "tofu" / "application" / "modules" / "appsync"
+        appsync_tf_content = "".join(f.read_text() + "\n" for f in sorted(appsync_dir.glob("*.tf")))
+
+        ds_names = re.findall(
+            r'resource\s+"aws_appsync_datasource"\s+"([^"]+)".*?name\s*=\s*"([^"]+)"',
+            appsync_tf_content,
+            re.DOTALL,
+        )
+        ds_json = json.dumps({"dataSources": [{"name": aws_name} for _, aws_name in ds_names]})
+
+        fn_matches = re.findall(
+            r'resource\s+"aws_appsync_function"\s+"([^"]+)".*?name\s*=\s*"([^"]+)"',
+            appsync_tf_content,
+            re.DOTALL,
+        )
+        fn_list = []
+        for i, (_, raw_name) in enumerate(fn_matches):
+            fn_name = raw_name.replace("${local.env_suffix}", "_pr_coverage")
+            fn_list.append({"name": fn_name, "functionId": f"fn_{i}"})
+        fn_json = json.dumps({"functions": fn_list})
+
+        res_matches = re.findall(
+            r'resource\s+"aws_appsync_resolver"\s+"([^"]+)".*?type\s*=\s*"([^"]+)".*?field\s*=\s*"([^"]+)"',
+            appsync_tf_content,
+            re.DOTALL,
+        )
+        resolvers_by_type: dict[str, list[dict]] = {}
+        for _, type_name, field_name in res_matches:
+            resolvers_by_type.setdefault(type_name, []).append({"typeName": type_name, "fieldName": field_name})
+
+        resolvers_map_file = tmp_env / "resolvers.json"
+        resolvers_map_file.write_text(json.dumps(resolvers_by_type))
+
+        write_mock(
+            tmp_env,
+            "aws",
+            f"""
+            #!/bin/bash
+            case "$1 $2" in
+              "s3api head-bucket")
+                exit 0
+                ;;
+              "dynamodb describe-table")
+                exit 0
+                ;;
+              "cognito-idp list-user-pools")
+                echo '{json.dumps({"UserPools": [{"Name": "kernelworx-users-ue1-pr-coverage", "Id": "us-east-1_COVERAGE"}]})}'
+                ;;
+              "cognito-idp list-user-pool-clients")
+                echo '{json.dumps({"UserPoolClients": [{"ClientName": "KernelWorx-Web", "ClientId": "client-coverage"}]})}'
+                ;;
+              "lambda get-function")
+                exit 0
+                ;;
+              "appsync list-graphql-apis")
+                echo '{json.dumps({"graphqlApis": [{"name": "kernelworx-api-ue1-pr-coverage", "apiId": "api-coverage"}]})}'
+                ;;
+              "appsync list-data-sources")
+                echo '{ds_json}'
+                ;;
+              "appsync list-functions")
+                echo '{fn_json}'
+                ;;
+              "appsync list-resolvers")
+                type_name=""
+                while [ $# -gt 0 ]; do
+                  if [ "$1" = "--type-name" ]; then
+                    type_name="$2"
+                    shift 2
+                  else
+                    shift
+                  fi
+                done
+                python3 -c "import sys, json; m=json.load(open('{resolvers_map_file}')); print(json.dumps({{'resolvers': m.get('$type_name', [])}}))"
+                ;;
+              "lambda list-layer-versions")
+                echo '{json.dumps({"LayerVersions": [{"Version": 1}]})}'
+                ;;
+              "lambda get-layer-version")
+                echo "arn:aws:lambda:us-east-1:123456789012:layer:kernelworx-deps-ue1-pr-coverage:1"
+                ;;
+              "lambda list-functions")
+                echo '{functions_json}'
+                ;;
+            esac
+            exit 0
+            """,
+        )
+
+        write_mock(
+            tmp_env,
+            "tofu",
+            f"""
+            #!/bin/bash
+            if [ "$1" = "import" ]; then
+                echo "$4" >> "{recorded}"
+            fi
+            exit 0
+            """,
+        )
+
+        script = """
+            set -e
+            export STATE_BUCKET="test-bucket"
+            export STATE_REGION="us-east-1"
+            export TF_VAR_encryption_passphrase="not-used"
+            source scripts/ephemeral-recover-common.sh
+            import_ephemeral_resources pr-coverage
+        """
+        result = run_bash(repo_root, script)
+        assert result.returncode == 0, result.stderr
+
+        imported_addresses = set(recorded.read_text().splitlines()) if recorded.exists() else set()
+        missing = declared_resources - imported_addresses
+
+        assert not missing, (
+            f"The following {len(missing)} OpenTofu ephemeral resource(s) are declared in modules "
+            f"but lack corresponding recovery import logic in scripts/ephemeral-recover-common.sh:\n"
+            + "\n".join(sorted(missing))
+        )

@@ -14,7 +14,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, Optional, cast
 
 import boto3
 from botocore.exceptions import ClientError
@@ -1496,8 +1496,10 @@ def _get_campaign_profile_id(db_campaign_id: str, campaign_id: str) -> str:
     return str(items[0]["profileId"])
 
 
-def _update_campaign_shared_code(profile_id: str, db_campaign_id: str, shared_campaign_code: Optional[str]) -> None:
-    """Update campaign's sharedCampaignCode field."""
+def _update_campaign_shared_code(
+    profile_id: str, db_campaign_id: str, shared_campaign_code: Optional[str]
+) -> Dict[str, Any]:
+    """Update campaign's sharedCampaignCode field and return the stored item."""
     updated_at = datetime.now(timezone.utc).isoformat()
 
     if shared_campaign_code is None:
@@ -1507,11 +1509,14 @@ def _update_campaign_shared_code(profile_id: str, db_campaign_id: str, shared_ca
         update_expr = "SET sharedCampaignCode = :code, updatedAt = :updated"
         expr_vals = {":code": shared_campaign_code, ":updated": updated_at}
 
-    tables.campaigns.update_item(
+    response = tables.campaigns.update_item(
         Key={"profileId": profile_id, "campaignId": db_campaign_id},
         UpdateExpression=update_expr,
         ExpressionAttributeValues=expr_vals,
+        ReturnValues="ALL_NEW",
     )
+
+    return cast(Dict[str, Any], response.get("Attributes", {}))
 
 
 def _validate_admin_and_get_campaign_id(event: Dict[str, Any]) -> tuple[str, Optional[str]]:
@@ -1531,7 +1536,7 @@ def _validate_admin_and_get_campaign_id(event: Dict[str, Any]) -> tuple[str, Opt
 
 def admin_update_campaign_shared_code(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
-    Update a campaign's sharedCampaignCode field.
+    Update a campaign's sharedCampaignCode field and return the stored campaign item.
 
     Admin-only operation. Allows associating a campaign with a shared campaign.
     """
@@ -1543,18 +1548,9 @@ def admin_update_campaign_shared_code(event: Dict[str, Any], context: Any) -> Di
         # Add CAMPAIGN# prefix if not present
         db_campaign_id = campaign_id if campaign_id.startswith("CAMPAIGN#") else f"CAMPAIGN#{campaign_id}"
 
-        # Get campaign and update shared code
+        # Get campaign profile, update shared code, and return the stored item
         profile_id = _get_campaign_profile_id(db_campaign_id, campaign_id)
-        _update_campaign_shared_code(profile_id, db_campaign_id, shared_campaign_code)
-
-        # Return updated campaign
-        updated_at = datetime.now(timezone.utc).isoformat()
-        updated_campaign = {
-            "campaignId": db_campaign_id,
-            "profileId": profile_id,
-            "sharedCampaignCode": shared_campaign_code,
-            "updatedAt": updated_at,
-        }
+        updated_campaign = _update_campaign_shared_code(profile_id, db_campaign_id, shared_campaign_code)
 
         logger.info("Updated campaign shared code", campaign_id=campaign_id, shared_campaign_code=shared_campaign_code)
         return updated_campaign

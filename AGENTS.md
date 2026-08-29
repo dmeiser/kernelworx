@@ -18,6 +18,8 @@ Ephemeral per-PR stacks live in `tofu/application/environments/ephemeral` and ar
 - `scripts/ephemeral-env.sh up <run-id>` creates/updates a stack; `down <run-id>` destroys it. State is stored in S3 under `s3://kernelworx-tofu-state-us-east-1-dev/application/ephemeral/<run-id>/terraform.tfstate`.
 - The script detects and removes stale S3 `.tflock` objects left by crashed or cancelled CI runners (different hostname = always stale; same hostname = stale after `EPHEMERAL_LOCK_STALE_SECONDS`, default 600).
 - If the current state object is missing but a previous S3 version exists, `ephemeral-env.sh down`, `recover-deploy.sh`, and `recover-destroy.sh` restore the latest version before proceeding, so resources are tracked.
+- `ephemeral-env.sh down` and `recover-destroy.sh` automatically empty ephemeral S3 buckets (purging all object versions and delete markers) prior to `tofu destroy` to prevent `BucketNotEmpty` errors.
+- Recovery imports in `scripts/ephemeral-recover-common.sh` continue on error across all resources and are dynamically verified against all declared OpenTofu modules in `tests/unit/test_ephemeral_reliability.py`.
 
 ### Recovery workflows
 

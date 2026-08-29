@@ -21,6 +21,7 @@ recover_state_if_missing "$RUN_ID"
 cleanup_stale_lock "$RUN_ID"
 init_backend "$RUN_ID"
 import_ephemeral_resources "$RUN_ID"
+empty_ephemeral_s3_buckets "$RUN_ID"
 
 echo "💥 Destroying recovered resources..."
 if tofu destroy -input=false -auto-approve -var="environment=$RUN_ID"; then

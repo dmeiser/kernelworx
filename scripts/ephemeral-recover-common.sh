@@ -51,7 +51,93 @@ import_resource() {
     return 0
   fi
   log "   📥 Importing $address ($id)"
-  tofu import -input=false -var="environment=$run_id" "$address" "$id" || true
+  if ! tofu import -input=false -var="environment=$run_id" "$address" "$id"; then
+    log "   ⚠️  Import of $address ($id) failed; continuing."
+  fi
+  return 0
+}
+
+# Empty S3 buckets (including all versions and delete markers) before teardown/destroy
+# so that `tofu destroy` or bucket deletion does not fail with BucketNotEmpty.
+empty_ephemeral_s3_buckets() {
+  local run_id="$1"
+  local region="${AWS_REGION:-us-east-1}"
+  local suffix="-ue1-${run_id}"
+
+  log "🧹 Emptying S3 buckets for run: $run_id"
+  for bucket_type in static exports; do
+    local bucket_name="kernelworx-${bucket_type}${suffix}"
+    if aws s3api head-bucket --bucket "$bucket_name" --region "$region" 2>/dev/null; then
+      log "   Emptying bucket: $bucket_name"
+      python3 - "$bucket_name" "$region" <<'PY' || true
+import json
+import subprocess
+import sys
+
+bucket = sys.argv[1]
+region = sys.argv[2]
+
+key_marker = None
+version_id_marker = None
+
+while True:
+    cmd = ["aws", "s3api", "list-object-versions", "--bucket", bucket, "--region", region, "--output", "json"]
+    if key_marker:
+        cmd += ["--key-marker", key_marker]
+    if version_id_marker:
+        cmd += ["--version-id-marker", version_id_marker]
+
+    res = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    if res.returncode != 0 or not res.stdout:
+        break
+    try:
+        data = json.loads(res.stdout)
+    except Exception:
+        break
+
+    objects_to_delete = []
+    for v in data.get("Versions", []):
+        key = v.get("Key")
+        vid = v.get("VersionId")
+        if key:
+            entry = {"Key": key}
+            if vid and vid != "null":
+                entry["VersionId"] = vid
+            objects_to_delete.append(entry)
+    for m in data.get("DeleteMarkers", []):
+        key = m.get("Key")
+        vid = m.get("VersionId")
+        if key:
+            entry = {"Key": key}
+            if vid and vid != "null":
+                entry["VersionId"] = vid
+            objects_to_delete.append(entry)
+
+    if objects_to_delete:
+        for i in range(0, len(objects_to_delete), 1000):
+            batch = objects_to_delete[i:i+1000]
+            del_payload = json.dumps({"Objects": batch, "Quiet": True})
+            subprocess.run(
+                ["aws", "s3api", "delete-objects", "--bucket", bucket, "--delete", del_payload, "--region", region],
+                capture_output=True, text=True, check=False
+            )
+
+    if not data.get("IsTruncated"):
+        break
+
+    key_marker = data.get("NextKeyMarker")
+    version_id_marker = data.get("NextVersionIdMarker")
+    if not key_marker:
+        break
+
+# Fallback cleanup for unversioned objects
+subprocess.run(
+    ["aws", "s3", "rm", f"s3://{bucket}", "--recursive", "--region", region],
+    capture_output=True, text=True, check=False
+)
+PY
+    fi
+  done
 }
 
 # If the state object has been deleted (e.g. by a previous failed teardown run
@@ -132,27 +218,35 @@ import_ephemeral_resources() {
 
   # IAM roles
   log "   Importing IAM roles..."
-  import_resource "$run_id" "module.iam.aws_iam_role.lambda_execution" "kernelworx-lambda-exec${suffix}"
-  import_resource "$run_id" "module.iam.aws_iam_role.appsync_service" "kernelworx-appsync${suffix}"
-  import_resource "$run_id" "module.appsync.aws_iam_role.appsync_logging" "kernelworx-api${suffix}-logs"
-  import_resource "$run_id" "module.iam.aws_iam_role.cognito_sms" "kernelworx${suffix}-UserPoolsmsRole"
+  local lambda_exec_role="kernelworx-lambda-exec${suffix}"
+  local lambda_admin_exec_role="kernelworx-lambda-admin-exec${suffix}"
+  local appsync_role="kernelworx-appsync${suffix}"
+  local cognito_sms_role="kernelworx${suffix}-UserPoolsmsRole"
+  local appsync_logging_role="kernelworx-api${suffix}-logs"
+
+  import_resource "$run_id" "module.iam.aws_iam_role.lambda_execution" "$lambda_exec_role"
+  import_resource "$run_id" "module.iam.aws_iam_role.lambda_admin_execution" "$lambda_admin_exec_role"
+  import_resource "$run_id" "module.iam.aws_iam_role.appsync_service" "$appsync_role"
+  import_resource "$run_id" "module.appsync.aws_iam_role.appsync_logging" "$appsync_logging_role"
+  import_resource "$run_id" "module.iam.aws_iam_role.cognito_sms" "$cognito_sms_role"
 
   # IAM policy attachments and inline policies. These must be in state so that
   # `tofu destroy` can detach/delete them before removing the parent roles.
   log "   Importing IAM policies..."
-  local lambda_exec_role="kernelworx-lambda-exec${suffix}"
-  local appsync_role="kernelworx-appsync${suffix}"
-  local cognito_sms_role="kernelworx${suffix}-UserPoolsmsRole"
-  local appsync_logging_role="kernelworx-api${suffix}-logs"
   import_resource "$run_id" "module.iam.aws_iam_role_policy_attachment.lambda_basic" "${lambda_exec_role}/arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
   import_resource "$run_id" "module.iam.aws_iam_role_policy.lambda_dynamodb" "${lambda_exec_role}:dynamodb-access"
   import_resource "$run_id" "module.iam.aws_iam_role_policy.lambda_s3" "${lambda_exec_role}:s3-access"
+  import_resource "$run_id" "module.iam.aws_iam_role_policy.lambda_cloudfront" "${lambda_exec_role}:cloudfront-invalidation"
+
+  import_resource "$run_id" "module.iam.aws_iam_role_policy_attachment.lambda_admin_basic" "${lambda_admin_exec_role}/arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+  import_resource "$run_id" "module.iam.aws_iam_role_policy.lambda_admin_dynamodb" "${lambda_admin_exec_role}:dynamodb-access"
+  import_resource "$run_id" "module.iam.aws_iam_role_policy.lambda_admin_s3" "${lambda_admin_exec_role}:s3-access"
+  import_resource "$run_id" "module.iam.aws_iam_role_policy.lambda_admin_cloudfront" "${lambda_admin_exec_role}:cloudfront-invalidation"
+
   import_resource "$run_id" "module.iam.aws_iam_role_policy.cognito_sms" "${cognito_sms_role}:sns-publish"
   import_resource "$run_id" "module.appsync.aws_iam_role_policy.appsync_logging" "${appsync_logging_role}:appsync-logging"
   import_resource "$run_id" "module.iam.aws_iam_role_policy.appsync_dynamodb" "${appsync_role}:dynamodb-access"
   import_resource "$run_id" "module.iam.aws_iam_role_policy.appsync_lambda" "${appsync_role}:lambda-invoke"
-  # CloudFront invalidation policy is only created when a distribution exists.
-  import_resource "$run_id" "module.iam.aws_iam_role_policy.lambda_cloudfront" "${lambda_exec_role}:cloudfront-invalidation"
 
   # Cognito user pool, client, and prefix domain
   log "   Importing Cognito resources..."
@@ -166,24 +260,24 @@ import_ephemeral_resources() {
     fi
 
     local cognito_page
-    cognito_page=$(aws cognito-idp list-user-pools "${cognito_args[@]}" 2>/dev/null)
+    cognito_page=$(aws cognito-idp list-user-pools "${cognito_args[@]}" 2>/dev/null || true)
     if [ -z "$cognito_page" ]; then
       break
     fi
 
-    user_pool_id=$(echo "$cognito_page" | python3 -c "import sys, json; d=json.load(sys.stdin); pools=[p for p in d.get('UserPools', []) if p.get('Name')=='kernelworx-users${suffix}']; print(pools[0]['Id'] if pools else '')")
+    user_pool_id=$(echo "$cognito_page" | python3 -c "import sys, json; d=json.load(sys.stdin); pools=[p for p in d.get('UserPools', []) if p.get('Name')=='kernelworx-users${suffix}']; print(pools[0]['Id'] if pools else '')" 2>/dev/null || true)
     if [ -n "$user_pool_id" ]; then
       break
     fi
 
-    cognito_next_token=$(echo "$cognito_page" | python3 -c "import sys, json; d=json.load(sys.stdin); print(d.get('NextToken', ''))")
+    cognito_next_token=$(echo "$cognito_page" | python3 -c "import sys, json; d=json.load(sys.stdin); print(d.get('NextToken', ''))" 2>/dev/null || true)
     [ -z "$cognito_next_token" ] && break
   done
   if [ -n "$user_pool_id" ] && [ "$user_pool_id" != "None" ]; then
     import_resource "$run_id" "module.cognito.aws_cognito_user_pool.main" "$user_pool_id"
 
     local client_id
-    client_id=$(aws cognito-idp list-user-pool-clients --user-pool-id "$user_pool_id" --region "$region" --query "UserPoolClients[?ClientName=='KernelWorx-Web'].ClientId | [0]" --output text 2>/dev/null | head -n1)
+    client_id=$(aws cognito-idp list-user-pool-clients --user-pool-id "$user_pool_id" --region "$region" --query "UserPoolClients[?ClientName=='KernelWorx-Web'].ClientId | [0]" --output text 2>/dev/null | head -n1 || true)
     if [ -n "$client_id" ] && [ "$client_id" != "None" ]; then
       import_resource "$run_id" "module.cognito.aws_cognito_user_pool_client.web" "${user_pool_id}/${client_id}"
     fi
@@ -202,8 +296,8 @@ import_ephemeral_resources() {
       import_resource "$run_id" "module.cognito.aws_lambda_permission.cognito_post_confirmation[0]" "AllowCognitoInvokePostConfirmation/${post_auth_name}"
     fi
 
-    # Cognito inline policy attached to the Lambda execution role.
-    import_resource "$run_id" "module.cognito.aws_iam_role_policy.lambda_cognito_admin" "${lambda_exec_role}:cognito-admin"
+    # Cognito inline policy attached to the Lambda admin execution role.
+    import_resource "$run_id" "module.cognito.aws_iam_role_policy.lambda_cognito_admin" "${lambda_admin_exec_role}:cognito-admin"
   fi
 
   # AppSync API
@@ -218,17 +312,17 @@ import_ephemeral_resources() {
     fi
 
     local api_page
-    api_page=$(aws appsync list-graphql-apis "${api_args[@]}" 2>/dev/null)
+    api_page=$(aws appsync list-graphql-apis "${api_args[@]}" 2>/dev/null || true)
     if [ -z "$api_page" ]; then
       break
     fi
 
-    appsync_id=$(echo "$api_page" | python3 -c "import sys, json; d=json.load(sys.stdin); apis=[a for a in d.get('graphqlApis', []) if a.get('name')=='kernelworx-api${suffix}']; print(apis[0]['apiId'] if apis else '')")
+    appsync_id=$(echo "$api_page" | python3 -c "import sys, json; d=json.load(sys.stdin); apis=[a for a in d.get('graphqlApis', []) if a.get('name')=='kernelworx-api${suffix}']; print(apis[0]['apiId'] if apis else '')" 2>/dev/null || true)
     if [ -n "$appsync_id" ]; then
       break
     fi
 
-    api_next_token=$(echo "$api_page" | python3 -c "import sys, json; d=json.load(sys.stdin); print(d.get('nextToken', ''))")
+    api_next_token=$(echo "$api_page" | python3 -c "import sys, json; d=json.load(sys.stdin); print(d.get('nextToken', ''))" 2>/dev/null || true)
     [ -z "$api_next_token" ] && break
   done
   if [ -n "$appsync_id" ] && [ "$appsync_id" != "None" ]; then
@@ -242,10 +336,10 @@ import_ephemeral_resources() {
   # Lambda layer version
   log "   Importing Lambda layer version..."
   local layer_versions
-  layer_versions=$(aws lambda list-layer-versions --layer-name "kernelworx-deps${suffix}" --region "$region" --query 'LayerVersions[].Version' --output text 2>/dev/null)
+  layer_versions=$(aws lambda list-layer-versions --layer-name "kernelworx-deps${suffix}" --region "$region" --query 'LayerVersions[].Version' --output text 2>/dev/null || true)
   for version in $layer_versions; do
     local layer_arn
-    layer_arn=$(aws lambda get-layer-version --layer-name "kernelworx-deps${suffix}" --version-number "$version" --region "$region" --query 'LayerVersionArn' --output text 2>/dev/null)
+    layer_arn=$(aws lambda get-layer-version --layer-name "kernelworx-deps${suffix}" --version-number "$version" --region "$region" --query 'LayerVersionArn' --output text 2>/dev/null || true)
     if [ -n "$layer_arn" ] && [ "$layer_arn" != "None" ]; then
       import_resource "$run_id" "module.lambda.aws_lambda_layer_version.shared" "$layer_arn"
       break
@@ -264,13 +358,13 @@ import_ephemeral_resources() {
     fi
 
     local page
-    page=$(aws lambda list-functions "${args[@]}" 2>/dev/null)
+    page=$(aws lambda list-functions "${args[@]}" 2>/dev/null || true)
     if [ -z "$page" ]; then
       break
     fi
 
     local names
-    names=$(echo "$page" | python3 -c "import sys, json; d=json.load(sys.stdin); print('\n'.join(f['FunctionName'] for f in d.get('Functions', []) if f['FunctionName'].endswith('${suffix}')))")
+    names=$(echo "$page" | python3 -c "import sys, json; d=json.load(sys.stdin); print('\n'.join(f['FunctionName'] for f in d.get('Functions', []) if f['FunctionName'].endswith('${suffix}')))" 2>/dev/null || true)
     if [ -n "$names" ]; then
       if [ -n "$func_names" ]; then
         func_names="$func_names
@@ -280,7 +374,7 @@ $names"
       fi
     fi
 
-    next_marker=$(echo "$page" | python3 -c "import sys, json; d=json.load(sys.stdin); print(d.get('NextMarker', ''))")
+    next_marker=$(echo "$page" | python3 -c "import sys, json; d=json.load(sys.stdin); print(d.get('NextMarker', ''))" 2>/dev/null || true)
     [ -z "$next_marker" ] && break
   done
   for func_name in $func_names; do
