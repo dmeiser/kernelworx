@@ -5,6 +5,7 @@ import urllib.parse
 import uuid
 
 from playwright.sync_api import Locator, Page, expect
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from .base_page import BasePage
 
@@ -162,13 +163,19 @@ class CatalogsPage(BasePage):
         """Return ``True`` when the catalogs page header is visible."""
         return bool(self._new_catalog_button().is_visible())
 
-    def has_catalog(self, name: str) -> bool:
+    def has_catalog(self, name: str, timeout: int = 10_000) -> bool:
         """Return ``True`` when a row with the exact catalog name is visible.
 
         Args:
             name: Catalog name text to search for.
+            timeout: Maximum wait in milliseconds. Defaults to 10 000.
         """
-        return self._catalog_row(name).first.is_visible()
+        row = self._catalog_row(name)
+        try:
+            row.first.wait_for(state="visible", timeout=timeout)
+        except PlaywrightTimeoutError:
+            return False
+        return True
 
     def has_any_catalogs(self) -> bool:
         """Return ``True`` when the current tab lists at least one catalog.
