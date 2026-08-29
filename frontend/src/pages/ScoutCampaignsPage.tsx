@@ -5,13 +5,7 @@
 import React from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery } from '@apollo/client/react';
-import {
-  Typography,
-  Box,
-  Button,
-  Grid,
-  Divider,
-} from '@mui/material';
+import { Typography, Box, Button, Grid, Divider } from '@mui/material';
 import { Add as AddIcon } from '@mui/icons-material';
 import { CampaignCard } from '../components/CampaignCard';
 import { LoadingState } from '../components/LoadingState';
@@ -67,15 +61,8 @@ interface PageBreadcrumbsProps {
 }
 
 const PageBreadcrumbs: React.FC<PageBreadcrumbsProps> = ({ sellerName, onNavigateBack }) => (
-  <NavBreadcrumbs
-    items={[
-      { label: 'Profiles', onClick: onNavigateBack },
-      { label: sellerName || 'Loading...' },
-    ]}
-  />
+  <NavBreadcrumbs items={[{ label: 'Profiles', onClick: onNavigateBack }, { label: sellerName || 'Loading...' }]} />
 );
-
-
 
 interface CampaignsGridProps {
   campaigns: Campaign[];
@@ -109,8 +96,6 @@ const CampaignsGrid: React.FC<CampaignsGridProps> = ({ campaigns, profileId, sec
     </Box>
   );
 };
-
-
 
 // --- Custom Hooks for Data Fetching ---
 
@@ -163,8 +148,12 @@ const ScoutCampaignsContent: React.FC<ScoutCampaignsContentProps> = ({
   const navigate = useNavigate();
 
   const canEdit = canEditProfile(profile);
-  const handleNavigateBack = () => { void navigate('/scouts'); };
-  const handleCreateClick = () => { void navigate('/create-campaign'); };
+  const handleNavigateBack = () => {
+    void navigate('/scouts');
+  };
+  const handleCreateClick = () => {
+    void navigate('/create-campaign');
+  };
 
   const { active, inactive } = separateCampaigns(campaigns);
   const showDivider = active.length > 0 && inactive.length > 0;

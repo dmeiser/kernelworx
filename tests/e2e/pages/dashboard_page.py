@@ -73,9 +73,7 @@ class DashboardPage(BasePage):
         Args:
             name: Seller name text (case-sensitive exact match).
         """
-        return self.page.locator("div.MuiCard-root").filter(
-            has=self.page.get_by_text(name, exact=True)
-        )
+        return self.page.locator("div.MuiCard-root").filter(has=self.page.get_by_text(name, exact=True))
 
     # ------------------------------------------------------------------
     # State queries

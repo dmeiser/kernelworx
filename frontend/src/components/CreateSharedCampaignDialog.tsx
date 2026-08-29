@@ -260,7 +260,11 @@ const CampaignFormFields: React.FC<CampaignFormFieldsProps> = ({
       <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
         <FormControl required fullWidth sx={{ minWidth: { xs: '100%', sm: 120 } }}>
           <InputLabel>Unit Type</InputLabel>
-          <Select value={formState.unitType} onChange={(e) => formSetters.setUnitType(e.target.value)} label="Unit Type">
+          <Select
+            value={formState.unitType}
+            onChange={(e) => formSetters.setUnitType(e.target.value)}
+            label="Unit Type"
+          >
             {UNIT_TYPES.map((type) => (
               <MenuItem key={type} value={type}>
                 {type}
@@ -287,7 +291,13 @@ const CampaignFormFields: React.FC<CampaignFormFieldsProps> = ({
           required
           fullWidth
         />
-        <StateAutocomplete value={formState.state} onChange={formSetters.setState} required fullWidth sx={{ minWidth: { xs: '100%', sm: 100 } }} />
+        <StateAutocomplete
+          value={formState.state}
+          onChange={formSetters.setState}
+          required
+          fullWidth
+          sx={{ minWidth: { xs: '100%', sm: 100 } }}
+        />
       </Stack>
     </Stack>
 
@@ -401,7 +411,9 @@ export const CreateSharedCampaignDialog: React.FC<CreateSharedCampaignDialogProp
           Cancel
         </Button>
         <Button
-          onClick={() => { void handleSubmit(); }}
+          onClick={() => {
+            void handleSubmit();
+          }}
           variant="contained"
           disabled={!isFormValid || isSubmitting || !canCreate}
           startIcon={isSubmitting ? <CircularProgress size={16} /> : undefined}

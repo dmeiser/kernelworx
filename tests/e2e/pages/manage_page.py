@@ -115,9 +115,7 @@ class ManagePage(BasePage):
         name_input.fill(new_name)
         self.get_by_role_button(self._SAVE_BTN).click()
         self.wait_for_loading()
-        expect(self.page.get_by_role("heading", name=f"Scout Management: {new_name}")).to_be_visible(
-            timeout=15_000
-        )
+        expect(self.page.get_by_role("heading", name=f"Scout Management: {new_name}")).to_be_visible(timeout=15_000)
 
     def delete_profile(self) -> None:
         """Delete the profile via the two-step Danger Zone confirmation.

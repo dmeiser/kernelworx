@@ -88,11 +88,7 @@ const bodyFont = [
   'sans-serif',
 ].join(',');
 
-export const displayFont = [
-  '"Bricolage Grotesque"',
-  '"Atkinson Hyperlegible"',
-  'sans-serif',
-].join(',');
+export const displayFont = ['"Bricolage Grotesque"', '"Atkinson Hyperlegible"', 'sans-serif'].join(',');
 
 export const theme = createTheme({
   palette: {

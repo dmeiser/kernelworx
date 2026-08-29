@@ -64,11 +64,7 @@ const HeaderTitle: React.FC<HeaderTitleProps> = ({ title, subtitle, backButton, 
     <Stack direction="row" alignItems="center" spacing={1} sx={{ minWidth: 0 }}>
       {backButton && <HeaderBackButton backButton={backButton} />}
       {Icon && <Icon sx={{ color: 'text.secondary', verticalAlign: 'bottom', mr: 0.5, flexShrink: 0 }} />}
-      <Typography
-        variant="h4"
-        component="h1"
-        sx={{ mb: subtitle ? 0.5 : 0, wordBreak: 'break-word', minWidth: 0 }}
-      >
+      <Typography variant="h4" component="h1" sx={{ mb: subtitle ? 0.5 : 0, wordBreak: 'break-word', minWidth: 0 }}>
         {title}
       </Typography>
     </Stack>
@@ -89,14 +85,7 @@ interface PageHeaderProps {
   children?: React.ReactNode;
 }
 
-export const PageHeader: React.FC<PageHeaderProps> = ({
-  title,
-  subtitle,
-  action,
-  backButton,
-  icon,
-  children,
-}) => (
+export const PageHeader: React.FC<PageHeaderProps> = ({ title, subtitle, action, backButton, icon, children }) => (
   <Card
     sx={{
       mb: { xs: 3, sm: 4 },

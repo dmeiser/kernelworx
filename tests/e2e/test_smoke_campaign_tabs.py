@@ -20,9 +20,7 @@ from tests.e2e.pages.dashboard_page import DashboardPage
 # ---------------------------------------------------------------------------
 
 
-def _navigate_to_owned_profile_campaigns(
-    owner_page: Page, profile_name: str
-) -> tuple[str, CampaignPage]:
+def _navigate_to_owned_profile_campaigns(owner_page: Page, profile_name: str) -> tuple[str, CampaignPage]:
     """Navigate from the dashboard to the owned profile's campaigns page."""
     dashboard = DashboardPage(owner_page)
     dashboard.goto()
@@ -58,9 +56,7 @@ def _create_or_pick_campaign(owner_page: Page, profile_id: str, campaign_page: C
 @pytest.mark.smoke
 def test_orders_tab_visible(owner_page: Page, ensure_owner_profile: str, ensure_owner_catalog: None) -> None:
     """The Orders tab is visible on the campaign detail page."""
-    profile_id, campaign_page = _navigate_to_owned_profile_campaigns(
-        owner_page, ensure_owner_profile
-    )
+    profile_id, campaign_page = _navigate_to_owned_profile_campaigns(owner_page, ensure_owner_profile)
     _create_or_pick_campaign(owner_page, profile_id, campaign_page)
 
     orders_tab = owner_page.get_by_role("tab", name="Orders")
@@ -70,9 +66,7 @@ def test_orders_tab_visible(owner_page: Page, ensure_owner_profile: str, ensure_
 @pytest.mark.smoke
 def test_summary_tab_visible(owner_page: Page, ensure_owner_profile: str, ensure_owner_catalog: None) -> None:
     """The Summary tab renders campaign summary content."""
-    profile_id, campaign_page = _navigate_to_owned_profile_campaigns(
-        owner_page, ensure_owner_profile
-    )
+    profile_id, campaign_page = _navigate_to_owned_profile_campaigns(owner_page, ensure_owner_profile)
     _create_or_pick_campaign(owner_page, profile_id, campaign_page)
 
     owner_page.get_by_role("tab", name="Summary").click()
@@ -84,9 +78,7 @@ def test_summary_tab_visible(owner_page: Page, ensure_owner_profile: str, ensure
 @pytest.mark.smoke
 def test_reports_tab_visible(owner_page: Page, ensure_owner_profile: str, ensure_owner_catalog: None) -> None:
     """The Reports tab renders campaign reports content."""
-    profile_id, campaign_page = _navigate_to_owned_profile_campaigns(
-        owner_page, ensure_owner_profile
-    )
+    profile_id, campaign_page = _navigate_to_owned_profile_campaigns(owner_page, ensure_owner_profile)
     _create_or_pick_campaign(owner_page, profile_id, campaign_page)
 
     owner_page.get_by_role("tab", name="Reports").click()
@@ -98,9 +90,7 @@ def test_reports_tab_visible(owner_page: Page, ensure_owner_profile: str, ensure
 @pytest.mark.smoke
 def test_settings_tab_visible(owner_page: Page, ensure_owner_profile: str, ensure_owner_catalog: None) -> None:
     """The Settings tab shows the campaign name input."""
-    profile_id, campaign_page = _navigate_to_owned_profile_campaigns(
-        owner_page, ensure_owner_profile
-    )
+    profile_id, campaign_page = _navigate_to_owned_profile_campaigns(owner_page, ensure_owner_profile)
     campaign_id, _ = _create_or_pick_campaign(owner_page, profile_id, campaign_page)
 
     settings = CampaignSettingsPage(owner_page)

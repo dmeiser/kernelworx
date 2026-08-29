@@ -367,9 +367,7 @@ def ensure_managed_catalog() -> Generator[None, None, None]:
             }
         )
     except Exception as exc:
-        raise RuntimeError(
-            f"Failed to ensure ADMIN_MANAGED catalog exists in {table_name}: {exc}"
-        ) from exc
+        raise RuntimeError(f"Failed to ensure ADMIN_MANAGED catalog exists in {table_name}: {exc}") from exc
 
     yield
 

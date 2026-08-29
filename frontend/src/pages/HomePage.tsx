@@ -90,7 +90,9 @@ export const HomePage: React.FC = () => {
             title="My Scouts"
             description="View and manage your seller profiles."
             icon={<PersonIcon fontSize="large" />}
-            onClick={() => { void navigate('/scouts'); }}
+            onClick={() => {
+              void navigate('/scouts');
+            }}
           />
         </Grid>
         <Grid size={{ xs: 12, sm: 6, md: 3 }}>
@@ -98,7 +100,9 @@ export const HomePage: React.FC = () => {
             title="Payment Methods"
             description="Set up how buyers can pay you."
             icon={<PaymentIcon fontSize="large" />}
-            onClick={() => { void navigate('/payment-methods'); }}
+            onClick={() => {
+              void navigate('/payment-methods');
+            }}
           />
         </Grid>
         <Grid size={{ xs: 12, sm: 6, md: 3 }}>
@@ -106,7 +110,9 @@ export const HomePage: React.FC = () => {
             title="Catalogs"
             description="Browse available product catalogs."
             icon={<InventoryIcon fontSize="large" />}
-            onClick={() => { void navigate('/catalogs'); }}
+            onClick={() => {
+              void navigate('/catalogs');
+            }}
           />
         </Grid>
         <Grid size={{ xs: 12, sm: 6, md: 3 }}>
@@ -114,7 +120,9 @@ export const HomePage: React.FC = () => {
             title="Shared Campaigns"
             description="Join or manage shared fundraising campaigns."
             icon={<CampaignIcon fontSize="large" />}
-            onClick={() => { void navigate('/shared-campaigns'); }}
+            onClick={() => {
+              void navigate('/shared-campaigns');
+            }}
           />
         </Grid>
       </Grid>

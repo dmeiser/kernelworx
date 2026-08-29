@@ -123,7 +123,9 @@ interface OrderRowProps {
 
 const OrderRow: React.FC<OrderRowProps> = ({ order, hasWritePermission, onEdit, onDelete }) => (
   <TableRow key={order.orderId} hover>
-    <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>{formatDisplayDate(order.orderDate, { year: 'numeric', month: 'short', day: 'numeric' }) || '—'}</TableCell>
+    <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>
+      {formatDisplayDate(order.orderDate, { year: 'numeric', month: 'short', day: 'numeric' }) || '—'}
+    </TableCell>
     <TableCell>
       <Typography variant="body2" fontWeight="medium">
         {order.customerName}
@@ -336,7 +338,9 @@ export const OrdersPage: React.FC = () => {
     // Order IDs now embed the campaign ID (ORDER#<campaign-uuid>#<order-uuid>),
     // so stripPrefix/toUrlId would leave a literal # in the path. Encode the
     // full prefixed ID so React Router decodes it back to the original value.
-    void navigate(`/scouts/${toUrlId(profileId)}/campaigns/${toUrlId(campaignId)}/orders/${encodeURIComponent(orderId)}/edit`);
+    void navigate(
+      `/scouts/${toUrlId(profileId)}/campaigns/${toUrlId(campaignId)}/orders/${encodeURIComponent(orderId)}/edit`,
+    );
   };
 
   const handleDeleteOrder = async (orderId: string) => {
@@ -366,7 +370,9 @@ export const OrdersPage: React.FC = () => {
       campaignId={campaignId}
       onCreateOrder={handleCreateOrder}
       onEditOrder={handleEditOrder}
-      onDeleteOrder={(orderId) => { void handleDeleteOrder(orderId); }}
+      onDeleteOrder={(orderId) => {
+        void handleDeleteOrder(orderId);
+      }}
     />
   );
 };

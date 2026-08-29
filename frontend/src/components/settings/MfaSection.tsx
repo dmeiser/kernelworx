@@ -144,7 +144,11 @@ const MfaSetupSection: React.FC<MfaSetupSectionProps> = ({ hook }) => {
         Enter the 6-digit code from your authenticator app to complete setup:
       </Typography>
 
-      <form onSubmit={(e) => { void hook.handleVerifyMFA(e); }}>
+      <form
+        onSubmit={(e) => {
+          void hook.handleVerifyMFA(e);
+        }}
+      >
         <Stack direction="row" spacing={2} alignItems="flex-start" flexWrap="wrap">
           <TextField
             label="Verification Code"

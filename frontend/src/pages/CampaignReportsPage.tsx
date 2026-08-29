@@ -856,8 +856,6 @@ const useReportActions = ({
   };
 };
 
-
-
 const ReportPanels: React.FC<{
   report?: UnitReport;
   reportView: ReportView;

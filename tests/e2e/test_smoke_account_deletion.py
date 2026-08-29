@@ -42,6 +42,4 @@ def test_account_deletion_ui_is_discoverable(owner_page: Page) -> None:
     dialog.get_by_role("button", name="Cancel").click()
     expect(dialog).to_be_hidden(timeout=10_000)
 
-    pytest.fail(
-        "RUN_ACCOUNT_DELETION is enabled but the full account-deletion cascade test is not implemented"
-    )
+    pytest.fail("RUN_ACCOUNT_DELETION is enabled but the full account-deletion cascade test is not implemented")

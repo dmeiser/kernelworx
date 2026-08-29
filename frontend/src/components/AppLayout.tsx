@@ -129,7 +129,11 @@ const DrawerContent: React.FC<{
         </ListItemIcon>
         <ListItemText primary="Catalogs" />
       </ListItemButton>
-      <ListItemButton onClick={() => onNavigate('/payment-methods')} selected={isActive('/payment-methods')} sx={navItemSx}>
+      <ListItemButton
+        onClick={() => onNavigate('/payment-methods')}
+        selected={isActive('/payment-methods')}
+        sx={navItemSx}
+      >
         <ListItemIcon>
           <PaymentIcon />
         </ListItemIcon>
@@ -138,14 +142,22 @@ const DrawerContent: React.FC<{
 
       <Divider sx={sectionDividerSx} />
 
-      <ListItemButton onClick={() => onNavigate('/shared-campaigns')} selected={isActive('/shared-campaigns')} sx={navItemSx}>
+      <ListItemButton
+        onClick={() => onNavigate('/shared-campaigns')}
+        selected={isActive('/shared-campaigns')}
+        sx={navItemSx}
+      >
         <ListItemIcon>
           <CampaignIcon />
         </ListItemIcon>
         <ListItemText primary="Shared Campaigns" />
       </ListItemButton>
       {hasSharedCampaigns && (
-        <ListItemButton onClick={() => onNavigate('/campaign-reports')} selected={isActive('/campaign-reports')} sx={navItemSx}>
+        <ListItemButton
+          onClick={() => onNavigate('/campaign-reports')}
+          selected={isActive('/campaign-reports')}
+          sx={navItemSx}
+        >
           <ListItemIcon>
             <AssessmentIcon />
           </ListItemIcon>
@@ -255,7 +267,9 @@ export const AppLayout: React.FC<{ children?: React.ReactNode }> = ({ children }
     <AppLayoutView
       isDesktop={isDesktop}
       displayName={displayName}
-      onLogout={() => { void logout(); }}
+      onLogout={() => {
+        void logout();
+      }}
       onNavigate={handleNavigation}
       isActive={isActive}
       toggleMobileDrawer={toggleMobileDrawer}
@@ -309,9 +323,24 @@ const AppLayoutView: React.FC<{
           <Box
             component="button"
             tabIndex={0}
-            sx={{ display: 'flex', alignItems: 'center', gap: 1, cursor: 'pointer', background: 'none', border: 'none', padding: 0, minWidth: 0, flex: 1 }}
+            sx={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 1,
+              cursor: 'pointer',
+              background: 'none',
+              border: 'none',
+              padding: 0,
+              minWidth: 0,
+              flex: 1,
+            }}
             onClick={() => onNavigate('/home')}
-            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onNavigate('/home'); } }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onNavigate('/home');
+              }
+            }}
           >
             <Box
               component="img"

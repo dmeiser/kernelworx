@@ -27,7 +27,7 @@ def parse_currency(value: str) -> Decimal:
         ValueError: If the text cannot be parsed as a currency value.
     """
     cleaned = value.strip()
-    negative = cleaned.startswith('(') or cleaned.startswith('-')
+    negative = cleaned.startswith("(") or cleaned.startswith("-")
     cleaned = re.sub(r"[^0-9.]", "", cleaned)
     if not cleaned:
         raise ValueError(f"No numeric value found in currency string: {value!r}")

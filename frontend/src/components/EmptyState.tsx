@@ -41,9 +41,7 @@ export const EmptyState: React.FC<EmptyStateProps> = ({ title, message, actionLa
       <Typography color="text.secondary" sx={{ mb: actionLabel ? 3 : 0 }}>
         {message}
       </Typography>
-      {actionLabel && onAction && (
-        <EmptyStateAction label={actionLabel} icon={actionIcon} onClick={onAction} />
-      )}
+      {actionLabel && onAction && <EmptyStateAction label={actionLabel} icon={actionIcon} onClick={onAction} />}
     </CardContent>
   </Card>
 );

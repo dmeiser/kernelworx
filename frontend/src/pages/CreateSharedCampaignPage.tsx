@@ -463,31 +463,28 @@ export const CreateSharedCampaignPage: React.FC = () => {
 
   // Create mutation. Update the cached list immediately so the newly created
   // campaign is visible when the user is redirected back to /shared-campaigns.
-  const [createSharedCampaign] = useMutation<{ createSharedCampaign: SharedCampaign }>(
-    CREATE_SHARED_CAMPAIGN,
-    {
-      update: (cache, { data }) => {
-        const created = data?.createSharedCampaign;
-        if (!created) return;
+  const [createSharedCampaign] = useMutation<{ createSharedCampaign: SharedCampaign }>(CREATE_SHARED_CAMPAIGN, {
+    update: (cache, { data }) => {
+      const created = data?.createSharedCampaign;
+      if (!created) return;
 
-        const existing = cache.readQuery<{ listMySharedCampaigns: SharedCampaign[] }>({
-          query: LIST_MY_SHARED_CAMPAIGNS,
-        });
+      const existing = cache.readQuery<{ listMySharedCampaigns: SharedCampaign[] }>({
+        query: LIST_MY_SHARED_CAMPAIGNS,
+      });
 
-        const campaigns = existing?.listMySharedCampaigns ?? [];
-        if (campaigns.some((c) => c.sharedCampaignCode === created.sharedCampaignCode)) {
-          return;
-        }
+      const campaigns = existing?.listMySharedCampaigns ?? [];
+      if (campaigns.some((c) => c.sharedCampaignCode === created.sharedCampaignCode)) {
+        return;
+      }
 
-        cache.writeQuery({
-          query: LIST_MY_SHARED_CAMPAIGNS,
-          data: {
-            listMySharedCampaigns: [created, ...campaigns],
-          },
-        });
-      },
+      cache.writeQuery({
+        query: LIST_MY_SHARED_CAMPAIGNS,
+        data: {
+          listMySharedCampaigns: [created, ...campaigns],
+        },
+      });
     },
-  );
+  });
 
   // Form data for validation
   const formData: FormData = {
@@ -552,8 +549,12 @@ export const CreateSharedCampaignPage: React.FC = () => {
     }
   };
 
-  const handleCancel = () => { void navigate(-1); };
-  const handleBack = () => { void navigate(-1); };
+  const handleCancel = () => {
+    void navigate(-1);
+  };
+  const handleBack = () => {
+    void navigate(-1);
+  };
 
   return (
     <Container maxWidth="md" sx={{ py: 3 }}>
@@ -620,7 +621,9 @@ export const CreateSharedCampaignPage: React.FC = () => {
 
           <ActionButtonsSection
             onCancel={handleCancel}
-            onSubmit={() => { void handleSubmit(); }}
+            onSubmit={() => {
+              void handleSubmit();
+            }}
             isSubmitting={isSubmitting}
             isValid={formIsValid}
             canCreate={canCreate}
