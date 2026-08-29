@@ -55,7 +55,9 @@ export const useCreateCampaignPageSetup = (effectiveSharedCampaignCode: string |
   );
 
   // Profile refetch effect
-  useProfileRefetch(() => { void refetchProfiles(); });
+  useProfileRefetch(() => {
+    void refetchProfiles();
+  });
 
   // Shared campaign form initialization
   useSharedCampaignFormInit(

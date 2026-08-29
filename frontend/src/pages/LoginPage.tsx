@@ -89,7 +89,11 @@ interface MfaFormProps extends FormProps {
 }
 
 const MfaForm: React.FC<MfaFormProps> = ({ loading, onSubmit, mfaCode, setMfaCode, onBack }) => (
-  <form onSubmit={(e) => { void onSubmit(e); }}>
+  <form
+    onSubmit={(e) => {
+      void onSubmit(e);
+    }}
+  >
     <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
       Enter the 6-digit code from your authenticator app
     </Typography>
@@ -145,7 +149,11 @@ const CredentialsForm: React.FC<CredentialsFormProps> = ({
   onForgotPassword,
   onPasskeyLogin,
 }) => (
-  <form onSubmit={(e) => { void onSubmit(e); }}>
+  <form
+    onSubmit={(e) => {
+      void onSubmit(e);
+    }}
+  >
     <Stack spacing={2} sx={{ mb: 3 }}>
       <TextField
         label="Email"
@@ -184,7 +192,9 @@ const CredentialsForm: React.FC<CredentialsFormProps> = ({
       fullWidth
       size="large"
       startIcon={<FingerprintIcon />}
-      onClick={() => { void onPasskeyLogin(); }}
+      onClick={() => {
+        void onPasskeyLogin();
+      }}
       disabled={loading}
       sx={{ mb: 3 }}
     >
@@ -214,7 +224,9 @@ const SocialSection: React.FC<SocialSectionProps> = ({ loading, onSocialLogin, o
         fullWidth
         size="large"
         startIcon={<GoogleIcon />}
-        onClick={() => { void onSocialLogin('Google'); }}
+        onClick={() => {
+          void onSocialLogin('Google');
+        }}
         disabled={loading}
       >
         Continue with Google
@@ -228,14 +240,15 @@ const SocialSection: React.FC<SocialSectionProps> = ({ loading, onSocialLogin, o
           component="button"
           type="button"
           variant="body2"
-          onClick={() => { void onSignup(); }}
+          onClick={() => {
+            void onSignup();
+          }}
           sx={{ cursor: 'pointer', fontWeight: 600 }}
         >
           Sign up
         </MuiLink>
       </Typography>
     </Box>
-
   </>
 );
 
@@ -304,7 +317,9 @@ function useLoginState(
     setShowMfa(false);
     setMfaCode('');
     setPassword('');
-    scheduleRedirect(() => { void navigate(from, { replace: true }); }, 500);
+    scheduleRedirect(() => {
+      void navigate(from, { replace: true });
+    }, 500);
   };
 
   const handleMfaSubmit = async (e: React.FormEvent) => {
@@ -458,7 +473,9 @@ const LoginFormContainer: React.FC<LoginFormContainerProps> = ({ state, onForgot
     return (
       <MfaForm
         loading={state.loading}
-        onSubmit={(e) => { void state.handleMfaSubmit(e); }}
+        onSubmit={(e) => {
+          void state.handleMfaSubmit(e);
+        }}
         mfaCode={state.mfaCode}
         setMfaCode={state.setMfaCode}
         onBack={state.handleBack}
@@ -468,13 +485,17 @@ const LoginFormContainer: React.FC<LoginFormContainerProps> = ({ state, onForgot
   return (
     <CredentialsForm
       loading={state.loading}
-      onSubmit={(e) => { void state.handleEmailLogin(e); }}
+      onSubmit={(e) => {
+        void state.handleEmailLogin(e);
+      }}
       email={state.email}
       setEmail={state.setEmail}
       password={state.password}
       setPassword={state.setPassword}
       onForgotPassword={onForgotPassword}
-      onPasskeyLogin={() => { void state.handlePasskeyLogin(); }}
+      onPasskeyLogin={() => {
+        void state.handlePasskeyLogin();
+      }}
     />
   );
 };
@@ -510,8 +531,12 @@ export const LoginPage: React.FC = () => {
 
   const state = useLoginState(loginWithPassword, navigate, from);
 
-  const handleForgotPassword = () => { void navigate('/forgot-password'); };
-  const handleSignup = () => { void navigate('/signup'); };
+  const handleForgotPassword = () => {
+    void navigate('/forgot-password');
+  };
+  const handleSignup = () => {
+    void navigate('/signup');
+  };
   const clearError = () => state.setError(null);
 
   return (
@@ -528,13 +553,17 @@ export const LoginPage: React.FC = () => {
       <Card sx={{ width: '100%', maxWidth: 450 }}>
         <CardContent sx={{ p: 4 }}>
           <Box sx={{ textAlign: 'center', mb: 4 }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5, mb: 2, flexWrap: 'wrap' }}>
-              <Box
-                component="img"
-                src="/logo.svg"
-                alt="KernelWorx mark"
-                sx={{ width: 32, height: 32 }}
-              />
+            <Box
+              sx={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 0.5,
+                mb: 2,
+                flexWrap: 'wrap',
+              }}
+            >
+              <Box component="img" src="/logo.svg" alt="KernelWorx mark" sx={{ width: 32, height: 32 }} />
               <Typography
                 variant="h5"
                 sx={{
@@ -543,8 +572,12 @@ export const LoginPage: React.FC = () => {
                   lineHeight: 1,
                 }}
               >
-                <Box component="span" sx={{ color: 'text.primary' }}>Kernel</Box>
-                <Box component="span" sx={{ color: 'primary.main' }}>Worx</Box>
+                <Box component="span" sx={{ color: 'text.primary' }}>
+                  Kernel
+                </Box>
+                <Box component="span" sx={{ color: 'primary.main' }}>
+                  Worx
+                </Box>
               </Typography>
             </Box>
             <Typography
@@ -566,7 +599,9 @@ export const LoginPage: React.FC = () => {
           <OptionalSocialSection
             showMfa={state.showMfa}
             loading={state.loading}
-            onSocialLogin={(provider) => { void state.handleSocialLogin(provider); }}
+            onSocialLogin={(provider) => {
+              void state.handleSocialLogin(provider);
+            }}
             onSignup={handleSignup}
           />
         </CardContent>

@@ -59,7 +59,9 @@ export const AcceptInvitePage: React.FC = () => {
     if (redirectTimeoutRef.current) {
       clearTimeout(redirectTimeoutRef.current);
     }
-    redirectTimeoutRef.current = setTimeout(() => { void navigate('/scouts'); }, 2000);
+    redirectTimeoutRef.current = setTimeout(() => {
+      void navigate('/scouts');
+    }, 2000);
   };
 
   const handleError = (err: Error) => {
@@ -104,7 +106,16 @@ export const AcceptInvitePage: React.FC = () => {
         <CardContent>
           <Stack spacing={3}>
             <Box>
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5, mb: 2, flexWrap: 'wrap' }}>
+              <Box
+                sx={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 0.5,
+                  mb: 2,
+                  flexWrap: 'wrap',
+                }}
+              >
                 <Box component="img" src="/logo.svg" alt="KernelWorx mark" sx={{ width: 32, height: 32 }} />
                 <Typography
                   variant="h5"
@@ -114,8 +125,12 @@ export const AcceptInvitePage: React.FC = () => {
                     lineHeight: 1,
                   }}
                 >
-                  <Box component="span" sx={{ color: 'text.primary' }}>Kernel</Box>
-                  <Box component="span" sx={{ color: 'primary.main' }}>Worx</Box>
+                  <Box component="span" sx={{ color: 'text.primary' }}>
+                    Kernel
+                  </Box>
+                  <Box component="span" sx={{ color: 'primary.main' }}>
+                    Worx
+                  </Box>
                 </Typography>
               </Box>
               <Typography
@@ -150,7 +165,11 @@ export const AcceptInvitePage: React.FC = () => {
 
             {error && <Alert severity="error">{error}</Alert>}
 
-            <form onSubmit={(e) => { void handleSubmit(e); }}>
+            <form
+              onSubmit={(e) => {
+                void handleSubmit(e);
+              }}
+            >
               <Stack spacing={2}>
                 <TextField
                   fullWidth

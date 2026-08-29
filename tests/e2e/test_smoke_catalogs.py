@@ -86,9 +86,7 @@ def test_create_catalog_with_multiple_products(owner_page: Page) -> None:
         {"productName": "Cheese Popcorn", "price": 22.0, "description": "Savory cheddar"},
     ]
     catalogs.create_catalog(catalog_name, products)
-    assert catalogs.has_catalog(catalog_name), (
-        f"Created catalog '{catalog_name}' must appear in the list"
-    )
+    assert catalogs.has_catalog(catalog_name), f"Created catalog '{catalog_name}' must appear in the list"
 
     catalogs.view_catalog(catalog_name)
     names = catalogs.get_preview_product_names()
@@ -106,9 +104,12 @@ def test_edit_catalog_product(owner_page: Page) -> None:
     catalogs.switch_to_my_catalogs()
 
     catalog_name = f"E2E Edit Product Catalog {int(time.time())}"
-    catalogs.create_catalog(catalog_name, [
-        {"productName": "Original Product", "price": 10.0, "description": "Original description"},
-    ])
+    catalogs.create_catalog(
+        catalog_name,
+        [
+            {"productName": "Original Product", "price": 10.0, "description": "Original description"},
+        ],
+    )
 
     catalogs.edit_catalog_product(
         catalog_name,
@@ -118,12 +119,8 @@ def test_edit_catalog_product(owner_page: Page) -> None:
         description="Updated description",
     )
     catalogs.view_catalog(catalog_name)
-    assert catalogs.preview_has_product("Updated Product", 15.0), (
-        "Updated product must appear in preview"
-    )
-    assert not catalogs.preview_has_product("Original Product", 10.0), (
-        "Original product must no longer appear"
-    )
+    assert catalogs.preview_has_product("Updated Product", 15.0), "Updated product must appear in preview"
+    assert not catalogs.preview_has_product("Original Product", 10.0), "Original product must no longer appear"
 
 
 @pytest.mark.smoke
@@ -134,10 +131,13 @@ def test_remove_catalog_product(owner_page: Page) -> None:
     catalogs.switch_to_my_catalogs()
 
     catalog_name = f"E2E Remove Product Catalog {int(time.time())}"
-    catalogs.create_catalog(catalog_name, [
-        {"productName": "Keep Product", "price": 10.0},
-        {"productName": "Remove Product", "price": 20.0},
-    ])
+    catalogs.create_catalog(
+        catalog_name,
+        [
+            {"productName": "Keep Product", "price": 10.0},
+            {"productName": "Remove Product", "price": 20.0},
+        ],
+    )
 
     catalogs.remove_catalog_product(catalog_name, index=1)
     catalogs.view_catalog(catalog_name)
@@ -157,9 +157,12 @@ def test_catalog_preview_page(owner_page: Page) -> None:
     catalogs.switch_to_my_catalogs()
 
     catalog_name = f"E2E Preview Catalog {int(time.time())}"
-    catalogs.create_catalog(catalog_name, [
-        {"productName": "Preview Product", "price": 30.0, "description": "Preview description"},
-    ])
+    catalogs.create_catalog(
+        catalog_name,
+        [
+            {"productName": "Preview Product", "price": 30.0, "description": "Preview description"},
+        ],
+    )
 
     catalogs.view_catalog(catalog_name)
     assert "/catalogs/" in owner_page.url and "/preview" in owner_page.url, (
@@ -174,9 +177,5 @@ def test_catalog_preview_page(owner_page: Page) -> None:
     names = catalogs.get_preview_product_names()
     assert "Preview Product" in names, f"Expected Preview Product in table; got: {names}"
     assert catalogs.preview_has_product("Preview Product", 30.0)
-    assert catalogs.get_preview_create_campaign_button_visible(), (
-        "Create Campaign button must be visible"
-    )
-    assert catalogs.get_preview_create_shared_campaign_button_visible(), (
-        "Create Shared Campaign button must be visible"
-    )
+    assert catalogs.get_preview_create_campaign_button_visible(), "Create Campaign button must be visible"
+    assert catalogs.get_preview_create_shared_campaign_button_visible(), "Create Shared Campaign button must be visible"

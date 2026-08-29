@@ -11,11 +11,7 @@
 import React from 'react';
 import { Routes, Route, Navigate, useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useQuery } from '@apollo/client/react';
-import {
-  Box,
-  Tabs,
-  Tab,
-} from '@mui/material';
+import { Box, Tabs, Tab } from '@mui/material';
 import {
   ShoppingCart as OrdersIcon,
   Assessment as ReportsIcon,
@@ -69,8 +65,6 @@ function logCampaignError(error: Error): void {
 }
 
 // --- Sub-Components ---
-
-
 
 interface CampaignBreadcrumbsProps {
   profileId: string;
@@ -221,7 +215,9 @@ const CampaignContent: React.FC<CampaignContentProps> = ({ profileId, tabValue, 
       sellerName={profile?.sellerName || 'Loading...'}
       campaignName={campaign.campaignName}
       campaignYear={campaign.campaignYear}
-      onNavigate={(path) => { void navHandlers.navigate(path); }}
+      onNavigate={(path) => {
+        void navHandlers.navigate(path);
+      }}
     />
     <CampaignHeader campaign={campaign} onBack={navHandlers.handleBack} />
     <CampaignTabs

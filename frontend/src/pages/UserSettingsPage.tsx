@@ -43,7 +43,10 @@ interface Account {
 }
 
 // Helper to create the mutation onCompleted callback
-const createUpdateCompletedHandler = (profileHook: ReturnType<typeof useProfileEdit>, refetch: () => Promise<unknown>) => {
+const createUpdateCompletedHandler = (
+  profileHook: ReturnType<typeof useProfileEdit>,
+  refetch: () => Promise<unknown>,
+) => {
   return () => {
     profileHook.setUpdateSuccess(true);
     profileHook.setUpdateError(null);
@@ -90,8 +93,6 @@ const getAccountFromData = (data: { getMyAccount: Account } | undefined): Accoun
 
 // Helper to get email from account
 const getAccountEmail = (account: Account | undefined): string | undefined => account?.email;
-
-
 
 // Conditional success alert component
 const SuccessAlert: React.FC<{ show: boolean }> = ({ show }) =>
@@ -163,7 +164,11 @@ export const UserSettingsPage: React.FC = () => {
   // Wrapper handlers for email hook (needs access to account email, logout, navigate)
   const handleRequestEmailUpdate = () => emailHook.handleRequestEmailUpdate(getAccountEmail(account));
 
-  const handleConfirmEmailUpdate = () => { void emailHook.handleConfirmEmailUpdate(logout, (path) => { void navigate(path); }); };
+  const handleConfirmEmailUpdate = () => {
+    void emailHook.handleConfirmEmailUpdate(logout, (path) => {
+      void navigate(path);
+    });
+  };
 
   const handleOpenEditDialog = () => profileHook.handleOpenEditDialog(account);
 
@@ -191,7 +196,13 @@ export const UserSettingsPage: React.FC = () => {
     <Box>
       <PageHeader
         title="User Settings"
-        backButton={{ onClick: () => { void navigate('/settings'); }, label: 'Back', 'aria-label': 'Back to settings' }}
+        backButton={{
+          onClick: () => {
+            void navigate('/settings');
+          },
+          label: 'Back',
+          'aria-label': 'Back to settings',
+        }}
       />
 
       <SuccessAlert show={profileHook.updateSuccess} />
@@ -221,14 +232,24 @@ export const UserSettingsPage: React.FC = () => {
       <DeleteAccountSection onDeleteAccount={handleDeleteAccount} userEmail={account?.email} />
 
       {/* Edit Profile Dialog */}
-      <EditProfileDialog profileHook={profileHook} updating={updating} onSave={() => { void handleSaveProfile(); }} />
+      <EditProfileDialog
+        profileHook={profileHook}
+        updating={updating}
+        onSave={() => {
+          void handleSaveProfile();
+        }}
+      />
 
       {/* Change Email Dialog */}
       <ChangeEmailDialog
         emailHook={emailHook}
         currentEmail={account?.email}
-        onRequestUpdate={() => { void handleRequestEmailUpdate(); }}
-        onConfirmUpdate={() => { void handleConfirmEmailUpdate(); }}
+        onRequestUpdate={() => {
+          void handleRequestEmailUpdate();
+        }}
+        onConfirmUpdate={() => {
+          void handleConfirmEmailUpdate();
+        }}
       />
     </Box>
   );

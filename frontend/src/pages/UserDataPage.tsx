@@ -305,7 +305,9 @@ export const UserDataPage: React.FC = () => {
         items={[
           {
             label: 'Admin Console',
-            onClick: () => { void navigate('/admin'); },
+            onClick: () => {
+              void navigate('/admin');
+            },
             icon: <BackIcon fontSize="small" />,
           },
           { label: `User Data: ${profileIdWithoutPrefix}` },
@@ -324,7 +326,13 @@ export const UserDataPage: React.FC = () => {
 
       {/* Tabs */}
       <Paper sx={{ mb: 3 }}>
-        <Tabs value={currentTab} onChange={handleTabChange} variant="scrollable" scrollButtons="auto" allowScrollButtonsMobile>
+        <Tabs
+          value={currentTab}
+          onChange={handleTabChange}
+          variant="scrollable"
+          scrollButtons="auto"
+          allowScrollButtonsMobile
+        >
           <Tab id="user-data-tab-0" aria-controls="user-data-tabpanel-0" label={`Profiles (${profiles.length})`} />
           <Tab id="user-data-tab-1" aria-controls="user-data-tabpanel-1" label={`Catalogs (${catalogs.length})`} />
           <Tab id="user-data-tab-2" aria-controls="user-data-tabpanel-2" label={`Campaigns (${campaigns.length})`} />
@@ -642,12 +650,8 @@ export const UserDataPage: React.FC = () => {
                           {sharedCampaign.city}, {sharedCampaign.state}
                         </Typography>
                       </TableCell>
-                      <TableCell>
-                        {formatDisplayDate(sharedCampaign.startDate) || '—'}
-                      </TableCell>
-                      <TableCell>
-                        {formatDisplayDate(sharedCampaign.endDate) || '—'}
-                      </TableCell>
+                      <TableCell>{formatDisplayDate(sharedCampaign.startDate) || '—'}</TableCell>
+                      <TableCell>{formatDisplayDate(sharedCampaign.endDate) || '—'}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>

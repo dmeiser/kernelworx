@@ -101,9 +101,7 @@ def _navigate_to_share_management(owner_page: Page, profile_name: str) -> tuple[
 
 
 @pytest.mark.smoke
-def test_create_invite(
-    owner_page: Page, ensure_owner_profile: str, _module_state: dict[str, str]
-) -> None:
+def test_create_invite(owner_page: Page, ensure_owner_profile: str, _module_state: dict[str, str]) -> None:
     """Owner generates a WRITE invite for the owned profile; code is non-empty.
 
     Stores ``invite_code`` and ``profile_id`` in ``_module_state`` so that
