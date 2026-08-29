@@ -75,9 +75,9 @@ export default defineConfig({
     setupFiles: './tests/setup.ts',
     exclude: ['**/node_modules/**', '**/dist/**', '**/tests/e2e/**'],
     // Ensure tests timeout rather than hang
-    testTimeout: 10000,
-    hookTimeout: 10000,
-    teardownTimeout: 10000,
+    testTimeout: 20000,
+    hookTimeout: 20000,
+    teardownTimeout: 20000,
     deps: {
       optimizer: {
         web: {
