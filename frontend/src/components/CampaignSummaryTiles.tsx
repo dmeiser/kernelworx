@@ -29,12 +29,12 @@ export const CampaignSummaryTiles: React.FC<CampaignSummaryTilesProps> = ({ camp
     data: ordersData,
     loading,
     error,
-  } = useQuery<{ listOrdersByCampaign: Order[] }>(LIST_ORDERS_BY_CAMPAIGN, {
+  } = useQuery<{ listOrdersByCampaign: { orders: Order[] } }>(LIST_ORDERS_BY_CAMPAIGN, {
     variables: { campaignId: dbCampaignId },
     skip: !dbCampaignId,
   });
 
-  const orders = ordersData?.listOrdersByCampaign || [];
+  const orders = ordersData?.listOrdersByCampaign.orders || [];
 
   // Calculate statistics
   const totalOrders = orders.length;

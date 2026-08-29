@@ -247,7 +247,7 @@ const useOrdersData = ({ profileId, campaignId }: UseOrdersDataParams) => {
     loading: ordersLoading,
     error: ordersError,
     refetch: refetchOrders,
-  } = useQuery<{ listOrdersByCampaign: Order[] }>(LIST_ORDERS_BY_CAMPAIGN, {
+  } = useQuery<{ listOrdersByCampaign: { orders: Order[] } }>(LIST_ORDERS_BY_CAMPAIGN, {
     variables: { campaignId: dbCampaignId },
     skip: !dbCampaignId,
   });
@@ -259,7 +259,7 @@ const useOrdersData = ({ profileId, campaignId }: UseOrdersDataParams) => {
   });
 
   return {
-    orders: ordersData?.listOrdersByCampaign ?? [],
+    orders: ordersData?.listOrdersByCampaign.orders ?? [],
     profile: profileData?.getProfile,
     loading: ordersLoading,
     error: ordersError,
