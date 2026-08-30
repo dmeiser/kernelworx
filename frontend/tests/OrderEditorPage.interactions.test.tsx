@@ -1116,6 +1116,26 @@ describe('OrderEditorPage - Edit Order', () => {
     expect(screen.queryByDisplayValue('Jane Smith')).not.toBeInTheDocument();
   }, 20000);
 
+  test('keeps payment method from loaded order when payment methods load', async () => {
+    const mocks = editMocks();
+    renderEditOrder(mocks);
+
+    await waitFor(
+      () => {
+        expect(screen.getByRole('heading', { name: /edit order/i })).toBeInTheDocument();
+      },
+      { timeout: 10000 },
+    );
+
+    await waitFor(
+      () => {
+        const paymentSelect = screen.getByRole('combobox', { name: /payment method/i });
+        expect((paymentSelect as HTMLSelectElement).value).toBe('Venmo');
+      },
+      { timeout: 5000 },
+    );
+  }, 20000);
+
   test('renders Update Order button for edit mode', async () => {
     renderEditOrder(editMocks());
 

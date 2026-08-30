@@ -24,7 +24,7 @@ import {
   MenuItem,
 } from '@mui/material';
 import { useNavigate, type NavigateFunction } from 'react-router-dom';
-import { signUp, confirmSignUp, autoSignIn, fetchAuthSession } from 'aws-amplify/auth';
+import { signUp, confirmSignUp, autoSignIn, fetchAuthSession, resendSignUpCode } from 'aws-amplify/auth';
 import { useMutation } from '@apollo/client/react';
 import { UPDATE_MY_ACCOUNT } from '../lib/graphql';
 import { useAuth } from '../contexts/AuthContext';
@@ -52,6 +52,8 @@ const SIGNUP_ERROR_MESSAGES: Record<string, string> = {
 const VERIFICATION_ERROR_MESSAGES: Record<string, string> = {
   CodeMismatchException: 'Invalid verification code. Please check and try again',
   ExpiredCodeException: 'Verification code expired. Please request a new one',
+  LimitExceededException: 'Too many attempts. Please try again later',
+  UserNotFoundException: 'No account found with this email address',
 };
 
 // Helper: Get error message from dispatch table with fallback
@@ -327,8 +329,19 @@ export const SignupPage: React.FC = () => {
   };
 
   const handleResendCode = async () => {
-    // TODO: Implement resend verification code
-    setSuccess('Resend code functionality coming soon');
+    setError(null);
+    setSuccess(null);
+    setLoading(true);
+    try {
+      await resendSignUpCode({ username: email });
+      setSuccess('Verification code resent. Please check your email.');
+    } catch (err: unknown) {
+      console.error('Resend verification code failed:', err);
+      const typedError = err as { name?: string; message?: string };
+      setError(getVerificationErrorMessage(typedError));
+    } finally {
+      setLoading(false);
+    }
   };
 
   if (showVerification) {

@@ -1019,9 +1019,9 @@ describe('Profile Query Operations Integration Tests', () => {
     });
 
     it('handles profile with very long sellerName', async () => {
-      // Arrange: Create profile with a long name (close to max allowed)
-      // Assuming 255 character limit is reasonable
-      const longName = `${getTestPrefix()}-` + 'A'.repeat(200);
+      // Arrange: Create profile with max allowed name length (100 characters)
+      const baseName = `${getTestPrefix()}-`;
+      const longName = baseName + 'A'.repeat(100 - baseName.length);
       const { data: createData } = await ownerClient.mutate({
         mutation: CREATE_PROFILE,
         variables: { input: { sellerName: longName } },
@@ -1038,7 +1038,7 @@ describe('Profile Query Operations Integration Tests', () => {
 
       // Assert: Long name is preserved
       expect(data.getProfile.sellerName).toBe(longName);
-      expect(data.getProfile.sellerName.length).toBeGreaterThan(200);
+      expect(data.getProfile.sellerName.length).toBe(100);
     });
 
     it('handles concurrent profile access during query', async () => {
