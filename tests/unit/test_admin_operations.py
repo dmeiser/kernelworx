@@ -13,6 +13,7 @@ Tests for:
 """
 
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Any, Dict
 from unittest.mock import MagicMock, call, patch
 
@@ -2432,6 +2433,54 @@ class TestCreateManagedCatalog:
 
         assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
         assert "Valid product price is required" in exc_info.value.message
+
+    def test_product_string_price_is_accepted(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """Test that a numeric string price is accepted and converted."""
+        monkeypatch.setenv("CATALOGS_TABLE_NAME", "kernelworx-catalogs-ue1-dev")
+
+        event = {
+            **admin_appsync_event,
+            "arguments": {
+                "input": {
+                    "catalogName": "Test Catalog",
+                    "products": [{"productName": "Test", "price": "5.50"}],
+                }
+            },
+        }
+
+        result = create_managed_catalog(event, lambda_context)
+
+        assert result["products"][0]["price"] == Decimal("5.50")
+
+    def test_product_non_numeric_string_price_raises_error(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """Test that a non-numeric string price returns INVALID_INPUT."""
+        event = {
+            **admin_appsync_event,
+            "arguments": {
+                "input": {
+                    "catalogName": "Test Catalog",
+                    "products": [{"productName": "Test", "price": "not-a-number"}],
+                }
+            },
+        }
+
+        with pytest.raises(AppError) as exc_info:
+            create_managed_catalog(event, lambda_context)
+
+        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+        assert "Product price must be a valid number" in exc_info.value.message
 
     def test_missing_caller_id_raises_error(
         self,
