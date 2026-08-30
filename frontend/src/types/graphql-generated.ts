@@ -742,9 +742,13 @@ export type GqlUpdateCampaignInput = {
   campaignName?: InputMaybe<Scalars['String']['input']>;
   campaignYear?: InputMaybe<Scalars['Int']['input']>;
   catalogId?: InputMaybe<Scalars['ID']['input']>;
+  city?: InputMaybe<Scalars['String']['input']>;
   endDate?: InputMaybe<Scalars['AWSDateTime']['input']>;
   isActive?: InputMaybe<Scalars['Boolean']['input']>;
   startDate?: InputMaybe<Scalars['AWSDateTime']['input']>;
+  state?: InputMaybe<Scalars['String']['input']>;
+  unitNumber?: InputMaybe<Scalars['Int']['input']>;
+  unitType?: InputMaybe<Scalars['String']['input']>;
 };
 
 export type GqlUpdateMyAccountInput = {
