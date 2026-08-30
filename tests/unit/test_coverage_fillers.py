@@ -756,14 +756,14 @@ def test_campaign_operations_normalize_account_id():
     assert _normalize_account_id("") == ""
 
 
-def test_campaign_reporting_reraises_non_not_found_profile_error(monkeypatch):
+def test_campaign_reporting_propagates_batch_access_error(monkeypatch):
     from src.handlers import campaign_reporting
     from src.utils.errors import AppError, ErrorCode
 
-    def mock_check_profile_access(*args, **kwargs):
+    def mock_batch_check_profile_access(*args, **kwargs):
         raise AppError(ErrorCode.INTERNAL_ERROR, "DynamoDB is unavailable")
 
-    monkeypatch.setattr(campaign_reporting, "check_profile_access", mock_check_profile_access)
+    monkeypatch.setattr(campaign_reporting, "batch_check_profile_access", mock_batch_check_profile_access)
 
     with pytest.raises(AppError) as exc_info:
         campaign_reporting._get_accessible_profiles(["PROFILE#1"], "ACCOUNT#caller")

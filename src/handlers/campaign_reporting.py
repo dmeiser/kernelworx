@@ -6,17 +6,15 @@ from boto3.dynamodb.conditions import Key
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
-    from utils.auth import check_profile_access
+    from utils.auth import batch_check_profile_access
     from utils.dynamodb import tables
-    from utils.errors import AppError, ErrorCode
-    from utils.ids import ensure_catalog_id
+    from utils.ids import ensure_catalog_id, ensure_profile_id
     from utils.logging import get_logger
     from utils.pagination import query_all_items
 except ModuleNotFoundError:  # pragma: no cover
-    from ..utils.auth import check_profile_access
+    from ..utils.auth import batch_check_profile_access
     from ..utils.dynamodb import tables
-    from ..utils.errors import AppError, ErrorCode
-    from ..utils.ids import ensure_catalog_id
+    from ..utils.ids import ensure_catalog_id, ensure_profile_id
     from ..utils.logging import get_logger
     from ..utils.pagination import query_all_items
 
@@ -55,31 +53,20 @@ def _group_campaigns_by_profile(campaigns: List[Dict[str, Any]]) -> Dict[str, Li
 
 
 def _get_accessible_profiles(profile_ids: list[str], caller_account_id: str) -> Dict[str, Dict[str, Any]]:
-    """Get profiles that caller has READ access to."""
+    """Get profiles that caller has READ access to, using batched authorization."""
     accessible_profiles: Dict[str, Dict[str, Any]] = {}
-    for profile_id in profile_ids:
-        try:
-            has_access = check_profile_access(
-                caller_account_id=caller_account_id,
-                profile_id=profile_id,
-                required_permission="READ",
-            )
-        except AppError as e:
-            if e.error_code == ErrorCode.NOT_FOUND:
-                # Profile row was deleted/orphaned; skip it instead of failing the whole report
-                logger.warning(f"Profile {profile_id} not found during unit report, skipping")
-                continue
-            raise
-        if has_access:
-            profile_response = tables.profiles.query(
-                IndexName="profileId-index",
-                KeyConditionExpression="profileId = :profileId",
-                ExpressionAttributeValues={":profileId": profile_id},
-                Limit=1,
-            )
-            profile_items = profile_response.get("Items", [])
-            if profile_items:
-                accessible_profiles[profile_id] = profile_items[0]
+    accessible_ids = batch_check_profile_access(caller_account_id, profile_ids, required_permission="READ")
+
+    for profile_id in accessible_ids:
+        profile_response = tables.profiles.query(
+            IndexName="profileId-index",
+            KeyConditionExpression="profileId = :profileId",
+            ExpressionAttributeValues={":profileId": ensure_profile_id(profile_id)},
+            Limit=1,
+        )
+        profile_items = profile_response.get("Items", [])
+        if profile_items:
+            accessible_profiles[profile_id] = profile_items[0]
     return accessible_profiles
 
 
