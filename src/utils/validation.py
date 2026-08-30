@@ -12,6 +12,12 @@ from .errors import AppError, ErrorCode
 # US phone number pattern: 10 digits with optional formatting
 PHONE_PATTERN = re.compile(r"^(?:\+?1[-.\s]?)?\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})$")
 
+# Scout unit types supported by the application
+VALID_UNIT_TYPES = {"Pack", "Troop", "Crew", "Ship", "Post"}
+
+# Maximum allowed length for a seller profile name
+MAX_SELLER_NAME_LENGTH = 100
+
 
 def validate_unit_number(value: Any, required: bool = False) -> Optional[int]:
     """
@@ -41,6 +47,62 @@ def validate_unit_number(value: Any, required: bool = False) -> Optional[int]:
         raise AppError(ErrorCode.INVALID_INPUT, "unitNumber must be a valid integer")
 
 
+def validate_seller_name(name: Any) -> str:
+    """
+    Validate seller name length and non-emptiness.
+
+    Args:
+        name: Seller name value
+
+    Returns:
+        Trimmed seller name
+
+    Raises:
+        AppError: If name is missing, empty, or too long
+    """
+    if name is None:
+        raise AppError(ErrorCode.INVALID_INPUT, "sellerName is required")
+
+    cleaned = str(name).strip()
+    if not cleaned:
+        raise AppError(ErrorCode.INVALID_INPUT, "sellerName is required")
+    if len(cleaned) > MAX_SELLER_NAME_LENGTH:
+        raise AppError(
+            ErrorCode.INVALID_INPUT,
+            f"sellerName must not exceed {MAX_SELLER_NAME_LENGTH} characters",
+        )
+
+    return cleaned
+
+
+def validate_unit_type(unit_type: Optional[str]) -> Optional[str]:
+    """
+    Validate unit type against the supported enum.
+
+    Args:
+        unit_type: Unit type value (e.g., Pack, Troop)
+
+    Returns:
+        The unit type unchanged if valid, or None if not provided
+
+    Raises:
+        AppError: If unitType is not a supported value
+    """
+    if unit_type is None:
+        return None
+
+    if not isinstance(unit_type, str):
+        raise AppError(ErrorCode.INVALID_INPUT, "unitType must be a string")
+
+    if unit_type not in VALID_UNIT_TYPES:
+        raise AppError(
+            ErrorCode.INVALID_INPUT,
+            f"unitType must be one of: {', '.join(sorted(VALID_UNIT_TYPES))}",
+        )
+
+    return unit_type
+
+
 def validate_unit_fields(
     unit_type: Optional[str],
     unit_number: Optional[int],
@@ -51,7 +113,7 @@ def validate_unit_fields(
     Validate that all unit fields are present if any are provided.
 
     Args:
-        unit_type: Scout unit type (Pack, Troop, Crew, Ship)
+        unit_type: Scout unit type (Pack, Troop, Crew, Ship, Post)
         unit_number: Unit number
         city: City name
         state: State abbreviation

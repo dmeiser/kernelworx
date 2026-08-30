@@ -9,12 +9,12 @@ try:  # pragma: no cover
     from utils.dynamodb import tables
     from utils.errors import AppError, ErrorCode
     from utils.logging import get_logger
-    from utils.validation import validate_unit_number
+    from utils.validation import validate_seller_name, validate_unit_number, validate_unit_type
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.dynamodb import tables
     from ..utils.errors import AppError, ErrorCode
     from ..utils.logging import get_logger
-    from ..utils.validation import validate_unit_number
+    from ..utils.validation import validate_seller_name, validate_unit_number, validate_unit_type
 
 logger = get_logger(__name__)
 
@@ -58,17 +58,14 @@ def create_seller_profile(event: Dict[str, Any], context: Any) -> Dict[str, Any]
         Created profile dict
 
     Raises:
-        ValueError: If input validation fails
+        AppError: If input validation fails or an unexpected error occurs
     """
     try:
         input_data = event["arguments"]["input"]
-        seller_name = input_data["sellerName"]
-        unit_type = input_data.get("unitType")
+        seller_name = validate_seller_name(input_data.get("sellerName"))
+        unit_type = validate_unit_type(input_data.get("unitType"))
         unit_number = input_data.get("unitNumber")
         caller_account_id = event["identity"]["sub"]
-
-        if not seller_name or not str(seller_name).strip():
-            raise AppError(ErrorCode.INVALID_INPUT, "sellerName is required")
 
         if unit_number is not None:
             validate_unit_number(unit_number, required=True)
@@ -100,4 +97,4 @@ def create_seller_profile(event: Dict[str, Any], context: Any) -> Dict[str, Any]
         raise
     except Exception as e:
         logger.error("Error creating seller profile", extra={"error": str(e)}, exc_info=True)
-        raise RuntimeError(f"Failed to create seller profile: {str(e)}") from e
+        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to create seller profile") from e

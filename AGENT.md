@@ -309,7 +309,7 @@ resource "aws_appsync_resolver" "update_campaign" {
 **Add new GraphQL mutation/query**:
 1. Update GraphQL schema
 2. Create AppSync resolver (direct DynamoDB or Lambda)
-3. Add authorization checks (owner/share/admin)
+3. Add authorization checks (owner/share/admin) — AppSync `user_pool_config.default_action = "ALLOW"`, so the schema does not enforce authorization; every resolver must implement its own check
 4. Create unit tests for resolver logic
 5. Test with Apollo Client in frontend
 

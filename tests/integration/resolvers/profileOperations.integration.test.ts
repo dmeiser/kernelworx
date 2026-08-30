@@ -338,9 +338,9 @@ describe('Profile Operations Integration Tests', () => {
     });
 
     it('accepts very long sellerName (boundary test)', async () => {
-      // Arrange & Act - Create a profile with a very long name (255 characters)
+      // Arrange & Act - Create a profile with max allowed length (100 characters)
       const baseName = `${getTestPrefix()}-`;
-      const longName = baseName + 'A'.repeat(255 - baseName.length);
+      const longName = baseName + 'A'.repeat(100 - baseName.length);
       
       const { data } = await ownerClient.mutate({
         mutation: CREATE_PROFILE,
@@ -352,7 +352,7 @@ describe('Profile Operations Integration Tests', () => {
 
       // Assert - Long name should be stored correctly
       expect(data.createSellerProfile.sellerName).toBe(longName);
-      expect(data.createSellerProfile.sellerName.length).toBe(255);
+      expect(data.createSellerProfile.sellerName.length).toBe(100);
     });
   });
 
