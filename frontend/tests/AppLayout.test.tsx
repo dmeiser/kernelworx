@@ -201,4 +201,160 @@ describe('AppLayout', () => {
       expect(screen.queryByRole('presentation')).not.toBeInTheDocument();
     });
   });
+
+  it('navigates to home when pressing Enter or Space on logo', async () => {
+    const user = userEvent.setup();
+    renderAppLayout();
+
+    await waitFor(() => {
+      expect(screen.getByAltText('KernelWorx mark')).toBeInTheDocument();
+    });
+
+    const logoBtn = screen.getByAltText('KernelWorx mark').closest('button')!;
+    logoBtn.focus();
+    await user.keyboard('{Enter}');
+    expect(mockNavigate).toHaveBeenCalledWith('/home');
+
+    mockNavigate.mockClear();
+    await user.keyboard(' ');
+    expect(mockNavigate).toHaveBeenCalledWith('/home');
+
+    mockNavigate.mockClear();
+    await user.keyboard('{Escape}');
+    expect(mockNavigate).not.toHaveBeenCalled();
+  });
+
+  it('renders givenName only or email if familyName is missing', async () => {
+    mockUseAuth.mockReturnValue({
+      account: {
+        accountId: 'ACCOUNT#123',
+        email: 'test@example.com',
+        givenName: 'Test',
+        familyName: undefined,
+        isAdmin: false,
+      } as Account,
+      logout: mockLogout,
+      isAdmin: false,
+    });
+    mockUseQuery.mockReturnValue({ data: { listMySharedCampaigns: [] }, loading: false });
+
+    render(
+      <BrowserRouter>
+        <AppLayout>
+          <div>Content</div>
+        </AppLayout>
+      </BrowserRouter>,
+    );
+
+    expect(screen.getByText('Test')).toBeInTheDocument();
+  });
+
+  it('renders email when givenName and familyName are missing', async () => {
+    mockUseAuth.mockReturnValue({
+      account: {
+        accountId: 'ACCOUNT#123',
+        email: 'onlyemail@example.com',
+        givenName: '',
+        familyName: undefined,
+        isAdmin: false,
+      } as Account,
+      logout: mockLogout,
+      isAdmin: false,
+    });
+    mockUseQuery.mockReturnValue({ data: undefined, loading: false });
+
+    render(
+      <BrowserRouter>
+        <AppLayout>
+          <div>Content</div>
+        </AppLayout>
+      </BrowserRouter>,
+    );
+
+    expect(screen.getByText('onlyemail@example.com')).toBeInTheDocument();
+  });
+
+  it('handles null account displayName gracefully', async () => {
+    mockUseAuth.mockReturnValue({
+      account: null,
+      logout: mockLogout,
+      isAdmin: false,
+    });
+    mockUseQuery.mockReturnValue({ data: { listMySharedCampaigns: [] }, loading: false });
+
+    render(
+      <BrowserRouter>
+        <AppLayout>
+          <div data-testid="page-content">Content</div>
+        </AppLayout>
+      </BrowserRouter>,
+    );
+
+    expect(screen.getByTestId('page-content')).toBeInTheDocument();
+  });
+
+  it('renders and navigates other mobile drawer items including reports and admin', async () => {
+    isDesktop = false;
+    mockUseAuth.mockReturnValue({
+      account: {
+        accountId: 'ACCOUNT#123',
+        email: 'test@example.com',
+        givenName: 'Test',
+        familyName: 'Admin',
+        isAdmin: true,
+      } as Account,
+      logout: mockLogout,
+      isAdmin: true,
+    });
+    mockUseQuery.mockReturnValue({
+      data: { listMySharedCampaigns: [{ sharedCampaignCode: 'code-1', isActive: true }] },
+      loading: false,
+    });
+
+    render(
+      <BrowserRouter>
+        <AppLayout>
+          <div>Content</div>
+        </AppLayout>
+      </BrowserRouter>,
+    );
+
+    const user = userEvent.setup();
+    const openBtn = screen.getByRole('button', { name: /open drawer/i });
+
+    await user.click(openBtn);
+    expect(screen.getByText('Campaign Reports')).toBeInTheDocument();
+    expect(screen.getByText('Admin Console')).toBeInTheDocument();
+
+    await user.click(screen.getByText('Campaign Reports'));
+    expect(mockNavigate).toHaveBeenCalledWith('/campaign-reports');
+
+    await user.click(openBtn);
+    await user.click(screen.getByText('Admin Console'));
+    expect(mockNavigate).toHaveBeenCalledWith('/admin');
+
+    await user.click(openBtn);
+    await user.click(screen.getByText('Catalogs'));
+    expect(mockNavigate).toHaveBeenCalledWith('/catalogs');
+
+    await user.click(openBtn);
+    await user.click(screen.getByText('Payment Methods'));
+    expect(mockNavigate).toHaveBeenCalledWith('/payment-methods');
+
+    await user.click(openBtn);
+    await user.click(screen.getByText('Shared Campaigns'));
+    expect(mockNavigate).toHaveBeenCalledWith('/shared-campaigns');
+
+    await user.click(openBtn);
+    await user.click(screen.getByText('Accept Invite'));
+    expect(mockNavigate).toHaveBeenCalledWith('/accept-invite');
+
+    await user.click(openBtn);
+    await user.click(screen.getByText('Settings'));
+    expect(mockNavigate).toHaveBeenCalledWith('/settings');
+
+    await user.click(openBtn);
+    await user.click(screen.getByText('Home'));
+    expect(mockNavigate).toHaveBeenCalledWith('/home');
+  });
 });

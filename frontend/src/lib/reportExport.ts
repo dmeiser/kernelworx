@@ -2,8 +2,6 @@
  * Report export utilities for generating CSV/XLSX files from order data
  */
 
-import * as XLSX from 'xlsx';
-
 interface LineItem {
   productId: string;
   productName: string;
@@ -124,8 +122,12 @@ export function downloadAsCSV(orders: Order[], campaignId: string): void {
   URL.revokeObjectURL(url);
 }
 
-export function downloadAsXLSX(orders: Order[], campaignId: string): void {
+export async function downloadAsXLSX(orders: Order[], campaignId: string): Promise<void> {
   const { rows } = prepareReportData(orders);
+
+  // Dynamically import xlsx only when XLSX export is requested so it is not
+  // pulled into the main application bundle.
+  const XLSX = await import('xlsx');
 
   // Create workbook
   const ws = XLSX.utils.aoa_to_sheet(rows);
