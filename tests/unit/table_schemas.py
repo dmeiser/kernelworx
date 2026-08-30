@@ -137,6 +137,7 @@ def create_campaigns_table_schema() -> dict[str, Any]:
     GSIs:
     - campaignId-index: direct campaign lookup
     - catalogId-index: find campaigns using a specific catalog
+    - unitCampaignKey-index: find campaigns for a unit+campaign
     """
     return {
         "TableName": "kernelworx-campaigns-v2-ue1-dev",
@@ -148,6 +149,7 @@ def create_campaigns_table_schema() -> dict[str, Any]:
             {"AttributeName": "profileId", "AttributeType": "S"},
             {"AttributeName": "campaignId", "AttributeType": "S"},
             {"AttributeName": "catalogId", "AttributeType": "S"},
+            {"AttributeName": "unitCampaignKey", "AttributeType": "S"},
         ],
         "GlobalSecondaryIndexes": [
             {
@@ -161,6 +163,13 @@ def create_campaigns_table_schema() -> dict[str, Any]:
                 "IndexName": "catalogId-index",
                 "KeySchema": [
                     {"AttributeName": "catalogId", "KeyType": "HASH"},
+                ],
+                "Projection": {"ProjectionType": "ALL"},
+            },
+            {
+                "IndexName": "unitCampaignKey-index",
+                "KeySchema": [
+                    {"AttributeName": "unitCampaignKey", "KeyType": "HASH"},
                 ],
                 "Projection": {"ProjectionType": "ALL"},
             },

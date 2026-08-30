@@ -172,7 +172,7 @@ describe('CampaignSettingsPage', () => {
     await waitFor(() => {
       expect(screen.getByText('Shared Campaign')).toBeInTheDocument();
     });
-    expect(screen.getByText(/created from a shared campaign link/i)).toBeInTheDocument();
+    expect(screen.getByText(/Changing the catalog, campaign name, or unit information/i)).toBeInTheDocument();
   });
 
   it('does not show shared campaign warning for non-shared campaigns', async () => {
@@ -455,27 +455,24 @@ describe('CampaignSettingsPage', () => {
 
   it('saves campaign with empty dates omitted from input', async () => {
     const user = userEvent.setup();
-    const mocks = createMocks(
-      { ...mockCampaign, startDate: undefined, endDate: undefined },
-      [
-        {
-          request: {
-            query: UPDATE_CAMPAIGN,
-            variables: {
-              input: {
-                campaignId: CAMPAIGN_ID,
-                campaignName: 'Updated Sale',
-                catalogId: CATALOG_ID,
-                isActive: true,
-              },
+    const mocks = createMocks({ ...mockCampaign, startDate: undefined, endDate: undefined }, [
+      {
+        request: {
+          query: UPDATE_CAMPAIGN,
+          variables: {
+            input: {
+              campaignId: CAMPAIGN_ID,
+              campaignName: 'Updated Sale',
+              catalogId: CATALOG_ID,
+              isActive: true,
             },
           },
-          result: {
-            data: { updateCampaign: { ...mockCampaign, campaignName: 'Updated Sale' } },
-          },
         },
-      ],
-    );
+        result: {
+          data: { updateCampaign: { ...mockCampaign, campaignName: 'Updated Sale' } },
+        },
+      },
+    ]);
     renderPage(mocks);
 
     await waitFor(() => {
@@ -674,6 +671,215 @@ describe('CampaignSettingsPage', () => {
     await waitFor(() => {
       expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
     });
+  });
+
+  it('renders existing unit information', async () => {
+    renderPage(createMocks());
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('Spring Sale')).toBeInTheDocument();
+    });
+
+    expect(screen.getByText(/Pack 101/i)).toBeInTheDocument();
+    expect(screen.getByDisplayValue('Springfield')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('IL')).toBeInTheDocument();
+  });
+
+  it('updates unit information and saves', async () => {
+    const user = userEvent.setup();
+    const mocks = createMocks(
+      { ...mockCampaign, unitType: undefined, unitNumber: undefined, city: undefined, state: undefined },
+      [
+        {
+          request: {
+            query: UPDATE_CAMPAIGN,
+            variables: {
+              input: {
+                campaignId: CAMPAIGN_ID,
+                campaignName: 'Spring Sale',
+                catalogId: CATALOG_ID,
+                isActive: true,
+                startDate: '2025-03-01T00:00:00.000Z',
+                endDate: '2025-03-31T00:00:00.000Z',
+                unitType: 'Troop',
+                unitNumber: 42,
+                city: 'Anytown',
+                state: 'KY',
+              },
+            },
+          },
+          result: {
+            data: {
+              updateCampaign: {
+                ...mockCampaign,
+                unitType: 'Troop',
+                unitNumber: 42,
+                city: 'Anytown',
+                state: 'KY',
+              },
+            },
+          },
+        },
+      ],
+    );
+    renderPage(mocks);
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('Spring Sale')).toBeInTheDocument();
+    });
+
+    // Expand the unit section (no unit type, so collapsed by default)
+    const unitHeaders = await screen.findAllByText(/Unit Information/i);
+    const accordionHeader = unitHeaders.find((el) => el.closest('.MuiAccordionSummary-root')) || unitHeaders[0];
+    await user.click(accordionHeader);
+
+    // Select unit type via the form control combobox
+    const unitTypeLabel =
+      (await screen.findAllByText(/Unit Type/i)).find((el) => el.tagName === 'LABEL') ||
+      (await screen.findAllByText(/Unit Type/i))[0];
+    const unitForm = unitTypeLabel.closest('.MuiFormControl-root') as HTMLElement;
+    const unitCombo = unitForm.querySelector('[role="combobox"]') as HTMLElement;
+    await user.click(unitCombo);
+    await waitFor(() => {
+      expect(screen.getByRole('option', { name: 'Troop' })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole('option', { name: 'Troop' }));
+
+    const unitNumberInput = screen.getByLabelText(/Unit Number/i);
+    fireEvent.change(unitNumberInput, { target: { value: '42' } });
+
+    const cityInput = screen.getByLabelText(/City/i);
+    fireEvent.change(cityInput, { target: { value: 'Anytown' } });
+
+    const stateLabel =
+      (await screen.findAllByText(/State/i)).find((el) => el.tagName === 'LABEL') ||
+      (await screen.findAllByText(/State/i))[0];
+    const stateForm = stateLabel.closest('.MuiFormControl-root') as HTMLElement;
+    const stateCombo = stateForm.querySelector('[role="combobox"]') as HTMLElement;
+    await user.click(stateCombo);
+    const stateOptions = await screen.findAllByRole('option');
+    const kyOption = stateOptions.find((opt) => opt.textContent === 'KY');
+    await user.click(kyOption!);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /save changes/i })).not.toBeDisabled();
+    });
+
+    await user.click(screen.getByRole('button', { name: /save changes/i }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+    });
+  });
+
+  it('shows validation error when unit type is selected but fields are missing', async () => {
+    const user = userEvent.setup();
+    renderPage(
+      createMocks({ ...mockCampaign, unitType: undefined, unitNumber: undefined, city: undefined, state: undefined }),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('Spring Sale')).toBeInTheDocument();
+    });
+
+    const unitHeaders2 = await screen.findAllByText(/Unit Information/i);
+    const accordionHeader2 = unitHeaders2.find((el) => el.closest('.MuiAccordionSummary-root')) || unitHeaders2[0];
+    await user.click(accordionHeader2);
+
+    const unitTypeLabel2 =
+      (await screen.findAllByText(/Unit Type/i)).find((el) => el.tagName === 'LABEL') ||
+      (await screen.findAllByText(/Unit Type/i))[0];
+    const unitForm2 = unitTypeLabel2.closest('.MuiFormControl-root') as HTMLElement;
+    const unitCombo2 = unitForm2.querySelector('[role="combobox"]') as HTMLElement;
+    await user.click(unitCombo2);
+    await waitFor(() => {
+      expect(screen.getByRole('option', { name: 'Troop' })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole('option', { name: 'Troop' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /save changes/i })).not.toBeDisabled();
+    });
+
+    await user.click(screen.getByRole('button', { name: /save changes/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Unit number is required/i)).toBeInTheDocument();
+    });
+  });
+
+  it('clears unit information when unit type is changed to None and saves', async () => {
+    const user = userEvent.setup();
+    const mocks = createMocks(mockCampaign, [
+      {
+        request: {
+          query: UPDATE_CAMPAIGN,
+          variables: {
+            input: {
+              campaignId: CAMPAIGN_ID,
+              campaignName: 'Spring Sale',
+              catalogId: CATALOG_ID,
+              isActive: true,
+              startDate: '2025-03-01T00:00:00.000Z',
+              endDate: '2025-03-31T00:00:00.000Z',
+              unitType: null,
+              unitNumber: null,
+              city: null,
+              state: null,
+            },
+          },
+        },
+        result: {
+          data: {
+            updateCampaign: {
+              ...mockCampaign,
+              unitType: null,
+              unitNumber: null,
+              city: null,
+              state: null,
+            },
+          },
+        },
+      },
+    ]);
+    renderPage(mocks);
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('Spring Sale')).toBeInTheDocument();
+    });
+
+    const unitTypeLabel =
+      (await screen.findAllByText(/Unit Type/i)).find((el) => el.tagName === 'LABEL') ||
+      (await screen.findAllByText(/Unit Type/i))[0];
+    const unitForm = unitTypeLabel.closest('.MuiFormControl-root') as HTMLElement;
+    const unitCombo = unitForm.querySelector('[role="combobox"]') as HTMLElement;
+    await user.click(unitCombo);
+    await waitFor(() => {
+      expect(screen.getByRole('option', { name: 'None' })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole('option', { name: 'None' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /save changes/i })).not.toBeDisabled();
+    });
+
+    await user.click(screen.getByRole('button', { name: /save changes/i }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+    });
+  });
+
+  it('disables unit information editing for shared campaigns', async () => {
+    renderPage(createMocks(mockSharedCampaign));
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('Spring Sale')).toBeInTheDocument();
+    });
+
+    expect(
+      screen.getByText(/Unit information cannot be changed for campaigns created from a shared campaign link/i),
+    ).toBeInTheDocument();
   });
 
   describe('dateToISO helper', () => {

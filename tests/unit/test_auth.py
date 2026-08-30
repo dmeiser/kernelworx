@@ -5,8 +5,10 @@ from typing import Any, Dict
 import pytest
 
 from src.utils.auth import (
+    batch_check_profile_access,
     check_profile_access,
     get_account,
+    get_dynamodb_resource,
     is_admin,
     is_profile_owner,
     require_profile_access,
@@ -417,6 +419,445 @@ class TestCheckProfileAccess:
         result = check_profile_access(another_account_id, sample_profile_id, "READ")
 
         assert result is False
+
+
+class TestBatchCheckProfileAccess:
+    """Tests for batch_check_profile_access function."""
+
+    def test_batch_owner_and_shared_access(
+        self,
+        dynamodb_table: Any,
+        shares_table: Any,
+        sample_profile: Any,
+        sample_profile_id: str,
+        sample_account_id: str,
+        another_account_id: str,
+    ) -> None:
+        """Batch check returns owned profile and shared profile in one call."""
+        # Create an extra profile owned by another_account_id and share it with sample_account_id
+        shared_profile_id = "PROFILE#shared-profile"
+        dynamodb_table.put_item(
+            Item={
+                "ownerAccountId": f"ACCOUNT#{another_account_id}",
+                "profileId": shared_profile_id,
+                "sellerName": "Shared Profile",
+            }
+        )
+        shares_table.put_item(
+            Item={
+                "profileId": shared_profile_id,
+                "targetAccountId": f"ACCOUNT#{sample_account_id}",
+                "permissions": ["READ"],
+            }
+        )
+
+        result = batch_check_profile_access(
+            sample_account_id,
+            [sample_profile_id, shared_profile_id, "PROFILE#no-access"],
+        )
+
+        assert sample_profile_id in result
+        assert shared_profile_id in result
+        assert "PROFILE#no-access" not in result
+
+    def test_batch_write_permission_filtering(
+        self,
+        dynamodb_table: Any,
+        shares_table: Any,
+        sample_profile: Any,
+        sample_profile_id: str,
+        another_account_id: str,
+    ) -> None:
+        """Batch check respects required_permission for shared profiles."""
+        # sample_profile is owned by sample_account_id; another_account_id has READ share
+        shares_table.put_item(
+            Item={
+                "profileId": sample_profile_id,
+                "targetAccountId": f"ACCOUNT#{another_account_id}",
+                "permissions": ["READ"],
+            }
+        )
+
+        read_result = batch_check_profile_access(another_account_id, [sample_profile_id], "READ")
+        write_result = batch_check_profile_access(another_account_id, [sample_profile_id], "WRITE")
+
+        assert sample_profile_id in read_result
+        assert sample_profile_id not in write_result
+
+    def test_batch_empty_input(self, dynamodb_table: Any) -> None:
+        """Batch check with empty profile IDs returns empty set."""
+        result = batch_check_profile_access("any-account", [])
+
+        assert result == set()
+
+    def test_batch_ignores_duplicates(
+        self,
+        dynamodb_table: Any,
+        sample_profile: Any,
+        sample_profile_id: str,
+        sample_account_id: str,
+    ) -> None:
+        """Batch check deduplicates repeated profile IDs."""
+        result = batch_check_profile_access(
+            sample_account_id,
+            [sample_profile_id, sample_profile_id, sample_profile_id],
+        )
+
+        assert result == {sample_profile_id}
+
+    def test_batch_ownership_keys_chunked_at_100(
+        self,
+        dynamodb_table: Any,
+        sample_account_id: str,
+        monkeypatch: Any,
+    ) -> None:
+        """BatchGetItem ownership requests are split at DynamoDB's 100-key limit."""
+        profile_ids: list[str] = []
+        for n in range(150):
+            profile_id = f"PROFILE#owner-chunk-{n:03d}"
+            dynamodb_table.put_item(
+                Item={
+                    "ownerAccountId": f"ACCOUNT#{sample_account_id}",
+                    "profileId": profile_id,
+                }
+            )
+            profile_ids.append(profile_id)
+
+        resource = get_dynamodb_resource()
+        original_batch_get_item = resource.batch_get_item
+        batch_sizes: list[int] = []
+
+        def patched_batch_get_item(RequestItems: Dict[str, Any]) -> Dict[str, Any]:
+            for spec in RequestItems.values():
+                batch_sizes.append(len(spec.get("Keys", [])))
+            return original_batch_get_item(RequestItems=RequestItems)
+
+        monkeypatch.setattr(resource, "batch_get_item", patched_batch_get_item)
+        monkeypatch.setattr("src.utils.auth.get_dynamodb_resource", lambda: resource)
+
+        result = batch_check_profile_access(sample_account_id, profile_ids)
+
+        assert len(result) == 150
+        assert max(batch_sizes) <= 100
+        assert sum(batch_sizes) == 150
+
+    def test_batch_share_keys_chunked_at_100(
+        self,
+        dynamodb_table: Any,
+        shares_table: Any,
+        sample_account_id: str,
+        another_account_id: str,
+        monkeypatch: Any,
+    ) -> None:
+        """BatchGetItem share requests are split at DynamoDB's 100-key limit."""
+        profile_ids: list[str] = []
+        for n in range(150):
+            profile_id = f"PROFILE#share-chunk-{n:03d}"
+            dynamodb_table.put_item(
+                Item={
+                    "ownerAccountId": f"ACCOUNT#{another_account_id}",
+                    "profileId": profile_id,
+                }
+            )
+            shares_table.put_item(
+                Item={
+                    "profileId": profile_id,
+                    "targetAccountId": f"ACCOUNT#{sample_account_id}",
+                    "permissions": ["READ"],
+                }
+            )
+            profile_ids.append(profile_id)
+
+        resource = get_dynamodb_resource()
+        original_batch_get_item = resource.batch_get_item
+        shares_table_name = shares_table.table_name
+        batch_sizes: list[int] = []
+
+        def patched_batch_get_item(RequestItems: Dict[str, Any]) -> Dict[str, Any]:
+            for table_name, spec in RequestItems.items():
+                if table_name == shares_table_name:
+                    batch_sizes.append(len(spec.get("Keys", [])))
+            return original_batch_get_item(RequestItems=RequestItems)
+
+        monkeypatch.setattr(resource, "batch_get_item", patched_batch_get_item)
+        monkeypatch.setattr("src.utils.auth.get_dynamodb_resource", lambda: resource)
+
+        result = batch_check_profile_access(sample_account_id, profile_ids)
+
+        assert len(result) == 150
+        assert max(batch_sizes) <= 100
+        assert sum(batch_sizes) == 150
+
+    def test_batch_retries_unprocessed_ownership_keys(
+        self,
+        dynamodb_table: Any,
+        sample_account_id: str,
+        monkeypatch: Any,
+    ) -> None:
+        """Unprocessed ownership keys are retried and eventually resolved."""
+        profile_ids: list[str] = []
+        for n in range(5):
+            profile_id = f"PROFILE#unproc-owner-{n}"
+            dynamodb_table.put_item(
+                Item={
+                    "ownerAccountId": f"ACCOUNT#{sample_account_id}",
+                    "profileId": profile_id,
+                }
+            )
+            profile_ids.append(profile_id)
+
+        resource = get_dynamodb_resource()
+        original_batch_get_item = resource.batch_get_item
+        profiles_table_name = dynamodb_table.table_name
+        call_count = 0
+
+        def patched_batch_get_item(RequestItems: Dict[str, Any]) -> Dict[str, Any]:
+            nonlocal call_count
+            table_name = next(iter(RequestItems))
+            if table_name == profiles_table_name:
+                call_count += 1
+                if call_count == 1:
+                    keys = RequestItems[table_name]["Keys"]
+                    return {
+                        "Responses": {table_name: []},
+                        "UnprocessedKeys": {table_name: {"Keys": keys}},
+                    }
+            return original_batch_get_item(RequestItems=RequestItems)
+
+        monkeypatch.setattr(resource, "batch_get_item", patched_batch_get_item)
+        monkeypatch.setattr("src.utils.auth.get_dynamodb_resource", lambda: resource)
+        monkeypatch.setattr("src.utils.auth.time.sleep", lambda _seconds: None)
+
+        result = batch_check_profile_access(sample_account_id, profile_ids)
+
+        assert result == set(profile_ids)
+        assert call_count == 2
+
+    def test_batch_retries_unprocessed_share_keys(
+        self,
+        dynamodb_table: Any,
+        shares_table: Any,
+        sample_account_id: str,
+        another_account_id: str,
+        monkeypatch: Any,
+    ) -> None:
+        """Unprocessed share keys are retried and eventually resolved."""
+        profile_ids: list[str] = []
+        for n in range(5):
+            profile_id = f"PROFILE#unproc-share-{n}"
+            dynamodb_table.put_item(
+                Item={
+                    "ownerAccountId": f"ACCOUNT#{another_account_id}",
+                    "profileId": profile_id,
+                }
+            )
+            shares_table.put_item(
+                Item={
+                    "profileId": profile_id,
+                    "targetAccountId": f"ACCOUNT#{sample_account_id}",
+                    "permissions": ["READ"],
+                }
+            )
+            profile_ids.append(profile_id)
+
+        resource = get_dynamodb_resource()
+        original_batch_get_item = resource.batch_get_item
+        shares_table_name = shares_table.table_name
+        share_call_count = 0
+
+        def patched_batch_get_item(RequestItems: Dict[str, Any]) -> Dict[str, Any]:
+            nonlocal share_call_count
+            table_name = next(iter(RequestItems))
+            if table_name == shares_table_name:
+                share_call_count += 1
+                if share_call_count == 1:
+                    keys = RequestItems[table_name]["Keys"]
+                    return {
+                        "Responses": {table_name: []},
+                        "UnprocessedKeys": {table_name: {"Keys": keys}},
+                    }
+            return original_batch_get_item(RequestItems=RequestItems)
+
+        monkeypatch.setattr(resource, "batch_get_item", patched_batch_get_item)
+        monkeypatch.setattr("src.utils.auth.get_dynamodb_resource", lambda: resource)
+        monkeypatch.setattr("src.utils.auth.time.sleep", lambda _seconds: None)
+
+        result = batch_check_profile_access(sample_account_id, profile_ids)
+
+        assert result == set(profile_ids)
+        assert share_call_count == 2
+
+    def test_batch_raises_when_ownership_unprocessed_exhausted(
+        self,
+        dynamodb_table: Any,
+        sample_account_id: str,
+        monkeypatch: Any,
+    ) -> None:
+        """Exhausted ownership retries raise an internal error instead of silently denying."""
+        profile_ids: list[str] = []
+        for n in range(3):
+            profile_id = f"PROFILE#unproc-owner-exhausted-{n}"
+            dynamodb_table.put_item(
+                Item={
+                    "ownerAccountId": f"ACCOUNT#{sample_account_id}",
+                    "profileId": profile_id,
+                }
+            )
+            profile_ids.append(profile_id)
+
+        resource = get_dynamodb_resource()
+
+        def patched_batch_get_item(RequestItems: Dict[str, Any]) -> Dict[str, Any]:
+            table_name = next(iter(RequestItems))
+            keys = RequestItems[table_name]["Keys"]
+            return {
+                "Responses": {table_name: []},
+                "UnprocessedKeys": {table_name: {"Keys": keys}},
+            }
+
+        monkeypatch.setattr(resource, "batch_get_item", patched_batch_get_item)
+        monkeypatch.setattr("src.utils.auth.get_dynamodb_resource", lambda: resource)
+        monkeypatch.setattr("src.utils.auth.time.sleep", lambda _seconds: None)
+
+        with pytest.raises(AppError) as exc_info:
+            batch_check_profile_access(sample_account_id, profile_ids)
+
+        assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+
+    def test_batch_raises_when_share_unprocessed_exhausted(
+        self,
+        dynamodb_table: Any,
+        shares_table: Any,
+        sample_account_id: str,
+        another_account_id: str,
+        monkeypatch: Any,
+    ) -> None:
+        """Exhausted share retries raise an internal error instead of silently denying."""
+        profile_ids: list[str] = []
+        for n in range(3):
+            profile_id = f"PROFILE#unproc-share-exhausted-{n}"
+            dynamodb_table.put_item(
+                Item={
+                    "ownerAccountId": f"ACCOUNT#{another_account_id}",
+                    "profileId": profile_id,
+                }
+            )
+            shares_table.put_item(
+                Item={
+                    "profileId": profile_id,
+                    "targetAccountId": f"ACCOUNT#{sample_account_id}",
+                    "permissions": ["READ"],
+                }
+            )
+            profile_ids.append(profile_id)
+
+        resource = get_dynamodb_resource()
+        original_batch_get_item = resource.batch_get_item
+        shares_table_name = shares_table.table_name
+
+        def patched_batch_get_item(RequestItems: Dict[str, Any]) -> Dict[str, Any]:
+            table_name = next(iter(RequestItems))
+            keys = RequestItems[table_name]["Keys"]
+            if table_name == shares_table_name:
+                return {
+                    "Responses": {table_name: []},
+                    "UnprocessedKeys": {table_name: {"Keys": keys}},
+                }
+            return original_batch_get_item(RequestItems=RequestItems)
+
+        monkeypatch.setattr(resource, "batch_get_item", patched_batch_get_item)
+        monkeypatch.setattr("src.utils.auth.get_dynamodb_resource", lambda: resource)
+        monkeypatch.setattr("src.utils.auth.time.sleep", lambda _seconds: None)
+
+        with pytest.raises(AppError) as exc_info:
+            batch_check_profile_access(sample_account_id, profile_ids)
+
+        assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+
+    def test_batch_owned_item_missing_profile_id_is_ignored(
+        self,
+        dynamodb_table: Any,
+        sample_account_id: str,
+        monkeypatch: Any,
+    ) -> None:
+        """Ownership items without a profileId are ignored rather than crashing."""
+        profile_id = "PROFILE#missing-owned-id"
+        dynamodb_table.put_item(
+            Item={
+                "ownerAccountId": f"ACCOUNT#{sample_account_id}",
+                "profileId": profile_id,
+            }
+        )
+
+        resource = get_dynamodb_resource()
+        original_batch_get_item = resource.batch_get_item
+        profiles_table_name = dynamodb_table.table_name
+
+        def patched_batch_get_item(RequestItems: Dict[str, Any]) -> Dict[str, Any]:
+            table_name = next(iter(RequestItems))
+            if table_name == profiles_table_name:
+                return {
+                    "Responses": {
+                        table_name: [
+                            {"ownerAccountId": f"ACCOUNT#{sample_account_id}", "profileId": profile_id},
+                            {"ownerAccountId": f"ACCOUNT#{sample_account_id}"},  # missing profileId
+                        ]
+                    },
+                    "UnprocessedKeys": {},
+                }
+            return original_batch_get_item(RequestItems=RequestItems)
+
+        monkeypatch.setattr(resource, "batch_get_item", patched_batch_get_item)
+        monkeypatch.setattr("src.utils.auth.get_dynamodb_resource", lambda: resource)
+
+        result = batch_check_profile_access(sample_account_id, [profile_id])
+
+        assert result == {profile_id}
+
+    def test_batch_share_item_missing_profile_id_is_ignored(
+        self,
+        dynamodb_table: Any,
+        shares_table: Any,
+        sample_account_id: str,
+        another_account_id: str,
+        monkeypatch: Any,
+    ) -> None:
+        """Share items without a profileId are ignored rather than crashing."""
+        profile_id = "PROFILE#missing-share-id"
+        dynamodb_table.put_item(
+            Item={
+                "ownerAccountId": f"ACCOUNT#{another_account_id}",
+                "profileId": profile_id,
+            }
+        )
+
+        resource = get_dynamodb_resource()
+        original_batch_get_item = resource.batch_get_item
+        shares_table_name = shares_table.table_name
+
+        def patched_batch_get_item(RequestItems: Dict[str, Any]) -> Dict[str, Any]:
+            table_name = next(iter(RequestItems))
+            if table_name == shares_table_name:
+                return {
+                    "Responses": {
+                        table_name: [
+                            {
+                                "targetAccountId": f"ACCOUNT#{sample_account_id}",
+                                "permissions": ["READ"],
+                                # missing profileId
+                            }
+                        ]
+                    },
+                    "UnprocessedKeys": {},
+                }
+            return original_batch_get_item(RequestItems=RequestItems)
+
+        monkeypatch.setattr(resource, "batch_get_item", patched_batch_get_item)
+        monkeypatch.setattr("src.utils.auth.get_dynamodb_resource", lambda: resource)
+
+        result = batch_check_profile_access(sample_account_id, [profile_id])
+
+        assert result == set()
 
 
 class TestRequireProfileAccess:

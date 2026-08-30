@@ -6,12 +6,12 @@ from boto3.dynamodb.conditions import Key
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
-    from utils.auth import check_profile_access
+    from utils.auth import batch_check_profile_access
     from utils.dynamodb import tables
     from utils.logging import get_logger
     from utils.pagination import query_all_items
 except ModuleNotFoundError:  # pragma: no cover
-    from ..utils.auth import check_profile_access
+    from ..utils.auth import batch_check_profile_access
     from ..utils.dynamodb import tables
     from ..utils.logging import get_logger
     from ..utils.pagination import query_all_items
@@ -20,13 +20,10 @@ logger = get_logger(__name__)
 
 
 def _filter_accessible_profiles(profiles: List[Dict[str, Any]], caller_account_id: str) -> List[Dict[str, Any]]:
-    """Filter profiles to those the caller has READ access to."""
-    accessible = []
-    for profile in profiles:
-        profile_id = profile["profileId"]
-        if check_profile_access(caller_account_id=caller_account_id, profile_id=profile_id, required_permission="READ"):
-            accessible.append(profile)
-    return accessible
+    """Filter profiles to those the caller has READ access to, using batched authorization."""
+    profile_ids = [profile["profileId"] for profile in profiles]
+    accessible_ids = batch_check_profile_access(caller_account_id, profile_ids, required_permission="READ")
+    return [profile for profile in profiles if profile["profileId"] in accessible_ids]
 
 
 def _collect_catalog_ids(profiles: List[Dict[str, Any]], campaign_name: str, campaign_year: int) -> Set[str]:
@@ -131,15 +128,24 @@ def _build_unit_campaign_key(
     return f"{unit_type}#{unit_number}#{city}#{state}#{campaign_name}#{campaign_year}"
 
 
+def _add_catalog_id_if_accessible(catalog_ids: Set[str], campaign: Dict[str, Any], accessible_ids: set[str]) -> None:
+    """Add a campaign's catalog ID if the profile is accessible and catalogId is a string."""
+    profile_id = campaign["profileId"]
+    if profile_id not in accessible_ids:
+        return
+    catalog_id = campaign.get("catalogId")
+    if catalog_id is not None and isinstance(catalog_id, str):
+        catalog_ids.add(catalog_id)
+
+
 def _collect_catalog_ids_from_campaigns(campaigns: List[Dict[str, Any]], caller_account_id: str) -> Set[str]:
-    """Collect catalog IDs from campaigns the caller has access to."""
+    """Collect catalog IDs from campaigns the caller has access to, using batched authorization."""
+    profile_ids = [campaign["profileId"] for campaign in campaigns]
+    accessible_ids = batch_check_profile_access(caller_account_id, profile_ids, required_permission="READ")
+
     catalog_ids: Set[str] = set()
     for campaign in campaigns:
-        profile_id = campaign["profileId"]
-        if check_profile_access(caller_account_id=caller_account_id, profile_id=profile_id, required_permission="READ"):
-            catalog_id = campaign.get("catalogId")
-            if catalog_id is not None and isinstance(catalog_id, str):
-                catalog_ids.add(catalog_id)
+        _add_catalog_id_if_accessible(catalog_ids, campaign, accessible_ids)
     return catalog_ids
 
 

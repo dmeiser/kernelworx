@@ -10,6 +10,7 @@ import { Box, CircularProgress, CssBaseline, ThemeProvider } from '@mui/material
 import { ApolloProvider } from '@apollo/client/react';
 import { AuthProvider } from './contexts/AuthContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { DevFooter } from './components/DevFooter';
 import { apolloClient } from './lib/apollo';
 import { theme } from './lib/theme';
@@ -106,6 +107,22 @@ function PageLoader() {
   );
 }
 
+function PublicRoute({ children }: { children: React.ReactNode }) {
+  const { pathname } = useLocation();
+  return <ErrorBoundary resetKey={pathname}>{children}</ErrorBoundary>;
+}
+
+function ProtectedAppRoute({ children, requireAdmin }: { children: React.ReactNode; requireAdmin?: boolean }) {
+  const { pathname } = useLocation();
+  return (
+    <ProtectedRoute requireAdmin={requireAdmin}>
+      <AppLayout>
+        <ErrorBoundary resetKey={pathname}>{children}</ErrorBoundary>
+      </AppLayout>
+    </ProtectedRoute>
+  );
+}
+
 function App() {
   return (
     <ThemeProvider theme={theme}>
@@ -117,22 +134,62 @@ function App() {
               <ScrollToHash />
               <Routes>
                 {/* Public routes */}
-                <Route path="/" element={<LandingPage />} />
-                <Route path="/login" element={<LoginPage />} />
-                <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-                <Route path="/signup" element={<SignupPage />} />
-                <Route path="/privacy" element={<PrivacyPolicyPage />} />
-                <Route path="/story" element={<StoryPage />} />
+                <Route
+                  path="/"
+                  element={
+                    <PublicRoute>
+                      <LandingPage />
+                    </PublicRoute>
+                  }
+                />
+                <Route
+                  path="/login"
+                  element={
+                    <PublicRoute>
+                      <LoginPage />
+                    </PublicRoute>
+                  }
+                />
+                <Route
+                  path="/forgot-password"
+                  element={
+                    <PublicRoute>
+                      <ForgotPasswordPage />
+                    </PublicRoute>
+                  }
+                />
+                <Route
+                  path="/signup"
+                  element={
+                    <PublicRoute>
+                      <SignupPage />
+                    </PublicRoute>
+                  }
+                />
+                <Route
+                  path="/privacy"
+                  element={
+                    <PublicRoute>
+                      <PrivacyPolicyPage />
+                    </PublicRoute>
+                  }
+                />
+                <Route
+                  path="/story"
+                  element={
+                    <PublicRoute>
+                      <StoryPage />
+                    </PublicRoute>
+                  }
+                />
 
                 {/* Shared Campaign short-link route */}
                 <Route
                   path="/c/:sharedCampaignCode"
                   element={
-                    <ProtectedRoute>
-                      <AppLayout>
-                        <CreateCampaignPage />
-                      </AppLayout>
-                    </ProtectedRoute>
+                    <ProtectedAppRoute>
+                      <CreateCampaignPage />
+                    </ProtectedAppRoute>
                   }
                 />
 
@@ -140,22 +197,18 @@ function App() {
                 <Route
                   path="/create-campaign"
                   element={
-                    <ProtectedRoute>
-                      <AppLayout>
-                        <CreateCampaignPage />
-                      </AppLayout>
-                    </ProtectedRoute>
+                    <ProtectedAppRoute>
+                      <CreateCampaignPage />
+                    </ProtectedAppRoute>
                   }
                 />
 
                 <Route
                   path="/accept-invite"
                   element={
-                    <ProtectedRoute>
-                      <AppLayout>
-                        <AcceptInvitePage />
-                      </AppLayout>
-                    </ProtectedRoute>
+                    <ProtectedAppRoute>
+                      <AcceptInvitePage />
+                    </ProtectedAppRoute>
                   }
                 />
 
@@ -163,165 +216,135 @@ function App() {
                 <Route
                   path="/home"
                   element={
-                    <ProtectedRoute>
-                      <AppLayout>
-                        <HomePage />
-                      </AppLayout>
-                    </ProtectedRoute>
+                    <ProtectedAppRoute>
+                      <HomePage />
+                    </ProtectedAppRoute>
                   }
                 />
 
                 <Route
                   path="/scouts"
                   element={
-                    <ProtectedRoute>
-                      <AppLayout>
-                        <ScoutsPage />
-                      </AppLayout>
-                    </ProtectedRoute>
+                    <ProtectedAppRoute>
+                      <ScoutsPage />
+                    </ProtectedAppRoute>
                   }
                 />
 
                 <Route
                   path="/scouts/:profileId/campaigns"
                   element={
-                    <ProtectedRoute>
-                      <AppLayout>
-                        <ScoutCampaignsPage />
-                      </AppLayout>
-                    </ProtectedRoute>
+                    <ProtectedAppRoute>
+                      <ScoutCampaignsPage />
+                    </ProtectedAppRoute>
                   }
                 />
 
                 <Route
                   path="/scouts/:profileId/manage"
                   element={
-                    <ProtectedRoute>
-                      <AppLayout>
-                        <ScoutManagementPage />
-                      </AppLayout>
-                    </ProtectedRoute>
+                    <ProtectedAppRoute>
+                      <ScoutManagementPage />
+                    </ProtectedAppRoute>
                   }
                 />
 
                 <Route
                   path="/scouts/:profileId/campaigns/:campaignId/*"
                   element={
-                    <ProtectedRoute>
-                      <AppLayout>
-                        <CampaignLayout />
-                      </AppLayout>
-                    </ProtectedRoute>
+                    <ProtectedAppRoute>
+                      <CampaignLayout />
+                    </ProtectedAppRoute>
                   }
                 />
 
                 <Route
                   path="/settings"
                   element={
-                    <ProtectedRoute>
-                      <AppLayout>
-                        <SettingsPage />
-                      </AppLayout>
-                    </ProtectedRoute>
+                    <ProtectedAppRoute>
+                      <SettingsPage />
+                    </ProtectedAppRoute>
                   }
                 />
 
                 <Route
                   path="/account/settings"
                   element={
-                    <ProtectedRoute>
-                      <AppLayout>
-                        <UserSettingsPage />
-                      </AppLayout>
-                    </ProtectedRoute>
+                    <ProtectedAppRoute>
+                      <UserSettingsPage />
+                    </ProtectedAppRoute>
                   }
                 />
 
                 <Route
                   path="/catalogs/:catalogId/preview"
                   element={
-                    <ProtectedRoute>
-                      <AppLayout>
-                        <CatalogPreviewPage />
-                      </AppLayout>
-                    </ProtectedRoute>
+                    <ProtectedAppRoute>
+                      <CatalogPreviewPage />
+                    </ProtectedAppRoute>
                   }
                 />
 
                 <Route
                   path="/catalogs"
                   element={
-                    <ProtectedRoute>
-                      <AppLayout>
-                        <CatalogsPage />
-                      </AppLayout>
-                    </ProtectedRoute>
+                    <ProtectedAppRoute>
+                      <CatalogsPage />
+                    </ProtectedAppRoute>
                   }
                 />
 
                 <Route
                   path="/campaign-reports"
                   element={
-                    <ProtectedRoute>
-                      <AppLayout>
-                        <CampaignReportsPage />
-                      </AppLayout>
-                    </ProtectedRoute>
+                    <ProtectedAppRoute>
+                      <CampaignReportsPage />
+                    </ProtectedAppRoute>
                   }
                 />
 
                 <Route
                   path="/shared-campaigns"
                   element={
-                    <ProtectedRoute>
-                      <AppLayout>
-                        <SharedCampaignsPage />
-                      </AppLayout>
-                    </ProtectedRoute>
+                    <ProtectedAppRoute>
+                      <SharedCampaignsPage />
+                    </ProtectedAppRoute>
                   }
                 />
 
                 <Route
                   path="/shared-campaigns/create"
                   element={
-                    <ProtectedRoute>
-                      <AppLayout>
-                        <CreateSharedCampaignPage />
-                      </AppLayout>
-                    </ProtectedRoute>
+                    <ProtectedAppRoute>
+                      <CreateSharedCampaignPage />
+                    </ProtectedAppRoute>
                   }
                 />
 
                 <Route
                   path="/payment-methods"
                   element={
-                    <ProtectedRoute>
-                      <AppLayout>
-                        <PaymentMethodsPage />
-                      </AppLayout>
-                    </ProtectedRoute>
+                    <ProtectedAppRoute>
+                      <PaymentMethodsPage />
+                    </ProtectedAppRoute>
                   }
                 />
 
                 <Route
                   path="/admin"
                   element={
-                    <ProtectedRoute requireAdmin>
-                      <AppLayout>
-                        <AdminPage />
-                      </AppLayout>
-                    </ProtectedRoute>
+                    <ProtectedAppRoute requireAdmin>
+                      <AdminPage />
+                    </ProtectedAppRoute>
                   }
                 />
 
                 <Route
                   path="/admin/user-data/:accountId"
                   element={
-                    <ProtectedRoute requireAdmin>
-                      <AppLayout>
-                        <UserDataPage />
-                      </AppLayout>
-                    </ProtectedRoute>
+                    <ProtectedAppRoute requireAdmin>
+                      <UserDataPage />
+                    </ProtectedAppRoute>
                   }
                 />
 
