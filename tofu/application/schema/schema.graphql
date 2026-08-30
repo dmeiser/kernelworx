@@ -296,6 +296,10 @@ input UpdateCampaignInput {
   endDate: AWSDateTime
   catalogId: ID
   isActive: Boolean
+  unitType: String
+  unitNumber: Int
+  city: String
+  state: String
 }
 
 input CreateCatalogInput {

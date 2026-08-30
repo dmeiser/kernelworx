@@ -1,5 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
+import { util } from '@aws-appsync/utils';
 import { request, response } from './update_campaign_fn.js';
 
 describe('update_campaign_fn request', () => {
@@ -82,6 +83,176 @@ describe('update_campaign_fn request', () => {
 
     const result = request(ctx);
     assert.doesNotMatch(result.update.expression, /unitCampaignKey/);
+  });
+
+  it('updates unit fields and recomputes unitCampaignKey', () => {
+    const ctx = {
+      stash: {
+        campaign: {
+          profileId: 'PROFILE#scout',
+          campaignId: 'CAMPAIGN#c1',
+          campaignName: 'Fall',
+          campaignYear: 2024,
+        },
+      },
+      args: {
+        input: {
+          unitType: 'Pack',
+          unitNumber: 158,
+          city: 'Springfield',
+          state: 'IL',
+        },
+      },
+    };
+
+    const result = request(ctx);
+
+    assert.match(result.update.expression, /unitType = :unitType/);
+    assert.match(result.update.expression, /unitNumber = :unitNumber/);
+    assert.match(result.update.expression, /city = :city/);
+    assert.match(result.update.expression, /state = :state/);
+    assert.match(result.update.expression, /unitCampaignKey = :unitCampaignKey/);
+    assert.strictEqual(
+      result.update.expressionValues[':unitCampaignKey'],
+      'Pack#158#Springfield#IL#Fall#2024',
+    );
+  });
+
+  it('recomputes unitCampaignKey when unit fields change', () => {
+    const ctx = {
+      stash: {
+        campaign: {
+          profileId: 'PROFILE#scout',
+          campaignId: 'CAMPAIGN#c1',
+          campaignName: 'Fall',
+          campaignYear: 2024,
+          unitType: 'Pack',
+          unitNumber: 158,
+          city: 'Springfield',
+          state: 'IL',
+          unitCampaignKey: 'Pack#158#Springfield#IL#Fall#2024',
+        },
+      },
+      args: {
+        input: {
+          unitNumber: 200,
+        },
+      },
+    };
+
+    const result = request(ctx);
+
+    assert.match(result.update.expression, /unitCampaignKey = :unitCampaignKey/);
+    assert.strictEqual(
+      result.update.expressionValues[':unitCampaignKey'],
+      'Pack#200#Springfield#IL#Fall#2024',
+    );
+  });
+
+  it('errors when unitType is provided without all unit fields', () => {
+    const ctx = {
+      stash: {
+        campaign: {
+          profileId: 'PROFILE#scout',
+          campaignId: 'CAMPAIGN#c1',
+          campaignName: 'Fall',
+          campaignYear: 2024,
+        },
+      },
+      args: {
+        input: {
+          unitType: 'Pack',
+        },
+      },
+    };
+
+    let capturedError = null;
+    const originalError = util.error;
+    util.error = (message, type) => {
+      capturedError = { message, type };
+      throw new Error(message);
+    };
+    try {
+      request(ctx);
+    } catch (_err) {
+      // expected
+    } finally {
+      util.error = originalError;
+    }
+
+    assert.ok(capturedError);
+    assert.match(capturedError.message, /unitNumber is required/i);
+  });
+
+  it('rejects unit field updates for shared campaigns', () => {
+    const ctx = {
+      stash: {
+        campaign: {
+          profileId: 'PROFILE#scout',
+          campaignId: 'CAMPAIGN#c1',
+          campaignName: 'Fall',
+          campaignYear: 2024,
+          sharedCampaignCode: 'SHARED-ABC',
+        },
+      },
+      args: {
+        input: {
+          unitType: 'Pack',
+          unitNumber: 158,
+          city: 'Springfield',
+          state: 'IL',
+        },
+      },
+    };
+
+    let capturedError = null;
+    const originalError = util.error;
+    util.error = (message, type) => {
+      capturedError = { message, type };
+      throw new Error(message);
+    };
+    try {
+      request(ctx);
+    } catch (_err) {
+      // expected
+    } finally {
+      util.error = originalError;
+    }
+
+    assert.ok(capturedError);
+    assert.match(capturedError.message, /cannot be changed for campaigns created from a shared campaign/i);
+  });
+
+  it('does not add unitCampaignKey when unit fields are cleared', () => {
+    const ctx = {
+      stash: {
+        campaign: {
+          profileId: 'PROFILE#scout',
+          campaignId: 'CAMPAIGN#c1',
+          campaignName: 'Fall',
+          campaignYear: 2024,
+          unitType: 'Pack',
+          unitNumber: 158,
+          city: 'Springfield',
+          state: 'IL',
+          unitCampaignKey: 'Pack#158#Springfield#IL#Fall#2024',
+        },
+      },
+      args: {
+        input: {
+          unitType: null,
+          unitNumber: null,
+          city: null,
+          state: null,
+        },
+      },
+    };
+
+    const result = request(ctx);
+
+    assert.match(result.update.expression, /unitType = :unitType/);
+    assert.doesNotMatch(result.update.expression, /unitCampaignKey = :unitCampaignKey/);
+    assert.match(result.update.expression, /REMOVE unitCampaignKey/);
   });
 
   it('does not prefix null catalogId with CATALOG#', () => {
@@ -255,6 +426,156 @@ describe('update_campaign_fn request', () => {
     assert.match(result.update.expression, /campaignYear = :campaignYear/);
     assert.strictEqual(result.update.expressionValues[':campaignYear'], 2025);
     assert.doesNotMatch(result.update.expression, /unitCampaignKey/);
+  });
+  it('rejects clearing unitType while leaving other unit fields in place', () => {
+    const ctx = {
+      stash: {
+        campaign: {
+          profileId: 'PROFILE#scout',
+          campaignId: 'CAMPAIGN#c1',
+          campaignName: 'Fall',
+          campaignYear: 2024,
+          unitType: 'Pack',
+          unitNumber: 158,
+          city: 'Springfield',
+          state: 'IL',
+          unitCampaignKey: 'Pack#158#Springfield#IL#Fall#2024',
+        },
+      },
+      args: {
+        input: {
+          unitType: null,
+        },
+      },
+    };
+
+    let capturedError = null;
+    const originalError = util.error;
+    util.error = (message, type) => {
+      capturedError = { message, type };
+      throw new Error(message);
+    };
+    try {
+      request(ctx);
+    } catch (_err) {
+      // expected
+    } finally {
+      util.error = originalError;
+    }
+
+    assert.ok(capturedError);
+    assert.match(capturedError.message, /unitType is required when unit fields are present/i);
+  });
+
+  it('rejects unitNumber update without unitType', () => {
+    const ctx = {
+      stash: {
+        campaign: {
+          profileId: 'PROFILE#scout',
+          campaignId: 'CAMPAIGN#c1',
+          campaignName: 'Fall',
+          campaignYear: 2024,
+        },
+      },
+      args: {
+        input: {
+          unitNumber: 42,
+        },
+      },
+    };
+
+    let capturedError = null;
+    const originalError = util.error;
+    util.error = (message, type) => {
+      capturedError = { message, type };
+      throw new Error(message);
+    };
+    try {
+      request(ctx);
+    } catch (_err) {
+      // expected
+    } finally {
+      util.error = originalError;
+    }
+
+    assert.ok(capturedError);
+    assert.match(capturedError.message, /unitType is required when unit fields are present/i);
+  });
+
+  it('rejects non-positive unitNumber values', () => {
+    const ctx = {
+      stash: {
+        campaign: {
+          profileId: 'PROFILE#scout',
+          campaignId: 'CAMPAIGN#c1',
+          campaignName: 'Fall',
+          campaignYear: 2024,
+        },
+      },
+      args: {
+        input: {
+          unitType: 'Pack',
+          unitNumber: 0,
+          city: 'Springfield',
+          state: 'IL',
+        },
+      },
+    };
+
+    let capturedError = null;
+    const originalError = util.error;
+    util.error = (message, type) => {
+      capturedError = { message, type };
+      throw new Error(message);
+    };
+    try {
+      request(ctx);
+    } catch (_err) {
+      // expected
+    } finally {
+      util.error = originalError;
+    }
+
+    assert.ok(capturedError);
+    assert.match(capturedError.message, /unitNumber must be a positive integer/i);
+  });
+
+  it('rejects decimal unitNumber values', () => {
+    const ctx = {
+      stash: {
+        campaign: {
+          profileId: 'PROFILE#scout',
+          campaignId: 'CAMPAIGN#c1',
+          campaignName: 'Fall',
+          campaignYear: 2024,
+        },
+      },
+      args: {
+        input: {
+          unitType: 'Pack',
+          unitNumber: 1.5,
+          city: 'Springfield',
+          state: 'IL',
+        },
+      },
+    };
+
+    let capturedError = null;
+    const originalError = util.error;
+    util.error = (message, type) => {
+      capturedError = { message, type };
+      throw new Error(message);
+    };
+    try {
+      request(ctx);
+    } catch (_err) {
+      // expected
+    } finally {
+      util.error = originalError;
+    }
+
+    assert.ok(capturedError);
+    assert.match(capturedError.message, /unitNumber must be a positive integer/i);
   });
 });
 
