@@ -22,7 +22,8 @@ logger = get_logger(__name__)
 def _is_profile_owner(profiles_table: "Table", caller_account_id: str, db_profile_id: str) -> bool:
     """Check if caller is the profile owner via direct lookup."""
     direct_response = profiles_table.get_item(
-        Key={"ownerAccountId": f"ACCOUNT#{caller_account_id}", "profileId": db_profile_id}
+        Key={"ownerAccountId": f"ACCOUNT#{caller_account_id}", "profileId": db_profile_id},
+        ConsistentRead=True,
     )
     return "Item" in direct_response
 
