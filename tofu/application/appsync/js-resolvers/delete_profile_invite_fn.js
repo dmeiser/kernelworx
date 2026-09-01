@@ -7,7 +7,8 @@ export function request(ctx) {
     ctx.stash.profileId = dbProfileId;
     return {
         operation: 'GetItem',
-        key: util.dynamodb.toMapValues({ ownerAccountId: expectedOwner, profileId: dbProfileId })
+        key: util.dynamodb.toMapValues({ ownerAccountId: expectedOwner, profileId: dbProfileId }),
+        consistentRead: true
     };
 }
 

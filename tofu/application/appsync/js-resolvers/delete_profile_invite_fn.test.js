@@ -17,6 +17,7 @@ describe('delete_profile_invite_fn request', () => {
             ownerAccountId: 'ACCOUNT#user-123',
             profileId: 'PROFILE#prof-456'
         });
+        assert.strictEqual(result.consistentRead, true);
         assert.strictEqual(ctx.stash.profileId, 'PROFILE#prof-456');
     });
 
@@ -34,6 +35,7 @@ describe('delete_profile_invite_fn request', () => {
             ownerAccountId: 'ACCOUNT#user-123',
             profileId: 'PROFILE#prof-456'
         });
+        assert.strictEqual(result.consistentRead, true);
         assert.strictEqual(ctx.stash.profileId, 'PROFILE#prof-456');
     });
 });

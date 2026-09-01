@@ -17,6 +17,7 @@ describe('verify_profile_owner_for_share_fn request', () => {
             ownerAccountId: 'ACCOUNT#user-123',
             profileId: 'PROFILE#prof-456'
         });
+        assert.strictEqual(result.consistentRead, true);
     });
 
     it('preserves already-prefixed profileId', () => {
@@ -33,6 +34,7 @@ describe('verify_profile_owner_for_share_fn request', () => {
             ownerAccountId: 'ACCOUNT#user-123',
             profileId: 'PROFILE#prof-456'
         });
+        assert.strictEqual(result.consistentRead, true);
     });
 });
 
