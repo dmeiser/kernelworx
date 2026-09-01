@@ -101,6 +101,7 @@ class TestCleanupStaleLock:
         assert "No lock object found" in result.stderr
 
     def test_different_host_fresh_lock_is_left(self, repo_root: Path, tmp_env: Path) -> None:
+        recorded = tmp_env / "aws_calls.txt"
         lock = {
             "Created": (datetime.now(timezone.utc) - timedelta(seconds=30)).isoformat(),
             "Who": "runner@other-host",
@@ -110,6 +111,7 @@ class TestCleanupStaleLock:
             tmp_env,
             f"""
             #!/bin/bash
+            echo "$@" >> "{recorded}"
             case "$1 $2" in
               "s3api head-object")
                 exit 0
@@ -117,14 +119,20 @@ class TestCleanupStaleLock:
               "s3 cp")
                 echo '{json.dumps(lock)}'
                 ;;
+              "s3 rm")
+                echo "removed"
+                ;;
             esac
             exit 0
             """,
         )
         assert result.returncode == 0, result.stderr
         assert "Lock appears fresh" in result.stderr
+        rm_calls = [line for line in recorded.read_text().splitlines() if line.startswith("s3 rm")]
+        assert not rm_calls, "Fresh lock from a different host must not be deleted"
 
     def test_different_host_stale_lock_is_removed(self, repo_root: Path, tmp_env: Path) -> None:
+        recorded = tmp_env / "aws_calls.txt"
         lock = {
             "Created": (datetime.now(timezone.utc) - timedelta(seconds=900)).isoformat(),
             "Who": "runner@other-host",
@@ -134,6 +142,7 @@ class TestCleanupStaleLock:
             tmp_env,
             f"""
             #!/bin/bash
+            echo "$@" >> "{recorded}"
             case "$1 $2" in
               "s3api head-object")
                 exit 0
@@ -150,8 +159,11 @@ class TestCleanupStaleLock:
         )
         assert result.returncode == 0, result.stderr
         assert "Lock is older than threshold" in result.stderr
+        rm_calls = [line for line in recorded.read_text().splitlines() if line.startswith("s3 rm")]
+        assert rm_calls, "Stale lock from a different host must be deleted"
 
     def test_same_host_fresh_lock_is_left(self, repo_root: Path, tmp_env: Path) -> None:
+        recorded = tmp_env / "aws_calls.txt"
         this_host = os.uname().nodename
         lock = {
             "Created": (datetime.now(timezone.utc) - timedelta(seconds=30)).isoformat(),
@@ -162,6 +174,7 @@ class TestCleanupStaleLock:
             tmp_env,
             f"""
             #!/bin/bash
+            echo "$@" >> "{recorded}"
             case "$1 $2" in
               "s3api head-object")
                 exit 0
@@ -169,14 +182,20 @@ class TestCleanupStaleLock:
               "s3 cp")
                 echo '{json.dumps(lock)}'
                 ;;
+              "s3 rm")
+                echo "removed"
+                ;;
             esac
             exit 0
             """,
         )
         assert result.returncode == 0, result.stderr
         assert "Lock appears fresh" in result.stderr
+        rm_calls = [line for line in recorded.read_text().splitlines() if line.startswith("s3 rm")]
+        assert not rm_calls, "Fresh lock from the same host must not be deleted"
 
     def test_same_host_stale_lock_is_removed(self, repo_root: Path, tmp_env: Path) -> None:
+        recorded = tmp_env / "aws_calls.txt"
         this_host = os.uname().nodename
         lock = {
             "Created": (datetime.now(timezone.utc) - timedelta(seconds=900)).isoformat(),
@@ -187,6 +206,7 @@ class TestCleanupStaleLock:
             tmp_env,
             f"""
             #!/bin/bash
+            echo "$@" >> "{recorded}"
             case "$1 $2" in
               "s3api head-object")
                 exit 0
@@ -203,6 +223,8 @@ class TestCleanupStaleLock:
         )
         assert result.returncode == 0, result.stderr
         assert "Lock is older than threshold" in result.stderr
+        rm_calls = [line for line in recorded.read_text().splitlines() if line.startswith("s3 rm")]
+        assert rm_calls, "Stale lock from the same host must be deleted"
 
 
 class TestRecoverStateIfMissing:
