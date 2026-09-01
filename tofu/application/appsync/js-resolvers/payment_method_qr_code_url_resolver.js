@@ -40,6 +40,7 @@ export function request(ctx) {
             ownerAccountId: ownerAccountId,
             methodName: methodName,
             s3Key: s3Key,
+            profileId: ctx.source.profileId || null,
             identity: ctx.identity,
         }
     };
