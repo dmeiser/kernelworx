@@ -160,40 +160,8 @@ def _delete_invites(invites: List[Dict[str, Any]]) -> int:
     return _batch_delete_keys(tables.invites, keys, ["inviteCode"])
 
 
-def _delete_shared_campaigns(campaigns: List[Dict[str, Any]], owner_account_id: str) -> int:
-    """Delete shared campaigns created by the profile owner."""
-    deleted_count = 0
-    seen_codes: set[str] = set()
-    normalized_owner = ensure_account_id(owner_account_id)
-    for campaign in campaigns:
-        code = campaign.get("sharedCampaignCode")
-        if not code or code in seen_codes:
-            continue
-        seen_codes.add(code)
-        try:
-            items = query_all_items(
-                tables.shared_campaigns,
-                {
-                    "KeyConditionExpression": "sharedCampaignCode = :code",
-                    "ExpressionAttributeValues": {":code": code},
-                },
-            )
-            for item in items:
-                created_by = item.get("createdBy", "")
-                if created_by in (owner_account_id, normalized_owner):
-                    key: Dict[str, Any] = {"sharedCampaignCode": code}
-                    if "SK" in item:
-                        key["SK"] = item["SK"]
-                    tables.shared_campaigns.delete_item(Key=key)
-                    deleted_count += 1
-                    logger.info(f"Deleted shared campaign {code}")
-        except Exception as e:
-            logger.warning(f"Failed to delete shared campaign {code}: {str(e)}")
-    return deleted_count
-
-
 def _delete_s3_reports(profile_id: str) -> int:
-    """Delete all S3 report objects for this profile."""
+    """Delete all S3 report objects and versions for this profile."""
     bucket_name = os.environ.get("EXPORTS_BUCKET")
     if not bucket_name:
         return 0
@@ -207,13 +175,23 @@ def _delete_s3_reports(profile_id: str) -> int:
 
     for prefix in set(prefixes):
         try:
-            paginator = s3.get_paginator("list_objects_v2")
+            paginator = s3.get_paginator("list_object_versions")
             for page in paginator.paginate(Bucket=bucket_name, Prefix=prefix):
-                objects = [{"Key": obj["Key"]} for obj in page.get("Contents", []) if "Key" in obj]
-                if objects:
-                    s3.delete_objects(Bucket=bucket_name, Delete={"Objects": objects})
-                    deleted_count += len(objects)
-                    logger.info(f"Deleted {len(objects)} report objects from S3 under {prefix}")
+                delete_items: list[dict[str, str]] = []
+                for version in page.get("Versions", []):
+                    k = version.get("Key")
+                    vid = version.get("VersionId")
+                    if k and vid:
+                        delete_items.append({"Key": k, "VersionId": vid})
+                for marker in page.get("DeleteMarkers", []):
+                    k = marker.get("Key")
+                    vid = marker.get("VersionId")
+                    if k and vid:
+                        delete_items.append({"Key": k, "VersionId": vid})
+                if delete_items:
+                    s3.delete_objects(Bucket=bucket_name, Delete={"Objects": delete_items})
+                    deleted_count += len(delete_items)
+                    logger.info(f"Deleted {len(delete_items)} report versions from S3 under {prefix}")
         except Exception as e:
             logger.warning(f"Error cleaning up S3 reports under {prefix}: {str(e)}")
 
@@ -259,7 +237,10 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> bool:
     owner_account_id = _get_profile_owner_id(db_profile_id)
     db_caller_id = ensure_account_id(caller_account_id)
     if owner_account_id != db_caller_id:
-        raise AppError(ErrorCode.FORBIDDEN, "Only profile owner can delete a profile")
+        logger.warning(
+            f"Unauthorized delete attempt: caller {caller_account_id} is not owner {owner_account_id} of {db_profile_id}"
+        )
+        raise AppError(ErrorCode.FORBIDDEN, "Not authorized to delete this profile")
 
     logger.info(f"Starting cascade delete for profile {db_profile_id}")
 
@@ -290,7 +271,6 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> bool:
 
     orders_deleted = _delete_orders(order_keys)
     reports_deleted = _delete_s3_reports(db_profile_id)
-    shared_campaigns_deleted = _delete_shared_campaigns(campaigns, owner_account_id)
     campaigns_deleted = _delete_campaigns(db_profile_id, campaigns)
     shares_deleted = _delete_shares(db_profile_id, shares)
     invites_deleted = _delete_invites(invites)
@@ -301,6 +281,6 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> bool:
         f"Cascade delete complete for profile {db_profile_id}: "
         f"orders={orders_deleted}, campaigns={campaigns_deleted}, "
         f"shares={shares_deleted}, invites={invites_deleted}, "
-        f"shared_campaigns={shared_campaigns_deleted}, reports={reports_deleted}"
+        f"reports={reports_deleted}"
     )
     return True
