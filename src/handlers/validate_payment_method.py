@@ -43,6 +43,12 @@ def _extract_and_normalize_inputs(event: Dict[str, Any]) -> tuple[str | None, st
     return owner_account_id, payment_method
 
 
+def _prev_result_as_dict(event: Dict[str, Any]) -> Dict[str, Any]:
+    """Return the previous pipeline result as a mutable dict."""
+    prev_result = event.get("prev", {}).get("result", {})
+    return dict(prev_result) if isinstance(prev_result, dict) else {}
+
+
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
     Validate that the payment method exists for the profile owner's account.
@@ -50,14 +56,17 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     Args:
         event: AppSync pipeline event with:
             - prev.result.ownerAccountId: Profile owner's account ID
-            - arguments.input.paymentMethod: Payment method name
+            - arguments.input.paymentMethod: Optional payment method name.
+              When omitted, validation is skipped so updateOrder can perform
+              partial updates without changing the payment method.
         context: Lambda context (unused)
 
     Returns:
         The input unchanged (passthrough)
 
     Raises:
-        AppError: If payment method does not exist for the account
+        AppError: If payment method is required but missing or does not exist
+            for the account.
     """
     logger = get_logger(__name__)
 
@@ -65,9 +74,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         owner_account_id, payment_method = _extract_and_normalize_inputs(event)
 
         if owner_account_id is None or payment_method is None:
-            prev_result = event.get("prev", {}).get("result", {})
-            result: Dict[str, Any] = dict(prev_result) if isinstance(prev_result, dict) else {}
-            return result
+            return _prev_result_as_dict(event)
 
         logger.info(
             "Validating payment method for order", owner_account_id=owner_account_id, payment_method=payment_method
@@ -77,9 +84,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             "Payment method validated successfully", owner_account_id=owner_account_id, payment_method=payment_method
         )
 
-        prev_result = event.get("prev", {}).get("result", {})
-        result = dict(prev_result) if isinstance(prev_result, dict) else {}
-        return result
+        return _prev_result_as_dict(event)
 
     except AppError:
         # Re-raise app errors
