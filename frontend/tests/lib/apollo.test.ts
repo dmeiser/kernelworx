@@ -43,7 +43,9 @@ describe('lib/apollo', () => {
     it('throws when token is missing', async () => {
       (fetchAuthSession as any).mockResolvedValue({ tokens: {} });
 
-      await expect(getAuthContext(null as any, { headers: {} } as any)).rejects.toThrow('No valid auth token available');
+      await expect(getAuthContext(null as any, { headers: {} } as any)).rejects.toThrow(
+        'No valid auth token available',
+      );
     });
   });
 
