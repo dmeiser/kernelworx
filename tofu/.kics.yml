@@ -15,3 +15,7 @@ exclude-queries:
   - 8d29754a-2a18-460d-a1ba-9509f8d359da
   # not enabling x-ray for cost reasons
   - 8152e0cf-d2f0-47ad-96d5-d003a76eabd1
+  # DynamoDB AWS-owned encryption key used to avoid KMS charges
+  - ce089fd4-1406-47bd-8aad-c259772bb294
+  # CloudWatch log groups AWS-managed encryption used to avoid KMS charges
+  - 0afbcfe9-d341-4b92-a64c-7e6de0543879
