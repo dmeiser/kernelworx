@@ -10,6 +10,7 @@ import userEvent from '@testing-library/user-event';
 import { AppLayout } from '../src/components/AppLayout';
 import { BrowserRouter } from 'react-router-dom';
 import type { Account } from '../src/types/auth';
+import { LIST_MY_SHARED_CAMPAIGNS } from '../src/lib/graphql';
 
 const mockNavigate = vi.fn();
 vi.mock('react-router-dom', async () => {
@@ -30,7 +31,7 @@ vi.mock('@apollo/client/react', async () => {
   const actual = await vi.importActual('@apollo/client/react');
   return {
     ...actual,
-    useQuery: () => mockUseQuery(),
+    useQuery: (...args: unknown[]) => mockUseQuery(...args),
   };
 });
 
@@ -356,5 +357,16 @@ describe('AppLayout', () => {
     await user.click(openBtn);
     await user.click(screen.getByText('Home'));
     expect(mockNavigate).toHaveBeenCalledWith('/home');
+  });
+
+  it('queries shared campaigns with cache-first fetch policy', () => {
+    renderAppLayout();
+
+    expect(mockUseQuery).toHaveBeenCalledWith(
+      LIST_MY_SHARED_CAMPAIGNS,
+      expect.objectContaining({
+        fetchPolicy: 'cache-first',
+      }),
+    );
   });
 });
