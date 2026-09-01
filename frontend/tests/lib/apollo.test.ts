@@ -110,19 +110,8 @@ describe('lib/apollo', () => {
     });
   });
 
-  describe('apolloClient defaultOptions', () => {
-    it('uses errorPolicy "none" for mutations so GraphQL errors are surfaced', () => {
-      expect(apolloClient.defaultOptions.mutate?.errorPolicy).toBe('none');
-    });
-
-    it('keeps errorPolicy "all" for queries so partial data can still render', () => {
-      expect(apolloClient.defaultOptions.query?.errorPolicy).toBe('all');
-      expect(apolloClient.defaultOptions.watchQuery?.errorPolicy).toBe('all');
-    });
-  });
-
-  describe('mutation error surfacing', () => {
-    it('rejects when the server returns GraphQL errors', async () => {
+  describe('apolloClient defaultOptions behavior', () => {
+    it('mutations reject when the server returns GraphQL errors', async () => {
       const mutation = gql`
         mutation Fail {
           fail
@@ -139,12 +128,35 @@ describe('lib/apollo', () => {
       const client = new ApolloClient({
         link,
         cache: new InMemoryCache(),
-        defaultOptions: {
-          mutate: { errorPolicy: 'none' },
-        },
+        defaultOptions: apolloClient.defaultOptions,
       });
 
       await expect(client.mutate({ mutation })).rejects.toThrow('Mutation failed');
+    });
+
+    it('queries still resolve with data when the server returns GraphQL errors', async () => {
+      const query = gql`
+        query Partial {
+          partial
+        }
+      `;
+      const link = new MockLink([
+        {
+          request: { query },
+          result: {
+            data: { partial: 'some data' },
+            errors: [{ message: 'Field error', extensions: { errorCode: 'INTERNAL_ERROR' } }],
+          },
+        },
+      ]);
+      const client = new ApolloClient({
+        link,
+        cache: new InMemoryCache(),
+        defaultOptions: apolloClient.defaultOptions,
+      });
+
+      const result = await client.query({ query });
+      expect(result.data).toEqual({ partial: 'some data' });
     });
   });
 });
