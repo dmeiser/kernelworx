@@ -168,7 +168,7 @@ def _lookup_cognito_user_with_retry(
             users_response = cognito.list_users(UserPoolId=user_pool_id, Filter=f'sub = "{account_id}"', Limit=1)
             users = users_response.get("Users", [])
             if users:
-                return users[0]["Username"]
+                return str(users[0]["Username"])
             return None
         except ClientError as e:
             error_code = e.response.get("Error", {}).get("Code")
