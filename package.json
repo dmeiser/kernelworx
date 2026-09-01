@@ -5,7 +5,7 @@
   "scripts": {
     "spellcheck": "./frontend/node_modules/.bin/cspell --config cspell.json .",
     "test:guards": "vitest --run",
-    "test:js-resolvers": "cd tofu/application/appsync/js-resolvers && node --import ./register-loader.mjs --test",
+    "test:js-resolvers": "cd tofu/application/appsync/js-resolvers && node --import ./register-loader.mjs --test --test-concurrency=1",
     "test": "npm run test:js-resolvers"
   },
   "devDependencies": {
