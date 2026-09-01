@@ -18,6 +18,7 @@ describe('lookup_profile_for_update_fn request', () => {
         assert.strictEqual(result.operation, 'GetItem');
         assert.strictEqual(result.key.ownerAccountId, 'ACCOUNT#user-uuid-123');
         assert.strictEqual(result.key.profileId, 'PROFILE#prof-456');
+        assert.strictEqual(result.consistentRead, true);
     });
 
     it('uses GetItem with ownerAccountId and preserves existing PROFILE# prefix', () => {
@@ -35,6 +36,7 @@ describe('lookup_profile_for_update_fn request', () => {
         assert.strictEqual(result.operation, 'GetItem');
         assert.strictEqual(result.key.ownerAccountId, 'ACCOUNT#user-uuid-123');
         assert.strictEqual(result.key.profileId, 'PROFILE#prof-456');
+        assert.strictEqual(result.consistentRead, true);
     });
 });
 

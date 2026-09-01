@@ -9,7 +9,8 @@ export function request(ctx) {
         key: util.dynamodb.toMapValues({
             ownerAccountId: expectedOwner,
             profileId: dbProfileId
-        })
+        }),
+        consistentRead: true
     };
 }
 
