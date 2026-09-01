@@ -309,6 +309,57 @@ def _verify_write_access(caller_account_id: str, profile_id: str) -> None:
         )
 
 
+def _is_truthy_flag(value: Any) -> bool:
+    """Return True for boolean True or string representations of true."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.lower() == "true"
+    return False
+
+
+def _can_use_catalog(catalog: Dict[str, Any], caller_account_id: str, profile: Dict[str, Any]) -> bool:
+    """Return True if the caller may read or use the catalog.
+
+    Rules:
+      - Deleted catalogs cannot be used.
+      - Public catalogs can be used by any authenticated caller.
+      - Private catalogs can be used by their owner.
+      - Private catalogs can also be used when the caller has access to a profile
+        whose owner owns the catalog (for example, via a WRITE share on that profile).
+    """
+    if _is_truthy_flag(catalog.get("isDeleted")):
+        return False
+    if _is_truthy_flag(catalog.get("isPublic")):
+        return True
+
+    catalog_owner = _normalize_account_id(catalog.get("ownerAccountId"))
+    if catalog_owner and catalog_owner == caller_account_id:
+        return True
+
+    profile_owner = _normalize_account_id(profile.get("ownerAccountId"))
+    if profile_owner and profile_owner == catalog_owner:
+        return True
+
+    return False
+
+
+def _verify_catalog_access(catalog_id: str, caller_account_id: str, profile: Dict[str, Any]) -> None:
+    """Verify the catalog exists, is not deleted, and may be used by the caller."""
+    catalog: Optional[Dict[str, Any]] = None
+    try:
+        response = tables.catalogs.get_item(Key={"catalogId": catalog_id})
+        catalog = response.get("Item")
+    except Exception as e:
+        logger.error(f"Error fetching catalog {catalog_id}: {str(e)}")
+
+    if not catalog or _is_truthy_flag(catalog.get("isDeleted")):
+        raise AppError(ErrorCode.NOT_FOUND, f"Catalog {catalog_id} not found")
+
+    if not _can_use_catalog(catalog, caller_account_id, profile):
+        raise AppError(ErrorCode.FORBIDDEN, "You do not have permission to use this catalog")
+
+
 def _load_shared_campaign(shared_campaign_code: Optional[str]) -> Optional[Dict[str, Any]]:
     """Load and validate shared campaign if code provided.
 
@@ -340,7 +391,7 @@ def _load_shared_campaign(shared_campaign_code: Optional[str]) -> Optional[Dict[
         except Exception as e:
             logger.error(f"Error fetching catalog {catalog_id}: {str(e)}")
 
-    if not catalog or catalog.get("isDeleted"):
+    if not catalog or _is_truthy_flag(catalog.get("isDeleted")):
         raise AppError(
             ErrorCode.INVALID_INPUT,
             f"Shared Campaign {shared_campaign_code} is no longer available",
@@ -441,6 +492,9 @@ def create_campaign(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         shared_campaign = _load_shared_campaign(shared_campaign_code)
         values = _extract_campaign_values(inp, shared_campaign)
         _prepare_campaign_values(values)
+
+        if shared_campaign is None:
+            _verify_catalog_access(values["catalog_id"], caller_account_id, profile)
 
         now = datetime.now(timezone.utc).isoformat()
         db_profile_id = profile.get("profileId") or ensure_profile_id(profile_id)

@@ -215,6 +215,18 @@ class TestCreateCampaign:
             "isDeleted": False,
         }
 
+    @pytest.fixture(autouse=True)
+    def _seed_default_catalog(self, catalogs_table: Any) -> None:
+        """Seed a public catalog owned by the default caller for direct-create tests."""
+        catalogs_table.put_item(
+            Item={
+                "catalogId": "CATALOG#catalog-abc",
+                "catalogName": "Default Public Catalog",
+                "isPublic": "true",
+                "ownerAccountId": "ACCOUNT#test-account-123",
+            }
+        )
+
     @patch("src.handlers.campaign_operations.dynamodb_client")
     @patch("src.handlers.campaign_operations.check_profile_access")
     @patch("src.handlers.campaign_operations._get_profile")
@@ -1159,6 +1171,221 @@ class TestCreateCampaign:
         assert result["endDate"] == "2024-12-31T00:00:00"
         mock_dynamodb_client.transact_write_items.assert_called_once()
 
+    @patch("src.handlers.campaign_operations.dynamodb_client")
+    @patch("src.handlers.campaign_operations.check_profile_access")
+    @patch("src.handlers.campaign_operations._get_profile")
+    def test_create_campaign_private_catalog_owned_by_caller(
+        self,
+        mock_get_profile: MagicMock,
+        mock_check_access: MagicMock,
+        mock_dynamodb_client: MagicMock,
+        lambda_context: MagicMock,
+        sample_profile: Dict[str, Any],
+        catalogs_table: Any,
+    ) -> None:
+        """Test campaign creation with a private catalog owned by the caller."""
+        mock_check_access.return_value = True
+        mock_get_profile.return_value = sample_profile
+        catalogs_table.put_item(
+            Item={
+                "catalogId": "CATALOG#private-owned",
+                "catalogName": "Private Owned Catalog",
+                "isPublic": "false",
+                "ownerAccountId": "ACCOUNT#test-account-123",
+            }
+        )
+
+        event = {
+            "arguments": {
+                "input": {
+                    "profileId": "PROFILE#profile-123",
+                    "campaignName": "Fall",
+                    "campaignYear": 2024,
+                    "startDate": "2024-09-01T00:00:00Z",
+                    "catalogId": "private-owned",
+                }
+            },
+            "identity": {"sub": "test-account-123"},
+        }
+
+        result = create_campaign(event, lambda_context)
+        assert result["catalogId"] == "CATALOG#private-owned"
+        mock_dynamodb_client.transact_write_items.assert_called_once()
+
+    @patch("src.handlers.campaign_operations.dynamodb_client")
+    @patch("src.handlers.campaign_operations.check_profile_access")
+    @patch("src.handlers.campaign_operations._get_profile")
+    def test_create_campaign_private_catalog_owned_by_profile_owner(
+        self,
+        mock_get_profile: MagicMock,
+        mock_check_access: MagicMock,
+        mock_dynamodb_client: MagicMock,
+        lambda_context: MagicMock,
+        catalogs_table: Any,
+    ) -> None:
+        """Test campaign creation with a private catalog owned by the profile owner."""
+        profile_owner = "owner-456"
+        profile = {
+            "profileId": "PROFILE#profile-123",
+            "ownerAccountId": f"ACCOUNT#{profile_owner}",
+            "sellerName": "Test Scout",
+        }
+        mock_check_access.return_value = True
+        mock_get_profile.return_value = profile
+        catalogs_table.put_item(
+            Item={
+                "catalogId": "CATALOG#private-profile",
+                "catalogName": "Private Profile Owner Catalog",
+                "isPublic": "false",
+                "ownerAccountId": f"ACCOUNT#{profile_owner}",
+            }
+        )
+
+        event = {
+            "arguments": {
+                "input": {
+                    "profileId": "PROFILE#profile-123",
+                    "campaignName": "Fall",
+                    "campaignYear": 2024,
+                    "startDate": "2024-09-01T00:00:00Z",
+                    "catalogId": "private-profile",
+                }
+            },
+            "identity": {"sub": "test-account-123"},
+        }
+
+        result = create_campaign(event, lambda_context)
+        assert result["catalogId"] == "CATALOG#private-profile"
+        mock_dynamodb_client.transact_write_items.assert_called_once()
+
+    @patch("src.handlers.campaign_operations.dynamodb_client")
+    @patch("src.handlers.campaign_operations.check_profile_access")
+    @patch("src.handlers.campaign_operations._get_profile")
+    def test_create_campaign_rejects_private_catalog_not_shared(
+        self,
+        mock_get_profile: MagicMock,
+        mock_check_access: MagicMock,
+        mock_dynamodb_client: MagicMock,
+        lambda_context: MagicMock,
+        catalogs_table: Any,
+    ) -> None:
+        """Test campaign creation rejects a private catalog that is not shared."""
+        profile = {
+            "profileId": "PROFILE#profile-123",
+            "ownerAccountId": "ACCOUNT#owner-456",
+            "sellerName": "Test Scout",
+        }
+        mock_check_access.return_value = True
+        mock_get_profile.return_value = profile
+        catalogs_table.put_item(
+            Item={
+                "catalogId": "CATALOG#private-other",
+                "catalogName": "Private Other User Catalog",
+                "isPublic": "false",
+                "ownerAccountId": "ACCOUNT#someone-else",
+            }
+        )
+
+        event = {
+            "arguments": {
+                "input": {
+                    "profileId": "PROFILE#profile-123",
+                    "campaignName": "Fall",
+                    "campaignYear": 2024,
+                    "startDate": "2024-09-01T00:00:00Z",
+                    "catalogId": "private-other",
+                }
+            },
+            "identity": {"sub": "test-account-123"},
+        }
+
+        with pytest.raises(AppError) as exc_info:
+            create_campaign(event, lambda_context)
+
+        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
+        assert "permission" in str(exc_info.value.message).lower()
+        mock_dynamodb_client.transact_write_items.assert_not_called()
+
+    @patch("src.handlers.campaign_operations.dynamodb_client")
+    @patch("src.handlers.campaign_operations.check_profile_access")
+    @patch("src.handlers.campaign_operations._get_profile")
+    def test_create_campaign_rejects_deleted_catalog(
+        self,
+        mock_get_profile: MagicMock,
+        mock_check_access: MagicMock,
+        mock_dynamodb_client: MagicMock,
+        lambda_context: MagicMock,
+        sample_profile: Dict[str, Any],
+        catalogs_table: Any,
+    ) -> None:
+        """Test campaign creation rejects a deleted catalog."""
+        mock_check_access.return_value = True
+        mock_get_profile.return_value = sample_profile
+        catalogs_table.put_item(
+            Item={
+                "catalogId": "CATALOG#deleted",
+                "catalogName": "Deleted Catalog",
+                "isPublic": "true",
+                "ownerAccountId": "ACCOUNT#test-account-123",
+                "isDeleted": True,
+            }
+        )
+
+        event = {
+            "arguments": {
+                "input": {
+                    "profileId": "PROFILE#profile-123",
+                    "campaignName": "Fall",
+                    "campaignYear": 2024,
+                    "startDate": "2024-09-01T00:00:00Z",
+                    "catalogId": "deleted",
+                }
+            },
+            "identity": {"sub": "test-account-123"},
+        }
+
+        with pytest.raises(AppError) as exc_info:
+            create_campaign(event, lambda_context)
+
+        assert exc_info.value.error_code == ErrorCode.NOT_FOUND
+        assert "not found" in str(exc_info.value.message).lower()
+        mock_dynamodb_client.transact_write_items.assert_not_called()
+
+    @patch("src.handlers.campaign_operations.dynamodb_client")
+    @patch("src.handlers.campaign_operations.check_profile_access")
+    @patch("src.handlers.campaign_operations._get_profile")
+    def test_create_campaign_rejects_missing_catalog(
+        self,
+        mock_get_profile: MagicMock,
+        mock_check_access: MagicMock,
+        mock_dynamodb_client: MagicMock,
+        lambda_context: MagicMock,
+        sample_profile: Dict[str, Any],
+    ) -> None:
+        """Test campaign creation rejects a missing catalog."""
+        mock_check_access.return_value = True
+        mock_get_profile.return_value = sample_profile
+
+        event = {
+            "arguments": {
+                "input": {
+                    "profileId": "PROFILE#profile-123",
+                    "campaignName": "Fall",
+                    "campaignYear": 2024,
+                    "startDate": "2024-09-01T00:00:00Z",
+                    "catalogId": "does-not-exist",
+                }
+            },
+            "identity": {"sub": "test-account-123"},
+        }
+
+        with pytest.raises(AppError) as exc_info:
+            create_campaign(event, lambda_context)
+
+        assert exc_info.value.error_code == ErrorCode.NOT_FOUND
+        assert "not found" in str(exc_info.value.message).lower()
+        mock_dynamodb_client.transact_write_items.assert_not_called()
+
     @pytest.mark.skip(reason="TODO: Fix mock setup for shared_campaigns_table - mocking not working as expected")
     @patch("src.handlers.campaign_operations.dynamodb_client")
     @patch("src.handlers.campaign_operations.check_profile_access")
@@ -1198,6 +1425,120 @@ class TestCreateCampaign:
         # Assert - Input dates used instead of Shared Campaign dates
         assert result["startDate"] == "2024-10-01T00:00:00Z"
         assert result["endDate"] == "2024-11-30T00:00:00Z"
+
+
+class TestCatalogAccess:
+    """Tests for catalog access helpers."""
+
+    def test_can_use_catalog_public(self) -> None:
+        """Public catalogs are usable by any caller."""
+        from src.handlers.campaign_operations import _can_use_catalog
+
+        catalog = {"catalogId": "CATALOG#pub", "isPublic": "true"}
+        assert _can_use_catalog(catalog, "anyone", {}) is True
+
+    def test_can_use_catalog_public_boolean(self) -> None:
+        """Public catalogs may use boolean isPublic."""
+        from src.handlers.campaign_operations import _can_use_catalog
+
+        catalog = {"catalogId": "CATALOG#pub", "isPublic": True}
+        assert _can_use_catalog(catalog, "anyone", {}) is True
+
+    def test_can_use_catalog_owner(self) -> None:
+        """Private catalogs are usable by their owner."""
+        from src.handlers.campaign_operations import _can_use_catalog
+
+        catalog = {"catalogId": "CATALOG#priv", "isPublic": "false", "ownerAccountId": "ACCOUNT#owner-1"}
+        profile = {"ownerAccountId": "ACCOUNT#owner-2"}
+        assert _can_use_catalog(catalog, "owner-1", profile) is True
+
+    def test_can_use_catalog_profile_owner(self) -> None:
+        """Private catalogs are usable via a profile share when owners match."""
+        from src.handlers.campaign_operations import _can_use_catalog
+
+        catalog = {"catalogId": "CATALOG#priv", "isPublic": "false", "ownerAccountId": "ACCOUNT#owner-1"}
+        profile = {"ownerAccountId": "ACCOUNT#owner-1"}
+        assert _can_use_catalog(catalog, "contributor", profile) is True
+
+    def test_can_use_catalog_deleted(self) -> None:
+        """Deleted catalogs cannot be used."""
+        from src.handlers.campaign_operations import _can_use_catalog
+
+        catalog = {"catalogId": "CATALOG#del", "isPublic": "true", "isDeleted": True}
+        assert _can_use_catalog(catalog, "owner", {}) is False
+
+    def test_can_use_catalog_private_not_shared(self) -> None:
+        """Private catalogs are blocked when caller is not owner and has no profile share."""
+        from src.handlers.campaign_operations import _can_use_catalog
+
+        catalog = {"catalogId": "CATALOG#priv", "isPublic": "false", "ownerAccountId": "ACCOUNT#owner-1"}
+        profile = {"ownerAccountId": "ACCOUNT#owner-2"}
+        assert _can_use_catalog(catalog, "contributor", profile) is False
+
+    @patch("src.handlers.campaign_operations.tables")
+    def test_verify_catalog_access_success(self, mock_tables: MagicMock) -> None:
+        """Verification succeeds for an accessible catalog."""
+        from src.handlers.campaign_operations import _verify_catalog_access
+
+        mock_tables.catalogs.get_item.return_value = {"Item": {"catalogId": "CATALOG#pub", "isPublic": "true"}}
+
+        _verify_catalog_access("CATALOG#pub", "caller", {"ownerAccountId": "ACCOUNT#other"})
+
+    @patch("src.handlers.campaign_operations.tables")
+    def test_verify_catalog_access_missing_raises(self, mock_tables: MagicMock) -> None:
+        """Missing catalog raises NOT_FOUND."""
+        from src.handlers.campaign_operations import _verify_catalog_access
+
+        mock_tables.catalogs.get_item.return_value = {}
+
+        with pytest.raises(AppError) as exc_info:
+            _verify_catalog_access("CATALOG#missing", "caller", {})
+
+        assert exc_info.value.error_code == ErrorCode.NOT_FOUND
+
+    @patch("src.handlers.campaign_operations.tables")
+    def test_verify_catalog_access_deleted_raises(self, mock_tables: MagicMock) -> None:
+        """Deleted catalog raises NOT_FOUND."""
+        from src.handlers.campaign_operations import _verify_catalog_access
+
+        mock_tables.catalogs.get_item.return_value = {
+            "Item": {"catalogId": "CATALOG#del", "isPublic": "true", "isDeleted": True}
+        }
+
+        with pytest.raises(AppError) as exc_info:
+            _verify_catalog_access("CATALOG#del", "caller", {})
+
+        assert exc_info.value.error_code == ErrorCode.NOT_FOUND
+
+    @patch("src.handlers.campaign_operations.tables")
+    def test_verify_catalog_access_forbidden_raises(self, mock_tables: MagicMock) -> None:
+        """Private catalog without share raises FORBIDDEN."""
+        from src.handlers.campaign_operations import _verify_catalog_access
+
+        mock_tables.catalogs.get_item.return_value = {
+            "Item": {
+                "catalogId": "CATALOG#priv",
+                "isPublic": "false",
+                "ownerAccountId": "ACCOUNT#owner-1",
+            }
+        }
+
+        with pytest.raises(AppError) as exc_info:
+            _verify_catalog_access("CATALOG#priv", "caller", {"ownerAccountId": "ACCOUNT#owner-2"})
+
+        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
+
+    @patch("src.handlers.campaign_operations.tables")
+    def test_verify_catalog_access_fetch_error_raises(self, mock_tables: MagicMock) -> None:
+        """Catalog fetch errors are treated as NOT_FOUND."""
+        from src.handlers.campaign_operations import _verify_catalog_access
+
+        mock_tables.catalogs.get_item.side_effect = Exception("DynamoDB error")
+
+        with pytest.raises(AppError) as exc_info:
+            _verify_catalog_access("CATALOG#err", "caller", {})
+
+        assert exc_info.value.error_code == ErrorCode.NOT_FOUND
 
 
 class TestGetSharedCampaign:

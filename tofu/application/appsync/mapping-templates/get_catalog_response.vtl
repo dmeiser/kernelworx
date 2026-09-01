@@ -4,7 +4,19 @@
 #if(!$ctx.result || $ctx.result.isEmpty())
     $util.toJson(null)
 #else
-    ## READ ACCESS: Anyone can view catalog by ID (no authorization check)
-    ## Note: ownerAccountId is removed from GraphQL schema but still in DynamoDB for WRITE auth
-    $util.toJson($ctx.result)
+    ## Enforce catalog access rules: deleted catalogs are unreadable, and private
+    ## catalogs are only readable by their owner. Public catalogs are readable by
+    ## any authenticated caller.
+    #set($isDeleted = $ctx.result.isDeleted == true || $ctx.result.isDeleted == 'true')
+    #if($isDeleted)
+        $util.toJson(null)
+    #else
+        #set($isPublic = $ctx.result.isPublic == true || $ctx.result.isPublic == 'true')
+        #set($isOwner = $ctx.result.ownerAccountId == 'ACCOUNT#' + $ctx.identity.sub)
+        #if($isPublic || $isOwner)
+            $util.toJson($ctx.result)
+        #else
+            $util.toJson(null)
+        #end
+    #end
 #end
