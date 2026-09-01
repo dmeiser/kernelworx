@@ -5970,6 +5970,57 @@ class TestAdminOperationExceptionHandlers:
             )
             mock_tables.accounts.scan.assert_not_called()
 
+    def test_search_user_dynamodb_email_index_mixed_case(
+        self,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """Test mixed-case email query is normalized to lowercase for email-index query."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+
+        event = {
+            **admin_appsync_event,
+            "info": {"fieldName": "adminSearchUser"},
+            "arguments": {"query": "User.Name@Example.COM"},
+        }
+
+        with (
+            patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client,
+            patch("src.handlers.admin_operations.tables") as mock_tables,
+            patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names,
+            patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups,
+        ):
+            mock_client = MagicMock()
+            mock_get_client.return_value = mock_client
+
+            mock_tables.accounts.query.return_value = {
+                "Items": [{"accountId": "ACCOUNT#sub-999", "email": "user.name@example.com"}]
+            }
+
+            mock_cognito_user = {
+                "Username": "user.name@example.com",
+                "Attributes": [
+                    {"Name": "sub", "Value": "sub-999"},
+                    {"Name": "email", "Value": "user.name@example.com"},
+                ],
+                "Enabled": True,
+                "UserStatus": "CONFIRMED",
+                "UserCreateDate": datetime(2024, 1, 1, tzinfo=timezone.utc),
+            }
+            mock_client.list_users.return_value = {"Users": [mock_cognito_user]}
+            mock_batch_names.return_value = {"sub-999": "Test User"}
+            mock_batch_groups.return_value = {"user.name@example.com": []}
+
+            result = admin_search_user(event, lambda_context)
+            assert len(result) == 1
+            assert result[0]["email"] == "user.name@example.com"
+            mock_tables.accounts.query.assert_called_once_with(
+                IndexName="email-index",
+                KeyConditionExpression="email = :email",
+                ExpressionAttributeValues={":email": "user.name@example.com"},
+            )
+
     def test_search_user_dynamodb_email_index_client_error_fallback(
         self,
         admin_appsync_event: Dict[str, Any],

@@ -412,7 +412,11 @@ def _search_accounts_in_dynamodb(query: str, logger: Any) -> list[Dict[str, Any]
                 if gsi_items:
                     return gsi_items[:max_results]
             except ClientError as e:
-                logger.warning("DynamoDB email-index query failed, falling back to scan", error=str(e), query=query)
+                logger.warning(
+                    "DynamoDB email-index query failed, falling back to scan",
+                    error=str(e),
+                    query=mask_email(query),
+                )
 
         # Scan accounts and filter in Python for case-insensitive matching
         paginator_params: Dict[str, Any] = {}
@@ -436,14 +440,14 @@ def _search_accounts_in_dynamodb(query: str, logger: Any) -> list[Dict[str, Any]
         if scanned_count >= max_scan and last_key:
             logger.warning(
                 "DynamoDB accounts search reached max scan limit; results may be truncated",
-                query=query,
+                query=mask_email(query),
                 scanned_count=scanned_count,
             )
 
         return matches
 
     except ClientError as e:
-        logger.warning("DynamoDB search failed", error=str(e), query=query)
+        logger.warning("DynamoDB search failed", error=str(e), query=mask_email(query))
         return []
 
 
