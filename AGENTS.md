@@ -54,6 +54,8 @@ The schema currently uses `@aws_cognito_user_pools` only to require Cognito auth
 - VTL/JS direct data-source resolvers in `tofu/application/appsync/js-resolvers/` and VTL mapping templates in `tofu/application/appsync/mapping-templates/`
 - Lambda resolvers in `src/handlers/`
 
+Catalog access rules (public/private visibility, soft-delete, and ownership) are enforced in the `getCatalog` and `Campaign.catalog` VTL response templates and in `createCampaign` via `_can_use_catalog`/`_verify_catalog_access` in `src/handlers/campaign_operations.py`.
+
 Consequences for new resolvers:
 
 - Every new query, mutation, or field that returns sensitive data or performs a mutation must implement its own owner/share/admin check.

@@ -12,9 +12,7 @@ from typing import Any, Dict, Optional
 import airspeed
 import pytest
 
-MAPPING_TEMPLATES_DIR = (
-    Path(__file__).parent.parent.parent / "tofu" / "application" / "appsync" / "mapping-templates"
-)
+MAPPING_TEMPLATES_DIR = Path(__file__).parent.parent.parent / "tofu" / "application" / "appsync" / "mapping-templates"
 
 
 class _Util:
