@@ -133,8 +133,8 @@ export function request(ctx) {
             }
 
             const product = productsMap[productId];
-            const pricePerUnit = product.price;
-            const pricePerUnitCents = Math.round(pricePerUnit * 100);
+            const pricePerUnitCents = Math.round(product.price * 100);
+            const pricePerUnit = pricePerUnitCents / 100;
             const subtotalCents = pricePerUnitCents * quantity;
             totalAmountCents += subtotalCents;
             const subtotal = subtotalCents / 100;

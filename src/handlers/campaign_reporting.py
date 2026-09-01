@@ -1,6 +1,6 @@
 """Lambda resolver for campaign-level reporting using campaign-based queries."""
 
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Dict, List, cast
 
 from boto3.dynamodb.conditions import Key
@@ -71,20 +71,25 @@ def _get_accessible_profiles(profile_ids: list[str], caller_account_id: str) -> 
     return accessible_profiles
 
 
+def _quantize_money(value: Any) -> Decimal:
+    """Convert value to Decimal and quantize to 2 decimal places (cents)."""
+    return Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
 def _build_order_detail(order: Dict[str, Any]) -> Dict[str, Any]:
     """Build order detail from an order item using Decimal for monetary values."""
     return {
         "orderId": cast(str, order["orderId"]),
         "customerName": cast(str, order["customerName"]),
         "orderDate": cast(str, order["orderDate"]),
-        "totalAmount": Decimal(str(order["totalAmount"])),
+        "totalAmount": _quantize_money(order["totalAmount"]),
         "lineItems": [
             {
                 "productId": cast(str, item["productId"]),
                 "productName": cast(str, item["productName"]),
                 "quantity": int(cast(int, item["quantity"])),
-                "pricePerUnit": Decimal(str(item["pricePerUnit"])),
-                "subtotal": Decimal(str(item["subtotal"])),
+                "pricePerUnit": _quantize_money(item["pricePerUnit"]),
+                "subtotal": _quantize_money(item["subtotal"]),
             }
             for item in cast(List[Dict[str, Any]], order.get("lineItems", []))
         ],
