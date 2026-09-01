@@ -865,6 +865,12 @@ const createExportSellerHandler = async (
   }
 };
 
+const hasRequiredOrderData = (
+  report: UnitReport | undefined,
+  allOrders: SellerOrder[],
+  allProducts: string[],
+): boolean => Boolean(report && allOrders.length && allProducts.length);
+
 // Helper: Create export order details handler
 const createExportOrderHandler = async (
   report: UnitReport | undefined,
@@ -872,7 +878,7 @@ const createExportOrderHandler = async (
   allProducts: string[],
   showSnackbar: (message: string) => void,
 ) => {
-  if (!report || !allOrders.length || !allProducts.length) return;
+  if (!hasRequiredOrderData(report, allOrders, allProducts) || !report) return;
   try {
     await buildOrderDetailsWorkbook(report, allOrders, allProducts);
   } catch (err) {
