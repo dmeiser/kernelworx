@@ -100,15 +100,17 @@ class TestToDynamoValue:
         result = _to_dynamo_value({"key": "value", "count": 5})
         assert result == {"M": {"key": {"S": "value"}, "count": {"N": "5"}}}
 
-    def test_to_dynamo_value_custom_object(self) -> None:
-        """Test converting a custom object falls back to string."""
+    def test_to_dynamo_value_set(self) -> None:
+        """Test converting a set to DynamoDB list."""
+        result = _to_dynamo_value({"val1"})
+        assert result == {"L": [{"S": "val1"}]}
 
-        class CustomObj:
-            def __str__(self) -> str:
-                return "custom_string"
+    def test_normalize_account_id_none(self) -> None:
+        """Test normalizing None account id returns empty string."""
+        from src.handlers.campaign_operations import _normalize_account_id
 
-        result = _to_dynamo_value(CustomObj())
-        assert result == {"S": "custom_string"}
+        assert _normalize_account_id(None) == ""
+        assert _normalize_account_id("") == ""
 
 
 class TestCreateCampaign:
@@ -1245,8 +1247,64 @@ class TestGetSharedCampaign:
 class TestGetProfile:
     """Tests for _get_profile helper function."""
 
+    def test_get_profile_with_owner_id_success(self) -> None:
+        """Test strongly consistent profile retrieval using ownerAccountId composite key."""
+        from src.handlers.campaign_operations import _get_profile
+
+        mock_table = MagicMock()
+        mock_table.get_item.return_value = {
+            "Item": {"profileId": "PROFILE#123", "sellerName": "Test", "ownerAccountId": "ACCOUNT#user-1"}
+        }
+
+        with patch("src.handlers.campaign_operations.tables") as mock_tables:
+            mock_tables.profiles = mock_table
+            result = _get_profile("123", owner_account_id="user-1")
+
+        assert result is not None
+        assert result["profileId"] == "PROFILE#123"
+        mock_table.get_item.assert_called_once_with(
+            Key={"ownerAccountId": "ACCOUNT#user-1", "profileId": "PROFILE#123"},
+            ConsistentRead=True,
+        )
+
+    def test_get_profile_with_prefixed_owner_id_success(self) -> None:
+        """Test strongly consistent profile retrieval when ownerAccountId already has prefix."""
+        from src.handlers.campaign_operations import _get_profile
+
+        mock_table = MagicMock()
+        mock_table.get_item.return_value = {
+            "Item": {"profileId": "PROFILE#123", "sellerName": "Test", "ownerAccountId": "ACCOUNT#user-1"}
+        }
+
+        with patch("src.handlers.campaign_operations.tables") as mock_tables:
+            mock_tables.profiles = mock_table
+            result = _get_profile("PROFILE#123", owner_account_id="ACCOUNT#user-1")
+
+        assert result is not None
+        assert result["profileId"] == "PROFILE#123"
+        mock_table.get_item.assert_called_once_with(
+            Key={"ownerAccountId": "ACCOUNT#user-1", "profileId": "PROFILE#123"},
+            ConsistentRead=True,
+        )
+
+    def test_get_profile_with_owner_id_fallback_to_gsi(self) -> None:
+        """Test fallback to GSI query when get_item returns no Item."""
+        from src.handlers.campaign_operations import _get_profile
+
+        mock_table = MagicMock()
+        mock_table.get_item.return_value = {}
+        mock_table.query.return_value = {"Items": [{"profileId": "PROFILE#123", "sellerName": "Test"}]}
+
+        with patch("src.handlers.campaign_operations.tables") as mock_tables:
+            mock_tables.profiles = mock_table
+            result = _get_profile("123", owner_account_id="shared-caller")
+
+        assert result is not None
+        assert result["profileId"] == "PROFILE#123"
+        mock_table.query.assert_called_once()
+
     def test_get_profile_success(self) -> None:
-        """Test successful profile retrieval."""
+        """Test successful profile retrieval via GSI when no owner is provided."""
         from src.handlers.campaign_operations import _get_profile
 
         mock_table = MagicMock()
