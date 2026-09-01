@@ -159,7 +159,7 @@ def _delete_all_user_data(account_id: str, context: Any, logger: Any) -> None:
 
 def _lookup_cognito_user_with_retry(
     cognito: Any, user_pool_id: str, account_id: str, logger: Any
-) -> Optional[str]:
+) -> str | None:
     """Look up Cognito username by sub with retry for transient errors."""
     attempt = 0
     max_retries = 3
@@ -186,7 +186,7 @@ def _lookup_cognito_user_with_retry(
 
 
 def _delete_user_from_cognito(
-    cognito: Any, user_pool_id: str, account_id: str, username: Optional[str], logger: Any
+    cognito: Any, user_pool_id: str, account_id: str, username: str | None, logger: Any
 ) -> None:
     """Delete user from Cognito User Pool with retry for transient errors."""
     if not username:
