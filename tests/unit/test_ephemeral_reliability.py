@@ -725,6 +725,47 @@ class TestWorkflowDispatchSurface:
         assert set(jobs) == {"ephemeral-test", "sweep"}
         assert "workflow_dispatch" not in (workflow.get("on") or {})
 
+    def test_ephemeral_test_job_only_runs_on_pull_request(self, repo_root: Path) -> None:
+        workflow = self._load_workflow(repo_root)
+        job_if = workflow["jobs"]["ephemeral-test"].get("if", "")
+        normalized = job_if.replace("${{", "").replace("}}", "").replace(" ", "")
+        assert "github.event_name=='pull_request'" in normalized, (
+            f"ephemeral-test job must be gated to pull_request events, got: {job_if!r}"
+        )
+        assert "github.event_name=='schedule'" not in normalized, (
+            f"ephemeral-test job must not run on schedule events, got: {job_if!r}"
+        )
+
+    def test_ephemeral_test_uses_valid_pr_run_id(self, repo_root: Path) -> None:
+        workflow = self._load_workflow(repo_root)
+        up_step = next(
+            s
+            for s in workflow["jobs"]["ephemeral-test"]["steps"]
+            if s.get("id") == "ephemeral_up"
+        )
+        run_script = up_step["run"]
+        assert 'scripts/ephemeral-env.sh up "pr-${{ github.event.pull_request.number }}"' in run_script, (
+            "ephemeral-env.sh up must use a PR-numbered run-id"
+        )
+        assert "pr-${{ github.run_id }}" not in run_script, (
+            "ephemeral-env.sh up must not fall back to github.run_id for the run-id"
+        )
+
+    def test_sweep_job_has_ephemeral_environment(self, repo_root: Path) -> None:
+        workflow = self._load_workflow(repo_root)
+        sweep_job = workflow["jobs"]["sweep"]
+        assert sweep_job.get("environment") == "ephemeral", (
+            "sweep job must use the ephemeral environment so it can assume the AWS role"
+        )
+
+    def test_sweep_job_only_runs_on_schedule(self, repo_root: Path) -> None:
+        workflow = self._load_workflow(repo_root)
+        job_if = workflow["jobs"]["sweep"].get("if", "")
+        normalized = job_if.replace("${{", "").replace("}}", "").replace(" ", "")
+        assert "github.event_name=='schedule'" in normalized, (
+            f"sweep job must be gated to schedule events, got: {job_if!r}"
+        )
+
     def test_manual_teardown_workflow(self, repo_root: Path) -> None:
         workflow = self._load_workflow(repo_root, "manual-teardown.yml")
         inputs = workflow.get("on", {}).get("workflow_dispatch", {}).get("inputs", {})
