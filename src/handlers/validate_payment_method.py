@@ -1,7 +1,7 @@
 """
-Lambda handler for validating payment methods during order creation.
+Lambda handler for validating payment methods during order creation and updates.
 
-This handler is called as part of the createOrder pipeline to ensure
+This handler is called as part of the createOrder and updateOrder pipelines to ensure
 the payment method exists for the profile owner's account.
 """
 
@@ -18,7 +18,7 @@ except ModuleNotFoundError:  # pragma: no cover
     from src.utils.payment_methods import validate_payment_method_exists
 
 
-def _extract_and_normalize_inputs(event: Dict[str, Any]) -> tuple[str, str]:
+def _extract_and_normalize_inputs(event: Dict[str, Any]) -> tuple[str | None, str | None]:
     """Extract and normalize owner_account_id and payment_method from event."""
     prev_result = event.get("prev", {}).get("result", {})
     arguments = event.get("arguments", {})
@@ -29,6 +29,11 @@ def _extract_and_normalize_inputs(event: Dict[str, Any]) -> tuple[str, str]:
         raise AppError(ErrorCode.INVALID_INPUT, "Owner account ID not found in pipeline context")
 
     payment_method = input_data.get("paymentMethod")
+    if payment_method is None:
+        # updateOrder allows partial updates; skip validation when paymentMethod
+        # is not provided so that other fields can be updated without it.
+        return None, None
+
     if not payment_method:
         raise AppError(ErrorCode.INVALID_INPUT, "Payment method is required")
 
@@ -59,6 +64,11 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     try:
         owner_account_id, payment_method = _extract_and_normalize_inputs(event)
 
+        if owner_account_id is None or payment_method is None:
+            prev_result = event.get("prev", {}).get("result", {})
+            result: Dict[str, Any] = dict(prev_result) if isinstance(prev_result, dict) else {}
+            return result
+
         logger.info(
             "Validating payment method for order", owner_account_id=owner_account_id, payment_method=payment_method
         )
@@ -68,7 +78,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         )
 
         prev_result = event.get("prev", {}).get("result", {})
-        result: Dict[str, Any] = dict(prev_result) if isinstance(prev_result, dict) else {}
+        result = dict(prev_result) if isinstance(prev_result, dict) else {}
         return result
 
     except AppError:
