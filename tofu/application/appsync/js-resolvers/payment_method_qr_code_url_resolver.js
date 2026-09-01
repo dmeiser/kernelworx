@@ -1,11 +1,18 @@
 /**
  * Field resolver for PaymentMethod.qrCodeUrl
- * 
- * Generates presigned S3 URLs for QR codes on-demand.
- * 
- * Authorization:
- * - For myPaymentMethods: ownerAccountId from stash (set to ctx.identity.sub)
- * - For paymentMethodsForProfile: ownerAccountId from stash (set by pipeline)
+ *
+ * Generates presigned S3 URLs for QR codes on-demand by invoking the
+ * generate-qr-code-presigned-url Lambda function.
+ *
+ * Payload:
+ * - ownerAccountId: from ctx.source (set by the payment-methods pipeline) or
+ *   the authenticated caller for myPaymentMethods
+ * - profileId: from ctx.source (set by paymentMethodsForProfile) or null for
+ *   myPaymentMethods, so the Lambda can authorize WRITE collaborators
+ * - methodName, s3Key, qrCodeUrl, identity
+ *
+ * Authorization is enforced by the Lambda, which allows owners and WRITE
+ * collaborators on the profile to retrieve the presigned URL.
  */
 import { util } from '@aws-appsync/utils';
 

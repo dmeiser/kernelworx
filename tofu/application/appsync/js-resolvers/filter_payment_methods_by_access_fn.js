@@ -1,11 +1,13 @@
 /**
  * Filter and inject global payment methods based on access level.
- * 
+ *
  * This function:
  * - Adds global methods (Cash, Check)
  * - Filters out QR codes for READ users
+ * - Annotates each method with ownerAccountId and profileId for the
+ *   PaymentMethod.qrCodeUrl field resolver authorization
  * - Sorts alphabetically (case-insensitive)
- * 
+ *
  * Note: APPSYNC_JS doesn't support passing functions as arguments (no comparator
  * in .sort()). We use a workaround: extract lowercase keys, sort them, then
  * reorder the original array.
