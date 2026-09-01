@@ -1,17 +1,22 @@
 import { util } from '@aws-appsync/utils';
 
 export function request(ctx) {
-    const input = ctx.args.input;
-    var targetAccountId = ctx.stash.targetAccountId;
-    const profileId = input.profileId || ctx.stash.invite.profileId;
-    const permissions = input.permissions || ctx.stash.invite.permissions;
+    // If share already exists from previous check in pipeline, reject immediately
+    if (ctx.stash && ctx.stash.existingShare) {
+        util.error('This profile is already shared with this user.', 'ALREADY_SHARED');
+    }
+
+    const input = ctx.args && ctx.args.input ? ctx.args.input : {};
+    var targetAccountId = ctx.stash ? ctx.stash.targetAccountId : undefined;
+    const profileId = input.profileId || (ctx.stash && ctx.stash.invite ? ctx.stash.invite.profileId : undefined);
+    const permissions = input.permissions || (ctx.stash && ctx.stash.invite ? ctx.stash.invite.permissions : undefined);
     const now = util.time.nowISO8601();
     
     // Get ownerAccountId from stash - check profile (shareProfileDirect) or invite (redeemProfileInvite)
     var ownerAccountId = null;
-    if (ctx.stash.profile && ctx.stash.profile.ownerAccountId) {
+    if (ctx.stash && ctx.stash.profile && ctx.stash.profile.ownerAccountId) {
         ownerAccountId = ctx.stash.profile.ownerAccountId;
-    } else if (ctx.stash.invite && ctx.stash.invite.ownerAccountId) {
+    } else if (ctx.stash && ctx.stash.invite && ctx.stash.invite.ownerAccountId) {
         ownerAccountId = ctx.stash.invite.ownerAccountId;
     }
     
@@ -32,34 +37,42 @@ export function request(ctx) {
     // Normalize profileId to ensure PROFILE# prefix is used when storing shares
     const dbProfileId = profileId && profileId.startsWith('PROFILE#') ? profileId : `PROFILE#${profileId}`;
 
+    const callerSub = ctx.identity && ctx.identity.sub ? ctx.identity.sub : '';
     const shareItem = {
         profileId: dbProfileId,
         targetAccountId: targetAccountId,
         shareId: shareId,
         permissions: permissions,
         ownerAccountId: ownerAccountId,  // Store for BatchGetItem lookup
-        createdByAccountId: `ACCOUNT#${ctx.identity.sub}`,
+        createdByAccountId: `ACCOUNT#${callerSub}`,
         createdAt: now
     };
     
     // Store full share item in stash for response
-    ctx.stash.shareItem = shareItem;
+    if (ctx.stash) {
+        ctx.stash.shareItem = shareItem;
+    }
     
-    // Use PutItem without condition to support both create and update (upsert)
     return {
         operation: 'PutItem',
         key: util.dynamodb.toMapValues({ profileId: dbProfileId, targetAccountId: targetAccountId }),
-        attributeValues: util.dynamodb.toMapValues(shareItem)
+        attributeValues: util.dynamodb.toMapValues(shareItem),
+        condition: {
+            expression: 'attribute_not_exists(profileId) AND attribute_not_exists(targetAccountId)'
+        }
     };
 }
 
 export function response(ctx) {
     if (ctx.error) {
+        if (ctx.error.type === 'DynamoDB:ConditionalCheckFailedException' || (ctx.error.message && ctx.error.message.includes('ConditionalCheckFailed'))) {
+            util.error('This profile is already shared with this user.', 'ALREADY_SHARED');
+        }
         util.error(ctx.error.message, ctx.error.type);
     }
     // Return the share item with targetAccountId stripped of ACCOUNT# prefix
     // Keep profileId with PROFILE# prefix for consistency with createSellerProfile
-    const shareItem = ctx.stash.shareItem;
+    const shareItem = (ctx.stash && ctx.stash.shareItem) ? ctx.stash.shareItem : (ctx.result || {});
     const cleanTargetAccountId = shareItem.targetAccountId && shareItem.targetAccountId.startsWith('ACCOUNT#')
         ? shareItem.targetAccountId.substring(8)
         : shareItem.targetAccountId;
