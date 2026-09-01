@@ -5,7 +5,12 @@ export function request(ctx) {
     const profileId = input.profileId;
     const permissions = input.permissions;
     const callerAccountId = ctx.identity.sub;
-    
+
+    // Validate that permissions is a non-empty array of valid PermissionType values
+    if (!Array.isArray(permissions) || permissions.length === 0) {
+        util.error('Permissions must include at least one permission', 'BadRequest');
+    }
+
     // Get ownerAccountId from profile in stash (for BatchGetItem on profiles table)
     const ownerAccountId = ctx.stash.profile ? ctx.stash.profile.ownerAccountId : null;
     

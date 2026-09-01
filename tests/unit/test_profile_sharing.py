@@ -503,6 +503,85 @@ class TestListMyShares:
             assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
             assert "Failed to list shared profiles" in exc_info.value.message
 
+    def test_skips_share_with_empty_permissions(
+        self,
+        dynamodb_table: Any,
+        shares_table: Any,
+        another_account_id: str,
+        sample_account_id: str,
+        appsync_event: Dict[str, Any],
+        lambda_context: Any,
+    ) -> None:
+        """Test that shares with empty permissions are not returned."""
+        from src.handlers.profile_sharing import list_my_shares
+
+        profile_id = "PROFILE#empty-perms"
+        owner_id = f"ACCOUNT#{sample_account_id}"
+
+        dynamodb_table.put_item(
+            Item={
+                "ownerAccountId": owner_id,
+                "profileId": profile_id,
+                "sellerName": "Empty Perms",
+                "createdAt": "2024-01-01T00:00:00Z",
+                "updatedAt": "2024-01-01T00:00:00Z",
+            }
+        )
+
+        shares_table.put_item(
+            Item={
+                "profileId": profile_id,
+                "targetAccountId": f"ACCOUNT#{another_account_id}",
+                "ownerAccountId": owner_id,
+                "permissions": [],
+                "createdAt": "2024-01-01T00:00:00Z",
+            }
+        )
+
+        event = {**appsync_event, "identity": {"sub": another_account_id}}
+        result = list_my_shares(event, lambda_context)
+
+        assert result == []
+
+    def test_skips_share_with_missing_permissions(
+        self,
+        dynamodb_table: Any,
+        shares_table: Any,
+        another_account_id: str,
+        sample_account_id: str,
+        appsync_event: Dict[str, Any],
+        lambda_context: Any,
+    ) -> None:
+        """Test that shares missing the permissions field are not returned."""
+        from src.handlers.profile_sharing import list_my_shares
+
+        profile_id = "PROFILE#missing-perms"
+        owner_id = f"ACCOUNT#{sample_account_id}"
+
+        dynamodb_table.put_item(
+            Item={
+                "ownerAccountId": owner_id,
+                "profileId": profile_id,
+                "sellerName": "Missing Perms",
+                "createdAt": "2024-01-01T00:00:00Z",
+                "updatedAt": "2024-01-01T00:00:00Z",
+            }
+        )
+
+        shares_table.put_item(
+            Item={
+                "profileId": profile_id,
+                "targetAccountId": f"ACCOUNT#{another_account_id}",
+                "ownerAccountId": owner_id,
+                "createdAt": "2024-01-01T00:00:00Z",
+            }
+        )
+
+        event = {**appsync_event, "identity": {"sub": another_account_id}}
+        result = list_my_shares(event, lambda_context)
+
+        assert result == []
+
     def test_profile_without_share_skipped(
         self,
         dynamodb_table: Any,

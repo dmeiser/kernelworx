@@ -1,5 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
+import { util } from '@aws-appsync/utils';
 import { request, response } from './create_share_fn.js';
 
 describe('create_share_fn request', () => {
@@ -27,6 +28,78 @@ describe('create_share_fn request', () => {
             () => request(ctx),
             /ALREADY_SHARED: This profile is already shared with this user\./
         );
+    });
+
+    it('rejects empty permissions array from input', () => {
+        const ctx = {
+            args: {
+                input: {
+                    profileId: 'PROFILE#prof-1',
+                    targetAccountEmail: 'friend@example.com',
+                    permissions: [],
+                },
+            },
+            identity: { sub: 'user-123' },
+            stash: {
+                targetAccountId: 'ACCOUNT#user-456',
+                profile: { ownerAccountId: 'ACCOUNT#owner-1' },
+            },
+        };
+
+        let capturedError = null;
+        const originalError = util.error;
+        util.error = (message, type) => {
+            capturedError = { message, type };
+            throw new Error(message);
+        };
+        try {
+            request(ctx);
+        } catch (_err) {
+            // expected
+        } finally {
+            util.error = originalError;
+        }
+
+        assert.ok(capturedError);
+        assert.match(capturedError.message, /permissions must include at least one permission/i);
+        assert.strictEqual(capturedError.type, 'BadRequest');
+    });
+
+    it('rejects empty permissions array from invite stash', () => {
+        const ctx = {
+            args: {
+                input: {
+                    inviteCode: 'INVITE123',
+                },
+            },
+            identity: { sub: 'user-123' },
+            stash: {
+                targetAccountId: 'user-456',
+                invite: {
+                    profileId: 'PROFILE#prof-1',
+                    permissions: [],
+                    ownerAccountId: 'ACCOUNT#owner-1',
+                },
+            },
+        };
+
+        let capturedError = null;
+        const originalError = util.error;
+        util.error = (message, type) => {
+            capturedError = { message, type };
+            throw new Error(message);
+        };
+        try {
+            request(ctx);
+        } catch (_err) {
+            // expected
+        } finally {
+            util.error = originalError;
+        }
+
+        assert.ok(capturedError);
+        assert.match(capturedError.message, /permissions must include at least one permission/i);
+        assert.strictEqual(capturedError.type, 'BadRequest');
     });
 
     it('builds PutItem request with conditional check for shareProfileDirect flow', () => {
@@ -106,7 +179,7 @@ describe('create_share_fn request', () => {
                 },
             },
             stash: {
-                targetAccountId: 'ACCOUNT#user1',
+                targetAccountId: 'ACCOUNT#u1',
             },
             identity: { sub: 'user1' },
         };

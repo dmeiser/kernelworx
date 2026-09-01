@@ -68,15 +68,18 @@ def test_pre_signup_handle_signup_exception():
 def test_profile_sharing_deduplicate_and_extract_helpers():
     from src.handlers import profile_sharing
 
-    # Deduplicate skips invalid entries and keeps first valid share
+    # Deduplicate skips invalid entries and entries without effective permissions,
+    # keeping the first valid share and deduplicating by profileId.
     shares = [
         {"profileId": "P1"},
         {"profileId": "P1", "ownerAccountId": "A1"},
-        {"profileId": "P1", "ownerAccountId": "A1", "extra": True},
+        {"profileId": "P1", "ownerAccountId": "A1", "permissions": ["READ"], "extra": True},
+        {"profileId": "P1", "ownerAccountId": "A1", "permissions": ["WRITE"]},
         {"profileId": "P2", "ownerAccountId": 123},
+        {"profileId": "P3", "ownerAccountId": "A2", "permissions": []},
     ]
     deduped = profile_sharing._deduplicate_shares(shares)
-    assert deduped == {"P1": {"profileId": "P1", "ownerAccountId": "A1", "permissions": []}}
+    assert deduped == {"P1": {"profileId": "P1", "ownerAccountId": "A1", "permissions": ["READ"]}}
 
     # Extract ignores responses when table name missing
     batch_response = {"Responses": {"Other": [{"profileId": "P3"}]}}

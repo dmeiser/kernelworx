@@ -36,10 +36,12 @@ export function response(ctx) {
     
     // Strip ACCOUNT# prefix from targetAccountId, keep profileId with PROFILE# prefix
     const items = ctx.result.items || [];
-    return items.map(item => ({
-        ...item,
-        targetAccountId: item.targetAccountId && item.targetAccountId.startsWith('ACCOUNT#')
-            ? item.targetAccountId.substring(8)
-            : item.targetAccountId
-    }));
+    return items
+        .filter(item => Array.isArray(item.permissions) && item.permissions.length > 0)
+        .map(item => ({
+            ...item,
+            targetAccountId: item.targetAccountId && item.targetAccountId.startsWith('ACCOUNT#')
+                ? item.targetAccountId.substring(8)
+                : item.targetAccountId
+        }));
 }

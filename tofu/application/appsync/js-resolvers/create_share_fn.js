@@ -10,8 +10,14 @@ export function request(ctx) {
     var targetAccountId = ctx.stash ? ctx.stash.targetAccountId : undefined;
     const profileId = input.profileId || (ctx.stash && ctx.stash.invite ? ctx.stash.invite.profileId : undefined);
     const permissions = input.permissions || (ctx.stash && ctx.stash.invite ? ctx.stash.invite.permissions : undefined);
+
+    // Validate that permissions is a non-empty array of valid PermissionType values
+    if (!Array.isArray(permissions) || permissions.length === 0) {
+        util.error('Permissions must include at least one permission', 'BadRequest');
+    }
+
     const now = util.time.nowISO8601();
-    
+
     // Get ownerAccountId from stash - check profile (shareProfileDirect) or invite (redeemProfileInvite)
     var ownerAccountId = null;
     if (ctx.stash && ctx.stash.profile && ctx.stash.profile.ownerAccountId) {
@@ -19,21 +25,21 @@ export function request(ctx) {
     } else if (ctx.stash && ctx.stash.invite && ctx.stash.invite.ownerAccountId) {
         ownerAccountId = ctx.stash.invite.ownerAccountId;
     }
-    
+
     // Validate that ownerAccountId was found
     if (!ownerAccountId) {
         util.error('Failed to determine profile owner', 'InternalServerError');
     }
-    
+
     // Ensure targetAccountId has ACCOUNT# prefix
     if (targetAccountId && !targetAccountId.startsWith('ACCOUNT#')) {
         targetAccountId = `ACCOUNT#${targetAccountId}`;
     }
-    
+
     // Generate shareId for backward compatibility with tests
     // Format: SHARE#{targetAccountId} (targetAccountId already has ACCOUNT# prefix)
     const shareId = `SHARE#${targetAccountId}`;
-    
+
     // Normalize profileId to ensure PROFILE# prefix is used when storing shares
     const dbProfileId = profileId && profileId.startsWith('PROFILE#') ? profileId : `PROFILE#${profileId}`;
 
@@ -47,12 +53,12 @@ export function request(ctx) {
         createdByAccountId: `ACCOUNT#${callerSub}`,
         createdAt: now
     };
-    
+
     // Store full share item in stash for response
     if (ctx.stash) {
         ctx.stash.shareItem = shareItem;
     }
-    
+
     return {
         operation: 'PutItem',
         key: util.dynamodb.toMapValues({ profileId: dbProfileId, targetAccountId: targetAccountId }),
@@ -76,7 +82,7 @@ export function response(ctx) {
     const cleanTargetAccountId = shareItem.targetAccountId && shareItem.targetAccountId.startsWith('ACCOUNT#')
         ? shareItem.targetAccountId.substring(8)
         : shareItem.targetAccountId;
-    
+
     return {
         ...shareItem,
         targetAccountId: cleanTargetAccountId

@@ -51,12 +51,17 @@ export function response(ctx) {
         if (item.expiresAt && item.expiresAt < nowEpochSeconds) {
             return false;
         }
-        
+
         // Skip used invites (has used=true or usedAt set)
         if (item.used === true || item.usedAt) {
             return false;
         }
-        
+
+        // Skip invites that grant no effective permission
+        if (!Array.isArray(item.permissions) || item.permissions.length === 0) {
+            return false;
+        }
+
         return true;
     });
     

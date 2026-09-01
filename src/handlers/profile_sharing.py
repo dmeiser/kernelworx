@@ -46,12 +46,21 @@ def _is_valid_share_entry(profile_id: Any, owner_account_id: Any) -> bool:
     return isinstance(profile_id, str) and isinstance(owner_account_id, str)
 
 
+def _has_effective_permission(permissions: Any) -> bool:
+    """Check if permissions grant at least one effective READ or WRITE right."""
+    if not isinstance(permissions, (list, set)):
+        return False
+    return any(p in ("READ", "WRITE") for p in permissions)
+
+
 def _add_share_to_map(shares_by_profile: Dict[str, Dict[str, Any]], share: Dict[str, Any]) -> None:
     """Add a share to the deduplicated map if valid and not already present."""
     profile_id_val = share.get("profileId")
     owner_account_id_val = share.get("ownerAccountId")
 
     if not _is_valid_share_entry(profile_id_val, owner_account_id_val):
+        return
+    if not _has_effective_permission(share.get("permissions")):
         return
     if profile_id_val in shares_by_profile:
         return
