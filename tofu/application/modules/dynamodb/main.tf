@@ -512,6 +512,7 @@ resource "aws_dynamodb_table" "invites" {
 # PK: sharedCampaignCode
 # GSI: GSI1 (createdBy, createdAt)
 # GSI: GSI2 (unitCampaignKey)
+# GSI: catalogId-index (catalogId) - used to enforce catalog delete constraints
 # ============================================================================
 resource "aws_dynamodb_table" "shared_campaigns" {
   name                        = "${var.name_prefix}-shared-campaigns${local.table_suffix}"
@@ -539,6 +540,11 @@ resource "aws_dynamodb_table" "shared_campaigns" {
     type = "S"
   }
 
+  attribute {
+    name = "catalogId"
+    type = "S"
+  }
+
   global_secondary_index {
     name            = "GSI1"
     projection_type = "ALL"
@@ -560,6 +566,16 @@ resource "aws_dynamodb_table" "shared_campaigns" {
 
     key_schema {
       attribute_name = "unitCampaignKey"
+      key_type       = "HASH"
+    }
+  }
+
+  global_secondary_index {
+    name            = "catalogId-index"
+    projection_type = "ALL"
+
+    key_schema {
+      attribute_name = "catalogId"
       key_type       = "HASH"
     }
   }
