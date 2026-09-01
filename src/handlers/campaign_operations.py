@@ -92,15 +92,25 @@ def _get_shared_campaign(shared_campaign_code: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-def _get_profile(profile_id: str) -> Optional[Dict[str, Any]]:
-    """Retrieve a profile by ID using the profileId-index GSI.
+def _get_profile(profile_id: str, owner_account_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """Retrieve a profile by ID using strongly consistent GetItem when owner is known,
+    or the profileId-index GSI as a fallback.
 
     Accepts either a raw UUID or a PROFILE# prefixed id and normalizes to the
     DynamoDB-stored prefix when querying the profile table.
     """
     try:
-        # Ensure we query the profile GSI with the PROFILE# prefix
         db_profile_id = profile_id if profile_id.startswith("PROFILE#") else f"PROFILE#{profile_id}"
+
+        if owner_account_id:
+            db_owner_id = owner_account_id if owner_account_id.startswith("ACCOUNT#") else f"ACCOUNT#{owner_account_id}"
+            response = tables.profiles.get_item(
+                Key={"ownerAccountId": db_owner_id, "profileId": db_profile_id},
+                ConsistentRead=True,
+            )
+            item: Optional[Dict[str, Any]] = response.get("Item")
+            if item:
+                return item
 
         response = tables.profiles.query(
             IndexName="profileId-index",
@@ -353,7 +363,7 @@ def _extract_campaign_values(
 def _get_verified_profile(caller_account_id: str, profile_id: str) -> Dict[str, Any]:
     """Verify access and get profile. Raises AppError if access denied or not found."""
     _verify_write_access(caller_account_id, profile_id)
-    profile = _get_profile(profile_id)
+    profile = _get_profile(profile_id, owner_account_id=caller_account_id)
     if not profile:
         raise AppError(ErrorCode.NOT_FOUND, f"Profile {profile_id} not found")
     return profile
