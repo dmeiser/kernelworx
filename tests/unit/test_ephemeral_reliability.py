@@ -749,22 +749,15 @@ class TestWorkflowDispatchSurface:
         job_if = workflow["jobs"]["ephemeral-test"].get("if", "")
         normalized = self._normalize_if_expression(job_if)
         assert normalized == (
-            "github.event_name == 'pull_request' "
-            "&& github.event.pull_request.head.repo.full_name == github.repository"
-        ), (
-            f"ephemeral-test job must be gated to same-repo pull_request events, got: {job_if!r}"
-        )
+            "github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository"
+        ), f"ephemeral-test job must be gated to same-repo pull_request events, got: {job_if!r}"
 
     def test_ephemeral_test_uses_valid_pr_run_id(self, repo_root: Path) -> None:
         workflow = self._load_workflow(repo_root)
-        up_step = next(
-            s
-            for s in workflow["jobs"]["ephemeral-test"]["steps"]
-            if s.get("id") == "ephemeral_up"
-        )
+        up_step = next(s for s in workflow["jobs"]["ephemeral-test"]["steps"] if s.get("id") == "ephemeral_up")
         run_script = up_step["run"]
         args = self._extract_command_args(run_script, "ephemeral-env.sh", "up")
-        assert args[2] == 'pr-${{ github.event.pull_request.number }}', (
+        assert args[2] == "pr-${{ github.event.pull_request.number }}", (
             "ephemeral-env.sh up must use a PR-numbered run-id"
         )
 

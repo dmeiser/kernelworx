@@ -124,6 +124,8 @@ jobs:
     if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    # The ephemeral environment is required so this job can assume the AWS role
+    # that owns the S3 state bucket and the ephemeral stacks.
     environment: ephemeral
     permissions:
       contents: read
