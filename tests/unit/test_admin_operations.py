@@ -1501,6 +1501,72 @@ class TestAdminDeleteUser:
         lambda_context: Any,
         monkeypatch: Any,
     ) -> None:
+        """Test successful user deletion when accountId is passed with ACCOUNT# prefix."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
+
+        target_uuid = "11111111-1111-1111-1111-111111111111"
+        prefixed_account_id = f"ACCOUNT#{target_uuid}"
+
+        # Create target account
+        accounts_table = get_accounts_table()
+        accounts_table.put_item(
+            Item={
+                "accountId": prefixed_account_id,
+                "email": "target@example.com",
+                "createdAt": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+
+        event = {
+            **admin_appsync_event,
+            "arguments": {"accountId": prefixed_account_id},
+        }
+
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+            mock_cognito = MagicMock()
+            # Mock Cognito list_users to find user by raw sub
+            mock_cognito.list_users.return_value = {
+                "Users": [
+                    {
+                        "Username": "cognito-username-123",
+                        "Attributes": [
+                            {"Name": "sub", "Value": target_uuid},
+                            {"Name": "email", "Value": "target@example.com"},
+                        ],
+                    }
+                ]
+            }
+            mock_cognito.admin_delete_user.return_value = {}
+            mock_get_client.return_value = mock_cognito
+
+            result = admin_delete_user(event, lambda_context)
+
+            assert result is True
+
+            # Verify Cognito filter used the raw UUID without ACCOUNT# prefix
+            mock_cognito.list_users.assert_called_once_with(
+                UserPoolId="test-pool-id",
+                Filter=f'sub = "{target_uuid}"',
+                Limit=1,
+            )
+
+            # Verify Cognito user was deleted
+            mock_cognito.admin_delete_user.assert_called_once_with(
+                UserPoolId="test-pool-id", Username="cognito-username-123"
+            )
+
+            # Verify account was deleted from DynamoDB
+            response = accounts_table.get_item(Key={"accountId": prefixed_account_id})
+            assert "Item" not in response
+
+    def test_success_no_dynamodb_account(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
         """Test successful user deletion when user hasn't logged in yet (no DynamoDB Account)."""
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
@@ -3275,6 +3341,189 @@ class TestAccountDeletionHelpers:
 
         count = _delete_inbound_shares("no-shares", MagicMock())
         assert count == 0
+
+    def test_find_cognito_user_by_sub_unprefixed(self) -> None:
+        """_find_cognito_user_by_sub queries Cognito with raw sub."""
+        from src.handlers.admin_operations import _find_cognito_user_by_sub
+
+        mock_cognito = MagicMock()
+        mock_cognito.list_users.return_value = {
+            "Users": [
+                {
+                    "Username": "user-123",
+                    "Attributes": [
+                        {"Name": "sub", "Value": "11111111-1111-1111-1111-111111111111"},
+                        {"Name": "email", "Value": "user@example.com"},
+                    ],
+                }
+            ]
+        }
+
+        username, email = _find_cognito_user_by_sub(
+            mock_cognito, "pool-id", "11111111-1111-1111-1111-111111111111", MagicMock()
+        )
+
+        assert username == "user-123"
+        assert email == "user@example.com"
+        mock_cognito.list_users.assert_called_once_with(
+            UserPoolId="pool-id",
+            Filter='sub = "11111111-1111-1111-1111-111111111111"',
+            Limit=1,
+        )
+
+    def test_find_cognito_user_by_sub_prefixed(self) -> None:
+        """_find_cognito_user_by_sub strips ACCOUNT# prefix before querying Cognito."""
+        from src.handlers.admin_operations import _find_cognito_user_by_sub
+
+        mock_cognito = MagicMock()
+        mock_cognito.list_users.return_value = {
+            "Users": [
+                {
+                    "Username": "user-123",
+                    "Attributes": [
+                        {"Name": "sub", "Value": "11111111-1111-1111-1111-111111111111"},
+                        {"Name": "email", "Value": "user@example.com"},
+                    ],
+                }
+            ]
+        }
+
+        username, email = _find_cognito_user_by_sub(
+            mock_cognito, "pool-id", "ACCOUNT#11111111-1111-1111-1111-111111111111", MagicMock()
+        )
+
+        assert username == "user-123"
+        assert email == "user@example.com"
+        mock_cognito.list_users.assert_called_once_with(
+            UserPoolId="pool-id",
+            Filter='sub = "11111111-1111-1111-1111-111111111111"',
+            Limit=1,
+        )
+
+    def test_find_cognito_user_by_sub_not_found(self) -> None:
+        """_find_cognito_user_by_sub returns (None, None) when user not found."""
+        from src.handlers.admin_operations import _find_cognito_user_by_sub
+
+        mock_cognito = MagicMock()
+        mock_cognito.list_users.return_value = {"Users": []}
+
+        username, email = _find_cognito_user_by_sub(
+            mock_cognito, "pool-id", "ACCOUNT#11111111-1111-1111-1111-111111111111", MagicMock()
+        )
+
+        assert username is None
+        assert email is None
+
+    def test_find_cognito_user_by_sub_client_error(self) -> None:
+        """_find_cognito_user_by_sub raises AppError when Cognito call fails."""
+        from src.handlers.admin_operations import _find_cognito_user_by_sub
+
+        mock_cognito = MagicMock()
+        mock_cognito.list_users.side_effect = ClientError(
+            {"Error": {"Code": "InternalErrorException", "Message": "Cognito failure"}},
+            "ListUsers",
+        )
+
+        with pytest.raises(AppError) as exc_info:
+            _find_cognito_user_by_sub(
+                mock_cognito, "pool-id", "ACCOUNT#11111111-1111-1111-1111-111111111111", MagicMock()
+            )
+
+        assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+
+    def test_account_exists_in_dynamodb_unprefixed(self, dynamodb_table: Any) -> None:
+        """_account_exists_in_dynamodb normalizes unprefixed account ID."""
+        from src.handlers.admin_operations import _account_exists_in_dynamodb
+
+        accounts_table = get_accounts_table()
+        target_account_id = "11111111-1111-1111-1111-111111111111"
+        accounts_table.put_item(
+            Item={
+                "accountId": f"ACCOUNT#{target_account_id}",
+                "email": "target@example.com",
+            }
+        )
+
+        assert _account_exists_in_dynamodb(target_account_id, MagicMock()) is True
+
+    def test_account_exists_in_dynamodb_prefixed(self, dynamodb_table: Any) -> None:
+        """_account_exists_in_dynamodb normalizes ACCOUNT#-prefixed account ID."""
+        from src.handlers.admin_operations import _account_exists_in_dynamodb
+
+        accounts_table = get_accounts_table()
+        target_account_id = "11111111-1111-1111-1111-111111111111"
+        accounts_table.put_item(
+            Item={
+                "accountId": f"ACCOUNT#{target_account_id}",
+                "email": "target@example.com",
+            }
+        )
+
+        assert _account_exists_in_dynamodb(f"ACCOUNT#{target_account_id}", MagicMock()) is True
+
+    def test_account_exists_in_dynamodb_not_found(self, dynamodb_table: Any) -> None:
+        """_account_exists_in_dynamodb returns False when account not in DynamoDB."""
+        from src.handlers.admin_operations import _account_exists_in_dynamodb
+
+        assert _account_exists_in_dynamodb("non-existent-user", MagicMock()) is False
+
+    def test_account_exists_in_dynamodb_client_error(self) -> None:
+        """_account_exists_in_dynamodb propagates ClientError."""
+        from src.handlers.admin_operations import _account_exists_in_dynamodb
+
+        with patch("src.handlers.admin_operations.tables.accounts.get_item") as mock_get:
+            mock_get.side_effect = ClientError(
+                {"Error": {"Code": "ResourceNotFoundException", "Message": "Table not found"}},
+                "GetItem",
+            )
+            with pytest.raises(ClientError):
+                _account_exists_in_dynamodb("test-user", MagicMock())
+
+    def test_delete_account_from_dynamodb_unprefixed(self, dynamodb_table: Any) -> None:
+        """_delete_account_from_dynamodb deletes item using normalized key from unprefixed ID."""
+        from src.handlers.admin_operations import _delete_account_from_dynamodb
+
+        accounts_table = get_accounts_table()
+        target_account_id = "11111111-1111-1111-1111-111111111111"
+        accounts_table.put_item(
+            Item={
+                "accountId": f"ACCOUNT#{target_account_id}",
+                "email": "target@example.com",
+            }
+        )
+
+        _delete_account_from_dynamodb(target_account_id, MagicMock())
+        response = accounts_table.get_item(Key={"accountId": f"ACCOUNT#{target_account_id}"})
+        assert "Item" not in response
+
+    def test_delete_account_from_dynamodb_prefixed(self, dynamodb_table: Any) -> None:
+        """_delete_account_from_dynamodb deletes item using normalized key from prefixed ID."""
+        from src.handlers.admin_operations import _delete_account_from_dynamodb
+
+        accounts_table = get_accounts_table()
+        target_account_id = "11111111-1111-1111-1111-111111111111"
+        accounts_table.put_item(
+            Item={
+                "accountId": f"ACCOUNT#{target_account_id}",
+                "email": "target@example.com",
+            }
+        )
+
+        _delete_account_from_dynamodb(f"ACCOUNT#{target_account_id}", MagicMock())
+        response = accounts_table.get_item(Key={"accountId": f"ACCOUNT#{target_account_id}"})
+        assert "Item" not in response
+
+    def test_delete_account_from_dynamodb_client_error(self) -> None:
+        """_delete_account_from_dynamodb propagates ClientError."""
+        from src.handlers.admin_operations import _delete_account_from_dynamodb
+
+        with patch("src.handlers.admin_operations.tables.accounts.delete_item") as mock_delete:
+            mock_delete.side_effect = ClientError(
+                {"Error": {"Code": "ResourceNotFoundException", "Message": "Table not found"}},
+                "DeleteItem",
+            )
+            with pytest.raises(ClientError):
+                _delete_account_from_dynamodb("test-user", MagicMock())
 
 
 class TestGetCognitoClient:

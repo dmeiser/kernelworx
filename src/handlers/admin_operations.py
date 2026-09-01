@@ -585,13 +585,14 @@ def _find_cognito_user_by_sub(
     AppError so the caller does not proceed to delete DynamoDB data while
     the Cognito user still exists.
     """
+    raw_sub = account_id[8:] if account_id.startswith("ACCOUNT#") else account_id
     # Validate before interpolating into the Cognito filter to prevent
     # quote-injection / filter breakage (#124).
-    _validate_sub_for_filter(account_id)
+    _validate_sub_for_filter(raw_sub)
     try:
         users_response = cognito.list_users(
             UserPoolId=user_pool_id,
-            Filter=f'sub = "{account_id}"',
+            Filter=f'sub = "{raw_sub}"',
             Limit=1,
         )
         users = users_response.get("Users", [])
@@ -623,7 +624,7 @@ def _delete_user_from_cognito(cognito: Any, user_pool_id: str, username: str, em
 
 def _account_exists_in_dynamodb(account_id: str, logger: Any) -> bool:
     """Check whether an account record exists in DynamoDB."""
-    db_account_id = f"ACCOUNT#{account_id}"
+    db_account_id = _normalize_account_id(account_id)
     try:
         response = tables.accounts.get_item(Key={"accountId": db_account_id}, ProjectionExpression="accountId")
         exists = "Item" in response
@@ -642,7 +643,7 @@ def _delete_account_from_dynamodb(account_id: str, logger: Any) -> None:
     raise for missing keys). Other ClientErrors are propagated so that Cognito
     deletion is not attempted while account data remains.
     """
-    db_account_id = f"ACCOUNT#{account_id}"
+    db_account_id = _normalize_account_id(account_id)
     try:
         tables.accounts.delete_item(Key={"accountId": db_account_id})
         logger.info("Deleted account from DynamoDB", account_id=db_account_id)
@@ -778,11 +779,6 @@ def admin_delete_user(event: Dict[str, Any], context: Any) -> bool:
 
         username, email = _find_cognito_user_by_sub(cognito, user_pool_id, account_id, logger)
         account_exists = _account_exists_in_dynamodb(account_id, logger)
-        # TODO(#186): admin_delete_user passes the raw accountId to the DynamoDB
-        # and Cognito lookups above, so an ACCOUNT#-prefixed value for a non-self
-        # target yields a spurious NOT_FOUND. Normalize accountId consistently
-        # across this handler in a follow-up; #125 only fixed the self-deletion
-        # guard.
 
         if not username and not account_exists:
             raise AppError(ErrorCode.NOT_FOUND, f"User not found: {account_id}")
