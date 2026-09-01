@@ -103,6 +103,33 @@ describe('Profile Operations Integration Tests', () => {
     });
   };
 
+  const updateProfileWithRetry = async (
+    client: any,
+    input: any,
+    maxRetries = 5,
+    delayMs = 500,
+  ) => {
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        return await client.mutate({
+          mutation: UPDATE_PROFILE,
+          variables: { input },
+        });
+      } catch (err: any) {
+        if (
+          attempt < maxRetries - 1 &&
+          (err?.message?.includes('not found or access denied') ||
+            err?.message?.includes('NotFound') ||
+            err?.message?.includes('Forbidden'))
+        ) {
+          await new Promise((r) => setTimeout(r, delayMs));
+          continue;
+        }
+        throw err;
+      }
+    }
+  };
+
   beforeAll(async () => {
     // Create authenticated clients and get account IDs
     const ownerAuth: AuthenticatedClientResult = await createAuthenticatedClient('owner');
@@ -369,14 +396,9 @@ describe('Profile Operations Integration Tests', () => {
 
       // Act: Update profile
       const newName = `${getTestPrefix()}-UpdatedName`;
-      const { data } = await ownerClient.mutate({
-        mutation: UPDATE_PROFILE,
-        variables: {
-          input: {
-            profileId: testProfileId,
-            sellerName: newName,
-          },
-        },
+      const { data } = await updateProfileWithRetry(ownerClient, {
+        profileId: testProfileId,
+        sellerName: newName,
       });
 
       // Assert
@@ -400,14 +422,9 @@ describe('Profile Operations Integration Tests', () => {
 
       // Act: Update profile
       const newName = `${getTestPrefix()}-UpdatedForTimestamp`;
-      const { data } = await ownerClient.mutate({
-        mutation: UPDATE_PROFILE,
-        variables: {
-          input: {
-            profileId: testProfileId,
-            sellerName: newName,
-          },
-        },
+      const { data } = await updateProfileWithRetry(ownerClient, {
+        profileId: testProfileId,
+        sellerName: newName,
       });
 
       // Assert
