@@ -8,7 +8,8 @@ export function request(ctx) {
     const expectedOwner = 'ACCOUNT#' + ctx.identity.sub;
     return {
         operation: 'GetItem',
-        key: util.dynamodb.toMapValues({ ownerAccountId: expectedOwner, profileId: dbProfileId })
+        key: util.dynamodb.toMapValues({ ownerAccountId: expectedOwner, profileId: dbProfileId }),
+        consistentRead: true
     };
 }
 
