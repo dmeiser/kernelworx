@@ -420,6 +420,63 @@ class TestCheckProfileAccess:
 
         assert result is False
 
+    def test_stale_share_after_ownership_transfer_denied(
+        self,
+        dynamodb_table: Any,
+        shares_table: Any,
+        sample_profile: Any,
+        sample_profile_id: str,
+        sample_account_id: str,
+        another_account_id: str,
+    ) -> None:
+        """A share created by a former owner is denied after the profile is transferred."""
+        # Share from the original owner to another user, recording the owner.
+        shares_table.put_item(
+            Item={
+                "profileId": sample_profile_id,
+                "targetAccountId": f"ACCOUNT#{another_account_id}",
+                "permissions": ["READ"],
+                "ownerAccountId": f"ACCOUNT#{sample_account_id}",
+            }
+        )
+        # Simulate ownership transfer: delete old record and create new owner record.
+        dynamodb_table.delete_item(
+            Key={"ownerAccountId": f"ACCOUNT#{sample_account_id}", "profileId": sample_profile_id}
+        )
+        new_owner_id = "new-owner-account"
+        dynamodb_table.put_item(
+            Item={
+                "ownerAccountId": f"ACCOUNT#{new_owner_id}",
+                "profileId": sample_profile_id,
+                "sellerName": "Transferred Profile",
+            }
+        )
+
+        result = check_profile_access(another_account_id, sample_profile_id, "READ")
+
+        assert result is False
+
+    def test_share_without_owner_account_id_allowed_for_backward_compat(
+        self,
+        dynamodb_table: Any,
+        shares_table: Any,
+        sample_profile: Any,
+        sample_profile_id: str,
+        another_account_id: str,
+    ) -> None:
+        """Shares without ownerAccountId are accepted when the profile exists."""
+        shares_table.put_item(
+            Item={
+                "profileId": sample_profile_id,
+                "targetAccountId": f"ACCOUNT#{another_account_id}",
+                "permissions": ["READ"],
+            }
+        )
+
+        result = check_profile_access(another_account_id, sample_profile_id, "READ")
+
+        assert result is True
+
 
 class TestBatchCheckProfileAccess:
     """Tests for batch_check_profile_access function."""
@@ -850,6 +907,141 @@ class TestBatchCheckProfileAccess:
                     },
                     "UnprocessedKeys": {},
                 }
+            return original_batch_get_item(RequestItems=RequestItems)
+
+        monkeypatch.setattr(resource, "batch_get_item", patched_batch_get_item)
+        monkeypatch.setattr("src.utils.auth.get_dynamodb_resource", lambda: resource)
+
+        result = batch_check_profile_access(sample_account_id, [profile_id])
+
+        assert result == set()
+
+    def test_batch_stale_share_after_ownership_transfer_denied(
+        self,
+        dynamodb_table: Any,
+        shares_table: Any,
+        sample_account_id: str,
+        another_account_id: str,
+    ) -> None:
+        """Batch check rejects a stale share after the profile is transferred."""
+        profile_id = "PROFILE#batch-transfer-profile"
+        original_owner = sample_account_id
+        dynamodb_table.put_item(
+            Item={
+                "ownerAccountId": f"ACCOUNT#{original_owner}",
+                "profileId": profile_id,
+                "sellerName": "Batch Transfer Profile",
+            }
+        )
+        shares_table.put_item(
+            Item={
+                "profileId": profile_id,
+                "targetAccountId": f"ACCOUNT#{another_account_id}",
+                "permissions": ["READ"],
+                "ownerAccountId": f"ACCOUNT#{original_owner}",
+            }
+        )
+        # Simulate ownership transfer by deleting the old record and creating a new one.
+        dynamodb_table.delete_item(
+            Key={"ownerAccountId": f"ACCOUNT#{original_owner}", "profileId": profile_id}
+        )
+        new_owner_id = "batch-new-owner"
+        dynamodb_table.put_item(
+            Item={
+                "ownerAccountId": f"ACCOUNT#{new_owner_id}",
+                "profileId": profile_id,
+                "sellerName": "Batch Transferred Profile",
+            }
+        )
+
+        result = batch_check_profile_access(another_account_id, [profile_id])
+
+        assert profile_id not in result
+
+    def test_batch_uses_extra_profile_read_to_validate_shares(
+        self,
+        dynamodb_table: Any,
+        shares_table: Any,
+        sample_account_id: str,
+        another_account_id: str,
+        monkeypatch: Any,
+    ) -> None:
+        """When shares include ownerAccountId, batch auth validates with a third BatchGetItem."""
+        profile_id = "PROFILE#validated-share-profile"
+        dynamodb_table.put_item(
+            Item={
+                "ownerAccountId": f"ACCOUNT#{another_account_id}",
+                "profileId": profile_id,
+                "sellerName": "Validated Share Profile",
+            }
+        )
+        shares_table.put_item(
+            Item={
+                "profileId": profile_id,
+                "targetAccountId": f"ACCOUNT#{sample_account_id}",
+                "permissions": ["READ"],
+                "ownerAccountId": f"ACCOUNT#{another_account_id}",
+            }
+        )
+
+        resource = get_dynamodb_resource()
+        original_batch_get_item = resource.batch_get_item
+        call_count = 0
+
+        def counted_batch_get_item(*args: Any, **kwargs: Any) -> Dict[str, Any]:
+            nonlocal call_count
+            call_count += 1
+            return original_batch_get_item(*args, **kwargs)
+
+        monkeypatch.setattr(resource, "batch_get_item", counted_batch_get_item)
+        monkeypatch.setattr("src.utils.auth.get_dynamodb_resource", lambda: resource)
+
+        result = batch_check_profile_access(sample_account_id, [profile_id])
+
+        assert profile_id in result
+        assert call_count == 3
+
+    def test_batch_validated_profile_item_missing_profile_id_is_ignored(
+        self,
+        dynamodb_table: Any,
+        shares_table: Any,
+        sample_account_id: str,
+        another_account_id: str,
+        monkeypatch: Any,
+    ) -> None:
+        """Validation profile items without a profileId are ignored rather than crashing."""
+        profile_id = "PROFILE#missing-validated-id"
+        profiles_table_name = dynamodb_table.table_name
+        dynamodb_table.put_item(
+            Item={
+                "ownerAccountId": f"ACCOUNT#{another_account_id}",
+                "profileId": profile_id,
+                "sellerName": "Missing Validated Id",
+            }
+        )
+        shares_table.put_item(
+            Item={
+                "profileId": profile_id,
+                "targetAccountId": f"ACCOUNT#{sample_account_id}",
+                "permissions": ["READ"],
+                "ownerAccountId": f"ACCOUNT#{another_account_id}",
+            }
+        )
+
+        resource = get_dynamodb_resource()
+        original_batch_get_item = resource.batch_get_item
+
+        def patched_batch_get_item(RequestItems: Dict[str, Any]) -> Dict[str, Any]:
+            for table_name in RequestItems:
+                if table_name == profiles_table_name:
+                    return {
+                        "Responses": {
+                            table_name: [
+                                {"ownerAccountId": f"ACCOUNT#{another_account_id}"}  # missing profileId
+                            ]
+                        },
+                        "UnprocessedKeys": {},
+                    }
             return original_batch_get_item(RequestItems=RequestItems)
 
         monkeypatch.setattr(resource, "batch_get_item", patched_batch_get_item)
