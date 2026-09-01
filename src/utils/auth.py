@@ -20,9 +20,10 @@ logger = get_logger(__name__)
 
 
 def _is_profile_owner(profiles_table: "Table", caller_account_id: str, db_profile_id: str) -> bool:
-    """Check if caller is the profile owner via direct lookup."""
+    """Check if caller is the profile owner via strongly consistent base-table lookup."""
     direct_response = profiles_table.get_item(
-        Key={"ownerAccountId": f"ACCOUNT#{caller_account_id}", "profileId": db_profile_id}
+        Key={"ownerAccountId": f"ACCOUNT#{caller_account_id}", "profileId": db_profile_id},
+        ConsistentRead=True,
     )
     return "Item" in direct_response
 
@@ -75,12 +76,12 @@ def _is_share_valid(share: Dict[str, Any], profiles_table: "Table", db_profile_i
     A profile ownership transfer deletes the old owner's base-table record, so a
     strongly consistent read using the share's stored owner will only succeed
     while the share is still valid. Shares that are missing ``ownerAccountId``
-    cannot be validated this way and are accepted for backward compatibility;
-    production shares always include this attribute.
+    cannot be validated against the current owner; they are accepted only when
+    the profile still exists (verified via the eventually consistent GSI).
     """
     share_owner = share.get("ownerAccountId")
     if not share_owner:
-        return True
+        return _profile_exists(profiles_table, db_profile_id)
     profile_response = profiles_table.get_item(
         Key={"ownerAccountId": share_owner, "profileId": db_profile_id},
         ConsistentRead=True,
@@ -198,9 +199,7 @@ def check_profile_access(caller_account_id: str, profile_id: str, required_permi
     db_caller_id = ensure_account_id(caller_account_id)
     # ensure_account_id returns Optional[str], but we know caller_account_id is not None here
     assert db_caller_id is not None
-    if _check_share_permissions(
-        tables.profiles, tables.shares, db_profile_id, db_caller_id, required_permission
-    ):
+    if _check_share_permissions(tables.profiles, tables.shares, db_profile_id, db_caller_id, required_permission):
         return True
 
     # Verify profile exists so we raise NOT_FOUND for missing profiles
@@ -235,16 +234,15 @@ def _batch_check_owned_profiles(db_profile_ids: list[str], db_caller_id: str) ->
     return owned_db_ids
 
 
-def _batch_check_shared_profiles(
-    remaining_ids: list[str], db_caller_id: str, required_permission: str
-) -> set[str]:
+def _batch_check_shared_profiles(remaining_ids: list[str], db_caller_id: str, required_permission: str) -> set[str]:
     """Return the set of db_profile_ids shared with the caller with required permission.
 
     Each candidate share is validated with a strongly consistent base-table read
     of the profile using the share's stored ``ownerAccountId`` when available.
     Stale shares that outlive an ownership transfer are rejected because the old
     owner's record no longer exists. Shares without ``ownerAccountId`` are
-    accepted for backward compatibility; production shares always include it.
+    accepted only when the profile still exists (verified via the eventually
+    consistent GSI); production shares always include this attribute.
     """
     candidate_shares: list[tuple[str, Optional[str]]] = []
     share_keys = [{"profileId": pid, "targetAccountId": db_caller_id} for pid in remaining_ids]
@@ -263,12 +261,14 @@ def _batch_check_shared_profiles(
         return set()
 
     # Shares that record their owner are validated against the profile base
-    # table. Shares without ownerAccountId are accepted for backward compat.
+    # table. Shares without ownerAccountId are accepted only after verifying
+    # the profile still exists via the GSI.
     profile_keys: list[Dict[str, str]] = []
     valid_shared_db_ids: set[str] = set()
+    backward_compat_ids: list[str] = []
     for db_pid, share_owner in candidate_shares:
         if not share_owner:
-            valid_shared_db_ids.add(db_pid)
+            backward_compat_ids.append(db_pid)
         else:
             profile_keys.append({"ownerAccountId": share_owner, "profileId": db_pid})
 
@@ -279,6 +279,11 @@ def _batch_check_shared_profiles(
 
     if profile_keys:
         _batch_get_all_items(tables.profiles.table_name, profile_keys, _on_profile_item)
+
+    for db_pid in backward_compat_ids:
+        if _profile_exists(tables.profiles, db_pid):
+            valid_shared_db_ids.add(db_pid)
+
     return valid_shared_db_ids
 
 
@@ -286,7 +291,7 @@ def batch_check_profile_access(
     caller_account_id: str, profile_ids: list[str], required_permission: str = "READ"
 ) -> set[str]:
     """
-    Check access for multiple profiles using two BatchGetItem calls.
+    Check access for multiple profiles using up to three BatchGetItem calls.
 
     Returns the set of original profile IDs the caller is allowed to access.
     Owner checks and share checks are batched so a unit with N scouts no longer
@@ -332,6 +337,13 @@ def require_profile_access(caller_account_id: str, profile_id: str, required_per
 def is_profile_owner(caller_account_id: str, profile_id: str) -> bool:
     """
     Check if caller is the owner of a profile.
+
+    This function queries the eventually consistent ``profileId-index`` GSI to
+    locate the profile's current owner. It is suitable for non-authoritative
+    ownership checks (for example, UI hints or audit logging) but should not be
+    used as the sole security gate; prefer ``check_profile_access`` or
+    ``require_profile_access`` for access-control decisions, which perform
+    strongly consistent base-table reads where possible.
 
     Args:
         caller_account_id: Cognito sub (Account ID) of the caller

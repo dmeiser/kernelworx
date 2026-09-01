@@ -477,6 +477,104 @@ class TestCheckProfileAccess:
 
         assert result is True
 
+    def test_share_without_owner_account_id_denied_when_profile_missing(
+        self,
+        dynamodb_table: Any,
+        shares_table: Any,
+        another_account_id: str,
+    ) -> None:
+        """Backward-compatible shares on deleted profiles are treated as stale/revoked."""
+        missing_profile_id = "PROFILE#missing-profile"
+        shares_table.put_item(
+            Item={
+                "profileId": missing_profile_id,
+                "targetAccountId": f"ACCOUNT#{another_account_id}",
+                "permissions": ["READ"],
+            }
+        )
+
+        with pytest.raises(AppError) as exc_info:
+            check_profile_access(another_account_id, missing_profile_id, "READ")
+
+        assert exc_info.value.error_code == ErrorCode.NOT_FOUND
+
+    def test_owner_check_uses_consistent_read(
+        self,
+        dynamodb_table: Any,
+        sample_profile: Any,
+        sample_account_id: str,
+        sample_profile_id: str,
+        monkeypatch: Any,
+    ) -> None:
+        """Owner lookup must use a strongly consistent base-table read."""
+        import src.utils.auth as auth_module
+
+        original_get_item = auth_module.tables.profiles.get_item
+        calls: list[Dict[str, Any]] = []
+
+        def wrapped_get_item(**kwargs: Any) -> Dict[str, Any]:
+            calls.append(kwargs)
+            return original_get_item(**kwargs)
+
+        monkeypatch.setattr(auth_module.tables.profiles, "get_item", wrapped_get_item)
+
+        result = check_profile_access(sample_account_id, sample_profile_id, "READ")
+
+        assert result is True
+        owner_call = next(c for c in calls if c.get("Key", {}).get("ownerAccountId") == f"ACCOUNT#{sample_account_id}")
+        assert owner_call.get("ConsistentRead") is True
+
+    def test_share_validation_uses_consistent_read(
+        self,
+        dynamodb_table: Any,
+        shares_table: Any,
+        sample_profile: Any,
+        sample_profile_id: str,
+        sample_account_id: str,
+        another_account_id: str,
+        monkeypatch: Any,
+    ) -> None:
+        """Share lookup and owner-validation lookup must be strongly consistent."""
+        import src.utils.auth as auth_module
+
+        original_profile_get_item = auth_module.tables.profiles.get_item
+        original_share_get_item = auth_module.tables.shares.get_item
+        profile_calls: list[Dict[str, Any]] = []
+        share_calls: list[Dict[str, Any]] = []
+
+        def wrapped_profile_get_item(**kwargs: Any) -> Dict[str, Any]:
+            profile_calls.append(kwargs)
+            return original_profile_get_item(**kwargs)
+
+        def wrapped_share_get_item(**kwargs: Any) -> Dict[str, Any]:
+            share_calls.append(kwargs)
+            return original_share_get_item(**kwargs)
+
+        monkeypatch.setattr(auth_module.tables.profiles, "get_item", wrapped_profile_get_item)
+        monkeypatch.setattr(auth_module.tables.shares, "get_item", wrapped_share_get_item)
+
+        shares_table.put_item(
+            Item={
+                "profileId": sample_profile_id,
+                "targetAccountId": f"ACCOUNT#{another_account_id}",
+                "permissions": ["READ"],
+                "ownerAccountId": f"ACCOUNT#{sample_account_id}",
+            }
+        )
+
+        result = check_profile_access(another_account_id, sample_profile_id, "READ")
+
+        assert result is True
+        assert len(share_calls) == 1
+        assert share_calls[0].get("ConsistentRead") is True
+        validation_call = next(
+            c
+            for c in profile_calls
+            if c.get("Key", {}).get("profileId") == sample_profile_id
+            and c.get("Key", {}).get("ownerAccountId") == f"ACCOUNT#{sample_account_id}"
+        )
+        assert validation_call.get("ConsistentRead") is True
+
 
 class TestBatchCheckProfileAccess:
     """Tests for batch_check_profile_access function."""
@@ -942,9 +1040,7 @@ class TestBatchCheckProfileAccess:
             }
         )
         # Simulate ownership transfer by deleting the old record and creating a new one.
-        dynamodb_table.delete_item(
-            Key={"ownerAccountId": f"ACCOUNT#{original_owner}", "profileId": profile_id}
-        )
+        dynamodb_table.delete_item(Key={"ownerAccountId": f"ACCOUNT#{original_owner}", "profileId": profile_id})
         new_owner_id = "batch-new-owner"
         dynamodb_table.put_item(
             Item={
@@ -1050,6 +1146,109 @@ class TestBatchCheckProfileAccess:
         result = batch_check_profile_access(sample_account_id, [profile_id])
 
         assert result == set()
+
+    def test_batch_share_without_owner_account_id_denied_when_profile_missing(
+        self,
+        dynamodb_table: Any,
+        shares_table: Any,
+        sample_account_id: str,
+    ) -> None:
+        """Batch check rejects backward-compatible shares on deleted profiles."""
+        missing_profile_id = "PROFILE#batch-missing-profile"
+        shares_table.put_item(
+            Item={
+                "profileId": missing_profile_id,
+                "targetAccountId": f"ACCOUNT#{sample_account_id}",
+                "permissions": ["READ"],
+            }
+        )
+
+        result = batch_check_profile_access(sample_account_id, [missing_profile_id])
+
+        assert missing_profile_id not in result
+
+    def test_batch_owned_check_uses_consistent_read(
+        self,
+        dynamodb_table: Any,
+        sample_profile: Any,
+        sample_account_id: str,
+        sample_profile_id: str,
+        monkeypatch: Any,
+    ) -> None:
+        """Batch owner lookups must request strongly consistent reads."""
+        resource = get_dynamodb_resource()
+        original_batch_get_item = resource.batch_get_item
+        calls: list[Dict[str, Any]] = []
+
+        def wrapped_batch_get_item(*args: Any, **kwargs: Any) -> Dict[str, Any]:
+            request_items = kwargs.get("RequestItems") or (args[0] if args else {})
+            calls.append(request_items)
+            return original_batch_get_item(*args, **kwargs)
+
+        monkeypatch.setattr(resource, "batch_get_item", wrapped_batch_get_item)
+        monkeypatch.setattr("src.utils.auth.get_dynamodb_resource", lambda: resource)
+
+        result = batch_check_profile_access(sample_account_id, [sample_profile_id])
+
+        assert result == {sample_profile_id}
+        profiles_table_name = dynamodb_table.table_name
+        owner_request = next(req for req in calls if profiles_table_name in req)
+        assert owner_request[profiles_table_name].get("ConsistentRead") is True
+
+    def test_batch_share_check_uses_consistent_read(
+        self,
+        dynamodb_table: Any,
+        shares_table: Any,
+        sample_profile: Any,
+        sample_profile_id: str,
+        sample_account_id: str,
+        another_account_id: str,
+        monkeypatch: Any,
+    ) -> None:
+        """Batch share lookups and validation lookups must request strongly consistent reads."""
+        profile_id = "PROFILE#consistent-read-share-profile"
+        dynamodb_table.put_item(
+            Item={
+                "ownerAccountId": f"ACCOUNT#{another_account_id}",
+                "profileId": profile_id,
+                "sellerName": "Consistent Read Share Profile",
+            }
+        )
+        shares_table.put_item(
+            Item={
+                "profileId": profile_id,
+                "targetAccountId": f"ACCOUNT#{sample_account_id}",
+                "permissions": ["READ"],
+                "ownerAccountId": f"ACCOUNT#{another_account_id}",
+            }
+        )
+
+        resource = get_dynamodb_resource()
+        original_batch_get_item = resource.batch_get_item
+        calls: list[Dict[str, Any]] = []
+
+        def wrapped_batch_get_item(*args: Any, **kwargs: Any) -> Dict[str, Any]:
+            request_items = kwargs.get("RequestItems") or (args[0] if args else {})
+            calls.append(request_items)
+            return original_batch_get_item(*args, **kwargs)
+
+        monkeypatch.setattr(resource, "batch_get_item", wrapped_batch_get_item)
+        monkeypatch.setattr("src.utils.auth.get_dynamodb_resource", lambda: resource)
+
+        result = batch_check_profile_access(sample_account_id, [profile_id])
+
+        assert result == {profile_id}
+        profiles_table_name = dynamodb_table.table_name
+        shares_table_name = shares_table.table_name
+        share_request = next(req for req in calls if shares_table_name in req)
+        validation_request = next(
+            req
+            for req in calls
+            if profiles_table_name in req
+            and req[profiles_table_name]["Keys"][0].get("ownerAccountId") == f"ACCOUNT#{another_account_id}"
+        )
+        assert share_request[shares_table_name].get("ConsistentRead") is True
+        assert validation_request[profiles_table_name].get("ConsistentRead") is True
 
 
 class TestRequireProfileAccess:
