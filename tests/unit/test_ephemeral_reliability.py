@@ -755,7 +755,61 @@ class TestWorkflowDispatchSurface:
         assert self._if_gates_on_mode(jobs["recover-deploy"]["if"], "recover-deploy")
         assert self._if_gates_on_mode(jobs["recover-destroy"]["if"], "recover-destroy")
 
-    def test_sweep_continues_on_error(self, repo_root: Path, tmp_env: Path) -> None:
+    def test_sweep_skips_open_and_unknown_pr_states(self, repo_root: Path, tmp_env: Path) -> None:
+        workflow = self._load_workflow(repo_root)
+        sweep_step = workflow["jobs"]["sweep"]["steps"][-1]
+        run_script = sweep_step["run"]
+
+        teardown_calls = tmp_env / "teardown_calls.txt"
+        write_mock(
+            tmp_env,
+            "aws",
+            """
+            #!/bin/bash
+            if [ "$1" = "s3" ] && [ "$2" = "ls" ]; then
+                echo "2026-08-23 00:00:00 1234 application/ephemeral/pr-7/terraform.tfstate"
+                echo "2026-08-23 00:00:00 1234 application/ephemeral/pr-42/terraform.tfstate"
+                echo "2026-08-23 00:00:00 1234 application/ephemeral/pr-99/terraform.tfstate"
+            fi
+            exit 0
+            """,
+        )
+        write_mock(
+            tmp_env,
+            "gh",
+            """
+            #!/bin/bash
+            if echo "$*" | grep -q "\\b7\\b"; then
+                echo "OPEN"
+            else
+                echo "UNKNOWN"
+            fi
+            exit 0
+            """,
+        )
+        write_mock(
+            tmp_env,
+            "scripts/ephemeral-env.sh",
+            f"""
+            #!/bin/bash
+            echo "$@" >> "{teardown_calls}"
+            exit 1
+            """,
+        )
+
+        result = subprocess.run(
+            ["bash", "-c", run_script],
+            cwd=tmp_env,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "GH_TOKEN": "test-token"},
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        calls = teardown_calls.read_text().splitlines() if teardown_calls.exists() else []
+        assert calls == [], f"Expected no teardowns for OPEN/UNKNOWN states, got: {calls}"
+
+    def test_sweep_fails_when_teardown_fails(self, repo_root: Path, tmp_env: Path) -> None:
         workflow = self._load_workflow(repo_root)
         sweep_step = workflow["jobs"]["sweep"]["steps"][-1]
         run_script = sweep_step["run"]
@@ -792,7 +846,51 @@ class TestWorkflowDispatchSurface:
             env={**os.environ, "GH_TOKEN": "test-token"},
             check=False,
         )
-        assert result.returncode == 0, result.stderr
+        assert result.returncode == 1, result.stderr
+        calls = set(teardown_calls.read_text().splitlines())
+        assert calls == {"down pr-7", "down pr-42"}
+
+    def test_sweep_continues_after_partial_failure(self, repo_root: Path, tmp_env: Path) -> None:
+        workflow = self._load_workflow(repo_root)
+        sweep_step = workflow["jobs"]["sweep"]["steps"][-1]
+        run_script = sweep_step["run"]
+
+        teardown_calls = tmp_env / "teardown_calls.txt"
+        write_mock(
+            tmp_env,
+            "aws",
+            """
+            #!/bin/bash
+            if [ "$1" = "s3" ] && [ "$2" = "ls" ]; then
+                echo "2026-08-23 00:00:00 1234 application/ephemeral/pr-7/terraform.tfstate"
+                echo "2026-08-23 00:00:00 1234 application/ephemeral/pr-42/terraform.tfstate"
+            fi
+            exit 0
+            """,
+        )
+        write_mock(tmp_env, "gh", '#!/bin/bash\necho "CLOSED"')
+        write_mock(
+            tmp_env,
+            "scripts/ephemeral-env.sh",
+            f"""
+            #!/bin/bash
+            echo "$@" >> "{teardown_calls}"
+            if echo "$@" | grep -q "pr-7"; then
+                exit 1
+            fi
+            exit 0
+            """,
+        )
+
+        result = subprocess.run(
+            ["bash", "-c", run_script],
+            cwd=tmp_env,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "GH_TOKEN": "test-token"},
+            check=False,
+        )
+        assert result.returncode == 1, result.stderr
         calls = set(teardown_calls.read_text().splitlines())
         assert calls == {"down pr-7", "down pr-42"}
 

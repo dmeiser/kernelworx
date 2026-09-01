@@ -167,7 +167,8 @@ jobs:
             exit 0
           fi
 
-          echo "$keys" | while IFS= read -r key; do
+          failures=0
+          while IFS= read -r key; do
             pr_num=$(echo "$key" | sed -n "s|^${PR_PREFIX}\([0-9][0-9]*\)/terraform.tfstate$|\1|p")
             if [ -z "$pr_num" ]; then
               echo "⚠️  Skipping non-PR state key: $key"
@@ -177,13 +178,32 @@ jobs:
             echo "Checking PR #${pr_num}..."
             pr_state=$(gh pr view "$pr_num" --json state -q .state 2>/dev/null || echo "UNKNOWN")
 
-            if [ "$pr_state" = "OPEN" ]; then
-              echo "  PR #${pr_num} is still open; leaving environment intact."
-              continue
-            fi
+            case "$pr_state" in
+              OPEN)
+                echo "  PR #${pr_num} is still open; leaving environment intact."
+                continue
+                ;;
+              CLOSED|MERGED)
+                echo "  PR #${pr_num} is ${pr_state}; tearing down pr-${pr_num}."
+                if ! scripts/ephemeral-env.sh down "pr-${pr_num}"; then
+                  echo "❌ Teardown failed for pr-${pr_num}." >&2
+                  failures=$((failures + 1))
+                fi
+                ;;
+              UNKNOWN)
+                echo "  PR #${pr_num} state is unknown; skipping teardown to avoid accidental destruction."
+                continue
+                ;;
+              *)
+                echo "  PR #${pr_num} has unexpected state '${pr_state}'; skipping teardown."
+                continue
+                ;;
+            esac
+          done < <(echo "$keys")
 
-            echo "  PR #${pr_num} is ${pr_state}; tearing down pr-${pr_num}."
-            if ! scripts/ephemeral-env.sh down "pr-${pr_num}"; then
-              echo "❌ Teardown failed for pr-${pr_num}; continuing sweep."
-            fi
-          done
+          if [ "$failures" -gt 0 ]; then
+            echo "❌ Sweep completed with ${failures} teardown failure(s)." >&2
+            exit 1
+          fi
+
+          echo "✅ Sweep completed."
