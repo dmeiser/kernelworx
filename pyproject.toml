@@ -23,6 +23,7 @@ dev = [
     "playwright>=1.51.0",
     "pytest-playwright>=0.7.0",
     "python-dotenv>=1.2.1",
+    "airspeed>=0.7.1",
 ]
 
 [tool.ruff]

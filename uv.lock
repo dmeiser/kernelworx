@@ -140,6 +140,18 @@ wheels = [
 ]
 
 [[package]]
+name = "airspeed"
+version = "0.7.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "cachetools" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/8a/29/895191cd1f2e28c61a5e4a07c7fbfb3ee3e5f7730cbaac643c9b149d2060/airspeed-0.7.1.tar.gz", hash = "sha256:7b7bf93db92e9dc60d64b193af971950bc6764c28e0d6143698d27a3b7f48cf5", size = 16779, upload-time = "2026-05-22T17:14:25.145Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/5e/ab/ed3c4f9609bd53de83fa761902c9adfae46b95b4614f4d55f037eb00e01e/airspeed-0.7.1-py3-none-any.whl", hash = "sha256:40787897d4490142c6abd6bee10172dc548c2b6b2ab7a225ae0231f3fcf068d4", size = 14434, upload-time = "2026-05-22T17:14:24.153Z" },
+]
+
+[[package]]
 name = "ast-serialize"
 version = "0.5.0"
 source = { registry = "https://pypi.org/simple" }
@@ -256,6 +268,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/7f/81/79693e833291c00dc89ee610e5e915381b6f08233912e28df50106840780/botocore_stubs-1.43.14.tar.gz", hash = "sha256:9e3bc1fdd51da7473f0df726c82747a1b0ae913449d629659765c247fecc2039", size = 42738, upload-time = "2026-05-25T06:06:37.484Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/89/ca/f017727b11895908c5dedc829cf2ec35e0c4b2a26ba875db325fef2cefdf/botocore_stubs-1.43.14-py3-none-any.whl", hash = "sha256:fb98f1475c92fd718644e786b5c543a20f1b1f610e89e0a7191c3f1f429c75aa", size = 67093, upload-time = "2026-05-25T06:06:34.532Z" },
+]
+
+[[package]]
+name = "cachetools"
+version = "7.1.8"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/4b/39/9a4689914dd907915cee74733b95888fc1d8a21aad47a24a0a2deec73ac4/cachetools-7.1.8.tar.gz", hash = "sha256:1221d547a0b24b7f26fa891d40d488b5258beab9aebd8ed68c729be3af849c43", size = 40909, upload-time = "2026-08-31T19:02:53.985Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d7/3d/9487690d0e937854db587205c66bab3c3cf88d9f00ed380b74cb88cc94ee/cachetools-7.1.8-py3-none-any.whl", hash = "sha256:a81e3844acaa7355b6567f97bd67a94a14ec3a9bc2cbbdae45b9592cc036775b", size = 16842, upload-time = "2026-08-31T19:02:52.554Z" },
 ]
 
 [[package]]
@@ -592,6 +613,7 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "airspeed" },
     { name = "boto3-stubs", extra = ["dynamodb", "lambda", "s3", "ses", "sns"] },
     { name = "moto", extra = ["dynamodb", "s3"] },
     { name = "mypy" },
@@ -615,6 +637,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "airspeed", specifier = ">=0.7.1" },
     { name = "boto3-stubs", extras = ["dynamodb", "s3", "lambda", "sns", "ses"], specifier = ">=1.41.5" },
     { name = "moto", extras = ["dynamodb", "s3", "lambda", "sns", "ses"], specifier = ">=5.1.17" },
     { name = "mypy", specifier = ">=1.19.0" },
