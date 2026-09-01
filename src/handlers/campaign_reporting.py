@@ -1,6 +1,6 @@
 """Lambda resolver for campaign-level reporting using campaign-based queries."""
 
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, Dict, List, cast
 
 from boto3.dynamodb.conditions import Key
@@ -225,7 +225,9 @@ def get_unit_report(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     item["pricePerUnit"] = float(item["pricePerUnit"])
                     item["subtotal"] = float(item["subtotal"])
 
-        logger.info(f"Report complete: {len(sellers)} sellers, ${float(total_unit_sales):.2f}, {total_unit_orders} orders")
+        logger.info(
+            f"Report complete: {len(sellers)} sellers, ${float(total_unit_sales):.2f}, {total_unit_orders} orders"
+        )
 
         return {
             "unitType": unit_type,
