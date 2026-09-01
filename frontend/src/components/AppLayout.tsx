@@ -232,7 +232,9 @@ export const AppLayout: React.FC<{ children?: React.ReactNode }> = ({ children }
   // Check if user has any shared campaigns
   const { data: campaignsData } = useQuery<{
     listMySharedCampaigns: { sharedCampaignCode: string; isActive: boolean }[];
-  }>(LIST_MY_SHARED_CAMPAIGNS);
+  }>(LIST_MY_SHARED_CAMPAIGNS, {
+    fetchPolicy: 'cache-first',
+  });
 
   const hasSharedCampaigns = React.useMemo(
     () => (campaignsData?.listMySharedCampaigns?.filter((c: { isActive: boolean }) => c.isActive)?.length ?? 0) > 0,
