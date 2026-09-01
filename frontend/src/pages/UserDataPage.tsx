@@ -211,7 +211,9 @@ export const UserDataPage: React.FC = () => {
       void refetchProfiles();
     },
     onError: (error) => {
-      console.error('Transfer failed:', error);
+      if (import.meta.env.DEV) {
+        console.error('Transfer failed:', error);
+      }
     },
   });
 
@@ -226,7 +228,9 @@ export const UserDataPage: React.FC = () => {
       void refetchCampaigns();
     },
     onError: (error) => {
-      console.error('Update shared code failed:', error);
+      if (import.meta.env.DEV) {
+        console.error('Update shared code failed:', error);
+      }
     },
   });
 

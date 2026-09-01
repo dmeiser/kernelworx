@@ -571,7 +571,9 @@ export const ScoutManagementPage: React.FC = () => {
       await runPendingAction(pendingAction);
       setPendingAction(null);
     } catch (err) {
-      console.error(`Error ${pendingAction.type === 'revoke' ? 'revoking share' : 'transferring ownership'}:`, err);
+      if (import.meta.env.DEV) {
+        console.error(`Error ${pendingAction.type === 'revoke' ? 'revoking share' : 'transferring ownership'}:`, err);
+      }
       setActionError(pendingAction.type === 'revoke' ? 'Failed to revoke access' : 'Failed to transfer ownership');
       throw err;
     }

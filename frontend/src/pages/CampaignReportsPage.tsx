@@ -858,7 +858,9 @@ const createExportSellerHandler = async (
   try {
     await buildSellerReportWorkbook(report, productList);
   } catch (err) {
-    console.error('Failed to download seller report:', err);
+    if (import.meta.env.DEV) {
+      console.error('Failed to download seller report:', err);
+    }
     showSnackbar('Failed to download Excel file. Please try again.');
   }
 };
@@ -874,7 +876,9 @@ const createExportOrderHandler = async (
   try {
     await buildOrderDetailsWorkbook(report, allOrders, allProducts);
   } catch (err) {
-    console.error('Failed to download order details:', err);
+    if (import.meta.env.DEV) {
+      console.error('Failed to download order details:', err);
+    }
     showSnackbar('Failed to download Excel file. Please try again.');
   }
 };

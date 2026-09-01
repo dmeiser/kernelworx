@@ -38,8 +38,10 @@ export const CreateProfileDialog: React.FC<CreateProfileDialogProps> = ({ open, 
       form.reset();
       onClose();
     } catch (error) {
-      /* v8 ignore next -- Error logging, tested via integration */
-      console.error('Failed to create profile:', error);
+      /* v8 ignore next 3 -- Error logging, tested via integration */
+      if (import.meta.env.DEV) {
+        console.error('Failed to create profile:', error);
+      }
     } finally {
       setLoading(false);
     }
