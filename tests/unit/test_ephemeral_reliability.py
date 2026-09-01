@@ -807,7 +807,7 @@ class TestWorkflowDispatchSurface:
         )
         assert result.returncode == 0, result.stderr
         calls = teardown_calls.read_text().splitlines() if teardown_calls.exists() else []
-        assert calls == [], f"Expected no teardowns for OPEN/UNKNOWN states, got: {calls}"
+        assert calls == [], f"Expected no teardown calls for OPEN/UNKNOWN states, got: {calls}"
 
     def test_sweep_fails_when_teardown_fails(self, repo_root: Path, tmp_env: Path) -> None:
         workflow = self._load_workflow(repo_root)
