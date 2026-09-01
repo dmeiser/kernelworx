@@ -179,7 +179,7 @@ jobs:
 
       - name: KICS security scan
         run: |
-          docker run --rm -v "$GITHUB_WORKSPACE:/path" checkmarx/kics:latest scan \
+          docker run --rm -v "$GITHUB_WORKSPACE:/path" checkmarx/kics:v2.1.20 scan \
             -p /path/tofu \
             --config /path/tofu/.kics.yml \
             --fail-on high,medium \
