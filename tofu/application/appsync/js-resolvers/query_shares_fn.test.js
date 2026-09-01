@@ -30,7 +30,7 @@ describe('query_shares_fn request', () => {
 });
 
 describe('query_shares_fn response', () => {
-    it('filters out shares with empty permissions', () => {
+    it('filters out shares with empty or non-effective permissions', () => {
         const ctx = {
             stash: {},
             result: {
@@ -38,6 +38,7 @@ describe('query_shares_fn response', () => {
                     { profileId: 'PROFILE#prof-1', targetAccountId: 'ACCOUNT#user-1', permissions: ['READ'] },
                     { profileId: 'PROFILE#prof-1', targetAccountId: 'ACCOUNT#user-2', permissions: [] },
                     { profileId: 'PROFILE#prof-1', targetAccountId: 'ACCOUNT#user-3', permissions: ['WRITE'] },
+                    { profileId: 'PROFILE#prof-1', targetAccountId: 'ACCOUNT#user-4', permissions: ['ADMIN'] },
                 ],
             },
         };
@@ -48,6 +49,7 @@ describe('query_shares_fn response', () => {
         assert.ok(result.some(item => item.targetAccountId === 'user-1'));
         assert.ok(result.some(item => item.targetAccountId === 'user-3'));
         assert.ok(!result.some(item => item.targetAccountId === 'user-2'));
+        assert.ok(!result.some(item => item.targetAccountId === 'user-4'));
     });
 
     it('filters out shares with missing permissions', () => {

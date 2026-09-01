@@ -58,7 +58,7 @@ export function response(ctx) {
         }
 
         // Skip invites that grant no effective permission
-        if (!Array.isArray(item.permissions) || item.permissions.length === 0) {
+        if (!Array.isArray(item.permissions) || !item.permissions.some(p => p === 'READ' || p === 'WRITE')) {
             return false;
         }
 

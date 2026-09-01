@@ -37,7 +37,7 @@ export function response(ctx) {
     // Strip ACCOUNT# prefix from targetAccountId, keep profileId with PROFILE# prefix
     const items = ctx.result.items || [];
     return items
-        .filter(item => Array.isArray(item.permissions) && item.permissions.length > 0)
+        .filter(item => Array.isArray(item.permissions) && item.permissions.some(p => p === 'READ' || p === 'WRITE'))
         .map(item => ({
             ...item,
             targetAccountId: item.targetAccountId && item.targetAccountId.startsWith('ACCOUNT#')

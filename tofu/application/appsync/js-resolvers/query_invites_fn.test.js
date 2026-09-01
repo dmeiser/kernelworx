@@ -31,7 +31,7 @@ describe('query_invites_fn request', () => {
 });
 
 describe('query_invites_fn response', () => {
-    it('filters out expired, used, and empty-permission invites', () => {
+    it('filters out expired, used, and non-effective-permission invites', () => {
         const originalNowEpochSeconds = util.time.nowEpochSeconds;
         const originalEpochMilliSecondsToISO8601 = util.time.epochMilliSecondsToISO8601;
         util.time.nowEpochSeconds = () => 1000;
@@ -46,6 +46,7 @@ describe('query_invites_fn response', () => {
                         { inviteCode: 'USED', profileId: 'PROFILE#prof-1', permissions: ['READ'], expiresAt: 2000, used: true },
                         { inviteCode: 'EMPTY', profileId: 'PROFILE#prof-1', permissions: [], expiresAt: 2000, used: false },
                         { inviteCode: 'MISSING', profileId: 'PROFILE#prof-1', expiresAt: 2000, used: false },
+                        { inviteCode: 'ADMINONLY', profileId: 'PROFILE#prof-1', permissions: ['ADMIN'], expiresAt: 2000, used: false },
                     ],
                 },
             };
