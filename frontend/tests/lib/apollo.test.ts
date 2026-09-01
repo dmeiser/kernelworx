@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mapErrorCodeToMessage, getAuthContext, handleApolloError } from '../../src/lib/apollo';
+import { apolloClient, mapErrorCodeToMessage, getAuthContext, handleApolloError } from '../../src/lib/apollo';
 import { fetchAuthSession } from 'aws-amplify/auth';
 import { CombinedGraphQLErrors } from '@apollo/client/errors';
+import { ApolloClient, gql, InMemoryCache } from '@apollo/client';
+import { MockLink } from '@apollo/client/testing';
 
 vi.mock('aws-amplify/auth', async () => ({
   fetchAuthSession: vi.fn(),
@@ -105,6 +107,44 @@ describe('lib/apollo', () => {
       expect(ev.detail.message).toContain('Network error');
 
       window.removeEventListener('graphql-error', handler as any);
+    });
+  });
+
+  describe('apolloClient defaultOptions', () => {
+    it('uses errorPolicy "none" for mutations so GraphQL errors are surfaced', () => {
+      expect(apolloClient.defaultOptions.mutate?.errorPolicy).toBe('none');
+    });
+
+    it('keeps errorPolicy "all" for queries so partial data can still render', () => {
+      expect(apolloClient.defaultOptions.query?.errorPolicy).toBe('all');
+      expect(apolloClient.defaultOptions.watchQuery?.errorPolicy).toBe('all');
+    });
+  });
+
+  describe('mutation error surfacing', () => {
+    it('rejects when the server returns GraphQL errors', async () => {
+      const mutation = gql`
+        mutation Fail {
+          fail
+        }
+      `;
+      const link = new MockLink([
+        {
+          request: { query: mutation },
+          result: {
+            errors: [{ message: 'Mutation failed', extensions: { errorCode: 'INTERNAL_ERROR' } }],
+          },
+        },
+      ]);
+      const client = new ApolloClient({
+        link,
+        cache: new InMemoryCache(),
+        defaultOptions: {
+          mutate: { errorPolicy: 'none' },
+        },
+      });
+
+      await expect(client.mutate({ mutation })).rejects.toThrow('Mutation failed');
     });
   });
 });
