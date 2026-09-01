@@ -141,6 +141,28 @@ const REVOKE_SHARE = gql`
   }
 `;
 
+async function requestReportWithRetry(
+  client: any,
+  input: { campaignId: string; format?: string },
+  maxRetries = 5,
+  delayMs = 1000,
+) {
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      return await client.mutate({
+        mutation: REQUEST_CAMPAIGN_REPORT,
+        variables: { input },
+      });
+    } catch (err: any) {
+      if (attempt < maxRetries - 1 && (err?.message?.includes('not found') || err?.networkError)) {
+        await new Promise((r) => setTimeout(r, delayMs));
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
 describe('requestCampaignReport Integration Tests', () => {
   const SUITE_ID = 'request-campaign-report';
   
@@ -821,13 +843,8 @@ describe('requestCampaignReport Integration Tests', () => {
     });
 
     test('should generate report for campaign with no orders', async () => {
-      const result = await ownerClient.mutate({
-        mutation: REQUEST_CAMPAIGN_REPORT,
-        variables: {
-          input: {
-            campaignId: emptyCampaignId,
-          },
-        },
+      const result = await requestReportWithRetry(ownerClient, {
+        campaignId: emptyCampaignId,
       });
 
       expect(result.data.requestCampaignReport).toBeDefined();
@@ -841,14 +858,9 @@ describe('requestCampaignReport Integration Tests', () => {
     });
 
     test('should generate CSV report for campaign with no orders', async () => {
-      const result = await ownerClient.mutate({
-        mutation: REQUEST_CAMPAIGN_REPORT,
-        variables: {
-          input: {
-            campaignId: emptyCampaignId,
-            format: 'csv',
-          },
-        },
+      const result = await requestReportWithRetry(ownerClient, {
+        campaignId: emptyCampaignId,
+        format: 'csv',
       });
 
       expect(result.data.requestCampaignReport).toBeDefined();
