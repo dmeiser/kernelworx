@@ -107,10 +107,8 @@ describe('update_campaign_fn request', () => {
 
     const result = request(ctx);
 
-    assert.match(result.update.expression, /unitType = :unitType/);
-    assert.match(result.update.expression, /unitNumber = :unitNumber/);
-    assert.match(result.update.expression, /city = :city/);
-    assert.match(result.update.expression, /state = :state/);
+    assert.match(result.update.expression, /#state = :state/);
+    assert.strictEqual(result.update.expressionNames['#state'], 'state');
     assert.match(result.update.expression, /unitCampaignKey = :unitCampaignKey/);
     assert.strictEqual(
       result.update.expressionValues[':unitCampaignKey'],

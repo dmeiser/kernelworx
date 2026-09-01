@@ -79,6 +79,7 @@ export function request(ctx) {
     // Build update expression dynamically
     const updates = [];
     const removes = [];
+    const exprNames = {};
     const exprValues = {};
 
     const unitType = getUpdatedUnitField(input, campaign, 'unitType');
@@ -126,7 +127,8 @@ export function request(ctx) {
         exprValues[':city'] = input.city;
     }
     if (input.state !== undefined) {
-        updates.push('state = :state');
+        updates.push('#state = :state');
+        exprNames['#state'] = 'state';
         exprValues[':state'] = input.state;
     }
 
@@ -172,14 +174,19 @@ export function request(ctx) {
         updateExpression += ' REMOVE ' + removes.join(', ');
     }
 
+    const updateObj = {
+        expression: updateExpression,
+        expressionValues: util.dynamodb.toMapValues(exprValues)
+    };
+    if (Object.keys(exprNames).length > 0) {
+        updateObj.expressionNames = exprNames;
+    }
+
     // V2: Use composite key (profileId, campaignId) - campaignId is the SK
     return {
         operation: 'UpdateItem',
         key: util.dynamodb.toMapValues({ profileId: campaign.profileId, campaignId: campaign.campaignId }),
-        update: {
-            expression: updateExpression,
-            expressionValues: util.dynamodb.toMapValues(exprValues)
-        }
+        update: updateObj
     };
 }
 
