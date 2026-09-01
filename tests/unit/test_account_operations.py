@@ -870,9 +870,9 @@ class TestDeleteMyAccount:
                 delete_my_account(event, lambda_context)
 
             assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
-            assert "Failed to delete account from Cognito" in str(exc_info.value)
-        # Account should still be deleted from DynamoDB
-        assert accounts_table.get_item(Key={"accountId": account_id_key}).get("Item") is None
+            assert "Failed to verify account in Cognito" in str(exc_info.value)
+        # Account should NOT be deleted from DynamoDB if pre-check fails
+        assert accounts_table.get_item(Key={"accountId": account_id_key}).get("Item") is not None
 
     def test_delete_account_cognito_admin_delete_error(
         self,
@@ -1027,3 +1027,112 @@ class TestDeleteMyAccount:
             result = delete_my_account(event, lambda_context)
 
             assert result is True
+
+    def test_delete_account_cognito_retry_success(
+        self,
+        dynamodb_table: Any,
+        sample_account_id: str,
+        appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """Test transient Cognito errors are retried and succeed on subsequent attempt."""
+        from botocore.exceptions import ClientError
+
+        from src.handlers.account_operations import delete_my_account
+
+        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
+        monkeypatch.setenv("USER_POOL_ID", "us-east-1_test123")
+
+        dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
+        accounts_table = dynamodb.Table("kernelworx-accounts-ue1-dev")
+        account_id_key = f"ACCOUNT#{sample_account_id}"
+
+        accounts_table.put_item(
+            Item={
+                "accountId": account_id_key,
+                "email": "test@example.com",
+                "createdAt": datetime.now(timezone.utc).isoformat(),
+                "updatedAt": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+
+        with patch("boto3.client") as mock_boto_client:
+            mock_cognito = MagicMock()
+            mock_boto_client.return_value = mock_cognito
+
+            mock_cognito.list_users.return_value = {
+                "Users": [{"Username": "test-user", "Attributes": [{"Name": "sub", "Value": sample_account_id}]}]
+            }
+
+            # First attempt fails with TooManyRequestsException, second succeeds
+            throttle_error = ClientError(
+                {"Error": {"Code": "TooManyRequestsException", "Message": "Throttled"}}, "AdminDeleteUser"
+            )
+            mock_cognito.admin_delete_user.side_effect = [throttle_error, {}]
+
+            event = {
+                **appsync_event,
+                "identity": {"sub": sample_account_id},
+            }
+
+            with patch("time.sleep") as mock_sleep:
+                result = delete_my_account(event, lambda_context)
+                assert result is True
+                assert mock_sleep.call_count == 1
+                assert mock_cognito.admin_delete_user.call_count == 2
+
+    def test_delete_account_cognito_retry_exhausted(
+        self,
+        dynamodb_table: Any,
+        sample_account_id: str,
+        appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """Test transient Cognito errors that exhaust retries raise AppError."""
+        from botocore.exceptions import ClientError
+
+        from src.handlers.account_operations import delete_my_account
+
+        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
+        monkeypatch.setenv("USER_POOL_ID", "us-east-1_test123")
+
+        dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
+        accounts_table = dynamodb.Table("kernelworx-accounts-ue1-dev")
+        account_id_key = f"ACCOUNT#{sample_account_id}"
+
+        accounts_table.put_item(
+            Item={
+                "accountId": account_id_key,
+                "email": "test@example.com",
+                "createdAt": datetime.now(timezone.utc).isoformat(),
+                "updatedAt": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+
+        with patch("boto3.client") as mock_boto_client:
+            mock_cognito = MagicMock()
+            mock_boto_client.return_value = mock_cognito
+
+            mock_cognito.list_users.return_value = {
+                "Users": [{"Username": "test-user", "Attributes": [{"Name": "sub", "Value": sample_account_id}]}]
+            }
+
+            # All attempts fail with TooManyRequestsException
+            throttle_error = ClientError(
+                {"Error": {"Code": "TooManyRequestsException", "Message": "Throttled"}}, "AdminDeleteUser"
+            )
+            mock_cognito.admin_delete_user.side_effect = throttle_error
+
+            event = {
+                **appsync_event,
+                "identity": {"sub": sample_account_id},
+            }
+
+            with patch("time.sleep") as mock_sleep:
+                with pytest.raises(AppError) as exc_info:
+                    delete_my_account(event, lambda_context)
+                assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+                assert mock_sleep.call_count == 2
+                assert mock_cognito.admin_delete_user.call_count == 3
