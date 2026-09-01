@@ -142,6 +142,7 @@ def _update_shares_after_transfer(db_profile_id: str, db_new_owner_id: str) -> N
                     Key={"profileId": db_profile_id, "targetAccountId": target_account_id},
                     UpdateExpression="SET ownerAccountId = :new_owner",
                     ExpressionAttributeValues={":new_owner": db_new_owner_id},
+                    ConditionExpression="attribute_exists(profileId) AND attribute_exists(targetAccountId)",
                 )
         except Exception:
             logger.error(

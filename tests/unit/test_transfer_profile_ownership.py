@@ -212,8 +212,10 @@ class TestTransferProfileOwnership:
         )
         assert "Item" not in share_res
 
-    def test_transfer_shares_pagination(self, profiles_table: Any, shares_table: Any) -> None:
-        """Transfer handles pagination when updating multiple shares."""
+    def test_transfer_shares_pagination(
+        self, profiles_table: Any, shares_table: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Transfer handles pagination when updating multiple shares across pages."""
         owner_id = "owner-1"
         new_owner_id = "new-owner"
         profile_id = "profile-paginated"
@@ -221,9 +223,33 @@ class TestTransferProfileOwnership:
         _seed_profile(profiles_table, owner_id, profile_id)
         _seed_share(shares_table, profile_id, new_owner_id, owner_id)
 
-        # Seed 10 third-party shares
-        for i in range(10):
+        # Seed 4 third-party shares
+        for i in range(4):
             _seed_share(shares_table, profile_id, f"tp-user-{i}", owner_id)
+
+        from boto3.dynamodb.conditions import Key
+
+        original_query = transfer_profile_ownership.tables.shares.query
+        all_items = original_query(
+            KeyConditionExpression=Key("profileId").eq(f"PROFILE#{profile_id}")
+        ).get("Items", [])
+        query_calls = []
+
+        def paginated_query(*args: Any, **kwargs: Any) -> Any:
+            query_calls.append(kwargs)
+            lek = kwargs.get("ExclusiveStartKey")
+            if not lek:
+                return {
+                    "Items": all_items[:2],
+                    "LastEvaluatedKey": {
+                        "profileId": f"PROFILE#{profile_id}",
+                        "targetAccountId": all_items[1]["targetAccountId"],
+                    },
+                }
+            else:
+                return {"Items": all_items[2:]}
+
+        monkeypatch.setattr(transfer_profile_ownership.tables.shares, "query", paginated_query)
 
         event = {
             "identity": {"sub": owner_id},
@@ -237,9 +263,10 @@ class TestTransferProfileOwnership:
 
         result = lambda_handler(event, None)
         assert result["ownerAccountId"] == f"ACCOUNT#{new_owner_id}"
+        assert len(query_calls) >= 2
 
-        # Verify all 10 third-party shares updated
-        for i in range(10):
+        # Verify all 4 third-party shares updated
+        for i in range(4):
             tp_share = shares_table.get_item(
                 Key={"profileId": f"PROFILE#{profile_id}", "targetAccountId": f"ACCOUNT#tp-user-{i}"}
             )
