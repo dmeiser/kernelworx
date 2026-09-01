@@ -1,5 +1,6 @@
 """Lambda resolver for campaign operations with shared campaign and share support."""
 
+import time
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -501,6 +502,8 @@ def _to_dynamo_value(value: Any) -> Dict[str, Any]:
 
 
 BATCH_DELETE_SIZE = 25
+_ORDER_DELETE_VERIFY_RETRIES = 3
+_ORDER_DELETE_VERIFY_DELAY_SECONDS = 0.1
 
 
 def _get_campaign_by_id(campaign_id: str) -> Optional[Dict[str, Any]]:
@@ -522,16 +525,9 @@ def _get_campaign_by_id(campaign_id: str) -> Optional[Dict[str, Any]]:
     return items[0] if items else None
 
 
-def _delete_orders_for_campaign(campaign_id: str) -> int:
-    """Delete all orders for a campaign, paginating the query and chunking deletes.
-
-    Args:
-        campaign_id: The campaign ID (with CAMPAIGN# prefix).
-
-    Returns:
-        Number of orders deleted.
-    """
-    orders = query_all_items(
+def _query_order_keys_for_campaign(campaign_id: str) -> List[Dict[str, Any]]:
+    """Return the order keys (campaignId, orderId) for a campaign."""
+    orders: List[Dict[str, Any]] = query_all_items(
         tables.orders,
         {
             "KeyConditionExpression": "campaignId = :cid",
@@ -539,10 +535,11 @@ def _delete_orders_for_campaign(campaign_id: str) -> int:
             "ProjectionExpression": "campaignId, orderId",
         },
     )
+    return orders
 
-    if not orders:
-        return 0
 
+def _delete_order_keys(orders: List[Dict[str, Any]]) -> int:
+    """Delete a list of order keys in batches, returning the count deleted."""
     deleted_count = 0
     for i in range(0, len(orders), BATCH_DELETE_SIZE):
         batch = orders[i : i + BATCH_DELETE_SIZE]
@@ -555,6 +552,66 @@ def _delete_orders_for_campaign(campaign_id: str) -> int:
                     }
                 )
         deleted_count += len(batch)
+    return deleted_count
+
+
+def _verify_orders_deleted(campaign_id: str) -> None:
+    """Verify no orders remain for a campaign using strongly consistent reads.
+
+    Retries briefly to tolerate transient propagation lag. Raises AppError if
+    orders are still present after retries.
+    """
+    remaining: List[Dict[str, Any]] = []
+    for attempt in range(1, _ORDER_DELETE_VERIFY_RETRIES + 1):
+        remaining = query_all_items(
+            tables.orders,
+            {
+                "KeyConditionExpression": "campaignId = :cid",
+                "ExpressionAttributeValues": {":cid": campaign_id},
+                "ProjectionExpression": "campaignId, orderId",
+                "ConsistentRead": True,
+            },
+        )
+        if not remaining:
+            return
+        if attempt < _ORDER_DELETE_VERIFY_RETRIES:
+            logger.warning(
+                "Orders still present after delete, retrying",
+                campaign_id=campaign_id,
+                attempt=attempt,
+                count=len(remaining),
+            )
+            time.sleep(_ORDER_DELETE_VERIFY_DELAY_SECONDS)
+
+    logger.error(
+        "Orders still present after delete verification",
+        campaign_id=campaign_id,
+        count=len(remaining),
+    )
+    raise AppError(
+        ErrorCode.INTERNAL_ERROR,
+        "Failed to delete all orders for campaign",
+    )
+
+
+def _delete_orders_for_campaign(campaign_id: str) -> int:
+    """Delete all orders for a campaign and verify they are gone.
+
+    Args:
+        campaign_id: The campaign ID (with CAMPAIGN# prefix).
+
+    Returns:
+        Number of orders deleted.
+
+    Raises:
+        AppError: If orders remain after deletion attempts.
+    """
+    orders = _query_order_keys_for_campaign(campaign_id)
+    if not orders:
+        return 0
+
+    deleted_count = _delete_order_keys(orders)
+    _verify_orders_deleted(campaign_id)
 
     logger.info("Deleted orders for campaign", campaign_id=campaign_id, count=deleted_count)
     return deleted_count

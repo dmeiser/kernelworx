@@ -93,6 +93,19 @@ resource "aws_appsync_function" "delete_campaign" {
   code = file("${local.js_resolvers_dir}/delete_campaign_fn.js")
 }
 
+resource "aws_appsync_function" "verify_campaign_delete_propagation" {
+  api_id      = aws_appsync_graphql_api.main.id
+  data_source = aws_appsync_datasource.campaigns.name
+  name        = "VerifyCampaignDeletePropagationFn${local.env_suffix}"
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/verify_campaign_delete_propagation_fn.js")
+}
+
 resource "aws_appsync_function" "query_campaign" {
   api_id      = aws_appsync_graphql_api.main.id
   data_source = aws_appsync_datasource.campaigns.name

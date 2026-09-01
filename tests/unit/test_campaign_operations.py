@@ -1725,3 +1725,110 @@ class TestDeleteCampaignOrders:
 
             assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
             assert "Failed to delete campaign orders" in exc_info.value.message
+
+
+class TestVerifyOrdersDeleted:
+    """Tests for the strongly-consistent order deletion verification helper."""
+
+    @patch("src.handlers.campaign_operations.query_all_items")
+    @patch("src.handlers.campaign_operations.time.sleep")
+    def test_returns_immediately_when_no_orders_remain(self, mock_sleep: MagicMock, mock_query: MagicMock) -> None:
+        """Test that verification succeeds on the first consistent query."""
+        from src.handlers.campaign_operations import _verify_orders_deleted
+
+        mock_query.return_value = []
+
+        _verify_orders_deleted("CAMPAIGN#verify")
+
+        mock_query.assert_called_once()
+        mock_sleep.assert_not_called()
+
+    @patch("src.handlers.campaign_operations.query_all_items")
+    @patch("src.handlers.campaign_operations.time.sleep")
+    def test_retries_then_returns_when_orders_eventually_gone(
+        self, mock_sleep: MagicMock, mock_query: MagicMock
+    ) -> None:
+        """Test that verification retries when orders are still present."""
+        from src.handlers.campaign_operations import (
+            _ORDER_DELETE_VERIFY_RETRIES,
+            _verify_orders_deleted,
+        )
+
+        mock_query.side_effect = [
+            [{"campaignId": "CAMPAIGN#retry", "orderId": "ORDER#1"}],
+            [],
+        ]
+
+        _verify_orders_deleted("CAMPAIGN#retry")
+
+        assert mock_query.call_count == 2
+        assert mock_sleep.call_count == 1
+        # ConsistentRead must be enabled on every verification query
+        for call in mock_query.call_args_list:
+            assert call.args[1]["ConsistentRead"] is True
+        assert _ORDER_DELETE_VERIFY_RETRIES >= 2
+
+    @patch("src.handlers.campaign_operations.query_all_items")
+    @patch("src.handlers.campaign_operations.time.sleep")
+    def test_raises_when_orders_remain_after_all_retries(self, mock_sleep: MagicMock, mock_query: MagicMock) -> None:
+        """Test that verification raises INTERNAL_ERROR when orders persist."""
+        from src.handlers.campaign_operations import (
+            _ORDER_DELETE_VERIFY_RETRIES,
+            _verify_orders_deleted,
+        )
+        from src.utils.errors import AppError, ErrorCode
+
+        remaining_order = {"campaignId": "CAMPAIGN#stuck", "orderId": "ORDER#1"}
+        mock_query.return_value = [remaining_order]
+
+        with pytest.raises(AppError) as exc_info:
+            _verify_orders_deleted("CAMPAIGN#stuck")
+
+        assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+        assert "Failed to delete all orders for campaign" in str(exc_info.value.message)
+        assert mock_query.call_count == _ORDER_DELETE_VERIFY_RETRIES
+        assert mock_sleep.call_count == _ORDER_DELETE_VERIFY_RETRIES - 1
+
+
+class TestQueryOrderKeysForCampaign:
+    """Tests for the order key query helper."""
+
+    @patch("src.handlers.campaign_operations.query_all_items")
+    def test_queries_orders_by_campaign_id(self, mock_query: MagicMock) -> None:
+        """Test that _query_order_keys_for_campaign queries the orders table."""
+        from src.handlers.campaign_operations import _query_order_keys_for_campaign
+
+        mock_query.return_value = [
+            {"campaignId": "CAMPAIGN#q", "orderId": "ORDER#1"},
+            {"campaignId": "CAMPAIGN#q", "orderId": "ORDER#2"},
+        ]
+
+        result = _query_order_keys_for_campaign("CAMPAIGN#q")
+
+        assert len(result) == 2
+        mock_query.assert_called_once()
+        call_args = mock_query.call_args.args
+        assert call_args[1]["KeyConditionExpression"] == "campaignId = :cid"
+        assert call_args[1]["ExpressionAttributeValues"] == {":cid": "CAMPAIGN#q"}
+
+
+class TestDeleteOrderKeys:
+    """Tests for the order batch delete helper."""
+
+    def test_deletes_orders_in_batches(self) -> None:
+        """Test that _delete_order_keys deletes orders using the batch writer."""
+        from src.handlers.campaign_operations import _delete_order_keys
+
+        mock_table = MagicMock()
+        mock_writer = MagicMock()
+        mock_table.batch_writer.return_value.__enter__ = MagicMock(return_value=mock_writer)
+        mock_table.batch_writer.return_value.__exit__ = MagicMock(return_value=False)
+
+        orders = [{"campaignId": "CAMPAIGN#batch", "orderId": f"ORDER#{i}"} for i in range(3)]
+
+        with patch("src.handlers.campaign_operations.tables") as mock_tables:
+            mock_tables.orders = mock_table
+            count = _delete_order_keys(orders)
+
+        assert count == 3
+        assert mock_writer.delete_item.call_count == 3
