@@ -100,8 +100,35 @@ class TestCleanupStaleLock:
         assert result.returncode == 0, result.stderr
         assert "No lock object found" in result.stderr
 
-    def test_different_host_lock_is_removed(self, repo_root: Path, tmp_env: Path) -> None:
-        lock = {"Created": "2026-08-23T00:00:00Z", "Who": "runner@other-host"}
+    def test_different_host_fresh_lock_is_left(self, repo_root: Path, tmp_env: Path) -> None:
+        lock = {
+            "Created": (datetime.now(timezone.utc) - timedelta(seconds=30)).isoformat(),
+            "Who": "runner@other-host",
+        }
+        result = self._source_and_call(
+            repo_root,
+            tmp_env,
+            f"""
+            #!/bin/bash
+            case "$1 $2" in
+              "s3api head-object")
+                exit 0
+                ;;
+              "s3 cp")
+                echo '{json.dumps(lock)}'
+                ;;
+            esac
+            exit 0
+            """,
+        )
+        assert result.returncode == 0, result.stderr
+        assert "Lock appears fresh" in result.stderr
+
+    def test_different_host_stale_lock_is_removed(self, repo_root: Path, tmp_env: Path) -> None:
+        lock = {
+            "Created": (datetime.now(timezone.utc) - timedelta(seconds=900)).isoformat(),
+            "Who": "runner@other-host",
+        }
         result = self._source_and_call(
             repo_root,
             tmp_env,
@@ -122,7 +149,7 @@ class TestCleanupStaleLock:
             """,
         )
         assert result.returncode == 0, result.stderr
-        assert "Lock belongs to a different host" in result.stderr
+        assert "Lock is older than threshold" in result.stderr
 
     def test_same_host_fresh_lock_is_left(self, repo_root: Path, tmp_env: Path) -> None:
         this_host = os.uname().nodename
@@ -147,7 +174,7 @@ class TestCleanupStaleLock:
             """,
         )
         assert result.returncode == 0, result.stderr
-        assert "Lock appears fresh and from this host" in result.stderr
+        assert "Lock appears fresh" in result.stderr
 
     def test_same_host_stale_lock_is_removed(self, repo_root: Path, tmp_env: Path) -> None:
         this_host = os.uname().nodename
