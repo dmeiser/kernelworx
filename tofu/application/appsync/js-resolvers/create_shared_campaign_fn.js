@@ -5,13 +5,18 @@ export function request(ctx) {
     const account = ctx.stash.account;
     const now = util.time.nowISO8601();
     
-    // Generate shared campaign code: UNITTYPE + UNITNUMBER + CAMPAIGN + YEAR
+    // Generate shared campaign code: UNITTYPE + UNITNUMBER + CAMPAIGN + YEAR + RANDOM SUFFIX
     // Convert numbers to strings using template literal (String() not available in APPSYNC_JS)
     const campaignYearStr = '' + input.campaignYear;
     const unitNumStr = '' + input.unitNumber;
     const campaignAbbrev = input.campaignName.substring(0, 4).toUpperCase().trim();
     const yearAbbrev = campaignYearStr.substring(2);
-    const sharedCampaignCode = input.unitType.toUpperCase() + unitNumStr + '-' + campaignAbbrev + '-' + input.state.toUpperCase() + '-' + yearAbbrev;
+    // Append a short random suffix to avoid collisions when the same deterministic
+    // prefix is produced for different campaign names or units. Clients may retry
+    // the mutation on the rare collision; the suffix is regenerated each time.
+    const RANDOM_SUFFIX_LENGTH = 6;
+    const randomSuffix = util.autoId().substring(0, RANDOM_SUFFIX_LENGTH).toUpperCase();
+    const sharedCampaignCode = input.unitType.toUpperCase() + unitNumStr + '-' + campaignAbbrev + '-' + input.state.toUpperCase() + '-' + yearAbbrev + '-' + randomSuffix;
     
     // Build unit+campaign composite key for GSI2
     const unitCampaignKey = input.unitType + '#' + unitNumStr + '#' + input.city + '#' + input.state + '#' + input.campaignName + '#' + campaignYearStr;
