@@ -426,19 +426,32 @@ describe('createCampaign Integration Tests', () => {
       });
       const testCatalogId = catalogData.createCatalog.catalogId;
 
-      // Act: Contributor creates campaign
-      const { data } = await contributorClient.mutate({
-        mutation: CREATE_CAMPAIGN,
-        variables: {
-          input: {
-            profileId: testProfileId,
-            campaignName: `${getTestPrefix()}-Campaign`,
-            campaignYear: 2025,
-            startDate: '2025-01-01T00:00:00Z',
-            catalogId: testCatalogId,
-          },
-        },
-      });
+      // Act: Contributor creates campaign (with retry for share propagation)
+      let createCampaignRes: any;
+      for (let attempt = 1; attempt <= 10; attempt++) {
+        try {
+          createCampaignRes = await contributorClient.mutate({
+            mutation: CREATE_CAMPAIGN,
+            variables: {
+              input: {
+                profileId: testProfileId,
+                campaignName: `${getTestPrefix()}-Campaign`,
+                campaignYear: 2025,
+                startDate: '2025-01-01T00:00:00Z',
+                catalogId: testCatalogId,
+              },
+            },
+          });
+          break;
+        } catch (err) {
+          if (attempt < 10) {
+            await new Promise((resolve) => setTimeout(resolve, 1000));
+          } else {
+            throw err;
+          }
+        }
+      }
+      const data = createCampaignRes.data;
 
       // Assert
       expect(data.createCampaign).toBeDefined();
