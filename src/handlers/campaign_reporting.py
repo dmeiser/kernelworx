@@ -1,5 +1,6 @@
 """Lambda resolver for campaign-level reporting using campaign-based queries."""
 
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, Dict, List, cast
 
 from boto3.dynamodb.conditions import Key
@@ -70,20 +71,25 @@ def _get_accessible_profiles(profile_ids: list[str], caller_account_id: str) -> 
     return accessible_profiles
 
 
+def _quantize_money(value: Any) -> Decimal:
+    """Convert value to Decimal and quantize to 2 decimal places (cents)."""
+    return Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
 def _build_order_detail(order: Dict[str, Any]) -> Dict[str, Any]:
-    """Build order detail from an order item."""
+    """Build order detail from an order item using Decimal for monetary values."""
     return {
         "orderId": cast(str, order["orderId"]),
         "customerName": cast(str, order["customerName"]),
         "orderDate": cast(str, order["orderDate"]),
-        "totalAmount": float(cast(float, order["totalAmount"])),
+        "totalAmount": _quantize_money(order["totalAmount"]),
         "lineItems": [
             {
                 "productId": cast(str, item["productId"]),
                 "productName": cast(str, item["productName"]),
                 "quantity": int(cast(int, item["quantity"])),
-                "pricePerUnit": float(cast(float, item["pricePerUnit"])),
-                "subtotal": float(cast(float, item["subtotal"])),
+                "pricePerUnit": _quantize_money(item["pricePerUnit"]),
+                "subtotal": _quantize_money(item["subtotal"]),
             }
             for item in cast(List[Dict[str, Any]], order.get("lineItems", []))
         ],
@@ -94,7 +100,7 @@ def _get_seller_data(profile_id: str, profile: Dict[str, Any], campaigns: List[D
     """Get seller data including orders from all campaigns."""
     seller_name = profile.get("sellerName", "Unknown")
     seller_orders: List[Dict[str, Any]] = []
-    seller_total_sales = 0.0
+    seller_total_sales = Decimal("0")
 
     for campaign in campaigns:
         campaign_id = campaign["campaignId"]
@@ -106,7 +112,6 @@ def _get_seller_data(profile_id: str, profile: Dict[str, Any], campaigns: List[D
         for order in orders:
             order_detail = _build_order_detail(order)
             seller_orders.append(order_detail)
-            # TODO(#75): Sales totals use Python floats; consider integer cents or Decimal to avoid rounding drift.
             seller_total_sales += order_detail["totalAmount"]
 
     return {
@@ -133,17 +138,16 @@ def _extract_unit_report_params(event: Dict[str, Any]) -> tuple[str, int, str, s
 
 def _aggregate_seller_data(
     accessible_profiles: Dict[str, Dict[str, Any]], profile_campaigns: Dict[str, List[Dict[str, Any]]]
-) -> tuple[List[Dict[str, Any]], float, int]:
+) -> tuple[List[Dict[str, Any]], Decimal, int]:
     """Aggregate seller data from accessible profiles."""
     sellers: List[Dict[str, Any]] = []
-    total_unit_sales = 0.0
+    total_unit_sales = Decimal("0")
     total_unit_orders = 0
 
     for profile_id, profile in accessible_profiles.items():
         seller_data = _get_seller_data(profile_id, profile, profile_campaigns[profile_id])
         if seller_data["orders"] or seller_data["totalSales"] > 0:
             sellers.append(seller_data)
-            # TODO(#75): Unit sales aggregate floats; consider integer cents or Decimal to avoid rounding drift.
             total_unit_sales += seller_data["totalSales"]
             total_unit_orders += seller_data["orderCount"]
 
@@ -212,7 +216,18 @@ def get_unit_report(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         # Step 4: Build seller data
         sellers, total_unit_sales, total_unit_orders = _aggregate_seller_data(accessible_profiles, profile_campaigns)
 
-        logger.info(f"Report complete: {len(sellers)} sellers, ${total_unit_sales:.2f}, {total_unit_orders} orders")
+        # Convert Decimal totals back to floats for the GraphQL Float schema
+        for seller in sellers:
+            seller["totalSales"] = float(seller["totalSales"])
+            for order in seller["orders"]:
+                order["totalAmount"] = float(order["totalAmount"])
+                for item in order["lineItems"]:
+                    item["pricePerUnit"] = float(item["pricePerUnit"])
+                    item["subtotal"] = float(item["subtotal"])
+
+        logger.info(
+            f"Report complete: {len(sellers)} sellers, ${float(total_unit_sales):.2f}, {total_unit_orders} orders"
+        )
 
         return {
             "unitType": unit_type,
@@ -220,7 +235,7 @@ def get_unit_report(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             "campaignName": campaign_name,
             "campaignYear": campaign_year,
             "sellers": sellers,
-            "totalSales": total_unit_sales,
+            "totalSales": float(total_unit_sales),
             "totalOrders": total_unit_orders,
         }
 
