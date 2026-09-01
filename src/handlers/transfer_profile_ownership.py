@@ -5,7 +5,7 @@ have access via a share. The transfer involves:
 1. Verifying caller is current owner
 2. Verifying new owner has existing share
 3. Updating profile's ownerAccountId
-4. Deleting the share (since they're now the owner)
+4. Updating existing shares (deleting new owner's share, updating third-party shares' ownerAccountId)
 """
 
 import os
@@ -23,12 +23,14 @@ try:  # pragma: no cover
     from utils.errors import AppError, ErrorCode
     from utils.ids import ensure_account_id, ensure_profile_id
     from utils.logging import get_logger
+    from utils.pagination import query_all_items
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.auth import is_admin
     from ..utils.dynamodb import tables
     from ..utils.errors import AppError, ErrorCode
     from ..utils.ids import ensure_account_id, ensure_profile_id
     from ..utils.logging import get_logger
+    from ..utils.pagination import query_all_items
 
 logger = get_logger(__name__)
 _type_serializer = TypeSerializer()
@@ -106,21 +108,48 @@ def _transfer_ownership(profile: Dict[str, Any], db_profile_id: str, db_new_owne
     profile["ownerAccountId"] = db_new_owner_id
 
 
-def _delete_share_if_exists(db_profile_id: str, db_new_owner_id: str) -> None:
-    """Delete the share if it exists (new owner doesn't need it anymore).
+def _update_shares_after_transfer(db_profile_id: str, db_new_owner_id: str) -> None:
+    """Update or clean up shares after profile ownership transfer.
 
-    Logs unexpected failures but does not fail the transfer, since the share is
-    best-effort cleanup after ownership has already changed.
+    - Deletes the share for the new owner (they now own the profile).
+    - Updates ownerAccountId on third-party shares to the new owner.
+
+    Logs unexpected failures but does not fail the transfer, since share updates
+    are best-effort cleanup after ownership has already changed.
     """
     try:
-        tables.shares.delete_item(Key={"profileId": db_profile_id, "targetAccountId": db_new_owner_id})
+        shares = query_all_items(
+            tables.shares,
+            {"KeyConditionExpression": Key("profileId").eq(db_profile_id)},
+        )
     except Exception:
         logger.error(
-            "Failed to delete share for new owner after ownership transfer",
+            "Failed to query shares after ownership transfer",
             profile_id=db_profile_id,
-            target_account_id=db_new_owner_id,
             exc_info=True,
         )
+        return
+
+    for share in shares:
+        target_account_id = share.get("targetAccountId")
+        if not target_account_id:
+            continue
+        try:
+            if target_account_id == db_new_owner_id:
+                tables.shares.delete_item(Key={"profileId": db_profile_id, "targetAccountId": target_account_id})
+            else:
+                tables.shares.update_item(
+                    Key={"profileId": db_profile_id, "targetAccountId": target_account_id},
+                    UpdateExpression="SET ownerAccountId = :new_owner",
+                    ExpressionAttributeValues={":new_owner": db_new_owner_id},
+                )
+        except Exception:
+            logger.error(
+                "Failed to update share after ownership transfer",
+                profile_id=db_profile_id,
+                target_account_id=target_account_id,
+                exc_info=True,
+            )
 
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
@@ -137,6 +166,6 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     caller_is_admin = is_admin(event)
     _verify_new_owner_has_share(db_profile_id, db_new_owner_id, caller_is_admin)
     _transfer_ownership(profile, db_profile_id, db_new_owner_id)
-    _delete_share_if_exists(db_profile_id, db_new_owner_id)
+    _update_shares_after_transfer(db_profile_id, db_new_owner_id)
 
     return profile
