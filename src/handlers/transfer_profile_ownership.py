@@ -2,10 +2,15 @@
 
 This handler transfers ownership of a SellerProfile to a new owner who must already
 have access via a share. The transfer involves:
-1. Verifying caller is current owner
+1. Verifying caller is current owner (or admin)
 2. Verifying new owner has existing share
-3. Updating profile's ownerAccountId
-4. Deleting the share (since they're now the owner)
+3. Atomically deleting the old owner's base-table record and creating a new record
+   with the updated ownerAccountId (the hash key cannot be updated in place)
+4. Deleting the new owner's share (since they're now the owner)
+
+Because ownership is encoded in the profile base-table hash key, deleting the old
+owner's record invalidates any other shares that still reference the previous owner,
+so stale shares are automatically rejected by subsequent authorization checks.
 """
 
 import os
