@@ -58,7 +58,7 @@ const handleSignInWithRedirect = (checkAuthSession: () => Promise<void>) => {
     .catch(() => {});
 };
 
-const handleSignInFailure = (eventData: unknown, setLoading: (loading: boolean) => void) => {
+const handleSignInFailure = (setLoading: (loading: boolean) => void) => {
   setLoading(false);
 };
 
@@ -66,7 +66,7 @@ const handleTokenRefresh = (checkAuthSession: () => Promise<void>) => {
   void checkAuthSession();
 };
 
-const handleTokenRefreshFailure = (eventData: unknown, handlers: AuthEventHandlers) => {
+const handleTokenRefreshFailure = (handlers: AuthEventHandlers) => {
   handlers.onTokenRefreshFailure();
 };
 
@@ -76,17 +76,17 @@ const createAuthEventHandler = (
   setLoading: (loading: boolean) => void,
   handlers: AuthEventHandlers,
 ) => {
-  const eventHandlers: Record<string, (data: unknown) => void> = {
+  const eventHandlers: Record<string, () => void> = {
     signInWithRedirect: () => handleSignInWithRedirect(checkAuthSession),
-    signInWithRedirect_failure: (data) => handleSignInFailure(data, setLoading),
+    signInWithRedirect_failure: () => handleSignInFailure(setLoading),
     signedOut: () => handlers.onSignedOut(),
     tokenRefresh: () => handleTokenRefresh(checkAuthSession),
-    tokenRefresh_failure: (data) => handleTokenRefreshFailure(data, handlers),
+    tokenRefresh_failure: () => handleTokenRefreshFailure(handlers),
   };
 
-  return (eventName: string, eventData: unknown) => {
+  return (eventName: string) => {
     const handler = eventHandlers[eventName];
-    if (handler) handler(eventData);
+    if (handler) handler();
   };
 };
 
@@ -105,7 +105,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         fetchPolicy: 'network-only', // Always fetch fresh data
       });
       return data?.getMyAccount ?? null;
-    } catch (error) {
+    } catch {
       return null;
     }
   }, []);
@@ -135,7 +135,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         // User is authenticated but account record doesn't exist yet
         setAccount(null);
       }
-    } catch (error) {
+    } catch {
       setHasValidTokens(false);
       setAccount(null);
     } finally {
@@ -165,7 +165,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     });
 
     const unsubscribe = Hub.listen('auth', ({ payload }) => {
-      handleEvent(payload.event, (payload as { data?: unknown }).data);
+      handleEvent(payload.event);
     });
 
     return unsubscribe;
@@ -186,12 +186,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
    * Amplify automatically exchanges the code for JWT tokens.
    */
   const login = useCallback(async () => {
-    try {
-      // Redirect to Cognito Hosted UI (shows all login options)
-      await signInWithRedirect();
-    } catch (error) {
-      throw error;
-    }
+    // Redirect to Cognito Hosted UI (shows all login options)
+    await signInWithRedirect();
   }, []);
 
   /**
@@ -202,24 +198,20 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
    */
   const loginWithPassword = useCallback(
     async (email: string, password: string) => {
-      try {
-        const result = await signIn({ username: email, password });
+      const result = await signIn({ username: email, password });
 
-        // Check if sign-in is complete or if there's a next step (MFA, etc.)
-        if (result.isSignedIn) {
-          // Sign-in complete - refresh the auth session
-          await checkAuthSession();
-          return result;
-        } else if (result.nextStep) {
-          // There's a next step (MFA challenge, new password required, etc.)
-          // Return the result so the UI can handle it
-          return result;
-        }
-
+      // Check if sign-in is complete or if there's a next step (MFA, etc.)
+      if (result.isSignedIn) {
+        // Sign-in complete - refresh the auth session
+        await checkAuthSession();
         return result;
-      } catch (error) {
-        throw error;
+      } else if (result.nextStep) {
+        // There's a next step (MFA challenge, new password required, etc.)
+        // Return the result so the UI can handle it
+        return result;
       }
+
+      return result;
     },
     [checkAuthSession],
   );
@@ -238,7 +230,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       // which clears the Cognito session cookies, then redirects back to redirectSignOut
       await signOut({ global: true });
       // Note: The redirect happens automatically, we won't reach this line
-    } catch (error) {
+    } catch {
       // If signOut fails, clear local state and do manual redirect
       setAccount(null);
       // Build the Cognito logout URL manually as fallback

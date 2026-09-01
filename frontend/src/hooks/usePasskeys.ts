@@ -69,7 +69,6 @@ const registerPasskey = async (
     setPasskeyName('');
     await loadPasskeys();
   } catch (err: unknown) {
-    console.error('Passkey registration failed:', err);
     setPasskeyError(
       getErrorMessage(
         err,
@@ -97,8 +96,8 @@ export const usePasskeys = (): UsePasskeysReturn => {
     try {
       const credentials = await listWebAuthnCredentials();
       setPasskeys(credentials.credentials);
-    } catch (err) {
-      console.error('Failed to load passkeys:', err);
+    } catch {
+      // Ignore load passkeys failure
     }
   }, []);
 
@@ -109,7 +108,6 @@ export const usePasskeys = (): UsePasskeysReturn => {
       await deleteWebAuthnCredential({ credentialId });
       await loadPasskeys();
     } catch (err: unknown) {
-      console.error('Delete passkey failed:', err);
       setPasskeyError(getErrorMessage(err, 'Failed to delete passkey'));
     } finally {
       setPasskeyLoading(false);
@@ -124,7 +122,6 @@ export const usePasskeys = (): UsePasskeysReturn => {
       await updateMFAPreference({ totp: 'DISABLED' });
       setMfaEnabled(false);
     } catch (err: unknown) {
-      console.error('Failed to disable MFA:', err);
       setPasskeyError(getErrorMessage(err, 'Failed to disable MFA'));
       setPasskeyLoading(false);
       return;

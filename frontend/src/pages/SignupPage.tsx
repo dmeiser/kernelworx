@@ -150,7 +150,7 @@ async function saveOptionalFields(
   try {
     const input = buildOptionalFieldsInput(fields);
     await updateMyAccount({ variables: { input } });
-  } catch (updateError) {
+  } catch {
     // Don't block navigation if this fails
   }
 }
@@ -186,7 +186,7 @@ async function processAutoSignIn(
     await saveOptionalFields(updateMyAccount, optionalFields);
     await refreshSession();
     void navigate('/home');
-  } catch (autoSignInError) {
+  } catch {
     await handlePostVerificationAuth(refreshSession, navigate, setSuccess, scheduleRedirect);
   }
 }
@@ -326,7 +326,6 @@ export const SignupPage: React.FC = () => {
       await resendSignUpCode({ username: email });
       setSuccess('Verification code resent. Please check your email.');
     } catch (err: unknown) {
-      console.error('Resend verification code failed:', err);
       const typedError = err as { name?: string; message?: string };
       setError(getVerificationErrorMessage(typedError));
     } finally {

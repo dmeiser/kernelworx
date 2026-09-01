@@ -59,7 +59,6 @@ export const usePasswordChange = (): UsePasswordChangeReturn => {
       setNewPassword('');
       setConfirmPassword('');
     } catch (err: unknown) {
-      console.error('Password change failed:', err);
       setPasswordError(getErrorMessage(err, 'Failed to change password. Please check your current password.'));
     } finally {
       setPasswordLoading(false);

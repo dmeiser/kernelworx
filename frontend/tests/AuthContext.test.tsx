@@ -175,7 +175,6 @@ describe('AuthContext', () => {
   });
 
   it('handles auth session check failure', async () => {
-    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.mocked(amplifyAuth.fetchAuthSession).mockRejectedValue(new Error('Auth error'));
 
     render(
@@ -189,9 +188,6 @@ describe('AuthContext', () => {
     });
 
     expect(screen.getByTestId('isAuthenticated')).toHaveTextContent('false');
-    expect(consoleErrorSpy).toHaveBeenCalledWith('Auth session check failed:', expect.any(Error));
-
-    consoleErrorSpy.mockRestore();
   });
 
   it('calls signInWithRedirect on login', async () => {
@@ -217,7 +213,6 @@ describe('AuthContext', () => {
   });
 
   it('catches errors during login', async () => {
-    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.mocked(amplifyAuth.fetchAuthSession).mockResolvedValue({ tokens: undefined } as any);
     vi.mocked(amplifyAuth.signInWithRedirect).mockRejectedValue(new Error('Login failed'));
 
@@ -229,7 +224,7 @@ describe('AuthContext', () => {
       expect(result.current).toBeDefined();
     });
 
-    // Login should reject and log error
+    // Login should reject
     let caughtError: Error | undefined;
     try {
       await act(async () => {
@@ -240,8 +235,6 @@ describe('AuthContext', () => {
     }
 
     expect(caughtError).toBeInstanceOf(Error);
-    expect(consoleErrorSpy).toHaveBeenCalledWith('Login failed:', expect.any(Error));
-    consoleErrorSpy.mockRestore();
   });
 
   it('calls signOut on logout and clears account', async () => {
@@ -269,7 +262,6 @@ describe('AuthContext', () => {
   });
 
   it('handles logout failure with fallback redirect', async () => {
-    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.mocked(amplifyAuth.fetchAuthSession).mockResolvedValue(createMockSession(true) as any);
     vi.mocked(amplifyAuth.getCurrentUser).mockResolvedValue(mockUser as any);
     vi.mocked(amplifyAuth.signOut).mockRejectedValue(new Error('Logout failed'));
@@ -291,11 +283,6 @@ describe('AuthContext', () => {
     // Click will trigger the promise rejection, but we catch it in the handler
     logoutButton.click();
 
-    // Wait for error to be logged
-    await waitFor(() => {
-      expect(consoleErrorSpy).toHaveBeenCalledWith('Logout failed:', expect.any(Error));
-    });
-
     // Verify the fallback redirect was attempted
     await waitFor(() => {
       expect(locationHrefSpy).toHaveBeenCalled();
@@ -305,7 +292,6 @@ describe('AuthContext', () => {
     expect(redirectUrl).toContain('&logout_uri=');
 
     restore();
-    consoleErrorSpy.mockRestore();
   });
 
   it('listens for Hub auth events on mount', () => {
@@ -406,7 +392,6 @@ describe('AuthContext', () => {
 
   it('handles signInWithRedirect_failure Hub event', async () => {
     let hubCallback: any;
-    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.mocked(amplifyUtils.Hub.listen).mockImplementation((_channel, callback) => {
       hubCallback = callback;
       return vi.fn();
@@ -421,19 +406,17 @@ describe('AuthContext', () => {
     );
 
     // Simulate signInWithRedirect_failure event
-    hubCallback({ payload: { event: 'signInWithRedirect_failure', data: { error: 'Auth failed' } } });
-
-    await waitFor(() => {
-      expect(consoleErrorSpy).toHaveBeenCalledWith('Sign in failed:', { error: 'Auth failed' });
-      expect(screen.getByTestId('loading')).toHaveTextContent('false');
+    act(() => {
+      hubCallback({ payload: { event: 'signInWithRedirect_failure', data: { error: 'Auth failed' } } });
     });
 
-    consoleErrorSpy.mockRestore();
+    await waitFor(() => {
+      expect(screen.getByTestId('loading')).toHaveTextContent('false');
+    });
   });
 
   it('handles tokenRefresh_failure Hub event', async () => {
     let hubCallback: any;
-    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.mocked(amplifyUtils.Hub.listen).mockImplementation((_channel, callback) => {
       hubCallback = callback;
       return vi.fn();
@@ -453,14 +436,13 @@ describe('AuthContext', () => {
     });
 
     // Simulate tokenRefresh_failure event
-    hubCallback({ payload: { event: 'tokenRefresh_failure', data: { error: 'Token refresh failed' } } });
-
-    await waitFor(() => {
-      expect(consoleErrorSpy).toHaveBeenCalledWith('Token refresh failed:', { error: 'Token refresh failed' });
-      expect(screen.getByTestId('isAuthenticated')).toHaveTextContent('false');
+    act(() => {
+      hubCallback({ payload: { event: 'tokenRefresh_failure', data: { error: 'Token refresh failed' } } });
     });
 
-    consoleErrorSpy.mockRestore();
+    await waitFor(() => {
+      expect(screen.getByTestId('isAuthenticated')).toHaveTextContent('false');
+    });
   });
 
   it('unsubscribes from Hub events on unmount', () => {
@@ -621,7 +603,6 @@ describe('AuthContext', () => {
     });
 
     it('throws error on login failure', async () => {
-      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       vi.mocked(amplifyAuth.fetchAuthSession).mockResolvedValue({ tokens: undefined } as any);
       vi.mocked(amplifyAuth.signIn).mockRejectedValue(new Error('Invalid credentials'));
 
@@ -644,8 +625,6 @@ describe('AuthContext', () => {
 
       expect(caughtError).toBeInstanceOf(Error);
       expect(caughtError?.message).toBe('Invalid credentials');
-      expect(consoleErrorSpy).toHaveBeenCalledWith('Email/password login failed:', expect.any(Error));
-      consoleErrorSpy.mockRestore();
     });
   });
 
@@ -771,8 +750,7 @@ describe('AuthContext', () => {
   });
 
   describe('fetchAccountData error handling', () => {
-    it('logs error and returns null when account fetch fails', async () => {
-      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    it('returns null when account fetch fails', async () => {
       vi.mocked(amplifyAuth.fetchAuthSession).mockResolvedValue(createMockSession(true) as any);
       vi.mocked(amplifyAuth.getCurrentUser).mockResolvedValue(mockUser as any);
 
@@ -790,17 +768,11 @@ describe('AuthContext', () => {
         expect(screen.getByTestId('loading')).toHaveTextContent('false');
       });
 
-      // Error should have been logged
-      expect(consoleErrorSpy).toHaveBeenCalledWith('Failed to fetch account data:', expect.any(Error));
-
       // Account should be null (accountId element should not exist since account is conditionally rendered)
       expect(screen.queryByTestId('accountId')).not.toBeInTheDocument();
-
-      consoleErrorSpy.mockRestore();
     });
 
     it('returns null when getMyAccount is null', async () => {
-      const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       vi.mocked(amplifyAuth.fetchAuthSession).mockResolvedValue(createMockSession(true) as any);
       vi.mocked(amplifyAuth.getCurrentUser).mockResolvedValue(mockUser as any);
 
@@ -818,13 +790,8 @@ describe('AuthContext', () => {
         expect(screen.getByTestId('loading')).toHaveTextContent('false');
       });
 
-      // Warning should have been logged for authenticated user without account record
-      expect(consoleWarnSpy).toHaveBeenCalledWith('User has valid tokens but no account record yet');
-
       // Account should be null
       expect(screen.queryByTestId('accountId')).not.toBeInTheDocument();
-
-      consoleWarnSpy.mockRestore();
     });
   });
 });
