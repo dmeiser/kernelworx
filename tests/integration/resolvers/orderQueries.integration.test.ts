@@ -137,6 +137,27 @@ const GET_ORDER = gql`
   }
 `;
 
+const getOrderWithRetry = async (client: any, orderId: string, maxAttempts = 10): Promise<any> => {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const res = await client.query({
+        query: GET_ORDER,
+        variables: { orderId },
+        fetchPolicy: 'network-only',
+      });
+      if (res.data?.getOrder) {
+        return res.data.getOrder;
+      }
+    } catch {
+      // ignore transient error
+    }
+    if (attempt < maxAttempts) {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+  }
+  throw new Error(`Failed to get order ${orderId} after ${maxAttempts} attempts`);
+};
+
 const LIST_ORDERS_BY_CAMPAIGN = gql`
   query ListOrdersByCampaign($campaignId: ID!, $limit: Int, $nextToken: String) {
     listOrdersByCampaign(campaignId: $campaignId, limit: $limit, nextToken: $nextToken) {
@@ -1008,21 +1029,17 @@ describe('Order Query Operations Integration Tests', () => {
       });
       const orderId = orderData.createOrder.orderId;
 
-      const { data }: any = await ownerClient.query({
-        query: GET_ORDER,
-        variables: { orderId },
-        fetchPolicy: 'network-only',
-      });
+      const order = await getOrderWithRetry(ownerClient, orderId);
 
       // Verify line items have correct subtotals
-      expect(data.getOrder.lineItems.length).toBe(1);
+      expect(order.lineItems.length).toBe(1);
       
-      const lineItem = data.getOrder.lineItems[0];
+      const lineItem = order.lineItems[0];
       expect(lineItem.quantity).toBe(5);
       expect(lineItem.subtotal).toBe(lineItem.quantity * lineItem.pricePerUnit);
       
       // totalAmount should match the subtotal
-      expect(data.getOrder.totalAmount).toBe(lineItem.subtotal);
+      expect(order.totalAmount).toBe(lineItem.subtotal);
 
       await ownerClient.mutate({
         mutation: DELETE_ORDER,
