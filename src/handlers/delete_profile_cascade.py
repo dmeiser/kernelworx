@@ -1,8 +1,8 @@
-"""Lambda resolver to cascade-delete a profile and all related data."""
-
+import os
 import time
 from typing import TYPE_CHECKING, Any, Dict, List
 
+import boto3
 from botocore.exceptions import ClientError
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -33,6 +33,16 @@ logger = get_logger(__name__)
 BATCH_SIZE = 25
 _PROFILE_LOOKUP_RETRIES = 3
 _PROFILE_LOOKUP_DELAY_SECONDS = 0.1
+
+s3_client: Any = None
+
+
+def _get_s3_client() -> Any:
+    """Return S3 client, supporting module-level mock for testing."""
+    global s3_client
+    if s3_client is not None:
+        return s3_client
+    return boto3.client("s3")
 
 
 def _raise_delete_error(table_name: str, exc: Exception) -> None:
@@ -150,6 +160,66 @@ def _delete_invites(invites: List[Dict[str, Any]]) -> int:
     return _batch_delete_keys(tables.invites, keys, ["inviteCode"])
 
 
+def _delete_shared_campaigns(campaigns: List[Dict[str, Any]], owner_account_id: str) -> int:
+    """Delete shared campaigns created by the profile owner."""
+    deleted_count = 0
+    seen_codes: set[str] = set()
+    normalized_owner = ensure_account_id(owner_account_id)
+    for campaign in campaigns:
+        code = campaign.get("sharedCampaignCode")
+        if not code or code in seen_codes:
+            continue
+        seen_codes.add(code)
+        try:
+            items = query_all_items(
+                tables.shared_campaigns,
+                {
+                    "KeyConditionExpression": "sharedCampaignCode = :code",
+                    "ExpressionAttributeValues": {":code": code},
+                },
+            )
+            for item in items:
+                created_by = item.get("createdBy", "")
+                if created_by in (owner_account_id, normalized_owner):
+                    key: Dict[str, Any] = {"sharedCampaignCode": code}
+                    if "SK" in item:
+                        key["SK"] = item["SK"]
+                    tables.shared_campaigns.delete_item(Key=key)
+                    deleted_count += 1
+                    logger.info(f"Deleted shared campaign {code}")
+        except Exception as e:
+            logger.warning(f"Failed to delete shared campaign {code}: {str(e)}")
+    return deleted_count
+
+
+def _delete_s3_reports(profile_id: str) -> int:
+    """Delete all S3 report objects for this profile."""
+    bucket_name = os.environ.get("EXPORTS_BUCKET")
+    if not bucket_name:
+        return 0
+
+    s3 = _get_s3_client()
+    deleted_count = 0
+    prefixes = [f"reports/{profile_id}/"]
+    clean_id = profile_id.replace("PROFILE#", "")
+    if clean_id != profile_id:
+        prefixes.append(f"reports/{clean_id}/")
+
+    for prefix in set(prefixes):
+        try:
+            paginator = s3.get_paginator("list_objects_v2")
+            for page in paginator.paginate(Bucket=bucket_name, Prefix=prefix):
+                objects = [{"Key": obj["Key"]} for obj in page.get("Contents", []) if "Key" in obj]
+                if objects:
+                    s3.delete_objects(Bucket=bucket_name, Delete={"Objects": objects})
+                    deleted_count += len(objects)
+                    logger.info(f"Deleted {len(objects)} report objects from S3 under {prefix}")
+        except Exception as e:
+            logger.warning(f"Error cleaning up S3 reports under {prefix}: {str(e)}")
+
+    return deleted_count
+
+
 def _delete_profile(owner_account_id: str, profile_id: str) -> None:
     """Delete the profile metadata record."""
     try:
@@ -219,6 +289,8 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> bool:
     order_keys = _collect_order_keys(campaigns)
 
     orders_deleted = _delete_orders(order_keys)
+    reports_deleted = _delete_s3_reports(db_profile_id)
+    shared_campaigns_deleted = _delete_shared_campaigns(campaigns, owner_account_id)
     campaigns_deleted = _delete_campaigns(db_profile_id, campaigns)
     shares_deleted = _delete_shares(db_profile_id, shares)
     invites_deleted = _delete_invites(invites)
@@ -228,6 +300,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> bool:
     logger.info(
         f"Cascade delete complete for profile {db_profile_id}: "
         f"orders={orders_deleted}, campaigns={campaigns_deleted}, "
-        f"shares={shares_deleted}, invites={invites_deleted}"
+        f"shares={shares_deleted}, invites={invites_deleted}, "
+        f"shared_campaigns={shared_campaigns_deleted}, reports={reports_deleted}"
     )
     return True

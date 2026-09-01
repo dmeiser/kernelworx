@@ -721,3 +721,164 @@ class TestDeleteProfileCascade:
             ExpressionAttributeValues={":pid": profile_id},
         )
         assert len(invites_response.get("Items", [])) == 0
+
+    def test_delete_shared_campaigns_matching_creator(
+        self, profiles_table: Any, campaigns_table: Any, shared_campaigns_table: Any
+    ) -> None:
+        """Test deleting shared campaigns created by profile owner."""
+        owner_id = "owner-sc-1"
+        profile_id = "PROFILE#sc-prof-1"
+        _create_profile(profiles_table, owner_id, profile_id)
+
+        shared_campaigns_table.put_item(
+            Item={
+                "sharedCampaignCode": "SC-100",
+                "SK": "METADATA",
+                "createdBy": f"ACCOUNT#{owner_id}",
+                "campaignName": "Shared Popcorn",
+            }
+        )
+
+        campaigns_table.put_item(
+            Item={
+                "profileId": profile_id,
+                "campaignId": "CAMPAIGN#c100",
+                "campaignName": "Camp 100",
+                "sharedCampaignCode": "SC-100",
+            }
+        )
+
+        event = {
+            "arguments": {"profileId": profile_id},
+            "identity": {"sub": owner_id},
+        }
+        result = lambda_handler(event, None)
+        assert result is True
+
+        res = shared_campaigns_table.get_item(Key={"sharedCampaignCode": "SC-100", "SK": "METADATA"})
+        assert "Item" not in res
+
+    def test_delete_shared_campaigns_not_creator(
+        self, profiles_table: Any, campaigns_table: Any, shared_campaigns_table: Any
+    ) -> None:
+        """Test shared campaign is not deleted if created by a different owner."""
+        owner_id = "owner-sc-2"
+        profile_id = "PROFILE#sc-prof-2"
+        _create_profile(profiles_table, owner_id, profile_id)
+
+        shared_campaigns_table.put_item(
+            Item={
+                "sharedCampaignCode": "SC-200",
+                "SK": "METADATA",
+                "createdBy": "ACCOUNT#other-owner",
+                "campaignName": "Shared Popcorn Other",
+            }
+        )
+
+        campaigns_table.put_item(
+            Item={
+                "profileId": profile_id,
+                "campaignId": "CAMPAIGN#c200",
+                "campaignName": "Camp 200",
+                "sharedCampaignCode": "SC-200",
+            }
+        )
+
+        event = {
+            "arguments": {"profileId": profile_id},
+            "identity": {"sub": owner_id},
+        }
+        result = lambda_handler(event, None)
+        assert result is True
+
+        res = shared_campaigns_table.get_item(Key={"sharedCampaignCode": "SC-200", "SK": "METADATA"})
+        assert "Item" in res
+
+    def test_delete_shared_campaigns_error_handled_gracefully(self) -> None:
+        """Test that errors in shared campaign cleanup are caught and logged."""
+        from src.handlers.delete_profile_cascade import _delete_shared_campaigns
+
+        with patch("src.handlers.delete_profile_cascade.query_all_items") as mock_query:
+            mock_query.side_effect = Exception("DynamoDB error")
+            count = _delete_shared_campaigns([{"sharedCampaignCode": "ERR-1"}], "ACCOUNT#owner")
+            assert count == 0
+
+    def test_delete_s3_reports_success(self, monkeypatch: Any) -> None:
+        """Test S3 report deletion when EXPORTS_BUCKET is configured."""
+        from src.handlers.delete_profile_cascade import _delete_s3_reports
+
+        monkeypatch.setenv("EXPORTS_BUCKET", "test-reports-bucket")
+        mock_s3 = MagicMock()
+        mock_paginator = MagicMock()
+        mock_paginator.paginate.return_value = [
+            {"Contents": [{"Key": "reports/PROFILE#p1/c1/r1.xlsx"}]},
+            {"Contents": []},
+        ]
+        mock_s3.get_paginator.return_value = mock_paginator
+
+        with patch("src.handlers.delete_profile_cascade.s3_client", mock_s3):
+            count = _delete_s3_reports("PROFILE#p1")
+            assert count >= 1
+            mock_s3.delete_objects.assert_called()
+
+    def test_delete_s3_reports_no_bucket(self, monkeypatch: Any) -> None:
+        """Test S3 report deletion returns 0 when no bucket configured."""
+        from src.handlers.delete_profile_cascade import _delete_s3_reports
+
+        monkeypatch.delenv("EXPORTS_BUCKET", raising=False)
+        count = _delete_s3_reports("PROFILE#p1")
+        assert count == 0
+
+    def test_delete_s3_reports_error_handled_gracefully(self, monkeypatch: Any) -> None:
+        """Test S3 report deletion error is handled gracefully."""
+        from src.handlers.delete_profile_cascade import _delete_s3_reports
+
+        monkeypatch.setenv("EXPORTS_BUCKET", "test-reports-bucket")
+        mock_s3 = MagicMock()
+        mock_s3.get_paginator.side_effect = Exception("S3 error")
+
+        with patch("src.handlers.delete_profile_cascade.s3_client", mock_s3):
+            count = _delete_s3_reports("PROFILE#p1")
+            assert count == 0
+
+    def test_get_s3_client_default(self) -> None:
+        """Test _get_s3_client returns default boto3 S3 client when s3_client is None."""
+        import src.handlers.delete_profile_cascade as mod
+        from src.handlers.delete_profile_cascade import _get_s3_client
+
+        mod.s3_client = None
+        with patch("boto3.client") as mock_boto:
+            mock_client = MagicMock()
+            mock_boto.return_value = mock_client
+            client = _get_s3_client()
+            assert client == mock_client
+            mock_boto.assert_called_once_with("s3")
+
+    def test_delete_shared_campaigns_without_sk(self) -> None:
+        """Test deleting shared campaigns when item does not have SK."""
+        from src.handlers.delete_profile_cascade import _delete_shared_campaigns
+
+        with (
+            patch("src.handlers.delete_profile_cascade.query_all_items") as mock_query,
+            patch("src.handlers.delete_profile_cascade.tables") as mock_tables,
+        ):
+            mock_query.return_value = [{"sharedCampaignCode": "SC-101", "createdBy": "ACCOUNT#owner"}]
+            count = _delete_shared_campaigns([{"sharedCampaignCode": "SC-101"}], "ACCOUNT#owner")
+            assert count == 1
+            mock_tables.shared_campaigns.delete_item.assert_called_once_with(Key={"sharedCampaignCode": "SC-101"})
+
+    def test_delete_s3_reports_with_unprefixed_profile_id(self, monkeypatch: Any) -> None:
+        """Test S3 report deletion when profile_id has no PROFILE# prefix."""
+        from src.handlers.delete_profile_cascade import _delete_s3_reports
+
+        monkeypatch.setenv("EXPORTS_BUCKET", "test-reports-bucket")
+        mock_s3 = MagicMock()
+        mock_paginator = MagicMock()
+        mock_paginator.paginate.return_value = [
+            {"Contents": [{"Key": "reports/p1/c1/r1.xlsx"}]},
+        ]
+        mock_s3.get_paginator.return_value = mock_paginator
+
+        with patch("src.handlers.delete_profile_cascade.s3_client", mock_s3):
+            count = _delete_s3_reports("p1")
+            assert count == 1
