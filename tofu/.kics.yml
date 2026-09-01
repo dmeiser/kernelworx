@@ -2,7 +2,7 @@
 # Excludes queries that are not applicable or too expensive for this volunteer project
 
 exclude-queries:
-  # WAF is too expensive for volunteer/personal budget (~$5/month + $1 per million requests)
+  # WAF is too expensive for volunteer/personal budget (~/month +  per million requests)
   - 1419b4c6-6d5c-4534-9cf6-6a5266085333
   # S3 access logging disabled to minimize storage costs
   - 4552b71f-0a2a-4bc4-92dd-ed7ec1b4674c
@@ -19,3 +19,5 @@ exclude-queries:
   - ce089fd4-1406-47bd-8aad-c259772bb294
   # CloudWatch log groups AWS-managed encryption used to avoid KMS charges
   - 0afbcfe9-d341-4b92-a64c-7e6de0543879
+  # CloudFront OAI static bucket policy
+  - 4bc4dd4c-7d8d-405e-a0fb-57fa4c31b4d9

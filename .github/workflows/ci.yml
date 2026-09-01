@@ -178,10 +178,5 @@ jobs:
         run: mkdir -p tofu/kics-results
 
       - name: KICS security scan
-        uses: checkmarx/kics-github-action@v2
-        with:
-          path: tofu
-          config_path: tofu/.kics.yml
-          fail_on: high,medium
-          output_path: tofu/kics-results
-          output_formats: json
+        run: |
+          docker run --rm -v ":/path" checkmarx/kics:latest scan             -p /path/tofu             --config /path/tofu/.kics.yml             --fail-on high,medium             -o /path/tofu/kics-results             --report-formats json
