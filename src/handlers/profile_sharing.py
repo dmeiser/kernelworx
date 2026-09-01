@@ -76,13 +76,9 @@ def _extract_batch_profiles(
 ) -> List[Dict[str, Any]]:
     """Extract profiles from a BatchGetItem response."""
     responses = batch_response.get("Responses", {})
-    if table_name in responses:
+    if isinstance(responses, dict):
         return cast(List[Dict[str, Any]], responses.get(table_name, []))
-    # Fallback: aggregate all responses across keys (best-effort for test shapes)
-    batch_profiles: List[Dict[str, Any]] = []
-    for items in responses.values():
-        batch_profiles.extend(items)
-    return batch_profiles
+    return []
 
 
 def _batch_get_profiles(
@@ -147,17 +143,16 @@ def _fetch_batch_with_retry(
 
     if keys_to_fetch:
         logger.error("Unprocessed keys still remain after all retries", count=len(keys_to_fetch))
+        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to list shared profiles")
 
     return all_profiles
 
 
 def _get_unprocessed_table(unprocessed_keys: Dict[str, Any], table_name: str) -> Any:
     """Get unprocessed table from unprocessed keys."""
-    unprocessed_table = unprocessed_keys.get(table_name, {})
-    if not unprocessed_table and isinstance(unprocessed_keys, dict):
-        for v in unprocessed_keys.values():
-            return v
-    return unprocessed_table
+    if isinstance(unprocessed_keys, dict):
+        return unprocessed_keys.get(table_name, {})
+    return {}
 
 
 def _log_unprocessed_keys(unprocessed_keys: Dict[str, Any], table_name: str, logger: Any) -> None:

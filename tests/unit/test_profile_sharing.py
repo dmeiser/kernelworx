@@ -557,7 +557,7 @@ class TestListMyShares:
         with patch("src.handlers.profile_sharing.dynamodb.batch_get_item") as mock_batch_get:
             mock_batch_get.return_value = {
                 "Responses": {
-                    "kernelworx-profiles-ue1-dev": [
+                    "kernelworx-profiles-v2-ue1-dev": [
                         {
                             "ownerAccountId": f"ACCOUNT#{sample_account_id}",
                             "profileId": profile_id,
@@ -885,3 +885,71 @@ class TestListMyShares:
 
         # Empty result since no profiles were returned
         assert result == []
+
+    def test_unprocessed_keys_exhausted_retries_raises_app_error(
+        self,
+        dynamodb_table: Any,
+        shares_table: Any,
+        another_account_id: str,
+        sample_account_id: str,
+        appsync_event: Dict[str, Any],
+        lambda_context: Any,
+    ) -> None:
+        """Test that list_my_shares raises AppError when unprocessed keys remain after max retries."""
+        from unittest.mock import patch
+
+        from src.handlers.profile_sharing import list_my_shares
+
+        owner_id = f"ACCOUNT#{sample_account_id}"
+        profile_id = "PROFILE#unprocessed-exhausted"
+
+        shares_table.put_item(
+            Item={
+                "profileId": profile_id,
+                "targetAccountId": f"ACCOUNT#{another_account_id}",
+                "ownerAccountId": owner_id,
+                "permissions": ["READ"],
+                "createdAt": "2024-01-01T00:00:00Z",
+            }
+        )
+
+        event = {**appsync_event, "identity": {"sub": another_account_id}}
+
+        mock_unprocessed = {
+            "Responses": {"kernelworx-profiles-v2-ue1-dev": []},
+            "UnprocessedKeys": {
+                "kernelworx-profiles-v2-ue1-dev": {"Keys": [{"ownerAccountId": owner_id, "profileId": profile_id}]}
+            },
+        }
+
+        with patch(
+            "src.handlers.profile_sharing.dynamodb.batch_get_item",
+            return_value=mock_unprocessed,
+        ):
+            with pytest.raises(AppError) as exc_info:
+                list_my_shares(event, lambda_context)
+
+        assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+        assert "Failed to list shared profiles" in exc_info.value.message
+
+    def test_extract_batch_profiles_only_extracts_from_target_table(self) -> None:
+        """Test that _extract_batch_profiles only extracts items matching table_name."""
+        from src.handlers.profile_sharing import _extract_batch_profiles
+
+        target_table = "kernelworx-profiles-v2-ue1-dev"
+        batch_response: Any = {
+            "Responses": {
+                target_table: [{"profileId": "PROFILE#1", "sellerName": "Target"}],
+                "other-table-name": [{"otherId": "OTHER#1", "data": "Unexpected"}],
+            }
+        }
+
+        result = _extract_batch_profiles(batch_response, target_table)
+        assert result == [{"profileId": "PROFILE#1", "sellerName": "Target"}]
+
+        # When target table is not in Responses, returns empty list
+        assert _extract_batch_profiles(batch_response, "non-existent-table") == []
+
+        # When Responses is missing or not a dict
+        assert _extract_batch_profiles({}, target_table) == []
+        assert _extract_batch_profiles({"Responses": None}, target_table) == []  # type: ignore[dict-item]
