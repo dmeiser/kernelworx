@@ -54,7 +54,7 @@ def _has_effective_permission(permissions: Any) -> bool:
 
 
 def _add_share_to_map(shares_by_profile: Dict[str, Dict[str, Any]], share: Dict[str, Any]) -> None:
-    """Add a share to the deduplicated map if valid and not already present."""
+    """Add a share to the deduplicated map if valid, grants an effective permission, and not already present."""
     profile_id_val = share.get("profileId")
     owner_account_id_val = share.get("ownerAccountId")
 

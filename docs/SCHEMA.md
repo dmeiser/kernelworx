@@ -310,6 +310,8 @@ graph TD
     E -->|No| H["✓ Read-Only Access<br/>Read Only"]
 ```
 
+Shares and invites must grant at least one effective `READ` or `WRITE` permission to be usable. Entries with empty permissions, or permissions that do not include `READ` or `WRITE`, are rejected at creation/redeem time and filtered out by `listMyShares`, `listSharesByProfile`, and `listInvitesByProfile`.
+
 ## State Management
 
 ### Active vs Inactive Campaigns
