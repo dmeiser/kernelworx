@@ -685,6 +685,7 @@ def _delete_orders_for_campaign(campaign_id: str) -> int:
 
     deleted_count = _delete_order_keys(orders)
     _verify_orders_deleted(campaign_id)
+    _verify_orders_deleted_by_ids([order["orderId"] for order in orders])
 
     logger.info("Deleted orders for campaign", campaign_id=campaign_id, count=deleted_count)
     return deleted_count

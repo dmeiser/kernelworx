@@ -1726,6 +1726,41 @@ class TestDeleteCampaignOrders:
             assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
             assert "Failed to delete campaign orders" in exc_info.value.message
 
+    def test_delete_campaign_orders_verifies_order_id_gsi(
+        self,
+        orders_table: Any,
+        campaigns_table: Any,
+        profiles_table: Any,
+        lambda_context: Any,
+    ) -> None:
+        """Test that deleted orders are no longer visible in the orderId-index GSI."""
+        from src.handlers.campaign_operations import delete_campaign_orders
+
+        campaign_id = "CAMPAIGN#gsi-verify"
+        profile_id = "PROFILE#gsi-verify"
+        self._seed_owned_campaign(profiles_table, campaigns_table, profile_id, campaign_id, self._OWNER_SUB)
+        order_ids = [f"ORDER#{i}" for i in range(3)]
+        for order_id in order_ids:
+            orders_table.put_item(
+                Item={
+                    "campaignId": campaign_id,
+                    "orderId": order_id,
+                    "customerName": "Customer",
+                    "totalAmount": Decimal("10.0"),
+                }
+            )
+
+        result = delete_campaign_orders(self._event(campaign_id, self._OWNER_SUB), lambda_context)
+
+        assert result == {"deletedCount": 3}
+        for order_id in order_ids:
+            gsi_response = orders_table.query(
+                IndexName="orderId-index",
+                KeyConditionExpression="orderId = :oid",
+                ExpressionAttributeValues={":oid": order_id},
+            )
+            assert len(gsi_response.get("Items", [])) == 0
+
 
 class TestVerifyOrdersDeleted:
     """Tests for the strongly-consistent order deletion verification helper."""
