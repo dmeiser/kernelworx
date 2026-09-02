@@ -742,6 +742,37 @@ describe('Catalog CRUD Integration Tests', () => {
           })
         ).rejects.toThrow(/conditional request failed/i);  // VTL returns raw DynamoDB error
       });
+
+      it('should reject update with empty products array', async () => {
+        // Arrange: Create catalog
+        const createInput = {
+          catalogName: 'Catalog to Update',
+          isPublic: true,
+          products: [{ productName: 'Product', price: 10.0, sortOrder: 1 }],
+        };
+        const { data: createData } = await ownerClient.mutate({
+          mutation: CREATE_CATALOG,
+          variables: { input: createInput },
+        });
+        const catalogId = createData.createCatalog.catalogId;
+
+        const updateInput = {
+          catalogName: 'Updated Catalog',
+          isPublic: true,
+          products: [],
+        };
+
+        // Act & Assert
+        await expect(
+          ownerClient.mutate({
+            mutation: UPDATE_CATALOG,
+            variables: { catalogId: catalogId, input: updateInput },
+          })
+        ).rejects.toThrow(/Products array cannot be empty/i);
+
+        // Cleanup
+        await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId } });
+      });
     });
 
     describe('Product Management', () => {

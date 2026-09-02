@@ -1,4 +1,8 @@
 #set($now = $util.time.nowISO8601())
+## Validate products array is not empty
+#if($ctx.args.input.products.size() == 0)
+    $util.error("Products array cannot be empty", "ValidationException")
+#end
 ## Add productId to each product if not present
 #set($productsWithIds = [])
 #foreach($product in $ctx.args.input.products)
