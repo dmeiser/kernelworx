@@ -285,6 +285,7 @@ def create_shared_campaigns_table_schema() -> dict[str, Any]:
     GSIs:
     - GSI1: createdBy + createdAt (list by creator)
     - GSI2: unitCampaignKey + sharedCampaignCode (discover by unit+campaign)
+    - catalogId-index: catalogId (enforce catalog delete constraints)
     """
     return {
         "TableName": "kernelworx-shared-campaigns-ue1-dev",
@@ -298,6 +299,7 @@ def create_shared_campaigns_table_schema() -> dict[str, Any]:
             {"AttributeName": "createdBy", "AttributeType": "S"},
             {"AttributeName": "createdAt", "AttributeType": "S"},
             {"AttributeName": "unitCampaignKey", "AttributeType": "S"},
+            {"AttributeName": "catalogId", "AttributeType": "S"},
         ],
         "GlobalSecondaryIndexes": [
             {
@@ -313,6 +315,13 @@ def create_shared_campaigns_table_schema() -> dict[str, Any]:
                 "KeySchema": [
                     {"AttributeName": "unitCampaignKey", "KeyType": "HASH"},
                     {"AttributeName": "sharedCampaignCode", "KeyType": "RANGE"},
+                ],
+                "Projection": {"ProjectionType": "ALL"},
+            },
+            {
+                "IndexName": "catalogId-index",
+                "KeySchema": [
+                    {"AttributeName": "catalogId", "KeyType": "HASH"},
                 ],
                 "Projection": {"ProjectionType": "ALL"},
             },
