@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import shlex
 import shutil
 import subprocess
 import textwrap
@@ -768,11 +770,60 @@ class TestWorkflowDispatchSurface:
             or f"inputs.mode=='{expected_mode}'" in normalized
         )
 
+    @staticmethod
+    def _normalize_if_expression(expression: str) -> str:
+        """Normalize a GitHub Actions `if` expression for semantic comparison."""
+        return re.sub(r"\s+", " ", expression.replace("${{", "").replace("}}", "")).strip()
+
+    @staticmethod
+    def _extract_command_args(script: str, basename: str, subcommand: str) -> list[str]:
+        """Parse a shell script and return the args of the first matching command."""
+        for line in script.splitlines():
+            segment = line.split("|", 1)[0].strip()
+            if not segment:
+                continue
+            parts = shlex.split(segment)
+            if len(parts) >= 2 and parts[0].endswith(basename) and parts[1] == subcommand:
+                return parts
+        raise AssertionError(f"Could not find {basename} {subcommand} command in script")
+
     def test_ephemeral_test_has_no_manual_jobs(self, repo_root: Path) -> None:
         workflow = self._load_workflow(repo_root)
         jobs = workflow.get("jobs", {})
         assert set(jobs) == {"ephemeral-test", "sweep"}
         assert "workflow_dispatch" not in (workflow.get("on") or {})
+
+    def test_ephemeral_test_job_only_runs_on_pull_request(self, repo_root: Path) -> None:
+        workflow = self._load_workflow(repo_root)
+        job_if = workflow["jobs"]["ephemeral-test"].get("if", "")
+        normalized = self._normalize_if_expression(job_if)
+        assert normalized == (
+            "github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository"
+        ), f"ephemeral-test job must be gated to same-repo pull_request events, got: {job_if!r}"
+
+    def test_ephemeral_test_uses_valid_pr_run_id(self, repo_root: Path) -> None:
+        workflow = self._load_workflow(repo_root)
+        up_step = next(s for s in workflow["jobs"]["ephemeral-test"]["steps"] if s.get("id") == "ephemeral_up")
+        run_script = up_step["run"]
+        args = self._extract_command_args(run_script, "ephemeral-env.sh", "up")
+        assert args[2] == "pr-${{ github.event.pull_request.number }}", (
+            "ephemeral-env.sh up must use a PR-numbered run-id"
+        )
+
+    def test_sweep_job_has_ephemeral_environment(self, repo_root: Path) -> None:
+        workflow = self._load_workflow(repo_root)
+        sweep_job = workflow["jobs"]["sweep"]
+        assert sweep_job.get("environment") == "ephemeral", (
+            "sweep job must use the ephemeral environment so it can assume the AWS role"
+        )
+
+    def test_sweep_job_only_runs_on_schedule(self, repo_root: Path) -> None:
+        workflow = self._load_workflow(repo_root)
+        job_if = workflow["jobs"]["sweep"].get("if", "")
+        normalized = self._normalize_if_expression(job_if)
+        assert normalized == "github.event_name == 'schedule'", (
+            f"sweep job must be gated to schedule events, got: {job_if!r}"
+        )
 
     def test_manual_teardown_workflow(self, repo_root: Path) -> None:
         workflow = self._load_workflow(repo_root, "manual-teardown.yml")

@@ -24,7 +24,9 @@ jobs:
   ephemeral-test:
     name: Ephemeral tests for PR #${{ github.event.pull_request.number }}
     # Same-repo branches only: forks do not have access to repository secrets.
-    if: github.event_name == 'schedule' || github.event.pull_request.head.repo.full_name == github.repository
+    # This job must not run on the nightly schedule event: there is no PR number,
+    # which would produce an invalid run-id of "pr-".
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 75
     environment: ephemeral
@@ -122,6 +124,9 @@ jobs:
     if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    # The ephemeral environment is required so this job can assume the AWS role
+    # that owns the S3 state bucket and the ephemeral stacks.
+    environment: ephemeral
     permissions:
       contents: read
       pull-requests: read
