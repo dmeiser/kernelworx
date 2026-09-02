@@ -5,7 +5,7 @@ export function request(ctx) {
     const account = ctx.stash.account;
     const now = util.time.nowISO8601();
     
-    // Generate shared campaign code: UNITTYPE + UNITNUMBER + CAMPAIGN + YEAR + RANDOM SUFFIX
+    // Generate shared campaign code: UNITTYPE + UNITNUMBER + '-' + CAMPAIGN_ABBREV + '-' + STATE + '-' + YEAR_ABBREV + '-' + RANDOM_SUFFIX
     // Convert numbers to strings using template literal (String() not available in APPSYNC_JS)
     const campaignYearStr = '' + input.campaignYear;
     const unitNumStr = '' + input.unitNumber;
