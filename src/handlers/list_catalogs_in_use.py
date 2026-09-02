@@ -41,6 +41,21 @@ async def _extract_field_values(items: list[Dict[str, Any]], field_name: str) ->
     return [item[field_name] for item in items if item.get(field_name)]
 
 
+def _share_item_has_accessible_permissions(item: Dict[str, Any]) -> bool:
+    """Check if a share item grants READ or WRITE access.
+
+    Defensive filter for legacy shares that were created with an empty or
+    unsupported permissions array (#242).
+    """
+    permissions = item.get("permissions", [])
+    if not isinstance(permissions, (list, set)) or not permissions:
+        return False
+    for perm in permissions:
+        if isinstance(perm, str) and perm.upper() in {"READ", "WRITE"}:
+            return True
+    return False
+
+
 async def _handle_pagination(table: Any, query_params: Dict[str, Any], field_name: str) -> List[str]:
     """Handle DynamoDB pagination for query operations."""
     results: List[str] = []
@@ -87,9 +102,26 @@ async def _async_get_shared_profile_ids(dynamodb: Any, shares_table_name: str, t
         "IndexName": "targetAccountId-index",
         "KeyConditionExpression": "targetAccountId = :targetAccountId",
         "ExpressionAttributeValues": {":targetAccountId": target_account_id},
-        "ProjectionExpression": "profileId",
+        "ProjectionExpression": "profileId, permissions",
     }
-    return await _handle_pagination(table, query_params, "profileId")
+    results: List[str] = []
+    response = await table.query(**query_params)
+    results.extend(
+        item["profileId"]
+        for item in response.get("Items", [])
+        if item.get("profileId") and _share_item_has_accessible_permissions(item)
+    )
+
+    while response.get("LastEvaluatedKey"):
+        query_params["ExclusiveStartKey"] = response["LastEvaluatedKey"]
+        response = await table.query(**query_params)
+        results.extend(
+            item["profileId"]
+            for item in response.get("Items", [])
+            if item.get("profileId") and _share_item_has_accessible_permissions(item)
+        )
+
+    return results
 
 
 async def _async_get_shared_campaign_catalog_ids(
