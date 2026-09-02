@@ -23,7 +23,8 @@ export function request(ctx) {
         expressionValues: util.dynamodb.toMapValues({ 
             ':campaignId': campaignId
         })
-        }
+        },
+        consistentRead: true
     };
 
     const limit = ctx.args.limit;

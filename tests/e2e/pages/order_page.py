@@ -154,7 +154,7 @@ class OrderPage(BasePage):
         self._customer_name_input().fill(customer_name)
         if phone is not None:
             self._customer_phone_input().fill(phone)
-        self._add_product_button().click()
+        self._ensure_row_exists(0)
         product_row = self.page.get_by_role("row").nth(1)  # nth(0) is <thead>
         product_row.get_by_role("combobox").click()
         self.page.get_by_role("option").first.click()
@@ -419,7 +419,13 @@ class OrderPage(BasePage):
             expect(cell.first).to_be_visible(timeout=10_000)
             return True
         except Exception:  # noqa: BLE001
-            return False
+            try:
+                self.page.reload()
+                self.wait_for_loading()
+                expect(cell.first).to_be_visible(timeout=5_000)
+                return True
+            except Exception:  # noqa: BLE001
+                return False
 
     def get_order_total(self) -> str:
         """Return the order-total text shown at the bottom of the line items table.

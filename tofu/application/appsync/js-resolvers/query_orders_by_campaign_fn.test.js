@@ -13,6 +13,7 @@ describe('query_orders_by_campaign_fn request', () => {
 
         assert.strictEqual(result.operation, 'Query');
         assert.strictEqual(result.query.expression, 'campaignId = :campaignId');
+        assert.strictEqual(result.consistentRead, true);
         assert.strictEqual(result.limit, undefined);
         assert.strictEqual(result.nextToken, undefined);
     });

@@ -722,6 +722,23 @@ interface SubmitOrderParams {
   navigate: (path: string) => void;
 }
 
+function checkFormErrors(formState: OrderFormState): LineItemInput[] | null {
+  const validation = validateOrderForm(formState.customerName, formState.lineItems);
+  if (!validation.isValid) {
+    formState.setError(validation.error!);
+    return null;
+  }
+  if (!isValidPhoneNumber(formState.customerPhone)) {
+    formState.setError(PHONE_ERROR_MESSAGE);
+    return null;
+  }
+  return validation.validLineItems;
+}
+
+function hasMutationErrors(res: unknown): boolean {
+  return Boolean(res && typeof res === 'object' && 'errors' in res && (res as { errors?: unknown[] }).errors?.length);
+}
+
 async function submitOrder({
   formState,
   urlParams,
@@ -730,23 +747,18 @@ async function submitOrder({
   navigate,
 }: SubmitOrderParams): Promise<void> {
   formState.setError(null);
-
-  const validation = validateOrderForm(formState.customerName, formState.lineItems);
-  if (!validation.isValid) {
-    formState.setError(validation.error!);
-    return;
-  }
-
-  if (!isValidPhoneNumber(formState.customerPhone)) {
-    formState.setError(PHONE_ERROR_MESSAGE);
+  const validLineItems = checkFormErrors(formState);
+  if (!validLineItems) {
     return;
   }
 
   formState.setLoading(true);
 
   try {
-    await executeOrderMutation(formState, urlParams, validation.validLineItems, createOrder, updateOrder);
-    navigate(urlParams.ordersUrl);
+    const res = await executeOrderMutation(formState, urlParams, validLineItems, createOrder, updateOrder);
+    if (!hasMutationErrors(res)) {
+      navigate(urlParams.ordersUrl);
+    }
   } catch (err: unknown) {
     const error = err as { message?: string };
     formState.setError(error.message || 'Failed to save order');
@@ -760,13 +772,13 @@ async function executeOrderMutation(
   validLineItems: LineItemInput[],
   createOrder: SubmitOrderParams['createOrder'],
   updateOrder: SubmitOrderParams['updateOrder'],
-): Promise<void> {
+): Promise<unknown> {
   if (urlParams.isEditing) {
     const input = buildUpdateOrderInput(formState, urlParams.dbOrderId, validLineItems);
-    await updateOrder({ variables: { input } });
+    return await updateOrder({ variables: { input } });
   } else {
     const input = buildCreateOrderInput(formState, urlParams.dbProfileId, urlParams.dbCampaignId, validLineItems);
-    await createOrder({ variables: { input } });
+    return await createOrder({ variables: { input } });
   }
 }
 

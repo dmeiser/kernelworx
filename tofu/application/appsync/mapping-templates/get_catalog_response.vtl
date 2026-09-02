@@ -12,7 +12,7 @@
         $util.toJson(null)
     #else
         #set($isPublic = $ctx.result.isPublic == true || $ctx.result.isPublic == 'true')
-        #set($isOwner = $ctx.result.ownerAccountId == 'ACCOUNT#' + $ctx.identity.sub)
+        #set($isOwner = $ctx.result.ownerAccountId == 'ACCOUNT#' + $ctx.identity.sub || $ctx.result.ownerAccountId == $ctx.identity.sub)
         #if($isPublic || $isOwner)
             $util.toJson($ctx.result)
         #else
