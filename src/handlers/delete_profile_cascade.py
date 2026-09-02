@@ -10,11 +10,14 @@ if TYPE_CHECKING:  # pragma: no cover
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
+    from campaign_operations import _verify_campaign_deleted, _verify_orders_deleted_by_ids
+
     from utils.dynamodb import tables
     from utils.errors import AppError, ErrorCode
     from utils.ids import ensure_account_id, ensure_profile_id
     from utils.logging import get_logger
 except ModuleNotFoundError:  # pragma: no cover
+    from ..handlers.campaign_operations import _verify_campaign_deleted, _verify_orders_deleted_by_ids
     from ..utils.dynamodb import tables
     from ..utils.errors import AppError, ErrorCode
     from ..utils.ids import ensure_account_id, ensure_profile_id
@@ -268,10 +271,19 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> bool:
     )
 
     order_keys = _collect_order_keys(campaigns)
+    order_ids = [key["orderId"] for key in order_keys]
+    campaign_ids = [str(campaign["campaignId"]) for campaign in campaigns if campaign.get("campaignId")]
 
     orders_deleted = _delete_orders(order_keys)
+    if order_ids:
+        _verify_orders_deleted_by_ids(order_ids)
+
     reports_deleted = _delete_s3_reports(db_profile_id)
     campaigns_deleted = _delete_campaigns(db_profile_id, campaigns)
+    if campaign_ids:
+        for campaign_id in campaign_ids:
+            _verify_campaign_deleted(campaign_id)
+
     shares_deleted = _delete_shares(db_profile_id, shares)
     invites_deleted = _delete_invites(invites)
 

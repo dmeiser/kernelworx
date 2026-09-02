@@ -2660,7 +2660,10 @@ class TestAdminDeleteUserOrders:
             "arguments": {"accountId": target_account_id},
         }
 
-        with patch("src.handlers.admin_operations.tables") as mock_tables:
+        with (
+            patch("src.handlers.admin_operations.tables") as mock_tables,
+            patch("src.handlers.campaign_operations.tables") as mock_campaign_tables,
+        ):
             # Mock profiles query
             mock_tables.profiles.query.return_value = {
                 "Items": [
@@ -2685,6 +2688,10 @@ class TestAdminDeleteUserOrders:
                     ]
                 },
             ]
+
+            # GSI verification helpers use campaign_operations.tables
+            mock_campaign_tables.orders.query.return_value = {"Items": []}
+            mock_campaign_tables.campaigns.query.return_value = {"Items": []}
 
             result = admin_delete_user_orders(event, lambda_context)
 
@@ -2779,7 +2786,10 @@ class TestAdminDeleteUserCampaigns:
             "arguments": {"accountId": target_account_id},
         }
 
-        with patch("src.handlers.admin_operations.tables") as mock_tables:
+        with (
+            patch("src.handlers.admin_operations.tables") as mock_tables,
+            patch("src.handlers.campaign_operations.tables") as mock_campaign_tables,
+        ):
             # Mock profiles query
             mock_tables.profiles.query.return_value = {
                 "Items": [
@@ -2787,13 +2797,16 @@ class TestAdminDeleteUserCampaigns:
                 ]
             }
 
-            # Mock campaigns query
+            # Mock campaigns query - campaigns for the profile
             mock_tables.campaigns.query.return_value = {
                 "Items": [
                     {"campaignId": "campaign-1", "profileId": "profile-1"},
                     {"campaignId": "campaign-2", "profileId": "profile-1"},
                 ]
             }
+
+            # GSI verification helpers use campaign_operations.tables
+            mock_campaign_tables.campaigns.query.return_value = {"Items": []}
 
             result = admin_delete_user_campaigns(event, lambda_context)
 

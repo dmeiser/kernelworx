@@ -557,13 +557,20 @@ class TestDeleteProfileCascade:
         mock_writer = _make_mock_batch_writer()
         mock_table.batch_writer.return_value = mock_writer
 
-        with patch("src.handlers.delete_profile_cascade.tables") as mock_tables:
+        with (
+            patch("src.handlers.delete_profile_cascade.tables") as mock_tables,
+            patch("src.handlers.campaign_operations.tables") as mock_campaign_tables,
+        ):
             mock_tables.profiles.query.return_value = {"Items": [{"ownerAccountId": f"ACCOUNT#{owner_id}"}]}
             mock_tables.profiles.delete_item.return_value = {}
             mock_tables.shares.query.return_value = {"Items": []}
             mock_tables.invites.query.return_value = {"Items": []}
             mock_tables.campaigns.query.return_value = {"Items": [{"profileId": profile_id, "campaignId": campaign_id}]}
             mock_tables.orders = mock_table
+
+            # GSI verification helpers use campaign_operations.tables
+            mock_campaign_tables.orders.query.return_value = {"Items": []}
+            mock_campaign_tables.campaigns.query.return_value = {"Items": []}
 
             event = {
                 "arguments": {"profileId": profile_id},

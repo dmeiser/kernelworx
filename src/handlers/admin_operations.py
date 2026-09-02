@@ -21,11 +21,14 @@ from botocore.exceptions import ClientError
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
+    from campaign_operations import _verify_campaign_deleted, _verify_orders_deleted_by_ids
+
     from utils.auth import is_admin
     from utils.dynamodb import get_dynamodb_resource, tables
     from utils.errors import AppError, ErrorCode
     from utils.logging import get_logger, mask_email
 except ModuleNotFoundError:  # pragma: no cover
+    from ..handlers.campaign_operations import _verify_campaign_deleted, _verify_orders_deleted_by_ids
     from ..utils.auth import is_admin
     from ..utils.dynamodb import get_dynamodb_resource, tables
     from ..utils.errors import AppError, ErrorCode
@@ -976,7 +979,7 @@ def create_managed_catalog(event: Dict[str, Any], context: Any) -> Dict[str, Any
 
 
 def _delete_orders_for_campaign(campaign_id: str, logger: Any) -> int:
-    """Delete all orders for a campaign. Returns count deleted."""
+    """Delete all orders for a campaign and verify GSI propagation. Returns count deleted."""
     orders = query_all_items(
         tables.orders,
         {
@@ -986,9 +989,16 @@ def _delete_orders_for_campaign(campaign_id: str, logger: Any) -> int:
     )
 
     deleted_count = 0
+    order_ids: list[str] = []
     for order in orders:
-        tables.orders.delete_item(Key={"campaignId": campaign_id, "orderId": order["orderId"]})
+        order_id = order["orderId"]
+        tables.orders.delete_item(Key={"campaignId": campaign_id, "orderId": order_id})
+        order_ids.append(order_id)
         deleted_count += 1
+
+    if order_ids:
+        _verify_orders_deleted_by_ids(order_ids)
+
     return deleted_count
 
 
@@ -1030,7 +1040,9 @@ def _delete_user_campaigns(account_id: str, logger: Any) -> int:
             },
         )
         for campaign in campaigns:
-            tables.campaigns.delete_item(Key={"profileId": profile_id, "campaignId": campaign["campaignId"]})
+            campaign_id = campaign["campaignId"]
+            tables.campaigns.delete_item(Key={"profileId": profile_id, "campaignId": campaign_id})
+            _verify_campaign_deleted(campaign_id)
             deleted_count += 1
 
     logger.info("Deleted user campaigns", account_id=account_id, count=deleted_count)

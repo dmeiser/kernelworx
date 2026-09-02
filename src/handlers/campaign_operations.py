@@ -502,8 +502,10 @@ def _to_dynamo_value(value: Any) -> Dict[str, Any]:
 
 
 BATCH_DELETE_SIZE = 25
-_ORDER_DELETE_VERIFY_RETRIES = 3
-_ORDER_DELETE_VERIFY_DELAY_SECONDS = 0.1
+_DELETE_VERIFY_RETRIES = 3
+_DELETE_VERIFY_DELAY_SECONDS = 0.1
+_ORDER_DELETE_VERIFY_RETRIES = _DELETE_VERIFY_RETRIES
+_ORDER_DELETE_VERIFY_DELAY_SECONDS = _DELETE_VERIFY_DELAY_SECONDS
 
 
 def _get_campaign_by_id(campaign_id: str) -> Optional[Dict[str, Any]]:
@@ -562,7 +564,7 @@ def _verify_orders_deleted(campaign_id: str) -> None:
     orders are still present after retries.
     """
     remaining: List[Dict[str, Any]] = []
-    for attempt in range(1, _ORDER_DELETE_VERIFY_RETRIES + 1):
+    for attempt in range(1, _DELETE_VERIFY_RETRIES + 1):
         remaining = query_all_items(
             tables.orders,
             {
@@ -574,14 +576,14 @@ def _verify_orders_deleted(campaign_id: str) -> None:
         )
         if not remaining:
             return
-        if attempt < _ORDER_DELETE_VERIFY_RETRIES:
+        if attempt < _DELETE_VERIFY_RETRIES:
             logger.warning(
                 "Orders still present after delete, retrying",
                 campaign_id=campaign_id,
                 attempt=attempt,
                 count=len(remaining),
             )
-            time.sleep(_ORDER_DELETE_VERIFY_DELAY_SECONDS)
+            time.sleep(_DELETE_VERIFY_DELAY_SECONDS)
 
     logger.error(
         "Orders still present after delete verification",
@@ -592,6 +594,77 @@ def _verify_orders_deleted(campaign_id: str) -> None:
         ErrorCode.INTERNAL_ERROR,
         "Failed to delete all orders for campaign",
     )
+
+
+def _verify_order_deleted(order_id: str) -> None:
+    """Verify an order is no longer visible in the orderId-index GSI.
+
+    Retries briefly to tolerate transient propagation lag. Raises AppError if
+    the order is still present after retries.
+    """
+    for attempt in range(1, _DELETE_VERIFY_RETRIES + 1):
+        remaining = query_all_items(
+            tables.orders,
+            {
+                "IndexName": "orderId-index",
+                "KeyConditionExpression": "orderId = :oid",
+                "ExpressionAttributeValues": {":oid": order_id},
+                "ProjectionExpression": "orderId",
+                "Limit": 1,
+            },
+        )
+        if not remaining:
+            return
+        if attempt < _DELETE_VERIFY_RETRIES:
+            logger.warning(
+                "Order still present in GSI after delete, retrying",
+                order_id=order_id,
+                attempt=attempt,
+            )
+            time.sleep(_DELETE_VERIFY_DELAY_SECONDS)
+
+    logger.error("Order still present in GSI after delete verification", order_id=order_id)
+    raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to delete order")
+
+
+def _verify_orders_deleted_by_ids(order_ids: List[str]) -> None:
+    """Verify a list of order IDs are no longer visible in the orderId-index GSI."""
+    for order_id in order_ids:
+        _verify_order_deleted(order_id)
+
+
+def _verify_campaign_deleted(campaign_id: str) -> None:
+    """Verify a campaign is no longer visible in the campaignId-index GSI.
+
+    Retries briefly to tolerate transient propagation lag. Raises AppError if
+    the campaign is still present after retries.
+    """
+    for attempt in range(1, _DELETE_VERIFY_RETRIES + 1):
+        remaining = query_all_items(
+            tables.campaigns,
+            {
+                "IndexName": "campaignId-index",
+                "KeyConditionExpression": "campaignId = :cid",
+                "ExpressionAttributeValues": {":cid": campaign_id},
+                "ProjectionExpression": "campaignId",
+                "Limit": 1,
+            },
+        )
+        if not remaining:
+            return
+        if attempt < _DELETE_VERIFY_RETRIES:
+            logger.warning(
+                "Campaign still present in GSI after delete, retrying",
+                campaign_id=campaign_id,
+                attempt=attempt,
+            )
+            time.sleep(_DELETE_VERIFY_DELAY_SECONDS)
+
+    logger.error(
+        "Campaign still present in GSI after delete verification",
+        campaign_id=campaign_id,
+    )
+    raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to delete campaign")
 
 
 def _delete_orders_for_campaign(campaign_id: str) -> int:
