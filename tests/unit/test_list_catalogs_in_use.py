@@ -198,7 +198,10 @@ class TestAsyncGetSharedProfileIds:
                 "LastEvaluatedKey": {"pk": "key1"},
             },
             {
-                "Items": [{"profileId": "PROFILE#prof2", "permissions": ["WRITE"]}, {}],  # Include item without profileId
+                "Items": [
+                    {"profileId": "PROFILE#prof2", "permissions": ["WRITE"]},
+                    {},  # Item without profileId
+                ],
             },
         ]
 
