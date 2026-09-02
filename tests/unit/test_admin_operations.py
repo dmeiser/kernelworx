@@ -2698,6 +2698,62 @@ class TestAdminDeleteUserOrders:
             assert result == 3  # 3 orders deleted
             assert mock_tables.orders.delete_item.call_count == 3
 
+    def test_success_with_campaign_having_no_orders(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """Test that a campaign without orders is handled and skipped correctly."""
+        monkeypatch.setenv("PROFILES_TABLE_NAME", "kernelworx-profiles-ue1-dev")
+        monkeypatch.setenv("CAMPAIGNS_TABLE_NAME", "kernelworx-campaigns-ue1-dev")
+        monkeypatch.setenv("ORDERS_TABLE_NAME", "kernelworx-orders-ue1-dev")
+
+        from src.handlers.admin_operations import admin_delete_user_orders
+
+        target_account_id = "target-user-123"
+        db_account_id = f"ACCOUNT#{target_account_id}"
+
+        event = {
+            **admin_appsync_event,
+            "arguments": {"accountId": target_account_id},
+        }
+
+        with (
+            patch("src.handlers.admin_operations.tables") as mock_tables,
+            patch("src.handlers.campaign_operations.tables") as mock_campaign_tables,
+        ):
+            # Mock profiles query
+            mock_tables.profiles.query.return_value = {
+                "Items": [
+                    {"profileId": "profile-1", "ownerAccountId": db_account_id},
+                ]
+            }
+
+            # Mock campaigns query - two campaigns for the same profile
+            mock_tables.campaigns.query.return_value = {
+                "Items": [
+                    {"campaignId": "campaign-1", "profileId": "profile-1"},
+                    {"campaignId": "campaign-2", "profileId": "profile-1"},
+                ]
+            }
+
+            # Mock orders query - first campaign has one order, second has none
+            mock_tables.orders.query.side_effect = [
+                {"Items": [{"orderId": "order-1", "campaignId": "campaign-1"}]},
+                {"Items": []},
+            ]
+
+            # GSI verification helpers use campaign_operations.tables
+            mock_campaign_tables.orders.query.return_value = {"Items": []}
+            mock_campaign_tables.campaigns.query.return_value = {"Items": []}
+
+            result = admin_delete_user_orders(event, lambda_context)
+
+            assert result == 1  # Only 1 order deleted
+            assert mock_tables.orders.delete_item.call_count == 1
+
     def test_non_admin_forbidden(
         self,
         dynamodb_table: Any,

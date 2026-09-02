@@ -19,16 +19,17 @@ from typing import TYPE_CHECKING, Any, Dict, Optional, cast
 import boto3
 from botocore.exceptions import ClientError
 
+# Sibling handler modules use a same-package relative import, which resolves both
+# in the Lambda zip (package `handlers`) and in unit tests (package `src.handlers`).
+from .campaign_operations import _verify_campaign_deleted, _verify_orders_deleted_by_ids
+
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
-    from campaign_operations import _verify_campaign_deleted, _verify_orders_deleted_by_ids
-
     from utils.auth import is_admin
     from utils.dynamodb import get_dynamodb_resource, tables
     from utils.errors import AppError, ErrorCode
     from utils.logging import get_logger, mask_email
 except ModuleNotFoundError:  # pragma: no cover
-    from ..handlers.campaign_operations import _verify_campaign_deleted, _verify_orders_deleted_by_ids
     from ..utils.auth import is_admin
     from ..utils.dynamodb import get_dynamodb_resource, tables
     from ..utils.errors import AppError, ErrorCode

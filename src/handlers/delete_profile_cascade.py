@@ -8,16 +8,17 @@ from botocore.exceptions import ClientError
 if TYPE_CHECKING:  # pragma: no cover
     from mypy_boto3_dynamodb.service_resource import Table
 
+# Sibling handler modules use a same-package relative import, which resolves both
+# in the Lambda zip (package `handlers`) and in unit tests (package `src.handlers`).
+from .campaign_operations import _verify_campaign_deleted, _verify_orders_deleted_by_ids
+
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
-    from campaign_operations import _verify_campaign_deleted, _verify_orders_deleted_by_ids
-
     from utils.dynamodb import tables
     from utils.errors import AppError, ErrorCode
     from utils.ids import ensure_account_id, ensure_profile_id
     from utils.logging import get_logger
 except ModuleNotFoundError:  # pragma: no cover
-    from ..handlers.campaign_operations import _verify_campaign_deleted, _verify_orders_deleted_by_ids
     from ..utils.dynamodb import tables
     from ..utils.errors import AppError, ErrorCode
     from ..utils.ids import ensure_account_id, ensure_profile_id
