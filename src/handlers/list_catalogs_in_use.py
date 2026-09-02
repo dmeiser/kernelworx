@@ -18,7 +18,7 @@ Returns: [ID!]! (list of catalog IDs)
 """
 
 import asyncio
-from typing import Any, Dict, List, Set, Tuple
+from typing import Any, Callable, Dict, List, Set, Tuple
 
 import aioboto3
 
@@ -36,21 +36,36 @@ except ModuleNotFoundError:  # pragma: no cover
 logger = get_logger(__name__)
 
 
+def _has_effective_permission(permissions: Any) -> bool:
+    """Check if permissions grant at least one effective READ or WRITE right."""
+    if not isinstance(permissions, (list, set)):
+        return False
+    return any(p in ("READ", "WRITE") for p in permissions)
+
+
 async def _extract_field_values(items: list[Dict[str, Any]], field_name: str) -> List[str]:
     """Extract field values from DynamoDB items."""
     return [item[field_name] for item in items if item.get(field_name)]
 
 
-async def _handle_pagination(table: Any, query_params: Dict[str, Any], field_name: str) -> List[str]:
-    """Handle DynamoDB pagination for query operations."""
+async def _handle_pagination(
+    table: Any, query_params: Dict[str, Any], field_name: str, filter_fn: Callable[[Dict[str, Any]], bool] | None = None
+) -> List[str]:
+    """Handle DynamoDB pagination for query operations, optionally filtering items."""
     results: List[str] = []
     response = await table.query(**query_params)
-    results.extend(await _extract_field_values(response.get("Items", []), field_name))
+    items = response.get("Items", [])
+    if filter_fn:
+        items = [item for item in items if filter_fn(item)]
+    results.extend(await _extract_field_values(items, field_name))
 
     while response.get("LastEvaluatedKey"):
         query_params["ExclusiveStartKey"] = response["LastEvaluatedKey"]
         response = await table.query(**query_params)
-        results.extend(await _extract_field_values(response.get("Items", []), field_name))
+        items = response.get("Items", [])
+        if filter_fn:
+            items = [item for item in items if filter_fn(item)]
+        results.extend(await _extract_field_values(items, field_name))
 
     return results
 
@@ -81,15 +96,23 @@ async def _async_get_campaigns_for_profile(dynamodb: Any, campaigns_table_name: 
 
 
 async def _async_get_shared_profile_ids(dynamodb: Any, shares_table_name: str, target_account_id: str) -> List[str]:
-    """Async: Get profile IDs that are shared with this account."""
+    """Async: Get profile IDs that are shared with this account.
+
+    Only returns profiles where the share grants at least one effective READ or WRITE permission.
+    """
     table = await dynamodb.Table(shares_table_name)
     query_params = {
         "IndexName": "targetAccountId-index",
         "KeyConditionExpression": "targetAccountId = :targetAccountId",
         "ExpressionAttributeValues": {":targetAccountId": target_account_id},
-        "ProjectionExpression": "profileId",
+        "ProjectionExpression": "profileId, permissions",
     }
-    return await _handle_pagination(table, query_params, "profileId")
+    return await _handle_pagination(
+        table,
+        query_params,
+        "profileId",
+        filter_fn=lambda item: _has_effective_permission(item.get("permissions")),
+    )
 
 
 async def _async_get_shared_campaign_catalog_ids(

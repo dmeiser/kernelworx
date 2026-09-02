@@ -129,8 +129,8 @@ class TestAsyncGetSharedProfileIds:
         mock_table = AsyncMock()
         mock_table.query.return_value = {
             "Items": [
-                {"profileId": "PROFILE#prof1"},
-                {"profileId": "PROFILE#prof2"},
+                {"profileId": "PROFILE#prof1", "permissions": ["READ"]},
+                {"profileId": "PROFILE#prof2", "permissions": ["WRITE"]},
             ]
         }
 
@@ -144,7 +144,7 @@ class TestAsyncGetSharedProfileIds:
             IndexName="targetAccountId-index",
             KeyConditionExpression="targetAccountId = :targetAccountId",
             ExpressionAttributeValues={":targetAccountId": "ACCOUNT#test-user"},
-            ProjectionExpression="profileId",
+            ProjectionExpression="profileId, permissions",
         )
 
     @pytest.mark.asyncio
@@ -170,11 +170,11 @@ class TestAsyncGetSharedProfileIds:
         mock_table = AsyncMock()
         mock_table.query.side_effect = [
             {
-                "Items": [{"profileId": "PROFILE#prof1"}],
+                "Items": [{"profileId": "PROFILE#prof1", "permissions": ["READ"]}],
                 "LastEvaluatedKey": {"pk": "key1"},
             },
             {
-                "Items": [{"profileId": "PROFILE#prof2"}],
+                "Items": [{"profileId": "PROFILE#prof2", "permissions": ["WRITE"]}],
             },
         ]
 
@@ -194,11 +194,14 @@ class TestAsyncGetSharedProfileIds:
         mock_table = AsyncMock()
         mock_table.query.side_effect = [
             {
-                "Items": [{"profileId": "PROFILE#prof1"}],
+                "Items": [{"profileId": "PROFILE#prof1", "permissions": ["READ"]}],
                 "LastEvaluatedKey": {"pk": "key1"},
             },
             {
-                "Items": [{"profileId": "PROFILE#prof2"}, {}],  # Include item without profileId
+                "Items": [
+                    {"profileId": "PROFILE#prof2", "permissions": ["WRITE"]},
+                    {},
+                ],  # Include item without profileId
             },
         ]
 
@@ -217,8 +220,8 @@ class TestAsyncGetSharedProfileIds:
         mock_table = AsyncMock()
         mock_table.query.return_value = {
             "Items": [
-                {"profileId": "PROFILE#prof1"},
-                {},  # Missing profileId
+                {"profileId": "PROFILE#prof1", "permissions": ["READ"]},
+                {"permissions": ["READ"]},  # Missing profileId
             ]
         }
 
@@ -228,6 +231,29 @@ class TestAsyncGetSharedProfileIds:
         result = await _async_get_shared_profile_ids(mock_dynamodb, "shares-table", "ACCOUNT#test-user")
 
         assert result == ["PROFILE#prof1"]
+
+    @pytest.mark.asyncio
+    async def test_skips_shares_without_effective_permission(self) -> None:
+        """Should skip shares with empty, missing, or non-effective permissions."""
+        from src.handlers.list_catalogs_in_use import _async_get_shared_profile_ids
+
+        mock_table = AsyncMock()
+        mock_table.query.return_value = {
+            "Items": [
+                {"profileId": "PROFILE#prof1", "permissions": ["READ"]},
+                {"profileId": "PROFILE#prof2", "permissions": []},
+                {"profileId": "PROFILE#prof3"},
+                {"profileId": "PROFILE#prof4", "permissions": ["ADMIN"]},
+                {"profileId": "PROFILE#prof5", "permissions": ["WRITE"]},
+            ]
+        }
+
+        mock_dynamodb = AsyncMock()
+        mock_dynamodb.Table.return_value = mock_table
+
+        result = await _async_get_shared_profile_ids(mock_dynamodb, "shares-table", "ACCOUNT#test-user")
+
+        assert result == ["PROFILE#prof1", "PROFILE#prof5"]
 
 
 class TestAsyncGetCampaignsForProfile:
@@ -459,7 +485,7 @@ class TestAsyncGetAllCatalogIds:
         mock_campaigns_table.query.return_value = {"Items": [{"catalogId": "CATALOG#cat1"}]}
 
         mock_shares_table = AsyncMock()
-        mock_shares_table.query.return_value = {"Items": [{"profileId": "PROFILE#shared1"}]}
+        mock_shares_table.query.return_value = {"Items": [{"profileId": "PROFILE#shared1", "permissions": ["READ"]}]}
 
         async def mock_table(table_name: str) -> AsyncMock:
             """Return the appropriate mock table based on name."""

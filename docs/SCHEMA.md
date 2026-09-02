@@ -304,13 +304,15 @@ graph TD
     A["User wants to access Profile"] -->|Check: ownerAccountId = user| B{Is Owner?}
     B -->|Yes| C["✓ Full Access<br/>Read + Write + Delete"]
     B -->|No| D["Query SHARE table"]
-    D -->|Share exists| E{Has WRITE?}
+    D -->|Share found| G{Grants READ or WRITE?}
     D -->|Share not found| F["✗ No Access"]
-    E -->|Yes| G["✓ Write Access<br/>Read + Write"]
-    E -->|No| H["✓ Read-Only Access<br/>Read Only"]
+    G -->|No| F
+    G -->|Yes| E{Has WRITE?}
+    E -->|Yes| H["✓ Write Access<br/>Read + Write"]
+    E -->|No| I["✓ Read-Only Access<br/>Read Only"]
 ```
 
-Shares and invites must grant at least one effective `READ` or `WRITE` permission to be usable. Entries with empty permissions, or permissions that do not include `READ` or `WRITE`, are rejected at creation/redeem time and filtered out by `listMyShares`, `listSharesByProfile`, and `listInvitesByProfile`.
+Shares and invites must grant at least one effective `READ` or `WRITE` permission to be usable. Entries with empty permissions, or permissions that do not include `READ` or `WRITE`, are rejected at creation/redeem time and filtered out by `listMyShares`, `listSharesByProfile`, and `listInvitesByProfile`. The `listCatalogsInUse` Lambda also ignores shares with no effective `READ` or `WRITE` permission when resolving shared profiles.
 
 ## State Management
 
