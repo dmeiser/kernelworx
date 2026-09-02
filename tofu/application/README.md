@@ -18,6 +18,7 @@ tofu/
 │   ├── lambda/            # Lambda functions
 │   ├── appsync/           # AppSync API
 │   ├── cloudfront/        # CloudFront distribution
+│   ├── waf/               # CloudFront-scope WAF (rate limiting, #165)
 │   └── certificates/      # ACM certificates
 └── scripts/               # Deployment and import scripts
 ```

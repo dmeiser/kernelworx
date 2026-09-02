@@ -91,7 +91,11 @@ else
 fi
 
 if [ -z "$APPSYNC_API_URL" ] || [ "$APPSYNC_API_URL" == "None" ]; then
-    APPSYNC_API_URL="https://api.${SITE_DOMAIN}/graphql"
+    API_NAME="kernelworx-api-ue1-${ENVIRONMENT}"
+    APPSYNC_API_URL=$(aws appsync list-graphql-apis \
+        --query "graphqlApis[?name=='$API_NAME'].uris['GRAPHQL'] | [0]" \
+        --output text \
+        --region "$REGION" 2>/dev/null || echo "")
 fi
 
 if [ -z "$SITE_URL" ] || [ "$SITE_URL" == "None" ]; then
@@ -155,14 +159,10 @@ VITE_OAUTH_REDIRECT_SIGNIN=${SITE_URL}
 VITE_OAUTH_REDIRECT_SIGNOUT=${SITE_URL}
 EOF
 
-# Also update .env for local dev consistency, keeping the direct endpoints
-# that `vite dev` needs (localhost is not behind CloudFront).
+# Refresh .env from .env.production so the build below cannot pick up
+# local-dev absolute endpoints: Vite loads .env in every mode, and
+# .env.production overrides only the keys it defines.
 cp .env.production .env
-cat >> .env << EOF
-# Local `vite dev` overrides (not used by production builds)
-VITE_APPSYNC_ENDPOINT=${APPSYNC_API_URL}
-VITE_COGNITO_DOMAIN=${COGNITO_DOMAIN}
-EOF
 
 echo "   .env.production file updated"
 
@@ -172,6 +172,14 @@ echo "   .env.production file updated"
 echo ""
 echo "🔨 Building frontend..."
 npm run build
+
+# Append the local-dev overrides only after the production build, keeping
+# the direct endpoints that 'vite dev' needs (localhost is not behind
+# CloudFront).
+cat >> .env << EOF
+VITE_APPSYNC_ENDPOINT=${APPSYNC_API_URL}
+VITE_COGNITO_DOMAIN=${COGNITO_DOMAIN}
+EOF
 
 # ============================================================
 # Step 4: Sync to S3
