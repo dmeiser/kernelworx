@@ -1232,7 +1232,8 @@ describe('Order Operations Integration Tests', () => {
 
       const orderId = createData.createOrder.orderId;
 
-      // Update payment method
+      // Update payment method (CREDIT_CARD is no longer valid; only Cash, Check,
+      // and configured custom methods are accepted by the update pipeline validator)
       const updateInput = {
         orderId,
         paymentMethod: 'CHECK',
