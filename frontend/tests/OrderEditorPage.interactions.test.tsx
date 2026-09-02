@@ -888,7 +888,9 @@ describe('OrderEditorPage - Create Order', () => {
         errors: [new GraphQLError('Catalog access denied')],
       },
     };
-    renderCreateOrder(baseMocks([createOrderGraphQLError]), { mutate: { errorPolicy: 'all' } } as DefaultOptions);
+    renderCreateOrder(baseMocks([createOrderGraphQLError]), {
+      mutate: { errorPolicy: 'all' },
+    } as unknown as DefaultOptions);
 
     await waitFor(
       () => {

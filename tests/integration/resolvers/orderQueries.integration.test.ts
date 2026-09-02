@@ -2,7 +2,7 @@ import '../setup.ts';
 import { describe, test, expect, beforeAll, afterAll } from 'vitest';
 import { ApolloClient, NormalizedCacheObject, gql, HttpLink, InMemoryCache } from '@apollo/client';
 import { createAuthenticatedClient } from '../setup/apolloClient';
-import { deleteTestAccounts } from '../setup/testData';
+import { deleteCatalogWithRetry, deleteTestAccounts } from '../setup/testData';
 
 // Helper to create unauthenticated client
 const createUnauthenticatedClient = () => {
@@ -563,12 +563,9 @@ describe('Order Query Operations Integration Tests', () => {
         }
       }
       
-      // 4. Delete catalog
+      // 4. Delete catalog (retry for GSI eventual consistency after campaign deletion)
       if (testCatalogId) {
-        await ownerClient.mutate({
-          mutation: DELETE_CATALOG,
-          variables: { catalogId: testCatalogId },
-        });
+        await deleteCatalogWithRetry(ownerClient, testCatalogId);
       }
       
       // 5. Delete profiles
@@ -1190,27 +1187,7 @@ describe('Order Query Operations Integration Tests', () => {
       // Cleanup
       await ownerClient.mutate({ mutation: DELETE_ORDER, variables: { orderId } });
       await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId } });
-
-      // Retry deleteCatalog to tolerate catalogId-index GSI propagation lag
-      // after campaign deletion (Bug #21: GSI eventual consistency).
-      let catalogDeleted = false;
-      for (let attempt = 0; attempt < 5; attempt++) {
-        try {
-          await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId } });
-          catalogDeleted = true;
-          break;
-        } catch (error: any) {
-          const message = error?.message || error?.graphQLErrors?.[0]?.message || '';
-          if (attempt < 4 && message.includes('Cannot delete catalog')) {
-            await new Promise((resolve) => setTimeout(resolve, 500));
-          } else {
-            throw error;
-          }
-        }
-      }
-      if (!catalogDeleted) {
-        throw new Error('Failed to delete catalog after retries');
-      }
+      await deleteCatalogWithRetry(ownerClient, catalogId);
     }, 15000);
 
     test('Listing orders for campaign with many orders', async () => {
