@@ -211,6 +211,16 @@ module "appsync" {
   lambda_function_arns = module.lambda.function_arns
 }
 
+# Ephemeral has no CloudFront distribution, so the edge WAF feature is nulled:
+# zero WAF objects, zero cost, zero behavior change.
+module "waf" {
+  source = "../../modules/waf"
+
+  name_prefix = local.name_prefix
+  environment = var.environment
+  create      = false
+}
+
 # Outputs consumed by test scripts
 output "appsync_api_url" {
   description = "GraphQL API URL for the AppSync API"

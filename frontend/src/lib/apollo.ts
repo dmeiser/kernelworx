@@ -23,7 +23,10 @@ import { fetchAuthSession } from 'aws-amplify/auth';
  * HTTP link to AppSync endpoint
  */
 const httpLink = createHttpLink({
-  uri: import.meta.env.VITE_APPSYNC_ENDPOINT,
+  // Same-origin: dev/prod serve /graphql through the site's CloudFront
+  // distribution, so no absolute endpoint is configured. Ephemeral and local
+  // `vite dev` builds set VITE_APPSYNC_ENDPOINT to the direct AppSync URL.
+  uri: import.meta.env.VITE_APPSYNC_ENDPOINT ?? '/graphql',
 });
 
 /**

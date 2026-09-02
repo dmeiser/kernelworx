@@ -126,6 +126,7 @@ HMAC
 Home
 hostedzone
 href
+HSTS
 htmlcov
 htmlFor
 httpOnly
@@ -208,6 +209,7 @@ noindex
 noname
 noout
 noreferrer
+nosniff
 nosuchkey
 noto
 octokit

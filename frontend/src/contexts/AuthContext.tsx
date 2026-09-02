@@ -9,6 +9,7 @@ import React, { createContext, useContext, useEffect, useState, useCallback } fr
 import { fetchAuthSession, signInWithRedirect, signIn, signOut, getCurrentUser } from 'aws-amplify/auth';
 import { Hub } from 'aws-amplify/utils';
 import { apolloClient } from '../lib/apollo';
+import { getCognitoDomain } from '../lib/cognitoDomain';
 import { GET_MY_ACCOUNT } from '../lib/graphql';
 import { getSafeRedirect } from '../lib/redirect';
 import type { Account, AuthContextValue } from '../types/auth';
@@ -233,8 +234,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     } catch {
       // If signOut fails, clear local state and do manual redirect
       setAccount(null);
-      // Build the Cognito logout URL manually as fallback
-      const domain = import.meta.env.VITE_COGNITO_DOMAIN;
+      // Build the logout URL manually as fallback. Auth is served same-origin
+      // in dev/prod, so this routes through the site's auth proxy behaviors.
+      const domain = getCognitoDomain();
       const clientId = import.meta.env.VITE_COGNITO_USER_POOL_CLIENT_ID;
       const logoutUri = encodeURIComponent(import.meta.env.VITE_OAUTH_REDIRECT_SIGNOUT);
       window.location.href = `https://${domain}/logout?client_id=${clientId}&logout_uri=${logoutUri}`;
