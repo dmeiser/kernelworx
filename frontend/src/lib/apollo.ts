@@ -82,7 +82,9 @@ export const handleApolloError = ({ operation, error }: ErrorLink.ErrorHandlerOp
       const errorCode = extensions?.errorCode;
 
       if (import.meta.env.DEV) {
-        console.error(`[GraphQL error]: Message: ${message}, Code: ${errorCode}, Location: ${locations}, Path: ${path}`);
+        console.error(
+          `[GraphQL error]: Message: ${message}, Code: ${errorCode}, Location: ${locations}, Path: ${path}`,
+        );
       }
 
       // Map errorCode to user-facing messages
