@@ -156,10 +156,10 @@ VITE_OAUTH_REDIRECT_SIGNOUT=${SITE_URL}
 EOF
 
 # Also update .env for local dev consistency, keeping the direct endpoints
-# that `vite dev` needs (localhost is not behind CloudFront).
+# that 'vite dev' needs (localhost is not behind CloudFront).
 cp .env.production .env
 cat >> .env << EOF
-# Local `vite dev` overrides (not used by production builds)
+# Local 'vite dev' overrides (not used by production builds)
 VITE_APPSYNC_ENDPOINT=${APPSYNC_API_URL}
 VITE_COGNITO_DOMAIN=${COGNITO_DOMAIN}
 EOF
