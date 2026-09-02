@@ -208,3 +208,81 @@ class TestCampaignCatalogResponse:
 
         with pytest.raises(RuntimeError, match="DynamoDB:UserError"):
             _render("campaign_catalog_response.vtl", ctx)
+
+
+class TestSharedCampaignCatalogResponse:
+    """Authorization behavior of the ``SharedCampaign.catalog`` field resolver."""
+
+    @pytest.mark.parametrize("is_public", ["true", True])
+    def test_public_catalog_is_returned(self, is_public: Any) -> None:
+        ctx = {
+            "error": None,
+            "identity": {"sub": "any-caller"},
+            "result": _catalog_result(is_public=is_public),
+            "source": {"catalogId": "CATALOG#test"},
+        }
+
+        output = _render("shared_campaign_catalog_response.vtl", ctx)
+
+        assert json.loads(output)["catalogId"] == "CATALOG#test"
+
+    def test_private_catalog_owned_by_caller_is_returned(self) -> None:
+        ctx = {
+            "error": None,
+            "identity": {"sub": "owner-1"},
+            "result": _catalog_result(is_public="false"),
+            "source": {"catalogId": "CATALOG#test"},
+        }
+
+        output = _render("shared_campaign_catalog_response.vtl", ctx)
+
+        assert json.loads(output)["catalogId"] == "CATALOG#test"
+
+    def test_private_catalog_owned_by_another_is_hidden(self) -> None:
+        ctx = {
+            "error": None,
+            "identity": {"sub": "other-caller"},
+            "result": _catalog_result(is_public="false"),
+            "source": {"catalogId": "CATALOG#test"},
+        }
+
+        output = _render("shared_campaign_catalog_response.vtl", ctx)
+
+        assert json.loads(output) is None
+
+    @pytest.mark.parametrize("is_deleted", ["true", True])
+    def test_deleted_catalog_is_hidden(self, is_deleted: Any) -> None:
+        ctx = {
+            "error": None,
+            "identity": {"sub": "owner-1"},
+            "result": _catalog_result(is_public="true", is_deleted=is_deleted),
+            "source": {"catalogId": "CATALOG#test"},
+        }
+
+        output = _render("shared_campaign_catalog_response.vtl", ctx)
+
+        assert json.loads(output) is None
+
+    @pytest.mark.parametrize("result", [None, {}])
+    def test_missing_catalog_returns_null(self, result: Any) -> None:
+        ctx = {
+            "error": None,
+            "identity": {"sub": "owner-1"},
+            "result": result,
+            "source": {"catalogId": "CATALOG#missing"},
+        }
+
+        output = _render("shared_campaign_catalog_response.vtl", ctx)
+
+        assert json.loads(output) is None
+
+    def test_resolver_error_is_propagated(self) -> None:
+        ctx = {
+            "error": {"message": "DynamoDB failure", "type": "DynamoDB:UserError"},
+            "identity": {"sub": "owner-1"},
+            "result": _catalog_result(),
+            "source": {"catalogId": "CATALOG#test"},
+        }
+
+        with pytest.raises(RuntimeError, match="DynamoDB:UserError"):
+            _render("shared_campaign_catalog_response.vtl", ctx)
