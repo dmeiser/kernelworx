@@ -6,8 +6,12 @@ import { describe, test, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MockedProvider } from '@apollo/client/testing/react';
+import { ApolloClient, InMemoryCache } from '@apollo/client';
+import { ApolloProvider } from '@apollo/client/react';
+import { MockLink } from '@apollo/client/testing';
 import { GraphQLError } from 'graphql';
 import { BrowserRouter } from 'react-router-dom';
+import { apolloClient } from '../src/lib/apollo';
 import { AdminPage } from '../src/pages/AdminPage';
 import {
   LIST_MANAGED_CATALOGS,
@@ -101,6 +105,21 @@ function renderAdmin(mocks: any[]) {
         <AdminPage />
       </BrowserRouter>
     </MockedProvider>,
+  );
+}
+
+function renderAdminWithProductionClient(mocks: any[]) {
+  const client = new ApolloClient({
+    link: new MockLink(mocks),
+    cache: new InMemoryCache(),
+    defaultOptions: apolloClient.defaultOptions,
+  });
+  return render(
+    <ApolloProvider client={client}>
+      <BrowserRouter>
+        <AdminPage />
+      </BrowserRouter>
+    </ApolloProvider>,
   );
 }
 
@@ -1191,7 +1210,7 @@ describe('AdminPage - Catalog Management', () => {
     });
   });
 
-  test('shows error snackbar when delete catalog mutation fails', async () => {
+  test('shows inline error in delete catalog dialog when mutation fails', async () => {
     const user = userEvent.setup();
     const mocks = [
       {
@@ -1215,8 +1234,10 @@ describe('AdminPage - Catalog Management', () => {
     await user.click(deleteButtons[deleteButtons.length - 1]);
 
     await waitFor(() => {
-      expect(screen.getByText(/Error deleting catalog: Delete catalog failed/i)).toBeInTheDocument();
+      expect(screen.getByText(/Delete catalog failed/i)).toBeInTheDocument();
     });
+    // Dialog should remain open so the admin can retry or cancel
+    expect(screen.getByRole('button', { name: /delete/i })).toBeInTheDocument();
   });
 });
 
@@ -1263,5 +1284,100 @@ describe('AdminPage - UserStatusChip edge cases', () => {
       // The locale date cell should show '—'
       expect(screen.getByText('test@example.com')).toBeInTheDocument();
     });
+  });
+});
+
+describe('AdminPage - production Apollo client defaults', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  test('cascading delete stops at the first GraphQL error and does not show success', async () => {
+    const user = userEvent.setup();
+    const accountId = 'ACCOUNT#test-user-1';
+    const mocks = baseMocks([
+      {
+        request: { query: ADMIN_SEARCH_USER, variables: { query: 'test' } },
+        result: { data: { adminSearchUser: [mockAdminUser] } },
+      },
+      {
+        request: { query: ADMIN_DELETE_USER_ORDERS, variables: { accountId } },
+        result: { data: { adminDeleteUserOrders: 5 } },
+      },
+      {
+        request: { query: ADMIN_DELETE_USER_CAMPAIGNS, variables: { accountId } },
+        result: { errors: [new GraphQLError('Campaign delete failed')] },
+      },
+    ]);
+    renderAdminWithProductionClient(mocks);
+
+    fireEvent.change(screen.getByPlaceholderText(/search by email, name/i), { target: { value: 'test' } });
+    await user.click(screen.getByRole('button', { name: /search/i }));
+    await waitFor(() => expect(screen.getByText('test@example.com')).toBeInTheDocument());
+
+    await user.click(screen.getByRole('button', { name: /Delete user test@example.com/i }));
+    await user.click(screen.getByRole('button', { name: /delete user/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Campaign delete failed/i)).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/deleted successfully/i)).not.toBeInTheDocument();
+  });
+
+  test('reset password dialog shows inline error and keeps dialog open on GraphQL error', async () => {
+    const user = userEvent.setup();
+    const mocks = baseMocks([
+      {
+        request: { query: ADMIN_SEARCH_USER, variables: { query: 'test' } },
+        result: { data: { adminSearchUser: [mockAdminUser] } },
+      },
+      {
+        request: { query: ADMIN_RESET_USER_PASSWORD, variables: { email: 'test@example.com' } },
+        result: { errors: [new GraphQLError('Reset password failed')] },
+      },
+    ]);
+    renderAdminWithProductionClient(mocks);
+
+    fireEvent.change(screen.getByPlaceholderText(/search by email, name/i), { target: { value: 'test' } });
+    await user.click(screen.getByRole('button', { name: /search/i }));
+    await waitFor(() => expect(screen.getByText('test@example.com')).toBeInTheDocument());
+
+    await user.click(screen.getByRole('button', { name: /Reset password for test@example.com/i }));
+    await user.click(screen.getByRole('button', { name: /send reset email/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Reset password failed/i)).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/Password reset email sent/i)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /send reset email/i })).toBeInTheDocument();
+  });
+
+  test('delete catalog dialog shows inline error and keeps dialog open on GraphQL error', async () => {
+    const user = userEvent.setup();
+    const mocks = [
+      {
+        request: { query: LIST_MANAGED_CATALOGS },
+        result: { data: { listManagedCatalogs: [mockCatalog] } },
+      },
+      {
+        request: { query: DELETE_CATALOG, variables: { catalogId: 'CAT~1' } },
+        result: { errors: [new GraphQLError('Delete catalog failed')] },
+      },
+    ];
+    renderAdminWithProductionClient(mocks);
+
+    await user.click(screen.getByRole('tab', { name: /catalogs/i }));
+    await waitFor(() => expect(screen.getByText('Test Catalog')).toBeInTheDocument());
+
+    await user.click(screen.getByRole('button', { name: /delete catalog/i }));
+    await waitFor(() => expect(screen.getByText('Delete Catalog')).toBeInTheDocument());
+
+    const deleteButtons = screen.getAllByRole('button', { name: /delete/i });
+    await user.click(deleteButtons[deleteButtons.length - 1]);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Delete catalog failed/i)).toBeInTheDocument();
+    });
+    expect(screen.getByRole('button', { name: /delete/i })).toBeInTheDocument();
   });
 });
