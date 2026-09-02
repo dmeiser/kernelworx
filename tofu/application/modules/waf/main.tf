@@ -159,7 +159,7 @@ resource "aws_wafv2_web_acl" "main" {
 resource "aws_cloudwatch_log_group" "waf" {
   count = var.create ? 1 : 0
 
-  name              = "/aws/waf/${local.name}"
+  name              = "aws-waf-logs-${local.name}"
   retention_in_days = var.log_retention_days
 }
 
