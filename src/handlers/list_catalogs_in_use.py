@@ -102,7 +102,11 @@ async def _async_get_shared_profile_ids(dynamodb: Any, shares_table_name: str, t
         "IndexName": "targetAccountId-index",
         "KeyConditionExpression": "targetAccountId = :targetAccountId",
         "ExpressionAttributeValues": {":targetAccountId": target_account_id},
-        "ProjectionExpression": "profileId, permissions",
+        # "permissions" is a DynamoDB reserved word; it must be referenced via
+        # an expression attribute name or the query is rejected with a
+        # ValidationException.
+        "ProjectionExpression": "profileId, #permissions",
+        "ExpressionAttributeNames": {"#permissions": "permissions"},
     }
     results: List[str] = []
     response = await table.query(**query_params)

@@ -3,7 +3,9 @@
 from typing import Any, Dict, List, Set
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import boto3
 import pytest
+from moto import mock_aws
 
 
 class TestAsyncGetOwnedProfileIds:
@@ -144,8 +146,60 @@ class TestAsyncGetSharedProfileIds:
             IndexName="targetAccountId-index",
             KeyConditionExpression="targetAccountId = :targetAccountId",
             ExpressionAttributeValues={":targetAccountId": "ACCOUNT#test-user"},
-            ProjectionExpression="profileId, permissions",
+            ProjectionExpression="profileId, #permissions",
+            ExpressionAttributeNames={"#permissions": "permissions"},
         )
+
+    @pytest.mark.asyncio
+    async def test_query_is_accepted_by_dynamodb_expression_validation(self) -> None:
+        """The emitted query must pass DynamoDB's reserved-keyword validation.
+
+        Regression test for the ephemeral integration failure where every
+        listCatalogsInUse call returned INTERNAL_ERROR ("Failed to list
+        catalogs in use"): "permissions" is a DynamoDB reserved word, so a
+        ProjectionExpression containing it bare is rejected with a
+        ValidationException. moto enforces the same expression validation
+        as the real service; before the fix this test fails with
+        "reserved keyword: permissions" and passes after it.
+        """
+        from src.handlers.list_catalogs_in_use import _async_get_shared_profile_ids
+
+        mock_table = AsyncMock()
+        mock_table.query.return_value = {"Items": []}
+        mock_dynamodb = AsyncMock()
+        mock_dynamodb.Table.return_value = mock_table
+
+        await _async_get_shared_profile_ids(mock_dynamodb, "shares-table", "ACCOUNT#test-user")
+        query_kwargs = mock_table.query.call_args.kwargs
+
+        with mock_aws():
+            dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
+            dynamodb.create_table(
+                TableName="shares-table",
+                KeySchema=[
+                    {"AttributeName": "profileId", "KeyType": "HASH"},
+                    {"AttributeName": "targetAccountId", "KeyType": "RANGE"},
+                ],
+                AttributeDefinitions=[
+                    {"AttributeName": "profileId", "AttributeType": "S"},
+                    {"AttributeName": "targetAccountId", "AttributeType": "S"},
+                ],
+                GlobalSecondaryIndexes=[
+                    {
+                        "IndexName": "targetAccountId-index",
+                        "KeySchema": [{"AttributeName": "targetAccountId", "KeyType": "HASH"}],
+                        "Projection": {"ProjectionType": "ALL"},
+                    }
+                ],
+                BillingMode="PAY_PER_REQUEST",
+            )
+            real_table = dynamodb.Table("shares-table")
+            real_table.put_item(
+                Item={"profileId": "PROFILE#prof1", "targetAccountId": "ACCOUNT#test-user", "permissions": ["READ"]}
+            )
+            response = real_table.query(**query_kwargs)
+
+        assert response["Items"] == [{"profileId": "PROFILE#prof1", "permissions": ["READ"]}]
 
     @pytest.mark.asyncio
     async def test_returns_empty_list_when_no_shares(self) -> None:
