@@ -189,6 +189,7 @@ resource "aws_appsync_resolver" "update_order" {
       aws_appsync_function.lookup_order.function_id,
       aws_appsync_function.verify_profile_write_access.function_id,
       aws_appsync_function.check_share_permissions.function_id,
+      aws_appsync_function.validate_payment_method_appsync.function_id,
       aws_appsync_function.get_catalog_for_update_order.function_id,
       aws_appsync_function.fetch_catalog_for_update.function_id,
       aws_appsync_function.update_order.function_id,

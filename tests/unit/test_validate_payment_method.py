@@ -137,16 +137,43 @@ class TestValidatePaymentMethodHandler:
 
         assert "Owner account ID not found" in str(exc_info.value)
 
-    def test_missing_payment_method(
+    def test_missing_payment_method_skips_validation(
         self, dynamodb_tables: Dict[str, Any], sample_account: Dict[str, Any], sample_account_id: str
     ) -> None:
-        """Test validation fails when paymentMethod is missing."""
+        """Test validation is skipped when paymentMethod is missing (updateOrder partial update)."""
         event = {"prev": {"result": {"ownerAccountId": sample_account_id}}, "arguments": {"input": {}}}
+
+        result = lambda_handler(event, None)
+
+        assert result["ownerAccountId"] == sample_account_id
+
+    def test_empty_payment_method_is_rejected(
+        self, dynamodb_tables: Dict[str, Any], sample_account: Dict[str, Any], sample_account_id: str
+    ) -> None:
+        """Test validation fails when paymentMethod is explicitly empty."""
+        event = {
+            "prev": {"result": {"ownerAccountId": sample_account_id}},
+            "arguments": {"input": {"paymentMethod": ""}},
+        }
 
         with pytest.raises(AppError) as exc_info:
             lambda_handler(event, None)
 
         assert "Payment method is required" in str(exc_info.value)
+
+    def test_update_order_rejects_invalid_payment_method(
+        self, dynamodb_tables: Dict[str, Any], sample_account: Dict[str, Any], sample_account_id: str
+    ) -> None:
+        """Test updateOrder path rejects a payment method that does not exist."""
+        event = {
+            "prev": {"result": {"ownerAccountId": sample_account_id}},
+            "arguments": {"input": {"paymentMethod": "Zelle"}},
+        }
+
+        with pytest.raises(AppError) as exc_info:
+            lambda_handler(event, None)
+
+        assert "does not exist" in str(exc_info.value)
 
     def test_case_insensitive_validation(
         self, dynamodb_tables: Dict[str, Any], sample_account: Dict[str, Any], sample_account_id: str
