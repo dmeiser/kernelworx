@@ -1003,7 +1003,14 @@ def _delete_orders_for_campaign(campaign_id: str, logger: Any) -> int:
 
 
 def _delete_user_orders(account_id: str, logger: Any) -> int:
-    """Delete all orders for all campaigns of all profiles owned by a user. Returns count deleted."""
+    """Delete all orders for all campaigns of all profiles owned by a user.
+
+    Verifies that each deleted order is no longer visible in the orderId-index
+    GSI before returning. Raises AppError if propagation fails.
+
+    Returns:
+        Count of orders deleted.
+    """
     db_account_id = _normalize_account_id(account_id)
     deleted_count = 0
 
@@ -1025,7 +1032,14 @@ def _delete_user_orders(account_id: str, logger: Any) -> int:
 
 
 def _delete_user_campaigns(account_id: str, logger: Any) -> int:
-    """Delete all campaigns for all profiles owned by a user. Returns count deleted."""
+    """Delete all campaigns for all profiles owned by a user.
+
+    Verifies that each deleted campaign is no longer visible in the
+    campaignId-index GSI before returning. Raises AppError if propagation fails.
+
+    Returns:
+        Count of campaigns deleted.
+    """
     db_account_id = _normalize_account_id(account_id)
     deleted_count = 0
 
@@ -1090,6 +1104,9 @@ def admin_delete_user_orders(event: Dict[str, Any], context: Any) -> int:
     """
     Delete all orders for all campaigns of all profiles owned by a user (admin only).
 
+    Verifies that each deleted order is no longer visible in the orderId-index
+    GSI before returning success.
+
     Returns the count of deleted orders.
     """
     logger = get_logger(__name__)
@@ -1107,6 +1124,9 @@ def admin_delete_user_orders(event: Dict[str, Any], context: Any) -> int:
 def admin_delete_user_campaigns(event: Dict[str, Any], context: Any) -> int:
     """
     Delete all campaigns for all profiles owned by a user (admin only).
+
+    Verifies that each deleted campaign is no longer visible in the
+    campaignId-index GSI before returning success.
 
     Returns the count of deleted campaigns.
     """

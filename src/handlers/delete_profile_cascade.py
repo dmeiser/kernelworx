@@ -213,6 +213,9 @@ def _delete_profile(owner_account_id: str, profile_id: str) -> None:
 def lambda_handler(event: Dict[str, Any], context: Any) -> bool:
     """Cascade-delete a profile and all related data.
 
+    Verifies that deleted orders and campaigns are no longer visible in their
+    respective GSIs (orderId-index and campaignId-index) before returning.
+
     Args:
         event: Lambda event from AppSync. Contains:
             - arguments: { profileId: str }

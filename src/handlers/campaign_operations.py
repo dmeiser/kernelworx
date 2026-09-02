@@ -696,6 +696,9 @@ def delete_campaign_orders(event: Dict[str, Any], context: Any) -> Dict[str, Any
 
     Expects event.arguments.campaignId. Returns { deletedCount: int }.
 
+    Verifies that each deleted order is no longer visible in the orderId-index
+    GSI before returning success. Raises AppError if propagation fails.
+
     Authorization: the caller must have WRITE access to the profile that owns the
     campaign. This is enforced here in the handler so a resolver rewire or a
     second datasource cannot bypass it.
