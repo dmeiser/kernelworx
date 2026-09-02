@@ -243,12 +243,16 @@ jobs:
 
       - name: Build and deploy frontend
         env:
-          # Vite build-time variables
-          VITE_APPSYNC_ENDPOINT: ${{ steps.tofu_outputs.outputs.api_url }}
+          # Vite build-time variables.
+          # VITE_APPSYNC_ENDPOINT is intentionally unset: dev/prod serve
+          # /graphql same-origin through the site's CloudFront distribution.
+          # VITE_COGNITO_DOMAIN is intentionally unset: auth is proxied
+          # same-origin at root paths (/login, /logout, /oauth2/*), so the
+          # frontend derives the OAuth domain from the site URL. Ephemeral
+          # environments set both to absolute values (no CloudFront there).
           VITE_APPSYNC_REGION: ${{ secrets.AWS_REGION }}
           VITE_COGNITO_USER_POOL_ID: ${{ steps.tofu_outputs.outputs.user_pool_id }}
           VITE_COGNITO_USER_POOL_CLIENT_ID: ${{ steps.tofu_outputs.outputs.client_id }}
-          VITE_COGNITO_DOMAIN: ${{ steps.tofu_outputs.outputs.cognito_domain }}
           VITE_OAUTH_REDIRECT_SIGNIN: ${{ steps.tofu_outputs.outputs.site_url }}
           VITE_OAUTH_REDIRECT_SIGNOUT: ${{ steps.tofu_outputs.outputs.site_url }}
         working-directory: frontend
