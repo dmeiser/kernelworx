@@ -736,7 +736,17 @@ function checkFormErrors(formState: OrderFormState): LineItemInput[] | null {
 }
 
 function hasMutationErrors(res: unknown): boolean {
-  return Boolean(res && typeof res === 'object' && 'errors' in res && (res as { errors?: unknown[] }).errors?.length);
+  if (!res || typeof res !== 'object') {
+    return false;
+  }
+  const typed = res as { errors?: unknown[]; error?: { errors?: unknown[] } };
+  if (Array.isArray(typed.errors) && typed.errors.length > 0) {
+    return true;
+  }
+  const apolloError = typed.error;
+  return Boolean(
+    apolloError && typeof apolloError === 'object' && Array.isArray(apolloError.errors) && apolloError.errors.length > 0,
+  );
 }
 
 async function submitOrder({

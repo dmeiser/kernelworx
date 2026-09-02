@@ -9,9 +9,10 @@ import userEvent from '@testing-library/user-event';
 import { MockedProvider } from '@apollo/client/testing/react';
 import type { MockedResponse } from '@apollo/client/testing';
 import { MockLink } from '@apollo/client/testing';
-import { ApolloClient, InMemoryCache } from '@apollo/client';
+import { ApolloClient, InMemoryCache, type DefaultOptions } from '@apollo/client';
 import { ApolloProvider } from '@apollo/client/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
+import { GraphQLError } from 'graphql';
 import {
   GET_CAMPAIGN,
   GET_PROFILE,
@@ -216,10 +217,10 @@ function baseMocks(extra: MockedResponse[] = []): MockedResponse[] {
   ];
 }
 
-function renderCreateOrder(mocks: MockedResponse[]) {
+function renderCreateOrder(mocks: MockedResponse[], defaultOptions?: DefaultOptions) {
   const path = `/scouts/${encodeURIComponent(PROFILE_RAW)}/campaigns/${encodeURIComponent(CAMPAIGN_RAW)}/orders/new`;
   return render(
-    <MockedProvider mocks={mocks}>
+    <MockedProvider mocks={mocks} defaultOptions={defaultOptions}>
       <MemoryRouter initialEntries={[path]}>
         <Routes>
           <Route path="/scouts/:profileId/campaigns/:campaignId/orders/new" element={<OrderEditorPage />} />
@@ -877,6 +878,57 @@ describe('OrderEditorPage - Create Order', () => {
       },
       { timeout: 5000 },
     );
+  }, 25000);
+
+  test('does not navigate when create order mutation returns GraphQL errors', async () => {
+    mockNavigate.mockClear();
+    const createOrderGraphQLError: MockedResponse = {
+      request: { query: CREATE_ORDER, variables: () => true },
+      result: {
+        errors: [new GraphQLError('Catalog access denied')],
+      },
+    };
+    renderCreateOrder(baseMocks([createOrderGraphQLError]), { mutate: { errorPolicy: 'all' } });
+
+    await waitFor(
+      () => {
+        expect(screen.getByRole('heading', { name: /create order/i })).toBeInTheDocument();
+      },
+      { timeout: 10000 },
+    );
+
+    await waitFor(
+      () => {
+        const paymentSelect = screen.getByRole('combobox', { name: /payment method/i });
+        expect((paymentSelect as HTMLSelectElement).value).toBe('Cash');
+      },
+      { timeout: 5000 },
+    );
+
+    fireEvent.change(screen.getByLabelText(/Customer Name/i), { target: { value: 'John Doe' } });
+
+    const productSelects = screen.getAllByRole('combobox', { name: 'Select' });
+    if (productSelects.length > 0) {
+      fireEvent.change(productSelects[0], { target: { value: 'PROD~A' } });
+    }
+
+    await waitFor(
+      () => {
+        expect(screen.getByRole('button', { name: /create order/i })).not.toBeDisabled();
+      },
+      { timeout: 3000 },
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /create order/i }));
+
+    await waitFor(
+      () => {
+        expect(screen.getByRole('button', { name: /create order/i })).not.toBeDisabled();
+      },
+      { timeout: 5000 },
+    );
+
+    expect(mockNavigate).not.toHaveBeenCalled();
   }, 25000);
 
   test('updates product and quantity for a line item', async () => {
