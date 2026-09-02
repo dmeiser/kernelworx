@@ -1762,67 +1762,90 @@ class TestDeleteCampaignOrders:
             assert len(gsi_response.get("Items", [])) == 0
 
 
-class TestVerifyOrdersDeleted:
-    """Tests for the strongly-consistent order deletion verification helper."""
+class TestVerifyOrderKeysDeleted:
+    """Tests for the base-table order deletion verification helper."""
 
-    @patch("src.handlers.campaign_operations.query_all_items")
-    @patch("src.handlers.campaign_operations.time.sleep")
-    def test_returns_immediately_when_no_orders_remain(self, mock_sleep: MagicMock, mock_query: MagicMock) -> None:
-        """Test that verification succeeds on the first consistent query."""
-        from src.handlers.campaign_operations import _verify_orders_deleted
+    def test_returns_when_all_order_keys_are_absent(self) -> None:
+        """Test that verification succeeds when every deleted order is gone."""
+        from src.handlers.campaign_operations import _verify_order_keys_deleted
 
-        mock_query.return_value = []
+        mock_table = MagicMock()
+        mock_table.get_item.return_value = {}
 
-        _verify_orders_deleted("CAMPAIGN#verify")
-
-        mock_query.assert_called_once()
-        mock_sleep.assert_not_called()
-
-    @patch("src.handlers.campaign_operations.query_all_items")
-    @patch("src.handlers.campaign_operations.time.sleep")
-    def test_retries_then_returns_when_orders_eventually_gone(
-        self, mock_sleep: MagicMock, mock_query: MagicMock
-    ) -> None:
-        """Test that verification retries when orders are still present."""
-        from src.handlers.campaign_operations import (
-            _ORDER_DELETE_VERIFY_RETRIES,
-            _verify_orders_deleted,
-        )
-
-        mock_query.side_effect = [
-            [{"campaignId": "CAMPAIGN#retry", "orderId": "ORDER#1"}],
-            [],
+        order_keys = [
+            {"campaignId": "CAMPAIGN#batch", "orderId": "ORDER#1"},
+            {"campaignId": "CAMPAIGN#batch", "orderId": "ORDER#2"},
         ]
 
-        _verify_orders_deleted("CAMPAIGN#retry")
+        with patch("src.handlers.campaign_operations.tables") as mock_tables:
+            mock_tables.orders = mock_table
+            _verify_order_keys_deleted(order_keys)
 
-        assert mock_query.call_count == 2
-        assert mock_sleep.call_count == 1
-        # ConsistentRead must be enabled on every verification query
-        for call in mock_query.call_args_list:
-            assert call.args[1]["ConsistentRead"] is True
-        assert _ORDER_DELETE_VERIFY_RETRIES >= 2
+        assert mock_table.get_item.call_count == 2
+        for call, key in zip(mock_table.get_item.call_args_list, order_keys):
+            assert call.kwargs["Key"] == {"campaignId": key["campaignId"], "orderId": key["orderId"]}
+            assert call.kwargs["ConsistentRead"] is True
 
-    @patch("src.handlers.campaign_operations.query_all_items")
-    @patch("src.handlers.campaign_operations.time.sleep")
-    def test_raises_when_orders_remain_after_all_retries(self, mock_sleep: MagicMock, mock_query: MagicMock) -> None:
-        """Test that verification raises INTERNAL_ERROR when orders persist."""
-        from src.handlers.campaign_operations import (
-            _ORDER_DELETE_VERIFY_RETRIES,
-            _verify_orders_deleted,
-        )
+    def test_raises_when_an_order_key_persists(self) -> None:
+        """Test that verification raises INTERNAL_ERROR when an order persists."""
+        from src.handlers.campaign_operations import _verify_order_keys_deleted
         from src.utils.errors import AppError, ErrorCode
 
-        remaining_order = {"campaignId": "CAMPAIGN#stuck", "orderId": "ORDER#1"}
-        mock_query.return_value = [remaining_order]
+        mock_table = MagicMock()
+        mock_table.get_item.side_effect = [{}, {"Item": {"campaignId": "CAMPAIGN#x", "orderId": "ORDER#2"}}]
 
-        with pytest.raises(AppError) as exc_info:
-            _verify_orders_deleted("CAMPAIGN#stuck")
+        with (
+            patch("src.handlers.campaign_operations.tables") as mock_tables,
+            pytest.raises(AppError) as exc_info,
+        ):
+            mock_tables.orders = mock_table
+            _verify_order_keys_deleted(
+                [
+                    {"campaignId": "CAMPAIGN#x", "orderId": "ORDER#1"},
+                    {"campaignId": "CAMPAIGN#x", "orderId": "ORDER#2"},
+                ]
+            )
 
         assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
-        assert "Failed to delete all orders for campaign" in str(exc_info.value.message)
-        assert mock_query.call_count == _ORDER_DELETE_VERIFY_RETRIES
-        assert mock_sleep.call_count == _ORDER_DELETE_VERIFY_RETRIES - 1
+        assert "Failed to delete order" in str(exc_info.value.message)
+
+
+class TestVerifyCampaignDeleted:
+    """Tests for the base-table campaign deletion verification helper."""
+
+    def test_returns_when_campaign_is_absent(self) -> None:
+        """Test that verification succeeds when the deleted campaign is gone."""
+        from src.handlers.campaign_operations import _verify_campaign_deleted
+
+        mock_table = MagicMock()
+        mock_table.get_item.return_value = {}
+
+        with patch("src.handlers.campaign_operations.tables") as mock_tables:
+            mock_tables.campaigns = mock_table
+            _verify_campaign_deleted("PROFILE#1", "CAMPAIGN#gone")
+
+        mock_table.get_item.assert_called_once_with(
+            Key={"profileId": "PROFILE#1", "campaignId": "CAMPAIGN#gone"},
+            ConsistentRead=True,
+        )
+
+    def test_raises_when_campaign_persists(self) -> None:
+        """Test that verification raises INTERNAL_ERROR when the campaign persists."""
+        from src.handlers.campaign_operations import _verify_campaign_deleted
+        from src.utils.errors import AppError, ErrorCode
+
+        mock_table = MagicMock()
+        mock_table.get_item.return_value = {"Item": {"profileId": "PROFILE#1", "campaignId": "CAMPAIGN#stuck"}}
+
+        with (
+            patch("src.handlers.campaign_operations.tables") as mock_tables,
+            pytest.raises(AppError) as exc_info,
+        ):
+            mock_tables.campaigns = mock_table
+            _verify_campaign_deleted("PROFILE#1", "CAMPAIGN#stuck")
+
+        assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+        assert "Failed to delete campaign" in str(exc_info.value.message)
 
 
 class TestQueryOrderKeysForCampaign:
@@ -1867,116 +1890,3 @@ class TestDeleteOrderKeys:
 
         assert count == 3
         assert mock_writer.delete_item.call_count == 3
-
-
-class TestVerifyOrderDeletedGsi:
-    """Tests for the orderId-index GSI propagation verifier."""
-
-    @patch("src.handlers.campaign_operations.query_all_items")
-    @patch("src.handlers.campaign_operations.time.sleep")
-    def test_returns_when_order_absent_from_gsi(self, mock_sleep: MagicMock, mock_query: MagicMock) -> None:
-        """Test that verification succeeds when the order is no longer in the GSI."""
-        from src.handlers.campaign_operations import _verify_order_deleted
-
-        mock_query.return_value = []
-
-        _verify_order_deleted("ORDER#gone")
-
-        mock_query.assert_called_once()
-        call_args = mock_query.call_args.args
-        assert call_args[1]["IndexName"] == "orderId-index"
-        assert call_args[1]["KeyConditionExpression"] == "orderId = :oid"
-        mock_sleep.assert_not_called()
-
-    @patch("src.handlers.campaign_operations.query_all_items")
-    @patch("src.handlers.campaign_operations.time.sleep")
-    def test_retries_then_succeeds(self, mock_sleep: MagicMock, mock_query: MagicMock) -> None:
-        """Test that verification retries when the GSI entry is still present."""
-        from src.handlers.campaign_operations import _verify_order_deleted
-
-        mock_query.side_effect = [[{"orderId": "ORDER#lag"}], []]
-
-        _verify_order_deleted("ORDER#lag")
-
-        assert mock_query.call_count == 2
-        assert mock_sleep.call_count == 1
-
-    @patch("src.handlers.campaign_operations.query_all_items")
-    @patch("src.handlers.campaign_operations.time.sleep")
-    def test_raises_when_order_persists(self, mock_sleep: MagicMock, mock_query: MagicMock) -> None:
-        """Test that verification raises INTERNAL_ERROR when the order persists."""
-        from src.handlers.campaign_operations import _DELETE_VERIFY_RETRIES, _verify_order_deleted
-        from src.utils.errors import AppError, ErrorCode
-
-        mock_query.return_value = [{"orderId": "ORDER#stuck"}]
-
-        with pytest.raises(AppError) as exc_info:
-            _verify_order_deleted("ORDER#stuck")
-
-        assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
-        assert mock_query.call_count == _DELETE_VERIFY_RETRIES
-        assert mock_sleep.call_count == _DELETE_VERIFY_RETRIES - 1
-
-
-class TestVerifyOrdersDeletedByIds:
-    """Tests for batch order GSI propagation verifier."""
-
-    @patch("src.handlers.campaign_operations.query_all_items")
-    def test_verifies_each_order_id(self, mock_query: MagicMock) -> None:
-        """Test that _verify_orders_deleted_by_ids checks every order ID."""
-        from src.handlers.campaign_operations import _verify_orders_deleted_by_ids
-
-        mock_query.return_value = []
-
-        _verify_orders_deleted_by_ids(["ORDER#1", "ORDER#2", "ORDER#3"])
-
-        assert mock_query.call_count == 3
-
-
-class TestVerifyCampaignDeletedGsi:
-    """Tests for the campaignId-index GSI propagation verifier."""
-
-    @patch("src.handlers.campaign_operations.query_all_items")
-    @patch("src.handlers.campaign_operations.time.sleep")
-    def test_returns_when_campaign_absent_from_gsi(self, mock_sleep: MagicMock, mock_query: MagicMock) -> None:
-        """Test that verification succeeds when the campaign is no longer in the GSI."""
-        from src.handlers.campaign_operations import _verify_campaign_deleted
-
-        mock_query.return_value = []
-
-        _verify_campaign_deleted("CAMPAIGN#gone")
-
-        mock_query.assert_called_once()
-        call_args = mock_query.call_args.args
-        assert call_args[1]["IndexName"] == "campaignId-index"
-        assert call_args[1]["KeyConditionExpression"] == "campaignId = :cid"
-        mock_sleep.assert_not_called()
-
-    @patch("src.handlers.campaign_operations.query_all_items")
-    @patch("src.handlers.campaign_operations.time.sleep")
-    def test_retries_then_succeeds(self, mock_sleep: MagicMock, mock_query: MagicMock) -> None:
-        """Test that verification retries when the campaign GSI entry is still present."""
-        from src.handlers.campaign_operations import _verify_campaign_deleted
-
-        mock_query.side_effect = [[{"campaignId": "CAMPAIGN#lag"}], []]
-
-        _verify_campaign_deleted("CAMPAIGN#lag")
-
-        assert mock_query.call_count == 2
-        assert mock_sleep.call_count == 1
-
-    @patch("src.handlers.campaign_operations.query_all_items")
-    @patch("src.handlers.campaign_operations.time.sleep")
-    def test_raises_when_campaign_persists(self, mock_sleep: MagicMock, mock_query: MagicMock) -> None:
-        """Test that verification raises INTERNAL_ERROR when the campaign persists."""
-        from src.handlers.campaign_operations import _DELETE_VERIFY_RETRIES, _verify_campaign_deleted
-        from src.utils.errors import AppError, ErrorCode
-
-        mock_query.return_value = [{"campaignId": "CAMPAIGN#stuck"}]
-
-        with pytest.raises(AppError) as exc_info:
-            _verify_campaign_deleted("CAMPAIGN#stuck")
-
-        assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
-        assert mock_query.call_count == _DELETE_VERIFY_RETRIES
-        assert mock_sleep.call_count == _DELETE_VERIFY_RETRIES - 1

@@ -3,7 +3,7 @@ import assert from 'node:assert';
 import { request, response } from './verify_campaign_delete_propagation_fn.js';
 
 describe('verify_campaign_delete_propagation_fn request', () => {
-  it('queries campaignId-index for the deleted campaign', () => {
+  it('reads the base table with a strongly consistent read for the deleted campaign', () => {
     const ctx = {
       stash: {
         campaign: { profileId: 'PROFILE#1', campaignId: 'CAMPAIGN#1' },
@@ -12,29 +12,27 @@ describe('verify_campaign_delete_propagation_fn request', () => {
 
     const result = request(ctx);
 
-    assert.strictEqual(result.operation, 'Query');
-    assert.strictEqual(result.index, 'campaignId-index');
-    assert.strictEqual(result.query.expression, 'campaignId = :campaignId');
-    assert.deepStrictEqual(result.query.expressionValues, { ':campaignId': 'CAMPAIGN#1' });
-    assert.strictEqual(result.limit, 1);
+    assert.strictEqual(result.operation, 'GetItem');
+    assert.deepStrictEqual(result.key, { profileId: 'PROFILE#1', campaignId: 'CAMPAIGN#1' });
+    assert.strictEqual(result.consistentRead, true);
   });
 
-  it('returns a no-op query when campaign was not found', () => {
+  it('returns a no-op read when campaign was not found', () => {
     const ctx = { stash: {} };
 
     const result = request(ctx);
 
-    assert.strictEqual(result.operation, 'Query');
-    assert.strictEqual(result.index, 'campaignId-index');
-    assert.deepStrictEqual(result.query.expressionValues, { ':campaignId': 'NOOP' });
+    assert.strictEqual(result.operation, 'GetItem');
+    assert.deepStrictEqual(result.key, { profileId: 'NOOP', campaignId: 'NOOP' });
+    assert.strictEqual(result.consistentRead, true);
   });
 });
 
 describe('verify_campaign_delete_propagation_fn response', () => {
-  it('returns true when the GSI entry is gone', () => {
+  it('returns true when the campaign row is gone', () => {
     const ctx = {
       stash: { campaign: { campaignId: 'CAMPAIGN#1' } },
-      result: { items: [] },
+      result: null,
     };
 
     const result = response(ctx);
@@ -45,7 +43,7 @@ describe('verify_campaign_delete_propagation_fn response', () => {
   it('returns true when delete was skipped', () => {
     const ctx = {
       stash: {},
-      result: { items: [] },
+      result: null,
     };
 
     const result = response(ctx);
@@ -53,15 +51,15 @@ describe('verify_campaign_delete_propagation_fn response', () => {
     assert.strictEqual(result, true);
   });
 
-  it('throws ConflictException when the GSI entry is still present', () => {
+  it('throws ConflictException when the campaign row is still present', () => {
     const ctx = {
       stash: { campaign: { campaignId: 'CAMPAIGN#1' } },
-      result: { items: [{ campaignId: 'CAMPAIGN#1', profileId: 'PROFILE#1' }] },
+      result: { campaignId: 'CAMPAIGN#1', profileId: 'PROFILE#1' },
     };
 
     assert.throws(
       () => response(ctx),
-      /ConflictException: Campaign delete propagation pending; please retry/
+      /ConflictException: Campaign deletion could not be confirmed; please retry/
     );
   });
 });

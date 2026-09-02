@@ -21,7 +21,7 @@ from botocore.exceptions import ClientError
 
 # Sibling handler modules use a same-package relative import, which resolves both
 # in the Lambda zip (package `handlers`) and in unit tests (package `src.handlers`).
-from .campaign_operations import _verify_campaign_deleted, _verify_orders_deleted_by_ids
+from .campaign_operations import _verify_campaign_deleted, _verify_order_keys_deleted
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
@@ -980,7 +980,7 @@ def create_managed_catalog(event: Dict[str, Any], context: Any) -> Dict[str, Any
 
 
 def _delete_orders_for_campaign(campaign_id: str, logger: Any) -> int:
-    """Delete all orders for a campaign and verify GSI propagation. Returns count deleted."""
+    """Delete all orders for a campaign and verify deletion. Returns count deleted."""
     orders = query_all_items(
         tables.orders,
         {
@@ -990,15 +990,12 @@ def _delete_orders_for_campaign(campaign_id: str, logger: Any) -> int:
     )
 
     deleted_count = 0
-    order_ids: list[str] = []
     for order in orders:
-        order_id = order["orderId"]
-        tables.orders.delete_item(Key={"campaignId": campaign_id, "orderId": order_id})
-        order_ids.append(order_id)
+        tables.orders.delete_item(Key={"campaignId": campaign_id, "orderId": order["orderId"]})
         deleted_count += 1
 
-    if order_ids:
-        _verify_orders_deleted_by_ids(order_ids)
+    if orders:
+        _verify_order_keys_deleted(orders)
 
     return deleted_count
 
@@ -1006,8 +1003,9 @@ def _delete_orders_for_campaign(campaign_id: str, logger: Any) -> int:
 def _delete_user_orders(account_id: str, logger: Any) -> int:
     """Delete all orders for all campaigns of all profiles owned by a user.
 
-    Verifies that each deleted order is no longer visible in the orderId-index
-    GSI before returning. Raises AppError if propagation fails.
+    Verifies with strongly consistent reads that each deleted order is gone
+    from the orders table before returning. Raises AppError if a deleted order
+    is still present.
 
     Returns:
         Count of orders deleted.
@@ -1035,8 +1033,9 @@ def _delete_user_orders(account_id: str, logger: Any) -> int:
 def _delete_user_campaigns(account_id: str, logger: Any) -> int:
     """Delete all campaigns for all profiles owned by a user.
 
-    Verifies that each deleted campaign is no longer visible in the
-    campaignId-index GSI before returning. Raises AppError if propagation fails.
+    Verifies with strongly consistent reads that each deleted campaign is gone
+    from the campaigns table before returning. Raises AppError if a deleted
+    campaign is still present.
 
     Returns:
         Count of campaigns deleted.
@@ -1057,7 +1056,7 @@ def _delete_user_campaigns(account_id: str, logger: Any) -> int:
         for campaign in campaigns:
             campaign_id = campaign["campaignId"]
             tables.campaigns.delete_item(Key={"profileId": profile_id, "campaignId": campaign_id})
-            _verify_campaign_deleted(campaign_id)
+            _verify_campaign_deleted(profile_id, campaign_id)
             deleted_count += 1
 
     logger.info("Deleted user campaigns", account_id=account_id, count=deleted_count)
@@ -1105,8 +1104,8 @@ def admin_delete_user_orders(event: Dict[str, Any], context: Any) -> int:
     """
     Delete all orders for all campaigns of all profiles owned by a user (admin only).
 
-    Verifies that each deleted order is no longer visible in the orderId-index
-    GSI before returning success.
+    Verifies with strongly consistent reads that each deleted order is gone
+    from the orders table before returning success.
 
     Returns the count of deleted orders.
     """
@@ -1126,8 +1125,8 @@ def admin_delete_user_campaigns(event: Dict[str, Any], context: Any) -> int:
     """
     Delete all campaigns for all profiles owned by a user (admin only).
 
-    Verifies that each deleted campaign is no longer visible in the
-    campaignId-index GSI before returning success.
+    Verifies with strongly consistent reads that each deleted campaign is gone
+    from the campaigns table before returning success.
 
     Returns the count of deleted campaigns.
     """

@@ -568,9 +568,9 @@ class TestDeleteProfileCascade:
             mock_tables.campaigns.query.return_value = {"Items": [{"profileId": profile_id, "campaignId": campaign_id}]}
             mock_tables.orders = mock_table
 
-            # GSI verification helpers use campaign_operations.tables
-            mock_campaign_tables.orders.query.return_value = {"Items": []}
-            mock_campaign_tables.campaigns.query.return_value = {"Items": []}
+            # Delete verification helpers use campaign_operations.tables
+            mock_campaign_tables.orders.get_item.return_value = {}
+            mock_campaign_tables.campaigns.get_item.return_value = {}
 
             event = {
                 "arguments": {"profileId": profile_id},

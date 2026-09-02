@@ -1,35 +1,29 @@
 import { util } from '@aws-appsync/utils';
 
+const NOOP_CAMPAIGN_ID = 'NOOP';
 const NOOP_ORDER_ID = 'NOOP';
 
 export function request(ctx) {
     const order = ctx.stash.order;
 
     // If the lookup did not find the order, the delete was skipped and there is
-    // nothing to verify. Issue a no-op query so the pipeline can return true.
+    // nothing to verify. Issue a no-op read so the pipeline can return true.
     if (!order) {
         return {
-            operation: 'Query',
-            index: 'orderId-index',
-            query: {
-                expression: 'orderId = :orderId',
-                expressionValues: util.dynamodb.toMapValues({ ':orderId': NOOP_ORDER_ID })
-            },
-            limit: 1
+            operation: 'GetItem',
+            key: util.dynamodb.toMapValues({ campaignId: NOOP_CAMPAIGN_ID, orderId: NOOP_ORDER_ID }),
+            consistentRead: true
         };
     }
 
-    // Verify the order is no longer visible in the orderId-index GSI before we
-    // report success. If the GSI entry is still present, the caller should retry
-    // the idempotent delete.
+    // Confirm the order is actually gone before reporting success. The
+    // orderId-index GSI is eventually consistent, so a GSI read can keep
+    // showing a deleted row for an unbounded time; a strongly consistent
+    // base-table read deterministically reflects the completed delete.
     return {
-        operation: 'Query',
-        index: 'orderId-index',
-        query: {
-            expression: 'orderId = :orderId',
-            expressionValues: util.dynamodb.toMapValues({ ':orderId': order.orderId })
-        },
-        limit: 1
+        operation: 'GetItem',
+        key: util.dynamodb.toMapValues({ campaignId: order.campaignId, orderId: order.orderId }),
+        consistentRead: true
     };
 }
 
@@ -42,9 +36,11 @@ export function response(ctx) {
         return true;
     }
 
-    const items = ctx.result.items || [];
-    if (items.length > 0) {
-        util.error('Order delete propagation pending; please retry', 'ConflictException');
+    // ctx.result is the item for GetItem, or null when it is absent. If the
+    // row is still present the delete did not take effect; the delete is
+    // idempotent, so the caller may retry it.
+    if (ctx.result) {
+        util.error('Order deletion could not be confirmed; please retry', 'ConflictException');
     }
 
     return true;

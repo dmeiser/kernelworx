@@ -1,6 +1,5 @@
 """Lambda resolver for campaign operations with shared campaign and share support."""
 
-import time
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -502,10 +501,6 @@ def _to_dynamo_value(value: Any) -> Dict[str, Any]:
 
 
 BATCH_DELETE_SIZE = 25
-_DELETE_VERIFY_RETRIES = 3
-_DELETE_VERIFY_DELAY_SECONDS = 0.1
-_ORDER_DELETE_VERIFY_RETRIES = _DELETE_VERIFY_RETRIES
-_ORDER_DELETE_VERIFY_DELAY_SECONDS = _DELETE_VERIFY_DELAY_SECONDS
 
 
 def _get_campaign_by_id(campaign_id: str) -> Optional[Dict[str, Any]]:
@@ -557,114 +552,47 @@ def _delete_order_keys(orders: List[Dict[str, Any]]) -> int:
     return deleted_count
 
 
-def _verify_orders_deleted(campaign_id: str) -> None:
-    """Verify no orders remain for a campaign using strongly consistent reads.
+def _verify_order_keys_deleted(order_keys: List[Dict[str, Any]]) -> None:
+    """Verify deleted orders are absent from the base table.
 
-    Retries briefly to tolerate transient propagation lag. Raises AppError if
-    orders are still present after retries.
+    Uses a strongly consistent read on each exact key that was deleted, which
+    deterministically reflects the completed deletes. The orderId-index GSI
+    cannot be used here: it is eventually consistent and can keep showing
+    deleted rows for an unbounded time. Raises AppError if any key persists.
     """
-    remaining: List[Dict[str, Any]] = []
-    for attempt in range(1, _DELETE_VERIFY_RETRIES + 1):
-        remaining = query_all_items(
-            tables.orders,
-            {
-                "KeyConditionExpression": "campaignId = :cid",
-                "ExpressionAttributeValues": {":cid": campaign_id},
-                "ProjectionExpression": "campaignId, orderId",
-                "ConsistentRead": True,
-            },
+    for key in order_keys:
+        response = tables.orders.get_item(
+            Key={"campaignId": str(key["campaignId"]), "orderId": str(key["orderId"])},
+            ConsistentRead=True,
         )
-        if not remaining:
-            return
-        if attempt < _DELETE_VERIFY_RETRIES:
-            logger.warning(
-                "Orders still present after delete, retrying",
-                campaign_id=campaign_id,
-                attempt=attempt,
-                count=len(remaining),
+        if response.get("Item"):
+            logger.error(
+                "Order still present after delete verification",
+                campaign_id=key["campaignId"],
+                order_id=key["orderId"],
             )
-            time.sleep(_DELETE_VERIFY_DELAY_SECONDS)
-
-    logger.error(
-        "Orders still present after delete verification",
-        campaign_id=campaign_id,
-        count=len(remaining),
-    )
-    raise AppError(
-        ErrorCode.INTERNAL_ERROR,
-        "Failed to delete all orders for campaign",
-    )
+            raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to delete order")
 
 
-def _verify_order_deleted(order_id: str) -> None:
-    """Verify an order is no longer visible in the orderId-index GSI.
+def _verify_campaign_deleted(profile_id: str, campaign_id: str) -> None:
+    """Verify a deleted campaign is absent from the base table.
 
-    Retries briefly to tolerate transient propagation lag. Raises AppError if
-    the order is still present after retries.
+    Uses a strongly consistent read on the exact key that was deleted, which
+    deterministically reflects the completed delete. The campaignId-index GSI
+    cannot be used here: it is eventually consistent and can keep showing a
+    deleted row for an unbounded time. Raises AppError if the key persists.
     """
-    for attempt in range(1, _DELETE_VERIFY_RETRIES + 1):
-        remaining = query_all_items(
-            tables.orders,
-            {
-                "IndexName": "orderId-index",
-                "KeyConditionExpression": "orderId = :oid",
-                "ExpressionAttributeValues": {":oid": order_id},
-                "ProjectionExpression": "orderId",
-                "Limit": 1,
-            },
-        )
-        if not remaining:
-            return
-        if attempt < _DELETE_VERIFY_RETRIES:
-            logger.warning(
-                "Order still present in GSI after delete, retrying",
-                order_id=order_id,
-                attempt=attempt,
-            )
-            time.sleep(_DELETE_VERIFY_DELAY_SECONDS)
-
-    logger.error("Order still present in GSI after delete verification", order_id=order_id)
-    raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to delete order")
-
-
-def _verify_orders_deleted_by_ids(order_ids: List[str]) -> None:
-    """Verify a list of order IDs are no longer visible in the orderId-index GSI."""
-    for order_id in order_ids:
-        _verify_order_deleted(order_id)
-
-
-def _verify_campaign_deleted(campaign_id: str) -> None:
-    """Verify a campaign is no longer visible in the campaignId-index GSI.
-
-    Retries briefly to tolerate transient propagation lag. Raises AppError if
-    the campaign is still present after retries.
-    """
-    for attempt in range(1, _DELETE_VERIFY_RETRIES + 1):
-        remaining = query_all_items(
-            tables.campaigns,
-            {
-                "IndexName": "campaignId-index",
-                "KeyConditionExpression": "campaignId = :cid",
-                "ExpressionAttributeValues": {":cid": campaign_id},
-                "ProjectionExpression": "campaignId",
-                "Limit": 1,
-            },
-        )
-        if not remaining:
-            return
-        if attempt < _DELETE_VERIFY_RETRIES:
-            logger.warning(
-                "Campaign still present in GSI after delete, retrying",
-                campaign_id=campaign_id,
-                attempt=attempt,
-            )
-            time.sleep(_DELETE_VERIFY_DELAY_SECONDS)
-
-    logger.error(
-        "Campaign still present in GSI after delete verification",
-        campaign_id=campaign_id,
+    response = tables.campaigns.get_item(
+        Key={"profileId": profile_id, "campaignId": campaign_id},
+        ConsistentRead=True,
     )
-    raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to delete campaign")
+    if response.get("Item"):
+        logger.error(
+            "Campaign still present after delete verification",
+            profile_id=profile_id,
+            campaign_id=campaign_id,
+        )
+        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to delete campaign")
 
 
 def _delete_orders_for_campaign(campaign_id: str) -> int:
@@ -677,15 +605,14 @@ def _delete_orders_for_campaign(campaign_id: str) -> int:
         Number of orders deleted.
 
     Raises:
-        AppError: If orders remain after deletion attempts.
+        AppError: If a deleted order is still present afterwards.
     """
     orders = _query_order_keys_for_campaign(campaign_id)
     if not orders:
         return 0
 
     deleted_count = _delete_order_keys(orders)
-    _verify_orders_deleted(campaign_id)
-    _verify_orders_deleted_by_ids([order["orderId"] for order in orders])
+    _verify_order_keys_deleted(orders)
 
     logger.info("Deleted orders for campaign", campaign_id=campaign_id, count=deleted_count)
     return deleted_count
@@ -696,8 +623,9 @@ def delete_campaign_orders(event: Dict[str, Any], context: Any) -> Dict[str, Any
 
     Expects event.arguments.campaignId. Returns { deletedCount: int }.
 
-    Verifies that each deleted order is no longer visible in the orderId-index
-    GSI before returning success. Raises AppError if propagation fails.
+    Verifies with strongly consistent reads that each deleted order is gone
+    from the orders table before returning success. Raises AppError if a
+    deleted order is still present.
 
     Authorization: the caller must have WRITE access to the profile that owns the
     campaign. This is enforced here in the handler so a resolver rewire or a

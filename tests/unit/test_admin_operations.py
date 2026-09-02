@@ -2689,9 +2689,9 @@ class TestAdminDeleteUserOrders:
                 },
             ]
 
-            # GSI verification helpers use campaign_operations.tables
-            mock_campaign_tables.orders.query.return_value = {"Items": []}
-            mock_campaign_tables.campaigns.query.return_value = {"Items": []}
+            # Delete verification helpers use campaign_operations.tables
+            mock_campaign_tables.orders.get_item.return_value = {}
+            mock_campaign_tables.campaigns.get_item.return_value = {}
 
             result = admin_delete_user_orders(event, lambda_context)
 
@@ -2745,9 +2745,9 @@ class TestAdminDeleteUserOrders:
                 {"Items": []},
             ]
 
-            # GSI verification helpers use campaign_operations.tables
-            mock_campaign_tables.orders.query.return_value = {"Items": []}
-            mock_campaign_tables.campaigns.query.return_value = {"Items": []}
+            # Delete verification helpers use campaign_operations.tables
+            mock_campaign_tables.orders.get_item.return_value = {}
+            mock_campaign_tables.campaigns.get_item.return_value = {}
 
             result = admin_delete_user_orders(event, lambda_context)
 
@@ -2861,8 +2861,8 @@ class TestAdminDeleteUserCampaigns:
                 ]
             }
 
-            # GSI verification helpers use campaign_operations.tables
-            mock_campaign_tables.campaigns.query.return_value = {"Items": []}
+            # Delete verification helpers use campaign_operations.tables
+            mock_campaign_tables.campaigns.get_item.return_value = {}
 
             result = admin_delete_user_campaigns(event, lambda_context)
 
