@@ -94,7 +94,7 @@ describe('Apollo endpoint resolution (#165 same-origin)', () => {
 
     if (fetchMock.mock.calls.length !== 1) {
       throw new Error(
-        `expected 1 fetch call, got ${fetchMock.mock.calls.length}; query errors: ${JSON.stringify(result.errors)}`,
+        `expected 1 fetch call, got ${fetchMock.mock.calls.length}; query error: ${JSON.stringify(result.error)}`,
       );
     }
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
@@ -116,7 +116,7 @@ describe('Apollo endpoint resolution (#165 same-origin)', () => {
 
     if (fetchMock.mock.calls.length !== 1) {
       throw new Error(
-        `expected 1 fetch call, got ${fetchMock.mock.calls.length}; query errors: ${JSON.stringify(result.errors)}`,
+        `expected 1 fetch call, got ${fetchMock.mock.calls.length}; query error: ${JSON.stringify(result.error)}`,
       );
     }
     const [url] = fetchMock.mock.calls[0] as unknown as [string];
@@ -170,9 +170,7 @@ describe('Manual logout fallback URL (AuthContext)', () => {
 
       const { AuthProvider, useAuth } = await import('../src/contexts/AuthContext');
       const { renderHook, act } = await import('@testing-library/react');
-      const wrapper = ({ children }: { children: React.ReactNode }) => (
-        <AuthProvider>{children}</AuthProvider>
-      );
+      const wrapper = ({ children }: { children: React.ReactNode }) => <AuthProvider>{children}</AuthProvider>;
       const { result } = renderHook(() => useAuth(), { wrapper });
 
       await act(async () => {
