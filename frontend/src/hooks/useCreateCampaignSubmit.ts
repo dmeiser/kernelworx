@@ -185,7 +185,9 @@ export const useCreateCampaignSubmit = () => {
           void navigate(`/scouts/${toUrlId(profileId)}/campaigns/${toUrlId(createdCampaign.campaignId)}`);
         }
       } catch (error) {
-        console.error('Failed to create campaign:', error);
+        if (import.meta.env.DEV) {
+          console.error('Failed to create campaign:', error);
+        }
         onError('Failed to create campaign. Please try again.');
       }
     },

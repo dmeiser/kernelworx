@@ -78,7 +78,9 @@ export const handleApolloError = ({ operation, error }: ErrorLink.ErrorHandlerOp
       const { message, locations, path, extensions } = typedErr;
       const errorCode = extensions?.errorCode;
 
-      console.error(`[GraphQL error]: Message: ${message}, Code: ${errorCode}, Location: ${locations}, Path: ${path}`);
+      if (import.meta.env.DEV) {
+        console.error(`[GraphQL error]: Message: ${message}, Code: ${errorCode}, Location: ${locations}, Path: ${path}`);
+      }
 
       // Map errorCode to user-facing messages
       // These will be displayed via toast notifications in the UI
@@ -100,7 +102,9 @@ export const handleApolloError = ({ operation, error }: ErrorLink.ErrorHandlerOp
   } else {
     // Network or other error
     const networkError = error as ErrorLike;
-    console.error(`[Network/Error]: ${networkError.message}`);
+    if (import.meta.env.DEV) {
+      console.error(`[Network/Error]: ${networkError.message}`);
+    }
 
     // Emit network error event
     if (typeof window !== 'undefined') {

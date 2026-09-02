@@ -858,10 +858,18 @@ const createExportSellerHandler = async (
   try {
     await buildSellerReportWorkbook(report, productList);
   } catch (err) {
-    console.error('Failed to download seller report:', err);
+    if (import.meta.env.DEV) {
+      console.error('Failed to download seller report:', err);
+    }
     showSnackbar('Failed to download Excel file. Please try again.');
   }
 };
+
+const hasRequiredOrderData = (
+  report: UnitReport | undefined,
+  allOrders: SellerOrder[],
+  allProducts: string[],
+): boolean => Boolean(report && allOrders.length && allProducts.length);
 
 // Helper: Create export order details handler
 const createExportOrderHandler = async (
@@ -870,11 +878,13 @@ const createExportOrderHandler = async (
   allProducts: string[],
   showSnackbar: (message: string) => void,
 ) => {
-  if (!report || !allOrders.length || !allProducts.length) return;
+  if (!hasRequiredOrderData(report, allOrders, allProducts) || !report) return;
   try {
     await buildOrderDetailsWorkbook(report, allOrders, allProducts);
   } catch (err) {
-    console.error('Failed to download order details:', err);
+    if (import.meta.env.DEV) {
+      console.error('Failed to download order details:', err);
+    }
     showSnackbar('Failed to download Excel file. Please try again.');
   }
 };

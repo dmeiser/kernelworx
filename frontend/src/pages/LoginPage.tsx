@@ -307,7 +307,6 @@ function useLoginState(
       }
       applyLoginAction(getLoginStepAction(result.nextStep?.signInStep));
     } catch (err: unknown) {
-      console.error('Login failed:', err);
       setError(getErrorMessage(err, 'Login failed. Please check your credentials.'));
       setLoading(false);
     }
@@ -336,7 +335,6 @@ function useLoginState(
       setError('MFA verification failed');
       setLoading(false);
     } catch (err: unknown) {
-      console.error('MFA failed:', err);
       setError(getErrorMessage(err, 'Invalid MFA code'));
       setLoading(false);
     }
@@ -389,7 +387,6 @@ function useLoginState(
       });
       await processPasskeyResult(result);
     } catch (err: unknown) {
-      console.error('Passkey login failed:', err);
       setError(getErrorMessage(err, 'Passkey authentication failed. Make sure you have a passkey registered.'));
       setLoading(false);
     }
@@ -404,8 +401,7 @@ function useLoginState(
         sessionStorage.setItem('oauth_redirect', safeFrom);
       }
       await signInWithRedirect({ provider });
-    } catch (err: unknown) {
-      console.error('Social login failed:', err);
+    } catch {
       setError(`${provider} login failed. Please try again.`);
       setLoading(false);
     }

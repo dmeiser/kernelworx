@@ -171,7 +171,9 @@ const DownloadButtons: React.FC<{ orders: Order[]; campaignId: string }> = ({ or
     try {
       await downloadAsXLSX(orders, campaignId);
     } catch (err) {
-      console.error('Failed to download XLSX:', err);
+      if (import.meta.env.DEV) {
+        console.error('Failed to download XLSX:', err);
+      }
       showSnackbar('Failed to download Excel file. Please try again.');
     }
   };

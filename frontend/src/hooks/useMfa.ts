@@ -68,7 +68,6 @@ const runMfaSetup = async (
     setMfaSetupCode(totpSetupDetails.sharedSecret);
     setQrCodeUrl(qrDataUrl);
   } catch (err: unknown) {
-    console.error('MFA setup failed:', err);
     setMfaError(getErrorMessage(err, 'Failed to set up MFA'));
   } finally {
     setMfaLoading(false);
@@ -93,8 +92,8 @@ export const useMfa = (): UseMfaReturn => {
     try {
       const mfaPreference = await fetchMFAPreference();
       setMfaEnabled(mfaPreference.preferred === 'TOTP');
-    } catch (err) {
-      console.error('Failed to fetch MFA preference:', err);
+    } catch {
+      // Ignore load MFA preference error
     }
   }, []);
 
@@ -125,7 +124,6 @@ export const useMfa = (): UseMfaReturn => {
       );
       await loadPasskeys();
     } catch (err: unknown) {
-      console.error('Failed to remove passkeys:', err);
       setMfaError(getErrorMessage(err, 'Failed to remove passkeys'));
       return;
     } finally {
@@ -150,7 +148,6 @@ export const useMfa = (): UseMfaReturn => {
       setQrCodeUrl(null);
       setMfaVerificationCode('');
     } catch (err: unknown) {
-      console.error('MFA verification failed:', err);
       setMfaError(getErrorMessage(err, 'Invalid verification code. Please try again.'));
     } finally {
       setMfaLoading(false);
@@ -171,7 +168,6 @@ export const useMfa = (): UseMfaReturn => {
       setMfaEnabled(false);
       setMfaSuccess(false);
     } catch (err: unknown) {
-      console.error('Disable MFA failed:', err);
       setMfaError(getErrorMessage(err, 'Failed to disable MFA'));
     } finally {
       setMfaLoading(false);
