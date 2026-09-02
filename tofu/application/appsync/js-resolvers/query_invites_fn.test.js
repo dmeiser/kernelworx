@@ -46,7 +46,7 @@ describe('query_invites_fn response', () => {
                         { inviteCode: 'USED', profileId: 'PROFILE#prof-1', permissions: ['READ'], expiresAt: 2000, used: true },
                         { inviteCode: 'EMPTY', profileId: 'PROFILE#prof-1', permissions: [], expiresAt: 2000, used: false },
                         { inviteCode: 'MISSING', profileId: 'PROFILE#prof-1', expiresAt: 2000, used: false },
-                        { inviteCode: 'ADMINONLY', profileId: 'PROFILE#prof-1', permissions: ['ADMIN'], expiresAt: 2000, used: false },
+                        { inviteCode: 'ADMIN_ONLY', profileId: 'PROFILE#prof-1', permissions: ['ADMIN'], expiresAt: 2000, used: false },
                     ],
                 },
             };
