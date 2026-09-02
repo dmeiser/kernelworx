@@ -31,8 +31,60 @@ variable "certificate_validation" {
   default     = null
 }
 
+variable "web_acl_id" {
+  description = "ID of the CLOUDFRONT-scope AWS WAF web ACL to attach to the distribution (null = no WAF)"
+  type        = string
+  default     = null
+}
+
+variable "api_origin_domain" {
+  description = "AppSync default endpoint hostname for the /graphql behavior (null = no API behavior)"
+  type        = string
+  default     = null
+}
+
+variable "auth_origin_domain" {
+  description = "Cognito custom domain hostname proxied for /login, /logout, /oauth2/*, /.well-known/*, /favicon.ico (null = no auth behaviors)"
+  type        = string
+  default     = null
+}
+
 locals {
   site_domain = var.site_domain
+
+  api_origin_id  = "AppSync-${var.api_origin_domain}"
+  auth_origin_id = "Cognito-${var.auth_origin_domain}"
+
+  # Auth paths proxied to the Cognito custom domain (Amplify builds OAuth URLs
+  # at root paths, so these must live at the root and not under a prefix).
+  auth_path_patterns = ["/login", "/logout", "/oauth2/*", "/.well-known/*", "/favicon.ico"]
+}
+
+# CloudFront Function: Cognito answers with absolute redirects on its own
+# domain; rewrite them to the site origin so browsers stay on the
+# distribution. Associated with the auth ordered cache behaviors only.
+resource "aws_cloudfront_function" "auth_location_rewrite" {
+  count   = var.auth_origin_domain != null ? 1 : 0
+  name    = "${replace(local.site_domain, ".", "-")}-auth-location-rewrite"
+  runtime = "cloudfront-js-2.0"
+  comment = "Rewrite Cognito absolute Location redirects from ${var.auth_origin_domain} to ${local.site_domain}"
+  publish = true
+
+  code = <<-EOF
+  function handler(event) {
+    var response = event.response;
+    var location = response.headers.location;
+    var prefix = "https://${var.auth_origin_domain}";
+    if (location && location.value.indexOf(prefix) === 0) {
+      var rest = location.value.slice(prefix.length);
+      if (rest.indexOf("/") !== 0) {
+        rest = "/" + rest;
+      }
+      location.value = "https://${local.site_domain}" + rest;
+    }
+    return response;
+  }
+  EOF
 }
 
 # Origin Access Identity
@@ -73,6 +125,7 @@ resource "aws_cloudfront_distribution" "site" {
   default_root_object = "index.html"
   aliases             = [local.site_domain]
   price_class         = "PriceClass_100"
+  web_acl_id          = var.web_acl_id
 
   origin {
     domain_name = var.static_bucket_regional_domain
@@ -83,12 +136,107 @@ resource "aws_cloudfront_distribution" "site" {
     }
   }
 
+  # AppSync default endpoint hostname (the served TLS cert matches it; the
+  # custom-domain name does not work as an origin name).
+  dynamic "origin" {
+    for_each = var.api_origin_domain != null ? [1] : []
+
+    content {
+      domain_name = var.api_origin_domain
+      origin_id   = local.api_origin_id
+
+      custom_origin_config {
+        http_port              = 80
+        https_port             = 443
+        origin_protocol_policy = "https-only"
+        origin_ssl_protocols   = ["TLSv1.2", "TLSv1.3"]
+      }
+    }
+  }
+
+  # Cognito custom domain, reached with SNI/Host of the custom domain.
+  dynamic "origin" {
+    for_each = var.auth_origin_domain != null ? [1] : []
+
+    content {
+      domain_name = var.auth_origin_domain
+      origin_id   = local.auth_origin_id
+
+      custom_origin_config {
+        http_port              = 80
+        https_port             = 443
+        origin_protocol_policy = "https-only"
+        origin_ssl_protocols   = ["TLSv1.2", "TLSv1.3"]
+      }
+    }
+  }
+
+  # GraphQL API path: same-origin through the distribution, no caching.
+  dynamic "ordered_cache_behavior" {
+    for_each = var.api_origin_domain != null ? [1] : []
+
+    content {
+      path_pattern           = "/graphql"
+      allowed_methods        = ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"]
+      cached_methods         = ["GET", "HEAD"]
+      target_origin_id       = local.api_origin_id
+      viewer_protocol_policy = "redirect-to-https"
+
+      forwarded_values {
+        query_string = true
+        headers      = ["Authorization", "Content-Type", "Accept"]
+
+        cookies {
+          forward = "none"
+        }
+      }
+
+      min_ttl     = 0
+      default_ttl = 0
+      max_ttl     = 0
+    }
+  }
+
+  # Cognito auth paths (managed login + OAuth endpoints), ahead of the
+  # default behavior. Caching disabled; cookies must flow to Cognito.
+  dynamic "ordered_cache_behavior" {
+    for_each = var.auth_origin_domain != null ? local.auth_path_patterns : []
+
+    content {
+      path_pattern           = ordered_cache_behavior.value
+      allowed_methods        = ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"]
+      cached_methods         = ["GET", "HEAD"]
+      target_origin_id       = local.auth_origin_id
+      viewer_protocol_policy = "redirect-to-https"
+
+      forwarded_values {
+        query_string = true
+
+        cookies {
+          forward = "all"
+        }
+      }
+
+      min_ttl     = 0
+      default_ttl = 0
+      max_ttl     = 0
+
+      function_association {
+        event_type   = "viewer-response"
+        function_arn = aws_cloudfront_function.auth_location_rewrite[0].arn
+      }
+    }
+  }
+
   default_cache_behavior {
     allowed_methods        = ["GET", "HEAD", "OPTIONS"]
     cached_methods         = ["GET", "HEAD"]
     target_origin_id       = "S3-${var.static_bucket_id}"
     viewer_protocol_policy = "redirect-to-https"
     compress               = true
+
+    # #166: security headers (CSP incl. frame-ancestors) on all site responses.
+    response_headers_policy_id = aws_cloudfront_response_headers_policy.security.id
 
     forwarded_values {
       query_string = false
