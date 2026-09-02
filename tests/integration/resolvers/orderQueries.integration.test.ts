@@ -1190,7 +1190,27 @@ describe('Order Query Operations Integration Tests', () => {
       // Cleanup
       await ownerClient.mutate({ mutation: DELETE_ORDER, variables: { orderId } });
       await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId } });
-      await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId } });
+
+      // Retry deleteCatalog to tolerate catalogId-index GSI propagation lag
+      // after campaign deletion (Bug #21: GSI eventual consistency).
+      let catalogDeleted = false;
+      for (let attempt = 0; attempt < 5; attempt++) {
+        try {
+          await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId } });
+          catalogDeleted = true;
+          break;
+        } catch (error: any) {
+          const message = error?.message || error?.graphQLErrors?.[0]?.message || '';
+          if (attempt < 4 && message.includes('Cannot delete catalog')) {
+            await new Promise((resolve) => setTimeout(resolve, 500));
+          } else {
+            throw error;
+          }
+        }
+      }
+      if (!catalogDeleted) {
+        throw new Error('Failed to delete catalog after retries');
+      }
     }, 15000);
 
     test('Listing orders for campaign with many orders', async () => {
