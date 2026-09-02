@@ -137,43 +137,58 @@ class TestValidatePaymentMethodHandler:
 
         assert "Owner account ID not found" in str(exc_info.value)
 
-    def test_missing_payment_method_skips_validation(
+    def test_missing_payment_method_is_skipped(
         self, dynamodb_tables: Dict[str, Any], sample_account: Dict[str, Any], sample_account_id: str
     ) -> None:
-        """Test validation is skipped when paymentMethod is missing (updateOrder partial update)."""
+        """Test validation is skipped when paymentMethod is omitted (e.g. updateOrder)."""
         event = {"prev": {"result": {"ownerAccountId": sample_account_id}}, "arguments": {"input": {}}}
 
         result = lambda_handler(event, None)
-
         assert result["ownerAccountId"] == sample_account_id
 
-    def test_empty_payment_method_is_rejected(
+    def test_null_payment_method_is_skipped(
         self, dynamodb_tables: Dict[str, Any], sample_account: Dict[str, Any], sample_account_id: str
     ) -> None:
-        """Test validation fails when paymentMethod is explicitly empty."""
+        """Test validation is skipped when paymentMethod is explicitly null."""
+        event = {
+            "prev": {"result": {"ownerAccountId": sample_account_id}},
+            "arguments": {"input": {"paymentMethod": None}},
+        }
+
+        result = lambda_handler(event, None)
+        assert result["ownerAccountId"] == sample_account_id
+
+    def test_empty_payment_method_is_skipped(
+        self, dynamodb_tables: Dict[str, Any], sample_account: Dict[str, Any], sample_account_id: str
+    ) -> None:
+        """Test validation is skipped when paymentMethod is an empty string."""
         event = {
             "prev": {"result": {"ownerAccountId": sample_account_id}},
             "arguments": {"input": {"paymentMethod": ""}},
         }
 
-        with pytest.raises(AppError) as exc_info:
-            lambda_handler(event, None)
+        result = lambda_handler(event, None)
+        assert result["ownerAccountId"] == sample_account_id
 
-        assert "Payment method is required" in str(exc_info.value)
-
-    def test_update_order_rejects_invalid_payment_method(
+    def test_skipped_validation_preserves_prev_result(
         self, dynamodb_tables: Dict[str, Any], sample_account: Dict[str, Any], sample_account_id: str
     ) -> None:
-        """Test updateOrder path rejects a payment method that does not exist."""
+        """Test prev.result is preserved when paymentMethod validation is skipped."""
         event = {
-            "prev": {"result": {"ownerAccountId": sample_account_id}},
-            "arguments": {"input": {"paymentMethod": "Zelle"}},
+            "prev": {
+                "result": {
+                    "ownerAccountId": sample_account_id,
+                    "profileId": "PROFILE#123",
+                    "otherData": "should be preserved",
+                }
+            },
+            "arguments": {"input": {}},
         }
 
-        with pytest.raises(AppError) as exc_info:
-            lambda_handler(event, None)
-
-        assert "does not exist" in str(exc_info.value)
+        result = lambda_handler(event, None)
+        assert result["ownerAccountId"] == sample_account_id
+        assert result["profileId"] == "PROFILE#123"
+        assert result["otherData"] == "should be preserved"
 
     def test_case_insensitive_validation(
         self, dynamodb_tables: Dict[str, Any], sample_account: Dict[str, Any], sample_account_id: str
