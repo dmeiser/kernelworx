@@ -15,9 +15,9 @@ export function response(ctx) {
         util.error('Catalog not found', 'NotFound');
     }
     
-    // READ ACCESS: Anyone can read catalog by ID (no authorization check).
-    // Security relies on UUID obscurity - catalogIds are not guessable.
-    // WRITE ACCESS: Only owner can update/delete (checked in update/delete resolvers).
+    // Access rules (public/private visibility, soft-delete, ownership) are enforced
+    // by the getCatalog response template and the Campaign.catalog /
+    // SharedCampaign.catalog field response templates.
     const catalog = ctx.result;
     ctx.stash.catalog = catalog;
     return catalog;

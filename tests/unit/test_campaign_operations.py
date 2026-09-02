@@ -1,7 +1,7 @@
 """Unit tests for campaign_operations Lambda handler."""
 
 from decimal import Decimal
-from typing import Any, Dict
+from typing import Any, Dict, List, cast
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -658,7 +658,7 @@ class TestCreateCampaign:
         # Mock the transact_write_items to fail on first call (share already exists).
         # The share is at index 1 of the 2-item transaction; campaign at index 0
         # succeeded, so the share's conditional check (attribute_not_exists) failed.
-        mock_exception = Exception("TransactionCanceledException")
+        mock_exception: Any = Exception("TransactionCanceledException")
         mock_exception.response = {"CancellationReasons": [{"Code": "None"}, {"Code": "ConditionalCheckFailed"}]}
 
         # Create a proper exception type mock
@@ -730,7 +730,7 @@ class TestCreateCampaign:
         mock_get_profile.return_value = sample_profile
 
         # Test missing campaignName
-        event = {
+        event: Dict[str, Any] = {
             "arguments": {"input": {"profileId": "PROFILE#123"}},
             "identity": {"sub": "test-account-123"},
         }
@@ -761,7 +761,7 @@ class TestCreateCampaign:
         mock_check_access.return_value = True
         mock_get_profile.return_value = sample_profile
 
-        base_event = {
+        base_event: Dict[str, Any] = {
             "arguments": {
                 "input": {
                     "profileId": "PROFILE#123",
@@ -862,9 +862,7 @@ class TestCreateCampaign:
             "TransactWriteItems",
         )
         # Add the response attribute that the code checks
-        transaction_exception.response = {  # type: ignore[attr-defined]
-            "CancellationReasons": [{"Code": "None"}, {"Code": "ConditionalCheckFailed"}]
-        }
+        transaction_exception.response = {"CancellationReasons": [{"Code": "None"}, {"Code": "ConditionalCheckFailed"}]}
 
         # Configure the mock to raise the exception on first call, succeed on second
         mock_dynamodb_client.transact_write_items.side_effect = [transaction_exception, None]
@@ -911,9 +909,7 @@ class TestCreateCampaign:
             },
             "TransactWriteItems",
         )
-        transaction_exception.response = {  # type: ignore[attr-defined]
-            "CancellationReasons": [{"Code": "ThrottlingError"}]
-        }
+        transaction_exception.response = {"CancellationReasons": [{"Code": "ThrottlingError"}]}
 
         mock_dynamodb_client.transact_write_items.side_effect = transaction_exception
         mock_dynamodb_client.exceptions.TransactionCanceledException = ClientError
@@ -1716,11 +1712,11 @@ class TestDynamoDBClient:
 class TestHandleTransactionFailure:
     """Tests for _handle_transaction_failure conditional-retry logic (Closes #134)."""
 
-    def _build_exception(self, reasons: list) -> Exception:
+    def _build_exception(self, reasons: List[Dict[str, Any]]) -> Exception:
         exception_type = type("TransactionCanceledException", (Exception,), {})
         instance = exception_type("Transaction cancelled")
         instance.response = {"CancellationReasons": reasons}
-        return instance
+        return cast(Exception, instance)
 
     def _share_item(self) -> Dict[str, Any]:
         return {"Put": {"TableName": "shares", "Item": {"id": {"S": "x"}}}}
@@ -2051,8 +2047,8 @@ class TestDeleteCampaignOrders:
         lambda_context: Any,
     ) -> None:
         """Test that unexpected errors are wrapped in an INTERNAL_ERROR AppError."""
-        from src.handlers.admin_operations import AppError, ErrorCode
         from src.handlers.campaign_operations import delete_campaign_orders
+        from src.utils.errors import AppError, ErrorCode
 
         campaign_id = "CAMPAIGN#any"
         profile_id = "PROFILE#any"

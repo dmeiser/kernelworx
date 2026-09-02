@@ -34,7 +34,7 @@ def _render(template_name: str, ctx: Dict[str, Any]) -> str:
     template_path = MAPPING_TEMPLATES_DIR / template_name
     template = airspeed.Template(template_path.read_text())
     try:
-        return template.merge({"ctx": ctx, "util": _Util()}).strip()
+        return str(template.merge({"ctx": ctx, "util": _Util()})).strip()
     except airspeed.TemplateExecutionError as exc:
         if exc.__cause__ is not None:
             raise exc.__cause__ from None

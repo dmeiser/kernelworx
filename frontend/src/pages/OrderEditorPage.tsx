@@ -735,18 +735,17 @@ function checkFormErrors(formState: OrderFormState): LineItemInput[] | null {
   return validation.validLineItems;
 }
 
+function hasNonEmptyErrorArray(value: unknown): boolean {
+  return Array.isArray(value) && value.length > 0;
+}
+
 function hasMutationErrors(res: unknown): boolean {
   if (!res || typeof res !== 'object') {
     return false;
   }
   const typed = res as { errors?: unknown[]; error?: { errors?: unknown[] } };
-  if (Array.isArray(typed.errors) && typed.errors.length > 0) {
-    return true;
-  }
-  const apolloError = typed.error;
-  return Boolean(
-    apolloError && typeof apolloError === 'object' && Array.isArray(apolloError.errors) && apolloError.errors.length > 0,
-  );
+  const nestedErrors = typed.error?.errors;
+  return hasNonEmptyErrorArray(typed.errors) || hasNonEmptyErrorArray(nestedErrors);
 }
 
 async function submitOrder({
