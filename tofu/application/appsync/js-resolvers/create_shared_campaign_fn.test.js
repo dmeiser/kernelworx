@@ -69,6 +69,54 @@ describe('create_shared_campaign_fn request', () => {
     assert.strictEqual(result.key.sharedCampaignCode, 'TROOP123-CO O-CA-25-550E84');
   });
 
+  it('avoids collisions for different cities that share the same deterministic prefix', () => {
+    const codeSpringfield = withAutoId(
+      '550e8400-e29b-41d4-a716-446655440000',
+      () =>
+        request({
+          ...baseCtx,
+          args: { input: { ...baseInput, city: 'Springfield' } },
+        })
+    ).key.sharedCampaignCode;
+
+    const codeShelbyville = withAutoId(
+      '660e8400-e29b-41d4-a716-446655440000',
+      () =>
+        request({
+          ...baseCtx,
+          args: { input: { ...baseInput, city: 'Shelbyville' } },
+        })
+    ).key.sharedCampaignCode;
+
+    assert.ok(codeSpringfield.startsWith('TROOP123-COOK-CA-25-'));
+    assert.ok(codeShelbyville.startsWith('TROOP123-COOK-CA-25-'));
+    assert.notStrictEqual(codeSpringfield, codeShelbyville);
+  });
+
+  it('avoids collisions for campaign names that share the same four-character prefix', () => {
+    const codeCookieSale = withAutoId(
+      '550e8400-e29b-41d4-a716-446655440000',
+      () =>
+        request({
+          ...baseCtx,
+          args: { input: { ...baseInput, campaignName: 'Cookie Sale' } },
+        })
+    ).key.sharedCampaignCode;
+
+    const codeCookiesForCharity = withAutoId(
+      '660e8400-e29b-41d4-a716-446655440000',
+      () =>
+        request({
+          ...baseCtx,
+          args: { input: { ...baseInput, campaignName: 'Cookies for Charity' } },
+        })
+    ).key.sharedCampaignCode;
+
+    assert.ok(codeCookieSale.startsWith('TROOP123-COOK-CA-25-'));
+    assert.ok(codeCookiesForCharity.startsWith('TROOP123-COOK-CA-25-'));
+    assert.notStrictEqual(codeCookieSale, codeCookiesForCharity);
+  });
+
   it('builds unitCampaignKey from unit and campaign fields', () => {
     const result = request(baseCtx);
 
