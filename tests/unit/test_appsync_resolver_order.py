@@ -30,17 +30,12 @@ MOVED_INSTANCES_ERROR = textwrap.dedent(
     │ Error: Moved resource instances excluded by targeting
     │
     │ Resource instances in your current state have moved to new addresses in the
-    │ configuration. Running tofu apply in this mode will therefore not move these
-    │ instances in the state.
+    │ latest configuration. OpenTofu must include those resource instances while
+    │ planning in order to ensure a correct result, but your -target=... options
+    │ do not fully cover all of those resource instances.
     │
-    │ To explicitly move these instances in the state, you must instead run tofu
-    │ apply without the -target option. If you want to change the address of an
-    │ instance without moving it in the state, use the "moved" block
-    │ replace_triggered_by argument.
-    │
-    │ The following -target options would address all of these moved instance
-    │ addresses:
-    │
+    │ To create a valid plan, either remove your -target=... options altogether
+    │ or add the following additional target options:
     │   -target="module.appsync.aws_appsync_domain_name.api"
     │   -target="module.appsync.aws_appsync_domain_name_api_association.api"
     │   -target="module.cognito.aws_cognito_user_pool_domain.custom"
@@ -48,7 +43,7 @@ MOVED_INSTANCES_ERROR = textwrap.dedent(
     │   -target="module.iam.aws_iam_role_policy.lambda_cloudfront"
     │
     │ Note that adding these options may include further additional resource
-    │ instances.
+    │ instances in your plan, in order to respect object dependencies.
     ╵
     """
 )
