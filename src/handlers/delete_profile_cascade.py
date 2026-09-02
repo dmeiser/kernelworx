@@ -1,8 +1,8 @@
-"""Lambda resolver to cascade-delete a profile and all related data."""
-
+import os
 import time
 from typing import TYPE_CHECKING, Any, Dict, List
 
+import boto3
 from botocore.exceptions import ClientError
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -33,6 +33,16 @@ logger = get_logger(__name__)
 BATCH_SIZE = 25
 _PROFILE_LOOKUP_RETRIES = 3
 _PROFILE_LOOKUP_DELAY_SECONDS = 0.1
+
+s3_client: Any = None
+
+
+def _get_s3_client() -> Any:
+    """Return S3 client, supporting module-level mock for testing."""
+    global s3_client
+    if s3_client is not None:
+        return s3_client
+    return boto3.client("s3")
 
 
 def _raise_delete_error(table_name: str, exc: Exception) -> None:
@@ -150,6 +160,44 @@ def _delete_invites(invites: List[Dict[str, Any]]) -> int:
     return _batch_delete_keys(tables.invites, keys, ["inviteCode"])
 
 
+def _delete_s3_reports(profile_id: str) -> int:
+    """Delete all S3 report objects and versions for this profile."""
+    bucket_name = os.environ.get("EXPORTS_BUCKET")
+    if not bucket_name:
+        return 0
+
+    s3 = _get_s3_client()
+    deleted_count = 0
+    prefixes = [f"reports/{profile_id}/"]
+    clean_id = profile_id.replace("PROFILE#", "")
+    if clean_id != profile_id:
+        prefixes.append(f"reports/{clean_id}/")
+
+    for prefix in set(prefixes):
+        try:
+            paginator = s3.get_paginator("list_object_versions")
+            for page in paginator.paginate(Bucket=bucket_name, Prefix=prefix):
+                delete_items: list[dict[str, str]] = []
+                for version in page.get("Versions", []):
+                    k = version.get("Key")
+                    vid = version.get("VersionId")
+                    if k and vid:
+                        delete_items.append({"Key": k, "VersionId": vid})
+                for marker in page.get("DeleteMarkers", []):
+                    k = marker.get("Key")
+                    vid = marker.get("VersionId")
+                    if k and vid:
+                        delete_items.append({"Key": k, "VersionId": vid})
+                if delete_items:
+                    s3.delete_objects(Bucket=bucket_name, Delete={"Objects": delete_items})
+                    deleted_count += len(delete_items)
+                    logger.info(f"Deleted {len(delete_items)} report versions from S3 under {prefix}")
+        except Exception as e:
+            logger.warning(f"Error cleaning up S3 reports under {prefix}: {str(e)}")
+
+    return deleted_count
+
+
 def _delete_profile(owner_account_id: str, profile_id: str) -> None:
     """Delete the profile metadata record."""
     try:
@@ -189,7 +237,10 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> bool:
     owner_account_id = _get_profile_owner_id(db_profile_id)
     db_caller_id = ensure_account_id(caller_account_id)
     if owner_account_id != db_caller_id:
-        raise AppError(ErrorCode.FORBIDDEN, "Only profile owner can delete a profile")
+        logger.warning(
+            f"Unauthorized delete attempt: caller {caller_account_id} is not owner {owner_account_id} of {db_profile_id}"
+        )
+        raise AppError(ErrorCode.FORBIDDEN, "Not authorized to delete this profile")
 
     logger.info(f"Starting cascade delete for profile {db_profile_id}")
 
@@ -219,6 +270,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> bool:
     order_keys = _collect_order_keys(campaigns)
 
     orders_deleted = _delete_orders(order_keys)
+    reports_deleted = _delete_s3_reports(db_profile_id)
     campaigns_deleted = _delete_campaigns(db_profile_id, campaigns)
     shares_deleted = _delete_shares(db_profile_id, shares)
     invites_deleted = _delete_invites(invites)
@@ -228,6 +280,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> bool:
     logger.info(
         f"Cascade delete complete for profile {db_profile_id}: "
         f"orders={orders_deleted}, campaigns={campaigns_deleted}, "
-        f"shares={shares_deleted}, invites={invites_deleted}"
+        f"shares={shares_deleted}, invites={invites_deleted}, "
+        f"reports={reports_deleted}"
     )
     return True

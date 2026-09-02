@@ -721,3 +721,82 @@ class TestDeleteProfileCascade:
             ExpressionAttributeValues={":pid": profile_id},
         )
         assert len(invites_response.get("Items", [])) == 0
+
+    def test_delete_s3_reports_success(self, monkeypatch: Any) -> None:
+        """Test S3 report deletion with object versions and delete markers."""
+        from src.handlers.delete_profile_cascade import _delete_s3_reports
+
+        monkeypatch.setenv("EXPORTS_BUCKET", "test-reports-bucket")
+        mock_s3 = MagicMock()
+        mock_paginator = MagicMock()
+        mock_paginator.paginate.return_value = [
+            {
+                "Versions": [
+                    {"Key": "reports/PROFILE#p1/c1/r1.xlsx", "VersionId": "v1"},
+                    {"Key": "reports/PROFILE#p1/c1/r1.xlsx", "VersionId": "v2"},
+                    {"Key": "", "VersionId": "v3"},
+                    {"Key": "reports/PROFILE#p1/c1/r1.xlsx"},
+                ],
+                "DeleteMarkers": [
+                    {"Key": "reports/PROFILE#p1/c1/r1.xlsx", "VersionId": "dm1"},
+                    {"Key": "", "VersionId": "dm2"},
+                    {"VersionId": "dm3"},
+                ],
+            },
+            {"Versions": [], "DeleteMarkers": []},
+        ]
+        mock_s3.get_paginator.return_value = mock_paginator
+
+        with patch("src.handlers.delete_profile_cascade.s3_client", mock_s3):
+            count = _delete_s3_reports("PROFILE#p1")
+            assert count >= 3
+            mock_s3.delete_objects.assert_called()
+
+    def test_delete_s3_reports_no_bucket(self, monkeypatch: Any) -> None:
+        """Test S3 report deletion returns 0 when no bucket configured."""
+        from src.handlers.delete_profile_cascade import _delete_s3_reports
+
+        monkeypatch.delenv("EXPORTS_BUCKET", raising=False)
+        count = _delete_s3_reports("PROFILE#p1")
+        assert count == 0
+
+    def test_delete_s3_reports_error_handled_gracefully(self, monkeypatch: Any) -> None:
+        """Test S3 report deletion error is handled gracefully."""
+        from src.handlers.delete_profile_cascade import _delete_s3_reports
+
+        monkeypatch.setenv("EXPORTS_BUCKET", "test-reports-bucket")
+        mock_s3 = MagicMock()
+        mock_s3.get_paginator.side_effect = Exception("S3 error")
+
+        with patch("src.handlers.delete_profile_cascade.s3_client", mock_s3):
+            count = _delete_s3_reports("PROFILE#p1")
+            assert count == 0
+
+    def test_get_s3_client_default(self) -> None:
+        """Test _get_s3_client returns default boto3 S3 client when s3_client is None."""
+        import src.handlers.delete_profile_cascade as mod
+        from src.handlers.delete_profile_cascade import _get_s3_client
+
+        mod.s3_client = None
+        with patch("boto3.client") as mock_boto:
+            mock_client = MagicMock()
+            mock_boto.return_value = mock_client
+            client = _get_s3_client()
+            assert client == mock_client
+            mock_boto.assert_called_once_with("s3")
+
+    def test_delete_s3_reports_with_unprefixed_profile_id(self, monkeypatch: Any) -> None:
+        """Test S3 report deletion when profile_id has no PROFILE# prefix."""
+        from src.handlers.delete_profile_cascade import _delete_s3_reports
+
+        monkeypatch.setenv("EXPORTS_BUCKET", "test-reports-bucket")
+        mock_s3 = MagicMock()
+        mock_paginator = MagicMock()
+        mock_paginator.paginate.return_value = [
+            {"Versions": [{"Key": "reports/p1/c1/r1.xlsx", "VersionId": "v10"}]},
+        ]
+        mock_s3.get_paginator.return_value = mock_paginator
+
+        with patch("src.handlers.delete_profile_cascade.s3_client", mock_s3):
+            count = _delete_s3_reports("p1")
+            assert count == 1
