@@ -392,21 +392,38 @@ def _search_accounts_in_dynamodb(query: str, logger: Any) -> list[Dict[str, Any]
     Search DynamoDB Accounts table with case-insensitive partial matching.
 
     Searches email, givenName, and familyName fields.
+    For exact email queries, utilizes the email-index GSI for fast O(1) lookup.
     Returns all matching accounts (up to max_results limit).
-
-    Note: For small user bases (<10k), scanning and filtering in Python is acceptable.
-    For larger scale, consider adding lowercase GSI fields or using OpenSearch.
     """
     query_lower = query.lower()
     matches: list[Dict[str, Any]] = []
     max_results = 50  # Limit results to prevent overwhelming responses
 
     try:
+        # Check email-index GSI first for full email queries
+        if "@" in query and re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", query):
+            try:
+                gsi_response = tables.accounts.query(
+                    IndexName="email-index",
+                    KeyConditionExpression="email = :email",
+                    ExpressionAttributeValues={":email": query_lower},
+                )
+                gsi_items = cast(list[Dict[str, Any]], gsi_response.get("Items", []))
+                if gsi_items:
+                    return gsi_items[:max_results]
+            except ClientError as e:
+                logger.warning(
+                    "DynamoDB email-index query failed, falling back to scan",
+                    error=str(e),
+                    query=mask_email(query),
+                )
+
         # Scan accounts and filter in Python for case-insensitive matching
         paginator_params: Dict[str, Any] = {}
         scanned_count = 0
         max_scan = 1000  # Safety limit
 
+        last_key: Dict[str, Any] | None = None
         while scanned_count < max_scan and len(matches) < max_results:
             items, last_key = _scan_accounts_page(paginator_params)
 
@@ -420,10 +437,17 @@ def _search_accounts_in_dynamodb(query: str, logger: Any) -> list[Dict[str, Any]
             else:
                 break
 
+        if scanned_count >= max_scan and last_key:
+            logger.warning(
+                "DynamoDB accounts search reached max scan limit; results may be truncated",
+                query=mask_email(query),
+                scanned_count=scanned_count,
+            )
+
         return matches
 
     except ClientError as e:
-        logger.warning("DynamoDB search failed", error=str(e), query=query)
+        logger.warning("DynamoDB search failed", error=str(e), query=mask_email(query))
         return []
 
 
