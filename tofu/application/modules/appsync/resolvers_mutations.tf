@@ -103,8 +103,8 @@ resource "aws_appsync_resolver" "redeem_profile_invite" {
     functions = [
       aws_appsync_function.lookup_invite.function_id,
       aws_appsync_function.check_existing_share.function_id,
-      aws_appsync_function.create_share.function_id,
       aws_appsync_function.mark_invite_used.function_id,
+      aws_appsync_function.create_share.function_id,
     ]
   }
 
