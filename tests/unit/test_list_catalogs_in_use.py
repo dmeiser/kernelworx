@@ -144,7 +144,6 @@ class TestAsyncGetSharedProfileIds:
             IndexName="targetAccountId-index",
             KeyConditionExpression="targetAccountId = :targetAccountId",
             ExpressionAttributeValues={":targetAccountId": "ACCOUNT#test-user"},
-            ProjectionExpression="profileId, permissions",
         )
 
     @pytest.mark.asyncio

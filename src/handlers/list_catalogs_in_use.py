@@ -105,7 +105,6 @@ async def _async_get_shared_profile_ids(dynamodb: Any, shares_table_name: str, t
         "IndexName": "targetAccountId-index",
         "KeyConditionExpression": "targetAccountId = :targetAccountId",
         "ExpressionAttributeValues": {":targetAccountId": target_account_id},
-        "ProjectionExpression": "profileId, permissions",
     }
     return await _handle_pagination(
         table,
