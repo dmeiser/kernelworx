@@ -35,8 +35,11 @@ def _extract_and_normalize_inputs(event: Dict[str, Any]) -> tuple[str, str | Non
         raise AppError(ErrorCode.INVALID_INPUT, "Owner account ID not found in pipeline context")
 
     payment_method = input_data.get("paymentMethod")
-    if not payment_method:
+    if payment_method is None:
         return owner_account_id, None
+
+    if not payment_method:
+        raise AppError(ErrorCode.INVALID_INPUT, "Payment method is required")
 
     if owner_account_id.startswith("ACCOUNT#"):
         owner_account_id = owner_account_id[8:]
@@ -48,9 +51,10 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
     Validate that the payment method exists for the profile owner's account.
 
-    If arguments.input.paymentMethod is missing, empty, or None, the handler
+    If arguments.input.paymentMethod is missing or None, the handler
     returns prev.result unchanged. This makes it safe to use in updateOrder,
     where paymentMethod is optional and should only be validated when supplied.
+    A present-but-empty payment method is rejected as invalid input.
 
     Args:
         event: AppSync pipeline event with:

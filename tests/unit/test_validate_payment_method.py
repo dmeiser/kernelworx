@@ -158,17 +158,20 @@ class TestValidatePaymentMethodHandler:
         result = lambda_handler(event, None)
         assert result["ownerAccountId"] == sample_account_id
 
-    def test_empty_payment_method_is_skipped(
+    def test_empty_payment_method_is_rejected(
         self, dynamodb_tables: Dict[str, Any], sample_account: Dict[str, Any], sample_account_id: str
     ) -> None:
-        """Test validation is skipped when paymentMethod is an empty string."""
+        """Test validation fails when paymentMethod is an empty string."""
         event = {
             "prev": {"result": {"ownerAccountId": sample_account_id}},
             "arguments": {"input": {"paymentMethod": ""}},
         }
 
-        result = lambda_handler(event, None)
-        assert result["ownerAccountId"] == sample_account_id
+        with pytest.raises(AppError) as exc_info:
+            lambda_handler(event, None)
+
+        assert exc_info.value.error_code == "INVALID_INPUT"
+        assert "Payment method is required" in str(exc_info.value)
 
     def test_skipped_validation_preserves_prev_result(
         self, dynamodb_tables: Dict[str, Any], sample_account: Dict[str, Any], sample_account_id: str

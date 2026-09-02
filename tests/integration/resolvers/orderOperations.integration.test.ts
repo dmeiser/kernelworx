@@ -1434,6 +1434,40 @@ describe('Order Operations Integration Tests', () => {
       }
     }, 10000);
 
+    test('rejects update with empty payment method', async () => {
+      const createInput = {
+        profileId: testProfileId,
+        campaignId: testCampaignId,
+        customerName: 'Empty Payment Method Update Test',
+        orderDate: new Date().toISOString(),
+        paymentMethod: 'CASH',
+        lineItems: [{ productId: testProductId, quantity: 1 }],
+      };
+
+      const { data: createData } = await ownerClient.mutate({
+        mutation: CREATE_ORDER,
+        variables: { input: createInput },
+      });
+      const orderId = createData.createOrder.orderId;
+
+      try {
+        await expect(
+          ownerClient.mutate({
+            mutation: UPDATE_ORDER,
+            variables: {
+              input: {
+                orderId,
+                paymentMethod: '',
+              },
+            },
+          })
+        ).rejects.toThrow();
+      } finally {
+        // Cleanup
+        await ownerClient.mutate({ mutation: DELETE_ORDER, variables: { orderId } });
+      }
+    }, 10000);
+
     test('preserves historical payment method when updating other fields after method deletion', async () => {
       const customMethodName = `Zelle-Historical-Update-${Date.now()}`;
       await ownerClient.mutate({
