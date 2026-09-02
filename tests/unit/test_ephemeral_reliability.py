@@ -100,13 +100,18 @@ class TestCleanupStaleLock:
         assert result.returncode == 0, result.stderr
         assert "No lock object found" in result.stderr
 
-    def test_different_host_lock_is_removed(self, repo_root: Path, tmp_env: Path) -> None:
-        lock = {"Created": "2026-08-23T00:00:00Z", "Who": "runner@other-host"}
+    def test_different_host_fresh_lock_is_left(self, repo_root: Path, tmp_env: Path) -> None:
+        recorded = tmp_env / "aws_calls.txt"
+        lock = {
+            "Created": (datetime.now(timezone.utc) - timedelta(seconds=30)).isoformat(),
+            "Who": "runner@other-host",
+        }
         result = self._source_and_call(
             repo_root,
             tmp_env,
             f"""
             #!/bin/bash
+            echo "$@" >> "{recorded}"
             case "$1 $2" in
               "s3api head-object")
                 exit 0
@@ -122,44 +127,22 @@ class TestCleanupStaleLock:
             """,
         )
         assert result.returncode == 0, result.stderr
-        assert "Lock belongs to a different host" in result.stderr
+        assert "Lock appears fresh" in result.stderr
+        rm_calls = [line for line in recorded.read_text().splitlines() if line.startswith("s3 rm")]
+        assert not rm_calls, "Fresh lock from a different host must not be deleted"
 
-    def test_same_host_fresh_lock_is_left(self, repo_root: Path, tmp_env: Path) -> None:
-        this_host = os.uname().nodename
-        lock = {
-            "Created": (datetime.now(timezone.utc) - timedelta(seconds=30)).isoformat(),
-            "Who": f"runner@{this_host}",
-        }
-        result = self._source_and_call(
-            repo_root,
-            tmp_env,
-            f"""
-            #!/bin/bash
-            case "$1 $2" in
-              "s3api head-object")
-                exit 0
-                ;;
-              "s3 cp")
-                echo '{json.dumps(lock)}'
-                ;;
-            esac
-            exit 0
-            """,
-        )
-        assert result.returncode == 0, result.stderr
-        assert "Lock appears fresh and from this host" in result.stderr
-
-    def test_same_host_stale_lock_is_removed(self, repo_root: Path, tmp_env: Path) -> None:
-        this_host = os.uname().nodename
+    def test_different_host_stale_lock_is_removed(self, repo_root: Path, tmp_env: Path) -> None:
+        recorded = tmp_env / "aws_calls.txt"
         lock = {
             "Created": (datetime.now(timezone.utc) - timedelta(seconds=900)).isoformat(),
-            "Who": f"runner@{this_host}",
+            "Who": "runner@other-host",
         }
         result = self._source_and_call(
             repo_root,
             tmp_env,
             f"""
             #!/bin/bash
+            echo "$@" >> "{recorded}"
             case "$1 $2" in
               "s3api head-object")
                 exit 0
@@ -176,6 +159,72 @@ class TestCleanupStaleLock:
         )
         assert result.returncode == 0, result.stderr
         assert "Lock is older than threshold" in result.stderr
+        rm_calls = [line for line in recorded.read_text().splitlines() if line.startswith("s3 rm")]
+        assert rm_calls, "Stale lock from a different host must be deleted"
+
+    def test_same_host_fresh_lock_is_left(self, repo_root: Path, tmp_env: Path) -> None:
+        recorded = tmp_env / "aws_calls.txt"
+        this_host = os.uname().nodename
+        lock = {
+            "Created": (datetime.now(timezone.utc) - timedelta(seconds=30)).isoformat(),
+            "Who": f"runner@{this_host}",
+        }
+        result = self._source_and_call(
+            repo_root,
+            tmp_env,
+            f"""
+            #!/bin/bash
+            echo "$@" >> "{recorded}"
+            case "$1 $2" in
+              "s3api head-object")
+                exit 0
+                ;;
+              "s3 cp")
+                echo '{json.dumps(lock)}'
+                ;;
+              "s3 rm")
+                echo "removed"
+                ;;
+            esac
+            exit 0
+            """,
+        )
+        assert result.returncode == 0, result.stderr
+        assert "Lock appears fresh" in result.stderr
+        rm_calls = [line for line in recorded.read_text().splitlines() if line.startswith("s3 rm")]
+        assert not rm_calls, "Fresh lock from the same host must not be deleted"
+
+    def test_same_host_stale_lock_is_removed(self, repo_root: Path, tmp_env: Path) -> None:
+        recorded = tmp_env / "aws_calls.txt"
+        this_host = os.uname().nodename
+        lock = {
+            "Created": (datetime.now(timezone.utc) - timedelta(seconds=900)).isoformat(),
+            "Who": f"runner@{this_host}",
+        }
+        result = self._source_and_call(
+            repo_root,
+            tmp_env,
+            f"""
+            #!/bin/bash
+            echo "$@" >> "{recorded}"
+            case "$1 $2" in
+              "s3api head-object")
+                exit 0
+                ;;
+              "s3 cp")
+                echo '{json.dumps(lock)}'
+                ;;
+              "s3 rm")
+                echo "removed"
+                ;;
+            esac
+            exit 0
+            """,
+        )
+        assert result.returncode == 0, result.stderr
+        assert "Lock is older than threshold" in result.stderr
+        rm_calls = [line for line in recorded.read_text().splitlines() if line.startswith("s3 rm")]
+        assert rm_calls, "Stale lock from the same host must be deleted"
 
 
 class TestRecoverStateIfMissing:
