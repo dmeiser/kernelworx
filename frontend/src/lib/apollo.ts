@@ -216,7 +216,10 @@ export const apolloClient = new ApolloClient({
       errorPolicy: 'all',
     },
     mutate: {
-      errorPolicy: 'all',
+      // Surface GraphQL errors as thrown failures rather than returning them
+      // alongside data. This prevents mutation callers from treating a failed
+      // mutation as a success just because partial data was returned.
+      errorPolicy: 'none',
     },
   } as unknown as NonNullable<ConstructorParameters<typeof ApolloClient>[0]['defaultOptions']>,
   // The double cast is required because ApolloClient's constructor type expects
