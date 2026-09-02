@@ -1235,7 +1235,7 @@ describe('Order Operations Integration Tests', () => {
       // Update payment method
       const updateInput = {
         orderId,
-        paymentMethod: 'CREDIT_CARD',
+        paymentMethod: 'CHECK',
       };
 
       const { data: updateData } = await ownerClient.mutate({
@@ -1243,7 +1243,7 @@ describe('Order Operations Integration Tests', () => {
         variables: { input: updateInput },
       });
 
-      expect(updateData.updateOrder.paymentMethod).toBe('CREDIT_CARD');
+      expect(updateData.updateOrder.paymentMethod).toBe('CHECK');
     }, 10000);
   });
 
