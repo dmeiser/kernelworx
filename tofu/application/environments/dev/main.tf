@@ -249,7 +249,7 @@ module "cloudfront" {
   static_bucket_regional_domain = module.s3.static_bucket_regional_domain
 
   # #165: one CLOUDFRONT-scope WAF on the distribution (the only WAF).
-  web_acl_id = module.waf.web_acl_id
+  web_acl_id = module.waf.web_acl_arn
 
   # Same-origin API and auth proxy through the distribution. The AppSync
   # origin is the default endpoint hostname: the served TLS cert matches it,
