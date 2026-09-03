@@ -19,6 +19,10 @@ from typing import TYPE_CHECKING, Any, Dict, Optional, cast
 import boto3
 from botocore.exceptions import ClientError
 
+# Sibling handler modules use a same-package relative import, which resolves both
+# in the Lambda zip (package `handlers`) and in unit tests (package `src.handlers`).
+from .campaign_operations import _verify_campaign_deleted, _verify_order_keys_deleted
+
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
     from utils.auth import is_admin
@@ -976,7 +980,7 @@ def create_managed_catalog(event: Dict[str, Any], context: Any) -> Dict[str, Any
 
 
 def _delete_orders_for_campaign(campaign_id: str, logger: Any) -> int:
-    """Delete all orders for a campaign. Returns count deleted."""
+    """Delete all orders for a campaign and verify deletion. Returns count deleted."""
     orders = query_all_items(
         tables.orders,
         {
@@ -989,11 +993,23 @@ def _delete_orders_for_campaign(campaign_id: str, logger: Any) -> int:
     for order in orders:
         tables.orders.delete_item(Key={"campaignId": campaign_id, "orderId": order["orderId"]})
         deleted_count += 1
+
+    if orders:
+        _verify_order_keys_deleted(orders)
+
     return deleted_count
 
 
 def _delete_user_orders(account_id: str, logger: Any) -> int:
-    """Delete all orders for all campaigns of all profiles owned by a user. Returns count deleted."""
+    """Delete all orders for all campaigns of all profiles owned by a user.
+
+    Verifies with strongly consistent reads that each deleted order is gone
+    from the orders table before returning. Raises AppError if a deleted order
+    is still present.
+
+    Returns:
+        Count of orders deleted.
+    """
     db_account_id = _normalize_account_id(account_id)
     deleted_count = 0
 
@@ -1015,7 +1031,15 @@ def _delete_user_orders(account_id: str, logger: Any) -> int:
 
 
 def _delete_user_campaigns(account_id: str, logger: Any) -> int:
-    """Delete all campaigns for all profiles owned by a user. Returns count deleted."""
+    """Delete all campaigns for all profiles owned by a user.
+
+    Verifies with strongly consistent reads that each deleted campaign is gone
+    from the campaigns table before returning. Raises AppError if a deleted
+    campaign is still present.
+
+    Returns:
+        Count of campaigns deleted.
+    """
     db_account_id = _normalize_account_id(account_id)
     deleted_count = 0
 
@@ -1030,7 +1054,9 @@ def _delete_user_campaigns(account_id: str, logger: Any) -> int:
             },
         )
         for campaign in campaigns:
-            tables.campaigns.delete_item(Key={"profileId": profile_id, "campaignId": campaign["campaignId"]})
+            campaign_id = campaign["campaignId"]
+            tables.campaigns.delete_item(Key={"profileId": profile_id, "campaignId": campaign_id})
+            _verify_campaign_deleted(profile_id, campaign_id)
             deleted_count += 1
 
     logger.info("Deleted user campaigns", account_id=account_id, count=deleted_count)
@@ -1078,6 +1104,9 @@ def admin_delete_user_orders(event: Dict[str, Any], context: Any) -> int:
     """
     Delete all orders for all campaigns of all profiles owned by a user (admin only).
 
+    Verifies with strongly consistent reads that each deleted order is gone
+    from the orders table before returning success.
+
     Returns the count of deleted orders.
     """
     logger = get_logger(__name__)
@@ -1095,6 +1124,9 @@ def admin_delete_user_orders(event: Dict[str, Any], context: Any) -> int:
 def admin_delete_user_campaigns(event: Dict[str, Any], context: Any) -> int:
     """
     Delete all campaigns for all profiles owned by a user (admin only).
+
+    Verifies with strongly consistent reads that each deleted campaign is gone
+    from the campaigns table before returning success.
 
     Returns the count of deleted campaigns.
     """

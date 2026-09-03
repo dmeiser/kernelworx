@@ -232,6 +232,7 @@ picklist
 pipefail
 pkeys
 playwright
+popstate
 Pool
 poolsms
 Popover
@@ -293,6 +294,7 @@ sharedCampaignCode
 sharedCampaigns
 sheetjs
 shortlink
+Shelbyville
 Signin
 signout
 Signup

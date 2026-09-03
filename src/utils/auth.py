@@ -20,7 +20,7 @@ logger = get_logger(__name__)
 
 
 def _is_profile_owner(profiles_table: "Table", caller_account_id: str, db_profile_id: str) -> bool:
-    """Check if caller is the profile owner via direct lookup."""
+    """Check if caller is the profile owner via strongly consistent base-table lookup."""
     direct_response = profiles_table.get_item(
         Key={"ownerAccountId": f"ACCOUNT#{caller_account_id}", "profileId": db_profile_id},
         ConsistentRead=True,
@@ -69,14 +69,43 @@ def _has_required_permission(permissions: list[str], required_permission: str) -
     return False
 
 
+def _is_share_valid(share: Dict[str, Any], profiles_table: "Table", db_profile_id: str) -> bool:
+    """Verify a share record still reflects the profile's current owner.
+
+    Shares store the ``ownerAccountId`` that existed when the share was created.
+    A profile ownership transfer deletes the old owner's base-table record, so a
+    strongly consistent read using the share's stored owner will only succeed
+    while the share is still valid. Shares that are missing ``ownerAccountId``
+    cannot be validated against the current owner; they are accepted only when
+    the profile still exists (verified via the eventually consistent GSI).
+    """
+    share_owner = share.get("ownerAccountId")
+    if not share_owner:
+        return _profile_exists(profiles_table, db_profile_id)
+    profile_response = profiles_table.get_item(
+        Key={"ownerAccountId": share_owner, "profileId": db_profile_id},
+        ConsistentRead=True,
+    )
+    return "Item" in profile_response
+
+
 def _check_share_permissions(
-    shares_table: "Table", db_profile_id: str, db_caller_id: str, required_permission: str
+    profiles_table: "Table",
+    shares_table: "Table",
+    db_profile_id: str,
+    db_caller_id: str,
+    required_permission: str,
 ) -> bool:
-    """Check if caller has required permission via share."""
-    share_response = shares_table.get_item(Key={"profileId": db_profile_id, "targetAccountId": db_caller_id})
+    """Check if caller has required permission via a valid share."""
+    share_response = shares_table.get_item(
+        Key={"profileId": db_profile_id, "targetAccountId": db_caller_id},
+        ConsistentRead=True,
+    )
     if "Item" not in share_response:
         return False
     share = share_response["Item"]
+    if not _is_share_valid(share, profiles_table, db_profile_id):
+        return False
     permissions = _normalize_permissions(share.get("permissions", []))
     return _has_required_permission(permissions, required_permission)
 
@@ -98,7 +127,7 @@ def _fetch_batch(
     keys_to_fetch: list[Dict[str, str]],
     on_item: Callable[[Dict[str, Any]], None],
 ) -> list[Dict[str, str]]:
-    """Fetch one batch of keys, retrying UnprocessedKeys up to three times.
+    """Fetch one batch of keys with strongly consistent reads, retrying UnprocessedKeys.
 
     Returns any keys still unprocessed after retries.
     """
@@ -107,7 +136,9 @@ def _fetch_batch(
             break
         response = cast(
             Dict[str, Any],
-            get_dynamodb_resource().batch_get_item(RequestItems={table_name: {"Keys": keys_to_fetch}}),
+            get_dynamodb_resource().batch_get_item(
+                RequestItems={table_name: {"Keys": keys_to_fetch, "ConsistentRead": True}}
+            ),
         )
         for item in response.get("Responses", {}).get(table_name, []):
             on_item(item)
@@ -163,15 +194,20 @@ def check_profile_access(caller_account_id: str, profile_id: str, required_permi
     if _is_profile_owner(tables.profiles, caller_account_id, db_profile_id):
         return True
 
-    # Verify profile exists
-    if not _profile_exists(tables.profiles, db_profile_id):
-        raise AppError(ErrorCode.NOT_FOUND, f"Profile {profile_id} not found")
-
-    # Check share permissions
+    # Check share permissions, validating the share against the profile's
+    # current owner with a strongly consistent base-table read.
     db_caller_id = ensure_account_id(caller_account_id)
     # ensure_account_id returns Optional[str], but we know caller_account_id is not None here
     assert db_caller_id is not None
-    return _check_share_permissions(tables.shares, db_profile_id, db_caller_id, required_permission)
+    if _check_share_permissions(tables.profiles, tables.shares, db_profile_id, db_caller_id, required_permission):
+        return True
+
+    # Verify profile exists so we raise NOT_FOUND for missing profiles
+    # rather than returning a misleading FORBIDDEN result.
+    if not _profile_exists(tables.profiles, db_profile_id):
+        raise AppError(ErrorCode.NOT_FOUND, f"Profile {profile_id} not found")
+
+    return False
 
 
 def _build_profile_id_map(profile_ids: list[str]) -> dict[str, str]:
@@ -199,26 +235,63 @@ def _batch_check_owned_profiles(db_profile_ids: list[str], db_caller_id: str) ->
 
 
 def _batch_check_shared_profiles(remaining_ids: list[str], db_caller_id: str, required_permission: str) -> set[str]:
-    """Return the set of db_profile_ids shared with the caller with required permission."""
-    shared_db_ids: set[str] = set()
+    """Return the set of db_profile_ids shared with the caller with required permission.
+
+    Each candidate share is validated with a strongly consistent base-table read
+    of the profile using the share's stored ``ownerAccountId`` when available.
+    Stale shares that outlive an ownership transfer are rejected because the old
+    owner's record no longer exists. Shares without ``ownerAccountId`` are
+    accepted only when the profile still exists (verified via the eventually
+    consistent GSI); production shares always include this attribute.
+    """
+    candidate_shares: list[tuple[str, Optional[str]]] = []
     share_keys = [{"profileId": pid, "targetAccountId": db_caller_id} for pid in remaining_ids]
 
     def _on_share_item(share: Dict[str, Any]) -> None:
         permissions = _normalize_permissions(share.get("permissions", []))
-        if _has_required_permission(permissions, required_permission):
-            db_pid = share.get("profileId")
-            if db_pid:
-                shared_db_ids.add(cast(str, db_pid))
+        if not _has_required_permission(permissions, required_permission):
+            return
+        db_pid = share.get("profileId")
+        if db_pid:
+            candidate_shares.append((cast(str, db_pid), share.get("ownerAccountId")))
 
     _batch_get_all_items(tables.shares.table_name, share_keys, _on_share_item)
-    return shared_db_ids
+
+    if not candidate_shares:
+        return set()
+
+    # Shares that record their owner are validated against the profile base
+    # table. Shares without ownerAccountId are accepted only after verifying
+    # the profile still exists via the GSI.
+    profile_keys: list[Dict[str, str]] = []
+    valid_shared_db_ids: set[str] = set()
+    backward_compat_ids: list[str] = []
+    for db_pid, share_owner in candidate_shares:
+        if not share_owner:
+            backward_compat_ids.append(db_pid)
+        else:
+            profile_keys.append({"ownerAccountId": share_owner, "profileId": db_pid})
+
+    def _on_profile_item(item: Dict[str, Any]) -> None:
+        db_pid = item.get("profileId")
+        if db_pid:
+            valid_shared_db_ids.add(cast(str, db_pid))
+
+    if profile_keys:
+        _batch_get_all_items(tables.profiles.table_name, profile_keys, _on_profile_item)
+
+    for db_pid in backward_compat_ids:
+        if _profile_exists(tables.profiles, db_pid):
+            valid_shared_db_ids.add(db_pid)
+
+    return valid_shared_db_ids
 
 
 def batch_check_profile_access(
     caller_account_id: str, profile_ids: list[str], required_permission: str = "READ"
 ) -> set[str]:
     """
-    Check access for multiple profiles using two BatchGetItem calls.
+    Check access for multiple profiles using up to three BatchGetItem calls.
 
     Returns the set of original profile IDs the caller is allowed to access.
     Owner checks and share checks are batched so a unit with N scouts no longer
@@ -264,6 +337,13 @@ def require_profile_access(caller_account_id: str, profile_id: str, required_per
 def is_profile_owner(caller_account_id: str, profile_id: str) -> bool:
     """
     Check if caller is the owner of a profile.
+
+    This function queries the eventually consistent ``profileId-index`` GSI to
+    locate the profile's current owner. It is suitable for non-authoritative
+    ownership checks (for example, UI hints or audit logging) but should not be
+    used as the sole security gate; prefer ``check_profile_access`` or
+    ``require_profile_access`` for access-control decisions, which perform
+    strongly consistent base-table reads where possible.
 
     Args:
         caller_account_id: Cognito sub (Account ID) of the caller

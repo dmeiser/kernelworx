@@ -173,8 +173,10 @@ class TestCampaignReportingBatchAuth:
         assert result["totalOrders"] == 20
         assert result["totalSales"] == 200.0
 
-        # Authorization should require exactly two BatchGetItem calls:
-        # one for ownership checks and one for share checks.
+        # Authorization requires up to three BatchGetItem calls:
+        # one for ownership checks, one for share checks, and one to validate
+        # each share's stored ownerAccountId against the profile base table.
+        # These legacy shares omit ownerAccountId, so only two calls are made.
         assert batch_get_item_calls == 2
 
 
@@ -303,7 +305,9 @@ class TestListUnitCatalogsBatchAuth:
 
         assert len(result) == 1
         assert result[0]["catalogId"] == "catalog-123"
-        # One ownership BatchGetItem + one share BatchGetItem.
+        # These legacy shares omit ownerAccountId, so only two BatchGetItem
+        # calls are needed (ownership + shares). Shares that include ownerAccountId
+        # trigger a third validation call against the profiles base table.
         assert batch_get_item_calls == 2
 
 
@@ -436,5 +440,7 @@ class TestListUnitCampaignCatalogsBatchAuth:
 
         assert len(result) == 1
         assert result[0]["catalogId"] == "catalog-123"
-        # One ownership BatchGetItem + one share BatchGetItem.
+        # These legacy shares omit ownerAccountId, so only two BatchGetItem
+        # calls are needed (ownership + shares). Shares that include ownerAccountId
+        # trigger a third validation call against the profiles base table.
         assert batch_get_item_calls == 2

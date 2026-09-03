@@ -116,6 +116,90 @@ describe('create_share_fn request', () => {
             /InternalServerError: Failed to determine profile owner/
         );
     });
+
+    it('rejects empty permissions array', () => {
+        const ctx = {
+            args: {
+                input: {
+                    profileId: 'PROFILE#p1',
+                    permissions: [],
+                },
+            },
+            stash: {
+                targetAccountId: 'ACCOUNT#user1',
+                profile: { ownerAccountId: 'ACCOUNT#owner1' },
+            },
+            identity: { sub: 'owner1' },
+        };
+
+        assert.throws(
+            () => request(ctx),
+            /InvalidInput: permissions must contain at least one supported permission \(READ or WRITE\)/
+        );
+    });
+
+    it('rejects permissions array with no supported permission', () => {
+        const ctx = {
+            args: {
+                input: {
+                    profileId: 'PROFILE#p1',
+                    permissions: ['ADMIN'],
+                },
+            },
+            stash: {
+                targetAccountId: 'ACCOUNT#user1',
+                profile: { ownerAccountId: 'ACCOUNT#owner1' },
+            },
+            identity: { sub: 'owner1' },
+        };
+
+        assert.throws(
+            () => request(ctx),
+            /InvalidInput: permissions must contain at least one supported permission \(READ or WRITE\)/
+        );
+    });
+
+    it('rejects non-array permissions from invite stash', () => {
+        const ctx = {
+            args: {
+                input: {},
+            },
+            stash: {
+                targetAccountId: 'ACCOUNT#user2',
+                invite: {
+                    profileId: 'PROFILE#p2',
+                    permissions: 'READ',
+                    ownerAccountId: 'ACCOUNT#owner2',
+                },
+            },
+            identity: { sub: 'user2' },
+        };
+
+        assert.throws(
+            () => request(ctx),
+            /InvalidInput: permissions must contain at least one supported permission \(READ or WRITE\)/
+        );
+    });
+
+    it('accepts single WRITE permission', () => {
+        const ctx = {
+            args: {
+                input: {
+                    profileId: 'PROFILE#p1',
+                    permissions: ['WRITE'],
+                },
+            },
+            stash: {
+                targetAccountId: 'ACCOUNT#user1',
+                profile: { ownerAccountId: 'ACCOUNT#owner1' },
+            },
+            identity: { sub: 'owner1' },
+        };
+
+        const result = request(ctx);
+
+        assert.deepStrictEqual(result.attributeValues.permissions, ['WRITE']);
+    });
 });
 
 describe('create_share_fn response', () => {

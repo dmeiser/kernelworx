@@ -524,9 +524,6 @@ export const AdminPage: React.FC = () => {
       showSnackbar('Catalog deleted successfully');
       void refetchCatalogs();
     },
-    onError: (error) => {
-      showSnackbar(`Error deleting catalog: ${error.message}`);
-    },
   });
 
   // Cascading delete mutations (called sequentially)
@@ -584,12 +581,7 @@ export const AdminPage: React.FC = () => {
     /* v8 ignore start -- Delete catalog dialog only opens when a target is selected */
     if (!deleteCatalogTarget) return;
     /* v8 ignore stop */
-    try {
-      await deleteCatalog({ variables: { catalogId: deleteCatalogTarget.catalogId } });
-    } catch {
-      // Error is surfaced by the mutation's onError callback; swallow to avoid unhandled rejection
-    }
-    setDeleteCatalogTarget(null);
+    await deleteCatalog({ variables: { catalogId: deleteCatalogTarget.catalogId } });
   };
 
   const handleSaveCatalog = async (catalogData: {
