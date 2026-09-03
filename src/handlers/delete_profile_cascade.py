@@ -8,6 +8,10 @@ from botocore.exceptions import ClientError
 if TYPE_CHECKING:  # pragma: no cover
     from mypy_boto3_dynamodb.service_resource import Table
 
+# Sibling handler modules use a same-package relative import, which resolves both
+# in the Lambda zip (package `handlers`) and in unit tests (package `src.handlers`).
+from .campaign_operations import _verify_campaign_deleted, _verify_order_keys_deleted
+
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
     from utils.dynamodb import tables
@@ -210,6 +214,9 @@ def _delete_profile(owner_account_id: str, profile_id: str) -> None:
 def lambda_handler(event: Dict[str, Any], context: Any) -> bool:
     """Cascade-delete a profile and all related data.
 
+    Verifies with strongly consistent reads that deleted orders and campaigns
+    are gone from their tables before returning.
+
     Args:
         event: Lambda event from AppSync. Contains:
             - arguments: { profileId: str }
@@ -270,8 +277,16 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> bool:
     order_keys = _collect_order_keys(campaigns)
 
     orders_deleted = _delete_orders(order_keys)
+    if order_keys:
+        _verify_order_keys_deleted(order_keys)
+
     reports_deleted = _delete_s3_reports(db_profile_id)
     campaigns_deleted = _delete_campaigns(db_profile_id, campaigns)
+    for campaign in campaigns:
+        campaign_id = campaign.get("campaignId")
+        if campaign_id:
+            _verify_campaign_deleted(db_profile_id, str(campaign_id))
+
     shares_deleted = _delete_shares(db_profile_id, shares)
     invites_deleted = _delete_invites(invites)
 
