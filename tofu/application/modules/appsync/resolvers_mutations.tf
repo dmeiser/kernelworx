@@ -295,6 +295,7 @@ resource "aws_appsync_resolver" "delete_catalog" {
     functions = [
       aws_appsync_function.get_catalog_for_delete.function_id,
       aws_appsync_function.check_catalog_usage.function_id,
+      aws_appsync_function.check_shared_campaign_usage.function_id,
       aws_appsync_function.delete_catalog_fn.function_id,
     ]
   }
