@@ -6,7 +6,7 @@ python-hcl2) and assert the *meaning* of the edge architecture contract:
 - Exactly one WAF exists anywhere: a CLOUDFRONT-scope aws_wafv2_web_acl
   attached via web_acl_id. No regional web ACLs, no
   aws_wafv2_web_acl_association resources.
-- The WAF rate rule blocks at 2000 requests per IP per 300s; the AWS managed
+- The WAF rate rule blocks at 20000 requests per IP per 300s; the AWS managed
   core rule set is staged in Count; WAF logs land in an aws-waf-logs-*
   CloudWatch log group. Every WAF resource no-ops when create = false so
   ephemeral environments create zero objects.
@@ -158,7 +158,7 @@ def test_waf_is_the_only_waf_and_is_cloudfront_scoped():
     assert associations == 0, "aws_wafv2_web_acl_association must not exist anywhere"
 
 
-def test_waf_default_allows_and_rate_rule_blocks_2000_per_300s(waf_module):
+def test_waf_default_allows_and_rate_rule_blocks_20000_per_300s(waf_module):
     acl = first_resource(waf_module, "aws_wafv2_web_acl", "main")
     assert "allow" in block(acl["default_action"])
 
@@ -174,13 +174,13 @@ def test_waf_default_allows_and_rate_rule_blocks_2000_per_300s(waf_module):
     stmt = block(rate_rule["statement"])["rate_based_statement"]
     stmt = block(stmt)
     # The limit/window are variable-driven; the variable defaults above pin
-    # the shipped 2000 requests / 300s contract.
+    # the shipped 20000 requests / 300s contract.
     assert stmt["limit"] == "${var.rate_limit}"
     assert stmt["aggregate_key_type"] == "IP"
     assert stmt["evaluation_window_sec"] == "${var.rate_evaluation_window}"
 
     defaults = variable_defaults(waf_module)
-    assert defaults["rate_limit"] == 2000
+    assert defaults["rate_limit"] == 20000
     assert defaults["rate_evaluation_window"] == 300
     assert defaults["rate_rule_action"] == "Block"
 
