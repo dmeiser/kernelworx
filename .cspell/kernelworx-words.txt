@@ -232,6 +232,7 @@ picklist
 pipefail
 pkeys
 playwright
+popstate
 Pool
 poolsms
 Popover

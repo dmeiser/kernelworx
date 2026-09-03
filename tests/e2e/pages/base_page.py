@@ -37,11 +37,25 @@ class BasePage:
     def navigate(self, path: str = "") -> None:
         """Navigate to *path* relative to the E2E_BASE_URL environment variable.
 
+        In deployed environments (dev/prod) auth is served same-origin through
+        the site's CloudFront distribution, and ``/login`` is proxied to the
+        Cognito managed UI.  A hard browser load of ``/login`` therefore serves
+        Cognito's hosted page, not the app's branded login form.  Load the SPA
+        root and navigate client-side so the app's own login route renders.
+
         Args:
             path: URL path to append, e.g. ``"/login"``. Defaults to ``""``.
         """
         base_url = os.getenv("E2E_BASE_URL", "https://localhost:5173").rstrip("/")
-        self.page.goto(f"{base_url}{path}")
+        self.page.goto(f"{base_url}/")
+        if path:
+            self.page.evaluate(
+                """(path) => {
+                    window.history.pushState(null, '', path);
+                    window.dispatchEvent(new PopStateEvent('popstate'));
+                }""",
+                path,
+            )
 
     def wait_for_url_contains(self, fragment: str, timeout: int = 10_000) -> None:
         """Block until the current URL contains *fragment*.
