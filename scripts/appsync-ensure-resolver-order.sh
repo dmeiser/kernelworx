@@ -101,9 +101,64 @@ echo "$deletions" | while IFS= read -r addr; do
   log "     - $addr"
 done
 
+# Print the -target addresses OpenTofu suggests after a targeted apply fails
+# with "Moved resource instances excluded by targeting". Returns non-zero when
+# that error is absent so callers never retry on unrelated failures.
+extract_moved_targets() {
+  local err
+  err="$(cat)"
+  if ! grep -q "Moved resource instances excluded by targeting" <<<"$err"; then
+    return 1
+  fi
+  # The (\\.|[^"])* body tolerates backslash-escaped quotes in index keys,
+  # e.g. trigger_functions[\"pre-signup\"].
+  grep -oE -- '-target="(\\.|[^"])*"' <<<"$err" | sed -e 's/^-target="//' -e 's/"$//' -e 's/\\"/"/g' | sort -u
+}
+
+# Run a targeted apply for one resolver, widening the target set if OpenTofu
+# refuses because moved resource instances are excluded by targeting. Such
+# moves stay pending in environments whose state predates a `moved`-block
+# deployment, and each retry may surface further required targets, so retry
+# with the union of the known and suggested targets, bounded.
+apply_resolver_target() {
+  local target="$1"
+  local apply_targets=("$target")
+  local attempt=0
+  local max_retries=3
+  local apply_err suggested t s found
+  while true; do
+    local apply_args=()
+    for t in "${apply_targets[@]}"; do
+      apply_args+=("-target=$t")
+    done
+    if apply_err=$(tofu apply -input=false -auto-approve "${apply_args[@]}" "${EXTRA_TOFU_ARGS[@]}" 2>&1); then
+      return 0
+    fi
+    printf '%s\n' "$apply_err" >&2
+    attempt=$((attempt + 1))
+    if [ "$attempt" -gt "$max_retries" ] || ! suggested=$(extract_moved_targets <<<"$apply_err") || [ -z "$suggested" ]; then
+      return 1
+    fi
+    log "   Moved resource instances excluded by targeting; retrying with additional targets:"
+    while IFS= read -r s; do
+      found=0
+      for t in "${apply_targets[@]}"; do
+        if [ "$t" = "$s" ]; then
+          found=1
+          break
+        fi
+      done
+      if [ "$found" -eq 0 ]; then
+        log "     + $s"
+        apply_targets+=("$s")
+      fi
+    done <<<"$suggested"
+  done
+}
+
 for target in "${TARGETS[@]}"; do
   log "🎯 Applying resolver target first: $target"
-  tofu apply -input=false -auto-approve -target="$target" "${EXTRA_TOFU_ARGS[@]}"
+  apply_resolver_target "$target"
 done
 
 log "   Resolver ordering guard complete."

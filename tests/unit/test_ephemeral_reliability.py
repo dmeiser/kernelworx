@@ -56,6 +56,7 @@ def run_bash(repo_root: Path, script: str, env: dict[str, str] | None = None) ->
 class TestBashSyntax:
     def test_all_shell_scripts_parse(self, repo_root: Path) -> None:
         scripts = [
+            repo_root / "scripts" / "appsync-ensure-resolver-order.sh",
             repo_root / "scripts" / "ephemeral-env.sh",
             repo_root / "scripts" / "ephemeral-recover-common.sh",
             repo_root / "scripts" / "recover-deploy.sh",
