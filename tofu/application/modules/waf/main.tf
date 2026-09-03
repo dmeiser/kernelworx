@@ -19,9 +19,9 @@ variable "create" {
 }
 
 variable "rate_limit" {
-  description = "Maximum requests per IP per evaluation window before blocking"
+  description = "Maximum requests per IP per evaluation window before blocking. The CI smoke suite legitimately peaks near 2500 requests/IP/5min (measured in aws-waf-logs), so the limit must clear suite volume while still throttling abusive single-IP floods; 20000 was chosen with ~8x headroom."
   type        = number
-  default     = 2000
+  default     = 20000
 }
 
 variable "rate_evaluation_window" {
