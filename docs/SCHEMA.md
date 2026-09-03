@@ -136,6 +136,7 @@ Global Secondary Indexes: `targetAccountId-index` (targetAccountId)
 |-----------|------|---------|
 | profileId | String | PK - Shared profile |
 | targetAccountId | String | SK - Recipient account, also in GSI |
+| ownerAccountId | String | Owner at time of share creation; auth validates this still matches the profile's current owner |
 | permissions | StringSet | READ, WRITE |
 | createdAt | DateTime | Timestamp |
 | updatedAt | DateTime | Timestamp |
@@ -198,11 +199,13 @@ flowchart TD
 ```mermaid
 flowchart TD
     A["User Accesses Profile"] -->|profileId + accountId| B{Is Owner?}
-    B -->|Yes: ownerAccountId = accountId| C["Full Access"]
+    B -->|Yes: strongly consistent base-table lookup succeeds| C["Full Access"]
     B -->|No| D["Query SHARE table"]
     D -->|Found entry| E["Check Permissions"]
-    E -->|READ/WRITE| F["Grant Access"]
-    D -->|Not Found| G["Deny Access"]
+    E -->|READ/WRITE| F["Validate share against current owner"]
+    F -->|ownerAccountId still valid| G["Grant Access"]
+    F -->|stale / owner changed| H["Deny Access"]
+    D -->|Not Found| H["Deny Access"]
 ```
 
 ### Find Unit's Campaign
@@ -244,7 +247,7 @@ sequenceDiagram
     Frontend->>GraphQL: AcceptInvite(inviteCode)
     GraphQL->>Lambda: Look up invite
     Lambda->>INVITE: Query by inviteCode (PK)
-    Lambda->>SHARE: Create share entry
+    Lambda->>SHARE: Create share entry with current ownerAccountId
     Lambda->>INVITE: Delete invite (now consumed)
     Lambda->>Frontend: Success
     Frontend->>Recipient: Profile now accessible
@@ -302,13 +305,17 @@ graph TD
 
 ```mermaid
 graph TD
-    A["User wants to access Profile"] -->|Check: ownerAccountId = user| B{Is Owner?}
+    A["User wants to access Profile"] -->|Strongly consistent base-table check: ownerAccountId = user| B{Is Owner?}
     B -->|Yes| C["✓ Full Access<br/>Read + Write + Delete"]
     B -->|No| D["Query SHARE table"]
     D -->|Share exists| E{Has WRITE?}
     D -->|Share not found| F["✗ No Access"]
-    E -->|Yes| G["✓ Write Access<br/>Read + Write"]
-    E -->|No| H["✓ Read-Only Access<br/>Read Only"]
+    E -->|Yes| G{"ownerAccountId in share still current owner?"}
+    E -->|No| H{"ownerAccountId in share still current owner?"}
+    G -->|Yes| I["✓ Write Access<br/>Read + Write"]
+    G -->|No| F
+    H -->|Yes| J["✓ Read-Only Access<br/>Read Only"]
+    H -->|No| F
 ```
 
 ## State Management
