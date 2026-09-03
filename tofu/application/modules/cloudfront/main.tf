@@ -32,7 +32,7 @@ variable "certificate_validation" {
 }
 
 variable "web_acl_id" {
-  description = "ID of the CLOUDFRONT-scope AWS WAF web ACL to attach to the distribution (null = no WAF)"
+  description = "Full ARN of the CLOUDFRONT-scope AWS WAF web ACL to attach to the distribution (null = no WAF). The bare ACL ID is rejected by CloudFront in this account ('Web ACL is not accessible by the requester'), so the ARN is passed."
   type        = string
   default     = null
 }
