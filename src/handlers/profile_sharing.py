@@ -46,12 +46,29 @@ def _is_valid_share_entry(profile_id: Any, owner_account_id: Any) -> bool:
     return isinstance(profile_id, str) and isinstance(owner_account_id, str)
 
 
+def _share_has_accessible_permissions(share: Dict[str, Any]) -> bool:
+    """Check if a share grants READ or WRITE access.
+
+    Defensive filter for legacy shares that were created with an empty or
+    unsupported permissions array (#242).
+    """
+    permissions = share.get("permissions", [])
+    if not isinstance(permissions, (list, set)) or not permissions:
+        return False
+    for perm in permissions:
+        if isinstance(perm, str) and perm.upper() in {"READ", "WRITE"}:
+            return True
+    return False
+
+
 def _add_share_to_map(shares_by_profile: Dict[str, Dict[str, Any]], share: Dict[str, Any]) -> None:
     """Add a share to the deduplicated map if valid and not already present."""
     profile_id_val = share.get("profileId")
     owner_account_id_val = share.get("ownerAccountId")
 
     if not _is_valid_share_entry(profile_id_val, owner_account_id_val):
+        return
+    if not _share_has_accessible_permissions(share):
         return
     if profile_id_val in shares_by_profile:
         return

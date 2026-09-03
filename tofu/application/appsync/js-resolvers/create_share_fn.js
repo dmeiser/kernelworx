@@ -1,5 +1,17 @@
 import { util } from '@aws-appsync/utils';
 
+function validatePermissions(permissions) {
+    if (!Array.isArray(permissions) || permissions.length === 0) {
+        util.error('permissions must contain at least one supported permission (READ or WRITE)', 'InvalidInput');
+    }
+    const hasSupportedPermission = permissions.some(permission =>
+        typeof permission === 'string' && ['READ', 'WRITE'].includes(permission.toUpperCase())
+    );
+    if (!hasSupportedPermission) {
+        util.error('permissions must contain at least one supported permission (READ or WRITE)', 'InvalidInput');
+    }
+}
+
 export function request(ctx) {
     // If share already exists from previous check in pipeline, reject immediately
     if (ctx.stash && ctx.stash.existingShare) {
@@ -10,6 +22,9 @@ export function request(ctx) {
     var targetAccountId = ctx.stash ? ctx.stash.targetAccountId : undefined;
     const profileId = input.profileId || (ctx.stash && ctx.stash.invite ? ctx.stash.invite.profileId : undefined);
     const permissions = input.permissions || (ctx.stash && ctx.stash.invite ? ctx.stash.invite.permissions : undefined);
+
+    validatePermissions(permissions);
+
     const now = util.time.nowISO8601();
     
     // Get ownerAccountId from stash - check profile (shareProfileDirect) or invite (redeemProfileInvite)
