@@ -373,7 +373,7 @@ def test_env_wires_single_waf_into_distribution(env_name):
     assert len(waf_mods) == 1
     cf_mods = modules(doc, "cloudfront")
     assert len(cf_mods) == 1
-    assert cf_mods[0]["web_acl_id"] == "${module.waf.web_acl_id}"
+    assert cf_mods[0]["web_acl_id"] == "${module.waf.web_acl_arn}"
     # AppSync default endpoint hostname, custom-domain name deliberately unused.
     assert cf_mods[0]["api_origin_domain"] == (
         '${replace(replace(module.appsync.api_url, "https://", ""), "/graphql", "")}'
