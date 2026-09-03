@@ -772,7 +772,7 @@ describe('Profile Sharing Integration Tests', () => {
       expect(shares.listSharesByProfile[0].permissions).toEqual(['READ', 'WRITE']);
     });
 
-    it('redeeming invite when already have share updates permissions', async () => {
+    it('redeeming invite when already have share fails with ALREADY_SHARED', async () => {
       // Arrange: Create profile and share directly with contributor first
       const { data: profileData } = await ownerClient.mutate({
         mutation: CREATE_PROFILE,
@@ -813,20 +813,22 @@ describe('Profile Sharing Integration Tests', () => {
       });
       const inviteCode = inviteData.createProfileInvite.inviteCode;
 
-      // Act: Contributor redeems invite (already has share)
-      const { data: redeemData } = await contributorClient.mutate({
-        mutation: REDEEM_INVITE,
-        variables: { input: { inviteCode } },
-      });
+      // Act & Assert: Contributor redeems invite (already has share -> should fail)
+      await expect(
+        contributorClient.mutate({
+          mutation: REDEEM_INVITE,
+          variables: { input: { inviteCode } },
+        })
+      ).rejects.toThrow(/already shared/i);
 
-      // Assert: Share should be updated with new permissions (not duplicated)
+      // Assert: Share permissions should remain unchanged
       const { data: finalShares } = await ownerClient.query({
         query: LIST_SHARES,
         variables: { profileId },
         fetchPolicy: 'network-only',
       });
       expect(finalShares.listSharesByProfile).toHaveLength(1);
-      expect(finalShares.listSharesByProfile[0].permissions).toEqual(['READ', 'WRITE']);
+      expect(finalShares.listSharesByProfile[0].permissions).toEqual(['READ']);
     });
 
     it('owner redeeming their own profile invite returns error', async () => {
@@ -1083,7 +1085,7 @@ describe('Profile Sharing Integration Tests', () => {
       ).rejects.toThrow(/forbidden|not authorized/i);
     });
 
-    it('updating existing share changes permissions (not duplicate)', async () => {
+    it('sharing with already shared user fails with ALREADY_SHARED', async () => {
       // Arrange: Create profile and share with READ permissions
       const { data: profileData } = await ownerClient.mutate({
         mutation: CREATE_PROFILE,
@@ -1104,32 +1106,30 @@ describe('Profile Sharing Integration Tests', () => {
         },
       });
 
-      const firstShareId = firstShare.shareProfileDirect.shareId;
+      expect(firstShare.shareProfileDirect.permissions).toEqual(['READ']);
 
-      // Act: Share again with WRITE permission (should update, not create duplicate)
-      const { data: updatedShare } = await ownerClient.mutate({
-        mutation: SHARE_DIRECT,
-        variables: {
-          input: {
-            profileId,
-            targetAccountEmail: contributorEmail,
-            permissions: ['READ', 'WRITE'],
+      // Act & Assert: Share again with WRITE permission (should fail with ALREADY_SHARED)
+      await expect(
+        ownerClient.mutate({
+          mutation: SHARE_DIRECT,
+          variables: {
+            input: {
+              profileId,
+              targetAccountEmail: contributorEmail,
+              permissions: ['READ', 'WRITE'],
+            },
           },
-        },
-      });
+        })
+      ).rejects.toThrow(/already shared/i);
 
-      // Assert: Same share ID (updated, not created new)
-      expect(updatedShare.shareProfileDirect.shareId).toBe(firstShareId);
-      expect(updatedShare.shareProfileDirect.permissions).toEqual(['READ', 'WRITE']);
-
-      // Verify there's only one share (not two)
+      // Verify there's only one share and permissions were not updated
       const { data: shares } = await ownerClient.query({
         query: LIST_SHARES,
         variables: { profileId },
         fetchPolicy: 'network-only',
       });
       expect(shares.listSharesByProfile).toHaveLength(1);
-      expect(shares.listSharesByProfile[0].permissions).toEqual(['READ', 'WRITE']);
+      expect(shares.listSharesByProfile[0].permissions).toEqual(['READ']);
     });
 
     it('rejects missing profileId', async () => {
@@ -1358,7 +1358,7 @@ describe('Profile Sharing Integration Tests', () => {
       }
     });
 
-    it('downgrading permissions (WRITE → READ)', async () => {
+    it('re-sharing to downgrade permissions fails with ALREADY_SHARED', async () => {
       // Arrange: Create profile and share with WRITE permissions
       const { data: profileData } = await ownerClient.mutate({
         mutation: CREATE_PROFILE,
@@ -1379,33 +1379,30 @@ describe('Profile Sharing Integration Tests', () => {
         },
       });
 
-      const firstShareId = firstShare.shareProfileDirect.shareId;
       expect(firstShare.shareProfileDirect.permissions).toEqual(['READ', 'WRITE']);
 
-      // Act: Downgrade to READ only
-      const { data: downgradedShare } = await ownerClient.mutate({
-        mutation: SHARE_DIRECT,
-        variables: {
-          input: {
-            profileId,
-            targetAccountEmail: contributorEmail,
-            permissions: ['READ'],
+      // Act & Assert: Try to re-share with READ only (should fail with ALREADY_SHARED)
+      await expect(
+        ownerClient.mutate({
+          mutation: SHARE_DIRECT,
+          variables: {
+            input: {
+              profileId,
+              targetAccountEmail: contributorEmail,
+              permissions: ['READ'],
+            },
           },
-        },
-      });
+        })
+      ).rejects.toThrow(/already shared/i);
 
-      // Assert: Same share ID (updated, not created new) with downgraded permissions
-      expect(downgradedShare.shareProfileDirect.shareId).toBe(firstShareId);
-      expect(downgradedShare.shareProfileDirect.permissions).toEqual(['READ']);
-
-      // Verify the share was updated in the database
+      // Verify the share permissions remained unchanged in the database
       const { data: shares } = await ownerClient.query({
         query: LIST_SHARES,
         variables: { profileId },
         fetchPolicy: 'network-only',
       });
       expect(shares.listSharesByProfile).toHaveLength(1);
-      expect(shares.listSharesByProfile[0].permissions).toEqual(['READ']);
+      expect(shares.listSharesByProfile[0].permissions).toEqual(['READ', 'WRITE']);
     });
   });
 

@@ -46,12 +46,29 @@ def _is_valid_share_entry(profile_id: Any, owner_account_id: Any) -> bool:
     return isinstance(profile_id, str) and isinstance(owner_account_id, str)
 
 
+def _share_has_accessible_permissions(share: Dict[str, Any]) -> bool:
+    """Check if a share grants READ or WRITE access.
+
+    Defensive filter for legacy shares that were created with an empty or
+    unsupported permissions array (#242).
+    """
+    permissions = share.get("permissions", [])
+    if not isinstance(permissions, (list, set)) or not permissions:
+        return False
+    for perm in permissions:
+        if isinstance(perm, str) and perm.upper() in {"READ", "WRITE"}:
+            return True
+    return False
+
+
 def _add_share_to_map(shares_by_profile: Dict[str, Dict[str, Any]], share: Dict[str, Any]) -> None:
     """Add a share to the deduplicated map if valid and not already present."""
     profile_id_val = share.get("profileId")
     owner_account_id_val = share.get("ownerAccountId")
 
     if not _is_valid_share_entry(profile_id_val, owner_account_id_val):
+        return
+    if not _share_has_accessible_permissions(share):
         return
     if profile_id_val in shares_by_profile:
         return
@@ -76,13 +93,9 @@ def _extract_batch_profiles(
 ) -> List[Dict[str, Any]]:
     """Extract profiles from a BatchGetItem response."""
     responses = batch_response.get("Responses", {})
-    if table_name in responses:
+    if isinstance(responses, dict):
         return cast(List[Dict[str, Any]], responses.get(table_name, []))
-    # Fallback: aggregate all responses across keys (best-effort for test shapes)
-    batch_profiles: List[Dict[str, Any]] = []
-    for items in responses.values():
-        batch_profiles.extend(items)
-    return batch_profiles
+    return []
 
 
 def _batch_get_profiles(
@@ -147,17 +160,16 @@ def _fetch_batch_with_retry(
 
     if keys_to_fetch:
         logger.error("Unprocessed keys still remain after all retries", count=len(keys_to_fetch))
+        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to list shared profiles")
 
     return all_profiles
 
 
 def _get_unprocessed_table(unprocessed_keys: Dict[str, Any], table_name: str) -> Any:
     """Get unprocessed table from unprocessed keys."""
-    unprocessed_table = unprocessed_keys.get(table_name, {})
-    if not unprocessed_table and isinstance(unprocessed_keys, dict):
-        for v in unprocessed_keys.values():
-            return v
-    return unprocessed_table
+    if isinstance(unprocessed_keys, dict):
+        return unprocessed_keys.get(table_name, {})
+    return {}
 
 
 def _log_unprocessed_keys(unprocessed_keys: Dict[str, Any], table_name: str, logger: Any) -> None:

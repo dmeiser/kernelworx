@@ -150,9 +150,7 @@ async function saveOptionalFields(
   try {
     const input = buildOptionalFieldsInput(fields);
     await updateMyAccount({ variables: { input } });
-    console.log('Optional fields saved successfully');
-  } catch (updateError) {
-    console.error('Failed to save optional fields:', updateError);
+  } catch {
     // Don't block navigation if this fails
   }
 }
@@ -166,11 +164,9 @@ async function handlePostVerificationAuth(
 ): Promise<void> {
   try {
     await fetchAuthSession();
-    console.log('User is authenticated despite autoSignIn failure');
     await refreshSession();
     void navigate('/home');
   } catch {
-    console.log('User is not authenticated, redirecting to login');
     setSuccess('Please log in with your new account');
     scheduleRedirect(() => void navigate('/login'));
   }
@@ -190,8 +186,7 @@ async function processAutoSignIn(
     await saveOptionalFields(updateMyAccount, optionalFields);
     await refreshSession();
     void navigate('/home');
-  } catch (autoSignInError) {
-    console.log('Auto sign-in failed, checking authentication state:', autoSignInError);
+  } catch {
     await handlePostVerificationAuth(refreshSession, navigate, setSuccess, scheduleRedirect);
   }
 }
@@ -267,10 +262,8 @@ export const SignupPage: React.FC = () => {
         },
       });
 
-      console.log('Signup successful:', signUpResult);
       handleSignupNextStep(signUpResult.nextStep.signUpStep);
     } catch (err: unknown) {
-      console.error('Signup failed:', err);
       const typedError = err as { name?: string; message?: string };
       setError(getSignupErrorMessage(typedError));
     } finally {
@@ -303,8 +296,6 @@ export const SignupPage: React.FC = () => {
         confirmationCode: verificationCode,
       });
 
-      console.log('Email confirmed:', confirmResult);
-
       if (!confirmResult.isSignUpComplete) {
         return;
       }
@@ -320,7 +311,6 @@ export const SignupPage: React.FC = () => {
         scheduleRedirect,
       );
     } catch (err: unknown) {
-      console.error('Email verification failed:', err);
       const typedError = err as { name?: string; message?: string };
       setError(getVerificationErrorMessage(typedError));
     } finally {
@@ -336,7 +326,6 @@ export const SignupPage: React.FC = () => {
       await resendSignUpCode({ username: email });
       setSuccess('Verification code resent. Please check your email.');
     } catch (err: unknown) {
-      console.error('Resend verification code failed:', err);
       const typedError = err as { name?: string; message?: string };
       setError(getVerificationErrorMessage(typedError));
     } finally {

@@ -237,7 +237,9 @@ const updatePreferencesWithRollback = async (
       variables: buildPreferencesVariables(preferences, checked),
     });
   } catch (error) {
-    console.error('Failed to update preferences:', error);
+    if (import.meta.env.DEV) {
+      console.error('Failed to update preferences:', error);
+    }
     setShowReadOnlyProfiles(!checked);
   }
 };
@@ -262,7 +264,9 @@ const loadSharedProfilesWithErrorHandling = async (
     setSharedProfiles(profiles);
     setSharedProfilesLoaded(true);
   } catch (err) {
-    console.error('Failed to load shared profiles:', err);
+    if (import.meta.env.DEV) {
+      console.error('Failed to load shared profiles:', err);
+    }
     setSharedProfilesError(handleSharedProfilesError(err));
   } finally {
     setSharedProfilesLoading(false);

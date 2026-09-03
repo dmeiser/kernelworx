@@ -100,15 +100,17 @@ class TestToDynamoValue:
         result = _to_dynamo_value({"key": "value", "count": 5})
         assert result == {"M": {"key": {"S": "value"}, "count": {"N": "5"}}}
 
-    def test_to_dynamo_value_custom_object(self) -> None:
-        """Test converting a custom object falls back to string."""
+    def test_to_dynamo_value_set(self) -> None:
+        """Test converting a set to DynamoDB list."""
+        result = _to_dynamo_value({"val1"})
+        assert result == {"L": [{"S": "val1"}]}
 
-        class CustomObj:
-            def __str__(self) -> str:
-                return "custom_string"
+    def test_normalize_account_id_none(self) -> None:
+        """Test normalizing None account id returns empty string."""
+        from src.handlers.campaign_operations import _normalize_account_id
 
-        result = _to_dynamo_value(CustomObj())
-        assert result == {"S": "custom_string"}
+        assert _normalize_account_id(None) == ""
+        assert _normalize_account_id("") == ""
 
 
 class TestCreateCampaign:
@@ -1245,8 +1247,64 @@ class TestGetSharedCampaign:
 class TestGetProfile:
     """Tests for _get_profile helper function."""
 
+    def test_get_profile_with_owner_id_success(self) -> None:
+        """Test strongly consistent profile retrieval using ownerAccountId composite key."""
+        from src.handlers.campaign_operations import _get_profile
+
+        mock_table = MagicMock()
+        mock_table.get_item.return_value = {
+            "Item": {"profileId": "PROFILE#123", "sellerName": "Test", "ownerAccountId": "ACCOUNT#user-1"}
+        }
+
+        with patch("src.handlers.campaign_operations.tables") as mock_tables:
+            mock_tables.profiles = mock_table
+            result = _get_profile("123", owner_account_id="user-1")
+
+        assert result is not None
+        assert result["profileId"] == "PROFILE#123"
+        mock_table.get_item.assert_called_once_with(
+            Key={"ownerAccountId": "ACCOUNT#user-1", "profileId": "PROFILE#123"},
+            ConsistentRead=True,
+        )
+
+    def test_get_profile_with_prefixed_owner_id_success(self) -> None:
+        """Test strongly consistent profile retrieval when ownerAccountId already has prefix."""
+        from src.handlers.campaign_operations import _get_profile
+
+        mock_table = MagicMock()
+        mock_table.get_item.return_value = {
+            "Item": {"profileId": "PROFILE#123", "sellerName": "Test", "ownerAccountId": "ACCOUNT#user-1"}
+        }
+
+        with patch("src.handlers.campaign_operations.tables") as mock_tables:
+            mock_tables.profiles = mock_table
+            result = _get_profile("PROFILE#123", owner_account_id="ACCOUNT#user-1")
+
+        assert result is not None
+        assert result["profileId"] == "PROFILE#123"
+        mock_table.get_item.assert_called_once_with(
+            Key={"ownerAccountId": "ACCOUNT#user-1", "profileId": "PROFILE#123"},
+            ConsistentRead=True,
+        )
+
+    def test_get_profile_with_owner_id_fallback_to_gsi(self) -> None:
+        """Test fallback to GSI query when get_item returns no Item."""
+        from src.handlers.campaign_operations import _get_profile
+
+        mock_table = MagicMock()
+        mock_table.get_item.return_value = {}
+        mock_table.query.return_value = {"Items": [{"profileId": "PROFILE#123", "sellerName": "Test"}]}
+
+        with patch("src.handlers.campaign_operations.tables") as mock_tables:
+            mock_tables.profiles = mock_table
+            result = _get_profile("123", owner_account_id="shared-caller")
+
+        assert result is not None
+        assert result["profileId"] == "PROFILE#123"
+        mock_table.query.assert_called_once()
+
     def test_get_profile_success(self) -> None:
-        """Test successful profile retrieval."""
+        """Test successful profile retrieval via GSI when no owner is provided."""
         from src.handlers.campaign_operations import _get_profile
 
         mock_table = MagicMock()
@@ -1667,3 +1725,168 @@ class TestDeleteCampaignOrders:
 
             assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
             assert "Failed to delete campaign orders" in exc_info.value.message
+
+    def test_delete_campaign_orders_verifies_order_id_gsi(
+        self,
+        orders_table: Any,
+        campaigns_table: Any,
+        profiles_table: Any,
+        lambda_context: Any,
+    ) -> None:
+        """Test that deleted orders are no longer visible in the orderId-index GSI."""
+        from src.handlers.campaign_operations import delete_campaign_orders
+
+        campaign_id = "CAMPAIGN#gsi-verify"
+        profile_id = "PROFILE#gsi-verify"
+        self._seed_owned_campaign(profiles_table, campaigns_table, profile_id, campaign_id, self._OWNER_SUB)
+        order_ids = [f"ORDER#{i}" for i in range(3)]
+        for order_id in order_ids:
+            orders_table.put_item(
+                Item={
+                    "campaignId": campaign_id,
+                    "orderId": order_id,
+                    "customerName": "Customer",
+                    "totalAmount": Decimal("10.0"),
+                }
+            )
+
+        result = delete_campaign_orders(self._event(campaign_id, self._OWNER_SUB), lambda_context)
+
+        assert result == {"deletedCount": 3}
+        for order_id in order_ids:
+            gsi_response = orders_table.query(
+                IndexName="orderId-index",
+                KeyConditionExpression="orderId = :oid",
+                ExpressionAttributeValues={":oid": order_id},
+            )
+            assert len(gsi_response.get("Items", [])) == 0
+
+
+class TestVerifyOrderKeysDeleted:
+    """Tests for the base-table order deletion verification helper."""
+
+    def test_returns_when_all_order_keys_are_absent(self) -> None:
+        """Test that verification succeeds when every deleted order is gone."""
+        from src.handlers.campaign_operations import _verify_order_keys_deleted
+
+        mock_table = MagicMock()
+        mock_table.get_item.return_value = {}
+
+        order_keys = [
+            {"campaignId": "CAMPAIGN#batch", "orderId": "ORDER#1"},
+            {"campaignId": "CAMPAIGN#batch", "orderId": "ORDER#2"},
+        ]
+
+        with patch("src.handlers.campaign_operations.tables") as mock_tables:
+            mock_tables.orders = mock_table
+            _verify_order_keys_deleted(order_keys)
+
+        assert mock_table.get_item.call_count == 2
+        for call, key in zip(mock_table.get_item.call_args_list, order_keys):
+            assert call.kwargs["Key"] == {"campaignId": key["campaignId"], "orderId": key["orderId"]}
+            assert call.kwargs["ConsistentRead"] is True
+
+    def test_raises_when_an_order_key_persists(self) -> None:
+        """Test that verification raises INTERNAL_ERROR when an order persists."""
+        from src.handlers.campaign_operations import _verify_order_keys_deleted
+        from src.utils.errors import AppError, ErrorCode
+
+        mock_table = MagicMock()
+        mock_table.get_item.side_effect = [{}, {"Item": {"campaignId": "CAMPAIGN#x", "orderId": "ORDER#2"}}]
+
+        with (
+            patch("src.handlers.campaign_operations.tables") as mock_tables,
+            pytest.raises(AppError) as exc_info,
+        ):
+            mock_tables.orders = mock_table
+            _verify_order_keys_deleted(
+                [
+                    {"campaignId": "CAMPAIGN#x", "orderId": "ORDER#1"},
+                    {"campaignId": "CAMPAIGN#x", "orderId": "ORDER#2"},
+                ]
+            )
+
+        assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+        assert "Failed to delete order" in str(exc_info.value.message)
+
+
+class TestVerifyCampaignDeleted:
+    """Tests for the base-table campaign deletion verification helper."""
+
+    def test_returns_when_campaign_is_absent(self) -> None:
+        """Test that verification succeeds when the deleted campaign is gone."""
+        from src.handlers.campaign_operations import _verify_campaign_deleted
+
+        mock_table = MagicMock()
+        mock_table.get_item.return_value = {}
+
+        with patch("src.handlers.campaign_operations.tables") as mock_tables:
+            mock_tables.campaigns = mock_table
+            _verify_campaign_deleted("PROFILE#1", "CAMPAIGN#gone")
+
+        mock_table.get_item.assert_called_once_with(
+            Key={"profileId": "PROFILE#1", "campaignId": "CAMPAIGN#gone"},
+            ConsistentRead=True,
+        )
+
+    def test_raises_when_campaign_persists(self) -> None:
+        """Test that verification raises INTERNAL_ERROR when the campaign persists."""
+        from src.handlers.campaign_operations import _verify_campaign_deleted
+        from src.utils.errors import AppError, ErrorCode
+
+        mock_table = MagicMock()
+        mock_table.get_item.return_value = {"Item": {"profileId": "PROFILE#1", "campaignId": "CAMPAIGN#stuck"}}
+
+        with (
+            patch("src.handlers.campaign_operations.tables") as mock_tables,
+            pytest.raises(AppError) as exc_info,
+        ):
+            mock_tables.campaigns = mock_table
+            _verify_campaign_deleted("PROFILE#1", "CAMPAIGN#stuck")
+
+        assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+        assert "Failed to delete campaign" in str(exc_info.value.message)
+
+
+class TestQueryOrderKeysForCampaign:
+    """Tests for the order key query helper."""
+
+    @patch("src.handlers.campaign_operations.query_all_items")
+    def test_queries_orders_by_campaign_id(self, mock_query: MagicMock) -> None:
+        """Test that _query_order_keys_for_campaign queries the orders table."""
+        from src.handlers.campaign_operations import _query_order_keys_for_campaign
+
+        mock_query.return_value = [
+            {"campaignId": "CAMPAIGN#q", "orderId": "ORDER#1"},
+            {"campaignId": "CAMPAIGN#q", "orderId": "ORDER#2"},
+        ]
+
+        result = _query_order_keys_for_campaign("CAMPAIGN#q")
+
+        assert len(result) == 2
+        mock_query.assert_called_once()
+        call_args = mock_query.call_args.args
+        assert call_args[1]["KeyConditionExpression"] == "campaignId = :cid"
+        assert call_args[1]["ExpressionAttributeValues"] == {":cid": "CAMPAIGN#q"}
+
+
+class TestDeleteOrderKeys:
+    """Tests for the order batch delete helper."""
+
+    def test_deletes_orders_in_batches(self) -> None:
+        """Test that _delete_order_keys deletes orders using the batch writer."""
+        from src.handlers.campaign_operations import _delete_order_keys
+
+        mock_table = MagicMock()
+        mock_writer = MagicMock()
+        mock_table.batch_writer.return_value.__enter__ = MagicMock(return_value=mock_writer)
+        mock_table.batch_writer.return_value.__exit__ = MagicMock(return_value=False)
+
+        orders = [{"campaignId": "CAMPAIGN#batch", "orderId": f"ORDER#{i}"} for i in range(3)]
+
+        with patch("src.handlers.campaign_operations.tables") as mock_tables:
+            mock_tables.orders = mock_table
+            count = _delete_order_keys(orders)
+
+        assert count == 3
+        assert mock_writer.delete_item.call_count == 3

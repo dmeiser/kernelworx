@@ -644,7 +644,7 @@ describe('Share Query Operations Integration Tests', () => {
       const usedInviteCode = inviteData.createProfileInvite.inviteCode;
 
       // Redeem the invite to mark it as used
-      await contributorClient.mutate({
+      await readonlyClient.mutate({
         mutation: REDEEM_PROFILE_INVITE,
         variables: { input: { inviteCode: usedInviteCode } },
       });

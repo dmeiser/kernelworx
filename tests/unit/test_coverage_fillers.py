@@ -71,17 +71,19 @@ def test_profile_sharing_deduplicate_and_extract_helpers():
     # Deduplicate skips invalid entries and keeps first valid share
     shares = [
         {"profileId": "P1"},
-        {"profileId": "P1", "ownerAccountId": "A1"},
-        {"profileId": "P1", "ownerAccountId": "A1", "extra": True},
-        {"profileId": "P2", "ownerAccountId": 123},
+        {"profileId": "P1", "ownerAccountId": "A1", "permissions": ["READ"]},
+        {"profileId": "P1", "ownerAccountId": "A1", "permissions": ["READ"], "extra": True},
+        {"profileId": "P2", "ownerAccountId": 123, "permissions": ["READ"]},
     ]
     deduped = profile_sharing._deduplicate_shares(shares)
-    assert deduped == {"P1": {"profileId": "P1", "ownerAccountId": "A1", "permissions": []}}
+    assert deduped == {"P1": {"profileId": "P1", "ownerAccountId": "A1", "permissions": ["READ"]}}
 
-    # Extract fallback path aggregates responses when table name missing
+    # Extract ignores responses when table name missing
     batch_response = {"Responses": {"Other": [{"profileId": "P3"}]}}
     extracted = profile_sharing._extract_batch_profiles(batch_response, "ProfilesTable")
-    assert extracted == [{"profileId": "P3"}]
+    assert extracted == []
+    assert profile_sharing._extract_batch_profiles({}, "ProfilesTable") == []
+    assert profile_sharing._extract_batch_profiles({"Responses": None}, "ProfilesTable") == []  # type: ignore[dict-item]
 
 
 def test_profile_sharing_log_unprocessed_and_build_result():
@@ -137,12 +139,16 @@ def test_profile_sharing_fetch_batch_retry_edge_cases(monkeypatch):
 
     from src.handlers import profile_sharing
 
-    # _get_unprocessed_table fallback loop when table not found by name
+    # _get_unprocessed_table returns empty dict when table not found by name
     result = profile_sharing._get_unprocessed_table({"OtherTable": {"Keys": [1]}}, "Profiles")
-    assert result == {"Keys": [1]}
+    assert result == {}
 
     # _get_unprocessed_table with empty unprocessed keys
     result = profile_sharing._get_unprocessed_table({}, "Profiles")
+    assert result == {}
+
+    # _get_unprocessed_table with non-dict unprocessed keys
+    result = profile_sharing._get_unprocessed_table(None, "Profiles")  # type: ignore[arg-type]
     assert result == {}
 
 
@@ -212,6 +218,7 @@ def test_profile_sharing_fetch_batch_unprocessed_after_retries(monkeypatch):
     from unittest.mock import MagicMock
 
     from src.handlers import profile_sharing
+    from src.utils.errors import AppError, ErrorCode
 
     mock_table = MagicMock()
     mock_table.name = "test-table"
@@ -238,8 +245,10 @@ def test_profile_sharing_fetch_batch_unprocessed_after_retries(monkeypatch):
         }
 
     monkeypatch.setattr(profile_sharing.dynamodb, "batch_get_item", always_unprocessed)
-    result = profile_sharing._fetch_batch_with_retry(keys, mock_table, logger)
-    assert result == []
+    with pytest.raises(AppError) as exc_info:
+        profile_sharing._fetch_batch_with_retry(keys, mock_table, logger)
+    assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+    assert "Failed to list shared profiles" in exc_info.value.message
     assert any("still remain" in e[0] for e in logger.errors)
 
 

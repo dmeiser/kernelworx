@@ -244,3 +244,106 @@ class TestGenerateQrCodePresignedUrl:
             generate_qr_code_presigned_url(event, None)
 
         assert exc_info.value.error_code == ErrorCode.UNAUTHORIZED
+
+    def test_allows_write_collaborator_with_profile_id(self, s3_bucket: Any) -> None:
+        """Test that a WRITE collaborator can retrieve the owner's QR code."""
+        owner_account_id = "account-123"
+        collaborator_id = "account-456"
+        profile_id = "profile-abc"
+        s3_key = f"payment-qr-codes/{owner_account_id}/venmo.png"
+
+        bucket_name = os.environ.get("EXPORTS_BUCKET", "test-exports-bucket")
+        s3_bucket.put_object(Bucket=bucket_name, Key=s3_key, Body=b"fake-qr-data")
+
+        event: Dict[str, Any] = {
+            "qrCodeUrl": s3_key,
+            "ownerAccountId": owner_account_id,
+            "identity": {"sub": collaborator_id},
+            "methodName": "Venmo",
+            "s3Key": s3_key,
+            "profileId": profile_id,
+        }
+
+        with patch("src.handlers.generate_qr_code_presigned_url.check_profile_access") as mock_check_access:
+            mock_check_access.return_value = True
+
+            result = generate_qr_code_presigned_url(event, None)
+
+        assert result is not None
+        assert result.startswith("https://")
+        mock_check_access.assert_called_once_with(collaborator_id, profile_id, "WRITE")
+
+    def test_rejects_non_owner_without_profile_id(self) -> None:
+        """Test that a non-owner is denied when no profileId is provided."""
+        event: Dict[str, Any] = {
+            "qrCodeUrl": "payment-qr-codes/account-123/venmo.png",
+            "ownerAccountId": "account-123",
+            "identity": {"sub": "other-account"},
+            "methodName": "Venmo",
+            "s3Key": "payment-qr-codes/account-123/venmo.png",
+        }
+
+        with pytest.raises(AppError) as exc_info:
+            generate_qr_code_presigned_url(event, None)
+
+        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
+
+    def test_rejects_collaborator_without_write_permission(self) -> None:
+        """Test that a collaborator without WRITE access is denied."""
+        event: Dict[str, Any] = {
+            "qrCodeUrl": "payment-qr-codes/account-123/venmo.png",
+            "ownerAccountId": "account-123",
+            "identity": {"sub": "other-account"},
+            "methodName": "Venmo",
+            "s3Key": "payment-qr-codes/account-123/venmo.png",
+            "profileId": "profile-abc",
+        }
+
+        with patch("src.handlers.generate_qr_code_presigned_url.check_profile_access") as mock_check_access:
+            mock_check_access.return_value = False
+
+            with pytest.raises(AppError) as exc_info:
+                generate_qr_code_presigned_url(event, None)
+
+        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
+        mock_check_access.assert_called_once_with("other-account", "profile-abc", "WRITE")
+
+    def test_rejects_collaborator_when_profile_not_found(self) -> None:
+        """Test that a missing profile is treated as denied for collaborators."""
+        event: Dict[str, Any] = {
+            "qrCodeUrl": "payment-qr-codes/account-123/venmo.png",
+            "ownerAccountId": "account-123",
+            "identity": {"sub": "other-account"},
+            "methodName": "Venmo",
+            "s3Key": "payment-qr-codes/account-123/venmo.png",
+            "profileId": "profile-abc",
+        }
+
+        with patch("src.handlers.generate_qr_code_presigned_url.check_profile_access") as mock_check_access:
+            mock_check_access.side_effect = AppError(ErrorCode.NOT_FOUND, "Profile not found")
+
+            with pytest.raises(AppError) as exc_info:
+                generate_qr_code_presigned_url(event, None)
+
+        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
+        mock_check_access.assert_called_once_with("other-account", "profile-abc", "WRITE")
+
+    def test_propagates_unexpected_profile_access_error(self) -> None:
+        """Test that non-NotFound errors from check_profile_access propagate."""
+        event: Dict[str, Any] = {
+            "qrCodeUrl": "payment-qr-codes/account-123/venmo.png",
+            "ownerAccountId": "account-123",
+            "identity": {"sub": "other-account"},
+            "methodName": "Venmo",
+            "s3Key": "payment-qr-codes/account-123/venmo.png",
+            "profileId": "profile-abc",
+        }
+
+        with patch("src.handlers.generate_qr_code_presigned_url.check_profile_access") as mock_check_access:
+            mock_check_access.side_effect = AppError(ErrorCode.INTERNAL_ERROR, "DynamoDB error")
+
+            with pytest.raises(AppError) as exc_info:
+                generate_qr_code_presigned_url(event, None)
+
+        assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+        mock_check_access.assert_called_once_with("other-account", "profile-abc", "WRITE")

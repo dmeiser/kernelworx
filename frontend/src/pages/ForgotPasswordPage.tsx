@@ -157,15 +157,9 @@ function useForgotPasswordState(navigate: NavigateFunction): ForgotPasswordState
   const handleRequestError = (err: unknown): boolean => {
     const typed = err as { name?: string; message?: string };
     if (SENSITIVE_RESET_ERROR_NAMES.has(typed.name ?? '')) {
-      // Keep the user-facing response uniform, but log for operator visibility.
-      console.warn(
-        'Reset password request returned sensitive error; swallowing to avoid account enumeration:',
-        typed.name,
-        typed.message,
-      );
+      // Keep the user-facing response uniform to avoid account enumeration.
       return false;
     }
-    console.error('Reset password request failed:', err);
     setError(getErrorMessage(err, RESET_ERROR_MESSAGES, 'Unable to send reset code. Please try again.'));
     return true;
   };
@@ -252,7 +246,6 @@ function useForgotPasswordState(navigate: NavigateFunction): ForgotPasswordState
       if (typed.name === 'UserNotFoundException') {
         setError('Invalid confirmation code. Please check and try again.');
       } else {
-        console.error('Confirm reset password failed:', err);
         setError(getErrorMessage(err, CONFIRM_ERROR_MESSAGES, 'Unable to reset password. Please try again.'));
       }
     } finally {

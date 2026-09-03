@@ -587,9 +587,11 @@ delete_state_objects() {
 
 # Remove a stale S3 lockfile left behind by a crashed or cancelled run.
 # OpenTofu's S3 backend uses a .tflock object when use_lockfile=true.
-# A lock from a different host is always considered stale (each CI run gets a
-# fresh runner). A lock from the same host is removed only when it is older
-# than EPHEMERAL_LOCK_STALE_SECONDS (default 10 minutes).
+# A lock is considered stale only when it is older than
+# EPHEMERAL_LOCK_STALE_SECONDS (default 10 minutes). Hostname is logged for
+# diagnostics but is NOT used as a deletion signal: a different hostname may
+# still belong to an active CI runner holding a fresh lock, so we avoid
+# deleting locks held by currently running jobs.
 cleanup_stale_lock() {
   local run_id="$1"
   local state_key="application/ephemeral/${run_id}/terraform.tfstate"
@@ -620,16 +622,10 @@ cleanup_stale_lock() {
   local this_host
   this_host=$(hostname)
 
-  # A lock created by a different host cannot belong to the current run, so
-  # treat it as stale. This handles CI runners that crash or are cancelled.
-  if [ -n "$lock_host" ] && [ "$lock_host" != "$this_host" ]; then
-    log "   🗑️  Lock belongs to a different host ($lock_host != $this_host); removing as stale."
-    aws s3 rm "$lock_url" --region "$STATE_REGION" || true
-    return 0
+  if [ -n "$lock_host" ]; then
+    log "   Lock host: $lock_host (this host: $this_host)."
   fi
 
-  # Same host: fall back to age-based check to avoid deleting a lock held by a
-  # concurrent local process.
   if [ -n "$lock_created" ]; then
     local lock_age_seconds
     lock_age_seconds=$(python3 - <<PY
@@ -655,5 +651,5 @@ PY
     fi
   fi
 
-  log "   ⚠️  Lock appears fresh and from this host; leaving in place."
+  log "   ⚠️  Lock appears fresh; leaving in place."
 }

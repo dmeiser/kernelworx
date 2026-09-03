@@ -58,8 +58,7 @@ const handleSignInWithRedirect = (checkAuthSession: () => Promise<void>) => {
     .catch(() => {});
 };
 
-const handleSignInFailure = (eventData: unknown, setLoading: (loading: boolean) => void) => {
-  console.error('Sign in failed:', eventData);
+const handleSignInFailure = (setLoading: (loading: boolean) => void) => {
   setLoading(false);
 };
 
@@ -67,8 +66,7 @@ const handleTokenRefresh = (checkAuthSession: () => Promise<void>) => {
   void checkAuthSession();
 };
 
-const handleTokenRefreshFailure = (eventData: unknown, handlers: AuthEventHandlers) => {
-  console.error('Token refresh failed:', eventData);
+const handleTokenRefreshFailure = (handlers: AuthEventHandlers) => {
   handlers.onTokenRefreshFailure();
 };
 
@@ -78,17 +76,17 @@ const createAuthEventHandler = (
   setLoading: (loading: boolean) => void,
   handlers: AuthEventHandlers,
 ) => {
-  const eventHandlers: Record<string, (data: unknown) => void> = {
+  const eventHandlers: Record<string, () => void> = {
     signInWithRedirect: () => handleSignInWithRedirect(checkAuthSession),
-    signInWithRedirect_failure: (data) => handleSignInFailure(data, setLoading),
+    signInWithRedirect_failure: () => handleSignInFailure(setLoading),
     signedOut: () => handlers.onSignedOut(),
     tokenRefresh: () => handleTokenRefresh(checkAuthSession),
-    tokenRefresh_failure: (data) => handleTokenRefreshFailure(data, handlers),
+    tokenRefresh_failure: () => handleTokenRefreshFailure(handlers),
   };
 
-  return (eventName: string, eventData: unknown) => {
+  return (eventName: string) => {
     const handler = eventHandlers[eventName];
-    if (handler) handler(eventData);
+    if (handler) handler();
   };
 };
 
@@ -107,8 +105,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         fetchPolicy: 'network-only', // Always fetch fresh data
       });
       return data?.getMyAccount ?? null;
-    } catch (error) {
-      console.error('Failed to fetch account data:', error);
+    } catch {
       return null;
     }
   }, []);
@@ -136,11 +133,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         setAccount(mergeAccountWithAdminStatus(accountData, isAdminFromToken));
       } else {
         // User is authenticated but account record doesn't exist yet
-        console.warn('User has valid tokens but no account record yet');
         setAccount(null);
       }
-    } catch (error) {
-      console.error('Auth session check failed:', error);
+    } catch {
       setHasValidTokens(false);
       setAccount(null);
     } finally {
@@ -170,7 +165,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     });
 
     const unsubscribe = Hub.listen('auth', ({ payload }) => {
-      handleEvent(payload.event, (payload as { data?: unknown }).data);
+      handleEvent(payload.event);
     });
 
     return unsubscribe;
@@ -191,13 +186,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
    * Amplify automatically exchanges the code for JWT tokens.
    */
   const login = useCallback(async () => {
-    try {
-      // Redirect to Cognito Hosted UI (shows all login options)
-      await signInWithRedirect();
-    } catch (error) {
-      console.error('Login failed:', error);
-      throw error;
-    }
+    // Redirect to Cognito Hosted UI (shows all login options)
+    await signInWithRedirect();
   }, []);
 
   /**
@@ -208,25 +198,20 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
    */
   const loginWithPassword = useCallback(
     async (email: string, password: string) => {
-      try {
-        const result = await signIn({ username: email, password });
+      const result = await signIn({ username: email, password });
 
-        // Check if sign-in is complete or if there's a next step (MFA, etc.)
-        if (result.isSignedIn) {
-          // Sign-in complete - refresh the auth session
-          await checkAuthSession();
-          return result;
-        } else if (result.nextStep) {
-          // There's a next step (MFA challenge, new password required, etc.)
-          // Return the result so the UI can handle it
-          return result;
-        }
-
+      // Check if sign-in is complete or if there's a next step (MFA, etc.)
+      if (result.isSignedIn) {
+        // Sign-in complete - refresh the auth session
+        await checkAuthSession();
         return result;
-      } catch (error) {
-        console.error('Email/password login failed:', error);
-        throw error;
+      } else if (result.nextStep) {
+        // There's a next step (MFA challenge, new password required, etc.)
+        // Return the result so the UI can handle it
+        return result;
       }
+
+      return result;
     },
     [checkAuthSession],
   );
@@ -239,15 +224,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
    */
   const logout = useCallback(async () => {
     try {
-      console.log('Starting logout...');
       setAccount(null);
       setHasValidTokens(false);
       // signOut with global:true will redirect to Cognito's /logout endpoint
       // which clears the Cognito session cookies, then redirects back to redirectSignOut
       await signOut({ global: true });
       // Note: The redirect happens automatically, we won't reach this line
-    } catch (error) {
-      console.error('Logout failed:', error);
+    } catch {
       // If signOut fails, clear local state and do manual redirect
       setAccount(null);
       // Build the Cognito logout URL manually as fallback

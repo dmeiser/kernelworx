@@ -4,16 +4,38 @@ Lambda handler for PaymentMethod.qrCodeUrl field resolver.
 Generates a single presigned URL for a payment method QR code.
 """
 
-from typing import Any, Dict
+from typing import Any, Dict, cast
 
 try:  # pragma: no cover
+    from utils.auth import check_profile_access
     from utils.errors import AppError, ErrorCode
     from utils.logging import get_logger
     from utils.payment_methods import generate_presigned_get_url
 except ModuleNotFoundError:  # pragma: no cover
+    from ..utils.auth import check_profile_access
     from ..utils.errors import AppError, ErrorCode
     from ..utils.logging import get_logger
     from ..utils.payment_methods import generate_presigned_get_url
+
+
+def _caller_can_access_qr(caller_id: str, owner_account_id: str, profile_id: str | None) -> bool:
+    """Check if caller may retrieve a QR code for the owner's payment method.
+
+    Owners may always retrieve their own QR codes. WRITE collaborators may
+    retrieve QR codes for payment methods on profiles they have WRITE access to.
+    """
+    if caller_id == owner_account_id:
+        return True
+
+    if not profile_id:
+        return False
+
+    try:
+        return cast(bool, check_profile_access(caller_id, profile_id, "WRITE"))
+    except AppError as e:
+        if e.error_code == ErrorCode.NOT_FOUND:
+            return False
+        raise
 
 
 def _validate_and_extract_params(event: Dict[str, Any]) -> tuple[str, str, str | None]:
@@ -27,7 +49,8 @@ def _validate_and_extract_params(event: Dict[str, Any]) -> tuple[str, str, str |
     if not owner_account_id:
         raise AppError(ErrorCode.UNAUTHORIZED, "Owner account ID required")
 
-    if caller_id != owner_account_id:
+    profile_id: str | None = event.get("profileId")
+    if not _caller_can_access_qr(caller_id, owner_account_id, profile_id):
         raise AppError(ErrorCode.FORBIDDEN, "Access denied")
 
     method_name: str = event.get("methodName", "")

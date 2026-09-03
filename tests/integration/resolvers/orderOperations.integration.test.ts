@@ -1232,10 +1232,11 @@ describe('Order Operations Integration Tests', () => {
 
       const orderId = createData.createOrder.orderId;
 
-      // Update payment method
+      // Update payment method (CREDIT_CARD is no longer valid; only Cash, Check,
+      // and configured custom methods are accepted by the update pipeline validator)
       const updateInput = {
         orderId,
-        paymentMethod: 'CREDIT_CARD',
+        paymentMethod: 'CHECK',
       };
 
       const { data: updateData } = await ownerClient.mutate({
@@ -1243,7 +1244,7 @@ describe('Order Operations Integration Tests', () => {
         variables: { input: updateInput },
       });
 
-      expect(updateData.updateOrder.paymentMethod).toBe('CREDIT_CARD');
+      expect(updateData.updateOrder.paymentMethod).toBe('CHECK');
     }, 10000);
   });
 
@@ -1288,6 +1289,234 @@ describe('Order Operations Integration Tests', () => {
     // With the custom payment types feature (Phase 1-4), only Cash, Check, 
     // and user-created custom methods are valid. These legacy tests are
     // replaced by the "creates order with valid custom payment method" test.
+  });
+
+  describe('updateOrder payment methods', () => {
+    test('updates order payment method to Cash', async () => {
+      const createInput = {
+        profileId: testProfileId,
+        campaignId: testCampaignId,
+        customerName: 'Cash Update Test',
+        orderDate: new Date().toISOString(),
+        paymentMethod: 'CHECK',
+        lineItems: [{ productId: testProductId, quantity: 1 }],
+      };
+
+      const { data: createData } = await ownerClient.mutate({
+        mutation: CREATE_ORDER,
+        variables: { input: createInput },
+      });
+      const orderId = createData.createOrder.orderId;
+
+      const { data: updateData } = await ownerClient.mutate({
+        mutation: UPDATE_ORDER,
+        variables: {
+          input: {
+            orderId,
+            paymentMethod: 'Cash',
+          },
+        },
+      });
+
+      expect(updateData.updateOrder.paymentMethod).toBe('Cash');
+
+      // Cleanup
+      await ownerClient.mutate({ mutation: DELETE_ORDER, variables: { orderId } });
+    }, 10000);
+
+    test('updates order payment method to Check', async () => {
+      const createInput = {
+        profileId: testProfileId,
+        campaignId: testCampaignId,
+        customerName: 'Check Update Test',
+        orderDate: new Date().toISOString(),
+        paymentMethod: 'CASH',
+        lineItems: [{ productId: testProductId, quantity: 1 }],
+      };
+
+      const { data: createData } = await ownerClient.mutate({
+        mutation: CREATE_ORDER,
+        variables: { input: createInput },
+      });
+      const orderId = createData.createOrder.orderId;
+
+      const { data: updateData } = await ownerClient.mutate({
+        mutation: UPDATE_ORDER,
+        variables: {
+          input: {
+            orderId,
+            paymentMethod: 'Check',
+          },
+        },
+      });
+
+      expect(updateData.updateOrder.paymentMethod).toBe('Check');
+
+      // Cleanup
+      await ownerClient.mutate({ mutation: DELETE_ORDER, variables: { orderId } });
+    }, 10000);
+
+    test('updates order payment method to active custom method', async () => {
+      const customMethodName = 'Venmo-Update-Test';
+      await ownerClient.mutate({
+        mutation: CREATE_PAYMENT_METHOD,
+        variables: { name: customMethodName },
+      });
+
+      try {
+        const createInput = {
+          profileId: testProfileId,
+          campaignId: testCampaignId,
+          customerName: 'Custom Update Test',
+          orderDate: new Date().toISOString(),
+          paymentMethod: 'CASH',
+          lineItems: [{ productId: testProductId, quantity: 1 }],
+        };
+
+        const { data: createData } = await ownerClient.mutate({
+          mutation: CREATE_ORDER,
+          variables: { input: createInput },
+        });
+        const orderId = createData.createOrder.orderId;
+
+        const { data: updateData } = await ownerClient.mutate({
+          mutation: UPDATE_ORDER,
+          variables: {
+            input: {
+              orderId,
+              paymentMethod: customMethodName,
+            },
+          },
+        });
+
+        expect(updateData.updateOrder.paymentMethod).toBe(customMethodName);
+
+        // Cleanup
+        await ownerClient.mutate({ mutation: DELETE_ORDER, variables: { orderId } });
+      } finally {
+        await ownerClient.mutate({
+          mutation: DELETE_PAYMENT_METHOD,
+          variables: { name: customMethodName },
+        });
+      }
+    }, 15000);
+
+    test('rejects update to unknown/legacy payment method', async () => {
+      const createInput = {
+        profileId: testProfileId,
+        campaignId: testCampaignId,
+        customerName: 'Invalid Update Test',
+        orderDate: new Date().toISOString(),
+        paymentMethod: 'CASH',
+        lineItems: [{ productId: testProductId, quantity: 1 }],
+      };
+
+      const { data: createData } = await ownerClient.mutate({
+        mutation: CREATE_ORDER,
+        variables: { input: createInput },
+      });
+      const orderId = createData.createOrder.orderId;
+
+      try {
+        await expect(
+          ownerClient.mutate({
+            mutation: UPDATE_ORDER,
+            variables: {
+              input: {
+                orderId,
+                paymentMethod: 'NonExistentPaymentMethod-12345',
+              },
+            },
+          })
+        ).rejects.toThrow();
+      } finally {
+        // Cleanup
+        await ownerClient.mutate({ mutation: DELETE_ORDER, variables: { orderId } });
+      }
+    }, 10000);
+
+    test('rejects update with empty payment method', async () => {
+      const createInput = {
+        profileId: testProfileId,
+        campaignId: testCampaignId,
+        customerName: 'Empty Payment Method Update Test',
+        orderDate: new Date().toISOString(),
+        paymentMethod: 'CASH',
+        lineItems: [{ productId: testProductId, quantity: 1 }],
+      };
+
+      const { data: createData } = await ownerClient.mutate({
+        mutation: CREATE_ORDER,
+        variables: { input: createInput },
+      });
+      const orderId = createData.createOrder.orderId;
+
+      try {
+        await expect(
+          ownerClient.mutate({
+            mutation: UPDATE_ORDER,
+            variables: {
+              input: {
+                orderId,
+                paymentMethod: '',
+              },
+            },
+          })
+        ).rejects.toThrow();
+      } finally {
+        // Cleanup
+        await ownerClient.mutate({ mutation: DELETE_ORDER, variables: { orderId } });
+      }
+    }, 10000);
+
+    test('preserves historical payment method when updating other fields after method deletion', async () => {
+      const customMethodName = `Zelle-Historical-Update-${Date.now()}`;
+      await ownerClient.mutate({
+        mutation: CREATE_PAYMENT_METHOD,
+        variables: { name: customMethodName },
+      });
+
+      const createInput = {
+        profileId: testProfileId,
+        campaignId: testCampaignId,
+        customerName: 'Historical Update Test',
+        orderDate: new Date().toISOString(),
+        paymentMethod: customMethodName,
+        lineItems: [{ productId: testProductId, quantity: 1 }],
+      };
+
+      const { data: createData } = await ownerClient.mutate({
+        mutation: CREATE_ORDER,
+        variables: { input: createInput },
+      });
+      const orderId = createData.createOrder.orderId;
+
+      try {
+        // Delete the custom payment method; the existing order now has a
+        // historical/legacy payment method that is no longer configured.
+        await ownerClient.mutate({
+          mutation: DELETE_PAYMENT_METHOD,
+          variables: { name: customMethodName },
+        });
+
+        // Update a different field without changing paymentMethod.
+        const { data: updateData } = await ownerClient.mutate({
+          mutation: UPDATE_ORDER,
+          variables: {
+            input: {
+              orderId,
+              customerName: 'Historical Update Test Updated',
+            },
+          },
+        });
+
+        expect(updateData.updateOrder.customerName).toBe('Historical Update Test Updated');
+        expect(updateData.updateOrder.paymentMethod).toBe(customMethodName);
+      } finally {
+        // Cleanup
+        await ownerClient.mutate({ mutation: DELETE_ORDER, variables: { orderId } });
+      }
+    }, 15000);
   });
 
   describe('createOrder optional fields', () => {

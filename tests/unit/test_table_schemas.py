@@ -201,6 +201,12 @@ class TestSharedCampaignsTableSchema:
         assert "GSI1" in gsi_names
         assert "GSI2" in gsi_names
 
+    def test_has_catalog_id_index(self):
+        """Schema includes catalogId-index for delete constraint checks."""
+        schema = create_shared_campaigns_table_schema()
+        gsi_names = [gsi["IndexName"] for gsi in schema["GlobalSecondaryIndexes"]]
+        assert "catalogId-index" in gsi_names
+
 
 class TestGetAllTableSchemas:
     """Tests for get_all_table_schemas function."""

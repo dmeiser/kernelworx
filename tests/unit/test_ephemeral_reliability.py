@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import shlex
 import shutil
 import subprocess
 import textwrap
@@ -54,6 +56,7 @@ def run_bash(repo_root: Path, script: str, env: dict[str, str] | None = None) ->
 class TestBashSyntax:
     def test_all_shell_scripts_parse(self, repo_root: Path) -> None:
         scripts = [
+            repo_root / "scripts" / "appsync-ensure-resolver-order.sh",
             repo_root / "scripts" / "ephemeral-env.sh",
             repo_root / "scripts" / "ephemeral-recover-common.sh",
             repo_root / "scripts" / "recover-deploy.sh",
@@ -100,13 +103,18 @@ class TestCleanupStaleLock:
         assert result.returncode == 0, result.stderr
         assert "No lock object found" in result.stderr
 
-    def test_different_host_lock_is_removed(self, repo_root: Path, tmp_env: Path) -> None:
-        lock = {"Created": "2026-08-23T00:00:00Z", "Who": "runner@other-host"}
+    def test_different_host_fresh_lock_is_left(self, repo_root: Path, tmp_env: Path) -> None:
+        recorded = tmp_env / "aws_calls.txt"
+        lock = {
+            "Created": (datetime.now(timezone.utc) - timedelta(seconds=30)).isoformat(),
+            "Who": "runner@other-host",
+        }
         result = self._source_and_call(
             repo_root,
             tmp_env,
             f"""
             #!/bin/bash
+            echo "$@" >> "{recorded}"
             case "$1 $2" in
               "s3api head-object")
                 exit 0
@@ -122,44 +130,22 @@ class TestCleanupStaleLock:
             """,
         )
         assert result.returncode == 0, result.stderr
-        assert "Lock belongs to a different host" in result.stderr
+        assert "Lock appears fresh" in result.stderr
+        rm_calls = [line for line in recorded.read_text().splitlines() if line.startswith("s3 rm")]
+        assert not rm_calls, "Fresh lock from a different host must not be deleted"
 
-    def test_same_host_fresh_lock_is_left(self, repo_root: Path, tmp_env: Path) -> None:
-        this_host = os.uname().nodename
-        lock = {
-            "Created": (datetime.now(timezone.utc) - timedelta(seconds=30)).isoformat(),
-            "Who": f"runner@{this_host}",
-        }
-        result = self._source_and_call(
-            repo_root,
-            tmp_env,
-            f"""
-            #!/bin/bash
-            case "$1 $2" in
-              "s3api head-object")
-                exit 0
-                ;;
-              "s3 cp")
-                echo '{json.dumps(lock)}'
-                ;;
-            esac
-            exit 0
-            """,
-        )
-        assert result.returncode == 0, result.stderr
-        assert "Lock appears fresh and from this host" in result.stderr
-
-    def test_same_host_stale_lock_is_removed(self, repo_root: Path, tmp_env: Path) -> None:
-        this_host = os.uname().nodename
+    def test_different_host_stale_lock_is_removed(self, repo_root: Path, tmp_env: Path) -> None:
+        recorded = tmp_env / "aws_calls.txt"
         lock = {
             "Created": (datetime.now(timezone.utc) - timedelta(seconds=900)).isoformat(),
-            "Who": f"runner@{this_host}",
+            "Who": "runner@other-host",
         }
         result = self._source_and_call(
             repo_root,
             tmp_env,
             f"""
             #!/bin/bash
+            echo "$@" >> "{recorded}"
             case "$1 $2" in
               "s3api head-object")
                 exit 0
@@ -176,6 +162,72 @@ class TestCleanupStaleLock:
         )
         assert result.returncode == 0, result.stderr
         assert "Lock is older than threshold" in result.stderr
+        rm_calls = [line for line in recorded.read_text().splitlines() if line.startswith("s3 rm")]
+        assert rm_calls, "Stale lock from a different host must be deleted"
+
+    def test_same_host_fresh_lock_is_left(self, repo_root: Path, tmp_env: Path) -> None:
+        recorded = tmp_env / "aws_calls.txt"
+        this_host = os.uname().nodename
+        lock = {
+            "Created": (datetime.now(timezone.utc) - timedelta(seconds=30)).isoformat(),
+            "Who": f"runner@{this_host}",
+        }
+        result = self._source_and_call(
+            repo_root,
+            tmp_env,
+            f"""
+            #!/bin/bash
+            echo "$@" >> "{recorded}"
+            case "$1 $2" in
+              "s3api head-object")
+                exit 0
+                ;;
+              "s3 cp")
+                echo '{json.dumps(lock)}'
+                ;;
+              "s3 rm")
+                echo "removed"
+                ;;
+            esac
+            exit 0
+            """,
+        )
+        assert result.returncode == 0, result.stderr
+        assert "Lock appears fresh" in result.stderr
+        rm_calls = [line for line in recorded.read_text().splitlines() if line.startswith("s3 rm")]
+        assert not rm_calls, "Fresh lock from the same host must not be deleted"
+
+    def test_same_host_stale_lock_is_removed(self, repo_root: Path, tmp_env: Path) -> None:
+        recorded = tmp_env / "aws_calls.txt"
+        this_host = os.uname().nodename
+        lock = {
+            "Created": (datetime.now(timezone.utc) - timedelta(seconds=900)).isoformat(),
+            "Who": f"runner@{this_host}",
+        }
+        result = self._source_and_call(
+            repo_root,
+            tmp_env,
+            f"""
+            #!/bin/bash
+            echo "$@" >> "{recorded}"
+            case "$1 $2" in
+              "s3api head-object")
+                exit 0
+                ;;
+              "s3 cp")
+                echo '{json.dumps(lock)}'
+                ;;
+              "s3 rm")
+                echo "removed"
+                ;;
+            esac
+            exit 0
+            """,
+        )
+        assert result.returncode == 0, result.stderr
+        assert "Lock is older than threshold" in result.stderr
+        rm_calls = [line for line in recorded.read_text().splitlines() if line.startswith("s3 rm")]
+        assert rm_calls, "Stale lock from the same host must be deleted"
 
 
 class TestRecoverStateIfMissing:
@@ -719,11 +771,60 @@ class TestWorkflowDispatchSurface:
             or f"inputs.mode=='{expected_mode}'" in normalized
         )
 
+    @staticmethod
+    def _normalize_if_expression(expression: str) -> str:
+        """Normalize a GitHub Actions `if` expression for semantic comparison."""
+        return re.sub(r"\s+", " ", expression.replace("${{", "").replace("}}", "")).strip()
+
+    @staticmethod
+    def _extract_command_args(script: str, basename: str, subcommand: str) -> list[str]:
+        """Parse a shell script and return the args of the first matching command."""
+        for line in script.splitlines():
+            segment = line.split("|", 1)[0].strip()
+            if not segment:
+                continue
+            parts = shlex.split(segment)
+            if len(parts) >= 2 and parts[0].endswith(basename) and parts[1] == subcommand:
+                return parts
+        raise AssertionError(f"Could not find {basename} {subcommand} command in script")
+
     def test_ephemeral_test_has_no_manual_jobs(self, repo_root: Path) -> None:
         workflow = self._load_workflow(repo_root)
         jobs = workflow.get("jobs", {})
         assert set(jobs) == {"ephemeral-test", "sweep"}
         assert "workflow_dispatch" not in (workflow.get("on") or {})
+
+    def test_ephemeral_test_job_only_runs_on_pull_request(self, repo_root: Path) -> None:
+        workflow = self._load_workflow(repo_root)
+        job_if = workflow["jobs"]["ephemeral-test"].get("if", "")
+        normalized = self._normalize_if_expression(job_if)
+        assert normalized == (
+            "github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository"
+        ), f"ephemeral-test job must be gated to same-repo pull_request events, got: {job_if!r}"
+
+    def test_ephemeral_test_uses_valid_pr_run_id(self, repo_root: Path) -> None:
+        workflow = self._load_workflow(repo_root)
+        up_step = next(s for s in workflow["jobs"]["ephemeral-test"]["steps"] if s.get("id") == "ephemeral_up")
+        run_script = up_step["run"]
+        args = self._extract_command_args(run_script, "ephemeral-env.sh", "up")
+        assert args[2] == "pr-${{ github.event.pull_request.number }}", (
+            "ephemeral-env.sh up must use a PR-numbered run-id"
+        )
+
+    def test_sweep_job_has_ephemeral_environment(self, repo_root: Path) -> None:
+        workflow = self._load_workflow(repo_root)
+        sweep_job = workflow["jobs"]["sweep"]
+        assert sweep_job.get("environment") == "ephemeral", (
+            "sweep job must use the ephemeral environment so it can assume the AWS role"
+        )
+
+    def test_sweep_job_only_runs_on_schedule(self, repo_root: Path) -> None:
+        workflow = self._load_workflow(repo_root)
+        job_if = workflow["jobs"]["sweep"].get("if", "")
+        normalized = self._normalize_if_expression(job_if)
+        assert normalized == "github.event_name == 'schedule'", (
+            f"sweep job must be gated to schedule events, got: {job_if!r}"
+        )
 
     def test_manual_teardown_workflow(self, repo_root: Path) -> None:
         workflow = self._load_workflow(repo_root, "manual-teardown.yml")
@@ -755,7 +856,61 @@ class TestWorkflowDispatchSurface:
         assert self._if_gates_on_mode(jobs["recover-deploy"]["if"], "recover-deploy")
         assert self._if_gates_on_mode(jobs["recover-destroy"]["if"], "recover-destroy")
 
-    def test_sweep_continues_on_error(self, repo_root: Path, tmp_env: Path) -> None:
+    def test_sweep_skips_open_and_unknown_pr_states(self, repo_root: Path, tmp_env: Path) -> None:
+        workflow = self._load_workflow(repo_root)
+        sweep_step = workflow["jobs"]["sweep"]["steps"][-1]
+        run_script = sweep_step["run"]
+
+        teardown_calls = tmp_env / "teardown_calls.txt"
+        write_mock(
+            tmp_env,
+            "aws",
+            """
+            #!/bin/bash
+            if [ "$1" = "s3" ] && [ "$2" = "ls" ]; then
+                echo "2026-08-23 00:00:00 1234 application/ephemeral/pr-7/terraform.tfstate"
+                echo "2026-08-23 00:00:00 1234 application/ephemeral/pr-42/terraform.tfstate"
+                echo "2026-08-23 00:00:00 1234 application/ephemeral/pr-99/terraform.tfstate"
+            fi
+            exit 0
+            """,
+        )
+        write_mock(
+            tmp_env,
+            "gh",
+            """
+            #!/bin/bash
+            if echo "$*" | grep -q "\\b7\\b"; then
+                echo "OPEN"
+            else
+                echo "UNKNOWN"
+            fi
+            exit 0
+            """,
+        )
+        write_mock(
+            tmp_env,
+            "scripts/ephemeral-env.sh",
+            f"""
+            #!/bin/bash
+            echo "$@" >> "{teardown_calls}"
+            exit 1
+            """,
+        )
+
+        result = subprocess.run(
+            ["bash", "-c", run_script],
+            cwd=tmp_env,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "GH_TOKEN": "test-token"},
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        calls = teardown_calls.read_text().splitlines() if teardown_calls.exists() else []
+        assert calls == [], f"Expected no teardown calls for OPEN/UNKNOWN states, got: {calls}"
+
+    def test_sweep_fails_when_teardown_fails(self, repo_root: Path, tmp_env: Path) -> None:
         workflow = self._load_workflow(repo_root)
         sweep_step = workflow["jobs"]["sweep"]["steps"][-1]
         run_script = sweep_step["run"]
@@ -792,7 +947,51 @@ class TestWorkflowDispatchSurface:
             env={**os.environ, "GH_TOKEN": "test-token"},
             check=False,
         )
-        assert result.returncode == 0, result.stderr
+        assert result.returncode == 1, result.stderr
+        calls = set(teardown_calls.read_text().splitlines())
+        assert calls == {"down pr-7", "down pr-42"}
+
+    def test_sweep_continues_after_partial_failure(self, repo_root: Path, tmp_env: Path) -> None:
+        workflow = self._load_workflow(repo_root)
+        sweep_step = workflow["jobs"]["sweep"]["steps"][-1]
+        run_script = sweep_step["run"]
+
+        teardown_calls = tmp_env / "teardown_calls.txt"
+        write_mock(
+            tmp_env,
+            "aws",
+            """
+            #!/bin/bash
+            if [ "$1" = "s3" ] && [ "$2" = "ls" ]; then
+                echo "2026-08-23 00:00:00 1234 application/ephemeral/pr-7/terraform.tfstate"
+                echo "2026-08-23 00:00:00 1234 application/ephemeral/pr-42/terraform.tfstate"
+            fi
+            exit 0
+            """,
+        )
+        write_mock(tmp_env, "gh", '#!/bin/bash\necho "CLOSED"')
+        write_mock(
+            tmp_env,
+            "scripts/ephemeral-env.sh",
+            f"""
+            #!/bin/bash
+            echo "$@" >> "{teardown_calls}"
+            if echo "$@" | grep -q "pr-7"; then
+                exit 1
+            fi
+            exit 0
+            """,
+        )
+
+        result = subprocess.run(
+            ["bash", "-c", run_script],
+            cwd=tmp_env,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "GH_TOKEN": "test-token"},
+            check=False,
+        )
+        assert result.returncode == 1, result.stderr
         calls = set(teardown_calls.read_text().splitlines())
         assert calls == {"down pr-7", "down pr-42"}
 

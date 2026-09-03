@@ -405,7 +405,9 @@ export const CampaignSettingsPage: React.FC = () => {
       await maybeUpdateCampaign(isValid, updateCampaign, input);
       setUnitChangeConfirmOpen(false);
     } catch (err) {
-      console.error('Error saving campaign:', err);
+      if (import.meta.env.DEV) {
+        console.error('Error saving campaign:', err);
+      }
       setSaveError('Failed to save campaign changes. Please try again.');
       setUnitChangeConfirmOpen(false);
     }

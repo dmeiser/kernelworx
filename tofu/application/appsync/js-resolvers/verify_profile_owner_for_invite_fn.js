@@ -1,17 +1,13 @@
 import { util } from '@aws-appsync/utils';
 
 export function request(ctx) {
-    // NEW STRUCTURE: Query profileId-index GSI to find profile
     const profileId = ctx.args.input.profileId;
-    // Add PROFILE# prefix for DynamoDB query (field resolver strips it for API responses)
-    const dbProfileId = profileId.startsWith('PROFILE#') ? profileId : `PROFILE#${profileId}`;
+    const dbProfileId = profileId && profileId.startsWith('PROFILE#') ? profileId : `PROFILE#${profileId}`;
+    const expectedOwner = ctx.identity.sub.startsWith('ACCOUNT#') ? ctx.identity.sub : 'ACCOUNT#' + ctx.identity.sub;
     return {
-        operation: 'Query',
-        index: 'profileId-index',
-        query: {
-            expression: 'profileId = :profileId',
-            expressionValues: util.dynamodb.toMapValues({ ':profileId': dbProfileId })
-        }
+        operation: 'GetItem',
+        key: util.dynamodb.toMapValues({ ownerAccountId: expectedOwner, profileId: dbProfileId }),
+        consistentRead: true
     };
 }
 
@@ -19,8 +15,8 @@ export function response(ctx) {
     if (ctx.error) {
         util.error(ctx.error.message, ctx.error.type);
     }
-    const profile = ctx.result.items && ctx.result.items[0];
-    if (!profile || profile.ownerAccountId !== 'ACCOUNT#' + ctx.identity.sub) {
+    const profile = ctx.result;
+    if (!profile) {
         util.error('Forbidden: Only profile owner can create invites', 'Unauthorized');
     }
     ctx.stash.profile = profile;

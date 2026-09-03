@@ -742,6 +742,37 @@ describe('Catalog CRUD Integration Tests', () => {
           })
         ).rejects.toThrow(/conditional request failed/i);  // VTL returns raw DynamoDB error
       });
+
+      it('should reject update with empty products array', async () => {
+        // Arrange: Create catalog
+        const createInput = {
+          catalogName: 'Catalog to Update',
+          isPublic: true,
+          products: [{ productName: 'Product', price: 10.0, sortOrder: 1 }],
+        };
+        const { data: createData } = await ownerClient.mutate({
+          mutation: CREATE_CATALOG,
+          variables: { input: createInput },
+        });
+        const catalogId = createData.createCatalog.catalogId;
+
+        const updateInput = {
+          catalogName: 'Updated Catalog',
+          isPublic: true,
+          products: [],
+        };
+
+        // Act & Assert
+        await expect(
+          ownerClient.mutate({
+            mutation: UPDATE_CATALOG,
+            variables: { catalogId: catalogId, input: updateInput },
+          })
+        ).rejects.toThrow(/Products array cannot be empty/i);
+
+        // Cleanup
+        await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId } });
+      });
     });
 
     describe('Product Management', () => {
@@ -869,6 +900,47 @@ describe('Catalog CRUD Integration Tests', () => {
         expect(data.updateCatalog.products[0].price).toBe(originalProducts[0].price);
         expect(data.updateCatalog.products[1].productName).toBe(originalProducts[1].productName);
         expect(data.updateCatalog.products[1].price).toBe(originalProducts[1].price);
+
+        // Cleanup
+        await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId } });
+      });
+
+      it('should reject empty products array on update and leave catalog unchanged', async () => {
+        // Arrange: Create a valid catalog
+        const createInput = {
+          catalogName: 'Update Empty Products Test',
+          isPublic: false,
+          products: [{ productName: 'Original Product', price: 10.0, sortOrder: 1 }],
+        };
+        const { data: createData } = await ownerClient.mutate({
+          mutation: CREATE_CATALOG,
+          variables: { input: createInput },
+        });
+        const catalogId = createData.createCatalog.catalogId;
+
+        // Act: Attempt to update with an empty products array
+        const updateInput = {
+          catalogName: 'Should Not Apply',
+          isPublic: true,
+          products: [],
+        };
+        await expect(
+          ownerClient.mutate({
+            mutation: UPDATE_CATALOG,
+            variables: { catalogId: catalogId, input: updateInput },
+          })
+        ).rejects.toThrow();
+
+        // Assert: Catalog still has its original product and name
+        const { data: getData }: any = await ownerClient.query({
+          query: gql`query GetCatalog($catalogId: ID!) { getCatalog(catalogId: $catalogId) { catalogId catalogName isPublic products { productName price sortOrder } } }`,
+          variables: { catalogId },
+          fetchPolicy: 'network-only',
+        });
+        expect(getData.getCatalog.catalogName).toBe('Update Empty Products Test');
+        expect(getData.getCatalog.isPublic).toBe(false);
+        expect(getData.getCatalog.products).toHaveLength(1);
+        expect(getData.getCatalog.products[0].productName).toBe('Original Product');
 
         // Cleanup
         await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId } });

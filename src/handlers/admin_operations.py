@@ -19,6 +19,10 @@ from typing import TYPE_CHECKING, Any, Dict, Optional, cast
 import boto3
 from botocore.exceptions import ClientError
 
+# Sibling handler modules use a same-package relative import, which resolves both
+# in the Lambda zip (package `handlers`) and in unit tests (package `src.handlers`).
+from .campaign_operations import _verify_campaign_deleted, _verify_order_keys_deleted
+
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
     from utils.auth import is_admin
@@ -392,21 +396,38 @@ def _search_accounts_in_dynamodb(query: str, logger: Any) -> list[Dict[str, Any]
     Search DynamoDB Accounts table with case-insensitive partial matching.
 
     Searches email, givenName, and familyName fields.
+    For exact email queries, utilizes the email-index GSI for fast O(1) lookup.
     Returns all matching accounts (up to max_results limit).
-
-    Note: For small user bases (<10k), scanning and filtering in Python is acceptable.
-    For larger scale, consider adding lowercase GSI fields or using OpenSearch.
     """
     query_lower = query.lower()
     matches: list[Dict[str, Any]] = []
     max_results = 50  # Limit results to prevent overwhelming responses
 
     try:
+        # Check email-index GSI first for full email queries
+        if "@" in query and re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", query):
+            try:
+                gsi_response = tables.accounts.query(
+                    IndexName="email-index",
+                    KeyConditionExpression="email = :email",
+                    ExpressionAttributeValues={":email": query_lower},
+                )
+                gsi_items = cast(list[Dict[str, Any]], gsi_response.get("Items", []))
+                if gsi_items:
+                    return gsi_items[:max_results]
+            except ClientError as e:
+                logger.warning(
+                    "DynamoDB email-index query failed, falling back to scan",
+                    error=str(e),
+                    query=mask_email(query),
+                )
+
         # Scan accounts and filter in Python for case-insensitive matching
         paginator_params: Dict[str, Any] = {}
         scanned_count = 0
         max_scan = 1000  # Safety limit
 
+        last_key: Dict[str, Any] | None = None
         while scanned_count < max_scan and len(matches) < max_results:
             items, last_key = _scan_accounts_page(paginator_params)
 
@@ -420,10 +441,17 @@ def _search_accounts_in_dynamodb(query: str, logger: Any) -> list[Dict[str, Any]
             else:
                 break
 
+        if scanned_count >= max_scan and last_key:
+            logger.warning(
+                "DynamoDB accounts search reached max scan limit; results may be truncated",
+                query=mask_email(query),
+                scanned_count=scanned_count,
+            )
+
         return matches
 
     except ClientError as e:
-        logger.warning("DynamoDB search failed", error=str(e), query=query)
+        logger.warning("DynamoDB search failed", error=str(e), query=mask_email(query))
         return []
 
 
@@ -585,13 +613,14 @@ def _find_cognito_user_by_sub(
     AppError so the caller does not proceed to delete DynamoDB data while
     the Cognito user still exists.
     """
+    raw_sub = account_id[8:] if account_id.startswith("ACCOUNT#") else account_id
     # Validate before interpolating into the Cognito filter to prevent
     # quote-injection / filter breakage (#124).
-    _validate_sub_for_filter(account_id)
+    _validate_sub_for_filter(raw_sub)
     try:
         users_response = cognito.list_users(
             UserPoolId=user_pool_id,
-            Filter=f'sub = "{account_id}"',
+            Filter=f'sub = "{raw_sub}"',
             Limit=1,
         )
         users = users_response.get("Users", [])
@@ -623,7 +652,7 @@ def _delete_user_from_cognito(cognito: Any, user_pool_id: str, username: str, em
 
 def _account_exists_in_dynamodb(account_id: str, logger: Any) -> bool:
     """Check whether an account record exists in DynamoDB."""
-    db_account_id = f"ACCOUNT#{account_id}"
+    db_account_id = _normalize_account_id(account_id)
     try:
         response = tables.accounts.get_item(Key={"accountId": db_account_id}, ProjectionExpression="accountId")
         exists = "Item" in response
@@ -642,7 +671,7 @@ def _delete_account_from_dynamodb(account_id: str, logger: Any) -> None:
     raise for missing keys). Other ClientErrors are propagated so that Cognito
     deletion is not attempted while account data remains.
     """
-    db_account_id = f"ACCOUNT#{account_id}"
+    db_account_id = _normalize_account_id(account_id)
     try:
         tables.accounts.delete_item(Key={"accountId": db_account_id})
         logger.info("Deleted account from DynamoDB", account_id=db_account_id)
@@ -778,11 +807,6 @@ def admin_delete_user(event: Dict[str, Any], context: Any) -> bool:
 
         username, email = _find_cognito_user_by_sub(cognito, user_pool_id, account_id, logger)
         account_exists = _account_exists_in_dynamodb(account_id, logger)
-        # TODO(#186): admin_delete_user passes the raw accountId to the DynamoDB
-        # and Cognito lookups above, so an ACCOUNT#-prefixed value for a non-self
-        # target yields a spurious NOT_FOUND. Normalize accountId consistently
-        # across this handler in a follow-up; #125 only fixed the self-deletion
-        # guard.
 
         if not username and not account_exists:
             raise AppError(ErrorCode.NOT_FOUND, f"User not found: {account_id}")
@@ -956,7 +980,7 @@ def create_managed_catalog(event: Dict[str, Any], context: Any) -> Dict[str, Any
 
 
 def _delete_orders_for_campaign(campaign_id: str, logger: Any) -> int:
-    """Delete all orders for a campaign. Returns count deleted."""
+    """Delete all orders for a campaign and verify deletion. Returns count deleted."""
     orders = query_all_items(
         tables.orders,
         {
@@ -969,11 +993,23 @@ def _delete_orders_for_campaign(campaign_id: str, logger: Any) -> int:
     for order in orders:
         tables.orders.delete_item(Key={"campaignId": campaign_id, "orderId": order["orderId"]})
         deleted_count += 1
+
+    if orders:
+        _verify_order_keys_deleted(orders)
+
     return deleted_count
 
 
 def _delete_user_orders(account_id: str, logger: Any) -> int:
-    """Delete all orders for all campaigns of all profiles owned by a user. Returns count deleted."""
+    """Delete all orders for all campaigns of all profiles owned by a user.
+
+    Verifies with strongly consistent reads that each deleted order is gone
+    from the orders table before returning. Raises AppError if a deleted order
+    is still present.
+
+    Returns:
+        Count of orders deleted.
+    """
     db_account_id = _normalize_account_id(account_id)
     deleted_count = 0
 
@@ -995,7 +1031,15 @@ def _delete_user_orders(account_id: str, logger: Any) -> int:
 
 
 def _delete_user_campaigns(account_id: str, logger: Any) -> int:
-    """Delete all campaigns for all profiles owned by a user. Returns count deleted."""
+    """Delete all campaigns for all profiles owned by a user.
+
+    Verifies with strongly consistent reads that each deleted campaign is gone
+    from the campaigns table before returning. Raises AppError if a deleted
+    campaign is still present.
+
+    Returns:
+        Count of campaigns deleted.
+    """
     db_account_id = _normalize_account_id(account_id)
     deleted_count = 0
 
@@ -1010,7 +1054,9 @@ def _delete_user_campaigns(account_id: str, logger: Any) -> int:
             },
         )
         for campaign in campaigns:
-            tables.campaigns.delete_item(Key={"profileId": profile_id, "campaignId": campaign["campaignId"]})
+            campaign_id = campaign["campaignId"]
+            tables.campaigns.delete_item(Key={"profileId": profile_id, "campaignId": campaign_id})
+            _verify_campaign_deleted(profile_id, campaign_id)
             deleted_count += 1
 
     logger.info("Deleted user campaigns", account_id=account_id, count=deleted_count)
@@ -1058,6 +1104,9 @@ def admin_delete_user_orders(event: Dict[str, Any], context: Any) -> int:
     """
     Delete all orders for all campaigns of all profiles owned by a user (admin only).
 
+    Verifies with strongly consistent reads that each deleted order is gone
+    from the orders table before returning success.
+
     Returns the count of deleted orders.
     """
     logger = get_logger(__name__)
@@ -1075,6 +1124,9 @@ def admin_delete_user_orders(event: Dict[str, Any], context: Any) -> int:
 def admin_delete_user_campaigns(event: Dict[str, Any], context: Any) -> int:
     """
     Delete all campaigns for all profiles owned by a user (admin only).
+
+    Verifies with strongly consistent reads that each deleted campaign is gone
+    from the campaigns table before returning success.
 
     Returns the count of deleted campaigns.
     """

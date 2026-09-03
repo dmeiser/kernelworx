@@ -107,7 +107,9 @@ const copyLinkToClipboard = async (
     await navigator.clipboard.writeText(link);
     onSuccess();
   } catch (err) {
-    console.error('Failed to copy link:', err);
+    if (import.meta.env.DEV) {
+      console.error('Failed to copy link:', err);
+    }
     onError(err);
   }
 };
@@ -129,7 +131,9 @@ const generateQRCode = async (
     });
     onSuccess(qrDataUrl);
   } catch (err) {
-    console.error('Failed to generate QR code:', err);
+    if (import.meta.env.DEV) {
+      console.error('Failed to generate QR code:', err);
+    }
     onError(err);
   }
 };
@@ -624,7 +628,9 @@ export const SharedCampaignsPage: React.FC = () => {
         },
       });
     } catch (err) {
-      console.error('Error deactivating shared campaign:', err);
+      if (import.meta.env.DEV) {
+        console.error('Error deactivating shared campaign:', err);
+      }
       showSnackbar('Failed to deactivate shared campaign');
     }
   };

@@ -13,6 +13,19 @@ resource "aws_appsync_function" "get_catalog_for_delete" {
   code = file("${local.js_resolvers_dir}/get_catalog_for_delete_fn.js")
 }
 
+resource "aws_appsync_function" "check_shared_campaign_usage" {
+  api_id      = aws_appsync_graphql_api.main.id
+  data_source = aws_appsync_datasource.shared_campaigns.name
+  name        = "CheckSharedCampaignUsageFn${local.env_suffix}"
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/check_shared_campaign_usage_fn.js")
+}
+
 resource "aws_appsync_function" "delete_catalog_fn" {
   api_id      = aws_appsync_graphql_api.main.id
   data_source = aws_appsync_datasource.catalogs.name

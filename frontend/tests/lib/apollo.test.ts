@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mapErrorCodeToMessage, getAuthContext, handleApolloError } from '../../src/lib/apollo';
+import { apolloClient, mapErrorCodeToMessage, getAuthContext, handleApolloError } from '../../src/lib/apollo';
 import { fetchAuthSession } from 'aws-amplify/auth';
 import { CombinedGraphQLErrors } from '@apollo/client/errors';
+import { ApolloClient, gql, InMemoryCache } from '@apollo/client';
+import { MockLink } from '@apollo/client/testing';
 
 vi.mock('aws-amplify/auth', async () => ({
   fetchAuthSession: vi.fn(),
@@ -41,7 +43,9 @@ describe('lib/apollo', () => {
     it('throws when token is missing', async () => {
       (fetchAuthSession as any).mockResolvedValue({ tokens: {} });
 
-      await expect(getAuthContext(null as any, { headers: {} } as any)).rejects.toThrow('No valid auth token available');
+      await expect(getAuthContext(null as any, { headers: {} } as any)).rejects.toThrow(
+        'No valid auth token available',
+      );
     });
   });
 
@@ -105,6 +109,119 @@ describe('lib/apollo', () => {
       expect(ev.detail.message).toContain('Network error');
 
       window.removeEventListener('graphql-error', handler as any);
+    });
+
+    it('suppresses console.error in production mode for both GraphQL and network errors', () => {
+      const devOrig = import.meta.env.DEV;
+      try {
+        (import.meta.env as any).DEV = false;
+
+        const gqlError = new CombinedGraphQLErrors({
+          errors: [
+            {
+              message: 'Forbidden action',
+              locations: [{ line: 1, column: 1 }],
+              path: ['test'],
+              extensions: { errorCode: 'FORBIDDEN' },
+            },
+          ],
+        });
+
+        handleApolloError({
+          error: gqlError,
+          operation: { operationName: 'TestOp' },
+        } as any);
+
+        expect(console.error).not.toHaveBeenCalled();
+
+        handleApolloError({
+          error: new Error('Network timeout'),
+          operation: { operationName: 'TestOp' },
+        } as any);
+
+        expect(console.error).not.toHaveBeenCalled();
+      } finally {
+        (import.meta.env as any).DEV = devOrig;
+      }
+    });
+
+    it('logs formatted error fields in DEV mode', () => {
+      const devOrig = import.meta.env.DEV;
+      try {
+        (import.meta.env as any).DEV = true;
+
+        const gqlError = new CombinedGraphQLErrors({
+          errors: [
+            {
+              message: 'Unauthorized access',
+              locations: [{ line: 2, column: 3 }],
+              path: ['user', 'profile'],
+              extensions: { errorCode: 'UNAUTHORIZED' },
+            },
+          ],
+        });
+
+        handleApolloError({
+          error: gqlError,
+          operation: { operationName: 'GetProfile' },
+        } as any);
+
+        expect(console.error).toHaveBeenCalledWith(
+          expect.stringContaining('[GraphQL error]: Message: Unauthorized access, Code: UNAUTHORIZED'),
+        );
+      } finally {
+        (import.meta.env as any).DEV = devOrig;
+      }
+    });
+  });
+
+  describe('apolloClient defaultOptions behavior', () => {
+    it('mutations reject when the server returns GraphQL errors', async () => {
+      const mutation = gql`
+        mutation Fail {
+          fail
+        }
+      `;
+      const link = new MockLink([
+        {
+          request: { query: mutation },
+          result: {
+            errors: [{ message: 'Mutation failed', extensions: { errorCode: 'INTERNAL_ERROR' } }],
+          },
+        },
+      ]);
+      const client = new ApolloClient({
+        link,
+        cache: new InMemoryCache(),
+        defaultOptions: apolloClient.defaultOptions,
+      });
+
+      await expect(client.mutate({ mutation })).rejects.toThrow('Mutation failed');
+    });
+
+    it('queries still resolve with data when the server returns GraphQL errors', async () => {
+      const query = gql`
+        query Partial {
+          partial
+        }
+      `;
+      const link = new MockLink([
+        {
+          request: { query },
+          result: {
+            data: { partial: 'some data' },
+            errors: [{ message: 'Field error', extensions: { errorCode: 'INTERNAL_ERROR' } }],
+          },
+        },
+      ]);
+      const client = new ApolloClient({
+        link,
+        cache: new InMemoryCache(),
+        defaultOptions: apolloClient.defaultOptions,
+      });
+
+      const result = await client.query({ query });
+      expect(result.data).toEqual({ partial: 'some data' });
     });
   });
 });

@@ -50,8 +50,10 @@ export const EditProfileDialog: React.FC<EditProfileDialogProps> = ({
       await onSubmit(profileId, form.values.sellerName.trim());
       onClose();
     } catch (error) {
-      /* v8 ignore next -- Error logging, tested via integration */
-      console.error('Failed to update profile:', error);
+      /* v8 ignore next 3 -- Error logging, tested via integration */
+      if (import.meta.env.DEV) {
+        console.error('Failed to update profile:', error);
+      }
     } finally {
       setLoading(false);
     }

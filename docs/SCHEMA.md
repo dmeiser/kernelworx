@@ -13,7 +13,7 @@ graph LR
     E["🛍️ CATALOGS<br/>PK: catalogId<br/>GSI: ownerAccountId, isPublic+createdAt"]
     F["🔗 SHARES<br/>PK: profileId + targetAccountId<br/>GSI: targetAccountId"]
     G["🎫 INVITES<br/>PK: inviteCode<br/>GSI: profileId<br/>TTL: expiresAt"]
-    H["🔄 SHARED_CAMPAIGNS<br/>PK: sharedCampaignCode<br/>GSI: createdBy+createdAt, unitCampaignKey"]
+    H["🔄 SHARED_CAMPAIGNS<br/>PK: sharedCampaignCode<br/>GSI: createdBy+createdAt, unitCampaignKey, catalogId-index"]
     
     B -->|created by| A
     C -->|in| B
@@ -159,12 +159,13 @@ Primary Key: `sharedCampaignCode` (String)
 Global Secondary Indexes:
 - `GSI1` (createdBy + createdAt)
 - `GSI2` (unitCampaignKey)
+- `catalogId-index` (catalogId) - Enforces catalog delete constraints
 
 | Attribute | Type | Purpose |
 |-----------|------|---------|
 | sharedCampaignCode | String | PK - Shareable template code |
 | campaignName | String | Template name |
-| catalogId | String | Catalog reference |
+| catalogId | String | Catalog reference, GSI - Enforce delete constraints |
 | unitType | String | Target unit type |
 | unitNumber | Integer | Target unit number (0 = any) |
 | city | String | Unit location |
@@ -287,7 +288,7 @@ graph TD
         E1["CATALOG<br/>GSI1: ownerAccountId<br/>GSI2: isPublic+createdAt"]
         F1["SHARE<br/>GSI: targetAccountId"]
         G1["INVITE<br/>GSI: profileId"]
-        H1["SHARED_CAMPAIGN<br/>GSI1: createdBy+createdAt<br/>GSI2: unitCampaignKey"]
+        H1["SHARED_CAMPAIGN<br/>GSI1: createdBy+createdAt<br/>GSI2: unitCampaignKey<br/>GSI3: catalogId-index"]
     end
     
     A --> A1

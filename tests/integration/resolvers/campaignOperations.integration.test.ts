@@ -84,6 +84,10 @@ const UPDATE_CAMPAIGN = gql`
       startDate
       endDate
       catalogId
+      unitType
+      unitNumber
+      city
+      state
       updatedAt
     }
   }
@@ -337,6 +341,27 @@ describe('Campaign Operations Integration Tests', () => {
       expect(data.updateCampaign).toBeDefined();
       expect(data.updateCampaign.startDate).toBe(newStartDate);
       expect(data.updateCampaign.endDate).toBe(newEndDate);
+    }, 10000);
+
+    test('updates campaign unit information including reserved keyword state', async () => {
+      const input = {
+        campaignId: testCampaignId,
+        unitType: 'Pack',
+        unitNumber: 42,
+        city: 'Dallas',
+        state: 'TX',
+      };
+
+      const { data } = await ownerClient.mutate({
+        mutation: UPDATE_CAMPAIGN,
+        variables: { input },
+      });
+
+      expect(data.updateCampaign).toBeDefined();
+      expect(data.updateCampaign.unitType).toBe('Pack');
+      expect(data.updateCampaign.unitNumber).toBe(42);
+      expect(data.updateCampaign.city).toBe('Dallas');
+      expect(data.updateCampaign.state).toBe('TX');
     }, 10000);
 
     test('rejects update with non-existent campaignId', async () => {

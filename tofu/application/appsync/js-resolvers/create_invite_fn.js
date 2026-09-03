@@ -1,10 +1,24 @@
 import { util } from '@aws-appsync/utils';
 
+function validatePermissions(permissions) {
+    if (!Array.isArray(permissions) || permissions.length === 0) {
+        util.error('permissions must contain at least one supported permission (READ or WRITE)', 'InvalidInput');
+    }
+    const hasSupportedPermission = permissions.some(permission =>
+        typeof permission === 'string' && ['READ', 'WRITE'].includes(permission.toUpperCase())
+    );
+    if (!hasSupportedPermission) {
+        util.error('permissions must contain at least one supported permission (READ or WRITE)', 'InvalidInput');
+    }
+}
+
 export function request(ctx) {
     const input = ctx.args.input;
     const profileId = input.profileId;
     const permissions = input.permissions;
     const callerAccountId = ctx.identity.sub;
+
+    validatePermissions(permissions);
     
     // Get ownerAccountId from profile in stash (for BatchGetItem on profiles table)
     const ownerAccountId = ctx.stash.profile ? ctx.stash.profile.ownerAccountId : null;

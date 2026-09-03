@@ -57,6 +57,24 @@ const CREATE_CAMPAIGN = gql`
   }
 `;
 
+const createCampaignWithRetry = async (client: any, input: any, maxAttempts = 10): Promise<any> => {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const res = await client.mutate({
+        mutation: CREATE_CAMPAIGN,
+        variables: { input },
+      });
+      return res.data.createCampaign;
+    } catch (err) {
+      if (attempt < maxAttempts) {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      } else {
+        throw err;
+      }
+    }
+  }
+};
+
 const SHARE_DIRECT = gql`
   mutation ShareProfileDirect($input: ShareProfileDirectInput!) {
     shareProfileDirect(input: $input) {
@@ -1397,51 +1415,36 @@ describe('Campaign Query Resolvers Integration Tests', () => {
       const futureStart = new Date(now.getFullYear() + 1, 0, 1).toISOString();
 
       // Create past campaign
-      const { data: pastCampaignData }: any = await ownerClient.mutate({
-        mutation: CREATE_CAMPAIGN,
-        variables: {
-          input: {
-            profileId: profileId,
-            campaignName: `${getTestPrefix()}-PastCampaign`,
-            campaignYear: 2025,
-            startDate: pastStart,
-            endDate: pastEnd,
-            catalogId: catalogId,
-          },
-        },
+      const pastCampaign = await createCampaignWithRetry(ownerClient, {
+        profileId: profileId,
+        campaignName: `${getTestPrefix()}-PastCampaign`,
+        campaignYear: 2025,
+        startDate: pastStart,
+        endDate: pastEnd,
+        catalogId: catalogId,
       });
-      const pastCampaignId = pastCampaignData.createCampaign.campaignId;
+      const pastCampaignId = pastCampaign.campaignId;
 
       // Create active campaign
-      const { data: activeCampaignData }: any = await ownerClient.mutate({
-        mutation: CREATE_CAMPAIGN,
-        variables: {
-          input: {
-            profileId: profileId,
-            campaignName: `${getTestPrefix()}-ActiveCampaign`,
-            campaignYear: 2025,
-            startDate: activeStart,
-            endDate: activeEnd,
-            catalogId: catalogId,
-          },
-        },
+      const activeCampaign = await createCampaignWithRetry(ownerClient, {
+        profileId: profileId,
+        campaignName: `${getTestPrefix()}-ActiveCampaign`,
+        campaignYear: 2025,
+        startDate: activeStart,
+        endDate: activeEnd,
+        catalogId: catalogId,
       });
-      const activeCampaignId = activeCampaignData.createCampaign.campaignId;
+      const activeCampaignId = activeCampaign.campaignId;
 
       // Create future campaign
-      const { data: futureCampaignData }: any = await ownerClient.mutate({
-        mutation: CREATE_CAMPAIGN,
-        variables: {
-          input: {
-            profileId: profileId,
-            campaignName: `${getTestPrefix()}-FutureCampaign`,
-            campaignYear: 2025,
-            startDate: futureStart,
-            catalogId: catalogId,
-          },
-        },
+      const futureCampaign = await createCampaignWithRetry(ownerClient, {
+        profileId: profileId,
+        campaignName: `${getTestPrefix()}-FutureCampaign`,
+        campaignYear: 2025,
+        startDate: futureStart,
+        catalogId: catalogId,
       });
-      const futureCampaignId = futureCampaignData.createCampaign.campaignId;
+      const futureCampaignId = futureCampaign.campaignId;
 
       // Act: List all campaigns
       const { data }: any = await ownerClient.query({

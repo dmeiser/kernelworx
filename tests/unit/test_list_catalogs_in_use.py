@@ -3,7 +3,9 @@
 from typing import Any, Dict, List, Set
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import boto3
 import pytest
+from moto import mock_aws
 
 
 class TestAsyncGetOwnedProfileIds:
@@ -129,8 +131,8 @@ class TestAsyncGetSharedProfileIds:
         mock_table = AsyncMock()
         mock_table.query.return_value = {
             "Items": [
-                {"profileId": "PROFILE#prof1"},
-                {"profileId": "PROFILE#prof2"},
+                {"profileId": "PROFILE#prof1", "permissions": ["READ"]},
+                {"profileId": "PROFILE#prof2", "permissions": ["WRITE"]},
             ]
         }
 
@@ -144,8 +146,60 @@ class TestAsyncGetSharedProfileIds:
             IndexName="targetAccountId-index",
             KeyConditionExpression="targetAccountId = :targetAccountId",
             ExpressionAttributeValues={":targetAccountId": "ACCOUNT#test-user"},
-            ProjectionExpression="profileId",
+            ProjectionExpression="profileId, #permissions",
+            ExpressionAttributeNames={"#permissions": "permissions"},
         )
+
+    @pytest.mark.asyncio
+    async def test_query_is_accepted_by_dynamodb_expression_validation(self) -> None:
+        """The emitted query must pass DynamoDB's reserved-keyword validation.
+
+        Regression test for the ephemeral integration failure where every
+        listCatalogsInUse call returned INTERNAL_ERROR ("Failed to list
+        catalogs in use"): "permissions" is a DynamoDB reserved word, so a
+        ProjectionExpression containing it bare is rejected with a
+        ValidationException. moto enforces the same expression validation
+        as the real service; before the fix this test fails with
+        "reserved keyword: permissions" and passes after it.
+        """
+        from src.handlers.list_catalogs_in_use import _async_get_shared_profile_ids
+
+        mock_table = AsyncMock()
+        mock_table.query.return_value = {"Items": []}
+        mock_dynamodb = AsyncMock()
+        mock_dynamodb.Table.return_value = mock_table
+
+        await _async_get_shared_profile_ids(mock_dynamodb, "shares-table", "ACCOUNT#test-user")
+        query_kwargs = mock_table.query.call_args.kwargs
+
+        with mock_aws():
+            dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
+            dynamodb.create_table(
+                TableName="shares-table",
+                KeySchema=[
+                    {"AttributeName": "profileId", "KeyType": "HASH"},
+                    {"AttributeName": "targetAccountId", "KeyType": "RANGE"},
+                ],
+                AttributeDefinitions=[
+                    {"AttributeName": "profileId", "AttributeType": "S"},
+                    {"AttributeName": "targetAccountId", "AttributeType": "S"},
+                ],
+                GlobalSecondaryIndexes=[
+                    {
+                        "IndexName": "targetAccountId-index",
+                        "KeySchema": [{"AttributeName": "targetAccountId", "KeyType": "HASH"}],
+                        "Projection": {"ProjectionType": "ALL"},
+                    }
+                ],
+                BillingMode="PAY_PER_REQUEST",
+            )
+            real_table = dynamodb.Table("shares-table")
+            real_table.put_item(
+                Item={"profileId": "PROFILE#prof1", "targetAccountId": "ACCOUNT#test-user", "permissions": ["READ"]}
+            )
+            response = real_table.query(**query_kwargs)
+
+        assert response["Items"] == [{"profileId": "PROFILE#prof1", "permissions": ["READ"]}]
 
     @pytest.mark.asyncio
     async def test_returns_empty_list_when_no_shares(self) -> None:
@@ -170,11 +224,11 @@ class TestAsyncGetSharedProfileIds:
         mock_table = AsyncMock()
         mock_table.query.side_effect = [
             {
-                "Items": [{"profileId": "PROFILE#prof1"}],
+                "Items": [{"profileId": "PROFILE#prof1", "permissions": ["READ"]}],
                 "LastEvaluatedKey": {"pk": "key1"},
             },
             {
-                "Items": [{"profileId": "PROFILE#prof2"}],
+                "Items": [{"profileId": "PROFILE#prof2", "permissions": ["WRITE"]}],
             },
         ]
 
@@ -194,11 +248,14 @@ class TestAsyncGetSharedProfileIds:
         mock_table = AsyncMock()
         mock_table.query.side_effect = [
             {
-                "Items": [{"profileId": "PROFILE#prof1"}],
+                "Items": [{"profileId": "PROFILE#prof1", "permissions": ["READ"]}],
                 "LastEvaluatedKey": {"pk": "key1"},
             },
             {
-                "Items": [{"profileId": "PROFILE#prof2"}, {}],  # Include item without profileId
+                "Items": [
+                    {"profileId": "PROFILE#prof2", "permissions": ["WRITE"]},
+                    {},  # Item without profileId
+                ],
             },
         ]
 
@@ -217,8 +274,68 @@ class TestAsyncGetSharedProfileIds:
         mock_table = AsyncMock()
         mock_table.query.return_value = {
             "Items": [
-                {"profileId": "PROFILE#prof1"},
+                {"profileId": "PROFILE#prof1", "permissions": ["READ"]},
                 {},  # Missing profileId
+            ]
+        }
+
+        mock_dynamodb = AsyncMock()
+        mock_dynamodb.Table.return_value = mock_table
+
+        result = await _async_get_shared_profile_ids(mock_dynamodb, "shares-table", "ACCOUNT#test-user")
+
+        assert result == ["PROFILE#prof1"]
+
+    @pytest.mark.asyncio
+    async def test_filters_shares_with_empty_permissions(self) -> None:
+        """Should skip shares with empty permissions array (#242)."""
+        from src.handlers.list_catalogs_in_use import _async_get_shared_profile_ids
+
+        mock_table = AsyncMock()
+        mock_table.query.return_value = {
+            "Items": [
+                {"profileId": "PROFILE#prof1", "permissions": ["READ"]},
+                {"profileId": "PROFILE#prof2", "permissions": []},
+            ]
+        }
+
+        mock_dynamodb = AsyncMock()
+        mock_dynamodb.Table.return_value = mock_table
+
+        result = await _async_get_shared_profile_ids(mock_dynamodb, "shares-table", "ACCOUNT#test-user")
+
+        assert result == ["PROFILE#prof1"]
+
+    @pytest.mark.asyncio
+    async def test_filters_shares_with_invalid_permissions(self) -> None:
+        """Should skip shares with unsupported permissions (#242)."""
+        from src.handlers.list_catalogs_in_use import _async_get_shared_profile_ids
+
+        mock_table = AsyncMock()
+        mock_table.query.return_value = {
+            "Items": [
+                {"profileId": "PROFILE#prof1", "permissions": ["WRITE"]},
+                {"profileId": "PROFILE#prof2", "permissions": ["ADMIN"]},
+            ]
+        }
+
+        mock_dynamodb = AsyncMock()
+        mock_dynamodb.Table.return_value = mock_table
+
+        result = await _async_get_shared_profile_ids(mock_dynamodb, "shares-table", "ACCOUNT#test-user")
+
+        assert result == ["PROFILE#prof1"]
+
+    @pytest.mark.asyncio
+    async def test_filters_shares_with_missing_permissions(self) -> None:
+        """Should skip shares missing permissions attribute (#242)."""
+        from src.handlers.list_catalogs_in_use import _async_get_shared_profile_ids
+
+        mock_table = AsyncMock()
+        mock_table.query.return_value = {
+            "Items": [
+                {"profileId": "PROFILE#prof1", "permissions": ["READ"]},
+                {"profileId": "PROFILE#prof2"},
             ]
         }
 
@@ -459,7 +576,7 @@ class TestAsyncGetAllCatalogIds:
         mock_campaigns_table.query.return_value = {"Items": [{"catalogId": "CATALOG#cat1"}]}
 
         mock_shares_table = AsyncMock()
-        mock_shares_table.query.return_value = {"Items": [{"profileId": "PROFILE#shared1"}]}
+        mock_shares_table.query.return_value = {"Items": [{"profileId": "PROFILE#shared1", "permissions": ["READ"]}]}
 
         async def mock_table(table_name: str) -> AsyncMock:
             """Return the appropriate mock table based on name."""
