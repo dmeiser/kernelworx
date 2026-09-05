@@ -98,6 +98,8 @@ jobs:
     timeout-minutes: 60
     environment:
       name: ${{ inputs.environment }}
+    env:
+      TF_VAR_github_token: ${{ github.token }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -147,6 +149,7 @@ jobs:
           TF_VAR_encryption_passphrase: ${{ secrets.TF_VAR_ENCRYPTION_PASSPHRASE }}
           TF_VAR_google_client_id: ${{ secrets.TF_VAR_GOOGLE_CLIENT_ID }}
           TF_VAR_google_client_secret: ${{ secrets.TF_VAR_GOOGLE_CLIENT_SECRET }}
+          TF_VAR_github_token: ${{ github.token }}
           TF_IN_AUTOMATION: "true"
         working-directory: ${{ inputs.tofu-directory }}
         run: tofu init
@@ -158,6 +161,7 @@ jobs:
           TF_VAR_encryption_passphrase: ${{ secrets.TF_VAR_ENCRYPTION_PASSPHRASE }}
           TF_VAR_google_client_id: ${{ secrets.TF_VAR_GOOGLE_CLIENT_ID }}
           TF_VAR_google_client_secret: ${{ secrets.TF_VAR_GOOGLE_CLIENT_SECRET }}
+          TF_VAR_github_token: ${{ github.token }}
           TF_IN_AUTOMATION: "true"
         working-directory: ${{ inputs.tofu-directory }}
         run: |
@@ -176,6 +180,7 @@ jobs:
           TF_VAR_encryption_passphrase: ${{ secrets.TF_VAR_ENCRYPTION_PASSPHRASE }}
           TF_VAR_google_client_id: ${{ secrets.TF_VAR_GOOGLE_CLIENT_ID }}
           TF_VAR_google_client_secret: ${{ secrets.TF_VAR_GOOGLE_CLIENT_SECRET }}
+          TF_VAR_github_token: ${{ github.token }}
           TF_IN_AUTOMATION: "true"
         working-directory: ${{ inputs.tofu-directory }}
         # One-time migration: the deleteSellerProfile resolver was refactored from
@@ -192,6 +197,7 @@ jobs:
           TF_VAR_encryption_passphrase: ${{ secrets.TF_VAR_ENCRYPTION_PASSPHRASE }}
           TF_VAR_google_client_id: ${{ secrets.TF_VAR_GOOGLE_CLIENT_ID }}
           TF_VAR_google_client_secret: ${{ secrets.TF_VAR_GOOGLE_CLIENT_SECRET }}
+          TF_VAR_github_token: ${{ github.token }}
           TF_IN_AUTOMATION: "true"
         working-directory: ${{ inputs.tofu-directory }}
         run: |
@@ -207,6 +213,7 @@ jobs:
           TF_VAR_encryption_passphrase: ${{ secrets.TF_VAR_ENCRYPTION_PASSPHRASE }}
           TF_VAR_google_client_id: ${{ secrets.TF_VAR_GOOGLE_CLIENT_ID }}
           TF_VAR_google_client_secret: ${{ secrets.TF_VAR_GOOGLE_CLIENT_SECRET }}
+          TF_VAR_github_token: ${{ github.token }}
           TF_IN_AUTOMATION: "true"
         working-directory: ${{ inputs.tofu-directory }}
         run: tofu plan -out=tfplan
@@ -220,6 +227,7 @@ jobs:
           TF_VAR_encryption_passphrase: ${{ secrets.TF_VAR_ENCRYPTION_PASSPHRASE }}
           TF_VAR_google_client_id: ${{ secrets.TF_VAR_GOOGLE_CLIENT_ID }}
           TF_VAR_google_client_secret: ${{ secrets.TF_VAR_GOOGLE_CLIENT_SECRET }}
+          TF_VAR_github_token: ${{ github.token }}
           TF_IN_AUTOMATION: "true"
         working-directory: ${{ inputs.tofu-directory }}
         run: tofu apply -auto-approve tfplan
@@ -230,6 +238,7 @@ jobs:
           TF_VAR_encryption_passphrase: ${{ secrets.TF_VAR_ENCRYPTION_PASSPHRASE }}
           TF_VAR_google_client_id: ${{ secrets.TF_VAR_GOOGLE_CLIENT_ID }}
           TF_VAR_google_client_secret: ${{ secrets.TF_VAR_GOOGLE_CLIENT_SECRET }}
+          TF_VAR_github_token: ${{ github.token }}
           TF_IN_AUTOMATION: "true"
         working-directory: ${{ inputs.tofu-directory }}
         run: |

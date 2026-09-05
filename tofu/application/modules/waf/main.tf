@@ -64,14 +64,26 @@ variable "log_retention_days" {
   default     = 7
 }
 
+variable "github_token" {
+  description = "Optional GitHub token for authenticating calls to api.github.com/meta to avoid IP rate limits"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
 data "http" "github_meta" {
   count = var.create ? 1 : 0
 
   url = "https://api.github.com/meta"
 
-  request_headers = {
-    Accept = "application/json"
-  }
+  request_headers = merge(
+    {
+      Accept = "application/json"
+    },
+    var.github_token != "" ? {
+      Authorization = "Bearer ${var.github_token}"
+    } : {}
+  )
 }
 
 locals {
