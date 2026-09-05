@@ -104,6 +104,13 @@ variable "google_client_secret" {
   description = "Google OAuth client secret"
 }
 
+variable "github_token" {
+  type        = string
+  sensitive   = true
+  default     = ""
+  description = "Optional GitHub token for authenticating calls to api.github.com/meta"
+}
+
 # Local computed values
 locals {
   name_prefix  = "kernelworx"
@@ -269,6 +276,7 @@ module "waf" {
   name_prefix        = local.name_prefix
   environment        = var.environment
   log_retention_days = var.environment == "prod" ? 30 : 7
+  github_token       = var.github_token
 }
 
 module "route53" {
