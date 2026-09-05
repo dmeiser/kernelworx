@@ -57,6 +57,9 @@ KernelWorx is an open-source, serverless application designed for Scouting Ameri
 # Install Python dependencies
 uv sync
 
+# Install root Node.js dependencies (resolver bundling tooling)
+npm install
+
 # Install frontend dependencies
 cd frontend && npm install
 ```
@@ -107,7 +110,7 @@ npm run test -- --coverage
 
 ### OpenTofu Deployment
 
-Use the deployment helper, which builds the Lambda layer and runs OpenTofu:
+Use the deployment helper, which builds the Lambda layer, bundles the AppSync resolver JavaScript, and runs OpenTofu:
 
 ```bash
 # Preview changes
@@ -117,9 +120,11 @@ Use the deployment helper, which builds the Lambda layer and runs OpenTofu:
 ./tofu/application/scripts/deploy.sh dev apply
 ```
 
-The helper sources the root `.env` for `TF_VAR_encryption_passphrase` and builds
-`.build/lambda-layer` before invoking `tofu`. If you run `tofu` directly, export
-`TF_VAR_encryption_passphrase` and build the layer first.
+The helper sources the root `.env` for `TF_VAR_encryption_passphrase`, builds
+`.build/lambda-layer`, and bundles the AppSync resolver JavaScript before
+invoking `tofu`. If you run `tofu` directly, export
+`TF_VAR_encryption_passphrase`, build the layer, and run
+`npm install && npm run build:resolvers` at the repo root first.
 
 ## Architecture
 

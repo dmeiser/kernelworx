@@ -23,7 +23,6 @@ async function build() {
         external: ['@aws-appsync/utils'],
         write: true,
     });
-    
     console.log('Resolvers bundled successfully');
 }
 
