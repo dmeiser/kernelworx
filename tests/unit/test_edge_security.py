@@ -365,6 +365,9 @@ def test_response_headers_policy_enforces_security_headers(cloudfront_module):
     csp_text = locals_block["csp"]
     assert "frame-ancestors 'none'" in csp_text
     assert "default-src 'self'" in csp_text
+    assert "font-src 'self'" in csp_text
+    assert "fonts.gstatic.com" not in csp_text
+    assert "fonts.googleapis.com" not in csp_text
 
     frame = block(sec["frame_options"])
     assert frame["frame_option"] == "DENY"
