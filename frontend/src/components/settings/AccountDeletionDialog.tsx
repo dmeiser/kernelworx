@@ -33,7 +33,7 @@ import {
   Replay as ResumeIcon,
   Warning as WarningIcon,
 } from '@mui/icons-material';
-import type { UseAccountDeletionReturn, ProfileDeletionItem } from '../../hooks/useAccountDeletion';
+import type { UseAccountDeletionReturn, ProfileDeletionItem, DeletionStep } from '../../hooks/useAccountDeletion';
 
 interface AccountDeletionDialogProps {
   open: boolean;
@@ -62,31 +62,7 @@ interface ProfilesPreviewListProps {
   isDiscovered: boolean;
 }
 
-function ProfilesPreviewList({ isLoading, error, profiles, isDiscovered }: ProfilesPreviewListProps) {
-  if (isLoading) {
-    return (
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, my: 1.5 }}>
-        <CircularProgress size={16} />
-        <Typography variant="body2" color="text.secondary">
-          Finding associated seller profiles...
-        </Typography>
-      </Box>
-    );
-  }
-
-  if (error && !isDiscovered) {
-    return (
-      <Alert severity="error" sx={{ my: 1.5 }}>
-        Failed to load seller profiles: {error}. You can still delete your account; associated
-        profiles will be removed server-side.
-      </Alert>
-    );
-  }
-
-  if (!isDiscovered) {
-    return null;
-  }
-
+function ProfilesPreviewListContent({ profiles }: { profiles: ProfileDeletionItem[] }) {
   if (profiles.length === 0) {
     return (
       <Typography variant="body2" color="text.secondary" sx={{ my: 1, fontStyle: 'italic' }}>
@@ -117,6 +93,33 @@ function ProfilesPreviewList({ isLoading, error, profiles, isDiscovered }: Profi
       </List>
     </Box>
   );
+}
+
+function ProfilesPreviewList({ isLoading, error, profiles, isDiscovered }: ProfilesPreviewListProps) {
+  if (isLoading) {
+    return (
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, my: 1.5 }}>
+        <CircularProgress size={16} />
+        <Typography variant="body2" color="text.secondary">
+          Finding associated seller profiles...
+        </Typography>
+      </Box>
+    );
+  }
+
+  if (!isDiscovered) {
+    if (error) {
+      return (
+        <Alert severity="error" sx={{ my: 1.5 }}>
+          Failed to load seller profiles: {error}. You can still delete your account; associated
+          profiles will be removed server-side.
+        </Alert>
+      );
+    }
+    return null;
+  }
+
+  return <ProfilesPreviewListContent profiles={profiles} />;
 }
 
 interface ConfirmationViewProps {
@@ -346,6 +349,82 @@ function ProgressList({ deletion }: { deletion: UseAccountDeletionReturn }) {
   );
 }
 
+function DeletionStatusAlert({ step, error }: { step: DeletionStep; error: string | null }) {
+  if (step === 'error') {
+    return (
+      <Alert severity="error" sx={{ mb: 2 }}>
+        Deletion encountered an error: {error}. You can resume to continue deleting remaining data.
+      </Alert>
+    );
+  }
+  if (step === 'completed') {
+    return (
+      <Alert severity="success" sx={{ mb: 2 }}>
+        Account successfully deleted. You will be signed out momentarily.
+      </Alert>
+    );
+  }
+  return (
+    <Box sx={{ mb: 2 }}>
+      <Alert severity="info" sx={{ mb: 1.5 }}>
+        Please keep this window open while your data is being deleted.
+      </Alert>
+      <LinearProgress color="error" />
+    </Box>
+  );
+}
+
+function DeletionProgressView({
+  deletion,
+  onCancel,
+}: {
+  deletion: UseAccountDeletionReturn;
+  onCancel: () => void;
+}) {
+  return (
+    <>
+      <ProgressHeader step={deletion.step} />
+      <DialogContent>
+        <DeletionStatusAlert step={deletion.step} error={deletion.error} />
+        <ProgressList deletion={deletion} />
+      </DialogContent>
+      <DialogActions>
+        {deletion.step === 'error' && (
+          <>
+            <Button onClick={onCancel}>Close</Button>
+            <Button
+              onClick={() => {
+                void deletion.resumeDeletion();
+              }}
+              color="error"
+              variant="contained"
+              startIcon={<ResumeIcon />}
+            >
+              Resume Deletion
+            </Button>
+          </>
+        )}
+      </DialogActions>
+    </>
+  );
+}
+
+function canTriggerProfileLoad(
+  open: boolean,
+  step: DeletionStep,
+  isDiscovered: boolean,
+  isLoading: boolean,
+  hasError: boolean
+): boolean {
+  if (!open || step !== 'idle') {
+    return false;
+  }
+  if (isDiscovered || isLoading) {
+    return false;
+  }
+  return !hasError;
+}
+
 export const AccountDeletionDialog: React.FC<AccountDeletionDialogProps> = ({
   open,
   onClose,
@@ -355,11 +434,13 @@ export const AccountDeletionDialog: React.FC<AccountDeletionDialogProps> = ({
   const [confirmText, setConfirmText] = useState('');
   const { step, error, isDiscovered, isLoadingProfiles, loadProfiles } = deletion;
 
+  const shouldLoad = canTriggerProfileLoad(open, step, isDiscovered, isLoadingProfiles, Boolean(error));
+
   useEffect(() => {
-    if (open && step === 'idle' && !isDiscovered && !isLoadingProfiles && !error) {
+    if (shouldLoad) {
       void loadProfiles();
     }
-  }, [open, step, error, isDiscovered, isLoadingProfiles, loadProfiles]);
+  }, [shouldLoad, loadProfiles]);
 
   const handleStart = () => {
     void deletion.startDeletion();
@@ -373,11 +454,9 @@ export const AccountDeletionDialog: React.FC<AccountDeletionDialogProps> = ({
     }
   };
 
-  const isConfirmedView = deletion.step === 'idle';
-
   return (
     <Dialog open={open} onClose={handleCancel} maxWidth="sm" fullWidth>
-      {isConfirmedView ? (
+      {deletion.step === 'idle' ? (
         <ConfirmationView
           userEmail={userEmail}
           confirmText={confirmText}
@@ -390,46 +469,7 @@ export const AccountDeletionDialog: React.FC<AccountDeletionDialogProps> = ({
           isDiscovered={deletion.isDiscovered}
         />
       ) : (
-        <>
-          <ProgressHeader step={deletion.step} />
-          <DialogContent>
-            {deletion.step === 'error' ? (
-              <Alert severity="error" sx={{ mb: 2 }}>
-                Deletion encountered an error: {deletion.error}. You can resume to continue deleting remaining data.
-              </Alert>
-            ) : deletion.step === 'completed' ? (
-              <Alert severity="success" sx={{ mb: 2 }}>
-                Account successfully deleted. You will be signed out momentarily.
-              </Alert>
-            ) : (
-              <Box sx={{ mb: 2 }}>
-                <Alert severity="info" sx={{ mb: 1.5 }}>
-                  Please keep this window open while your data is being deleted.
-                </Alert>
-                <LinearProgress color="error" />
-              </Box>
-            )}
-
-            <ProgressList deletion={deletion} />
-          </DialogContent>
-          <DialogActions>
-            {deletion.step === 'error' && (
-              <>
-                <Button onClick={handleCancel}>Close</Button>
-                <Button
-                  onClick={() => {
-                    void deletion.resumeDeletion();
-                  }}
-                  color="error"
-                  variant="contained"
-                  startIcon={<ResumeIcon />}
-                >
-                  Resume Deletion
-                </Button>
-              </>
-            )}
-          </DialogActions>
-        </>
+        <DeletionProgressView deletion={deletion} onCancel={handleCancel} />
       )}
     </Dialog>
   );
