@@ -57,11 +57,12 @@ function StatusIcon({ status }: { status: ProfileDeletionItem['status'] }) {
 
 interface ProfilesPreviewListProps {
   isLoading: boolean;
+  error: string | null;
   profiles: ProfileDeletionItem[];
   isDiscovered: boolean;
 }
 
-function ProfilesPreviewList({ isLoading, profiles, isDiscovered }: ProfilesPreviewListProps) {
+function ProfilesPreviewList({ isLoading, error, profiles, isDiscovered }: ProfilesPreviewListProps) {
   if (isLoading) {
     return (
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, my: 1.5 }}>
@@ -70,6 +71,15 @@ function ProfilesPreviewList({ isLoading, profiles, isDiscovered }: ProfilesPrev
           Finding associated seller profiles...
         </Typography>
       </Box>
+    );
+  }
+
+  if (error && !isDiscovered) {
+    return (
+      <Alert severity="error" sx={{ my: 1.5 }}>
+        Failed to load seller profiles: {error}. You can still delete your account; associated
+        profiles will be removed server-side.
+      </Alert>
     );
   }
 
@@ -116,6 +126,7 @@ interface ConfirmationViewProps {
   onConfirm: () => void;
   onCancel: () => void;
   isLoadingProfiles: boolean;
+  error: string | null;
   profiles: ProfileDeletionItem[];
   isDiscovered: boolean;
 }
@@ -127,6 +138,7 @@ function ConfirmationView({
   onConfirm,
   onCancel,
   isLoadingProfiles,
+  error,
   profiles,
   isDiscovered,
 }: ConfirmationViewProps) {
@@ -146,6 +158,7 @@ function ConfirmationView({
 
         <ProfilesPreviewList
           isLoading={isLoadingProfiles}
+          error={error}
           profiles={profiles}
           isDiscovered={isDiscovered}
         />
@@ -340,13 +353,13 @@ export const AccountDeletionDialog: React.FC<AccountDeletionDialogProps> = ({
   deletion,
 }) => {
   const [confirmText, setConfirmText] = useState('');
-  const { step, isDiscovered, isLoadingProfiles, loadProfiles } = deletion;
+  const { step, error, isDiscovered, isLoadingProfiles, loadProfiles } = deletion;
 
   useEffect(() => {
-    if (open && step === 'idle' && !isDiscovered && !isLoadingProfiles) {
+    if (open && step === 'idle' && !isDiscovered && !isLoadingProfiles && !error) {
       void loadProfiles();
     }
-  }, [open, step, isDiscovered, isLoadingProfiles, loadProfiles]);
+  }, [open, step, error, isDiscovered, isLoadingProfiles, loadProfiles]);
 
   const handleStart = () => {
     void deletion.startDeletion();
@@ -372,6 +385,7 @@ export const AccountDeletionDialog: React.FC<AccountDeletionDialogProps> = ({
           onConfirm={handleStart}
           onCancel={handleCancel}
           isLoadingProfiles={deletion.isLoadingProfiles}
+          error={deletion.error}
           profiles={deletion.profiles}
           isDiscovered={deletion.isDiscovered}
         />

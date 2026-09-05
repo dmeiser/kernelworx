@@ -84,11 +84,18 @@ function extractProfilesFromData(data: ListMyProfilesQueryData | undefined): Pro
 }
 
 async function fetchProfiles(client: ReturnType<typeof useApolloClient>): Promise<ProfileDeletionItem[]> {
-  const result = await client.query<ListMyProfilesQueryData>({
-    query: LIST_MY_PROFILES,
-    fetchPolicy: 'network-only',
-  });
-  return extractProfilesFromData(result.data);
+  const discovered: ProfileDeletionItem[] = [];
+  let nextToken: string | null | undefined;
+  do {
+    const result = await client.query<ListMyProfilesQueryData>({
+      query: LIST_MY_PROFILES,
+      fetchPolicy: 'network-only',
+      variables: { nextToken: nextToken ?? undefined },
+    });
+    discovered.push(...extractProfilesFromData(result.data));
+    nextToken = result.data?.listMyProfiles?.nextToken;
+  } while (nextToken);
+  return discovered;
 }
 
 async function deleteSingleProfile(
@@ -223,6 +230,24 @@ export function useAccountDeletion(options?: UseAccountDeletionOptions): UseAcco
   const resumeDeletion = useCallback(async () => {
     setError(null);
 
+    if (!isDiscovered) {
+      setStep('discovering');
+      let current: ProfileDeletionItem[];
+      try {
+        current = await fetchProfiles(client);
+        setProfiles(current);
+        setIsDiscovered(true);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Failed to load user profiles';
+        setError(msg);
+        setStep('error');
+        return;
+      }
+      setStep('deleting-profiles');
+      await runProfileDeletionLoop(current, 0);
+      return;
+    }
+
     const firstUnfinished = profiles.findIndex((p) => p.status !== 'completed');
     if (firstUnfinished !== -1) {
       setStep('deleting-profiles');
@@ -231,7 +256,7 @@ export function useAccountDeletion(options?: UseAccountDeletionOptions): UseAcco
     }
 
     await finalizeAccountDeletion();
-  }, [finalizeAccountDeletion, profiles, runProfileDeletionLoop]);
+  }, [client, finalizeAccountDeletion, isDiscovered, profiles, runProfileDeletionLoop]);
 
   const reset = useCallback(() => {
     setStep('idle');

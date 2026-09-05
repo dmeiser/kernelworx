@@ -6,6 +6,7 @@ module is gated by ``RUN_ACCOUNT_DELETION``.
 
 import os
 import random
+import re
 import string
 import time
 
@@ -130,7 +131,7 @@ def test_account_deletion_happy_path(browser: Browser) -> None:
         expect(confirm_dialog.get_by_text("Account Deleted")).to_be_visible(timeout=30_000)
 
         # 8. Verify sign-out and redirect to root or login
-        page.wait_for_url(r"(https?://[^/]+/?$|/login)", timeout=15_000)
+        page.wait_for_url(re.compile(r"(https?://[^/]+/?$|/login)"), timeout=15_000)
 
         # 9. Verify Cognito user was deleted
         with pytest.raises(Exception):

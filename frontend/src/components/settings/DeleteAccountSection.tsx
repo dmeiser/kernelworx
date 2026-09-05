@@ -32,13 +32,11 @@ import { AccountDeletionDialog } from './AccountDeletionDialog';
 
 interface DeleteAccountSectionProps {
   onAccountDeleted?: () => Promise<void>;
-  onDeleteAccount?: () => Promise<void>;
   userEmail?: string;
 }
 
 export const DeleteAccountSection: React.FC<DeleteAccountSectionProps> = ({
   onAccountDeleted,
-  onDeleteAccount,
   userEmail,
 }) => {
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -46,8 +44,6 @@ export const DeleteAccountSection: React.FC<DeleteAccountSectionProps> = ({
   const handleSuccess = async () => {
     if (onAccountDeleted) {
       await onAccountDeleted();
-    } else if (onDeleteAccount) {
-      await onDeleteAccount();
     }
   };
 
