@@ -19,7 +19,7 @@ variable "create" {
 }
 
 variable "rate_limit" {
-  description = "Maximum requests per IP per evaluation window before blocking. The CI smoke suite peaks near 2500 req/5min from one shared egress IP and GitHub CI ranges skip the rate limit via the address group, so 2000 stays tight for everyone else."
+  description = "Maximum requests per IP per evaluation window before blocking. The CI smoke suite peaks near 2500 req/5min from one shared egress IP and GitHub CI ranges skip the rate rule via the address group, so 2000 stays tight for everyone else."
   type        = number
   default     = 2000
 }
@@ -77,7 +77,11 @@ data "http" "github_meta" {
 locals {
   name                 = "${var.name_prefix}-waf-${var.environment}"
   github_meta_response = var.create ? jsondecode(data.http.github_meta[0].response_body) : {}
-  github_actions_cidrs = var.create ? try(local.github_meta_response["actions"], []) : []
+  # The feed mixes IPv4 and IPv6 CIDRs, but the declared IP set holds IPV4 only
+  # (the provider passes the list through unfiltered, and a mixed list makes
+  # CreateIPSet fail). GitHub-hosted runners have no IPv6 egress, so nothing
+  # needed by the CI smoke suite is lost.
+  github_actions_cidrs = var.create ? [for c in try(local.github_meta_response["actions"], []) : c if !strcontains(c, ":")] : []
 }
 
 data "aws_caller_identity" "current" {}
@@ -85,8 +89,9 @@ data "aws_caller_identity" "current" {}
 data "aws_region" "current" {}
 
 # GitHub Actions IP set (#269) built at deploy time from api.github.com/meta.
-# Allows CI smoke test runs (peaking near 2500 req/5min from one shared IP)
-# to bypass the per-IP rate limit without loosening protection for everyone else.
+# Scoped into the rate rule below so CI smoke test runs (peaking near 2500
+# req/5min from one shared IP) skip only the per-IP rate limit, without
+# loosening protection for everyone else.
 resource "aws_wafv2_ip_set" "github_actions" {
   count = var.create ? 1 : 0
 
@@ -118,29 +123,8 @@ resource "aws_wafv2_web_acl" "main" {
     allow {}
   }
 
-  # GitHub Actions CI allowlist (#269). Requests matching the IP set skip rate limiting.
-  rule {
-    name     = "github-actions-allowlist"
-    priority = 1
-
-    action {
-      allow {}
-    }
-
-    statement {
-      ip_set_reference_statement {
-        arn = aws_wafv2_ip_set.github_actions[0].arn
-      }
-    }
-
-    visibility_config {
-      cloudwatch_metrics_enabled = true
-      metric_name                = "${local.name}-github-actions-allowlist"
-      sampled_requests_enabled   = true
-    }
-  }
-
-  # Per-IP rate limiting (#165). Block by default; flip to Count to observe.
+  # Per-IP rate limiting (#165), scoped down so GitHub Actions CI ranges skip
+  # only the rate limit while remaining subject to every other rule.
   rule {
     name     = "rate-limit"
     priority = 2
@@ -161,6 +145,16 @@ resource "aws_wafv2_web_acl" "main" {
         limit                 = var.rate_limit
         aggregate_key_type    = "IP"
         evaluation_window_sec = var.rate_evaluation_window
+
+        scope_down_statement {
+          not_statement {
+            statement {
+              ip_set_reference_statement {
+                arn = aws_wafv2_ip_set.github_actions[0].arn
+              }
+            }
+          }
+        }
       }
     }
 

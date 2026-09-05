@@ -265,6 +265,7 @@ relogin
 renderer
 repo
 repr
+reqs
 reraises
 returncode
 reusability

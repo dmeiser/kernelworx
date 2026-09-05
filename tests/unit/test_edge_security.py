@@ -6,8 +6,9 @@ python-hcl2) and assert the *meaning* of the edge architecture contract:
 - Exactly one WAF exists anywhere: a CLOUDFRONT-scope aws_wafv2_web_acl
   attached via web_acl_id. No regional web ACLs, no
   aws_wafv2_web_acl_association resources.
-- The WAF allows GitHub Actions CI ranges via a deploy-time IP set and rate limits
-  other traffic at 2000 requests per IP per 300s; the AWS managed
+- The WAF lets GitHub Actions CI ranges skip the per-IP rate rule via a
+  deploy-time IP set scoped down into it, and rate limits other traffic at
+  2000 requests per IP per 300s; the AWS managed
   core rule set is staged in Count; WAF logs land in an aws-waf-logs-*
   CloudWatch log group. Every WAF resource no-ops when create = false so
   ephemeral environments create zero objects.
@@ -163,16 +164,17 @@ def test_waf_default_allows_and_rate_rule_blocks_2000_per_300s(waf_module):
     acl = first_resource(waf_module, "aws_wafv2_web_acl", "main")
     assert "allow" in block(acl["default_action"])
 
-    # Rule 1: GitHub Actions CI allowlist (skips rate limiting)
-    allow_rule = next(r for r in acl["rule"] if r["name"] == "github-actions-allowlist")
-    assert allow_rule["priority"] == 1
-    assert "allow" in block(allow_rule["action"])
-    stmt = block(allow_rule["statement"])["ip_set_reference_statement"]
-    assert block(stmt)["arn"] == "${aws_wafv2_ip_set.github_actions[0].arn}"
-
-    # Rule 2: Per-IP rate limiting
+    # GitHub Actions CI exemption — implemented as a scope-down on the
+    # rate-based statement (NOT a terminal priority-1 allow rule, which would
+    # also exempt CI traffic from the managed core rule set at priority 3).
     rate_rule = next(r for r in acl["rule"] if r["name"] == "rate-limit")
     assert rate_rule["priority"] == 2
+    rate_stmt = block(block(rate_rule["statement"])["rate_based_statement"])
+    scope_down = block(rate_stmt["scope_down_statement"])
+    not_stmt = block(block(scope_down["not_statement"])["statement"])
+    ip_set_ref = block(not_stmt["ip_set_reference_statement"])
+    assert ip_set_ref["arn"] == "${aws_wafv2_ip_set.github_actions[0].arn}"
+    assert not [r for r in acl["rule"] if r["name"] == "github-actions-allowlist"]
     # Action is a dynamic block keyed on var.rate_rule_action; the default is
     # Block, with Count available for observation runs.
     action_dyn = block(rate_rule["action"])["dynamic"]
@@ -224,9 +226,7 @@ def test_waf_github_actions_ip_set_contract(waf_module):
     assert 'contains(keys(local.github_meta_response), "actions")' in preconditions[0]["condition"]
     assert "10000" in preconditions[1]["condition"]
 
-    data_http = [
-        bodies for entry in waf_module.get("data", []) for dtype, bodies in entry.items() if dtype == "http"
-    ]
+    data_http = [bodies for entry in waf_module.get("data", []) for dtype, bodies in entry.items() if dtype == "http"]
     assert data_http, "http data source for github_meta not found"
     meta_doc = list(data_http[0].values())[0]
     assert meta_doc["url"] == "https://api.github.com/meta"
