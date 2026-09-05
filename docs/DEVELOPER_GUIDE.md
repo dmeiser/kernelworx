@@ -197,7 +197,11 @@ separate DynamoDB tables (not a single-table design); see
 
 #### AppSync Resolvers (`tofu/application/modules/appsync/`)
 
-AppSync resolvers are defined in OpenTofu using `aws_appsync_resolver` and `aws_appsync_function` resources:
+AppSync resolvers are defined in OpenTofu using `aws_appsync_resolver` and `aws_appsync_function` resources. Resolver JavaScript lives in `tofu/application/appsync/js-resolvers/`; OpenTofu reads the bundled output at `tofu/application/appsync/dist/`, produced by `npm run build:resolvers` (esbuild inlines the shared `js-resolvers/lib/` modules). Run the build before any `tofu plan`/`apply`/`import`/`destroy` — the tofu commands fail when `dist/` is missing, and a stale `dist/` deploys outdated resolver code:
+
+```bash
+npm run build:resolvers
+```
 
 ```hcl
 # VTL resolver

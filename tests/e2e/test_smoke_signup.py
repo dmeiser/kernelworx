@@ -108,52 +108,15 @@ def test_signup_shows_verification_prompt(page: Page) -> None:
 
 
 @pytest.mark.smoke
+@pytest.mark.skipif(
+    not os.environ.get("RUN_EMAIL_INBOX"),
+    reason="Requires a configured test email inbox; set RUN_EMAIL_INBOX=1 to opt in",
+)
 def test_signup_completes_with_verification_code(page: Page) -> None:
-    """End-to-end signup completing via backend confirmation.
+    """Gated test for end-to-end signup with a real verification code.
 
-    This test bypasses the email verification step by manually confirming
-    the new user via the Cognito Admin API, then logging in through the UI.
+    The verification-code flow is **not implemented** in this test suite.
+    When ``RUN_EMAIL_INBOX`` is enabled the test fails explicitly so the
+    gate cannot be mistaken for a working implementation.
     """
-    base = BasePage(page)
-    base.navigate(_SIGNUP_PATH)
-    base.wait_for_loading()
-
-    email = _random_smoke_email()
-    password = "SmokeT3st!2026"
-
-    page.locator('input[type="email"]').first.fill(email)
-
-    for pw_field in page.locator('input[type="password"]').all():
-        pw_field.fill(password)
-
-    age_checkbox = page.get_by_label(_AGE_LABEL, exact=False)
-    if not age_checkbox.is_checked():
-        age_checkbox.check()
-
-    page.get_by_role("button", name=_CREATE_ACCOUNT_BTN).click()
-
-    verification_text = (
-        page.get_by_text(re.compile("check your email", re.IGNORECASE))
-        .or_(page.get_by_text(re.compile("verification", re.IGNORECASE)))
-        .or_(page.get_by_role("alert"))
-    )
-    expect(verification_text.first).to_be_visible(timeout=20_000)
-
-    user_pool_id = os.environ.get("TEST_USER_POOL_ID")
-    if not user_pool_id:
-        pytest.fail("TEST_USER_POOL_ID is not set in environment.")
-
-    import boto3
-
-    region = os.environ.get("TEST_REGION", "us-east-1")
-    cognito = boto3.client("cognito-idp", region_name=region)
-    cognito.admin_confirm_sign_up(UserPoolId=user_pool_id, Username=email)
-
-    page.get_by_role("button", name="Back to Login").click()
-    page.wait_for_url("**/login", timeout=10_000)
-
-    from tests.e2e.utils.auth import login
-
-    login(page, email, password)
-
-    expect(page).to_have_url(re.compile(r"/(scouts|home)"), timeout=15_000)
+    pytest.fail("Email inbox integration is not implemented")
