@@ -23,7 +23,10 @@ import { fetchAuthSession } from 'aws-amplify/auth';
  * HTTP link to AppSync endpoint
  */
 const httpLink = createHttpLink({
-  uri: import.meta.env.VITE_APPSYNC_ENDPOINT,
+  // Same-origin: dev/prod serve /graphql through the site's CloudFront
+  // distribution, so no absolute endpoint is configured. Ephemeral and local
+  // `vite dev` builds set VITE_APPSYNC_ENDPOINT to the direct AppSync URL.
+  uri: import.meta.env.VITE_APPSYNC_ENDPOINT ?? '/graphql',
 });
 
 /**
@@ -79,7 +82,9 @@ export const handleApolloError = ({ operation, error }: ErrorLink.ErrorHandlerOp
       const errorCode = extensions?.errorCode;
 
       if (import.meta.env.DEV) {
-        console.error(`[GraphQL error]: Message: ${message}, Code: ${errorCode}, Location: ${locations}, Path: ${path}`);
+        console.error(
+          `[GraphQL error]: Message: ${message}, Code: ${errorCode}, Location: ${locations}, Path: ${path}`,
+        );
       }
 
       // Map errorCode to user-facing messages

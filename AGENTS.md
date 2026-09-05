@@ -61,3 +61,14 @@ Consequences for new resolvers:
 - Do not rely on `@aws_cognito_user_pools` for authorization; use it only to require a Cognito-authenticated caller.
 
 This is a conscious, documented security posture. If schema-level owner authorization is added later, update this entry and the API comment in `tofu/application/modules/appsync/api.tf` accordingly.
+
+### Edge security architecture: one distribution, one WAF (#165/#166)
+
+One CloudFront distribution (`tofu/application/modules/cloudfront/`) serves everything for dev/prod; exactly one CLOUDFRONT-scope web ACL (`tofu/application/modules/waf/`) is attached via `web_acl_id`. There are deliberately no regional WAFs and no `aws_wafv2_web_acl_association` anywhere — do not add them.
+
+- `/graphql` behavior → AppSync **default endpoint hostname** (`<api-id>.appsync-api.us-east-1.amazonaws.com`). The served TLS cert matches only this hostname; the custom-domain name (`api.<env>.kernelworx.app`) does not work as an origin name and its Route53 record was removed. Forwarded headers: `Authorization`, `Content-Type`, `Accept`; caching disabled.
+- `/login`, `/logout`, `/oauth2/*`, `/.well-known/*`, `/favicon.ico` behaviors → Cognito custom domain `login.<env>.kernelworx.app` as a custom origin. The `login.<env>` Route53 record is load-bearing origin plumbing (CloudFront reaches Cognito's AWS-managed distribution with SNI/Host of that name) — never remove it. The `aws_cloudfront_function.auth_location_rewrite` viewer-response function rewrites absolute `Location: https://login.<env>.../...` redirects to the site origin; without it every login redirect bounces off the distribution.
+- The frontend is same-origin: Apollo falls back to `/graphql` and Amplify's `oauth.domain` falls back to the site host when `VITE_APPSYNC_ENDPOINT`/`VITE_COGNITO_DOMAIN` are unset. Dev/prod builds leave both unset; ephemeral and local `vite dev` set absolute values (ephemeral has no CloudFront).
+- Ephemeral instantiates the waf module with `create = false` (the count-equals-zero opt-out): zero WAF objects, zero cost. Keep that pattern when adding edge resources.
+- #166 ships via `aws_cloudfront_response_headers_policy.security` on the default behavior (CSP incl. `frame-ancestors 'none'`, XFO DENY, nosniff, Referrer-Policy, HSTS max-age=300). The frontend `<meta>` CSP stays until a later tightening phase.
+- The GitHub deploy role (`arn:aws:iam::750620721302:role/GitHubActionsKernelworxDev`, managed outside this repo) needs `wafv2:*` and CloudFront function permissions for deploys to succeed.

@@ -247,13 +247,32 @@ module "cloudfront" {
   static_bucket_id              = module.s3.static_bucket_id
   static_bucket_arn             = module.s3.static_bucket_arn
   static_bucket_regional_domain = module.s3.static_bucket_regional_domain
+
+  # #165: one CLOUDFRONT-scope WAF on the distribution (the only WAF).
+  web_acl_id = module.waf.web_acl_arn
+
+  # Same-origin API and auth proxy through the distribution. The AppSync
+  # origin is the default endpoint hostname: the served TLS cert matches it,
+  # unlike the custom-domain name.
+  api_origin_domain  = replace(replace(module.appsync.api_url, "https://", ""), "/graphql", "")
+  auth_origin_domain = local.login_domain
+}
+
+# The only WAF in the design: CLOUDFRONT scope, attached to the site
+# distribution. Rate rule blocks at 2000 req/300s per IP; the AWS managed core
+# rule set runs in Count until tuned.
+module "waf" {
+  source = "../../modules/waf"
+
+  name_prefix        = local.name_prefix
+  environment        = var.environment
+  log_retention_days = var.environment == "prod" ? 30 : 7
 }
 
 module "route53" {
   source = "../../modules/route53"
 
   zone_domain               = local.zone_domain
-  appsync_api_url           = module.appsync.api_url
   cognito_cloudfront_domain = module.cognito.cloudfront_domain
   cloudfront_domain_name    = module.cloudfront.distribution_domain
   api_validation_records    = module.certificates.api_validation_records

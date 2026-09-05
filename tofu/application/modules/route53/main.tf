@@ -11,11 +11,6 @@ variable "cloudfront_domain_name" {
   type        = string
 }
 
-variable "appsync_api_url" {
-  description = "AppSync API URL (HTTPS endpoint)"
-  type        = string
-}
-
 variable "cognito_cloudfront_domain" {
   description = "CloudFront domain backing the Cognito custom domain"
   type        = string
@@ -54,7 +49,6 @@ locals {
 
   # Record names relative to the hosted zone
   site_record_name  = "" # zone apex for both prod and dev
-  api_record_name   = "api"
   login_record_name = "login"
 }
 
@@ -79,22 +73,10 @@ resource "aws_route53_record" "site" {
   }
 }
 
-# API subdomain (CNAME to AppSync)
-# Extract domain from AppSync URL (https://xyz.appsync-api.region.amazonaws.com/graphql)
-resource "aws_route53_record" "api" {
-  zone_id         = data.aws_route53_zone.main.zone_id
-  name            = local.api_record_name
-  type            = "CNAME"
-  ttl             = 300
-  allow_overwrite = true
-
-  records = [
-    replace(replace(var.appsync_api_url, "https://", ""), "/graphql", "")
-  ]
-}
-
 # Login subdomain (Cognito custom domain)
-# This will be an A record with alias to CloudFront if using custom domain
+# Load-bearing plumbing: CloudFront's auth ordered behaviors proxy to this
+# hostname as their origin, so the record must stay even though the frontend
+# no longer advertises it.
 resource "aws_route53_record" "login" {
   zone_id         = data.aws_route53_zone.main.zone_id
   name            = local.login_record_name
@@ -138,11 +120,6 @@ output "zone_id" {
 output "zone_name_servers" {
   description = "Nameservers for the zone"
   value       = data.aws_route53_zone.main.name_servers
-}
-
-output "api_fqdn" {
-  description = "Fully qualified domain name for API"
-  value       = aws_route53_record.api.fqdn
 }
 
 output "login_fqdn" {

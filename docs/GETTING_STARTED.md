@@ -288,10 +288,12 @@ After the backend is deployed, build and deploy the React SPA:
 ```bash
 cd frontend
 
-# Copy and fill in values from `tofu output`
-cp .env.example .env.local
-
-# Build the production bundle
+# Build the production bundle. For dev/prod the app is same-origin — it calls
+# /graphql and the auth paths through the site's CloudFront distribution — so
+# VITE_APPSYNC_ENDPOINT and VITE_COGNITO_DOMAIN must stay unset for the build.
+# They are only for local `vite dev` and ephemeral environments (see
+# frontend/.env.example); make sure no local .env / .env.local defining them
+# is present, or Vite will bake the absolute endpoints into the bundle.
 npm run build
 
 # Upload to S3
