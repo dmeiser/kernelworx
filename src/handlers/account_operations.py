@@ -16,11 +16,13 @@ try:  # pragma: no cover
     from utils.dynamodb import tables
     from utils.errors import AppError, ErrorCode
     from utils.logging import get_logger
+    from utils.payment_methods import delete_all_user_qr_codes
     from utils.validation import validate_unit_number
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.dynamodb import tables
     from ..utils.errors import AppError, ErrorCode
     from ..utils.logging import get_logger
+    from ..utils.payment_methods import delete_all_user_qr_codes
     from ..utils.validation import validate_unit_number
 
 logger = get_logger(__name__)
@@ -146,10 +148,8 @@ def _delete_all_user_data(account_id: str, context: Any, logger: Any) -> None:
     _delete_inbound_shares(account_id, logger)
     _delete_user_profiles(account_id, logger)
     # Catalogs are preserved per product design and should never be deleted.
-
-    # TODO(KW-REVIEW-GLM53-1-decision-qr-code-retention-policy): Payment QR S3
-    # objects are intentionally not deleted here pending the captain decision on
-    # retention policy.
+    # Delete payment method QR codes from S3 per captain decision
+    delete_all_user_qr_codes(account_id, logger)
 
     account_id_key = f"ACCOUNT#{account_id}"
     tables.accounts.delete_item(Key={"accountId": account_id_key})

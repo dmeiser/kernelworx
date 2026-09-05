@@ -6,7 +6,7 @@
  * if an error occurs.
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Alert,
   Box,
@@ -28,6 +28,7 @@ import {
 import {
   CheckCircle as CheckCircleIcon,
   Error as ErrorIcon,
+  PersonOff as PersonOffIcon,
   RadioButtonUnchecked as PendingIcon,
   Replay as ResumeIcon,
   Warning as WarningIcon,
@@ -54,12 +55,69 @@ function StatusIcon({ status }: { status: ProfileDeletionItem['status'] }) {
   return <PendingIcon color="disabled" fontSize="small" />;
 }
 
+interface ProfilesPreviewListProps {
+  isLoading: boolean;
+  profiles: ProfileDeletionItem[];
+  isDiscovered: boolean;
+}
+
+function ProfilesPreviewList({ isLoading, profiles, isDiscovered }: ProfilesPreviewListProps) {
+  if (isLoading) {
+    return (
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, my: 1.5 }}>
+        <CircularProgress size={16} />
+        <Typography variant="body2" color="text.secondary">
+          Finding associated seller profiles...
+        </Typography>
+      </Box>
+    );
+  }
+
+  if (!isDiscovered) {
+    return null;
+  }
+
+  if (profiles.length === 0) {
+    return (
+      <Typography variant="body2" color="text.secondary" sx={{ my: 1, fontStyle: 'italic' }}>
+        No seller profiles found.
+      </Typography>
+    );
+  }
+
+  return (
+    <Box sx={{ my: 1.5, p: 1.5, bgcolor: 'action.hover', borderRadius: 1 }}>
+      <Typography variant="subtitle2" gutterBottom>
+        Seller profiles to be deleted ({profiles.length}):
+      </Typography>
+      <List dense disablePadding>
+        {profiles.map((p) => (
+          <ListItem key={p.profileId} disableGutters sx={{ py: 0.25 }}>
+            <ListItemIcon sx={{ minWidth: 28 }}>
+              <PersonOffIcon fontSize="small" color="action" />
+            </ListItemIcon>
+            <ListItemText
+              primary={p.sellerName}
+              secondary="Campaigns, orders, and shares will also be deleted"
+              primaryTypographyProps={{ variant: 'body2', fontWeight: 500 }}
+              secondaryTypographyProps={{ variant: 'caption' }}
+            />
+          </ListItem>
+        ))}
+      </List>
+    </Box>
+  );
+}
+
 interface ConfirmationViewProps {
   userEmail?: string;
   confirmText: string;
   onConfirmTextChange: (text: string) => void;
   onConfirm: () => void;
   onCancel: () => void;
+  isLoadingProfiles: boolean;
+  profiles: ProfileDeletionItem[];
+  isDiscovered: boolean;
 }
 
 function ConfirmationView({
@@ -68,8 +126,11 @@ function ConfirmationView({
   onConfirmTextChange,
   onConfirm,
   onCancel,
+  isLoadingProfiles,
+  profiles,
+  isDiscovered,
 }: ConfirmationViewProps) {
-  const isConfirmed = confirmText === 'DELETE';
+  const isConfirmed = confirmText === 'DELETE' && !isLoadingProfiles;
 
   return (
     <>
@@ -79,9 +140,15 @@ function ConfirmationView({
       </DialogTitle>
       <DialogContent>
         <DialogContentText>
-          This will permanently delete your account (<strong>{userEmail}</strong>) and associated profiles,
-          campaigns, and orders.
+          This will permanently delete your account (<strong>{userEmail}</strong>), associated profiles,
+          custom payment methods &amp; QR codes, campaigns, and orders.
         </DialogContentText>
+
+        <ProfilesPreviewList
+          isLoading={isLoadingProfiles}
+          profiles={profiles}
+          isDiscovered={isDiscovered}
+        />
 
         <Alert severity="warning" sx={{ my: 2 }}>
           <strong>Warning:</strong> This action is permanent and cannot be undone.
@@ -196,7 +263,7 @@ function getAccountSecondaryText(
     return 'Deleted';
   }
   if (step === 'deleting-account') {
-    return 'Deleting account and signing out...';
+    return 'Deleting account, payment methods & S3 QR codes...';
   }
   if (isAccountFailed) {
     return `Failed: ${error || 'Unknown error'}`;
@@ -238,7 +305,7 @@ function AccountListItem({
         <AccountStatusIcon step={step} isAccountFailed={isAccountFailed} />
       </ListItemIcon>
       <ListItemText
-        primary="Account & credentials"
+        primary="Account, payment methods & credentials"
         secondary={getAccountSecondaryText(step, error, isAccountFailed)}
       />
     </ListItem>
@@ -273,6 +340,13 @@ export const AccountDeletionDialog: React.FC<AccountDeletionDialogProps> = ({
   deletion,
 }) => {
   const [confirmText, setConfirmText] = useState('');
+  const { step, isDiscovered, isLoadingProfiles, loadProfiles } = deletion;
+
+  useEffect(() => {
+    if (open && step === 'idle' && !isDiscovered && !isLoadingProfiles) {
+      void loadProfiles();
+    }
+  }, [open, step, isDiscovered, isLoadingProfiles, loadProfiles]);
 
   const handleStart = () => {
     void deletion.startDeletion();
@@ -297,6 +371,9 @@ export const AccountDeletionDialog: React.FC<AccountDeletionDialogProps> = ({
           onConfirmTextChange={setConfirmText}
           onConfirm={handleStart}
           onCancel={handleCancel}
+          isLoadingProfiles={deletion.isLoadingProfiles}
+          profiles={deletion.profiles}
+          isDiscovered={deletion.isDiscovered}
         />
       ) : (
         <>

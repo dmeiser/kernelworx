@@ -25,6 +25,7 @@ import {
   Receipt as ReceiptIcon,
   Share as ShareIcon,
   MenuBook as CatalogIcon,
+  Payment as PaymentIcon,
 } from '@mui/icons-material';
 import { useAccountDeletion } from '../../hooks/useAccountDeletion';
 import { AccountDeletionDialog } from './AccountDeletionDialog';
@@ -113,6 +114,15 @@ export const DeleteAccountSection: React.FC<DeleteAccountSectionProps> = ({
             <ShareIcon fontSize="small" />
           </ListItemIcon>
           <ListItemText primary="All shares and invitations" />
+        </ListItem>
+        <ListItem>
+          <ListItemIcon>
+            <PaymentIcon fontSize="small" />
+          </ListItemIcon>
+          <ListItemText
+            primary="Custom payment methods & QR codes"
+            secondary="All payment preferences and uploaded QR code images stored in S3"
+          />
         </ListItem>
         <ListItem>
           <ListItemIcon>

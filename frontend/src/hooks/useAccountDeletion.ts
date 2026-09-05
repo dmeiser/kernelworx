@@ -41,6 +41,9 @@ export interface UseAccountDeletionReturn {
   profiles: ProfileDeletionItem[];
   error: string | null;
   isProcessing: boolean;
+  isLoadingProfiles: boolean;
+  isDiscovered: boolean;
+  loadProfiles: () => Promise<ProfileDeletionItem[]>;
   startDeletion: () => Promise<void>;
   resumeDeletion: () => Promise<void>;
   reset: () => void;
@@ -127,6 +130,8 @@ export function useAccountDeletion(options?: UseAccountDeletionOptions): UseAcco
   const [step, setStep] = useState<DeletionStep>('idle');
   const [profiles, setProfiles] = useState<ProfileDeletionItem[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [isLoadingProfiles, setIsLoadingProfiles] = useState(false);
+  const [isDiscovered, setIsDiscovered] = useState(false);
 
   const updateProfileStatus = useCallback((index: number, patch: Partial<ProfileDeletionItem>) => {
     setProfiles((prev) => {
@@ -137,6 +142,23 @@ export function useAccountDeletion(options?: UseAccountDeletionOptions): UseAcco
       return copy;
     });
   }, []);
+
+  const loadProfiles = useCallback(async () => {
+    setIsLoadingProfiles(true);
+    setError(null);
+    try {
+      const discovered = await fetchProfiles(client);
+      setProfiles(discovered);
+      setIsDiscovered(true);
+      setIsLoadingProfiles(false);
+      return discovered;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to load user profiles';
+      setError(msg);
+      setIsLoadingProfiles(false);
+      return [];
+    }
+  }, [client]);
 
   const finalizeAccountDeletion = useCallback(async () => {
     setStep('deleting-account');
@@ -178,22 +200,25 @@ export function useAccountDeletion(options?: UseAccountDeletionOptions): UseAcco
 
   const startDeletion = useCallback(async () => {
     setError(null);
-    setStep('discovering');
+    let current = profiles;
 
-    let discovered: ProfileDeletionItem[] = [];
-    try {
-      discovered = await fetchProfiles(client);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed to load user profiles';
-      setError(msg);
-      setStep('error');
-      return;
+    if (!isDiscovered) {
+      setStep('discovering');
+      try {
+        current = await fetchProfiles(client);
+        setProfiles(current);
+        setIsDiscovered(true);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Failed to load user profiles';
+        setError(msg);
+        setStep('error');
+        return;
+      }
     }
 
-    setProfiles(discovered);
     setStep('deleting-profiles');
-    await runProfileDeletionLoop(discovered, 0);
-  }, [client, runProfileDeletionLoop]);
+    await runProfileDeletionLoop(current, 0);
+  }, [client, isDiscovered, profiles, runProfileDeletionLoop]);
 
   const resumeDeletion = useCallback(async () => {
     setError(null);
@@ -212,6 +237,8 @@ export function useAccountDeletion(options?: UseAccountDeletionOptions): UseAcco
     setStep('idle');
     setProfiles([]);
     setError(null);
+    setIsLoadingProfiles(false);
+    setIsDiscovered(false);
   }, []);
 
   const isProcessing =
@@ -222,6 +249,9 @@ export function useAccountDeletion(options?: UseAccountDeletionOptions): UseAcco
     profiles,
     error,
     isProcessing,
+    isLoadingProfiles,
+    isDiscovered,
+    loadProfiles,
     startDeletion,
     resumeDeletion,
     reset,

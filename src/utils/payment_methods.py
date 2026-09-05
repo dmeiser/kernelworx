@@ -780,3 +780,66 @@ def generate_presigned_get_url(
     except ClientError as e:
         logger.error("Failed to generate pre-signed URL", error=str(e))
         raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to generate QR code URL")
+
+
+def delete_all_user_qr_codes(account_id: str, logger: Any = None) -> int:
+    """Delete all payment QR code objects for an account from S3.
+
+    Purges all S3 objects under payment-qr-codes/{account_id}/ and
+    payment-qr-codes/{clean_id}/, including versions and delete markers.
+
+    Args:
+        account_id: Account ID (with or without 'ACCOUNT#' prefix)
+        logger: Optional logger instance
+
+    Returns:
+        Number of S3 object versions/markers deleted.
+    """
+    bucket_name = os.environ.get("EXPORTS_BUCKET")
+    if not bucket_name:
+        return 0
+
+    s3 = _get_s3_client()
+    clean_id = account_id.replace("ACCOUNT#", "")
+    prefixes = {f"{QR_CODE_S3_PREFIX}/{account_id}/", f"{QR_CODE_S3_PREFIX}/{clean_id}/"}
+    deleted_count = 0
+
+    for prefix in prefixes:
+        try:
+            versions_paginator: Any = s3.get_paginator("list_object_versions")
+            for page in versions_paginator.paginate(Bucket=bucket_name, Prefix=prefix):
+                delete_items: list[Any] = []
+                for version in page.get("Versions", []):
+                    k = version.get("Key")
+                    vid = version.get("VersionId")
+                    if k and vid:
+                        delete_items.append({"Key": k, "VersionId": vid})
+                    elif k:
+                        delete_items.append({"Key": k})
+                for marker in page.get("DeleteMarkers", []):
+                    k = marker.get("Key")
+                    vid = marker.get("VersionId")
+                    if k and vid:
+                        delete_items.append({"Key": k, "VersionId": vid})
+                    elif k:
+                        delete_items.append({"Key": k})
+                if delete_items:
+                    s3.delete_objects(Bucket=bucket_name, Delete={"Objects": delete_items})
+                    deleted_count += len(delete_items)
+        except Exception:
+            try:
+                objects_paginator: Any = s3.get_paginator("list_objects_v2")
+                for obj_page in objects_paginator.paginate(Bucket=bucket_name, Prefix=prefix):
+                    delete_keys: list[Any] = [{"Key": obj["Key"]} for obj in obj_page.get("Contents", []) if obj.get("Key")]
+                    if delete_keys:
+                        s3.delete_objects(Bucket=bucket_name, Delete={"Objects": delete_keys})
+                        deleted_count += len(delete_keys)
+            except Exception as fallback_err:
+                if logger:
+                    logger.warning("Error cleaning up S3 payment QR codes", prefix=prefix, error=str(fallback_err))
+
+    if logger and deleted_count > 0:
+        logger.info("Deleted user payment QR codes from S3", account_id=account_id, count=deleted_count)
+
+    return deleted_count
+

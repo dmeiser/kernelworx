@@ -29,11 +29,13 @@ try:  # pragma: no cover
     from utils.dynamodb import get_dynamodb_resource, tables
     from utils.errors import AppError, ErrorCode
     from utils.logging import get_logger, mask_email
+    from utils.payment_methods import delete_all_user_qr_codes
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.auth import is_admin
     from ..utils.dynamodb import get_dynamodb_resource, tables
     from ..utils.errors import AppError, ErrorCode
     from ..utils.logging import get_logger, mask_email
+    from ..utils.payment_methods import delete_all_user_qr_codes
 
 # Handle both Lambda (absolute) and unit test (relative) imports.  mypy sees the
 # relative path it can resolve; the runtime fallback tries absolute first for Lambda.
@@ -817,9 +819,8 @@ def admin_delete_user(event: Dict[str, Any], context: Any) -> bool:
         _delete_inbound_shares(account_id, logger)
         _delete_account_from_dynamodb(account_id, logger)
 
-        # TODO(KW-REVIEW-GLM53-1-decision-qr-code-retention-policy): Payment QR S3
-        # objects are intentionally not deleted here pending the captain decision on
-        # retention policy.
+        # Delete payment method QR codes from S3 per captain decision
+        delete_all_user_qr_codes(account_id, logger)
 
         if username:
             _delete_user_from_cognito(cognito, user_pool_id, username, email or "", logger)

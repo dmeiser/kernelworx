@@ -104,6 +104,7 @@ describe('DeleteAccountSection & AccountDeletionDialog', () => {
     );
 
     expect(screen.getByText('Delete Account')).toBeInTheDocument();
+    expect(screen.getByText(/Custom payment methods & QR codes/i)).toBeInTheDocument();
     expect(screen.getByText(/Custom catalogs/i)).toBeInTheDocument();
     expect(screen.getByText(/Catalogs you created will be preserved and never deleted/i)).toBeInTheDocument();
   });
@@ -130,6 +131,13 @@ describe('DeleteAccountSection & AccountDeletionDialog', () => {
 
     expect(screen.getByText('Confirm Account Deletion')).toBeInTheDocument();
     expect(screen.getByText(/Custom catalogs you created are preserved/i)).toBeInTheDocument();
+
+    // Profiles are previewed in confirmation view before deletion begins
+    await waitFor(() => {
+      expect(screen.getByText('Seller profiles to be deleted (2):')).toBeInTheDocument();
+      expect(screen.getByText('Scout Alex')).toBeInTheDocument();
+      expect(screen.getByText('Scout Ben')).toBeInTheDocument();
+    });
 
     const deleteButton = screen.getByRole('button', { name: 'Delete Account' });
     expect(deleteButton).toBeDisabled();
@@ -224,6 +232,37 @@ describe('DeleteAccountSection & AccountDeletionDialog', () => {
     // Should not stop on "not found" error, instead proceeding through scout 2 and account delete
     await waitFor(() => {
       expect(onAccountDeleted).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  test('previews empty state when user has no seller profiles', async () => {
+    const user = userEvent.setup();
+    const emptyProfilesMock = {
+      request: {
+        query: LIST_MY_PROFILES,
+        variables: {},
+      },
+      result: {
+        data: {
+          listMyProfiles: {
+            __typename: 'SellerProfileConnection',
+            profiles: [],
+            nextToken: null,
+          },
+        },
+      },
+    };
+
+    render(
+      <MockedProvider mocks={[emptyProfilesMock, createDeleteAccountMock()]}>
+        <DeleteAccountSection userEmail="noprofiles@example.com" />
+      </MockedProvider>
+    );
+
+    await user.click(screen.getByRole('button', { name: /Delete My Account/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('No seller profiles found.')).toBeInTheDocument();
     });
   });
 });
