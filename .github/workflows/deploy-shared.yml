@@ -208,6 +208,9 @@ jobs:
           "$GITHUB_WORKSPACE/scripts/appsync-ensure-resolver-order.sh" \
             -t module.appsync.aws_appsync_resolver.create_order
 
+      - name: Build AppSync resolvers
+        run: npm run build:resolvers
+
       - name: OpenTofu plan
         env:
           TF_VAR_encryption_passphrase: ${{ secrets.TF_VAR_ENCRYPTION_PASSPHRASE }}

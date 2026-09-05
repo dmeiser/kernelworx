@@ -121,6 +121,9 @@ case "$ACTION" in
 
     log "📋 Planning and applying ephemeral stack..."
 
+    log "📦 Building AppSync JS resolvers..."
+    npm run build:resolvers
+
     # AppSync rejects deleting pipeline functions that are still referenced by a
     # resolver. If the plan would destroy any AppSync functions, update the
     # affected pipeline resolver(s) first so the full apply can delete them.
