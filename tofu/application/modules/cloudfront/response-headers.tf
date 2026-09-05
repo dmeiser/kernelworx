@@ -7,7 +7,7 @@ locals {
   # Mirrors the frontend <meta> CSP (frontend/index.html) during migration,
   # plus frame-ancestors 'none' and base-uri 'self'. Tightening of
   # connect-src to 'self' is a later phase, after same-origin is universal.
-  csp = "default-src 'self'; font-src 'self' https://fonts.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; script-src 'self'; img-src 'self' data: https:; connect-src 'self' https://*.amazonaws.com https://*.amazoncognito.com https://api.kernelworx.app https://api.dev.kernelworx.app ws: wss:; frame-ancestors 'none'; base-uri 'self'"
+  csp = "default-src 'self'; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data: https:; connect-src 'self' https://*.amazonaws.com https://*.amazoncognito.com https://api.kernelworx.app https://api.dev.kernelworx.app ws: wss:; frame-ancestors 'none'; base-uri 'self'"
 }
 
 resource "aws_cloudfront_response_headers_policy" "security" {
