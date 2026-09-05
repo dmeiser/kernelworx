@@ -326,7 +326,7 @@ function AccountListItem({
 }
 
 function ProgressList({ deletion }: { deletion: UseAccountDeletionReturn }) {
-  const isDiscovered = deletion.step !== 'discovering';
+  const isDiscovered = deletion.isDiscovered;
   const isAccountFailed =
     deletion.step === 'error' &&
     deletion.profiles.every((p) => p.status === 'completed');

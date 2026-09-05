@@ -118,8 +118,7 @@ async function deleteSingleProfile(
 }
 
 async function executeAccountDeletion(
-  client: ReturnType<typeof useApolloClient>,
-  onSuccess?: () => Promise<void> | void
+  client: ReturnType<typeof useApolloClient>
 ): Promise<void> {
   const result = await client.mutate({
     mutation: DELETE_MY_ACCOUNT,
@@ -127,10 +126,9 @@ async function executeAccountDeletion(
   if (result.error) {
     throw result.error;
   }
-  if (onSuccess) {
-    await onSuccess();
-  }
 }
+
+const COMPLETION_BANNER_DELAY_MS = 500;
 
 export function useAccountDeletion(options?: UseAccountDeletionOptions): UseAccountDeletionReturn {
   const client = useApolloClient();
@@ -170,8 +168,10 @@ export function useAccountDeletion(options?: UseAccountDeletionOptions): UseAcco
   const finalizeAccountDeletion = useCallback(async () => {
     setStep('deleting-account');
     try {
-      await executeAccountDeletion(client, options?.onSuccess);
+      await executeAccountDeletion(client);
       setStep('completed');
+      await new Promise((resolve) => setTimeout(resolve, COMPLETION_BANNER_DELAY_MS));
+      await options?.onSuccess?.();
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to delete account';
       setError(msg);
