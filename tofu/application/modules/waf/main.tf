@@ -76,7 +76,7 @@ data "http" "github_meta" {
 
 locals {
   name                 = "${var.name_prefix}-waf-${var.environment}"
-  github_meta_response = var.create ? jsondecode(data.http.github_meta[0].response_body) : {}
+  github_meta_response = jsondecode(var.create ? data.http.github_meta[0].response_body : "{}")
   # The feed mixes IPv4 and IPv6 CIDRs, but the declared IP set holds IPV4 only
   # (the provider passes the list through unfiltered, and a mixed list makes
   # CreateIPSet fail). GitHub-hosted runners have no IPv6 egress, so nothing
