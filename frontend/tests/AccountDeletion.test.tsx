@@ -272,4 +272,357 @@ describe('DeleteAccountSection & AccountDeletionDialog', () => {
       expect(screen.getByText('No seller profiles found.')).toBeInTheDocument();
     });
   });
+
+  test('cancels confirmation view and closes dialog', async () => {
+    const user = userEvent.setup();
+
+    render(
+      <MockedProvider mocks={[createListProfilesMock()]}>
+        <DeleteAccountSection userEmail="cancel@example.com" />
+      </MockedProvider>
+    );
+
+    await user.click(screen.getByRole('button', { name: /Delete My Account/i }));
+    expect(screen.getByText('Confirm Account Deletion')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => {
+      expect(screen.queryByText('Confirm Account Deletion')).not.toBeInTheDocument();
+    });
+  });
+
+  test('closes dialog on error view close button', async () => {
+    const user = userEvent.setup();
+    const failingMock = createDeleteProfileMock('PROFILE#scout-1', 'Network error');
+
+    render(
+      <MockedProvider mocks={[createListProfilesMock(), failingMock]}>
+        <DeleteAccountSection userEmail="errorclose@example.com" />
+      </MockedProvider>
+    );
+
+    await user.click(screen.getByRole('button', { name: /Delete My Account/i }));
+    await waitFor(() => {
+      expect(screen.getByText('Seller profiles to be deleted (2):')).toBeInTheDocument();
+    });
+
+    await user.type(screen.getByPlaceholderText('Type DELETE to confirm'), 'DELETE');
+    await user.click(screen.getByRole('button', { name: 'Delete Account' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Deletion Interrupted')).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Close' }));
+    await waitFor(() => {
+      expect(screen.queryByText('Deletion Interrupted')).not.toBeInTheDocument();
+    });
+  });
+
+  test('handles discovery failure and displays error alert in preview', async () => {
+    const user = userEvent.setup();
+    const errorDiscoveryMock = {
+      request: {
+        query: LIST_MY_PROFILES,
+        variables: {},
+      },
+      result: {
+        errors: [new GraphQLError('Failed to fetch profiles')],
+      },
+    };
+
+    render(
+      <MockedProvider mocks={[errorDiscoveryMock]}>
+        <DeleteAccountSection userEmail="discfail@example.com" />
+      </MockedProvider>
+    );
+
+    await user.click(screen.getByRole('button', { name: /Delete My Account/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Failed to load seller profiles: Failed to fetch profiles/i)).toBeInTheDocument();
+    });
+  });
+
+  test('resumes deletion from discovery failure', async () => {
+    const user = userEvent.setup();
+    const onAccountDeleted = vi.fn().mockResolvedValue(undefined);
+
+    const errorDiscoveryMock = {
+      request: {
+        query: LIST_MY_PROFILES,
+        variables: {},
+      },
+      result: {
+        errors: [new GraphQLError('Server down')],
+      },
+    };
+
+    render(
+      <MockedProvider
+        mocks={[
+          errorDiscoveryMock,
+          errorDiscoveryMock,
+          createListProfilesMock(),
+          createDeleteProfileMock('PROFILE#scout-1'),
+          createDeleteProfileMock('PROFILE#scout-2'),
+          createDeleteAccountMock(),
+        ]}
+      >
+        <DeleteAccountSection userEmail="resumedisc@example.com" onAccountDeleted={onAccountDeleted} />
+      </MockedProvider>
+    );
+
+    await user.click(screen.getByRole('button', { name: /Delete My Account/i }));
+    await waitFor(() => {
+      expect(screen.getByText(/Failed to load seller profiles: Server down/i)).toBeInTheDocument();
+    });
+
+    await user.type(screen.getByPlaceholderText('Type DELETE to confirm'), 'DELETE');
+    await user.click(screen.getByRole('button', { name: 'Delete Account' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Deletion Interrupted')).toBeInTheDocument();
+    });
+
+    // Click resume to re-attempt discovery and complete
+    await user.click(screen.getByRole('button', { name: /Resume Deletion/i }));
+
+    await waitFor(() => {
+      expect(onAccountDeleted).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  test('resumes deletion when account finalization fails', async () => {
+    const user = userEvent.setup();
+    const onAccountDeleted = vi.fn().mockResolvedValue(undefined);
+
+    const failingAccountMock = {
+      request: {
+        query: DELETE_MY_ACCOUNT,
+      },
+      error: new Error('Account deletion timeout'),
+    };
+
+    render(
+      <MockedProvider
+        mocks={[
+          createListProfilesMock(),
+          createDeleteProfileMock('PROFILE#scout-1'),
+          createDeleteProfileMock('PROFILE#scout-2'),
+          failingAccountMock,
+          createDeleteAccountMock(),
+        ]}
+      >
+        <DeleteAccountSection userEmail="resumeaccount@example.com" onAccountDeleted={onAccountDeleted} />
+      </MockedProvider>
+    );
+
+    await user.click(screen.getByRole('button', { name: /Delete My Account/i }));
+    await waitFor(() => {
+      expect(screen.getByText('Seller profiles to be deleted (2):')).toBeInTheDocument();
+    });
+
+    const deleteButton = screen.getByRole('button', { name: 'Delete Account' });
+    const confirmInput = screen.getByPlaceholderText('Type DELETE to confirm');
+    await user.type(confirmInput, 'DELETE');
+    expect(deleteButton).toBeEnabled();
+    await user.click(deleteButton);
+
+    await waitFor(() => {
+      expect(screen.getByText('Discover account profiles')).toBeInTheDocument();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('Deletion Interrupted')).toBeInTheDocument();
+      expect(screen.getAllByText(/Account deletion timeout/i).length).toBeGreaterThan(0);
+    });
+
+    // Resume when all profiles are completed (firstUnfinished === -1)
+    await user.click(screen.getByRole('button', { name: /Resume Deletion/i }));
+
+    await waitFor(() => {
+      expect(onAccountDeleted).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  test('paginates multiple pages of seller profiles', async () => {
+    const user = userEvent.setup();
+    const onAccountDeleted = vi.fn().mockResolvedValue(undefined);
+
+    const page1Mock = {
+      request: {
+        query: LIST_MY_PROFILES,
+        variables: {},
+      },
+      result: {
+        data: {
+          listMyProfiles: {
+            __typename: 'SellerProfileConnection',
+            profiles: [
+              {
+                __typename: 'SellerProfile',
+                profileId: 'PROFILE#page-1',
+                sellerName: 'Page 1 Scout',
+                ownerAccountId: 'ACCOUNT#user-1',
+                createdAt: '2026-01-01T00:00:00Z',
+                updatedAt: '2026-01-01T00:00:00Z',
+                isOwner: true,
+                permissions: [],
+                latestCampaign: null,
+              },
+            ],
+            nextToken: 'token-page-2',
+          },
+        },
+      },
+    };
+
+    const page2Mock = {
+      request: {
+        query: LIST_MY_PROFILES,
+        variables: { nextToken: 'token-page-2' },
+      },
+      result: {
+        data: {
+          listMyProfiles: {
+            __typename: 'SellerProfileConnection',
+            profiles: [
+              {
+                __typename: 'SellerProfile',
+                profileId: 'PROFILE#page-2',
+                sellerName: 'Page 2 Scout',
+                ownerAccountId: 'ACCOUNT#user-1',
+                createdAt: '2026-01-01T00:00:00Z',
+                updatedAt: '2026-01-01T00:00:00Z',
+                isOwner: true,
+                permissions: [],
+                latestCampaign: null,
+              },
+            ],
+            nextToken: null,
+          },
+        },
+      },
+    };
+
+    render(
+      <MockedProvider
+        mocks={[
+          page1Mock,
+          page2Mock,
+          createDeleteProfileMock('PROFILE#page-1'),
+          createDeleteProfileMock('PROFILE#page-2'),
+          createDeleteAccountMock(),
+        ]}
+      >
+        <DeleteAccountSection userEmail="paginated@example.com" onAccountDeleted={onAccountDeleted} />
+      </MockedProvider>
+    );
+
+    await user.click(screen.getByRole('button', { name: /Delete My Account/i }));
+
+    // Verify both profiles loaded across pages
+    await waitFor(() => {
+      expect(screen.getByText('Seller profiles to be deleted (2):')).toBeInTheDocument();
+      expect(screen.getByText('Page 1 Scout')).toBeInTheDocument();
+      expect(screen.getByText('Page 2 Scout')).toBeInTheDocument();
+    });
+
+    await user.type(screen.getByPlaceholderText('Type DELETE to confirm'), 'DELETE');
+    await user.click(screen.getByRole('button', { name: 'Delete Account' }));
+
+    await waitFor(() => {
+      expect(onAccountDeleted).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  test('discovers profiles during startDeletion if initial discovery had failed', async () => {
+    const user = userEvent.setup();
+    const onAccountDeleted = vi.fn().mockResolvedValue(undefined);
+
+    const initialErrorMock = {
+      request: {
+        query: LIST_MY_PROFILES,
+        variables: {},
+      },
+      result: {
+        errors: [new GraphQLError('Initial fetch failed')],
+      },
+    };
+
+    render(
+      <MockedProvider
+        mocks={[
+          initialErrorMock,
+          createListProfilesMock(),
+          createDeleteProfileMock('PROFILE#scout-1'),
+          createDeleteProfileMock('PROFILE#scout-2'),
+          createDeleteAccountMock(),
+        ]}
+      >
+        <DeleteAccountSection userEmail="startdisc@example.com" onAccountDeleted={onAccountDeleted} />
+      </MockedProvider>
+    );
+
+    await user.click(screen.getByRole('button', { name: /Delete My Account/i }));
+    await waitFor(() => {
+      expect(screen.getByText(/Failed to load seller profiles: Initial fetch failed/i)).toBeInTheDocument();
+    });
+
+    await user.type(screen.getByPlaceholderText('Type DELETE to confirm'), 'DELETE');
+    await user.click(screen.getByRole('button', { name: 'Delete Account' }));
+
+    await waitFor(() => {
+      expect(onAccountDeleted).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  test('handles discovery failure during resumeDeletion', async () => {
+    const user = userEvent.setup();
+    const onAccountDeleted = vi.fn().mockResolvedValue(undefined);
+
+    const failDiscoveryMock = {
+      request: {
+        query: LIST_MY_PROFILES,
+        variables: {},
+      },
+      result: {
+        errors: [new GraphQLError('Persistent discovery failure')],
+      },
+    };
+
+    render(
+      <MockedProvider
+        mocks={[
+          failDiscoveryMock,
+          failDiscoveryMock,
+          failDiscoveryMock,
+        ]}
+      >
+        <DeleteAccountSection userEmail="persistfail@example.com" onAccountDeleted={onAccountDeleted} />
+      </MockedProvider>
+    );
+
+    await user.click(screen.getByRole('button', { name: /Delete My Account/i }));
+    await waitFor(() => {
+      expect(screen.getByText(/Failed to load seller profiles: Persistent discovery failure/i)).toBeInTheDocument();
+    });
+
+    await user.type(screen.getByPlaceholderText('Type DELETE to confirm'), 'DELETE');
+    await user.click(screen.getByRole('button', { name: 'Delete Account' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Deletion Interrupted')).toBeInTheDocument();
+    });
+
+    // Click resume to re-attempt discovery which also fails
+    await user.click(screen.getByRole('button', { name: /Resume Deletion/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Deletion Interrupted')).toBeInTheDocument();
+      expect(screen.getAllByText(/Persistent discovery failure/i).length).toBeGreaterThan(0);
+    });
+    expect(onAccountDeleted).not.toHaveBeenCalled();
+  });
 });

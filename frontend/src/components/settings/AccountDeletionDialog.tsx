@@ -245,7 +245,7 @@ function DiscoveryListItem({ isDiscovered, count }: { isDiscovered: boolean; cou
 
 function getProfileSecondaryText(profile: ProfileDeletionItem): string {
   if (profile.status === 'failed') {
-    return `Failed: ${profile.error || 'Unknown error'}`;
+    return `Failed: ${profile.error}`;
   }
   if (profile.status === 'completed') {
     return 'Deleted';
@@ -258,7 +258,7 @@ function getProfileSecondaryText(profile: ProfileDeletionItem): string {
 
 function ProfileListItem({ profile, index }: { profile: ProfileDeletionItem; index: number }) {
   return (
-    <ListItem sx={{ pl: 4 }}>
+    <ListItem dense disableGutters sx={{ py: 0.5 }}>
       <ListItemIcon>
         <StatusIcon status={profile.status} />
       </ListItemIcon>
@@ -282,7 +282,7 @@ function getAccountSecondaryText(
     return 'Deleting account, payment methods & S3 QR codes...';
   }
   if (isAccountFailed) {
-    return `Failed: ${error || 'Unknown error'}`;
+    return `Failed: ${error}`;
   }
   return 'Pending';
 }

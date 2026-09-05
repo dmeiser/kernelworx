@@ -251,7 +251,7 @@ export function useAccountDeletion(options?: UseAccountDeletionOptions): UseAcco
     const firstUnfinished = profiles.findIndex((p) => p.status !== 'completed');
     if (firstUnfinished !== -1) {
       setStep('deleting-profiles');
-      await runProfileDeletionLoop(profiles, firstUnfinished);
+      await runProfileDeletionLoop(profiles, 0);
       return;
     }
 
