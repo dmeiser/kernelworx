@@ -1,0 +1,229 @@
+/**
+ * Custom hook for client-orchestrated account deletion.
+ *
+ * Sequentially deletes all seller profiles owned by the user (with cascades
+ * for campaigns, orders, shares, and invites) before deleting the account
+ * record and authentication credentials.
+ *
+ * Provides real-time status feedback for each entity and allows resuming
+ * if any step fails. Catalogs are never deleted.
+ */
+
+import { useState, useCallback } from 'react';
+import { useApolloClient } from '@apollo/client/react';
+import {
+  LIST_MY_PROFILES,
+  DELETE_SELLER_PROFILE,
+  DELETE_MY_ACCOUNT,
+} from '../lib/graphql';
+
+export type DeletionStep =
+  | 'idle'
+  | 'discovering'
+  | 'deleting-profiles'
+  | 'deleting-account'
+  | 'completed'
+  | 'error';
+
+export interface ProfileDeletionItem {
+  profileId: string;
+  sellerName: string;
+  status: 'pending' | 'in-progress' | 'completed' | 'failed';
+  error?: string;
+}
+
+export interface UseAccountDeletionOptions {
+  onSuccess?: () => Promise<void> | void;
+}
+
+export interface UseAccountDeletionReturn {
+  step: DeletionStep;
+  profiles: ProfileDeletionItem[];
+  error: string | null;
+  isProcessing: boolean;
+  startDeletion: () => Promise<void>;
+  resumeDeletion: () => Promise<void>;
+  reset: () => void;
+}
+
+interface RawProfile {
+  profileId?: string | null;
+  sellerName?: string | null;
+}
+
+interface ListMyProfilesQueryData {
+  listMyProfiles?: {
+    profiles?: RawProfile[] | null;
+    nextToken?: string | null;
+  } | null;
+}
+
+function isNotFoundError(err: unknown): boolean {
+  if (!err || typeof err !== 'object') {
+    return false;
+  }
+  const message =
+    'message' in err && typeof (err as { message: unknown }).message === 'string'
+      ? (err as { message: string }).message.toLowerCase()
+      : '';
+  return message.includes('not found');
+}
+
+function extractProfilesFromData(data: ListMyProfilesQueryData | undefined): ProfileDeletionItem[] {
+  const items = data?.listMyProfiles?.profiles ?? [];
+  return items
+    .filter((item): item is RawProfile & { profileId: string } => Boolean(item?.profileId))
+    .map((item) => ({
+      profileId: item.profileId,
+      sellerName: item.sellerName || 'Scout Profile',
+      status: 'pending' as const,
+    }));
+}
+
+async function fetchProfiles(client: ReturnType<typeof useApolloClient>): Promise<ProfileDeletionItem[]> {
+  const result = await client.query<ListMyProfilesQueryData>({
+    query: LIST_MY_PROFILES,
+    fetchPolicy: 'network-only',
+  });
+  return extractProfilesFromData(result.data);
+}
+
+async function deleteSingleProfile(
+  client: ReturnType<typeof useApolloClient>,
+  profileId: string
+): Promise<void> {
+  try {
+    const result = await client.mutate({
+      mutation: DELETE_SELLER_PROFILE,
+      variables: { profileId },
+    });
+    if (result.error) {
+      throw result.error;
+    }
+  } catch (err) {
+    if (!isNotFoundError(err)) {
+      throw err;
+    }
+  }
+}
+
+async function executeAccountDeletion(
+  client: ReturnType<typeof useApolloClient>,
+  onSuccess?: () => Promise<void> | void
+): Promise<void> {
+  const result = await client.mutate({
+    mutation: DELETE_MY_ACCOUNT,
+  });
+  if (result.error) {
+    throw result.error;
+  }
+  if (onSuccess) {
+    await onSuccess();
+  }
+}
+
+export function useAccountDeletion(options?: UseAccountDeletionOptions): UseAccountDeletionReturn {
+  const client = useApolloClient();
+  const [step, setStep] = useState<DeletionStep>('idle');
+  const [profiles, setProfiles] = useState<ProfileDeletionItem[]>([]);
+  const [error, setError] = useState<string | null>(null);
+
+  const updateProfileStatus = useCallback((index: number, patch: Partial<ProfileDeletionItem>) => {
+    setProfiles((prev) => {
+      const copy = [...prev];
+      if (copy[index]) {
+        copy[index] = { ...copy[index], ...patch };
+      }
+      return copy;
+    });
+  }, []);
+
+  const finalizeAccountDeletion = useCallback(async () => {
+    setStep('deleting-account');
+    try {
+      await executeAccountDeletion(client, options?.onSuccess);
+      setStep('completed');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to delete account';
+      setError(msg);
+      setStep('error');
+    }
+  }, [client, options]);
+
+  const runProfileDeletionLoop = useCallback(
+    async (currentProfiles: ProfileDeletionItem[], startIndex: number) => {
+      for (let i = startIndex; i < currentProfiles.length; i++) {
+        const item = currentProfiles[i];
+        if (item.status === 'completed') {
+          continue;
+        }
+
+        updateProfileStatus(i, { status: 'in-progress', error: undefined });
+        try {
+          await deleteSingleProfile(client, item.profileId);
+          updateProfileStatus(i, { status: 'completed' });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : 'Failed to delete profile';
+          updateProfileStatus(i, { status: 'failed', error: msg });
+          setError(msg);
+          setStep('error');
+          return;
+        }
+      }
+
+      await finalizeAccountDeletion();
+    },
+    [client, finalizeAccountDeletion, updateProfileStatus]
+  );
+
+  const startDeletion = useCallback(async () => {
+    setError(null);
+    setStep('discovering');
+
+    let discovered: ProfileDeletionItem[] = [];
+    try {
+      discovered = await fetchProfiles(client);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to load user profiles';
+      setError(msg);
+      setStep('error');
+      return;
+    }
+
+    setProfiles(discovered);
+    setStep('deleting-profiles');
+    await runProfileDeletionLoop(discovered, 0);
+  }, [client, runProfileDeletionLoop]);
+
+  const resumeDeletion = useCallback(async () => {
+    setError(null);
+
+    const firstUnfinished = profiles.findIndex((p) => p.status !== 'completed');
+    if (firstUnfinished !== -1) {
+      setStep('deleting-profiles');
+      await runProfileDeletionLoop(profiles, firstUnfinished);
+      return;
+    }
+
+    await finalizeAccountDeletion();
+  }, [finalizeAccountDeletion, profiles, runProfileDeletionLoop]);
+
+  const reset = useCallback(() => {
+    setStep('idle');
+    setProfiles([]);
+    setError(null);
+  }, []);
+
+  const isProcessing =
+    step === 'discovering' || step === 'deleting-profiles' || step === 'deleting-account';
+
+  return {
+    step,
+    profiles,
+    error,
+    isProcessing,
+    startDeletion,
+    resumeDeletion,
+    reset,
+  };
+}

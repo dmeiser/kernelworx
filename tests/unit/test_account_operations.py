@@ -316,7 +316,7 @@ class TestDeleteMyAccount:
         lambda_context: Any,
         monkeypatch: Any,
     ) -> None:
-        """Test that deleting account deletes EVERYTHING - profiles, campaigns, orders, catalogs, shares."""
+        """Test that deleting account deletes user data (profiles, campaigns, orders, shares) while preserving catalogs."""
         from src.handlers.account_operations import delete_my_account
 
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
@@ -475,10 +475,10 @@ class TestDeleteMyAccount:
         # 3. Campaign should be gone
         assert campaigns_table.get_item(Key={"profileId": profile_id, "campaignId": campaign_id}).get("Item") is None
 
-        # 4. CATALOG should be soft-deleted (isDeleted=true) - THIS IS CRITICAL
+        # 4. CATALOG should be preserved (never deleted or soft-deleted)
         catalog_item = catalogs_table.get_item(Key={"catalogId": catalog_id}).get("Item")
-        assert catalog_item is not None, "Catalog should still exist but be marked as deleted"
-        assert catalog_item.get("isDeleted") is True, "Catalog must have isDeleted=true"
+        assert catalog_item is not None, "Catalog should still exist"
+        assert catalog_item.get("isDeleted") is not True, "Catalog must not be deleted or marked as deleted"
 
         # 5. Order should be gone
         assert orders_table.get_item(Key={"campaignId": campaign_id, "orderId": order_id}).get("Item") is None
@@ -694,10 +694,11 @@ class TestDeleteMyAccount:
         orders_response = orders_table.scan()
         assert len(orders_response["Items"]) == 0
 
-        # All catalogs should be soft-deleted
+        # Catalogs are preserved and should not be deleted
         catalogs_response = catalogs_table.scan()
+        assert len(catalogs_response["Items"]) == 3
         for catalog in catalogs_response["Items"]:
-            assert catalog.get("isDeleted") is True
+            assert catalog.get("isDeleted") is not True
 
     def test_delete_account_with_no_data(
         self,
