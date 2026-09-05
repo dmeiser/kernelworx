@@ -41,6 +41,10 @@ terraform {
       source  = "hashicorp/archive"
       version = "~> 2.0"
     }
+    http = {
+      source  = "hashicorp/http"
+      version = "~> 3.0"
+    }
   }
 }
 
@@ -98,6 +102,13 @@ variable "google_client_secret" {
   type        = string
   sensitive   = true
   description = "Google OAuth client secret"
+}
+
+variable "github_token" {
+  type        = string
+  sensitive   = true
+  default     = ""
+  description = "Optional GitHub token for authenticating calls to api.github.com/meta"
 }
 
 # Local computed values
@@ -259,14 +270,16 @@ module "cloudfront" {
 }
 
 # The only WAF in the design: CLOUDFRONT scope, attached to the site
-# distribution. Rate rule blocks at 2000 req/300s per IP; the AWS managed core
-# rule set runs in Count until tuned.
+# distribution. Rate rule blocks at 2000 req/300s per IP (GitHub Actions CI
+# ranges skip only the rate rule via a deploy-time IP set); the AWS managed
+# core rule set runs in Count until tuned.
 module "waf" {
   source = "../../modules/waf"
 
   name_prefix        = local.name_prefix
   environment        = var.environment
   log_retention_days = var.environment == "prod" ? 30 : 7
+  github_token       = var.github_token
 }
 
 module "route53" {

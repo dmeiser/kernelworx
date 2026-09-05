@@ -230,9 +230,7 @@ class TestTransferProfileOwnership:
         from boto3.dynamodb.conditions import Key
 
         original_query = transfer_profile_ownership.tables.shares.query
-        all_items = original_query(
-            KeyConditionExpression=Key("profileId").eq(f"PROFILE#{profile_id}")
-        ).get("Items", [])
+        all_items = original_query(KeyConditionExpression=Key("profileId").eq(f"PROFILE#{profile_id}")).get("Items", [])
         query_calls = []
 
         def paginated_query(*args: Any, **kwargs: Any) -> Any:

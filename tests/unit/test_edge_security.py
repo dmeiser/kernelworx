@@ -6,7 +6,9 @@ python-hcl2) and assert the *meaning* of the edge architecture contract:
 - Exactly one WAF exists anywhere: a CLOUDFRONT-scope aws_wafv2_web_acl
   attached via web_acl_id. No regional web ACLs, no
   aws_wafv2_web_acl_association resources.
-- The WAF rate rule blocks at 2000 requests per IP per 300s; the AWS managed
+- The WAF lets GitHub Actions CI ranges skip the per-IP rate rule via a
+  deploy-time IP set scoped down into it, and rate limits other traffic at
+  2000 requests per IP per 300s; the AWS managed
   core rule set is staged in Count; WAF logs land in an aws-waf-logs-*
   CloudWatch log group. Every WAF resource no-ops when create = false so
   ephemeral environments create zero objects.
@@ -162,8 +164,17 @@ def test_waf_default_allows_and_rate_rule_blocks_2000_per_300s(waf_module):
     acl = first_resource(waf_module, "aws_wafv2_web_acl", "main")
     assert "allow" in block(acl["default_action"])
 
+    # GitHub Actions CI exemption — implemented as a scope-down on the
+    # rate-based statement (NOT a terminal priority-1 allow rule, which would
+    # also exempt CI traffic from the managed core rule set at priority 3).
     rate_rule = next(r for r in acl["rule"] if r["name"] == "rate-limit")
-    assert rate_rule["priority"] == 1
+    assert rate_rule["priority"] == 2
+    rate_stmt = block(block(rate_rule["statement"])["rate_based_statement"])
+    scope_down = block(rate_stmt["scope_down_statement"])
+    not_stmt = block(block(scope_down["not_statement"])["statement"])
+    ip_set_ref = block(not_stmt["ip_set_reference_statement"])
+    assert ip_set_ref["arn"] == "${aws_wafv2_ip_set.github_actions[0].arn}"
+    assert not [r for r in acl["rule"] if r["name"] == "github-actions-allowlist"]
     # Action is a dynamic block keyed on var.rate_rule_action; the default is
     # Block, with Count available for observation runs.
     action_dyn = block(rate_rule["action"])["dynamic"]
@@ -188,7 +199,7 @@ def test_waf_default_allows_and_rate_rule_blocks_2000_per_300s(waf_module):
 def test_waf_core_managed_rules_staged_in_count(waf_module):
     acl = first_resource(waf_module, "aws_wafv2_web_acl", "main")
     managed = next(r for r in dynamic_blocks(acl, "rule") if r["name"] == "aws-core-managed-rules")
-    assert managed["priority"] == 2
+    assert managed["priority"] == 3
     group = block(block(managed["statement"])["managed_rule_group_statement"])
     assert group["name"] == "AWSManagedRulesCommonRuleSet"
     assert group["vendor_name"] == "AWS"
@@ -200,6 +211,26 @@ def test_waf_core_managed_rules_staged_in_count(waf_module):
     defaults = variable_defaults(waf_module)
     assert defaults["enable_core_managed_rules"] is True
     assert defaults["managed_rule_action"] == "Count"
+
+
+def test_waf_github_actions_ip_set_contract(waf_module):
+    ip_set = first_resource(waf_module, "aws_wafv2_ip_set", "github_actions")
+    assert ip_set["name"] == "${local.name}-github-actions"
+    assert ip_set["scope"] == "CLOUDFRONT"
+    assert ip_set["ip_address_version"] == "IPV4"
+    assert ip_set["addresses"] == "${local.github_actions_cidrs}"
+
+    lifecycle = block(ip_set["lifecycle"])
+    preconditions = [block(p) for p in lifecycle.get("precondition", [])]
+    assert len(preconditions) == 2
+    assert 'contains(keys(local.github_meta_response), "actions")' in preconditions[0]["condition"]
+    assert "10000" in preconditions[1]["condition"]
+
+    data_http = [bodies for entry in waf_module.get("data", []) for dtype, bodies in entry.items() if dtype == "http"]
+    assert data_http, "http data source for github_meta not found"
+    meta_doc = list(data_http[0].values())[0]
+    assert meta_doc["url"] == "https://api.github.com/meta"
+    assert meta_doc["count"] == "${var.create ? 1 : 0}"
 
 
 def test_waf_logging_to_aws_waf_logs_log_group(waf_module):
@@ -233,8 +264,12 @@ def test_waf_create_false_zero_objects(waf_module):
 def test_waf_provider_pinned_and_cloudfront_region_us_east_1():
     tf_file = TF_APP / "modules" / "waf" / "terraform.tf"
     doc = load_hcl(tf_file)
-    aws_req = block(block(doc["terraform"][0])["required_providers"][0])["aws"]
+    reqs = block(block(doc["terraform"][0])["required_providers"][0])
+    aws_req = reqs["aws"]
     assert aws_req["version"] == "~> 6.56"
+    http_req = reqs["http"]
+    assert http_req["source"] == "hashicorp/http"
+    assert http_req["version"] == "~> 3.0"
     # CLOUDFRONT-scope WAFs require the us-east-1 provider, which the dev/prod
     # environments pin as the default region.
     for env in ("dev", "prod"):

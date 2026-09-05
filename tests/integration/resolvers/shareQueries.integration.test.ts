@@ -2,7 +2,7 @@ import '../setup.ts';
 import { describe, test, expect, beforeAll, afterAll } from 'vitest';
 import { ApolloClient, gql, NormalizedCacheObject, HttpLink, InMemoryCache } from '@apollo/client';
 import { createAuthenticatedClient } from '../setup/apolloClient';
-import { deleteTestAccounts, TABLE_NAMES } from '../setup/testData';
+import { deleteTestAccounts, TABLE_NAMES, waitForGSIConsistency } from '../setup/testData';
 
 // Helper to create unauthenticated client
 const createUnauthenticatedClient = () => {
@@ -649,15 +649,26 @@ describe('Share Query Operations Integration Tests', () => {
         variables: { input: { inviteCode: usedInviteCode } },
       });
 
-      // Query should not return used invite
-      const { data }: any = await ownerClient.query({
-        query: LIST_INVITES_BY_PROFILE,
-        variables: { profileId: testProfileId },
-        fetchPolicy: 'network-only',
-      });
+      // Query should not return the used invite. Redemption deletes the item
+      // from the invites table, but listInvitesByProfile reads the
+      // profileId-index GSI, which is only eventually consistent — poll until
+      // the deletion propagates (Bug #21 pattern).
+      const validInvites = await waitForGSIConsistency(
+        async () => {
+          const { data }: any = await ownerClient.query({
+            query: LIST_INVITES_BY_PROFILE,
+            variables: { profileId: testProfileId },
+            fetchPolicy: 'network-only',
+          });
+          return data.listInvitesByProfile;
+        },
+        (items: any[]) => !items.map((i: any) => i.inviteCode).includes(usedInviteCode),
+        120, // maxAttempts — GSI propagation can be very slow in reused, data-heavy ephemeral environments
+        1000 // delayMs
+      );
 
       // Should not include the used invite
-      const inviteCodes = data.listInvitesByProfile.map((i: any) => i.inviteCode);
+      const inviteCodes = validInvites.map((i: any) => i.inviteCode);
       expect(inviteCodes).not.toContain(usedInviteCode);
     });
 
