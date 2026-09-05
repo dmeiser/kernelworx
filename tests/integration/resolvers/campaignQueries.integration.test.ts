@@ -7,7 +7,7 @@ import '../setup.ts';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { ApolloClient, gql, HttpLink, InMemoryCache } from '@apollo/client';
 import { createAuthenticatedClient, AuthenticatedClientResult } from '../setup/apolloClient';
-import { deleteCatalogWithRetry, deleteTestAccounts } from '../setup/testData';
+import { deleteCatalogWithRetry, deleteTestAccounts, waitForGSIConsistency } from '../setup/testData';
 
 // Helper to create unauthenticated client
 const createUnauthenticatedClient = () => {
@@ -276,16 +276,24 @@ describe('Campaign Query Resolvers Integration Tests', () => {
         });
         const campaignId = campaignData.createCampaign.campaignId;
 
-        // Act
-        const { data } = await ownerClient.query({
-          query: GET_CAMPAIGN,
-          variables: { campaignId: campaignId },
-          fetchPolicy: 'network-only',
-        });
+        // Act: Poll getCampaign until the GSI (campaignId-index / profileId-index)
+        // reflects the newly created campaign (Bug #21 eventual consistency)
+        const campaigns = await waitForGSIConsistency(
+          async () => {
+            const res = await ownerClient.query({
+              query: GET_CAMPAIGN,
+              variables: { campaignId: campaignId },
+              fetchPolicy: 'network-only',
+            });
+            return res.data?.getCampaign ? [res.data.getCampaign] : [];
+          },
+          (items) => items.length > 0,
+          10,
+          1000
+        );
 
         // Assert
-        expect(data.getCampaign).toBeDefined();
-        expect(data.getCampaign.campaignId).toBe(campaignId);
+        expect(campaigns[0].campaignId).toBe(campaignId);
         
         // Cleanup
         await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId } });
