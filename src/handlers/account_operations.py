@@ -157,9 +157,7 @@ def _delete_all_user_data(account_id: str, context: Any, logger: Any) -> None:
     logger.info("Deleted all user data from DynamoDB")
 
 
-def _lookup_cognito_user_with_retry(
-    cognito: Any, user_pool_id: str, account_id: str, logger: Any
-) -> str | None:
+def _lookup_cognito_user_with_retry(cognito: Any, user_pool_id: str, account_id: str, logger: Any) -> str | None:
     """Look up Cognito username by sub with retry for transient errors."""
     attempt = 0
     max_retries = 3
