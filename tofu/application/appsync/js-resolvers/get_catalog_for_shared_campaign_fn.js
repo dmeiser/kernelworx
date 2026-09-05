@@ -14,11 +14,15 @@ export function response(ctx) {
     if (!ctx.result) {
         util.error('Catalog not found', 'NotFound');
     }
-    
+
     // READ ACCESS: Anyone can read catalog by ID (no authorization check).
     // Security relies on UUID obscurity - catalogIds are not guessable.
     // WRITE ACCESS: Only owner can update/delete (checked in update/delete resolvers).
     const catalog = ctx.result;
+    if (catalog.isDeleted === true) {
+        util.error('Catalog has been deleted', 'NotFound');
+    }
+
     ctx.stash.catalog = catalog;
     return catalog;
 }

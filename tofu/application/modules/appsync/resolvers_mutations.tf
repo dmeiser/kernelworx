@@ -156,6 +156,7 @@ resource "aws_appsync_resolver" "delete_campaign" {
       aws_appsync_function.check_share_permissions.function_id,
       aws_appsync_function.delete_campaign_orders_lambda.function_id,
       aws_appsync_function.delete_campaign.function_id,
+      aws_appsync_function.verify_campaign_delete_propagation.function_id,
     ]
   }
 
@@ -217,6 +218,7 @@ resource "aws_appsync_resolver" "delete_order" {
       aws_appsync_function.verify_profile_write_access.function_id,
       aws_appsync_function.check_share_permissions.function_id,
       aws_appsync_function.delete_order.function_id,
+      aws_appsync_function.verify_order_delete_propagation.function_id,
     ]
   }
 
@@ -293,6 +295,7 @@ resource "aws_appsync_resolver" "delete_catalog" {
     functions = [
       aws_appsync_function.get_catalog_for_delete.function_id,
       aws_appsync_function.check_catalog_usage.function_id,
+      aws_appsync_function.check_shared_campaign_usage.function_id,
       aws_appsync_function.delete_catalog_fn.function_id,
     ]
   }

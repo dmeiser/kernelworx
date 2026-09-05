@@ -108,6 +108,7 @@ fileName
 finditer
 findme
 fontSize
+fontsource
 formData
 Frontend
 fullname
@@ -295,6 +296,7 @@ sharedCampaignCode
 sharedCampaigns
 sheetjs
 shortlink
+Shelbyville
 Signin
 signout
 Signup

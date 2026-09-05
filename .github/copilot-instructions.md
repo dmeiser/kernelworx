@@ -219,37 +219,42 @@ module "dynamodb" {
 
 **Access Control Logic**:
 ```python
-def check_profile_access(caller_account_id: str, profile_id: str, action: str) -> bool:
+def check_profile_access(caller_account_id: str, profile_id: str, required_permission: str = "READ") -> bool:
     """
-    Check if caller can perform action on profile.
+    Check if caller can perform required_permission on profile.
     
-    Actions: 'read', 'write', 'admin'
+    Permissions: "READ", "WRITE"
     
     Returns True if:
-    - Caller is owner (ownerAccountId == caller_account_id)
-    - Caller has Share with appropriate permissions
-    - Caller is admin (for override scenarios)
+    - Caller is owner (strongly consistent base-table lookup succeeds)
+    - Caller has a Share with appropriate permissions AND the share's
+      stored ownerAccountId still matches the profile's current owner
+    
+    Raises NOT_FOUND if the profile does not exist.
+    Admin checks are performed separately via is_admin(); do not add them here.
     """
-    # Check ownership
-    profile = get_profile(profile_id)
-    if profile['ownerAccountId'] == caller_account_id:
+    # Check ownership with a strongly consistent base-table read
+    if is_profile_owner(caller_account_id, profile_id):
         return True
     
-    # Check shares
+    # Check shares with strongly consistent reads and validate against
+    # the profile's current owner to reject stale/revoked shares.
     share = get_share(profile_id, caller_account_id)
-    if share:
-        if action == 'read' and 'READ' in share['permissions']:
-            return True
-        if action == 'write' and 'WRITE' in share['permissions']:
-            return True
+    if share and share_still_valid(share, profile_id):
+        return required_permission in share["permissions"]
     
-    # Check admin override
-    account = get_account(caller_account_id)
-    if account.get('isAdmin') and action == 'admin':
-        return True
+    # Distinguish missing profiles from forbidden access
+    if not profile_exists(profile_id):
+        raise NotFound(f"Profile {profile_id} not found")
     
     return False
 ```
+
+**Important implementation details**:
+- Owner checks use strongly consistent `get_item` on the profiles base table.
+- Share lookups use strongly consistent `get_item` / `BatchGetItem`.
+- A share stores the `ownerAccountId` that existed when it was created; auth validates that owner still owns the profile. After an ownership transfer, old shares become invalid automatically because the old owner's base-table record is gone.
+- Use `check_profile_access()` or `require_profile_access()` for access-control decisions. `is_profile_owner()` uses the eventually consistent GSI and is only suitable for non-authoritative hints.
 
 ## 7. GraphQL Resolver Pattern - PREFER NON-LAMBDA
 

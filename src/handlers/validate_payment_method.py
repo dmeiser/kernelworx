@@ -2,7 +2,9 @@
 Lambda handler for validating payment methods during order creation and updates.
 
 This handler is called as part of the createOrder and updateOrder pipelines to ensure
-the payment method exists for the profile owner's account.
+a supplied payment method exists for the profile owner's account. When no payment
+method is supplied (e.g. updateOrder changing other fields), it passes through
+without validation so historical payment methods remain valid.
 """
 
 from typing import Any, Dict
@@ -18,8 +20,12 @@ except ModuleNotFoundError:  # pragma: no cover
     from src.utils.payment_methods import validate_payment_method_exists
 
 
-def _extract_and_normalize_inputs(event: Dict[str, Any]) -> tuple[str | None, str | None]:
-    """Extract and normalize owner_account_id and payment_method from event."""
+def _extract_and_normalize_inputs(event: Dict[str, Any]) -> tuple[str, str | None]:
+    """Extract and normalize owner_account_id and payment_method from event.
+
+    Returns the payment_method as None when it is not supplied so callers can
+    decide whether validation is required (e.g. updateOrder may omit it).
+    """
     prev_result = event.get("prev", {}).get("result", {})
     arguments = event.get("arguments", {})
     input_data = arguments.get("input", {})
@@ -30,9 +36,7 @@ def _extract_and_normalize_inputs(event: Dict[str, Any]) -> tuple[str | None, st
 
     payment_method = input_data.get("paymentMethod")
     if payment_method is None:
-        # updateOrder allows partial updates; skip validation when paymentMethod
-        # is not provided so that other fields can be updated without it.
-        return None, None
+        return owner_account_id, None
 
     if not payment_method:
         raise AppError(ErrorCode.INVALID_INPUT, "Payment method is required")
@@ -43,38 +47,40 @@ def _extract_and_normalize_inputs(event: Dict[str, Any]) -> tuple[str | None, st
     return owner_account_id, payment_method
 
 
-def _prev_result_as_dict(event: Dict[str, Any]) -> Dict[str, Any]:
-    """Return the previous pipeline result as a mutable dict."""
-    prev_result = event.get("prev", {}).get("result", {})
-    return dict(prev_result) if isinstance(prev_result, dict) else {}
-
-
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
     Validate that the payment method exists for the profile owner's account.
 
+    If arguments.input.paymentMethod is missing or None, the handler
+    returns prev.result unchanged. This makes it safe to use in updateOrder,
+    where paymentMethod is optional and should only be validated when supplied.
+    A present-but-empty payment method is rejected as invalid input.
+
     Args:
         event: AppSync pipeline event with:
             - prev.result.ownerAccountId: Profile owner's account ID
-            - arguments.input.paymentMethod: Optional payment method name.
-              When omitted, validation is skipped so updateOrder can perform
-              partial updates without changing the payment method.
+            - arguments.input.paymentMethod: Optional payment method name
         context: Lambda context (unused)
 
     Returns:
-        The input unchanged (passthrough)
+        The previous pipeline result unchanged (passthrough)
 
     Raises:
-        AppError: If payment method is required but missing or does not exist
-            for the account.
+        AppError: If payment method is supplied but does not exist for the account
     """
     logger = get_logger(__name__)
 
     try:
         owner_account_id, payment_method = _extract_and_normalize_inputs(event)
 
-        if owner_account_id is None or payment_method is None:
-            return _prev_result_as_dict(event)
+        prev_result = event.get("prev", {}).get("result", {})
+        result: Dict[str, Any] = dict(prev_result) if isinstance(prev_result, dict) else {}
+
+        if not payment_method:
+            # Payment method not supplied; nothing to validate. This allows
+            # updateOrder to modify other fields without re-validating the
+            # existing payment method (including historical custom methods).
+            return result
 
         logger.info(
             "Validating payment method for order", owner_account_id=owner_account_id, payment_method=payment_method
@@ -84,7 +90,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             "Payment method validated successfully", owner_account_id=owner_account_id, payment_method=payment_method
         )
 
-        return _prev_result_as_dict(event)
+        return result
 
     except AppError:
         # Re-raise app errors

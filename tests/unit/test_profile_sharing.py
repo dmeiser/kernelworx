@@ -953,3 +953,159 @@ class TestListMyShares:
         # When Responses is missing or not a dict
         assert _extract_batch_profiles({}, target_table) == []
         assert _extract_batch_profiles({"Responses": None}, target_table) == []  # type: ignore[dict-item]
+
+    def test_filters_shares_with_empty_permissions(
+        self,
+        dynamodb_table: Any,
+        shares_table: Any,
+        another_account_id: str,
+        sample_account_id: str,
+        appsync_event: Dict[str, Any],
+        lambda_context: Any,
+    ) -> None:
+        """Test that shares with empty permissions are ignored (#242)."""
+        from src.handlers.profile_sharing import list_my_shares
+
+        valid_profile_id = "PROFILE#valid-perms"
+        empty_profile_id = "PROFILE#empty-perms"
+        owner_id = f"ACCOUNT#{sample_account_id}"
+
+        for profile_id in [valid_profile_id, empty_profile_id]:
+            dynamodb_table.put_item(
+                Item={
+                    "ownerAccountId": owner_id,
+                    "profileId": profile_id,
+                    "sellerName": "Test Scout",
+                    "createdAt": "2024-01-01T00:00:00Z",
+                    "updatedAt": "2024-01-01T00:00:00Z",
+                }
+            )
+
+        shares_table.put_item(
+            Item={
+                "profileId": valid_profile_id,
+                "targetAccountId": f"ACCOUNT#{another_account_id}",
+                "ownerAccountId": owner_id,
+                "permissions": ["READ"],
+                "createdAt": "2024-01-01T00:00:00Z",
+            }
+        )
+        shares_table.put_item(
+            Item={
+                "profileId": empty_profile_id,
+                "targetAccountId": f"ACCOUNT#{another_account_id}",
+                "ownerAccountId": owner_id,
+                "permissions": [],
+                "createdAt": "2024-01-01T00:00:00Z",
+            }
+        )
+
+        event = {**appsync_event, "identity": {"sub": another_account_id}}
+        result = list_my_shares(event, lambda_context)
+
+        assert len(result) == 1
+        assert result[0]["profileId"] == valid_profile_id
+
+    def test_filters_shares_with_invalid_permissions(
+        self,
+        dynamodb_table: Any,
+        shares_table: Any,
+        another_account_id: str,
+        sample_account_id: str,
+        appsync_event: Dict[str, Any],
+        lambda_context: Any,
+    ) -> None:
+        """Test that shares with unsupported permissions are ignored (#242)."""
+        from src.handlers.profile_sharing import list_my_shares
+
+        valid_profile_id = "PROFILE#valid-perms"
+        invalid_profile_id = "PROFILE#invalid-perms"
+        owner_id = f"ACCOUNT#{sample_account_id}"
+
+        for profile_id in [valid_profile_id, invalid_profile_id]:
+            dynamodb_table.put_item(
+                Item={
+                    "ownerAccountId": owner_id,
+                    "profileId": profile_id,
+                    "sellerName": "Test Scout",
+                    "createdAt": "2024-01-01T00:00:00Z",
+                    "updatedAt": "2024-01-01T00:00:00Z",
+                }
+            )
+
+        shares_table.put_item(
+            Item={
+                "profileId": valid_profile_id,
+                "targetAccountId": f"ACCOUNT#{another_account_id}",
+                "ownerAccountId": owner_id,
+                "permissions": ["WRITE"],
+                "createdAt": "2024-01-01T00:00:00Z",
+            }
+        )
+        shares_table.put_item(
+            Item={
+                "profileId": invalid_profile_id,
+                "targetAccountId": f"ACCOUNT#{another_account_id}",
+                "ownerAccountId": owner_id,
+                "permissions": ["ADMIN", "DELETE"],
+                "createdAt": "2024-01-01T00:00:00Z",
+            }
+        )
+
+        event = {**appsync_event, "identity": {"sub": another_account_id}}
+        result = list_my_shares(event, lambda_context)
+
+        assert len(result) == 1
+        assert result[0]["profileId"] == valid_profile_id
+
+    def test_filters_shares_with_missing_permissions(
+        self,
+        dynamodb_table: Any,
+        shares_table: Any,
+        another_account_id: str,
+        sample_account_id: str,
+        appsync_event: Dict[str, Any],
+        lambda_context: Any,
+    ) -> None:
+        """Test that shares missing the permissions attribute are ignored (#242)."""
+        from src.handlers.profile_sharing import list_my_shares
+
+        valid_profile_id = "PROFILE#valid-perms"
+        missing_profile_id = "PROFILE#missing-perms"
+        owner_id = f"ACCOUNT#{sample_account_id}"
+
+        for profile_id in [valid_profile_id, missing_profile_id]:
+            dynamodb_table.put_item(
+                Item={
+                    "ownerAccountId": owner_id,
+                    "profileId": profile_id,
+                    "sellerName": "Test Scout",
+                    "createdAt": "2024-01-01T00:00:00Z",
+                    "updatedAt": "2024-01-01T00:00:00Z",
+                }
+            )
+
+        shares_table.put_item(
+            Item={
+                "profileId": valid_profile_id,
+                "targetAccountId": f"ACCOUNT#{another_account_id}",
+                "ownerAccountId": owner_id,
+                "permissions": ["READ"],
+                "createdAt": "2024-01-01T00:00:00Z",
+            }
+        )
+        shares_table.put_item(
+            Item={
+                "profileId": missing_profile_id,
+                "targetAccountId": f"ACCOUNT#{another_account_id}",
+                "ownerAccountId": owner_id,
+                # permissions intentionally missing
+                "createdAt": "2024-01-01T00:00:00Z",
+            }
+        )
+
+        event = {**appsync_event, "identity": {"sub": another_account_id}}
+        result = list_my_shares(event, lambda_context)
+
+        assert len(result) == 1
+        assert result[0]["profileId"] == valid_profile_id

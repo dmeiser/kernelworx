@@ -71,12 +71,12 @@ def test_profile_sharing_deduplicate_and_extract_helpers():
     # Deduplicate skips invalid entries and keeps first valid share
     shares = [
         {"profileId": "P1"},
-        {"profileId": "P1", "ownerAccountId": "A1"},
-        {"profileId": "P1", "ownerAccountId": "A1", "extra": True},
-        {"profileId": "P2", "ownerAccountId": 123},
+        {"profileId": "P1", "ownerAccountId": "A1", "permissions": ["READ"]},
+        {"profileId": "P1", "ownerAccountId": "A1", "permissions": ["READ"], "extra": True},
+        {"profileId": "P2", "ownerAccountId": 123, "permissions": ["READ"]},
     ]
     deduped = profile_sharing._deduplicate_shares(shares)
-    assert deduped == {"P1": {"profileId": "P1", "ownerAccountId": "A1", "permissions": []}}
+    assert deduped == {"P1": {"profileId": "P1", "ownerAccountId": "A1", "permissions": ["READ"]}}
 
     # Extract ignores responses when table name missing
     batch_response = {"Responses": {"Other": [{"profileId": "P3"}]}}

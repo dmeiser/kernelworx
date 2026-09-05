@@ -78,6 +78,19 @@ resource "aws_appsync_function" "delete_order" {
   code = file("${local.js_resolvers_dir}/delete_order_fn.js")
 }
 
+resource "aws_appsync_function" "verify_order_delete_propagation" {
+  api_id      = aws_appsync_graphql_api.main.id
+  data_source = aws_appsync_datasource.orders.name
+  name        = "VerifyOrderDeletePropagationFn${local.env_suffix}"
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/verify_order_delete_propagation_fn.js")
+}
+
 resource "aws_appsync_function" "get_campaign_for_order" {
   api_id      = aws_appsync_graphql_api.main.id
   data_source = aws_appsync_datasource.campaigns.name
