@@ -153,10 +153,17 @@ describe('DeleteAccountSection & AccountDeletionDialog', () => {
     // Should transition to progress view and show profile statuses
     await waitFor(() => {
       expect(screen.getByText('Discover account profiles')).toBeInTheDocument();
+      expect(screen.getByText('Found 2 seller profile(s)')).toBeInTheDocument();
+      expect(screen.getByText('Profile 1: Scout Alex')).toBeInTheDocument();
+      expect(screen.getByText('Profile 2: Scout Ben')).toBeInTheDocument();
+      expect(screen.getByText('Account, payment methods & credentials')).toBeInTheDocument();
     });
 
-    // Both profiles and account deletion complete
+    // Verify all steps complete with "Deleted" status and final success banner
     await waitFor(() => {
+      expect(screen.getByText('Account Deleted')).toBeInTheDocument();
+      expect(screen.getByText(/Account successfully deleted. You will be signed out momentarily./i)).toBeInTheDocument();
+      expect(screen.getAllByText('Deleted')).toHaveLength(3); // Profile 1, Profile 2, Account
       expect(onAccountDeleted).toHaveBeenCalledTimes(1);
     });
   });

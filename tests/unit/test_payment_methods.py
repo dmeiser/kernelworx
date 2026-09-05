@@ -961,6 +961,49 @@ class TestDeleteAllUserQRCodes:
         deleted = payment_methods.delete_all_user_qr_codes(sample_account_id)
         assert deleted == 0
 
+    def test_delete_all_user_qr_codes_versions_and_markers(self, monkeypatch: Any, sample_account_id: str) -> None:
+        """Test delete_all_user_qr_codes with versions, delete markers, and logger."""
+        monkeypatch.setenv("EXPORTS_BUCKET", "test-exports-bucket")
+        mock_s3 = MagicMock()
+        mock_paginator = MagicMock()
+        mock_paginator.paginate.return_value = [
+            {
+                "Versions": [
+                    {"Key": f"payment-qr-codes/{sample_account_id}/qr.png", "VersionId": "v1"},
+                    {"Key": "", "VersionId": "v2"},
+                    {"Key": f"payment-qr-codes/{sample_account_id}/qr.png"},
+                ],
+                "DeleteMarkers": [
+                    {"Key": f"payment-qr-codes/{sample_account_id}/qr.png", "VersionId": "m1"},
+                    {"Key": "", "VersionId": "m2"},
+                    {"VersionId": "m3"},
+                ],
+            },
+            {"Versions": [], "DeleteMarkers": []},
+        ]
+        mock_s3.get_paginator.return_value = mock_paginator
+        mock_logger = MagicMock()
+
+        with patch.object(payment_methods, "_get_s3_client", return_value=mock_s3):
+            deleted = payment_methods.delete_all_user_qr_codes(sample_account_id, logger=mock_logger)
+            assert deleted == 2
+            mock_s3.delete_objects.assert_called_once()
+            mock_logger.info.assert_called_once()
+
+    def test_delete_all_user_qr_codes_error_handled_gracefully(
+        self, monkeypatch: Any, sample_account_id: str
+    ) -> None:
+        """Test delete_all_user_qr_codes handles S3 exceptions gracefully."""
+        monkeypatch.setenv("EXPORTS_BUCKET", "test-exports-bucket")
+        mock_s3 = MagicMock()
+        mock_s3.get_paginator.side_effect = Exception("S3 error")
+        mock_logger = MagicMock()
+
+        with patch.object(payment_methods, "_get_s3_client", return_value=mock_s3):
+            deleted = payment_methods.delete_all_user_qr_codes(sample_account_id, logger=mock_logger)
+            assert deleted == 0
+            mock_logger.warning.assert_called()
+
 
 class TestEdgeCases:
     """Test edge cases and error handling."""
