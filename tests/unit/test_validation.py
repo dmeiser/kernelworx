@@ -352,4 +352,3 @@ class TestValidateRequiredFields:
         with pytest.raises(AppError) as exc_info:
             validate_required_fields({"name": []}, ["name"])
         assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
-

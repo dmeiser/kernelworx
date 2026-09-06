@@ -22,7 +22,6 @@ def test_validation_validate_unit_fields_requires_unit_number():
     assert ensure_profile_id("abc") == "PROFILE#abc"
 
 
-
 def test_pre_signup_handle_signup_exception():
     from botocore.exceptions import ClientError
 
@@ -738,7 +737,6 @@ def test_profile_sharing_fetch_batch_with_zero_retries():
 
     result = profile_sharing._fetch_batch_with_retry([], None, DummyLogger(), retries=0)  # type: ignore[arg-type]
     assert result == []
-
 
 
 def test_campaign_reporting_propagates_batch_access_error(monkeypatch):

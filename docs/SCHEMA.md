@@ -221,13 +221,12 @@ flowchart TD
 ```mermaid
 sequenceDiagram
     User->>Frontend: Create campaign from shared code
-    Frontend->>GraphQL: CreateCampaignFromShared(sharedCampaignCode)
-    GraphQL->>Lambda: Validate code & permissions
-    Lambda->>SHARED_CAMPAIGN: Get template (PK: sharedCampaignCode)
-    Lambda->>CATALOG: Verify catalog exists
-    Lambda->>CAMPAIGN: Create new campaign
-    Lambda->>CAMPAIGN: Set sharedCampaignCode reference
-    Lambda->>Frontend: Return new campaignId
+    Frontend->>GraphQL: createCampaign(input with sharedCampaignCode)
+    GraphQL->>Pipeline: Verify profile write access (owner or WRITE share)
+    Pipeline->>SHARED_CAMPAIGN: Get template (PK: sharedCampaignCode, must be active)
+    Pipeline->>CAMPAIGN: Create new campaign with sharedCampaignCode reference
+    Pipeline->>SHARE: Grant template creator READ access when shareWithCreator
+    Pipeline->>Frontend: Return new campaignId
     Frontend->>User: Redirect to campaign
 ```
 
