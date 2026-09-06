@@ -92,7 +92,6 @@ The current app function keys are:
 - `campaign-operations`
 - `delete-campaign-orders`
 - `delete-profile-cascade`
-- `update-account`
 - `delete-account`
 - `transfer-ownership`
 - `request-qr-upload`

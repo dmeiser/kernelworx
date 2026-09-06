@@ -328,7 +328,6 @@ import {
     "request-report",
     "transfer-ownership",
     "unit-reporting",
-    "update-account",
     "validate-payment-method",
   ])
   id = "/aws/lambda/${local.name_prefix}-${each.value}-${var.region_abbrev}-${var.environment}"

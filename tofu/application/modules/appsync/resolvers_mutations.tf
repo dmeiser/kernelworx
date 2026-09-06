@@ -433,13 +433,21 @@ resource "aws_appsync_resolver" "delete_shared_campaign" {
 
 # === ACCOUNT & PREFERENCES MUTATIONS ===
 
-# updateMyAccount (Lambda)
+# updateMyAccount (JS)
 resource "aws_appsync_resolver" "update_my_account" {
   api_id      = aws_appsync_graphql_api.main.id
   type        = "Mutation"
   field       = "updateMyAccount"
-  data_source = aws_appsync_datasource.update_account.name
+  data_source = aws_appsync_datasource.accounts.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/update_my_account_resolver.js")
 }
+
 
 # deleteMyAccount (Lambda)
 resource "aws_appsync_resolver" "delete_my_account" {
