@@ -49,6 +49,8 @@ Tainting shared pipeline functions via `lifecycle { replace_triggered_by = ... }
 
 `tofu/application/modules/appsync` reads resolver code from `tofu/application/appsync/dist/` (gitignored), not from `js-resolvers/` (the source that tests run against). `dist/` is produced by `npm run build:resolvers` (esbuild bundles `js-resolvers/*.js`, inlining `lib/`, keeping `@aws-appsync/utils` external). Every `tofu plan`, `apply`, `import`, or `destroy` fails with `Invalid function argument` from `file()` when `dist/` is missing, so run the build first for local tofu commands; `scripts/ephemeral-env.sh` (both `up` and `down`) and the recover scripts do it automatically, and CI workflows run a root `npm ci` before any tofu step. A stale `dist/` silently desyncs `resolver_code_hashes.tf`, so re-run the build after editing resolver sources.
 
+The build is also a prerequisite for the backend unit suite: `tests/unit/test_ephemeral_reliability.py` drives `ephemeral-env.sh` and the recover scripts with mocked `aws`/`tofu` but real `npm`, so `pytest tests/unit` needs Node.js and root `npm install` first (the CI backend job installs both).
+
 ### AppSync resolver-only authorization posture (#71)
 
 KernelWorx uses Amazon Cognito User Pools for AppSync authentication and `default_action = "ALLOW"` on the user pool config. AppSync therefore admits any authenticated Cognito user to every field by default; schema-level directives do not enforce ownership or share-based access control.

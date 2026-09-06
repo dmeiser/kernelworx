@@ -10,6 +10,9 @@ Audience: contributors working on KernelWorx. Focuses on day-to-day commands, qu
   uv run pytest tests/unit --cov=src --cov-fail-under=100
   ```
 
+  Requires Node.js and root `npm install` first: the ephemeral-reliability unit
+  tests run the deploy/recover scripts, which invoke `npm run build:resolvers`.
+
 #### Frontend (TypeScript)
 - Unit/component tests with coverage:
   ```bash
