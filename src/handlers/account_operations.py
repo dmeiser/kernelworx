@@ -23,7 +23,6 @@ except ModuleNotFoundError:  # pragma: no cover
 logger = get_logger(__name__)
 
 
-
 def _delete_all_user_data(account_id: str, context: Any, logger: Any) -> None:
     """Delete all user data from DynamoDB using shared deletion internals."""
     from .admin_operations import (
