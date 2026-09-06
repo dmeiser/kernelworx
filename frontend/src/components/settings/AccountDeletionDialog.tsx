@@ -111,8 +111,8 @@ function ProfilesPreviewList({ isLoading, error, profiles, isDiscovered }: Profi
     if (error) {
       return (
         <Alert severity="error" sx={{ my: 1.5 }}>
-          Failed to load seller profiles: {error}. You can still delete your account; associated
-          profiles will be removed server-side.
+          Failed to load seller profiles: {error}. Please try again or check your connection
+          before deleting your account.
         </Alert>
       );
     }
@@ -227,7 +227,28 @@ function ProgressHeader({ step }: { step: UseAccountDeletionReturn['step'] }) {
   );
 }
 
-function DiscoveryListItem({ isDiscovered, count }: { isDiscovered: boolean; count: number }) {
+function DiscoveryListItem({
+  isDiscovered,
+  count,
+  isError,
+}: {
+  isDiscovered: boolean;
+  count: number;
+  isError?: boolean;
+}) {
+  if (isError && !isDiscovered) {
+    return (
+      <ListItem>
+        <ListItemIcon>
+          <ErrorIcon color="error" fontSize="small" />
+        </ListItemIcon>
+        <ListItemText
+          primary="Discover account profiles"
+          secondary="Failed to discover profiles"
+        />
+      </ListItem>
+    );
+  }
   const icon = isDiscovered ? (
     <CheckCircleIcon color="success" fontSize="small" />
   ) : (
@@ -332,11 +353,16 @@ function ProgressList({ deletion }: { deletion: UseAccountDeletionReturn }) {
   const isDiscovered = deletion.isDiscovered;
   const isAccountFailed =
     deletion.step === 'error' &&
+    deletion.profiles.length > 0 &&
     deletion.profiles.every((p) => p.status === 'completed');
 
   return (
     <List dense sx={{ my: 1 }}>
-      <DiscoveryListItem isDiscovered={isDiscovered} count={deletion.profiles.length} />
+      <DiscoveryListItem
+        isDiscovered={isDiscovered}
+        count={deletion.profiles.length}
+        isError={deletion.step === 'error'}
+      />
       {deletion.profiles.map((profile, idx) => (
         <ProfileListItem key={profile.profileId} profile={profile} index={idx} />
       ))}

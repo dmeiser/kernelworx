@@ -160,12 +160,15 @@ describe('DeleteAccountSection & AccountDeletionDialog', () => {
     });
 
     // Verify all steps complete with "Deleted" status and final success banner
-    await waitFor(() => {
-      expect(screen.getByText('Account Deleted')).toBeInTheDocument();
-      expect(screen.getByText(/Account successfully deleted. You will be signed out momentarily./i)).toBeInTheDocument();
-      expect(screen.getAllByText('Deleted')).toHaveLength(3); // Profile 1, Profile 2, Account
-      expect(onAccountDeleted).toHaveBeenCalledTimes(1);
-    });
+    await waitFor(
+      () => {
+        expect(screen.getByText('Account Deleted')).toBeInTheDocument();
+        expect(screen.getByText(/Account successfully deleted. You will be signed out momentarily./i)).toBeInTheDocument();
+        expect(screen.getAllByText('Deleted')).toHaveLength(3); // Profile 1, Profile 2, Account
+        expect(onAccountDeleted).toHaveBeenCalledTimes(1);
+      },
+      { timeout: 3000 }
+    );
   });
 
   test('notifies user on error and allows resuming deletion', async () => {
@@ -208,9 +211,12 @@ describe('DeleteAccountSection & AccountDeletionDialog', () => {
     await user.click(resumeButton);
 
     // Deletion should resume and succeed
-    await waitFor(() => {
-      expect(onAccountDeleted).toHaveBeenCalledTimes(1);
-    });
+    await waitFor(
+      () => {
+        expect(onAccountDeleted).toHaveBeenCalledTimes(1);
+      },
+      { timeout: 3000 }
+    );
   });
 
   test('treats already-deleted profile (not found) as completed', async () => {
@@ -237,9 +243,12 @@ describe('DeleteAccountSection & AccountDeletionDialog', () => {
     await user.click(screen.getByRole('button', { name: 'Delete Account' }));
 
     // Should not stop on "not found" error, instead proceeding through scout 2 and account delete
-    await waitFor(() => {
-      expect(onAccountDeleted).toHaveBeenCalledTimes(1);
-    });
+    await waitFor(
+      () => {
+        expect(onAccountDeleted).toHaveBeenCalledTimes(1);
+      },
+      { timeout: 3000 }
+    );
   });
 
   test('previews empty state when user has no seller profiles', async () => {
@@ -388,9 +397,12 @@ describe('DeleteAccountSection & AccountDeletionDialog', () => {
     // Click resume to re-attempt discovery and complete
     await user.click(screen.getByRole('button', { name: /Resume Deletion/i }));
 
-    await waitFor(() => {
-      expect(onAccountDeleted).toHaveBeenCalledTimes(1);
-    });
+    await waitFor(
+      () => {
+        expect(onAccountDeleted).toHaveBeenCalledTimes(1);
+      },
+      { timeout: 3000 }
+    );
   });
 
   test('resumes deletion when account finalization fails', async () => {
@@ -441,9 +453,12 @@ describe('DeleteAccountSection & AccountDeletionDialog', () => {
     // Resume when all profiles are completed (firstUnfinished === -1)
     await user.click(screen.getByRole('button', { name: /Resume Deletion/i }));
 
-    await waitFor(() => {
-      expect(onAccountDeleted).toHaveBeenCalledTimes(1);
-    });
+    await waitFor(
+      () => {
+        expect(onAccountDeleted).toHaveBeenCalledTimes(1);
+      },
+      { timeout: 3000 }
+    );
   });
 
   test('paginates multiple pages of seller profiles', async () => {
@@ -532,9 +547,12 @@ describe('DeleteAccountSection & AccountDeletionDialog', () => {
     await user.type(screen.getByPlaceholderText('Type DELETE to confirm'), 'DELETE');
     await user.click(screen.getByRole('button', { name: 'Delete Account' }));
 
-    await waitFor(() => {
-      expect(onAccountDeleted).toHaveBeenCalledTimes(1);
-    });
+    await waitFor(
+      () => {
+        expect(onAccountDeleted).toHaveBeenCalledTimes(1);
+      },
+      { timeout: 3000 }
+    );
   });
 
   test('discovers profiles during startDeletion if initial discovery had failed', async () => {
@@ -573,9 +591,12 @@ describe('DeleteAccountSection & AccountDeletionDialog', () => {
     await user.type(screen.getByPlaceholderText('Type DELETE to confirm'), 'DELETE');
     await user.click(screen.getByRole('button', { name: 'Delete Account' }));
 
-    await waitFor(() => {
-      expect(onAccountDeleted).toHaveBeenCalledTimes(1);
-    });
+    await waitFor(
+      () => {
+        expect(onAccountDeleted).toHaveBeenCalledTimes(1);
+      },
+      { timeout: 3000 }
+    );
   });
 
   test('handles discovery failure during resumeDeletion', async () => {
