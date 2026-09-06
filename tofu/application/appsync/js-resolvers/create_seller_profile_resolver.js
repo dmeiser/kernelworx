@@ -11,7 +11,7 @@ export function request(ctx) {
     if (!sellerName) {
         util.error('sellerName is required', 'BadRequest');
     }
-    if (sellerName.length > 100) {
+    if ([...sellerName].length > 100) {
         util.error('sellerName cannot exceed 100 characters', 'BadRequest');
     }
 
@@ -23,7 +23,7 @@ export function request(ctx) {
     }
 
     if (input.unitNumber !== undefined && input.unitNumber !== null) {
-        if (typeof input.unitNumber !== 'number' || !Number.isInteger(input.unitNumber) || input.unitNumber < 1) {
+        if (typeof input.unitNumber !== 'number' || !Number.isFinite(input.unitNumber) || Math.floor(input.unitNumber) !== input.unitNumber || input.unitNumber < 1) {
             util.error('unitNumber must be a positive integer', 'BadRequest');
         }
     }

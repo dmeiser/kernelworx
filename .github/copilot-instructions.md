@@ -314,7 +314,6 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 **Currently required as Lambda:**
 - `post-auth` (Cognito trigger)
 - `request-report` (Excel/S3)
-- `create-profile` (DynamoDB transaction)
 
 ## 8. Common Patterns
 
