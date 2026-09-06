@@ -312,7 +312,6 @@ resource "aws_acm_certificate_validation" "site" {
 import {
   for_each = toset([
     "admin-operations",
-    "campaign-operations",
     "confirm-qr-upload",
     "create-profile",
     "delete-account",

@@ -79,16 +79,6 @@ resource "aws_appsync_datasource" "list_unit_campaign_catalogs" {
   }
 }
 
-resource "aws_appsync_datasource" "campaign_operations" {
-  api_id           = aws_appsync_graphql_api.main.id
-  name             = "CampaignOperationsDS"
-  type             = "AWS_LAMBDA"
-  service_role_arn = var.appsync_service_role_arn
-
-  lambda_config {
-    function_arn = var.lambda_function_arns["campaign-operations"]
-  }
-}
 
 resource "aws_appsync_datasource" "delete_campaign_orders" {
   api_id           = aws_appsync_graphql_api.main.id

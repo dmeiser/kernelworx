@@ -9,7 +9,9 @@ from src.utils.validation import (
     normalize_phone,
     validate_address,
     validate_invite_code,
+    validate_required_fields,
     validate_seller_name,
+    validate_unit_fields,
     validate_unit_number,
     validate_unit_type,
 )
@@ -285,3 +287,69 @@ class TestValidateUnitType:
             validate_unit_type("InvalidType")
         assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
         assert "unitType must be one of:" in exc_info.value.message
+
+
+class TestValidateUnitFields:
+    """Tests for validate_unit_fields function."""
+
+    def test_absent_unit_type_returns_none(self) -> None:
+        """Test that absent unit type returns None."""
+        assert validate_unit_fields(None, 123, "City", "ST") is None
+        assert validate_unit_fields("", 123, "City", "ST") is None
+
+    def test_missing_unit_number_raises_error(self) -> None:
+        """Test that missing unit number raises error."""
+        with pytest.raises(AppError) as exc_info:
+            validate_unit_fields("Pack", None, "City", "ST")
+        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+
+    def test_missing_city_raises_error(self) -> None:
+        """Test that missing city raises error."""
+        with pytest.raises(AppError) as exc_info:
+            validate_unit_fields("Pack", 123, "", "ST")
+        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+        assert "city is required" in exc_info.value.message
+
+    def test_missing_state_raises_error(self) -> None:
+        """Test that missing state raises error."""
+        with pytest.raises(AppError) as exc_info:
+            validate_unit_fields("Pack", 123, "City", "")
+        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+        assert "state is required" in exc_info.value.message
+
+    def test_valid_unit_fields(self) -> None:
+        """Test valid unit fields return tuple."""
+        result = validate_unit_fields("Pack", 123, "Springfield", "IL")
+        assert result == ("Pack", 123, "Springfield", "IL")
+
+
+class TestValidateRequiredFields:
+    """Tests for validate_required_fields function."""
+
+    def test_all_fields_present(self) -> None:
+        """Test validation passes when all required fields are present and non-empty."""
+        data = {"name": "Test", "id": 123, "items": ["a"]}
+        validate_required_fields(data, ["name", "id", "items"])
+
+    def test_missing_field_raises_error(self) -> None:
+        """Test that missing field raises AppError."""
+        with pytest.raises(AppError) as exc_info:
+            validate_required_fields({"name": "Test"}, ["name", "missing"])
+        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+        assert "missing is required" in exc_info.value.message
+
+    def test_empty_field_raises_error(self) -> None:
+        """Test that None, empty string, or empty list raises AppError."""
+        with pytest.raises(AppError) as exc_info:
+            validate_required_fields({"name": None}, ["name"])
+        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+        assert "name is required" in exc_info.value.message
+
+        with pytest.raises(AppError) as exc_info:
+            validate_required_fields({"name": ""}, ["name"])
+        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+
+        with pytest.raises(AppError) as exc_info:
+            validate_required_fields({"name": []}, ["name"])
+        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+

@@ -168,12 +168,29 @@ resource "aws_appsync_resolver" "delete_campaign" {
   code = file("${local.js_resolvers_dir}/delete_campaign_pipeline_resolver_v2.js")
 }
 
-# createCampaign (Lambda)
+# createCampaign Pipeline
 resource "aws_appsync_resolver" "create_campaign" {
-  api_id      = aws_appsync_graphql_api.main.id
-  type        = "Mutation"
-  field       = "createCampaign"
-  data_source = aws_appsync_datasource.campaign_operations.name
+  api_id = aws_appsync_graphql_api.main.id
+  type   = "Mutation"
+  field  = "createCampaign"
+  kind   = "PIPELINE"
+
+  pipeline_config {
+    functions = [
+      aws_appsync_function.verify_profile_write_access.function_id,
+      aws_appsync_function.check_share_permissions.function_id,
+      aws_appsync_function.lookup_shared_campaign.function_id,
+      aws_appsync_function.create_campaign.function_id,
+      aws_appsync_function.create_campaign_share.function_id,
+    ]
+  }
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/create_campaign_pipeline_resolver.js")
 }
 
 # === ORDER MUTATIONS ===
