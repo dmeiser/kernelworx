@@ -50,7 +50,7 @@ uv run pytest tests/e2e/test_smoke_auth.py -v
 
 ### Deployment
 - **Backend/OpenTofu (dev only)**:
-  - From the repo root: `./tofu/application/scripts/deploy.sh dev apply`
+  - From the repo root (after `npm install`): `./tofu/application/scripts/deploy.sh dev apply` (the helper bundles resolver JS automatically)
   - Preview first when making infra changes: `./tofu/application/scripts/deploy.sh dev plan` (respect dev-only deployment rule).
 - **Frontend**:
   - From `frontend/`: `./deploy.sh` (ensure build succeeds locally with `npm run build`).

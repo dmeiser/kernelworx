@@ -87,7 +87,7 @@ python --version  # Should be 3.14+
 uv --version
 
 # Check Node.js
-node --version  # Should be 20+
+node --version  # Should be 24+
 
 # Check AWS credentials
 aws sts get-caller-identity
@@ -249,6 +249,7 @@ uv run ruff format src/ tests/
 uv run mypy src/
 
 # Run all checks
+# Requires Node.js and root `npm install` first (see Installation above)
 uv run ruff check --select I --fix src/ tests/ && \
 uv run ruff format src/ tests/ && \
 uv run mypy src/ && \

@@ -81,6 +81,7 @@ uv run ruff format src/ tests/
 uv run mypy src/
 
 # Run tests with coverage
+# Requires Node.js and root `npm install` first (see Installation above)
 uv run pytest tests/unit --cov=src --cov-fail-under=100
 ```
 
