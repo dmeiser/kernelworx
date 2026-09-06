@@ -1,10 +1,6 @@
 import { util } from '@aws-appsync/utils';
 
 export function request(ctx) {
-  if (!ctx.stash) {
-    ctx.stash = {};
-  }
-
   const paymentMethod = (ctx.args && ctx.args.input && ctx.args.input.paymentMethod !== undefined)
     ? ctx.args.input.paymentMethod
     : null;
