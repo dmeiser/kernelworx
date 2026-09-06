@@ -86,11 +86,6 @@ locals {
       timeout     = 30
       memory_size = 256
     }
-    "create-profile" = {
-      handler     = "handlers.scout_operations.create_seller_profile"
-      timeout     = 30
-      memory_size = 256
-    }
     "request-report" = {
       handler     = "handlers.report_generation.request_campaign_report"
       timeout     = 60

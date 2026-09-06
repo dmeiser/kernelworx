@@ -314,7 +314,6 @@ import {
     "admin-operations",
     "campaign-operations",
     "confirm-qr-upload",
-    "create-profile",
     "delete-account",
     "delete-campaign-orders",
     "delete-profile-cascade",

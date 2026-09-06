@@ -316,7 +316,6 @@ import {
   for_each = toset([
     "list-my-shares",
     "list-catalogs-in-use",
-    "create-profile",
     "request-report",
     "unit-reporting",
     "list-unit-catalogs",

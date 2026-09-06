@@ -30,8 +30,3 @@ def test_reload_campaign_operations_import_fallback():
 def test_reload_campaign_reporting_import_fallback():
     module = _reload_module_with_no_utils("src.handlers.campaign_reporting")
     assert hasattr(module, "_build_unit_campaign_key")
-
-
-def test_reload_scout_operations_top_level():
-    module = _reload_module_with_no_utils("src.handlers.scout_operations")
-    assert hasattr(module, "create_seller_profile")
