@@ -80,7 +80,7 @@ resource "aws_appsync_function" "filter_payment_methods_by_access" {
 
 resource "aws_appsync_function" "validate_payment_method_appsync" {
   api_id      = aws_appsync_graphql_api.main.id
-  data_source = aws_appsync_datasource.validate_payment_method.name
+  data_source = aws_appsync_datasource.accounts.name
   name        = "ValidatePaymentMethodFn${local.env_suffix}"
 
   runtime {
@@ -88,7 +88,7 @@ resource "aws_appsync_function" "validate_payment_method_appsync" {
     runtime_version = "1.0.0"
   }
 
-  code = file("${local.js_resolvers_dir}/lambda_passthrough_resolver.js")
+  code = file("${local.js_resolvers_dir}/validate_payment_method_fn.js")
 }
 
 resource "aws_appsync_function" "validate_create_payment_method" {

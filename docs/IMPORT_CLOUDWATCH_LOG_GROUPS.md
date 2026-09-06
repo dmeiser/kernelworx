@@ -99,7 +99,6 @@ The current app function keys are:
 - `confirm-qr-upload`
 - `generate-qr-code-presigned-url`
 - `delete-qr-code`
-- `validate-payment-method`
 - `admin-operations`
 
 The current Cognito trigger function keys are:
@@ -122,7 +121,7 @@ for key in list-my-shares list-catalogs-in-use create-profile request-report uni
            list-unit-catalogs list-unit-campaign-catalogs campaign-operations \
            delete-campaign-orders delete-profile-cascade update-account delete-account \
            transfer-ownership request-qr-upload confirm-qr-upload \
-           generate-qr-code-presigned-url delete-qr-code validate-payment-method \
+           generate-qr-code-presigned-url delete-qr-code \
            admin-operations; do
   echo "tofu import 'module.lambda.aws_cloudwatch_log_group.functions[\"$key\"]' '/aws/lambda/$prefix-$key-$region_abbrev-$environment'"
 done
