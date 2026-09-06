@@ -83,15 +83,25 @@ function extractProfilesFromData(data: ListMyProfilesQueryData | undefined): Pro
     }));
 }
 
+function queryProfilesPage(
+  client: ReturnType<typeof useApolloClient>,
+  nextToken: string | null | undefined
+) {
+  return client.query<ListMyProfilesQueryData>({
+    query: LIST_MY_PROFILES,
+    fetchPolicy: 'network-only',
+    variables: { nextToken: nextToken ?? undefined },
+  });
+}
+
 async function fetchProfiles(client: ReturnType<typeof useApolloClient>): Promise<ProfileDeletionItem[]> {
   const discovered: ProfileDeletionItem[] = [];
   let nextToken: string | null | undefined;
   do {
-    const result = await client.query<ListMyProfilesQueryData>({
-      query: LIST_MY_PROFILES,
-      fetchPolicy: 'network-only',
-      variables: { nextToken: nextToken ?? undefined },
-    });
+    const result = await queryProfilesPage(client, nextToken);
+    if (result.error) {
+      throw result.error;
+    }
     discovered.push(...extractProfilesFromData(result.data));
     nextToken = result.data?.listMyProfiles?.nextToken;
   } while (nextToken);

@@ -12,8 +12,12 @@ import { describe, test, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MockedProvider } from '@apollo/client/testing/react';
+import { ApolloClient, InMemoryCache } from '@apollo/client';
+import { ApolloProvider } from '@apollo/client/react';
+import { MockLink } from '@apollo/client/testing';
 import { GraphQLError } from 'graphql';
 import { DeleteAccountSection } from '../src/components/settings/DeleteAccountSection';
+import { apolloClient } from '../src/lib/apollo';
 import { LIST_MY_PROFILES, DELETE_SELLER_PROFILE, DELETE_MY_ACCOUNT } from '../src/lib/graphql';
 
 describe('DeleteAccountSection & AccountDeletionDialog', () => {
@@ -645,5 +649,38 @@ describe('DeleteAccountSection & AccountDeletionDialog', () => {
       expect(screen.getAllByText(/Persistent discovery failure/i).length).toBeGreaterThan(0);
     });
     expect(onAccountDeleted).not.toHaveBeenCalled();
+  });
+
+  test('surfaces discovery GraphQL errors under production errorPolicy "all"', async () => {
+    const user = userEvent.setup();
+
+    const errorDiscoveryMock = {
+      request: {
+        query: LIST_MY_PROFILES,
+        variables: {},
+      },
+      result: {
+        errors: [new GraphQLError('Token expired')],
+      },
+    };
+
+    const client = new ApolloClient({
+      link: new MockLink([errorDiscoveryMock, errorDiscoveryMock, errorDiscoveryMock]),
+      cache: new InMemoryCache(),
+      defaultOptions: apolloClient.defaultOptions,
+    });
+
+    render(
+      <ApolloProvider client={client}>
+        <DeleteAccountSection userEmail="proderror@example.com" />
+      </ApolloProvider>
+    );
+
+    await user.click(screen.getByRole('button', { name: /Delete My Account/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Failed to load seller profiles: Token expired/i)).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/No seller profiles found\./i)).not.toBeInTheDocument();
   });
 });
