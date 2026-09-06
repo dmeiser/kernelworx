@@ -70,8 +70,6 @@ export function request(ctx) {
         ownerAccountId: dbOwnerAccountId,
         createdAt: now,
         createdByAccountId: callerAccountId,
-        GSI1PK: targetAccountId,
-        GSI1SK: shareId,
     };
 
     return {

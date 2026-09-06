@@ -386,7 +386,7 @@ describe('create_campaign_fn request', () => {
             args: {
                 input: {
                     profileId: 'PROFILE#my-profile',
-                    sharedCampaignCode: 'SHARED-123',
+                    sharedCampaignCode: '  SHARED-123  ',
                     // Override startDate only
                     startDate: '2026-08-15T00:00:00Z',
                 },
@@ -407,7 +407,7 @@ describe('create_campaign_fn request', () => {
         assert.strictEqual(result.attributeValues.state, 'IL');
         assert.strictEqual(result.attributeValues.startDate, '2026-08-15T00:00:00Z'); // Overridden
         assert.strictEqual(result.attributeValues.endDate, '2026-11-01T00:00:00Z'); // Kept from shared
-        assert.strictEqual(result.attributeValues.sharedCampaignCode, 'SHARED-123');
+        assert.strictEqual(result.attributeValues.sharedCampaignCode, 'SHARED-123'); // Trimmed from stash
         assert.strictEqual(result.attributeValues.unitCampaignKey, 'Crew#77#Peoria#IL#Shared Fall Fundraiser#2026');
     });
 });

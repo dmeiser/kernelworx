@@ -35,8 +35,6 @@ describe('create_campaign_share_fn request', () => {
         assert.strictEqual(result.attributeValues.ownerAccountId, 'ACCOUNT#owner-sub');
         assert.deepStrictEqual(result.attributeValues.permissions, ['READ']);
         assert.strictEqual(result.attributeValues.createdByAccountId, 'ACCOUNT#owner-sub');
-        assert.strictEqual(result.attributeValues.GSI1PK, 'ACCOUNT#creator-sub');
-        assert.strictEqual(result.attributeValues.GSI1SK, 'SHARE#auto-generated-id');
         assert.strictEqual(
             result.condition.expression,
             'attribute_not_exists(profileId) AND attribute_not_exists(targetAccountId)'

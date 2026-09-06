@@ -180,6 +180,7 @@ resource "aws_appsync_resolver" "create_campaign" {
       aws_appsync_function.verify_profile_write_access.function_id,
       aws_appsync_function.check_share_permissions.function_id,
       aws_appsync_function.lookup_shared_campaign.function_id,
+      aws_appsync_function.verify_shared_campaign_catalog.function_id,
       aws_appsync_function.create_campaign.function_id,
       aws_appsync_function.create_campaign_share.function_id,
     ]

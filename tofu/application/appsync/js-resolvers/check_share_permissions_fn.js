@@ -66,6 +66,11 @@ export function response(ctx) {
     
     // Check if caller has WRITE permission via share
     if (share.permissions.includes('WRITE')) {
+        const profile = ctx.stash.profile;
+        const currentOwner = profile && profile.ownerAccountId;
+        if (share.ownerAccountId && currentOwner && share.ownerAccountId !== currentOwner) {
+            util.error('Forbidden: Only profile owner or users with WRITE permission can perform this action (share is no longer valid)', 'Unauthorized');
+        }
         ctx.stash.share = share;
         return { authorized: true };
     }

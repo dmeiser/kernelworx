@@ -50,7 +50,7 @@ export function request(ctx) {
         endDate = (input.endDate !== undefined && input.endDate !== null && input.endDate !== '')
             ? input.endDate
             : sharedCampaign.endDate;
-        sharedCampaignCode = input.sharedCampaignCode;
+        sharedCampaignCode = sharedCampaign.sharedCampaignCode;
     } else {
         campaignName = input.campaignName;
         campaignYear = input.campaignYear;
