@@ -138,6 +138,7 @@ uv run pytest tests/e2e/ --headed --slowmo=500 -v
 | `test_smoke_signup.py` | New-user sign-up flow |
 | `test_smoke_settings.py` | Basic settings page flow (view and update settings) |
 | `test_smoke_reports.py` | Reports page smoke: load and request/download report |
+| `test_smoke_account_deletion.py` | Account deletion flow (gated by RUN_ACCOUNT_DELETION; runs disposable-user test in CI) |
 
 ---
 
