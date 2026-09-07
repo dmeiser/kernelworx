@@ -72,6 +72,6 @@ locals {
   env_suffix = "_${replace(var.environment, "-", "_")}"
 
   # JS resolver code path
-  js_resolvers_dir      = "${path.module}/../../appsync/js-resolvers"
+  js_resolvers_dir      = "${path.module}/../../appsync/dist"
   mapping_templates_dir = "${path.module}/../../appsync/mapping-templates"
 }

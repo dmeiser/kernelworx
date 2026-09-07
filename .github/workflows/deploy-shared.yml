@@ -132,7 +132,17 @@ jobs:
         with:
           node-version-file: ".node-version"
           cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          cache-dependency-path: |
+            frontend/package-lock.json
+            package-lock.json
+
+      - name: Install root Node.js dependencies
+        run: npm ci
+
+      # All tofu steps below (resolver-order guard, migration apply, plan/apply)
+      # evaluate file() against the bundled resolver output, so it must exist first.
+      - name: Build AppSync resolvers
+        run: npm run build:resolvers
 
       - name: Set up OpenTofu
         uses: opentofu/setup-opentofu@v1

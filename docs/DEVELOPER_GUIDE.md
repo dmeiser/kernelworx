@@ -10,6 +10,9 @@ Audience: contributors working on KernelWorx. Focuses on day-to-day commands, qu
   uv run pytest tests/unit --cov=src --cov-fail-under=100
   ```
 
+  Requires Node.js and root `npm install` first: the ephemeral-reliability unit
+  tests run the deploy/recover scripts, which invoke `npm run build:resolvers`.
+
 #### Frontend (TypeScript)
 - Unit/component tests with coverage:
   ```bash
@@ -47,7 +50,7 @@ uv run pytest tests/e2e/test_smoke_auth.py -v
 
 ### Deployment
 - **Backend/OpenTofu (dev only)**:
-  - From the repo root: `./tofu/application/scripts/deploy.sh dev apply`
+  - From the repo root (after `npm install`): `./tofu/application/scripts/deploy.sh dev apply` (the helper bundles resolver JS automatically)
   - Preview first when making infra changes: `./tofu/application/scripts/deploy.sh dev plan` (respect dev-only deployment rule).
 - **Frontend**:
   - From `frontend/`: `./deploy.sh` (ensure build succeeds locally with `npm run build`).
@@ -197,7 +200,11 @@ separate DynamoDB tables (not a single-table design); see
 
 #### AppSync Resolvers (`tofu/application/modules/appsync/`)
 
-AppSync resolvers are defined in OpenTofu using `aws_appsync_resolver` and `aws_appsync_function` resources:
+AppSync resolvers are defined in OpenTofu using `aws_appsync_resolver` and `aws_appsync_function` resources. Resolver JavaScript lives in `tofu/application/appsync/js-resolvers/`; OpenTofu reads the bundled output at `tofu/application/appsync/dist/`, produced by `npm run build:resolvers` (esbuild inlines the shared `js-resolvers/lib/` modules). Run the build before any `tofu plan`/`apply`/`import`/`destroy` — the tofu commands fail when `dist/` is missing, and a stale `dist/` deploys outdated resolver code:
+
+```bash
+npm run build:resolvers
+```
 
 ```hcl
 # VTL resolver

@@ -924,6 +924,25 @@ describe('Campaign Operations Integration Tests', () => {
       });
       const campaignId = createCampaignData.createCampaign.campaignId;
 
+      // Wait for campaignId-index GSI propagation before createOrder (Bug #21)
+      let retries = 0;
+      while (retries < 10) {
+        try {
+          const { data: campaignVerify } = await ownerClient.query({
+            query: GET_CAMPAIGN,
+            variables: { campaignId },
+            fetchPolicy: 'network-only',
+          });
+          if (campaignVerify?.getCampaign) {
+            break;
+          }
+        } catch {
+          // Campaign not found yet in GSI, retry
+        }
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        retries++;
+      }
+
       // Create an order
       const CREATE_ORDER = gql`
         mutation CreateOrder($input: CreateOrderInput!) {
