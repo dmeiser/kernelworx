@@ -1955,6 +1955,7 @@ class TestAdminDeleteUser:
         admin_appsync_event: Dict[str, Any],
         lambda_context: Any,
         monkeypatch: Any,
+        s3_bucket: Any,
     ) -> None:
         """Test that Cognito delete errors raise exception."""
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
