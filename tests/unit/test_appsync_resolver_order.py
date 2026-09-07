@@ -61,6 +61,14 @@ PLAN_WITH_FUNCTION_DELETE = (
     '"type":"aws_appsync_function","change":{"actions":["delete"]}}]}'
 )
 
+# Plan that only deletes a datasource (no function deletions) — this is the pattern
+# that caused the prod failure in runs 34161529463 / 34161836529 where Lambda→JS
+# migrations removed the old Lambda datasources while resolvers still referenced them.
+PLAN_WITH_DATASOURCE_DELETE = (
+    '{"resource_changes":[{"address":"module.appsync.aws_appsync_datasource.campaign_operations",'
+    '"type":"aws_appsync_datasource","change":{"actions":["delete"]}}]}'
+)
+
 PLAN_WITHOUT_DELETIONS = '{"resource_changes":[]}'
 
 TOFU_MOCK = textwrap.dedent(
@@ -226,11 +234,50 @@ class TestMovedInstancesRetry:
 
 
 class TestNoopFastPath:
-    def test_no_function_deletions_skips_guard(self, repo_root: Path, mock_tofu: Path, tmp_path: Path) -> None:
+    def test_no_function_or_datasource_deletions_skips_guard(
+        self, repo_root: Path, mock_tofu: Path, tmp_path: Path
+    ) -> None:
         (mock_tofu / "plan.json").write_text(PLAN_WITHOUT_DELETIONS)
 
         result = run_guard(repo_root, tmp_path, ["-t", RESOLVER_TARGET])
 
         assert result.returncode == 0, result.stderr
         assert "resolver ordering guard not needed" in result.stderr
+        assert apply_calls(mock_tofu) == []
+
+
+class TestDatasourceDeletion:
+    """Guard must also fire when an aws_appsync_datasource is being deleted.
+
+    This is the pattern from the prod outages in runs 34161529463 /
+    34161836529: three Lambda→JS migrations (#298, #299, #300, #301) removed
+    Lambda datasources from the config, but the guard only checked for
+    aws_appsync_function deletions, so it exited early and the full apply
+    tried to delete the datasources while resolvers still referenced them,
+    causing BadRequestException.
+    """
+
+    def test_datasource_deletion_triggers_guard(
+        self, repo_root: Path, mock_tofu: Path, tmp_path: Path
+    ) -> None:
+        """Guard fires (applies resolver targets) when a datasource is deleted."""
+        (mock_tofu / "plan.json").write_text(PLAN_WITH_DATASOURCE_DELETE)
+
+        result = run_guard(repo_root, tmp_path, ["-t", RESOLVER_TARGET])
+
+        assert result.returncode == 0, result.stderr
+        calls = apply_calls(mock_tofu)
+        assert len(calls) == 1, f"expected exactly one targeted apply, got: {calls}"
+        assert RESOLVER_TARGET in targets_of(calls[0])
+        assert "datasource" in result.stderr.lower() or "deletion" in result.stderr.lower()
+
+    def test_datasource_deletion_no_targets_is_noop(
+        self, repo_root: Path, mock_tofu: Path, tmp_path: Path
+    ) -> None:
+        """If no -t targets are given, guard still exits 0 even with datasource deletions."""
+        (mock_tofu / "plan.json").write_text(PLAN_WITH_DATASOURCE_DELETE)
+
+        result = run_guard(repo_root, tmp_path, [])
+
+        assert result.returncode == 0, result.stderr
         assert apply_calls(mock_tofu) == []
