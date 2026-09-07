@@ -331,7 +331,6 @@ import {
     "confirm-qr-upload",
     "generate-qr-code-presigned-url",
     "delete-qr-code",
-    "validate-payment-method",
     "admin-operations",
   ])
   id = "/aws/lambda/${local.name_prefix}-${each.value}-${var.region_abbrev}-${var.environment}"

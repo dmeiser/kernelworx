@@ -164,11 +164,6 @@ locals {
       timeout     = 10
       memory_size = 256
     }
-    "validate-payment-method" = {
-      handler     = "handlers.validate_payment_method.lambda_handler"
-      timeout     = 10
-      memory_size = 256
-    }
     "admin-operations" = {
       handler     = "handlers.admin_operations.lambda_handler"
       timeout     = 30
