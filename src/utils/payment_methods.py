@@ -701,7 +701,6 @@ def delete_qr_from_s3(account_id: str, payment_method_name: str) -> None:
                         logger.warning(
                             "Failed to delete QR code variant via UUID fallback", s3_key=s3_key, error=str(e)
                         )
-
     except Exception as e:
         logger.error("Failed to delete QR code from S3", error=str(e))
         raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to delete QR code")
@@ -780,3 +779,47 @@ def generate_presigned_get_url(
     except ClientError as e:
         logger.error("Failed to generate pre-signed URL", error=str(e))
         raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to generate QR code URL")
+
+
+def delete_all_user_qr_codes(account_id: str, logger: Any = None) -> int:
+    """Delete all S3 payment QR codes and versions for this account.
+
+    Purges all object versions and delete markers under the account's QR code
+    prefixes to completely clean up storage upon account deletion.
+    """
+    bucket_name = os.environ.get("EXPORTS_BUCKET")
+    if not bucket_name:
+        return 0
+
+    log = logger or get_logger(__name__)
+    s3 = _get_s3_client()
+    clean_id = account_id.replace("ACCOUNT#", "")
+    prefixes = [f"{QR_CODE_S3_PREFIX}/{account_id}/"]
+    if clean_id != account_id:
+        prefixes.append(f"{QR_CODE_S3_PREFIX}/{clean_id}/")
+
+    deleted_count = 0
+    for prefix in set(prefixes):
+        try:
+            paginator: Any = s3.get_paginator("list_object_versions")
+            for page in paginator.paginate(Bucket=bucket_name, Prefix=prefix):
+                delete_items: list[Any] = []
+                for version in page.get("Versions", []):
+                    k = version.get("Key")
+                    vid = version.get("VersionId")
+                    if k and vid:
+                        delete_items.append({"Key": k, "VersionId": vid})
+                for marker in page.get("DeleteMarkers", []):
+                    k = marker.get("Key")
+                    vid = marker.get("VersionId")
+                    if k and vid:
+                        delete_items.append({"Key": k, "VersionId": vid})
+                if delete_items:
+                    s3.delete_objects(Bucket=bucket_name, Delete={"Objects": delete_items})
+                    deleted_count += len(delete_items)
+                    log.info(f"Deleted {len(delete_items)} QR code versions from S3 under {prefix}")
+        except Exception as e:
+            log.error(f"Error purging S3 payment QR codes under {prefix}: {str(e)}")
+            raise AppError(ErrorCode.INTERNAL_ERROR, f"Failed to purge payment QR codes from S3: {str(e)}") from e
+
+    return deleted_count

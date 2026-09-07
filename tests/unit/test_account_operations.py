@@ -3,6 +3,7 @@
 Updated for multi-table design (accounts table).
 """
 
+import os
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, Dict
@@ -315,8 +316,9 @@ class TestDeleteMyAccount:
         appsync_event: Dict[str, Any],
         lambda_context: Any,
         monkeypatch: Any,
+        s3_bucket: Any,
     ) -> None:
-        """Test that deleting account deletes EVERYTHING - profiles, campaigns, orders, catalogs, shares."""
+        """Test that deleting account deletes user data (profiles, campaigns, orders, shares) while preserving catalogs."""
         from src.handlers.account_operations import delete_my_account
 
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
@@ -337,6 +339,10 @@ class TestDeleteMyAccount:
         catalog_id = "CATALOG#test-catalog-123"
         order_id = "ORDER#test-order-123"
         invite_code = "INVITE#test-invite-123"
+
+        # 0. Put payment QR code in S3
+        qr_key = f"payment-qr-codes/{sample_account_id}/venmo.png"
+        s3_bucket.put_object(Bucket=os.environ["EXPORTS_BUCKET"], Key=qr_key, Body=b"fake-qr-code")
 
         # 1. Create account
         accounts_table.put_item(
@@ -446,9 +452,12 @@ class TestDeleteMyAccount:
         )
 
         # Mock Cognito client
+        orig_boto_client = boto3.client
         with patch("boto3.client") as mock_boto_client:
             mock_cognito = MagicMock()
-            mock_boto_client.return_value = mock_cognito
+            mock_boto_client.side_effect = lambda svc, **kwargs: (
+                mock_cognito if svc == "cognito-idp" else orig_boto_client(svc, **kwargs)
+            )
             mock_cognito.list_users.return_value = {"Users": [{"Username": "testuser@example.com"}]}
 
             # Execute delete
@@ -475,10 +484,10 @@ class TestDeleteMyAccount:
         # 3. Campaign should be gone
         assert campaigns_table.get_item(Key={"profileId": profile_id, "campaignId": campaign_id}).get("Item") is None
 
-        # 4. CATALOG should be soft-deleted (isDeleted=true) - THIS IS CRITICAL
+        # 4. CATALOG should be preserved (never deleted or soft-deleted)
         catalog_item = catalogs_table.get_item(Key={"catalogId": catalog_id}).get("Item")
-        assert catalog_item is not None, "Catalog should still exist but be marked as deleted"
-        assert catalog_item.get("isDeleted") is True, "Catalog must have isDeleted=true"
+        assert catalog_item is not None, "Catalog should still exist"
+        assert catalog_item.get("isDeleted") is not True, "Catalog must not be deleted or marked as deleted"
 
         # 5. Order should be gone
         assert orders_table.get_item(Key={"campaignId": campaign_id, "orderId": order_id}).get("Item") is None
@@ -505,6 +514,12 @@ class TestDeleteMyAccount:
         mock_cognito.admin_delete_user.assert_called_once_with(
             UserPoolId="us-east-1_test123", Username="testuser@example.com"
         )
+
+        # 10. Verify S3 QR code was deleted
+        s3_objects = s3_bucket.list_objects_v2(
+            Bucket=os.environ["EXPORTS_BUCKET"], Prefix=f"payment-qr-codes/{sample_account_id}/"
+        )
+        assert "Contents" not in s3_objects or len(s3_objects["Contents"]) == 0
 
     def test_cannot_delete_another_users_account(
         self,
@@ -694,10 +709,11 @@ class TestDeleteMyAccount:
         orders_response = orders_table.scan()
         assert len(orders_response["Items"]) == 0
 
-        # All catalogs should be soft-deleted
+        # Catalogs are preserved and should not be deleted
         catalogs_response = catalogs_table.scan()
+        assert len(catalogs_response["Items"]) == 3
         for catalog in catalogs_response["Items"]:
-            assert catalog.get("isDeleted") is True
+            assert catalog.get("isDeleted") is not True
 
     def test_delete_account_with_no_data(
         self,

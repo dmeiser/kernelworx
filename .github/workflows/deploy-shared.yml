@@ -424,6 +424,7 @@ jobs:
           TEST_READONLY_PASSWORD: ${{ secrets.TEST_READONLY_PASSWORD }}
           TEST_USER_POOL_ID: ${{ secrets.TEST_USER_POOL_ID }}
           TEST_REGION: ${{ secrets.AWS_REGION }}
+          RUN_ACCOUNT_DELETION: "1"
           # In CI, fail the job if pre/post cleanup cannot run successfully.
           E2E_FAIL_ON_CLEANUP_ERROR: "1"
         run: uv run pytest tests/e2e/ -m smoke -v

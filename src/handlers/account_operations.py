@@ -16,11 +16,13 @@ try:  # pragma: no cover
     from utils.dynamodb import tables
     from utils.errors import AppError, ErrorCode
     from utils.logging import get_logger
+    from utils.payment_methods import delete_all_user_qr_codes
     from utils.validation import validate_unit_number
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.dynamodb import tables
     from ..utils.errors import AppError, ErrorCode
     from ..utils.logging import get_logger
+    from ..utils.payment_methods import delete_all_user_qr_codes
     from ..utils.validation import validate_unit_number
 
 logger = get_logger(__name__)
@@ -134,7 +136,6 @@ def _delete_all_user_data(account_id: str, context: Any, logger: Any) -> None:
         _delete_inbound_shares,
         _delete_invites_for_owned_profiles,
         _delete_user_campaigns,
-        _delete_user_catalogs,
         _delete_user_orders,
         _delete_user_profiles,
         _delete_user_shares,
@@ -146,11 +147,9 @@ def _delete_all_user_data(account_id: str, context: Any, logger: Any) -> None:
     _delete_invites_for_owned_profiles(account_id, logger)
     _delete_inbound_shares(account_id, logger)
     _delete_user_profiles(account_id, logger)
-    _delete_user_catalogs(account_id, logger)
-
-    # TODO(KW-REVIEW-GLM53-1-decision-qr-code-retention-policy): Payment QR S3
-    # objects are intentionally not deleted here pending the captain decision on
-    # retention policy.
+    # Catalogs are preserved per product design and should never be deleted.
+    # Delete payment method QR codes from S3 per captain decision
+    delete_all_user_qr_codes(account_id, logger)
 
     account_id_key = f"ACCOUNT#{account_id}"
     tables.accounts.delete_item(Key={"accountId": account_id_key})
@@ -223,7 +222,7 @@ def delete_my_account(event: Dict[str, Any], context: Any) -> bool:
 
     This is a self-service account deletion that:
     1. Verifies Cognito credentials and connectivity before deleting DynamoDB data
-    2. Deletes all user data from DynamoDB (profiles, campaigns, orders, shares, catalogs, invites)
+    2. Deletes all user data from DynamoDB (profiles, campaigns, orders, shares, invites; catalogs are preserved)
     3. Deletes the user from Cognito User Pool with retry on transient errors
 
     Args:
