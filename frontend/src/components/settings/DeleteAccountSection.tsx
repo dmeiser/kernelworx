@@ -104,7 +104,7 @@ export const DeleteAccountSection: React.FC<DeleteAccountSectionProps> = ({ onAc
           </ListItemIcon>
           <ListItemText
             primary="Custom payment methods & QR codes"
-            secondary="All payment preferences and uploaded QR code images stored in S3"
+            secondary="All payment preferences and uploaded QR code images"
           />
         </ListItem>
         <ListItem>

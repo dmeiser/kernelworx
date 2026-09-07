@@ -292,7 +292,7 @@ function getAccountSecondaryText(
     return 'Deleted';
   }
   if (step === 'deleting-account') {
-    return 'Deleting account, payment methods & S3 QR codes...';
+    return 'Deleting account, payment methods & QR codes...';
   }
   if (isAccountFailed) {
     return `Failed: ${error}`;
