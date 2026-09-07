@@ -82,21 +82,22 @@ cleanup() {
 }
 trap cleanup EXIT
 
-log "📋 Checking AppSync function deletion ordering in plan..."
+log "📋 Checking AppSync function/datasource deletion ordering in plan..."
 tofu plan -input=false -out="$PLAN_FILE" "${EXTRA_TOFU_ARGS[@]}"
 
-# Check whether the plan would destroy any aws_appsync_function resources.
-# The jq query selects resource_changes where type is aws_appsync_function and
-# the actions array contains "delete".
+# Check whether the plan would destroy any aws_appsync_function or
+# aws_appsync_datasource resources. AppSync rejects deleting either when a
+# resolver or function still references them. The jq query selects
+# resource_changes of both types where actions contains "delete".
 deletions=$(tofu show -json "$PLAN_FILE" | \
-  jq -r '.resource_changes[]? | select(.type == "aws_appsync_function" and (.change.actions | index("delete"))) | .address')
+  jq -r '.resource_changes[]? | select((.type == "aws_appsync_function" or .type == "aws_appsync_datasource") and (.change.actions | index("delete"))) | .address')
 
 if [ -z "$deletions" ]; then
-  log "   No AppSync function deletions planned; resolver ordering guard not needed."
+  log "   No AppSync function/datasource deletions planned; resolver ordering guard not needed."
   exit 0
 fi
 
-log "   Planned AppSync function deletions detected:"
+log "   Planned AppSync function/datasource deletions detected:"
 echo "$deletions" | while IFS= read -r addr; do
   log "     - $addr"
 done

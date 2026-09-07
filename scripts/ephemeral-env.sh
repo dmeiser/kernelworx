@@ -130,12 +130,19 @@ case "$ACTION" in
     log "📦 Building AppSync JS resolvers..."
     ensure_resolvers_built
 
-    # AppSync rejects deleting pipeline functions that are still referenced by a
-    # resolver. If the plan would destroy any AppSync functions, update the
-    # affected pipeline resolver(s) first so the full apply can delete them.
+    # AppSync rejects deleting pipeline functions or data sources that are still referenced
+    # by a resolver. If the plan would destroy any AppSync functions or data sources, update
+    # the affected resolver(s)/function(s) first so the full apply can delete them.
+    # Targets cover all Lambda→JS migrations that removed a Lambda data source:
+    #   create_order (pipeline fn set), validate_payment_method_appsync (data_source switch #299),
+    #   create_seller_profile (#300), create_campaign (#301), update_my_account (#298).
     "$ROOT_DIR/scripts/appsync-ensure-resolver-order.sh" \
       -d "$ENV_DIR" \
       -t module.appsync.aws_appsync_resolver.create_order \
+      -t module.appsync.aws_appsync_function.validate_payment_method_appsync \
+      -t module.appsync.aws_appsync_resolver.create_seller_profile \
+      -t module.appsync.aws_appsync_resolver.create_campaign \
+      -t module.appsync.aws_appsync_resolver.update_my_account \
       -- -var="environment=$RUN_ID"
 
     tofu apply -input=false -auto-approve -var="environment=$RUN_ID"
