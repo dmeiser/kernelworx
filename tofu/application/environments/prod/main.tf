@@ -327,7 +327,6 @@ import {
     "request-report",
     "transfer-ownership",
     "unit-reporting",
-    "update-account",
   ])
   id = "/aws/lambda/${local.name_prefix}-${each.value}-${var.region_abbrev}-${var.environment}"
   to = module.lambda.aws_cloudwatch_log_group.functions[each.value]

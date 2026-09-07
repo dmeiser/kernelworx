@@ -102,16 +102,6 @@ resource "aws_appsync_datasource" "delete_profile_cascade" {
   }
 }
 
-resource "aws_appsync_datasource" "update_account" {
-  api_id           = aws_appsync_graphql_api.main.id
-  name             = "UpdateAccountDS"
-  type             = "AWS_LAMBDA"
-  service_role_arn = var.appsync_service_role_arn
-
-  lambda_config {
-    function_arn = var.lambda_function_arns["update-account"]
-  }
-}
 
 resource "aws_appsync_datasource" "delete_account" {
   api_id           = aws_appsync_graphql_api.main.id

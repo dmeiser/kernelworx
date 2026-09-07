@@ -323,7 +323,6 @@ import {
     "campaign-operations",
     "delete-campaign-orders",
     "delete-profile-cascade",
-    "update-account",
     "delete-account",
     "transfer-ownership",
     "request-qr-upload",
