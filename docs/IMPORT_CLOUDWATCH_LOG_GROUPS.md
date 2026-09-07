@@ -84,7 +84,6 @@ The current app function keys are:
 
 - `list-my-shares`
 - `list-catalogs-in-use`
-- `create-profile`
 - `request-report`
 - `unit-reporting`
 - `list-unit-catalogs`
@@ -117,7 +116,7 @@ prefix="kernelworx"
 region_abbrev="ue1"
 environment="prod"   # change to "dev" as needed
 
-for key in list-my-shares list-catalogs-in-use create-profile request-report unit-reporting \
+for key in list-my-shares list-catalogs-in-use request-report unit-reporting \
            list-unit-catalogs list-unit-campaign-catalogs campaign-operations \
            delete-campaign-orders delete-profile-cascade update-account delete-account \
            transfer-ownership request-qr-upload confirm-qr-upload \

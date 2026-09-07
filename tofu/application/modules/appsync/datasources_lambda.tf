@@ -24,16 +24,6 @@ resource "aws_appsync_datasource" "list_catalogs_in_use" {
   }
 }
 
-resource "aws_appsync_datasource" "create_profile" {
-  api_id           = aws_appsync_graphql_api.main.id
-  name             = "CreateProfileDS"
-  type             = "AWS_LAMBDA"
-  service_role_arn = var.appsync_service_role_arn
-
-  lambda_config {
-    function_arn = var.lambda_function_arns["create-profile"]
-  }
-}
 
 resource "aws_appsync_datasource" "request_report" {
   api_id           = aws_appsync_graphql_api.main.id
