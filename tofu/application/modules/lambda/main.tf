@@ -116,11 +116,6 @@ locals {
       timeout     = 60
       memory_size = 512
     }
-    "update-account" = {
-      handler     = "handlers.account_operations.update_my_account"
-      timeout     = 10
-      memory_size = 256
-    }
     "delete-account" = {
       handler     = "handlers.account_operations.delete_my_account"
       timeout     = 30

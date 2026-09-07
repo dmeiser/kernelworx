@@ -90,7 +90,6 @@ The current app function keys are:
 - `list-unit-campaign-catalogs`
 - `delete-campaign-orders`
 - `delete-profile-cascade`
-- `update-account`
 - `delete-account`
 - `transfer-ownership`
 - `request-qr-upload`
@@ -117,7 +116,7 @@ environment="prod"   # change to "dev" as needed
 
 for key in list-my-shares list-catalogs-in-use request-report unit-reporting \
            list-unit-catalogs list-unit-campaign-catalogs \
-           delete-campaign-orders delete-profile-cascade update-account delete-account \
+           delete-campaign-orders delete-profile-cascade delete-account \
            transfer-ownership request-qr-upload confirm-qr-upload \
            generate-qr-code-presigned-url delete-qr-code \
            admin-operations; do
