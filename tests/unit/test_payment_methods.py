@@ -990,19 +990,21 @@ class TestDeleteAllUserQRCodes:
             mock_s3.delete_objects.assert_called_once()
             mock_logger.info.assert_called_once()
 
-    def test_delete_all_user_qr_codes_error_handled_gracefully(
+    def test_delete_all_user_qr_codes_error_raises_app_error(
         self, monkeypatch: Any, sample_account_id: str
     ) -> None:
-        """Test delete_all_user_qr_codes handles S3 exceptions gracefully."""
+        """Test delete_all_user_qr_codes surfaces S3 failures as AppError."""
         monkeypatch.setenv("EXPORTS_BUCKET", "test-exports-bucket")
         mock_s3 = MagicMock()
         mock_s3.get_paginator.side_effect = Exception("S3 error")
         mock_logger = MagicMock()
 
         with patch.object(payment_methods, "_get_s3_client", return_value=mock_s3):
-            deleted = payment_methods.delete_all_user_qr_codes(sample_account_id, logger=mock_logger)
-            assert deleted == 0
-            mock_logger.warning.assert_called()
+            with pytest.raises(AppError) as exc_info:
+                payment_methods.delete_all_user_qr_codes(sample_account_id, logger=mock_logger)
+            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+            assert "Failed to purge payment QR codes from S3" in exc_info.value.message
+            mock_logger.error.assert_called()
 
 
 class TestEdgeCases:

@@ -819,6 +819,9 @@ def delete_all_user_qr_codes(account_id: str, logger: Any = None) -> int:
                     deleted_count += len(delete_items)
                     log.info(f"Deleted {len(delete_items)} QR code versions from S3 under {prefix}")
         except Exception as e:
-            log.warning(f"Error cleaning up S3 payment QR codes under {prefix}: {str(e)}")
+            log.error(f"Error purging S3 payment QR codes under {prefix}: {str(e)}")
+            raise AppError(
+                ErrorCode.INTERNAL_ERROR, f"Failed to purge payment QR codes from S3: {str(e)}"
+            ) from e
 
     return deleted_count

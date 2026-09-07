@@ -130,6 +130,7 @@ class TestLambdaHandler:
         admin_appsync_event: Dict[str, Any],
         lambda_context: Any,
         monkeypatch: Any,
+        s3_bucket: Any,
     ) -> None:
         """Test dispatch to admin_delete_user."""
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
@@ -1300,6 +1301,7 @@ class TestAdminDeleteUser:
         admin_appsync_event: Dict[str, Any],
         lambda_context: Any,
         monkeypatch: Any,
+        s3_bucket: Any,
     ) -> None:
         """Test successful user deletion."""
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
@@ -1361,6 +1363,7 @@ class TestAdminDeleteUser:
         profiles_table: Any,
         invites_table: Any,
         shares_table: Any,
+        s3_bucket: Any,
     ) -> None:
         """Test that invites for owned profiles and inbound shares are deleted."""
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
@@ -1439,6 +1442,7 @@ class TestAdminDeleteUser:
         admin_appsync_event: Dict[str, Any],
         lambda_context: Any,
         monkeypatch: Any,
+        s3_bucket: Any,
     ) -> None:
         """Test that DynamoDB account is deleted before Cognito user."""
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
@@ -1500,6 +1504,7 @@ class TestAdminDeleteUser:
         admin_appsync_event: Dict[str, Any],
         lambda_context: Any,
         monkeypatch: Any,
+        s3_bucket: Any,
     ) -> None:
         """Test successful user deletion when accountId is passed with ACCOUNT# prefix."""
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
@@ -1566,6 +1571,7 @@ class TestAdminDeleteUser:
         admin_appsync_event: Dict[str, Any],
         lambda_context: Any,
         monkeypatch: Any,
+        s3_bucket: Any,
     ) -> None:
         """Test successful user deletion when user hasn't logged in yet (no DynamoDB Account)."""
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
@@ -1820,6 +1826,7 @@ class TestAdminDeleteUser:
         admin_appsync_event: Dict[str, Any],
         lambda_context: Any,
         monkeypatch: Any,
+        s3_bucket: Any,
     ) -> None:
         """Test that deletion succeeds when the Cognito user is already gone."""
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
@@ -1893,6 +1900,7 @@ class TestAdminDeleteUser:
         admin_appsync_event: Dict[str, Any],
         lambda_context: Any,
         monkeypatch: Any,
+        s3_bucket: Any,
     ) -> None:
         """Test that UserNotFoundException from Cognito delete is treated as success."""
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
@@ -2161,6 +2169,7 @@ class TestAdminDeleteUser:
         admin_appsync_event: Dict[str, Any],
         lambda_context: Any,
         monkeypatch: Any,
+        s3_bucket: Any,
     ) -> None:
         """Test that empty Cognito user list does not block DynamoDB cleanup."""
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")

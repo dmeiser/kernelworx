@@ -215,46 +215,47 @@ export function useAccountDeletion(options?: UseAccountDeletionOptions): UseAcco
     [client, finalizeAccountDeletion, updateProfileStatus]
   );
 
+  const discoverProfiles = useCallback(async () => {
+    setStep('discovering');
+    try {
+      const discovered = await fetchProfiles(client);
+      setProfiles(discovered);
+      setIsDiscovered(true);
+      return discovered;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to load user profiles';
+      setError(msg);
+      setStep('error');
+      return null;
+    }
+  }, [client]);
+
   const startDeletion = useCallback(async () => {
     setError(null);
     let current = profiles;
 
     if (!isDiscovered) {
-      setStep('discovering');
-      try {
-        current = await fetchProfiles(client);
-        setProfiles(current);
-        setIsDiscovered(true);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : 'Failed to load user profiles';
-        setError(msg);
-        setStep('error');
+      const discovered = await discoverProfiles();
+      if (discovered === null) {
         return;
       }
+      current = discovered;
     }
 
     setStep('deleting-profiles');
     await runProfileDeletionLoop(current, 0);
-  }, [client, isDiscovered, profiles, runProfileDeletionLoop]);
+  }, [discoverProfiles, isDiscovered, profiles, runProfileDeletionLoop]);
 
   const resumeDeletion = useCallback(async () => {
     setError(null);
 
     if (!isDiscovered) {
-      setStep('discovering');
-      let current: ProfileDeletionItem[];
-      try {
-        current = await fetchProfiles(client);
-        setProfiles(current);
-        setIsDiscovered(true);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : 'Failed to load user profiles';
-        setError(msg);
-        setStep('error');
+      const discovered = await discoverProfiles();
+      if (discovered === null) {
         return;
       }
       setStep('deleting-profiles');
-      await runProfileDeletionLoop(current, 0);
+      await runProfileDeletionLoop(discovered, 0);
       return;
     }
 
@@ -266,7 +267,7 @@ export function useAccountDeletion(options?: UseAccountDeletionOptions): UseAcco
     }
 
     await finalizeAccountDeletion();
-  }, [client, finalizeAccountDeletion, isDiscovered, profiles, runProfileDeletionLoop]);
+  }, [discoverProfiles, finalizeAccountDeletion, isDiscovered, profiles, runProfileDeletionLoop]);
 
   const reset = useCallback(() => {
     setStep('idle');
