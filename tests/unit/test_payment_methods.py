@@ -990,9 +990,7 @@ class TestDeleteAllUserQRCodes:
             mock_s3.delete_objects.assert_called_once()
             mock_logger.info.assert_called_once()
 
-    def test_delete_all_user_qr_codes_error_raises_app_error(
-        self, monkeypatch: Any, sample_account_id: str
-    ) -> None:
+    def test_delete_all_user_qr_codes_error_raises_app_error(self, monkeypatch: Any, sample_account_id: str) -> None:
         """Test delete_all_user_qr_codes surfaces S3 failures as AppError."""
         monkeypatch.setenv("EXPORTS_BUCKET", "test-exports-bucket")
         mock_s3 = MagicMock()

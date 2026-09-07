@@ -455,8 +455,8 @@ class TestDeleteMyAccount:
         orig_boto_client = boto3.client
         with patch("boto3.client") as mock_boto_client:
             mock_cognito = MagicMock()
-            mock_boto_client.side_effect = (
-                lambda svc, **kwargs: mock_cognito if svc == "cognito-idp" else orig_boto_client(svc, **kwargs)
+            mock_boto_client.side_effect = lambda svc, **kwargs: (
+                mock_cognito if svc == "cognito-idp" else orig_boto_client(svc, **kwargs)
             )
             mock_cognito.list_users.return_value = {"Users": [{"Username": "testuser@example.com"}]}
 

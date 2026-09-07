@@ -11,19 +11,9 @@
 
 import { useState, useCallback } from 'react';
 import { useApolloClient } from '@apollo/client/react';
-import {
-  LIST_MY_PROFILES,
-  DELETE_SELLER_PROFILE,
-  DELETE_MY_ACCOUNT,
-} from '../lib/graphql';
+import { LIST_MY_PROFILES, DELETE_SELLER_PROFILE, DELETE_MY_ACCOUNT } from '../lib/graphql';
 
-export type DeletionStep =
-  | 'idle'
-  | 'discovering'
-  | 'deleting-profiles'
-  | 'deleting-account'
-  | 'completed'
-  | 'error';
+export type DeletionStep = 'idle' | 'discovering' | 'deleting-profiles' | 'deleting-account' | 'completed' | 'error';
 
 export interface ProfileDeletionItem {
   profileId: string;
@@ -83,10 +73,7 @@ function extractProfilesFromData(data: ListMyProfilesQueryData | undefined): Pro
     }));
 }
 
-function queryProfilesPage(
-  client: ReturnType<typeof useApolloClient>,
-  nextToken: string | null | undefined
-) {
+function queryProfilesPage(client: ReturnType<typeof useApolloClient>, nextToken: string | null | undefined) {
   return client.query<ListMyProfilesQueryData>({
     query: LIST_MY_PROFILES,
     fetchPolicy: 'network-only',
@@ -108,10 +95,7 @@ async function fetchProfiles(client: ReturnType<typeof useApolloClient>): Promis
   return discovered;
 }
 
-async function deleteSingleProfile(
-  client: ReturnType<typeof useApolloClient>,
-  profileId: string
-): Promise<void> {
+async function deleteSingleProfile(client: ReturnType<typeof useApolloClient>, profileId: string): Promise<void> {
   try {
     const result = await client.mutate({
       mutation: DELETE_SELLER_PROFILE,
@@ -127,9 +111,7 @@ async function deleteSingleProfile(
   }
 }
 
-async function executeAccountDeletion(
-  client: ReturnType<typeof useApolloClient>
-): Promise<void> {
+async function executeAccountDeletion(client: ReturnType<typeof useApolloClient>): Promise<void> {
   const result = await client.mutate({
     mutation: DELETE_MY_ACCOUNT,
   });
@@ -212,7 +194,7 @@ export function useAccountDeletion(options?: UseAccountDeletionOptions): UseAcco
 
       await finalizeAccountDeletion();
     },
-    [client, finalizeAccountDeletion, updateProfileStatus]
+    [client, finalizeAccountDeletion, updateProfileStatus],
   );
 
   const discoverProfiles = useCallback(async () => {
@@ -277,8 +259,7 @@ export function useAccountDeletion(options?: UseAccountDeletionOptions): UseAcco
     setIsDiscovered(false);
   }, []);
 
-  const isProcessing =
-    step === 'discovering' || step === 'deleting-profiles' || step === 'deleting-account';
+  const isProcessing = step === 'discovering' || step === 'deleting-profiles' || step === 'deleting-account';
 
   return {
     step,

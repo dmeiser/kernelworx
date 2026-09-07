@@ -111,8 +111,8 @@ function ProfilesPreviewList({ isLoading, error, profiles, isDiscovered }: Profi
     if (error) {
       return (
         <Alert severity="error" sx={{ my: 1.5 }}>
-          Failed to load seller profiles: {error}. Please try again or check your connection
-          before deleting your account.
+          Failed to load seller profiles: {error}. Please try again or check your connection before deleting your
+          account.
         </Alert>
       );
     }
@@ -155,8 +155,8 @@ function ConfirmationView({
       </DialogTitle>
       <DialogContent>
         <DialogContentText>
-          This will permanently delete your account (<strong>{userEmail}</strong>), associated profiles,
-          custom payment methods &amp; QR codes, campaigns, and orders.
+          This will permanently delete your account (<strong>{userEmail}</strong>), associated profiles, custom payment
+          methods &amp; QR codes, campaigns, and orders.
         </DialogContentText>
 
         <ProfilesPreviewList
@@ -189,12 +189,7 @@ function ConfirmationView({
       </DialogContent>
       <DialogActions>
         <Button onClick={onCancel}>Cancel</Button>
-        <Button
-          onClick={onConfirm}
-          color="error"
-          variant="contained"
-          disabled={!isConfirmed}
-        >
+        <Button onClick={onConfirm} color="error" variant="contained" disabled={!isConfirmed}>
           Delete Account
         </Button>
       </DialogActions>
@@ -242,10 +237,7 @@ function DiscoveryListItem({
         <ListItemIcon>
           <ErrorIcon color="error" fontSize="small" />
         </ListItemIcon>
-        <ListItemText
-          primary="Discover account profiles"
-          secondary="Failed to discover profiles"
-        />
+        <ListItemText primary="Discover account profiles" secondary="Failed to discover profiles" />
       </ListItem>
     );
   }
@@ -294,7 +286,7 @@ function ProfileListItem({ profile, index }: { profile: ProfileDeletionItem; ind
 function getAccountSecondaryText(
   step: UseAccountDeletionReturn['step'],
   error: string | null,
-  isAccountFailed: boolean
+  isAccountFailed: boolean,
 ): string {
   if (step === 'completed') {
     return 'Deleted';
@@ -366,11 +358,7 @@ function ProgressList({ deletion }: { deletion: UseAccountDeletionReturn }) {
       {deletion.profiles.map((profile, idx) => (
         <ProfileListItem key={profile.profileId} profile={profile} index={idx} />
       ))}
-      <AccountListItem
-        step={deletion.step}
-        error={deletion.error}
-        isAccountFailed={isAccountFailed}
-      />
+      <AccountListItem step={deletion.step} error={deletion.error} isAccountFailed={isAccountFailed} />
     </List>
   );
 }
@@ -400,13 +388,7 @@ function DeletionStatusAlert({ step, error }: { step: DeletionStep; error: strin
   );
 }
 
-function DeletionProgressView({
-  deletion,
-  onCancel,
-}: {
-  deletion: UseAccountDeletionReturn;
-  onCancel: () => void;
-}) {
+function DeletionProgressView({ deletion, onCancel }: { deletion: UseAccountDeletionReturn; onCancel: () => void }) {
   return (
     <>
       <ProgressHeader step={deletion.step} />
@@ -440,7 +422,7 @@ function canTriggerProfileLoad(
   step: DeletionStep,
   isDiscovered: boolean,
   isLoading: boolean,
-  hasError: boolean
+  hasError: boolean,
 ): boolean {
   if (!open || step !== 'idle') {
     return false;
@@ -451,12 +433,7 @@ function canTriggerProfileLoad(
   return !hasError;
 }
 
-export const AccountDeletionDialog: React.FC<AccountDeletionDialogProps> = ({
-  open,
-  onClose,
-  userEmail,
-  deletion,
-}) => {
+export const AccountDeletionDialog: React.FC<AccountDeletionDialogProps> = ({ open, onClose, userEmail, deletion }) => {
   const [confirmText, setConfirmText] = useState('');
   const { step, error, isDiscovered, isLoadingProfiles, loadProfiles } = deletion;
 

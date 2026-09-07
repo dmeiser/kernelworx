@@ -7,17 +7,7 @@
  */
 
 import React, { useState } from 'react';
-import {
-  Box,
-  Button,
-  Typography,
-  Paper,
-  Alert,
-  List,
-  ListItem,
-  ListItemIcon,
-  ListItemText,
-} from '@mui/material';
+import { Box, Button, Typography, Paper, Alert, List, ListItem, ListItemIcon, ListItemText } from '@mui/material';
 import {
   Delete as DeleteIcon,
   PersonOff as PersonOffIcon,
@@ -35,10 +25,7 @@ interface DeleteAccountSectionProps {
   userEmail?: string;
 }
 
-export const DeleteAccountSection: React.FC<DeleteAccountSectionProps> = ({
-  onAccountDeleted,
-  userEmail,
-}) => {
+export const DeleteAccountSection: React.FC<DeleteAccountSectionProps> = ({ onAccountDeleted, userEmail }) => {
   const [dialogOpen, setDialogOpen] = useState(false);
 
   const handleSuccess = async () => {
@@ -135,22 +122,11 @@ export const DeleteAccountSection: React.FC<DeleteAccountSectionProps> = ({
         Please export any reports you need before proceeding.
       </Typography>
 
-      <Button
-        variant="outlined"
-        color="error"
-        startIcon={<DeleteIcon />}
-        onClick={handleOpenDialog}
-        size="large"
-      >
+      <Button variant="outlined" color="error" startIcon={<DeleteIcon />} onClick={handleOpenDialog} size="large">
         Delete My Account
       </Button>
 
-      <AccountDeletionDialog
-        open={dialogOpen}
-        onClose={handleCloseDialog}
-        userEmail={userEmail}
-        deletion={deletion}
-      />
+      <AccountDeletionDialog open={dialogOpen} onClose={handleCloseDialog} userEmail={userEmail} deletion={deletion} />
     </Paper>
   );
 };
