@@ -53,7 +53,7 @@ Essential knowledge for GitHub Copilot when working on this volunteer-run Scouti
 - **Data**: Amazon DynamoDB (eight separate tables)
 - **Auth**: Amazon Cognito User Pools (Google social login and email/password)
 - **Infrastructure**: OpenTofu (Infrastructure as Code)
-- **Package Management**: uv (Python), npm (frontend)
+- **Package Management**: uv (Python), npm (root tooling + frontend)
 
 **Key Design Patterns**:
 - **Multi-table DynamoDB**: Eight separate tables with named GSIs (see `tofu/application/modules/dynamodb/main.tf`)
@@ -314,7 +314,6 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 **Currently required as Lambda:**
 - `post-auth` (Cognito trigger)
 - `request-report` (Excel/S3)
-- `create-profile` (DynamoDB transaction)
 
 ## 8. Common Patterns
 
@@ -405,6 +404,9 @@ def generate_report(profile_id: str, campaign_id: str) -> str:
 ```bash
 # Install dependencies
 uv sync
+
+# Node.js 24+ and root npm install are also required for the unit suite:
+# the ephemeral-reliability tests run scripts that invoke `npm run build:resolvers`
 
 # Format code
 uv run ruff check --select I --fix src/ tests/ && uv run ruff format src/ tests/ 

@@ -328,12 +328,19 @@ resource "aws_appsync_resolver" "delete_catalog" {
 
 # === SELLER PROFILE MUTATIONS ===
 
-# createSellerProfile (Lambda)
+# createSellerProfile (JS)
 resource "aws_appsync_resolver" "create_seller_profile" {
   api_id      = aws_appsync_graphql_api.main.id
   type        = "Mutation"
   field       = "createSellerProfile"
-  data_source = aws_appsync_datasource.create_profile.name
+  data_source = aws_appsync_datasource.profiles.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/create_seller_profile_resolver.js")
 }
 
 # updateSellerProfile Pipeline

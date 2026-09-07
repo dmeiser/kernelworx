@@ -73,7 +73,7 @@ async function cleanupUnconfirmedSmokeUsers(): Promise<number> {
     return 0;
   }
 
-  console.log('  Cleaning up UNCONFIRMED smoke+ Cognito users...');
+  console.log('  Cleaning up smoke+ Cognito users (UNCONFIRMED and CONFIRMED)...');
   let deleted = 0;
   let paginationToken: string | undefined;
 
@@ -89,7 +89,7 @@ async function cleanupUnconfirmedSmokeUsers(): Promise<number> {
       );
 
       for (const user of result.Users || []) {
-        if (user.UserStatus !== 'UNCONFIRMED' || !user.Username) {
+        if (!user.Username) {
           continue;
         }
 
@@ -1072,9 +1072,9 @@ export default async function globalTeardown(): Promise<void> {
       : 'deleted';
     console.log(`   - ${label}: ${formatCount(count)} ${suffix}`);
   }
-  console.log(`   - Cognito smoke+ UNCONFIRMED users: ${formatCount(smokeUsersDeleted)} deleted`);
+  console.log(`   - Cognito smoke+ users (any status): ${formatCount(smokeUsersDeleted)} deleted`);
   console.log('   - Account records: preserved (not deleted)');
-  console.log('   - Cognito users: preserved (except smoke+ UNCONFIRMED test users)');
+  console.log('   - Cognito users: preserved (except smoke+ test users)');
 
   if (failures.length > 0) {
     const failOnCleanupError = ['1', 'true', 'yes'].includes(

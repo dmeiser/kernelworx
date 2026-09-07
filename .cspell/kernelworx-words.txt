@@ -81,6 +81,7 @@ Deregister
 designmd
 dev
 Device
+desyncs
 dialogProps
 dmeiser
 DOTALL
@@ -98,6 +99,7 @@ endswith
 env
 errorMessage
 esac
+esbuild
 eslint
 exfiltration
 exportable
@@ -141,6 +143,7 @@ ifdef
 IIFE
 impls
 importPath
+inlines
 infos
 inputRef
 inputValue

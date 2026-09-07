@@ -920,6 +920,91 @@ class TestGeneratePresignedGetURL:
         assert exc_info.value.error_code == ErrorCode.FORBIDDEN
 
 
+class TestDeleteAllUserQRCodes:
+    """Test deleting all QR codes for an account from S3."""
+
+    def test_delete_all_user_qr_codes(self, s3_bucket: Any, sample_account_id: str) -> None:
+        """Test deleting all QR codes for an account."""
+        bucket_name = os.environ.get("EXPORTS_BUCKET")
+        key1 = f"payment-qr-codes/{sample_account_id}/code1.png"
+        key2 = f"payment-qr-codes/{sample_account_id}/code2.jpg"
+        other_key = "payment-qr-codes/other-user/code3.png"
+
+        s3_bucket.put_object(Bucket=bucket_name, Key=key1, Body=b"1")
+        s3_bucket.put_object(Bucket=bucket_name, Key=key2, Body=b"2")
+        s3_bucket.put_object(Bucket=bucket_name, Key=other_key, Body=b"3")
+
+        deleted = payment_methods.delete_all_user_qr_codes(sample_account_id)
+        assert deleted >= 2
+
+        objs = s3_bucket.list_objects_v2(Bucket=bucket_name, Prefix=f"payment-qr-codes/{sample_account_id}/")
+        assert "Contents" not in objs or len(objs["Contents"]) == 0
+
+        other_objs = s3_bucket.list_objects_v2(Bucket=bucket_name, Prefix="payment-qr-codes/other-user/")
+        assert len(other_objs.get("Contents", [])) == 1
+
+    def test_delete_all_user_qr_codes_with_account_prefix(self, s3_bucket: Any, sample_account_id: str) -> None:
+        """Test deleting all QR codes when account ID has ACCOUNT# prefix."""
+        bucket_name = os.environ.get("EXPORTS_BUCKET")
+        key1 = f"payment-qr-codes/{sample_account_id}/code1.png"
+        s3_bucket.put_object(Bucket=bucket_name, Key=key1, Body=b"1")
+
+        deleted = payment_methods.delete_all_user_qr_codes(f"ACCOUNT#{sample_account_id}")
+        assert deleted >= 1
+
+        objs = s3_bucket.list_objects_v2(Bucket=bucket_name, Prefix=f"payment-qr-codes/{sample_account_id}/")
+        assert "Contents" not in objs or len(objs["Contents"]) == 0
+
+    def test_delete_all_user_qr_codes_no_bucket(self, monkeypatch: Any, sample_account_id: str) -> None:
+        """Test delete when EXPORTS_BUCKET is not set."""
+        monkeypatch.delenv("EXPORTS_BUCKET", raising=False)
+        deleted = payment_methods.delete_all_user_qr_codes(sample_account_id)
+        assert deleted == 0
+
+    def test_delete_all_user_qr_codes_versions_and_markers(self, monkeypatch: Any, sample_account_id: str) -> None:
+        """Test delete_all_user_qr_codes with versions, delete markers, and logger."""
+        monkeypatch.setenv("EXPORTS_BUCKET", "test-exports-bucket")
+        mock_s3 = MagicMock()
+        mock_paginator = MagicMock()
+        mock_paginator.paginate.return_value = [
+            {
+                "Versions": [
+                    {"Key": f"payment-qr-codes/{sample_account_id}/qr.png", "VersionId": "v1"},
+                    {"Key": "", "VersionId": "v2"},
+                    {"Key": f"payment-qr-codes/{sample_account_id}/qr.png"},
+                ],
+                "DeleteMarkers": [
+                    {"Key": f"payment-qr-codes/{sample_account_id}/qr.png", "VersionId": "m1"},
+                    {"Key": "", "VersionId": "m2"},
+                    {"VersionId": "m3"},
+                ],
+            },
+            {"Versions": [], "DeleteMarkers": []},
+        ]
+        mock_s3.get_paginator.return_value = mock_paginator
+        mock_logger = MagicMock()
+
+        with patch.object(payment_methods, "_get_s3_client", return_value=mock_s3):
+            deleted = payment_methods.delete_all_user_qr_codes(sample_account_id, logger=mock_logger)
+            assert deleted == 2
+            mock_s3.delete_objects.assert_called_once()
+            mock_logger.info.assert_called_once()
+
+    def test_delete_all_user_qr_codes_error_raises_app_error(self, monkeypatch: Any, sample_account_id: str) -> None:
+        """Test delete_all_user_qr_codes surfaces S3 failures as AppError."""
+        monkeypatch.setenv("EXPORTS_BUCKET", "test-exports-bucket")
+        mock_s3 = MagicMock()
+        mock_s3.get_paginator.side_effect = Exception("S3 error")
+        mock_logger = MagicMock()
+
+        with patch.object(payment_methods, "_get_s3_client", return_value=mock_s3):
+            with pytest.raises(AppError) as exc_info:
+                payment_methods.delete_all_user_qr_codes(sample_account_id, logger=mock_logger)
+            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+            assert "Failed to purge payment QR codes from S3" in exc_info.value.message
+            mock_logger.error.assert_called()
+
+
 class TestEdgeCases:
     """Test edge cases and error handling."""
 
@@ -1345,90 +1430,3 @@ class TestErrorHandling:
             payment_methods.update_payment_method(sample_account_id, "Venmo", "X" * 51)
         assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
         assert "50 characters" in exc_info.value.message or "must be" in exc_info.value.message.lower()
-
-
-class TestValidatePaymentMethodExists:
-    """Test validate_payment_method_exists function."""
-
-    def test_validate_global_payment_method_cash(self, dynamodb_tables: Dict[str, Any], sample_account_id: str) -> None:
-        """Test that Cash is always valid (global method)."""
-        # Should not raise any error
-        payment_methods.validate_payment_method_exists(sample_account_id, "Cash")
-
-    def test_validate_global_payment_method_check(
-        self, dynamodb_tables: Dict[str, Any], sample_account_id: str
-    ) -> None:
-        """Test that Check is always valid (global method)."""
-        # Should not raise any error
-        payment_methods.validate_payment_method_exists(sample_account_id, "Check")
-
-    def test_validate_global_payment_method_case_insensitive(
-        self, dynamodb_tables: Dict[str, Any], sample_account_id: str
-    ) -> None:
-        """Test that global methods are case-insensitive."""
-        # Should not raise any error
-        payment_methods.validate_payment_method_exists(sample_account_id, "cash")
-        payment_methods.validate_payment_method_exists(sample_account_id, "CHECK")
-        payment_methods.validate_payment_method_exists(sample_account_id, "CaSh")
-
-    def test_validate_custom_payment_method_exists(
-        self, dynamodb_tables: Dict[str, Any], sample_account: Dict[str, Any], sample_account_id: str
-    ) -> None:
-        """Test validating an existing custom payment method."""
-        # Create a custom payment method
-        payment_methods.create_payment_method(sample_account_id, "Venmo")
-
-        # Should not raise any error
-        payment_methods.validate_payment_method_exists(sample_account_id, "Venmo")
-
-    def test_validate_custom_payment_method_case_insensitive(
-        self, dynamodb_tables: Dict[str, Any], sample_account: Dict[str, Any], sample_account_id: str
-    ) -> None:
-        """Test that custom payment method validation is case-insensitive."""
-        # Create a custom payment method
-        payment_methods.create_payment_method(sample_account_id, "Venmo")
-
-        # Should not raise any error with different casing
-        payment_methods.validate_payment_method_exists(sample_account_id, "venmo")
-        payment_methods.validate_payment_method_exists(sample_account_id, "VENMO")
-        payment_methods.validate_payment_method_exists(sample_account_id, "VeNmO")
-
-    def test_validate_nonexistent_custom_payment_method(
-        self, dynamodb_tables: Dict[str, Any], sample_account: Dict[str, Any], sample_account_id: str
-    ) -> None:
-        """Test validating a non-existent custom payment method raises error."""
-        with pytest.raises(AppError) as exc_info:
-            payment_methods.validate_payment_method_exists(sample_account_id, "Zelle")
-
-        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
-        assert "does not exist" in exc_info.value.message
-        assert "Zelle" in exc_info.value.message
-
-    def test_validate_payment_method_account_has_no_methods(
-        self, dynamodb_tables: Dict[str, Any], sample_account: Dict[str, Any], sample_account_id: str
-    ) -> None:
-        """Test validating payment method when account has no custom methods."""
-        # Account exists but has no payment methods
-        # Global methods should still work
-        payment_methods.validate_payment_method_exists(sample_account_id, "Cash")
-
-        # Custom method should fail
-        with pytest.raises(AppError) as exc_info:
-            payment_methods.validate_payment_method_exists(sample_account_id, "Venmo")
-
-        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
-        assert "does not exist" in exc_info.value.message
-
-    def test_validate_payment_method_account_not_found(
-        self, dynamodb_tables: Dict[str, Any], sample_account_id: str
-    ) -> None:
-        """Test validating payment method when account doesn't exist."""
-        # Global methods should still work even if account doesn't exist
-        payment_methods.validate_payment_method_exists("nonexistent-account", "Cash")
-
-        # Custom method should fail
-        with pytest.raises(AppError) as exc_info:
-            payment_methods.validate_payment_method_exists("nonexistent-account", "Venmo")
-
-        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
-        assert "does not exist" in exc_info.value.message

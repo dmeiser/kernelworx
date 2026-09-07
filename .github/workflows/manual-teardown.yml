@@ -43,6 +43,16 @@ jobs:
       - name: Install Python dependencies
         run: uv sync --locked --dev
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: ".node-version"
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install root Node.js dependencies
+        run: npm ci
+
       - name: Set up OpenTofu
         uses: opentofu/setup-opentofu@v1
 

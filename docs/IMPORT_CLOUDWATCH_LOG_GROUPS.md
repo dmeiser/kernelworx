@@ -84,7 +84,6 @@ The current app function keys are:
 
 - `list-my-shares`
 - `list-catalogs-in-use`
-- `create-profile`
 - `request-report`
 - `unit-reporting`
 - `list-unit-catalogs`
@@ -98,7 +97,6 @@ The current app function keys are:
 - `confirm-qr-upload`
 - `generate-qr-code-presigned-url`
 - `delete-qr-code`
-- `validate-payment-method`
 - `admin-operations`
 
 The current Cognito trigger function keys are:
@@ -117,11 +115,11 @@ prefix="kernelworx"
 region_abbrev="ue1"
 environment="prod"   # change to "dev" as needed
 
-for key in list-my-shares list-catalogs-in-use create-profile request-report unit-reporting \
+for key in list-my-shares list-catalogs-in-use request-report unit-reporting \
            list-unit-catalogs list-unit-campaign-catalogs \
            delete-campaign-orders delete-profile-cascade update-account delete-account \
            transfer-ownership request-qr-upload confirm-qr-upload \
-           generate-qr-code-presigned-url delete-qr-code validate-payment-method \
+           generate-qr-code-presigned-url delete-qr-code \
            admin-operations; do
   echo "tofu import 'module.lambda.aws_cloudwatch_log_group.functions[\"$key\"]' '/aws/lambda/$prefix-$key-$region_abbrev-$environment'"
 done
