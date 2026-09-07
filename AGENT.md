@@ -80,7 +80,6 @@ The last commits before a successful validation run MUST be formatting/type-chec
 **Running Coverage**:
 ```bash
 # Generate coverage report
-# Requires Node.js and root `npm install` first (the ephemeral-reliability tests run `npm run build:resolvers`)
 uv run pytest tests/unit --cov=src --cov-report=term-missing --cov-report=html --cov-fail-under=100
 
 # View HTML report
@@ -169,8 +168,6 @@ Before claiming work is complete:
 - Test all error handling and edge cases
 - Test all validation logic (customer input, invite expiration, etc.)
 - **Required**: 100% code coverage, all tests pass
-- **Prerequisites**: Node.js and root `npm install` — the ephemeral-reliability
-  unit tests run the deploy/recover scripts, which invoke `npm run build:resolvers`
 
 **Integration Testing**:
 - Test against AWS dev account or LocalStack Pro (if approved)

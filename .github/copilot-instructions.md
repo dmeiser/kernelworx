@@ -405,9 +405,6 @@ def generate_report(profile_id: str, campaign_id: str) -> str:
 # Install dependencies
 uv sync
 
-# Node.js 24+ and root npm install are also required for the unit suite:
-# the ephemeral-reliability tests run scripts that invoke `npm run build:resolvers`
-
 # Format code
 uv run ruff check --select I --fix src/ tests/ && uv run ruff format src/ tests/ 
 

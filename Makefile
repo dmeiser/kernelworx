@@ -5,7 +5,7 @@ help:
 	@echo "KernelWorx - Build & Test Commands"
 	@echo ""
 	@echo "Testing:"
-	@echo "  make test              - Run Python unit tests (pytest, needs root npm install)"
+	@echo "  make test              - Run Python unit tests (pytest)"
 	@echo "  make test-frontend     - Run TypeScript unit tests (vitest)"
 	@echo "  make test-e2e          - Run Python E2E smoke tests (pytest-playwright)"
 	@echo "  make test-integration  - Run integration tests"
