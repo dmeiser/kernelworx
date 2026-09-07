@@ -249,3 +249,56 @@ resource "aws_appsync_function" "get_shared_campaign_for_delete" {
 
   code = file("${local.js_resolvers_dir}/get_shared_campaign_for_delete_fn.js")
 }
+
+resource "aws_appsync_function" "lookup_shared_campaign" {
+  api_id      = aws_appsync_graphql_api.main.id
+  data_source = aws_appsync_datasource.shared_campaigns.name
+  name        = "LookupSharedCampaignFn${local.env_suffix}"
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lookup_shared_campaign_fn.js")
+}
+
+resource "aws_appsync_function" "verify_shared_campaign_catalog" {
+  api_id      = aws_appsync_graphql_api.main.id
+  data_source = aws_appsync_datasource.catalogs.name
+  name        = "VerifySharedCampaignCatalogFn${local.env_suffix}"
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/verify_shared_campaign_catalog_fn.js")
+}
+
+resource "aws_appsync_function" "create_campaign" {
+  api_id      = aws_appsync_graphql_api.main.id
+  data_source = aws_appsync_datasource.campaigns.name
+  name        = "CreateCampaignFn${local.env_suffix}"
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/create_campaign_fn.js")
+}
+
+resource "aws_appsync_function" "create_campaign_share" {
+  api_id      = aws_appsync_graphql_api.main.id
+  data_source = aws_appsync_datasource.shares.name
+  name        = "CreateCampaignShareFn${local.env_suffix}"
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/create_campaign_share_fn.js")
+}
+

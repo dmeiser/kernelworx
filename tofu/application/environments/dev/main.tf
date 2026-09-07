@@ -320,7 +320,6 @@ import {
     "unit-reporting",
     "list-unit-catalogs",
     "list-unit-campaign-catalogs",
-    "campaign-operations",
     "delete-campaign-orders",
     "delete-profile-cascade",
     "delete-account",

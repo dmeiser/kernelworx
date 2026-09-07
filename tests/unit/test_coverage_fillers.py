@@ -22,23 +22,6 @@ def test_validation_validate_unit_fields_requires_unit_number():
     assert ensure_profile_id("abc") == "PROFILE#abc"
 
 
-def test_campaign_operations_dynamo_value_for_scalar_fallback():
-    from src.handlers import campaign_operations
-
-    class CustomObj:
-        pass
-
-    obj = CustomObj()
-    result = campaign_operations._dynamo_value_for_scalar(obj)
-    assert result == {"S": str(obj)}
-
-    # Set branch for collection conversion (sets are now serialized as L, not SS)
-    assert campaign_operations._dynamo_value_for_collection({"k": "v"}) == {"M": {"k": {"S": "v"}}}
-    result = campaign_operations._dynamo_value_for_collection({"a", "b"})
-    assert result.get("L") is not None
-    assert len(result["L"]) == 2
-
-
 def test_pre_signup_handle_signup_exception():
     from botocore.exceptions import ClientError
 
@@ -754,15 +737,6 @@ def test_profile_sharing_fetch_batch_with_zero_retries():
 
     result = profile_sharing._fetch_batch_with_retry([], None, DummyLogger(), retries=0)  # type: ignore[arg-type]
     assert result == []
-
-
-def test_campaign_operations_normalize_account_id():
-    from src.handlers.campaign_operations import _normalize_account_id
-
-    assert _normalize_account_id("ACCOUNT#abc") == "abc"
-    assert _normalize_account_id("abc") == "abc"
-    assert _normalize_account_id(None) == ""  # type: ignore[arg-type]
-    assert _normalize_account_id("") == ""
 
 
 def test_campaign_reporting_propagates_batch_access_error(monkeypatch):

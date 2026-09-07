@@ -106,11 +106,6 @@ locals {
       timeout     = 30
       memory_size = 512
     }
-    "campaign-operations" = {
-      handler     = "handlers.campaign_operations.create_campaign"
-      timeout     = 30
-      memory_size = 512
-    }
     "delete-campaign-orders" = {
       handler     = "handlers.campaign_operations.delete_campaign_orders"
       timeout     = 60
