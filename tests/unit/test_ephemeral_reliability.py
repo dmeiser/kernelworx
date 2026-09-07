@@ -31,6 +31,7 @@ def repo_root() -> Path:
 def tmp_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Provide an isolated temp directory prepended to PATH."""
     monkeypatch.setenv("PATH", f"{tmp_path}:{os.environ['PATH']}")
+    write_mock(tmp_path, "npm", "#!/bin/bash\nexit 0")
     return tmp_path
 
 

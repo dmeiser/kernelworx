@@ -249,7 +249,6 @@ uv run ruff format src/ tests/
 uv run mypy src/
 
 # Run all checks
-# Requires Node.js and root `npm install` first (see Installation above)
 uv run ruff check --select I --fix src/ tests/ && \
 uv run ruff format src/ tests/ && \
 uv run mypy src/ && \
