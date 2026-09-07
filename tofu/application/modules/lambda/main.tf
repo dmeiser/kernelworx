@@ -86,11 +86,6 @@ locals {
       timeout     = 30
       memory_size = 256
     }
-    "create-profile" = {
-      handler     = "handlers.scout_operations.create_seller_profile"
-      timeout     = 30
-      memory_size = 256
-    }
     "request-report" = {
       handler     = "handlers.report_generation.request_campaign_report"
       timeout     = 60
@@ -156,11 +151,6 @@ locals {
     }
     "delete-qr-code" = {
       handler     = "handlers.payment_methods_handlers.delete_qr_code"
-      timeout     = 10
-      memory_size = 256
-    }
-    "validate-payment-method" = {
-      handler     = "handlers.validate_payment_method.lambda_handler"
       timeout     = 10
       memory_size = 256
     }

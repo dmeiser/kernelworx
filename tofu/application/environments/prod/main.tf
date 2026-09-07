@@ -314,7 +314,6 @@ import {
     "admin-operations",
     "campaign-operations",
     "confirm-qr-upload",
-    "create-profile",
     "delete-account",
     "delete-campaign-orders",
     "delete-profile-cascade",
@@ -328,7 +327,6 @@ import {
     "request-report",
     "transfer-ownership",
     "unit-reporting",
-    "validate-payment-method",
   ])
   id = "/aws/lambda/${local.name_prefix}-${each.value}-${var.region_abbrev}-${var.environment}"
   to = module.lambda.aws_cloudwatch_log_group.functions[each.value]

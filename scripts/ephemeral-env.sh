@@ -58,6 +58,12 @@ STATE_KEY="application/ephemeral/${RUN_ID}/terraform.tfstate"
 
 cd "$ENV_DIR"
 
+# Every tofu plan/apply/destroy evaluates file() against the bundled resolver
+# output, so the bundle must exist before any tofu invocation.
+ensure_resolvers_built() {
+  (cd "$ROOT_DIR" && npm run build:resolvers)
+}
+
 build_lambda_layer() {
   log "📦 Building Lambda layer dependencies..."
   LAYER_REQ="$LAYER_DIR/requirements.txt"
@@ -120,6 +126,9 @@ case "$ACTION" in
     cleanup_stale_lock "$RUN_ID"
 
     log "📋 Planning and applying ephemeral stack..."
+
+    log "📦 Building AppSync JS resolvers..."
+    ensure_resolvers_built
 
     # AppSync rejects deleting pipeline functions that are still referenced by a
     # resolver. If the plan would destroy any AppSync functions, update the
@@ -212,6 +221,9 @@ case "$ACTION" in
 
     cleanup_stale_lock "$RUN_ID"
     empty_ephemeral_s3_buckets "$RUN_ID"
+
+    log "📦 Building AppSync JS resolvers..."
+    ensure_resolvers_built
 
     log "💥 Destroying AWS resources..."
     if tofu destroy -input=false -auto-approve -var="environment=$RUN_ID"; then

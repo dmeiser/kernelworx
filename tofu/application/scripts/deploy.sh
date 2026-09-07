@@ -43,6 +43,12 @@ build_lambda_layer() {
     (cd "$ROOT_DIR" && uv pip install --requirement "$LAYER_REQ" --target "$LAYER_DIR/python")
 }
 
+# Tofu reads resolver code from the esbuild bundle; regenerate it so plan/apply
+# never evaluate file() against a missing or stale directory.
+build_resolvers() {
+    (cd "$ROOT_DIR" && npm run build:resolvers)
+}
+
 # Check whether a saved plan is still fresh relative to source/config changes.
 # Returns 0 (true) if the plan exists and no relevant source files are newer.
 plan_is_fresh() {
@@ -81,6 +87,7 @@ case "$ACTION" in
     plan)
         echo "📋 Planning changes..."
         build_lambda_layer
+        build_resolvers
         tofu plan -out=tfplan $EXTRA_FLAGS
         ;;
     apply)
@@ -90,6 +97,7 @@ case "$ACTION" in
         fi
 
         build_lambda_layer
+        build_resolvers
         if [ -f tfplan ] && plan_is_fresh tfplan; then
             echo "🚀 Applying saved plan..."
             tofu apply $AUTO_APPROVE_FLAG $EXTRA_FLAGS tfplan
@@ -110,6 +118,7 @@ case "$ACTION" in
         echo "⚠️  Are you sure? This will destroy all resources!"
         read -p "Type 'yes' to confirm: " confirm
         if [ "$confirm" == "yes" ]; then
+            build_resolvers
             tofu destroy $EXTRA_FLAGS
         else
             echo "Aborted."
@@ -117,6 +126,7 @@ case "$ACTION" in
         ;;
     validate)
         echo "✅ Validating configuration..."
+        build_resolvers
         tofu validate $EXTRA_FLAGS
         ;;
     fmt)

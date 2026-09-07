@@ -1,76 +1,52 @@
 /**
  * Delete Account Section Component
  *
- * Allows users to permanently delete their account and all associated data
+ * Allows users to permanently delete their account and all associated data.
+ * Orchestrates stepped deletion on the frontend with user feedback and
+ * resumption support. Catalogs are never deleted.
  */
 
 import React, { useState } from 'react';
-import {
-  Box,
-  Button,
-  Typography,
-  Paper,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogContentText,
-  DialogActions,
-  TextField,
-  Alert,
-  List,
-  ListItem,
-  ListItemIcon,
-  ListItemText,
-} from '@mui/material';
+import { Box, Button, Typography, Paper, Alert, List, ListItem, ListItemIcon, ListItemText } from '@mui/material';
 import {
   Delete as DeleteIcon,
-  Warning as WarningIcon,
   PersonOff as PersonOffIcon,
   Campaign as CampaignIcon,
   Receipt as ReceiptIcon,
   Share as ShareIcon,
-  Category as CategoryIcon,
+  MenuBook as CatalogIcon,
+  Payment as PaymentIcon,
 } from '@mui/icons-material';
+import { useAccountDeletion } from '../../hooks/useAccountDeletion';
+import { AccountDeletionDialog } from './AccountDeletionDialog';
 
 interface DeleteAccountSectionProps {
-  onDeleteAccount: () => Promise<void>;
+  onAccountDeleted?: () => Promise<void>;
   userEmail?: string;
 }
 
-export const DeleteAccountSection: React.FC<DeleteAccountSectionProps> = ({ onDeleteAccount, userEmail }) => {
+export const DeleteAccountSection: React.FC<DeleteAccountSectionProps> = ({ onAccountDeleted, userEmail }) => {
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [confirmText, setConfirmText] = useState('');
-  const [deleting, setDeleting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+
+  const handleSuccess = async () => {
+    if (onAccountDeleted) {
+      await onAccountDeleted();
+    }
+  };
+
+  const deletion = useAccountDeletion({
+    onSuccess: handleSuccess,
+  });
 
   const handleOpenDialog = () => {
+    deletion.reset();
     setDialogOpen(true);
-    setConfirmText('');
-    setError(null);
   };
 
   const handleCloseDialog = () => {
-    if (!deleting) {
+    if (!deletion.isProcessing) {
       setDialogOpen(false);
-      setConfirmText('');
-      setError(null);
-    }
-  };
-
-  const handleDelete = async () => {
-    if (confirmText !== 'DELETE') {
-      setError('Please type DELETE to confirm');
-      return;
-    }
-
-    try {
-      setDeleting(true);
-      setError(null);
-      await onDeleteAccount();
-      // Don't close dialog - user will be logged out and redirected
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete account');
-      setDeleting(false);
+      deletion.reset();
     }
   };
 
@@ -124,9 +100,21 @@ export const DeleteAccountSection: React.FC<DeleteAccountSectionProps> = ({ onDe
         </ListItem>
         <ListItem>
           <ListItemIcon>
-            <CategoryIcon fontSize="small" />
+            <PaymentIcon fontSize="small" />
           </ListItemIcon>
-          <ListItemText primary="All custom catalogs" />
+          <ListItemText
+            primary="Custom payment methods & QR codes"
+            secondary="All payment preferences and uploaded QR code images"
+          />
+        </ListItem>
+        <ListItem>
+          <ListItemIcon>
+            <CatalogIcon fontSize="small" color="primary" />
+          </ListItemIcon>
+          <ListItemText
+            primary="Custom catalogs"
+            secondary="Catalogs you created will be preserved and never deleted"
+          />
         </ListItem>
       </List>
 
@@ -138,58 +126,7 @@ export const DeleteAccountSection: React.FC<DeleteAccountSectionProps> = ({ onDe
         Delete My Account
       </Button>
 
-      {/* Confirmation Dialog */}
-      <Dialog open={dialogOpen} onClose={handleCloseDialog} maxWidth="sm" fullWidth>
-        <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <WarningIcon color="error" />
-          Confirm Account Deletion
-        </DialogTitle>
-        <DialogContent>
-          <DialogContentText>
-            This will permanently delete your account (<strong>{userEmail}</strong>) and all associated data.
-          </DialogContentText>
-
-          <Alert severity="warning" sx={{ my: 2 }}>
-            This action cannot be undone. All your data will be permanently deleted.
-          </Alert>
-
-          {error && (
-            <Alert severity="error" sx={{ mb: 2 }}>
-              {error}
-            </Alert>
-          )}
-
-          <Typography variant="body2" gutterBottom sx={{ mt: 2 }}>
-            To confirm, please type <strong>DELETE</strong> in the box below:
-          </Typography>
-
-          <TextField
-            autoFocus
-            fullWidth
-            value={confirmText}
-            onChange={(e) => setConfirmText(e.target.value)}
-            placeholder="Type DELETE to confirm"
-            disabled={deleting}
-            sx={{ mt: 1 }}
-            error={error !== null && confirmText !== 'DELETE'}
-          />
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={handleCloseDialog} disabled={deleting}>
-            Cancel
-          </Button>
-          <Button
-            onClick={() => {
-              void handleDelete();
-            }}
-            color="error"
-            variant="contained"
-            disabled={deleting || confirmText !== 'DELETE'}
-          >
-            {deleting ? 'Deleting...' : 'Delete Account'}
-          </Button>
-        </DialogActions>
-      </Dialog>
+      <AccountDeletionDialog open={dialogOpen} onClose={handleCloseDialog} userEmail={userEmail} deletion={deletion} />
     </Paper>
   );
 };

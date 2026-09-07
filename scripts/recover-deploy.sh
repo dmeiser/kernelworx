@@ -20,6 +20,10 @@ load_env
 recover_state_if_missing "$RUN_ID"
 cleanup_stale_lock "$RUN_ID"
 init_backend "$RUN_ID"
+
+echo "📦 Building AppSync JS resolvers..."
+(cd "$ROOT_DIR" && npm run build:resolvers)
+
 import_ephemeral_resources "$RUN_ID"
 
 echo ""

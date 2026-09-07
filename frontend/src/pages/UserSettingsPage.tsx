@@ -13,7 +13,7 @@ import { useQuery, useMutation } from '@apollo/client/react';
 import { Box, Alert } from '@mui/material';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { GET_MY_ACCOUNT, UPDATE_MY_ACCOUNT, DELETE_MY_ACCOUNT } from '../lib/graphql';
+import { GET_MY_ACCOUNT, UPDATE_MY_ACCOUNT } from '../lib/graphql';
 import { usePasswordChange, useMfa, usePasskeys, useEmailUpdate, useProfileEdit } from '../hooks';
 import { LoadingState } from '../components/LoadingState';
 import { ErrorAlert } from '../components/ErrorAlert';
@@ -138,8 +138,6 @@ export const UserSettingsPage: React.FC = () => {
     onError: createUpdateErrorHandler(profileHook),
   });
 
-  const [deleteMyAccount] = useMutation(DELETE_MY_ACCOUNT);
-
   // Merge GraphQL account data with AuthContext account (which has isAdmin from JWT token)
   const account = mergeAccountData(getAccountFromData(accountData), authAccount);
 
@@ -178,8 +176,7 @@ export const UserSettingsPage: React.FC = () => {
     });
   };
 
-  const handleDeleteAccount = async () => {
-    await deleteMyAccount();
+  const handleAccountDeleted = async () => {
     await logout();
     void navigate('/');
   };
@@ -229,7 +226,7 @@ export const UserSettingsPage: React.FC = () => {
       />
 
       {/* Delete Account Section */}
-      <DeleteAccountSection onDeleteAccount={handleDeleteAccount} userEmail={account?.email} />
+      <DeleteAccountSection onAccountDeleted={handleAccountDeleted} userEmail={account?.email} />
 
       {/* Edit Profile Dialog */}
       <EditProfileDialog

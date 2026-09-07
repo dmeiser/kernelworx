@@ -8,8 +8,9 @@ Cleanup policy
 --------------
 After the full test suite completes, all DynamoDB records created by test users
 are deleted by the TypeScript integration cleanup invoked by ``global_cleanup``.
-Cognito users and Account records are
-intentionally preserved so the same accounts can be reused across multiple runs.
+Persistent Cognito test users and Account records are intentionally preserved so
+the same accounts can be reused across multiple runs; throwaway ``smoke+``
+signup users are deleted in any confirmation state.
 
 Fixture hierarchy
 -----------------
@@ -99,7 +100,11 @@ def _run_typescript_cleanup() -> None:
 
 
 def _cleanup_unconfirmed_smoke_users(user_pool_id: str) -> None:
-    """Delete UNCONFIRMED Cognito users whose email starts with ``smoke+``.
+    """Delete smoke+ Cognito users regardless of confirmation state.
+
+    Confirmed ``smoke+`` users are deleted too: the signup smoke tests
+    confirm users server-side, so leaving only-UNCONFIRMED filtering in
+    place would leak a CONFIRMED user (plus its Account row) per run.
 
     Uses the AWS CLI instead of boto3 so credentials obtained via ``aws login``
     (e.g., AWS IAM Identity Center / SSO plugins) are picked up through the
@@ -136,31 +141,30 @@ def _cleanup_unconfirmed_smoke_users(user_pool_id: str) -> None:
 
         page = json.loads(result.stdout)
         for user in page.get("Users", []):
-            if user.get("UserStatus") == "UNCONFIRMED":
-                delete_cmd = [
-                    "aws",
-                    "cognito-idp",
-                    "admin-delete-user",
-                    "--user-pool-id",
-                    user_pool_id,
-                    "--username",
-                    user["Username"],
-                    "--output",
-                    "json",
-                    "--no-cli-pager",
-                ]
-                if region:
-                    delete_cmd.extend(["--region", region])
-                del_result = subprocess.run(delete_cmd, check=False, capture_output=True, text=True, timeout=120)
-                if del_result.returncode != 0:
-                    stderr = del_result.stderr
-                    # An already-deleted user between list and delete is benign in
-                    # concurrent runs; report every other failure at the end.
-                    if stderr and "UserNotFoundException" in stderr:
-                        continue
-                    failures.append(f"admin-delete-user failed for {user['Username']}: {stderr}")
-                # Small delay to avoid Cognito API throttling on rapid deletes.
-                time.sleep(0.2)
+            delete_cmd = [
+                "aws",
+                "cognito-idp",
+                "admin-delete-user",
+                "--user-pool-id",
+                user_pool_id,
+                "--username",
+                user["Username"],
+                "--output",
+                "json",
+                "--no-cli-pager",
+            ]
+            if region:
+                delete_cmd.extend(["--region", region])
+            del_result = subprocess.run(delete_cmd, check=False, capture_output=True, text=True, timeout=120)
+            if del_result.returncode != 0:
+                stderr = del_result.stderr
+                # An already-deleted user between list and delete is benign in
+                # concurrent runs; report every other failure at the end.
+                if stderr and "UserNotFoundException" in stderr:
+                    continue
+                failures.append(f"admin-delete-user failed for {user['Username']}: {stderr}")
+            # Small delay to avoid Cognito API throttling on rapid deletes.
+            time.sleep(0.2)
 
         next_token = page.get("PaginationToken")
         if not next_token:

@@ -21,6 +21,9 @@ cd kernelworx
 # Install Python dependencies (Lambda functions)
 uv sync
 
+# Install root Node.js dependencies (AppSync resolver bundling tooling)
+npm install
+
 # Install OpenTofu (macOS with Homebrew)
 brew install opentofu
 
@@ -84,7 +87,7 @@ python --version  # Should be 3.14+
 uv --version
 
 # Check Node.js
-node --version  # Should be 20+
+node --version  # Should be 24+
 
 # Check AWS credentials
 aws sts get-caller-identity
@@ -94,7 +97,7 @@ aws sts get-caller-identity
 
 ### Quick Start Deployment (Recommended)
 
-Use the deployment helper, which builds the Lambda layer and runs OpenTofu:
+Use the deployment helper, which builds the Lambda layer, bundles the AppSync resolver JavaScript, and runs OpenTofu:
 
 ```bash
 # Initialize OpenTofu (first time only)
@@ -110,10 +113,14 @@ Use the deployment helper, which builds the Lambda layer and runs OpenTofu:
 The helper will:
 1. Source the root `.env` for required `TF_VAR_*` values
 2. Build `.build/lambda-layer` from production Python dependencies
-3. Run `tofu` in `tofu/application/environments/dev`
+3. Bundle the AppSync resolver JavaScript (`npm run build:resolvers`)
+4. Run `tofu` in `tofu/application/environments/dev`
 
-If you run `tofu` directly, export `TF_VAR_encryption_passphrase` and build the
-layer first; a plain `tofu apply` will fail because the layer archive is missing.
+If you run `tofu` directly, export `TF_VAR_encryption_passphrase`, build the
+layer, and bundle the resolver JavaScript first (`npm install` at the repo
+root, then `npm run build:resolvers`); a plain `tofu apply` fails because the
+layer archive and the resolver bundle (`tofu/application/appsync/dist/`) are
+missing.
 
 ### Manual Deployment
 
@@ -128,6 +135,10 @@ rm -rf .build/lambda-layer
 mkdir -p .build/lambda-layer/python
 uv export --no-dev --format requirements.txt --no-hashes > .build/lambda-layer/requirements.txt
 uv pip install --requirement .build/lambda-layer/requirements.txt --target .build/lambda-layer/python
+
+# Bundle the AppSync resolver JavaScript (required by the appsync module)
+npm install
+npm run build:resolvers
 
 # Run OpenTofu from the environment directory
 cd tofu/application/environments/dev
@@ -238,6 +249,7 @@ uv run ruff format src/ tests/
 uv run mypy src/
 
 # Run all checks
+# Requires Node.js and root `npm install` first (see Installation above)
 uv run ruff check --select I --fix src/ tests/ && \
 uv run ruff format src/ tests/ && \
 uv run mypy src/ && \
@@ -249,6 +261,8 @@ uv run pytest tests/unit --cov=src --cov-fail-under=100
 ```bash
 cd tofu/application/environments/dev
 
+# Bundle the resolver JavaScript first (see Manual Deployment above);
+# a plain tofu init/plan fails while tofu/application/appsync/dist is missing
 # Initialize working directory
 tofu init
 

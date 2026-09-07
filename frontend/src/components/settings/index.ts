@@ -8,3 +8,4 @@ export { AccountInfoSection } from './AccountInfoSection';
 export { EditProfileDialog } from './EditProfileDialog';
 export { ChangeEmailDialog } from './ChangeEmailDialog';
 export { DeleteAccountSection } from './DeleteAccountSection';
+export { AccountDeletionDialog } from './AccountDeletionDialog';
