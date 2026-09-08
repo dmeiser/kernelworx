@@ -4,8 +4,9 @@ import { validatePhone, validateAddress } from './lib/validation.js';
 function validateOrderDate(orderDate) {
     if (!orderDate || typeof orderDate !== 'string' || !orderDate.trim()) {
         util.error('Order date is required', 'BadRequest');
-        return;
+        return false;
     }
+    return true;
 }
 
 export function request(ctx) {
@@ -56,7 +57,9 @@ export function request(ctx) {
         exprValues[':paymentMethod'] = input.paymentMethod;
     }
     if (input.orderDate !== undefined) {
-        validateOrderDate(input.orderDate);
+        if (!validateOrderDate(input.orderDate)) {
+            return;
+        }
         updates.push('orderDate = :orderDate');
         exprValues[':orderDate'] = input.orderDate;
     }
