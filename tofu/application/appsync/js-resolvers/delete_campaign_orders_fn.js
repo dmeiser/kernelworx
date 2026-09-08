@@ -1,5 +1,11 @@
 import { util, runtime } from '@aws-appsync/utils';
 
+// WARNING: this file is loaded via Terraform templatefile() (see
+// modules/appsync/functions_campaigns.tf), so every `${...}` below is
+// Terraform-interpolated, not a JS template literal. `${table_name}` is the
+// only intended placeholder; do NOT add other `${...}` sequences here —
+// Terraform will try to substitute them and the plan will fail or substitute
+// the wrong value. (Switching to file() is deferred per #284.)
 const tableName = '${table_name}';
 
 export function request(ctx) {
