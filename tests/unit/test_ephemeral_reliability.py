@@ -858,6 +858,33 @@ class TestWorkflowDispatchSurface:
         assert self._if_gates_on_mode(jobs["recover-deploy"]["if"], "recover-deploy")
         assert self._if_gates_on_mode(jobs["recover-destroy"]["if"], "recover-destroy")
 
+    def test_ci_infra_job_installs_dependencies_and_builds_resolvers_before_opentofu(self, repo_root: Path) -> None:
+        workflow = self._load_workflow(repo_root, "ci.yml")
+        infra_job = workflow.get("jobs", {}).get("infra")
+        assert infra_job is not None, "CI workflow must define an 'infra' job"
+
+        steps = infra_job.get("steps", [])
+        step_names = [s.get("name") for s in steps]
+
+        setup_node_idx = next((i for i, s in enumerate(steps) if "actions/setup-node" in s.get("uses", "")), -1)
+        npm_ci_idx = next((i for i, s in enumerate(steps) if (s.get("run") or "").strip() == "npm ci"), -1)
+        build_resolvers_idx = next(
+            (i for i, s in enumerate(steps) if (s.get("run") or "").strip() == "npm run build:resolvers"), -1
+        )
+        setup_opentofu_idx = next(
+            (i for i, s in enumerate(steps) if "opentofu/setup-opentofu" in s.get("uses", "")), -1
+        )
+
+        assert setup_node_idx != -1, f"Expected Node.js setup step in infra job steps: {step_names}"
+        assert npm_ci_idx != -1, f"Expected 'npm ci' step in infra job steps: {step_names}"
+        assert build_resolvers_idx != -1, f"Expected 'npm run build:resolvers' step in infra job steps: {step_names}"
+        assert setup_opentofu_idx != -1, f"Expected OpenTofu setup step in infra job steps: {step_names}"
+
+        # Invariant: Node setup -> npm ci -> build:resolvers -> setup-opentofu / tofu operations
+        assert setup_node_idx < npm_ci_idx, "Node.js setup must precede npm ci"
+        assert npm_ci_idx < build_resolvers_idx, "npm ci must precede building resolvers"
+        assert build_resolvers_idx < setup_opentofu_idx, "Building resolvers must precede OpenTofu setup and operations"
+
     def test_sweep_skips_open_and_unknown_pr_states(self, repo_root: Path, tmp_env: Path) -> None:
         workflow = self._load_workflow(repo_root)
         sweep_step = workflow["jobs"]["sweep"]["steps"][-1]
