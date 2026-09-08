@@ -1,6 +1,4 @@
 import { vi, describe, test, expect, beforeEach } from 'vitest';
-import { readFileSync } from 'node:fs';
-import path from 'node:path';
 
 // Guard test for create_order_fn.js: util.error() throws in the AppSync JS
 // runtime, but under any mock or changed behavior the validation helpers must
@@ -23,11 +21,6 @@ vi.mock('@aws-appsync/utils', () => {
 });
 
 import * as createOrderFn from '../../../tofu/application/appsync/js-resolvers/create_order_fn.js';
-
-const resolverSource = readFileSync(
-  path.resolve(__dirname, '../../tofu/application/appsync/js-resolvers/create_order_fn.js'),
-  'utf8'
-);
 
 function validInput() {
   return {
@@ -58,15 +51,6 @@ beforeEach(() => {
 });
 
 describe('create_order_fn early-return guards after util.error', () => {
-  test.each([
-    [/util\.error\('Customer name is required', 'BadRequest'\);\s*return/],
-    [/util\.error\(phoneResult\.error, 'BadRequest'\);\s*return/],
-    [/util\.error\(addressResult\.error, 'BadRequest'\);\s*return/],
-    [/util\.error\('Order date is required', 'BadRequest'\);\s*return/]
-  ])('source guard: return statement follows %s', (pattern) => {
-    expect(resolverSource).toMatch(pattern);
-  });
-
   test('missing customer name records the error and validation stops immediately', () => {
     const input = validInput();
     input.customerName = '';
