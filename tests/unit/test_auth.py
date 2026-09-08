@@ -1415,9 +1415,30 @@ class TestIsAdmin:
 
         assert result is False
 
-    def test_exception_returns_false(self) -> None:
-        """Test that exception during parsing returns False."""
-        # claims is a string instead of dict - causes AttributeError on .get()
+    def test_none_event_returns_false(self) -> None:
+        """Test that None event returns False (malformed event)."""
+        result = is_admin(None)  # type: ignore[arg-type]
+
+        assert result is False
+
+    def test_non_dict_event_returns_false(self) -> None:
+        """Test that non-dict event returns False (malformed event)."""
+        result = is_admin("not-an-event")  # type: ignore[arg-type]
+
+        assert result is False
+
+    def test_non_dict_identity_returns_false(self) -> None:
+        """Test that non-dict identity returns False (malformed event)."""
+        event: Dict[str, Any] = {
+            "identity": "not-a-dict",  # Invalid type
+        }
+
+        result = is_admin(event)
+
+        assert result is False
+
+    def test_non_dict_claims_returns_false(self) -> None:
+        """Test that non-dict claims returns False (malformed event)."""
         event: Dict[str, Any] = {
             "identity": {
                 "claims": "not-a-dict",  # Invalid type
@@ -1427,6 +1448,36 @@ class TestIsAdmin:
         result = is_admin(event)
 
         assert result is False
+
+    def test_groups_unexpected_type_returns_false(self) -> None:
+        """Test that non-str/non-list groups claim returns False."""
+        event: Dict[str, Any] = {
+            "identity": {
+                "claims": {
+                    "cognito:groups": 123,  # Invalid type
+                }
+            }
+        }
+
+        result = is_admin(event)
+
+        assert result is False
+
+    def test_unexpected_error_propagates(self) -> None:
+        """Test that genuinely unexpected errors are not swallowed."""
+
+        class BrokenDict(dict):  # type: ignore[type-arg]
+            def get(self, key: str, default: Any = None) -> Any:
+                raise RuntimeError("boom")
+
+        event: Dict[str, Any] = {
+            "identity": {
+                "claims": BrokenDict(),
+            }
+        }
+
+        with pytest.raises(RuntimeError, match="boom"):
+            is_admin(event)
 
 
 class TestHasRequiredPermissionEdgeCases:
