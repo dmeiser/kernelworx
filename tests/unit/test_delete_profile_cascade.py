@@ -192,18 +192,6 @@ class TestDeleteProfileCascade:
             Key={"ownerAccountId": f"ACCOUNT#{owner_id}", "profileId": profile_id}
         )
 
-    def test_not_found_when_profile_missing_for_caller(self, profiles_table: Any) -> None:
-        """Test NOT_FOUND when the profile does not exist under the caller's account."""
-        _create_profile(profiles_table, "owner-123", "PROFILE#test")
-        event = {
-            "arguments": {"profileId": "PROFILE#test"},
-            "identity": {"sub": "other-user"},
-        }
-        with patch("src.handlers.delete_profile_cascade.time.sleep"):
-            with pytest.raises(AppError) as exc_info:
-                lambda_handler(event, None)
-        assert exc_info.value.error_code == "NOT_FOUND"
-
     def test_unauthorized_call_raises_not_found(self, profiles_table: Any) -> None:
         """Test that a non-owner is rejected with NOT_FOUND (no existence leak)."""
         _create_profile(profiles_table, "owner-123", "PROFILE#test")
@@ -575,7 +563,6 @@ class TestDeleteProfileCascade:
         _create_profile(profiles_table, owner_id, profile_id)
 
         with patch("src.handlers.delete_profile_cascade.tables") as mock_tables:
-            mock_tables.profiles.query.return_value = {"Items": [{"ownerAccountId": f"ACCOUNT#{owner_id}"}]}
             mock_tables.profiles.get_item.return_value = {
                 "Item": {"ownerAccountId": f"ACCOUNT#{owner_id}", "profileId": profile_id}
             }
@@ -621,7 +608,6 @@ class TestDeleteProfileCascade:
             patch("src.handlers.delete_profile_cascade.tables") as mock_tables,
             patch("src.handlers.campaign_operations.tables") as mock_campaign_tables,
         ):
-            mock_tables.profiles.query.return_value = {"Items": [{"ownerAccountId": f"ACCOUNT#{owner_id}"}]}
             mock_tables.profiles.get_item.return_value = {
                 "Item": {"ownerAccountId": f"ACCOUNT#{owner_id}", "profileId": profile_id}
             }
@@ -667,7 +653,6 @@ class TestDeleteProfileCascade:
                 raise Exception("Batch write failed")
 
         with patch("src.handlers.delete_profile_cascade.tables") as mock_tables:
-            mock_tables.profiles.query.return_value = {"Items": [{"ownerAccountId": f"ACCOUNT#{owner_id}"}]}
             mock_tables.profiles.get_item.return_value = {
                 "Item": {"ownerAccountId": f"ACCOUNT#{owner_id}", "profileId": profile_id}
             }
@@ -705,7 +690,6 @@ class TestDeleteProfileCascade:
         }
 
         with patch("src.handlers.delete_profile_cascade.tables") as mock_tables:
-            mock_tables.profiles.query.return_value = {"Items": [{"ownerAccountId": f"ACCOUNT#{owner_id}"}]}
             mock_tables.profiles.get_item.return_value = {
                 "Item": {"ownerAccountId": f"ACCOUNT#{owner_id}", "profileId": profile_id}
             }
