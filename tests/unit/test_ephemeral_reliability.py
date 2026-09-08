@@ -63,6 +63,7 @@ class TestBashSyntax:
             repo_root / "scripts" / "recover-deploy.sh",
             repo_root / "scripts" / "recover-destroy.sh",
             repo_root / "scripts" / "create-ephemeral-test-users.sh",
+            repo_root / "tofu" / "application" / "scripts" / "deploy.sh",
         ]
         for script in scripts:
             result = subprocess.run(["bash", "-n", str(script)], capture_output=True, text=True, check=False)
