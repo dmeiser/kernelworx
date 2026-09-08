@@ -105,7 +105,7 @@ def _batch_get_profiles(
 ) -> List[Dict[str, Any]]:
     """Batch get profiles with retry logic, processing in batches of 100."""
     all_profiles: List[Dict[str, Any]] = []
-    for i in range(0, len(profile_keys), 100):  # pragma: no branch
+    for i in range(0, len(profile_keys), 100):
         batch_keys = profile_keys[i : i + 100]
         batch_profiles = _fetch_batch_with_retry(batch_keys, profiles_table, logger)
         all_profiles.extend(batch_profiles)
