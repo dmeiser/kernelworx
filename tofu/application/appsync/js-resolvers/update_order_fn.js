@@ -4,6 +4,7 @@ import { validatePhone, validateAddress } from './lib/validation.js';
 function validateOrderDate(orderDate) {
     if (!orderDate || typeof orderDate !== 'string' || !orderDate.trim()) {
         util.error('Order date is required', 'BadRequest');
+        return;
     }
 }
 
@@ -19,6 +20,7 @@ export function request(ctx) {
     if (input.customerName !== undefined) {
         if (typeof input.customerName !== 'string' || !input.customerName.trim()) {
             util.error('Customer name cannot be empty', 'BadRequest');
+            return;
         }
         updates.push('customerName = :customerName');
         exprValues[':customerName'] = input.customerName;
@@ -34,6 +36,7 @@ export function request(ctx) {
             const phoneResult = validatePhone(phoneValue);
             if (!phoneResult.valid) {
                 util.error(phoneResult.error, 'BadRequest');
+                return;
             }
             updates.push('customerPhone = :customerPhone');
             exprValues[':customerPhone'] = phoneResult.value;
@@ -43,6 +46,7 @@ export function request(ctx) {
         const addressResult = validateAddress(input.customerAddress);
         if (!addressResult.valid) {
             util.error(addressResult.error, 'BadRequest');
+            return;
         }
         updates.push('customerAddress = :customerAddress');
         exprValues[':customerAddress'] = input.customerAddress;
