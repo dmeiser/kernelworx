@@ -5,6 +5,7 @@ import { normalizeId } from './lib/ids.js';
 function validateCustomer(input) {
     if (!input.customerName || (typeof input.customerName === 'string' && !input.customerName.trim())) {
         util.error('Customer name is required', 'BadRequest');
+        return {};
     }
 
     const phoneValue = input.customerPhone != null ? `${input.customerPhone}`.trim() : '';
@@ -15,6 +16,7 @@ function validateCustomer(input) {
         const phoneResult = validatePhone(phoneValue);
         if (!phoneResult.valid) {
             util.error(phoneResult.error, 'BadRequest');
+            return { customerPhone: undefined };
         }
         customerPhone = phoneResult.value;
     }
@@ -23,6 +25,7 @@ function validateCustomer(input) {
         const addressResult = validateAddress(input.customerAddress);
         if (!addressResult.valid) {
             util.error(addressResult.error, 'BadRequest');
+            return { customerPhone };
         }
     }
 
@@ -32,6 +35,7 @@ function validateCustomer(input) {
 function validateOrderDate(orderDate) {
     if (!orderDate || typeof orderDate !== 'string' || !orderDate.trim()) {
         util.error('Order date is required', 'BadRequest');
+        return;
     }
 }
 
