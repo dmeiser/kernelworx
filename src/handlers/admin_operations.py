@@ -14,7 +14,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
-from typing import TYPE_CHECKING, Any, Dict, Optional, cast
+from typing import TYPE_CHECKING, Any, Dict, NoReturn, Optional, cast
 
 import boto3
 from botocore.exceptions import ClientError
@@ -64,8 +64,31 @@ def _get_cognito_client() -> Any:
     return boto3.client("cognito-idp")
 
 
+# DynamoDB/Cognito throttling codes: the lookup is retryable, so surface a
+# RESOURCE_BUSY error instead of silently incomplete admin data (#291).
+_THROTTLING_ERROR_CODES = frozenset({"ProvisionedThroughputExceededException", "ThrottlingException"})
+
+
+def _raise_batch_lookup_error(operation: str, logger: Any, error: Exception, **context: Any) -> NoReturn:
+    """Translate a failed batch lookup into a typed AppError (#291).
+
+    Throttling conditions become a retryable RESOURCE_BUSY so the admin UI can
+    show a retry prompt; any other ClientError or unexpected exception becomes
+    an INTERNAL_ERROR after an error-level log. Never returns: always raises.
+    """
+    if isinstance(error, ClientError):
+        error_code = error.response.get("Error", {}).get("Code", "")
+        if error_code in _THROTTLING_ERROR_CODES:
+            logger.warning(f"{operation} throttled", error=str(error), error_code=error_code, **context)
+            raise AppError(ErrorCode.RESOURCE_BUSY, "Temporarily unable to load data. Please retry.") from error
+        logger.error(f"{operation} failed", error=str(error), error_code=error_code, **context)
+        raise AppError(ErrorCode.INTERNAL_ERROR, f"Failed to {operation}") from error
+    logger.error(f"{operation} failed unexpectedly", error=str(error), **context)
+    raise AppError(ErrorCode.INTERNAL_ERROR, f"Failed to {operation}") from error
+
+
 def _get_user_groups(cognito: Any, user_pool_id: str, username: str, logger: Any) -> list[str]:
-    """Get the groups a user belongs to, logging per-user failures distinctly."""
+    """Get the groups a user belongs to; failures raise a typed AppError (#291)."""
     try:
         response = cognito.admin_list_groups_for_user(
             UserPoolId=user_pool_id,
@@ -73,15 +96,16 @@ def _get_user_groups(cognito: Any, user_pool_id: str, username: str, logger: Any
         )
         return [group["GroupName"] for group in response.get("Groups", [])]
     except ClientError as e:
-        logger.warning("Failed to fetch groups for user", username=mask_email(username), error=str(e))
-        return []
+        _raise_batch_lookup_error("load user groups", logger, e, username=mask_email(username))
 
 
 def _batch_get_user_groups(cognito: Any, user_pool_id: str, usernames: list[str], logger: Any) -> dict[str, list[str]]:
     """Fetch Cognito groups for multiple users in parallel.
 
     Cognito does not expose a batch group-membership API, so we parallelize
-    the per-user calls to avoid the N+1 fan-out.
+    the per-user calls to avoid the N+1 fan-out. Lookup failures raise an
+    AppError (retryable RESOURCE_BUSY on throttling) so the admin UI shows an
+    error instead of silently incomplete group data (#291).
     """
     groups_map: dict[str, list[str]] = {}
     unique_usernames = list(dict.fromkeys(u for u in usernames if u))
@@ -96,14 +120,20 @@ def _batch_get_user_groups(cognito: Any, user_pool_id: str, usernames: list[str]
             results = executor.map(_fetch, unique_usernames)
         for username, groups in results:
             groups_map[username] = groups
+    except AppError:
+        raise
     except Exception as e:
-        logger.warning("Failed to batch fetch user groups", error=str(e))
+        _raise_batch_lookup_error("load user groups", logger, e)
 
     return groups_map
 
 
 def _batch_get_display_names(account_ids: list[str], logger: Any) -> dict[str, str]:
-    """Batch fetch display names from the Accounts table using BatchGetItem."""
+    """Batch fetch display names from the Accounts table using BatchGetItem.
+
+    Lookup failures raise an AppError (retryable RESOURCE_BUSY on throttling)
+    so the admin UI shows an error instead of silently incomplete names (#291).
+    """
     display_names: dict[str, str] = {}
     if not account_ids:
         return display_names
@@ -146,8 +176,8 @@ def _batch_get_display_names(account_ids: list[str], logger: Any) -> dict[str, s
                         count=len(keys_to_fetch),
                     )
                     time.sleep(0.05 * (2**attempt))
-    except ClientError as e:
-        logger.warning("Failed to batch fetch display names", error=str(e))
+    except Exception as e:
+        _raise_batch_lookup_error("load display names", logger, e)
 
     return display_names
 

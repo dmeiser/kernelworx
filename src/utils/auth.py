@@ -408,16 +408,23 @@ def is_admin(event: Dict[str, Any]) -> bool:
     Returns:
         True if caller is in ADMIN Cognito group, False otherwise
     """
-    try:
-        claims = event.get("identity", {}).get("claims", {})
-        groups = claims.get("cognito:groups", [])
-        # cognito:groups can be a string or list in JWT
-        if isinstance(groups, str):
-            groups = [groups]
-        return "ADMIN" in groups
-    except AttributeError, KeyError, TypeError:
+    # Validate the event structure explicitly rather than relying on broad
+    # exception handling. Malformed events (None, non-dict, missing keys,
+    # wrong types) are legitimate "not admin" signals and return False;
+    # genuinely unexpected errors propagate so they are visible in logs and
+    # monitoring instead of being silently swallowed as a False result.
+    if not isinstance(event, dict):
         return False
-    except Exception as e:
-        logger = get_logger(__name__)
-        logger.warning("Unexpected exception in is_admin", error=str(e))
+    identity = event.get("identity")
+    if not isinstance(identity, dict):
         return False
+    claims = identity.get("claims")
+    if not isinstance(claims, dict):
+        return False
+    groups = claims.get("cognito:groups", [])
+    # cognito:groups can be a string or list in JWT
+    if isinstance(groups, str):
+        groups = [groups]
+    elif not isinstance(groups, list):
+        return False
+    return "ADMIN" in groups
