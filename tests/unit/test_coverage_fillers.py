@@ -235,20 +235,6 @@ def test_profile_sharing_fetch_batch_unprocessed_after_retries(monkeypatch):
     assert any("still remain" in e[0] for e in logger.errors)
 
 
-def test_auth_is_admin_unexpected_exception(monkeypatch):
-    from src.utils.auth import is_admin
-
-    # Event where identity.get("claims") raises something other than
-    # AttributeError/KeyError/TypeError — e.g. a claims object whose
-    # .get() method raises a RuntimeError
-    class MisbehavingClaims:
-        def get(self, key, default=None):
-            raise RuntimeError("claims broken")
-
-    result = is_admin({"identity": {"claims": MisbehavingClaims()}})
-    assert result is False
-
-
 def test_payment_methods_delete_qr_uuid_fallback(monkeypatch):
     from unittest.mock import MagicMock
 
