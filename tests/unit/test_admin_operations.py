@@ -4652,7 +4652,7 @@ class TestBatchHelpers:
         self,
         monkeypatch: Any,
     ) -> None:
-        """A ClientError during BatchGetItem is logged and returns an empty map."""
+        """A non-throttling ClientError during BatchGetItem raises INTERNAL_ERROR."""
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "test-accounts")
 
         with patch("src.handlers.admin_operations.get_dynamodb_resource") as mock_get_resource:
@@ -4663,9 +4663,50 @@ class TestBatchHelpers:
                 "BatchGetItem",
             )
 
-            result = _batch_get_display_names(["user-1"], MagicMock())
+            with pytest.raises(AppError) as exc_info:
+                _batch_get_display_names(["user-1"], MagicMock())
 
-            assert result == {}
+            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+            assert "Failed to load display names" in exc_info.value.message
+
+    def test_batch_get_display_names_throttling_raises_retryable(
+        self,
+        monkeypatch: Any,
+    ) -> None:
+        """A throttling ClientError during BatchGetItem raises retryable RESOURCE_BUSY."""
+        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "test-accounts")
+
+        with patch("src.handlers.admin_operations.get_dynamodb_resource") as mock_get_resource:
+            mock_resource = MagicMock()
+            mock_get_resource.return_value = mock_resource
+            mock_resource.batch_get_item.side_effect = ClientError(
+                {"Error": {"Code": "ProvisionedThroughputExceededException", "Message": "throttled"}},
+                "BatchGetItem",
+            )
+
+            with pytest.raises(AppError) as exc_info:
+                _batch_get_display_names(["user-1"], MagicMock())
+
+            assert exc_info.value.error_code == ErrorCode.RESOURCE_BUSY
+            assert exc_info.value.message == "Temporarily unable to load data. Please retry."
+
+    def test_batch_get_display_names_unexpected_exception_raises_internal(
+        self,
+        monkeypatch: Any,
+    ) -> None:
+        """A non-ClientError exception during BatchGetItem raises INTERNAL_ERROR."""
+        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "test-accounts")
+
+        with patch("src.handlers.admin_operations.get_dynamodb_resource") as mock_get_resource:
+            mock_resource = MagicMock()
+            mock_get_resource.return_value = mock_resource
+            mock_resource.batch_get_item.side_effect = RuntimeError("network blip")
+
+            with pytest.raises(AppError) as exc_info:
+                _batch_get_display_names(["user-1"], MagicMock())
+
+            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+            assert "Failed to load display names" in exc_info.value.message
 
     def test_batch_get_display_names_unprocessed_keys_retried(
         self,
@@ -4813,21 +4854,39 @@ class TestBatchHelpers:
     def test_batch_get_user_groups_per_user_error_handled(
         self,
     ) -> None:
-        """A per-user group lookup failure is logged and treated as no groups."""
+        """A per-user group lookup failure raises a typed AppError (#291)."""
         mock_cognito = MagicMock()
         mock_cognito.admin_list_groups_for_user.side_effect = ClientError(
             {"Error": {"Code": "InternalErrorException", "Message": "boom"}},
             "AdminListGroupsForUser",
         )
 
-        result = _batch_get_user_groups(mock_cognito, "pool-id", ["user-1"], MagicMock())
+        with pytest.raises(AppError) as exc_info:
+            _batch_get_user_groups(mock_cognito, "pool-id", ["user-1"], MagicMock())
 
-        assert result == {"user-1": []}
+        assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+        assert "Failed to load user groups" in exc_info.value.message
+
+    def test_batch_get_user_groups_per_user_throttling_raises_retryable(
+        self,
+    ) -> None:
+        """A throttled per-user group lookup raises retryable RESOURCE_BUSY (#291)."""
+        mock_cognito = MagicMock()
+        mock_cognito.admin_list_groups_for_user.side_effect = ClientError(
+            {"Error": {"Code": "ThrottlingException", "Message": "throttled"}},
+            "AdminListGroupsForUser",
+        )
+
+        with pytest.raises(AppError) as exc_info:
+            _batch_get_user_groups(mock_cognito, "pool-id", ["user-1"], MagicMock())
+
+        assert exc_info.value.error_code == ErrorCode.RESOURCE_BUSY
+        assert exc_info.value.message == "Temporarily unable to load data. Please retry."
 
     def test_batch_get_user_groups_executor_error_handled(
         self,
     ) -> None:
-        """A failure inside the parallel executor is logged and returns an empty map."""
+        """A failure inside the parallel executor raises INTERNAL_ERROR."""
         mock_cognito = MagicMock()
 
         with patch("src.handlers.admin_operations.ThreadPoolExecutor") as mock_executor_cls:
@@ -4837,9 +4896,11 @@ class TestBatchHelpers:
             mock_executor.__exit__ = MagicMock(return_value=False)
             mock_executor.map.side_effect = RuntimeError("executor failed")
 
-            result = _batch_get_user_groups(mock_cognito, "pool-id", ["user-1"], MagicMock())
+            with pytest.raises(AppError) as exc_info:
+                _batch_get_user_groups(mock_cognito, "pool-id", ["user-1"], MagicMock())
 
-            assert result == {}
+            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+            assert "Failed to load user groups" in exc_info.value.message
 
 
 class TestAdminGetUserProfiles:

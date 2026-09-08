@@ -55,6 +55,8 @@ class ErrorCode:
     # System errors
     INTERNAL_ERROR = "INTERNAL_ERROR"
     DATABASE_ERROR = "DATABASE_ERROR"
+    # Transient resource contention (e.g. DynamoDB/Cognito throttling); the client may retry
+    RESOURCE_BUSY = "RESOURCE_BUSY"
 
 
 def handle_error(error: Exception) -> Dict[str, Any]:

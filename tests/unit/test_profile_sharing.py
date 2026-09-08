@@ -1109,3 +1109,94 @@ class TestListMyShares:
 
         assert len(result) == 1
         assert result[0]["profileId"] == valid_profile_id
+
+
+class TestBatchGetProfiles:
+    """Tests for _batch_get_profiles batch loop behavior (#295)."""
+
+    TABLE_NAME = "kernelworx-profiles-v2-ue1-dev"
+
+    @staticmethod
+    def _make_key(index: int) -> Dict[str, str]:
+        return {"ownerAccountId": f"ACCOUNT#owner-{index}", "profileId": f"PROFILE#{index}"}
+
+    @staticmethod
+    def _make_profile(index: int) -> Dict[str, Any]:
+        return {
+            "ownerAccountId": f"ACCOUNT#owner-{index}",
+            "profileId": f"PROFILE#{index}",
+            "sellerName": f"Scout {index}",
+            "createdAt": "2024-01-01T00:00:00Z",
+            "updatedAt": "2024-01-01T00:00:00Z",
+        }
+
+    def _make_profiles_table(self) -> Any:
+        from unittest.mock import MagicMock
+
+        mock_table = MagicMock()
+        mock_table.name = self.TABLE_NAME
+        return mock_table
+
+    def test_empty_profile_keys_performs_no_batch_operations(self) -> None:
+        """Empty profile_keys: no batch_get_item calls, call succeeds with empty result."""
+        from unittest.mock import MagicMock, patch
+
+        from src.handlers.profile_sharing import _batch_get_profiles
+
+        mock_table = self._make_profiles_table()
+        logger = MagicMock()
+
+        with patch("src.handlers.profile_sharing.dynamodb.batch_get_item") as mock_batch_get:
+            result = _batch_get_profiles([], mock_table, logger)
+
+        assert result == []
+        mock_batch_get.assert_not_called()
+
+    def test_single_profile_fetches_one_batch(self) -> None:
+        """A single profile key results in exactly one batch operation."""
+        from unittest.mock import MagicMock, patch
+
+        from src.handlers.profile_sharing import _batch_get_profiles
+
+        mock_table = self._make_profiles_table()
+        logger = MagicMock()
+        key = self._make_key(1)
+        profile = self._make_profile(1)
+
+        with patch("src.handlers.profile_sharing.dynamodb.batch_get_item") as mock_batch_get:
+            mock_batch_get.return_value = {"Responses": {self.TABLE_NAME: [profile]}}
+            result = _batch_get_profiles([key], mock_table, logger)
+
+        assert result == [profile]
+        assert mock_batch_get.call_count == 1
+        request_keys = mock_batch_get.call_args[1]["RequestItems"][self.TABLE_NAME]["Keys"]
+        assert request_keys == [key]
+
+    def test_101_profiles_fetches_two_batches(self) -> None:
+        """101 profile keys result in two batches: 100 keys, then 1 key."""
+        from unittest.mock import MagicMock, patch
+
+        from src.handlers.profile_sharing import _batch_get_profiles
+
+        mock_table = self._make_profiles_table()
+        logger = MagicMock()
+        keys = [self._make_key(i) for i in range(101)]
+        first_batch_profiles = [self._make_profile(i) for i in range(100)]
+        second_batch_profiles = [self._make_profile(100)]
+
+        with patch("src.handlers.profile_sharing.dynamodb.batch_get_item") as mock_batch_get:
+            mock_batch_get.side_effect = [
+                {"Responses": {self.TABLE_NAME: first_batch_profiles}},
+                {"Responses": {self.TABLE_NAME: second_batch_profiles}},
+            ]
+            result = _batch_get_profiles(keys, mock_table, logger)
+
+        assert result == first_batch_profiles + second_batch_profiles
+        assert mock_batch_get.call_count == 2
+
+        first_request_keys = mock_batch_get.call_args_list[0][1]["RequestItems"][self.TABLE_NAME]["Keys"]
+        second_request_keys = mock_batch_get.call_args_list[1][1]["RequestItems"][self.TABLE_NAME]["Keys"]
+        assert first_request_keys == keys[:100]
+        assert len(first_request_keys) == 100
+        assert second_request_keys == keys[100:]
+        assert len(second_request_keys) == 1

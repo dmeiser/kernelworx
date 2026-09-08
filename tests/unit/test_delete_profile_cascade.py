@@ -132,45 +132,90 @@ class TestDeleteProfileCascade:
             lambda_handler(event, None)
 
     def test_get_profile_owner_id_not_found(self, profiles_table: Any) -> None:
-        """Test _get_profile_owner_id raises when profile is missing from GSI."""
+        """Test _get_profile_owner_id raises NOT_FOUND when the profile is absent."""
         with patch("src.handlers.delete_profile_cascade.time.sleep"):
-            with pytest.raises(Exception):
-                _get_profile_owner_id("PROFILE#nonexistent")
+            with pytest.raises(AppError) as exc_info:
+                _get_profile_owner_id("PROFILE#nonexistent", "ACCOUNT#owner-123")
+        assert exc_info.value.error_code == "NOT_FOUND"
 
-    def test_get_profile_owner_id_retries_on_eventual_consistency(self) -> None:
-        """Test _get_profile_owner_id retries when GSI is not yet consistent."""
-        with patch("src.handlers.delete_profile_cascade.tables.profiles.query") as mock_query:
-            mock_query.side_effect = [
-                {"Items": []},
-                {"Items": [{"ownerAccountId": "ACCOUNT#owner-123"}]},
-            ]
-            with patch("src.handlers.delete_profile_cascade.time.sleep") as mock_sleep:
-                owner_id = _get_profile_owner_id("PROFILE#test")
+    def test_get_profile_owner_id_uses_strongly_consistent_base_table_read(self) -> None:
+        """Test _get_profile_owner_id reads the base table with ConsistentRead=True."""
+        with patch("src.handlers.delete_profile_cascade.tables.profiles.get_item") as mock_get_item:
+            mock_get_item.return_value = {"Item": {"ownerAccountId": "ACCOUNT#owner-123"}}
+            owner_id = _get_profile_owner_id("PROFILE#test", "ACCOUNT#owner-123")
 
         assert owner_id == "ACCOUNT#owner-123"
-        assert mock_query.call_count == 2
+        mock_get_item.assert_called_once_with(
+            Key={"ownerAccountId": "ACCOUNT#owner-123", "profileId": "PROFILE#test"},
+            ConsistentRead=True,
+        )
+
+    def test_get_profile_owner_id_succeeds_after_initial_miss(self) -> None:
+        """Test _get_profile_owner_id retries when the first consistent read misses."""
+        with patch("src.handlers.delete_profile_cascade.tables.profiles.get_item") as mock_get_item:
+            mock_get_item.side_effect = [
+                {},
+                {"Item": {"ownerAccountId": "ACCOUNT#owner-123"}},
+            ]
+            with patch("src.handlers.delete_profile_cascade.time.sleep") as mock_sleep:
+                owner_id = _get_profile_owner_id("PROFILE#test", "ACCOUNT#owner-123")
+
+        assert owner_id == "ACCOUNT#owner-123"
+        assert mock_get_item.call_count == 2
         mock_sleep.assert_called_once()
 
     def test_get_profile_owner_id_raises_after_exhausting_retries(self) -> None:
-        """Test _get_profile_owner_id raises after all GSI lookup retries fail."""
-        with patch("src.handlers.delete_profile_cascade.tables.profiles.query") as mock_query:
-            mock_query.return_value = {"Items": []}
+        """Test _get_profile_owner_id raises NOT_FOUND after all lookup retries miss."""
+        with patch("src.handlers.delete_profile_cascade.tables.profiles.get_item") as mock_get_item:
+            mock_get_item.return_value = {}
             with patch("src.handlers.delete_profile_cascade.time.sleep") as mock_sleep:
-                with pytest.raises(Exception):
-                    _get_profile_owner_id("PROFILE#test")
+                with pytest.raises(AppError) as exc_info:
+                    _get_profile_owner_id("PROFILE#test", "ACCOUNT#owner-123")
 
-        assert mock_query.call_count == 3
+        assert exc_info.value.error_code == "NOT_FOUND"
+        assert mock_get_item.call_count == 3
         assert mock_sleep.call_count == 2
 
-    def test_unauthorized_call_raises_forbidden(self, profiles_table: Any) -> None:
-        """Test that a non-owner without WRITE access is rejected."""
+    def test_delete_proceeds_when_first_ownership_read_misses_then_succeeds(self) -> None:
+        """Test the cascade proceeds when the first ownership read misses and the next succeeds."""
+        owner_id = "owner-123"
+        profile_id = "PROFILE#consistent-read"
+
+        with patch("src.handlers.delete_profile_cascade.tables") as mock_tables:
+            mock_tables.profiles.get_item.side_effect = [
+                {},
+                {"Item": {"ownerAccountId": f"ACCOUNT#{owner_id}", "profileId": profile_id}},
+            ]
+            mock_tables.profiles.delete_item.return_value = {}
+            mock_tables.shares.query.return_value = {"Items": []}
+            mock_tables.invites.query.return_value = {"Items": []}
+            mock_tables.campaigns.query.return_value = {"Items": []}
+            mock_tables.orders.query.return_value = {"Items": []}
+
+            event = {
+                "arguments": {"profileId": profile_id},
+                "identity": {"sub": owner_id},
+            }
+            with patch("src.handlers.delete_profile_cascade.time.sleep"):
+                result = lambda_handler(event, None)
+
+        assert result is True
+        assert mock_tables.profiles.get_item.call_count == 2
+        mock_tables.profiles.delete_item.assert_called_once_with(
+            Key={"ownerAccountId": f"ACCOUNT#{owner_id}", "profileId": profile_id}
+        )
+
+    def test_unauthorized_call_raises_not_found(self, profiles_table: Any) -> None:
+        """Test that a non-owner is rejected with NOT_FOUND (no existence leak)."""
         _create_profile(profiles_table, "owner-123", "PROFILE#test")
         event = {
             "arguments": {"profileId": "PROFILE#test"},
             "identity": {"sub": "other-user"},
         }
-        with pytest.raises(Exception):
-            lambda_handler(event, None)
+        with patch("src.handlers.delete_profile_cascade.time.sleep"):
+            with pytest.raises(AppError) as exc_info:
+                lambda_handler(event, None)
+        assert exc_info.value.error_code == "NOT_FOUND"
 
     def test_delete_empty_profile(self, profiles_table: Any) -> None:
         """Test deleting a profile with no related data."""
@@ -531,7 +576,9 @@ class TestDeleteProfileCascade:
         _create_profile(profiles_table, owner_id, profile_id)
 
         with patch("src.handlers.delete_profile_cascade.tables") as mock_tables:
-            mock_tables.profiles.query.return_value = {"Items": [{"ownerAccountId": f"ACCOUNT#{owner_id}"}]}
+            mock_tables.profiles.get_item.return_value = {
+                "Item": {"ownerAccountId": f"ACCOUNT#{owner_id}", "profileId": profile_id}
+            }
             mock_tables.profiles.delete_item.side_effect = Exception("DynamoDB error")
             mock_tables.shares.query.return_value = {"Items": []}
             mock_tables.invites.query.return_value = {"Items": []}
@@ -574,7 +621,9 @@ class TestDeleteProfileCascade:
             patch("src.handlers.delete_profile_cascade.tables") as mock_tables,
             patch("src.handlers.campaign_operations.tables") as mock_campaign_tables,
         ):
-            mock_tables.profiles.query.return_value = {"Items": [{"ownerAccountId": f"ACCOUNT#{owner_id}"}]}
+            mock_tables.profiles.get_item.return_value = {
+                "Item": {"ownerAccountId": f"ACCOUNT#{owner_id}", "profileId": profile_id}
+            }
             mock_tables.profiles.delete_item.return_value = {}
             mock_tables.shares.query.return_value = {"Items": []}
             mock_tables.invites.query.return_value = {"Items": []}
@@ -617,7 +666,9 @@ class TestDeleteProfileCascade:
                 raise Exception("Batch write failed")
 
         with patch("src.handlers.delete_profile_cascade.tables") as mock_tables:
-            mock_tables.profiles.query.return_value = {"Items": [{"ownerAccountId": f"ACCOUNT#{owner_id}"}]}
+            mock_tables.profiles.get_item.return_value = {
+                "Item": {"ownerAccountId": f"ACCOUNT#{owner_id}", "profileId": profile_id}
+            }
             mock_tables.profiles.delete_item.return_value = {}
             mock_tables.shares.query.return_value = {
                 "Items": [{"profileId": profile_id, "targetAccountId": "ACCOUNT#user-1"}]
@@ -652,7 +703,9 @@ class TestDeleteProfileCascade:
         }
 
         with patch("src.handlers.delete_profile_cascade.tables") as mock_tables:
-            mock_tables.profiles.query.return_value = {"Items": [{"ownerAccountId": f"ACCOUNT#{owner_id}"}]}
+            mock_tables.profiles.get_item.return_value = {
+                "Item": {"ownerAccountId": f"ACCOUNT#{owner_id}", "profileId": profile_id}
+            }
             mock_tables.profiles.delete_item.return_value = {}
             mock_tables.shares.query.return_value = {
                 "Items": [{"profileId": profile_id, "targetAccountId": "ACCOUNT#user-1"}]

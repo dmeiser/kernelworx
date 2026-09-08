@@ -37,7 +37,7 @@ logger = get_logger(__name__)
 
 BATCH_SIZE = 25
 _PROFILE_LOOKUP_RETRIES = 3
-_PROFILE_LOOKUP_DELAY_SECONDS = 0.1
+_PROFILE_LOOKUP_BASE_DELAY_SECONDS = 0.2
 
 # S3 report cleanup retries: bounded attempts with exponential backoff for
 # transient errors only (throttling, timeouts, 5xx). Non-transient failures
@@ -103,24 +103,26 @@ def _batch_delete_keys(table: "Table", keys: List[Dict[str, Any]], primary_keys:
     return deleted_count
 
 
-def _get_profile_owner_id(profile_id: str) -> str:
-    """Look up the owner account ID for a profile via its GSI.
+def _get_profile_owner_id(profile_id: str, owner_account_id: str) -> str:
+    """Verify the expected owner owns the profile via a strongly consistent base-table read.
 
-    GSIs are eventually consistent, so the lookup retries briefly when the
-    profile is not yet visible after creation.
+    Reads the base table (keyed by ownerAccountId + profileId) with
+    ConsistentRead=True — the same pattern the account-deletion cascade uses
+    (PR #272) — instead of the eventually consistent ``profileId-index`` GSI.
+    A profile whose ownership was just transferred is therefore found
+    immediately, rather than failing with a spurious NOT_FOUND until the GSI
+    propagates. Raises NOT_FOUND when the profile is absent, which also covers
+    non-owner callers without revealing the profile's existence.
     """
     for attempt in range(1, _PROFILE_LOOKUP_RETRIES + 1):
-        response = tables.profiles.query(
-            IndexName="profileId-index",
-            KeyConditionExpression="profileId = :pid",
-            ExpressionAttributeValues={":pid": profile_id},
-            Limit=1,
+        response = tables.profiles.get_item(
+            Key={"ownerAccountId": owner_account_id, "profileId": profile_id},
+            ConsistentRead=True,
         )
-        items = response.get("Items", [])
-        if items:
-            return str(items[0]["ownerAccountId"])
+        if "Item" in response:
+            return owner_account_id
         if attempt < _PROFILE_LOOKUP_RETRIES:
-            time.sleep(_PROFILE_LOOKUP_DELAY_SECONDS)
+            time.sleep(_PROFILE_LOOKUP_BASE_DELAY_SECONDS * (2 ** (attempt - 1)))
 
     raise AppError(ErrorCode.NOT_FOUND, f"Profile {profile_id} not found")
 
@@ -294,7 +296,8 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> bool:
 
     Raises:
         ValueError: If profileId is missing
-        AppError: If authorization fails or deletion fails
+        AppError: If the profile is not found, the caller is not the owner,
+            or deletion fails
     """
     profile_id = event.get("arguments", {}).get("profileId")
     if not profile_id:
@@ -308,13 +311,14 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> bool:
     if not caller_account_id:
         raise AppError(ErrorCode.UNAUTHORIZED, "Authentication required")
 
-    owner_account_id = _get_profile_owner_id(db_profile_id)
+    # Individual profile deletion is owner-only, so the caller's account ID is
+    # the expected owner. Verifying ownership with a strongly consistent
+    # base-table read keyed by that owner (PR #272 pattern) avoids the
+    # eventually consistent profileId-index GSI race after ownership transfers.
     db_caller_id = ensure_account_id(caller_account_id)
-    if owner_account_id != db_caller_id:
-        logger.warning(
-            f"Unauthorized delete attempt: caller {caller_account_id} is not owner {owner_account_id} of {db_profile_id}"
-        )
-        raise AppError(ErrorCode.FORBIDDEN, "Not authorized to delete this profile")
+    # ensure_account_id only returns None for falsy input, which is guarded above
+    assert db_caller_id is not None
+    owner_account_id = _get_profile_owner_id(db_profile_id, db_caller_id)
 
     logger.info(f"Starting cascade delete for profile {db_profile_id}")
 
