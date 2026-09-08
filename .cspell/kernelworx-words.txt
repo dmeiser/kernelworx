@@ -192,6 +192,7 @@ metachars
 middleware
 millis
 minLength
+mtimes
 mockqrcode
 monkeypatching
 monorepo
