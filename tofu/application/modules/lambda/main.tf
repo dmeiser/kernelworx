@@ -314,14 +314,16 @@ resource "aws_lambda_function" "functions" {
 resource "aws_cloudwatch_log_group" "functions" {
   for_each = local.functions
 
-  name              = "/aws/lambda/${var.name_prefix}-${each.key}${local.func_suffix}"
+  name = "/aws/lambda/${var.name_prefix}-${each.key}${local.func_suffix}"
+  # kics-scan ignore-line -- retention IS set dynamically below; KICS only matches static values
   retention_in_days = var.environment == "prod" ? 30 : 7
 }
 
 resource "aws_cloudwatch_log_group" "trigger_functions" {
   for_each = local.trigger_functions
 
-  name              = "/aws/lambda/${var.name_prefix}-${each.key}${local.func_suffix}"
+  name = "/aws/lambda/${var.name_prefix}-${each.key}${local.func_suffix}"
+  # kics-scan ignore-line -- retention IS set dynamically below; KICS only matches static values
   retention_in_days = var.environment == "prod" ? 30 : 7
 }
 
