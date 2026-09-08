@@ -43,7 +43,7 @@ build_lambda_layer() {
     (cd "$ROOT_DIR" && uv pip install --requirement "$LAYER_REQ" --target "$LAYER_DIR/python")
 }
 
-# Tofu reads resolver code from the esbuild bundle; regenerate it so plan/apply
+# Tofu reads resolver code from the esbuild bundle; regenerate it so init/plan/apply
 # never evaluate file() against a missing or stale directory.
 build_resolvers() {
     (cd "$ROOT_DIR" && npm run build:resolvers)
@@ -82,6 +82,7 @@ echo ""
 case "$ACTION" in
     init)
         echo "📦 Initializing OpenTofu..."
+        build_resolvers
         tofu init -upgrade $EXTRA_FLAGS
         ;;
     plan)
