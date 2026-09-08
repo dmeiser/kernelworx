@@ -328,6 +328,7 @@ TabPanel
 tailwindcss
 tbody
 td
+templatefile
 Terraform
 testcode
 testpaths
