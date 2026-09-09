@@ -146,7 +146,9 @@ def assert_within_profile_sharing_role_scope(recorder: ApiCallRecorder) -> None:
     assert recorder.dynamodb_calls, "expected the handler to issue DynamoDB calls"
     operations = {op for op, _ in recorder.dynamodb_calls}
     tables = {table for _, table in recorder.dynamodb_calls}
-    assert operations <= ALLOWED_DYNAMODB_ACTIONS, f"unexpected DynamoDB actions: {operations - ALLOWED_DYNAMODB_ACTIONS}"
+    assert operations <= ALLOWED_DYNAMODB_ACTIONS, (
+        f"unexpected DynamoDB actions: {operations - ALLOWED_DYNAMODB_ACTIONS}"
+    )
     assert tables <= DOMAIN_TABLES, (
         f"handler touched tables outside the profile/sharing role scope: {tables - DOMAIN_TABLES}"
     )
