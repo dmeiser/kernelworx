@@ -31,7 +31,7 @@ resource "aws_appsync_graphql_api" "main" {
   #   SellerProfile (profileId, ownerAccountId, isOwner, permissions,
   #   latestCampaign). At 100 profiles in one response that is 501 resolver
   #   invocations; resolver_count_limit = 1000 gives ~2x headroom there while
-  #   capping alias-fanout attacks well below the AppSync default of 10000.
+  #   capping alias fan-out attacks well below the AppSync default of 10000.
   query_depth_limit    = 10
   resolver_count_limit = 1000
 
