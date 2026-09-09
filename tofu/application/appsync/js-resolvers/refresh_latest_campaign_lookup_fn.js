@@ -93,12 +93,11 @@ export function response(ctx) {
 
     // ISO8601 UTC strings compare lexicographically; pick the newest active
     // campaign by createdAt (same canonical semantics as the field resolver).
+    // The null-guard is folded into the condition because the AppSync JS
+    // runtime does not support `continue` (see query_invites_fn.js).
     let newest = null;
     for (const item of liveItems) {
-        if (!item) {
-            continue;
-        }
-        if (!newest || (item.createdAt || '') > (newest.createdAt || '')) {
+        if (item && (!newest || (item.createdAt || '') > (newest.createdAt || ''))) {
             newest = item;
         }
     }
