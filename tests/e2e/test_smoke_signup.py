@@ -25,6 +25,21 @@ Design decisions
   attempts): a freshly created Cognito user is not always visible to admin
   reads immediately (read-after-write propagation), and "not found yet" is
   the expected transient, not an error.
+* A failed ``signUp`` renders a MUI *error* alert (``AlertMessages`` in
+  ``SignupPage.tsx`` renders error and success alerts with the same
+  ``role="alert"``). The verification wait must therefore never treat a
+  generic alert as success: it matches only the genuine success signals
+  ("check your email" / "verification" text), then fails fast with the
+  error alert text. Otherwise a failed signup false-passes and the flow
+  dies later with a misleading ``UserNotFoundException`` from
+  ``admin-confirm-sign-up`` against a user that was never created.
+* The one expected environmental signup failure is Cognito's account-level
+  daily email-sending quota (50/day with the default email configuration)
+  being exhausted by fleet-wide smoke traffic. Once saturated, ``SignUp``
+  itself is rejected, so the native-signup path is **untestable, not
+  failing**: when the surfaced error is exactly the daily-email-limit
+  message, both signup tests ``pytest.skip`` with that reason instead of
+  failing. The quota resets daily; every other signup error still fails.
 * The submit button label verified from ``SignupPage.tsx`` is *Create Account*.
 * The age-confirmation checkbox label is
   *I confirm that I am 13 years of age or older*.
@@ -57,6 +72,14 @@ def _random_smoke_email() -> str:
 _SMOKE_PASSWORD = "SmokeT3st!2026"
 
 
+# Cognito account-level email quota: with the default email configuration
+# Cognito caps sending at 50 emails/day/account. Once the fleet's smoke
+# signups exhaust that quota, ``SignUp`` itself is rejected with this
+# message, so the native-signup path is untestable (not failing) until the
+# quota resets.
+_DAILY_EMAIL_LIMIT_RE = re.compile(r"Exceeded daily email limit", re.IGNORECASE)
+
+
 def _submit_signup_and_wait_for_verification(page: Page, email: str, password: str) -> None:
     """Fill and submit the signup form, then wait for the verification UI.
 
@@ -64,11 +87,12 @@ def _submit_signup_and_wait_for_verification(page: Page, email: str, password: s
     verification step showing text containing "check your email" or
     "verification" (case-insensitive).
 
-    A transient ``signUp`` failure renders a MUI *error* alert instead. That
-    error alert must not be mistaken for reaching the verification step:
-    proceeding past a failed signup surfaces later as a confusing Cognito
-    ``UserNotFoundException`` from ``admin-confirm-sign-up``. If the error
-    alert appears, fail immediately with its message.
+    A failed ``signUp`` renders a MUI *error* alert instead (``AlertMessages``
+    in ``SignupPage.tsx`` gives error and success alerts the same
+    ``role="alert"``, so a generic alert match would false-pass). If the
+    error alert appears, the helper fails fast with the alert text — except
+    when the text is Cognito's daily-email-limit quota message, in which case
+    native signup is untestable and the test is skipped with that reason.
     """
     page.locator('input[type="email"]').first.fill(email)
 
@@ -83,23 +107,27 @@ def _submit_signup_and_wait_for_verification(page: Page, email: str, password: s
 
     page.get_by_role("button", name=_CREATE_ACCOUNT_BTN).click()
 
-    error_alert = page.locator(".MuiAlert-standardError")
     verification_text = page.get_by_text(re.compile("check your email", re.IGNORECASE)).or_(
         page.get_by_text(re.compile("verification", re.IGNORECASE))
     )
+    error_alert = page.locator(".MuiAlert-standardError")
     expect(verification_text.first.or_(error_alert.first)).to_be_visible(timeout=20_000)
     if error_alert.first.is_visible():
-        pytest.fail(f"SignUp failed unexpectedly: {error_alert.first.inner_text()}")
+        message = error_alert.first.inner_text()
+        if _DAILY_EMAIL_LIMIT_RE.search(message):
+            pytest.skip(f"Cognito daily email quota exhausted, native signup untestable: {message}")
+        pytest.fail(f"SignUp failed unexpectedly: {message}")
 
 
-# Retry budget for admin-confirm-sign-up only. Since ~2026-09-09 Cognito's
-# read-after-write consistency for newly created users has been degraded:
-# successive ephemeral smoke runs exhausted the ~3 minute budget (7 attempts)
-# and then the ~6 minute budget (10 attempts, observed ~407 s test duration =
-# full exhaustion) against ``UserNotFoundException``. The budget now spans
-# ~14 minutes of backoff across 18 attempts (exponential, capped at 60 s);
-# every other failure and every other command still fail on the first
-# attempt.
+# Retry budget for admin-confirm-sign-up only. This tolerates genuine
+# read-after-write propagation lag: a freshly created Cognito user is not
+# always visible to admin reads immediately, and "not found yet" is the
+# expected transient. Note this retry does NOT help when ``signUp`` itself
+# was rejected (e.g. Cognito's daily email quota exhausted) — no user exists
+# to find; that case is caught much earlier by
+# ``_submit_signup_and_wait_for_verification``. Budget: ~14 minutes of
+# backoff across 18 attempts (exponential, capped at 60 s); every other
+# failure and every other command still fail on the first attempt.
 _CONFIRM_SIGNUP_MAX_ATTEMPTS = 18
 _CONFIRM_SIGNUP_BACKOFF_CAP_SECONDS = 60
 _CONFIRM_SIGNUP_BACKOFF_BASE_SECONDS = 5
