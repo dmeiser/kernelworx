@@ -32,7 +32,7 @@ variable "lambda_admin_role_arn" {
 # new iam-module output plus entries here mapping its function keys to that
 # ARN. The admin role (when set) still takes precedence for admin handlers;
 # otherwise a domain-role entry takes precedence over the shared monolithic
-# role. Unknown keys are ignored so partial rollouts cannot break planning.
+# role. Unknown keys are ignored so domains can be added incrementally without breaking planning.
 variable "lambda_domain_role_arns" {
   description = "Map of app function key to a scoped per-domain Lambda execution role ARN (#326 IAM role split). Takes precedence over lambda_role_arn; the admin role still wins for admin handlers."
   type        = map(string)
