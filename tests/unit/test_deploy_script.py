@@ -103,3 +103,87 @@ class TestDeployInit:
 
         calls = mock_env["log_file"].read_text().strip().splitlines()
         assert calls == ["npm run build:resolvers"]
+
+
+class TestPlanIsFresh:
+    """Unit tests for deploy.sh's plan_is_fresh freshness check.
+
+    deploy.sh's main block only runs when executed directly, so the script can be
+    sourced and plan_is_fresh driven against an isolated fixture ROOT_DIR.
+    """
+
+    PLAN_MTIME = 1_000
+
+    def _build_fixture(self, tmp_path: Path, *, dist_mtime: int, source_mtime: int) -> Path:
+        fixture = tmp_path / "fixture"
+        (fixture / "src").mkdir(parents=True)
+        (fixture / "tofu/application/appsync/dist").mkdir(parents=True)
+        (fixture / "tofu/application/appsync/js-resolvers").mkdir(parents=True)
+
+        plan = fixture / "tfplan"
+        plan.write_text("saved plan")
+        dist = fixture / "tofu/application/appsync/dist/query.js"
+        dist.write_text("// esbuild bundle output")
+        source = fixture / "tofu/application/appsync/js-resolvers/query.js"
+        source.write_text("// resolver source")
+
+        os.utime(plan, (self.PLAN_MTIME, self.PLAN_MTIME))
+        os.utime(dist, (dist_mtime, dist_mtime))
+        os.utime(source, (source_mtime, source_mtime))
+        return fixture
+
+    def _run_plan_is_fresh(self, repo_root: Path, fixture: Path, plan_name: str = "tfplan") -> str:
+        script = textwrap.dedent(
+            f"""
+            export TF_VAR_encryption_passphrase="test-passphrase"
+            # Sourcing prints env-loading warnings; silence them so only the
+            # FRESH/STALE verdict lands on stdout.
+            source "{repo_root}/tofu/application/scripts/deploy.sh" > /dev/null
+            ROOT_DIR="{fixture}"
+            if plan_is_fresh "{fixture}/{plan_name}"; then
+                echo FRESH
+            else
+                echo STALE
+            fi
+            """
+        )
+        result = subprocess.run(
+            ["bash", "-c", script],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, f"plan_is_fresh driver failed: {result.stderr}"
+        return result.stdout.strip()
+
+    def test_rebuilt_dist_does_not_invalidate_plan(self, repo_root: Path, tmp_path: Path) -> None:
+        """A dist/ bundle rebuilt after the plan must not count as a source change."""
+        fixture = self._build_fixture(tmp_path, dist_mtime=self.PLAN_MTIME + 500, source_mtime=self.PLAN_MTIME - 500)
+        assert self._run_plan_is_fresh(repo_root, fixture) == "FRESH"
+
+    def test_resolver_source_change_invalidates_plan(self, repo_root: Path, tmp_path: Path) -> None:
+        """A real resolver source edit newer than the plan must force a re-plan."""
+        fixture = self._build_fixture(tmp_path, dist_mtime=self.PLAN_MTIME - 500, source_mtime=self.PLAN_MTIME + 500)
+        assert self._run_plan_is_fresh(repo_root, fixture) == "STALE"
+
+    def test_python_source_change_invalidates_plan(self, repo_root: Path, tmp_path: Path) -> None:
+        """A Lambda handler edit newer than the plan must force a re-plan."""
+        fixture = self._build_fixture(tmp_path, dist_mtime=self.PLAN_MTIME - 500, source_mtime=self.PLAN_MTIME - 500)
+        handler = fixture / "src/handlers/example.py"
+        handler.parent.mkdir(parents=True, exist_ok=True)
+        handler.write_text("# handler")
+        os.utime(handler, (self.PLAN_MTIME + 500, self.PLAN_MTIME + 500))
+        assert self._run_plan_is_fresh(repo_root, fixture) == "STALE"
+
+    def test_missing_plan_is_stale(self, repo_root: Path, tmp_path: Path) -> None:
+        fixture = self._build_fixture(tmp_path, dist_mtime=self.PLAN_MTIME - 500, source_mtime=self.PLAN_MTIME - 500)
+        assert self._run_plan_is_fresh(repo_root, fixture, plan_name="no-such-plan") == "STALE"
+
+    def test_newer_env_invalidates_plan(self, repo_root: Path, tmp_path: Path) -> None:
+        """A root .env newer than the plan must force a re-plan."""
+        fixture = self._build_fixture(tmp_path, dist_mtime=self.PLAN_MTIME - 500, source_mtime=self.PLAN_MTIME - 500)
+        dot_env = fixture / ".env"
+        dot_env.write_text("TF_VAR_encryption_passphrase=x")
+        os.utime(dot_env, (self.PLAN_MTIME + 500, self.PLAN_MTIME + 500))
+        assert self._run_plan_is_fresh(repo_root, fixture) == "STALE"

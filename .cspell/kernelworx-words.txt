@@ -192,6 +192,7 @@ metachars
 middleware
 millis
 minLength
+mtimes
 mockqrcode
 monkeypatching
 monorepo
@@ -328,6 +329,7 @@ TabPanel
 tailwindcss
 tbody
 td
+templatefile
 Terraform
 testcode
 testpaths

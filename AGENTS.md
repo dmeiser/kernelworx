@@ -47,7 +47,7 @@ Tainting shared pipeline functions via `lifecycle { replace_triggered_by = ... }
 
 ### AppSync resolver bundling prerequisite (#277/#282/#288)
 
-`tofu/application/modules/appsync` reads resolver code from `tofu/application/appsync/dist/` (gitignored), not from `js-resolvers/` (the source that tests run against). `dist/` is produced by `npm run build:resolvers` (esbuild bundles `js-resolvers/*.js`, inlining `lib/`, keeping `@aws-appsync/utils` external). Root `package.json` pins `esbuild` to an exact version (#282) to prevent output differences across environments from triggering spurious `resolver_code_hashes.tf` taints (`tests/unit/check_esbuild_pinning.test.ts`). Every `tofu plan`, `apply`, `import`, or `destroy` fails with `Invalid function argument` from `file()` when `dist/` is missing, so run the build first for local tofu commands; `deploy.sh` (including on `init`, #288), `scripts/ephemeral-env.sh` (both `up` and `down`), and the recover scripts do it automatically, and CI workflows run a root `npm ci` before any tofu step. A stale `dist/` silently desyncs `resolver_code_hashes.tf`, so re-run the build after editing resolver sources.
+`tofu/application/modules/appsync` reads resolver code from `tofu/application/appsync/dist/` (gitignored), not from `js-resolvers/` (the source that tests run against). `dist/` is produced by `npm run build:resolvers` (esbuild bundles `js-resolvers/*.js`, inlining `lib/`, keeping `@aws-appsync/utils` external). Root `package.json` pins `esbuild` to an exact version (#282) to prevent output differences across environments from triggering spurious `resolver_code_hashes.tf` taints (`tests/unit/check_esbuild_pinning.test.ts`). `scripts/build-resolvers.mjs` resolves `srcDir`/`outDir` relative to the script (not cwd), validates the source dir before wiping `dist/`, and fails with an explicit "run `npm ci`" message when esbuild is absent (#281), so direct local invocation from any directory is safe. Every `tofu plan`, `apply`, `import`, or `destroy` fails with `Invalid function argument` from `file()` when `dist/` is missing, so run the build first for local tofu commands; `deploy.sh` (including on `init`, #288), `scripts/ephemeral-env.sh` (both `up` and `down`), and the recover scripts do it automatically, and CI workflows run a root `npm ci` before any tofu step. A stale `dist/` silently desyncs `resolver_code_hashes.tf`, so re-run the build after editing resolver sources.
 
 
 ### AppSync resolver-only authorization posture (#71)
@@ -66,6 +66,10 @@ Consequences for new resolvers:
 - Do not rely on `@aws_cognito_user_pools` for authorization; use it only to require a Cognito-authenticated caller.
 
 This is a conscious, documented security posture. If schema-level owner authorization is added later, update this entry and the API comment in `tofu/application/modules/appsync/api.tf` accordingly.
+
+### Lambda exception-handling decorator (#294)
+
+`src/utils/handlers.py` provides the `lambda_handler` decorator (imported in handler modules as `with_error_handling`): it re-raises `AppError` unchanged and converts any other unexpected `Exception` to `AppError(ErrorCode.INTERNAL_ERROR, ...)` after an error-level log naming the function. Use `@lambda_handler(error_message="...")` to preserve the handler's client-facing failure message. Only the generic unexpected-exception path is covered — handler-specific typed errors (e.g. retryable `RESOURCE_BUSY` in `_raise_batch_lookup_error`) must stay in the handler/helpers. Migration is incremental: `src/handlers/admin_operations.py` is the exemplar; `account_operations.py`, `campaign_operations.py`, and `profile_sharing.py` still carry the manual `except AppError: raise` / `except Exception` boilerplate and migrate in follow-up PRs. Overload stub lines in `src/utils/handlers.py` carry `pragma: no cover` (type-checking-only); the module must stay at 100% coverage.
 
 ### Edge security architecture: one distribution, one WAF (#165/#166)
 
