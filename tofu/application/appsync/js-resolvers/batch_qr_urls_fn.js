@@ -4,11 +4,13 @@
  *
  * Replaces the per-method PaymentMethod.qrCodeUrl field resolver (N+1 Lambda
  * invocations — one per payment method per query; see #330). Runs as the last
- * step of both parent query pipelines:
- * - myPaymentMethods (owner is the caller; stash.ownerAccountId set without
- *   prefix by set_owner_account_id_in_stash)
- * - paymentMethodsForProfile (owner is the profile owner; stash.ownerAccountId
- *   carries the ACCOUNT# prefix, stash.profileId is set)
+ * step of the pipelines returning PaymentMethod(s):
+ * - myPaymentMethods (array; owner is the caller; stash.ownerAccountId set
+ *   without prefix by set_owner_account_id_in_stash)
+ * - paymentMethodsForProfile (array; owner is the profile owner;
+ *   stash.ownerAccountId carries the ACCOUNT# prefix, stash.profileId is set)
+ * - updatePaymentMethod and confirmPaymentMethodQRCodeUpload (single
+ *   PaymentMethod; caller is the owner, so the identity.sub fallback applies)
  *
  * Authorization is enforced once in the Lambda against the shared
  * owner/profile context, exactly as the old field resolver did.
@@ -27,8 +29,17 @@ function extractS3Key(qrCodeUrl) {
     return qrCodeUrl;
 }
 
+function toMethodList(prev) {
+    if (prev == null) {
+        return [];
+    }
+    return Array.isArray(prev) ? prev : [prev];
+}
+
 export function request(ctx) {
-    const methods = ctx.prev.result || [];
+    const prev = ctx.prev.result;
+    const single = prev != null && !Array.isArray(prev);
+    const methods = toMethodList(prev);
 
     const s3Keys = [];
     for (const method of methods) {
@@ -40,7 +51,7 @@ export function request(ctx) {
     // Nothing to sign (e.g. only the global Cash/Check methods): skip the
     // Lambda invocation entirely and let the response pass methods through.
     if (s3Keys.length === 0) {
-        return runtime.earlyReturn(methods);
+        return runtime.earlyReturn(single ? methods[0] : methods);
     }
 
     // For myPaymentMethods the owner is the caller; for
@@ -66,10 +77,12 @@ export function response(ctx) {
         util.error(ctx.error.message, ctx.error.type);
     }
 
-    const methods = ctx.prev.result || [];
+    const prev = ctx.prev.result;
+    const single = prev != null && !Array.isArray(prev);
+    const methods = toMethodList(prev);
     const urlMap = ctx.result || {};
 
-    return methods.map(method => {
+    const mapped = methods.map(method => {
         // Global methods and QR-hidden methods have no stored value; keep
         // them (and any other fields) untouched.
         if (!method || !method.qrCodeUrl) {
@@ -78,4 +91,6 @@ export function response(ctx) {
         const s3Key = extractS3Key(method.qrCodeUrl);
         return { ...method, qrCodeUrl: urlMap[s3Key] || null };
     });
+
+    return single ? mapped[0] : mapped;
 }

@@ -94,6 +94,22 @@ resource "aws_appsync_function" "batch_qr_urls" {
   code = file("${local.js_resolvers_dir}/batch_qr_urls_fn.js")
 }
 
+# Invoke the confirm-qr-upload Lambda as the first step of the
+# confirmPaymentMethodQRCodeUpload pipeline. The batch_qr_urls function signs
+# the returned key as the pipeline's last step (#330).
+resource "aws_appsync_function" "confirm_qr_upload" {
+  api_id      = aws_appsync_graphql_api.main.id
+  data_source = aws_appsync_datasource.confirm_qr_upload.name
+  name        = "ConfirmQRUploadFn${local.env_suffix}"
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/confirm_qr_upload_fn.js")
+}
+
 resource "aws_appsync_function" "validate_payment_method_appsync" {
   api_id      = aws_appsync_graphql_api.main.id
   data_source = aws_appsync_datasource.accounts.name

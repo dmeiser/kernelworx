@@ -108,6 +108,35 @@ describe('batch_qr_urls_fn request', () => {
         assert.strictEqual(result.operation, undefined);
         assert.deepStrictEqual(result, []);
     });
+
+    it('signs a single PaymentMethod returned by a mutation pipeline', () => {
+        const ctx = {
+            prev: { result: { name: 'Venmo', qrCodeUrl: 'payment-qr-codes/account-123/venmo.png' } },
+            stash: {},
+            identity: { sub: 'account-123' },
+        };
+
+        const result = request(ctx);
+
+        assert.strictEqual(result.operation, 'Invoke');
+        assert.deepStrictEqual(result.payload.s3Keys, ['payment-qr-codes/account-123/venmo.png']);
+        assert.strictEqual(result.payload.ownerAccountId, 'account-123');
+        assert.strictEqual(result.payload.profileId, null);
+    });
+
+    it('returns a single QR-less PaymentMethod early without invoking', () => {
+        const method = { name: 'Venmo', qrCodeUrl: null };
+        const ctx = {
+            prev: { result: method },
+            stash: {},
+            identity: { sub: 'account-123' },
+        };
+
+        const result = request(ctx);
+
+        assert.strictEqual(result.operation, undefined);
+        assert.deepStrictEqual(result, method);
+    });
 });
 
 describe('batch_qr_urls_fn response', () => {
@@ -158,6 +187,17 @@ describe('batch_qr_urls_fn response', () => {
         const result = response(ctx);
 
         assert.deepStrictEqual(result, methods);
+    });
+
+    it('maps a single PaymentMethod to its presigned URL and returns an object, not an array', () => {
+        const ctx = {
+            prev: { result: { name: 'Venmo', qrCodeUrl: 'payment-qr-codes/account-123/venmo.png' } },
+            result: { 'payment-qr-codes/account-123/venmo.png': 'https://presigned.example.com/venmo' },
+        };
+
+        const result = response(ctx);
+
+        assert.deepStrictEqual(result, { name: 'Venmo', qrCodeUrl: 'https://presigned.example.com/venmo' });
     });
 
     it('re-signs stored full URLs via their extracted key', () => {
