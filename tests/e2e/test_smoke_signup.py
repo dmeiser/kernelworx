@@ -1,5 +1,9 @@
 """Smoke tests for the signup UI.
 
+``admin-confirm-sign-up`` races Cognito's read-after-write propagation: a
+``SignUp`` that has just returned can still yield ``UserNotFoundException``
+from immediate admin reads, so the confirmation step retries with backoff.
+
 ``TEST_USER_POOL_ID`` is confirmed present in the dev ``.env``; the Cognito
 user pool is accessible from the dev environment.
 
@@ -30,6 +34,7 @@ import random
 import re
 import string
 import subprocess
+import time
 
 import pytest
 from playwright.sync_api import Page, expect
@@ -98,6 +103,30 @@ def _cognito_cli(*args: str) -> None:
         raise RuntimeError(f"aws cognito-idp {' '.join(args)} failed: {result.stderr}")
 
 
+def _cognito_cli_retry_on_user_not_found(*args: str, attempts: int = 6, delay_seconds: float = 5.0) -> None:
+    """Run a ``aws cognito-idp`` admin command, retrying propagation lag.
+
+    Cognito ``SignUp`` is eventually consistent: an immediate admin read can
+    return ``UserNotFoundException`` even though the user was just created
+    (the same race the cleanup helper in ``tests/e2e/conftest.py`` tolerates
+    between ``list-users`` and ``admin-delete-user``).  Retry only that error;
+    every other failure is raised at once.
+    """
+    last_error: RuntimeError | None = None
+    for attempt in range(attempts):
+        try:
+            _cognito_cli(*args)
+            return
+        except RuntimeError as error:
+            if "UserNotFoundException" not in str(error):
+                raise
+            last_error = error
+            if attempt < attempts - 1:
+                time.sleep(delay_seconds)
+    assert last_error is not None  # pragma: no cover - loop always sets it
+    raise last_error
+
+
 @pytest.mark.smoke
 def test_signup_ui_renders(page: Page) -> None:
     """Verify the signup page renders all required form fields.
@@ -161,7 +190,7 @@ def test_signup_completes_after_backend_confirmation(page: Page) -> None:
     if not user_pool_id:
         pytest.fail("TEST_USER_POOL_ID is not set in environment.")
 
-    _cognito_cli(
+    _cognito_cli_retry_on_user_not_found(
         "admin-confirm-sign-up",
         "--user-pool-id",
         user_pool_id,
