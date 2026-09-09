@@ -24,6 +24,12 @@ environment):
   more than one exact comment match fails loudly and deletes nothing.
 - A removed block with lifecycle { destroy = false } makes OpenTofu FORGET
   the legacy OAI in state instead of scheduling a provider destroy.
+- Behavioral tests execute the gate's rendered local-exec command with a
+  stubbed `aws` executable (and a no-op `sleep`) on PATH and assert the
+  observable call log and exit status: idempotent no-match/NoSuch passes,
+  ambiguous comment matches fail without deleting, the ETag-conditional
+  delete runs only after the Deployed poll, InUse/unknown errors retry, and
+  unknown failures ultimately fail the apply.
 - aws_s3_bucket_policy.static depends on the gate so the principal flip (OAI
   canonical user -> Service+SourceArn) cannot cut S3 access for the live
   distribution while it still signs as the OAI.
@@ -48,6 +54,10 @@ python-hcl2) and assert the *meaning* of the OAC contract:
 from __future__ import annotations
 
 import io
+import os
+import re
+import subprocess
+import textwrap
 from pathlib import Path
 
 import hcl2
@@ -114,29 +124,277 @@ def test_legacy_oai_destroy_gate_polls_for_deployed(cloudfront_doc: dict) -> Non
     assert "exit 1" in command, "the gate must fail the apply if the distribution never deploys"
 
 
-def test_legacy_oai_destroy_gate_deletes_oai_out_of_band(cloudfront_doc: dict) -> None:
+# Values substituted for the provisioner's OpenTofu interpolations so the
+# rendered command can run against the stubbed `aws` executable.
+GATE_STUB_DIST_ID = "EGDISTRIBUTION123"
+GATE_STUB_SITE_DOMAIN = "gate-test.example.com"
+GATE_STUB_PLACEHOLDERS = {
+    "${aws_cloudfront_distribution.site.id}": GATE_STUB_DIST_ID,
+    "${local.site_domain}": GATE_STUB_SITE_DOMAIN,
+}
+
+AWS_STUB_HEADER = 'echo "aws $*" >> "$STUB_LOG"\n'
+
+_NOSUCH_ERROR = (
+    "An error occurred (NoSuchCloudFrontOriginAccessIdentity) when calling the "
+    "GetCloudFrontOriginAccessIdentity operation: The specified origin access "
+    "identity does not exist."
+)
+_INUSE_ERROR = (
+    "An error occurred (CloudFrontOriginAccessIdentityInUse) when calling the "
+    "DeleteCloudFrontOriginAccessIdentity operation: The origin access identity "
+    "is still in use by a distribution."
+)
+_UNKNOWN_ERROR = (
+    "An error occurred (AccessDenied) when calling the "
+    "DeleteCloudFrontOriginAccessIdentity operation: Access denied."
+)
+_THROTTLE_ERROR = (
+    "An error occurred (Throttling) when calling the "
+    "GetCloudFrontOriginAccessIdentity operation: Rate exceeded."
+)
+
+# Stub behavior notes (mirroring the real AWS CLI):
+# - a list query with no matches prints nothing to stdout under --output text
+#   when the filter yields an empty list;
+# - service errors are printed to stderr and exit non-zero;
+# - a successful delete prints nothing and exits 0.
+_NO_MATCH_STUB = (
+    AWS_STUB_HEADER
+    + 'case "$*" in\n'
+    + '  *list-cloud-front-origin-access-identities*) true ;;\n'
+    + '  *delete-cloud-front-origin-access-identity*) exit 0 ;;\n'
+    + '  *get-cloud-front-origin-access-identity*) echo "ETAGSHOULDNOTBEUSED" ;;\n'
+    + '  *get-distribution*) echo "Deployed" ;;\n'
+    + '  *) echo "unexpected aws invocation: $*" >&2; exit 99 ;;\n'
+    + 'esac\n'
+)
+
+_TWO_MATCH_STUB = (
+    AWS_STUB_HEADER
+    + 'case "$*" in\n'
+    + '  *list-cloud-front-origin-access-identities*) echo "OAI111 OAI222" ;;\n'
+    + '  *get-distribution*) echo "Deployed" ;;\n'
+    + '  *) echo "unexpected aws invocation: $*" >&2; exit 99 ;;\n'
+    + 'esac\n'
+)
+
+_DELETE_OK_STUB = (
+    AWS_STUB_HEADER
+    + 'case "$*" in\n'
+    + '  *list-cloud-front-origin-access-identities*) echo "OAIEXIST1" ;;\n'
+    + '  *delete-cloud-front-origin-access-identity*) exit 0 ;;\n'
+    + '  *get-cloud-front-origin-access-identity*) echo "ETAGVALID1" ;;\n'
+    + '  *get-distribution*) echo "Deployed" ;;\n'
+    + '  *) echo "unexpected aws invocation: $*" >&2; exit 99 ;;\n'
+    + 'esac\n'
+)
+
+_NOSUCH_STUB = (
+    AWS_STUB_HEADER
+    + 'case "$*" in\n'
+    + '  *list-cloud-front-origin-access-identities*) echo "OAIEXIST1" ;;\n'
+    + '  *get-cloud-front-origin-access-identity*)'
+    + f' echo {_NOSUCH_ERROR!r} >&2; exit 1 ;;\n'
+    + '  *get-distribution*) echo "Deployed" ;;\n'
+    + '  *) echo "unexpected aws invocation: $*" >&2; exit 99 ;;\n'
+    + 'esac\n'
+)
+
+_INUSE_THEN_OK_STUB = (
+    AWS_STUB_HEADER
+    + 'case "$*" in\n'
+    + '  *list-cloud-front-origin-access-identities*) echo "OAIEXIST1" ;;\n'
+    + '  *delete-cloud-front-origin-access-identity*)\n'
+    + '    n=$(( $(cat "$STUB_STATE/delete_count" 2>/dev/null || echo 0) + 1 ))\n'
+    + '    echo "$n" > "$STUB_STATE/delete_count"\n'
+    + '    if [ "$n" -lt 2 ]; then\n'
+    + f'      echo {_INUSE_ERROR!r} >&2\n'
+    + '      exit 1\n'
+    + '    fi\n'
+    + '    exit 0 ;;\n'
+    + '  *get-cloud-front-origin-access-identity*) echo "ETAGVALID1" ;;\n'
+    + '  *get-distribution*) echo "Deployed" ;;\n'
+    + '  *) echo "unexpected aws invocation: $*" >&2; exit 99 ;;\n'
+    + 'esac\n'
+)
+
+_UNKNOWN_DELETE_STUB = (
+    AWS_STUB_HEADER
+    + 'case "$*" in\n'
+    + '  *list-cloud-front-origin-access-identities*) echo "OAIEXIST1" ;;\n'
+    + '  *delete-cloud-front-origin-access-identity*)'
+    + f' echo {_UNKNOWN_ERROR!r} >&2; exit 1 ;;\n'
+    + '  *get-cloud-front-origin-access-identity*) echo "ETAGVALID1" ;;\n'
+    + '  *get-distribution*) echo "Deployed" ;;\n'
+    + '  *) echo "unexpected aws invocation: $*" >&2; exit 99 ;;\n'
+    + 'esac\n'
+)
+
+_THROTTLE_ONCE_STUB = (
+    AWS_STUB_HEADER
+    + 'case "$*" in\n'
+    + '  *list-cloud-front-origin-access-identities*) echo "OAIEXIST1" ;;\n'
+    + '  *delete-cloud-front-origin-access-identity*) exit 0 ;;\n'
+    + '  *get-cloud-front-origin-access-identity*)\n'
+    + '    n=$(( $(cat "$STUB_STATE/get_count" 2>/dev/null || echo 0) + 1 ))\n'
+    + '    echo "$n" > "$STUB_STATE/get_count"\n'
+    + '    if [ "$n" -eq 1 ]; then\n'
+    + f'      echo {_THROTTLE_ERROR!r} >&2\n'
+    + '      exit 1\n'
+    + '    fi\n'
+    + '    echo "ETAGVALID1" ;;\n'
+    + '  *get-distribution*) echo "Deployed" ;;\n'
+    + '  *) echo "unexpected aws invocation: $*" >&2; exit 99 ;;\n'
+    + 'esac\n'
+)
+
+_THROTTLE_ALWAYS_STUB = (
+    AWS_STUB_HEADER
+    + 'case "$*" in\n'
+    + '  *list-cloud-front-origin-access-identities*) echo "OAIEXIST1" ;;\n'
+    + '  *get-cloud-front-origin-access-identity*)'
+    + f' echo {_THROTTLE_ERROR!r} >&2; exit 1 ;;\n'
+    + '  *get-distribution*) echo "Deployed" ;;\n'
+    + '  *) echo "unexpected aws invocation: $*" >&2; exit 99 ;;\n'
+    + 'esac\n'
+)
+
+
+def _render_gate_script(cloudfront_doc: dict, tmp_path: Path) -> Path:
+    """Render the gate's local-exec command into a runnable shell script."""
     gate = first_resource(cloudfront_doc, "terraform_data", "legacy_oai_destroy_gate")
     provisioner = block(gate.get("provisioner"))
-    command = provisioner["local-exec"]["command"]
-    # Look up THIS environment's legacy OAI by its pre-#335 comment (unique
-    # per environment; dev and prod share an AWS account, so ids are
-    # account-global and must not be hardcoded).
-    assert "aws cloudfront list-cloud-front-origin-access-identities" in command
-    assert "Comment=='" in command
-    assert "${local.site_domain}" in command
-    # Refuse to delete when the comment is not unique.
-    assert 'if [ "$COUNT" -gt 1 ]' in command
-    assert "refusing to delete anything" in command
-    # Real destroy: ETag-conditional delete, ordered after the Deployed poll.
-    assert "aws cloudfront get-cloud-front-origin-access-identity" in command
-    assert "aws cloudfront delete-cloud-front-origin-access-identity" in command
-    assert "--if-match" in command
-    # Idempotent success paths: no match / NoSuch.
-    assert "NoSuchCloudFrontOriginAccessIdentity" in command
-    assert "nothing to delete" in command
-    # 409 InUse (cutover not yet propagated) retries ~20 min, then fails.
-    assert "CloudFrontOriginAccessIdentityInUse" in command
-    assert "exit 1" in command
+    local_exec = provisioner["local-exec"]
+    assert local_exec.get("interpreter") == ["/bin/bash", "-c"]
+    command = local_exec["command"]
+    # python-hcl2 keeps the heredoc markers and the marker-indentation; the
+    # real provisioner receives the dedented body only.
+    assert command.startswith('"<<-EOT\n'), "expected an indented heredoc command"
+    body = re.sub(r"\n[ \t]*EOT\"$", "", command[len('"<<-EOT\n') :])
+    script_text = textwrap.dedent(body)
+    # python-hcl2 preserves Terraform's $${...} escapes verbatim; Terraform
+    # collapses them to literal ${...} in the provisioner command.
+    script_text = script_text.replace("$${", "${")
+    for placeholder, value in GATE_STUB_PLACEHOLDERS.items():
+        assert placeholder in script_text, f"missing interpolation {placeholder}"
+        script_text = script_text.replace(placeholder, value)
+    script = tmp_path / "legacy_oai_destroy_gate.sh"
+    script.write_text(script_text)
+    return script
+
+
+def _run_gate(
+    script: Path, tmp_path: Path, aws_stub: str
+) -> tuple[subprocess.CompletedProcess, list[str]]:
+    """Run the rendered gate with stubbed `aws`/`sleep` and return (result, aws call log).
+
+    `sleep` is stubbed to a no-op so the retry backoffs (30s each) do not
+    slow the scenarios down.
+    """
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for name, body in (("aws", aws_stub), ("sleep", "exit 0\n")):
+        stub = bin_dir / name
+        stub.write_text("#!/bin/bash\n" + body)
+        stub.chmod(0o755)
+    (tmp_path / "stub-state").mkdir()
+    log = tmp_path / "aws-calls.log"
+    env = {
+        **os.environ,
+        "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+        "STUB_LOG": str(log),
+        "STUB_STATE": str(tmp_path / "stub-state"),
+    }
+    result = subprocess.run(
+        ["bash", str(script)],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    calls = log.read_text().splitlines() if log.exists() else []
+    return result, calls
+
+
+def _aws_calls(calls: list[str], needle: str) -> list[str]:
+    return [call for call in calls if needle in call]
+
+
+def test_gate_passes_idempotently_when_no_oai_matches(cloudfront_doc: dict, tmp_path: Path) -> None:
+    script = _render_gate_script(cloudfront_doc, tmp_path)
+    result, calls = _run_gate(script, tmp_path, _NO_MATCH_STUB)
+    assert result.returncode == 0, result.stderr
+    assert "nothing to delete" in result.stdout
+    assert _aws_calls(calls, "delete-cloud-front-origin-access-identity") == []
+
+
+def test_gate_refuses_ambiguous_comment_match(cloudfront_doc: dict, tmp_path: Path) -> None:
+    script = _render_gate_script(cloudfront_doc, tmp_path)
+    result, calls = _run_gate(script, tmp_path, _TWO_MATCH_STUB)
+    assert result.returncode == 1
+    assert "refusing to delete anything" in result.stderr
+    assert _aws_calls(calls, "delete-cloud-front-origin-access-identity") == []
+
+
+def test_gate_deletes_oai_with_if_match_after_deployed(cloudfront_doc: dict, tmp_path: Path) -> None:
+    script = _render_gate_script(cloudfront_doc, tmp_path)
+    result, calls = _run_gate(script, tmp_path, _DELETE_OK_STUB)
+    assert result.returncode == 0, result.stderr
+    deletes = _aws_calls(calls, "delete-cloud-front-origin-access-identity")
+    assert len(deletes) == 1
+    assert "--if-match ETAGVALID1" in deletes[0]
+    # The Deployed poll must complete before the destroy is attempted.
+    poll_positions = [i for i, c in enumerate(calls) if "get-distribution" in c]
+    assert poll_positions and poll_positions[-1] < calls.index(deletes[0])
+
+
+def test_gate_treats_nosuch_during_destroy_as_success(cloudfront_doc: dict, tmp_path: Path) -> None:
+    script = _render_gate_script(cloudfront_doc, tmp_path)
+    result, calls = _run_gate(script, tmp_path, _NOSUCH_STUB)
+    assert result.returncode == 0, result.stderr
+    assert "treating as deleted" in result.stdout
+    assert _aws_calls(calls, "delete-cloud-front-origin-access-identity") == []
+
+
+def test_gate_retries_inuse_until_delete_succeeds(cloudfront_doc: dict, tmp_path: Path) -> None:
+    script = _render_gate_script(cloudfront_doc, tmp_path)
+    result, calls = _run_gate(script, tmp_path, _INUSE_THEN_OK_STUB)
+    assert result.returncode == 0, result.stderr
+    assert len(_aws_calls(calls, "delete-cloud-front-origin-access-identity")) == 2
+
+
+def test_gate_fails_after_three_unknown_delete_errors(cloudfront_doc: dict, tmp_path: Path) -> None:
+    script = _render_gate_script(cloudfront_doc, tmp_path)
+    result, calls = _run_gate(script, tmp_path, _UNKNOWN_DELETE_STUB)
+    assert result.returncode == 1
+    assert "failed 3 times" in result.stderr
+    assert len(_aws_calls(calls, "delete-cloud-front-origin-access-identity")) == 3
+
+
+def test_gate_retries_transient_etag_read_failure(cloudfront_doc: dict, tmp_path: Path) -> None:
+    # A throttled (non-NoSuch) ETag read is a retryable failure, not "gone":
+    # the next attempt must re-read the ETag and proceed to the delete.
+    script = _render_gate_script(cloudfront_doc, tmp_path)
+    result, calls = _run_gate(script, tmp_path, _THROTTLE_ONCE_STUB)
+    assert result.returncode == 0, result.stderr
+    deletes = _aws_calls(calls, "delete-cloud-front-origin-access-identity")
+    assert len(deletes) == 1 and "--if-match ETAGVALID1" in deletes[0]
+    assert len(_aws_calls(calls, "get-cloud-front-origin-access-identity")) == 2
+
+
+def test_gate_fails_after_three_transient_etag_read_failures(
+    cloudfront_doc: dict, tmp_path: Path
+) -> None:
+    # A persistent non-NoSuch read failure must fail the apply (the removed
+    # block has already forgotten the OAI from state, so silently treating it
+    # as deleted would orphan it).
+    script = _render_gate_script(cloudfront_doc, tmp_path)
+    result, calls = _run_gate(script, tmp_path, _THROTTLE_ALWAYS_STUB)
+    assert result.returncode == 1
+    assert "failed 3 times" in result.stderr
+    assert _aws_calls(calls, "delete-cloud-front-origin-access-identity") == []
+    assert len(_aws_calls(calls, "get-cloud-front-origin-access-identity")) == 3
 
 
 def test_bucket_policy_waits_for_deployed_gate(cloudfront_doc: dict) -> None:

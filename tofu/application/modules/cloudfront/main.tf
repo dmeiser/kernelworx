@@ -171,20 +171,32 @@ resource "terraform_data" "legacy_oai_destroy_gate" {
 
       DELETED=0
       UNKNOWN_ERRORS=0
+      GET_ERRORS=0
       for i in $(seq 1 40); do
-        ETAG=$(aws cloudfront get-cloud-front-origin-access-identity --id "$ID" --query 'ETag' --output text 2>/dev/null || true)
-        if [ -z "$ETAG" ]; then
-          # Distinguish "gone" (NoSuch -> idempotent success) from a transient
-          # read failure (retry).
-          if aws cloudfront get-cloud-front-origin-access-identity --id "$ID" >/dev/null 2>&1; then
-            echo "Transient error reading ETag for legacy OAI $ID; retrying (attempt $i/40)..."
+        # One lookup call; classify its combined output. NoSuch means the
+        # identity is already gone; a bare single-token value is the ETag;
+        # anything else is a retryable read failure and must never be
+        # conflated with "gone" (state is already forgotten, so a false
+        # "deleted" would orphan the OAI).
+        GET_OUT=$(aws cloudfront get-cloud-front-origin-access-identity --id "$ID" --query 'ETag' --output text 2>&1 || true)
+        case "$GET_OUT" in
+          *NoSuchCloudFrontOriginAccessIdentity*)
+            echo "Legacy OAI $ID is already gone (NoSuch) — treating as deleted."
+            DELETED=1
+            break
+            ;;
+          ""|*[[:space:]]*)
+            GET_ERRORS=$((GET_ERRORS + 1))
+            if [ "$GET_ERRORS" -ge 3 ]; then
+              echo "ERROR: reading the ETag for legacy OAI $ID failed 3 times with: $GET_OUT" >&2
+              exit 1
+            fi
+            echo "Transient error reading ETag for legacy OAI $ID: $GET_OUT; retrying (attempt $GET_ERRORS/3)..."
             sleep 30
             continue
-          fi
-          echo "Legacy OAI $ID is already gone (NoSuch) — treating as deleted."
-          DELETED=1
-          break
-        fi
+            ;;
+        esac
+        ETAG="$GET_OUT"
         ERR=$(aws cloudfront delete-cloud-front-origin-access-identity --id "$ID" --if-match "$ETAG" 2>&1 || true)
         if [ -z "$ERR" ]; then
           echo "Legacy OAI $ID deleted."
