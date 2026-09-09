@@ -21,9 +21,10 @@ Design decisions
   its own user in a ``finally`` block, so the corresponding Account rows
   created by the post-confirmation trigger are removed from DynamoDB too.
 * ``admin-confirm-sign-up`` retries ``UserNotFoundException`` with
-  exponential backoff (~6 minutes total): a freshly created Cognito user is
-  not always visible to admin reads immediately (read-after-write
-  propagation), and "not found yet" is the expected transient, not an error.
+  exponential backoff capped at 60 s (~14 minutes of backoff across 18
+  attempts): a freshly created Cognito user is not always visible to admin
+  reads immediately (read-after-write propagation), and "not found yet" is
+  the expected transient, not an error.
 * The submit button label verified from ``SignupPage.tsx`` is *Create Account*.
 * The age-confirmation checkbox label is
   *I confirm that I am 13 years of age or older*.
@@ -93,13 +94,23 @@ def _submit_signup_and_wait_for_verification(page: Page, email: str, password: s
 
 # Retry budget for admin-confirm-sign-up only. Since ~2026-09-09 Cognito's
 # read-after-write consistency for newly created users has been degraded:
-# even a ~3 minute budget (7 attempts) exhausted against
-# ``UserNotFoundException`` in the ephemeral smoke runs, so the budget now
-# spans ~6 minutes. Backoff sleeps between the 10 attempts total ~375 s;
+# successive ephemeral smoke runs exhausted the ~3 minute budget (7 attempts)
+# and then the ~6 minute budget (10 attempts, observed ~407 s test duration =
+# full exhaustion) against ``UserNotFoundException``. The budget now spans
+# ~14 minutes of backoff across 18 attempts (exponential, capped at 60 s);
 # every other failure and every other command still fail on the first
 # attempt.
-_CONFIRM_SIGNUP_MAX_ATTEMPTS = 10
-_CONFIRM_SIGNUP_BACKOFF_SECONDS = (5, 10, 20, 40, 60, 60, 60, 60, 60)
+_CONFIRM_SIGNUP_MAX_ATTEMPTS = 18
+_CONFIRM_SIGNUP_BACKOFF_CAP_SECONDS = 60
+_CONFIRM_SIGNUP_BACKOFF_BASE_SECONDS = 5
+
+
+def _confirm_signup_backoff_seconds(attempt: int) -> int:
+    """Exponential backoff for attempt ``n``: 5, 10, 20, 40, then 60 s cap."""
+    return min(
+        _CONFIRM_SIGNUP_BACKOFF_CAP_SECONDS,
+        _CONFIRM_SIGNUP_BACKOFF_BASE_SECONDS << attempt,
+    )
 
 
 def _cognito_cli(*args: str, retry_user_not_found: bool = False) -> None:
@@ -111,7 +122,7 @@ def _cognito_cli(*args: str, retry_user_not_found: bool = False) -> None:
     ``tests/e2e/conftest.py``.
 
     With ``retry_user_not_found=True``, a ``UserNotFoundException`` failure is
-    retried with exponential backoff (see :data:`_CONFIRM_SIGNUP_BACKOFF_SECONDS`)
+    retried with exponential backoff (see :func:`_confirm_signup_backoff_seconds`)
     before raising; all other failures raise immediately.
     """
     cmd = ["aws", "cognito-idp", *args, "--output", "json", "--no-cli-pager"]
@@ -125,7 +136,7 @@ def _cognito_cli(*args: str, retry_user_not_found: bool = False) -> None:
         if not (retry_user_not_found and "UserNotFoundException" in result.stderr):
             break
         if attempt < _CONFIRM_SIGNUP_MAX_ATTEMPTS - 1:
-            time.sleep(_CONFIRM_SIGNUP_BACKOFF_SECONDS[attempt])
+            time.sleep(_confirm_signup_backoff_seconds(attempt))
     raise RuntimeError(f"aws cognito-idp {' '.join(args)} failed: {result.stderr}")
 
 
