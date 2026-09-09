@@ -17,6 +17,9 @@ import { util, runtime } from '@aws-appsync/utils';
  * the only intended placeholder; do NOT add other `${...}` sequences here —
  * Terraform will try to substitute them and the plan will fail or substitute
  * the wrong value. Use string concatenation instead of JS template literals.
+ *
+ * AppSync JS runtime restrictions (APPSYNC_JS 1.0.0): no `continue`
+ * statement, so the loops below use inclusive if-blocks instead.
  */
 
 // AppSync BatchGetItem supports at most 100 keys per table; accounts with
@@ -39,13 +42,12 @@ export function request(ctx) {
     const keys = [];
     for (const profileId of sharedProfileIds) {
         const share = sharesByProfile[profileId];
-        if (!share) {
-            continue;
+        if (share) {
+            keys.push(util.dynamodb.toMapValues({
+                ownerAccountId: share.ownerAccountId,
+                profileId: share.profileId
+            }));
         }
-        keys.push(util.dynamodb.toMapValues({
-            ownerAccountId: share.ownerAccountId,
-            profileId: share.profileId
-        }));
     }
 
     if (keys.length > MAX_BATCH_KEYS) {
@@ -88,26 +90,22 @@ export function response(ctx) {
     for (const profileId of sharedProfileIds) {
         const profile = profilesById[profileId];
         const share = sharesByProfile[profileId];
-        if (!profile || !share) {
-            continue;
+        const hasRequiredFields = profile && share
+            && typeof profile.profileId === 'string'
+            && profile.sellerName && profile.createdAt && profile.updatedAt;
+        if (hasRequiredFields) {
+            result.push({
+                profileId: profile.profileId,
+                ownerAccountId: normalizeAccountId(profile.ownerAccountId),
+                sellerName: profile.sellerName,
+                unitType: profile.unitType != null ? profile.unitType : null,
+                unitNumber: profile.unitNumber != null ? profile.unitNumber : null,
+                createdAt: profile.createdAt,
+                updatedAt: profile.updatedAt,
+                isOwner: profile.ownerAccountId === callerAccountId,
+                permissions: share.permissions
+            });
         }
-        if (typeof profile.profileId !== 'string') {
-            continue;
-        }
-        if (!profile.sellerName || !profile.createdAt || !profile.updatedAt) {
-            continue;
-        }
-        result.push({
-            profileId: profile.profileId,
-            ownerAccountId: normalizeAccountId(profile.ownerAccountId),
-            sellerName: profile.sellerName,
-            unitType: profile.unitType != null ? profile.unitType : null,
-            unitNumber: profile.unitNumber != null ? profile.unitNumber : null,
-            createdAt: profile.createdAt,
-            updatedAt: profile.updatedAt,
-            isOwner: profile.ownerAccountId === callerAccountId,
-            permissions: share.permissions
-        });
     }
     return result;
 }

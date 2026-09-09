@@ -9,6 +9,11 @@ import { util } from '@aws-appsync/utils';
  *   - skip legacy shares with no accessible (READ/WRITE) permission (#242)
  *   - first share per profileId wins
  * The deduplicated map is stashed for the BatchGetItem function.
+ *
+ * AppSync JS runtime restrictions (APPSYNC_JS 1.0.0): no `continue`
+ * statement and no Function.prototype.call, so the loop below uses a
+ * single inclusive if-block and Object.hasOwn (the documented `in`
+ * replacement).
  */
 
 function normalizeAccountId(accountId) {
@@ -57,24 +62,18 @@ export function response(ctx) {
     for (const share of items) {
         const profileId = share.profileId;
         const ownerAccountId = share.ownerAccountId;
-        if (typeof profileId !== 'string' || profileId.length === 0) {
-            continue;
+        const isValidShare = typeof profileId === 'string' && profileId.length > 0
+            && typeof ownerAccountId === 'string' && ownerAccountId.length > 0
+            && hasAccessiblePermissions(share.permissions)
+            && !Object.hasOwn(sharesByProfile, profileId);
+        if (isValidShare) {
+            sharesByProfile[profileId] = {
+                profileId: profileId,
+                ownerAccountId: ownerAccountId,
+                permissions: share.permissions
+            };
+            sharedProfileIds.push(profileId);
         }
-        if (typeof ownerAccountId !== 'string' || ownerAccountId.length === 0) {
-            continue;
-        }
-        if (!hasAccessiblePermissions(share.permissions)) {
-            continue;
-        }
-        if (Object.prototype.hasOwnProperty.call(sharesByProfile, profileId)) {
-            continue;
-        }
-        sharesByProfile[profileId] = {
-            profileId: profileId,
-            ownerAccountId: ownerAccountId,
-            permissions: share.permissions
-        };
-        sharedProfileIds.push(profileId);
     }
 
     ctx.stash.sharesByProfile = sharesByProfile;
