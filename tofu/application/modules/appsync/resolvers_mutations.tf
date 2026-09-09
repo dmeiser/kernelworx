@@ -131,6 +131,10 @@ resource "aws_appsync_resolver" "update_campaign" {
       aws_appsync_function.verify_profile_write_access.function_id,
       aws_appsync_function.check_share_permissions.function_id,
       aws_appsync_function.update_campaign.function_id,
+      # isActive can change which campaign is the latest active one;
+      # recompute the profile's denormalized latestCampaignId (#331).
+      aws_appsync_function.refresh_latest_campaign_lookup.function_id,
+      aws_appsync_function.refresh_latest_campaign_write.function_id,
     ]
   }
 
@@ -156,6 +160,12 @@ resource "aws_appsync_resolver" "delete_campaign" {
       aws_appsync_function.check_share_permissions.function_id,
       aws_appsync_function.delete_campaign_orders_lambda.function_id,
       aws_appsync_function.delete_campaign.function_id,
+      # Removing a campaign can change which campaign is the latest active
+      # one; recompute BEFORE the propagation check so the profile's
+      # denormalized latestCampaignId is refreshed even if verification
+      # fails (#331).
+      aws_appsync_function.refresh_latest_campaign_lookup.function_id,
+      aws_appsync_function.refresh_latest_campaign_write.function_id,
       aws_appsync_function.verify_campaign_delete_propagation.function_id,
     ]
   }
@@ -182,6 +192,9 @@ resource "aws_appsync_resolver" "create_campaign" {
       aws_appsync_function.lookup_shared_campaign.function_id,
       aws_appsync_function.verify_shared_campaign_catalog.function_id,
       aws_appsync_function.create_campaign.function_id,
+      # Stamp the owning profile's denormalized latestCampaignId in the same
+      # pipeline so it cannot drift (#331).
+      aws_appsync_function.set_profile_latest_campaign.function_id,
       aws_appsync_function.create_campaign_share.function_id,
     ]
   }

@@ -47,6 +47,7 @@ class TestListMyShares:
                 "sellerName": "Shared Scout",
                 "unitType": "Pack",
                 "unitNumber": "42",
+                "latestCampaignId": "CAMPAIGN#latest-1",
                 "createdAt": "2024-01-01T00:00:00Z",
                 "updatedAt": "2024-01-01T00:00:00Z",
             }
@@ -77,6 +78,9 @@ class TestListMyShares:
         assert result[0]["sellerName"] == "Shared Scout"
         assert result[0]["permissions"] == ["READ"]
         assert result[0]["isOwner"] is False
+        # Denormalized latestCampaignId passes through for the
+        # SharedProfile.latestCampaign field resolver fast path (#331).
+        assert result[0]["latestCampaignId"] == "CAMPAIGN#latest-1"
 
     def test_returns_empty_array_when_no_shares(
         self,

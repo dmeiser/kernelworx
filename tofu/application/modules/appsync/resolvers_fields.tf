@@ -98,6 +98,9 @@ resource "aws_appsync_resolver" "seller_profile_permissions" {
 }
 
 # SellerProfile.latestCampaign (JS)
+# Denormalized fast path (single GetItem via profile.latestCampaignId, set by
+# the campaign mutation pipelines) with a per-item GSI Query fallback for
+# profiles whose rows predate the denormalization (#331).
 resource "aws_appsync_resolver" "seller_profile_latest_campaign" {
   api_id      = aws_appsync_graphql_api.main.id
   type        = "SellerProfile"

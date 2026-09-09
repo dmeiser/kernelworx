@@ -229,6 +229,9 @@ def _build_shared_profile_result(
         "updatedAt": updated_at,
         "isOwner": profile.get("ownerAccountId") == caller_account_id_with_prefix,
         "permissions": permissions_list,
+        # Denormalized pointer for the SharedProfile.latestCampaign field
+        # resolver's GetItem fast path (#331); absent on unmigrated rows.
+        "latestCampaignId": profile.get("latestCampaignId"),
     }
 
 
