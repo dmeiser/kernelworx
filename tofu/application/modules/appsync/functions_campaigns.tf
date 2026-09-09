@@ -62,6 +62,11 @@ resource "aws_appsync_function" "delete_campaign_orders" {
     runtime_version = "1.0.0"
   }
 
+  # WARNING: templatefile() interpolates every `${...}` sequence in the source as a
+  # Terraform variable reference. The bundled source keeps only the intended
+  # `${table_name}` placeholder; any JS template literal added to the source will
+  # either fail the plan or be silently substituted. Do not add `${...}` to the
+  # source without also switching this to file() (#284 defers that switch).
   code = templatefile("${local.js_resolvers_dir}/delete_campaign_orders_fn.js", {
     table_name = var.dynamodb_table_names.orders
   })
