@@ -94,6 +94,68 @@ describe('refresh_latest_campaign_lookup_fn response', () => {
         assert.strictEqual(ctx.stash.latestActiveCampaignId, 'CAMPAIGN#b');
     });
 
+    it('excludes a just-deactivated campaign from a stale GSI read on updateCampaign', () => {
+        const ctx = {
+            info: { fieldName: 'updateCampaign' },
+            args: { input: { campaignId: 'CAMPAIGN#new', isActive: false } },
+            stash: {
+                campaign: { profileId: 'PROFILE#p1', campaignId: 'CAMPAIGN#new', createdAt: '2024-02-01T00:00:00Z', isActive: true },
+            },
+            prev: { result: true },
+            result: {
+                items: [
+                    { campaignId: 'CAMPAIGN#new', createdAt: '2024-02-01T00:00:00Z', isActive: true },
+                    { campaignId: 'CAMPAIGN#old', createdAt: '2024-01-01T00:00:00Z', isActive: true },
+                ],
+            },
+        };
+
+        response(ctx);
+
+        assert.strictEqual(ctx.stash.latestActiveCampaignId, 'CAMPAIGN#old');
+    });
+
+    it('adds a reactivated campaign as a candidate when the stale GSI omits it', () => {
+        const ctx = {
+            info: { fieldName: 'updateCampaign' },
+            args: { input: { campaignId: 'CAMPAIGN#new', isActive: true } },
+            stash: {
+                campaign: { profileId: 'PROFILE#p1', campaignId: 'CAMPAIGN#new', createdAt: '2024-02-01T00:00:00Z', isActive: false },
+            },
+            prev: { result: true },
+            result: {
+                items: [
+                    { campaignId: 'CAMPAIGN#older', createdAt: '2024-01-01T00:00:00Z', isActive: true },
+                ],
+            },
+        };
+
+        response(ctx);
+
+        assert.strictEqual(ctx.stash.latestActiveCampaignId, 'CAMPAIGN#new');
+    });
+
+    it('does not exclude a reactivated campaign the GSI already projects, picking newest by createdAt', () => {
+        const ctx = {
+            info: { fieldName: 'updateCampaign' },
+            args: { input: { campaignId: 'CAMPAIGN#new', isActive: true } },
+            stash: {
+                campaign: { profileId: 'PROFILE#p1', campaignId: 'CAMPAIGN#new', createdAt: '2024-02-01T00:00:00Z', isActive: false },
+            },
+            prev: { result: true },
+            result: {
+                items: [
+                    { campaignId: 'CAMPAIGN#newest', createdAt: '2024-03-01T00:00:00Z', isActive: true },
+                    { campaignId: 'CAMPAIGN#new', createdAt: '2024-02-01T00:00:00Z', isActive: true },
+                ],
+            },
+        };
+
+        response(ctx);
+
+        assert.strictEqual(ctx.stash.latestActiveCampaignId, 'CAMPAIGN#newest');
+    });
+
     it('stashes null when no active campaigns remain', () => {
         const ctx = {
             stash: { campaign: CAMPAIGN },

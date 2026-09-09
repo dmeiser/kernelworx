@@ -46,9 +46,12 @@ export function request(ctx) {
         }
     }
 
-    // No profile on this page carries the denormalized field: skip the
-    // BatchGetItem entirely and pass the connection through unchanged.
-    if (keys.length === 0) {
+    // Skip the BatchGetItem and pass the connection through unchanged when
+    // no profile carries the denormalized field, or when the page yields too
+    // many keys for a single BatchGetItem (100-key cap; an AppSync function
+    // can issue only one call). Oversized pages fall back to the per-item
+    // field resolver for every profile instead of failing the whole query.
+    if (keys.length === 0 || keys.length > 100) {
         return runtime.earlyReturn(connection);
     }
 

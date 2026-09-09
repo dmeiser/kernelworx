@@ -64,6 +64,15 @@ describe('batch_latest_campaigns_fn request', () => {
         assert.deepStrictEqual(result, ctx.prev.result);
     });
 
+    it('passes the connection through unchanged when a page yields more than 100 keys', () => {
+        const profiles = Array.from({ length: 101 }, (_, i) =>
+            profile({ profileId: 'PROFILE#p' + i, latestCampaignId: 'CAMPAIGN#' + i })
+        );
+        const ctx = { prev: { result: { profiles, nextToken: 'tok' } } };
+
+        assert.deepStrictEqual(request(ctx), ctx.prev.result);
+    });
+
     it('early-returns the connection through when profiles is empty', () => {
         const ctx = { prev: { result: { profiles: [], nextToken: null } } };
         assert.deepStrictEqual(request(ctx), ctx.prev.result);

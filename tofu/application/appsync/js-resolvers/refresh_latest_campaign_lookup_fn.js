@@ -66,14 +66,43 @@ export function response(ctx) {
     }
 
     const items = (ctx.result && ctx.result.items) || [];
-    // The deleteCampaign pipeline runs this query milliseconds after
-    // DeleteItem; the GSI is eventually consistent and may still project the
-    // just-deleted row. Never resurrect it as the profile's latest campaign.
-    const deletedCampaignId = (ctx.stash.campaign && ctx.stash.campaign.campaignId) || null;
-    const liveItems = deletedCampaignId
-        ? items.filter(item => item && item.campaignId !== deletedCampaignId)
-        : items;
-    ctx.stash.latestActiveCampaignId = liveItems.length > 0 ? liveItems[0].campaignId : null;
+    const campaign = ctx.stash.campaign;
+    const fieldName = ctx.info && ctx.info.fieldName;
+    const input = (ctx.args && ctx.args.input) || {};
+    const targetCampaignId = (campaign && campaign.campaignId) || null;
+
+    let liveItems = items;
+    if (targetCampaignId && fieldName !== 'updateCampaign') {
+        // The deleteCampaign pipeline runs this query milliseconds after
+        // DeleteItem; the GSI is eventually consistent and may still project
+        // the just-deleted row. Never resurrect it as the profile's latest
+        // campaign.
+        liveItems = liveItems.filter(item => item && item.campaignId !== targetCampaignId);
+    } else if (targetCampaignId && input.isActive === false) {
+        // The GSI may likewise still project the just-deactivated campaign
+        // as active; merge the caller's isActive intent and drop it.
+        liveItems = liveItems.filter(item => item && item.campaignId !== targetCampaignId);
+    } else if (targetCampaignId && input.isActive === true) {
+        // Conversely the stale GSI may still show the just-reactivated
+        // campaign as inactive and omit it; add it back as a candidate.
+        const present = liveItems.some(item => item && item.campaignId === targetCampaignId);
+        if (!present) {
+            liveItems = liveItems.concat([{ ...campaign, isActive: true }]);
+        }
+    }
+
+    // ISO8601 UTC strings compare lexicographically; pick the newest active
+    // campaign by createdAt (same canonical semantics as the field resolver).
+    let newest = null;
+    for (const item of liveItems) {
+        if (!item) {
+            continue;
+        }
+        if (!newest || (item.createdAt || '') > (newest.createdAt || '')) {
+            newest = item;
+        }
+    }
+    ctx.stash.latestActiveCampaignId = newest ? newest.campaignId : null;
     ctx.stash.latestActiveCampaignResolved = true;
 
     return ctx.prev.result;
