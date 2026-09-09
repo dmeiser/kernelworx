@@ -21,7 +21,9 @@ globalThis.React = React;
 // whole run (flaky, timing-dependent). Devtools are useless in tests, so
 // disable the connection for every client created during the run. Assigned
 // directly (not vi.spyOn) so the afterEach restoreAllMocks() cannot undo it.
-ApolloClient.prototype.connectToDevTools = () => {};
+// `connectToDevTools` is private in ApolloClient's typings; access it via a
+// structural cast so tsc accepts the prototype patch.
+(ApolloClient.prototype as unknown as { connectToDevTools: () => void }).connectToDevTools = () => {};
 
 // Extend Vitest matchers with testing-library matchers
 expect.extend(matchers);
