@@ -3,10 +3,11 @@
  *
  * This function:
  * - Adds global methods (Cash, Check)
- * - Filters out QR codes for READ users
- * - Annotates each method with ownerAccountId and profileId for the
- *   PaymentMethod.qrCodeUrl field resolver authorization
+ * - Filters out QR codes for READ users (before the batch QR signing step)
  * - Sorts alphabetically (case-insensitive)
+ *
+ * QR signing context (owner/profile) lives in the stash; the batch_qr_urls
+ * step at the end of the pipeline consumes it.
  *
  * Note: APPSYNC_JS doesn't support passing functions as arguments (no comparator
  * in .sort()). We use a workaround: extract lowercase keys, sort them, then
@@ -20,17 +21,11 @@ export function response(ctx) {
     // Get custom payment methods from previous step (get_owner_payment_methods)
     const customPaymentMethods = ctx.prev.result || [];
     const canSeeQR = ctx.stash.canSeeQR;
-    const ownerAccountId = ctx.stash.ownerAccountId;
-    const profileId = ctx.stash.profileId;
 
-    // Filter QR codes based on access level and annotate methods with the
-    // profile context the qrCodeUrl field resolver needs for authorization.
+    // Filter QR codes based on access level. Runs before the batch QR
+    // signing step, so nulling here means the key is never signed.
     const filteredMethods = customPaymentMethods.map(method => {
-        const filtered = {
-            ...method,
-            ownerAccountId: ownerAccountId,
-            profileId: profileId,
-        };
+        const filtered = { ...method };
         if (!canSeeQR && filtered.qrCodeUrl) {
             filtered.qrCodeUrl = null;  // Remove QR URL for READ users
         }
@@ -59,8 +54,6 @@ export function response(ctx) {
     const result = sorted.map(m => ({
         name: m.name,
         qrCodeUrl: m.qrCodeUrl,
-        ownerAccountId: m.ownerAccountId,
-        profileId: m.profileId,
     }));
 
     return result;
