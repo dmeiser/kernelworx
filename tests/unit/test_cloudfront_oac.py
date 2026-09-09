@@ -126,7 +126,7 @@ def test_legacy_oai_destroy_gate_polls_for_deployed(cloudfront_doc: dict) -> Non
 
 # Values substituted for the provisioner's OpenTofu interpolations so the
 # rendered command can run against the stubbed `aws` executable.
-GATE_STUB_DIST_ID = "EGDISTRIBUTION123"
+GATE_STUB_DIST_ID = "DISTRIBUTION123"
 GATE_STUB_SITE_DOMAIN = "gate-test.example.com"
 GATE_STUB_PLACEHOLDERS = {
     "${aws_cloudfront_distribution.site.id}": GATE_STUB_DIST_ID,
@@ -135,12 +135,12 @@ GATE_STUB_PLACEHOLDERS = {
 
 AWS_STUB_HEADER = 'echo "aws $*" >> "$STUB_LOG"\n'
 
-_NOSUCH_ERROR = (
+_MISSING_ERROR = (
     "An error occurred (NoSuchCloudFrontOriginAccessIdentity) when calling the "
     "GetCloudFrontOriginAccessIdentity operation: The specified origin access "
     "identity does not exist."
 )
-_INUSE_ERROR = (
+_IN_USE_ERROR = (
     "An error occurred (CloudFrontOriginAccessIdentityInUse) when calling the "
     "DeleteCloudFrontOriginAccessIdentity operation: The origin access identity "
     "is still in use by a distribution."
@@ -165,7 +165,7 @@ _NO_MATCH_STUB = (
     + 'case "$*" in\n'
     + "  *list-cloud-front-origin-access-identities*) true ;;\n"
     + "  *delete-cloud-front-origin-access-identity*) exit 0 ;;\n"
-    + '  *get-cloud-front-origin-access-identity*) echo "ETAGSHOULDNOTBEUSED" ;;\n'
+    + '  *get-cloud-front-origin-access-identity*) echo "UNUSED-TAG" ;;\n'
     + '  *get-distribution*) echo "Deployed" ;;\n'
     + '  *) echo "unexpected aws invocation: $*" >&2; exit 99 ;;\n'
     + "esac\n"
@@ -183,38 +183,38 @@ _TWO_MATCH_STUB = (
 _DELETE_OK_STUB = (
     AWS_STUB_HEADER
     + 'case "$*" in\n'
-    + '  *list-cloud-front-origin-access-identities*) echo "OAIEXIST1" ;;\n'
+    + '  *list-cloud-front-origin-access-identities*) echo "OAI1" ;;\n'
     + "  *delete-cloud-front-origin-access-identity*) exit 0 ;;\n"
-    + '  *get-cloud-front-origin-access-identity*) echo "ETAGVALID1" ;;\n'
+    + '  *get-cloud-front-origin-access-identity*) echo "ETAG1" ;;\n'
     + '  *get-distribution*) echo "Deployed" ;;\n'
     + '  *) echo "unexpected aws invocation: $*" >&2; exit 99 ;;\n'
     + "esac\n"
 )
 
-_NOSUCH_STUB = (
+_MISSING_STUB = (
     AWS_STUB_HEADER
     + 'case "$*" in\n'
-    + '  *list-cloud-front-origin-access-identities*) echo "OAIEXIST1" ;;\n'
+    + '  *list-cloud-front-origin-access-identities*) echo "OAI1" ;;\n'
     + "  *get-cloud-front-origin-access-identity*)"
-    + f" echo {_NOSUCH_ERROR!r} >&2; exit 1 ;;\n"
+    + f" echo {_MISSING_ERROR!r} >&2; exit 1 ;;\n"
     + '  *get-distribution*) echo "Deployed" ;;\n'
     + '  *) echo "unexpected aws invocation: $*" >&2; exit 99 ;;\n'
     + "esac\n"
 )
 
-_INUSE_THEN_OK_STUB = (
+_IN_USE_THEN_OK_STUB = (
     AWS_STUB_HEADER
     + 'case "$*" in\n'
-    + '  *list-cloud-front-origin-access-identities*) echo "OAIEXIST1" ;;\n'
+    + '  *list-cloud-front-origin-access-identities*) echo "OAI1" ;;\n'
     + "  *delete-cloud-front-origin-access-identity*)\n"
     + '    n=$(( $(cat "$STUB_STATE/delete_count" 2>/dev/null || echo 0) + 1 ))\n'
     + '    echo "$n" > "$STUB_STATE/delete_count"\n'
     + '    if [ "$n" -lt 2 ]; then\n'
-    + f"      echo {_INUSE_ERROR!r} >&2\n"
+    + f"      echo {_IN_USE_ERROR!r} >&2\n"
     + "      exit 1\n"
     + "    fi\n"
     + "    exit 0 ;;\n"
-    + '  *get-cloud-front-origin-access-identity*) echo "ETAGVALID1" ;;\n'
+    + '  *get-cloud-front-origin-access-identity*) echo "ETAG1" ;;\n'
     + '  *get-distribution*) echo "Deployed" ;;\n'
     + '  *) echo "unexpected aws invocation: $*" >&2; exit 99 ;;\n'
     + "esac\n"
@@ -223,10 +223,10 @@ _INUSE_THEN_OK_STUB = (
 _UNKNOWN_DELETE_STUB = (
     AWS_STUB_HEADER
     + 'case "$*" in\n'
-    + '  *list-cloud-front-origin-access-identities*) echo "OAIEXIST1" ;;\n'
+    + '  *list-cloud-front-origin-access-identities*) echo "OAI1" ;;\n'
     + "  *delete-cloud-front-origin-access-identity*)"
     + f" echo {_UNKNOWN_ERROR!r} >&2; exit 1 ;;\n"
-    + '  *get-cloud-front-origin-access-identity*) echo "ETAGVALID1" ;;\n'
+    + '  *get-cloud-front-origin-access-identity*) echo "ETAG1" ;;\n'
     + '  *get-distribution*) echo "Deployed" ;;\n'
     + '  *) echo "unexpected aws invocation: $*" >&2; exit 99 ;;\n'
     + "esac\n"
@@ -235,7 +235,7 @@ _UNKNOWN_DELETE_STUB = (
 _THROTTLE_ONCE_STUB = (
     AWS_STUB_HEADER
     + 'case "$*" in\n'
-    + '  *list-cloud-front-origin-access-identities*) echo "OAIEXIST1" ;;\n'
+    + '  *list-cloud-front-origin-access-identities*) echo "OAI1" ;;\n'
     + "  *delete-cloud-front-origin-access-identity*) exit 0 ;;\n"
     + "  *get-cloud-front-origin-access-identity*)\n"
     + '    n=$(( $(cat "$STUB_STATE/get_count" 2>/dev/null || echo 0) + 1 ))\n'
@@ -244,7 +244,7 @@ _THROTTLE_ONCE_STUB = (
     + f"      echo {_THROTTLE_ERROR!r} >&2\n"
     + "      exit 1\n"
     + "    fi\n"
-    + '    echo "ETAGVALID1" ;;\n'
+    + '    echo "ETAG1" ;;\n'
     + '  *get-distribution*) echo "Deployed" ;;\n'
     + '  *) echo "unexpected aws invocation: $*" >&2; exit 99 ;;\n'
     + "esac\n"
@@ -260,9 +260,9 @@ _LIST_THROTTLE_ONCE_STUB = (
     + f"      echo {_LIST_ERROR!r} >&2\n"
     + "      exit 1\n"
     + "    fi\n"
-    + '    echo "OAIEXIST1" ;;\n'
+    + '    echo "OAI1" ;;\n'
     + "  *delete-cloud-front-origin-access-identity*) exit 0 ;;\n"
-    + '  *get-cloud-front-origin-access-identity*) echo "ETAGVALID1" ;;\n'
+    + '  *get-cloud-front-origin-access-identity*) echo "ETAG1" ;;\n'
     + '  *get-distribution*) echo "Deployed" ;;\n'
     + '  *) echo "unexpected aws invocation: $*" >&2; exit 99 ;;\n'
     + "esac\n"
@@ -281,7 +281,7 @@ _LIST_THROTTLE_ALWAYS_STUB = (
 _THROTTLE_ALWAYS_STUB = (
     AWS_STUB_HEADER
     + 'case "$*" in\n'
-    + '  *list-cloud-front-origin-access-identities*) echo "OAIEXIST1" ;;\n'
+    + '  *list-cloud-front-origin-access-identities*) echo "OAI1" ;;\n'
     + "  *get-cloud-front-origin-access-identity*)"
     + f" echo {_THROTTLE_ERROR!r} >&2; exit 1 ;;\n"
     + '  *get-distribution*) echo "Deployed" ;;\n'
@@ -298,7 +298,7 @@ def _render_gate_script(cloudfront_doc: dict, tmp_path: Path) -> Path:
     assert local_exec.get("interpreter") == ["/bin/bash", "-c"]
     command = local_exec["command"]
     # python-hcl2 keeps the heredoc markers and the marker-indentation; the
-    # real provisioner receives the dedented body only.
+    # real provisioner receives the body with common leading whitespace stripped.
     assert command.startswith('"<<-EOT\n'), "expected an indented heredoc command"
     body = re.sub(r"\n[ \t]*EOT\"$", "", command[len('"<<-EOT\n') :])
     script_text = textwrap.dedent(body)
@@ -316,7 +316,7 @@ def _render_gate_script(cloudfront_doc: dict, tmp_path: Path) -> Path:
 def _run_gate(script: Path, tmp_path: Path, aws_stub: str) -> tuple[subprocess.CompletedProcess, list[str]]:
     """Run the rendered gate with stubbed `aws`/`sleep` and return (result, aws call log).
 
-    `sleep` is stubbed to a no-op so the retry backoffs (30s each) do not
+    `sleep` is stubbed to a no-op so the 30 s retry delays do not
     slow the scenarios down.
     """
     bin_dir = tmp_path / "bin"
@@ -370,23 +370,23 @@ def test_gate_deletes_oai_with_if_match_after_deployed(cloudfront_doc: dict, tmp
     assert result.returncode == 0, result.stderr
     deletes = _aws_calls(calls, "delete-cloud-front-origin-access-identity")
     assert len(deletes) == 1
-    assert "--if-match ETAGVALID1" in deletes[0]
+    assert "--if-match ETAG1" in deletes[0]
     # The Deployed poll must complete before the destroy is attempted.
     poll_positions = [i for i, c in enumerate(calls) if "get-distribution" in c]
     assert poll_positions and poll_positions[-1] < calls.index(deletes[0])
 
 
-def test_gate_treats_nosuch_during_destroy_as_success(cloudfront_doc: dict, tmp_path: Path) -> None:
+def test_gate_treats_missing_during_destroy_as_success(cloudfront_doc: dict, tmp_path: Path) -> None:
     script = _render_gate_script(cloudfront_doc, tmp_path)
-    result, calls = _run_gate(script, tmp_path, _NOSUCH_STUB)
+    result, calls = _run_gate(script, tmp_path, _MISSING_STUB)
     assert result.returncode == 0, result.stderr
     assert "treating as deleted" in result.stdout
     assert _aws_calls(calls, "delete-cloud-front-origin-access-identity") == []
 
 
-def test_gate_retries_inuse_until_delete_succeeds(cloudfront_doc: dict, tmp_path: Path) -> None:
+def test_gate_retries_conflict_until_delete_succeeds(cloudfront_doc: dict, tmp_path: Path) -> None:
     script = _render_gate_script(cloudfront_doc, tmp_path)
-    result, calls = _run_gate(script, tmp_path, _INUSE_THEN_OK_STUB)
+    result, calls = _run_gate(script, tmp_path, _IN_USE_THEN_OK_STUB)
     assert result.returncode == 0, result.stderr
     assert len(_aws_calls(calls, "delete-cloud-front-origin-access-identity")) == 2
 
@@ -406,7 +406,7 @@ def test_gate_retries_transient_etag_read_failure(cloudfront_doc: dict, tmp_path
     result, calls = _run_gate(script, tmp_path, _THROTTLE_ONCE_STUB)
     assert result.returncode == 0, result.stderr
     deletes = _aws_calls(calls, "delete-cloud-front-origin-access-identity")
-    assert len(deletes) == 1 and "--if-match ETAGVALID1" in deletes[0]
+    assert len(deletes) == 1 and "--if-match ETAG1" in deletes[0]
     assert len(_aws_calls(calls, "get-cloud-front-origin-access-identity")) == 2
 
 
@@ -418,7 +418,7 @@ def test_gate_retries_comment_lookup_failure_then_proceeds(cloudfront_doc: dict,
     assert result.returncode == 0, result.stderr
     assert len(_aws_calls(calls, "list-cloud-front-origin-access-identities")) == 2
     deletes = _aws_calls(calls, "delete-cloud-front-origin-access-identity")
-    assert len(deletes) == 1 and "--if-match ETAGVALID1" in deletes[0]
+    assert len(deletes) == 1 and "--if-match ETAG1" in deletes[0]
 
 
 def test_gate_fails_when_comment_lookup_keeps_failing(cloudfront_doc: dict, tmp_path: Path) -> None:
