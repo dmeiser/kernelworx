@@ -221,6 +221,7 @@ import_ephemeral_resources() {
   local lambda_exec_role="kernelworx-lambda-exec${suffix}"
   local lambda_admin_exec_role="kernelworx-lambda-admin-exec${suffix}"
   local lambda_campaign_exec_role="kernelworx-lambda-campaign-exec${suffix}"
+  local lambda_profile_sharing_exec_role="kernelworx-lambda-profile-sharing-exec${suffix}"
   local appsync_role="kernelworx-appsync${suffix}"
   local cognito_sms_role="kernelworx${suffix}-UserPoolsmsRole"
   local appsync_logging_role="kernelworx-api${suffix}-logs"
@@ -228,6 +229,7 @@ import_ephemeral_resources() {
   import_resource "$run_id" "module.iam.aws_iam_role.lambda_execution" "$lambda_exec_role"
   import_resource "$run_id" "module.iam.aws_iam_role.lambda_admin_execution" "$lambda_admin_exec_role"
   import_resource "$run_id" "module.iam.aws_iam_role.lambda_campaign_execution" "$lambda_campaign_exec_role"
+  import_resource "$run_id" "module.iam.aws_iam_role.lambda_profile_sharing_execution" "$lambda_profile_sharing_exec_role"
   import_resource "$run_id" "module.iam.aws_iam_role.appsync_service" "$appsync_role"
   import_resource "$run_id" "module.appsync.aws_iam_role.appsync_logging" "$appsync_logging_role"
   import_resource "$run_id" "module.iam.aws_iam_role.cognito_sms" "$cognito_sms_role"
@@ -247,6 +249,10 @@ import_ephemeral_resources() {
 
   import_resource "$run_id" "module.iam.aws_iam_role_policy_attachment.lambda_campaign_basic" "${lambda_campaign_exec_role}/arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
   import_resource "$run_id" "module.iam.aws_iam_role_policy.lambda_campaign_dynamodb" "${lambda_campaign_exec_role}:dynamodb-access"
+
+  import_resource "$run_id" "module.iam.aws_iam_role_policy_attachment.lambda_profile_sharing_basic" "${lambda_profile_sharing_exec_role}/arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+  import_resource "$run_id" "module.iam.aws_iam_role_policy.lambda_profile_sharing_dynamodb" "${lambda_profile_sharing_exec_role}:dynamodb-access"
+  import_resource "$run_id" "module.iam.aws_iam_role_policy.lambda_profile_sharing_s3" "${lambda_profile_sharing_exec_role}:s3-reports-cleanup"
 
   import_resource "$run_id" "module.iam.aws_iam_role_policy.cognito_sms" "${cognito_sms_role}:sns-publish"
   import_resource "$run_id" "module.appsync.aws_iam_role_policy.appsync_logging" "${appsync_logging_role}:appsync-logging"
