@@ -2,15 +2,29 @@
 
 # === CAMPAIGN FIELD RESOLVERS ===
 
-# Campaign.catalog (VTL)
+# Campaign.catalog (JS pipeline, #332)
+# check_source_catalog surfaces a catalog already batch-resolved by a parent
+# list query (listCampaignsByProfile); get_campaign_catalog performs the
+# single GetItem for singular fetches, exactly as the removed VTL resolver.
 resource "aws_appsync_resolver" "campaign_catalog" {
-  api_id      = aws_appsync_graphql_api.main.id
-  type        = "Campaign"
-  field       = "catalog"
-  data_source = aws_appsync_datasource.catalogs.name
+  api_id = aws_appsync_graphql_api.main.id
+  type   = "Campaign"
+  field  = "catalog"
+  kind   = "PIPELINE"
 
-  request_template  = file("${local.mapping_templates_dir}/campaign_catalog_request.vtl")
-  response_template = file("${local.mapping_templates_dir}/campaign_catalog_response.vtl")
+  pipeline_config {
+    functions = [
+      aws_appsync_function.check_source_catalog.function_id,
+      aws_appsync_function.get_campaign_catalog.function_id,
+    ]
+  }
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/campaign_catalog_pipeline_resolver.js")
 }
 
 # Campaign.totalOrders (VTL)
@@ -129,15 +143,30 @@ resource "aws_appsync_resolver" "shared_profile_latest_campaign" {
 
 # === SHARED CAMPAIGN FIELD RESOLVERS ===
 
-# SharedCampaign.catalog (VTL)
+# SharedCampaign.catalog (JS pipeline, #332)
+# check_source_catalog surfaces a catalog already batch-resolved by a parent
+# list query (listMySharedCampaigns / findSharedCampaigns);
+# get_shared_campaign_catalog performs the single GetItem for singular
+# fetches, exactly as the removed VTL resolver.
 resource "aws_appsync_resolver" "shared_campaign_catalog" {
-  api_id      = aws_appsync_graphql_api.main.id
-  type        = "SharedCampaign"
-  field       = "catalog"
-  data_source = aws_appsync_datasource.catalogs.name
+  api_id = aws_appsync_graphql_api.main.id
+  type   = "SharedCampaign"
+  field  = "catalog"
+  kind   = "PIPELINE"
 
-  request_template  = file("${local.mapping_templates_dir}/shared_campaign_catalog_request.vtl")
-  response_template = file("${local.mapping_templates_dir}/shared_campaign_catalog_response.vtl")
+  pipeline_config {
+    functions = [
+      aws_appsync_function.check_source_catalog.function_id,
+      aws_appsync_function.get_shared_campaign_catalog.function_id,
+    ]
+  }
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/shared_campaign_catalog_pipeline_resolver.js")
 }
 
 # === SHARE FIELD RESOLVERS ===
