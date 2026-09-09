@@ -80,7 +80,8 @@ resource "aws_appsync_function" "filter_payment_methods_by_access" {
 
 # Batch-generate presigned QR code URLs for all payment methods in one Lambda
 # invocation (replaces the per-method PaymentMethod.qrCodeUrl field resolver).
-# Must run last in the myPaymentMethods and paymentMethodsForProfile pipelines.
+# Must run last in the myPaymentMethods, paymentMethodsForProfile,
+# updatePaymentMethod, and confirmPaymentMethodQRCodeUpload pipelines.
 resource "aws_appsync_function" "batch_qr_urls" {
   api_id      = aws_appsync_graphql_api.main.id
   data_source = aws_appsync_datasource.generate_qr_presigned_url.name
