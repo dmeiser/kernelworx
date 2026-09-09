@@ -20,6 +20,10 @@ Design decisions
   ``tests/integration/globalTeardown.ts``; the completion test also deletes
   its own user in a ``finally`` block, so the corresponding Account rows
   created by the post-confirmation trigger are removed from DynamoDB too.
+* ``admin-confirm-sign-up`` retries ``UserNotFoundException`` with
+  exponential backoff (~3 minutes total): a freshly created Cognito user is
+  not always visible to admin reads immediately (read-after-write
+  propagation), and "not found yet" is the expected transient, not an error.
 * The submit button label verified from ``SignupPage.tsx`` is *Create Account*.
 * The age-confirmation checkbox label is
   *I confirm that I am 13 years of age or older*.
@@ -87,53 +91,41 @@ def _submit_signup_and_wait_for_verification(page: Page, email: str, password: s
         pytest.fail(f"SignUp failed unexpectedly: {error_alert.first.inner_text()}")
 
 
-def _cognito_cli_result(*args: str) -> subprocess.CompletedProcess[str]:
+# Retry budget for admin-confirm-sign-up only. Since ~2026-09-09 Cognito's
+# read-after-write consistency for newly created users has been slow enough
+# that a single immediate admin-confirm-sign-up exhausts against
+# ``UserNotFoundException`` in the ephemeral smoke runs. Backoff sleeps
+# between the 7 attempts total ~195 s (~3 minutes); every other failure and
+# every other command still fail on the first attempt.
+_CONFIRM_SIGNUP_MAX_ATTEMPTS = 7
+_CONFIRM_SIGNUP_BACKOFF_SECONDS = (5, 10, 20, 40, 60, 60)
+
+
+def _cognito_cli(*args: str, retry_user_not_found: bool = False) -> None:
     """Run an ``aws cognito-idp`` admin command via the AWS CLI subprocess.
 
     The CLI is used instead of boto3 so the test inherits the same credential
     source as the local AWS CLI (boto3's pinned botocore may not implement the
     local credential provider plugins), matching the cleanup helper in
     ``tests/e2e/conftest.py``.
+
+    With ``retry_user_not_found=True``, a ``UserNotFoundException`` failure is
+    retried with exponential backoff (see :data:`_CONFIRM_SIGNUP_BACKOFF_SECONDS`)
+    before raising; all other failures raise immediately.
     """
     cmd = ["aws", "cognito-idp", *args, "--output", "json", "--no-cli-pager"]
     region = os.environ.get("TEST_REGION")
     if region:
         cmd.extend(["--region", region])
-    return subprocess.run(cmd, check=False, capture_output=True, text=True, timeout=120)
-
-
-def _cognito_cli(*args: str) -> None:
-    """Run an ``aws cognito-idp`` admin command, raising with stderr on failure."""
-    result = _cognito_cli_result(*args)
-    if result.returncode != 0:
-        raise RuntimeError(f"aws cognito-idp {' '.join(args)} failed: {result.stderr}")
-
-
-def _confirm_signup(user_pool_id: str, email: str) -> None:
-    """Confirm a freshly signed-up user, tolerating brief propagation lag.
-
-    A user record can take a moment to become visible to Cognito admin APIs
-    immediately after ``SignUp``; a ``UserNotFoundException`` right after a
-    successful signup is a transient propagation race, not a missing user.
-    """
-    for attempt in range(5):
-        result = _cognito_cli_result(
-            "admin-confirm-sign-up",
-            "--user-pool-id",
-            user_pool_id,
-            "--username",
-            email,
-        )
+    for attempt in range(_CONFIRM_SIGNUP_MAX_ATTEMPTS if retry_user_not_found else 1):
+        result = subprocess.run(cmd, check=False, capture_output=True, text=True, timeout=120)
         if result.returncode == 0:
             return
-        if "UserNotFoundException" not in result.stderr:
-            raise RuntimeError(f"aws cognito-idp admin-confirm-sign-up failed: {result.stderr}")
-        if attempt < 4:
-            time.sleep(3)
-    raise RuntimeError(
-        "aws cognito-idp admin-confirm-sign-up still returning UserNotFoundException "
-        "after signup verification UI appeared; user never became visible"
-    )
+        if not (retry_user_not_found and "UserNotFoundException" in result.stderr):
+            break
+        if attempt < _CONFIRM_SIGNUP_MAX_ATTEMPTS - 1:
+            time.sleep(_CONFIRM_SIGNUP_BACKOFF_SECONDS[attempt])
+    raise RuntimeError(f"aws cognito-idp {' '.join(args)} failed: {result.stderr}")
 
 
 @pytest.mark.smoke
@@ -199,7 +191,14 @@ def test_signup_completes_after_backend_confirmation(page: Page) -> None:
     if not user_pool_id:
         pytest.fail("TEST_USER_POOL_ID is not set in environment.")
 
-    _confirm_signup(user_pool_id, email)
+    _cognito_cli(
+        "admin-confirm-sign-up",
+        "--user-pool-id",
+        user_pool_id,
+        "--username",
+        email,
+        retry_user_not_found=True,
+    )
 
     page.get_by_role("button", name="Back to Login").click()
     page.wait_for_url("**/login", timeout=10_000)
