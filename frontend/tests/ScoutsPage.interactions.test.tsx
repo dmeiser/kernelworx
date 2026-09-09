@@ -34,7 +34,7 @@ let mockAccountData: any = {
 let mockMyProfilesError: Error | null = null;
 let mockMyProfilesLoading = false;
 
-const loadMyProfilesMock = vi.fn().mockResolvedValue(undefined);
+const profilesQueryMock = vi.fn();
 const loadAccountMock = vi.fn();
 const updatePreferencesMock = vi.fn().mockResolvedValue({ data: {} });
 const createProfileMock = vi.fn().mockResolvedValue({ data: { createSellerProfile: { profileId: 'PROFILE#new1' } } });
@@ -48,14 +48,6 @@ let capturedDeleteOpts: any;
 
 const buildLazyQueryResult = (name: string | undefined) => {
   const lazyQueryHandlers: Record<string, () => [any, any]> = {
-    ListMyProfiles: () => [
-      loadMyProfilesMock,
-      {
-        data: { listMyProfiles: { profiles: mockMyProfilesError ? [] : mockMyProfiles } },
-        loading: mockMyProfilesLoading,
-        error: mockMyProfilesError ?? undefined,
-      },
-    ],
     GetMyAccount: () => [
       loadAccountMock,
       { data: mockAccountData ? { getMyAccount: mockAccountData } : undefined, loading: false },
@@ -119,9 +111,25 @@ vi.mock('@apollo/client/react', async () => {
     return [vi.fn().mockResolvedValue({ data: {} }), { loading: false }];
   };
 
-  // useApolloClient returns an instance with a query method for shared profiles
+  // useApolloClient returns an instance whose query method serves both the
+  // paginated listMyProfiles connection and the shared-profiles list.
   const useApolloClient = () => ({
-    query: vi.fn().mockResolvedValue({ data: { listMyShares: mockSharedProfiles } }),
+    query: (options: any) => {
+      const name = getOpName(options?.query);
+      if (name === 'ListMyProfiles') {
+        profilesQueryMock(options);
+        if (mockMyProfilesError) {
+          return Promise.reject(mockMyProfilesError);
+        }
+        if (mockMyProfilesLoading) {
+          return new Promise(() => {});
+        }
+        return Promise.resolve({
+          data: { listMyProfiles: { profiles: mockMyProfiles, nextToken: null } },
+        });
+      }
+      return Promise.resolve({ data: { listMyShares: mockSharedProfiles } });
+    },
   });
 
   return { ...actual, useLazyQuery, useMutation, useApolloClient };
@@ -242,16 +250,18 @@ describe('ScoutsPage – interactions', () => {
 
     // Invoke the captured onCompleted directly
     await waitFor(() => expect(capturedCreateOpts).toBeDefined(), { timeout: 5000 });
+    const callsBefore = profilesQueryMock.mock.calls.length;
     await capturedCreateOpts.onCompleted?.({});
 
-    expect(loadMyProfilesMock).toHaveBeenCalled();
+    expect(profilesQueryMock.mock.calls.length).toBeGreaterThan(callsBefore);
   }, 10000);
 
   it('updateProfile onCompleted triggers loadMyProfiles and loadSharedProfiles', async () => {
     renderScoutsPage();
     await waitFor(() => expect(capturedUpdateOpts).toBeDefined(), { timeout: 5000 });
+    const callsBefore = profilesQueryMock.mock.calls.length;
     await capturedUpdateOpts.onCompleted?.({});
-    expect(loadMyProfilesMock).toHaveBeenCalled();
+    expect(profilesQueryMock.mock.calls.length).toBeGreaterThan(callsBefore);
   }, 10000);
 
   it('deleteProfile onCompleted closes dialog and triggers loadMyProfiles', async () => {
@@ -259,8 +269,9 @@ describe('ScoutsPage – interactions', () => {
     await waitFor(() => expect(capturedDeleteOpts).toBeDefined(), { timeout: 5000 });
 
     // After delete onCompleted, the dialog should be closed and loadMyProfiles called
+    const callsBefore = profilesQueryMock.mock.calls.length;
     await capturedDeleteOpts.onCompleted?.({});
-    expect(loadMyProfilesMock).toHaveBeenCalled();
+    expect(profilesQueryMock.mock.calls.length).toBeGreaterThan(callsBefore);
   }, 10000);
 
   // ── handleCreateProfile / handleUpdateProfile ─────────────────────────────
