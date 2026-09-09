@@ -60,6 +60,13 @@ def _submit_signup_and_wait_for_verification(page: Page, email: str, password: s
 
     a) text containing "check your email" or "verification" (case-insensitive), or
     b) the MUI alert with the success message.
+
+    An error alert is *not* an acceptable signal: MUI renders both the error
+    and success alerts with ``role="alert"``, so matching any alert would
+    treat a failed ``signUp`` as success and send the caller on to
+    ``admin-confirm-sign-up`` for a user that was never created (which then
+    fails with ``UserNotFoundException`` no matter how long it is retried).
+    When sign-up fails, the visible error text is surfaced instead.
     """
     page.locator('input[type="email"]').first.fill(email)
 
@@ -74,12 +81,16 @@ def _submit_signup_and_wait_for_verification(page: Page, email: str, password: s
 
     page.get_by_role("button", name=_CREATE_ACCOUNT_BTN).click()
 
-    verification_text = (
-        page.get_by_text(re.compile("check your email", re.IGNORECASE))
-        .or_(page.get_by_text(re.compile("verification", re.IGNORECASE)))
-        .or_(page.get_by_role("alert"))
+    verification_text = page.get_by_text(re.compile("check your email", re.IGNORECASE)).or_(
+        page.get_by_text(re.compile("verification", re.IGNORECASE))
     )
-    expect(verification_text.first).to_be_visible(timeout=20_000)
+    try:
+        expect(verification_text.first).to_be_visible(timeout=20_000)
+    except AssertionError:
+        error_alert = page.get_by_role("alert").first
+        if error_alert.is_visible():
+            pytest.fail(f"signUp did not reach the verification step; UI error: {error_alert.inner_text()}")
+        raise
 
 
 def _run_cognito_cli(*args: str) -> subprocess.CompletedProcess:
