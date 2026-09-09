@@ -200,8 +200,9 @@ def confirm_qr_upload(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     Confirm QR code upload.
 
     AppSync Lambda resolver for confirmPaymentMethodQRCodeUpload mutation.
-    Validates S3 object exists, updates DynamoDB, and returns payment method with S3 key.
-    The AppSync field resolver for PaymentMethod.qrCodeUrl resolves the key to a
+    Validates S3 object exists, deletes any replaced QR object from S3, then
+    updates DynamoDB, and returns payment method with S3 key. The AppSync
+    field resolver for PaymentMethod.qrCodeUrl resolves the key to a
     pre-signed GET URL.
 
     Args:
@@ -212,7 +213,8 @@ def confirm_qr_upload(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         PaymentMethod with name and qrCodeUrl (S3 key)
 
     Raises:
-        AppError: If S3 object doesn't exist or update fails
+        AppError: If S3 object doesn't exist, deletion of the replaced QR
+            object fails, or update fails
     """
     logger = get_logger(__name__)
 
