@@ -1279,9 +1279,10 @@ class TestErrorHandling:
 
         payment_methods.s3_client = mock_s3
 
-        # This should log a warning but not raise, as delete_qr_from_s3 catches all exceptions
-        payment_methods.delete_qr_from_s3(sample_account_id, "Venmo")
-        # No assertion needed - we just verify it doesn't crash
+        with pytest.raises(AppError) as exc_info:
+            payment_methods.delete_qr_from_s3(sample_account_id, "Venmo")
+        assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+        assert "failed to delete qr code" in exc_info.value.message.lower()
 
         payment_methods.s3_client = None
 
