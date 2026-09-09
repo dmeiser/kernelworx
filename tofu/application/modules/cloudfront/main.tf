@@ -101,56 +101,138 @@ resource "aws_cloudfront_origin_access_control" "main" {
   }
 }
 
-# --- ONE-TIME MIGRATION SCAFFOLD (follow-up: remove after the legacy OAI is
-# destroyed in all environments) ---
+# --- ONE-TIME MIGRATION SCAFFOLD (KW-OAI-SCAFFOLD-CLEANUP-1: remove after the
+# legacy OAI is destroyed in all environments) ---
 #
-# #335/#359 removed aws_cloudfront_origin_access_identity.main from the config,
-# which leaves a dangling destroy in state. Nothing references the OAI anymore,
-# so OpenTofu schedules its destroy first/parallel to the OAC cutover, and
-# CloudFront rejects the delete (CloudFrontOriginAccessIdentityInUse) because
-# the InUse check runs against the live config — UpdateDistribution returns at
-# acceptance, several minutes before signing actually switches. The same race
-# hits aws_s3_bucket_policy.static: flipping the principal from the OAI
-# canonical user to the Service+SourceArn grant before the cutover has
-# DEPLOYED would leave the live distribution (still signing as the OAI) without
-# S3 access. The gate below orders both behind the distribution reaching the
-# Deployed state.
+# History: #335/#359 removed aws_cloudfront_origin_access_identity.main from the
+# config, leaving a dangling destroy in state; #374 tried to order that destroy
+# with a count = 0 re-add plus depends_on, but depends_on inside a count = 0
+# block is inert (no graph node), so prod run 34409731134 destroyed unordered
+# and 409'd (CloudFrontOriginAccessIdentityInUse) before the gate ever ran.
+# This scaffold replaces that pattern:
+#
+# - The removed block below makes OpenTofu FORGET the legacy OAI in state
+#   (destroy = false) instead of scheduling a provider destroy.
+# - terraform_data.legacy_oai_destroy_gate performs the real destroy
+#   out-of-band via AWS CLI, ordered after the distribution cutover has fully
+#   DEPLOYED (UpdateDistribution returns at acceptance, ~5-20 min before
+#   signing actually switches; the InUse check runs against the live config).
+# - aws_s3_bucket_policy.static's depends_on on the gate (further below) keeps
+#   the OAI-canonical-user -> Service+SourceArn principal flip from cutting S3
+#   access for the live distribution while it still signs as the OAI.
 resource "terraform_data" "legacy_oai_destroy_gate" {
   depends_on = [aws_cloudfront_distribution.site]
 
   provisioner "local-exec" {
-    # Poll until the distribution cutover has fully deployed (up to 30 min).
     # awscli is available in the deploy job (deploy-shared.yml uses it for the
-    # post-deploy invalidation).
+    # post-deploy invalidation). Bash $${...} escapes emit literal ${...} for
+    # the shell; ${...} (single $) is OpenTofu interpolation.
     command     = <<-EOT
       set -e
       DIST_ID="${aws_cloudfront_distribution.site.id}"
+
+      # --- Phase 1: wait for the OAC cutover to fully deploy (up to 30 min) ---
       for i in $(seq 1 60); do
         STATUS=$(aws cloudfront get-distribution --id "$DIST_ID" --query 'Distribution.Status' --output text 2>/dev/null || true)
         if [ "$STATUS" = "Deployed" ]; then
           echo "Distribution $DIST_ID reached Deployed; the legacy OAI destroy and bucket-policy cutover are safe to proceed."
-          exit 0
+          break
         fi
         echo "Distribution $DIST_ID status is '$${STATUS:-unknown}'; waiting for Deployed before legacy OAI destroy (attempt $i/60)..."
         sleep 30
       done
-      echo "ERROR: distribution $DIST_ID did not reach Deployed within 30 minutes; refusing to proceed with the legacy OAI destroy while the OAC cutover may still be in flight." >&2
-      exit 1
+      if [ "$${STATUS:-}" != "Deployed" ]; then
+        echo "ERROR: distribution $DIST_ID did not reach Deployed within 30 minutes; refusing to proceed with the legacy OAI destroy while the OAC cutover may still be in flight." >&2
+        exit 1
+      fi
+
+      # --- Phase 2: destroy the legacy OAI out-of-band (state was forgotten
+      # by the removed block; this CLI delete is the real destroy). Look it up
+      # by its pre-#335 comment, unique per environment (dev and prod share an
+      # account, so a hardcoded id could cross-delete). ---
+      OAI_COMMENT="OAI for ${local.site_domain}"
+      echo "Looking up legacy OAI with comment '$OAI_COMMENT'..."
+      IDS=$(aws cloudfront list-cloud-front-origin-access-identities --query "CloudFrontOriginAccessIdentityList.Items[?Comment=='$${OAI_COMMENT}'].Id" --output text 2>/dev/null || true)
+      COUNT=0
+      ID=""
+      for candidate in $IDS; do
+        COUNT=$((COUNT + 1))
+        ID="$candidate"
+      done
+      if [ "$COUNT" -eq 0 ]; then
+        echo "No legacy OAI with comment '$OAI_COMMENT' exists — nothing to delete (idempotent pass)."
+        exit 0
+      fi
+      if [ "$COUNT" -gt 1 ]; then
+        echo "ERROR: found $COUNT legacy OAIs with comment '$OAI_COMMENT' ($IDS); refusing to delete anything. Resolve manually." >&2
+        exit 1
+      fi
+      echo "Found legacy OAI $ID; attempting delete after Deployed gate..."
+
+      DELETED=0
+      UNKNOWN_ERRORS=0
+      for i in $(seq 1 40); do
+        ETAG=$(aws cloudfront get-cloud-front-origin-access-identity --id "$ID" --query 'ETag' --output text 2>/dev/null || true)
+        if [ -z "$ETAG" ]; then
+          # Distinguish "gone" (NoSuch -> idempotent success) from a transient
+          # read failure (retry).
+          if aws cloudfront get-cloud-front-origin-access-identity --id "$ID" >/dev/null 2>&1; then
+            echo "Transient error reading ETag for legacy OAI $ID; retrying (attempt $i/40)..."
+            sleep 30
+            continue
+          fi
+          echo "Legacy OAI $ID is already gone (NoSuch) — treating as deleted."
+          DELETED=1
+          break
+        fi
+        ERR=$(aws cloudfront delete-cloud-front-origin-access-identity --id "$ID" --if-match "$ETAG" 2>&1 || true)
+        if [ -z "$ERR" ]; then
+          echo "Legacy OAI $ID deleted."
+          DELETED=1
+          break
+        fi
+        case "$ERR" in
+          *NoSuchCloudFrontOriginAccessIdentity*)
+            echo "Legacy OAI $ID already absent — treating as deleted."
+            DELETED=1
+            break
+            ;;
+          *CloudFrontOriginAccessIdentityInUse*)
+            echo "Legacy OAI $ID still in use (cutover not fully propagated); retrying in 30s (attempt $i/40)..."
+            sleep 30
+            ;;
+          *)
+            UNKNOWN_ERRORS=$((UNKNOWN_ERRORS + 1))
+            if [ "$UNKNOWN_ERRORS" -ge 3 ]; then
+              echo "ERROR: deleting legacy OAI $ID failed 3 times with an unexpected error: $ERR" >&2
+              exit 1
+            fi
+            echo "Unexpected error deleting legacy OAI $ID: $ERR; retrying (attempt $UNKNOWN_ERRORS/3)..."
+            sleep 30
+            ;;
+        esac
+      done
+      if [ "$DELETED" -ne 1 ]; then
+        echo "ERROR: legacy OAI $ID was still in use after ~20 minutes of retries; re-run the deploy to retry. The removed block has forgotten it from state, so the out-of-band delete is safe to re-attempt." >&2
+        exit 1
+      fi
+      echo "Legacy OAI migration complete."
     EOT
     interpreter = ["/bin/bash", "-c"]
   }
 }
 
-# Re-added with count = 0 ONLY to order the dangling state destroy of the
-# legacy OAI after the gate above (the exact address must match state).
-# ONE-TIME MIGRATION SCAFFOLD: remove this block in a follow-up once the OAI
-# is destroyed in every environment.
-resource "aws_cloudfront_origin_access_identity" "main" {
-  count = 0
+# Forget the legacy OAI in state WITHOUT destroying it. The count = 0 +
+# depends_on ordering pattern from #374 is dead (inert — see history above);
+# the gate's local-exec performs the real out-of-band destroy after the
+# cutover Deploys. ONE-TIME MIGRATION SCAFFOLD: remove in
+# KW-OAI-SCAFFOLD-CLEANUP-1 once the OAI is gone from every environment.
+removed {
+  from = aws_cloudfront_origin_access_identity.main
 
-  comment = "legacy OAI for ${local.site_domain} — destroy-only scaffold, do not recreate"
-
-  depends_on = [terraform_data.legacy_oai_destroy_gate]
+  lifecycle {
+    destroy = false
+  }
 }
 
 # S3 Bucket Policy for CloudFront. Grants access to the CloudFront service

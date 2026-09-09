@@ -6,16 +6,24 @@ one-time destroy-ordering scaffold that fixes the resulting deploy failure.
 leaving a dangling destroy in state; because nothing references the OAI,
 OpenTofu scheduled its destroy before/parallel to the OAC cutover and
 CloudFront rejected it (CloudFrontOriginAccessIdentityInUse — the live
-distribution still referenced the OAI until the cutover Deployed). The module
-carries a one-time scaffold (to be removed in a follow-up once the legacy OAI
-is destroyed in all environments):
+distribution still referenced the OAI until the cutover Deployed). A first
+scaffold (#374) re-added the resource with count = 0 plus depends_on, but
+depends_on inside a count = 0 block is inert (no graph node), so prod run
+34409731134 destroyed unordered and 409'd before the gate ever ran. The
+module now carries the second-generation one-time scaffold (removed in
+KW-OAI-SCAFFOLD-CLEANUP-1 once the legacy OAI is gone from every
+environment):
 
 - terraform_data.legacy_oai_destroy_gate polls
   `aws cloudfront get-distribution --query 'Distribution.Status'` until the
   distribution reaches Deployed (the OAI InUse check runs against the live
-  config; UpdateDistribution returns at acceptance, before signing switches).
-- aws_cloudfront_origin_access_identity.main is re-added with count = 0 purely
-  to order the dangling state destroy after that gate.
+  config; UpdateDistribution returns at acceptance, before signing switches),
+  THEN destroys the legacy OAI out-of-band via AWS CLI, looking it up by its
+  pre-#335 comment (`OAI for <site_domain>`, unique per environment because
+  dev and prod share an AWS account). No match / NoSuch passes idempotently;
+  more than one exact comment match fails loudly and deletes nothing.
+- A removed block with lifecycle { destroy = false } makes OpenTofu FORGET
+  the legacy OAI in state instead of scheduling a provider destroy.
 - aws_s3_bucket_policy.static depends on the gate so the principal flip (OAI
   canonical user -> Service+SourceArn) cannot cut S3 access for the live
   distribution while it still signs as the OAI.
@@ -24,9 +32,9 @@ These tests parse the OpenTofu configuration into a semantic model (via
 python-hcl2) and assert the *meaning* of the OAC contract:
 
 - No aws_cloudfront_origin_access_identity resource exists anywhere in the
-  tofu tree except the count-0 destroy-ordering scaffold in the cloudfront
-  module (OAI is deprecated: no SSE-KMS, no dynamic requests, legacy request
-  signing).
+  tofu tree (OAI is deprecated: no SSE-KMS, no dynamic requests, legacy
+  request signing); state is dropped via the removed block, the real destroy
+  is the gate's out-of-band CLI delete.
 - The cloudfront module defines aws_cloudfront_origin_access_control.main
   with origin type "s3", signing behavior "always", and sigv4 signing.
 - The distribution's S3 origin references the OAC and no longer sets an
@@ -73,22 +81,24 @@ def all_tofu_docs() -> list[dict]:
 
 def test_no_origin_access_identity_anywhere(all_tofu_docs: list[dict]) -> None:
     for doc in all_tofu_docs:
-        for name, oai in resources(doc, "aws_cloudfront_origin_access_identity"):
-            # The only permitted occurrence is the one-time destroy-ordering
-            # scaffold in the cloudfront module (count = 0, never created;
-            # exists solely to order the dangling state destroy after the
-            # Deployed gate). Remove this allowance with the scaffold.
-            assert name == "main" and oai.get("count") == 0, (
-                "aws_cloudfront_origin_access_identity is deprecated (#335); "
-                "use aws_cloudfront_origin_access_control instead"
-            )
+        assert resources(doc, "aws_cloudfront_origin_access_identity") == [], (
+            "aws_cloudfront_origin_access_identity is deprecated (#335); "
+            "state is forgotten via the removed block and the real destroy is "
+            "the gate's out-of-band CLI delete"
+        )
 
 
-def test_legacy_oai_scaffold_is_destroy_only(cloudfront_doc: dict) -> None:
-    oai = first_resource(cloudfront_doc, "aws_cloudfront_origin_access_identity", "main")
-    assert oai["count"] == 0, "scaffold must never create an OAI"
-    assert oai["depends_on"] == ["${terraform_data.legacy_oai_destroy_gate}"], (
-        "the dangling OAI destroy must be ordered after the Deployed gate"
+def test_legacy_oai_removed_block_forgets_state(cloudfront_doc: dict) -> None:
+    removed = cloudfront_doc.get("removed", [])
+    assert isinstance(removed, list) and len(removed) == 1, "exactly one removed block expected"
+    entry = block(removed)
+    assert entry["from"] == "${aws_cloudfront_origin_access_identity.main}", (
+        "the removed block must forget the legacy OAI state object"
+    )
+    lifecycle = block(entry.get("lifecycle"))
+    assert lifecycle.get("destroy") is False, (
+        "the removed block must FORGET (destroy = false); the gate's local-exec "
+        "performs the real destroy after the Deployed gate"
     )
 
 
@@ -102,6 +112,31 @@ def test_legacy_oai_destroy_gate_polls_for_deployed(cloudfront_doc: dict) -> Non
     assert "Distribution.Status" in command
     assert "Deployed" in command
     assert "exit 1" in command, "the gate must fail the apply if the distribution never deploys"
+
+
+def test_legacy_oai_destroy_gate_deletes_oai_out_of_band(cloudfront_doc: dict) -> None:
+    gate = first_resource(cloudfront_doc, "terraform_data", "legacy_oai_destroy_gate")
+    provisioner = block(gate.get("provisioner"))
+    command = provisioner["local-exec"]["command"]
+    # Look up THIS environment's legacy OAI by its pre-#335 comment (unique
+    # per environment; dev and prod share an AWS account, so ids are
+    # account-global and must not be hardcoded).
+    assert "aws cloudfront list-cloud-front-origin-access-identities" in command
+    assert "Comment=='" in command
+    assert "${local.site_domain}" in command
+    # Refuse to delete when the comment is not unique.
+    assert 'if [ "$COUNT" -gt 1 ]' in command
+    assert "refusing to delete anything" in command
+    # Real destroy: ETag-conditional delete, ordered after the Deployed poll.
+    assert "aws cloudfront get-cloud-front-origin-access-identity" in command
+    assert "aws cloudfront delete-cloud-front-origin-access-identity" in command
+    assert "--if-match" in command
+    # Idempotent success paths: no match / NoSuch.
+    assert "NoSuchCloudFrontOriginAccessIdentity" in command
+    assert "nothing to delete" in command
+    # 409 InUse (cutover not yet propagated) retries ~20 min, then fails.
+    assert "CloudFrontOriginAccessIdentityInUse" in command
+    assert "exit 1" in command
 
 
 def test_bucket_policy_waits_for_deployed_gate(cloudfront_doc: dict) -> None:
