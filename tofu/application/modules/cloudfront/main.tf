@@ -101,11 +101,69 @@ resource "aws_cloudfront_origin_access_control" "main" {
   }
 }
 
+# --- ONE-TIME MIGRATION SCAFFOLD (follow-up: remove after the legacy OAI is
+# destroyed in all environments) ---
+#
+# #335/#359 removed aws_cloudfront_origin_access_identity.main from the config,
+# which leaves a dangling destroy in state. Nothing references the OAI anymore,
+# so OpenTofu schedules its destroy first/parallel to the OAC cutover, and
+# CloudFront rejects the delete (CloudFrontOriginAccessIdentityInUse) because
+# the InUse check runs against the live config — UpdateDistribution returns at
+# acceptance, several minutes before signing actually switches. The same race
+# hits aws_s3_bucket_policy.static: flipping the principal from the OAI
+# canonical user to the Service+SourceArn grant before the cutover has
+# DEPLOYED would leave the live distribution (still signing as the OAI) without
+# S3 access. The gate below orders both behind the distribution reaching the
+# Deployed state.
+resource "terraform_data" "legacy_oai_destroy_gate" {
+  depends_on = [aws_cloudfront_distribution.site]
+
+  provisioner "local-exec" {
+    # Poll until the distribution cutover has fully deployed (up to 30 min).
+    # awscli is available in the deploy job (deploy-shared.yml uses it for the
+    # post-deploy invalidation).
+    command     = <<-EOT
+      set -e
+      DIST_ID="${aws_cloudfront_distribution.site.id}"
+      for i in $(seq 1 60); do
+        STATUS=$(aws cloudfront get-distribution --id "$DIST_ID" --query 'Distribution.Status' --output text)
+        if [ "$STATUS" = "Deployed" ]; then
+          echo "Distribution $DIST_ID reached Deployed; the legacy OAI destroy and bucket-policy cutover are safe to proceed."
+          exit 0
+        fi
+        echo "Distribution $DIST_ID status is '$STATUS'; waiting for Deployed before legacy OAI destroy (attempt $i/60)..."
+        sleep 30
+      done
+      echo "ERROR: distribution $DIST_ID did not reach Deployed within 30 minutes; refusing to proceed with the legacy OAI destroy while the OAC cutover may still be in flight." >&2
+      exit 1
+    EOT
+    interpreter = ["/bin/bash", "-c"]
+  }
+}
+
+# Re-added with count = 0 ONLY to order the dangling state destroy of the
+# legacy OAI after the gate above (the exact address must match state).
+# ONE-TIME MIGRATION SCAFFOLD: remove this block in a follow-up once the OAI
+# is destroyed in every environment.
+resource "aws_cloudfront_origin_access_identity" "main" {
+  count = 0
+
+  comment = "legacy OAI for ${local.site_domain} — destroy-only scaffold, do not recreate"
+
+  depends_on = [terraform_data.legacy_oai_destroy_gate]
+}
+
 # S3 Bucket Policy for CloudFront. Grants access to the CloudFront service
 # principal, scoped to this distribution via the SourceArn condition (the
 # OAC signing model replaces the OAI canonical-user grant).
 resource "aws_s3_bucket_policy" "static" {
   bucket = var.static_bucket_id
+
+  # ONE-TIME MIGRATION SCAFFOLD: the principal flip (OAI canonical user ->
+  # Service+SourceArn) must wait until the OAC cutover is Deployed; while the
+  # live distribution still signs as the OAI, only the old grant would work.
+  # Remove this depends_on with the scaffold follow-up.
+  depends_on = [terraform_data.legacy_oai_destroy_gate]
 
   policy = jsonencode({
     Version = "2012-10-17"
