@@ -21,7 +21,7 @@ Design decisions
   its own user in a ``finally`` block, so the corresponding Account rows
   created by the post-confirmation trigger are removed from DynamoDB too.
 * ``admin-confirm-sign-up`` retries ``UserNotFoundException`` with
-  exponential backoff (~3 minutes total): a freshly created Cognito user is
+  exponential backoff (~6 minutes total): a freshly created Cognito user is
   not always visible to admin reads immediately (read-after-write
   propagation), and "not found yet" is the expected transient, not an error.
 * The submit button label verified from ``SignupPage.tsx`` is *Create Account*.
@@ -92,13 +92,14 @@ def _submit_signup_and_wait_for_verification(page: Page, email: str, password: s
 
 
 # Retry budget for admin-confirm-sign-up only. Since ~2026-09-09 Cognito's
-# read-after-write consistency for newly created users has been slow enough
-# that a single immediate admin-confirm-sign-up exhausts against
-# ``UserNotFoundException`` in the ephemeral smoke runs. Backoff sleeps
-# between the 7 attempts total ~195 s (~3 minutes); every other failure and
-# every other command still fail on the first attempt.
-_CONFIRM_SIGNUP_MAX_ATTEMPTS = 7
-_CONFIRM_SIGNUP_BACKOFF_SECONDS = (5, 10, 20, 40, 60, 60)
+# read-after-write consistency for newly created users has been degraded:
+# even a ~3 minute budget (7 attempts) exhausted against
+# ``UserNotFoundException`` in the ephemeral smoke runs, so the budget now
+# spans ~6 minutes. Backoff sleeps between the 10 attempts total ~375 s;
+# every other failure and every other command still fail on the first
+# attempt.
+_CONFIRM_SIGNUP_MAX_ATTEMPTS = 10
+_CONFIRM_SIGNUP_BACKOFF_SECONDS = (5, 10, 20, 40, 60, 60, 60, 60, 60)
 
 
 def _cognito_cli(*args: str, retry_user_not_found: bool = False) -> None:
