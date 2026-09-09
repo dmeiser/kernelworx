@@ -32,6 +32,7 @@ Autocomplete
 autouse
 aws
 AWS
+awscli
 awsjson
 awsurl
 backend
@@ -69,6 +70,7 @@ costEstimator
 creatorMessage
 ctype
 Cub
+cutover
 Dataloader
 dateutils
 ddee
