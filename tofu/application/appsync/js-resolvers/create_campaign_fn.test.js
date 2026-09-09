@@ -112,7 +112,7 @@ describe('create_campaign_fn request', () => {
 
         assert.throws(
             () => request(ctx),
-            /InvalidInput: unitNumber is required when unitType is provided/
+            /INVALID_INPUT: unitNumber is required when unitType is provided/
         );
     });
 
@@ -132,7 +132,7 @@ describe('create_campaign_fn request', () => {
 
         assert.throws(
             () => request(ctx),
-            /InvalidInput: unitNumber must be a valid integer/
+            /INVALID_INPUT: unitNumber must be a valid integer/
         );
     });
 
@@ -152,7 +152,7 @@ describe('create_campaign_fn request', () => {
 
         assert.throws(
             () => request(ctx),
-            /InvalidInput: unitNumber must be a positive integer/
+            /INVALID_INPUT: unitNumber must be a positive integer/
         );
     });
 
@@ -171,7 +171,7 @@ describe('create_campaign_fn request', () => {
 
         assert.throws(
             () => request(ctx),
-            /InvalidInput: city is required when unitType is provided/
+            /INVALID_INPUT: city is required when unitType is provided/
         );
     });
 
@@ -190,7 +190,7 @@ describe('create_campaign_fn request', () => {
 
         assert.throws(
             () => request(ctx),
-            /InvalidInput: state is required when unitType is provided/
+            /INVALID_INPUT: state is required when unitType is provided/
         );
     });
 
@@ -209,7 +209,7 @@ describe('create_campaign_fn request', () => {
 
         assert.throws(
             () => request(ctx),
-            /InvalidInput: unitType is required when unit fields are present/
+            /INVALID_INPUT: unitType is required when unit fields are present/
         );
     });
 
@@ -226,7 +226,7 @@ describe('create_campaign_fn request', () => {
 
         assert.throws(
             () => request(ctx),
-            /InvalidInput: campaign_name is required/
+            /INVALID_INPUT: campaign_name is required/
         );
     });
 
@@ -243,7 +243,7 @@ describe('create_campaign_fn request', () => {
 
         assert.throws(
             () => request(ctx),
-            /InvalidInput: campaign_year is required/
+            /INVALID_INPUT: campaign_year is required/
         );
     });
 
@@ -260,7 +260,7 @@ describe('create_campaign_fn request', () => {
 
         assert.throws(
             () => request(ctx),
-            /InvalidInput: campaign_year must be a valid integer/
+            /INVALID_INPUT: campaign_year must be a valid integer/
         );
     });
 
@@ -277,7 +277,7 @@ describe('create_campaign_fn request', () => {
 
         assert.throws(
             () => request(ctx),
-            /InvalidInput: catalog_id is required/
+            /INVALID_INPUT: catalog_id is required/
         );
     });
 
@@ -312,7 +312,7 @@ describe('create_campaign_fn request', () => {
 
         assert.throws(
             () => request(ctx),
-            /InvalidInput: endDate must be after startDate/
+            /INVALID_INPUT: endDate must be after startDate/
         );
     });
 
@@ -330,7 +330,7 @@ describe('create_campaign_fn request', () => {
 
         assert.throws(
             () => request(ctx),
-            /InvalidInput: Invalid date format for startDate or endDate/
+            /INVALID_INPUT: Invalid date format for startDate or endDate/
         );
     });
 
@@ -347,7 +347,7 @@ describe('create_campaign_fn request', () => {
 
         assert.throws(
             () => request(ctx),
-            /InvalidInput: Invalid date format for startDate or endDate/
+            /INVALID_INPUT: Invalid date format for startDate or endDate/
         );
     });
 

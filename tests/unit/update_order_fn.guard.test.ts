@@ -41,7 +41,7 @@ beforeEach(() => {
 describe('update_order_fn early-return guards after util.error', () => {
   test('empty customer name records the error and no UpdateItem is built', () => {
     const req: any = updateOrderFn.request(validCtx({ customerName: '  ' }) as any);
-    expect(errors).toEqual([{ msg: 'Customer name cannot be empty', type: 'BadRequest' }]);
+    expect(errors).toEqual([{ msg: 'Customer name cannot be empty', type: 'INVALID_INPUT' }]);
     // Without the guard, request() would continue and return an UpdateItem
     // whose expression sets the empty customerName.
     expect(req).toBeUndefined();
@@ -49,19 +49,19 @@ describe('update_order_fn early-return guards after util.error', () => {
 
   test('failed phone validation records the error and no UpdateItem is built', () => {
     const req: any = updateOrderFn.request(validCtx({ customerPhone: '123' }) as any);
-    expect(errors).toContainEqual({ msg: 'Phone number must be a valid 10-digit US number', type: 'BadRequest' });
+    expect(errors).toContainEqual({ msg: 'Phone number must be a valid 10-digit US number', type: 'INVALID_INPUT' });
     expect(req).toBeUndefined();
   });
 
   test('invalid address records the error and no UpdateItem is built', () => {
     const req: any = updateOrderFn.request(validCtx({ customerAddress: { street: '1 Main St' } }) as any);
-    expect(errors).toContainEqual({ msg: 'Address is missing required fields: city, state, zipCode', type: 'BadRequest' });
+    expect(errors).toContainEqual({ msg: 'Address is missing required fields: city, state, zipCode', type: 'INVALID_INPUT' });
     expect(req).toBeUndefined();
   });
 
   test('empty order date records the error and no UpdateItem is built', () => {
     const req: any = updateOrderFn.request(validCtx({ orderDate: '' }) as any);
-    expect(errors).toEqual([{ msg: 'Order date is required', type: 'BadRequest' }]);
+    expect(errors).toEqual([{ msg: 'Order date is required', type: 'INVALID_INPUT' }]);
     expect(req).toBeUndefined();
   });
 

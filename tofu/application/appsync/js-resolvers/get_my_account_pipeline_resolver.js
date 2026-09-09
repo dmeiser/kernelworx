@@ -6,7 +6,7 @@ export function request(ctx) {
 
 export function response(ctx) {
     if (!ctx.prev.result) {
-        util.error('Account not found', 'NotFound');
+        util.error('Account not found', 'NOT_FOUND');
     }
     return ctx.prev.result;
 }

@@ -62,12 +62,12 @@ describe('check_shared_campaign_usage_fn response', () => {
     it('throws propagated DynamoDB error when ctx.error is set', () => {
         const ctx = {
             prev: { result: { catalogId: 'CATALOG#catalog-abc' } },
-            error: { message: 'DynamoDB timeout', type: 'InternalServerError' },
+            error: { message: 'DynamoDB timeout', type: 'INTERNAL_ERROR' },
         };
 
         assert.throws(
             () => response(ctx),
-            /InternalServerError: DynamoDB timeout/
+            /INTERNAL_ERROR: DynamoDB timeout/
         );
     });
 });

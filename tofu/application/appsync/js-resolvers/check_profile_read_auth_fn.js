@@ -5,7 +5,7 @@ export function request(ctx) {
     
     // Safety check - profile should be set by fetch_profile_fn.js
     if (!profile) {
-        util.error('Profile not found in stash', 'InternalServerError');
+        util.error('Profile not found in stash', 'INTERNAL_ERROR');
     }
     
     // Check if caller is owner first (ownerAccountId uses ACCOUNT# prefix)
@@ -57,12 +57,12 @@ export function response(ctx) {
     
     // No share found - access denied
     if (!share || !share.profileId) {
-        util.error('Not authorized to access this profile', 'Unauthorized');
+        util.error('Not authorized to access this profile', 'UNAUTHORIZED');
     }
     
     // Share exists - check for READ or WRITE permission
     if (!share.permissions || !Array.isArray(share.permissions)) {
-        util.error('Not authorized to access this profile', 'Unauthorized');
+        util.error('Not authorized to access this profile', 'UNAUTHORIZED');
     }
     
     // Has READ or WRITE permission - authorized
@@ -74,5 +74,5 @@ export function response(ctx) {
     }
     
     // Share exists but no valid permissions
-    util.error('Not authorized to access this profile', 'Unauthorized');
+    util.error('Not authorized to access this profile', 'UNAUTHORIZED');
 }

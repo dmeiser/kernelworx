@@ -27,7 +27,7 @@ describe('get_catalog_fn request', () => {
 
         assert.throws(
             () => request(ctx),
-            /BadRequest: Catalog ID not found in stash/
+            /INVALID_INPUT: Catalog ID not found in stash/
         );
     });
 });
@@ -48,7 +48,7 @@ describe('get_catalog_fn response', () => {
 
         assert.throws(
             () => response(ctx),
-            /NotFound: Catalog not found for id: CATALOG#missing/
+            /NOT_FOUND: Catalog not found for id: CATALOG#missing/
         );
     });
 });

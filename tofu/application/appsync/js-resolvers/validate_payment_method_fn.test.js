@@ -42,14 +42,14 @@ describe('validate_payment_method_fn request', () => {
     });
   });
 
-  it('throws BadRequest when paymentMethod is empty string', () => {
+  it('throws INVALID_INPUT when paymentMethod is empty string', () => {
     const ctx = {
       args: { input: { paymentMethod: '' } },
       stash: {}
     };
     assert.throws(
       () => request(ctx),
-      /BadRequest: Payment method is required/
+      /INVALID_INPUT: Payment method is required/
     );
   });
 
@@ -136,14 +136,14 @@ describe('validate_payment_method_fn request', () => {
     });
   });
 
-  it('throws BadRequest when owner account ID is missing from stash', () => {
+  it('throws INVALID_INPUT when owner account ID is missing from stash', () => {
     const ctx = {
       args: { input: { paymentMethod: 'Venmo' } },
       stash: {}
     };
     assert.throws(
       () => request(ctx),
-      /BadRequest: Owner account ID not found in pipeline context/
+      /INVALID_INPUT: Owner account ID not found in pipeline context/
     );
   });
 });
@@ -168,14 +168,14 @@ describe('validate_payment_method_fn response', () => {
     );
   });
 
-  it('throws NotFound when owner account is not found in DynamoDB', () => {
+  it('throws NOT_FOUND when owner account is not found in DynamoDB', () => {
     const ctx = {
       stash: { paymentMethodToValidate: 'Venmo' },
       result: null
     };
     assert.throws(
       () => response(ctx),
-      /NotFound: Owner account not found/
+      /NOT_FOUND: Owner account not found/
     );
   });
 
@@ -197,7 +197,7 @@ describe('validate_payment_method_fn response', () => {
     assert.deepStrictEqual(res, { orderId: 'ord-456' });
   });
 
-  it('throws BadRequest when custom payment method does not exist in preferences', () => {
+  it('throws INVALID_INPUT when custom payment method does not exist in preferences', () => {
     const ctx = {
       stash: { paymentMethodToValidate: 'ApplePay' },
       result: {
@@ -211,11 +211,11 @@ describe('validate_payment_method_fn response', () => {
     };
     assert.throws(
       () => response(ctx),
-      /BadRequest: Payment method 'ApplePay' does not exist for this account/
+      /INVALID_INPUT: Payment method 'ApplePay' does not exist for this account/
     );
   });
 
-  it('throws BadRequest when preferences has no paymentMethods array', () => {
+  it('throws INVALID_INPUT when preferences has no paymentMethods array', () => {
     const ctx = {
       stash: { paymentMethodToValidate: 'Venmo' },
       result: {
@@ -224,18 +224,18 @@ describe('validate_payment_method_fn response', () => {
     };
     assert.throws(
       () => response(ctx),
-      /BadRequest: Payment method 'Venmo' does not exist for this account/
+      /INVALID_INPUT: Payment method 'Venmo' does not exist for this account/
     );
   });
 
-  it('throws BadRequest when account has no preferences object', () => {
+  it('throws INVALID_INPUT when account has no preferences object', () => {
     const ctx = {
       stash: { paymentMethodToValidate: 'Venmo' },
       result: {}
     };
     assert.throws(
       () => response(ctx),
-      /BadRequest: Payment method 'Venmo' does not exist for this account/
+      /INVALID_INPUT: Payment method 'Venmo' does not exist for this account/
     );
   });
 });

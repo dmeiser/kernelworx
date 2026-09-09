@@ -42,7 +42,7 @@ describe('delete_payment_method_qr_code_fn response', () => {
             },
             error: {
                 message: 'Failed to delete QR code',
-                type: 'InternalError',
+                type: 'INTERNAL_ERROR',
             },
         };
 

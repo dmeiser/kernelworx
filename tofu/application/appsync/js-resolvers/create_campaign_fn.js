@@ -66,19 +66,19 @@ export function request(ctx) {
 
     // Required fields validation
     if (!campaignName || (typeof campaignName === 'string' && campaignName.trim() === '')) {
-        util.error('campaign_name is required', 'InvalidInput');
+        util.error('campaign_name is required', 'INVALID_INPUT');
     }
 
     if (campaignYear === undefined || campaignYear === null || campaignYear === '') {
-        util.error('campaign_year is required', 'InvalidInput');
+        util.error('campaign_year is required', 'INVALID_INPUT');
     }
     const yearNum = typeof campaignYear === 'number' ? campaignYear : +campaignYear;
     if (isNaN(yearNum) || Math.floor(yearNum) !== yearNum) {
-        util.error('campaign_year must be a valid integer', 'InvalidInput');
+        util.error('campaign_year must be a valid integer', 'INVALID_INPUT');
     }
 
     if (!rawCatalogId || (typeof rawCatalogId === 'string' && rawCatalogId.trim() === '')) {
-        util.error('catalog_id is required', 'InvalidInput');
+        util.error('catalog_id is required', 'INVALID_INPUT');
     }
     const catalogId = (typeof rawCatalogId === 'string' && rawCatalogId.startsWith('CATALOG#'))
         ? rawCatalogId
@@ -87,22 +87,22 @@ export function request(ctx) {
     // Date range validation
     if (startDate && endDate) {
         if (typeof startDate !== 'string' || typeof endDate !== 'string') {
-            util.error('Invalid date format for startDate or endDate', 'InvalidInput');
+            util.error('Invalid date format for startDate or endDate', 'INVALID_INPUT');
         }
         const startMs = parseIsoToMs(startDate);
         const endMs = parseIsoToMs(endDate);
         if (startMs === null || endMs === null) {
-            util.error('Invalid date format for startDate or endDate', 'InvalidInput');
+            util.error('Invalid date format for startDate or endDate', 'INVALID_INPUT');
         }
         if (endMs <= startMs) {
-            util.error('endDate must be after startDate', 'InvalidInput');
+            util.error('endDate must be after startDate', 'INVALID_INPUT');
         }
     } else {
         if (startDate && typeof startDate !== 'string') {
-            util.error('Invalid date format for startDate or endDate', 'InvalidInput');
+            util.error('Invalid date format for startDate or endDate', 'INVALID_INPUT');
         }
         if (endDate && typeof endDate !== 'string') {
-            util.error('Invalid date format for startDate or endDate', 'InvalidInput');
+            util.error('Invalid date format for startDate or endDate', 'INVALID_INPUT');
         }
     }
 
@@ -111,21 +111,21 @@ export function request(ctx) {
     let validatedUnitNumber = null;
     if (unitType) {
         if (unitNumber === undefined || unitNumber === null || unitNumber === '') {
-            util.error('unitNumber is required when unitType is provided', 'InvalidInput');
+            util.error('unitNumber is required when unitType is provided', 'INVALID_INPUT');
         }
         const num = typeof unitNumber === 'number' ? unitNumber : +unitNumber;
         if (isNaN(num) || Math.floor(num) !== num) {
-            util.error('unitNumber must be a valid integer', 'InvalidInput');
+            util.error('unitNumber must be a valid integer', 'INVALID_INPUT');
         }
         if (num < 1) {
-            util.error('unitNumber must be a positive integer', 'InvalidInput');
+            util.error('unitNumber must be a positive integer', 'INVALID_INPUT');
         }
         validatedUnitNumber = num;
         if (!city || (typeof city === 'string' && city.trim() === '')) {
-            util.error('city is required when unitType is provided', 'InvalidInput');
+            util.error('city is required when unitType is provided', 'INVALID_INPUT');
         }
         if (!state || (typeof state === 'string' && state.trim() === '')) {
-            util.error('state is required when unitType is provided', 'InvalidInput');
+            util.error('state is required when unitType is provided', 'INVALID_INPUT');
         }
         unitCampaignKey = unitType + '#' + ('' + validatedUnitNumber) + '#' + city + '#' + state + '#' + campaignName + '#' + ('' + yearNum);
     } else if (
@@ -133,7 +133,7 @@ export function request(ctx) {
         (city !== undefined && city !== null && city !== '') ||
         (state !== undefined && state !== null && state !== '')
     ) {
-        util.error('unitType is required when unit fields are present', 'InvalidInput');
+        util.error('unitType is required when unit fields are present', 'INVALID_INPUT');
     }
 
     const campaignId = 'CAMPAIGN#' + util.autoId();
