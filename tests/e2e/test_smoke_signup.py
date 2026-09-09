@@ -74,7 +74,7 @@ _SMOKE_PASSWORD = "SmokeT3st!2026"
 
 # Cognito account-level email quota: with the default email configuration
 # Cognito caps sending at 50 emails/day/account. Once the fleet's smoke
-# signups exhaust that quota, ``SignUp`` itself is rejected with this
+# signup runs exhaust that quota, ``SignUp`` itself is rejected with this
 # message, so the native-signup path is untestable (not failing) until the
 # quota resets.
 _DAILY_EMAIL_LIMIT_RE = re.compile(r"Exceeded daily email limit", re.IGNORECASE)
