@@ -16,8 +16,12 @@ export function request(ctx) {
 }
 
 export function response(ctx) {
-    if (ctx.source && 'catalog' in ctx.source) {
-        return ctx.source.catalog === undefined ? null : ctx.source.catalog;
+    // NOTE: the AppSync JS runtime rejects the `in` operator at
+    // CreateFunction ("The code contains one or more errors"); an undefined
+    // check is equivalent here — the batch step only ever attaches `catalog`
+    // as an object or null, never as an explicit undefined.
+    if (ctx.source && ctx.source.catalog !== undefined) {
+        return ctx.source.catalog;
     }
     return undefined;
 }
