@@ -339,20 +339,26 @@ resource "aws_iam_role_policy" "appsync_dynamodb" {
 }
 
 # AppSync Lambda Invoke
+# Guarded by count: when no Lambda ARNs are provided, the policy is omitted
+# entirely rather than falling back to a wildcard on every Lambda in the account.
 data "aws_iam_policy_document" "appsync_lambda" {
+  count = length(local.lambda_invoke_arns) > 0 ? 1 : 0
+
   statement {
     effect  = "Allow"
     actions = ["lambda:InvokeFunction"]
     # Principle of least privilege: limit AppSync to specific Lambda functions it calls.
     # KICS recommendation: also allow qualified ARNs (":*") for versions/aliases.
-    resources = length(local.lambda_invoke_arns) > 0 ? local.lambda_invoke_arns : ["*"]
+    resources = local.lambda_invoke_arns
   }
 }
 
 resource "aws_iam_role_policy" "appsync_lambda" {
+  count = length(local.lambda_invoke_arns) > 0 ? 1 : 0
+
   name   = "lambda-invoke"
   role   = aws_iam_role.appsync_service.id
-  policy = data.aws_iam_policy_document.appsync_lambda.json
+  policy = data.aws_iam_policy_document.appsync_lambda[0].json
 }
 
 # =============================================================================
