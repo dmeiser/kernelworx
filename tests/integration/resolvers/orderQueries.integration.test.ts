@@ -1,8 +1,18 @@
 import '../setup.ts';
 import { describe, test, expect, beforeAll, afterAll } from 'vitest';
-import { ApolloClient, NormalizedCacheObject, gql } from '@apollo/client';
+import { ApolloClient, NormalizedCacheObject, gql, HttpLink, InMemoryCache } from '@apollo/client';
 import { createAuthenticatedClient } from '../setup/apolloClient';
 import { deleteTestAccounts } from '../setup/testData';
+
+// Helper to create unauthenticated client
+const createUnauthenticatedClient = () => {
+  return new ApolloClient({
+    link: new HttpLink({
+      uri: process.env.VITE_APPSYNC_ENDPOINT,
+    }),
+    cache: new InMemoryCache(),
+  });
+};
 
 /**
  * Integration tests for Order Query Operations (getOrder, listOrdersByCampaign)
