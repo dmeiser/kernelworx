@@ -93,9 +93,10 @@ describe('batch_qr_urls_fn request', () => {
         const result = request(ctx);
 
         assert.strictEqual(result.operation, undefined);
+        assert.deepStrictEqual(result, ctx.prev.result);
     });
 
-    it('returns early for an empty method list', () => {
+    it('returns early with an empty array for an empty method list', () => {
         const ctx = {
             prev: { result: [] },
             stash: {},
@@ -105,6 +106,7 @@ describe('batch_qr_urls_fn request', () => {
         const result = request(ctx);
 
         assert.strictEqual(result.operation, undefined);
+        assert.deepStrictEqual(result, []);
     });
 });
 
@@ -146,11 +148,11 @@ describe('batch_qr_urls_fn response', () => {
         assert.deepStrictEqual(result, [{ name: 'Venmo', qrCodeUrl: null }]);
     });
 
-    it('passes methods through unchanged after an empty-keys early return', () => {
+    it('passes methods through unchanged when the response handler runs after an early return', () => {
         const methods = [{ name: 'Cash', qrCodeUrl: null }, { name: 'Check', qrCodeUrl: null }];
         const ctx = {
             prev: { result: methods },
-            result: {},
+            result: methods,
         };
 
         const result = response(ctx);

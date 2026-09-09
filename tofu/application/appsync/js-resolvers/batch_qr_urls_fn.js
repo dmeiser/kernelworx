@@ -40,7 +40,7 @@ export function request(ctx) {
     // Nothing to sign (e.g. only the global Cash/Check methods): skip the
     // Lambda invocation entirely and let the response pass methods through.
     if (s3Keys.length === 0) {
-        return runtime.earlyReturn({});
+        return runtime.earlyReturn(methods);
     }
 
     // For myPaymentMethods the owner is the caller; for
