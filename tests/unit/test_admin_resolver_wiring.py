@@ -110,6 +110,5 @@ def test_passthrough_code_not_attached_to_other_datasources():
         if PASSTHROUGH_RESOLVER in code:
             offenders.append(name)
     assert offenders == [], (
-        "non-admin resolvers must keep default VTL behavior; "
-        f"passthrough code found on: {offenders}"
+        f"non-admin resolvers must keep default VTL behavior; passthrough code found on: {offenders}"
     )
