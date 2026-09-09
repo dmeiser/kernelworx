@@ -82,6 +82,8 @@ type SellerProfile {
   profileId: ID!
   ownerAccountId: ID!
   sellerName: String!
+  unitType: String
+  unitNumber: Int
   createdAt: AWSDateTime!
   updatedAt: AWSDateTime!
   isOwner: Boolean!
