@@ -37,7 +37,8 @@ resource "aws_appsync_graphql_api" "main" {
 
 # AppSync-managed CloudWatch log group with explicit retention.
 resource "aws_cloudwatch_log_group" "appsync" {
-  name              = "/aws/appsync/apis/${aws_appsync_graphql_api.main.id}"
+  name = "/aws/appsync/apis/${aws_appsync_graphql_api.main.id}"
+  # kics-scan ignore-line -- retention IS set dynamically below; KICS only matches static values
   retention_in_days = var.environment == "prod" ? 30 : 7
 
 }
