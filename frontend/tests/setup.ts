@@ -14,8 +14,8 @@ import { ApolloClient } from '@apollo/client';
 // Make React globally available for JSX
 globalThis.React = React;
 
-// Apollo Client schedules an uncancellable 10-second devtools-suggestion timer
-// (raw setTimeout) the first time a client connects to devtools under jsdom.
+// Apollo Client schedules a 10-second devtools-suggestion timer that cannot be
+// cancelled (raw setTimeout) the first time a client connects to devtools under jsdom.
 // Vitest deletes the jsdom globals between test files, so if that timer fires
 // in the gap it throws `ReferenceError: window is not defined` and fails the
 // whole run (flaky, timing-dependent). Devtools are useless in tests, so
