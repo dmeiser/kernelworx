@@ -131,7 +131,7 @@ resource "terraform_data" "legacy_oai_destroy_gate" {
           echo "Distribution $DIST_ID reached Deployed; the legacy OAI destroy and bucket-policy cutover are safe to proceed."
           exit 0
         fi
-        echo "Distribution $DIST_ID status is '${STATUS:-unknown}'; waiting for Deployed before legacy OAI destroy (attempt $i/60)..."
+        echo "Distribution $DIST_ID status is '$${STATUS:-unknown}'; waiting for Deployed before legacy OAI destroy (attempt $i/60)..."
         sleep 30
       done
       echo "ERROR: distribution $DIST_ID did not reach Deployed within 30 minutes; refusing to proceed with the legacy OAI destroy while the OAC cutover may still be in flight." >&2
