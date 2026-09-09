@@ -569,6 +569,7 @@ resource "aws_appsync_resolver" "delete_payment_method" {
   pipeline_config {
     functions = [
       aws_appsync_function.get_payment_method_for_delete.function_id,
+      aws_appsync_function.delete_payment_method_qr_code.function_id,
       aws_appsync_function.delete_payment_method_from_prefs.function_id,
     ]
   }
@@ -578,7 +579,7 @@ resource "aws_appsync_resolver" "delete_payment_method" {
     runtime_version = "1.0.0"
   }
 
-  code = file("${local.js_resolvers_dir}/delete_payment_method_no_qr_pipeline_resolver.js")
+  code = file("${local.js_resolvers_dir}/delete_payment_method_pipeline_resolver.js")
 }
 
 # deletePaymentMethodQRCode (Lambda)
