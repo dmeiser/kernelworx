@@ -1108,7 +1108,7 @@ class TestEphemeralResourceImportCoverage:
             rtype, rname, block = m.group(1), m.group(2), m.group(3)
             if "cloudfront" in rname:
                 continue
-            idx = "[0]" if re.search(r'^\s*count\s*=', block, re.MULTILINE) else ""
+            idx = "[0]" if re.search(r"^\s*count\s*=", block, re.MULTILINE) else ""
             iam_res.add(f"module.iam.{rtype}.{rname}{idx}")
 
         # 4. Cognito (ephemeral uses prefix domain and lambda triggers)
