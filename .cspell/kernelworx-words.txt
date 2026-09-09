@@ -157,6 +157,7 @@ isPublic
 jose
 José
 José's
+jsonencode
 jsonify
 kaushan
 kernelworx
