@@ -55,10 +55,13 @@ def _submit_signup_and_wait_for_verification(page: Page, email: str, password: s
     """Fill and submit the signup form, then wait for the verification UI.
 
     After a successful Cognito ``signUp`` call the UI transitions to the
-    verification step showing one of:
+    verification step showing text containing "check your email" or
+    "verification" (case-insensitive).
 
-    a) text containing "check your email" or "verification" (case-insensitive), or
-    b) the MUI alert with the success message.
+    A failed ``signUp`` instead renders an error alert.  An error alert must
+    NOT satisfy this wait: doing so lets the caller proceed (e.g. to
+    ``admin-confirm-sign-up``) and fail there with a misleading downstream
+    error (``UserNotFoundException``) instead of the real backend error.
     """
     page.locator('input[type="email"]').first.fill(email)
 
@@ -73,12 +76,17 @@ def _submit_signup_and_wait_for_verification(page: Page, email: str, password: s
 
     page.get_by_role("button", name=_CREATE_ACCOUNT_BTN).click()
 
-    verification_text = (
-        page.get_by_text(re.compile("check your email", re.IGNORECASE))
-        .or_(page.get_by_text(re.compile("verification", re.IGNORECASE)))
-        .or_(page.get_by_role("alert"))
+    verification_text = page.get_by_text(re.compile("check your email", re.IGNORECASE)).or_(
+        page.get_by_text(re.compile("verification", re.IGNORECASE))
     )
-    expect(verification_text.first).to_be_visible(timeout=20_000)
+    try:
+        expect(verification_text.first).to_be_visible(timeout=20_000)
+    except AssertionError:
+        # Surface the actual signUp failure instead of letting the caller hit a
+        # confusing downstream error against a user that was never created.
+        pytest.fail(
+            f"signup did not reach the verification step; UI alert(s): {page.get_by_role('alert').all_inner_texts()}"
+        )
 
 
 def _cognito_cli(*args: str) -> None:
