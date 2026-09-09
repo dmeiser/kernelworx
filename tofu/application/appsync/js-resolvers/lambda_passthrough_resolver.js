@@ -18,6 +18,7 @@ export function request(ctx) {
         payload: {
             arguments: ctx.arguments,
             identity: ctx.identity,
+            info: ctx.info,
             prev: {
                 result: {
                     paymentMethods: ctx.stash.customPaymentMethods || [],
