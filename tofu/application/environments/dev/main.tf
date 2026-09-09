@@ -314,7 +314,6 @@ resource "aws_acm_certificate_validation" "site" {
 # Without imports, OpenTofu fails with ResourceAlreadyExistsException.
 import {
   for_each = toset([
-    "list-my-shares",
     "list-catalogs-in-use",
     "request-report",
     "unit-reporting",

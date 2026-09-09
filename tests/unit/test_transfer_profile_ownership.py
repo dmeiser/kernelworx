@@ -116,10 +116,9 @@ class TestTransferProfileOwnership:
         assert tp2_share["Item"]["ownerAccountId"] == f"ACCOUNT#{new_owner_id}"
         assert tp2_share["Item"]["permissions"] == ["READ"]
 
-    def test_transfer_with_list_my_shares_hydration(self, profiles_table: Any, shares_table: Any) -> None:
-        """After transfer, third-party user can successfully list and hydrate the shared profile."""
-        from src.handlers.profile_sharing import list_my_shares
-
+    def test_transfer_updates_share_owner_for_gsi_hydration(self, profiles_table: Any, shares_table: Any) -> None:
+        """After transfer, third-party shares still appear in the targetAccountId-index GSI
+        used by the listMyShares AppSync pipeline resolver, with the updated ownerAccountId."""
         owner_id = "owner-1"
         new_owner_id = "user-2"
         third_party_id = "user-3"
@@ -141,13 +140,20 @@ class TestTransferProfileOwnership:
         }
         lambda_handler(event, None)
 
-        # Call list_my_shares as third_party_id
-        list_event = {"identity": {"sub": third_party_id}}
-        shares_response = list_my_shares(list_event, None)
-
-        assert len(shares_response) == 1
-        assert shares_response[0]["profileId"] == f"PROFILE#{profile_id}"
-        assert shares_response[0]["ownerAccountId"] == f"ACCOUNT#{new_owner_id}"
+        # The listMyShares pipeline queries shares via the targetAccountId-index GSI;
+        # verify the third party's share is still listed with the new ownerAccountId
+        # so the resolver's BatchGetItem can hydrate the profile.
+        response = shares_table.query(
+            IndexName="targetAccountId-index",
+            KeyConditionExpression="targetAccountId = :target",
+            ExpressionAttributeValues={":target": f"ACCOUNT#{third_party_id}"},
+        )
+        items = response["Items"]
+        assert len(items) == 1
+        assert items[0]["profileId"] == f"PROFILE#{profile_id}"
+        assert items[0]["ownerAccountId"] == f"ACCOUNT#{new_owner_id}"
+        # Default seeded permissions; the pipeline passes them through untouched
+        assert items[0]["permissions"] == ["READ"]
 
     def test_admin_transfer_without_prior_share(self, profiles_table: Any, shares_table: Any) -> None:
         """Admin can transfer ownership even if new owner does not have a prior share."""

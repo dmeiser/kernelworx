@@ -319,7 +319,6 @@ import {
     "delete-qr-code",
     "generate-qr-code-presigned-url",
     "list-catalogs-in-use",
-    "list-my-shares",
     "list-unit-campaign-catalogs",
     "list-unit-catalogs",
     "request-qr-upload",
