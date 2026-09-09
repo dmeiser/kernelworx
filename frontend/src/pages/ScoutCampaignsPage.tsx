@@ -113,13 +113,13 @@ function useProfileData(dbProfileId: string) {
 
 function useCampaignsData(dbProfileId: string) {
   const { data, loading, error, refetch } = useQuery<{
-    listCampaignsByProfile: Campaign[];
+    listCampaignsByProfile: { campaigns: Campaign[] };
   }>(LIST_CAMPAIGNS_BY_PROFILE, {
     variables: { profileId: dbProfileId },
     skip: !dbProfileId,
   });
   return {
-    campaigns: data?.listCampaignsByProfile || [],
+    campaigns: data?.listCampaignsByProfile.campaigns || [],
     campaignsLoading: loading,
     campaignsError: error,
     refetchCampaigns: refetch,

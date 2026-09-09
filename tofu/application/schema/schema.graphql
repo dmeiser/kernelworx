@@ -170,6 +170,11 @@ type OrderConnection {
   nextToken: String
 }
 
+type CampaignConnection {
+  campaigns: [Campaign!]!
+  nextToken: String
+}
+
 type LineItem {
   productId: ID!
   productName: String!
@@ -426,7 +431,7 @@ type Query {
   
   # Campaign queries
   getCampaign(campaignId: ID!): Campaign
-  listCampaignsByProfile(profileId: ID!): [Campaign!]!
+  listCampaignsByProfile(profileId: ID!, limit: Int, nextToken: String): CampaignConnection!
   
   # Catalog queries
   getCatalog(catalogId: ID!): Catalog @aws_cognito_user_pools
