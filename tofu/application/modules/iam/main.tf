@@ -215,6 +215,80 @@ resource "aws_iam_role_policy" "lambda_admin_cloudfront" {
 }
 
 # =============================================================================
+# Lambda Campaign Domain Execution Role (#351, chunk 1 of the #326 IAM role split)
+# =============================================================================
+#
+# First scoped per-domain execution role, establishing the pattern the remaining
+# #326 chunks reuse. Assigned to the campaign-domain handlers via the lambda
+# module's domain-role map (lambda_domain_role_arns):
+#   - delete-campaign-orders (handlers/campaign_operations.py)
+#   - unit-reporting (handlers/campaign_reporting.py)
+#
+# DynamoDB scope was verified against the handler source (including the shared
+# auth helpers in src/utils/auth.py):
+#   - campaigns: Query on campaignId-index / unitCampaignKey-index, GetItem
+#   - orders:    Query, GetItem, and BatchWriteItem deletes (order cleanup)
+#   - profiles:  Query / BatchGetItem via auth helpers (owner/share checks)
+#   - shares:    GetItem / BatchGetItem via auth helpers
+#
+# Read-only actions where the handlers only read; the single write action is
+# BatchWriteItem scoped to the orders table (the boto3 resource-style
+# batch_writer issues BatchWriteItem, which cannot be restricted to
+# delete-only at the IAM action level). No S3, CloudFront, or Cognito
+# permissions: neither handler touches those services. The monolithic shared
+# role is intentionally NOT narrowed here — that is the final chunk (#355).
+
+locals {
+  campaign_table_keys = ["campaigns", "orders", "profiles", "shares"]
+  campaign_table_arns = [for k in local.campaign_table_keys : var.dynamodb_table_arns[k]]
+  campaign_index_arns = [for arn in local.campaign_table_arns : "${arn}/index/*"]
+}
+
+resource "aws_iam_role" "lambda_campaign_execution" {
+  name = "${var.name_prefix}-lambda-campaign-exec${local.role_suffix}"
+
+  assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
+
+  lifecycle {
+    prevent_destroy = var.prevent_destroy
+  }
+}
+
+resource "aws_iam_role_policy_attachment" "lambda_campaign_basic" {
+  role       = aws_iam_role.lambda_campaign_execution.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+data "aws_iam_policy_document" "lambda_campaign_dynamodb" {
+  # Read-only on every table the campaign handlers touch (including the auth
+  # helpers' BatchGetItem), plus their GSIs.
+  statement {
+    effect = "Allow"
+    actions = [
+      "dynamodb:GetItem",
+      "dynamodb:Query",
+      "dynamodb:BatchGetItem",
+    ]
+    resources = concat(local.campaign_table_arns, local.campaign_index_arns)
+  }
+
+  # Order cleanup (delete-campaign-orders) uses the resource-style
+  # batch_writer, which issues BatchWriteItem deletes. Scoped to the orders
+  # table only.
+  statement {
+    effect    = "Allow"
+    actions   = ["dynamodb:BatchWriteItem"]
+    resources = [var.dynamodb_table_arns["orders"]]
+  }
+}
+
+resource "aws_iam_role_policy" "lambda_campaign_dynamodb" {
+  name   = "dynamodb-access"
+  role   = aws_iam_role.lambda_campaign_execution.id
+  policy = data.aws_iam_policy_document.lambda_campaign_dynamodb.json
+}
+
+# =============================================================================
 # AppSync Service Role
 # =============================================================================
 
@@ -352,6 +426,11 @@ output "lambda_admin_execution_role_arn" {
 output "lambda_admin_execution_role_name" {
   description = "Name of the Lambda admin execution role"
   value       = aws_iam_role.lambda_admin_execution.name
+}
+
+output "lambda_campaign_execution_role_arn" {
+  description = "ARN of the scoped Lambda execution role for the campaign domain (delete-campaign-orders, unit-reporting). First entry of the #326 per-domain role split; see lambda_domain_role_arns in the lambda module."
+  value       = aws_iam_role.lambda_campaign_execution.arn
 }
 
 output "appsync_service_role_arn" {

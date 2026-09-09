@@ -35,6 +35,14 @@ Recovery scripts share helpers in `scripts/ephemeral-recover-common.sh`.
 
 `aws_cloudwatch_log_group` resources for Lambda functions must use static `for_each` keys (e.g. `local.functions`) rather than `aws_lambda_function.*`. Basing keys on computed attributes such as `function_name` makes them unknown during planning, which breaks import-based recovery and can break fresh applies. See commit `f5b4e0e` and `tofu/application/modules/lambda/main.tf`.
 
+### Per-domain Lambda execution roles — #326 IAM role split (#351+)
+
+Chunk 1 (#351) established the pattern the remaining chunks (#352–#354) reuse; the final chunk #355 narrows/removes the monolithic role:
+
+- Each domain role lives in `tofu/application/modules/iam/main.tf` next to `lambda_execution`, named `${var.name_prefix}-lambda-<domain>-exec${local.role_suffix}`, with its own scoped inline DynamoDB policy. Scope must be verified against the actual handler source **including shared helpers** (`src/utils/auth.py` touches profiles/shares via every access check; `utils.dynamodb.tables` helpers may add tables). Note boto3 resource-style `batch_writer` issues `BatchWriteItem`, which cannot be restricted to delete-only at the IAM action level — scope it to the one table instead.
+- The lambda module's reusable wiring is the `lambda_domain_role_arns` map variable (function key -> role ARN) consumed by `local.app_role_arn` in `tofu/application/modules/lambda/main.tf`. Precedence: admin role (#121) > domain role > shared role. Each follow-up chunk adds one iam-module output and entries in the `lambda_domain_role_arns` map in all three environments (`dev`, `prod`, `ephemeral`). The campaign role's entry maps the function keys `delete-campaign-orders` and `unit-reporting` (keys are kebab-case; they do not match the python module names).
+- Any new IAM resource must also get an import line in `scripts/ephemeral-recover-common.sh` — `tests/unit/test_ephemeral_reliability.py::test_dynamic_resource_import_coverage` parses every resource out of the iam module and fails if recovery lacks a matching `import_resource`.
+
 ### Lambda IAM role isolation for Cognito admin actions (#121)
 
 Destructive Cognito actions (`AdminDeleteUser`, `AdminResetUserPassword`, `AdminLinkProviderForUser`, `ListUsers`) are isolated on a dedicated `aws_iam_role.lambda_admin_execution` role, assigned only to the `admin-operations`, `delete-account`, and `pre-signup` functions. When adding a new handler that needs these APIs, add its logical key to `local.admin_function_keys` or `local.admin_trigger_keys` in `tofu/application/modules/lambda/main.tf` so it receives the admin role. The shared Lambda execution role no longer grants any Cognito admin permissions.
