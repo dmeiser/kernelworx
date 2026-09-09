@@ -37,6 +37,17 @@ except ModuleNotFoundError:  # pragma: no cover
     from ..utils.logging import get_logger, mask_email
     from ..utils.payment_methods import delete_all_user_qr_codes
 
+# The decorator stays typed for mypy via the relative import below; at runtime
+# the absolute import resolves in the Lambda zip (package `utils`) and the
+# relative fallback resolves in unit tests (package `src.handlers`).
+if TYPE_CHECKING:  # pragma: no cover
+    from ..utils.handlers import lambda_handler as with_error_handling
+else:  # pragma: no cover
+    try:
+        from utils.handlers import lambda_handler as with_error_handling
+    except ModuleNotFoundError:
+        from ..utils.handlers import lambda_handler as with_error_handling
+
 # Handle both Lambda (absolute) and unit test (relative) imports.  mypy sees the
 # relative path it can resolve; the runtime fallback tries absolute first for Lambda.
 if TYPE_CHECKING:  # pragma: no cover
@@ -199,6 +210,7 @@ def _list_cognito_users(
     return response.get("Users", []), response.get("PaginationToken")
 
 
+@with_error_handling(error_message="Failed to list users")
 def admin_list_users(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
     List all Cognito users with their DynamoDB Account data (admin only).
@@ -218,38 +230,29 @@ def admin_list_users(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
     logger = get_logger(__name__)
 
-    try:
-        if not is_admin(event):
-            raise AppError(ErrorCode.FORBIDDEN, "Admin access required")
+    if not is_admin(event):
+        raise AppError(ErrorCode.FORBIDDEN, "Admin access required")
 
-        arguments = event.get("arguments", {})
-        limit = max(1, min(arguments.get("limit", 20), 60))
-        next_token = arguments.get("nextToken")
+    arguments = event.get("arguments", {})
+    limit = max(1, min(arguments.get("limit", 20), 60))
+    next_token = arguments.get("nextToken")
 
-        user_pool_id = _get_required_env("USER_POOL_ID")
-        cognito = _get_cognito_client()
+    user_pool_id = _get_required_env("USER_POOL_ID")
+    cognito = _get_cognito_client()
 
-        cognito_users, pagination_token = _list_cognito_users(cognito, user_pool_id, limit, next_token, logger)
+    cognito_users, pagination_token = _list_cognito_users(cognito, user_pool_id, limit, next_token, logger)
 
-        # Batch DynamoDB display-name lookups and parallelize Cognito group lookups
-        # to avoid the per-user N+1 fan-out.
-        account_ids = [
-            _extract_cognito_attributes(user)[1].get("sub", user.get("Username", "")) for user in cognito_users
-        ]
-        usernames = [user.get("Username", "") for user in cognito_users]
-        display_names = _batch_get_display_names(account_ids, logger)
-        groups_map = _batch_get_user_groups(cognito, user_pool_id, usernames, logger)
+    # Batch DynamoDB display-name lookups and parallelize Cognito group lookups
+    # to avoid the per-user N+1 fan-out.
+    account_ids = [_extract_cognito_attributes(user)[1].get("sub", user.get("Username", "")) for user in cognito_users]
+    usernames = [user.get("Username", "") for user in cognito_users]
+    display_names = _batch_get_display_names(account_ids, logger)
+    groups_map = _batch_get_user_groups(cognito, user_pool_id, usernames, logger)
 
-        admin_users = _build_admin_users_from_cognito(cognito_users, display_names, groups_map)
+    admin_users = _build_admin_users_from_cognito(cognito_users, display_names, groups_map)
 
-        logger.info("Listed users", count=len(admin_users), has_more=bool(pagination_token))
-        return {"users": admin_users, "nextToken": pagination_token}
-
-    except AppError:
-        raise
-    except Exception as e:
-        logger.error("Unexpected error in admin_list_users", error=str(e))
-        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to list users")
+    logger.info("Listed users", count=len(admin_users), has_more=bool(pagination_token))
+    return {"users": admin_users, "nextToken": pagination_token}
 
 
 def _execute_search_strategy(query: str, cognito: Any, user_pool_id: str, logger: Any) -> dict[str, Dict[str, Any]]:
@@ -261,6 +264,7 @@ def _execute_search_strategy(query: str, cognito: Any, user_pool_id: str, logger
     return _search_by_general_query(query, cognito, user_pool_id, logger)
 
 
+@with_error_handling(error_message="Failed to search user")
 def admin_search_user(event: Dict[str, Any], context: Any) -> list[Dict[str, Any]]:
     """
     Search for users by email, name, or accountId (admin only).
@@ -285,39 +289,30 @@ def admin_search_user(event: Dict[str, Any], context: Any) -> list[Dict[str, Any
     """
     logger = get_logger(__name__)
 
-    try:
-        if not is_admin(event):
-            raise AppError(ErrorCode.FORBIDDEN, "Admin access required")
+    if not is_admin(event):
+        raise AppError(ErrorCode.FORBIDDEN, "Admin access required")
 
-        query = str(event.get("arguments", {}).get("query", "")).strip()
-        if not query:
-            raise AppError(ErrorCode.INVALID_INPUT, "Search query is required")
+    query = str(event.get("arguments", {}).get("query", "")).strip()
+    if not query:
+        raise AppError(ErrorCode.INVALID_INPUT, "Search query is required")
 
-        _validate_search_query(query)
+    _validate_search_query(query)
 
-        user_pool_id = _get_required_env("USER_POOL_ID")
-        cognito = _get_cognito_client()
+    user_pool_id = _get_required_env("USER_POOL_ID")
+    cognito = _get_cognito_client()
 
-        # Determine search strategy based on query format.
-        # The map values are Cognito user dicts so we can batch enrich them.
-        results_map = _execute_search_strategy(query, cognito, user_pool_id, logger)
-        cognito_users = list(results_map.values())
+    # Determine search strategy based on query format.
+    # The map values are Cognito user dicts so we can batch enrich them.
+    results_map = _execute_search_strategy(query, cognito, user_pool_id, logger)
+    cognito_users = list(results_map.values())
 
-        # Batch DynamoDB display-name lookups and parallelize Cognito group lookups.
-        account_ids = [
-            _extract_cognito_attributes(user)[1].get("sub", user.get("Username", "")) for user in cognito_users
-        ]
-        usernames = [user.get("Username", "") for user in cognito_users]
-        display_names = _batch_get_display_names(account_ids, logger)
-        groups_map = _batch_get_user_groups(cognito, user_pool_id, usernames, logger)
+    # Batch DynamoDB display-name lookups and parallelize Cognito group lookups.
+    account_ids = [_extract_cognito_attributes(user)[1].get("sub", user.get("Username", "")) for user in cognito_users]
+    usernames = [user.get("Username", "") for user in cognito_users]
+    display_names = _batch_get_display_names(account_ids, logger)
+    groups_map = _batch_get_user_groups(cognito, user_pool_id, usernames, logger)
 
-        return _build_admin_users_from_cognito(cognito_users, display_names, groups_map)
-
-    except AppError:
-        raise
-    except Exception as e:
-        logger.error("Unexpected error in admin_search_user", error=str(e))
-        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to search user")
+    return _build_admin_users_from_cognito(cognito_users, display_names, groups_map)
 
 
 def _search_by_account_prefix(query: str, cognito: Any, user_pool_id: str, logger: Any) -> dict[str, Dict[str, Any]]:
@@ -751,6 +746,7 @@ def _initiate_password_reset(cognito: Any, user_pool_id: str, username: str, ema
         raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to initiate password reset")
 
 
+@with_error_handling(error_message="Failed to reset password")
 def admin_reset_user_password(event: Dict[str, Any], context: Any) -> bool:
     """
     Send password reset email to user (admin only).
@@ -769,32 +765,25 @@ def admin_reset_user_password(event: Dict[str, Any], context: Any) -> bool:
     """
     logger = get_logger(__name__)
 
-    try:
-        # Verify caller is admin and extract email
-        if not is_admin(event):
-            raise AppError(ErrorCode.FORBIDDEN, "Admin access required")
+    # Verify caller is admin and extract email
+    if not is_admin(event):
+        raise AppError(ErrorCode.FORBIDDEN, "Admin access required")
 
-        arguments = event.get("arguments", {})
-        email = arguments.get("email", "").strip().lower()
+    arguments = event.get("arguments", {})
+    email = arguments.get("email", "").strip().lower()
 
-        if not email:
-            raise AppError(ErrorCode.INVALID_INPUT, "Email is required")
+    if not email:
+        raise AppError(ErrorCode.INVALID_INPUT, "Email is required")
 
-        user_pool_id = _get_required_env("USER_POOL_ID")
-        cognito = _get_cognito_client()
+    user_pool_id = _get_required_env("USER_POOL_ID")
+    cognito = _get_cognito_client()
 
-        # Find user and initiate reset
-        username = _find_user_by_email(cognito, user_pool_id, email, logger)
-        _initiate_password_reset(cognito, user_pool_id, username, email, logger)
+    # Find user and initiate reset
+    username = _find_user_by_email(cognito, user_pool_id, email, logger)
+    _initiate_password_reset(cognito, user_pool_id, username, email, logger)
 
-        logger.info("Password reset initiated", email=mask_email(email), username=mask_email(username))
-        return True
-
-    except AppError:
-        raise
-    except Exception as e:
-        logger.error("Unexpected error in admin_reset_user_password", error=str(e))
-        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to reset password")
+    logger.info("Password reset initiated", email=mask_email(email), username=mask_email(username))
+    return True
 
 
 def _check_not_self_deletion(caller_id: str, account_id: str) -> None:
@@ -807,6 +796,7 @@ def _check_not_self_deletion(caller_id: str, account_id: str) -> None:
         raise AppError(ErrorCode.INVALID_INPUT, "Cannot delete your own account")
 
 
+@with_error_handling(error_message="Failed to delete user")
 def admin_delete_user(event: Dict[str, Any], context: Any) -> bool:
     """
     Delete user from Cognito and DynamoDB (admin only).
@@ -827,44 +817,37 @@ def admin_delete_user(event: Dict[str, Any], context: Any) -> bool:
     """
     logger = get_logger(__name__)
 
-    try:
-        account_id = _validate_admin_and_get_account_id(event)
+    account_id = _validate_admin_and_get_account_id(event)
 
-        identity = event.get("identity", {})
-        caller_id = identity.get("sub")
-        _check_not_self_deletion(str(caller_id), account_id)
+    identity = event.get("identity", {})
+    caller_id = identity.get("sub")
+    _check_not_self_deletion(str(caller_id), account_id)
 
-        user_pool_id = _get_required_env("USER_POOL_ID")
-        cognito = _get_cognito_client()
+    user_pool_id = _get_required_env("USER_POOL_ID")
+    cognito = _get_cognito_client()
 
-        username, email = _find_cognito_user_by_sub(cognito, user_pool_id, account_id, logger)
-        account_exists = _account_exists_in_dynamodb(account_id, logger)
+    username, email = _find_cognito_user_by_sub(cognito, user_pool_id, account_id, logger)
+    account_exists = _account_exists_in_dynamodb(account_id, logger)
 
-        if not username and not account_exists:
-            raise AppError(ErrorCode.NOT_FOUND, f"User not found: {account_id}")
+    if not username and not account_exists:
+        raise AppError(ErrorCode.NOT_FOUND, f"User not found: {account_id}")
 
-        # Delete DynamoDB data first so a partially-deleted Cognito state does not
-        # leave account records orphaned.
-        _delete_invites_for_owned_profiles(account_id, logger)
-        _delete_inbound_shares(account_id, logger)
-        _delete_account_from_dynamodb(account_id, logger)
+    # Delete DynamoDB data first so a partially-deleted Cognito state does not
+    # leave account records orphaned.
+    _delete_invites_for_owned_profiles(account_id, logger)
+    _delete_inbound_shares(account_id, logger)
+    _delete_account_from_dynamodb(account_id, logger)
 
-        # Delete payment method QR codes from S3 per captain decision
-        delete_all_user_qr_codes(account_id, logger)
+    # Delete payment method QR codes from S3 per captain decision
+    delete_all_user_qr_codes(account_id, logger)
 
-        if username:
-            _delete_user_from_cognito(cognito, user_pool_id, username, email or "", logger)
-        else:
-            logger.info("Cognito user already absent; DynamoDB cleanup completed", account_id=account_id)
+    if username:
+        _delete_user_from_cognito(cognito, user_pool_id, username, email or "", logger)
+    else:
+        logger.info("Cognito user already absent; DynamoDB cleanup completed", account_id=account_id)
 
-        logger.info("User deleted successfully", account_id=account_id, email=mask_email(email))
-        return True
-
-    except AppError:
-        raise
-    except Exception as e:
-        logger.error("Unexpected error in admin_delete_user", error=str(e))
-        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to delete user")
+    logger.info("User deleted successfully", account_id=account_id, email=mask_email(email))
+    return True
 
 
 def _validate_and_process_product(product: Dict[str, Any]) -> Dict[str, Any]:
@@ -963,6 +946,7 @@ def _validate_admin_and_get_caller_id(event: Dict[str, Any]) -> str:
     return str(caller_id)
 
 
+@with_error_handling(error_message="Failed to create catalog")
 def create_managed_catalog(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
     Create an ADMIN_MANAGED catalog (admin only).
@@ -982,32 +966,25 @@ def create_managed_catalog(event: Dict[str, Any], context: Any) -> Dict[str, Any
     """
     logger = get_logger(__name__)
 
-    try:
-        caller_id = _validate_admin_and_get_caller_id(event)
+    caller_id = _validate_admin_and_get_caller_id(event)
 
-        arguments = event.get("arguments", {})
-        catalog_input = arguments.get("input", {})
+    arguments = event.get("arguments", {})
+    catalog_input = arguments.get("input", {})
 
-        catalog_name, is_public, products = _validate_catalog_input(catalog_input)
+    catalog_name, is_public, products = _validate_catalog_input(catalog_input)
 
-        catalog_id = f"CATALOG#{uuid.uuid4()}"
-        now = datetime.now(timezone.utc).isoformat()
+    catalog_id = f"CATALOG#{uuid.uuid4()}"
+    now = datetime.now(timezone.utc).isoformat()
 
-        processed_products = [_validate_and_process_product(product) for product in products]
+    processed_products = [_validate_and_process_product(product) for product in products]
 
-        catalog_item = _build_catalog_item(catalog_id, catalog_name, is_public, caller_id, processed_products, now)
+    catalog_item = _build_catalog_item(catalog_id, catalog_name, is_public, caller_id, processed_products, now)
 
-        _persist_catalog(catalog_item, logger)
+    _persist_catalog(catalog_item, logger)
 
-        logger.info("Created managed catalog", catalog_id=catalog_id, catalog_name=catalog_name)
+    logger.info("Created managed catalog", catalog_id=catalog_id, catalog_name=catalog_name)
 
-        return catalog_item
-
-    except AppError:
-        raise
-    except Exception as e:
-        logger.error("Unexpected error in create_managed_catalog", error=str(e))
-        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to create catalog")
+    return catalog_item
 
 
 def _delete_orders_for_campaign(campaign_id: str, logger: Any) -> int:
@@ -1131,6 +1108,7 @@ def _delete_user_profiles(account_id: str, logger: Any) -> int:
     return deleted_count
 
 
+@with_error_handling(error_message="Failed to delete user orders")
 def admin_delete_user_orders(event: Dict[str, Any], context: Any) -> int:
     """
     Delete all orders for all campaigns of all profiles owned by a user (admin only).
@@ -1142,16 +1120,11 @@ def admin_delete_user_orders(event: Dict[str, Any], context: Any) -> int:
     """
     logger = get_logger(__name__)
 
-    try:
-        account_id = _validate_admin_and_get_account_id(event)
-        return _delete_user_orders(account_id, logger)
-    except AppError:
-        raise
-    except Exception as e:
-        logger.error("Unexpected error in admin_delete_user_orders", error=str(e))
-        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to delete user orders")
+    account_id = _validate_admin_and_get_account_id(event)
+    return _delete_user_orders(account_id, logger)
 
 
+@with_error_handling(error_message="Failed to delete user campaigns")
 def admin_delete_user_campaigns(event: Dict[str, Any], context: Any) -> int:
     """
     Delete all campaigns for all profiles owned by a user (admin only).
@@ -1163,16 +1136,11 @@ def admin_delete_user_campaigns(event: Dict[str, Any], context: Any) -> int:
     """
     logger = get_logger(__name__)
 
-    try:
-        account_id = _validate_admin_and_get_account_id(event)
-        return _delete_user_campaigns(account_id, logger)
-    except AppError:
-        raise
-    except Exception as e:
-        logger.error("Unexpected error in admin_delete_user_campaigns", error=str(e))
-        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to delete user campaigns")
+    account_id = _validate_admin_and_get_account_id(event)
+    return _delete_user_campaigns(account_id, logger)
 
 
+@with_error_handling(error_message="Failed to delete user shares")
 def admin_delete_user_shares(event: Dict[str, Any], context: Any) -> int:
     """
     Delete all shares for all profiles owned by a user (admin only).
@@ -1181,16 +1149,11 @@ def admin_delete_user_shares(event: Dict[str, Any], context: Any) -> int:
     """
     logger = get_logger(__name__)
 
-    try:
-        account_id = _validate_admin_and_get_account_id(event)
-        return _delete_user_shares(account_id, logger)
-    except AppError:
-        raise
-    except Exception as e:
-        logger.error("Unexpected error in admin_delete_user_shares", error=str(e))
-        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to delete user shares")
+    account_id = _validate_admin_and_get_account_id(event)
+    return _delete_user_shares(account_id, logger)
 
 
+@with_error_handling(error_message="Failed to delete user profiles")
 def admin_delete_user_profiles(event: Dict[str, Any], context: Any) -> int:
     """
     Delete all profiles owned by a user (admin only).
@@ -1199,14 +1162,8 @@ def admin_delete_user_profiles(event: Dict[str, Any], context: Any) -> int:
     """
     logger = get_logger(__name__)
 
-    try:
-        account_id = _validate_admin_and_get_account_id(event)
-        return _delete_user_profiles(account_id, logger)
-    except AppError:
-        raise
-    except Exception as e:
-        logger.error("Unexpected error in admin_delete_user_profiles", error=str(e))
-        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to delete user profiles")
+    account_id = _validate_admin_and_get_account_id(event)
+    return _delete_user_profiles(account_id, logger)
 
 
 def _delete_invites_for_owned_profiles(account_id: str, logger: Any) -> int:
@@ -1296,6 +1253,7 @@ def _delete_user_catalogs(account_id: str, logger: Any) -> int:
     return deleted_count
 
 
+@with_error_handling(error_message="Failed to delete user catalogs")
 def admin_delete_user_catalogs(event: Dict[str, Any], context: Any) -> int:
     """
     Soft delete all catalogs owned by a user (admin only).
@@ -1305,16 +1263,11 @@ def admin_delete_user_catalogs(event: Dict[str, Any], context: Any) -> int:
     """
     logger = get_logger(__name__)
 
-    try:
-        account_id = _validate_admin_and_get_account_id(event)
-        return _delete_user_catalogs(account_id, logger)
-    except AppError:
-        raise
-    except Exception as e:
-        logger.error("Unexpected error in admin_delete_user_catalogs", error=str(e))
-        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to delete user catalogs")
+    account_id = _validate_admin_and_get_account_id(event)
+    return _delete_user_catalogs(account_id, logger)
 
 
+@with_error_handling(error_message="Failed to get user profiles")
 def admin_get_user_profiles(event: Dict[str, Any], context: Any) -> list[Dict[str, Any]]:
     """
     Get all profiles owned by a user (admin only).
@@ -1323,29 +1276,23 @@ def admin_get_user_profiles(event: Dict[str, Any], context: Any) -> list[Dict[st
     """
     logger = get_logger(__name__)
 
-    try:
-        account_id = _validate_admin_and_get_account_id(event)
-        db_account_id = _normalize_account_id(account_id)
+    account_id = _validate_admin_and_get_account_id(event)
+    db_account_id = _normalize_account_id(account_id)
 
-        # Query profiles by ownerAccountId
-        profiles = query_all_items(
-            tables.profiles,
-            {
-                "KeyConditionExpression": "ownerAccountId = :owner",
-                "ExpressionAttributeValues": {":owner": db_account_id},
-            },
-        )
+    # Query profiles by ownerAccountId
+    profiles = query_all_items(
+        tables.profiles,
+        {
+            "KeyConditionExpression": "ownerAccountId = :owner",
+            "ExpressionAttributeValues": {":owner": db_account_id},
+        },
+    )
 
-        logger.info("Retrieved user profiles", account_id=account_id, count=len(profiles))
-        return profiles
-
-    except AppError:
-        raise
-    except Exception as e:
-        logger.error("Unexpected error in admin_get_user_profiles", error=str(e))
-        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to get user profiles")
+    logger.info("Retrieved user profiles", account_id=account_id, count=len(profiles))
+    return profiles
 
 
+@with_error_handling(error_message="Failed to get user catalogs")
 def admin_get_user_catalogs(event: Dict[str, Any], context: Any) -> list[Dict[str, Any]]:
     """
     Get all catalogs owned by a user (admin only).
@@ -1354,32 +1301,25 @@ def admin_get_user_catalogs(event: Dict[str, Any], context: Any) -> list[Dict[st
     """
     logger = get_logger(__name__)
 
-    try:
-        account_id = _validate_admin_and_get_account_id(event)
-        db_account_id = _normalize_account_id(account_id)
+    account_id = _validate_admin_and_get_account_id(event)
+    db_account_id = _normalize_account_id(account_id)
 
-        # Query catalogs by ownerAccountId using GSI
-        catalogs = query_all_items(
-            tables.catalogs,
-            {
-                "IndexName": "ownerAccountId-index",
-                "KeyConditionExpression": "ownerAccountId = :owner",
-                "FilterExpression": "attribute_not_exists(isDeleted) OR isDeleted = :false",
-                "ExpressionAttributeValues": {
-                    ":owner": db_account_id,
-                    ":false": False,
-                },
+    # Query catalogs by ownerAccountId using GSI
+    catalogs = query_all_items(
+        tables.catalogs,
+        {
+            "IndexName": "ownerAccountId-index",
+            "KeyConditionExpression": "ownerAccountId = :owner",
+            "FilterExpression": "attribute_not_exists(isDeleted) OR isDeleted = :false",
+            "ExpressionAttributeValues": {
+                ":owner": db_account_id,
+                ":false": False,
             },
-        )
+        },
+    )
 
-        logger.info("Retrieved user catalogs", account_id=account_id, count=len(catalogs))
-        return catalogs
-
-    except AppError:
-        raise
-    except Exception as e:
-        logger.error("Unexpected error in admin_get_user_catalogs", error=str(e))
-        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to get user catalogs")
+    logger.info("Retrieved user catalogs", account_id=account_id, count=len(catalogs))
+    return catalogs
 
 
 def _get_user_profiles(db_account_id: str, logger: Any) -> list[Dict[str, Any]]:
@@ -1411,6 +1351,7 @@ def _get_campaigns_for_profiles(profiles: list[Dict[str, Any]], logger: Any) -> 
     return all_campaigns
 
 
+@with_error_handling(error_message="Failed to get user campaigns")
 def admin_get_user_campaigns(event: Dict[str, Any], context: Any) -> list[Dict[str, Any]]:
     """
     Get all campaigns for a user's profiles.
@@ -1419,26 +1360,20 @@ def admin_get_user_campaigns(event: Dict[str, Any], context: Any) -> list[Dict[s
     """
     logger = get_logger(__name__)
 
-    try:
-        account_id = _validate_admin_and_get_account_id(event)
-        db_account_id = _normalize_account_id(account_id)
+    account_id = _validate_admin_and_get_account_id(event)
+    db_account_id = _normalize_account_id(account_id)
 
-        # First, get all profiles owned by this account
-        profiles = _get_user_profiles(db_account_id, logger)
-        logger.info("Retrieved user profiles", account_id=account_id, count=len(profiles))
+    # First, get all profiles owned by this account
+    profiles = _get_user_profiles(db_account_id, logger)
+    logger.info("Retrieved user profiles", account_id=account_id, count=len(profiles))
 
-        # Now query campaigns for each profile
-        all_campaigns = _get_campaigns_for_profiles(profiles, logger)
-        logger.info("Retrieved user campaigns", account_id=account_id, count=len(all_campaigns))
-        return all_campaigns
-
-    except AppError:
-        raise
-    except Exception as e:
-        logger.error("Unexpected error in admin_get_user_campaigns", error=str(e), exc_info=True)
-        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to get user campaigns")
+    # Now query campaigns for each profile
+    all_campaigns = _get_campaigns_for_profiles(profiles, logger)
+    logger.info("Retrieved user campaigns", account_id=account_id, count=len(all_campaigns))
+    return all_campaigns
 
 
+@with_error_handling(error_message="Failed to get user shared campaigns")
 def admin_get_user_shared_campaigns(event: Dict[str, Any], context: Any) -> list[Dict[str, Any]]:
     """
     Get all shared campaigns created by a user.
@@ -1447,30 +1382,23 @@ def admin_get_user_shared_campaigns(event: Dict[str, Any], context: Any) -> list
     """
     logger = get_logger(__name__)
 
-    try:
-        account_id = _validate_admin_and_get_account_id(event)
-        db_account_id = _normalize_account_id(account_id)
+    account_id = _validate_admin_and_get_account_id(event)
+    db_account_id = _normalize_account_id(account_id)
 
-        # Query shared campaigns by createdBy using GSI1
-        campaigns = query_all_items(
-            tables.shared_campaigns,
-            {
-                "IndexName": "GSI1",
-                "KeyConditionExpression": "createdBy = :creator",
-                "ExpressionAttributeValues": {
-                    ":creator": db_account_id,
-                },
+    # Query shared campaigns by createdBy using GSI1
+    campaigns = query_all_items(
+        tables.shared_campaigns,
+        {
+            "IndexName": "GSI1",
+            "KeyConditionExpression": "createdBy = :creator",
+            "ExpressionAttributeValues": {
+                ":creator": db_account_id,
             },
-        )
+        },
+    )
 
-        logger.info("Retrieved user shared campaigns", account_id=account_id, count=len(campaigns))
-        return campaigns
-
-    except AppError:
-        raise
-    except Exception as e:
-        logger.error("Unexpected error in admin_get_user_shared_campaigns", error=str(e))
-        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to get user shared campaigns")
+    logger.info("Retrieved user shared campaigns", account_id=account_id, count=len(campaigns))
+    return campaigns
 
 
 def _convert_permissions_to_lists(shares: list[Dict[str, Any]]) -> None:
@@ -1506,6 +1434,7 @@ def _validate_admin_and_get_profile_id(event: Dict[str, Any]) -> str:
     return profile_id if profile_id.startswith("PROFILE#") else f"PROFILE#{profile_id}"
 
 
+@with_error_handling(error_message="Failed to get profile shares")
 def admin_get_profile_shares(event: Dict[str, Any], context: Any) -> list[Dict[str, Any]]:
     """
     Get all shares for a specific profile.
@@ -1514,21 +1443,14 @@ def admin_get_profile_shares(event: Dict[str, Any], context: Any) -> list[Dict[s
     """
     logger = get_logger(__name__)
 
-    try:
-        db_profile_id = _validate_admin_and_get_profile_id(event)
+    db_profile_id = _validate_admin_and_get_profile_id(event)
 
-        # Query shares and convert sets to lists
-        shares = _query_profile_shares(db_profile_id)
-        _convert_permissions_to_lists(shares)
+    # Query shares and convert sets to lists
+    shares = _query_profile_shares(db_profile_id)
+    _convert_permissions_to_lists(shares)
 
-        logger.info("Retrieved profile shares", profile_id=db_profile_id, count=len(shares))
-        return shares
-
-    except AppError:
-        raise
-    except Exception as e:
-        logger.error("Unexpected error in admin_get_profile_shares", error=str(e))
-        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to get profile shares")
+    logger.info("Retrieved profile shares", profile_id=db_profile_id, count=len(shares))
+    return shares
 
 
 def _normalize_profile_and_account_ids(profile_id: str, target_account_id: str) -> tuple[str, str]:
@@ -1553,6 +1475,7 @@ def _validate_and_get_share_ids(event: Dict[str, Any]) -> tuple[str, str]:
     return profile_id, target_account_id
 
 
+@with_error_handling(error_message="Failed to delete share")
 def admin_delete_share(event: Dict[str, Any], context: Any) -> bool:
     """
     Delete a specific share (revoke access).
@@ -1561,20 +1484,13 @@ def admin_delete_share(event: Dict[str, Any], context: Any) -> bool:
     """
     logger = get_logger(__name__)
 
-    try:
-        profile_id, target_account_id = _validate_and_get_share_ids(event)
-        db_profile_id, db_target_id = _normalize_profile_and_account_ids(profile_id, target_account_id)
+    profile_id, target_account_id = _validate_and_get_share_ids(event)
+    db_profile_id, db_target_id = _normalize_profile_and_account_ids(profile_id, target_account_id)
 
-        tables.shares.delete_item(Key={"profileId": db_profile_id, "targetAccountId": db_target_id})
+    tables.shares.delete_item(Key={"profileId": db_profile_id, "targetAccountId": db_target_id})
 
-        logger.info("Deleted share", profile_id=profile_id, target_account_id=target_account_id)
-        return True
-
-    except AppError:
-        raise
-    except Exception as e:
-        logger.error("Unexpected error in admin_delete_share", error=str(e))
-        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to delete share")
+    logger.info("Deleted share", profile_id=profile_id, target_account_id=target_account_id)
+    return True
 
 
 def _get_campaign_profile_id(db_campaign_id: str, campaign_id: str) -> str:
@@ -1630,6 +1546,7 @@ def _validate_admin_and_get_campaign_id(event: Dict[str, Any]) -> tuple[str, Opt
     return campaign_id, shared_campaign_code
 
 
+@with_error_handling(error_message="Failed to update campaign shared code")
 def admin_update_campaign_shared_code(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
     Update a campaign's sharedCampaignCode field and return the stored campaign item.
@@ -1638,24 +1555,17 @@ def admin_update_campaign_shared_code(event: Dict[str, Any], context: Any) -> Di
     """
     logger = get_logger(__name__)
 
-    try:
-        campaign_id, shared_campaign_code = _validate_admin_and_get_campaign_id(event)
+    campaign_id, shared_campaign_code = _validate_admin_and_get_campaign_id(event)
 
-        # Add CAMPAIGN# prefix if not present
-        db_campaign_id = campaign_id if campaign_id.startswith("CAMPAIGN#") else f"CAMPAIGN#{campaign_id}"
+    # Add CAMPAIGN# prefix if not present
+    db_campaign_id = campaign_id if campaign_id.startswith("CAMPAIGN#") else f"CAMPAIGN#{campaign_id}"
 
-        # Get campaign profile, update shared code, and return the stored item
-        profile_id = _get_campaign_profile_id(db_campaign_id, campaign_id)
-        updated_campaign = _update_campaign_shared_code(profile_id, db_campaign_id, shared_campaign_code)
+    # Get campaign profile, update shared code, and return the stored item
+    profile_id = _get_campaign_profile_id(db_campaign_id, campaign_id)
+    updated_campaign = _update_campaign_shared_code(profile_id, db_campaign_id, shared_campaign_code)
 
-        logger.info("Updated campaign shared code", campaign_id=campaign_id, shared_campaign_code=shared_campaign_code)
-        return updated_campaign
-
-    except AppError:
-        raise
-    except Exception as e:
-        logger.error("Unexpected error in admin_update_campaign_shared_code", error=str(e))
-        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to update campaign shared code")
+    logger.info("Updated campaign shared code", campaign_id=campaign_id, shared_campaign_code=shared_campaign_code)
+    return updated_campaign
 
 
 # Operation dispatcher map

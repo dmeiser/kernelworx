@@ -67,6 +67,10 @@ Consequences for new resolvers:
 
 This is a conscious, documented security posture. If schema-level owner authorization is added later, update this entry and the API comment in `tofu/application/modules/appsync/api.tf` accordingly.
 
+### Lambda exception-handling decorator (#294)
+
+`src/utils/handlers.py` provides the `lambda_handler` decorator (imported in handler modules as `with_error_handling`): it re-raises `AppError` unchanged and converts any other unexpected `Exception` to `AppError(ErrorCode.INTERNAL_ERROR, ...)` after an error-level log naming the function. Use `@lambda_handler(error_message="...")` to preserve the handler's client-facing failure message. Only the generic unexpected-exception path is covered — handler-specific typed errors (e.g. retryable `RESOURCE_BUSY` in `_raise_batch_lookup_error`) must stay in the handler/helpers. Migration is incremental: `src/handlers/admin_operations.py` is the exemplar; `account_operations.py`, `campaign_operations.py`, and `profile_sharing.py` still carry the manual `except AppError: raise` / `except Exception` boilerplate and migrate in follow-up PRs. Overload stub lines in `src/utils/handlers.py` carry `pragma: no cover` (type-checking-only); the module must stay at 100% coverage.
+
 ### Edge security architecture: one distribution, one WAF (#165/#166)
 
 One CloudFront distribution (`tofu/application/modules/cloudfront/`) serves everything for dev/prod; exactly one CLOUDFRONT-scope web ACL (`tofu/application/modules/waf/`) is attached via `web_acl_id`. There are deliberately no regional WAFs and no `aws_wafv2_web_acl_association` anywhere — do not add them.
