@@ -10,9 +10,8 @@ from typing import Any, Dict
 from unittest.mock import MagicMock, patch
 
 import boto3
-import pytest
 
-from src.utils.errors import AppError, ErrorCode
+from src.utils.errors import ErrorCode
 
 
 class TestDeleteMyAccount:
@@ -541,11 +540,11 @@ class TestDeleteMyAccount:
             "identity": {"sub": sample_account_id},
         }
 
-        with pytest.raises(AppError) as exc_info:
-            delete_my_account(event, lambda_context)
+        result = delete_my_account(event, lambda_context)
 
-        assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
-        assert "USER_POOL_ID not configured" in str(exc_info.value)
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
+        assert "USER_POOL_ID not configured" in result["message"]
 
     def test_delete_account_cognito_client_error(
         self,
@@ -591,11 +590,11 @@ class TestDeleteMyAccount:
                 "identity": {"sub": sample_account_id},
             }
 
-            with pytest.raises(AppError) as exc_info:
-                delete_my_account(event, lambda_context)
+            result = delete_my_account(event, lambda_context)
 
-            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
-            assert "Failed to verify account in Cognito" in str(exc_info.value)
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
+            assert "Failed to verify account in Cognito" in result["message"]
         # Account should NOT be deleted from DynamoDB if pre-check fails
         assert accounts_table.get_item(Key={"accountId": account_id_key}).get("Item") is not None
 
@@ -653,12 +652,12 @@ class TestDeleteMyAccount:
                 "identity": {"sub": sample_account_id},
             }
 
-            # Should raise the error (line 171 re-raises), which is then caught and wrapped at line 211
-            with pytest.raises(AppError) as exc_info:
-                delete_my_account(event, lambda_context)
+            # The AppError from line 171 is converted to an error payload by the decorator.
+            result = delete_my_account(event, lambda_context)
 
-            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
-            assert "Failed to delete account from Cognito" in str(exc_info.value)
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
+            assert "Failed to delete account from Cognito" in result["message"]
 
     def test_delete_account_unexpected_exception(
         self,
@@ -687,12 +686,12 @@ class TestDeleteMyAccount:
                 "identity": {"sub": sample_account_id},
             }
 
-            # Should catch and wrap as AppError (lines 213-215)
-            with pytest.raises(AppError) as exc_info:
-                delete_my_account(event, lambda_context)
+            # Should catch and wrap as an INTERNAL_ERROR payload (lines 213-215)
+            result = delete_my_account(event, lambda_context)
 
-            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
-            assert "Failed to delete account" in str(exc_info.value)
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
+            assert "Failed to delete account" in result["message"]
 
     def test_delete_account_cognito_user_not_found_exception(
         self,
@@ -856,9 +855,10 @@ class TestDeleteMyAccount:
             }
 
             with patch("time.sleep") as mock_sleep:
-                with pytest.raises(AppError) as exc_info:
-                    delete_my_account(event, lambda_context)
-                assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+                result = delete_my_account(event, lambda_context)
+
+                assert result["__isError"] is True
+                assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
                 assert mock_sleep.call_count == 2
                 assert mock_cognito.admin_delete_user.call_count == 3
 

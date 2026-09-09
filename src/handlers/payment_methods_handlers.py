@@ -7,7 +7,7 @@ and confirmations. They integrate with AppSync pipeline resolvers.
 
 import copy
 import os
-from typing import Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
 import boto3
 from botocore.exceptions import ClientError
@@ -40,6 +40,17 @@ except ModuleNotFoundError:  # pragma: no cover
         validate_qr_s3_key,
     )
 
+# The decorator stays typed for mypy via the relative import below; at runtime
+# the absolute import resolves in the Lambda zip (package `utils`) and the
+# relative fallback resolves in unit tests (package `src.handlers`).
+if TYPE_CHECKING:  # pragma: no cover
+    from ..utils.handlers import lambda_handler as with_error_handling
+else:  # pragma: no cover
+    try:
+        from utils.handlers import lambda_handler as with_error_handling
+    except ModuleNotFoundError:
+        from ..utils.handlers import lambda_handler as with_error_handling
+
 
 def _extract_and_validate_caller(event: Dict[str, Any]) -> str:
     """Extract and validate caller identity from event."""
@@ -67,6 +78,7 @@ def _verify_payment_method_exists(caller_id: str, payment_method_name: str) -> D
     return dict(target)
 
 
+@with_error_handling(error_message="Failed to generate upload URL")
 def request_qr_upload(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
     Generate pre-signed POST URL for QR code upload.
@@ -85,46 +97,39 @@ def request_qr_upload(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
     logger = get_logger(__name__)
 
-    try:
-        caller_id = _extract_and_validate_caller(event)
+    caller_id = _extract_and_validate_caller(event)
 
-        arguments = event.get("arguments", {})
-        payment_method_name = arguments.get("paymentMethodName", "").strip()
-        _validate_payment_method_name(payment_method_name)
-        _verify_payment_method_exists(caller_id, payment_method_name)
+    arguments = event.get("arguments", {})
+    payment_method_name = arguments.get("paymentMethodName", "").strip()
+    _validate_payment_method_name(payment_method_name)
+    _verify_payment_method_exists(caller_id, payment_method_name)
 
-        # Generate UUID-based S3 key to avoid collisions from similar payment method names
-        s3_key = generate_qr_code_s3_key(caller_id, "png")
+    # Generate UUID-based S3 key to avoid collisions from similar payment method names
+    s3_key = generate_qr_code_s3_key(caller_id, "png")
 
-        # Generate pre-signed POST URL (must use direct S3, not CloudFront)
-        bucket_name = get_required_env("EXPORTS_BUCKET")
-        s3_client = boto3.client("s3", endpoint_url=os.getenv("S3_ENDPOINT"))
+    # Generate pre-signed POST URL (must use direct S3, not CloudFront)
+    bucket_name = get_required_env("EXPORTS_BUCKET")
+    s3_client = boto3.client("s3", endpoint_url=os.getenv("S3_ENDPOINT"))
 
-        presigned_post = s3_client.generate_presigned_post(
-            Bucket=bucket_name,
-            Key=s3_key,
-            Fields={"Content-Type": "image/png"},
-            Conditions=[
-                {"Content-Type": "image/png"},
-                ["content-length-range", 1, 5 * 1024 * 1024],  # 1 byte to 5MB
-            ],
-            ExpiresIn=900,  # 15 minutes
-        )
+    presigned_post = s3_client.generate_presigned_post(
+        Bucket=bucket_name,
+        Key=s3_key,
+        Fields={"Content-Type": "image/png"},
+        Conditions=[
+            {"Content-Type": "image/png"},
+            ["content-length-range", 1, 5 * 1024 * 1024],  # 1 byte to 5MB
+        ],
+        ExpiresIn=900,  # 15 minutes
+    )
 
-        logger.info(
-            "Generated pre-signed POST URL",
-            account_id=caller_id,
-            payment_method=payment_method_name,
-            s3_key=s3_key,
-        )
+    logger.info(
+        "Generated pre-signed POST URL",
+        account_id=caller_id,
+        payment_method=payment_method_name,
+        s3_key=s3_key,
+    )
 
-        return {"uploadUrl": presigned_post["url"], "fields": presigned_post["fields"], "s3Key": s3_key}
-
-    except AppError:
-        raise
-    except Exception as e:
-        logger.error("Failed to generate pre-signed POST URL", error=str(e))
-        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to generate upload URL")
+    return {"uploadUrl": presigned_post["url"], "fields": presigned_post["fields"], "s3Key": s3_key}
 
 
 def _validate_s3_object_exists(bucket_name: str, s3_key: str) -> None:
@@ -195,6 +200,7 @@ def _update_payment_method_qr_url(caller_id: str, payment_method_name: str, s3_k
     return dict(method_updated)
 
 
+@with_error_handling(error_message="Failed to confirm upload")
 def confirm_qr_upload(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
     Confirm QR code upload.
@@ -218,51 +224,44 @@ def confirm_qr_upload(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
     logger = get_logger(__name__)
 
+    caller_id = _extract_and_validate_caller(event)
+
+    arguments = event.get("arguments", {})
+    payment_method_name = arguments.get("paymentMethodName", "").strip()
+    s3_key = arguments.get("s3Key", "").strip()
+
+    _validate_qr_upload_inputs(payment_method_name, s3_key, caller_id)
+
+    bucket_name = get_required_env("EXPORTS_BUCKET")
+    _validate_s3_object_exists(bucket_name, s3_key)
+
+    # Delete the replaced QR object BEFORE pointing the record at the new
+    # key. The previous order (update first, delete second) meant a failed
+    # delete silently orphaned the old object (#303). Either failure now
+    # surfaces as an AppError instead of being swallowed.
+    previous_qr_key = _get_payment_method_qr_key(caller_id, payment_method_name)
+    if previous_qr_key and previous_qr_key != s3_key:
+        _delete_qr_from_s3_storage(previous_qr_key, caller_id, payment_method_name)
+
+    # Store the new key only after the old object is gone. If this put
+    # fails, the payment method is left without a QR image; the error
+    # tells the user to re-upload (accepted trade, #303).
     try:
-        caller_id = _extract_and_validate_caller(event)
-
-        arguments = event.get("arguments", {})
-        payment_method_name = arguments.get("paymentMethodName", "").strip()
-        s3_key = arguments.get("s3Key", "").strip()
-
-        _validate_qr_upload_inputs(payment_method_name, s3_key, caller_id)
-
-        bucket_name = get_required_env("EXPORTS_BUCKET")
-        _validate_s3_object_exists(bucket_name, s3_key)
-
-        # Delete the replaced QR object BEFORE pointing the record at the new
-        # key. The previous order (update first, delete second) meant a failed
-        # delete silently orphaned the old object (#303). Either failure now
-        # surfaces as an AppError instead of being swallowed.
-        previous_qr_key = _get_payment_method_qr_key(caller_id, payment_method_name)
-        if previous_qr_key and previous_qr_key != s3_key:
-            _delete_qr_from_s3_storage(previous_qr_key, caller_id, payment_method_name)
-
-        # Store the new key only after the old object is gone. If this put
-        # fails, the payment method is left without a QR image; the error
-        # tells the user to re-upload (accepted trade, #303).
-        try:
-            _update_payment_method_qr_url(caller_id, payment_method_name, s3_key)
-        except AppError:
-            raise
-        except Exception as e:
-            logger.error("Failed to store new QR key after deleting previous image", error=str(e))
-            raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to save the new QR image. Please re-upload it.") from e
-
-        logger.info(
-            "Confirmed QR code upload",
-            account_id=caller_id,
-            payment_method=payment_method_name,
-            s3_key=s3_key,
-        )
-
-        return {"name": payment_method_name, "qrCodeUrl": s3_key}
-
+        _update_payment_method_qr_url(caller_id, payment_method_name, s3_key)
     except AppError:
         raise
     except Exception as e:
-        logger.error("Failed to confirm QR code upload", error=str(e))
-        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to confirm upload")
+        logger.error("Failed to store new QR key after deleting previous image", error=str(e))
+        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to save the new QR image. Please re-upload it.") from e
+
+    logger.info(
+        "Confirmed QR code upload",
+        account_id=caller_id,
+        payment_method=payment_method_name,
+        s3_key=s3_key,
+    )
+
+    return {"name": payment_method_name, "qrCodeUrl": s3_key}
 
 
 def _delete_qr_from_s3_storage(stored_qr_key: str | None, caller_id: str, payment_method_name: str) -> None:
@@ -304,35 +303,29 @@ def _clear_qr_url_in_payment_method(caller_id: str, payment_method_name: str) ->
     _save_preferences(account_id_key, response, preferences)
 
 
+@with_error_handling(error_message="Failed to delete QR code")
 def delete_qr_code(event: Dict[str, Any], context: Any) -> bool:
     """
     Delete QR code from S3 and clear qrCodeUrl in DynamoDB for a payment method.
     """
     logger = get_logger(__name__)
 
-    try:
-        caller_id = _extract_and_validate_caller(event)
+    caller_id = _extract_and_validate_caller(event)
 
-        arguments = event.get("arguments", {})
-        payment_method_name = arguments.get("paymentMethodName", "").strip()
+    arguments = event.get("arguments", {})
+    payment_method_name = arguments.get("paymentMethodName", "").strip()
 
-        if not payment_method_name:
-            raise AppError(ErrorCode.INVALID_INPUT, "Payment method name is required")
+    if not payment_method_name:
+        raise AppError(ErrorCode.INVALID_INPUT, "Payment method name is required")
 
-        if is_reserved_name(payment_method_name):
-            raise AppError(ErrorCode.INVALID_INPUT, "Cannot delete QR for reserved methods")
+    if is_reserved_name(payment_method_name):
+        raise AppError(ErrorCode.INVALID_INPUT, "Cannot delete QR for reserved methods")
 
-        target = _verify_payment_method_exists(caller_id, payment_method_name)
-        stored_qr_key = target.get("qrCodeUrl")
+    target = _verify_payment_method_exists(caller_id, payment_method_name)
+    stored_qr_key = target.get("qrCodeUrl")
 
-        _delete_qr_from_s3_storage(stored_qr_key, caller_id, payment_method_name)
-        _clear_qr_url_in_payment_method(caller_id, payment_method_name)
+    _delete_qr_from_s3_storage(stored_qr_key, caller_id, payment_method_name)
+    _clear_qr_url_in_payment_method(caller_id, payment_method_name)
 
-        logger.info("Deleted QR code", account_id=caller_id, payment_method=payment_method_name)
-        return True
-
-    except AppError:
-        raise
-    except Exception as e:  # pragma: no cover - generic catch
-        logger.error("Failed to delete QR code", error=str(e))
-        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to delete QR code")
+    logger.info("Deleted QR code", account_id=caller_id, payment_method=payment_method_name)
+    return True

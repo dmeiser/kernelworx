@@ -17,8 +17,6 @@ Updated for V2 multi-table design (profiles, shares, invites tables).
 
 from typing import Any, Dict
 
-import pytest
-
 from src.utils.errors import AppError, ErrorCode
 
 
@@ -432,11 +430,11 @@ class TestListMyShares:
             "src.handlers.profile_sharing.dynamodb.batch_get_item",
             side_effect=Exception("Test error"),
         ):
-            with pytest.raises(AppError) as exc_info:
-                list_my_shares(event, lambda_context)
+            result = list_my_shares(event, lambda_context)
 
-            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
-            assert "Failed to list shared profiles" in exc_info.value.message
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
+            assert "Failed to list shared profiles" in result["message"]
 
     def test_app_error_passed_through(
         self,
@@ -471,12 +469,12 @@ class TestListMyShares:
             "src.handlers.profile_sharing.dynamodb.batch_get_item",
             side_effect=original_error,
         ):
-            with pytest.raises(AppError) as exc_info:
-                list_my_shares(event, lambda_context)
+            result = list_my_shares(event, lambda_context)
 
-            # The original AppError should pass through
-            assert exc_info.value.error_code == ErrorCode.NOT_FOUND
-            assert "Profile not found" in exc_info.value.message
+            # The original AppError code and message should pass through
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.NOT_FOUND
+            assert "Profile not found" in result["message"]
 
     def test_shares_query_exception_wrapped_in_app_error(
         self,
@@ -497,11 +495,11 @@ class TestListMyShares:
 
         with patch("src.handlers.profile_sharing.tables") as mock_tables:
             mock_tables.shares = mock_shares
-            with pytest.raises(AppError) as exc_info:
-                list_my_shares(event, lambda_context)
+            result = list_my_shares(event, lambda_context)
 
-            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
-            assert "Failed to list shared profiles" in exc_info.value.message
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
+            assert "Failed to list shared profiles" in result["message"]
 
     def test_profile_without_share_skipped(
         self,
@@ -926,11 +924,11 @@ class TestListMyShares:
             "src.handlers.profile_sharing.dynamodb.batch_get_item",
             return_value=mock_unprocessed,
         ):
-            with pytest.raises(AppError) as exc_info:
-                list_my_shares(event, lambda_context)
+            result = list_my_shares(event, lambda_context)
 
-        assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
-        assert "Failed to list shared profiles" in exc_info.value.message
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
+        assert "Failed to list shared profiles" in result["message"]
 
     def test_extract_batch_profiles_only_extracts_from_target_table(self) -> None:
         """Test that _extract_batch_profiles only extracts items matching table_name."""

@@ -99,10 +99,10 @@ class TestGenerateQrCodePresignedUrl:
             "s3Key": "payment-qr-codes/account-123/venmo.png",
         }
 
-        with pytest.raises(AppError) as exc_info:
-            generate_qr_code_presigned_url(event, None)
+        result = generate_qr_code_presigned_url(event, None)
 
-        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.FORBIDDEN
 
     def test_rejects_already_presigned_url_without_identity(self) -> None:
         """Test that an already-presigned URL still requires authentication (regression: #122)."""
@@ -114,10 +114,10 @@ class TestGenerateQrCodePresignedUrl:
             "s3Key": "payment-qr-codes/account-123/venmo.png",
         }
 
-        with pytest.raises(AppError) as exc_info:
-            generate_qr_code_presigned_url(event, None)
+        result = generate_qr_code_presigned_url(event, None)
 
-        assert exc_info.value.error_code == ErrorCode.UNAUTHORIZED
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.UNAUTHORIZED
 
     def test_raises_unauthorized_when_no_owner_id(self) -> None:
         """Test that UNAUTHORIZED error is raised when ownerAccountId is missing."""
@@ -129,11 +129,11 @@ class TestGenerateQrCodePresignedUrl:
             "s3Key": "payment-qr-codes/account-123/venmo.png",
         }
 
-        with pytest.raises(AppError) as exc_info:
-            generate_qr_code_presigned_url(event, None)
+        result = generate_qr_code_presigned_url(event, None)
 
-        assert exc_info.value.error_code == ErrorCode.UNAUTHORIZED
-        assert "Owner account ID required" in str(exc_info.value.message)
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.UNAUTHORIZED
+        assert "Owner account ID required" in result["message"]
 
     def test_raises_unauthorized_when_owner_id_empty(self) -> None:
         """Test that UNAUTHORIZED error is raised when ownerAccountId is empty string."""
@@ -145,11 +145,11 @@ class TestGenerateQrCodePresignedUrl:
             "s3Key": "payment-qr-codes/account-123/venmo.png",
         }
 
-        with pytest.raises(AppError) as exc_info:
-            generate_qr_code_presigned_url(event, None)
+        result = generate_qr_code_presigned_url(event, None)
 
-        assert exc_info.value.error_code == ErrorCode.UNAUTHORIZED
-        assert "Owner account ID required" in str(exc_info.value.message)
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.UNAUTHORIZED
+        assert "Owner account ID required" in result["message"]
 
     def test_generates_presigned_url_success(self, s3_bucket: Any) -> None:
         """Test successful presigned URL generation."""
@@ -189,11 +189,11 @@ class TestGenerateQrCodePresignedUrl:
         with patch("src.handlers.generate_qr_code_presigned_url.generate_presigned_get_url") as mock_generate:
             mock_generate.side_effect = Exception("Unexpected error")
 
-            with pytest.raises(AppError) as exc_info:
-                generate_qr_code_presigned_url(event, None)
+            result = generate_qr_code_presigned_url(event, None)
 
-            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
-            assert "Failed to generate QR code URL" in str(exc_info.value.message)
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
+            assert "Failed to generate QR code URL" in result["message"]
 
     def test_default_method_name_is_empty_string(self, s3_bucket: Any) -> None:
         """Test that method_name defaults to empty string when not provided."""
@@ -226,10 +226,10 @@ class TestGenerateQrCodePresignedUrl:
             "s3Key": "payment-qr-codes/account-123/venmo.png",
         }
 
-        with pytest.raises(AppError) as exc_info:
-            generate_qr_code_presigned_url(event, None)
+        result = generate_qr_code_presigned_url(event, None)
 
-        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.FORBIDDEN
 
     def test_raises_unauthorized_when_identity_missing(self) -> None:
         """Test that UNAUTHORIZED is raised when identity is missing."""
@@ -240,10 +240,10 @@ class TestGenerateQrCodePresignedUrl:
             "s3Key": "payment-qr-codes/account-123/venmo.png",
         }
 
-        with pytest.raises(AppError) as exc_info:
-            generate_qr_code_presigned_url(event, None)
+        result = generate_qr_code_presigned_url(event, None)
 
-        assert exc_info.value.error_code == ErrorCode.UNAUTHORIZED
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.UNAUTHORIZED
 
     def test_allows_write_collaborator_with_profile_id(self, s3_bucket: Any) -> None:
         """Test that a WRITE collaborator can retrieve the owner's QR code."""
@@ -283,10 +283,10 @@ class TestGenerateQrCodePresignedUrl:
             "s3Key": "payment-qr-codes/account-123/venmo.png",
         }
 
-        with pytest.raises(AppError) as exc_info:
-            generate_qr_code_presigned_url(event, None)
+        result = generate_qr_code_presigned_url(event, None)
 
-        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.FORBIDDEN
 
     def test_rejects_collaborator_without_write_permission(self) -> None:
         """Test that a collaborator without WRITE access is denied."""
@@ -302,10 +302,10 @@ class TestGenerateQrCodePresignedUrl:
         with patch("src.handlers.generate_qr_code_presigned_url.check_profile_access") as mock_check_access:
             mock_check_access.return_value = False
 
-            with pytest.raises(AppError) as exc_info:
-                generate_qr_code_presigned_url(event, None)
+            result = generate_qr_code_presigned_url(event, None)
 
-        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.FORBIDDEN
         mock_check_access.assert_called_once_with("other-account", "profile-abc", "WRITE")
 
     def test_rejects_collaborator_when_profile_not_found(self) -> None:
@@ -322,10 +322,10 @@ class TestGenerateQrCodePresignedUrl:
         with patch("src.handlers.generate_qr_code_presigned_url.check_profile_access") as mock_check_access:
             mock_check_access.side_effect = AppError(ErrorCode.NOT_FOUND, "Profile not found")
 
-            with pytest.raises(AppError) as exc_info:
-                generate_qr_code_presigned_url(event, None)
+            result = generate_qr_code_presigned_url(event, None)
 
-        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.FORBIDDEN
         mock_check_access.assert_called_once_with("other-account", "profile-abc", "WRITE")
 
     def test_propagates_unexpected_profile_access_error(self) -> None:
@@ -342,10 +342,10 @@ class TestGenerateQrCodePresignedUrl:
         with patch("src.handlers.generate_qr_code_presigned_url.check_profile_access") as mock_check_access:
             mock_check_access.side_effect = AppError(ErrorCode.INTERNAL_ERROR, "DynamoDB error")
 
-            with pytest.raises(AppError) as exc_info:
-                generate_qr_code_presigned_url(event, None)
+            result = generate_qr_code_presigned_url(event, None)
 
-        assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
         mock_check_access.assert_called_once_with("other-account", "profile-abc", "WRITE")
 
 

@@ -1,7 +1,7 @@
 """Lambda resolver for campaign-level reporting using campaign-based queries."""
 
 from decimal import ROUND_HALF_UP, Decimal
-from typing import Any, Dict, List, cast
+from typing import TYPE_CHECKING, Any, Dict, List, cast
 
 from boto3.dynamodb.conditions import Key
 
@@ -18,6 +18,18 @@ except ModuleNotFoundError:  # pragma: no cover
     from ..utils.ids import ensure_catalog_id, ensure_profile_id
     from ..utils.logging import get_logger
     from ..utils.pagination import query_all_items
+
+# The decorator stays typed for mypy via the relative import below; at runtime
+# the absolute import resolves in the Lambda zip (package `utils`) and the
+# relative fallback resolves in unit tests (package `src.handlers`).
+if TYPE_CHECKING:  # pragma: no cover
+    from ..utils.handlers import lambda_handler as with_error_handling
+else:  # pragma: no cover
+    try:
+        from utils.handlers import lambda_handler as with_error_handling
+    except ModuleNotFoundError:
+        from ..utils.handlers import lambda_handler as with_error_handling
+
 
 logger = get_logger(__name__)
 
@@ -155,6 +167,7 @@ def _aggregate_seller_data(
     return sellers, total_unit_sales, total_unit_orders
 
 
+@with_error_handling(error_message="Failed to generate unit report")
 def get_unit_report(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
     Generate unit-level popcorn sales report using unitCampaignKey-index queries.
@@ -176,69 +189,62 @@ def get_unit_report(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     Returns:
         UnitReport with seller summaries and order details
     """
-    try:
-        # Extract parameters
-        unit_type, unit_number, city, state, campaign_name, campaign_year, catalog_id, caller_account_id = (
-            _extract_unit_report_params(event)
-        )
+    # Extract parameters
+    unit_type, unit_number, city, state, campaign_name, campaign_year, catalog_id, caller_account_id = (
+        _extract_unit_report_params(event)
+    )
 
-        logger.info(
-            f"Generating unit report for {unit_type} {unit_number} in {city}, {state}, "
-            f"campaign {campaign_name} {campaign_year}, catalog {catalog_id}"
-        )
+    logger.info(
+        f"Generating unit report for {unit_type} {unit_number} in {city}, {state}, "
+        f"campaign {campaign_name} {campaign_year}, catalog {catalog_id}"
+    )
 
-        # Step 1: Query campaigns by unit+campaign key
-        unit_campaign_key = _build_unit_campaign_key(unit_type, unit_number, city, state, campaign_name, campaign_year)
-        unit_campaigns = query_all_items(
-            tables.campaigns,
-            {
-                "IndexName": "unitCampaignKey-index",
-                "KeyConditionExpression": Key("unitCampaignKey").eq(unit_campaign_key),
-                "FilterExpression": "catalogId = :cid",
-                "ExpressionAttributeValues": {":cid": catalog_id},
-            },
-        )
-        logger.info(f"Found {len(unit_campaigns)} campaigns")
+    # Step 1: Query campaigns by unit+campaign key
+    unit_campaign_key = _build_unit_campaign_key(unit_type, unit_number, city, state, campaign_name, campaign_year)
+    unit_campaigns = query_all_items(
+        tables.campaigns,
+        {
+            "IndexName": "unitCampaignKey-index",
+            "KeyConditionExpression": Key("unitCampaignKey").eq(unit_campaign_key),
+            "FilterExpression": "catalogId = :cid",
+            "ExpressionAttributeValues": {":cid": catalog_id},
+        },
+    )
+    logger.info(f"Found {len(unit_campaigns)} campaigns")
 
-        if not unit_campaigns:
-            return _empty_report(unit_type, unit_number, campaign_name, campaign_year)
+    if not unit_campaigns:
+        return _empty_report(unit_type, unit_number, campaign_name, campaign_year)
 
-        # Step 2: Group campaigns by profile
-        profile_campaigns = _group_campaigns_by_profile(unit_campaigns)
+    # Step 2: Group campaigns by profile
+    profile_campaigns = _group_campaigns_by_profile(unit_campaigns)
 
-        # Step 3: Get accessible profiles
-        accessible_profiles = _get_accessible_profiles(list(profile_campaigns.keys()), caller_account_id)
-        logger.info(f"Caller has access to {len(accessible_profiles)} of {len(profile_campaigns)} profiles")
+    # Step 3: Get accessible profiles
+    accessible_profiles = _get_accessible_profiles(list(profile_campaigns.keys()), caller_account_id)
+    logger.info(f"Caller has access to {len(accessible_profiles)} of {len(profile_campaigns)} profiles")
 
-        if not accessible_profiles:
-            return _empty_report(unit_type, unit_number, campaign_name, campaign_year)
+    if not accessible_profiles:
+        return _empty_report(unit_type, unit_number, campaign_name, campaign_year)
 
-        # Step 4: Build seller data
-        sellers, total_unit_sales, total_unit_orders = _aggregate_seller_data(accessible_profiles, profile_campaigns)
+    # Step 4: Build seller data
+    sellers, total_unit_sales, total_unit_orders = _aggregate_seller_data(accessible_profiles, profile_campaigns)
 
-        # Convert Decimal totals back to floats for the GraphQL Float schema
-        for seller in sellers:
-            seller["totalSales"] = float(seller["totalSales"])
-            for order in seller["orders"]:
-                order["totalAmount"] = float(order["totalAmount"])
-                for item in order["lineItems"]:
-                    item["pricePerUnit"] = float(item["pricePerUnit"])
-                    item["subtotal"] = float(item["subtotal"])
+    # Convert Decimal totals back to floats for the GraphQL Float schema
+    for seller in sellers:
+        seller["totalSales"] = float(seller["totalSales"])
+        for order in seller["orders"]:
+            order["totalAmount"] = float(order["totalAmount"])
+            for item in order["lineItems"]:
+                item["pricePerUnit"] = float(item["pricePerUnit"])
+                item["subtotal"] = float(item["subtotal"])
 
-        logger.info(
-            f"Report complete: {len(sellers)} sellers, ${float(total_unit_sales):.2f}, {total_unit_orders} orders"
-        )
+    logger.info(f"Report complete: {len(sellers)} sellers, ${float(total_unit_sales):.2f}, {total_unit_orders} orders")
 
-        return {
-            "unitType": unit_type,
-            "unitNumber": unit_number,
-            "campaignName": campaign_name,
-            "campaignYear": campaign_year,
-            "sellers": sellers,
-            "totalSales": float(total_unit_sales),
-            "totalOrders": total_unit_orders,
-        }
-
-    except Exception as e:
-        logger.error(f"Error generating unit report: {str(e)}", exc_info=True)
-        raise
+    return {
+        "unitType": unit_type,
+        "unitNumber": unit_number,
+        "campaignName": campaign_name,
+        "campaignYear": campaign_year,
+        "sellers": sellers,
+        "totalSales": float(total_unit_sales),
+        "totalOrders": total_unit_orders,
+    }

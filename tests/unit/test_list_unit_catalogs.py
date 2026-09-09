@@ -399,9 +399,13 @@ class TestListUnitCatalogs:
         with patch("src.handlers.list_unit_catalogs.tables") as mock_tables:
             mock_tables.profiles = mock_profiles
 
-            # Act & Assert
-            with pytest.raises(Exception, match="DynamoDB error"):
-                list_unit_catalogs(event, lambda_context)
+            # Act & Assert: the with_error_handling decorator converts the
+            # unexpected DynamoDB error into an INTERNAL_ERROR error payload.
+            result = list_unit_catalogs(event, lambda_context)
+
+            assert result["__isError"] is True
+            assert result["errorCode"] == "INTERNAL_ERROR"
+            assert result["message"] == "Failed to list unit catalogs"
 
     def test_list_unit_catalogs_partial_access(
         self,
@@ -772,9 +776,13 @@ class TestListUnitCampaignCatalogs:
         with patch("src.handlers.list_unit_catalogs.tables") as mock_tables:
             mock_tables.campaigns = mock_campaigns
 
-            # Act & Assert
-            with pytest.raises(Exception, match="DynamoDB error"):
-                list_unit_campaign_catalogs(event, lambda_context)
+            # Act & Assert: the with_error_handling decorator converts the
+            # unexpected DynamoDB error into an INTERNAL_ERROR error payload.
+            result = list_unit_campaign_catalogs(event, lambda_context)
+
+            assert result["__isError"] is True
+            assert result["errorCode"] == "INTERNAL_ERROR"
+            assert result["message"] == "Failed to list unit campaign catalogs"
 
     def test_list_unit_campaign_catalogs_campaign_without_catalog(
         self,
