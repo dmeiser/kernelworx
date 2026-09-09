@@ -246,7 +246,7 @@ import_ephemeral_resources() {
   import_resource "$run_id" "module.iam.aws_iam_role_policy.cognito_sms" "${cognito_sms_role}:sns-publish"
   import_resource "$run_id" "module.appsync.aws_iam_role_policy.appsync_logging" "${appsync_logging_role}:appsync-logging"
   import_resource "$run_id" "module.iam.aws_iam_role_policy.appsync_dynamodb" "${appsync_role}:dynamodb-access"
-  import_resource "$run_id" "module.iam.aws_iam_role_policy.appsync_lambda" "${appsync_role}:lambda-invoke"
+  import_resource "$run_id" "module.iam.aws_iam_role_policy.appsync_lambda[0]" "${appsync_role}:lambda-invoke"
 
   # Cognito user pool, client, and prefix domain
   log "   Importing Cognito resources..."

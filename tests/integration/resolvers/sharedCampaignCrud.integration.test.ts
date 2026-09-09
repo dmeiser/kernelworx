@@ -12,7 +12,7 @@ import '../setup.ts';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { ApolloClient, gql, HttpLink, InMemoryCache } from '@apollo/client';
 import { createAuthenticatedClient, AuthenticatedClientResult } from '../setup/apolloClient';
-import { deleteTestAccounts, TABLE_NAMES } from '../setup/testData';
+import { deleteTestAccounts, TABLE_NAMES, waitForGSIConsistency } from '../setup/testData';
 
 // Helper to create unauthenticated client
 const createUnauthenticatedClient = () => {
@@ -489,21 +489,31 @@ describe('Shared Campaign CRUD Operations', () => {
     // Cleanup handled by top-level afterAll via createdSharedCampaignCodes tracking
 
     it('should list all campaign shared campaigns created by the current user', async () => {
-      const result = await ownerClient.query({
-        query: LIST_MY_CAMPAIGN_SHARED_CAMPAIGNS,
-      });
+      // Poll the GSI-backed list query until all 3 newly created Fall campaigns
+      // are visible (Bug #21 - GSI eventual consistency)
+      const sharedCampaigns = await waitForGSIConsistency(
+        async () => {
+          const { data } = await ownerClient.query({
+            query: LIST_MY_CAMPAIGN_SHARED_CAMPAIGNS,
+            fetchPolicy: 'network-only',
+          });
+          return data.listMySharedCampaigns;
+        },
+        (items: any[]) =>
+          items.filter((p: any) => p.campaignName === 'Fall').length >= 3
+      );
 
-      expect(result.data.listMySharedCampaigns).toBeDefined();
-      expect(Array.isArray(result.data.listMySharedCampaigns)).toBe(true);
-      expect(result.data.listMySharedCampaigns.length).toBeGreaterThanOrEqual(3);
+      expect(sharedCampaigns).toBeDefined();
+      expect(Array.isArray(sharedCampaigns)).toBe(true);
+      expect(sharedCampaigns.length).toBeGreaterThanOrEqual(3);
 
       // All should be created by the owner
-      result.data.listMySharedCampaigns.forEach((sharedCampaign: any) => {
+      sharedCampaigns.forEach((sharedCampaign: any) => {
         expect(sharedCampaign.createdBy).toBe(ownerAccountId);
       });
-      
+
       // At least 3 should be Fall campaign (the ones we just created)
-      const fallSharedCampaigns = result.data.listMySharedCampaigns.filter(
+      const fallSharedCampaigns = sharedCampaigns.filter(
         (p: any) => p.campaignName === 'Fall'
       );
       expect(fallSharedCampaigns.length).toBeGreaterThanOrEqual(3);

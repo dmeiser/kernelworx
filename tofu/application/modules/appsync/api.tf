@@ -21,6 +21,20 @@ resource "aws_appsync_graphql_api" "main" {
 
   xray_enabled = false
 
+  # Query depth / resolver count limits (issue #328). Measured basis:
+  # - Deepest legitimate frontend query is GetUnitReport:
+  #   getUnitReport -> sellers -> orders -> lineItems -> scalar = depth 5
+  #   (root field counts as level 1). The schema's theoretical maximum is 6.
+  #   query_depth_limit = 10 gives ~2x headroom over both.
+  # - Worst-case legitimate resolver fan-out is ListMyProfiles (frontend sends
+  #   no limit): 1 query resolver + 5 per-item field resolvers per returned
+  #   SellerProfile (profileId, ownerAccountId, isOwner, permissions,
+  #   latestCampaign). At 100 profiles in one response that is 501 resolver
+  #   invocations; resolver_count_limit = 1000 gives ~2x headroom there while
+  #   capping alias fan-out attacks well below the AppSync default of 10000.
+  query_depth_limit    = 10
+  resolver_count_limit = 1000
+
   log_config {
     cloudwatch_logs_role_arn = aws_iam_role.appsync_logging.arn
     field_log_level          = "ERROR"
