@@ -87,16 +87,23 @@ resource "aws_cloudfront_function" "auth_location_rewrite" {
   EOF
 }
 
-# Origin Access Identity
-resource "aws_cloudfront_origin_access_identity" "main" {
-  comment = "OAI for ${local.site_domain}"
+# Origin Access Control (#335: OAI is deprecated; OAC supports SSE-KMS,
+# dynamic requests, and modern sigv4 request signing).
+resource "aws_cloudfront_origin_access_control" "main" {
+  name                              = "OAC for ${local.site_domain}"
+  description                       = "OAC for ${local.site_domain}"
+  origin_access_control_origin_type = "s3"
+  signing_behavior                  = "always"
+  signing_protocol                  = "sigv4"
 
   lifecycle {
     prevent_destroy = true
   }
 }
 
-# S3 Bucket Policy for CloudFront
+# S3 Bucket Policy for CloudFront. Grants access to the CloudFront service
+# principal, scoped to this distribution via the SourceArn condition (the
+# OAC signing model replaces the OAI canonical-user grant).
 resource "aws_s3_bucket_policy" "static" {
   bucket = var.static_bucket_id
 
@@ -107,10 +114,15 @@ resource "aws_s3_bucket_policy" "static" {
         Sid    = "AllowCloudFrontAccess"
         Effect = "Allow"
         Principal = {
-          AWS = aws_cloudfront_origin_access_identity.main.iam_arn
+          Service = "cloudfront.amazonaws.com"
         }
         Action   = "s3:GetObject"
         Resource = "${var.static_bucket_arn}/*"
+        Condition = {
+          StringEquals = {
+            "AWS:SourceArn" = aws_cloudfront_distribution.site.arn
+          }
+        }
       }
     ]
   })
@@ -131,8 +143,10 @@ resource "aws_cloudfront_distribution" "site" {
     domain_name = var.static_bucket_regional_domain
     origin_id   = "S3-${var.static_bucket_id}"
 
+    origin_access_control_id = aws_cloudfront_origin_access_control.main.id
+
     s3_origin_config {
-      origin_access_identity = aws_cloudfront_origin_access_identity.main.cloudfront_access_identity_path
+      origin_access_identity = ""
     }
   }
 
