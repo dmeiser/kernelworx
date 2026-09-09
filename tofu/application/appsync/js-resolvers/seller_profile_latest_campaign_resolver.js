@@ -1,7 +1,13 @@
 /**
  * SellerProfile.latestCampaign / SharedProfile.latestCampaign field resolver.
  *
- * Two read paths (#331):
+ * Three read paths (#331):
+ *
+ * 0. Batch annotation — the listMyProfiles pipeline already attached
+ *    latestCampaign via batch_latest_campaigns_fn (single BatchGetItem per
+ *    page). The field resolver still executes, so short-circuit with
+ *    runtime.earlyReturn and return the batched value without a datastore
+ *    round-trip.
  *
  * 1. Denormalized fast path — the profile item carries latestCampaignId
  *    (stamped by the createCampaign/updateCampaign/deleteCampaign pipelines).
@@ -15,9 +21,13 @@
  *    the original per-item Query against the profileId-createdAt-index with
  *    the same active-only filter, so behavior never regresses for them.
  */
-import { util } from '@aws-appsync/utils';
+import { util, runtime } from '@aws-appsync/utils';
 
 export function request(ctx) {
+    if (ctx.source.latestCampaign) {
+        return runtime.earlyReturn(ctx.source.latestCampaign);
+    }
+
     const profileId = ctx.source.profileId;
     // Add PROFILE# prefix for DynamoDB if not present
     const dbProfileId = profileId.startsWith('PROFILE#') ? profileId : `PROFILE#${profileId}`;

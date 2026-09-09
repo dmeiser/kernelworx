@@ -3,6 +3,24 @@ import assert from 'node:assert';
 import { request, response } from './seller_profile_latest_campaign_resolver.js';
 
 describe('seller_profile_latest_campaign_resolver request', () => {
+    it('returns the pipeline-attached latestCampaign without a datastore call', () => {
+        const campaign = { profileId: 'PROFILE#p1', campaignId: 'CAMPAIGN#1', isActive: true };
+        const ctx = {
+            source: {
+                profileId: 'PROFILE#p1',
+                latestCampaignId: 'CAMPAIGN#1',
+                latestCampaign: campaign,
+            },
+        };
+
+        const result = request(ctx);
+
+        assert.strictEqual(result, campaign);
+        assert.strictEqual(result.operation, undefined);
+        assert.strictEqual(result.key, undefined);
+        assert.strictEqual(result.index, undefined);
+    });
+
     it('uses a single GetItem when the profile carries latestCampaignId', () => {
         const ctx = {
             source: {
