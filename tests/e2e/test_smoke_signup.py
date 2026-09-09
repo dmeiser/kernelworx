@@ -30,6 +30,7 @@ import random
 import re
 import string
 import subprocess
+import time
 
 import pytest
 from playwright.sync_api import Page, expect
@@ -81,7 +82,7 @@ def _submit_signup_and_wait_for_verification(page: Page, email: str, password: s
     expect(verification_text.first).to_be_visible(timeout=20_000)
 
 
-def _cognito_cli(*args: str) -> None:
+def _run_cognito_cli(*args: str) -> subprocess.CompletedProcess:
     """Run an ``aws cognito-idp`` admin command via the AWS CLI subprocess.
 
     The CLI is used instead of boto3 so the test inherits the same credential
@@ -93,9 +94,46 @@ def _cognito_cli(*args: str) -> None:
     region = os.environ.get("TEST_REGION")
     if region:
         cmd.extend(["--region", region])
-    result = subprocess.run(cmd, check=False, capture_output=True, text=True, timeout=120)
+    return subprocess.run(cmd, check=False, capture_output=True, text=True, timeout=120)
+
+
+def _cognito_cli(*args: str) -> None:
+    """Run a Cognito admin command, raising with stderr on failure."""
+    result = _run_cognito_cli(*args)
     if result.returncode != 0:
         raise RuntimeError(f"aws cognito-idp {' '.join(args)} failed: {result.stderr}")
+
+
+def _confirm_signup_with_retry(user_pool_id: str, email: str) -> None:
+    """Confirm a freshly signed-up user, tolerating Cognito read-after-write lag.
+
+    ``signUp`` returns before the new user is visible to admin APIs, so an
+    immediate ``admin-confirm-sign-up`` can fail with ``UserNotFoundException``
+    even though the sign-up succeeded.  Retry only that error; any other
+    failure is raised immediately.
+    """
+    attempts = 6
+    delay_seconds = 5.0
+    last_stderr = ""
+    for attempt in range(attempts):
+        result = _run_cognito_cli(
+            "admin-confirm-sign-up",
+            "--user-pool-id",
+            user_pool_id,
+            "--username",
+            email,
+        )
+        if result.returncode == 0:
+            return
+        last_stderr = result.stderr
+        if "UserNotFoundException" not in result.stderr:
+            break
+        if attempt < attempts - 1:
+            time.sleep(delay_seconds)
+    raise RuntimeError(
+        f"aws cognito-idp admin-confirm-sign-up --user-pool-id {user_pool_id} "
+        f"--username {email} failed after {attempts} attempts: {last_stderr}"
+    )
 
 
 @pytest.mark.smoke
@@ -161,13 +199,7 @@ def test_signup_completes_after_backend_confirmation(page: Page) -> None:
     if not user_pool_id:
         pytest.fail("TEST_USER_POOL_ID is not set in environment.")
 
-    _cognito_cli(
-        "admin-confirm-sign-up",
-        "--user-pool-id",
-        user_pool_id,
-        "--username",
-        email,
-    )
+    _confirm_signup_with_retry(user_pool_id, email)
 
     page.get_by_role("button", name="Back to Login").click()
     page.wait_for_url("**/login", timeout=10_000)
