@@ -51,6 +51,9 @@ build_resolvers() {
 
 # Check whether a saved plan is still fresh relative to source/config changes.
 # Returns 0 (true) if the plan exists and no relevant source files are newer.
+# Build output under appsync/dist is regenerated (rm -rf + rewrite) on every
+# apply, so its mtimes always postdate the plan even when sources are unchanged;
+# prune it so a resolver rebuild alone never invalidates a saved plan.
 plan_is_fresh() {
     local plan_file="$1"
     if [ ! -f "$plan_file" ]; then
@@ -58,10 +61,11 @@ plan_is_fresh() {
     fi
     local newer_source
     newer_source=$(find "$ROOT_DIR/src" "$ROOT_DIR/tofu" \
+        -path "*/appsync/dist" -prune -o \
         -type f \
         \( -name "*.tf" -o -name "*.py" -o -name "*.js" -o -name "*.graphql" \
            -o -name "*.lock.hcl" -o -name "uv.lock" -o -name "pyproject.toml" \) \
-        -newer "$plan_file" 2>/dev/null | head -n 1)
+        -newer "$plan_file" -print 2>/dev/null | head -n 1)
     if [ -n "$newer_source" ]; then
         return 1
     fi
@@ -72,14 +76,15 @@ plan_is_fresh() {
     return 0
 }
 
-cd "$ENV_DIR"
+main() {
+    cd "$ENV_DIR"
 
-echo ""
-echo "🚀 OpenTofu $ACTION for $ENV"
-echo "   Working directory: $ENV_DIR"
-echo ""
+    echo ""
+    echo "🚀 OpenTofu $ACTION for $ENV"
+    echo "   Working directory: $ENV_DIR"
+    echo ""
 
-case "$ACTION" in
+    case "$ACTION" in
     init)
         echo "📦 Initializing OpenTofu..."
         build_resolvers
@@ -151,6 +156,13 @@ case "$ACTION" in
         echo "  $0 dev plan -target=module.s3 # Plan only s3 module"
                 exit 1
         ;;
-esac
-echo ""
-echo "✅ Done!"
+    esac
+    echo ""
+    echo "✅ Done!"
+}
+
+# Run the CLI only when executed directly; when sourced (tests), only the
+# helpers above (e.g. plan_is_fresh) are loaded.
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    main
+fi

@@ -1,10 +1,12 @@
 """Unit tests for delete_profile_cascade Lambda handler."""
 
+import os
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, Dict, List
 from unittest.mock import MagicMock, patch
 
+import boto3
 import pytest
 from botocore.exceptions import ClientError
 
@@ -21,6 +23,17 @@ from src.utils.errors import AppError
 def reset_tables() -> None:
     """Clear any table overrides between tests."""
     clear_all_overrides()
+
+
+@pytest.fixture(autouse=True)
+def exports_bucket(dynamodb_table: Any) -> None:
+    """Create the exports bucket in moto so cascade S3 cleanup runs against a real bucket.
+
+    Depends on dynamodb_table so the bucket is created inside the same active
+    mock_aws context as the DynamoDB tables.
+    """
+    s3 = boto3.client("s3", region_name="us-east-1")
+    s3.create_bucket(Bucket=os.environ["EXPORTS_BUCKET"])
 
 
 def _create_profile(profiles_table: Any, owner_account_id: str, profile_id: str) -> Dict[str, Any]:
@@ -820,8 +833,8 @@ class TestDeleteProfileCascade:
         count = _delete_s3_reports("PROFILE#p1")
         assert count == 0
 
-    def test_delete_s3_reports_error_handled_gracefully(self, monkeypatch: Any) -> None:
-        """Test S3 report deletion error is handled gracefully."""
+    def test_delete_s3_reports_error_raises_app_error(self, monkeypatch: Any) -> None:
+        """Test S3 failure raises AppError instead of being swallowed."""
         from src.handlers.delete_profile_cascade import _delete_s3_reports
 
         monkeypatch.setenv("EXPORTS_BUCKET", "test-reports-bucket")
@@ -829,8 +842,75 @@ class TestDeleteProfileCascade:
         mock_s3.get_paginator.side_effect = Exception("S3 error")
 
         with patch("src.handlers.delete_profile_cascade.s3_client", mock_s3):
-            count = _delete_s3_reports("PROFILE#p1")
-            assert count == 0
+            with pytest.raises(AppError):
+                _delete_s3_reports("PROFILE#p1")
+            mock_s3.get_paginator.assert_called_once()
+
+    def test_delete_s3_reports_transient_error_then_success(self, monkeypatch: Any) -> None:
+        """Test a transient throttling error is retried and then succeeds."""
+        from src.handlers.delete_profile_cascade import _delete_s3_reports
+
+        monkeypatch.setenv("EXPORTS_BUCKET", "test-reports-bucket")
+        sleep_mock = MagicMock()
+        monkeypatch.setattr("src.handlers.delete_profile_cascade.time.sleep", sleep_mock)
+        mock_s3 = MagicMock()
+        mock_paginator = MagicMock()
+        throttled = ClientError({"Error": {"Code": "Throttling", "Message": "rate limited"}}, "ListObjectVersions")
+        mock_paginator.paginate.side_effect = [
+            throttled,
+            [{"Versions": [{"Key": "reports/p1/c1/r1.xlsx", "VersionId": "v1"}]}],
+        ]
+        mock_s3.get_paginator.return_value = mock_paginator
+
+        with patch("src.handlers.delete_profile_cascade.s3_client", mock_s3):
+            count = _delete_s3_reports("p1")
+
+        assert count == 1
+        assert mock_paginator.paginate.call_count == 2  # throttled, then retried success
+        sleep_mock.assert_called_once()
+        mock_s3.delete_objects.assert_called_once()
+
+    def test_delete_s3_reports_transient_error_exhausts_retries(self, monkeypatch: Any) -> None:
+        """Test a persistent 5xx error raises AppError after bounded retries."""
+        from src.handlers.delete_profile_cascade import _delete_s3_reports
+
+        monkeypatch.setenv("EXPORTS_BUCKET", "test-reports-bucket")
+        sleep_mock = MagicMock()
+        monkeypatch.setattr("src.handlers.delete_profile_cascade.time.sleep", sleep_mock)
+        mock_s3 = MagicMock()
+        service_fault = ClientError(
+            {
+                "Error": {"Code": "SomeFault", "Message": "backend error"},
+                "ResponseMetadata": {"HTTPStatusCode": 500},
+            },
+            "ListObjectVersions",
+        )
+        mock_s3.get_paginator.side_effect = service_fault
+
+        with patch("src.handlers.delete_profile_cascade.s3_client", mock_s3):
+            with pytest.raises(AppError):
+                _delete_s3_reports("PROFILE#p1")
+
+        assert mock_s3.get_paginator.call_count == 3
+        assert sleep_mock.call_count == 2
+
+    def test_delete_s3_reports_non_transient_client_error_fails_fast(self, monkeypatch: Any) -> None:
+        """Test a non-transient client error raises AppError without retrying."""
+        from src.handlers.delete_profile_cascade import _delete_s3_reports
+
+        monkeypatch.setenv("EXPORTS_BUCKET", "test-reports-bucket")
+        sleep_mock = MagicMock()
+        monkeypatch.setattr("src.handlers.delete_profile_cascade.time.sleep", sleep_mock)
+        mock_s3 = MagicMock()
+        denied = ClientError({"Error": {"Code": "AccessDenied", "Message": "denied"}}, "ListObjectVersions")
+        mock_s3.get_paginator.side_effect = denied
+
+        with patch("src.handlers.delete_profile_cascade.s3_client", mock_s3):
+            with pytest.raises(AppError):
+                _delete_s3_reports("PROFILE#p1")
+
+        mock_s3.get_paginator.assert_called_once()
+        sleep_mock.assert_not_called()
 
     def test_get_s3_client_default(self) -> None:
         """Test _get_s3_client returns default boto3 S3 client when s3_client is None."""
