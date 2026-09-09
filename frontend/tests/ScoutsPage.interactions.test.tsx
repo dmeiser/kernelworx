@@ -188,7 +188,9 @@ describe('ScoutsPage – interactions', () => {
 
   it('shows InfoMessageAlert from location state', async () => {
     renderScoutsPage({ message: 'Profile created successfully' });
-    await waitFor(() => expect(screen.getByText('Profile created successfully')).toBeInTheDocument(), { timeout: 5000 });
+    await waitFor(() => expect(screen.getByText('Profile created successfully')).toBeInTheDocument(), {
+      timeout: 5000,
+    });
   }, 10000);
 
   it('shows EmptyState when user has no profiles and not loading', async () => {
@@ -246,7 +248,9 @@ describe('ScoutsPage – interactions', () => {
 
   it('createProfile onCompleted triggers loadMyProfiles', async () => {
     renderScoutsPage();
-    await waitFor(() => expect(screen.getByRole('progressbar', { hidden: true })).toBeTruthy(), { timeout: 100 }).catch(() => {});
+    await waitFor(() => expect(screen.getByRole('progressbar', { hidden: true })).toBeTruthy(), { timeout: 100 }).catch(
+      () => {},
+    );
 
     // Invoke the captured onCompleted directly
     await waitFor(() => expect(capturedCreateOpts).toBeDefined(), { timeout: 5000 });
@@ -291,9 +295,13 @@ describe('ScoutsPage – interactions', () => {
       );
       if (submitBtn) {
         fireEvent.click(submitBtn);
-        await waitFor(() => expect(createProfileMock).toHaveBeenCalledWith(
-          expect.objectContaining({ variables: expect.objectContaining({ sellerName: 'Test Scout Name' }) }),
-        ), { timeout: 3000 });
+        await waitFor(
+          () =>
+            expect(createProfileMock).toHaveBeenCalledWith(
+              expect.objectContaining({ variables: expect.objectContaining({ sellerName: 'Test Scout Name' }) }),
+            ),
+          { timeout: 3000 },
+        );
       }
     }
   }, 10000);
