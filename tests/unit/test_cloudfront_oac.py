@@ -126,9 +126,9 @@ def test_distribution_s3_origin_uses_oac(cloudfront_doc: dict) -> None:
     s3_origins = [o for o in origins if str(o.get("origin_id", "")).startswith("S3-")]
     assert s3_origins, "expected an S3 origin on the distribution"
     for origin in s3_origins:
-        assert origin.get("origin_access_control_id") == (
-            "${aws_cloudfront_origin_access_control.main.id}"
-        ), "S3 origin must sign requests via the OAC"
+        assert origin.get("origin_access_control_id") == ("${aws_cloudfront_origin_access_control.main.id}"), (
+            "S3 origin must sign requests via the OAC"
+        )
         s3_origin_config = block(origin.get("s3_origin_config"))
         assert s3_origin_config.get("origin_access_identity", "") == ""
 
@@ -151,7 +151,5 @@ def test_bucket_policy_grants_cloudfront_service_principal(cloudfront_doc: dict)
     assert stmt["Action"] == "s3:GetObject"
     # Scoped to this distribution only; no OAI canonical user anywhere.
     condition = stmt["Condition"]
-    assert condition == {
-        "StringEquals": {"AWS:SourceArn": "${aws_cloudfront_distribution.site.arn}"}
-    }
+    assert condition == {"StringEquals": {"AWS:SourceArn": "${aws_cloudfront_distribution.site.arn}"}}
     assert "canonical" not in str(stmt["Principal"]).lower()
