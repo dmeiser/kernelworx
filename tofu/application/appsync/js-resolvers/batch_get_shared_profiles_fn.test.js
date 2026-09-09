@@ -42,9 +42,9 @@ describe('batch_get_shared_profiles_fn request', () => {
         assert.deepStrictEqual(result, []);
     });
 
-    it('caps the batch at 100 keys', () => {
+    it('errors when distinct shared profiles exceed the 100-key BatchGetItem cap', () => {
         const shares = [];
-        for (let i = 0; i < 105; i++) {
+        for (let i = 0; i < 101; i++) {
             shares.push({
                 profileId: `PROFILE#p${i}`,
                 ownerAccountId: 'ACCOUNT#owner-1',
@@ -53,9 +53,10 @@ describe('batch_get_shared_profiles_fn request', () => {
         }
         const ctx = { stash: stashWithShares(shares) };
 
-        const result = request(ctx);
-
-        assert.strictEqual(result.tables[TABLE].keys.length, 100);
+        assert.throws(
+            () => request(ctx),
+            /listMyShares supports at most 100 distinct shared profiles per account; found 101/
+        );
     });
 });
 

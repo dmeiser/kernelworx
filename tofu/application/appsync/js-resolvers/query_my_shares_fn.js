@@ -47,6 +47,10 @@ export function response(ctx) {
         util.error(ctx.error.message, ctx.error.type);
     }
 
+    if (ctx.result && ctx.result.nextToken) {
+        util.error('listMyShares share list exceeds one page; accounts with this many shares are not supported');
+    }
+
     const items = (ctx.result && ctx.result.items) || [];
     const sharesByProfile = {};
     const sharedProfileIds = [];

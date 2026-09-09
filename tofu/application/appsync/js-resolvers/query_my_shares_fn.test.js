@@ -96,6 +96,21 @@ describe('query_my_shares_fn response', () => {
         assert.deepStrictEqual(stash.sharesByProfile, {});
     });
 
+    it('errors when the GSI query returns a nextToken instead of silently dropping later pages', () => {
+        const ctx = {
+            identity: { sub: 'user-123' },
+            stash: {},
+            result: {
+                items: [
+                    { profileId: 'PROFILE#p1', ownerAccountId: 'ACCOUNT#owner-1', permissions: ['READ'] },
+                ],
+                nextToken: 'page-2-token',
+            },
+        };
+
+        assert.throws(() => response(ctx), /share list exceeds one page/);
+    });
+
     it('handles a null result', () => {
         const ctx = { identity: { sub: 'user-123' }, stash: {}, result: null };
 

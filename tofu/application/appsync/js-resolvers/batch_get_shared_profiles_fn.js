@@ -19,8 +19,9 @@ import { util, runtime } from '@aws-appsync/utils';
  * the wrong value. Use string concatenation instead of JS template literals.
  */
 
-// AppSync BatchGetItem supports at most 100 keys per table; users with more
-// shares than that get the first 100 (a pipeline function cannot loop chunks).
+// AppSync BatchGetItem supports at most 100 keys per table; accounts with
+// more distinct shared profiles than that fail with an explicit error rather
+// than returning a truncated list (a pipeline function cannot loop chunks).
 const MAX_BATCH_KEYS = 100;
 const tableName = '${table_name}';
 
@@ -37,9 +38,6 @@ export function request(ctx) {
 
     const keys = [];
     for (const profileId of sharedProfileIds) {
-        if (keys.length >= MAX_BATCH_KEYS) {
-            break;
-        }
         const share = sharesByProfile[profileId];
         if (!share) {
             continue;
@@ -48,6 +46,10 @@ export function request(ctx) {
             ownerAccountId: share.ownerAccountId,
             profileId: share.profileId
         }));
+    }
+
+    if (keys.length > MAX_BATCH_KEYS) {
+        util.error('listMyShares supports at most ' + MAX_BATCH_KEYS + ' distinct shared profiles per account; found ' + keys.length);
     }
 
     if (keys.length === 0) {
