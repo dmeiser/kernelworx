@@ -4,6 +4,7 @@ Unit tests for payment methods Lambda handlers.
 Tests request_qr_upload, confirm_qr_upload, and delete_qr_code functions.
 """
 
+import copy
 import os
 from typing import Any, Dict, Generator
 from unittest.mock import MagicMock, patch
@@ -225,6 +226,227 @@ class TestConfirmQRUpload:
         methods = response["Item"]["preferences"]["paymentMethods"]
         venmo = next(m for m in methods if m["name"] == "Venmo")
         assert venmo["qrCodeUrl"] == new_s3_key
+
+    def test_confirm_upload_old_delete_failure_surfaces_error(
+        self, dynamodb_tables: Dict[str, Any], s3_bucket: Any, sample_account: Dict[str, Any], sample_account_id: str
+    ) -> None:
+        """Test that a failure deleting the old QR object surfaces an error and leaves state consistent (#303)."""
+        from src.utils.dynamodb import tables
+
+        create_payment_method(sample_account_id, "Venmo")
+
+        old_s3_key = f"payment-qr-codes/{sample_account_id}/{'a' * 32}.png"
+        new_s3_key = f"payment-qr-codes/{sample_account_id}/{'b' * 32}.png"
+        bucket_name = os.environ.get("EXPORTS_BUCKET", "test-exports-bucket")
+        s3_bucket.put_object(Bucket=bucket_name, Key=old_s3_key, Body=b"old-qr-data")
+        s3_bucket.put_object(Bucket=bucket_name, Key=new_s3_key, Body=b"new-qr-data")
+
+        account_id_key = f"ACCOUNT#{sample_account_id}"
+        response = tables.accounts.get_item(Key={"accountId": account_id_key})
+        methods = response["Item"]["preferences"]["paymentMethods"]
+        for m in methods:
+            if m["name"] == "Venmo":
+                m["qrCodeUrl"] = old_s3_key
+        preferences = response["Item"].get("preferences", {})
+        preferences["paymentMethods"] = methods
+        tables.accounts.update_item(
+            Key={"accountId": account_id_key},
+            UpdateExpression="SET preferences = :prefs",
+            ExpressionAttributeValues={":prefs": preferences},
+        )
+
+        event = {
+            "identity": {"sub": sample_account_id},
+            "arguments": {"paymentMethodName": "Venmo", "s3Key": new_s3_key},
+        }
+
+        with patch(
+            "src.handlers.payment_methods_handlers.delete_qr_by_key",
+            side_effect=AppError(ErrorCode.INTERNAL_ERROR, "Failed to delete QR code"),
+        ):
+            with pytest.raises(AppError) as exc_info:
+                confirm_qr_upload(event, None)
+            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+
+        # Record still points at the old key and the new object is untouched
+        response = tables.accounts.get_item(Key={"accountId": account_id_key})
+        methods = response["Item"]["preferences"]["paymentMethods"]
+        venmo = next(m for m in methods if m["name"] == "Venmo")
+        assert venmo["qrCodeUrl"] == old_s3_key
+        s3_bucket.head_object(Bucket=bucket_name, Key=new_s3_key)
+        s3_bucket.head_object(Bucket=bucket_name, Key=old_s3_key)
+
+    def test_confirm_upload_put_failure_after_old_deleted(
+        self, dynamodb_tables: Dict[str, Any], s3_bucket: Any, sample_account: Dict[str, Any], sample_account_id: str
+    ) -> None:
+        """Test that a put failure after the old object was removed errors and tells the user to re-upload (#303)."""
+        from src.utils.dynamodb import tables
+
+        create_payment_method(sample_account_id, "Venmo")
+
+        old_s3_key = f"payment-qr-codes/{sample_account_id}/{'a' * 32}.png"
+        new_s3_key = f"payment-qr-codes/{sample_account_id}/{'b' * 32}.png"
+        bucket_name = os.environ.get("EXPORTS_BUCKET", "test-exports-bucket")
+        s3_bucket.put_object(Bucket=bucket_name, Key=old_s3_key, Body=b"old-qr-data")
+        s3_bucket.put_object(Bucket=bucket_name, Key=new_s3_key, Body=b"new-qr-data")
+
+        account_id_key = f"ACCOUNT#{sample_account_id}"
+        response = tables.accounts.get_item(Key={"accountId": account_id_key})
+        methods = response["Item"]["preferences"]["paymentMethods"]
+        for m in methods:
+            if m["name"] == "Venmo":
+                m["qrCodeUrl"] = old_s3_key
+        preferences = response["Item"].get("preferences", {})
+        preferences["paymentMethods"] = methods
+        tables.accounts.update_item(
+            Key={"accountId": account_id_key},
+            UpdateExpression="SET preferences = :prefs",
+            ExpressionAttributeValues={":prefs": preferences},
+        )
+
+        event = {
+            "identity": {"sub": sample_account_id},
+            "arguments": {"paymentMethodName": "Venmo", "s3Key": new_s3_key},
+        }
+
+        with patch(
+            "src.handlers.payment_methods_handlers._update_payment_method_qr_url",
+            side_effect=Exception("DynamoDB unavailable"),
+        ):
+            with pytest.raises(AppError) as exc_info:
+                confirm_qr_upload(event, None)
+            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+            assert "re-upload" in exc_info.value.message.lower()
+
+        # Accepted trade: the old object was already deleted, so the method is
+        # left without a QR image and the record still references the old key
+        with pytest.raises(ClientError):
+            s3_bucket.head_object(Bucket=bucket_name, Key=old_s3_key)
+        response = tables.accounts.get_item(Key={"accountId": account_id_key})
+        methods = response["Item"]["preferences"]["paymentMethods"]
+        venmo = next(m for m in methods if m["name"] == "Venmo")
+        assert venmo["qrCodeUrl"] == old_s3_key
+
+    def test_confirm_upload_account_removed_between_reads(
+        self, dynamodb_tables: Dict[str, Any], s3_bucket: Any, sample_account: Dict[str, Any], sample_account_id: str
+    ) -> None:
+        """Test confirm_qr_upload when the account is deleted between the pre-delete read and the update (#303)."""
+        from src.utils.dynamodb import override_table
+
+        create_payment_method(sample_account_id, "Venmo")
+        s3_key = f"payment-qr-codes/{sample_account_id}/{'b' * 32}.png"
+        bucket_name = os.environ.get("EXPORTS_BUCKET", "test-exports-bucket")
+        s3_bucket.put_object(Bucket=bucket_name, Key=s3_key, Body=b"fake-qr-data")
+
+        mock_table = MagicMock()
+        tables_dict = dynamodb_tables
+        accounts_table = tables_dict["accounts"]
+        account_id_key = f"ACCOUNT#{sample_account_id}"
+        mock_table.get_item.side_effect = [
+            accounts_table.get_item(Key={"accountId": account_id_key}),
+            {},
+        ]
+
+        override_table("accounts", mock_table)
+        try:
+            event = {
+                "identity": {"sub": sample_account_id},
+                "arguments": {"paymentMethodName": "Venmo", "s3Key": s3_key},
+            }
+
+            with pytest.raises(AppError) as exc_info:
+                confirm_qr_upload(event, None)
+            assert exc_info.value.error_code == ErrorCode.NOT_FOUND
+        finally:
+            override_table("accounts", None)
+
+    def test_confirm_upload_method_removed_between_reads(
+        self, dynamodb_tables: Dict[str, Any], s3_bucket: Any, sample_account: Dict[str, Any], sample_account_id: str
+    ) -> None:
+        """Test confirm_qr_upload when the method vanishes between the pre-delete read and the update (#303)."""
+        from src.utils.dynamodb import override_table
+
+        create_payment_method(sample_account_id, "Venmo")
+        create_payment_method(sample_account_id, "PayPal")
+        s3_key = f"payment-qr-codes/{sample_account_id}/{'b' * 32}.png"
+        bucket_name = os.environ.get("EXPORTS_BUCKET", "test-exports-bucket")
+        s3_bucket.put_object(Bucket=bucket_name, Key=s3_key, Body=b"fake-qr-data")
+
+        mock_table = MagicMock()
+        tables_dict = dynamodb_tables
+        accounts_table = tables_dict["accounts"]
+        account_id_key = f"ACCOUNT#{sample_account_id}"
+        first_read = accounts_table.get_item(Key={"accountId": account_id_key})
+        # Second read: Venmo is gone, only PayPal remains
+        second_item = copy.deepcopy(first_read["Item"])
+        second_item["preferences"]["paymentMethods"] = [
+            m for m in second_item["preferences"]["paymentMethods"] if m["name"] == "PayPal"
+        ]
+        mock_table.get_item.side_effect = [first_read, {"Item": second_item}]
+
+        override_table("accounts", mock_table)
+        try:
+            event = {
+                "identity": {"sub": sample_account_id},
+                "arguments": {"paymentMethodName": "Venmo", "s3Key": s3_key},
+            }
+
+            with pytest.raises(AppError) as exc_info:
+                confirm_qr_upload(event, None)
+            assert exc_info.value.error_code == ErrorCode.NOT_FOUND
+        finally:
+            override_table("accounts", None)
+
+    def test_confirm_upload_replacement_deletes_old_before_put(
+        self, dynamodb_tables: Dict[str, Any], s3_bucket: Any, sample_account: Dict[str, Any], sample_account_id: str
+    ) -> None:
+        """Test the happy path deletes the old object before storing the new key (#303)."""
+        from unittest.mock import call
+
+        from src.utils.dynamodb import tables
+
+        create_payment_method(sample_account_id, "Venmo")
+
+        old_s3_key = f"payment-qr-codes/{sample_account_id}/{'a' * 32}.png"
+        new_s3_key = f"payment-qr-codes/{sample_account_id}/{'b' * 32}.png"
+        bucket_name = os.environ.get("EXPORTS_BUCKET", "test-exports-bucket")
+        s3_bucket.put_object(Bucket=bucket_name, Key=old_s3_key, Body=b"old-qr-data")
+        s3_bucket.put_object(Bucket=bucket_name, Key=new_s3_key, Body=b"new-qr-data")
+
+        account_id_key = f"ACCOUNT#{sample_account_id}"
+        response = tables.accounts.get_item(Key={"accountId": account_id_key})
+        methods = response["Item"]["preferences"]["paymentMethods"]
+        for m in methods:
+            if m["name"] == "Venmo":
+                m["qrCodeUrl"] = old_s3_key
+        preferences = response["Item"].get("preferences", {})
+        preferences["paymentMethods"] = methods
+        tables.accounts.update_item(
+            Key={"accountId": account_id_key},
+            UpdateExpression="SET preferences = :prefs",
+            ExpressionAttributeValues={":prefs": preferences},
+        )
+
+        event = {
+            "identity": {"sub": sample_account_id},
+            "arguments": {"paymentMethodName": "Venmo", "s3Key": new_s3_key},
+        }
+
+        with (
+            patch("src.handlers.payment_methods_handlers._delete_qr_from_s3_storage") as mock_delete,
+            patch("src.handlers.payment_methods_handlers._update_payment_method_qr_url") as mock_update,
+        ):
+            manager = MagicMock()
+            manager.attach_mock(mock_delete, "delete_old")
+            manager.attach_mock(mock_update, "put_new")
+
+            result = confirm_qr_upload(event, None)
+
+            assert result["qrCodeUrl"] == new_s3_key
+            assert manager.mock_calls == [
+                call.delete_old(old_s3_key, sample_account_id, "Venmo"),
+                call.put_new(sample_account_id, "Venmo", new_s3_key),
+            ]
 
     def test_confirm_upload_same_key_keeps_object(
         self, dynamodb_tables: Dict[str, Any], s3_bucket: Any, sample_account: Dict[str, Any], sample_account_id: str
@@ -727,7 +949,7 @@ class TestExceptionHandling:
     def test_delete_qr_s3_delete_fails(
         self, dynamodb_tables: Dict[str, Any], sample_account: Dict[str, Any], sample_account_id: str
     ) -> None:
-        """Test delete_qr_code when S3 delete fails (exercises exception handling)."""
+        """Test delete_qr_code surfaces S3 delete failures and leaves state consistent (#303)."""
         from unittest.mock import patch
 
         from src.handlers.payment_methods_handlers import delete_qr_code
@@ -759,15 +981,16 @@ class TestExceptionHandling:
                 "identity": {"sub": sample_account_id},
                 "arguments": {"paymentMethodName": "Venmo"},
             }
-            # Should still succeed despite S3 error (idempotent, logs warning)
-            result = delete_qr_code(event, None)
-            assert result is True
+            # Failure surfaces as a typed error instead of being swallowed
+            with pytest.raises(AppError) as exc_info:
+                delete_qr_code(event, None)
+            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
 
-        # Verify QR was still cleared in DynamoDB
+        # DynamoDB record is untouched so the user can retry
         response = tables.accounts.get_item(Key={"accountId": account_id_key})
         methods = response["Item"]["preferences"]["paymentMethods"]
         venmo = next(m for m in methods if m["name"] == "Venmo")
-        assert venmo.get("qrCodeUrl") is None
+        assert venmo.get("qrCodeUrl") == s3_key
 
     def test_delete_qr_legacy_http_url(
         self, dynamodb_tables: Dict[str, Any], sample_account: Dict[str, Any], sample_account_id: str
@@ -812,7 +1035,7 @@ class TestExceptionHandling:
     def test_delete_qr_legacy_http_url_s3_error(
         self, dynamodb_tables: Dict[str, Any], sample_account: Dict[str, Any], sample_account_id: str
     ) -> None:
-        """Test delete_qr_code with legacy HTTP URL when S3 delete fails."""
+        """Test delete_qr_code surfaces legacy-path S3 delete failures (#303)."""
         from unittest.mock import patch
 
         from src.handlers.payment_methods_handlers import delete_qr_code
@@ -846,6 +1069,13 @@ class TestExceptionHandling:
                 "identity": {"sub": sample_account_id},
                 "arguments": {"paymentMethodName": "Venmo"},
             }
-            # Should still succeed (S3 delete failure is logged but not raised)
-            result = delete_qr_code(event, None)
-            assert result is True
+            # Failure surfaces as a typed error instead of being swallowed
+            with pytest.raises(AppError) as exc_info:
+                delete_qr_code(event, None)
+            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+
+        # DynamoDB record still holds the legacy URL so the user can retry
+        response = tables.accounts.get_item(Key={"accountId": account_id_key})
+        methods = response["Item"]["preferences"]["paymentMethods"]
+        venmo = next(m for m in methods if m["name"] == "Venmo")
+        assert venmo.get("qrCodeUrl") == "https://dev.kernelworx.app/payment-qr-codes/acc-123/venmo.png"
