@@ -4,6 +4,7 @@
  * Tests authentication flows, token refresh, Hub event listeners
  */
 
+import React, { useState } from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, renderHook } from '@testing-library/react';
 import { act } from '@testing-library/react';
@@ -746,6 +747,62 @@ describe('AuthContext', () => {
       await waitFor(() => {
         expect(amplifyAuth.fetchAuthSession).toHaveBeenCalled();
       });
+    });
+  });
+
+  describe('provider value memoization (#341)', () => {
+    it('keeps context value reference-stable across unrelated provider re-renders', async () => {
+      vi.mocked(amplifyAuth.fetchAuthSession).mockResolvedValue(createMockSession(true) as any);
+      vi.mocked(amplifyAuth.getCurrentUser).mockResolvedValue(mockUser as any);
+
+      const capturedValues: unknown[] = [];
+
+      // Memoized consumer: only a context value change (not a parent re-render)
+      // can trigger a re-render, which is exactly the behavior #341 restores.
+      const Probe = React.memo(() => {
+        const value = useAuth();
+        capturedValues.push(value);
+        return <div data-testid="probe">{value.loading.toString()}</div>;
+      });
+
+      // Parent re-renders on button click; AuthProvider itself has no state change
+      const Wrapper = () => {
+        const [tick, setTick] = useState(0);
+        return (
+          <div>
+            <button data-testid="bump" onClick={() => setTick((t) => t + 1)}>
+              {tick}
+            </button>
+            <AuthProvider>
+              <Probe />
+            </AuthProvider>
+          </div>
+        );
+      };
+
+      render(<Wrapper />);
+
+      await waitFor(() => {
+        expect(capturedValues.length).toBeGreaterThan(0);
+      });
+
+      // Wait for auth initialization to settle, then snapshot the value
+      await waitFor(() => {
+        expect(screen.getByTestId('probe')).toHaveTextContent('false');
+      });
+      const settledCount = capturedValues.length;
+      const settledValue = capturedValues[capturedValues.length - 1];
+
+      // Force several unrelated re-renders of the AuthProvider via its parent
+      for (let i = 0; i < 3; i++) {
+        act(() => {
+          screen.getByTestId('bump').click();
+        });
+      }
+
+      // Consumer must not re-render: the memoized context value is reference-equal
+      expect(capturedValues.length).toBe(settledCount);
+      expect(capturedValues[capturedValues.length - 1]).toBe(settledValue);
     });
   });
 
