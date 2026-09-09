@@ -152,7 +152,23 @@ resource "terraform_data" "legacy_oai_destroy_gate" {
       # account, so a hardcoded id could cross-delete). ---
       OAI_COMMENT="OAI for ${local.site_domain}"
       echo "Looking up legacy OAI with comment '$OAI_COMMENT'..."
-      IDS=$(aws cloudfront list-cloud-front-origin-access-identities --query "CloudFrontOriginAccessIdentityList.Items[?Comment=='$${OAI_COMMENT}'].Id" --output text 2>/dev/null || true)
+      # A failed lookup must never be read as "no match" (state is already
+      # forgotten, so a false pass would orphan the OAI); only a successful
+      # query may yield the idempotent no-match pass.
+      IDS=""
+      LIST_ERRORS=0
+      while true; do
+        if IDS=$(aws cloudfront list-cloud-front-origin-access-identities --query "CloudFrontOriginAccessIdentityList.Items[?Comment=='$${OAI_COMMENT}'].Id" --output text 2>&1); then
+          break
+        fi
+        LIST_ERRORS=$((LIST_ERRORS + 1))
+        if [ "$LIST_ERRORS" -ge 3 ]; then
+          echo "ERROR: looking up legacy OAI with comment '$OAI_COMMENT' failed 3 times with: $IDS" >&2
+          exit 1
+        fi
+        echo "Transient error looking up legacy OAI with comment '$OAI_COMMENT': $IDS; retrying (attempt $LIST_ERRORS/3)..."
+        sleep 30
+      done
       COUNT=0
       ID=""
       for candidate in $IDS; do

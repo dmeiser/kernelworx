@@ -153,6 +153,10 @@ _THROTTLE_ERROR = (
     "An error occurred (Throttling) when calling the "
     "GetCloudFrontOriginAccessIdentity operation: Rate exceeded."
 )
+_LIST_ERROR = (
+    "An error occurred (Throttling) when calling the "
+    "ListCloudFrontOriginAccessIdentities operation: Rate exceeded."
+)
 
 # Stub behavior notes (mirroring the real AWS CLI):
 # - a list query with no matches prints nothing to stdout under --output text
@@ -244,6 +248,34 @@ _THROTTLE_ONCE_STUB = (
     + '      exit 1\n'
     + '    fi\n'
     + '    echo "ETAGVALID1" ;;\n'
+    + '  *get-distribution*) echo "Deployed" ;;\n'
+    + '  *) echo "unexpected aws invocation: $*" >&2; exit 99 ;;\n'
+    + 'esac\n'
+)
+
+_LIST_THROTTLE_ONCE_STUB = (
+    AWS_STUB_HEADER
+    + 'case "$*" in\n'
+    + '  *list-cloud-front-origin-access-identities*)\n'
+    + '    n=$(( $(cat "$STUB_STATE/list_count" 2>/dev/null || echo 0) + 1 ))\n'
+    + '    echo "$n" > "$STUB_STATE/list_count"\n'
+    + '    if [ "$n" -eq 1 ]; then\n'
+    + f'      echo {_LIST_ERROR!r} >&2\n'
+    + '      exit 1\n'
+    + '    fi\n'
+    + '    echo "OAIEXIST1" ;;\n'
+    + '  *delete-cloud-front-origin-access-identity*) exit 0 ;;\n'
+    + '  *get-cloud-front-origin-access-identity*) echo "ETAGVALID1" ;;\n'
+    + '  *get-distribution*) echo "Deployed" ;;\n'
+    + '  *) echo "unexpected aws invocation: $*" >&2; exit 99 ;;\n'
+    + 'esac\n'
+)
+
+_LIST_THROTTLE_ALWAYS_STUB = (
+    AWS_STUB_HEADER
+    + 'case "$*" in\n'
+    + '  *list-cloud-front-origin-access-identities*)'
+    + f' echo {_LIST_ERROR!r} >&2; exit 1 ;;\n'
     + '  *get-distribution*) echo "Deployed" ;;\n'
     + '  *) echo "unexpected aws invocation: $*" >&2; exit 99 ;;\n'
     + 'esac\n'
@@ -381,6 +413,31 @@ def test_gate_retries_transient_etag_read_failure(cloudfront_doc: dict, tmp_path
     deletes = _aws_calls(calls, "delete-cloud-front-origin-access-identity")
     assert len(deletes) == 1 and "--if-match ETAGVALID1" in deletes[0]
     assert len(_aws_calls(calls, "get-cloud-front-origin-access-identity")) == 2
+
+
+def test_gate_retries_comment_lookup_failure_then_proceeds(
+    cloudfront_doc: dict, tmp_path: Path
+) -> None:
+    # A throttled comment lookup is a retryable failure, not a "no match":
+    # the retry must re-run the lookup and proceed to the delete.
+    script = _render_gate_script(cloudfront_doc, tmp_path)
+    result, calls = _run_gate(script, tmp_path, _LIST_THROTTLE_ONCE_STUB)
+    assert result.returncode == 0, result.stderr
+    assert len(_aws_calls(calls, "list-cloud-front-origin-access-identities")) == 2
+    deletes = _aws_calls(calls, "delete-cloud-front-origin-access-identity")
+    assert len(deletes) == 1 and "--if-match ETAGVALID1" in deletes[0]
+
+
+def test_gate_fails_when_comment_lookup_keeps_failing(cloudfront_doc: dict, tmp_path: Path) -> None:
+    # A persistent lookup failure must fail the apply rather than pass
+    # idempotently — the removed block has already forgotten the OAI from
+    # state, so a false "no match" would orphan it.
+    script = _render_gate_script(cloudfront_doc, tmp_path)
+    result, calls = _run_gate(script, tmp_path, _LIST_THROTTLE_ALWAYS_STUB)
+    assert result.returncode == 1
+    assert "failed 3 times" in result.stderr
+    assert len(_aws_calls(calls, "list-cloud-front-origin-access-identities")) == 3
+    assert _aws_calls(calls, "delete-cloud-front-origin-access-identity") == []
 
 
 def test_gate_fails_after_three_transient_etag_read_failures(
