@@ -147,14 +147,29 @@ def _validate_qr_upload_inputs(payment_method_name: str, s3_key: str, caller_id:
         raise AppError(ErrorCode.FORBIDDEN, "Invalid S3 key - access denied")
 
 
-def _update_payment_method_qr_url(
-    caller_id: str, payment_method_name: str, s3_key: str
-) -> tuple[Dict[str, Any], Optional[str]]:
-    """Update payment method with QR code S3 key.
+def _get_payment_method_qr_key(caller_id: str, payment_method_name: str) -> Optional[str]:
+    """Return the QR code S3 key currently stored on the payment method.
 
-    Returns (updated_method, previous_qr_key) so the caller can clean up the
-    replaced S3 object.
+    Raises:
+        AppError: If the account or payment method does not exist.
     """
+    account_id_key = f"ACCOUNT#{caller_id}"
+    response = tables.accounts.get_item(Key={"accountId": account_id_key}, ConsistentRead=True)
+
+    if "Item" not in response:
+        raise AppError(ErrorCode.NOT_FOUND, f"Payment method '{payment_method_name}' not found")
+
+    methods = response["Item"].get("preferences", {}).get("paymentMethods", [])
+    for method in methods:
+        if method.get("name") == payment_method_name:
+            stored_key = method.get("qrCodeUrl")
+            return str(stored_key) if stored_key is not None else None
+
+    raise AppError(ErrorCode.NOT_FOUND, f"Payment method '{payment_method_name}' not found")
+
+
+def _update_payment_method_qr_url(caller_id: str, payment_method_name: str, s3_key: str) -> Dict[str, Any]:
+    """Update payment method with QR code S3 key and return the updated method."""
     account_id_key = f"ACCOUNT#{caller_id}"
     response = tables.accounts.get_item(Key={"accountId": account_id_key}, ConsistentRead=True)
 
@@ -165,10 +180,8 @@ def _update_payment_method_qr_url(
     existing_methods = list(preferences.get("paymentMethods", []))
 
     method_updated = None
-    previous_qr_key: Optional[str] = None
     for method in existing_methods:
         if method.get("name") == payment_method_name:
-            previous_qr_key = method.get("qrCodeUrl")
             method["qrCodeUrl"] = s3_key
             method_updated = method
             break
@@ -179,7 +192,7 @@ def _update_payment_method_qr_url(
     preferences["paymentMethods"] = existing_methods
     _save_preferences(account_id_key, response, preferences)
 
-    return dict(method_updated), previous_qr_key
+    return dict(method_updated)
 
 
 def confirm_qr_upload(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
@@ -187,8 +200,9 @@ def confirm_qr_upload(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     Confirm QR code upload.
 
     AppSync Lambda resolver for confirmPaymentMethodQRCodeUpload mutation.
-    Validates S3 object exists, updates DynamoDB, and returns payment method with S3 key.
-    The AppSync field resolver for PaymentMethod.qrCodeUrl resolves the key to a
+    Validates S3 object exists, deletes any replaced QR object from S3, then
+    updates DynamoDB, and returns payment method with S3 key. The AppSync
+    field resolver for PaymentMethod.qrCodeUrl resolves the key to a
     pre-signed GET URL.
 
     Args:
@@ -199,7 +213,8 @@ def confirm_qr_upload(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         PaymentMethod with name and qrCodeUrl (S3 key)
 
     Raises:
-        AppError: If S3 object doesn't exist or update fails
+        AppError: If S3 object doesn't exist, deletion of the replaced QR
+            object fails, or update fails
     """
     logger = get_logger(__name__)
 
@@ -214,11 +229,25 @@ def confirm_qr_upload(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
         bucket_name = get_required_env("EXPORTS_BUCKET")
         _validate_s3_object_exists(bucket_name, s3_key)
-        _updated_method, previous_qr_key = _update_payment_method_qr_url(caller_id, payment_method_name, s3_key)
 
-        # Delete the replaced QR object so re-uploads don't orphan S3 objects
+        # Delete the replaced QR object BEFORE pointing the record at the new
+        # key. The previous order (update first, delete second) meant a failed
+        # delete silently orphaned the old object (#303). Either failure now
+        # surfaces as an AppError instead of being swallowed.
+        previous_qr_key = _get_payment_method_qr_key(caller_id, payment_method_name)
         if previous_qr_key and previous_qr_key != s3_key:
-            _delete_qr_from_s3_storage(previous_qr_key, caller_id, payment_method_name, logger)
+            _delete_qr_from_s3_storage(previous_qr_key, caller_id, payment_method_name)
+
+        # Store the new key only after the old object is gone. If this put
+        # fails, the payment method is left without a QR image; the error
+        # tells the user to re-upload (accepted trade, #303).
+        try:
+            _update_payment_method_qr_url(caller_id, payment_method_name, s3_key)
+        except AppError:
+            raise
+        except Exception as e:
+            logger.error("Failed to store new QR key after deleting previous image", error=str(e))
+            raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to save the new QR image. Please re-upload it.") from e
 
         logger.info(
             "Confirmed QR code upload",
@@ -236,24 +265,22 @@ def confirm_qr_upload(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to confirm upload")
 
 
-def _delete_qr_from_s3_storage(
-    stored_qr_key: str | None, caller_id: str, payment_method_name: str, logger: Any
-) -> None:
-    """Delete QR code from S3 storage if it exists."""
+def _delete_qr_from_s3_storage(stored_qr_key: str | None, caller_id: str, payment_method_name: str) -> None:
+    """Delete QR code from S3 storage if it exists.
+
+    Raises:
+        AppError: If the deletion fails. Missing objects are treated as
+            success by the utils helpers, which log real failures at error
+            level before raising.
+    """
     if not stored_qr_key:
         return
 
     if stored_qr_key.startswith("payment-qr-codes/"):
-        try:
-            delete_qr_by_key(stored_qr_key)
-        except Exception as e:
-            logger.info("S3 delete completed (object may not have existed)", error=str(e))
+        delete_qr_by_key(stored_qr_key)
     else:
         # Fallback: Legacy slug-based key or HTTP URL - try the old method
-        try:
-            delete_qr_from_s3(caller_id, payment_method_name)
-        except Exception as e:
-            logger.info("S3 delete completed (object may not have existed)", error=str(e))
+        delete_qr_from_s3(caller_id, payment_method_name)
 
 
 def _clear_qr_url_in_payment_method(caller_id: str, payment_method_name: str) -> None:
@@ -298,7 +325,7 @@ def delete_qr_code(event: Dict[str, Any], context: Any) -> bool:
         target = _verify_payment_method_exists(caller_id, payment_method_name)
         stored_qr_key = target.get("qrCodeUrl")
 
-        _delete_qr_from_s3_storage(stored_qr_key, caller_id, payment_method_name, logger)
+        _delete_qr_from_s3_storage(stored_qr_key, caller_id, payment_method_name)
         _clear_qr_url_in_payment_method(caller_id, payment_method_name)
 
         logger.info("Deleted QR code", account_id=caller_id, payment_method=payment_method_name)
