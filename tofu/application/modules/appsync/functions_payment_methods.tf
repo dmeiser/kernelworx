@@ -156,6 +156,19 @@ resource "aws_appsync_function" "get_payment_method_for_delete" {
   code = file("${local.js_resolvers_dir}/get_payment_method_for_delete_fn.js")
 }
 
+resource "aws_appsync_function" "delete_payment_method_qr_code" {
+  api_id      = aws_appsync_graphql_api.main.id
+  data_source = aws_appsync_datasource.delete_qr_code.name
+  name        = "DeletePaymentMethodQRCodeFn${local.env_suffix}"
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/delete_payment_method_qr_code_fn.js")
+}
+
 resource "aws_appsync_function" "delete_payment_method_from_prefs" {
   api_id      = aws_appsync_graphql_api.main.id
   data_source = aws_appsync_datasource.accounts.name
