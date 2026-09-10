@@ -1100,11 +1100,16 @@ class TestEphemeralResourceImportCoverage:
         # 3. IAM (ephemeral stack has cloudfront_distribution_arn = null, so cloudfront invalidation policies are omitted)
         iam_tf = (modules_dir / "iam" / "main.tf").read_text()
         iam_res = set()
-        for m in re.finditer(r'resource\s+"([^"]+)"\s+"([^"]+)"', iam_tf):
-            rtype, rname = m.group(1), m.group(2)
+        for m in re.finditer(
+            r'resource\s+"([^"]+)"\s+"([^"]+)"(.*?)(?=\n(?:resource|data|locals|variable|output)\s|\Z)',
+            iam_tf,
+            re.DOTALL,
+        ):
+            rtype, rname, block = m.group(1), m.group(2), m.group(3)
             if "cloudfront" in rname:
                 continue
-            iam_res.add(f"module.iam.{rtype}.{rname}")
+            idx = "[0]" if re.search(r"^\s*count\s*=", block, re.MULTILINE) else ""
+            iam_res.add(f"module.iam.{rtype}.{rname}{idx}")
 
         # 4. Cognito (ephemeral uses prefix domain and lambda triggers)
         cognito_tf = (modules_dir / "cognito" / "main.tf").read_text()

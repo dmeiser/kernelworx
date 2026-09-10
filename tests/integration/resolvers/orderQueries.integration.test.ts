@@ -2,7 +2,35 @@ import '../setup.ts';
 import { describe, test, expect, beforeAll, afterAll } from 'vitest';
 import { ApolloClient, NormalizedCacheObject, gql, HttpLink, InMemoryCache } from '@apollo/client';
 import { createAuthenticatedClient } from '../setup/apolloClient';
-import { deleteTestAccounts } from '../setup/testData';
+import { deleteTestAccounts, TABLE_NAMES, waitForGSIConsistency } from '../setup/testData';
+import { DynamoDBClient, QueryCommand } from '@aws-sdk/client-dynamodb';
+
+const dynamoClient = new DynamoDBClient({ region: 'us-east-1' });
+
+/**
+ * Wait until a profile is visible through the profileId-index GSI.
+ * createCampaign/createOrder/shareProfileDirect pipelines look up the profile
+ * via this GSI (verify_profile_write_access_fn) and fail with "Profile not
+ * found" if the write has not propagated yet (GSI eventual consistency).
+ */
+const waitForProfileGSI = async (profileId: string): Promise<void> => {
+  await waitForGSIConsistency(
+    async () => {
+      const result = await dynamoClient.send(
+        new QueryCommand({
+          TableName: TABLE_NAMES.profiles,
+          IndexName: 'profileId-index',
+          KeyConditionExpression: 'profileId = :pid',
+          ExpressionAttributeValues: { ':pid': { S: profileId } },
+        })
+      );
+      return result.Items ?? [];
+    },
+    (items) => items.length > 0,
+    30,
+    1000
+  );
+};
 
 // Helper to create unauthenticated client
 const createUnauthenticatedClient = () => {
@@ -271,6 +299,9 @@ describe('Order Query Operations Integration Tests', () => {
       testProfileId = profileData.createSellerProfile.profileId;
       console.log(`Created profile: ${testProfileId}`);
 
+      // Wait for profileId-index GSI propagation before pipeline resolvers query it
+      await waitForProfileGSI(testProfileId);
+
       // 2. Create catalog with products
       console.log('Step 3: Creating catalog...');
       const { data: catalogData }: any = await ownerClient.mutate({
@@ -423,6 +454,9 @@ describe('Order Query Operations Integration Tests', () => {
       unsharedProfileId = unsharedProfileData.createSellerProfile.profileId;
       console.log(`Created unshared profile: ${unsharedProfileId}`);
 
+      // Wait for profileId-index GSI propagation before pipeline resolvers query it
+      await waitForProfileGSI(unsharedProfileId);
+
       console.log('Step 11: Creating unshared campaign...');
       const { data: unsharedCampaignData }: any = await ownerClient.mutate({
         mutation: CREATE_CAMPAIGN,
@@ -497,7 +531,7 @@ describe('Order Query Operations Integration Tests', () => {
       console.error('Error in beforeAll:', error);
       throw error;
     }
-  }, 30000);
+  }, 90000);
 
   afterAll(async () => {
     // Clean up all test data in reverse order

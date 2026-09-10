@@ -91,6 +91,12 @@ export type GqlCampaign = {
   updatedAt: Scalars['AWSDateTime']['output'];
 };
 
+export type GqlCampaignConnection = {
+  __typename?: 'CampaignConnection';
+  campaigns: Array<GqlCampaign>;
+  nextToken?: Maybe<Scalars['String']['output']>;
+};
+
 export type GqlCampaignReport = {
   __typename?: 'CampaignReport';
   campaignId: Scalars['ID']['output'];
@@ -472,7 +478,7 @@ export type GqlQuery = {
   getProfile?: Maybe<GqlSellerProfile>;
   getSharedCampaign?: Maybe<GqlSharedCampaign>;
   getUnitReport?: Maybe<GqlUnitReport>;
-  listCampaignsByProfile: Array<GqlCampaign>;
+  listCampaignsByProfile: GqlCampaignConnection;
   listCatalogsInUse: Array<Scalars['ID']['output']>;
   listInvitesByProfile: Array<GqlProfileInvite>;
   listManagedCatalogs: Array<GqlCatalog>;
@@ -557,6 +563,8 @@ export type GqlQuery_GetUnitReportArgs = {
 };
 
 export type GqlQuery_ListCampaignsByProfileArgs = {
+  limit?: InputMaybe<Scalars['Int']['input']>;
+  nextToken?: InputMaybe<Scalars['String']['input']>;
   profileId: Scalars['ID']['input'];
 };
 
@@ -629,6 +637,8 @@ export type GqlSellerProfile = {
   permissions?: Maybe<Array<GqlPermissionType>>;
   profileId: Scalars['ID']['output'];
   sellerName: Scalars['String']['output'];
+  unitNumber?: Maybe<Scalars['Int']['output']>;
+  unitType?: Maybe<Scalars['String']['output']>;
   updatedAt: Scalars['AWSDateTime']['output'];
 };
 
@@ -1004,30 +1014,36 @@ export type GqlGetProfileQuery = {
 
 export type GqlListCampaignsByProfileQueryVariables = Exact<{
   profileId: Scalars['ID']['input'];
+  limit?: InputMaybe<Scalars['Int']['input']>;
+  nextToken?: InputMaybe<Scalars['String']['input']>;
 }>;
 
 export type GqlListCampaignsByProfileQuery = {
   __typename?: 'Query';
-  listCampaignsByProfile: Array<{
-    __typename?: 'Campaign';
-    campaignId: string;
-    profileId: string;
-    campaignName: string;
-    campaignYear: number;
-    startDate?: string | null | undefined;
-    endDate?: string | null | undefined;
-    catalogId: string;
-    unitType?: string | null | undefined;
-    unitNumber?: number | null | undefined;
-    city?: string | null | undefined;
-    state?: string | null | undefined;
-    sharedCampaignCode?: string | null | undefined;
-    isActive: boolean;
-    createdAt: string;
-    updatedAt: string;
-    totalOrders?: number | null | undefined;
-    totalRevenue?: number | null | undefined;
-  }>;
+  listCampaignsByProfile: {
+    __typename?: 'CampaignConnection';
+    nextToken?: string | null | undefined;
+    campaigns: Array<{
+      __typename?: 'Campaign';
+      campaignId: string;
+      profileId: string;
+      campaignName: string;
+      campaignYear: number;
+      startDate?: string | null | undefined;
+      endDate?: string | null | undefined;
+      catalogId: string;
+      unitType?: string | null | undefined;
+      unitNumber?: number | null | undefined;
+      city?: string | null | undefined;
+      state?: string | null | undefined;
+      sharedCampaignCode?: string | null | undefined;
+      isActive: boolean;
+      createdAt: string;
+      updatedAt: string;
+      totalOrders?: number | null | undefined;
+      totalRevenue?: number | null | undefined;
+    }>;
+  };
 };
 
 export type GqlGetCampaignQueryVariables = Exact<{
