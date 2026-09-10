@@ -287,9 +287,15 @@ class TestListUnitCatalogsScope:
         seed_profile(profiles_table, OTHER_SUB, OTHER_PROFILE_ID, unitType="Pack", unitNumber=158)
         seed_campaign(campaigns_table, PROFILE_ID, CAMPAIGN_ID, catalogId=CATALOG_ID)
         seed_campaign(campaigns_table, OTHER_PROFILE_ID, "CAMPAIGN#campaign-456", catalogId="CATALOG#catalog-456")
-        catalogs_table.put_item(Item={"catalogId": CATALOG_ID, "catalogName": "Fall Catalog", "ownerAccountId": f"ACCOUNT#{OWNER_SUB}"})
         catalogs_table.put_item(
-            Item={"catalogId": "CATALOG#catalog-456", "catalogName": "Other Catalog", "ownerAccountId": f"ACCOUNT#{OTHER_SUB}"}
+            Item={"catalogId": CATALOG_ID, "catalogName": "Fall Catalog", "ownerAccountId": f"ACCOUNT#{OWNER_SUB}"}
+        )
+        catalogs_table.put_item(
+            Item={
+                "catalogId": "CATALOG#catalog-456",
+                "catalogName": "Other Catalog",
+                "ownerAccountId": f"ACCOUNT#{OTHER_SUB}",
+            }
         )
         api_calls.attach()
 
@@ -331,7 +337,9 @@ class TestListUnitCatalogsScope:
             catalogId=CATALOG_ID,
             unitCampaignKey=unit_campaign_key,
         )
-        catalogs_table.put_item(Item={"catalogId": CATALOG_ID, "catalogName": "Fall Catalog", "ownerAccountId": f"ACCOUNT#{OWNER_SUB}"})
+        catalogs_table.put_item(
+            Item={"catalogId": CATALOG_ID, "catalogName": "Fall Catalog", "ownerAccountId": f"ACCOUNT#{OWNER_SUB}"}
+        )
         api_calls.attach()
 
         result = list_unit_campaign_catalogs(
@@ -388,15 +396,11 @@ class TestListCatalogsInUseScope:
 
         calls: List[Tuple[str, str]] = []
         tables_by_name = {
-            "kernelworx-profiles-v2-ue1-dev": RecordingAsyncTable(
-                PROFILES_TABLE, [{"profileId": PROFILE_ID}], calls
-            ),
+            "kernelworx-profiles-v2-ue1-dev": RecordingAsyncTable(PROFILES_TABLE, [{"profileId": PROFILE_ID}], calls),
             "kernelworx-shares-ue1-dev": RecordingAsyncTable(
                 SHARES_TABLE, [{"profileId": "PROFILE#shared-1", "permissions": ["READ"]}], calls
             ),
-            "kernelworx-campaigns-v2-ue1-dev": RecordingAsyncTable(
-                CAMPAIGNS_TABLE, [{"catalogId": CATALOG_ID}], calls
-            ),
+            "kernelworx-campaigns-v2-ue1-dev": RecordingAsyncTable(CAMPAIGNS_TABLE, [{"catalogId": CATALOG_ID}], calls),
         }
 
         async def table_factory(table_name: str) -> RecordingAsyncTable:
@@ -413,9 +417,7 @@ class TestListCatalogsInUseScope:
         original_session = module.aioboto3.Session
         module.aioboto3.Session = MagicMock(return_value=mock_session)
         try:
-            owned, shared_profiles, shared_catalogs = await module._async_get_all_catalog_ids(
-                f"ACCOUNT#{OWNER_SUB}"
-            )
+            owned, shared_profiles, shared_catalogs = await module._async_get_all_catalog_ids(f"ACCOUNT#{OWNER_SUB}")
         finally:
             module.aioboto3.Session = original_session
 
