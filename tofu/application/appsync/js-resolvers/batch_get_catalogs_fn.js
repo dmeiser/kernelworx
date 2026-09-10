@@ -1,0 +1,78 @@
+import { util, runtime } from '@aws-appsync/utils';
+import { extractUniqueCatalogIds, attachCatalogs } from './lib/batch_catalogs.js';
+
+// WARNING: this file is loaded via Terraform templatefile() (see
+// modules/appsync/functions_catalogs.tf), so every dollar-brace sequence in
+// this file is Terraform-interpolated, not a JS template literal. The
+// table_name placeholder below is the only intended one; do NOT add other
+// dollar-brace sequences here — Terraform will try to substitute them and
+// the plan will fail or substitute the wrong value. (Switching to file() is
+// deferred per #284.)
+const tableName = '${table_name}';
+
+// DynamoDB caps BatchGetItem at 100 keys per request.
+const BATCH_GET_LIMIT = 100;
+
+/**
+ * Batch-fetch every catalog referenced by a page of campaigns in a single
+ * BatchGetItem, then attach each campaign's `catalog` from the batch result.
+ *
+ * Replaces the per-campaign Campaign.catalog GetItem field resolver (N+1
+ * reads in list queries — see #332). Runs as the last step of the
+ * listCampaignsByProfile pipeline, after #362's cursor pagination: the
+ * previous function returns a CampaignConnection ({ campaigns, nextToken }),
+ * so this function batches one page at a time and preserves nextToken.
+ * Deleted-catalog contract matches the removed campaign_catalog_response.vtl
+ * field resolver: the raw item is returned, soft-deleted catalogs included.
+ * (The SharedCampaign variant — which mapped soft-deleted catalogs to null —
+ * is batch_get_shared_campaign_catalogs_fn.js; those queries return plain
+ * arrays.)
+ */
+export function request(ctx) {
+    // #362: prev.result is a CampaignConnection, not a bare array.
+    const connection = ctx.prev.result || null;
+    const campaigns = connection && Array.isArray(connection.campaigns) ? connection.campaigns : [];
+    const catalogIds = extractUniqueCatalogIds(campaigns);
+
+    // No catalogs to fetch: skip the DynamoDB call entirely. The pipeline
+    // resolver response passes the connection through unchanged.
+    if (catalogIds.length === 0) {
+        return runtime.earlyReturn(connection);
+    }
+
+    if (catalogIds.length > BATCH_GET_LIMIT) {
+        util.error('Too many catalogs to batch fetch (' + catalogIds.length + ')', 'BadRequest');
+    }
+
+    const keys = [];
+    for (const catalogId of catalogIds) {
+        keys.push(util.dynamodb.toMapValues({ catalogId: catalogId }));
+    }
+
+    return {
+        operation: 'BatchGetItem',
+        tables: {
+            [tableName]: { keys: keys }
+        }
+    };
+}
+
+export function response(ctx) {
+    if (ctx.error) {
+        util.error(ctx.error.message, ctx.error.type);
+    }
+
+    const tableData = ctx.result && ctx.result.data ? ctx.result.data[tableName] : null;
+    const unprocessed = ctx.result && ctx.result.unprocessedKeys ? ctx.result.unprocessedKeys[tableName] : null;
+    if (unprocessed && unprocessed.length > 0) {
+        util.error('Failed to fetch ' + unprocessed.length + ' catalog(s)', 'InternalError');
+    }
+
+    const connection = ctx.prev.result || null;
+    const campaigns = connection && Array.isArray(connection.campaigns) ? connection.campaigns : [];
+    const mapped = attachCatalogs(campaigns, tableData, false);
+    if (connection && Array.isArray(connection.campaigns)) {
+        return { ...connection, campaigns: mapped };
+    }
+    return mapped;
+}

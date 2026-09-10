@@ -223,7 +223,6 @@ module "lambda" {
     "unit-reporting"         = module.iam.lambda_campaign_execution_role_arn
     # #352 (chunk 2 of #326): profile/sharing-domain handlers use the scoped
     # profile-sharing execution role.
-    "list-my-shares"         = module.iam.lambda_profile_sharing_execution_role_arn
     "transfer-ownership"     = module.iam.lambda_profile_sharing_execution_role_arn
     "delete-profile-cascade" = module.iam.lambda_profile_sharing_execution_role_arn
     # #353 (chunk 3 of #326): payment-domain handlers use the scoped payment
@@ -331,7 +330,6 @@ resource "aws_acm_certificate_validation" "site" {
 # Without imports, OpenTofu fails with ResourceAlreadyExistsException.
 import {
   for_each = toset([
-    "list-my-shares",
     "list-catalogs-in-use",
     "request-report",
     "unit-reporting",

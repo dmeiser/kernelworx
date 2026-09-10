@@ -33,4 +33,20 @@ describe('confirm_qr_upload_fn response', () => {
 
         assert.throws(() => response(ctx), /NotFound: S3 object not found/);
     });
+
+    it('aborts the pipeline when the handler returns a structured error', () => {
+        const ctx = {
+            result: { __isError: true, errorCode: 'NOT_FOUND', message: 'S3 object not found' },
+            error: null,
+        };
+
+        assert.throws(
+            () => response(ctx),
+            (err) => {
+                assert.strictEqual(err.message, 'NOT_FOUND: S3 object not found');
+                assert.deepStrictEqual(err.errorInfo, { errorCode: 'NOT_FOUND' });
+                return true;
+            }
+        );
+    });
 });

@@ -33,6 +33,18 @@ else:  # pragma: no cover
     except ModuleNotFoundError:
         from ..utils.pagination import query_all_items
 
+# The decorator stays typed for mypy via the relative import below; at runtime
+# the absolute import resolves in the Lambda zip (package `utils`) and the
+# relative fallback resolves in unit tests (package `src.handlers`).
+if TYPE_CHECKING:  # pragma: no cover
+    from ..utils.handlers import lambda_handler as with_error_handling
+else:  # pragma: no cover
+    try:
+        from utils.handlers import lambda_handler as with_error_handling
+    except ModuleNotFoundError:
+        from ..utils.handlers import lambda_handler as with_error_handling
+
+
 logger = get_logger(__name__)
 
 BATCH_SIZE = 25
@@ -280,6 +292,7 @@ def _delete_profile(owner_account_id: str, profile_id: str) -> None:
         raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to delete profile metadata")
 
 
+@with_error_handling(error_message="Failed to delete profile")
 def lambda_handler(event: Dict[str, Any], context: Any) -> bool:
     """Cascade-delete a profile and all related data.
 
@@ -295,13 +308,14 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> bool:
         True on success
 
     Raises:
-        ValueError: If profileId is missing
-        AppError: If the profile is not found, the caller is not the owner,
-            or deletion fails
+        AppError: If profileId is missing, the profile is not found, the
+            caller is not the owner, or deletion fails
     """
     profile_id = event.get("arguments", {}).get("profileId")
     if not profile_id:
-        raise ValueError("profileId is required")
+        # INVALID_INPUT (an AppError) so the message propagates unchanged
+        # through the with_error_handling decorator.
+        raise AppError(ErrorCode.INVALID_INPUT, "profileId is required")
 
     db_profile_id = ensure_profile_id(profile_id)
     # ensure_profile_id only returns None for falsy input, which is guarded above

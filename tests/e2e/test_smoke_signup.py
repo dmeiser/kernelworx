@@ -1,5 +1,9 @@
 """Smoke tests for the signup UI.
 
+``admin-confirm-sign-up`` races Cognito's read-after-write propagation: a
+``SignUp`` that has just returned can still yield ``UserNotFoundException``
+from immediate admin reads, so the confirmation step retries with backoff.
+
 ``TEST_USER_POOL_ID`` is confirmed present in the dev ``.env``; the Cognito
 user pool is accessible from the dev environment.
 
@@ -20,6 +24,26 @@ Design decisions
   ``tests/integration/globalTeardown.ts``; the completion test also deletes
   its own user in a ``finally`` block, so the corresponding Account rows
   created by the post-confirmation trigger are removed from DynamoDB too.
+* ``admin-confirm-sign-up`` retries ``UserNotFoundException`` with
+  exponential backoff capped at 60 s (~14 minutes of backoff across 18
+  attempts): a freshly created Cognito user is not always visible to admin
+  reads immediately (read-after-write propagation), and "not found yet" is
+  the expected transient, not an error.
+* A failed ``signUp`` renders a MUI *error* alert (``AlertMessages`` in
+  ``SignupPage.tsx`` renders error and success alerts with the same
+  ``role="alert"``). The verification wait must therefore never treat a
+  generic alert as success: it matches only the genuine success signals
+  ("check your email" / "verification" text), then fails fast with the
+  error alert text. Otherwise a failed signup false-passes and the flow
+  dies later with a misleading ``UserNotFoundException`` from
+  ``admin-confirm-sign-up`` against a user that was never created.
+* The one expected environmental signup failure is Cognito's account-level
+  daily email-sending quota (50/day with the default email configuration)
+  being exhausted by fleet-wide smoke traffic. Once saturated, ``SignUp``
+  itself is rejected, so the native-signup path is **untestable, not
+  failing**: when the surfaced error is exactly the daily-email-limit
+  message, both signup tests ``pytest.skip`` with that reason instead of
+  failing. The quota resets daily; every other signup error still fails.
 * The submit button label verified from ``SignupPage.tsx`` is *Create Account*.
 * The age-confirmation checkbox label is
   *I confirm that I am 13 years of age or older*.
@@ -52,6 +76,14 @@ def _random_smoke_email() -> str:
 _SMOKE_PASSWORD = "SmokeT3st!2026"
 
 
+# Cognito account-level email quota: with the default email configuration
+# Cognito caps sending at 50 emails/day/account. Once the fleet's smoke
+# signup runs exhaust that quota, ``SignUp`` itself is rejected with this
+# message, so the native-signup path is untestable (not failing) until the
+# quota resets.
+_DAILY_EMAIL_LIMIT_RE = re.compile(r"Exceeded daily email limit", re.IGNORECASE)
+
+
 def _submit_signup_and_wait_for_verification(page: Page, email: str, password: str) -> None:
     """Fill and submit the signup form, then wait for the verification UI.
 
@@ -59,11 +91,12 @@ def _submit_signup_and_wait_for_verification(page: Page, email: str, password: s
     verification step showing text containing "check your email" or
     "verification" (case-insensitive).
 
-    A transient ``signUp`` failure renders a MUI *error* alert instead. That
-    error alert must not be mistaken for reaching the verification step:
-    proceeding past a failed signup surfaces later as a confusing Cognito
-    ``UserNotFoundException`` from ``admin-confirm-sign-up``. If the error
-    alert appears, fail immediately with its message.
+    A failed ``signUp`` renders a MUI *error* alert instead (``AlertMessages``
+    in ``SignupPage.tsx`` gives error and success alerts the same
+    ``role="alert"``, so a generic alert match would false-pass). If the
+    error alert appears, the helper fails fast with the alert text — except
+    when the text is Cognito's daily-email-limit quota message, in which case
+    native signup is untestable and the test is skipped with that reason.
     """
     page.locator('input[type="email"]').first.fill(email)
 
@@ -78,62 +111,65 @@ def _submit_signup_and_wait_for_verification(page: Page, email: str, password: s
 
     page.get_by_role("button", name=_CREATE_ACCOUNT_BTN).click()
 
-    error_alert = page.locator(".MuiAlert-standardError")
     verification_text = page.get_by_text(re.compile("check your email", re.IGNORECASE)).or_(
         page.get_by_text(re.compile("verification", re.IGNORECASE))
     )
+    error_alert = page.locator(".MuiAlert-standardError")
     expect(verification_text.first.or_(error_alert.first)).to_be_visible(timeout=20_000)
     if error_alert.first.is_visible():
-        pytest.fail(f"SignUp failed unexpectedly: {error_alert.first.inner_text()}")
+        message = error_alert.first.inner_text()
+        if _DAILY_EMAIL_LIMIT_RE.search(message):
+            pytest.skip(f"Cognito daily email quota exhausted, native signup untestable: {message}")
+        pytest.fail(f"SignUp failed unexpectedly: {message}")
 
 
-def _cognito_cli_result(*args: str) -> subprocess.CompletedProcess[str]:
+# Retry budget for admin-confirm-sign-up only. This tolerates genuine
+# read-after-write propagation lag: a freshly created Cognito user is not
+# always visible to admin reads immediately, and "not found yet" is the
+# expected transient. Note this retry does NOT help when ``signUp`` itself
+# was rejected (e.g. Cognito's daily email quota exhausted) — no user exists
+# to find; that case is caught much earlier by
+# ``_submit_signup_and_wait_for_verification``. Budget: ~14 minutes of
+# backoff across 18 attempts (exponential, capped at 60 s); every other
+# failure and every other command still fail on the first attempt.
+_CONFIRM_SIGNUP_MAX_ATTEMPTS = 18
+_CONFIRM_SIGNUP_BACKOFF_CAP_SECONDS = 60
+_CONFIRM_SIGNUP_BACKOFF_BASE_SECONDS = 5
+
+
+def _confirm_signup_backoff_seconds(attempt: int) -> int:
+    """Exponential backoff for attempt ``n``: 5, 10, 20, 40, then 60 s cap."""
+    return min(
+        _CONFIRM_SIGNUP_BACKOFF_CAP_SECONDS,
+        _CONFIRM_SIGNUP_BACKOFF_BASE_SECONDS << attempt,
+    )
+
+
+def _cognito_cli(*args: str, retry_user_not_found: bool = False) -> None:
     """Run an ``aws cognito-idp`` admin command via the AWS CLI subprocess.
 
     The CLI is used instead of boto3 so the test inherits the same credential
     source as the local AWS CLI (boto3's pinned botocore may not implement the
     local credential provider plugins), matching the cleanup helper in
     ``tests/e2e/conftest.py``.
+
+    With ``retry_user_not_found=True``, a ``UserNotFoundException`` failure is
+    retried with exponential backoff (see :func:`_confirm_signup_backoff_seconds`)
+    before raising; all other failures raise immediately.
     """
     cmd = ["aws", "cognito-idp", *args, "--output", "json", "--no-cli-pager"]
     region = os.environ.get("TEST_REGION")
     if region:
         cmd.extend(["--region", region])
-    return subprocess.run(cmd, check=False, capture_output=True, text=True, timeout=120)
-
-
-def _cognito_cli(*args: str) -> None:
-    """Run an ``aws cognito-idp`` admin command, raising with stderr on failure."""
-    result = _cognito_cli_result(*args)
-    if result.returncode != 0:
-        raise RuntimeError(f"aws cognito-idp {' '.join(args)} failed: {result.stderr}")
-
-
-def _confirm_signup(user_pool_id: str, email: str) -> None:
-    """Confirm a freshly signed-up user, tolerating brief propagation lag.
-
-    A user record can take a moment to become visible to Cognito admin APIs
-    immediately after ``SignUp``; a ``UserNotFoundException`` right after a
-    successful signup is a transient propagation race, not a missing user.
-    """
-    for attempt in range(5):
-        result = _cognito_cli_result(
-            "admin-confirm-sign-up",
-            "--user-pool-id",
-            user_pool_id,
-            "--username",
-            email,
-        )
+    for attempt in range(_CONFIRM_SIGNUP_MAX_ATTEMPTS if retry_user_not_found else 1):
+        result = subprocess.run(cmd, check=False, capture_output=True, text=True, timeout=120)
         if result.returncode == 0:
             return
-        if "UserNotFoundException" not in result.stderr:
-            raise RuntimeError(f"aws cognito-idp admin-confirm-sign-up failed: {result.stderr}")
-        if attempt < 4:
-            time.sleep(3)
-    raise RuntimeError(
-        "aws cognito-idp admin-confirm-sign-up still returning UserNotFoundException "
-        "after signup verification UI appeared; user never became visible"
-    )
+        if not (retry_user_not_found and "UserNotFoundException" in result.stderr):
+            break
+        if attempt < _CONFIRM_SIGNUP_MAX_ATTEMPTS - 1:
+            time.sleep(_confirm_signup_backoff_seconds(attempt))
+    raise RuntimeError(f"aws cognito-idp {' '.join(args)} failed: {result.stderr}")
 
 
 @pytest.mark.smoke
@@ -199,7 +235,14 @@ def test_signup_completes_after_backend_confirmation(page: Page) -> None:
     if not user_pool_id:
         pytest.fail("TEST_USER_POOL_ID is not set in environment.")
 
-    _confirm_signup(user_pool_id, email)
+    _cognito_cli(
+        "admin-confirm-sign-up",
+        "--user-pool-id",
+        user_pool_id,
+        "--username",
+        email,
+        retry_user_not_found=True,
+    )
 
     page.get_by_role("button", name="Back to Login").click()
     page.wait_for_url("**/login", timeout=10_000)

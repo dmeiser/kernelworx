@@ -16,7 +16,7 @@ from src.handlers.delete_profile_cascade import (
     lambda_handler,
 )
 from src.utils.dynamodb import clear_all_overrides
-from src.utils.errors import AppError
+from src.utils.errors import AppError, ErrorCode
 
 
 @pytest.fixture(autouse=True)
@@ -116,20 +116,25 @@ def _make_mock_batch_writer() -> MagicMock:
 class TestDeleteProfileCascade:
     """Tests for the single-Lambda cascade profile deletion."""
 
-    def test_missing_profile_id_raises_error(self) -> None:
-        """Test that missing profileId raises ValueError."""
+    def test_missing_profile_id_returns_error_payload(self) -> None:
+        """Test that missing profileId returns an INVALID_INPUT error payload."""
         event = {"arguments": {}, "identity": {"sub": "owner-123"}}
-        with pytest.raises(ValueError, match="profileId is required"):
-            lambda_handler(event, None)
+        result = lambda_handler(event, None)
 
-    def test_profile_not_found_raises_error(self, profiles_table: Any) -> None:
-        """Test that deleting a non-existent profile raises an error during auth."""
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.INVALID_INPUT
+        assert result["message"] == "profileId is required"
+
+    def test_profile_not_found_returns_error_payload(self, profiles_table: Any) -> None:
+        """Test that deleting a non-existent profile returns an error during auth."""
         event = {
             "arguments": {"profileId": "PROFILE#nonexistent"},
             "identity": {"sub": "owner-123"},
         }
-        with pytest.raises(Exception):
-            lambda_handler(event, None)
+        result = lambda_handler(event, None)
+
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.NOT_FOUND
 
     def test_get_profile_owner_id_not_found(self, profiles_table: Any) -> None:
         """Test _get_profile_owner_id raises NOT_FOUND when the profile is absent."""
@@ -213,9 +218,10 @@ class TestDeleteProfileCascade:
             "identity": {"sub": "other-user"},
         }
         with patch("src.handlers.delete_profile_cascade.time.sleep"):
-            with pytest.raises(AppError) as exc_info:
-                lambda_handler(event, None)
-        assert exc_info.value.error_code == "NOT_FOUND"
+            result = lambda_handler(event, None)
+
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.NOT_FOUND
 
     def test_delete_empty_profile(self, profiles_table: Any) -> None:
         """Test deleting a profile with no related data."""
@@ -465,8 +471,10 @@ class TestDeleteProfileCascade:
             "arguments": {"profileId": profile_id},
             "identity": {"sub": writer_id},
         }
-        with pytest.raises(Exception):
-            lambda_handler(event, None)
+        result = lambda_handler(event, None)
+
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.NOT_FOUND
 
     def test_unauthenticated_user_cannot_delete(self, profiles_table: Any) -> None:
         """Test that an unauthenticated user cannot delete a profile."""
@@ -477,8 +485,10 @@ class TestDeleteProfileCascade:
         event = {
             "arguments": {"profileId": profile_id},
         }
-        with pytest.raises(Exception):
-            lambda_handler(event, None)
+        result = lambda_handler(event, None)
+
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.UNAUTHORIZED
 
     def test_shared_user_with_read_only_cannot_delete(self, profiles_table: Any, shares_table: Any) -> None:
         """Test that a shared user with only READ access cannot delete."""
@@ -499,8 +509,10 @@ class TestDeleteProfileCascade:
             "arguments": {"profileId": profile_id},
             "identity": {"sub": reader_id},
         }
-        with pytest.raises(Exception):
-            lambda_handler(event, None)
+        result = lambda_handler(event, None)
+
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.NOT_FOUND
 
     def test_campaign_without_campaign_id_is_skipped(
         self, profiles_table: Any, campaigns_table: Any, orders_table: Any, monkeypatch: Any
@@ -589,8 +601,10 @@ class TestDeleteProfileCascade:
                 "arguments": {"profileId": profile_id},
                 "identity": {"sub": owner_id},
             }
-            with pytest.raises(Exception):
-                lambda_handler(event, None)
+            result = lambda_handler(event, None)
+
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
 
     def test_delete_orders_with_pagination(self, profiles_table: Any, campaigns_table: Any) -> None:
         """Test that the handler paginates through order query results."""
@@ -682,13 +696,15 @@ class TestDeleteProfileCascade:
                 "arguments": {"profileId": profile_id},
                 "identity": {"sub": owner_id},
             }
-            with pytest.raises(AppError):
-                lambda_handler(event, None)
+            result = lambda_handler(event, None)
+
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
 
             # The profile metadata row must not be deleted if related data could not be removed.
             mock_tables.profiles.delete_item.assert_not_called()
 
-    def test_batch_write_client_error_raises_app_error(
+    def test_batch_write_client_error_returns_error_payload(
         self,
         profiles_table: Any,
     ) -> None:
@@ -719,8 +735,10 @@ class TestDeleteProfileCascade:
                 "arguments": {"profileId": profile_id},
                 "identity": {"sub": owner_id},
             }
-            with pytest.raises(AppError):
-                lambda_handler(event, None)
+            result = lambda_handler(event, None)
+
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
 
             mock_tables.profiles.delete_item.assert_not_called()
 

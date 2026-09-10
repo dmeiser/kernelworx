@@ -42,27 +42,51 @@ resource "aws_appsync_resolver" "get_profile" {
   response_template = file("${local.mapping_templates_dir}/get_profile_response.vtl")
 }
 
-# listMyProfiles (JS)
+# listMyProfiles Pipeline (JS)
+# Batch-attaches latestCampaign to profiles carrying the denormalized
+# latestCampaignId field in a single BatchGetItem per page (#331);
+# unmigrated profiles fall through to the field resolver's per-item Query.
 resource "aws_appsync_resolver" "list_my_profiles" {
-  api_id      = aws_appsync_graphql_api.main.id
-  type        = "Query"
-  field       = "listMyProfiles"
-  data_source = aws_appsync_datasource.profiles.name
+  api_id = aws_appsync_graphql_api.main.id
+  type   = "Query"
+  field  = "listMyProfiles"
+  kind   = "PIPELINE"
+
+  pipeline_config {
+    functions = [
+      aws_appsync_function.list_my_profiles.function_id,
+      aws_appsync_function.batch_latest_campaigns.function_id,
+    ]
+  }
 
   runtime {
     name            = "APPSYNC_JS"
     runtime_version = "1.0.0"
   }
 
-  code = file("${local.js_resolvers_dir}/list_my_profiles_fn.js")
+  code = file("${local.js_resolvers_dir}/list_my_profiles_pipeline_resolver.js")
 }
 
-# listMyShares (Lambda)
+# listMyShares Pipeline (JS) - migrated from the list-my-shares Lambda (#334)
 resource "aws_appsync_resolver" "list_my_shares" {
-  api_id      = aws_appsync_graphql_api.main.id
-  type        = "Query"
-  field       = "listMyShares"
-  data_source = aws_appsync_datasource.list_my_shares.name
+  api_id = aws_appsync_graphql_api.main.id
+  type   = "Query"
+  field  = "listMyShares"
+  kind   = "PIPELINE"
+
+  pipeline_config {
+    functions = [
+      aws_appsync_function.query_my_shares.function_id,
+      aws_appsync_function.batch_get_shared_profiles.function_id,
+    ]
+  }
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/list_my_shares_pipeline_resolver.js")
 }
 
 # listCatalogsInUse (Lambda)
@@ -71,6 +95,13 @@ resource "aws_appsync_resolver" "list_catalogs_in_use" {
   type        = "Query"
   field       = "listCatalogsInUse"
   data_source = aws_appsync_datasource.list_catalogs_in_use.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
 }
 
 # === CAMPAIGN QUERIES ===
@@ -100,6 +131,8 @@ resource "aws_appsync_resolver" "get_campaign" {
 }
 
 # listCampaignsByProfile Pipeline
+# Last step batch-resolves every campaign's catalog in one BatchGetItem
+# instead of one GetItem per campaign via the field resolver (#332).
 resource "aws_appsync_resolver" "list_campaigns_by_profile" {
   api_id = aws_appsync_graphql_api.main.id
   type   = "Query"
@@ -111,6 +144,7 @@ resource "aws_appsync_resolver" "list_campaigns_by_profile" {
       aws_appsync_function.verify_profile_read_access.function_id,
       aws_appsync_function.check_share_read_permissions.function_id,
       aws_appsync_function.query_campaigns.function_id,
+      aws_appsync_function.batch_get_catalogs.function_id,
     ]
   }
 
@@ -276,34 +310,52 @@ resource "aws_appsync_resolver" "get_shared_campaign" {
   response_template = file("${local.mapping_templates_dir}/get_shared_campaign_response.vtl")
 }
 
-# listMySharedCampaigns (JS)
+# listMySharedCampaigns Pipeline (#332)
+# Batch-resolves every shared campaign's catalog in one BatchGetItem instead
+# of one GetItem per campaign via the field resolver.
 resource "aws_appsync_resolver" "list_my_shared_campaigns" {
-  api_id      = aws_appsync_graphql_api.main.id
-  type        = "Query"
-  field       = "listMySharedCampaigns"
-  data_source = aws_appsync_datasource.shared_campaigns.name
+  api_id = aws_appsync_graphql_api.main.id
+  type   = "Query"
+  field  = "listMySharedCampaigns"
+  kind   = "PIPELINE"
+
+  pipeline_config {
+    functions = [
+      aws_appsync_function.query_my_shared_campaigns.function_id,
+      aws_appsync_function.batch_get_shared_campaign_catalogs.function_id,
+    ]
+  }
 
   runtime {
     name            = "APPSYNC_JS"
     runtime_version = "1.0.0"
   }
 
-  code = file("${local.js_resolvers_dir}/list_my_shared_campaigns_resolver.js")
+  code = file("${local.js_resolvers_dir}/list_my_shared_campaigns_pipeline_resolver.js")
 }
 
-# findSharedCampaigns (JS)
+# findSharedCampaigns Pipeline (#332)
+# Batch-resolves every shared campaign's catalog in one BatchGetItem instead
+# of one GetItem per campaign via the field resolver.
 resource "aws_appsync_resolver" "find_shared_campaigns" {
-  api_id      = aws_appsync_graphql_api.main.id
-  type        = "Query"
-  field       = "findSharedCampaigns"
-  data_source = aws_appsync_datasource.shared_campaigns.name
+  api_id = aws_appsync_graphql_api.main.id
+  type   = "Query"
+  field  = "findSharedCampaigns"
+  kind   = "PIPELINE"
+
+  pipeline_config {
+    functions = [
+      aws_appsync_function.find_shared_campaigns_by_unit.function_id,
+      aws_appsync_function.batch_get_shared_campaign_catalogs.function_id,
+    ]
+  }
 
   runtime {
     name            = "APPSYNC_JS"
     runtime_version = "1.0.0"
   }
 
-  code = file("${local.js_resolvers_dir}/find_shared_campaigns_resolver.js")
+  code = file("${local.js_resolvers_dir}/find_shared_campaigns_pipeline_resolver.js")
 }
 
 # === REPORTING QUERIES ===
@@ -314,6 +366,13 @@ resource "aws_appsync_resolver" "get_unit_report" {
   type        = "Query"
   field       = "getUnitReport"
   data_source = aws_appsync_datasource.unit_reporting.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
 }
 
 # listUnitCatalogs (Lambda)
@@ -322,6 +381,13 @@ resource "aws_appsync_resolver" "list_unit_catalogs" {
   type        = "Query"
   field       = "listUnitCatalogs"
   data_source = aws_appsync_datasource.list_unit_catalogs.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
 }
 
 # listUnitCampaignCatalogs (Lambda)
@@ -330,6 +396,13 @@ resource "aws_appsync_resolver" "list_unit_campaign_catalogs" {
   type        = "Query"
   field       = "listUnitCampaignCatalogs"
   data_source = aws_appsync_datasource.list_unit_campaign_catalogs.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
 }
 
 # === PAYMENT METHODS QUERIES ===
