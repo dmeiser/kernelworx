@@ -8,10 +8,12 @@ role grants DynamoDB GetItem/Query on exactly the tables the handlers touch
 (accounts, profiles, shares — the last two only via the shared
 ``utils.auth.check_profile_access`` collaborator path), UpdateItem on the
 accounts table only (payment methods live in the account record's
-``preferences.paymentMethods`` attribute), and S3 GetObject (HeadObject) /
-DeleteObject scoped to the ``payment-qr-codes/*`` prefix of the exports bucket.
-The pre-signed POST/GET URLs are signed client-side and used by the browser
-directly against S3, so they need no Lambda permission. See
+``preferences.paymentMethods`` attribute), and S3 PutObject / GetObject
+(HeadObject) / DeleteObject scoped to the ``payment-qr-codes/*`` prefix of the
+exports bucket. PutObject is required even though the upload runs browser-side:
+S3 authorizes a pre-signed request against the signing role's policy at request
+time, so the role backing ``request_qr_upload`` must hold PutObject on the QR
+prefix or the browser POST fails with 403. See
 ``tofu/application/modules/iam/main.tf``.
 
 These tests invoke the real handlers against moto DynamoDB/S3 while recording
@@ -49,7 +51,9 @@ UPDATE_TABLES = {ACCOUNTS_TABLE}
 ALLOWED_DYNAMODB_ACTIONS = {"GetItem", "Query", "UpdateItem"}
 
 # S3 API operations the #353 role permits, and the only object prefix the role
-# allows. HeadObject is authorized by the s3:GetObject IAM action.
+# allows. HeadObject is authorized by the s3:GetObject IAM action; PutObject is
+# also granted (for pre-signed POST uploads) but no handler issues it directly,
+# so it is never recorded here.
 ALLOWED_S3_OPERATIONS = {"HeadObject", "DeleteObject"}
 ALLOWED_S3_PREFIX = "payment-qr-codes/"
 
@@ -68,8 +72,10 @@ class ApiCallRecorder:
     (Table.get_item/update_item) and client-style calls are captured with
     their real operation names. Seeding performed before ``attach()`` is not
     recorded. Pre-signed URL generation never reaches this layer (it is pure
-    client-side signing), which is exactly why the role needs no PutObject /
-    GetObject grant for the upload/download URLs themselves.
+    client-side signing), so no PutObject call is recorded for
+    ``request_qr_upload`` — but the role still grants s3:PutObject on the QR
+    prefix, because S3 authorizes the browser's pre-signed POST against the
+    signing role's policy at request time.
     """
 
     def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:

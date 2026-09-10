@@ -453,18 +453,22 @@ resource "aws_iam_role_policy" "lambda_profile_sharing_s3" {
 # S3 scope: QR codes live under payment-qr-codes/<accountId>/ in the exports
 # bucket. confirm-qr-upload HEADs the uploaded object
 # (s3:GetObject covers HeadObject) and deletes the replaced object;
-# delete-qr-code deletes the stored object. The pre-signed POST/GET URLs from
-# request-qr-upload / generate-qr-code-presigned-url are signed client-side
-# and used by the browser directly against S3, so they need no Lambda
-# permission. Scoped to the payment-qr-codes/* prefix only. No KMS
-# (bucket is not SSE-KMS), CloudFront, or Cognito permissions.
+# delete-qr-code deletes the stored object. request-qr-upload returns a
+# pre-signed POST URL: although the upload itself is performed by the browser
+# directly against S3, S3 authorizes the pre-signed request against the
+# SIGNING principal's policy at request time, so this role still needs
+# s3:PutObject on the QR prefix or the browser upload fails with 403
+# (the pre-signed GET from generate-qr-code-presigned-url is authorized by
+# the s3:GetObject grant below). Scoped to the payment-qr-codes/* prefix
+# only. No KMS (bucket is not SSE-KMS), CloudFront, or Cognito permissions.
 # The monolithic shared role is intentionally NOT narrowed here — that is the
 # final chunk (#355).
 
 locals {
-  payment_table_keys = ["accounts", "profiles", "shares"]
-  payment_table_arns = [for k in local.payment_table_keys : var.dynamodb_table_arns[k]]
-  payment_index_arns = [for arn in local.payment_table_arns : "${arn}/index/*"]
+  payment_table_keys         = ["accounts", "profiles", "shares"]
+  payment_table_arns         = [for k in local.payment_table_keys : var.dynamodb_table_arns[k]]
+  payment_profile_arns       = [var.dynamodb_table_arns["profiles"]]
+  payment_profile_index_arns = [for arn in local.payment_profile_arns : "${arn}/index/*"]
 }
 
 resource "aws_iam_role" "lambda_payment_execution" {
@@ -483,16 +487,22 @@ resource "aws_iam_role_policy_attachment" "lambda_payment_basic" {
 }
 
 data "aws_iam_policy_document" "lambda_payment_dynamodb" {
-  # Read actions on every table these handlers touch, plus their GSIs.
-  # profiles/shares are reached only through utils.auth.check_profile_access
-  # (generate-qr-code-presigned-url's collaborator path).
+  # Read actions split exactly per the traced calls: GetItem on all three
+  # tables these handlers touch (accounts via utils.payment_methods,
+  # profiles/shares via utils.auth.check_profile_access),
+  # and Query only on the profiles table and its GSIs (the profileId-index
+  # lookup in check_profile_access). No Query on accounts or shares — the
+  # handlers never scan or look up those tables by key condition.
   statement {
-    effect = "Allow"
-    actions = [
-      "dynamodb:GetItem",
-      "dynamodb:Query",
-    ]
-    resources = concat(local.payment_table_arns, local.payment_index_arns)
+    effect    = "Allow"
+    actions   = ["dynamodb:GetItem"]
+    resources = local.payment_table_arns
+  }
+
+  statement {
+    effect    = "Allow"
+    actions   = ["dynamodb:Query"]
+    resources = concat(local.payment_profile_arns, local.payment_profile_index_arns)
   }
 
   # confirm-qr-upload / delete-qr-code rewrite the account record's
@@ -514,15 +524,19 @@ resource "aws_iam_role_policy" "lambda_payment_dynamodb" {
 data "aws_iam_policy_document" "lambda_payment_s3" {
   # confirm-qr-upload validates the uploaded object with HeadObject
   # (authorized by s3:GetObject) and deletes the replaced QR object;
-  # delete-qr-code deletes the stored QR object. Scoped to the QR prefix.
-  # KICS flags scoped s3:GetObject as potential data exfiltration; the keys
-  # are ownership-validated in code (validate_qr_s3_key) and the prefix is
-  # account-scoped, so this is expected access, not exfiltration.
+  # delete-qr-code deletes the stored QR object. s3:PutObject covers the
+  # browser's upload to the pre-signed POST URL that request-qr-upload
+  # returns — S3 authorizes pre-signed requests against the signing role's
+  # policy, so the role must hold PutObject on this prefix. Scoped to the QR
+  # prefix. KICS flags scoped s3:GetObject as potential data exfiltration;
+  # the keys are ownership-validated in code (validate_qr_s3_key) and the
+  # prefix is account-scoped, so this is expected access, not exfiltration.
   # kics-scan disable-line
   statement {
     effect = "Allow"
     # kics-scan ignore-line
     actions = [
+      "s3:PutObject",
       "s3:GetObject",
       "s3:DeleteObject",
     ]
