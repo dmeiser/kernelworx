@@ -40,7 +40,8 @@ UNIT_RESOLVER = "lambda_unit_resolver.js"
 # through direct UNIT resolvers (pipeline functions and field resolvers on
 # these handlers have their own JS code with __isError detection).
 EXPECTED_UNIT_FIELDS = {
-    "aws_appsync_datasource.list_my_shares.name": {"listMyShares"},
+    # listMyShares migrated to a JS pipeline resolver (#334) and no longer
+    # invokes a Lambda; it is intentionally absent from this map.
     "aws_appsync_datasource.list_catalogs_in_use.name": {"listCatalogsInUse"},
     "aws_appsync_datasource.request_report.name": {"requestCampaignReport"},
     "aws_appsync_datasource.unit_reporting.name": {"getUnitReport"},

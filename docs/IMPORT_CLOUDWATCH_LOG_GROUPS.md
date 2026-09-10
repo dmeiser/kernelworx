@@ -63,9 +63,6 @@ If your OpenTofu/Terraform version supports declarative imports, a single `tofu 
    For example, in the `dev` environment with `name_prefix = "kernelworx"` and `region_abbrev = "ue1"`:
 
    ```bash
-   tofu import 'module.lambda.aws_cloudwatch_log_group.functions["list-my-shares"]' \
-     '/aws/lambda/kernelworx-list-my-shares-ue1-dev'
-
    tofu import 'module.lambda.aws_cloudwatch_log_group.trigger_functions["post-auth"]' \
      '/aws/lambda/kernelworx-post-auth-ue1-dev'
    ```
@@ -82,7 +79,6 @@ If your OpenTofu/Terraform version supports declarative imports, a single `tofu 
 
 The current app function keys are:
 
-- `list-my-shares`
 - `list-catalogs-in-use`
 - `request-report`
 - `unit-reporting`
@@ -114,7 +110,7 @@ prefix="kernelworx"
 region_abbrev="ue1"
 environment="prod"   # change to "dev" as needed
 
-for key in list-my-shares list-catalogs-in-use request-report unit-reporting \
+for key in list-catalogs-in-use request-report unit-reporting \
            list-unit-catalogs list-unit-campaign-catalogs \
            delete-campaign-orders delete-profile-cascade delete-account \
            transfer-ownership request-qr-upload confirm-qr-upload \

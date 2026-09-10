@@ -12,7 +12,7 @@ import '../setup.ts';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { ApolloClient, gql, HttpLink, InMemoryCache } from '@apollo/client';
 import { createAuthenticatedClient, AuthenticatedClientResult } from '../setup/apolloClient';
-import { deleteCatalogWithRetry, deleteTestAccounts } from '../setup/testData';
+import { deleteCatalogWithRetry, deleteTestAccounts, waitForGSIConsistency } from '../setup/testData';
 
 // Helper to create unauthenticated client
 const createUnauthenticatedClient = () => {
@@ -970,6 +970,24 @@ describe('createCampaign Integration Tests', () => {
       // Assert: Campaign created with future startDate
       expect(data.createCampaign.campaignId).toBeDefined();
       expect(data.createCampaign.startDate).toBe(futureDate);
+
+      // Wait for the campaignId-index GSI to reflect the new campaign before
+      // deleting: deleteCampaign looks the campaign up via the GSI, and if it
+      // has not converged yet the delete silently no-ops (Bug #21), leaving a
+      // row that blocks catalog deletion.
+      await waitForGSIConsistency(
+        async () => {
+          const res = await ownerClient.query({
+            query: GET_CAMPAIGN,
+            variables: { campaignId: data.createCampaign.campaignId },
+            fetchPolicy: 'network-only',
+          });
+          return res.data?.getCampaign ? [res.data.getCampaign] : [];
+        },
+        (items) => items.length > 0,
+        10,
+        1000
+      );
 
       // Cleanup
       await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId: data.createCampaign.campaignId } });
