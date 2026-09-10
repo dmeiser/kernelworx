@@ -123,15 +123,18 @@ const GET_CAMPAIGN = gql`
 const LIST_CAMPAIGNS_BY_PROFILE = gql`
   query ListCampaignsByProfile($profileId: ID!) {
     listCampaignsByProfile(profileId: $profileId) {
-      campaignId
-      profileId
-      campaignName
-      campaignYear
-      startDate
-      endDate
-      catalogId
-      createdAt
-      updatedAt
+      campaigns {
+        campaignId
+        profileId
+        campaignName
+        campaignYear
+        startDate
+        endDate
+        catalogId
+        createdAt
+        updatedAt
+      }
+      nextToken
     }
   }
 `;
@@ -526,11 +529,11 @@ describe('Campaign Query Resolvers Integration Tests', () => {
         });
 
         // Assert
-        expect(data.listCampaignsByProfile).toBeDefined();
-        expect(data.listCampaignsByProfile.length).toBe(2);
-        expect(data.listCampaignsByProfile[0].campaignId).toBeDefined();
-        expect(data.listCampaignsByProfile[0].campaignName).toContain('Campaign');
-        expect(data.listCampaignsByProfile[1].campaignId).toBeDefined();
+        expect(data.listCampaignsByProfile.campaigns).toBeDefined();
+        expect(data.listCampaignsByProfile.campaigns.length).toBe(2);
+        expect(data.listCampaignsByProfile.campaigns[0].campaignId).toBeDefined();
+        expect(data.listCampaignsByProfile.campaigns[0].campaignName).toContain('Campaign');
+        expect(data.listCampaignsByProfile.campaigns[1].campaignId).toBeDefined();
         
         // Cleanup
         await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId: campaignId1 } });
@@ -555,8 +558,8 @@ describe('Campaign Query Resolvers Integration Tests', () => {
         });
 
         // Assert
-        expect(data.listCampaignsByProfile).toBeDefined();
-        expect(data.listCampaignsByProfile).toEqual([]);
+        expect(data.listCampaignsByProfile.campaigns).toBeDefined();
+        expect(data.listCampaignsByProfile.campaigns).toEqual([]);
         
         // Cleanup
         await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
@@ -571,8 +574,8 @@ describe('Campaign Query Resolvers Integration Tests', () => {
         });
 
         // Assert
-        expect(data.listCampaignsByProfile).toBeDefined();
-        expect(data.listCampaignsByProfile).toEqual([]);
+        expect(data.listCampaignsByProfile.campaigns).toBeDefined();
+        expect(data.listCampaignsByProfile.campaigns).toEqual([]);
       });
 
       it('should not include deleted campaign in list', async () => {
@@ -630,8 +633,8 @@ describe('Campaign Query Resolvers Integration Tests', () => {
           variables: { profileId: profileId },
           fetchPolicy: 'network-only',
         });
-        expect(beforeDelete.listCampaignsByProfile.length).toBe(2);
-        const beforeCampaignIds = beforeDelete.listCampaignsByProfile.map((s: any) => s.campaignId);
+        expect(beforeDelete.listCampaignsByProfile.campaigns.length).toBe(2);
+        const beforeCampaignIds = beforeDelete.listCampaignsByProfile.campaigns.map((s: any) => s.campaignId);
         expect(beforeCampaignIds).toContain(campaignIdToKeep);
         expect(beforeCampaignIds).toContain(campaignIdToDelete);
 
@@ -649,8 +652,8 @@ describe('Campaign Query Resolvers Integration Tests', () => {
         });
 
         // Assert: Only the kept campaign should appear
-        expect(afterDelete.listCampaignsByProfile.length).toBe(1);
-        const afterCampaignIds = afterDelete.listCampaignsByProfile.map((s: any) => s.campaignId);
+        expect(afterDelete.listCampaignsByProfile.campaigns.length).toBe(1);
+        const afterCampaignIds = afterDelete.listCampaignsByProfile.campaigns.map((s: any) => s.campaignId);
         expect(afterCampaignIds).toContain(campaignIdToKeep);
         expect(afterCampaignIds).not.toContain(campaignIdToDelete);
 
@@ -704,8 +707,8 @@ describe('Campaign Query Resolvers Integration Tests', () => {
         });
 
         // Assert
-        expect(data.listCampaignsByProfile).toBeDefined();
-        expect(data.listCampaignsByProfile.length).toBeGreaterThan(0);
+        expect(data.listCampaignsByProfile.campaigns).toBeDefined();
+        expect(data.listCampaignsByProfile.campaigns.length).toBeGreaterThan(0);
         
         // Cleanup
         await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId } });
@@ -767,8 +770,8 @@ describe('Campaign Query Resolvers Integration Tests', () => {
         });
 
         // Assert
-        expect(data.listCampaignsByProfile).toBeDefined();
-        expect(data.listCampaignsByProfile.length).toBeGreaterThan(0);
+        expect(data.listCampaignsByProfile.campaigns).toBeDefined();
+        expect(data.listCampaignsByProfile.campaigns.length).toBeGreaterThan(0);
         
         // Cleanup
         await ownerClient.mutate({ mutation: REVOKE_SHARE, variables: { input: { profileId, targetAccountId: readonlyAccountId } } });
@@ -819,7 +822,7 @@ describe('Campaign Query Resolvers Integration Tests', () => {
         });
 
         // Assert: Should return empty array due to authorization failure
-        expect(data.listCampaignsByProfile).toEqual([]);
+        expect(data.listCampaignsByProfile.campaigns).toEqual([]);
         
         // Cleanup
         await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId } });
@@ -1046,8 +1049,8 @@ describe('Campaign Query Resolvers Integration Tests', () => {
       });
 
       // Assert: Only one campaign should remain
-      expect(data.listCampaignsByProfile.length).toBe(1);
-      expect(data.listCampaignsByProfile[0].campaignId).toBe(campaignId2);
+      expect(data.listCampaignsByProfile.campaigns.length).toBe(1);
+      expect(data.listCampaignsByProfile.campaigns[0].campaignId).toBe(campaignId2);
 
       // Cleanup
       await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId: campaignId2 } });
@@ -1371,14 +1374,14 @@ describe('Campaign Query Resolvers Integration Tests', () => {
       });
 
       // Assert: Campaigns are returned with startDate for ordering
-      expect(data.listCampaignsByProfile.length).toBe(startDates.length);
+      expect(data.listCampaignsByProfile.campaigns.length).toBe(startDates.length);
       
-      for (const campaign of data.listCampaignsByProfile) {
+      for (const campaign of data.listCampaignsByProfile.campaigns) {
         expect(campaign.startDate).toBeDefined();
       }
       
       // Check ordering (may be ascending or descending by implementation)
-      const dates = data.listCampaignsByProfile.map((s: any) => new Date(s.startDate).getTime());
+      const dates = data.listCampaignsByProfile.campaigns.map((s: any) => new Date(s.startDate).getTime());
       const sortedAsc = [...dates].sort((a, b) => a - b);
       const sortedDesc = [...dates].sort((a, b) => b - a);
       
@@ -1462,10 +1465,10 @@ describe('Campaign Query Resolvers Integration Tests', () => {
       });
 
       // Assert: All campaigns are returned with date information for filtering
-      expect(data.listCampaignsByProfile.length).toBe(3);
+      expect(data.listCampaignsByProfile.campaigns.length).toBe(3);
       
       // Verify each campaign has dates that allow client-side filtering
-      const campaigns = data.listCampaignsByProfile;
+      const campaigns = data.listCampaignsByProfile.campaigns;
       for (const campaign of campaigns) {
         expect(campaign.startDate).toBeDefined();
         // endDate may be null for ongoing campaigns
