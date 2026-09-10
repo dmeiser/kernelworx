@@ -10,7 +10,7 @@ Supports two invocation shapes from AppSync:
   validation are omitted from the map (the resolver maps them to null).
 """
 
-from typing import Any, Dict, cast
+from typing import TYPE_CHECKING, Any, Dict, cast
 
 try:  # pragma: no cover
     from utils.auth import check_profile_access
@@ -22,6 +22,17 @@ except ModuleNotFoundError:  # pragma: no cover
     from ..utils.errors import AppError, ErrorCode
     from ..utils.logging import get_logger
     from ..utils.payment_methods import generate_presigned_get_url
+
+# The decorator stays typed for mypy via the relative import below; at runtime
+# the absolute import resolves in the Lambda zip (package `utils`) and the
+# relative fallback resolves in unit tests (package `src.handlers`).
+if TYPE_CHECKING:  # pragma: no cover
+    from ..utils.handlers import lambda_handler as with_error_handling
+else:  # pragma: no cover
+    try:
+        from utils.handlers import lambda_handler as with_error_handling
+    except ModuleNotFoundError:
+        from ..utils.handlers import lambda_handler as with_error_handling
 
 
 def _caller_can_access_qr(caller_id: str, owner_account_id: str, profile_id: str | None) -> bool:
@@ -100,33 +111,25 @@ def _generate_batch_presigned_urls(event: Dict[str, Any], owner_account_id: str)
     return url_map
 
 
+@with_error_handling(error_message="Failed to generate QR code URL")
 def generate_qr_code_presigned_url(event: Dict[str, Any], context: Any) -> str | None | Dict[str, str]:
     """Generate presigned URL(s) for payment method QR code(s)."""
     logger = get_logger(__name__)
 
-    try:
-        if event.get("s3Keys") is not None:
-            owner_account_id, _, _ = _validate_and_extract_params(event)
-            return _generate_batch_presigned_urls(event, owner_account_id)
+    if event.get("s3Keys") is not None:
+        owner_account_id, _, _ = _validate_and_extract_params(event)
+        return _generate_batch_presigned_urls(event, owner_account_id)
 
-        qr_code_url: str | None = event.get("qrCodeUrl")
-        if not qr_code_url:
-            return None
+    qr_code_url: str | None = event.get("qrCodeUrl")
+    if not qr_code_url:
+        return None
 
-        # Always validate ownership and re-sign from a validated key. Never
-        # short-circuit on an already-presigned stored URL: that would return
-        # another user's QR code URL before the ownership check runs.
-        owner_account_id, method_name, s3_key = _validate_and_extract_params(event)
+    # Always validate ownership and re-sign from a validated key. Never
+    # short-circuit on an already-presigned stored URL: that would return
+    # another user's QR code URL before the ownership check runs.
+    owner_account_id, method_name, s3_key = _validate_and_extract_params(event)
 
-        presigned_url: str | None = generate_presigned_get_url(
-            owner_account_id, method_name, s3_key, expiry_seconds=900
-        )
+    presigned_url: str | None = generate_presigned_get_url(owner_account_id, method_name, s3_key, expiry_seconds=900)
 
-        logger.info("Generated QR code presigned URL", owner_account_id=owner_account_id, method_name=method_name)
-        return presigned_url
-
-    except AppError:
-        raise
-    except Exception as e:
-        logger.error("Failed to generate presigned URL", error=str(e))
-        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to generate QR code URL")
+    logger.info("Generated QR code presigned URL", owner_account_id=owner_account_id, method_name=method_name)
+    return presigned_url

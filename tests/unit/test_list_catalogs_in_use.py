@@ -725,10 +725,10 @@ class TestHandler:
 
         assert result == []
 
-    def test_raises_app_error_on_exception(self) -> None:
-        """Should wrap unexpected exceptions in AppError."""
+    def test_returns_error_payload_on_exception(self) -> None:
+        """Should convert unexpected exceptions into an INTERNAL_ERROR payload."""
         from src.handlers.list_catalogs_in_use import handler
-        from src.utils.errors import AppError, ErrorCode
+        from src.utils.errors import ErrorCode
 
         event = {"identity": {"sub": "test-user-id"}}
 
@@ -739,14 +739,14 @@ class TestHandler:
             "src.handlers.list_catalogs_in_use._async_get_all_catalog_ids",
             side_effect=mock_get_all,
         ):
-            with pytest.raises(AppError) as exc_info:
-                handler(event, None)
+            result = handler(event, None)
 
-        assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
-        assert "Failed to list catalogs in use" in str(exc_info.value)
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
+        assert "Failed to list catalogs in use" in result["message"]
 
-    def test_reraises_app_error(self) -> None:
-        """Should re-raise AppError without wrapping."""
+    def test_converts_app_error_to_payload(self) -> None:
+        """Should convert an AppError into an error payload with its code intact."""
         from src.handlers.list_catalogs_in_use import handler
         from src.utils.errors import AppError, ErrorCode
 
@@ -759,7 +759,7 @@ class TestHandler:
             "src.handlers.list_catalogs_in_use._async_get_all_catalog_ids",
             side_effect=mock_get_all,
         ):
-            with pytest.raises(AppError) as exc_info:
-                handler(event, None)
+            result = handler(event, None)
 
-        assert exc_info.value.error_code == ErrorCode.NOT_FOUND
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.NOT_FOUND

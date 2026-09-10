@@ -135,7 +135,8 @@ case "$ACTION" in
     # the affected resolver(s)/function(s) first so the full apply can delete them.
     # Targets cover all Lambda→JS migrations that removed a Lambda data source:
     #   create_order (pipeline fn set), validate_payment_method_appsync (data_source switch #299),
-    #   create_seller_profile (#300), create_campaign (#301), update_my_account (#298).
+    #   create_seller_profile (#300), create_campaign (#301), update_my_account (#298),
+    #   list_my_shares (#334).
     "$ROOT_DIR/scripts/appsync-ensure-resolver-order.sh" \
       -d "$ENV_DIR" \
       -t module.appsync.aws_appsync_resolver.create_order \
@@ -143,6 +144,7 @@ case "$ACTION" in
       -t module.appsync.aws_appsync_resolver.create_seller_profile \
       -t module.appsync.aws_appsync_resolver.create_campaign \
       -t module.appsync.aws_appsync_resolver.update_my_account \
+      -t module.appsync.aws_appsync_resolver.list_my_shares \
       -- -var="environment=$RUN_ID"
 
     tofu apply -input=false -auto-approve -var="environment=$RUN_ID"

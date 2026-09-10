@@ -20,6 +20,12 @@ export function request(ctx) {
 }
 
 export function response(ctx) {
+    // #337: the decorated confirm-qr-upload handler returns a structured
+    // error payload instead of raising; abort the pipeline so batch_qr_urls
+    // never signs an error payload.
+    if (ctx.result && ctx.result.__isError) {
+        util.error(ctx.result.message, ctx.result.errorCode, null, { errorCode: ctx.result.errorCode });
+    }
     if (ctx.error) {
         util.error(ctx.error.message, ctx.error.type);
     }

@@ -1,6 +1,6 @@
 """Lambda resolver for campaign order operations and deletion verification helpers."""
 
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
@@ -17,6 +17,18 @@ except ModuleNotFoundError:  # pragma: no cover
     from ..utils.ids import ensure_campaign_id
     from ..utils.logging import get_logger
     from ..utils.pagination import query_all_items
+
+# The decorator stays typed for mypy via the relative import below; at runtime
+# the absolute import resolves in the Lambda zip (package `utils`) and the
+# relative fallback resolves in unit tests (package `src.handlers`).
+if TYPE_CHECKING:  # pragma: no cover
+    from ..utils.handlers import lambda_handler as with_error_handling
+else:  # pragma: no cover
+    try:
+        from utils.handlers import lambda_handler as with_error_handling
+    except ModuleNotFoundError:
+        from ..utils.handlers import lambda_handler as with_error_handling
+
 
 logger = get_logger(__name__)
 
@@ -138,6 +150,7 @@ def _delete_orders_for_campaign(campaign_id: str) -> int:
     return deleted_count
 
 
+@with_error_handling(error_message="Failed to delete campaign orders")
 def delete_campaign_orders(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """Delete all orders for a campaign (AppSync Lambda resolver).
 
@@ -151,32 +164,26 @@ def delete_campaign_orders(event: Dict[str, Any], context: Any) -> Dict[str, Any
     campaign. This is enforced here in the handler so a resolver rewire or a
     second datasource cannot bypass it.
     """
-    try:
-        campaign_id_arg = event.get("arguments", {}).get("campaignId", "")
-        if not campaign_id_arg:
-            raise AppError(ErrorCode.INVALID_INPUT, "campaignId is required")
+    campaign_id_arg = event.get("arguments", {}).get("campaignId", "")
+    if not campaign_id_arg:
+        raise AppError(ErrorCode.INVALID_INPUT, "campaignId is required")
 
-        caller_account_id = event.get("identity", {}).get("sub")
-        if not caller_account_id:
-            raise AppError(ErrorCode.UNAUTHORIZED, "Caller identity is required")
+    caller_account_id = event.get("identity", {}).get("sub")
+    if not caller_account_id:
+        raise AppError(ErrorCode.UNAUTHORIZED, "Caller identity is required")
 
-        db_campaign_id = ensure_campaign_id(campaign_id_arg)
-        assert db_campaign_id is not None
+    db_campaign_id = ensure_campaign_id(campaign_id_arg)
+    assert db_campaign_id is not None
 
-        campaign = _get_campaign_by_id(db_campaign_id)
-        if not campaign:
-            raise AppError(ErrorCode.NOT_FOUND, f"Campaign {campaign_id_arg} not found")
+    campaign = _get_campaign_by_id(db_campaign_id)
+    if not campaign:
+        raise AppError(ErrorCode.NOT_FOUND, f"Campaign {campaign_id_arg} not found")
 
-        profile_id = campaign.get("profileId")
-        if not profile_id:
-            raise AppError(ErrorCode.NOT_FOUND, f"Campaign {campaign_id_arg} has no profile")
+    profile_id = campaign.get("profileId")
+    if not profile_id:
+        raise AppError(ErrorCode.NOT_FOUND, f"Campaign {campaign_id_arg} has no profile")
 
-        require_profile_access(caller_account_id, profile_id, "WRITE")
+    require_profile_access(caller_account_id, profile_id, "WRITE")
 
-        deleted_count = _delete_orders_for_campaign(db_campaign_id)
-        return {"deletedCount": deleted_count}
-    except AppError:
-        raise
-    except Exception as e:
-        logger.error("Error deleting campaign orders", error=str(e), exc_info=True)
-        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to delete campaign orders") from e
+    deleted_count = _delete_orders_for_campaign(db_campaign_id)
+    return {"deletedCount": deleted_count}

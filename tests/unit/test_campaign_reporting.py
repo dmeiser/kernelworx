@@ -366,11 +366,13 @@ class TestGetUnitReport:
         with patch("src.handlers.campaign_reporting.tables") as mock_tables:
             mock_tables.campaigns = mock_campaigns_table
 
-            # Act & Assert
-            with pytest.raises(Exception) as exc_info:
-                get_unit_report(event, lambda_context)
+            # Act & Assert: the with_error_handling decorator converts the
+            # unexpected DynamoDB error into an INTERNAL_ERROR error payload.
+            result = get_unit_report(event, lambda_context)
 
-            assert "DynamoDB error" in str(exc_info.value)
+            assert result["__isError"] is True
+            assert result["errorCode"] == "INTERNAL_ERROR"
+            assert result["message"] == "Failed to generate unit report"
 
     def test_get_unit_report_different_campaign_year(
         self,

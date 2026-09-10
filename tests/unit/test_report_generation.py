@@ -14,7 +14,7 @@ import openpyxl
 import pytest
 
 from src.handlers.report_generation import request_campaign_report
-from src.utils.errors import AppError, ErrorCode
+from src.utils.errors import ErrorCode
 
 
 def get_orders_table() -> Any:
@@ -218,11 +218,11 @@ class TestRequestCampaignReport:
             "arguments": {"input": {"campaignId": sample_campaign_id, "format": "xlsx"}},
         }
 
-        # Act & Assert - should raise AppError with FORBIDDEN
-        with pytest.raises(AppError) as exc_info:
-            request_campaign_report(event, lambda_context)
+        # Act & Assert - should return an error payload with FORBIDDEN
+        result = request_campaign_report(event, lambda_context)
 
-        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.FORBIDDEN
 
     def test_nonexistent_campaign_returns_error(
         self,
@@ -237,11 +237,11 @@ class TestRequestCampaignReport:
             "arguments": {"input": {"campaignId": "CAMPAIGN#nonexistent", "format": "xlsx"}},
         }
 
-        # Act & Assert - should raise AppError with NOT_FOUND
-        with pytest.raises(AppError) as exc_info:
-            request_campaign_report(event, lambda_context)
+        # Act & Assert - should return an error payload with NOT_FOUND
+        result = request_campaign_report(event, lambda_context)
 
-        assert exc_info.value.error_code == ErrorCode.NOT_FOUND
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.NOT_FOUND
 
     def test_default_format_is_xlsx(
         self,
@@ -416,9 +416,13 @@ class TestRequestCampaignReport:
             "src.handlers.report_generation._get_campaign",
             side_effect=ValueError("Unexpected error"),
         ):
-            # Act & Assert - should raise exception
-            with pytest.raises(Exception, match="Failed to generate report.*Unexpected error"):
-                request_campaign_report(event, lambda_context)
+            # Act & Assert - the with_error_handling decorator converts the
+            # unexpected error into an INTERNAL_ERROR error payload.
+            result = request_campaign_report(event, lambda_context)
+
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
+            assert result["message"] == "Failed to generate report"
 
     def test_excel_cell_with_problematic_value(
         self,

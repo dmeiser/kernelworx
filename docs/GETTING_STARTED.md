@@ -218,7 +218,7 @@ tofu apply
 uv run pytest tests/unit --cov=src --cov-fail-under=100
 
 # Run specific test file
-uv run pytest tests/unit/test_profile_sharing.py -v
+uv run pytest tests/unit/test_transfer_profile_ownership.py -v
 
 # Run with coverage report
 uv run pytest tests/unit --cov=src --cov-report=html

@@ -15,7 +15,7 @@ so stale shares are automatically rejected by subsequent authorization checks.
 """
 
 import os
-from typing import Any, Dict
+from typing import TYPE_CHECKING, Any, Dict
 
 import boto3
 from boto3.dynamodb.conditions import Key
@@ -37,6 +37,18 @@ except ModuleNotFoundError:  # pragma: no cover
     from ..utils.ids import ensure_account_id, ensure_profile_id
     from ..utils.logging import get_logger
     from ..utils.pagination import query_all_items
+
+# The decorator stays typed for mypy via the relative import below; at runtime
+# the absolute import resolves in the Lambda zip (package `utils`) and the
+# relative fallback resolves in unit tests (package `src.handlers`).
+if TYPE_CHECKING:  # pragma: no cover
+    from ..utils.handlers import lambda_handler as with_error_handling
+else:  # pragma: no cover
+    try:
+        from utils.handlers import lambda_handler as with_error_handling
+    except ModuleNotFoundError:
+        from ..utils.handlers import lambda_handler as with_error_handling
+
 
 logger = get_logger(__name__)
 _type_serializer = TypeSerializer()
@@ -159,6 +171,7 @@ def _update_shares_after_transfer(db_profile_id: str, db_new_owner_id: str) -> N
             )
 
 
+@with_error_handling(error_message="Failed to transfer profile ownership")
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """Transfer profile ownership."""
     caller_account_id = event["identity"]["sub"]

@@ -131,6 +131,10 @@ resource "aws_appsync_resolver" "update_campaign" {
       aws_appsync_function.verify_profile_write_access.function_id,
       aws_appsync_function.check_share_permissions.function_id,
       aws_appsync_function.update_campaign.function_id,
+      # isActive can change which campaign is the latest active one;
+      # recompute the profile's denormalized latestCampaignId (#331).
+      aws_appsync_function.refresh_latest_campaign_lookup.function_id,
+      aws_appsync_function.refresh_latest_campaign_write.function_id,
     ]
   }
 
@@ -156,6 +160,12 @@ resource "aws_appsync_resolver" "delete_campaign" {
       aws_appsync_function.check_share_permissions.function_id,
       aws_appsync_function.delete_campaign_orders_lambda.function_id,
       aws_appsync_function.delete_campaign.function_id,
+      # Removing a campaign can change which campaign is the latest active
+      # one; recompute BEFORE the propagation check so the profile's
+      # denormalized latestCampaignId is refreshed even if verification
+      # fails (#331).
+      aws_appsync_function.refresh_latest_campaign_lookup.function_id,
+      aws_appsync_function.refresh_latest_campaign_write.function_id,
       aws_appsync_function.verify_campaign_delete_propagation.function_id,
     ]
   }
@@ -182,6 +192,9 @@ resource "aws_appsync_resolver" "create_campaign" {
       aws_appsync_function.lookup_shared_campaign.function_id,
       aws_appsync_function.verify_shared_campaign_catalog.function_id,
       aws_appsync_function.create_campaign.function_id,
+      # Stamp the owning profile's denormalized latestCampaignId in the same
+      # pipeline so it cannot drift (#331).
+      aws_appsync_function.set_profile_latest_campaign.function_id,
       aws_appsync_function.create_campaign_share.function_id,
     ]
   }
@@ -480,6 +493,13 @@ resource "aws_appsync_resolver" "delete_my_account" {
   type        = "Mutation"
   field       = "deleteMyAccount"
   data_source = aws_appsync_datasource.delete_account.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
 }
 
 # transferProfileOwnership (Lambda)
@@ -488,6 +508,13 @@ resource "aws_appsync_resolver" "transfer_profile_ownership" {
   type        = "Mutation"
   field       = "transferProfileOwnership"
   data_source = aws_appsync_datasource.transfer_ownership.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
 }
 
 # updateMyPreferences (JS)
@@ -511,6 +538,13 @@ resource "aws_appsync_resolver" "request_campaign_report" {
   type        = "Mutation"
   field       = "requestCampaignReport"
   data_source = aws_appsync_datasource.request_report.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
 }
 
 # === PAYMENT METHODS MUTATIONS ===
@@ -590,6 +624,13 @@ resource "aws_appsync_resolver" "delete_payment_method_qr_code" {
   type        = "Mutation"
   field       = "deletePaymentMethodQRCode"
   data_source = aws_appsync_datasource.delete_qr_code.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
 }
 
 # requestPaymentMethodQRCodeUpload (Lambda)
@@ -598,6 +639,13 @@ resource "aws_appsync_resolver" "request_payment_method_qr_code_upload" {
   type        = "Mutation"
   field       = "requestPaymentMethodQRCodeUpload"
   data_source = aws_appsync_datasource.request_qr_upload.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
 }
 
 # confirmPaymentMethodQRCodeUpload Pipeline

@@ -19,6 +19,7 @@ const RESOLVERS_DIR = join(
 // These just process data already in ctx.stash without making DynamoDB calls
 const PASSTHROUGH_FUNCTIONS = new Set([
   "check_payment_methods_access_fn.js",
+  "check_source_catalog_fn.js",
   "filter_payment_methods_by_access_fn.js",
   "get_payment_method_for_delete_fn.js",
   "inject_global_payment_methods_fn.js",

@@ -307,3 +307,48 @@ resource "aws_appsync_function" "create_campaign_share" {
   code = file("${local.js_resolvers_dir}/create_campaign_share_fn.js")
 }
 
+
+# Denormalized profile.latestCampaignId maintenance (#331).
+# The create pipeline SETs the field to the new campaign (a new campaign is
+# always the latest active one); the update/delete pipelines recompute the
+# canonical latest ACTIVE campaign whenever isActive changes or a campaign
+# is removed, so the denormalized pointer cannot drift from the semantics the
+# SellerProfile.latestCampaign resolver implements.
+resource "aws_appsync_function" "set_profile_latest_campaign" {
+  api_id      = aws_appsync_graphql_api.main.id
+  data_source = aws_appsync_datasource.profiles.name
+  name        = "SetProfileLatestCampaignFn${local.env_suffix}"
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/set_profile_latest_campaign_fn.js")
+}
+
+resource "aws_appsync_function" "refresh_latest_campaign_lookup" {
+  api_id      = aws_appsync_graphql_api.main.id
+  data_source = aws_appsync_datasource.campaigns.name
+  name        = "RefreshLatestCampaignLookupFn${local.env_suffix}"
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/refresh_latest_campaign_lookup_fn.js")
+}
+
+resource "aws_appsync_function" "refresh_latest_campaign_write" {
+  api_id      = aws_appsync_graphql_api.main.id
+  data_source = aws_appsync_datasource.profiles.name
+  name        = "RefreshLatestCampaignWriteFn${local.env_suffix}"
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/refresh_latest_campaign_write_fn.js")
+}
