@@ -42,7 +42,7 @@ describe('delete_payment_method_qr_code_fn response', () => {
             },
             error: {
                 message: 'Failed to delete QR code',
-                type: 'InternalError',
+                type: 'INTERNAL_ERROR',
             },
         };
 
@@ -50,6 +50,22 @@ describe('delete_payment_method_qr_code_fn response', () => {
 
         assert.deepStrictEqual(result, { qrDeleted: false });
         assert.strictEqual(ctx.stash.qrCleanupError, 'Failed to delete QR code');
+        assert.strictEqual(ctx.stash.qrDeleted, undefined);
+    });
+
+    it('continues the pipeline when the handler returns a structured error', () => {
+        const ctx = {
+            stash: {
+                paymentMethodName: 'Venmo',
+            },
+            error: null,
+            result: { __isError: true, errorCode: 'INTERNAL_ERROR', message: 'S3 deletion failed' },
+        };
+
+        const result = response(ctx);
+
+        assert.deepStrictEqual(result, { qrDeleted: false });
+        assert.strictEqual(ctx.stash.qrCleanupError, 'S3 deletion failed');
         assert.strictEqual(ctx.stash.qrDeleted, undefined);
     });
 

@@ -2,7 +2,7 @@ import { util } from '@aws-appsync/utils';
 
 export function request(ctx) {
   if (!ctx.identity || !ctx.identity.sub) {
-    util.error('Authentication required', 'Unauthorized');
+    util.error('Authentication required', 'UNAUTHORIZED');
   }
 
   const input = (ctx.args && ctx.args.input) || {};
@@ -10,12 +10,12 @@ export function request(ctx) {
   const allowedFields = ['givenName', 'familyName', 'city', 'state', 'unitType', 'unitNumber'];
   const provided = allowedFields.filter(f => input[f] !== undefined && input[f] !== null);
   if (provided.length === 0) {
-    util.error('At least one field must be provided (givenName, familyName, city, state, unitType, or unitNumber)', 'BadRequest');
+    util.error('At least one field must be provided (givenName, familyName, city, state, unitType, or unitNumber)', 'INVALID_INPUT');
   }
 
   if (input.unitNumber !== undefined && input.unitNumber !== null) {
     if (typeof input.unitNumber !== 'number' || !Number.isFinite(input.unitNumber) || Math.floor(input.unitNumber) !== input.unitNumber || input.unitNumber < 1) {
-      util.error('unitNumber must be a positive integer', 'BadRequest');
+      util.error('unitNumber must be a positive integer', 'INVALID_INPUT');
     }
   }
 
@@ -46,7 +46,7 @@ export function request(ctx) {
 export function response(ctx) {
   if (ctx.error) {
     if (ctx.error.type === 'DynamoDB:ConditionalCheckFailedException') {
-      util.error('Account ' + ctx.identity.sub + ' not found', 'NotFound');
+      util.error('Account ' + ctx.identity.sub + ' not found', 'NOT_FOUND');
     }
     util.error(ctx.error.message, ctx.error.type);
   }

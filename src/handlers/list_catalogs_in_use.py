@@ -18,19 +18,28 @@ Returns: [ID!]! (list of catalog IDs)
 """
 
 import asyncio
-from typing import Any, Dict, List, Set, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Set, Tuple
 
 import aioboto3
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
     from utils.dynamodb import get_required_env
-    from utils.errors import AppError, ErrorCode
     from utils.logging import get_correlation_id, get_logger
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.dynamodb import get_required_env
-    from ..utils.errors import AppError, ErrorCode
     from ..utils.logging import get_correlation_id, get_logger
+
+# The decorator stays typed for mypy via the relative import below; at runtime
+# the absolute import resolves in the Lambda zip (package `utils`) and the
+# relative fallback resolves in unit tests (package `src.handlers`).
+if TYPE_CHECKING:  # pragma: no cover
+    from ..utils.handlers import lambda_handler as with_error_handling
+else:  # pragma: no cover
+    try:
+        from utils.handlers import lambda_handler as with_error_handling
+    except ModuleNotFoundError:
+        from ..utils.handlers import lambda_handler as with_error_handling
 
 
 logger = get_logger(__name__)
@@ -187,6 +196,7 @@ async def _async_get_all_catalog_ids(
         return owned_catalog_ids, shared_profile_ids, shared_catalog_ids
 
 
+@with_error_handling(error_message="Failed to list catalogs in use")
 def handler(event: Dict[str, Any], context: Any) -> List[str]:
     """
     List all catalog IDs in use by campaigns the user has access to.
@@ -205,26 +215,19 @@ def handler(event: Dict[str, Any], context: Any) -> List[str]:
 
     request_logger.info("Listing catalogs in use", account_id=account_id_with_prefix)
 
-    try:
-        # Run all queries with optimal parallelism:
-        # - owned_catalog_ids and shared_profile_ids run concurrently
-        # - shared_catalog_ids waits for shared_profile_ids, then runs N queries in parallel
-        owned_catalog_ids, shared_profile_ids, shared_catalog_ids = asyncio.run(
-            _async_get_all_catalog_ids(account_id_with_prefix, request_logger)
-        )
+    # Run all queries with optimal parallelism:
+    # - owned_catalog_ids and shared_profile_ids run concurrently
+    # - shared_catalog_ids waits for shared_profile_ids, then runs N queries in parallel
+    owned_catalog_ids, shared_profile_ids, shared_catalog_ids = asyncio.run(
+        _async_get_all_catalog_ids(account_id_with_prefix, request_logger)
+    )
 
-        request_logger.info("Found owned campaign catalogs", count=len(owned_catalog_ids))
-        request_logger.info("Found shared profiles", count=len(shared_profile_ids))
-        request_logger.info("Found shared campaign catalogs", count=len(shared_catalog_ids))
+    request_logger.info("Found owned campaign catalogs", count=len(owned_catalog_ids))
+    request_logger.info("Found shared profiles", count=len(shared_profile_ids))
+    request_logger.info("Found shared campaign catalogs", count=len(shared_catalog_ids))
 
-        # Combine and deduplicate
-        all_catalog_ids = owned_catalog_ids | shared_catalog_ids
-        request_logger.info("Total unique catalogs in use", count=len(all_catalog_ids))
+    # Combine and deduplicate
+    all_catalog_ids = owned_catalog_ids | shared_catalog_ids
+    request_logger.info("Total unique catalogs in use", count=len(all_catalog_ids))
 
-        return sorted(all_catalog_ids)
-
-    except AppError:
-        raise
-    except Exception as e:
-        request_logger.error("Failed to list catalogs in use", error=str(e), exc_info=True)
-        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to list catalogs in use")
+    return sorted(all_catalog_ids)

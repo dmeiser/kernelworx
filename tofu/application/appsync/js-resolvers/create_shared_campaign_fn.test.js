@@ -229,9 +229,9 @@ describe('create_shared_campaign_fn response', () => {
 
   it('passes through other errors', () => {
     const ctx = {
-      error: { type: 'InternalServerError', message: 'DynamoDB error' },
+      error: { type: 'INTERNAL_ERROR', message: 'DynamoDB error' },
     };
 
-    assert.throws(() => response(ctx), /InternalServerError: DynamoDB error/);
+    assert.throws(() => response(ctx), /INTERNAL_ERROR: DynamoDB error/);
   });
 });

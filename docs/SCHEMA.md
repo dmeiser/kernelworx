@@ -48,13 +48,17 @@ Global Secondary Indexes: `email-index` (email)
 
 ### profiles
 Primary Key: `ownerAccountId` + `profileId` (Composite)
-Global Secondary Indexes: `profileId-index` (profileId)
+Global Secondary Indexes:
+- `profileId-index` (profileId)
+- `unitType-unitNumber-index` (unitType + unitNumber)
 
 | Attribute | Type | Purpose |
 |-----------|------|---------|
 | ownerAccountId | String | PK - Account owner |
 | profileId | String | SK - Profile ID, also in GSI |
 | sellerName | String | Scout/seller name |
+| unitType | String | Scout unit type |
+| unitNumber | Integer | Scout unit number |
 | createdAt | DateTime | Timestamp |
 | updatedAt | DateTime | Timestamp |
 
@@ -182,8 +186,8 @@ Global Secondary Indexes:
 ### Get User's Profiles
 ```mermaid
 flowchart TD
-    A["User Calls getMyProfiles"] -->|Uses accountId| B["Query ACCOUNT→SELLER_PROFILE"]
-    B -->|ownerAccountId = accountId| C["Return all profiles"]
+    A["User Calls listMyProfiles"] -->|Uses accountId| B["Query ACCOUNT→SELLER_PROFILE"]
+    B -->|ownerAccountId = accountId| C["Return one page of profiles (capped server-side)"]
 ```
 
 ### Get Campaign with Orders

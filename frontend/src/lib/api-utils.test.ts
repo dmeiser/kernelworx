@@ -185,6 +185,74 @@ describe('getErrorCode', () => {
     expect(getErrorCode(error)).toBe('UNAUTHORIZED');
   });
 
+  it('should extract errorType from extensions as fallback (#329)', () => {
+    const error = createApolloError('Error', [
+      {
+        message: 'Name is required',
+        locations: [],
+        path: ['mutation'],
+        extensions: { errorType: 'INVALID_INPUT' },
+      },
+    ]);
+    expect(getErrorCode(error)).toBe('INVALID_INPUT');
+  });
+
+  it('should prefer errorCode over code and errorType (#329)', () => {
+    const error = createApolloError('Error', [
+      {
+        message: 'Error',
+        locations: [],
+        path: ['query'],
+        extensions: { errorCode: 'NOT_FOUND', code: 'CODE', errorType: 'NotFound' },
+      },
+    ]);
+    expect(getErrorCode(error)).toBe('NOT_FOUND');
+  });
+
+  it('should handle non-string errorType', () => {
+    const error = createApolloError('Error', [
+      {
+        message: 'Error',
+        locations: [],
+        path: ['query'],
+        extensions: { errorType: 123 },
+      },
+    ]);
+    expect(getErrorCode(error)).toBeUndefined();
+  });
+
+  it('should feed errorType into typed matchers (#329)', () => {
+    const validationError = createApolloError('Error', [
+      {
+        message: 'Name is required',
+        locations: [],
+        path: ['mutation'],
+        extensions: { errorType: 'INVALID_INPUT' },
+      },
+    ]);
+    expect(isValidationError(validationError)).toBe(true);
+
+    const notFoundError = createApolloError('Error', [
+      {
+        message: 'Not found',
+        locations: [],
+        path: ['query'],
+        extensions: { errorType: 'NOT_FOUND' },
+      },
+    ]);
+    expect(isNotFoundError(notFoundError)).toBe(true);
+
+    const forbiddenError = createApolloError('Error', [
+      {
+        message: 'Forbidden',
+        locations: [],
+        path: ['query'],
+        extensions: { errorType: 'FORBIDDEN' },
+      },
+    ]);
+    expect(isForbiddenError(forbiddenError)).toBe(true);
+  });
+
   it('should return undefined for non-Apollo errors', () => {
     expect(getErrorCode(new Error('test'))).toBeUndefined();
   });

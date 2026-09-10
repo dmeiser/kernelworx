@@ -1,9 +1,10 @@
 /**
  * Custom hook for managing shared campaign state and queries
  */
-import { useMemo } from 'react';
-import { useQuery } from '@apollo/client/react';
-import { GET_SHARED_CAMPAIGN, LIST_MY_PROFILES } from '../lib/graphql';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useApolloClient, useQuery } from '@apollo/client/react';
+import { GET_SHARED_CAMPAIGN } from '../lib/graphql';
+import { fetchAllMyProfiles, type MyProfile } from '../lib/myProfiles';
 
 interface SharedCampaign {
   sharedCampaignCode: string;
@@ -28,14 +29,8 @@ interface SharedCampaign {
   isActive: boolean;
 }
 
-interface SellerProfile {
-  profileId: string;
-  sellerName: string;
-  isOwner: boolean;
-  permissions: string[];
-}
-
 export const useSharedCampaignAndProfiles = (effectiveSharedCampaignCode: string | undefined) => {
+  const apolloClient = useApolloClient();
   const {
     data: sharedCampaignData,
     loading: sharedCampaignLoading,
@@ -45,17 +40,31 @@ export const useSharedCampaignAndProfiles = (effectiveSharedCampaignCode: string
     skip: !effectiveSharedCampaignCode,
   });
 
-  const {
-    data: profilesData,
-    loading: profilesLoading,
-    refetch: refetchProfiles,
-  } = useQuery<{
-    listMyProfiles: { profiles: SellerProfile[] };
-  }>(LIST_MY_PROFILES);
+  // listMyProfiles is server-side paginated (capped pages, #328), so walk all
+  // nextToken pages instead of relying on a single useQuery response.
+  const [profiles, setProfiles] = useState<MyProfile[]>([]);
+  const [profilesLoading, setProfilesLoading] = useState(true);
+  const [profilesError, setProfilesError] = useState<Error | null>(null);
+
+  const loadProfiles = useCallback(async () => {
+    setProfilesLoading(true);
+    try {
+      setProfiles(await fetchAllMyProfiles(apolloClient));
+      setProfilesError(null);
+    } catch (err) {
+      setProfilesError(err as Error);
+    } finally {
+      setProfilesLoading(false);
+    }
+  }, [apolloClient]);
+
+  useEffect(() => {
+    void loadProfiles();
+  }, [loadProfiles]);
+
+  const refetchProfiles = useCallback(() => loadProfiles(), [loadProfiles]);
 
   const sharedCampaign = useMemo(() => sharedCampaignData?.getSharedCampaign ?? null, [sharedCampaignData]);
-
-  const profiles = useMemo(() => profilesData?.listMyProfiles.profiles ?? [], [profilesData]);
 
   const isSharedCampaignMode = useMemo(
     () => Boolean(effectiveSharedCampaignCode && sharedCampaign?.isActive && sharedCampaign?.catalog),
@@ -68,6 +77,7 @@ export const useSharedCampaignAndProfiles = (effectiveSharedCampaignCode: string
     sharedCampaignError,
     profiles,
     profilesLoading,
+    profilesError,
     refetchProfiles,
     isSharedCampaignMode,
   };

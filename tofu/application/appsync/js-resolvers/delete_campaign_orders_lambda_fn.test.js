@@ -36,6 +36,26 @@ describe('delete_campaign_orders_lambda_fn request', () => {
 });
 
 describe('delete_campaign_orders_lambda_fn response', () => {
+  it('aborts the pipeline when the handler returns a structured error', () => {
+    const ctx = {
+      stash: {},
+      result: { __isError: true, errorCode: 'RESOURCE_BUSY', message: 'orders still processing' },
+      error: null,
+    };
+
+    // util.error throws, halting the deleteCampaign pipeline before the
+    // delete_campaign step runs.
+    assert.throws(
+      () => response(ctx),
+      (err) => {
+        assert.strictEqual(err.message, 'RESOURCE_BUSY: orders still processing');
+        assert.deepStrictEqual(err.errorInfo, { errorCode: 'RESOURCE_BUSY' });
+        return true;
+      }
+    );
+    assert.strictEqual(ctx.stash.deletedOrdersCount, undefined);
+  });
+
   it('returns the Lambda result and stashes the deleted count', () => {
     const ctx = {
       stash: {},

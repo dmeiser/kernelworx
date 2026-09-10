@@ -58,7 +58,7 @@ describe('create_order_fn early-return guards after util.error', () => {
     // the phone error would be recorded as well.
     input.customerPhone = '123';
     const req: any = createOrderFn.request(validCtx(input) as any);
-    expect(errors).toEqual([{ msg: 'Customer name is required', type: 'BadRequest' }]);
+    expect(errors).toEqual([{ msg: 'Customer name is required', type: 'INVALID_INPUT' }]);
     expect(req.operation).toBe('PutItem');
   });
 
@@ -66,7 +66,7 @@ describe('create_order_fn early-return guards after util.error', () => {
     const input = validInput();
     input.customerPhone = '123';
     const req: any = createOrderFn.request(validCtx(input) as any);
-    expect(errors).toContainEqual({ msg: 'Phone number must be a valid 10-digit US number', type: 'BadRequest' });
+    expect(errors).toContainEqual({ msg: 'Phone number must be a valid 10-digit US number', type: 'INVALID_INPUT' });
     // The guard keeps customerPhone unset instead of copying phoneResult.value.
     expect(req.attributeValues.customerPhone).toBeUndefined();
   });
@@ -75,7 +75,7 @@ describe('create_order_fn early-return guards after util.error', () => {
     const input = validInput();
     input.customerAddress = { street: '1 Main St' };
     const req: any = createOrderFn.request(validCtx(input) as any);
-    expect(errors).toContainEqual({ msg: 'Address is missing required fields: city, state, zipCode', type: 'BadRequest' });
+    expect(errors).toContainEqual({ msg: 'Address is missing required fields: city, state, zipCode', type: 'INVALID_INPUT' });
     expect(req.operation).toBe('PutItem');
   });
 
@@ -83,7 +83,7 @@ describe('create_order_fn early-return guards after util.error', () => {
     const input = validInput();
     input.orderDate = '';
     const req: any = createOrderFn.request(validCtx(input) as any);
-    expect(errors).toEqual([{ msg: 'Order date is required', type: 'BadRequest' }]);
+    expect(errors).toEqual([{ msg: 'Order date is required', type: 'INVALID_INPUT' }]);
     expect(req.operation).toBe('PutItem');
   });
 });

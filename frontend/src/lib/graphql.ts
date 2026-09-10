@@ -207,9 +207,12 @@ export const GET_PROFILE = gql`
 
 export const LIST_CAMPAIGNS_BY_PROFILE = gql`
   ${CAMPAIGN_FRAGMENT}
-  query ListCampaignsByProfile($profileId: ID!) {
-    listCampaignsByProfile(profileId: $profileId) {
-      ...CampaignFields
+  query ListCampaignsByProfile($profileId: ID!, $limit: Int, $nextToken: String) {
+    listCampaignsByProfile(profileId: $profileId, limit: $limit, nextToken: $nextToken) {
+      campaigns {
+        ...CampaignFields
+      }
+      nextToken
     }
   }
 `;

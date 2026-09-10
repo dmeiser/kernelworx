@@ -17,7 +17,7 @@ export function response(ctx) {
     }
     const profile = ctx.result;
     if (!profile) {
-        util.error('Forbidden: Only profile owner can create invites', 'Unauthorized');
+        util.error('Forbidden: Only profile owner can create invites', 'UNAUTHORIZED');
     }
     ctx.stash.profile = profile;
     return profile;

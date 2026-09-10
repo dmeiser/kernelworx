@@ -56,17 +56,14 @@ def _submit_signup_and_wait_for_verification(page: Page, email: str, password: s
     """Fill and submit the signup form, then wait for the verification UI.
 
     After a successful Cognito ``signUp`` call the UI transitions to the
-    verification step showing one of:
+    verification step showing text containing "check your email" or
+    "verification" (case-insensitive).
 
-    a) text containing "check your email" or "verification" (case-insensitive), or
-    b) the MUI alert with the success message.
-
-    An error alert is *not* an acceptable signal: MUI renders both the error
-    and success alerts with ``role="alert"``, so matching any alert would
-    treat a failed ``signUp`` as success and send the caller on to
-    ``admin-confirm-sign-up`` for a user that was never created (which then
-    fails with ``UserNotFoundException`` no matter how long it is retried).
-    When sign-up fails, the visible error text is surfaced instead.
+    A transient ``signUp`` failure renders a MUI *error* alert instead. That
+    error alert must not be mistaken for reaching the verification step:
+    proceeding past a failed signup surfaces later as a confusing Cognito
+    ``UserNotFoundException`` from ``admin-confirm-sign-up``. If the error
+    alert appears, fail immediately with its message.
     """
     page.locator('input[type="email"]').first.fill(email)
 
@@ -81,19 +78,16 @@ def _submit_signup_and_wait_for_verification(page: Page, email: str, password: s
 
     page.get_by_role("button", name=_CREATE_ACCOUNT_BTN).click()
 
+    error_alert = page.locator(".MuiAlert-standardError")
     verification_text = page.get_by_text(re.compile("check your email", re.IGNORECASE)).or_(
         page.get_by_text(re.compile("verification", re.IGNORECASE))
     )
-    try:
-        expect(verification_text.first).to_be_visible(timeout=20_000)
-    except AssertionError:
-        error_alert = page.get_by_role("alert").first
-        if error_alert.is_visible():
-            pytest.fail(f"signUp did not reach the verification step; UI error: {error_alert.inner_text()}")
-        raise
+    expect(verification_text.first.or_(error_alert.first)).to_be_visible(timeout=20_000)
+    if error_alert.first.is_visible():
+        pytest.fail(f"SignUp failed unexpectedly: {error_alert.first.inner_text()}")
 
 
-def _run_cognito_cli(*args: str) -> subprocess.CompletedProcess:
+def _cognito_cli_result(*args: str) -> subprocess.CompletedProcess[str]:
     """Run an ``aws cognito-idp`` admin command via the AWS CLI subprocess.
 
     The CLI is used instead of boto3 so the test inherits the same credential
@@ -109,25 +103,21 @@ def _run_cognito_cli(*args: str) -> subprocess.CompletedProcess:
 
 
 def _cognito_cli(*args: str) -> None:
-    """Run a Cognito admin command, raising with stderr on failure."""
-    result = _run_cognito_cli(*args)
+    """Run an ``aws cognito-idp`` admin command, raising with stderr on failure."""
+    result = _cognito_cli_result(*args)
     if result.returncode != 0:
         raise RuntimeError(f"aws cognito-idp {' '.join(args)} failed: {result.stderr}")
 
 
-def _confirm_signup_with_retry(user_pool_id: str, email: str) -> None:
-    """Confirm a freshly signed-up user, tolerating Cognito read-after-write lag.
+def _confirm_signup(user_pool_id: str, email: str) -> None:
+    """Confirm a freshly signed-up user, tolerating brief propagation lag.
 
-    ``signUp`` returns before the new user is visible to admin APIs, so an
-    immediate ``admin-confirm-sign-up`` can fail with ``UserNotFoundException``
-    even though the sign-up succeeded.  Retry only that error; any other
-    failure is raised immediately.
+    A user record can take a moment to become visible to Cognito admin APIs
+    immediately after ``SignUp``; a ``UserNotFoundException`` right after a
+    successful signup is a transient propagation race, not a missing user.
     """
-    attempts = 6
-    delay_seconds = 5.0
-    last_stderr = ""
-    for attempt in range(attempts):
-        result = _run_cognito_cli(
+    for attempt in range(5):
+        result = _cognito_cli_result(
             "admin-confirm-sign-up",
             "--user-pool-id",
             user_pool_id,
@@ -136,14 +126,13 @@ def _confirm_signup_with_retry(user_pool_id: str, email: str) -> None:
         )
         if result.returncode == 0:
             return
-        last_stderr = result.stderr
         if "UserNotFoundException" not in result.stderr:
-            break
-        if attempt < attempts - 1:
-            time.sleep(delay_seconds)
+            raise RuntimeError(f"aws cognito-idp admin-confirm-sign-up failed: {result.stderr}")
+        if attempt < 4:
+            time.sleep(3)
     raise RuntimeError(
-        f"aws cognito-idp admin-confirm-sign-up --user-pool-id {user_pool_id} "
-        f"--username {email} failed after {attempts} attempts: {last_stderr}"
+        "aws cognito-idp admin-confirm-sign-up still returning UserNotFoundException "
+        "after signup verification UI appeared; user never became visible"
     )
 
 
@@ -210,7 +199,7 @@ def test_signup_completes_after_backend_confirmation(page: Page) -> None:
     if not user_pool_id:
         pytest.fail("TEST_USER_POOL_ID is not set in environment.")
 
-    _confirm_signup_with_retry(user_pool_id, email)
+    _confirm_signup(user_pool_id, email)
 
     page.get_by_role("button", name="Back to Login").click()
     page.wait_for_url("**/login", timeout=10_000)

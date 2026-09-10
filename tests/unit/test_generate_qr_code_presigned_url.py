@@ -99,10 +99,10 @@ class TestGenerateQrCodePresignedUrl:
             "s3Key": "payment-qr-codes/account-123/venmo.png",
         }
 
-        with pytest.raises(AppError) as exc_info:
-            generate_qr_code_presigned_url(event, None)
+        result = generate_qr_code_presigned_url(event, None)
 
-        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.FORBIDDEN
 
     def test_rejects_already_presigned_url_without_identity(self) -> None:
         """Test that an already-presigned URL still requires authentication (regression: #122)."""
@@ -114,10 +114,10 @@ class TestGenerateQrCodePresignedUrl:
             "s3Key": "payment-qr-codes/account-123/venmo.png",
         }
 
-        with pytest.raises(AppError) as exc_info:
-            generate_qr_code_presigned_url(event, None)
+        result = generate_qr_code_presigned_url(event, None)
 
-        assert exc_info.value.error_code == ErrorCode.UNAUTHORIZED
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.UNAUTHORIZED
 
     def test_raises_unauthorized_when_no_owner_id(self) -> None:
         """Test that UNAUTHORIZED error is raised when ownerAccountId is missing."""
@@ -129,11 +129,11 @@ class TestGenerateQrCodePresignedUrl:
             "s3Key": "payment-qr-codes/account-123/venmo.png",
         }
 
-        with pytest.raises(AppError) as exc_info:
-            generate_qr_code_presigned_url(event, None)
+        result = generate_qr_code_presigned_url(event, None)
 
-        assert exc_info.value.error_code == ErrorCode.UNAUTHORIZED
-        assert "Owner account ID required" in str(exc_info.value.message)
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.UNAUTHORIZED
+        assert "Owner account ID required" in result["message"]
 
     def test_raises_unauthorized_when_owner_id_empty(self) -> None:
         """Test that UNAUTHORIZED error is raised when ownerAccountId is empty string."""
@@ -145,11 +145,11 @@ class TestGenerateQrCodePresignedUrl:
             "s3Key": "payment-qr-codes/account-123/venmo.png",
         }
 
-        with pytest.raises(AppError) as exc_info:
-            generate_qr_code_presigned_url(event, None)
+        result = generate_qr_code_presigned_url(event, None)
 
-        assert exc_info.value.error_code == ErrorCode.UNAUTHORIZED
-        assert "Owner account ID required" in str(exc_info.value.message)
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.UNAUTHORIZED
+        assert "Owner account ID required" in result["message"]
 
     def test_generates_presigned_url_success(self, s3_bucket: Any) -> None:
         """Test successful presigned URL generation."""
@@ -189,11 +189,11 @@ class TestGenerateQrCodePresignedUrl:
         with patch("src.handlers.generate_qr_code_presigned_url.generate_presigned_get_url") as mock_generate:
             mock_generate.side_effect = Exception("Unexpected error")
 
-            with pytest.raises(AppError) as exc_info:
-                generate_qr_code_presigned_url(event, None)
+            result = generate_qr_code_presigned_url(event, None)
 
-            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
-            assert "Failed to generate QR code URL" in str(exc_info.value.message)
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
+            assert "Failed to generate QR code URL" in result["message"]
 
     def test_default_method_name_is_empty_string(self, s3_bucket: Any) -> None:
         """Test that method_name defaults to empty string when not provided."""
@@ -226,10 +226,10 @@ class TestGenerateQrCodePresignedUrl:
             "s3Key": "payment-qr-codes/account-123/venmo.png",
         }
 
-        with pytest.raises(AppError) as exc_info:
-            generate_qr_code_presigned_url(event, None)
+        result = generate_qr_code_presigned_url(event, None)
 
-        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.FORBIDDEN
 
     def test_raises_unauthorized_when_identity_missing(self) -> None:
         """Test that UNAUTHORIZED is raised when identity is missing."""
@@ -240,10 +240,10 @@ class TestGenerateQrCodePresignedUrl:
             "s3Key": "payment-qr-codes/account-123/venmo.png",
         }
 
-        with pytest.raises(AppError) as exc_info:
-            generate_qr_code_presigned_url(event, None)
+        result = generate_qr_code_presigned_url(event, None)
 
-        assert exc_info.value.error_code == ErrorCode.UNAUTHORIZED
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.UNAUTHORIZED
 
     def test_allows_write_collaborator_with_profile_id(self, s3_bucket: Any) -> None:
         """Test that a WRITE collaborator can retrieve the owner's QR code."""
@@ -283,10 +283,10 @@ class TestGenerateQrCodePresignedUrl:
             "s3Key": "payment-qr-codes/account-123/venmo.png",
         }
 
-        with pytest.raises(AppError) as exc_info:
-            generate_qr_code_presigned_url(event, None)
+        result = generate_qr_code_presigned_url(event, None)
 
-        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.FORBIDDEN
 
     def test_rejects_collaborator_without_write_permission(self) -> None:
         """Test that a collaborator without WRITE access is denied."""
@@ -302,10 +302,10 @@ class TestGenerateQrCodePresignedUrl:
         with patch("src.handlers.generate_qr_code_presigned_url.check_profile_access") as mock_check_access:
             mock_check_access.return_value = False
 
-            with pytest.raises(AppError) as exc_info:
-                generate_qr_code_presigned_url(event, None)
+            result = generate_qr_code_presigned_url(event, None)
 
-        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.FORBIDDEN
         mock_check_access.assert_called_once_with("other-account", "profile-abc", "WRITE")
 
     def test_rejects_collaborator_when_profile_not_found(self) -> None:
@@ -322,10 +322,10 @@ class TestGenerateQrCodePresignedUrl:
         with patch("src.handlers.generate_qr_code_presigned_url.check_profile_access") as mock_check_access:
             mock_check_access.side_effect = AppError(ErrorCode.NOT_FOUND, "Profile not found")
 
-            with pytest.raises(AppError) as exc_info:
-                generate_qr_code_presigned_url(event, None)
+            result = generate_qr_code_presigned_url(event, None)
 
-        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.FORBIDDEN
         mock_check_access.assert_called_once_with("other-account", "profile-abc", "WRITE")
 
     def test_propagates_unexpected_profile_access_error(self) -> None:
@@ -342,8 +342,156 @@ class TestGenerateQrCodePresignedUrl:
         with patch("src.handlers.generate_qr_code_presigned_url.check_profile_access") as mock_check_access:
             mock_check_access.side_effect = AppError(ErrorCode.INTERNAL_ERROR, "DynamoDB error")
 
-            with pytest.raises(AppError) as exc_info:
-                generate_qr_code_presigned_url(event, None)
+            result = generate_qr_code_presigned_url(event, None)
 
-        assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
         mock_check_access.assert_called_once_with("other-account", "profile-abc", "WRITE")
+
+
+class TestBatchGenerateQrCodePresignedUrls:
+    """Test the batch payload (s3Keys list) used by the batch_qr_urls pipeline function (#330)."""
+
+    def test_returns_map_of_presigned_urls(self, s3_bucket: Any) -> None:
+        """Test that a batch payload returns one URL per owned S3 key."""
+        owner_account_id = "account-123"
+        bucket_name = os.environ.get("EXPORTS_BUCKET", "test-exports-bucket")
+        keys = [
+            f"payment-qr-codes/{owner_account_id}/venmo.png",
+            f"payment-qr-codes/{owner_account_id}/zelle.png",
+        ]
+        for key in keys:
+            s3_bucket.put_object(Bucket=bucket_name, Key=key, Body=b"fake-qr-data")
+
+        event: Dict[str, Any] = {
+            "s3Keys": keys,
+            "ownerAccountId": owner_account_id,
+            "identity": {"sub": owner_account_id},
+        }
+
+        result = generate_qr_code_presigned_url(event, None)
+
+        assert isinstance(result, dict)
+        assert set(result.keys()) == set(keys)
+        for url in result.values():
+            assert url.startswith("https://")
+            assert "Signature=" in url or "X-Amz-Signature" in url
+
+    def test_single_lambda_invocation_signs_all_keys(self, s3_bucket: Any) -> None:
+        """Regression for #330: one invocation handles every key (no N+1)."""
+        owner_account_id = "account-123"
+        bucket_name = os.environ.get("EXPORTS_BUCKET", "test-exports-bucket")
+        keys = [f"payment-qr-codes/{owner_account_id}/method-{i}.png" for i in range(20)]
+        for key in keys:
+            s3_bucket.put_object(Bucket=bucket_name, Key=key, Body=b"fake-qr-data")
+
+        event: Dict[str, Any] = {
+            "s3Keys": keys,
+            "ownerAccountId": owner_account_id,
+            "identity": {"sub": owner_account_id},
+        }
+
+        with patch("src.handlers.generate_qr_code_presigned_url.generate_presigned_get_url") as mock_generate:
+            from src.utils.payment_methods import generate_presigned_get_url
+
+            mock_generate.side_effect = generate_presigned_get_url
+
+            result = generate_qr_code_presigned_url(event, None)
+
+        assert mock_generate.call_count == 20
+        assert set(result.keys()) == set(keys)
+
+    def test_skips_keys_that_fail_ownership_validation(self, s3_bucket: Any) -> None:
+        """Test that keys not owned by the owner are omitted, not fatal."""
+        owner_account_id = "account-123"
+        bucket_name = os.environ.get("EXPORTS_BUCKET", "test-exports-bucket")
+        owned_key = f"payment-qr-codes/{owner_account_id}/venmo.png"
+        foreign_key = "payment-qr-codes/other-account/venmo.png"
+        s3_bucket.put_object(Bucket=bucket_name, Key=owned_key, Body=b"fake-qr-data")
+
+        event: Dict[str, Any] = {
+            "s3Keys": [owned_key, foreign_key],
+            "ownerAccountId": owner_account_id,
+            "identity": {"sub": owner_account_id},
+        }
+
+        result = generate_qr_code_presigned_url(event, None)
+
+        assert set(result.keys()) == {owned_key}
+
+    def test_ignores_empty_and_non_string_keys(self, s3_bucket: Any) -> None:
+        """Test that empty/non-string entries are ignored."""
+        owner_account_id = "account-123"
+        bucket_name = os.environ.get("EXPORTS_BUCKET", "test-exports-bucket")
+        key = f"payment-qr-codes/{owner_account_id}/venmo.png"
+        s3_bucket.put_object(Bucket=bucket_name, Key=key, Body=b"fake-qr-data")
+
+        event: Dict[str, Any] = {
+            "s3Keys": ["", None, 42, key],
+            "ownerAccountId": owner_account_id,
+            "identity": {"sub": owner_account_id},
+        }
+
+        result = generate_qr_code_presigned_url(event, None)
+
+        assert set(result.keys()) == {key}
+
+    def test_empty_keys_list_returns_empty_map(self, s3_bucket: Any) -> None:
+        """Test that an empty batch returns an empty map without signing."""
+        event: Dict[str, Any] = {
+            "s3Keys": [],
+            "ownerAccountId": "account-123",
+            "identity": {"sub": "account-123"},
+        }
+
+        with patch("src.handlers.generate_qr_code_presigned_url.generate_presigned_get_url") as mock_generate:
+            result = generate_qr_code_presigned_url(event, None)
+
+        assert result == {}
+        mock_generate.assert_not_called()
+
+    def test_batch_requires_authentication(self, s3_bucket: Any) -> None:
+        """Test that a batch payload without identity is rejected."""
+        event: Dict[str, Any] = {
+            "s3Keys": ["payment-qr-codes/account-123/venmo.png"],
+            "ownerAccountId": "account-123",
+        }
+
+        result = generate_qr_code_presigned_url(event, None)
+
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.UNAUTHORIZED
+
+    def test_batch_rejects_non_owner_without_profile(self, s3_bucket: Any) -> None:
+        """Test that a batch for another owner's methods is denied."""
+        event: Dict[str, Any] = {
+            "s3Keys": ["payment-qr-codes/account-123/venmo.png"],
+            "ownerAccountId": "account-123",
+            "identity": {"sub": "other-account"},
+        }
+
+        result = generate_qr_code_presigned_url(event, None)
+
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.FORBIDDEN
+
+    def test_batch_propagates_non_forbidden_signing_errors(self, s3_bucket: Any) -> None:
+        """Test that non-FORBIDDEN signing errors fail the batch (not skipped)."""
+        owner_account_id = "account-123"
+        s3_key = f"payment-qr-codes/{owner_account_id}/venmo.png"
+        bucket_name = os.environ.get("EXPORTS_BUCKET", "test-exports-bucket")
+        s3_bucket.put_object(Bucket=bucket_name, Key=s3_key, Body=b"fake-qr-data")
+
+        event: Dict[str, Any] = {
+            "s3Keys": [s3_key],
+            "ownerAccountId": owner_account_id,
+            "identity": {"sub": owner_account_id},
+        }
+
+        with patch("src.handlers.generate_qr_code_presigned_url.generate_presigned_get_url") as mock_generate:
+            mock_generate.side_effect = AppError(ErrorCode.INTERNAL_ERROR, "S3 unavailable")
+
+            result = generate_qr_code_presigned_url(event, None)
+
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.INTERNAL_ERROR

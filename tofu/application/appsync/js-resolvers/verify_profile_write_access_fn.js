@@ -41,7 +41,7 @@ export function request(ctx) {
         hasOrder: !!(ctx.stash && ctx.stash.order),
         hasCampaign: !!(ctx.stash && ctx.stash.campaign),
         orderKeys: ctx.stash && ctx.stash.order ? Object.keys(ctx.stash.order) : []
-        }), 'BadRequest');
+        }), 'INVALID_INPUT');
     }
     
     // Normalize profileId to DB format: ensure it starts with PROFILE#
@@ -71,7 +71,7 @@ export function response(ctx) {
     const profile = ctx.result.items && ctx.result.items[0];
     
     if (!profile) {
-        util.error('Profile not found', 'NotFound');
+        util.error('Profile not found', 'NOT_FOUND');
     }
     
     // Store profile in stash for later use

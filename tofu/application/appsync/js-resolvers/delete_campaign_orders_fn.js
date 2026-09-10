@@ -35,7 +35,7 @@ export function response(ctx) {
     const tableData = ctx.result && ctx.result.data ? ctx.result.data[tableName] : null;
     const unprocessed = ctx.result && ctx.result.unprocessedKeys ? ctx.result.unprocessedKeys[tableName] : null;
     if (unprocessed && unprocessed.length > 0) {
-        util.error('Failed to delete ' + unprocessed.length + ' order(s)', 'InternalError');
+        util.error('Failed to delete ' + unprocessed.length + ' order(s)', 'INTERNAL_ERROR');
     }
     const deleted = Array.isArray(tableData)
         ? tableData.filter((item) => item !== null).length

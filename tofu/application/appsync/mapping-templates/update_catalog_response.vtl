@@ -1,6 +1,6 @@
 #if($ctx.error)
     #if($ctx.error.type == "DynamoDB:ConditionalCheckFailedException")
-        $util.error("Catalog not found or access denied", "Forbidden")
+        $util.error("Catalog not found or access denied", "FORBIDDEN")
     #else
         $util.error($ctx.error.message, $ctx.error.type)
     #end
