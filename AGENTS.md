@@ -71,6 +71,9 @@ Read paths: `listMyProfiles` is a pipeline (`list_my_profiles` → `batch_latest
 
 The APPSYNC_JS 1.0.0 runtime rejects resolver/function code at `CreateFunction`/`CreateResolver` time (`BadRequestException: The code contains one or more errors.`) for constructs Node accepts. Hit so far: the `in` operator, `Number.isInteger`, the `continue` statement, and any `Function.prototype.call`/`apply`/`bind` (e.g. `Object.prototype.hasOwnProperty.call` — use the documented `Object.hasOwn` instead). See https://docs.aws.amazon.com/appsync/latest/devguide/supported-features.html for the supported feature list; `query_invites_fn.js` shows the filter-logic alternative to `continue`. Node unit tests cannot catch these — only a deploy does.
 
+### templatefile() interpolation in js-resolver sources (#332)
+
+`aws_appsync_function` resources that load code with `templatefile()` — currently `delete_campaign_orders_fn.js`, `batch_get_catalogs_fn.js`, and `batch_get_shared_campaign_catalogs_fn.js` in `tofu/application/appsync/js-resolvers/` — interpolate every literal `${...}` in the source as a Terraform expression, even inside JS comments and JSDoc. Any stray JS template literal or comment placeholder breaks every `tofu plan`/`apply` touching that function with `Invalid expression`. Keep those files free of unintended `${...}` sequences (escape as `$${...}` or write the placeholder in prose); each file carries a header warning and the load site in `tofu/application/modules/appsync/functions_*.tf` repeats it. Prefer `file()` for new functions unless a table name genuinely must be injected.
 
 ### AppSync resolver-only authorization posture (#71)
 
