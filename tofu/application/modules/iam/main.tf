@@ -462,9 +462,10 @@ resource "aws_iam_role_policy" "lambda_profile_sharing_s3" {
 # final chunk (#355).
 
 locals {
-  payment_table_keys = ["accounts", "profiles", "shares"]
-  payment_table_arns = [for k in local.payment_table_keys : var.dynamodb_table_arns[k]]
-  payment_index_arns = [for arn in local.payment_table_arns : "${arn}/index/*"]
+  payment_table_keys         = ["accounts", "profiles", "shares"]
+  payment_table_arns         = [for k in local.payment_table_keys : var.dynamodb_table_arns[k]]
+  payment_profile_arns       = [var.dynamodb_table_arns["profiles"]]
+  payment_profile_index_arns = [for arn in local.payment_profile_arns : "${arn}/index/*"]
 }
 
 resource "aws_iam_role" "lambda_payment_execution" {
@@ -483,16 +484,22 @@ resource "aws_iam_role_policy_attachment" "lambda_payment_basic" {
 }
 
 data "aws_iam_policy_document" "lambda_payment_dynamodb" {
-  # Read actions on every table these handlers touch, plus their GSIs.
-  # profiles/shares are reached only through utils.auth.check_profile_access
-  # (generate-qr-code-presigned-url's collaborator path).
+  # Read actions split exactly per the traced calls: GetItem on all three
+  # tables these handlers touch (accounts via utils.payment_methods,
+  # profiles/shares via utils.auth.check_profile_access),
+  # and Query only on the profiles table and its GSIs (the profileId-index
+  # lookup in check_profile_access). No Query on accounts or shares — the
+  # handlers never scan or look up those tables by key condition.
   statement {
-    effect = "Allow"
-    actions = [
-      "dynamodb:GetItem",
-      "dynamodb:Query",
-    ]
-    resources = concat(local.payment_table_arns, local.payment_index_arns)
+    effect    = "Allow"
+    actions   = ["dynamodb:GetItem"]
+    resources = local.payment_table_arns
+  }
+
+  statement {
+    effect    = "Allow"
+    actions   = ["dynamodb:Query"]
+    resources = concat(local.payment_profile_arns, local.payment_profile_index_arns)
   }
 
   # confirm-qr-upload / delete-qr-code rewrite the account record's
