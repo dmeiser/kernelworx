@@ -200,6 +200,25 @@ describe('batch_qr_urls_fn response', () => {
         assert.deepStrictEqual(result, { name: 'Venmo', qrCodeUrl: 'https://presigned.example.com/venmo' });
     });
 
+    it('aborts the pipeline when the handler returns a structured error', () => {
+        const ctx = {
+            prev: {
+                result: [{ name: 'Venmo', qrCodeUrl: 'payment-qr-codes/account-123/venmo.png' }],
+            },
+            result: { __isError: true, errorCode: 'FORBIDDEN', message: 'Access denied' },
+            error: null,
+        };
+
+        assert.throws(
+            () => response(ctx),
+            (err) => {
+                assert.strictEqual(err.message, 'FORBIDDEN: Access denied');
+                assert.deepStrictEqual(err.errorInfo, { errorCode: 'FORBIDDEN' });
+                return true;
+            }
+        );
+    });
+
     it('re-signs stored full URLs via their extracted key', () => {
         const stored = 'https://bucket.s3.amazonaws.com/payment-qr-codes/account-123/venmo.png?X-Amz-Signature=abc';
         const ctx = {

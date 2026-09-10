@@ -10,9 +10,11 @@ of the wiring contract:
 - Every UNIT resolver on the admin_operations Lambda datasource carries the
   passthrough JS code and an APPSYNC_JS runtime, and none are converted to
   PIPELINE resolvers.
-- No resolver on any other datasource carries that code: those handlers are
-  not decorator-wrapped and still raise, so they must keep AppSync's default
-  VTL behavior.
+- No resolver on any other datasource carries that code: it forwards an
+  admin-shaped payload (`identity.claims`, `prev.result.paymentMethods`), so
+  other datasources must not reuse it. Decorator-wrapped handlers on other
+  Lambda datasources use `lambda_unit_resolver.js` instead (see
+  test_lambda_unit_resolver_wiring.py).
 """
 
 from __future__ import annotations
@@ -110,5 +112,5 @@ def test_passthrough_code_not_attached_to_other_datasources():
         if PASSTHROUGH_RESOLVER in code:
             offenders.append(name)
     assert offenders == [], (
-        f"non-admin resolvers must keep default VTL behavior; passthrough code found on: {offenders}"
+        f"non-admin resolvers must not forward the admin-shaped payload; passthrough code found on: {offenders}"
     )

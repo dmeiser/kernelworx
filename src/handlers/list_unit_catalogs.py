@@ -1,6 +1,6 @@
 """Lambda resolver for listing catalogs used in a unit."""
 
-from typing import Any, Dict, List, Set
+from typing import TYPE_CHECKING, Any, Dict, List, Set
 
 from boto3.dynamodb.conditions import Key
 
@@ -15,6 +15,18 @@ except ModuleNotFoundError:  # pragma: no cover
     from ..utils.dynamodb import tables
     from ..utils.logging import get_logger
     from ..utils.pagination import query_all_items
+
+# The decorator stays typed for mypy via the relative import below; at runtime
+# the absolute import resolves in the Lambda zip (package `utils`) and the
+# relative fallback resolves in unit tests (package `src.handlers`).
+if TYPE_CHECKING:  # pragma: no cover
+    from ..utils.handlers import lambda_handler as with_error_handling
+else:  # pragma: no cover
+    try:
+        from utils.handlers import lambda_handler as with_error_handling
+    except ModuleNotFoundError:
+        from ..utils.handlers import lambda_handler as with_error_handling
+
 
 logger = get_logger(__name__)
 
@@ -60,6 +72,7 @@ def _fetch_catalogs(catalog_ids: Set[str]) -> List[Dict[str, Any]]:
     return catalogs
 
 
+@with_error_handling(error_message="Failed to list unit catalogs")
 def list_unit_catalogs(event: Dict[str, Any], context: Any) -> List[Dict[str, Any]]:
     """
     List all catalogs used by scouts in a unit (that the caller has access to).
@@ -75,50 +88,45 @@ def list_unit_catalogs(event: Dict[str, Any], context: Any) -> List[Dict[str, An
     Returns:
         List of Catalog objects
     """
-    try:
-        unit_type = event["arguments"]["unitType"]
-        unit_number = int(event["arguments"]["unitNumber"])
-        campaign_name = event["arguments"]["campaignName"]
-        campaign_year = int(event["arguments"]["campaignYear"])
-        caller_account_id = event["identity"]["sub"]
+    unit_type = event["arguments"]["unitType"]
+    unit_number = int(event["arguments"]["unitNumber"])
+    campaign_name = event["arguments"]["campaignName"]
+    campaign_year = int(event["arguments"]["campaignYear"])
+    caller_account_id = event["identity"]["sub"]
 
-        logger.info(f"Listing catalogs for {unit_type} {unit_number}, campaign {campaign_name} {campaign_year}")
+    logger.info(f"Listing catalogs for {unit_type} {unit_number}, campaign {campaign_name} {campaign_year}")
 
-        # Step 1: Find all profiles in this unit via the unitType-unitNumber-index
-        unit_profiles = query_all_items(
-            tables.profiles,
-            {
-                "IndexName": "unitType-unitNumber-index",
-                "KeyConditionExpression": Key("unitType").eq(unit_type) & Key("unitNumber").eq(unit_number),
-            },
-        )
-        logger.info(f"Found {len(unit_profiles)} profiles")
+    # Step 1: Find all profiles in this unit via the unitType-unitNumber-index
+    unit_profiles = query_all_items(
+        tables.profiles,
+        {
+            "IndexName": "unitType-unitNumber-index",
+            "KeyConditionExpression": Key("unitType").eq(unit_type) & Key("unitNumber").eq(unit_number),
+        },
+    )
+    logger.info(f"Found {len(unit_profiles)} profiles")
 
-        if not unit_profiles:
-            return []
+    if not unit_profiles:
+        return []
 
-        # Step 2: Filter to accessible profiles
-        accessible_profiles = _filter_accessible_profiles(unit_profiles, caller_account_id)
-        logger.info(f"Caller has access to {len(accessible_profiles)} of {len(unit_profiles)} profiles")
+    # Step 2: Filter to accessible profiles
+    accessible_profiles = _filter_accessible_profiles(unit_profiles, caller_account_id)
+    logger.info(f"Caller has access to {len(accessible_profiles)} of {len(unit_profiles)} profiles")
 
-        if not accessible_profiles:
-            return []
+    if not accessible_profiles:
+        return []
 
-        # Step 3: Collect catalog IDs from matching campaigns
-        catalog_ids = _collect_catalog_ids(accessible_profiles, campaign_name, campaign_year)
-        logger.info(f"Found {len(catalog_ids)} unique catalogs")
+    # Step 3: Collect catalog IDs from matching campaigns
+    catalog_ids = _collect_catalog_ids(accessible_profiles, campaign_name, campaign_year)
+    logger.info(f"Found {len(catalog_ids)} unique catalogs")
 
-        if not catalog_ids:
-            return []
+    if not catalog_ids:
+        return []
 
-        # Step 4: Fetch and return catalog details
-        catalogs = _fetch_catalogs(catalog_ids)
-        logger.info(f"Returning {len(catalogs)} catalogs")
-        return catalogs
-
-    except Exception as e:
-        logger.error(f"Error listing unit catalogs: {str(e)}", exc_info=True)
-        raise
+    # Step 4: Fetch and return catalog details
+    catalogs = _fetch_catalogs(catalog_ids)
+    logger.info(f"Returning {len(catalogs)} catalogs")
+    return catalogs
 
 
 def _build_unit_campaign_key(
@@ -149,6 +157,7 @@ def _collect_catalog_ids_from_campaigns(campaigns: List[Dict[str, Any]], caller_
     return catalog_ids
 
 
+@with_error_handling(error_message="Failed to list unit campaign catalogs")
 def list_unit_campaign_catalogs(event: Dict[str, Any], context: Any) -> List[Dict[str, Any]]:
     """
     List all catalogs used by scouts in a unit+campaign using unitCampaignKey-index.
@@ -168,43 +177,38 @@ def list_unit_campaign_catalogs(event: Dict[str, Any], context: Any) -> List[Dic
     Returns:
         List of Catalog objects
     """
-    try:
-        unit_type = event["arguments"]["unitType"]
-        unit_number = int(event["arguments"]["unitNumber"])
-        city = event["arguments"]["city"]
-        state = event["arguments"]["state"]
-        campaign_name = event["arguments"]["campaignName"]
-        campaign_year = int(event["arguments"]["campaignYear"])
-        caller_account_id = event["identity"]["sub"]
+    unit_type = event["arguments"]["unitType"]
+    unit_number = int(event["arguments"]["unitNumber"])
+    city = event["arguments"]["city"]
+    state = event["arguments"]["state"]
+    campaign_name = event["arguments"]["campaignName"]
+    campaign_year = int(event["arguments"]["campaignYear"])
+    caller_account_id = event["identity"]["sub"]
 
-        logger.info(f"Listing catalogs for {unit_type} {unit_number} in {city}, {state}, campaign {campaign_name}")
+    logger.info(f"Listing catalogs for {unit_type} {unit_number} in {city}, {state}, campaign {campaign_name}")
 
-        # Step 1: Query unitCampaignKey-index
-        unit_campaign_key = _build_unit_campaign_key(unit_type, unit_number, city, state, campaign_name, campaign_year)
-        unit_campaigns = query_all_items(
-            tables.campaigns,
-            {
-                "IndexName": "unitCampaignKey-index",
-                "KeyConditionExpression": Key("unitCampaignKey").eq(unit_campaign_key),
-            },
-        )
-        logger.info(f"Found {len(unit_campaigns)} campaigns")
+    # Step 1: Query unitCampaignKey-index
+    unit_campaign_key = _build_unit_campaign_key(unit_type, unit_number, city, state, campaign_name, campaign_year)
+    unit_campaigns = query_all_items(
+        tables.campaigns,
+        {
+            "IndexName": "unitCampaignKey-index",
+            "KeyConditionExpression": Key("unitCampaignKey").eq(unit_campaign_key),
+        },
+    )
+    logger.info(f"Found {len(unit_campaigns)} campaigns")
 
-        if not unit_campaigns:
-            return []
+    if not unit_campaigns:
+        return []
 
-        # Step 2: Collect catalog IDs from accessible campaigns
-        catalog_ids = _collect_catalog_ids_from_campaigns(unit_campaigns, caller_account_id)
-        logger.info(f"Found {len(catalog_ids)} unique catalogs in accessible campaigns")
+    # Step 2: Collect catalog IDs from accessible campaigns
+    catalog_ids = _collect_catalog_ids_from_campaigns(unit_campaigns, caller_account_id)
+    logger.info(f"Found {len(catalog_ids)} unique catalogs in accessible campaigns")
 
-        if not catalog_ids:
-            return []
+    if not catalog_ids:
+        return []
 
-        # Step 3: Fetch and return catalog details
-        catalogs = _fetch_catalogs(catalog_ids)
-        logger.info(f"Returning {len(catalogs)} catalogs")
-        return catalogs
-
-    except Exception as e:
-        logger.error(f"Error listing unit campaign catalogs: {str(e)}", exc_info=True)
-        raise
+    # Step 3: Fetch and return catalog details
+    catalogs = _fetch_catalogs(catalog_ids)
+    logger.info(f"Returning {len(catalogs)} catalogs")
+    return catalogs

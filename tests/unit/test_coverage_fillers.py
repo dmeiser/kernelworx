@@ -382,7 +382,6 @@ def test_transfer_profile_ownership_success(monkeypatch):
 
 @mock_aws
 def test_transfer_profile_ownership_error_paths():
-    from src.utils.errors import AppError
 
     os.environ["AWS_REGION"] = "us-east-1"
     os.environ["PROFILES_TABLE_NAME"] = "ProfilesTable"
@@ -437,9 +436,9 @@ def test_transfer_profile_ownership_error_paths():
         "arguments": {"input": {"profileId": "PROFILE#abc", "newOwnerAccountId": "new456"}},
     }
 
-    # Missing share triggers AppError
-    with pytest.raises(AppError):
-        transfer_module.lambda_handler(event_base, None)
+    # Missing share returns an error payload
+    result = transfer_module.lambda_handler(event_base, None)
+    assert result["__isError"] is True
 
     # Seed share but wrong caller triggers AppError
     shares_table.put_item(Item={"profileId": "PROFILE#abc", "targetAccountId": "ACCOUNT#new456"})
@@ -447,16 +446,16 @@ def test_transfer_profile_ownership_error_paths():
         "identity": {"sub": "someoneelse"},
         "arguments": {"input": {"profileId": "PROFILE#abc", "newOwnerAccountId": "new456"}},
     }
-    with pytest.raises(AppError):
-        transfer_module.lambda_handler(event_bad_owner, None)
+    result = transfer_module.lambda_handler(event_bad_owner, None)
+    assert result["__isError"] is True
 
     # Missing profile triggers AppError
     event_missing_profile = {
         "identity": {"sub": "owner123"},
         "arguments": {"input": {"profileId": "PROFILE#missing", "newOwnerAccountId": "new456"}},
     }
-    with pytest.raises(AppError):
-        transfer_module.lambda_handler(event_missing_profile, None)
+    result = transfer_module.lambda_handler(event_missing_profile, None)
+    assert result["__isError"] is True
 
 
 @mock_aws
