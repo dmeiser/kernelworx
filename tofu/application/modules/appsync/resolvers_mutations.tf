@@ -480,6 +480,13 @@ resource "aws_appsync_resolver" "delete_my_account" {
   type        = "Mutation"
   field       = "deleteMyAccount"
   data_source = aws_appsync_datasource.delete_account.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
 }
 
 # transferProfileOwnership (Lambda)
@@ -488,6 +495,13 @@ resource "aws_appsync_resolver" "transfer_profile_ownership" {
   type        = "Mutation"
   field       = "transferProfileOwnership"
   data_source = aws_appsync_datasource.transfer_ownership.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
 }
 
 # updateMyPreferences (JS)
@@ -511,6 +525,13 @@ resource "aws_appsync_resolver" "request_campaign_report" {
   type        = "Mutation"
   field       = "requestCampaignReport"
   data_source = aws_appsync_datasource.request_report.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
 }
 
 # === PAYMENT METHODS MUTATIONS ===
@@ -590,6 +611,13 @@ resource "aws_appsync_resolver" "delete_payment_method_qr_code" {
   type        = "Mutation"
   field       = "deletePaymentMethodQRCode"
   data_source = aws_appsync_datasource.delete_qr_code.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
 }
 
 # requestPaymentMethodQRCodeUpload (Lambda)
@@ -598,6 +626,13 @@ resource "aws_appsync_resolver" "request_payment_method_qr_code_upload" {
   type        = "Mutation"
   field       = "requestPaymentMethodQRCodeUpload"
   data_source = aws_appsync_datasource.request_qr_upload.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
 }
 
 # confirmPaymentMethodQRCodeUpload Pipeline

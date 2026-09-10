@@ -116,10 +116,10 @@ class TestRequestQRUpload:
         """Test request upload for reserved name (Cash)."""
         event = {"identity": {"sub": sample_account_id}, "arguments": {"paymentMethodName": "Cash"}}
 
-        with pytest.raises(AppError) as exc_info:
-            request_qr_upload(event, None)
-        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
-        assert "reserved" in exc_info.value.message.lower()
+        result = request_qr_upload(event, None)
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.INVALID_INPUT
+        assert "reserved" in result["message"].lower()
 
     def test_request_upload_nonexistent_method(
         self, dynamodb_tables: Dict[str, Any], sample_account: Dict[str, Any], sample_account_id: str
@@ -127,26 +127,26 @@ class TestRequestQRUpload:
         """Test request upload for nonexistent payment method."""
         event = {"identity": {"sub": sample_account_id}, "arguments": {"paymentMethodName": "Zelle"}}
 
-        with pytest.raises(AppError) as exc_info:
-            request_qr_upload(event, None)
-        assert exc_info.value.error_code == ErrorCode.NOT_FOUND
-        assert "not found" in exc_info.value.message.lower()
+        result = request_qr_upload(event, None)
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.NOT_FOUND
+        assert "not found" in result["message"].lower()
 
     def test_request_upload_unauthenticated(self) -> None:
         """Test request upload without authentication."""
         event = {"identity": {}, "arguments": {"paymentMethodName": "Venmo"}}
 
-        with pytest.raises(AppError) as exc_info:
-            request_qr_upload(event, None)
-        assert exc_info.value.error_code == ErrorCode.UNAUTHORIZED
+        result = request_qr_upload(event, None)
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.UNAUTHORIZED
 
     def test_request_upload_empty_name(self, sample_account_id: str) -> None:
         """Test request upload with empty name."""
         event = {"identity": {"sub": sample_account_id}, "arguments": {"paymentMethodName": ""}}
 
-        with pytest.raises(AppError) as exc_info:
-            request_qr_upload(event, None)
-        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+        result = request_qr_upload(event, None)
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.INVALID_INPUT
 
 
 class TestConfirmQRUpload:
@@ -264,9 +264,9 @@ class TestConfirmQRUpload:
             "src.handlers.payment_methods_handlers.delete_qr_by_key",
             side_effect=AppError(ErrorCode.INTERNAL_ERROR, "Failed to delete QR code"),
         ):
-            with pytest.raises(AppError) as exc_info:
-                confirm_qr_upload(event, None)
-            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+            result = confirm_qr_upload(event, None)
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
 
         # Record still points at the old key and the new object is untouched
         response = tables.accounts.get_item(Key={"accountId": account_id_key})
@@ -313,10 +313,10 @@ class TestConfirmQRUpload:
             "src.handlers.payment_methods_handlers._update_payment_method_qr_url",
             side_effect=Exception("DynamoDB unavailable"),
         ):
-            with pytest.raises(AppError) as exc_info:
-                confirm_qr_upload(event, None)
-            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
-            assert "re-upload" in exc_info.value.message.lower()
+            result = confirm_qr_upload(event, None)
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
+            assert "re-upload" in result["message"].lower()
 
         # Accepted trade: the old object was already deleted, so the method is
         # left without a QR image and the record still references the old key
@@ -354,9 +354,9 @@ class TestConfirmQRUpload:
                 "arguments": {"paymentMethodName": "Venmo", "s3Key": s3_key},
             }
 
-            with pytest.raises(AppError) as exc_info:
-                confirm_qr_upload(event, None)
-            assert exc_info.value.error_code == ErrorCode.NOT_FOUND
+            result = confirm_qr_upload(event, None)
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.NOT_FOUND
         finally:
             override_table("accounts", None)
 
@@ -391,9 +391,9 @@ class TestConfirmQRUpload:
                 "arguments": {"paymentMethodName": "Venmo", "s3Key": s3_key},
             }
 
-            with pytest.raises(AppError) as exc_info:
-                confirm_qr_upload(event, None)
-            assert exc_info.value.error_code == ErrorCode.NOT_FOUND
+            result = confirm_qr_upload(event, None)
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.NOT_FOUND
         finally:
             override_table("accounts", None)
 
@@ -499,10 +499,10 @@ class TestConfirmQRUpload:
             "arguments": {"paymentMethodName": "Venmo", "s3Key": s3_key},
         }
 
-        with pytest.raises(AppError) as exc_info:
-            confirm_qr_upload(event, None)
-        assert exc_info.value.error_code == ErrorCode.NOT_FOUND
-        assert "upload not found" in exc_info.value.message.lower()
+        result = confirm_qr_upload(event, None)
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.NOT_FOUND
+        assert "upload not found" in result["message"].lower()
 
     def test_confirm_upload_nonexistent_method(
         self, dynamodb_tables: Dict[str, Any], s3_bucket: Any, sample_account: Dict[str, Any], sample_account_id: str
@@ -519,10 +519,10 @@ class TestConfirmQRUpload:
             "arguments": {"paymentMethodName": "Zelle", "s3Key": s3_key},
         }
 
-        with pytest.raises(AppError) as exc_info:
-            confirm_qr_upload(event, None)
-        assert exc_info.value.error_code == ErrorCode.NOT_FOUND
-        assert "not found" in exc_info.value.message.lower()
+        result = confirm_qr_upload(event, None)
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.NOT_FOUND
+        assert "not found" in result["message"].lower()
 
     def test_confirm_upload_account_not_exists(self, dynamodb_tables: Dict[str, Any], s3_bucket: Any) -> None:
         """Test confirm upload when account doesn't exist in DynamoDB."""
@@ -540,10 +540,10 @@ class TestConfirmQRUpload:
             "arguments": {"paymentMethodName": "Venmo", "s3Key": s3_key},
         }
 
-        with pytest.raises(AppError) as exc_info:
-            confirm_qr_upload(event, None)
-        assert exc_info.value.error_code == ErrorCode.NOT_FOUND
-        assert "not found" in exc_info.value.message.lower()
+        result = confirm_qr_upload(event, None)
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.NOT_FOUND
+        assert "not found" in result["message"].lower()
 
     def test_confirm_upload_unauthenticated(self) -> None:
         """Test confirm upload without authentication."""
@@ -552,17 +552,17 @@ class TestConfirmQRUpload:
             "arguments": {"paymentMethodName": "Venmo", "s3Key": "payment-qr-codes/acc/venmo.png"},
         }
 
-        with pytest.raises(AppError) as exc_info:
-            confirm_qr_upload(event, None)
-        assert exc_info.value.error_code == ErrorCode.UNAUTHORIZED
+        result = confirm_qr_upload(event, None)
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.UNAUTHORIZED
 
     def test_confirm_upload_empty_parameters(self, sample_account_id: str) -> None:
         """Test confirm upload with empty parameters."""
         event = {"identity": {"sub": sample_account_id}, "arguments": {"paymentMethodName": "", "s3Key": ""}}
 
-        with pytest.raises(AppError) as exc_info:
-            confirm_qr_upload(event, None)
-        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+        result = confirm_qr_upload(event, None)
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.INVALID_INPUT
 
     def test_confirm_upload_wrong_account_s3_key(self, sample_account_id: str) -> None:
         """Test confirm upload with s3_key belonging to another account - security check."""
@@ -575,10 +575,10 @@ class TestConfirmQRUpload:
             "arguments": {"paymentMethodName": "Venmo", "s3Key": s3_key},
         }
 
-        with pytest.raises(AppError) as exc_info:
-            confirm_qr_upload(event, None)
-        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
-        assert "access denied" in exc_info.value.message.lower()
+        result = confirm_qr_upload(event, None)
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.FORBIDDEN
+        assert "access denied" in result["message"].lower()
 
     def test_confirm_upload_malformed_s3_key(self, sample_account_id: str) -> None:
         """Test confirm upload with malformed s3_key - security check."""
@@ -587,9 +587,9 @@ class TestConfirmQRUpload:
             "arguments": {"paymentMethodName": "Venmo", "s3Key": "malformed/key.png"},
         }
 
-        with pytest.raises(AppError) as exc_info:
-            confirm_qr_upload(event, None)
-        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
+        result = confirm_qr_upload(event, None)
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.FORBIDDEN
 
     def test_confirm_upload_detects_concurrent_modification(
         self, dynamodb_tables: Dict[str, Any], s3_bucket: Any, sample_account: Dict[str, Any], sample_account_id: str
@@ -618,10 +618,10 @@ class TestConfirmQRUpload:
                 "arguments": {"paymentMethodName": "Venmo", "s3Key": s3_key},
             }
 
-            with pytest.raises(AppError) as exc_info:
-                confirm_qr_upload(event, None)
-            assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
-            assert "modified by another request" in str(exc_info.value.message)
+            result = confirm_qr_upload(event, None)
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.INVALID_INPUT
+            assert "modified by another request" in result["message"]
         finally:
             override_table("accounts", None)
 
@@ -694,10 +694,10 @@ class TestDeleteQRCode:
 
         event = {"identity": {"sub": sample_account_id}, "arguments": {"paymentMethodName": "Cash"}}
 
-        with pytest.raises(AppError) as exc_info:
-            delete_qr_code(event, None)
-        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
-        assert "reserved" in exc_info.value.message.lower()
+        result = delete_qr_code(event, None)
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.INVALID_INPUT
+        assert "reserved" in result["message"].lower()
 
     def test_delete_qr_nonexistent_method(
         self, dynamodb_tables: Dict[str, Any], sample_account: Dict[str, Any], sample_account_id: str
@@ -707,10 +707,10 @@ class TestDeleteQRCode:
 
         event = {"identity": {"sub": sample_account_id}, "arguments": {"paymentMethodName": "Zelle"}}
 
-        with pytest.raises(AppError) as exc_info:
-            delete_qr_code(event, None)
-        assert exc_info.value.error_code == ErrorCode.NOT_FOUND
-        assert "not found" in exc_info.value.message.lower()
+        result = delete_qr_code(event, None)
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.NOT_FOUND
+        assert "not found" in result["message"].lower()
 
     def test_delete_qr_account_not_exists(self, dynamodb_tables: Dict[str, Any]) -> None:
         """Test deleting QR when account doesn't exist in DynamoDB."""
@@ -719,10 +719,10 @@ class TestDeleteQRCode:
         fake_account_id = "nonexistent-account"
         event = {"identity": {"sub": fake_account_id}, "arguments": {"paymentMethodName": "Venmo"}}
 
-        with pytest.raises(AppError) as exc_info:
-            delete_qr_code(event, None)
-        assert exc_info.value.error_code == ErrorCode.NOT_FOUND
-        assert "not found" in exc_info.value.message.lower()
+        result = delete_qr_code(event, None)
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.NOT_FOUND
+        assert "not found" in result["message"].lower()
 
     def test_delete_qr_unauthenticated(self) -> None:
         """Test deleting QR without authentication."""
@@ -730,9 +730,9 @@ class TestDeleteQRCode:
 
         event = {"identity": {}, "arguments": {"paymentMethodName": "Venmo"}}
 
-        with pytest.raises(AppError) as exc_info:
-            delete_qr_code(event, None)
-        assert exc_info.value.error_code == ErrorCode.UNAUTHORIZED
+        result = delete_qr_code(event, None)
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.UNAUTHORIZED
 
     def test_delete_qr_empty_name(self, sample_account_id: str) -> None:
         """Test deleting QR with empty name."""
@@ -740,9 +740,9 @@ class TestDeleteQRCode:
 
         event = {"identity": {"sub": sample_account_id}, "arguments": {"paymentMethodName": ""}}
 
-        with pytest.raises(AppError) as exc_info:
-            delete_qr_code(event, None)
-        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+        result = delete_qr_code(event, None)
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.INVALID_INPUT
 
     def test_delete_qr_detects_concurrent_modification(
         self, dynamodb_tables: Dict[str, Any], sample_account: Dict[str, Any], sample_account_id: str
@@ -766,10 +766,10 @@ class TestDeleteQRCode:
         try:
             event = {"identity": {"sub": sample_account_id}, "arguments": {"paymentMethodName": "Venmo"}}
 
-            with pytest.raises(AppError) as exc_info:
-                delete_qr_code(event, None)
-            assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
-            assert "modified by another request" in str(exc_info.value.message)
+            result = delete_qr_code(event, None)
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.INVALID_INPUT
+            assert "modified by another request" in result["message"]
         finally:
             override_table("accounts", None)
 
@@ -787,9 +787,9 @@ class TestExceptionHandling:
             with patch("src.handlers.payment_methods_handlers.get_payment_methods", return_value=[{"name": "Venmo"}]):
                 event = {"identity": {"sub": sample_account_id}, "arguments": {"paymentMethodName": "Venmo"}}
 
-                with pytest.raises(AppError) as exc_info:
-                    request_qr_upload(event, None)
-                assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+                result = request_qr_upload(event, None)
+                assert result["__isError"] is True
+                assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
 
     def test_confirm_qr_upload_generic_exception(self, sample_account_id: str) -> None:
         """Test generic exception handling in confirm_qr_upload."""
@@ -806,9 +806,9 @@ class TestExceptionHandling:
                 "arguments": {"paymentMethodName": "Venmo", "s3Key": s3_key},
             }
 
-            with pytest.raises(AppError) as exc_info:
-                confirm_qr_upload(event, None)
-            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+            result = confirm_qr_upload(event, None)
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
 
     def test_confirm_qr_upload_s3_client_error_non_404(self, sample_account_id: str) -> None:
         """Test S3 ClientError that is not 404 (re-raise path)."""
@@ -826,9 +826,9 @@ class TestExceptionHandling:
                 "arguments": {"paymentMethodName": "Venmo", "s3Key": s3_key},
             }
 
-            with pytest.raises(AppError) as exc_info:
-                confirm_qr_upload(event, None)
-            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+            result = confirm_qr_upload(event, None)
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
 
     def test_delete_qr_account_deleted_after_s3_delete(
         self, dynamodb_tables: Dict[str, Any], s3_bucket: Any, sample_account: Dict[str, Any], sample_account_id: str
@@ -870,10 +870,10 @@ class TestExceptionHandling:
                 "arguments": {"paymentMethodName": "Venmo"},
             }
 
-            with pytest.raises(AppError) as exc_info:
-                delete_qr_code(event, None)
-            assert exc_info.value.error_code == ErrorCode.NOT_FOUND
-            assert "not found" in str(exc_info.value)
+            result = delete_qr_code(event, None)
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.NOT_FOUND
+            assert "not found" in result["message"]
 
     def test_confirm_upload_method_not_found_in_loop(
         self, dynamodb_tables: Dict[str, Any], s3_bucket: Any, sample_account: Dict[str, Any], sample_account_id: str
@@ -893,10 +893,10 @@ class TestExceptionHandling:
             "arguments": {"paymentMethodName": "Venmo", "s3Key": s3_key},
         }
 
-        with pytest.raises(AppError) as exc_info:
-            confirm_qr_upload(event, None)
-        assert exc_info.value.error_code == ErrorCode.NOT_FOUND
-        assert "not found" in str(exc_info.value)
+        result = confirm_qr_upload(event, None)
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.NOT_FOUND
+        assert "not found" in result["message"]
 
     def test_delete_qr_method_not_found_in_loop(
         self, dynamodb_tables: Dict[str, Any], s3_bucket: Any, sample_account: Dict[str, Any], sample_account_id: str
@@ -981,10 +981,10 @@ class TestExceptionHandling:
                 "identity": {"sub": sample_account_id},
                 "arguments": {"paymentMethodName": "Venmo"},
             }
-            # Failure surfaces as a typed error instead of being swallowed
-            with pytest.raises(AppError) as exc_info:
-                delete_qr_code(event, None)
-            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+            # Failure surfaces as a typed error payload instead of being swallowed
+            result = delete_qr_code(event, None)
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
 
         # DynamoDB record is untouched so the user can retry
         response = tables.accounts.get_item(Key={"accountId": account_id_key})
@@ -1069,10 +1069,10 @@ class TestExceptionHandling:
                 "identity": {"sub": sample_account_id},
                 "arguments": {"paymentMethodName": "Venmo"},
             }
-            # Failure surfaces as a typed error instead of being swallowed
-            with pytest.raises(AppError) as exc_info:
-                delete_qr_code(event, None)
-            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+            # Failure surfaces as a typed error payload instead of being swallowed
+            result = delete_qr_code(event, None)
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
 
         # DynamoDB record still holds the legacy URL so the user can retry
         response = tables.accounts.get_item(Key={"accountId": account_id_key})

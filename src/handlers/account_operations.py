@@ -5,7 +5,7 @@ Handles user account management including deleting user accounts.
 """
 
 import os
-from typing import Any, Dict
+from typing import TYPE_CHECKING, Any, Dict
 
 import boto3
 from botocore.exceptions import ClientError
@@ -21,6 +21,18 @@ except ModuleNotFoundError:  # pragma: no cover
     from ..utils.errors import AppError, ErrorCode
     from ..utils.logging import get_logger
     from ..utils.payment_methods import delete_all_user_qr_codes
+
+# The decorator stays typed for mypy via the relative import below; at runtime
+# the absolute import resolves in the Lambda zip (package `utils`) and the
+# relative fallback resolves in unit tests (package `src.handlers`).
+if TYPE_CHECKING:  # pragma: no cover
+    from ..utils.handlers import lambda_handler as with_error_handling
+else:  # pragma: no cover
+    try:
+        from utils.handlers import lambda_handler as with_error_handling
+    except ModuleNotFoundError:
+        from ..utils.handlers import lambda_handler as with_error_handling
+
 
 logger = get_logger(__name__)
 
@@ -111,6 +123,7 @@ def _delete_user_from_cognito(
             raise
 
 
+@with_error_handling(error_message="Failed to delete account")
 def delete_my_account(event: Dict[str, Any], context: Any) -> bool:
     """
     Delete the authenticated user's account and all associated data.
@@ -141,6 +154,9 @@ def delete_my_account(event: Dict[str, Any], context: Any) -> bool:
 
     cognito = boto3.client("cognito-idp")
 
+    # Handler-specific Cognito error handling stays in this try block: the
+    # decorator only covers the generic unexpected-exception path, not typed
+    # ClientError mapping.
     try:
         # Pre-check Cognito lookup to fail early on authorization/network/config issues
         try:
@@ -156,11 +172,6 @@ def delete_my_account(event: Dict[str, Any], context: Any) -> bool:
         logger.info("Account deletion completed successfully")
         return True
 
-    except AppError:
-        raise
     except ClientError as e:
         logger.error(f"Cognito error during account deletion: {str(e)}")
         raise AppError(ErrorCode.INTERNAL_ERROR, f"Failed to delete account from Cognito: {str(e)}")
-    except Exception as e:
-        logger.error(f"Failed to delete account: {str(e)}")
-        raise AppError(ErrorCode.INTERNAL_ERROR, f"Failed to delete account: {str(e)}")

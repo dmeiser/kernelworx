@@ -63,6 +63,13 @@ resource "aws_appsync_resolver" "list_my_shares" {
   type        = "Query"
   field       = "listMyShares"
   data_source = aws_appsync_datasource.list_my_shares.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
 }
 
 # listCatalogsInUse (Lambda)
@@ -71,6 +78,13 @@ resource "aws_appsync_resolver" "list_catalogs_in_use" {
   type        = "Query"
   field       = "listCatalogsInUse"
   data_source = aws_appsync_datasource.list_catalogs_in_use.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
 }
 
 # === CAMPAIGN QUERIES ===
@@ -314,6 +328,13 @@ resource "aws_appsync_resolver" "get_unit_report" {
   type        = "Query"
   field       = "getUnitReport"
   data_source = aws_appsync_datasource.unit_reporting.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
 }
 
 # listUnitCatalogs (Lambda)
@@ -322,6 +343,13 @@ resource "aws_appsync_resolver" "list_unit_catalogs" {
   type        = "Query"
   field       = "listUnitCatalogs"
   data_source = aws_appsync_datasource.list_unit_catalogs.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
 }
 
 # listUnitCampaignCatalogs (Lambda)
@@ -330,6 +358,13 @@ resource "aws_appsync_resolver" "list_unit_campaign_catalogs" {
   type        = "Query"
   field       = "listUnitCampaignCatalogs"
   data_source = aws_appsync_datasource.list_unit_campaign_catalogs.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
 }
 
 # === PAYMENT METHODS QUERIES ===

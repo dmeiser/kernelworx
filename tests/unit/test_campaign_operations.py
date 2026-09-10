@@ -156,12 +156,12 @@ class TestDeleteCampaignOrders:
         self,
         lambda_context: Any,
     ) -> None:
-        """Test that missing campaignId raises an error."""
+        """Test that missing campaignId returns an error payload."""
         event = {"arguments": {}, "identity": {"sub": self._OWNER_SUB}}
-        with pytest.raises(AppError) as exc_info:
-            delete_campaign_orders(event, lambda_context)
+        result = delete_campaign_orders(event, lambda_context)
 
-        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.INVALID_INPUT
 
     def test_delete_campaign_orders_missing_identity(
         self,
@@ -174,21 +174,21 @@ class TestDeleteCampaignOrders:
         profile_id = "PROFILE#no-identity"
         self._seed_owned_campaign(profiles_table, campaigns_table, profile_id, campaign_id, self._OWNER_SUB)
 
-        with pytest.raises(AppError) as exc_info:
-            delete_campaign_orders({"arguments": {"campaignId": campaign_id}}, lambda_context)
+        result = delete_campaign_orders({"arguments": {"campaignId": campaign_id}}, lambda_context)
 
-        assert exc_info.value.error_code == ErrorCode.UNAUTHORIZED
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.UNAUTHORIZED
 
     def test_delete_campaign_orders_campaign_not_found(
         self,
         campaigns_table: Any,
         lambda_context: Any,
     ) -> None:
-        """Test that deleting a nonexistent campaign raises NOT_FOUND."""
-        with pytest.raises(AppError) as exc_info:
-            delete_campaign_orders(self._event("CAMPAIGN#ghost", self._OWNER_SUB), lambda_context)
+        """Test that deleting a nonexistent campaign returns NOT_FOUND."""
+        result = delete_campaign_orders(self._event("CAMPAIGN#ghost", self._OWNER_SUB), lambda_context)
 
-        assert exc_info.value.error_code == ErrorCode.NOT_FOUND
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.NOT_FOUND
 
     def test_delete_campaign_orders_campaign_missing_profile_id(
         self,
@@ -200,10 +200,10 @@ class TestDeleteCampaignOrders:
             "src.handlers.campaign_operations._get_campaign_by_id",
             return_value={"campaignId": campaign_id, "campaignName": "Orphan"},
         ):
-            with pytest.raises(AppError) as exc_info:
-                delete_campaign_orders(self._event(campaign_id, self._OWNER_SUB), lambda_context)
+            result = delete_campaign_orders(self._event(campaign_id, self._OWNER_SUB), lambda_context)
 
-        assert exc_info.value.error_code == ErrorCode.NOT_FOUND
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.NOT_FOUND
 
     def test_delete_campaign_orders_denied_non_owner(
         self,
@@ -225,10 +225,10 @@ class TestDeleteCampaignOrders:
             }
         )
 
-        with pytest.raises(AppError) as exc_info:
-            delete_campaign_orders(self._event(campaign_id, "intruder-sub"), lambda_context)
+        result = delete_campaign_orders(self._event(campaign_id, "intruder-sub"), lambda_context)
 
-        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.FORBIDDEN
         remaining = orders_table.query(
             KeyConditionExpression="campaignId = :cid",
             ExpressionAttributeValues={":cid": campaign_id},
@@ -288,11 +288,11 @@ class TestDeleteCampaignOrders:
         with patch("src.handlers.campaign_operations._delete_orders_for_campaign") as mock_delete:
             mock_delete.side_effect = RuntimeError("unexpected failure")
 
-            with pytest.raises(AppError) as exc_info:
-                delete_campaign_orders(self._event(campaign_id, self._OWNER_SUB), lambda_context)
+            result = delete_campaign_orders(self._event(campaign_id, self._OWNER_SUB), lambda_context)
 
-            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
-            assert "Failed to delete campaign orders" in exc_info.value.message
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
+            assert "Failed to delete campaign orders" in result["message"]
 
     def test_delete_campaign_orders_verifies_order_id_gsi(
         self,
