@@ -1,6 +1,6 @@
 ## Validate products array is not empty
 #if($ctx.args.input.products.size() == 0)
-    $util.error("Products array cannot be empty", "ValidationException")
+    $util.error("Products array cannot be empty", "INVALID_INPUT")
 #end
 #set($catalogId = "CATALOG#$util.autoId()")
 #set($now = $util.time.nowISO8601())

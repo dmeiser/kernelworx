@@ -2,13 +2,13 @@ import { util } from '@aws-appsync/utils';
 
 function validatePermissions(permissions) {
     if (!Array.isArray(permissions) || permissions.length === 0) {
-        util.error('permissions must contain at least one supported permission (READ or WRITE)', 'InvalidInput');
+        util.error('permissions must contain at least one supported permission (READ or WRITE)', 'INVALID_INPUT');
     }
     const hasSupportedPermission = permissions.some(permission =>
         typeof permission === 'string' && ['READ', 'WRITE'].includes(permission.toUpperCase())
     );
     if (!hasSupportedPermission) {
-        util.error('permissions must contain at least one supported permission (READ or WRITE)', 'InvalidInput');
+        util.error('permissions must contain at least one supported permission (READ or WRITE)', 'INVALID_INPUT');
     }
 }
 
@@ -37,7 +37,7 @@ export function request(ctx) {
     
     // Validate that ownerAccountId was found
     if (!ownerAccountId) {
-        util.error('Failed to determine profile owner', 'InternalServerError');
+        util.error('Failed to determine profile owner', 'INTERNAL_ERROR');
     }
     
     // Ensure targetAccountId has ACCOUNT# prefix

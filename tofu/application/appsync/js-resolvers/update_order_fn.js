@@ -3,7 +3,7 @@ import { validatePhone, validateAddress } from './lib/validation.js';
 
 function validateOrderDate(orderDate) {
     if (!orderDate || typeof orderDate !== 'string' || !orderDate.trim()) {
-        util.error('Order date is required', 'BadRequest');
+        util.error('Order date is required', 'INVALID_INPUT');
         return false;
     }
     return true;
@@ -20,7 +20,7 @@ export function request(ctx) {
 
     if (input.customerName !== undefined) {
         if (typeof input.customerName !== 'string' || !input.customerName.trim()) {
-            util.error('Customer name cannot be empty', 'BadRequest');
+            util.error('Customer name cannot be empty', 'INVALID_INPUT');
             return;
         }
         updates.push('customerName = :customerName');
@@ -36,7 +36,7 @@ export function request(ctx) {
         } else {
             const phoneResult = validatePhone(phoneValue);
             if (!phoneResult.valid) {
-                util.error(phoneResult.error, 'BadRequest');
+                util.error(phoneResult.error, 'INVALID_INPUT');
                 return;
             }
             updates.push('customerPhone = :customerPhone');
@@ -46,7 +46,7 @@ export function request(ctx) {
     if (input.customerAddress !== undefined && input.customerAddress !== null) {
         const addressResult = validateAddress(input.customerAddress);
         if (!addressResult.valid) {
-            util.error(addressResult.error, 'BadRequest');
+            util.error(addressResult.error, 'INVALID_INPUT');
             return;
         }
         updates.push('customerAddress = :customerAddress');
@@ -65,16 +65,16 @@ export function request(ctx) {
     }
 
     if (input.totalAmount !== undefined && input.lineItems === undefined) {
-        util.error('totalAmount cannot be set directly without lineItems', 'BadRequest');
+        util.error('totalAmount cannot be set directly without lineItems', 'INVALID_INPUT');
     }
 
     if (input.lineItems !== undefined) {
         if (!Array.isArray(input.lineItems) || input.lineItems.length === 0) {
-            util.error('Order must have at least one line item', 'BadRequest');
+            util.error('Order must have at least one line item', 'INVALID_INPUT');
         }
 
         if (!catalog) {
-            util.error('Catalog not loaded for lineItems update', 'InternalError');
+            util.error('Catalog not loaded for lineItems update', 'INTERNAL_ERROR');
         }
 
         const productsMap = {};
@@ -91,11 +91,11 @@ export function request(ctx) {
             const quantity = lineItem.quantity;
 
             if (quantity < 1) {
-                util.error('Quantity must be at least 1 (got ' + quantity + ')', 'BadRequest');
+                util.error('Quantity must be at least 1 (got ' + quantity + ')', 'INVALID_INPUT');
             }
 
             if (!productsMap[productId]) {
-                util.error('Product ' + productId + ' not found in catalog', 'BadRequest');
+                util.error('Product ' + productId + ' not found in catalog', 'INVALID_INPUT');
             }
 
             const product = productsMap[productId];

@@ -17,8 +17,11 @@ export const util = {
     },
   },
   autoId: () => 'auto-generated-id',
-  error: (message, type) => {
-    throw new Error(`${type}: ${message}`);
+  error: (message, type, data, errorInfo) => {
+    const error = new Error(`${type}: ${message}`);
+    // #329: AppSync merges the 4th util.error arg into GraphQL extensions.
+    error.errorInfo = errorInfo;
+    throw error;
   },
 };
 

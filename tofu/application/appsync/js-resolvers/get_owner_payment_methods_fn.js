@@ -9,7 +9,7 @@ export function request(ctx) {
     const ownerAccountId = ctx.stash.ownerAccountId;
     
     if (!ownerAccountId) {
-        util.error('Owner account ID not found', 'InternalError');
+        util.error('Owner account ID not found', 'INTERNAL_ERROR');
     }
     
     // ownerAccountId already has 'ACCOUNT#' prefix from the profile

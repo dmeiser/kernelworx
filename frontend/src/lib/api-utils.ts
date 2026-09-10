@@ -102,6 +102,11 @@ export function isApolloLikeError(error: unknown): error is ApolloLikeError {
 /**
  * Extract error code from an Apollo error if available.
  *
+ * Reads, in priority order: `extensions.errorCode` (our custom error format),
+ * `extensions.code` (standard GraphQL), then `extensions.errorType` (#329:
+ * AppSync JS resolvers emit `util.error(message, type)`, which lands in
+ * `extensions.errorType`).
+ *
  * @param error - The Apollo error object
  * @returns Error code string or undefined
  */
@@ -125,6 +130,11 @@ export function getErrorCode(error: ApolloLikeError | unknown): string | undefin
   // Check extensions.code (standard GraphQL error format)
   if (extensions?.code && typeof extensions.code === 'string') {
     return extensions.code;
+  }
+
+  // Check extensions.errorType (#329: AppSync JS resolver util.error type)
+  if (extensions?.errorType && typeof extensions.errorType === 'string') {
+    return extensions.errorType;
   }
 
   return undefined;

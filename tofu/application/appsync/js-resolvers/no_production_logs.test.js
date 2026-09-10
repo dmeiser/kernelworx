@@ -125,7 +125,7 @@ describe('production AppSync resolvers do not log to console', () => {
         );
         assert.strictEqual(
             missingResult.error.message,
-            'NotFound: Catalog not found for id: CATALOG#missing'
+            'NOT_FOUND: Catalog not found for id: CATALOG#missing'
         );
         assert.deepStrictEqual(missingResult.calls, []);
     });

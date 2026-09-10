@@ -9,20 +9,20 @@ export function request(ctx) {
     const newName = (ctx.args.newName || '').trim();
 
     if (!accountId) {
-        util.error('Authentication required', 'Unauthorized');
+        util.error('Authentication required', 'UNAUTHORIZED');
     }
     if (!currentName) {
-        util.error('Current name is required', 'BadRequest');
+        util.error('Current name is required', 'INVALID_INPUT');
     }
     if (!newName) {
-        util.error('New name is required', 'BadRequest');
+        util.error('New name is required', 'INVALID_INPUT');
     }
     if (newName.length > 50) {
-        util.error('Payment method name must be 50 characters or less', 'BadRequest');
+        util.error('Payment method name must be 50 characters or less', 'INVALID_INPUT');
     }
     const newLower = newName.toLowerCase();
     if (newLower === 'cash' || newLower === 'check') {
-        util.error(`Cannot rename to reserved method '${newName}'`, 'BadRequest');
+        util.error(`Cannot rename to reserved method '${newName}'`, 'INVALID_INPUT');
     }
 
     ctx.stash.accountId = accountId;
@@ -47,12 +47,12 @@ export function response(ctx) {
 
     const exists = methods.find(m => m.name && m.name.toLowerCase() === ctx.stash.currentName.toLowerCase());
     if (!exists) {
-        util.error(`Payment method '${ctx.stash.currentName}' not found`, 'NotFound');
+        util.error(`Payment method '${ctx.stash.currentName}' not found`, 'NOT_FOUND');
     }
 
     const duplicate = methods.find(m => m.name && m.name.toLowerCase() === ctx.stash.newLower);
     if (duplicate && ctx.stash.currentName.toLowerCase() !== ctx.stash.newLower) {
-        util.error(`Payment method '${ctx.stash.newName}' already exists`, 'BadRequest');
+        util.error(`Payment method '${ctx.stash.newName}' already exists`, 'INVALID_INPUT');
     }
 
     ctx.stash.existingMethods = methods;

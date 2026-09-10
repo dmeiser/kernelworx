@@ -1099,7 +1099,9 @@ describe('Profile Operations Integration Tests', () => {
       const LIST_CAMPAIGNS = gql`
         query ListCampaignsByProfile($profileId: ID!) {
           listCampaignsByProfile(profileId: $profileId) {
-            campaignId
+            campaigns {
+              campaignId
+            }
           }
         }
       `;
@@ -1108,7 +1110,7 @@ describe('Profile Operations Integration Tests', () => {
         variables: { profileId: testProfileId },
         fetchPolicy: 'network-only',
       });
-      const beforeCampaignIds = beforeDelete.listCampaignsByProfile.map((s: any) => s.campaignId);
+      const beforeCampaignIds = beforeDelete.listCampaignsByProfile.campaigns.map((s: any) => s.campaignId);
       expect(beforeCampaignIds).toContain(campaignId);
 
       // Act: Delete the profile

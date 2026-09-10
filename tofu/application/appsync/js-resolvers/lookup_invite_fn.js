@@ -15,7 +15,7 @@ export function response(ctx) {
         util.error(ctx.error.message, ctx.error.type);
     }
     if (!ctx.result || !ctx.result.inviteCode) {
-        util.error('Invalid invite code', 'NotFound');
+        util.error('Invalid invite code', 'NOT_FOUND');
     }
     
     const invite = ctx.result;

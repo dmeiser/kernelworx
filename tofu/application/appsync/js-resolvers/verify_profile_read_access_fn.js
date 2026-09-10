@@ -32,7 +32,7 @@ export function request(ctx) {
     }
     
     if (!profileId) {
-        util.error('Profile ID not found in request', 'BadRequest');
+        util.error('Profile ID not found in request', 'INVALID_INPUT');
     }
     
     // Store profileId in stash for next function
@@ -73,7 +73,7 @@ export function response(ctx) {
     
     if (!profile) {
         // Profile doesn't exist - for getCampaign, we'll return null later
-        // For listCampaignsByProfile, we'll return empty array
+        // For listCampaignsByProfile, we'll return an empty connection ({ campaigns: [], nextToken: null })
         ctx.stash.profileNotFound = true;
         ctx.stash.authorized = false;
         return { authorized: false };

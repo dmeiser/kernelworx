@@ -1,11 +1,11 @@
 ## Validate products array is not empty (same invariant as create)
 #if($ctx.args.input.products.size() == 0)
-    $util.error("Products array cannot be empty", "ValidationException")
+    $util.error("Products array cannot be empty", "INVALID_INPUT")
 #end
 #set($now = $util.time.nowISO8601())
 ## Validate products array is not empty
 #if($ctx.args.input.products.size() == 0)
-    $util.error("Products array cannot be empty", "ValidationException")
+    $util.error("Products array cannot be empty", "INVALID_INPUT")
 #end
 ## Add productId to each product if not present
 #set($productsWithIds = [])

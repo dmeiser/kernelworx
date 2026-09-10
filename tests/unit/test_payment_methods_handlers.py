@@ -175,7 +175,7 @@ class TestConfirmQRUpload:
 
         assert result["name"] == "Venmo"
         assert result["qrCodeUrl"] is not None
-        # Returns S3 key (field resolver will generate presigned URL)
+        # Returns S3 key (pipeline's batch QR step signs it into a URL)
         assert result["qrCodeUrl"] == s3_key
 
     def test_confirm_upload_deletes_replaced_qr_object(

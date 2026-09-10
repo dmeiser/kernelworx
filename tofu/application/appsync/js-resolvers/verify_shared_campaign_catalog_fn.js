@@ -40,7 +40,7 @@ export function response(ctx) {
 
     const catalog = ctx.result;
     if (!sharedCampaign.catalogId || !catalog || catalog.isDeleted === true) {
-        util.error('Shared Campaign ' + sharedCampaign.sharedCampaignCode + ' is no longer available', 'InvalidInput');
+        util.error('Shared Campaign ' + sharedCampaign.sharedCampaignCode + ' is no longer available', 'INVALID_INPUT');
     }
 
     return catalog;
