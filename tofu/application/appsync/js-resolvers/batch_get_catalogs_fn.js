@@ -14,25 +14,30 @@ const tableName = '${table_name}';
 const BATCH_GET_LIMIT = 100;
 
 /**
- * Batch-fetch every catalog referenced by a campaign array in a single
+ * Batch-fetch every catalog referenced by a page of campaigns in a single
  * BatchGetItem, then attach each campaign's `catalog` from the batch result.
  *
  * Replaces the per-campaign Campaign.catalog GetItem field resolver (N+1
  * reads in list queries — see #332). Runs as the last step of the
- * listCampaignsByProfile pipeline. Deleted-catalog contract matches the
- * removed campaign_catalog_response.vtl field resolver: the raw item is
- * returned, soft-deleted catalogs included. (The SharedCampaign variant —
- * which mapped soft-deleted catalogs to null — is
- * batch_get_shared_campaign_catalogs_fn.js.)
+ * listCampaignsByProfile pipeline, after #362's cursor pagination: the
+ * previous function returns a CampaignConnection ({ campaigns, nextToken }),
+ * so this function batches one page at a time and preserves nextToken.
+ * Deleted-catalog contract matches the removed campaign_catalog_response.vtl
+ * field resolver: the raw item is returned, soft-deleted catalogs included.
+ * (The SharedCampaign variant — which mapped soft-deleted catalogs to null —
+ * is batch_get_shared_campaign_catalogs_fn.js; those queries return plain
+ * arrays.)
  */
 export function request(ctx) {
-    const campaigns = ctx.prev.result || [];
+    // #362: prev.result is a CampaignConnection, not a bare array.
+    const connection = ctx.prev.result || null;
+    const campaigns = connection && Array.isArray(connection.campaigns) ? connection.campaigns : [];
     const catalogIds = extractUniqueCatalogIds(campaigns);
 
     // No catalogs to fetch: skip the DynamoDB call entirely. The pipeline
-    // resolver response passes the campaigns through unchanged.
+    // resolver response passes the connection through unchanged.
     if (catalogIds.length === 0) {
-        return runtime.earlyReturn(campaigns);
+        return runtime.earlyReturn(connection);
     }
 
     if (catalogIds.length > BATCH_GET_LIMIT) {
@@ -57,12 +62,17 @@ export function response(ctx) {
         util.error(ctx.error.message, ctx.error.type);
     }
 
-    const campaigns = ctx.prev.result || [];
     const tableData = ctx.result && ctx.result.data ? ctx.result.data[tableName] : null;
     const unprocessed = ctx.result && ctx.result.unprocessedKeys ? ctx.result.unprocessedKeys[tableName] : null;
     if (unprocessed && unprocessed.length > 0) {
         util.error('Failed to fetch ' + unprocessed.length + ' catalog(s)', 'InternalError');
     }
 
-    return attachCatalogs(campaigns, tableData, false);
+    const connection = ctx.prev.result || null;
+    const campaigns = connection && Array.isArray(connection.campaigns) ? connection.campaigns : [];
+    const mapped = attachCatalogs(campaigns, tableData, false);
+    if (connection && Array.isArray(connection.campaigns)) {
+        return { ...connection, campaigns: mapped };
+    }
+    return mapped;
 }
