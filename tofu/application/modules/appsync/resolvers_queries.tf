@@ -346,6 +346,8 @@ resource "aws_appsync_resolver" "my_payment_methods" {
       aws_appsync_function.get_payment_methods.function_id,
       aws_appsync_function.inject_global_payment_methods.function_id,
       aws_appsync_function.set_owner_account_id_in_stash.function_id,
+      # Batch-sign all QR URLs in one Lambda invocation (last step; #330)
+      aws_appsync_function.batch_qr_urls.function_id,
     ]
   }
 
@@ -370,6 +372,8 @@ resource "aws_appsync_resolver" "payment_methods_for_profile" {
       aws_appsync_function.check_payment_methods_access.function_id,
       aws_appsync_function.get_owner_payment_methods.function_id,
       aws_appsync_function.filter_payment_methods_by_access.function_id,
+      # Batch-sign all QR URLs in one Lambda invocation (last step; #330)
+      aws_appsync_function.batch_qr_urls.function_id,
     ]
   }
 

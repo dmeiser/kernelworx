@@ -10,7 +10,7 @@ describe('filter_payment_methods_by_access_fn request', () => {
 });
 
 describe('filter_payment_methods_by_access_fn response', () => {
-    it('annotates custom methods with ownerAccountId and profileId for WRITE access', () => {
+    it('keeps QR URLs for WRITE access without resolver-only annotations', () => {
         const ctx = {
             prev: {
                 result: [
@@ -30,11 +30,11 @@ describe('filter_payment_methods_by_access_fn response', () => {
         const venmo = result.find(m => m.name === 'Venmo');
         assert.ok(venmo);
         assert.strictEqual(venmo.qrCodeUrl, 'payment-qr-codes/account-123/venmo.png');
-        assert.strictEqual(venmo.ownerAccountId, 'ACCOUNT#account-123');
-        assert.strictEqual(venmo.profileId, 'profile-abc');
+        assert.strictEqual('ownerAccountId' in venmo, false);
+        assert.strictEqual('profileId' in venmo, false);
     });
 
-    it('strips QR URLs for READ access but keeps owner metadata', () => {
+    it('strips QR URLs for READ access', () => {
         const ctx = {
             prev: {
                 result: [
@@ -52,8 +52,6 @@ describe('filter_payment_methods_by_access_fn response', () => {
 
         const venmo = result.find(m => m.name === 'Venmo');
         assert.strictEqual(venmo.qrCodeUrl, null);
-        assert.strictEqual(venmo.ownerAccountId, 'ACCOUNT#account-123');
-        assert.strictEqual(venmo.profileId, 'profile-abc');
     });
 
     it('sorts methods alphabetically', () => {

@@ -548,6 +548,8 @@ resource "aws_appsync_resolver" "update_payment_method" {
     functions = [
       aws_appsync_function.validate_update_payment_method.function_id,
       aws_appsync_function.update_payment_method.function_id,
+      # Batch-sign the QR URL in one Lambda invocation (last step; #330)
+      aws_appsync_function.batch_qr_urls.function_id,
     ]
   }
 
@@ -598,12 +600,27 @@ resource "aws_appsync_resolver" "request_payment_method_qr_code_upload" {
   data_source = aws_appsync_datasource.request_qr_upload.name
 }
 
-# confirmPaymentMethodQRCodeUpload (Lambda)
+# confirmPaymentMethodQRCodeUpload Pipeline
 resource "aws_appsync_resolver" "confirm_payment_method_qr_code_upload" {
-  api_id      = aws_appsync_graphql_api.main.id
-  type        = "Mutation"
-  field       = "confirmPaymentMethodQRCodeUpload"
-  data_source = aws_appsync_datasource.confirm_qr_upload.name
+  api_id = aws_appsync_graphql_api.main.id
+  type   = "Mutation"
+  field  = "confirmPaymentMethodQRCodeUpload"
+  kind   = "PIPELINE"
+
+  pipeline_config {
+    functions = [
+      aws_appsync_function.confirm_qr_upload.function_id,
+      # Sign the returned S3 key into a presigned URL (last step; #330)
+      aws_appsync_function.batch_qr_urls.function_id,
+    ]
+  }
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/confirm_payment_method_qr_code_upload_pipeline_resolver.js")
 }
 
 # === ADMIN MUTATIONS ===
