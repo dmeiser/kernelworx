@@ -221,6 +221,11 @@ module "lambda" {
   lambda_domain_role_arns = {
     "delete-campaign-orders" = module.iam.lambda_campaign_execution_role_arn
     "unit-reporting"         = module.iam.lambda_campaign_execution_role_arn
+    # #352 (chunk 2 of #326): profile/sharing-domain handlers use the scoped
+    # profile-sharing execution role.
+    "list-my-shares"         = module.iam.lambda_profile_sharing_execution_role_arn
+    "transfer-ownership"     = module.iam.lambda_profile_sharing_execution_role_arn
+    "delete-profile-cascade" = module.iam.lambda_profile_sharing_execution_role_arn
   }
   exports_bucket_name = module.s3.exports_bucket_name
 
