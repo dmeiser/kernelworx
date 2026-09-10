@@ -73,7 +73,7 @@ export function response(ctx) {
     
     if (!profile) {
         // Profile doesn't exist - for getCampaign, we'll return null later
-        // For listCampaignsByProfile, we'll return empty array
+        // For listCampaignsByProfile, we'll return an empty connection ({ campaigns: [], nextToken: null })
         ctx.stash.profileNotFound = true;
         ctx.stash.authorized = false;
         return { authorized: false };

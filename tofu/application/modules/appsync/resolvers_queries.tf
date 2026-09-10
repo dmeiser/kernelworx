@@ -172,29 +172,6 @@ resource "aws_appsync_resolver" "list_orders_by_campaign" {
   code = file("${local.js_resolvers_dir}/list_orders_by_campaign_resolver.js")
 }
 
-# listOrdersByProfile Pipeline
-resource "aws_appsync_resolver" "list_orders_by_profile" {
-  api_id = aws_appsync_graphql_api.main.id
-  type   = "Query"
-  field  = "listOrdersByProfile"
-  kind   = "PIPELINE"
-
-  pipeline_config {
-    functions = [
-      aws_appsync_function.verify_profile_read_access.function_id,
-      aws_appsync_function.check_share_read_permissions.function_id,
-      aws_appsync_function.query_orders_by_profile.function_id,
-    ]
-  }
-
-  runtime {
-    name            = "APPSYNC_JS"
-    runtime_version = "1.0.0"
-  }
-
-  code = file("${local.js_resolvers_dir}/list_orders_by_profile_resolver.js")
-}
-
 # === SHARE & INVITE QUERIES ===
 
 # listSharesByProfile Pipeline
