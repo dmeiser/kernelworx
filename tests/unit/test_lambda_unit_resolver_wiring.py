@@ -77,18 +77,14 @@ def _all_resolvers():
 
 def _unit_resolvers():
     return [
-        (name, attrs)
-        for name, attrs in _all_resolvers()
-        if _norm(attrs.get("data_source", "")) in EXPECTED_UNIT_FIELDS
+        (name, attrs) for name, attrs in _all_resolvers() if _norm(attrs.get("data_source", "")) in EXPECTED_UNIT_FIELDS
     ]
 
 
 def test_unit_resolver_fields_match_expected_per_datasource():
     for data_source, expected_fields in EXPECTED_UNIT_FIELDS.items():
         fields = {
-            _norm(attrs["field"])
-            for _, attrs in _all_resolvers()
-            if _norm(attrs.get("data_source", "")) == data_source
+            _norm(attrs["field"]) for _, attrs in _all_resolvers() if _norm(attrs.get("data_source", "")) == data_source
         }
         assert fields == expected_fields, f"{data_source}: {fields} != {expected_fields}"
 
