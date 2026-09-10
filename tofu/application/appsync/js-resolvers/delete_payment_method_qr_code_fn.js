@@ -39,6 +39,16 @@ export function response(ctx) {
         return { qrDeleted: false };
     }
 
+    // #337: the decorated delete-qr-code handler returns a structured error
+    // payload instead of raising; treat it like a data source error.
+    if (ctx.result && ctx.result.__isError) {
+        console.error(
+            `Failed to delete QR code for payment method '${ctx.stash.paymentMethodName}': ${ctx.result.message}`
+        );
+        ctx.stash.qrCleanupError = ctx.result.message;
+        return { qrDeleted: false };
+    }
+
     ctx.stash.qrDeleted = true;
     return { qrDeleted: true };
 }
