@@ -2,17 +2,6 @@
 
 # Lambda Data Sources - one per Lambda function that AppSync calls
 
-resource "aws_appsync_datasource" "list_my_shares" {
-  api_id           = aws_appsync_graphql_api.main.id
-  name             = "ListMySharesDS"
-  type             = "AWS_LAMBDA"
-  service_role_arn = var.appsync_service_role_arn
-
-  lambda_config {
-    function_arn = var.lambda_function_arns["list-my-shares"]
-  }
-}
-
 resource "aws_appsync_datasource" "list_catalogs_in_use" {
   api_id           = aws_appsync_graphql_api.main.id
   name             = "ListCatalogsInUseDS"

@@ -89,11 +89,6 @@ locals {
 
   # Lambda functions configuration
   functions = {
-    "list-my-shares" = {
-      handler     = "handlers.profile_sharing.list_my_shares"
-      timeout     = 30
-      memory_size = 256
-    }
     "list-catalogs-in-use" = {
       handler     = "handlers.list_catalogs_in_use.handler"
       timeout     = 30

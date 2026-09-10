@@ -57,19 +57,26 @@ resource "aws_appsync_resolver" "list_my_profiles" {
   code = file("${local.js_resolvers_dir}/list_my_profiles_fn.js")
 }
 
-# listMyShares (Lambda)
+# listMyShares Pipeline (JS) - migrated from the list-my-shares Lambda (#334)
 resource "aws_appsync_resolver" "list_my_shares" {
-  api_id      = aws_appsync_graphql_api.main.id
-  type        = "Query"
-  field       = "listMyShares"
-  data_source = aws_appsync_datasource.list_my_shares.name
+  api_id = aws_appsync_graphql_api.main.id
+  type   = "Query"
+  field  = "listMyShares"
+  kind   = "PIPELINE"
+
+  pipeline_config {
+    functions = [
+      aws_appsync_function.query_my_shares.function_id,
+      aws_appsync_function.batch_get_shared_profiles.function_id,
+    ]
+  }
 
   runtime {
     name            = "APPSYNC_JS"
     runtime_version = "1.0.0"
   }
 
-  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+  code = file("${local.js_resolvers_dir}/list_my_shares_pipeline_resolver.js")
 }
 
 # listCatalogsInUse (Lambda)

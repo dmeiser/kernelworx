@@ -1,7 +1,8 @@
 """Behavioral scope check for the #352 scoped profile/sharing execution role.
 
-The profile/sharing-domain Lambda functions (``list-my-shares``,
-``transfer-ownership``, and ``delete-profile-cascade``) run under the scoped
+The profile/sharing-domain Lambda functions (``transfer-ownership`` and
+``delete-profile-cascade``; ``list-my-shares`` was removed when listMyShares
+migrated to an AppSync JS pipeline in #334) run under the scoped
 per-domain role added in #352 (chunk 2 of the #326 IAM role split, reusing the
 wiring pattern #351 established). That role grants DynamoDB read actions
 (GetItem/Query/BatchGetItem) on exactly the tables the handlers touch
@@ -28,7 +29,6 @@ import botocore.client
 import pytest
 
 from src.handlers.delete_profile_cascade import lambda_handler as cascade_handler
-from src.handlers.profile_sharing import list_my_shares
 from src.handlers.transfer_profile_ownership import lambda_handler as transfer_handler
 
 PROFILES_TABLE = "kernelworx-profiles-v2-ue1-dev"
@@ -162,7 +162,7 @@ def assert_within_profile_sharing_role_scope(recorder: ApiCallRecorder) -> None:
 
 
 def seed_profile(profiles_table: Any, owner_sub: str = OWNER_SUB, profile_id: str = PROFILE_ID) -> None:
-    """Seed an owner profile with all fields list_my_shares validates."""
+    """Seed an owner profile with the fields the sharing handlers validate."""
     profiles_table.put_item(
         Item={
             "ownerAccountId": f"ACCOUNT#{owner_sub}",
@@ -205,31 +205,6 @@ def seed_campaign_with_order(campaigns_table: Any, orders_table: Any) -> None:
             "orderDate": "2024-10-01T00:00:00Z",
         }
     )
-
-
-class TestListMySharesScope:
-    """list-my-shares (read-only share hydration) stays within the role scope."""
-
-    def test_shared_profile_hydration(
-        self,
-        profiles_table: Any,
-        shares_table: Any,
-        lambda_context: Any,
-        api_calls: ApiCallRecorder,
-    ) -> None:
-        seed_profile(profiles_table)
-        seed_share(shares_table, FRIEND_SUB, ["READ", "WRITE"])
-        api_calls.attach()
-
-        result = list_my_shares({"identity": {"sub": FRIEND_SUB}}, lambda_context)
-
-        assert len(result) == 1
-        assert result[0]["profileId"] == PROFILE_ID
-        assert result[0]["isOwner"] is False
-        # Read-only path: shares GSI Query + profiles BatchGetItem.
-        assert ("Query", SHARES_TABLE) in api_calls.dynamodb_calls
-        assert ("BatchGetItem", PROFILES_TABLE) in api_calls.dynamodb_calls
-        assert_within_profile_sharing_role_scope(api_calls)
 
 
 class TestTransferOwnershipScope:
