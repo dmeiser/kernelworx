@@ -158,3 +158,40 @@ resource "aws_appsync_function" "check_catalog_usage" {
   code = file("${local.js_resolvers_dir}/check_catalog_usage_fn.js")
 }
 
+
+# listMyProfiles pipeline functions (#331): the list query itself, plus a
+# BatchGetItem step that attaches latestCampaign to every profile carrying
+# the denormalized latestCampaignId field in a single call per page.
+resource "aws_appsync_function" "list_my_profiles" {
+  api_id      = aws_appsync_graphql_api.main.id
+  data_source = aws_appsync_datasource.profiles.name
+  name        = "ListMyProfilesFn${local.env_suffix}"
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/list_my_profiles_fn.js")
+}
+
+resource "aws_appsync_function" "batch_latest_campaigns" {
+  api_id      = aws_appsync_graphql_api.main.id
+  data_source = aws_appsync_datasource.campaigns.name
+  name        = "BatchLatestCampaignsFn${local.env_suffix}"
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  # WARNING: templatefile() interpolates every `${...}` sequence in the source as a
+  # Terraform variable reference. The bundled source keeps only the intended
+  # `${campaigns_table_name}` placeholder; any JS template literal added to the
+  # source will either fail the plan or be silently substituted. Do not add
+  # `${...}` to the source without also switching this to file() (#284 defers
+  # that switch).
+  code = templatefile("${local.js_resolvers_dir}/batch_latest_campaigns_fn.js", {
+    campaigns_table_name = var.dynamodb_table_names.campaigns
+  })
+}

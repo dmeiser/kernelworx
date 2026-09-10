@@ -103,7 +103,11 @@ export function response(ctx) {
                 createdAt: profile.createdAt,
                 updatedAt: profile.updatedAt,
                 isOwner: profile.ownerAccountId === callerAccountId,
-                permissions: share.permissions
+                permissions: share.permissions,
+                // Denormalized pointer for the SharedProfile.latestCampaign
+                // field resolver's GetItem fast path (#331); absent on
+                // unmigrated rows, which fall back to the per-item Query.
+                latestCampaignId: profile.latestCampaignId != null ? profile.latestCampaignId : null
             });
         }
     }

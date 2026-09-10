@@ -100,6 +100,7 @@ describe('batch_get_shared_profiles_fn response', () => {
                 updatedAt: '2024-02-01T00:00:00Z',
                 isOwner: false,
                 permissions: ['READ'],
+                latestCampaignId: null,
             },
             {
                 profileId: 'PROFILE#p2',
@@ -111,8 +112,35 @@ describe('batch_get_shared_profiles_fn response', () => {
                 updatedAt: '2024-02-05T00:00:00Z',
                 isOwner: false,
                 permissions: ['READ', 'WRITE'],
+                latestCampaignId: null,
             },
         ]);
+    });
+
+    it('passes the denormalized latestCampaignId through for the latestCampaign fast path (#331)', () => {
+        const profiles = [
+            {
+                profileId: 'PROFILE#p1',
+                ownerAccountId: 'ACCOUNT#owner-1',
+                sellerName: 'Alice',
+                latestCampaignId: 'CAMPAIGN#latest-1',
+                createdAt: '2024-01-01T00:00:00Z',
+                updatedAt: '2024-02-01T00:00:00Z',
+            },
+            {
+                profileId: 'PROFILE#p2',
+                ownerAccountId: 'ACCOUNT#owner-2',
+                sellerName: 'Bob',
+                createdAt: '2024-01-05T00:00:00Z',
+                updatedAt: '2024-02-05T00:00:00Z',
+            },
+        ];
+        const ctx = { identity: { sub: 'user-123' }, stash: STASH, result: { data: { [TABLE]: profiles } } };
+
+        const result = response(ctx);
+
+        assert.strictEqual(result[0].latestCampaignId, 'CAMPAIGN#latest-1');
+        assert.strictEqual(result[1].latestCampaignId, null);
     });
 
     it('normalizes unprefixed ownerAccountId and detects ownership from raw stored value', () => {

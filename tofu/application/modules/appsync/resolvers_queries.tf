@@ -42,19 +42,29 @@ resource "aws_appsync_resolver" "get_profile" {
   response_template = file("${local.mapping_templates_dir}/get_profile_response.vtl")
 }
 
-# listMyProfiles (JS)
+# listMyProfiles Pipeline (JS)
+# Batch-attaches latestCampaign to profiles carrying the denormalized
+# latestCampaignId field in a single BatchGetItem per page (#331);
+# unmigrated profiles fall through to the field resolver's per-item Query.
 resource "aws_appsync_resolver" "list_my_profiles" {
-  api_id      = aws_appsync_graphql_api.main.id
-  type        = "Query"
-  field       = "listMyProfiles"
-  data_source = aws_appsync_datasource.profiles.name
+  api_id = aws_appsync_graphql_api.main.id
+  type   = "Query"
+  field  = "listMyProfiles"
+  kind   = "PIPELINE"
+
+  pipeline_config {
+    functions = [
+      aws_appsync_function.list_my_profiles.function_id,
+      aws_appsync_function.batch_latest_campaigns.function_id,
+    ]
+  }
 
   runtime {
     name            = "APPSYNC_JS"
     runtime_version = "1.0.0"
   }
 
-  code = file("${local.js_resolvers_dir}/list_my_profiles_fn.js")
+  code = file("${local.js_resolvers_dir}/list_my_profiles_pipeline_resolver.js")
 }
 
 # listMyShares Pipeline (JS) - migrated from the list-my-shares Lambda (#334)

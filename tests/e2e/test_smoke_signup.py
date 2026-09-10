@@ -1,5 +1,9 @@
 """Smoke tests for the signup UI.
 
+``admin-confirm-sign-up`` races Cognito's read-after-write propagation: a
+``SignUp`` that has just returned can still yield ``UserNotFoundException``
+from immediate admin reads, so the confirmation step retries with backoff.
+
 ``TEST_USER_POOL_ID`` is confirmed present in the dev ``.env``; the Cognito
 user pool is accessible from the dev environment.
 
