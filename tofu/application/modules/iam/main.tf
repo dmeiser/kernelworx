@@ -422,6 +422,121 @@ resource "aws_iam_role_policy" "lambda_profile_sharing_s3" {
 }
 
 # =============================================================================
+# Lambda Payment Domain Execution Role (#353, chunk 3 of the #326 IAM role split)
+# =============================================================================
+#
+# Third scoped per-domain execution role, reusing the wiring pattern #351
+# established (the lambda module's lambda_domain_role_arns map). Assigned to
+# the payment-domain handlers:
+#   - request-qr-upload              (handlers/payment_methods_handlers.py)
+#   - confirm-qr-upload              (handlers/payment_methods_handlers.py)
+#   - generate-qr-code-presigned-url (handlers/generate_qr_code_presigned_url.py)
+#   - delete-qr-code                 (handlers/payment_methods_handlers.py)
+#
+# DynamoDB scope was verified against the handler source (including the shared
+# helpers they invoke):
+#   - accounts: GetItem (utils/payment_methods.get_payment_methods /
+#     _get_existing_payment_methods, payment_methods_handlers.
+#     _get_payment_method_qr_key) and UpdateItem
+#     (utils/payment_methods._save_preferences, used by confirm_qr-upload to
+#     store the new key and by delete-qr-code to clear it). Payment methods
+#     live in the account record's preferences.paymentMethods attribute; the
+#     handlers never touch any other table's items for payment CRUD.
+#   - profiles/shares: only generate-qr-code-presigned-url reaches these, via
+#     utils.auth.check_profile_access (owner check, share check, and
+#     profile-exists verification): GetItem + Query on profileId-index on
+#     profiles, GetItem on shares. That helper's single-profile path uses no
+#     BatchGetItem, so it is not granted here.
+#   - orders/catalogs: NOT touched by any payment handler (order paymentMethod
+#     fields are read/written by AppSync direct resolvers, not these Lambdas).
+#
+# S3 scope: QR codes live under payment-qr-codes/<accountId>/ in the exports
+# bucket. confirm-qr-upload HEADs the uploaded object
+# (s3:GetObject covers HeadObject) and deletes the replaced object;
+# delete-qr-code deletes the stored object. The pre-signed POST/GET URLs from
+# request-qr-upload / generate-qr-code-presigned-url are signed client-side
+# and used by the browser directly against S3, so they need no Lambda
+# permission. Scoped to the payment-qr-codes/* prefix only. No KMS
+# (bucket is not SSE-KMS), CloudFront, or Cognito permissions.
+# The monolithic shared role is intentionally NOT narrowed here — that is the
+# final chunk (#355).
+
+locals {
+  payment_table_keys = ["accounts", "profiles", "shares"]
+  payment_table_arns = [for k in local.payment_table_keys : var.dynamodb_table_arns[k]]
+  payment_index_arns = [for arn in local.payment_table_arns : "${arn}/index/*"]
+}
+
+resource "aws_iam_role" "lambda_payment_execution" {
+  name = "${var.name_prefix}-lambda-payment-exec${local.role_suffix}"
+
+  assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
+
+  lifecycle {
+    prevent_destroy = var.prevent_destroy
+  }
+}
+
+resource "aws_iam_role_policy_attachment" "lambda_payment_basic" {
+  role       = aws_iam_role.lambda_payment_execution.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+data "aws_iam_policy_document" "lambda_payment_dynamodb" {
+  # Read actions on every table these handlers touch, plus their GSIs.
+  # profiles/shares are reached only through utils.auth.check_profile_access
+  # (generate-qr-code-presigned-url's collaborator path).
+  statement {
+    effect = "Allow"
+    actions = [
+      "dynamodb:GetItem",
+      "dynamodb:Query",
+    ]
+    resources = concat(local.payment_table_arns, local.payment_index_arns)
+  }
+
+  # confirm-qr-upload / delete-qr-code rewrite the account record's
+  # preferences via utils.payment_methods._save_preferences (optimistic-lock
+  # UpdateItem). Scoped to the accounts table only.
+  statement {
+    effect    = "Allow"
+    actions   = ["dynamodb:UpdateItem"]
+    resources = [var.dynamodb_table_arns["accounts"]]
+  }
+}
+
+resource "aws_iam_role_policy" "lambda_payment_dynamodb" {
+  name   = "dynamodb-access"
+  role   = aws_iam_role.lambda_payment_execution.id
+  policy = data.aws_iam_policy_document.lambda_payment_dynamodb.json
+}
+
+data "aws_iam_policy_document" "lambda_payment_s3" {
+  # confirm-qr-upload validates the uploaded object with HeadObject
+  # (authorized by s3:GetObject) and deletes the replaced QR object;
+  # delete-qr-code deletes the stored QR object. Scoped to the QR prefix.
+  # KICS flags scoped s3:GetObject as potential data exfiltration; the keys
+  # are ownership-validated in code (validate_qr_s3_key) and the prefix is
+  # account-scoped, so this is expected access, not exfiltration.
+  # kics-scan disable-line
+  statement {
+    effect = "Allow"
+    # kics-scan ignore-line
+    actions = [
+      "s3:GetObject",
+      "s3:DeleteObject",
+    ]
+    resources = ["${var.exports_bucket_arn}/payment-qr-codes/*"]
+  }
+}
+
+resource "aws_iam_role_policy" "lambda_payment_s3" {
+  name   = "s3-qr-codes"
+  role   = aws_iam_role.lambda_payment_execution.id
+  policy = data.aws_iam_policy_document.lambda_payment_s3.json
+}
+
+# =============================================================================
 # AppSync Service Role
 # =============================================================================
 
@@ -570,6 +685,11 @@ output "lambda_admin_execution_role_name" {
 output "lambda_campaign_execution_role_arn" {
   description = "ARN of the scoped Lambda execution role for the campaign domain (delete-campaign-orders, unit-reporting). First entry of the #326 per-domain role split; see lambda_domain_role_arns in the lambda module."
   value       = aws_iam_role.lambda_campaign_execution.arn
+}
+
+output "lambda_payment_execution_role_arn" {
+  description = "ARN of the scoped Lambda execution role for the payment domain (request-qr-upload, confirm-qr-upload, generate-qr-code-presigned-url, delete-qr-code). Chunk 3 of the #326 per-domain role split; see lambda_domain_role_arns in the lambda module."
+  value       = aws_iam_role.lambda_payment_execution.arn
 }
 
 output "lambda_profile_sharing_execution_role_arn" {

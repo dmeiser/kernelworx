@@ -226,6 +226,12 @@ module "lambda" {
     "list-my-shares"         = module.iam.lambda_profile_sharing_execution_role_arn
     "transfer-ownership"     = module.iam.lambda_profile_sharing_execution_role_arn
     "delete-profile-cascade" = module.iam.lambda_profile_sharing_execution_role_arn
+    # #353 (chunk 3 of #326): payment-domain handlers use the scoped payment
+    # execution role.
+    "request-qr-upload"              = module.iam.lambda_payment_execution_role_arn
+    "confirm-qr-upload"              = module.iam.lambda_payment_execution_role_arn
+    "generate-qr-code-presigned-url" = module.iam.lambda_payment_execution_role_arn
+    "delete-qr-code"                 = module.iam.lambda_payment_execution_role_arn
   }
   exports_bucket_name = module.s3.exports_bucket_name
 
