@@ -25,7 +25,7 @@ describe('update_order_fn request', () => {
 
     assert.throws(
       () => request(ctx),
-      /BadRequest: Order must have at least one line item/
+      /INVALID_INPUT: Order must have at least one line item/
     );
   });
 
@@ -89,7 +89,7 @@ describe('update_order_fn request', () => {
 
     assert.throws(
       () => request(ctx),
-      /BadRequest: Order must have at least one line item/
+      /INVALID_INPUT: Order must have at least one line item/
     );
   });
 
@@ -111,7 +111,7 @@ describe('update_order_fn request', () => {
 
     assert.throws(
       () => request(ctx),
-      /BadRequest: Order must have at least one line item/
+      /INVALID_INPUT: Order must have at least one line item/
     );
   });
 

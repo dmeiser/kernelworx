@@ -48,13 +48,17 @@ Global Secondary Indexes: `email-index` (email)
 
 ### profiles
 Primary Key: `ownerAccountId` + `profileId` (Composite)
-Global Secondary Indexes: `profileId-index` (profileId)
+Global Secondary Indexes:
+- `profileId-index` (profileId)
+- `unitType-unitNumber-index` (unitType + unitNumber)
 
 | Attribute | Type | Purpose |
 |-----------|------|---------|
 | ownerAccountId | String | PK - Account owner |
 | profileId | String | SK - Profile ID, also in GSI |
 | sellerName | String | Scout/seller name |
+| unitType | String | Scout unit type |
+| unitNumber | Integer | Scout unit number |
 | createdAt | DateTime | Timestamp |
 | updatedAt | DateTime | Timestamp |
 

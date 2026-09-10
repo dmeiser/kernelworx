@@ -20,7 +20,7 @@ export function response(ctx) {
     // If the item exists under the caller's partition key, they are the owner.
     const profile = ctx.result;
     if (!profile) {
-        util.error('Forbidden: Only profile owner can share profiles', 'Unauthorized');
+        util.error('Forbidden: Only profile owner can share profiles', 'UNAUTHORIZED');
     }
     ctx.stash.profile = profile;
     return profile;

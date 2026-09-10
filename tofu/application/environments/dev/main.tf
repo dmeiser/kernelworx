@@ -216,7 +216,13 @@ module "lambda" {
   # #121: admin-operations, delete-account, and pre-signup use the isolated
   # admin role that carries the Cognito admin policy.
   lambda_admin_role_arn = module.iam.lambda_admin_execution_role_arn
-  exports_bucket_name   = module.s3.exports_bucket_name
+  # #351 (chunk 1 of #326): campaign-domain handlers use the scoped campaign
+  # execution role. Follow-up chunks add their domain functions to this map.
+  lambda_domain_role_arns = {
+    "delete-campaign-orders" = module.iam.lambda_campaign_execution_role_arn
+    "unit-reporting"         = module.iam.lambda_campaign_execution_role_arn
+  }
+  exports_bucket_name = module.s3.exports_bucket_name
 
   table_names = {
     accounts         = module.dynamodb.accounts_table_name

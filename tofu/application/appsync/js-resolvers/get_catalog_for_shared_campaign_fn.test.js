@@ -26,33 +26,33 @@ describe('get_catalog_for_shared_campaign_fn response', () => {
         assert.strictEqual(ctx.stash.catalog, catalog);
     });
 
-    it('throws NotFound when the catalog does not exist', () => {
+    it('throws NOT_FOUND when the catalog does not exist', () => {
         const ctx = { stash: {}, result: null };
 
         assert.throws(
             () => response(ctx),
-            /NotFound: Catalog not found/
+            /NOT_FOUND: Catalog not found/
         );
     });
 
-    it('throws NotFound when the catalog has been soft-deleted', () => {
+    it('throws NOT_FOUND when the catalog has been soft-deleted', () => {
         const ctx = { stash: {}, result: { catalogId: 'catalog-abc', isDeleted: true } };
 
         assert.throws(
             () => response(ctx),
-            /NotFound: Catalog has been deleted/
+            /NOT_FOUND: Catalog has been deleted/
         );
     });
 
     it('throws propagated DynamoDB error when ctx.error is set', () => {
         const ctx = {
             stash: {},
-            error: { message: 'DynamoDB timeout', type: 'InternalServerError' },
+            error: { message: 'DynamoDB timeout', type: 'INTERNAL_ERROR' },
         };
 
         assert.throws(
             () => response(ctx),
-            /InternalServerError: DynamoDB timeout/
+            /INTERNAL_ERROR: DynamoDB timeout/
         );
     });
 });

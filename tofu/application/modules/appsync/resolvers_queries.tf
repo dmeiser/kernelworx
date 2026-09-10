@@ -172,29 +172,6 @@ resource "aws_appsync_resolver" "list_orders_by_campaign" {
   code = file("${local.js_resolvers_dir}/list_orders_by_campaign_resolver.js")
 }
 
-# listOrdersByProfile Pipeline
-resource "aws_appsync_resolver" "list_orders_by_profile" {
-  api_id = aws_appsync_graphql_api.main.id
-  type   = "Query"
-  field  = "listOrdersByProfile"
-  kind   = "PIPELINE"
-
-  pipeline_config {
-    functions = [
-      aws_appsync_function.verify_profile_read_access.function_id,
-      aws_appsync_function.check_share_read_permissions.function_id,
-      aws_appsync_function.query_orders_by_profile.function_id,
-    ]
-  }
-
-  runtime {
-    name            = "APPSYNC_JS"
-    runtime_version = "1.0.0"
-  }
-
-  code = file("${local.js_resolvers_dir}/list_orders_by_profile_resolver.js")
-}
-
 # === SHARE & INVITE QUERIES ===
 
 # listSharesByProfile Pipeline
@@ -369,6 +346,8 @@ resource "aws_appsync_resolver" "my_payment_methods" {
       aws_appsync_function.get_payment_methods.function_id,
       aws_appsync_function.inject_global_payment_methods.function_id,
       aws_appsync_function.set_owner_account_id_in_stash.function_id,
+      # Batch-sign all QR URLs in one Lambda invocation (last step; #330)
+      aws_appsync_function.batch_qr_urls.function_id,
     ]
   }
 
@@ -393,6 +372,8 @@ resource "aws_appsync_resolver" "payment_methods_for_profile" {
       aws_appsync_function.check_payment_methods_access.function_id,
       aws_appsync_function.get_owner_payment_methods.function_id,
       aws_appsync_function.filter_payment_methods_by_access.function_id,
+      # Batch-sign all QR URLs in one Lambda invocation (last step; #330)
+      aws_appsync_function.batch_qr_urls.function_id,
     ]
   }
 
@@ -412,6 +393,13 @@ resource "aws_appsync_resolver" "admin_list_users" {
   type        = "Query"
   field       = "adminListUsers"
   data_source = aws_appsync_datasource.admin_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_passthrough_resolver.js")
 }
 
 # adminSearchUser (Lambda)
@@ -420,6 +408,13 @@ resource "aws_appsync_resolver" "admin_search_user" {
   type        = "Query"
   field       = "adminSearchUser"
   data_source = aws_appsync_datasource.admin_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_passthrough_resolver.js")
 }
 
 # adminGetUserProfiles (Lambda)
@@ -428,6 +423,13 @@ resource "aws_appsync_resolver" "admin_get_user_profiles" {
   type        = "Query"
   field       = "adminGetUserProfiles"
   data_source = aws_appsync_datasource.admin_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_passthrough_resolver.js")
 }
 
 # adminGetUserCatalogs (Lambda)
@@ -436,6 +438,13 @@ resource "aws_appsync_resolver" "admin_get_user_catalogs" {
   type        = "Query"
   field       = "adminGetUserCatalogs"
   data_source = aws_appsync_datasource.admin_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_passthrough_resolver.js")
 }
 
 # adminGetUserCampaigns (Lambda)
@@ -444,6 +453,13 @@ resource "aws_appsync_resolver" "admin_get_user_campaigns" {
   type        = "Query"
   field       = "adminGetUserCampaigns"
   data_source = aws_appsync_datasource.admin_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_passthrough_resolver.js")
 }
 
 # adminGetUserSharedCampaigns (Lambda)
@@ -452,6 +468,13 @@ resource "aws_appsync_resolver" "admin_get_user_shared_campaigns" {
   type        = "Query"
   field       = "adminGetUserSharedCampaigns"
   data_source = aws_appsync_datasource.admin_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_passthrough_resolver.js")
 }
 
 # adminGetProfileShares (Lambda)
@@ -460,4 +483,11 @@ resource "aws_appsync_resolver" "admin_get_profile_shares" {
   type        = "Query"
   field       = "adminGetProfileShares"
   data_source = aws_appsync_datasource.admin_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_passthrough_resolver.js")
 }

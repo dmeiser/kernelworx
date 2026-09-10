@@ -351,11 +351,11 @@ class TestLambdaHandler:
             "info": {"fieldName": "unknownOperation"},
         }
 
-        with pytest.raises(AppError) as exc_info:
-            lambda_handler(event, lambda_context)
+        result = lambda_handler(event, lambda_context)
 
-        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
-        assert "Unknown admin operation" in exc_info.value.message
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.INVALID_INPUT
+        assert "Unknown admin operation" in result["message"]
 
 
 class TestAdminListUsers:
@@ -667,11 +667,11 @@ class TestAdminListUsers:
             "arguments": {},
         }
 
-        with pytest.raises(AppError) as exc_info:
-            admin_list_users(event, lambda_context)
+        result = admin_list_users(event, lambda_context)
 
-        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
-        assert "Admin access required" in exc_info.value.message
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.FORBIDDEN
+        assert "Admin access required" in result["message"]
 
     def test_missing_user_pool_id_env(
         self,
@@ -688,11 +688,11 @@ class TestAdminListUsers:
             "arguments": {},
         }
 
-        with pytest.raises(AppError) as exc_info:
-            admin_list_users(event, lambda_context)
+        result = admin_list_users(event, lambda_context)
 
-        assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
-        assert "USER_POOL_ID" in exc_info.value.message
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
+        assert "USER_POOL_ID" in result["message"]
 
     def test_cognito_list_users_error(
         self,
@@ -717,11 +717,11 @@ class TestAdminListUsers:
             )
             mock_get_client.return_value = mock_cognito
 
-            with pytest.raises(AppError) as exc_info:
-                admin_list_users(event, lambda_context)
+            result = admin_list_users(event, lambda_context)
 
-            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
-            assert "Failed to list users" in exc_info.value.message
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
+            assert "Failed to list users" in result["message"]
 
     def test_group_lookup_error_handled_gracefully(
         self,
@@ -903,11 +903,11 @@ class TestAdminListUsers:
             mock_cognito.list_users.side_effect = RuntimeError("Unexpected error")
             mock_get_client.return_value = mock_cognito
 
-            with pytest.raises(AppError) as exc_info:
-                admin_list_users(event, lambda_context)
+            result = admin_list_users(event, lambda_context)
 
-            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
-            assert "Failed to list users" in exc_info.value.message
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
+            assert "Failed to list users" in result["message"]
 
 
 class TestAdminResetUserPassword:
@@ -987,11 +987,11 @@ class TestAdminResetUserPassword:
             "arguments": {"email": "test@example.com"},
         }
 
-        with pytest.raises(AppError) as exc_info:
-            admin_reset_user_password(event, lambda_context)
+        result = admin_reset_user_password(event, lambda_context)
 
-        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
-        assert "Admin access required" in exc_info.value.message
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.FORBIDDEN
+        assert "Admin access required" in result["message"]
 
     def test_empty_email_raises_error(
         self,
@@ -1008,11 +1008,11 @@ class TestAdminResetUserPassword:
             "arguments": {"email": "   "},
         }
 
-        with pytest.raises(AppError) as exc_info:
-            admin_reset_user_password(event, lambda_context)
+        result = admin_reset_user_password(event, lambda_context)
 
-        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
-        assert "Email is required" in exc_info.value.message
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.INVALID_INPUT
+        assert "Email is required" in result["message"]
 
     def test_user_not_found(
         self,
@@ -1034,10 +1034,10 @@ class TestAdminResetUserPassword:
             mock_cognito.list_users.return_value = {"Users": []}
             mock_get_client.return_value = mock_cognito
 
-            with pytest.raises(AppError) as exc_info:
-                admin_reset_user_password(event, lambda_context)
+            result = admin_reset_user_password(event, lambda_context)
 
-            assert exc_info.value.error_code == ErrorCode.NOT_FOUND
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.NOT_FOUND
 
     def test_missing_user_pool_id_raises_error(
         self,
@@ -1054,11 +1054,11 @@ class TestAdminResetUserPassword:
             "arguments": {"email": "test@example.com"},
         }
 
-        with pytest.raises(AppError) as exc_info:
-            admin_reset_user_password(event, lambda_context)
+        result = admin_reset_user_password(event, lambda_context)
 
-        assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
-        assert "USER_POOL_ID" in exc_info.value.message
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
+        assert "USER_POOL_ID" in result["message"]
 
     def test_cognito_list_users_error(
         self,
@@ -1083,10 +1083,10 @@ class TestAdminResetUserPassword:
             )
             mock_get_client.return_value = mock_cognito
 
-            with pytest.raises(AppError) as exc_info:
-                admin_reset_user_password(event, lambda_context)
+            result = admin_reset_user_password(event, lambda_context)
 
-            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
 
     def test_cognito_reset_user_not_found(
         self,
@@ -1112,10 +1112,10 @@ class TestAdminResetUserPassword:
             )
             mock_get_client.return_value = mock_cognito
 
-            with pytest.raises(AppError) as exc_info:
-                admin_reset_user_password(event, lambda_context)
+            result = admin_reset_user_password(event, lambda_context)
 
-            assert exc_info.value.error_code == ErrorCode.NOT_FOUND
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.NOT_FOUND
 
     def test_cognito_invalid_parameter_exception(
         self,
@@ -1141,10 +1141,10 @@ class TestAdminResetUserPassword:
             )
             mock_get_client.return_value = mock_cognito
 
-            with pytest.raises(AppError) as exc_info:
-                admin_reset_user_password(event, lambda_context)
+            result = admin_reset_user_password(event, lambda_context)
 
-            assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.INVALID_INPUT
 
     def test_cognito_other_error_during_reset(
         self,
@@ -1170,10 +1170,10 @@ class TestAdminResetUserPassword:
             )
             mock_get_client.return_value = mock_cognito
 
-            with pytest.raises(AppError) as exc_info:
-                admin_reset_user_password(event, lambda_context)
+            result = admin_reset_user_password(event, lambda_context)
 
-            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
 
     def test_unexpected_exception_handled(
         self,
@@ -1195,10 +1195,10 @@ class TestAdminResetUserPassword:
             mock_cognito.list_users.side_effect = RuntimeError("Unexpected error")
             mock_get_client.return_value = mock_cognito
 
-            with pytest.raises(AppError) as exc_info:
-                admin_reset_user_password(event, lambda_context)
+            result = admin_reset_user_password(event, lambda_context)
 
-            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
 
     def test_email_with_quote_rejected_before_filter(
         self,
@@ -1219,10 +1219,10 @@ class TestAdminResetUserPassword:
             mock_cognito = MagicMock()
             mock_get_client.return_value = mock_cognito
 
-            with pytest.raises(AppError) as exc_info:
-                admin_reset_user_password(event, lambda_context)
+            result = admin_reset_user_password(event, lambda_context)
 
-            assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.INVALID_INPUT
             mock_cognito.list_users.assert_not_called()
 
     def test_email_with_backslash_rejected_before_filter(
@@ -1244,10 +1244,10 @@ class TestAdminResetUserPassword:
             mock_cognito = MagicMock()
             mock_get_client.return_value = mock_cognito
 
-            with pytest.raises(AppError) as exc_info:
-                admin_reset_user_password(event, lambda_context)
+            result = admin_reset_user_password(event, lambda_context)
 
-            assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.INVALID_INPUT
             mock_cognito.list_users.assert_not_called()
 
     def test_malformed_email_rejected_before_filter(
@@ -1269,10 +1269,10 @@ class TestAdminResetUserPassword:
             mock_cognito = MagicMock()
             mock_get_client.return_value = mock_cognito
 
-            with pytest.raises(AppError) as exc_info:
-                admin_reset_user_password(event, lambda_context)
+            result = admin_reset_user_password(event, lambda_context)
 
-            assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.INVALID_INPUT
             mock_cognito.list_users.assert_not_called()
 
     def test_oversize_email_rejected_before_filter(
@@ -1628,10 +1628,10 @@ class TestAdminDeleteUser:
             "arguments": {"accountId": "11111111-1111-1111-1111-111111111111"},
         }
 
-        with pytest.raises(AppError) as exc_info:
-            admin_delete_user(event, lambda_context)
+        result = admin_delete_user(event, lambda_context)
 
-        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.FORBIDDEN
 
     def test_empty_account_id_raises_error(
         self,
@@ -1648,11 +1648,11 @@ class TestAdminDeleteUser:
             "arguments": {"accountId": "   "},
         }
 
-        with pytest.raises(AppError) as exc_info:
-            admin_delete_user(event, lambda_context)
+        result = admin_delete_user(event, lambda_context)
 
-        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
-        assert "Account ID is required" in exc_info.value.message
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.INVALID_INPUT
+        assert "Account ID is required" in result["message"]
 
     def test_self_deletion_prevented(
         self,
@@ -1670,11 +1670,11 @@ class TestAdminDeleteUser:
             "arguments": {"accountId": sample_account_id},
         }
 
-        with pytest.raises(AppError) as exc_info:
-            admin_delete_user(event, lambda_context)
+        result = admin_delete_user(event, lambda_context)
 
-        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
-        assert "Cannot delete your own account" in exc_info.value.message
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.INVALID_INPUT
+        assert "Cannot delete your own account" in result["message"]
 
     def test_self_deletion_prevented_with_account_prefix(
         self,
@@ -1692,11 +1692,11 @@ class TestAdminDeleteUser:
             "arguments": {"accountId": f"ACCOUNT#{sample_account_id}"},
         }
 
-        with pytest.raises(AppError) as exc_info:
-            admin_delete_user(event, lambda_context)
+        result = admin_delete_user(event, lambda_context)
 
-        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
-        assert "Cannot delete your own account" in exc_info.value.message
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.INVALID_INPUT
+        assert "Cannot delete your own account" in result["message"]
 
     def test_account_id_with_quote_rejected_before_cognito(
         self,
@@ -1718,10 +1718,10 @@ class TestAdminDeleteUser:
             mock_cognito = MagicMock()
             mock_get_client.return_value = mock_cognito
 
-            with pytest.raises(AppError) as exc_info:
-                admin_delete_user(event, lambda_context)
+            result = admin_delete_user(event, lambda_context)
 
-            assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.INVALID_INPUT
             mock_cognito.list_users.assert_not_called()
 
     def test_account_id_with_backslash_rejected_before_cognito(
@@ -1744,10 +1744,10 @@ class TestAdminDeleteUser:
             mock_cognito = MagicMock()
             mock_get_client.return_value = mock_cognito
 
-            with pytest.raises(AppError) as exc_info:
-                admin_delete_user(event, lambda_context)
+            result = admin_delete_user(event, lambda_context)
 
-            assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.INVALID_INPUT
             mock_cognito.list_users.assert_not_called()
 
     def test_account_id_with_whitespace_rejected_before_cognito(
@@ -1770,10 +1770,10 @@ class TestAdminDeleteUser:
             mock_cognito = MagicMock()
             mock_get_client.return_value = mock_cognito
 
-            with pytest.raises(AppError) as exc_info:
-                admin_delete_user(event, lambda_context)
+            result = admin_delete_user(event, lambda_context)
 
-            assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.INVALID_INPUT
             mock_cognito.list_users.assert_not_called()
 
     def test_oversize_sub_rejected_before_filter(
@@ -1814,10 +1814,10 @@ class TestAdminDeleteUser:
             mock_cognito.list_users.return_value = {"Users": []}
             mock_get_client.return_value = mock_cognito
 
-            with pytest.raises(AppError) as exc_info:
-                admin_delete_user(event, lambda_context)
+            result = admin_delete_user(event, lambda_context)
 
-            assert exc_info.value.error_code == ErrorCode.NOT_FOUND
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.NOT_FOUND
             mock_cognito.list_users.assert_called_once()
 
     def test_account_not_found_cognito_idempotent(
@@ -1888,10 +1888,10 @@ class TestAdminDeleteUser:
             mock_cognito.list_users.return_value = {"Users": []}
             mock_get_client.return_value = mock_cognito
 
-            with pytest.raises(AppError) as exc_info:
-                admin_delete_user(event, lambda_context)
+            result = admin_delete_user(event, lambda_context)
 
-            assert exc_info.value.error_code == ErrorCode.NOT_FOUND
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.NOT_FOUND
             mock_cognito.admin_delete_user.assert_not_called()
 
     def test_cognito_user_not_found_continues(
@@ -1989,10 +1989,10 @@ class TestAdminDeleteUser:
             )
             mock_get_client.return_value = mock_cognito
 
-            with pytest.raises(AppError) as exc_info:
-                admin_delete_user(event, lambda_context)
+            result = admin_delete_user(event, lambda_context)
 
-            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
 
     def test_self_deletion_prevented_via_lambda_handler(
         self,
@@ -2011,10 +2011,10 @@ class TestAdminDeleteUser:
             "arguments": {"accountId": "22222222-2222-2222-2222-222222222222"},  # Same as caller in fixture
         }
 
-        with pytest.raises(AppError) as exc_info:
-            admin_delete_user(event, lambda_context)
+        result = admin_delete_user(event, lambda_context)
 
-        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.INVALID_INPUT
 
     def test_dynamodb_delete_error_prevents_cognito_delete(
         self,
@@ -2071,10 +2071,10 @@ class TestAdminDeleteUser:
                 mock_tables.invites.query.return_value = {"Items": []}
                 mock_tables.shares.query.return_value = {"Items": []}
 
-                with pytest.raises(AppError) as exc_info:
-                    admin_delete_user(event, lambda_context)
+                result = admin_delete_user(event, lambda_context)
 
-                assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+                assert result["__isError"] is True
+                assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
                 mock_cognito.admin_delete_user.assert_not_called()
 
     def test_cognito_lookup_error_aborts_deletion(
@@ -2112,10 +2112,10 @@ class TestAdminDeleteUser:
             )
             mock_get_client.return_value = mock_cognito
 
-            with pytest.raises(AppError) as exc_info:
-                admin_delete_user(event, lambda_context)
+            result = admin_delete_user(event, lambda_context)
 
-            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
             mock_cognito.admin_delete_user.assert_not_called()
             response = accounts_table.get_item(Key={"accountId": f"ACCOUNT#{target_account_id}"})
             assert "Item" in response
@@ -2157,10 +2157,10 @@ class TestAdminDeleteUser:
             mock_cognito.admin_delete_user.return_value = {}
             mock_get_client.return_value = mock_cognito
 
-            with pytest.raises(AppError) as exc_info:
-                admin_delete_user(event, lambda_context)
+            result = admin_delete_user(event, lambda_context)
 
-            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
             response = accounts_table.get_item(Key={"accountId": f"ACCOUNT#{target_account_id}"})
             assert "Item" in response
 
@@ -2240,10 +2240,10 @@ class TestAdminDeleteUser:
             )
             mock_tables.accounts = mock_accounts
 
-            with pytest.raises(AppError) as exc_info:
-                admin_delete_user(event, lambda_context)
+            result = admin_delete_user(event, lambda_context)
 
-            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
             mock_accounts.delete_item.assert_not_called()
             mock_cognito.admin_delete_user.assert_not_called()
 
@@ -2266,10 +2266,10 @@ class TestAdminDeleteUser:
         with patch("src.handlers.admin_operations.tables") as mock_tables:
             mock_tables.invites.query.side_effect = RuntimeError("Unexpected")
 
-            with pytest.raises(AppError) as exc_info:
-                admin_delete_user(event, lambda_context)
+            result = admin_delete_user(event, lambda_context)
 
-            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
 
 
 class TestCreateManagedCatalog:
@@ -2385,10 +2385,10 @@ class TestCreateManagedCatalog:
             },
         }
 
-        with pytest.raises(AppError) as exc_info:
-            create_managed_catalog(event, lambda_context)
+        result = create_managed_catalog(event, lambda_context)
 
-        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.FORBIDDEN
 
     def test_missing_catalog_name_raises_error(
         self,
@@ -2408,11 +2408,11 @@ class TestCreateManagedCatalog:
             },
         }
 
-        with pytest.raises(AppError) as exc_info:
-            create_managed_catalog(event, lambda_context)
+        result = create_managed_catalog(event, lambda_context)
 
-        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
-        assert "Catalog name is required" in exc_info.value.message
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.INVALID_INPUT
+        assert "Catalog name is required" in result["message"]
 
     def test_empty_products_raises_error(
         self,
@@ -2432,11 +2432,11 @@ class TestCreateManagedCatalog:
             },
         }
 
-        with pytest.raises(AppError) as exc_info:
-            create_managed_catalog(event, lambda_context)
+        result = create_managed_catalog(event, lambda_context)
 
-        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
-        assert "Products array cannot be empty" in exc_info.value.message
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.INVALID_INPUT
+        assert "Products array cannot be empty" in result["message"]
 
     def test_product_missing_name_raises_error(
         self,
@@ -2456,11 +2456,11 @@ class TestCreateManagedCatalog:
             },
         }
 
-        with pytest.raises(AppError) as exc_info:
-            create_managed_catalog(event, lambda_context)
+        result = create_managed_catalog(event, lambda_context)
 
-        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
-        assert "Product name is required" in exc_info.value.message
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.INVALID_INPUT
+        assert "Product name is required" in result["message"]
 
     def test_product_invalid_price_raises_error(
         self,
@@ -2480,11 +2480,11 @@ class TestCreateManagedCatalog:
             },
         }
 
-        with pytest.raises(AppError) as exc_info:
-            create_managed_catalog(event, lambda_context)
+        result = create_managed_catalog(event, lambda_context)
 
-        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
-        assert "Valid product price is required" in exc_info.value.message
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.INVALID_INPUT
+        assert "Valid product price is required" in result["message"]
 
     def test_product_missing_price_raises_error(
         self,
@@ -2504,11 +2504,11 @@ class TestCreateManagedCatalog:
             },
         }
 
-        with pytest.raises(AppError) as exc_info:
-            create_managed_catalog(event, lambda_context)
+        result = create_managed_catalog(event, lambda_context)
 
-        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
-        assert "Valid product price is required" in exc_info.value.message
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.INVALID_INPUT
+        assert "Valid product price is required" in result["message"]
 
     def test_product_string_price_is_accepted(
         self,
@@ -2552,11 +2552,11 @@ class TestCreateManagedCatalog:
             },
         }
 
-        with pytest.raises(AppError) as exc_info:
-            create_managed_catalog(event, lambda_context)
+        result = create_managed_catalog(event, lambda_context)
 
-        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
-        assert "Product price must be a valid number" in exc_info.value.message
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.INVALID_INPUT
+        assert "Product price must be a valid number" in result["message"]
 
     def test_missing_caller_id_raises_error(
         self,
@@ -2580,10 +2580,10 @@ class TestCreateManagedCatalog:
             },
         }
 
-        with pytest.raises(AppError) as exc_info:
-            create_managed_catalog(event, lambda_context)
+        result = create_managed_catalog(event, lambda_context)
 
-        assert exc_info.value.error_code == ErrorCode.UNAUTHORIZED
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.UNAUTHORIZED
 
     def test_dynamodb_error_raises(
         self,
@@ -2613,10 +2613,10 @@ class TestCreateManagedCatalog:
             )
             mock_tables.catalogs = mock_catalogs
 
-            with pytest.raises(AppError) as exc_info:
-                create_managed_catalog(event, lambda_context)
+            result = create_managed_catalog(event, lambda_context)
 
-            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
 
     def test_unexpected_exception_handled(
         self,
@@ -2639,10 +2639,10 @@ class TestCreateManagedCatalog:
         with patch("src.handlers.admin_operations.tables") as mock_tables:
             mock_tables.catalogs.put_item.side_effect = RuntimeError("Unexpected")
 
-            with pytest.raises(AppError) as exc_info:
-                create_managed_catalog(event, lambda_context)
+            result = create_managed_catalog(event, lambda_context)
 
-            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
 
 
 class TestAdminDeleteUserOrders:
@@ -2778,10 +2778,10 @@ class TestAdminDeleteUserOrders:
             "arguments": {"accountId": "target-user-123"},
         }
 
-        with pytest.raises(AppError) as exc_info:
-            admin_delete_user_orders(event, lambda_context)
+        result = admin_delete_user_orders(event, lambda_context)
 
-        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.FORBIDDEN
 
     def test_missing_account_id(
         self,
@@ -2797,10 +2797,10 @@ class TestAdminDeleteUserOrders:
             "arguments": {},
         }
 
-        with pytest.raises(AppError) as exc_info:
-            admin_delete_user_orders(event, lambda_context)
+        result = admin_delete_user_orders(event, lambda_context)
 
-        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.INVALID_INPUT
 
     def test_unexpected_error_handled(
         self,
@@ -2822,10 +2822,10 @@ class TestAdminDeleteUserOrders:
         with patch("src.handlers.admin_operations.tables") as mock_tables:
             mock_tables.profiles.query.side_effect = RuntimeError("Unexpected")
 
-            with pytest.raises(AppError) as exc_info:
-                admin_delete_user_orders(event, lambda_context)
+            result = admin_delete_user_orders(event, lambda_context)
 
-            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
 
 
 class TestAdminDeleteUserCampaigns:
@@ -2893,10 +2893,10 @@ class TestAdminDeleteUserCampaigns:
             "arguments": {"accountId": "target-user-123"},
         }
 
-        with pytest.raises(AppError) as exc_info:
-            admin_delete_user_campaigns(event, lambda_context)
+        result = admin_delete_user_campaigns(event, lambda_context)
 
-        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.FORBIDDEN
 
     def test_missing_account_id(
         self,
@@ -2912,10 +2912,10 @@ class TestAdminDeleteUserCampaigns:
             "arguments": {},
         }
 
-        with pytest.raises(AppError) as exc_info:
-            admin_delete_user_campaigns(event, lambda_context)
+        result = admin_delete_user_campaigns(event, lambda_context)
 
-        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.INVALID_INPUT
 
     def test_unexpected_error_handled(
         self,
@@ -2937,10 +2937,10 @@ class TestAdminDeleteUserCampaigns:
         with patch("src.handlers.admin_operations.tables") as mock_tables:
             mock_tables.profiles.query.side_effect = RuntimeError("Unexpected")
 
-            with pytest.raises(AppError) as exc_info:
-                admin_delete_user_campaigns(event, lambda_context)
+            result = admin_delete_user_campaigns(event, lambda_context)
 
-            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
 
 
 class TestAdminDeleteUserShares:
@@ -3002,10 +3002,10 @@ class TestAdminDeleteUserShares:
             "arguments": {"accountId": "target-user-123"},
         }
 
-        with pytest.raises(AppError) as exc_info:
-            admin_delete_user_shares(event, lambda_context)
+        result = admin_delete_user_shares(event, lambda_context)
 
-        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.FORBIDDEN
 
     def test_missing_account_id(
         self,
@@ -3021,10 +3021,10 @@ class TestAdminDeleteUserShares:
             "arguments": {},
         }
 
-        with pytest.raises(AppError) as exc_info:
-            admin_delete_user_shares(event, lambda_context)
+        result = admin_delete_user_shares(event, lambda_context)
 
-        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.INVALID_INPUT
 
     def test_unexpected_error_handled(
         self,
@@ -3046,10 +3046,10 @@ class TestAdminDeleteUserShares:
         with patch("src.handlers.admin_operations.tables") as mock_tables:
             mock_tables.profiles.query.side_effect = RuntimeError("Unexpected")
 
-            with pytest.raises(AppError) as exc_info:
-                admin_delete_user_shares(event, lambda_context)
+            result = admin_delete_user_shares(event, lambda_context)
 
-            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
 
 
 class TestAdminDeleteUserProfiles:
@@ -3104,10 +3104,10 @@ class TestAdminDeleteUserProfiles:
             "arguments": {"accountId": "target-user-123"},
         }
 
-        with pytest.raises(AppError) as exc_info:
-            admin_delete_user_profiles(event, lambda_context)
+        result = admin_delete_user_profiles(event, lambda_context)
 
-        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.FORBIDDEN
 
     def test_missing_account_id(
         self,
@@ -3123,10 +3123,10 @@ class TestAdminDeleteUserProfiles:
             "arguments": {},
         }
 
-        with pytest.raises(AppError) as exc_info:
-            admin_delete_user_profiles(event, lambda_context)
+        result = admin_delete_user_profiles(event, lambda_context)
 
-        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.INVALID_INPUT
 
     def test_unexpected_error_handled(
         self,
@@ -3148,10 +3148,10 @@ class TestAdminDeleteUserProfiles:
         with patch("src.handlers.admin_operations.tables") as mock_tables:
             mock_tables.profiles.query.side_effect = RuntimeError("Unexpected")
 
-            with pytest.raises(AppError) as exc_info:
-                admin_delete_user_profiles(event, lambda_context)
+            result = admin_delete_user_profiles(event, lambda_context)
 
-            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
 
 
 class TestAdminDeleteUserCatalogs:
@@ -3270,10 +3270,10 @@ class TestAdminDeleteUserCatalogs:
             "arguments": {"accountId": "target-user-123"},
         }
 
-        with pytest.raises(AppError) as exc_info:
-            admin_delete_user_catalogs(event, lambda_context)
+        result = admin_delete_user_catalogs(event, lambda_context)
 
-        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.FORBIDDEN
 
     def test_missing_account_id(
         self,
@@ -3289,10 +3289,10 @@ class TestAdminDeleteUserCatalogs:
             "arguments": {},
         }
 
-        with pytest.raises(AppError) as exc_info:
-            admin_delete_user_catalogs(event, lambda_context)
+        result = admin_delete_user_catalogs(event, lambda_context)
 
-        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.INVALID_INPUT
 
     def test_unexpected_error_handled(
         self,
@@ -3314,10 +3314,10 @@ class TestAdminDeleteUserCatalogs:
         with patch("src.handlers.admin_operations.tables") as mock_tables:
             mock_tables.catalogs.query.side_effect = RuntimeError("Unexpected")
 
-            with pytest.raises(AppError) as exc_info:
-                admin_delete_user_catalogs(event, lambda_context)
+            result = admin_delete_user_catalogs(event, lambda_context)
 
-            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
 
 
 class TestAccountDeletionHelpers:
@@ -4021,10 +4021,10 @@ class TestAdminSearchUser:
             "arguments": {"query": "   "},  # whitespace only
         }
 
-        with pytest.raises(AppError) as exc_info:
-            admin_search_user(event, lambda_context)
+        result = admin_search_user(event, lambda_context)
 
-        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.INVALID_INPUT
 
     def test_search_user_invalid_query_raises_error(
         self,
@@ -4041,11 +4041,11 @@ class TestAdminSearchUser:
             "arguments": {"query": 'test"injection'},
         }
 
-        with pytest.raises(AppError) as exc_info:
-            admin_search_user(event, lambda_context)
+        result = admin_search_user(event, lambda_context)
 
-        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
-        assert "valid UUID" in exc_info.value.message
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.INVALID_INPUT
+        assert "valid UUID" in result["message"]
 
     def test_search_user_malformed_account_prefix_raises_error(
         self,
@@ -4062,10 +4062,10 @@ class TestAdminSearchUser:
             "arguments": {"query": "ACCOUNT#not-a-uuid"},
         }
 
-        with pytest.raises(AppError) as exc_info:
-            admin_search_user(event, lambda_context)
+        result = admin_search_user(event, lambda_context)
 
-        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.INVALID_INPUT
 
     def test_search_user_non_admin_raises_error(
         self,
@@ -4082,10 +4082,10 @@ class TestAdminSearchUser:
             "arguments": {"query": "user@example.com"},
         }
 
-        with pytest.raises(AppError) as exc_info:
-            admin_search_user(event, lambda_context)
+        result = admin_search_user(event, lambda_context)
 
-        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.FORBIDDEN
 
     def test_search_user_admin_found(
         self,
@@ -4520,11 +4520,11 @@ class TestAdminSearchUser:
             with patch("src.handlers.admin_operations.tables"):
                 mock_get_client.side_effect = RuntimeError("Unexpected error")
 
-                with pytest.raises(AppError) as exc_info:
-                    admin_search_user(event, lambda_context)
+                result = admin_search_user(event, lambda_context)
 
-                assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
-                assert "Failed to search user" in exc_info.value.message
+                assert result["__isError"] is True
+                assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
+                assert "Failed to search user" in result["message"]
 
 
 class TestBatchHelpers:
@@ -4985,10 +4985,10 @@ class TestAdminGetUserProfiles:
         admin_appsync_event["info"]["fieldName"] = "adminGetUserProfiles"
         admin_appsync_event["arguments"] = {}
 
-        with pytest.raises(AppError) as exc_info:
-            lambda_handler(admin_appsync_event, lambda_context)
+        result = lambda_handler(admin_appsync_event, lambda_context)
 
-        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.INVALID_INPUT
 
     def test_get_user_profiles_non_admin(
         self,
@@ -5000,10 +5000,10 @@ class TestAdminGetUserProfiles:
         non_admin_appsync_event["info"]["fieldName"] = "adminGetUserProfiles"
         non_admin_appsync_event["arguments"] = {"accountId": "some-user"}
 
-        with pytest.raises(AppError) as exc_info:
-            lambda_handler(non_admin_appsync_event, lambda_context)
+        result = lambda_handler(non_admin_appsync_event, lambda_context)
 
-        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.FORBIDDEN
 
     def test_get_user_profiles_paginates(
         self,
@@ -5099,10 +5099,10 @@ class TestAdminGetUserCatalogs:
         admin_appsync_event["info"]["fieldName"] = "adminGetUserCatalogs"
         admin_appsync_event["arguments"] = {"accountId": ""}
 
-        with pytest.raises(AppError) as exc_info:
-            lambda_handler(admin_appsync_event, lambda_context)
+        result = lambda_handler(admin_appsync_event, lambda_context)
 
-        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.INVALID_INPUT
 
     def test_get_user_catalogs_non_admin(
         self,
@@ -5114,10 +5114,10 @@ class TestAdminGetUserCatalogs:
         non_admin_appsync_event["info"]["fieldName"] = "adminGetUserCatalogs"
         non_admin_appsync_event["arguments"] = {"accountId": "some-user"}
 
-        with pytest.raises(AppError) as exc_info:
-            lambda_handler(non_admin_appsync_event, lambda_context)
+        result = lambda_handler(non_admin_appsync_event, lambda_context)
 
-        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.FORBIDDEN
 
     def test_get_user_catalogs_paginates(
         self,
@@ -5304,10 +5304,10 @@ class TestAdminGetUserCampaigns:
         admin_appsync_event["info"]["fieldName"] = "adminGetUserCampaigns"
         admin_appsync_event["arguments"] = {}
 
-        with pytest.raises(AppError) as exc_info:
-            lambda_handler(admin_appsync_event, lambda_context)
+        result = lambda_handler(admin_appsync_event, lambda_context)
 
-        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.INVALID_INPUT
 
     def test_get_user_campaigns_non_admin(
         self,
@@ -5319,10 +5319,10 @@ class TestAdminGetUserCampaigns:
         non_admin_appsync_event["info"]["fieldName"] = "adminGetUserCampaigns"
         non_admin_appsync_event["arguments"] = {"accountId": "some-user"}
 
-        with pytest.raises(AppError) as exc_info:
-            lambda_handler(non_admin_appsync_event, lambda_context)
+        result = lambda_handler(non_admin_appsync_event, lambda_context)
 
-        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.FORBIDDEN
 
 
 class TestAdminGetUserSharedCampaigns:
@@ -5381,10 +5381,10 @@ class TestAdminGetUserSharedCampaigns:
         admin_appsync_event["info"]["fieldName"] = "adminGetUserSharedCampaigns"
         admin_appsync_event["arguments"] = {}
 
-        with pytest.raises(AppError) as exc_info:
-            lambda_handler(admin_appsync_event, lambda_context)
+        result = lambda_handler(admin_appsync_event, lambda_context)
 
-        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.INVALID_INPUT
 
     def test_get_user_shared_campaigns_non_admin(
         self,
@@ -5396,10 +5396,10 @@ class TestAdminGetUserSharedCampaigns:
         non_admin_appsync_event["info"]["fieldName"] = "adminGetUserSharedCampaigns"
         non_admin_appsync_event["arguments"] = {"accountId": "some-user"}
 
-        with pytest.raises(AppError) as exc_info:
-            lambda_handler(non_admin_appsync_event, lambda_context)
+        result = lambda_handler(non_admin_appsync_event, lambda_context)
 
-        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.FORBIDDEN
 
     def test_get_user_shared_campaigns_paginates(
         self,
@@ -5506,10 +5506,10 @@ class TestAdminGetProfileShares:
         admin_appsync_event["info"]["fieldName"] = "adminGetProfileShares"
         admin_appsync_event["arguments"] = {}
 
-        with pytest.raises(AppError) as exc_info:
-            lambda_handler(admin_appsync_event, lambda_context)
+        result = lambda_handler(admin_appsync_event, lambda_context)
 
-        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.INVALID_INPUT
 
     def test_get_profile_shares_permissions_set_conversion(
         self,
@@ -5577,10 +5577,10 @@ class TestAdminGetProfileShares:
         non_admin_appsync_event["info"]["fieldName"] = "adminGetProfileShares"
         non_admin_appsync_event["arguments"] = {"profileId": "some-profile"}
 
-        with pytest.raises(AppError) as exc_info:
-            lambda_handler(non_admin_appsync_event, lambda_context)
+        result = lambda_handler(non_admin_appsync_event, lambda_context)
 
-        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.FORBIDDEN
 
     def test_get_profile_shares_paginates(
         self,
@@ -5680,10 +5680,10 @@ class TestAdminDeleteShare:
         admin_appsync_event["info"]["fieldName"] = "adminDeleteShare"
         admin_appsync_event["arguments"] = {"profileId": "some-id"}
 
-        with pytest.raises(AppError) as exc_info:
-            lambda_handler(admin_appsync_event, lambda_context)
+        result = lambda_handler(admin_appsync_event, lambda_context)
 
-        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.INVALID_INPUT
 
     def test_delete_share_non_admin(
         self,
@@ -5698,10 +5698,10 @@ class TestAdminDeleteShare:
             "targetAccountId": "user",
         }
 
-        with pytest.raises(AppError) as exc_info:
-            lambda_handler(non_admin_appsync_event, lambda_context)
+        result = lambda_handler(non_admin_appsync_event, lambda_context)
 
-        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.FORBIDDEN
 
 
 class TestAdminUpdateCampaignSharedCode:
@@ -5808,10 +5808,10 @@ class TestAdminUpdateCampaignSharedCode:
             "sharedCampaignCode": "CODE",
         }
 
-        with pytest.raises(AppError) as exc_info:
-            lambda_handler(admin_appsync_event, lambda_context)
+        result = lambda_handler(admin_appsync_event, lambda_context)
 
-        assert exc_info.value.error_code == ErrorCode.NOT_FOUND
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.NOT_FOUND
 
     def test_update_campaign_shared_code_missing_campaign_id(
         self,
@@ -5823,10 +5823,10 @@ class TestAdminUpdateCampaignSharedCode:
         admin_appsync_event["info"]["fieldName"] = "adminUpdateCampaignSharedCode"
         admin_appsync_event["arguments"] = {"sharedCampaignCode": "CODE"}
 
-        with pytest.raises(AppError) as exc_info:
-            lambda_handler(admin_appsync_event, lambda_context)
+        result = lambda_handler(admin_appsync_event, lambda_context)
 
-        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.INVALID_INPUT
 
     def test_update_campaign_shared_code_non_admin(
         self,
@@ -5841,10 +5841,10 @@ class TestAdminUpdateCampaignSharedCode:
             "sharedCampaignCode": "CODE",
         }
 
-        with pytest.raises(AppError) as exc_info:
-            lambda_handler(non_admin_appsync_event, lambda_context)
+        result = lambda_handler(non_admin_appsync_event, lambda_context)
 
-        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.FORBIDDEN
 
 
 class TestAdminOperationExceptionHandlers:
@@ -5862,11 +5862,11 @@ class TestAdminOperationExceptionHandlers:
         with patch("src.handlers.admin_operations.tables") as mock_tables:
             mock_tables.profiles.query.side_effect = RuntimeError("Unexpected failure")
 
-            with pytest.raises(AppError) as exc_info:
-                lambda_handler(admin_appsync_event, lambda_context)
+            result = lambda_handler(admin_appsync_event, lambda_context)
 
-            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
-            assert "Failed to get user profiles" in exc_info.value.message
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
+            assert "Failed to get user profiles" in result["message"]
 
     def test_get_user_catalogs_unexpected_error(
         self,
@@ -5880,11 +5880,11 @@ class TestAdminOperationExceptionHandlers:
         with patch("src.handlers.admin_operations.tables") as mock_tables:
             mock_tables.catalogs.query.side_effect = RuntimeError("Unexpected failure")
 
-            with pytest.raises(AppError) as exc_info:
-                lambda_handler(admin_appsync_event, lambda_context)
+            result = lambda_handler(admin_appsync_event, lambda_context)
 
-            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
-            assert "Failed to get user catalogs" in exc_info.value.message
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
+            assert "Failed to get user catalogs" in result["message"]
 
     def test_get_user_campaigns_unexpected_error(
         self,
@@ -5898,11 +5898,11 @@ class TestAdminOperationExceptionHandlers:
         with patch("src.handlers.admin_operations.tables") as mock_tables:
             mock_tables.profiles.query.side_effect = RuntimeError("Unexpected failure")
 
-            with pytest.raises(AppError) as exc_info:
-                lambda_handler(admin_appsync_event, lambda_context)
+            result = lambda_handler(admin_appsync_event, lambda_context)
 
-            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
-            assert "Failed to get user campaigns" in exc_info.value.message
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
+            assert "Failed to get user campaigns" in result["message"]
 
     def test_get_user_shared_campaigns_unexpected_error(
         self,
@@ -5916,11 +5916,11 @@ class TestAdminOperationExceptionHandlers:
         with patch("src.handlers.admin_operations.tables") as mock_tables:
             mock_tables.shared_campaigns.query.side_effect = RuntimeError("Unexpected failure")
 
-            with pytest.raises(AppError) as exc_info:
-                lambda_handler(admin_appsync_event, lambda_context)
+            result = lambda_handler(admin_appsync_event, lambda_context)
 
-            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
-            assert "Failed to get user shared campaigns" in exc_info.value.message
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
+            assert "Failed to get user shared campaigns" in result["message"]
 
     def test_get_profile_shares_unexpected_error(
         self,
@@ -5934,11 +5934,11 @@ class TestAdminOperationExceptionHandlers:
         with patch("src.handlers.admin_operations.tables") as mock_tables:
             mock_tables.shares.query.side_effect = RuntimeError("Unexpected failure")
 
-            with pytest.raises(AppError) as exc_info:
-                lambda_handler(admin_appsync_event, lambda_context)
+            result = lambda_handler(admin_appsync_event, lambda_context)
 
-            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
-            assert "Failed to get profile shares" in exc_info.value.message
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
+            assert "Failed to get profile shares" in result["message"]
 
     def test_delete_share_unexpected_error(
         self,
@@ -5955,11 +5955,11 @@ class TestAdminOperationExceptionHandlers:
         with patch("src.handlers.admin_operations.tables") as mock_tables:
             mock_tables.shares.delete_item.side_effect = RuntimeError("Unexpected failure")
 
-            with pytest.raises(AppError) as exc_info:
-                lambda_handler(admin_appsync_event, lambda_context)
+            result = lambda_handler(admin_appsync_event, lambda_context)
 
-            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
-            assert "Failed to delete share" in exc_info.value.message
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
+            assert "Failed to delete share" in result["message"]
 
     def test_update_campaign_shared_code_unexpected_error(
         self,
@@ -5976,11 +5976,11 @@ class TestAdminOperationExceptionHandlers:
         with patch("src.handlers.admin_operations.tables") as mock_tables:
             mock_tables.campaigns.query.side_effect = RuntimeError("Unexpected failure")
 
-            with pytest.raises(AppError) as exc_info:
-                lambda_handler(admin_appsync_event, lambda_context)
+            result = lambda_handler(admin_appsync_event, lambda_context)
 
-            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
-            assert "Failed to update campaign shared code" in exc_info.value.message
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
+            assert "Failed to update campaign shared code" in result["message"]
 
     def test_search_user_account_without_name(
         self,

@@ -17,13 +17,23 @@ export function request(ctx) {
     // Add PROFILE# prefix for DynamoDB query
     const dbProfileId = profileId.startsWith('PROFILE#') ? profileId : `PROFILE#${profileId}`;
     // V2: Direct PK query on profileId (no GSI needed)
-    return {
+    const request = {
         operation: 'Query',
         query: {
             expression: 'profileId = :profileId',
             expressionValues: util.dynamodb.toMapValues({ ':profileId': dbProfileId })
         }
     };
+
+    const limit = ctx.args.limit;
+    if (typeof limit === 'number' && limit > 0) {
+        request.limit = limit;
+    }
+    if (ctx.args.nextToken) {
+        request.nextToken = ctx.args.nextToken;
+    }
+
+    return request;
 }
 
 export function response(ctx) {
@@ -31,11 +41,11 @@ export function response(ctx) {
         util.error(ctx.error.message, ctx.error.type);
     }
     
-    // If not authorized or profile not found, return empty array
+    // If not authorized or profile not found, return empty connection
     if (!ctx.stash.authorized || ctx.stash.profileNotFound) {
-        return [];
+        return { campaigns: [], nextToken: null };
     }
-    
+
     // Return all campaigns (active and inactive) with default isActive value
     const items = ctx.result.items || [];
     for (const item of items) {
@@ -44,6 +54,9 @@ export function response(ctx) {
             item.isActive = true;
         }
     }
-    
-    return items;
+
+    return {
+        campaigns: items,
+        nextToken: ctx.result.nextToken || null
+    };
 }

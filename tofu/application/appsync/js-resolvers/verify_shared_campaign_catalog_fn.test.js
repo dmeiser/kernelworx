@@ -58,7 +58,7 @@ describe('verify_shared_campaign_catalog_fn response', () => {
         assert.deepStrictEqual(result, catalog);
     });
 
-    it('throws InvalidInput when the catalog is missing', () => {
+    it('throws INVALID_INPUT when the catalog is missing', () => {
         const ctx = {
             stash: { sharedCampaign: { sharedCampaignCode: 'CODE-1', catalogId: 'CATALOG#gone' } },
             result: null,
@@ -66,11 +66,11 @@ describe('verify_shared_campaign_catalog_fn response', () => {
 
         assert.throws(
             () => response(ctx),
-            /InvalidInput: Shared Campaign CODE-1 is no longer available/
+            /INVALID_INPUT: Shared Campaign CODE-1 is no longer available/
         );
     });
 
-    it('throws InvalidInput when the catalog is soft-deleted', () => {
+    it('throws INVALID_INPUT when the catalog is soft-deleted', () => {
         const ctx = {
             stash: { sharedCampaign: { sharedCampaignCode: 'CODE-1', catalogId: 'CATALOG#gone' } },
             result: { catalogId: 'CATALOG#gone', isDeleted: true },
@@ -78,7 +78,7 @@ describe('verify_shared_campaign_catalog_fn response', () => {
 
         assert.throws(
             () => response(ctx),
-            /InvalidInput: Shared Campaign CODE-1 is no longer available/
+            /INVALID_INPUT: Shared Campaign CODE-1 is no longer available/
         );
     });
 
@@ -93,12 +93,12 @@ describe('verify_shared_campaign_catalog_fn response', () => {
     it('throws propagated DynamoDB error when ctx.error is set', () => {
         const ctx = {
             stash: { sharedCampaign: { sharedCampaignCode: 'CODE-1', catalogId: 'CATALOG#cat-1' } },
-            error: { message: 'DynamoDB timeout', type: 'InternalServerError' },
+            error: { message: 'DynamoDB timeout', type: 'INTERNAL_ERROR' },
         };
 
         assert.throws(
             () => response(ctx),
-            /InternalServerError: DynamoDB timeout/
+            /INTERNAL_ERROR: DynamoDB timeout/
         );
     });
 });

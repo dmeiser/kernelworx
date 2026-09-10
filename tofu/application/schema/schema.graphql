@@ -82,6 +82,8 @@ type SellerProfile {
   profileId: ID!
   ownerAccountId: ID!
   sellerName: String!
+  unitType: String
+  unitNumber: Int
   createdAt: AWSDateTime!
   updatedAt: AWSDateTime!
   isOwner: Boolean!
@@ -167,6 +169,11 @@ type Order {
 
 type OrderConnection {
   orders: [Order!]!
+  nextToken: String
+}
+
+type CampaignConnection {
+  campaigns: [Campaign!]!
   nextToken: String
 }
 
@@ -426,7 +433,7 @@ type Query {
   
   # Campaign queries
   getCampaign(campaignId: ID!): Campaign
-  listCampaignsByProfile(profileId: ID!): [Campaign!]!
+  listCampaignsByProfile(profileId: ID!, limit: Int, nextToken: String): CampaignConnection!
   
   # Catalog queries
   getCatalog(catalogId: ID!): Catalog @aws_cognito_user_pools
@@ -437,7 +444,6 @@ type Query {
   # Order queries
   getOrder(orderId: ID!): Order
   listOrdersByCampaign(campaignId: ID!, limit: Int, nextToken: String): OrderConnection!
-  listOrdersByProfile(profileId: ID!, limit: Int, nextToken: String): OrderConnection!
   
   # Share queries
   listSharesByProfile(profileId: ID!): [Share!]!

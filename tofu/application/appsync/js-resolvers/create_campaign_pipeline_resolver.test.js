@@ -34,13 +34,13 @@ describe('create_campaign_pipeline_resolver response', () => {
             },
             error: {
                 message: 'Pipeline failed',
-                type: 'InternalServerError',
+                type: 'INTERNAL_ERROR',
             },
         };
 
         assert.throws(
             () => response(ctx),
-            /InternalServerError: Pipeline failed/
+            /INTERNAL_ERROR: Pipeline failed/
         );
     });
 });

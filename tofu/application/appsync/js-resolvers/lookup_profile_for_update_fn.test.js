@@ -73,7 +73,7 @@ describe('lookup_profile_for_update_fn response', () => {
         );
     });
 
-    it('throws Forbidden when profile is null (not found or not owner)', () => {
+    it('throws FORBIDDEN when profile is null (not found or not owner)', () => {
         const ctx = {
             stash: {},
             result: null,
@@ -81,11 +81,11 @@ describe('lookup_profile_for_update_fn response', () => {
 
         assert.throws(
             () => response(ctx),
-            /Forbidden: Profile not found or access denied/
+            /FORBIDDEN: Profile not found or access denied/
         );
     });
 
-    it('throws Forbidden when profile is undefined', () => {
+    it('throws FORBIDDEN when profile is undefined', () => {
         const ctx = {
             stash: {},
             result: undefined,
@@ -93,7 +93,7 @@ describe('lookup_profile_for_update_fn response', () => {
 
         assert.throws(
             () => response(ctx),
-            /Forbidden: Profile not found or access denied/
+            /FORBIDDEN: Profile not found or access denied/
         );
     });
 });
