@@ -34,7 +34,7 @@ function validateUnitUpdate(input, campaign) {
     }
 
     if (campaign.sharedCampaignCode) {
-        util.error('Unit information cannot be changed for campaigns created from a shared campaign link.', 'InvalidInput');
+        util.error('Unit information cannot be changed for campaigns created from a shared campaign link.', 'INVALID_INPUT');
         return;
     }
 
@@ -45,23 +45,23 @@ function validateUnitUpdate(input, campaign) {
 
     if (unitType) {
         if (!isNonEmptyUnitField(unitNumber)) {
-            util.error('unitNumber is required when unitType is provided', 'InvalidInput');
+            util.error('unitNumber is required when unitType is provided', 'INVALID_INPUT');
             return;
         }
         if (unitNumber < 1 || Math.floor(unitNumber) !== unitNumber) {
-            util.error('unitNumber must be a positive integer', 'InvalidInput');
+            util.error('unitNumber must be a positive integer', 'INVALID_INPUT');
             return;
         }
         if (!isNonEmptyUnitField(city)) {
-            util.error('city is required when unitType is provided', 'InvalidInput');
+            util.error('city is required when unitType is provided', 'INVALID_INPUT');
             return;
         }
         if (!isNonEmptyUnitField(state)) {
-            util.error('state is required when unitType is provided', 'InvalidInput');
+            util.error('state is required when unitType is provided', 'INVALID_INPUT');
             return;
         }
     } else if (isNonEmptyUnitField(unitNumber) || isNonEmptyUnitField(city) || isNonEmptyUnitField(state)) {
-        util.error('unitType is required when unit fields are present', 'InvalidInput');
+        util.error('unitType is required when unit fields are present', 'INVALID_INPUT');
         return;
     }
 }

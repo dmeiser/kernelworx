@@ -10,23 +10,23 @@ import { LIST_CAMPAIGNS_BY_PROFILE } from '../src/lib/graphql';
 const campaignsEmptyMocks = [
   {
     request: { query: LIST_CAMPAIGNS_BY_PROFILE, variables: { profileId: 'PROFILE#profile-123' } },
-    result: { data: { listCampaignsByProfile: [] } },
+    result: { data: { listCampaignsByProfile: { campaigns: [] } } },
   },
   {
     request: { query: LIST_CAMPAIGNS_BY_PROFILE, variables: { profileId: 'PROFILE#profile-456' } },
-    result: { data: { listCampaignsByProfile: [] } },
+    result: { data: { listCampaignsByProfile: { campaigns: [] } } },
   },
   {
     request: { query: LIST_CAMPAIGNS_BY_PROFILE, variables: { profileId: 'PROFILE#profile-789' } },
-    result: { data: { listCampaignsByProfile: [] } },
+    result: { data: { listCampaignsByProfile: { campaigns: [] } } },
   },
   {
     request: { query: LIST_CAMPAIGNS_BY_PROFILE, variables: { profileId: 'PROFILE#profile-999' } },
-    result: { data: { listCampaignsByProfile: [] } },
+    result: { data: { listCampaignsByProfile: { campaigns: [] } } },
   },
   {
     request: { query: LIST_CAMPAIGNS_BY_PROFILE, variables: { profileId: 'PROFILE#profile-empty' } },
-    result: { data: { listCampaignsByProfile: [] } },
+    result: { data: { listCampaignsByProfile: { campaigns: [] } } },
   },
 ];
 

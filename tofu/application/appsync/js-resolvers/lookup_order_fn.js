@@ -47,7 +47,7 @@ export function response(ctx) {
         order = ctx.result || null;
     }
     if (!order) {
-        util.error('Order not found', 'NotFound');
+        util.error('Order not found', 'NOT_FOUND');
     }
     // Store order in stash for next function
     ctx.stash.order = order;

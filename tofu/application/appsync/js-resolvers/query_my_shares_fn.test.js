@@ -10,6 +10,7 @@ describe('query_my_shares_fn request', () => {
 
         assert.strictEqual(result.operation, 'Query');
         assert.strictEqual(result.index, 'targetAccountId-index');
+        assert.strictEqual(result.limit, 100);
         assert.strictEqual(result.query.expression, 'targetAccountId = :targetAccountId');
         assert.deepStrictEqual(result.query.expressionValues, { ':targetAccountId': 'ACCOUNT#user-123' });
     });

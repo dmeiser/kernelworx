@@ -12,7 +12,7 @@ export function response(ctx) {
         util.error(ctx.error.message, ctx.error.type);
     }
     if (!ctx.result) {
-        util.error('Catalog not found', 'NotFound');
+        util.error('Catalog not found', 'NOT_FOUND');
     }
 
     // READ ACCESS: Anyone can read catalog by ID (no authorization check).
@@ -20,7 +20,7 @@ export function response(ctx) {
     // WRITE ACCESS: Only owner can update/delete (checked in update/delete resolvers).
     const catalog = ctx.result;
     if (catalog.isDeleted === true) {
-        util.error('Catalog has been deleted', 'NotFound');
+        util.error('Catalog has been deleted', 'NOT_FOUND');
     }
 
     ctx.stash.catalog = catalog;

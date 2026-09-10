@@ -11,7 +11,7 @@ from botocore.exceptions import ClientError
 from src.handlers import transfer_profile_ownership
 from src.handlers.transfer_profile_ownership import lambda_handler
 from src.utils.dynamodb import clear_all_overrides
-from src.utils.errors import AppError, ErrorCode
+from src.utils.errors import ErrorCode
 
 
 @pytest.fixture(autouse=True)
@@ -386,9 +386,9 @@ class TestTransferProfileOwnership:
             },
         }
 
-        with pytest.raises(AppError) as exc_info:
-            lambda_handler(event, None)
-        assert exc_info.value.error_code == ErrorCode.NOT_FOUND
+        result = lambda_handler(event, None)
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.NOT_FOUND
 
     def test_caller_not_owner_or_admin_raises_forbidden(self, profiles_table: Any, shares_table: Any) -> None:
         """Non-owner non-admin caller raises FORBIDDEN."""
@@ -406,9 +406,9 @@ class TestTransferProfileOwnership:
             },
         }
 
-        with pytest.raises(AppError) as exc_info:
-            lambda_handler(event, None)
-        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
+        result = lambda_handler(event, None)
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.FORBIDDEN
 
     def test_new_owner_missing_share_raises_invalid_input(self, profiles_table: Any, shares_table: Any) -> None:
         """Non-admin transfer to user without existing share raises INVALID_INPUT."""
@@ -426,9 +426,9 @@ class TestTransferProfileOwnership:
             },
         }
 
-        with pytest.raises(AppError) as exc_info:
-            lambda_handler(event, None)
-        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+        result = lambda_handler(event, None)
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.INVALID_INPUT
 
     def test_transact_write_client_error_raises_internal_error(
         self, profiles_table: Any, shares_table: Any, monkeypatch: pytest.MonkeyPatch
@@ -460,6 +460,6 @@ class TestTransferProfileOwnership:
             },
         }
 
-        with pytest.raises(AppError) as exc_info:
-            lambda_handler(event, None)
-        assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+        result = lambda_handler(event, None)
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.INTERNAL_ERROR

@@ -4,7 +4,7 @@ import { normalizeId } from './lib/ids.js';
 
 function validateCustomer(input) {
     if (!input.customerName || (typeof input.customerName === 'string' && !input.customerName.trim())) {
-        util.error('Customer name is required', 'BadRequest');
+        util.error('Customer name is required', 'INVALID_INPUT');
         return {};
     }
 
@@ -15,7 +15,7 @@ function validateCustomer(input) {
     if (phoneValue !== '') {
         const phoneResult = validatePhone(phoneValue);
         if (!phoneResult.valid) {
-            util.error(phoneResult.error, 'BadRequest');
+            util.error(phoneResult.error, 'INVALID_INPUT');
             return { customerPhone: undefined };
         }
         customerPhone = phoneResult.value;
@@ -24,7 +24,7 @@ function validateCustomer(input) {
     if (hasAddress) {
         const addressResult = validateAddress(input.customerAddress);
         if (!addressResult.valid) {
-            util.error(addressResult.error, 'BadRequest');
+            util.error(addressResult.error, 'INVALID_INPUT');
             return { customerPhone };
         }
     }
@@ -34,7 +34,7 @@ function validateCustomer(input) {
 
 function validateOrderDate(orderDate) {
     if (!orderDate || typeof orderDate !== 'string' || !orderDate.trim()) {
-        util.error('Order date is required', 'BadRequest');
+        util.error('Order date is required', 'INVALID_INPUT');
         return;
     }
 }
@@ -50,29 +50,29 @@ export function request(ctx) {
     const profileIdRaw = input.profileId || ctx.stash.profileId;
     const profileId = normalizeId(profileIdRaw, 'PROFILE#');
     if (!profileId) {
-        util.error('Invalid profileId', 'BadRequest');
+        util.error('Invalid profileId', 'INVALID_INPUT');
     }
 
     const campaignIdRaw = input.campaignId || ctx.stash.campaignId;
     const campaignId = normalizeId(campaignIdRaw, 'CAMPAIGN#');
     if (!campaignId) {
-        util.error('Invalid campaignId', 'BadRequest');
+        util.error('Invalid campaignId', 'INVALID_INPUT');
     }
 
     if (!campaign || !campaign.profileId) {
-        util.error('Campaign profile association missing', 'BadRequest');
+        util.error('Campaign profile association missing', 'INVALID_INPUT');
     }
     const normalizedCampaignProfileId = normalizeId(campaign.profileId, 'PROFILE#');
     if (normalizedCampaignProfileId !== profileId) {
-        util.error('Campaign does not belong to the specified profile', 'Unauthorized');
+        util.error('Campaign does not belong to the specified profile', 'UNAUTHORIZED');
     }
 
     if (!input.lineItems || input.lineItems.length === 0) {
-        util.error('Order must have at least one line item', 'BadRequest');
+        util.error('Order must have at least one line item', 'INVALID_INPUT');
     }
 
     if (!catalog) {
-        util.error('Catalog could not be loaded for this campaign', 'BadRequest');
+        util.error('Catalog could not be loaded for this campaign', 'INVALID_INPUT');
     }
 
     let enrichedLineItems = [];
@@ -89,11 +89,11 @@ export function request(ctx) {
         const quantity = lineItem.quantity;
 
         if (quantity < 1) {
-            util.error('Quantity must be at least 1 (got ' + quantity + ')', 'BadRequest');
+            util.error('Quantity must be at least 1 (got ' + quantity + ')', 'INVALID_INPUT');
         }
 
         if (!productsMap[productId]) {
-            util.error('Product ' + productId + ' not found in catalog', 'BadRequest');
+            util.error('Product ' + productId + ' not found in catalog', 'INVALID_INPUT');
         }
 
         const product = productsMap[productId];
@@ -142,10 +142,10 @@ export function request(ctx) {
     }
 
     if (!campaignId || typeof campaignId !== 'string') {
-        util.error('Invalid campaignId for PutItem: ' + campaignId, 'BadRequest');
+        util.error('Invalid campaignId for PutItem: ' + campaignId, 'INVALID_INPUT');
     }
     if (!orderId || typeof orderId !== 'string') {
-        util.error('Invalid orderId for PutItem: ' + orderId, 'BadRequest');
+        util.error('Invalid orderId for PutItem: ' + orderId, 'INVALID_INPUT');
     }
 
     for (const li of enrichedLineItems) {

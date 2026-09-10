@@ -5,8 +5,9 @@
  * 1. Get profile from DynamoDB
  * 2. Check authorization and determine access level
  * 3. Get owner's payment methods
- * 4. Generate pre-signed URLs (Lambda)
- * 5. Filter/inject/sort based on access
+ * 4. Filter/inject/sort based on access
+ * 5. Batch-generate all presigned QR URLs in one Lambda invocation (last
+ *    step, after filtering, so READ users never trigger signing; see #330)
  */
 export function request(ctx) {
     return {};

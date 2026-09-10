@@ -14,7 +14,7 @@ export function response(ctx) {
         util.error(ctx.error.message, ctx.error.type);
     }
     if (!ctx.result) {
-        util.error('Account not found', 'NotFound');
+        util.error('Account not found', 'NOT_FOUND');
     }
     ctx.stash.account = ctx.result;
     return ctx.result;

@@ -5,7 +5,7 @@
  * Integrates with AppSync GraphQL API to fetch Account metadata.
  */
 
-import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback, useMemo } from 'react';
 import { fetchAuthSession, signInWithRedirect, signIn, signOut, getCurrentUser } from 'aws-amplify/auth';
 import { Hub } from 'aws-amplify/utils';
 import { apolloClient } from '../lib/apollo';
@@ -250,16 +250,22 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     await checkAuthSession();
   }, [checkAuthSession]);
 
-  const value: AuthContextValue = {
-    account,
-    loading,
-    isAuthenticated: hasValidTokens, // Check tokens, not account record
-    isAdmin: account?.isAdmin ?? false,
-    login,
-    loginWithPassword,
-    logout,
-    refreshSession,
-  };
+  // Memoize the provider value so consumers only re-render when auth state
+  // actually changes, not on every AuthProvider render. All function members
+  // are already stabilized with useCallback above.
+  const value: AuthContextValue = useMemo(
+    () => ({
+      account,
+      loading,
+      isAuthenticated: hasValidTokens, // Check tokens, not account record
+      isAdmin: account?.isAdmin ?? false,
+      login,
+      loginWithPassword,
+      logout,
+      refreshSession,
+    }),
+    [account, loading, hasValidTokens, login, loginWithPassword, logout, refreshSession],
+  );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };

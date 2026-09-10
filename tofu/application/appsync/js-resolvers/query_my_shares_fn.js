@@ -14,7 +14,15 @@ import { util } from '@aws-appsync/utils';
  * statement and no Function.prototype.call, so the loop below uses a
  * single inclusive if-block and Object.hasOwn (the documented `in`
  * replacement).
+ *
+ * The Query is capped at MAX_PAGE_LIMIT items per page, mirroring the
+ * listMyProfiles page cap (#369): a larger share list surfaces a nextToken,
+ * which the response fails closed on, so a single invocation never exceeds
+ * the resolver budget and the batch step's 100-key cap is the containment
+ * boundary for both steps.
  */
+
+const MAX_PAGE_LIMIT = 100;
 
 function normalizeAccountId(accountId) {
     if (typeof accountId !== 'string') {
@@ -40,6 +48,7 @@ export function request(ctx) {
     return {
         operation: 'Query',
         index: 'targetAccountId-index',
+        limit: MAX_PAGE_LIMIT,
         query: {
             expression: 'targetAccountId = :targetAccountId',
             expressionValues: util.dynamodb.toMapValues({ ':targetAccountId': targetAccountId })

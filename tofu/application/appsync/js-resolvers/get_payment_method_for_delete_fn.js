@@ -8,15 +8,15 @@ export function request(ctx) {
     const name = (ctx.args.name || '').trim();
 
     if (!accountId) {
-        util.error('Authentication required', 'Unauthorized');
+        util.error('Authentication required', 'UNAUTHORIZED');
     }
     if (!name) {
-        util.error('Payment method name is required', 'BadRequest');
+        util.error('Payment method name is required', 'INVALID_INPUT');
     }
 
     const nameLower = name.toLowerCase();
     if (nameLower === 'cash' || nameLower === 'check') {
-        util.error(`Cannot delete reserved payment method '${name}'`, 'BadRequest');
+        util.error(`Cannot delete reserved payment method '${name}'`, 'INVALID_INPUT');
     }
 
     ctx.stash.accountId = accountId;
@@ -40,7 +40,7 @@ export function response(ctx) {
 
     const method = methods.find(m => m.name && m.name.toLowerCase() === ctx.stash.nameLower);
     if (!method) {
-        util.error(`Payment method '${ctx.stash.paymentMethodName}' not found`, 'NotFound');
+        util.error(`Payment method '${ctx.stash.paymentMethodName}' not found`, 'NOT_FOUND');
     }
 
     ctx.stash.existingMethods = methods;

@@ -26,6 +26,19 @@ variable "lambda_admin_role_arn" {
   default     = null
 }
 
+# #326 IAM role split: map of function key to a scoped per-domain execution
+# role ARN. This is the reusable wiring mechanism for the per-domain roles
+# created in the iam module — each follow-up chunk adds its domain role as a
+# new iam-module output plus entries here mapping its function keys to that
+# ARN. The admin role (when set) still takes precedence for admin handlers;
+# otherwise a domain-role entry takes precedence over the shared monolithic
+# role. Unknown keys are ignored so domains can be added incrementally without breaking planning.
+variable "lambda_domain_role_arns" {
+  description = "Map of app function key to a scoped per-domain Lambda execution role ARN (#326 IAM role split). Takes precedence over lambda_role_arn; the admin role still wins for admin handlers."
+  type        = map(string)
+  default     = {}
+}
+
 variable "exports_bucket_name" {
   description = "Name of the S3 bucket used for report exports"
   type        = string
@@ -184,12 +197,16 @@ locals {
   admin_trigger_keys  = ["pre-signup"]
 }
 
-# Returns the admin role ARN when configured and the function is an admin
-# handler, otherwise the shared role ARN.
+# Role resolution per app function, in precedence order:
+#   1. Admin role (#121) when configured and the function is an admin handler.
+#   2. Domain role (#326) when the function key has an entry in
+#      var.lambda_domain_role_arns — the per-domain role split mechanism that
+#      follow-up chunks extend with their own role(s).
+#   3. The shared monolithic role.
 locals {
   app_role_arn = {
     for k in keys(local.functions) :
-    k => (var.lambda_admin_role_arn != null && contains(local.admin_function_keys, k) ? var.lambda_admin_role_arn : var.lambda_role_arn)
+    k => (var.lambda_admin_role_arn != null && contains(local.admin_function_keys, k) ? var.lambda_admin_role_arn : lookup(var.lambda_domain_role_arns, k, var.lambda_role_arn))
   }
   trigger_role_arn = {
     for k in keys(local.trigger_functions) :

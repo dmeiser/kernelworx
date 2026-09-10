@@ -3,7 +3,7 @@ import { util } from '@aws-appsync/utils';
 export function request(ctx) {
     const profileId = ctx.args.profileId;
     if (!profileId) {
-        util.error('Profile ID is required', 'BadRequest');
+        util.error('Profile ID is required', 'INVALID_INPUT');
     }
     
     // Store clean profileId for authorization check
@@ -32,7 +32,7 @@ export function response(ctx) {
     const profile = ctx.result.items && ctx.result.items[0];
     
     if (!profile) {
-        util.error('Profile not found', 'NotFound');
+        util.error('Profile not found', 'NOT_FOUND');
     }
     
     // Store profile in stash for authorization and return

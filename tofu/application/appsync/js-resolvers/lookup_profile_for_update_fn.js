@@ -20,7 +20,7 @@ export function response(ctx) {
     }
     const profile = ctx.result;
     if (!profile) {
-        util.error('Profile not found or access denied', 'Forbidden');
+        util.error('Profile not found or access denied', 'FORBIDDEN');
     }
     ctx.stash.profile = profile;
     return profile;

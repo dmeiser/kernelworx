@@ -480,6 +480,13 @@ resource "aws_appsync_resolver" "delete_my_account" {
   type        = "Mutation"
   field       = "deleteMyAccount"
   data_source = aws_appsync_datasource.delete_account.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
 }
 
 # transferProfileOwnership (Lambda)
@@ -488,6 +495,13 @@ resource "aws_appsync_resolver" "transfer_profile_ownership" {
   type        = "Mutation"
   field       = "transferProfileOwnership"
   data_source = aws_appsync_datasource.transfer_ownership.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
 }
 
 # updateMyPreferences (JS)
@@ -511,6 +525,13 @@ resource "aws_appsync_resolver" "request_campaign_report" {
   type        = "Mutation"
   field       = "requestCampaignReport"
   data_source = aws_appsync_datasource.request_report.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
 }
 
 # === PAYMENT METHODS MUTATIONS ===
@@ -548,6 +569,8 @@ resource "aws_appsync_resolver" "update_payment_method" {
     functions = [
       aws_appsync_function.validate_update_payment_method.function_id,
       aws_appsync_function.update_payment_method.function_id,
+      # Batch-sign the QR URL in one Lambda invocation (last step; #330)
+      aws_appsync_function.batch_qr_urls.function_id,
     ]
   }
 
@@ -588,6 +611,13 @@ resource "aws_appsync_resolver" "delete_payment_method_qr_code" {
   type        = "Mutation"
   field       = "deletePaymentMethodQRCode"
   data_source = aws_appsync_datasource.delete_qr_code.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
 }
 
 # requestPaymentMethodQRCodeUpload (Lambda)
@@ -596,14 +626,36 @@ resource "aws_appsync_resolver" "request_payment_method_qr_code_upload" {
   type        = "Mutation"
   field       = "requestPaymentMethodQRCodeUpload"
   data_source = aws_appsync_datasource.request_qr_upload.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
 }
 
-# confirmPaymentMethodQRCodeUpload (Lambda)
+# confirmPaymentMethodQRCodeUpload Pipeline
 resource "aws_appsync_resolver" "confirm_payment_method_qr_code_upload" {
-  api_id      = aws_appsync_graphql_api.main.id
-  type        = "Mutation"
-  field       = "confirmPaymentMethodQRCodeUpload"
-  data_source = aws_appsync_datasource.confirm_qr_upload.name
+  api_id = aws_appsync_graphql_api.main.id
+  type   = "Mutation"
+  field  = "confirmPaymentMethodQRCodeUpload"
+  kind   = "PIPELINE"
+
+  pipeline_config {
+    functions = [
+      aws_appsync_function.confirm_qr_upload.function_id,
+      # Sign the returned S3 key into a presigned URL (last step; #330)
+      aws_appsync_function.batch_qr_urls.function_id,
+    ]
+  }
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/confirm_payment_method_qr_code_upload_pipeline_resolver.js")
 }
 
 # === ADMIN MUTATIONS ===
@@ -614,6 +666,13 @@ resource "aws_appsync_resolver" "admin_reset_user_password" {
   type        = "Mutation"
   field       = "adminResetUserPassword"
   data_source = aws_appsync_datasource.admin_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_passthrough_resolver.js")
 }
 
 # adminDeleteUser (Lambda)
@@ -622,6 +681,13 @@ resource "aws_appsync_resolver" "admin_delete_user" {
   type        = "Mutation"
   field       = "adminDeleteUser"
   data_source = aws_appsync_datasource.admin_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_passthrough_resolver.js")
 }
 
 # adminDeleteUserOrders (Lambda)
@@ -630,6 +696,13 @@ resource "aws_appsync_resolver" "admin_delete_user_orders" {
   type        = "Mutation"
   field       = "adminDeleteUserOrders"
   data_source = aws_appsync_datasource.admin_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_passthrough_resolver.js")
 }
 
 # adminDeleteUserCampaigns (Lambda)
@@ -638,6 +711,13 @@ resource "aws_appsync_resolver" "admin_delete_user_campaigns" {
   type        = "Mutation"
   field       = "adminDeleteUserCampaigns"
   data_source = aws_appsync_datasource.admin_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_passthrough_resolver.js")
 }
 
 # adminDeleteUserShares (Lambda)
@@ -646,6 +726,13 @@ resource "aws_appsync_resolver" "admin_delete_user_shares" {
   type        = "Mutation"
   field       = "adminDeleteUserShares"
   data_source = aws_appsync_datasource.admin_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_passthrough_resolver.js")
 }
 
 # adminDeleteUserProfiles (Lambda)
@@ -654,6 +741,13 @@ resource "aws_appsync_resolver" "admin_delete_user_profiles" {
   type        = "Mutation"
   field       = "adminDeleteUserProfiles"
   data_source = aws_appsync_datasource.admin_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_passthrough_resolver.js")
 }
 
 # adminDeleteUserCatalogs (Lambda)
@@ -662,6 +756,13 @@ resource "aws_appsync_resolver" "admin_delete_user_catalogs" {
   type        = "Mutation"
   field       = "adminDeleteUserCatalogs"
   data_source = aws_appsync_datasource.admin_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_passthrough_resolver.js")
 }
 
 # createManagedCatalog (Lambda)
@@ -670,6 +771,13 @@ resource "aws_appsync_resolver" "create_managed_catalog" {
   type        = "Mutation"
   field       = "createManagedCatalog"
   data_source = aws_appsync_datasource.admin_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_passthrough_resolver.js")
 }
 
 # adminDeleteShare (Lambda)
@@ -678,6 +786,13 @@ resource "aws_appsync_resolver" "admin_delete_share" {
   type        = "Mutation"
   field       = "adminDeleteShare"
   data_source = aws_appsync_datasource.admin_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_passthrough_resolver.js")
 }
 
 # adminUpdateCampaignSharedCode (Lambda)
@@ -686,4 +801,11 @@ resource "aws_appsync_resolver" "admin_update_campaign_shared_code" {
   type        = "Mutation"
   field       = "adminUpdateCampaignSharedCode"
   data_source = aws_appsync_datasource.admin_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_passthrough_resolver.js")
 }

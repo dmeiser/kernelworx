@@ -18,7 +18,7 @@ export function response(ctx) {
         util.error(ctx.error.message, ctx.error.type);
     }
     if (!ctx.result.items || ctx.result.items.length === 0) {
-        util.error('Share recipient not found or not eligible', 'BadRequest');
+        util.error('Share recipient not found or not eligible', 'INVALID_INPUT');
     }
 
     const account = ctx.result.items[0];

@@ -40,6 +40,6 @@ describe('get_payment_method_for_delete_fn response', () => {
     it('errors when no method matches case-insensitively', () => {
         const ctx = makeCtx('venmo', [{ name: 'PayPal' }]);
 
-        assert.throws(() => response(ctx), /NotFound/);
+        assert.throws(() => response(ctx), /NOT_FOUND/);
     });
 });

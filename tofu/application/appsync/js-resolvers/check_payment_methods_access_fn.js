@@ -11,7 +11,7 @@ export function request(ctx) {
     const callerId = ctx.identity.sub;
     
     if (!profile) {
-        util.error('Profile not found', 'NotFound');
+        util.error('Profile not found', 'NOT_FOUND');
     }
     
     // Store owner account ID for next steps (already has ACCOUNT# prefix)
@@ -58,7 +58,7 @@ export function response(ctx) {
     // Check share permissions
     const share = ctx.result;
     if (!share) {
-        util.error('Unauthorized access to profile', 'Forbidden');
+        util.error('Unauthorized access to profile', 'FORBIDDEN');
     }
     
     const permissions = share.permissions || [];
@@ -70,7 +70,7 @@ export function response(ctx) {
         ctx.stash.accessLevel = 'READ';
         ctx.stash.canSeeQR = false;  // READ users cannot see QR codes
     } else {
-        util.error('Insufficient permissions', 'Forbidden');
+        util.error('Insufficient permissions', 'FORBIDDEN');
     }
     
     return {};

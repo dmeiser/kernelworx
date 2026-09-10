@@ -25,7 +25,7 @@ export function request(ctx) {
 export function response(ctx) {
     if (ctx.error) {
         if (ctx.error.type === 'DynamoDB:ConditionalCheckFailedException') {
-        util.error('Account not found. Please sign out and sign in again.', 'NotFound');
+        util.error('Account not found. Please sign out and sign in again.', 'NOT_FOUND');
         }
         util.error(ctx.error.message, ctx.error.type);
     }
