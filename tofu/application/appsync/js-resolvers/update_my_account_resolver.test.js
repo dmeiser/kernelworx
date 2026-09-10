@@ -10,7 +10,7 @@ describe('update_my_account_resolver request', () => {
 
     assert.throws(
       () => request(ctx),
-      /Unauthorized: Authentication required/
+      /UNAUTHORIZED: Authentication required/
     );
   });
 
@@ -22,7 +22,7 @@ describe('update_my_account_resolver request', () => {
 
     assert.throws(
       () => request(ctx),
-      /Unauthorized: Authentication required/
+      /UNAUTHORIZED: Authentication required/
     );
   });
 
@@ -34,7 +34,7 @@ describe('update_my_account_resolver request', () => {
 
     assert.throws(
       () => request(ctx),
-      /BadRequest: At least one field must be provided/
+      /INVALID_INPUT: At least one field must be provided/
     );
   });
 
@@ -46,7 +46,7 @@ describe('update_my_account_resolver request', () => {
 
     assert.throws(
       () => request(ctx),
-      /BadRequest: At least one field must be provided/
+      /INVALID_INPUT: At least one field must be provided/
     );
   });
 
@@ -64,7 +64,7 @@ describe('update_my_account_resolver request', () => {
 
     assert.throws(
       () => request(ctx),
-      /BadRequest: At least one field must be provided/
+      /INVALID_INPUT: At least one field must be provided/
     );
   });
 
@@ -79,7 +79,7 @@ describe('update_my_account_resolver request', () => {
 
       assert.throws(
         () => request(ctx),
-        /BadRequest: unitNumber must be a positive integer/,
+        /INVALID_INPUT: unitNumber must be a positive integer/,
         `Expected unitNumber ${val} to be rejected`
       );
     }
@@ -177,7 +177,7 @@ describe('update_my_account_resolver response', () => {
     assert.deepStrictEqual(result, ctx.result);
   });
 
-  it('maps ConditionalCheckFailedException to NotFound with account id', () => {
+  it('maps ConditionalCheckFailedException to NOT_FOUND with account id', () => {
     const ctx = {
       identity: { sub: 'user-123' },
       error: {
@@ -188,7 +188,7 @@ describe('update_my_account_resolver response', () => {
 
     assert.throws(
       () => response(ctx),
-      /NotFound: Account user-123 not found/
+      /NOT_FOUND: Account user-123 not found/
     );
   });
 

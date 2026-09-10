@@ -93,7 +93,7 @@ describe('lookup_shared_campaign_fn response', () => {
         );
     });
 
-    it('throws NotFound when shared campaign item is not found', () => {
+    it('throws NOT_FOUND when shared campaign item is not found', () => {
         const ctx = {
             args: { input: { sharedCampaignCode: 'INVALID-CODE' } },
             stash: {},
@@ -102,11 +102,11 @@ describe('lookup_shared_campaign_fn response', () => {
 
         assert.throws(
             () => response(ctx),
-            /NotFound: Shared Campaign INVALID-CODE not found/
+            /NOT_FOUND: Shared Campaign INVALID-CODE not found/
         );
     });
 
-    it('throws NotFound when shared campaign item has no sharedCampaignCode', () => {
+    it('throws NOT_FOUND when shared campaign item has no sharedCampaignCode', () => {
         const ctx = {
             args: { input: { sharedCampaignCode: 'EMPTY-ITEM' } },
             stash: {},
@@ -115,11 +115,11 @@ describe('lookup_shared_campaign_fn response', () => {
 
         assert.throws(
             () => response(ctx),
-            /NotFound: Shared Campaign EMPTY-ITEM not found/
+            /NOT_FOUND: Shared Campaign EMPTY-ITEM not found/
         );
     });
 
-    it('throws InvalidInput when shared campaign is inactive', () => {
+    it('throws INVALID_INPUT when shared campaign is inactive', () => {
         const ctx = {
             args: { input: { sharedCampaignCode: 'INACTIVE-CODE' } },
             stash: {},
@@ -131,7 +131,7 @@ describe('lookup_shared_campaign_fn response', () => {
 
         assert.throws(
             () => response(ctx),
-            /InvalidInput: Shared Campaign INACTIVE-CODE is no longer active/
+            /INVALID_INPUT: Shared Campaign INACTIVE-CODE is no longer active/
         );
     });
 

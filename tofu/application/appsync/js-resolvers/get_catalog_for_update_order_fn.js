@@ -43,14 +43,14 @@ export function response(ctx) {
     
     const items = ctx.result.items || [];
     if (items.length === 0) {
-        util.error('Campaign not found', 'NotFound');
+        util.error('Campaign not found', 'NOT_FOUND');
     }
     
     const campaign = items[0];
     const catalogId = campaign.catalogId;
     
     if (!catalogId) {
-        util.error('Campaign does not have a catalog assigned', 'BadRequest');
+        util.error('Campaign does not have a catalog assigned', 'INVALID_INPUT');
     }
     
     // Store catalogId in stash for next request

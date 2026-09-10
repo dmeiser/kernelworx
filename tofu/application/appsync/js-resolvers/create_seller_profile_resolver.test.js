@@ -14,7 +14,7 @@ describe('create_seller_profile_resolver request', () => {
 
         assert.throws(
             () => request(ctx),
-            /Unauthorized: Authentication required/
+            /UNAUTHORIZED: Authentication required/
         );
     });
 
@@ -30,7 +30,7 @@ describe('create_seller_profile_resolver request', () => {
 
         assert.throws(
             () => request(ctx),
-            /Unauthorized: Authentication required/
+            /UNAUTHORIZED: Authentication required/
         );
     });
 
@@ -44,7 +44,7 @@ describe('create_seller_profile_resolver request', () => {
 
         assert.throws(
             () => request(ctx),
-            /BadRequest: sellerName is required/
+            /INVALID_INPUT: sellerName is required/
         );
     });
 
@@ -56,7 +56,7 @@ describe('create_seller_profile_resolver request', () => {
 
         assert.throws(
             () => request(ctx),
-            /BadRequest: sellerName is required/
+            /INVALID_INPUT: sellerName is required/
         );
     });
 
@@ -72,7 +72,7 @@ describe('create_seller_profile_resolver request', () => {
 
         assert.throws(
             () => request(ctx),
-            /BadRequest: sellerName is required/
+            /INVALID_INPUT: sellerName is required/
         );
     });
 
@@ -88,7 +88,7 @@ describe('create_seller_profile_resolver request', () => {
 
         assert.throws(
             () => request(ctx),
-            /BadRequest: sellerName cannot exceed 100 characters/
+            /INVALID_INPUT: sellerName cannot exceed 100 characters/
         );
     });
 
@@ -119,7 +119,7 @@ describe('create_seller_profile_resolver request', () => {
 
         assert.throws(
             () => request(ctx),
-            /BadRequest: unitType must be one of: Crew, Pack, Post, Ship, Troop/
+            /INVALID_INPUT: unitType must be one of: Crew, Pack, Post, Ship, Troop/
         );
     });
 
@@ -155,7 +155,7 @@ describe('create_seller_profile_resolver request', () => {
 
         assert.throws(
             () => request(ctx),
-            /BadRequest: unitNumber must be a positive integer/
+            /INVALID_INPUT: unitNumber must be a positive integer/
         );
     });
 
@@ -172,7 +172,7 @@ describe('create_seller_profile_resolver request', () => {
 
         assert.throws(
             () => request(ctx),
-            /BadRequest: unitNumber must be a positive integer/
+            /INVALID_INPUT: unitNumber must be a positive integer/
         );
     });
 
@@ -189,7 +189,7 @@ describe('create_seller_profile_resolver request', () => {
 
         assert.throws(
             () => request(ctx),
-            /BadRequest: unitNumber must be a positive integer/
+            /INVALID_INPUT: unitNumber must be a positive integer/
         );
     });
 
@@ -206,7 +206,7 @@ describe('create_seller_profile_resolver request', () => {
 
         assert.throws(
             () => request(ctx),
-            /BadRequest: unitNumber must be a positive integer/
+            /INVALID_INPUT: unitNumber must be a positive integer/
         );
     });
 

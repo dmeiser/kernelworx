@@ -32,7 +32,7 @@ export function request(ctx) {
     }
     
     if (!profileId) {
-        util.error('Profile ID not found in request', 'BadRequest');
+        util.error('Profile ID not found in request', 'INVALID_INPUT');
     }
     
     // Store profileId in stash for next function

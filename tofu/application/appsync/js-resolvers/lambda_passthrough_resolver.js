@@ -18,6 +18,7 @@ export function request(ctx) {
         payload: {
             arguments: ctx.arguments,
             identity: ctx.identity,
+            info: ctx.info,
             prev: {
                 result: {
                     paymentMethods: ctx.stash.customPaymentMethods || [],
@@ -30,6 +31,14 @@ export function request(ctx) {
 }
 
 export function response(ctx) {
+    // #329: Lambda handlers wrapped in the `lambda_handler` decorator return
+    // structured error payloads (`__isError` + errorCode + message) instead of
+    // raising, so the error code survives Lambda serialization. Surface it in
+    // both errorType and extensions.errorCode for the frontend's typed
+    // matchers.
+    if (ctx.result && ctx.result.__isError) {
+        util.error(ctx.result.message, ctx.result.errorCode, null, { errorCode: ctx.result.errorCode });
+    }
     if (ctx.error) {
         util.error(ctx.error.message, ctx.error.type);
     }

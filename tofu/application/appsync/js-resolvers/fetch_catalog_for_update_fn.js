@@ -11,7 +11,7 @@ export function request(ctx) {
     
     const rawCatalogId = ctx.stash.catalogId;
     if (!rawCatalogId) {
-        util.error('Catalog ID not found in stash', 'BadRequest');
+        util.error('Catalog ID not found in stash', 'INVALID_INPUT');
     }
     // Normalize to DB format: ensure it starts with CATALOG#
     const catalogId = (typeof rawCatalogId === 'string' && rawCatalogId.startsWith('CATALOG#')) ? rawCatalogId : 'CATALOG#' + rawCatalogId;
@@ -35,7 +35,7 @@ export function response(ctx) {
     
     if (!ctx.result) {
         // Include the looked-up catalogId in the error to aid debugging
-        util.error('Catalog not found for id: ' + ctx.stash.catalogId, 'NotFound');
+        util.error('Catalog not found for id: ' + ctx.stash.catalogId, 'NOT_FOUND');
     }
     
     // Store catalog in stash for UpdateOrderFn
