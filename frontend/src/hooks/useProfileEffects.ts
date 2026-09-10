@@ -8,7 +8,7 @@ interface SellerProfile {
   profileId: string;
   sellerName: string;
   isOwner: boolean;
-  permissions: string[];
+  permissions?: (string | null)[] | null;
 }
 
 export const useProfileEffects = (
