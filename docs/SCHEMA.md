@@ -186,8 +186,8 @@ Global Secondary Indexes:
 ### Get User's Profiles
 ```mermaid
 flowchart TD
-    A["User Calls getMyProfiles"] -->|Uses accountId| B["Query ACCOUNT→SELLER_PROFILE"]
-    B -->|ownerAccountId = accountId| C["Return all profiles"]
+    A["User Calls listMyProfiles"] -->|Uses accountId| B["Query ACCOUNT→SELLER_PROFILE"]
+    B -->|ownerAccountId = accountId| C["Return one page of profiles (capped server-side)"]
 ```
 
 ### Get Campaign with Orders
