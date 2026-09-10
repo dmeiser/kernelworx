@@ -10,7 +10,7 @@ export function request(ctx) {
     const accountId = ctx.identity.sub;
     
     if (!accountId) {
-        util.error('Authentication required', 'Unauthorized');
+        util.error('Authentication required', 'UNAUTHORIZED');
     }
     
     // Account table uses accountId as primary key (with ACCOUNT# prefix)

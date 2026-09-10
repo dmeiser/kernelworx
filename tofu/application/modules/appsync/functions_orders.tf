@@ -181,16 +181,3 @@ resource "aws_appsync_function" "query_orders_by_campaign" {
 
   code = file("${local.js_resolvers_dir}/query_orders_by_campaign_fn.js")
 }
-
-resource "aws_appsync_function" "query_orders_by_profile" {
-  api_id      = aws_appsync_graphql_api.main.id
-  data_source = aws_appsync_datasource.orders.name
-  name        = "QueryOrdersByProfileFn${local.env_suffix}"
-
-  runtime {
-    name            = "APPSYNC_JS"
-    runtime_version = "1.0.0"
-  }
-
-  code = file("${local.js_resolvers_dir}/query_orders_by_profile_fn.js")
-}

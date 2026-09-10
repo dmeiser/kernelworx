@@ -631,6 +631,13 @@ resource "aws_appsync_resolver" "admin_reset_user_password" {
   type        = "Mutation"
   field       = "adminResetUserPassword"
   data_source = aws_appsync_datasource.admin_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_passthrough_resolver.js")
 }
 
 # adminDeleteUser (Lambda)
@@ -639,6 +646,13 @@ resource "aws_appsync_resolver" "admin_delete_user" {
   type        = "Mutation"
   field       = "adminDeleteUser"
   data_source = aws_appsync_datasource.admin_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_passthrough_resolver.js")
 }
 
 # adminDeleteUserOrders (Lambda)
@@ -647,6 +661,13 @@ resource "aws_appsync_resolver" "admin_delete_user_orders" {
   type        = "Mutation"
   field       = "adminDeleteUserOrders"
   data_source = aws_appsync_datasource.admin_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_passthrough_resolver.js")
 }
 
 # adminDeleteUserCampaigns (Lambda)
@@ -655,6 +676,13 @@ resource "aws_appsync_resolver" "admin_delete_user_campaigns" {
   type        = "Mutation"
   field       = "adminDeleteUserCampaigns"
   data_source = aws_appsync_datasource.admin_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_passthrough_resolver.js")
 }
 
 # adminDeleteUserShares (Lambda)
@@ -663,6 +691,13 @@ resource "aws_appsync_resolver" "admin_delete_user_shares" {
   type        = "Mutation"
   field       = "adminDeleteUserShares"
   data_source = aws_appsync_datasource.admin_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_passthrough_resolver.js")
 }
 
 # adminDeleteUserProfiles (Lambda)
@@ -671,6 +706,13 @@ resource "aws_appsync_resolver" "admin_delete_user_profiles" {
   type        = "Mutation"
   field       = "adminDeleteUserProfiles"
   data_source = aws_appsync_datasource.admin_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_passthrough_resolver.js")
 }
 
 # adminDeleteUserCatalogs (Lambda)
@@ -679,6 +721,13 @@ resource "aws_appsync_resolver" "admin_delete_user_catalogs" {
   type        = "Mutation"
   field       = "adminDeleteUserCatalogs"
   data_source = aws_appsync_datasource.admin_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_passthrough_resolver.js")
 }
 
 # createManagedCatalog (Lambda)
@@ -687,6 +736,13 @@ resource "aws_appsync_resolver" "create_managed_catalog" {
   type        = "Mutation"
   field       = "createManagedCatalog"
   data_source = aws_appsync_datasource.admin_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_passthrough_resolver.js")
 }
 
 # adminDeleteShare (Lambda)
@@ -695,6 +751,13 @@ resource "aws_appsync_resolver" "admin_delete_share" {
   type        = "Mutation"
   field       = "adminDeleteShare"
   data_source = aws_appsync_datasource.admin_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_passthrough_resolver.js")
 }
 
 # adminUpdateCampaignSharedCode (Lambda)
@@ -703,4 +766,11 @@ resource "aws_appsync_resolver" "admin_update_campaign_shared_code" {
   type        = "Mutation"
   field       = "adminUpdateCampaignSharedCode"
   data_source = aws_appsync_datasource.admin_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_passthrough_resolver.js")
 }

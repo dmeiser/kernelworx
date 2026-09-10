@@ -24,7 +24,7 @@ export function request(ctx) {
     }
     
     if (!profileId) {
-        util.error('Profile ID not found for share check', 'BadRequest');
+        util.error('Profile ID not found for share check', 'INVALID_INPUT');
     }
     
     // Normalize profileId to ensure PROFILE# prefix for share lookup
@@ -56,12 +56,12 @@ export function response(ctx) {
     
     // No share found - access denied
     if (!share || !share.profileId) {
-        util.error('Forbidden: Only profile owner or users with WRITE permission can perform this action (no share found)', 'Unauthorized');
+        util.error('Forbidden: Only profile owner or users with WRITE permission can perform this action (no share found)', 'UNAUTHORIZED');
     }
     
     // Share exists but doesn't have permissions field - deny
     if (!share.permissions || !Array.isArray(share.permissions)) {
-        util.error('Forbidden: Share exists but permissions are invalid', 'Unauthorized');
+        util.error('Forbidden: Share exists but permissions are invalid', 'UNAUTHORIZED');
     }
     
     // Check if caller has WRITE permission via share
@@ -69,12 +69,12 @@ export function response(ctx) {
         const profile = ctx.stash.profile;
         const currentOwner = profile && profile.ownerAccountId;
         if (share.ownerAccountId && currentOwner && share.ownerAccountId !== currentOwner) {
-            util.error('Forbidden: Only profile owner or users with WRITE permission can perform this action (share is no longer valid)', 'Unauthorized');
+            util.error('Forbidden: Only profile owner or users with WRITE permission can perform this action (share is no longer valid)', 'UNAUTHORIZED');
         }
         ctx.stash.share = share;
         return { authorized: true };
     }
     
     // Share exists but only has READ permission - access denied
-    util.error('Forbidden: Only profile owner or users with WRITE permission can perform this action (share has READ only, permissions: ' + JSON.stringify(share.permissions) + ')', 'Unauthorized');
+    util.error('Forbidden: Only profile owner or users with WRITE permission can perform this action (share has READ only, permissions: ' + JSON.stringify(share.permissions) + ')', 'UNAUTHORIZED');
 }

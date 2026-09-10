@@ -71,7 +71,7 @@ describe('create_invite_fn request', () => {
 
         assert.throws(
             () => request(ctx),
-            /InvalidInput: permissions must contain at least one supported permission \(READ or WRITE\)/
+            /INVALID_INPUT: permissions must contain at least one supported permission \(READ or WRITE\)/
         );
     });
 
@@ -91,7 +91,7 @@ describe('create_invite_fn request', () => {
 
         assert.throws(
             () => request(ctx),
-            /InvalidInput: permissions must contain at least one supported permission \(READ or WRITE\)/
+            /INVALID_INPUT: permissions must contain at least one supported permission \(READ or WRITE\)/
         );
     });
 
@@ -111,7 +111,7 @@ describe('create_invite_fn request', () => {
 
         assert.throws(
             () => request(ctx),
-            /InvalidInput: permissions must contain at least one supported permission \(READ or WRITE\)/
+            /INVALID_INPUT: permissions must contain at least one supported permission \(READ or WRITE\)/
         );
     });
 
@@ -130,7 +130,7 @@ describe('create_invite_fn request', () => {
 
         assert.throws(
             () => request(ctx),
-            /InvalidInput: permissions must contain at least one supported permission \(READ or WRITE\)/
+            /INVALID_INPUT: permissions must contain at least one supported permission \(READ or WRITE\)/
         );
     });
 

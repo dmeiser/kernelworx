@@ -21,7 +21,7 @@ export function response(ctx) {
     
     const items = ctx.result.items || [];
     if (items.length === 0) {
-        util.error('Campaign not found', 'NotFound');
+        util.error('Campaign not found', 'NOT_FOUND');
     }
     
     const campaign = items[0];
@@ -32,7 +32,7 @@ export function response(ctx) {
     }
     
     if (!campaign.catalogId) {
-        util.error('Campaign has no catalog assigned', 'BadRequest');
+        util.error('Campaign has no catalog assigned', 'INVALID_INPUT');
     }
 
     // Normalize catalogId to DB format (ensure CATALOG# prefix) and store

@@ -1167,6 +1167,29 @@ describe('Catalog CRUD Integration Tests', () => {
           }
         `;
 
+        // createCampaign verifies profile access via the profileId-index GSI,
+        // which is eventually consistent (Bug #21). Retry until the new profile
+        // is visible; a rejected attempt performs no write, so retrying is safe.
+        const createCampaignWithGSIRetry = async (
+          client: ApolloClient<any>,
+          input: Record<string, unknown>,
+        ): Promise<any> => {
+          for (let attempt = 1; ; attempt++) {
+            try {
+              const { data } = await client.mutate({
+                mutation: CREATE_CAMPAIGN,
+                variables: { input },
+              });
+              return data;
+            } catch (error: any) {
+              if (attempt >= 20 || !/Profile not found/i.test(error?.message ?? '')) {
+                throw error;
+              }
+              await new Promise((resolve) => setTimeout(resolve, 1000));
+            }
+          }
+        };
+
         // Owner creates a profile and campaign using the public catalog
         const { data: ownerProfileData }: any = await ownerClient.mutate({
           mutation: CREATE_PROFILE,
@@ -1174,17 +1197,12 @@ describe('Catalog CRUD Integration Tests', () => {
         });
         const ownerProfileId = ownerProfileData.createSellerProfile.profileId;
 
-        const { data: ownerCampaignData }: any = await ownerClient.mutate({
-          mutation: CREATE_CAMPAIGN,
-          variables: {
-            input: {
-              profileId: ownerProfileId,
-              catalogId: catalogId,
-              campaignName: 'Owner Campaign',
-              campaignYear: 2025,
-              startDate: new Date().toISOString(),
-            },
-          },
+        const ownerCampaignData = await createCampaignWithGSIRetry(ownerClient, {
+          profileId: ownerProfileId,
+          catalogId: catalogId,
+          campaignName: 'Owner Campaign',
+          campaignYear: 2025,
+          startDate: new Date().toISOString(),
         });
         const ownerCampaignId = ownerCampaignData.createCampaign.campaignId;
 
@@ -1195,17 +1213,12 @@ describe('Catalog CRUD Integration Tests', () => {
         });
         const contributorProfileId = contributorProfileData.createSellerProfile.profileId;
 
-        const { data: contributorCampaignData }: any = await contributorClient.mutate({
-          mutation: CREATE_CAMPAIGN,
-          variables: {
-            input: {
-              profileId: contributorProfileId,
-              catalogId: catalogId,
-              campaignName: 'Contributor Campaign',
-              campaignYear: 2025,
-              startDate: new Date().toISOString(),
-            },
-          },
+        const contributorCampaignData = await createCampaignWithGSIRetry(contributorClient, {
+          profileId: contributorProfileId,
+          catalogId: catalogId,
+          campaignName: 'Contributor Campaign',
+          campaignYear: 2025,
+          startDate: new Date().toISOString(),
         });
         const contributorCampaignId = contributorCampaignData.createCampaign.campaignId;
 

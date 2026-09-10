@@ -2,7 +2,35 @@ import '../setup.ts';
 import { describe, test, expect, beforeAll, afterAll } from 'vitest';
 import { ApolloClient, NormalizedCacheObject, gql, HttpLink, InMemoryCache } from '@apollo/client';
 import { createAuthenticatedClient } from '../setup/apolloClient';
-import { deleteTestAccounts } from '../setup/testData';
+import { deleteTestAccounts, TABLE_NAMES, waitForGSIConsistency } from '../setup/testData';
+import { DynamoDBClient, QueryCommand } from '@aws-sdk/client-dynamodb';
+
+const dynamoClient = new DynamoDBClient({ region: 'us-east-1' });
+
+/**
+ * Wait until a profile is visible through the profileId-index GSI.
+ * createCampaign/createOrder/shareProfileDirect pipelines look up the profile
+ * via this GSI (verify_profile_write_access_fn) and fail with "Profile not
+ * found" if the write has not propagated yet (GSI eventual consistency).
+ */
+const waitForProfileGSI = async (profileId: string): Promise<void> => {
+  await waitForGSIConsistency(
+    async () => {
+      const result = await dynamoClient.send(
+        new QueryCommand({
+          TableName: TABLE_NAMES.profiles,
+          IndexName: 'profileId-index',
+          KeyConditionExpression: 'profileId = :pid',
+          ExpressionAttributeValues: { ':pid': { S: profileId } },
+        })
+      );
+      return result.Items ?? [];
+    },
+    (items) => items.length > 0,
+    30,
+    1000
+  );
+};
 
 // Helper to create unauthenticated client
 const createUnauthenticatedClient = () => {
@@ -14,9 +42,8 @@ const createUnauthenticatedClient = () => {
   });
 };
 
-
 /**
- * Integration tests for Order Query Operations (getOrder, listOrdersByCampaign, listOrdersByProfile)
+ * Integration tests for Order Query Operations (getOrder, listOrdersByCampaign)
  * 
  * Test Data Setup:
  * - TEST_OWNER_EMAIL: Owner of profile/campaign (can query orders)
@@ -27,7 +54,6 @@ const createUnauthenticatedClient = () => {
  * VTL Resolvers Under Test:
  * - getOrder: Queries GSI6 (orderId index)
  * - listOrdersByCampaign: Queries main table (PK=campaignId, SK begins_with "ORDER#")
- * - listOrdersByProfile: Queries GSI2 (GSI2PK=profileId)
  */
 
 // GraphQL Queries for setup
@@ -214,33 +240,6 @@ const REVOKE_SHARE = gql`
   }
 `;
 
-const LIST_ORDERS_BY_PROFILE = gql`
-  query ListOrdersByProfile($profileId: ID!, $limit: Int, $nextToken: String) {
-    listOrdersByProfile(profileId: $profileId, limit: $limit, nextToken: $nextToken) {
-      orders {
-        orderId
-        profileId
-        campaignId
-        customerName
-        customerPhone
-        orderDate
-        paymentMethod
-        lineItems {
-          productId
-          productName
-          quantity
-          pricePerUnit
-          subtotal
-        }
-        totalAmount
-        createdAt
-        updatedAt
-      }
-      nextToken
-    }
-  }
-`;
-
 describe('Order Query Operations Integration Tests', () => {
   const SUITE_ID = 'order-queries';
   
@@ -299,6 +298,9 @@ describe('Order Query Operations Integration Tests', () => {
       });
       testProfileId = profileData.createSellerProfile.profileId;
       console.log(`Created profile: ${testProfileId}`);
+
+      // Wait for profileId-index GSI propagation before pipeline resolvers query it
+      await waitForProfileGSI(testProfileId);
 
       // 2. Create catalog with products
       console.log('Step 3: Creating catalog...');
@@ -452,6 +454,9 @@ describe('Order Query Operations Integration Tests', () => {
       unsharedProfileId = unsharedProfileData.createSellerProfile.profileId;
       console.log(`Created unshared profile: ${unsharedProfileId}`);
 
+      // Wait for profileId-index GSI propagation before pipeline resolvers query it
+      await waitForProfileGSI(unsharedProfileId);
+
       console.log('Step 11: Creating unshared campaign...');
       const { data: unsharedCampaignData }: any = await ownerClient.mutate({
         mutation: CREATE_CAMPAIGN,
@@ -526,7 +531,7 @@ describe('Order Query Operations Integration Tests', () => {
       console.error('Error in beforeAll:', error);
       throw error;
     }
-  }, 30000);
+  }, 90000);
 
   afterAll(async () => {
     // Clean up all test data in reverse order
@@ -829,120 +834,6 @@ describe('Order Query Operations Integration Tests', () => {
   });
 
   // ========================================
-  // 5.12.3: listOrdersByProfile
-  // ========================================
-
-  describe('5.12.3: listOrdersByProfile', () => {
-    test('Happy Path: Returns all orders for a profile', async () => {
-      // ✅ FIXED BUG #26: Now queries main table with PK=profileId
-      const { data }: any = await ownerClient.query({
-        query: LIST_ORDERS_BY_PROFILE,
-        variables: { profileId: testProfileId },
-        fetchPolicy: 'network-only',
-      });
-
-      expect(data.listOrdersByProfile.orders).toBeDefined();
-      expect(data.listOrdersByProfile.orders.length).toBeGreaterThanOrEqual(2);
-      
-      const orderIds = data.listOrdersByProfile.orders.map((o: any) => o.orderId);
-      expect(orderIds).toContain(testOrderId1);
-      expect(orderIds).toContain(testOrderId2);
-    });
-
-    test('Happy Path: Returns empty array if no orders', async () => {
-      const { data }: any = await ownerClient.query({
-        query: LIST_ORDERS_BY_PROFILE,
-        variables: { profileId: emptyProfileId },
-        fetchPolicy: 'network-only',
-      });
-
-      expect(data.listOrdersByProfile.orders).toBeDefined();
-      expect(data.listOrdersByProfile.orders).toEqual([]);
-    });
-
-    test('Happy Path: Includes all order fields', async () => {
-      // ✅ FIXED: Bug #26 resolved
-      const { data }: any = await ownerClient.query({
-        query: LIST_ORDERS_BY_PROFILE,
-        variables: { profileId: testProfileId },
-        fetchPolicy: 'network-only',
-      });
-
-      const order = data.listOrdersByProfile.orders[0];
-      expect(order).toHaveProperty('orderId');
-      expect(order).toHaveProperty('profileId');
-      expect(order).toHaveProperty('campaignId');
-      expect(order).toHaveProperty('customerName');
-      expect(order).toHaveProperty('paymentMethod');
-      expect(order).toHaveProperty('lineItems');
-      expect(order).toHaveProperty('totalAmount');
-    });
-
-    test('Authorization: Profile owner can list orders', async () => {
-      // ✅ FIXED Bug #24: listOrdersByProfile now includes authorization via pipeline resolver
-      const { data }: any = await ownerClient.query({
-        query: LIST_ORDERS_BY_PROFILE,
-        variables: { profileId: testProfileId },
-        fetchPolicy: 'network-only',
-      });
-
-      expect(data.listOrdersByProfile.orders).toBeDefined();
-      expect(data.listOrdersByProfile.orders.length).toBeGreaterThan(0);
-    });
-
-    test('Authorization: Shared user can list orders', async () => {
-      // ✅ FIXED Bug #24: listOrdersByProfile now includes authorization via pipeline resolver
-      const { data }: any = await contributorClient.query({
-        query: LIST_ORDERS_BY_PROFILE,
-        variables: { profileId: testProfileId },
-        fetchPolicy: 'network-only',
-      });
-
-      expect(data.listOrdersByProfile.orders).toBeDefined();
-      expect(data.listOrdersByProfile.orders.length).toBeGreaterThan(0);
-    });
-
-    test('Authorization: Non-shared user cannot list orders', async () => {
-      // ✅ FIXED Bug #24: listOrdersByProfile now includes authorization via pipeline resolver
-      // Test: contributor tries to list orders from unshared profile
-      // Expected: Returns empty array (query permissions model - don't error)
-      
-      const { data }: any = await contributorClient.query({
-        query: LIST_ORDERS_BY_PROFILE,
-        variables: { profileId: unsharedProfileId },
-        fetchPolicy: 'network-only',
-      });
-      
-      expect(data.listOrdersByProfile.orders).toEqual([]);
-    });
-
-    test('Authorization: Unauthenticated user cannot list orders by profile', async () => {
-      // Test: unauthenticated user tries to list orders
-      // Expected: Returns error (no auth token)
-      
-      const unauthClient = createUnauthenticatedClient();
-      
-      await expect(
-        unauthClient.query({
-          query: LIST_ORDERS_BY_PROFILE,
-          variables: { profileId: testProfileId },
-          fetchPolicy: 'network-only',
-        })
-      ).rejects.toThrow();
-    });
-
-    test('Input Validation: Returns empty array for non-existent profileId', async () => {
-      const { data }: any = await ownerClient.query({
-        query: LIST_ORDERS_BY_PROFILE,
-        variables: { profileId: 'PROFILE#nonexistent' },
-        fetchPolicy: 'network-only',
-      });
-
-      expect(data.listOrdersByProfile.orders).toEqual([]);
-    });
-  });
-
-  // ========================================
   // 5.12.4: Order Edge Cases
   // ========================================
 
@@ -1232,75 +1123,6 @@ describe('Order Query Operations Integration Tests', () => {
         await ownerClient.mutate({ mutation: DELETE_ORDER, variables: { orderId } });
       }
     }, 20000);
-
-    test('Listing orders across multiple campaigns', async () => {
-      // Create a second campaign
-      const { data: campaign2Data }: any = await ownerClient.mutate({
-        mutation: CREATE_CAMPAIGN,
-        variables: {
-          input: {
-            profileId: testProfileId,
-            campaignName: 'Second Campaign For Orders',
-            campaignYear: 2025,
-            catalogId: testCatalogId,
-            startDate: new Date().toISOString(),
-          },
-        },
-      });
-      const campaign2Id = campaign2Data.createCampaign.campaignId;
-
-      // Create orders in both campaigns
-      const { data: order1Data }: any = await ownerClient.mutate({
-        mutation: CREATE_ORDER,
-        variables: {
-          input: {
-            profileId: testProfileId,
-            campaignId: testCampaignId,
-            customerName: 'Campaign 1 Customer',
-            orderDate: new Date().toISOString(),
-            paymentMethod: 'CASH',
-            lineItems: [{ productId: testProductId, quantity: 1 }],
-          },
-        },
-      });
-      const order1Id = order1Data.createOrder.orderId;
-
-      const { data: order2Data }: any = await ownerClient.mutate({
-        mutation: CREATE_ORDER,
-        variables: {
-          input: {
-            profileId: testProfileId,
-            campaignId: campaign2Id,
-            customerName: 'Campaign 2 Customer',
-            orderDate: new Date().toISOString(),
-            paymentMethod: 'CHECK',
-            lineItems: [{ productId: testProductId, quantity: 2 }],
-          },
-        },
-      });
-      const order2Id = order2Data.createOrder.orderId;
-
-      // List orders by profile - should include orders from both campaigns
-      const { data }: any = await ownerClient.query({
-        query: LIST_ORDERS_BY_PROFILE,
-        variables: { profileId: testProfileId },
-        fetchPolicy: 'network-only',
-      });
-
-      const orderIds = data.listOrdersByProfile.orders.map((o: any) => o.orderId);
-      expect(orderIds).toContain(order1Id);
-      expect(orderIds).toContain(order2Id);
-
-      // Verify both campaigns are represented
-      const campaignIds = data.listOrdersByProfile.orders.map((o: any) => o.campaignId);
-      expect(campaignIds).toContain(testCampaignId);
-      expect(campaignIds).toContain(campaign2Id);
-
-      // Cleanup
-      await ownerClient.mutate({ mutation: DELETE_ORDER, variables: { orderId: order1Id } });
-      await ownerClient.mutate({ mutation: DELETE_ORDER, variables: { orderId: order2Id } });
-      await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId: campaign2Id } });
-    }, 15000);
 
     test('Performance: Listing orders ordered by orderDate', async () => {
       // Create orders with different dates to test ordering

@@ -24,7 +24,7 @@ export function response(ctx) {
         util.error(ctx.error.message, ctx.error.type);
     }
     if (!ctx.result) {
-        util.error('Catalog not found', 'NotFound');
+        util.error('Catalog not found', 'NOT_FOUND');
     }
     
     const catalog = ctx.result;
@@ -50,7 +50,7 @@ export function response(ctx) {
     if (isOwner || isAdmin) {
         ctx.stash.authorized = true;
     } else {
-        util.error('Not authorized to delete this catalog', 'Forbidden');
+        util.error('Not authorized to delete this catalog', 'FORBIDDEN');
     }
     
     ctx.stash.catalog = catalog;
