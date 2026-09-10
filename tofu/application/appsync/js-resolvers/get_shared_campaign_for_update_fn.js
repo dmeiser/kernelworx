@@ -12,11 +12,11 @@ export function response(ctx) {
         util.error(ctx.error.message, ctx.error.type);
     }
     if (!ctx.result) {
-        util.error('Shared Campaign not found', 'NotFound');
+        util.error('Shared Campaign not found', 'NOT_FOUND');
     }
     // Check ownership
     if (ctx.result.createdBy !== `ACCOUNT#${ctx.identity.sub}`) {
-        util.error('Only the creator can update this campaign sharedCampaign', 'Forbidden');
+        util.error('Only the creator can update this campaign sharedCampaign', 'FORBIDDEN');
     }
     ctx.stash.sharedCampaign = ctx.result;
     return ctx.result;

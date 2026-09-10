@@ -1,45 +1,50 @@
-"""Tests for the lambda_handler exception-handling decorator (#294)."""
+"""Tests for the lambda_handler exception-handling decorator (#294, #329)."""
 
 from typing import Any, Dict
-
-import pytest
 
 from src.utils.errors import AppError, ErrorCode
 from src.utils.handlers import lambda_handler
 
 
 class TestLambdaHandlerDecorator:
-    """Tests for the lambda_handler decorator's exception-handling contract."""
+    """Tests for the lambda_handler decorator's exception-handling contract.
 
-    def test_app_error_propagates_unchanged(self) -> None:
-        """AppError raised by the handler propagates unchanged."""
+    Per #329 the decorator returns structured error payloads
+    (``__isError`` + ``errorCode`` + ``message``) instead of re-raising, so
+    the error code survives AWS Lambda serialization and reaches AppSync
+    (and the frontend's typed matchers) intact.
+    """
+
+    def test_app_error_returns_structured_payload(self) -> None:
+        """AppError raised by the handler becomes a structured error payload."""
         original = AppError(ErrorCode.NOT_FOUND, "User not found", {"userId": "u1"})
 
         @lambda_handler
         def handler(event: Dict[str, Any], context: Any) -> Any:
             raise original
 
-        with pytest.raises(AppError) as exc_info:
-            handler({}, None)
+        result = handler({}, None)
 
-        assert exc_info.value is original
-        assert exc_info.value.error_code == ErrorCode.NOT_FOUND
-        assert exc_info.value.message == "User not found"
-        assert exc_info.value.details == {"userId": "u1"}
+        assert result == {
+            "__isError": True,
+            "errorCode": ErrorCode.NOT_FOUND,
+            "message": "User not found",
+        }
 
-    def test_generic_exception_converts_to_internal_error(self) -> None:
-        """Any other unexpected Exception becomes an INTERNAL_ERROR AppError."""
+    def test_generic_exception_returns_internal_error_payload(self) -> None:
+        """Any other unexpected Exception becomes an INTERNAL_ERROR payload."""
 
         @lambda_handler
         def handler(event: Dict[str, Any], context: Any) -> Any:
             raise ValueError("boom")
 
-        with pytest.raises(AppError) as exc_info:
-            handler({}, None)
+        result = handler({}, None)
 
-        assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
-        assert exc_info.value.message == "Failed to execute handler"
-        assert isinstance(exc_info.value.__cause__, ValueError)
+        assert result == {
+            "__isError": True,
+            "errorCode": ErrorCode.INTERNAL_ERROR,
+            "message": "Failed to execute handler",
+        }
 
     def test_custom_error_message_used(self) -> None:
         """An explicit error_message overrides the default INTERNAL_ERROR message."""
@@ -48,11 +53,13 @@ class TestLambdaHandlerDecorator:
         def handler(event: Dict[str, Any], context: Any) -> Any:
             raise RuntimeError("db down")
 
-        with pytest.raises(AppError) as exc_info:
-            handler({}, None)
+        result = handler({}, None)
 
-        assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
-        assert exc_info.value.message == "Failed to list users"
+        assert result == {
+            "__isError": True,
+            "errorCode": ErrorCode.INTERNAL_ERROR,
+            "message": "Failed to list users",
+        }
 
     def test_normal_return_value_unchanged(self) -> None:
         """A successful handler return value passes through unchanged."""
@@ -73,9 +80,9 @@ class TestLambdaHandlerDecorator:
         def my_failing_handler(event: Dict[str, Any], context: Any) -> Any:
             raise RuntimeError("kaput")
 
-        with pytest.raises(AppError):
-            my_failing_handler({}, None)
+        result = my_failing_handler({}, None)
 
+        assert result["__isError"] is True
         log_line = capsys.readouterr().out.strip()
         entry = json.loads(log_line)
         assert entry["level"] == "ERROR"

@@ -11,7 +11,8 @@
 
 import { useState, useCallback } from 'react';
 import { useApolloClient } from '@apollo/client/react';
-import { LIST_MY_PROFILES, DELETE_SELLER_PROFILE, DELETE_MY_ACCOUNT } from '../lib/graphql';
+import { DELETE_SELLER_PROFILE, DELETE_MY_ACCOUNT } from '../lib/graphql';
+import { fetchAllMyProfiles } from '../lib/myProfiles';
 
 export type DeletionStep = 'idle' | 'discovering' | 'deleting-profiles' | 'deleting-account' | 'completed' | 'error';
 
@@ -39,18 +40,6 @@ export interface UseAccountDeletionReturn {
   reset: () => void;
 }
 
-interface RawProfile {
-  profileId?: string | null;
-  sellerName?: string | null;
-}
-
-interface ListMyProfilesQueryData {
-  listMyProfiles?: {
-    profiles?: RawProfile[] | null;
-    nextToken?: string | null;
-  } | null;
-}
-
 function isNotFoundError(err: unknown): boolean {
   if (!err || typeof err !== 'object') {
     return false;
@@ -62,37 +51,15 @@ function isNotFoundError(err: unknown): boolean {
   return message.includes('not found');
 }
 
-function extractProfilesFromData(data: ListMyProfilesQueryData | undefined): ProfileDeletionItem[] {
-  const items = data?.listMyProfiles?.profiles ?? [];
-  return items
-    .filter((item): item is RawProfile & { profileId: string } => Boolean(item?.profileId))
+async function fetchProfiles(client: ReturnType<typeof useApolloClient>): Promise<ProfileDeletionItem[]> {
+  const profiles = await fetchAllMyProfiles(client);
+  return profiles
+    .filter((item) => Boolean(item?.profileId))
     .map((item) => ({
       profileId: item.profileId,
       sellerName: item.sellerName || 'Scout Profile',
       status: 'pending' as const,
     }));
-}
-
-function queryProfilesPage(client: ReturnType<typeof useApolloClient>, nextToken: string | null | undefined) {
-  return client.query<ListMyProfilesQueryData>({
-    query: LIST_MY_PROFILES,
-    fetchPolicy: 'network-only',
-    variables: { nextToken: nextToken ?? undefined },
-  });
-}
-
-async function fetchProfiles(client: ReturnType<typeof useApolloClient>): Promise<ProfileDeletionItem[]> {
-  const discovered: ProfileDeletionItem[] = [];
-  let nextToken: string | null | undefined;
-  do {
-    const result = await queryProfilesPage(client, nextToken);
-    if (result.error) {
-      throw result.error;
-    }
-    discovered.push(...extractProfilesFromData(result.data));
-    nextToken = result.data?.listMyProfiles?.nextToken;
-  } while (nextToken);
-  return discovered;
 }
 
 async function deleteSingleProfile(client: ReturnType<typeof useApolloClient>, profileId: string): Promise<void> {

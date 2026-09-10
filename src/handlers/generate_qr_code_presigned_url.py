@@ -1,7 +1,13 @@
 """
-Lambda handler for PaymentMethod.qrCodeUrl field resolver.
+Lambda handler for PaymentMethod.qrCodeUrl presigned URL generation.
 
-Generates a single presigned URL for a payment method QR code.
+Supports two invocation shapes from AppSync:
+- Single: the legacy field-resolver payload (qrCodeUrl/ownerAccountId/...) -
+  returns one presigned URL or None.
+- Batch: a ``s3Keys`` list from the batch_qr_urls pipeline function (#330) -
+  authorizes the caller once against the shared owner/profile context and
+  returns a map of S3 key -> presigned URL. Keys that fail ownership
+  validation are omitted from the map (the resolver maps them to null).
 """
 
 from typing import Any, Dict, cast
@@ -58,11 +64,51 @@ def _validate_and_extract_params(event: Dict[str, Any]) -> tuple[str, str, str |
     return owner_account_id, method_name, s3_key
 
 
-def generate_qr_code_presigned_url(event: Dict[str, Any], context: Any) -> str | None:
-    """Generate a presigned URL for a single payment method QR code."""
+def _generate_batch_presigned_urls(event: Dict[str, Any], owner_account_id: str) -> Dict[str, str]:
+    """Generate presigned URLs for a batch of S3 keys in one invocation.
+
+    Authorization was already validated once for the shared owner/profile
+    context. Each key is still individually ownership-validated by
+    ``generate_presigned_get_url``; keys that do not belong to the owner
+    (e.g. stale preference entries) are skipped rather than failing the
+    whole batch.
+    """
+    logger = get_logger(__name__)
+
+    url_map: Dict[str, str] = {}
+    s3_keys = event.get("s3Keys") or []
+    for s3_key in s3_keys:
+        if not isinstance(s3_key, str) or not s3_key:
+            continue
+        try:
+            # s3_key is always provided here, so generation never falls back
+            # to lookup and cannot return None.
+            url = cast(str, generate_presigned_get_url(owner_account_id, "", s3_key=s3_key, expiry_seconds=900))
+        except AppError as e:
+            if e.error_code == ErrorCode.FORBIDDEN:
+                logger.warning("Skipping QR key that failed ownership validation", s3_key=s3_key)
+                continue
+            raise
+        url_map[s3_key] = url
+
+    logger.info(
+        "Batch generated QR code presigned URLs",
+        owner_account_id=owner_account_id,
+        requested=len(s3_keys),
+        signed=len(url_map),
+    )
+    return url_map
+
+
+def generate_qr_code_presigned_url(event: Dict[str, Any], context: Any) -> str | None | Dict[str, str]:
+    """Generate presigned URL(s) for payment method QR code(s)."""
     logger = get_logger(__name__)
 
     try:
+        if event.get("s3Keys") is not None:
+            owner_account_id, _, _ = _validate_and_extract_params(event)
+            return _generate_batch_presigned_urls(event, owner_account_id)
+
         qr_code_url: str | None = event.get("qrCodeUrl")
         if not qr_code_url:
             return None

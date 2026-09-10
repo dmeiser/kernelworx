@@ -64,7 +64,7 @@ describe('lookup_order_fn response', () => {
 
         assert.throws(
             () => response(ctx),
-            /NotFound: Order not found/
+            /NOT_FOUND: Order not found/
         );
     });
 
@@ -73,7 +73,7 @@ describe('lookup_order_fn response', () => {
 
         assert.throws(
             () => response(ctx),
-            /NotFound: Order not found/
+            /NOT_FOUND: Order not found/
         );
     });
 });

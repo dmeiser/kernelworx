@@ -13,22 +13,22 @@ export function request(ctx) {
     const accountId = ctx.identity.sub;
     
     if (!accountId) {
-        util.error('Authentication required', 'Unauthorized');
+        util.error('Authentication required', 'UNAUTHORIZED');
     }
     
     // Validate name
     if (!name) {
-        util.error('Payment method name is required', 'BadRequest');
+        util.error('Payment method name is required', 'INVALID_INPUT');
     }
     
     if (name.length > 50) {
-        util.error('Payment method name must be 50 characters or less', 'BadRequest');
+        util.error('Payment method name must be 50 characters or less', 'INVALID_INPUT');
     }
     
     // Check reserved names (case-insensitive)
     const nameLower = name.toLowerCase();
     if (nameLower === 'cash' || nameLower === 'check') {
-        util.error(`Cannot create payment method: "${name}" is a reserved name`, 'BadRequest');
+        util.error(`Cannot create payment method: "${name}" is a reserved name`, 'INVALID_INPUT');
     }
     
     // Store normalized name for uniqueness check
@@ -61,7 +61,7 @@ export function response(ctx) {
     );
     
     if (duplicate) {
-        util.error(`Payment method "${ctx.stash.paymentMethodName}" already exists`, 'BadRequest');
+        util.error(`Payment method "${ctx.stash.paymentMethodName}" already exists`, 'INVALID_INPUT');
     }
     
     // Store existing methods for update

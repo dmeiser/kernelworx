@@ -56,7 +56,7 @@ describe('delete_profile_invite_fn response', () => {
         assert.strictEqual(ctx.stash.authorized, true);
     });
 
-    it('throws Unauthorized when profile is not found', () => {
+    it('throws UNAUTHORIZED when profile is not found', () => {
         const ctx = {
             args: { profileId: 'PROFILE#prof-456', inviteCode: 'INV-789' },
             stash: {},
@@ -65,7 +65,7 @@ describe('delete_profile_invite_fn response', () => {
 
         assert.throws(
             () => response(ctx),
-            /Unauthorized: Forbidden: Only profile owner can delete invites/
+            /UNAUTHORIZED: Forbidden: Only profile owner can delete invites/
         );
     });
 
