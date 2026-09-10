@@ -73,6 +73,12 @@ export function request(ctx) {
 }
 
 export function response(ctx) {
+    // #337: the decorated generate-qr-code-presigned-url handler returns a
+    // structured error payload instead of raising; surface it rather than
+    // mapping every qrCodeUrl to null.
+    if (ctx.result && ctx.result.__isError) {
+        util.error(ctx.result.message, ctx.result.errorCode, null, { errorCode: ctx.result.errorCode });
+    }
     if (ctx.error) {
         util.error(ctx.error.message, ctx.error.type);
     }

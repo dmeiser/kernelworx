@@ -4,7 +4,7 @@ The `lambda_handler` decorator (src/utils/handlers.py) returns structured
 `__isError` payloads instead of raising, so every resolver that invokes a
 decorated handler must run JS code that detects the payload and calls
 `util.error(...)` — otherwise the error dict leaks into the field result and
-typed error codes never reach the client. The 11 direct Lambda UNIT resolvers
+typed error codes never reach the client. The 10 direct Lambda UNIT resolvers
 on decorator-wrapped handlers run `lambda_unit_resolver.js` for this. These
 tests parse the OpenTofu configuration into a semantic model (via
 python-hcl2) and assert the meaning of the wiring contract:
@@ -15,6 +15,10 @@ python-hcl2) and assert the meaning of the wiring contract:
 - The field set on those datasources is exactly the expected set (no
   resolver is left on the default VTL behavior, which cannot detect
   `__isError`).
+- confirmPaymentMethodQRCodeUpload is NOT a unit resolver: since #330/#367 it
+  is a PIPELINE whose confirm_qr_upload function invokes the decorated
+  handler, so its `__isError` detection lives in confirm_qr_upload_fn.js
+  (covered by the js-resolver tests).
 """
 
 from __future__ import annotations
@@ -45,9 +49,23 @@ EXPECTED_UNIT_FIELDS = {
     "aws_appsync_datasource.delete_account.name": {"deleteMyAccount"},
     "aws_appsync_datasource.transfer_ownership.name": {"transferProfileOwnership"},
     "aws_appsync_datasource.request_qr_upload.name": {"requestPaymentMethodQRCodeUpload"},
-    "aws_appsync_datasource.confirm_qr_upload.name": {"confirmPaymentMethodQRCodeUpload"},
     "aws_appsync_datasource.delete_qr_code.name": {"deletePaymentMethodQRCode"},
 }
+
+
+def test_confirm_upload_is_a_pipeline_not_a_unit_resolver():
+    """#330/#367: confirmPaymentMethodQRCodeUpload invokes the decorated
+    confirm-qr-upload handler through the confirm_qr_upload pipeline
+    function (which detects __isError), not a direct unit resolver."""
+    confirm = next(
+        (attrs for _, attrs in _all_resolvers() if _norm(attrs["field"]) == "confirmPaymentMethodQRCodeUpload"),
+        None,
+    )
+    assert confirm is not None, "confirmPaymentMethodQRCodeUpload resolver missing"
+    assert _norm(confirm.get("kind", "")) == "PIPELINE"
+    assert "data_source" not in confirm, "pipeline resolver must not bind a unit data_source"
+    pipeline = confirm.get("pipeline_config", [{}])[0].get("functions", [])
+    assert any("aws_appsync_function.confirm_qr_upload" in str(fn) for fn in pipeline), pipeline
 
 
 def _norm(value):

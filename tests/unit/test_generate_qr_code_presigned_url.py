@@ -457,10 +457,10 @@ class TestBatchGenerateQrCodePresignedUrls:
             "ownerAccountId": "account-123",
         }
 
-        with pytest.raises(AppError) as exc_info:
-            generate_qr_code_presigned_url(event, None)
+        result = generate_qr_code_presigned_url(event, None)
 
-        assert exc_info.value.error_code == ErrorCode.UNAUTHORIZED
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.UNAUTHORIZED
 
     def test_batch_rejects_non_owner_without_profile(self, s3_bucket: Any) -> None:
         """Test that a batch for another owner's methods is denied."""
@@ -470,10 +470,10 @@ class TestBatchGenerateQrCodePresignedUrls:
             "identity": {"sub": "other-account"},
         }
 
-        with pytest.raises(AppError) as exc_info:
-            generate_qr_code_presigned_url(event, None)
+        result = generate_qr_code_presigned_url(event, None)
 
-        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.FORBIDDEN
 
     def test_batch_propagates_non_forbidden_signing_errors(self, s3_bucket: Any) -> None:
         """Test that non-FORBIDDEN signing errors fail the batch (not skipped)."""
@@ -491,7 +491,7 @@ class TestBatchGenerateQrCodePresignedUrls:
         with patch("src.handlers.generate_qr_code_presigned_url.generate_presigned_get_url") as mock_generate:
             mock_generate.side_effect = AppError(ErrorCode.INTERNAL_ERROR, "S3 unavailable")
 
-            with pytest.raises(AppError) as exc_info:
-                generate_qr_code_presigned_url(event, None)
+            result = generate_qr_code_presigned_url(event, None)
 
-        assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
