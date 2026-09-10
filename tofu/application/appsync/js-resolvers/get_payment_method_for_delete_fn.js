@@ -44,6 +44,7 @@ export function response(ctx) {
     }
 
     ctx.stash.existingMethods = methods;
+    ctx.stash.paymentMethodName = method.name;
     ctx.stash.hasQR = !!(method.qrCodeUrl);
     return {};
 }

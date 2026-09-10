@@ -44,6 +44,46 @@ describe('list_my_profiles_fn response', () => {
         assert.deepStrictEqual(result.profiles[0].permissions, ['READ', 'WRITE']);
     });
 
+    it('passes through unitType and unitNumber so owners can query their own unit details', () => {
+        const ctx = {
+            stash: {},
+            result: {
+                items: [
+                    {
+                        profileId: 'PROFILE#p1',
+                        sellerName: 'Scout Name',
+                        unitType: 'Troop',
+                        unitNumber: 456,
+                        createdAt: '2024-01-01T00:00:00Z',
+                    },
+                ],
+                nextToken: null,
+            },
+        };
+
+        const result = response(ctx);
+
+        assert.strictEqual(result.profiles.length, 1);
+        assert.strictEqual(result.profiles[0].unitType, 'Troop');
+        assert.strictEqual(result.profiles[0].unitNumber, 456);
+    });
+
+    it('passes through null unitType and unitNumber when profile has no unit details', () => {
+        const ctx = {
+            stash: {},
+            result: {
+                items: [{ profileId: 'PROFILE#p1', createdAt: '2024-01-01T00:00:00Z' }],
+                nextToken: null,
+            },
+        };
+
+        const result = response(ctx);
+
+        assert.strictEqual(result.profiles.length, 1);
+        assert.strictEqual(result.profiles[0].unitType, undefined);
+        assert.strictEqual(result.profiles[0].unitNumber, undefined);
+    });
+
     it('filters out incomplete records and returns empty profiles', () => {
         const ctx = {
             stash: {},

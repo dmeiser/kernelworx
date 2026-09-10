@@ -644,6 +644,8 @@ export type GqlSellerProfile = {
   permissions?: Maybe<Array<GqlPermissionType>>;
   profileId: Scalars['ID']['output'];
   sellerName: Scalars['String']['output'];
+  unitNumber?: Maybe<Scalars['Int']['output']>;
+  unitType?: Maybe<Scalars['String']['output']>;
   updatedAt: Scalars['AWSDateTime']['output'];
 };
 
