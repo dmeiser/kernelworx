@@ -1,7 +1,38 @@
 import { ApolloClient, InMemoryCache, HttpLink, ApolloLink } from '@apollo/client';
 import { setContext } from '@apollo/client/link/context';
+import { RetryLink } from '@apollo/client/link/retry';
 import { signInUser, AuthResult } from './cognitoAuth';
 import { getAwsConfig } from './awsConfig';
+
+/**
+ * Retry transient transport failures between the CI runner and AppSync.
+ *
+ * CI occasionally fails a whole suite in `beforeAll` with undici's
+ * `TypeError: fetch failed` (cause: `read ECONNRESET`) — a TCP connection
+ * reset where no HTTP response was ever received. Without a retry that
+ * single reset skips every test in the suite and fails the run.
+ *
+ * Only errors WITHOUT an HTTP status code are retried: a response was never
+ * received, so re-sending the request is the standard recovery. HTTP-level
+ * failures (4xx/5xx `ServerError`) and GraphQL errors returned in a 200
+ * response are never retried here — mutations are not idempotent and
+ * Apollo Client 4's RetryLink already passes GraphQL results through without
+ * invoking this callback.
+ */
+const transportRetryLink = new RetryLink({
+  attempts: (count, _operation, error) => {
+    const receivedResponse =
+      typeof (error as { statusCode?: number }).statusCode === 'number';
+    if (!receivedResponse && count < 3) {
+      console.warn(
+        `⚠️  AppSync transport error (attempt ${count}/3), retrying: ${error.message}`
+      );
+      return true;
+    }
+    return false;
+  },
+  delay: { initial: 500, max: 3000, jitter: true },
+});
 
 interface AuthConfig {
   accessToken: string;
@@ -67,9 +98,10 @@ export async function createAuthenticatedClient(
     };
   });
 
-  // Create and return client
+  // Create and return client (transport retries wrap the HTTP link so a
+  // connection reset re-sends the request instead of killing the suite)
   const client = new ApolloClient({
-    link: authLink.concat(httpLink),
+    link: authLink.concat(transportRetryLink).concat(httpLink),
     cache: new InMemoryCache(),
     defaultOptions: {
       query: { fetchPolicy: 'no-cache' },
