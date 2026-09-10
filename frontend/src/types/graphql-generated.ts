@@ -487,7 +487,6 @@ export type GqlQuery = {
   listMySharedCampaigns: Array<GqlSharedCampaign>;
   listMyShares: Array<GqlSharedProfile>;
   listOrdersByCampaign: GqlOrderConnection;
-  listOrdersByProfile: GqlOrderConnection;
   listSharesByProfile: Array<GqlShare>;
   listUnitCampaignCatalogs: Array<GqlCatalog>;
   listUnitCatalogs: Array<GqlCatalog>;
@@ -582,12 +581,6 @@ export type GqlQuery_ListOrdersByCampaignArgs = {
   campaignId: Scalars['ID']['input'];
   limit?: InputMaybe<Scalars['Int']['input']>;
   nextToken?: InputMaybe<Scalars['String']['input']>;
-};
-
-export type GqlQuery_ListOrdersByProfileArgs = {
-  limit?: InputMaybe<Scalars['Int']['input']>;
-  nextToken?: InputMaybe<Scalars['String']['input']>;
-  profileId: Scalars['ID']['input'];
 };
 
 export type GqlQuery_ListSharesByProfileArgs = {

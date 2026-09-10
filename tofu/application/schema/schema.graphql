@@ -444,7 +444,6 @@ type Query {
   # Order queries
   getOrder(orderId: ID!): Order
   listOrdersByCampaign(campaignId: ID!, limit: Int, nextToken: String): OrderConnection!
-  listOrdersByProfile(profileId: ID!, limit: Int, nextToken: String): OrderConnection!
   
   # Share queries
   listSharesByProfile(profileId: ID!): [Share!]!
