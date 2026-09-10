@@ -22,6 +22,12 @@ export function request(ctx) {
 }
 
 export function response(ctx) {
+    // #337: the decorated delete-campaign-orders handler returns a structured
+    // error payload instead of raising. Abort the pipeline so delete_campaign
+    // never runs after a failed order-deletion step.
+    if (ctx.result && ctx.result.__isError) {
+        util.error(ctx.result.message, ctx.result.errorCode, null, { errorCode: ctx.result.errorCode });
+    }
     if (ctx.error) {
         util.error(ctx.error.message, ctx.error.type);
     }

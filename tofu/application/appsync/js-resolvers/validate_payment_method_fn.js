@@ -14,7 +14,7 @@ export function request(ctx) {
   }
 
   if (paymentMethod === '') {
-    util.error('Payment method is required', 'BadRequest');
+    util.error('Payment method is required', 'INVALID_INPUT');
   }
 
   const methodLower = paymentMethod.toLowerCase();
@@ -31,7 +31,7 @@ export function request(ctx) {
     ctx.stash.ownerAccountId;
 
   if (!rawOwner) {
-    util.error('Owner account ID not found in pipeline context', 'BadRequest');
+    util.error('Owner account ID not found in pipeline context', 'INVALID_INPUT');
   }
 
   const accountId = rawOwner.startsWith('ACCOUNT#') ? rawOwner : 'ACCOUNT#' + rawOwner;
@@ -54,7 +54,7 @@ export function response(ctx) {
   }
 
   if (!ctx.result) {
-    util.error('Owner account not found', 'NotFound');
+    util.error('Owner account not found', 'NOT_FOUND');
   }
 
   const paymentMethods = (ctx.result.preferences && ctx.result.preferences.paymentMethods) || [];
@@ -62,7 +62,7 @@ export function response(ctx) {
   const found = paymentMethods.some(m => m.name && m.name.toLowerCase() === target);
 
   if (!found) {
-    util.error("Payment method '" + ctx.stash.paymentMethodToValidate + "' does not exist for this account", 'BadRequest');
+    util.error("Payment method '" + ctx.stash.paymentMethodToValidate + "' does not exist for this account", 'INVALID_INPUT');
   }
 
   return ctx.prev ? ctx.prev.result : null;

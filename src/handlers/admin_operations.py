@@ -1590,18 +1590,22 @@ _OPERATION_HANDLERS = {
 }
 
 
+@with_error_handling(error_message="Failed to execute admin operation")
 def lambda_handler(event: Dict[str, Any], context: Any) -> Any:
     """
     Main Lambda handler that dispatches to specific admin operations.
 
     Determines which operation to call based on the GraphQL field name.
+    Wrapped in ``with_error_handling`` (#329) so dispatch-level errors also
+    return the structured ``__isError`` payload instead of raising.
 
     Args:
         event: AppSync event
         context: Lambda context
 
     Returns:
-        Result from the specific operation handler
+        Result from the specific operation handler, or a structured error
+        payload when the operation fails.
     """
     field_name = event.get("info", {}).get("fieldName", "")
     handler = _OPERATION_HANDLERS.get(field_name)

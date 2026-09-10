@@ -60,10 +60,14 @@ def _submit_signup_and_wait_for_verification(page: Page, email: str, password: s
     """Fill and submit the signup form, then wait for the verification UI.
 
     After a successful Cognito ``signUp`` call the UI transitions to the
-    verification step showing one of:
+    verification step showing text containing "check your email" or
+    "verification" (case-insensitive).
 
-    a) text containing "check your email" or "verification" (case-insensitive), or
-    b) the MUI alert with the success message.
+    A transient ``signUp`` failure renders a MUI *error* alert instead. That
+    error alert must not be mistaken for reaching the verification step:
+    proceeding past a failed signup surfaces later as a confusing Cognito
+    ``UserNotFoundException`` from ``admin-confirm-sign-up``. If the error
+    alert appears, fail immediately with its message.
     """
     page.locator('input[type="email"]').first.fill(email)
 
@@ -78,15 +82,16 @@ def _submit_signup_and_wait_for_verification(page: Page, email: str, password: s
 
     page.get_by_role("button", name=_CREATE_ACCOUNT_BTN).click()
 
-    verification_text = (
-        page.get_by_text(re.compile("check your email", re.IGNORECASE))
-        .or_(page.get_by_text(re.compile("verification", re.IGNORECASE)))
-        .or_(page.get_by_role("alert"))
+    error_alert = page.locator(".MuiAlert-standardError")
+    verification_text = page.get_by_text(re.compile("check your email", re.IGNORECASE)).or_(
+        page.get_by_text(re.compile("verification", re.IGNORECASE))
     )
-    expect(verification_text.first).to_be_visible(timeout=20_000)
+    expect(verification_text.first.or_(error_alert.first)).to_be_visible(timeout=20_000)
+    if error_alert.first.is_visible():
+        pytest.fail(f"SignUp failed unexpectedly: {error_alert.first.inner_text()}")
 
 
-def _cognito_cli(*args: str) -> None:
+def _cognito_cli_result(*args: str) -> subprocess.CompletedProcess[str]:
     """Run an ``aws cognito-idp`` admin command via the AWS CLI subprocess.
 
     The CLI is used instead of boto3 so the test inherits the same credential
@@ -98,33 +103,41 @@ def _cognito_cli(*args: str) -> None:
     region = os.environ.get("TEST_REGION")
     if region:
         cmd.extend(["--region", region])
-    result = subprocess.run(cmd, check=False, capture_output=True, text=True, timeout=120)
+    return subprocess.run(cmd, check=False, capture_output=True, text=True, timeout=120)
+
+
+def _cognito_cli(*args: str) -> None:
+    """Run an ``aws cognito-idp`` admin command, raising with stderr on failure."""
+    result = _cognito_cli_result(*args)
     if result.returncode != 0:
         raise RuntimeError(f"aws cognito-idp {' '.join(args)} failed: {result.stderr}")
 
 
-def _cognito_cli_retry_on_user_not_found(*args: str, attempts: int = 6, delay_seconds: float = 5.0) -> None:
-    """Run a ``aws cognito-idp`` admin command, retrying propagation lag.
+def _confirm_signup(user_pool_id: str, email: str) -> None:
+    """Confirm a freshly signed-up user, tolerating brief propagation lag.
 
-    Cognito ``SignUp`` is eventually consistent: an immediate admin read can
-    return ``UserNotFoundException`` even though the user was just created
-    (the same race the cleanup helper in ``tests/e2e/conftest.py`` tolerates
-    between ``list-users`` and ``admin-delete-user``).  Retry only that error;
-    every other failure is raised at once.
+    A user record can take a moment to become visible to Cognito admin APIs
+    immediately after ``SignUp``; a ``UserNotFoundException`` right after a
+    successful signup is a transient propagation race, not a missing user.
     """
-    last_error: RuntimeError | None = None
-    for attempt in range(attempts):
-        try:
-            _cognito_cli(*args)
+    for attempt in range(5):
+        result = _cognito_cli_result(
+            "admin-confirm-sign-up",
+            "--user-pool-id",
+            user_pool_id,
+            "--username",
+            email,
+        )
+        if result.returncode == 0:
             return
-        except RuntimeError as error:
-            if "UserNotFoundException" not in str(error):
-                raise
-            last_error = error
-            if attempt < attempts - 1:
-                time.sleep(delay_seconds)
-    assert last_error is not None  # pragma: no cover - loop always sets it
-    raise last_error
+        if "UserNotFoundException" not in result.stderr:
+            raise RuntimeError(f"aws cognito-idp admin-confirm-sign-up failed: {result.stderr}")
+        if attempt < 4:
+            time.sleep(3)
+    raise RuntimeError(
+        "aws cognito-idp admin-confirm-sign-up still returning UserNotFoundException "
+        "after signup verification UI appeared; user never became visible"
+    )
 
 
 @pytest.mark.smoke
@@ -190,13 +203,7 @@ def test_signup_completes_after_backend_confirmation(page: Page) -> None:
     if not user_pool_id:
         pytest.fail("TEST_USER_POOL_ID is not set in environment.")
 
-    _cognito_cli_retry_on_user_not_found(
-        "admin-confirm-sign-up",
-        "--user-pool-id",
-        user_pool_id,
-        "--username",
-        email,
-    )
+    _confirm_signup(user_pool_id, email)
 
     page.get_by_role("button", name="Back to Login").click()
     page.wait_for_url("**/login", timeout=10_000)

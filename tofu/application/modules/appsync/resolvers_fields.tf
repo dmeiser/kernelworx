@@ -180,19 +180,3 @@ resource "aws_appsync_resolver" "account_id" {
   code = file("${local.js_resolvers_dir}/account_id_resolver.js")
 }
 
-# === PAYMENT METHOD FIELD RESOLVERS ===
-
-# PaymentMethod.qrCodeUrl (Lambda via JS)
-resource "aws_appsync_resolver" "payment_method_qr_code_url" {
-  api_id      = aws_appsync_graphql_api.main.id
-  type        = "PaymentMethod"
-  field       = "qrCodeUrl"
-  data_source = aws_appsync_datasource.generate_qr_presigned_url.name
-
-  runtime {
-    name            = "APPSYNC_JS"
-    runtime_version = "1.0.0"
-  }
-
-  code = file("${local.js_resolvers_dir}/payment_method_qr_code_url_resolver.js")
-}

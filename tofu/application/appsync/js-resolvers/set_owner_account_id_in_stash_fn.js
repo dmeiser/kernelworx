@@ -1,8 +1,8 @@
 /**
- * Set owner account ID in stash for field resolvers.
+ * Set owner account ID in stash for the batch QR URL signing step.
  * 
  * For myPaymentMethods, the owner is the authenticated user.
- * This allows the qrCodeUrl field resolver to generate presigned URLs.
+ * batch_qr_urls uses this (with no profileId) to authorize signing.
  */
 export function request(ctx) {
     // Set owner account ID in stash for downstream resolvers

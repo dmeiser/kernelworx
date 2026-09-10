@@ -19,7 +19,7 @@ export function response(ctx) {
         util.error(ctx.error.message, ctx.error.type);
     }
     if (!ctx.result.items || ctx.result.items.length === 0) {
-        util.error('Campaign not found', 'NotFound');
+        util.error('Campaign not found', 'NOT_FOUND');
     }
     // Store campaign in stash for next function
     ctx.stash.campaign = ctx.result.items[0];

@@ -136,14 +136,14 @@ describe('check_existing_share_fn response', () => {
         const ctx = {
             error: {
                 message: 'DynamoDB error',
-                type: 'InternalServerError',
+                type: 'INTERNAL_ERROR',
             },
             stash: {},
         };
 
         assert.throws(
             () => response(ctx),
-            /InternalServerError: DynamoDB error/
+            /INTERNAL_ERROR: DynamoDB error/
         );
     });
 });

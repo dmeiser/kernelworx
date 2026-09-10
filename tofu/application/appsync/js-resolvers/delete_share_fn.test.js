@@ -70,7 +70,7 @@ describe('delete_share_fn response', () => {
         assert.strictEqual(result, true);
     });
 
-    it('throws Unauthorized error on ConditionalCheckFailedException', () => {
+    it('throws UNAUTHORIZED error on ConditionalCheckFailedException', () => {
         const ctx = {
             error: {
                 type: 'DynamoDB:ConditionalCheckFailedException',
@@ -80,7 +80,7 @@ describe('delete_share_fn response', () => {
 
         assert.throws(
             () => response(ctx),
-            /Unauthorized: Not authorized to revoke this share or share not found/
+            /UNAUTHORIZED: Not authorized to revoke this share or share not found/
         );
     });
 

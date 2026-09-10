@@ -26,10 +26,10 @@ import {
   UPDATE_MY_PREFERENCES,
 } from '../lib/graphql';
 import { ensureProfileId } from '../lib/ids';
-import type { SellerProfile } from '../types';
+import { fetchAllMyProfiles, type MyProfile } from '../lib/myProfiles';
 
-// Use SellerProfile as the Profile type for this page
-type Profile = Pick<SellerProfile, 'profileId' | 'sellerName' | 'isOwner' | 'permissions' | 'latestCampaign'>;
+// Use the listMyProfiles page item as the Profile type for this page
+type Profile = MyProfile;
 
 // Default preferences value
 const DEFAULT_PREFERENCES = { showReadOnlyProfiles: true };
@@ -105,7 +105,7 @@ const OwnedProfilesSection: React.FC<{ profiles: Profile[] }> = ({ profiles }) =
               sellerName={profile.sellerName}
               isOwner={profile.isOwner ?? false}
               permissions={profile.permissions ?? []}
-              latestCampaign={profile.latestCampaign}
+              latestCampaign={profile.latestCampaign ?? undefined}
             />
           </Grid>
         ))}
@@ -132,7 +132,7 @@ const SharedProfilesSection: React.FC<{
               sellerName={profile.sellerName}
               isOwner={profile.isOwner ?? false}
               permissions={profile.permissions ?? []}
-              latestCampaign={profile.latestCampaign}
+              latestCampaign={profile.latestCampaign ?? undefined}
             />
           </Grid>
         ))}
@@ -381,16 +381,31 @@ export const ScoutsPage: React.FC = () => {
     await updatePreferencesWithRollback(updatePreferences, preferences, checked, setShowReadOnlyProfiles);
   };
 
-  // Fetch owned profiles
-  const [loadMyProfiles, { data: myProfilesData, loading: myProfilesLoading, error: myProfilesError }] = useLazyQuery<{
-    listMyProfiles: { profiles: Profile[] };
-  }>(LIST_MY_PROFILES, {
-    fetchPolicy: 'network-only',
-    notifyOnNetworkStatusChange: true,
-  });
+  // Fetch owned profiles. listMyProfiles is server-side paginated (capped
+  // pages, #328), so walk every nextToken page to get the full set.
+  const apolloClient = useApolloClient();
+  const [myProfiles, setMyProfiles] = useState<Profile[]>([]);
+  const [myProfilesLoaded, setMyProfilesLoaded] = useState(false);
+  const [myProfilesLoading, setMyProfilesLoading] = useState(false);
+  const [myProfilesError, setMyProfilesError] = useState<Error | null>(null);
+
+  const loadMyProfiles = React.useCallback(async () => {
+    setMyProfilesLoading(true);
+    try {
+      setMyProfiles(await fetchAllMyProfiles(apolloClient));
+      setMyProfilesLoaded(true);
+      setMyProfilesError(null);
+    } catch (err) {
+      // Mark loaded so the page renders and surfaces the error alert instead
+      // of spinning forever on the loading state.
+      setMyProfilesLoaded(true);
+      setMyProfilesError(err as Error);
+    } finally {
+      setMyProfilesLoading(false);
+    }
+  }, [apolloClient]);
 
   // Shared profiles state - we fetch shares then individual profiles
-  const apolloClient = useApolloClient();
   const [sharedProfiles, setSharedProfiles] = useState<Profile[]>([]);
   const [sharedProfilesLoading, setSharedProfilesLoading] = useState(false);
   const [sharedProfilesError, setSharedProfilesError] = useState<Error | null>(null);
@@ -468,7 +483,7 @@ export const ScoutsPage: React.FC = () => {
   };
   /* v8 ignore stop */
 
-  const myProfiles = getMyProfiles(myProfilesData);
+  const myProfilesData = myProfilesLoaded ? { listMyProfiles: { profiles: myProfiles } } : undefined;
   const filteredSharedProfiles = filterSharedProfiles(sharedProfiles, showReadOnlyProfiles);
   const profilesLoading = combineLoadingStates(myProfilesLoading, sharedProfilesLoading);
   const bothProfilesLoaded = areBothProfilesLoaded(myProfilesData, sharedProfilesLoaded);

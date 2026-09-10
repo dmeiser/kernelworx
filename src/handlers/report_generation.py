@@ -32,6 +32,17 @@ except ModuleNotFoundError:  # pragma: no cover
     from ..utils.logging import get_logger
     from ..utils.pagination import query_all_items
 
+# The decorator stays typed for mypy via the relative import below; at runtime
+# the absolute import resolves in the Lambda zip (package `utils`) and the
+# relative fallback resolves in unit tests (package `src.handlers`).
+if TYPE_CHECKING:  # pragma: no cover
+    from ..utils.handlers import lambda_handler as with_error_handling
+else:  # pragma: no cover
+    try:
+        from utils.handlers import lambda_handler as with_error_handling
+    except ModuleNotFoundError:
+        from ..utils.handlers import lambda_handler as with_error_handling
+
 
 # Report pre-signed URL lifetime in seconds (3 hours)
 REPORT_URL_EXPIRATION_SECONDS = 3 * 60 * 60
@@ -61,6 +72,7 @@ def _generate_report_content(
     )
 
 
+@with_error_handling(error_message="Failed to generate report")
 def request_campaign_report(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
     Generate a campaign report and upload to S3.
@@ -149,11 +161,10 @@ def request_campaign_report(event: Dict[str, Any], context: Any) -> Dict[str, An
         return result
 
     except AppError as e:
+        # Typed AppError logging stays: the decorator re-raises AppError
+        # unchanged but does not log it.
         logger.error("AppError in request_campaign_report", error_code=e.error_code, error_message=e.message)
         raise
-    except Exception as e:
-        logger.error("Unexpected error generating report", error=str(e), exc_info=True)
-        raise AppError(ErrorCode.INTERNAL_ERROR, f"Failed to generate report: {e}") from e
 
 
 def _get_campaign(table: Any, campaign_id: str) -> Dict[str, Any] | None:

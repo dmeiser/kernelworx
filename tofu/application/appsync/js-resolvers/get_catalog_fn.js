@@ -8,7 +8,7 @@ import { util } from '@aws-appsync/utils';
 export function request(ctx) {
     const rawCatalogId = ctx.stash.catalogId;
     if (!rawCatalogId) {
-        util.error('Catalog ID not found in stash', 'BadRequest');
+        util.error('Catalog ID not found in stash', 'INVALID_INPUT');
     }
     // Normalize to DB format: ensure it starts with CATALOG#
     const catalogId = (typeof rawCatalogId === 'string' && rawCatalogId.startsWith('CATALOG#')) ? rawCatalogId : 'CATALOG#' + rawCatalogId;
@@ -27,7 +27,7 @@ export function response(ctx) {
         util.error(ctx.error.message, ctx.error.type);
     }
     if (!ctx.result) {
-        util.error('Catalog not found for id: ' + ctx.stash.catalogId, 'NotFound');
+        util.error('Catalog not found for id: ' + ctx.stash.catalogId, 'NOT_FOUND');
     }
 
     // READ ACCESS: Anyone can view catalog by ID (no auth check).

@@ -33,11 +33,11 @@ export function response(ctx) {
     const code = input.sharedCampaignCode;
 
     if (!sharedCampaign || !sharedCampaign.sharedCampaignCode) {
-        util.error('Shared Campaign ' + code + ' not found', 'NotFound');
+        util.error('Shared Campaign ' + code + ' not found', 'NOT_FOUND');
     }
 
     if (sharedCampaign.isActive === false) {
-        util.error('Shared Campaign ' + code + ' is no longer active', 'InvalidInput');
+        util.error('Shared Campaign ' + code + ' is no longer active', 'INVALID_INPUT');
     }
 
     ctx.stash.sharedCampaign = sharedCampaign;

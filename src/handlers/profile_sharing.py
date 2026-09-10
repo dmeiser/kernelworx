@@ -25,6 +25,17 @@ except ModuleNotFoundError:  # pragma: no cover
     from ..utils.logging import StructuredLogger, get_correlation_id
     from ..utils.pagination import query_all_items
 
+# The decorator stays typed for mypy via the relative import below; at runtime
+# the absolute import resolves in the Lambda zip (package `utils`) and the
+# relative fallback resolves in unit tests (package `src.handlers`).
+if TYPE_CHECKING:  # pragma: no cover
+    from ..utils.handlers import lambda_handler as with_error_handling
+else:  # pragma: no cover
+    try:
+        from utils.handlers import lambda_handler as with_error_handling
+    except ModuleNotFoundError:
+        from ..utils.handlers import lambda_handler as with_error_handling
+
 
 # Expose a module-level proxy for test monkeypatching (tests patch ``profile_sharing.dynamodb.batch_get_item``)
 class _DynamoProxy:
@@ -267,6 +278,7 @@ def _merge_profiles_with_shares(
     return result
 
 
+@with_error_handling(error_message="Failed to list shared profiles")
 def list_my_shares(event: Dict[str, Any], context: Any) -> List[Dict[str, Any]]:
     """
     List profiles shared with the current user with full profile data.
@@ -294,36 +306,29 @@ def list_my_shares(event: Dict[str, Any], context: Any) -> List[Dict[str, Any]]:
 
     logger.info("Listing shared profiles", caller_account_id=caller_account_id)
 
-    try:
-        # Step 1: Query shares table GSI to get all shares for this user
-        target_account_id_with_prefix = _normalize_caller_account_id(caller_account_id)
-        shares = _query_shares_for_account(target_account_id_with_prefix, logger)
+    # Step 1: Query shares table GSI to get all shares for this user
+    target_account_id_with_prefix = _normalize_caller_account_id(caller_account_id)
+    shares = _query_shares_for_account(target_account_id_with_prefix, logger)
 
-        if not shares:
-            logger.info("No shares found")
-            return []
+    if not shares:
+        logger.info("No shares found")
+        return []
 
-        # Deduplicate by profileId (in case of duplicate shares)
-        shares_by_profile = _deduplicate_shares(shares)
-        logger.info("Found shares", count=len(shares_by_profile))
+    # Deduplicate by profileId (in case of duplicate shares)
+    shares_by_profile = _deduplicate_shares(shares)
+    logger.info("Found shares", count=len(shares_by_profile))
 
-        # Step 2: BatchGetItem to get full profile data
-        profile_keys = [
-            {"ownerAccountId": s["ownerAccountId"], "profileId": s["profileId"]} for s in shares_by_profile.values()
-        ]
-        all_profiles = _batch_get_profiles(profile_keys, tables.profiles, logger)
-        logger.info("Retrieved profiles", count=len(all_profiles))
+    # Step 2: BatchGetItem to get full profile data
+    profile_keys = [
+        {"ownerAccountId": s["ownerAccountId"], "profileId": s["profileId"]} for s in shares_by_profile.values()
+    ]
+    all_profiles = _batch_get_profiles(profile_keys, tables.profiles, logger)
+    logger.info("Retrieved profiles", count=len(all_profiles))
 
-        # Step 3: Merge profile data with share permissions
-        result = _merge_profiles_with_shares(
-            all_profiles, shares_by_profile, _normalize_caller_account_id(caller_account_id)
-        )
+    # Step 3: Merge profile data with share permissions
+    result = _merge_profiles_with_shares(
+        all_profiles, shares_by_profile, _normalize_caller_account_id(caller_account_id)
+    )
 
-        logger.info("Returning shared profiles", count=len(result))
-        return result
-
-    except AppError:
-        raise
-    except Exception as e:
-        logger.error("Failed to list shared profiles", error=str(e))
-        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to list shared profiles")
+    logger.info("Returning shared profiles", count=len(result))
+    return result
