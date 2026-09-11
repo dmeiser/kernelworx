@@ -551,6 +551,121 @@ resource "aws_iam_role_policy" "lambda_payment_s3" {
 }
 
 # =============================================================================
+# Lambda Account & Reporting Domain Execution Role (#354, chunk 4 of the #326 IAM role split)
+# =============================================================================
+#
+# Fourth scoped per-domain execution role, reusing the wiring pattern #351
+# established (the lambda module's lambda_domain_role_arns map). Assigned to
+# the account/reporting-domain handlers:
+#   - request-report            (handlers/report_generation.py)
+#   - list-catalogs-in-use      (handlers/list_catalogs_in_use.py)
+#   - list-unit-catalogs        (handlers/list_unit_catalogs.py)
+#   - list-unit-campaign-catalogs (handlers/list_unit_catalogs.py)
+#
+# The account-lifecycle handler delete-account (handlers/account_operations.py)
+# is NOT attached here: it performs Cognito admin actions (AdminDeleteUser,
+# ListUsers) and stays on the isolated admin role (#121), which takes
+# precedence in the lambda module's role resolution. Issue #354 item 3.
+#
+# DynamoDB scope was verified against the handler source (including the shared
+# helpers they invoke):
+#   - request-report: Query on campaigns campaignId-index GSI, Query on the
+#     orders base table (all orders for the campaign), and the single-profile
+#     auth path utils.auth.check_profile_access (strongly consistent GetItem
+#     on profiles base table, GetItem on shares, Query on profiles
+#     profileId-index GSI). Read-only.
+#   - list-catalogs-in-use: Query on the profiles base table (ownerAccountId),
+#     Query on shares targetAccountId-index GSI, Query on the campaigns base
+#     table (profileId). Read-only.
+#   - list-unit-catalogs / list-unit-campaign-catalogs: Query on profiles
+#     unitType-unitNumber-index GSI or campaigns unitCampaignKey-index GSI,
+#     the batched auth path utils.auth.batch_check_profile_access
+#     (BatchGetItem on profiles and shares, plus a profiles profileId-index
+#     Query only for legacy shares without ownerAccountId), Query on the
+#     campaigns base table, and GetItem on catalogs. Read-only.
+#
+# Every handler in this domain is read-only on DynamoDB: no PutItem,
+# UpdateItem, DeleteItem, BatchWriteItem, or TransactWriteItems anywhere in
+# the traced call chains, so the role grants only GetItem/Query/BatchGetItem.
+#
+# S3 scope: request-report writes the generated report under
+# reports/<profileId>/<campaignId>/ in the exports bucket and returns a
+# pre-signed GET URL valid for 3 hours. s3:PutObject covers the upload; the
+# pre-signed download is authorized at request time against the signing
+# role's policy, so the role must also hold s3:GetObject on the reports
+# prefix (same reasoning as the #353 payment role's QR prefix). Scoped to
+# the reports/* prefix only. No CloudFront or Cognito permissions. The
+# monolithic shared role is intentionally NOT narrowed here — that is the
+# final chunk (#355).
+
+locals {
+  account_reporting_table_keys = ["profiles", "shares", "campaigns", "orders", "catalogs"]
+  account_reporting_table_arns = [for k in local.account_reporting_table_keys : var.dynamodb_table_arns[k]]
+  account_reporting_index_arns = [for arn in local.account_reporting_table_arns : "${arn}/index/*"]
+}
+
+resource "aws_iam_role" "lambda_account_reporting_execution" {
+  name = "${var.name_prefix}-lambda-account-reporting-exec${local.role_suffix}"
+
+  assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
+
+  lifecycle {
+    prevent_destroy = var.prevent_destroy
+  }
+}
+
+resource "aws_iam_role_policy_attachment" "lambda_account_reporting_basic" {
+  role       = aws_iam_role.lambda_account_reporting_execution.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+data "aws_iam_policy_document" "lambda_account_reporting_dynamodb" {
+  # Read-only: every handler in this domain only reads DynamoDB (see the
+  # header comment for the per-handler trace), plus their GSIs.
+  statement {
+    effect = "Allow"
+    actions = [
+      "dynamodb:GetItem",
+      "dynamodb:Query",
+      "dynamodb:BatchGetItem",
+    ]
+    resources = concat(local.account_reporting_table_arns, local.account_reporting_index_arns)
+  }
+}
+
+resource "aws_iam_role_policy" "lambda_account_reporting_dynamodb" {
+  name   = "dynamodb-access"
+  role   = aws_iam_role.lambda_account_reporting_execution.id
+  policy = data.aws_iam_policy_document.lambda_account_reporting_dynamodb.json
+}
+
+data "aws_iam_policy_document" "lambda_account_reporting_s3" {
+  # request-report uploads the generated report and returns a pre-signed GET
+  # URL; S3 authorizes the pre-signed request against the signing role's
+  # policy at request time, so the role must hold GetObject on the reports
+  # prefix. KICS flags scoped s3:GetObject as potential data exfiltration;
+  # the keys are written by this same handler under reports/<profileId>/ and
+  # access is ownership-validated in code, so this is expected access, not
+  # exfiltration.
+  # kics-scan disable-line
+  statement {
+    effect = "Allow"
+    # kics-scan ignore-line
+    actions = [
+      "s3:PutObject",
+      "s3:GetObject",
+    ]
+    resources = ["${var.exports_bucket_arn}/reports/*"]
+  }
+}
+
+resource "aws_iam_role_policy" "lambda_account_reporting_s3" {
+  name   = "s3-reports"
+  role   = aws_iam_role.lambda_account_reporting_execution.id
+  policy = data.aws_iam_policy_document.lambda_account_reporting_s3.json
+}
+
+# =============================================================================
 # AppSync Service Role
 # =============================================================================
 
@@ -694,6 +809,11 @@ output "lambda_admin_execution_role_arn" {
 output "lambda_admin_execution_role_name" {
   description = "Name of the Lambda admin execution role"
   value       = aws_iam_role.lambda_admin_execution.name
+}
+
+output "lambda_account_reporting_execution_role_arn" {
+  description = "ARN of the scoped Lambda execution role for the account/reporting domain (request-report, list-catalogs-in-use, list-unit-catalogs, list-unit-campaign-catalogs). Chunk 4 of the #326 per-domain role split; see lambda_domain_role_arns in the lambda module."
+  value       = aws_iam_role.lambda_account_reporting_execution.arn
 }
 
 output "lambda_campaign_execution_role_arn" {
