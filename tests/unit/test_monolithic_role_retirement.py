@@ -1,140 +1,199 @@
-"""Static wiring checks for the #355 retirement of the monolithic Lambda role.
+"""Wiring contract for the #355 retirement of the monolithic Lambda role.
 
 #326 split the monolithic shared Lambda execution role into scoped per-domain
 roles (campaign #351, profile/sharing #352, payment #353, account/reporting
 #354) plus a dedicated role for the Cognito post-auth trigger (#355). #355
 (chunk 5, final) removes the monolithic role entirely:
 
-- the iam module declares no ``aws_iam_role.lambda_execution`` and no
-  ``lambda_execution_role_arn`` output;
-- the lambda module has no ``lambda_role_arn`` variable (no shared fallback —
-  every non-admin function resolves through ``lambda_domain_role_arns`` and a
-  missing entry fails the plan loudly);
-- the cognito module has no legacy ``lambda_execution_role_arn`` fallback for
-  the admin policy;
+- the iam module declares no ``aws_iam_role.lambda_execution``, its retired
+  inline policies, or a ``lambda_execution_role_arn`` output;
+- the post-auth replacement role's inline policy grants exactly
+  GetItem/PutItem/UpdateItem on the accounts table — no S3, CloudFront, or
+  Cognito grants anywhere in its attached policies;
+- the lambda module has no ``lambda_role_arn`` variable and its role-resolution
+  locals index ``var.lambda_domain_role_arns`` directly (no shared fallback —
+  a missing entry fails the plan loudly);
+- the cognito module attaches its admin policy to the dedicated admin-role
+  variable, with no legacy ``lambda_execution_role_arn`` fallback;
 - every non-admin Lambda function key (app and trigger) has an entry in the
   ``lambda_domain_role_arns`` map of ALL THREE environments (dev, prod,
-  ephemeral), so tofu plan can never hit the loud missing-entry failure;
-- the recovery script no longer imports the retired role but does import the
-  post-auth replacement.
+  ephemeral), so tofu plan can never hit the loud missing-entry failure.
 
-These tests parse the OpenTofu configuration directly so the retirement
-invariants hold regardless of what a future refactor does to the module
-layout.
+These tests parse the OpenTofu configuration into a semantic model (via
+python-hcl2, the pattern established by test_cloudfront_oac.py,
+test_admin_resolver_wiring.py, and test_edge_security.py) and assert the
+meaning of the retirement contract. The recovery script's import list is
+covered behaviorally by test_ephemeral_reliability.py, which executes the
+script with stubbed aws/tofu executables and asserts the recorded ``tofu
+import`` addresses: the retired monolithic role is absent and the post-auth
+role plus its basic-execution attachment and DynamoDB policy are present.
 """
 
-import re
-from pathlib import Path
-from typing import List
+from __future__ import annotations
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-LAMBDA_TF = REPO_ROOT / "tofu" / "application" / "modules" / "lambda" / "main.tf"
-IAM_TF = REPO_ROOT / "tofu" / "application" / "modules" / "iam" / "main.tf"
-COGNITO_TF = REPO_ROOT / "tofu" / "application" / "modules" / "cognito" / "main.tf"
-RECOVER_SH = REPO_ROOT / "scripts" / "ephemeral-recover-common.sh"
+from tests.unit.test_edge_security import (
+    TF_APP,
+    block,
+    first_resource,
+    load_hcl,
+    modules,
+    resources,
+)
+
+IAM_DOC = load_hcl(TF_APP / "modules" / "iam" / "main.tf")
+LAMBDA_DOC = load_hcl(TF_APP / "modules" / "lambda" / "main.tf")
+COGNITO_DOC = load_hcl(TF_APP / "modules" / "cognito" / "main.tf")
 ENVIRONMENTS = ("dev", "prod", "ephemeral")
 
 
-def _extract_map_keys(content: str, map_name: str) -> List[str]:
-    """Return the quoted keys of a ``map_name = { ... }`` block ( brace-balanced)."""
-    m = re.search(r"\b" + re.escape(map_name) + r"\s*=\s*\{", content)
-    if not m:
-        return []
-    start = m.end() - 1
-    depth = 0
-    block = ""
-    for i in range(start, len(content)):
-        if content[i] == "{":
-            depth += 1
-        elif content[i] == "}":
-            depth -= 1
-            if depth == 0:
-                block = content[start + 1 : i]
-                break
-    return re.findall(r'^\s*"([a-z0-9-]+)"\s*=', block, re.MULTILINE)
+def _variables(doc: dict) -> set[str]:
+    return {name for entry in doc.get("variable", []) for name in entry}
 
 
-def _extract_list(content: str, list_name: str) -> List[str]:
-    """Return the quoted items of a ``list_name = [...]`` local."""
-    m = re.search(re.escape(list_name) + r"\s*=\s*\[([^\]]*)\]", content)
-    if not m:
-        return []
-    return re.findall(r'"([^"]+)"', m.group(1))
+def _variable_attrs(doc: dict, name: str) -> dict:
+    for entry in doc.get("variable", []):
+        if name in entry:
+            return entry[name]
+    raise AssertionError(f"variable {name} not found")
+
+
+def _outputs(doc: dict) -> set[str]:
+    return {name for entry in doc.get("output", []) for name in entry}
+
+
+def _locals(doc: dict) -> dict:
+    merged = {}
+    for entry in doc.get("locals", []):
+        merged.update(entry)
+    return merged
+
+
+def _policy_document(doc: dict, name: str) -> dict:
+    for entry in doc.get("data", []):
+        bodies = entry.get("aws_iam_policy_document", {})
+        if name in bodies:
+            return block(bodies[name])
+    raise AssertionError(f"data.aws_iam_policy_document.{name} not found")
+
+
+def _inline_policy_statements(doc: dict, role_label: str) -> list[tuple[str, list[dict]]]:
+    """(policy label, statements) for every inline policy attached to the role."""
+    attached = []
+    for label, body in resources(doc, "aws_iam_role_policy"):
+        if body.get("role") != f"${{aws_iam_role.{role_label}.id}}":
+            continue
+        ref = body.get("policy", "")
+        prefix, suffix = "${data.aws_iam_policy_document.", ".json}"
+        assert ref.startswith(prefix) and ref.endswith(suffix), (
+            f"{label}: policy must be rendered from a data.aws_iam_policy_document"
+        )
+        attached.append((label, _policy_document(doc, ref[len(prefix) : -len(suffix)]).get("statement", [])))
+    return attached
+
+
+def _lambda_module_block(env: str) -> dict:
+    found = modules(load_hcl(TF_APP / "environments" / env / "main.tf"), "lambda")
+    assert len(found) == 1, f"{env}: exactly one lambda module block expected"
+    return found[0]
+
+
+def _all_function_keys() -> list[str]:
+    merged = _locals(LAMBDA_DOC)
+    admin = set(merged["admin_function_keys"]) | set(merged["admin_trigger_keys"])
+    keys = sorted(set(merged["functions"]) | set(merged["trigger_functions"]))
+    return [k for k in keys if k not in admin]
 
 
 class TestMonolithicRoleRemoved:
     """The monolithic role, its policies, and its plumbing are gone."""
 
     def test_iam_module_declares_no_monolithic_role(self) -> None:
-        iam_tf = IAM_TF.read_text()
-        assert 'resource "aws_iam_role" "lambda_execution"' not in iam_tf
-        assert 'resource "aws_iam_role_policy_attachment" "lambda_basic"' not in iam_tf
-        assert 'resource "aws_iam_role_policy" "lambda_dynamodb"' not in iam_tf
-        assert 'resource "aws_iam_role_policy" "lambda_s3"' not in iam_tf
-        assert 'resource "aws_iam_role_policy" "lambda_cloudfront"' not in iam_tf
-        assert 'output "lambda_execution_role_arn"' not in iam_tf
-        assert 'output "lambda_execution_role_name"' not in iam_tf
-        assert "TODO(#75)" not in iam_tf
+        assert all(label != "lambda_execution" for label, _ in resources(IAM_DOC, "aws_iam_role"))
+        assert all(
+            label != "lambda_basic" for label, _ in resources(IAM_DOC, "aws_iam_role_policy_attachment")
+        )
+        retired_policies = {"lambda_dynamodb", "lambda_s3", "lambda_cloudfront"}
+        policy_labels = {label for label, _ in resources(IAM_DOC, "aws_iam_role_policy")}
+        assert retired_policies.isdisjoint(policy_labels), (
+            f"retired monolithic inline policies still declared: {retired_policies & policy_labels}"
+        )
+        assert "lambda_execution_role_arn" not in _outputs(IAM_DOC)
+        assert "lambda_execution_role_name" not in _outputs(IAM_DOC)
+        assert "lambda_execution_role_arn" not in _variables(IAM_DOC)
 
     def test_iam_module_declares_post_auth_role(self) -> None:
-        iam_tf = IAM_TF.read_text()
-        assert 'resource "aws_iam_role" "lambda_post_auth_execution"' in iam_tf
-        assert 'output "lambda_post_auth_execution_role_arn"' in iam_tf
-        # Scoped to the accounts table only: no S3/CloudFront/Cognito grants.
-        post_auth_block = re.search(
-            r'resource "aws_iam_role" "lambda_post_auth_execution".*?(?=\nresource|\Z)',
-            iam_tf,
-            re.DOTALL,
+        role = first_resource(IAM_DOC, "aws_iam_role", "lambda_post_auth_execution")
+        assert role["assume_role_policy"] == "${data.aws_iam_policy_document.lambda_assume_role.json}"
+        assert "lambda_post_auth_execution_role_arn" in _outputs(IAM_DOC)
+        attachment = first_resource(IAM_DOC, "aws_iam_role_policy_attachment", "lambda_post_auth_basic")
+        assert attachment["role"] == "${aws_iam_role.lambda_post_auth_execution.name}"
+
+    def test_post_auth_role_scoped_to_accounts_table(self) -> None:
+        """The post-auth role's inline policies grant DynamoDB access to the
+        accounts table only: exactly GetItem/PutItem/UpdateItem, no S3,
+        CloudFront, or Cognito grants."""
+        attached = _inline_policy_statements(IAM_DOC, "lambda_post_auth_execution")
+        assert [label for label, _ in attached] == ["lambda_post_auth_dynamodb"], (
+            "post-auth role must carry exactly its DynamoDB inline policy "
+            "(plus the managed AWSLambdaBasicExecutionRole attachment)"
         )
-        assert post_auth_block is not None
+        [(_, statements)] = attached
+        assert len(statements) == 1
+        statement = statements[0]
+        assert statement.get("effect") == "Allow"
+        assert sorted(statement.get("actions", [])) == [
+            "dynamodb:GetItem",
+            "dynamodb:PutItem",
+            "dynamodb:UpdateItem",
+        ]
+        assert statement.get("resources") == ['${var.dynamodb_table_arns["accounts"]}']
 
-    def test_lambda_module_has_no_shared_fallback(self) -> None:
-        lambda_tf = LAMBDA_TF.read_text()
-        assert 'variable "lambda_role_arn"' not in lambda_tf
-        # No fallback against a shared role anywhere in the resolution logic.
-        assert "var.lambda_role_arn" not in lambda_tf
 
-    def test_cognito_module_has_no_legacy_fallback(self) -> None:
-        cognito_tf = COGNITO_TF.read_text()
-        assert 'variable "lambda_execution_role_arn"' not in cognito_tf
-        assert "coalesce(" not in cognito_tf
+class TestLambdaModuleHasNoSharedFallback:
+    def test_no_shared_role_variable(self) -> None:
+        assert "lambda_role_arn" not in _variables(LAMBDA_DOC)
+
+    def test_role_resolution_indexes_domain_map_directly(self) -> None:
+        merged = _locals(LAMBDA_DOC)
+        for local_name in ("app_role_arn", "trigger_role_arn"):
+            expr = merged[local_name]
+            assert "var.lambda_domain_role_arns" in expr, (
+                f"local.{local_name} must resolve non-admin functions through the domain-role map"
+            )
+            assert "var.lambda_role_arn" not in expr, f"local.{local_name} must not fall back to a shared role"
+            assert "coalesce" not in expr, f"local.{local_name} must not coalesce a shared-role fallback"
+
+
+class TestCognitoModuleHasNoLegacyFallback:
+    def test_admin_policy_targets_admin_role_variable(self) -> None:
+        assert "lambda_execution_role_arn" not in _variables(COGNITO_DOC)
+        admin_var = _variable_attrs(COGNITO_DOC, "lambda_admin_execution_role_arn")
+        assert "default" not in admin_var, "admin role ARN must be required (no fallback default)"
+        policy = first_resource(COGNITO_DOC, "aws_iam_role_policy", "lambda_cognito_admin")
+        assert "var.lambda_admin_execution_role_arn" in policy["role"], (
+            "the Cognito admin policy must attach to the dedicated admin role (#121); "
+            "the monolithic shared role was retired in #355"
+        )
 
 
 class TestEveryFunctionHasScopedRole:
     """Every non-admin function key resolves via lambda_domain_role_arns in all envs."""
 
-    def _all_function_keys(self) -> List[str]:
-        lambda_tf = LAMBDA_TF.read_text()
-        admin_keys = set(_extract_list(lambda_tf, "admin_function_keys"))
-        admin_keys |= set(_extract_list(lambda_tf, "admin_trigger_keys"))
-        keys = _extract_map_keys(lambda_tf, "functions") + _extract_map_keys(lambda_tf, "trigger_functions")
-        return [k for k in keys if k not in admin_keys]
-
     def test_all_non_admin_functions_have_domain_entries(self) -> None:
-        function_keys = self._all_function_keys()
-        assert len(function_keys) > 0
+        function_keys = _all_function_keys()
+        assert function_keys
         for env in ENVIRONMENTS:
-            env_tf = (REPO_ROOT / "tofu" / "application" / "environments" / env / "main.tf").read_text()
-            domain_keys = set(_extract_map_keys(env_tf, "lambda_domain_role_arns"))
-            missing = [k for k in function_keys if k not in domain_keys]
+            domain_map = _lambda_module_block(env)["lambda_domain_role_arns"]
+            missing = [k for k in function_keys if k not in domain_map]
             assert not missing, f"{env}: functions missing a lambda_domain_role_arns entry: {missing}"
-            assert "post-auth" in domain_keys, f"{env}: post-auth trigger must map to the scoped post-auth role"
+            assert domain_map["post-auth"] == "${module.iam.lambda_post_auth_execution_role_arn}", (
+                f"{env}: post-auth trigger must map to the scoped post-auth role"
+            )
 
     def test_environments_pass_no_monolithic_wiring(self) -> None:
         for env in ENVIRONMENTS:
-            env_tf = (REPO_ROOT / "tofu" / "application" / "environments" / env / "main.tf").read_text()
-            assert "lambda_execution_role_arn" not in env_tf, f"{env}: legacy monolithic wiring remains"
-            assert "lambda_role_arn" not in env_tf, f"{env}: shared fallback wiring remains"
-            assert "lambda_post_auth_execution_role_arn" in env_tf, f"{env}: post-auth role not wired"
-
-
-class TestRecoveryImportsMatchRetirement:
-    """The recovery script imports the post-auth role, not the retired one."""
-
-    def test_recovery_imports(self) -> None:
-        recover_sh = RECOVER_SH.read_text()
-        assert "module.iam.aws_iam_role.lambda_execution" not in recover_sh
-        assert "lambda_exec_role" not in recover_sh
-        assert "module.iam.aws_iam_role.lambda_post_auth_execution" in recover_sh
-        assert "module.iam.aws_iam_role_policy_attachment.lambda_post_auth_basic" in recover_sh
-        assert "module.iam.aws_iam_role_policy.lambda_post_auth_dynamodb" in recover_sh
+            attrs = _lambda_module_block(env)
+            legacy = {"lambda_role_arn", "lambda_execution_role_arn"} & {
+                k for k in attrs if not k.startswith("__")
+            }
+            assert not legacy, f"{env}: legacy monolithic/shared role wiring remains: {sorted(legacy)}"
