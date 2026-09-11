@@ -108,12 +108,6 @@ One CloudFront distribution (`tofu/application/modules/cloudfront/`) serves ever
 - #166 ships via `aws_cloudfront_response_headers_policy.security` on the default behavior (CSP incl. `frame-ancestors 'none'`, XFO DENY, nosniff, Referrer-Policy, HSTS max-age=300). The frontend `<meta>` CSP stays until a later tightening phase.
 - The GitHub deploy role (`arn:aws:iam::750620721302:role/GitHubActionsKernelworxDev`, managed outside this repo) needs `wafv2:*` and CloudFront function permissions for deploys to succeed.
 
-### Temporary: legacy-OAI destroy scaffold, gen 2 (#376 deploy fix)
+### Legacy-OAI migration complete (#335/#359/#377, scaffold removed in KW-OAI-SCAFFOLD-CLEANUP-1)
 
-`#335`/`#359` removed `aws_cloudfront_origin_access_identity.main` from `tofu/application/modules/cloudfront/main.tf`, leaving a dangling destroy that fails deploys with `CloudFrontOriginAccessIdentityInUse` (CloudFront's InUse check runs against the live config, which stops referencing the OAI only once the OAC cutover Deploys). The gen-1 fix (`#374`, `count = 0` re-add + `depends_on`) did NOT work: `depends_on` inside a `count = 0` block is inert — no graph node — so the stale instance's destroy ran unordered and 409'd (prod run 34409731134). The gen-2 scaffold (remove in `KW-OAI-SCAFFOLD-CLEANUP-1` once the OAI is gone from every environment):
-
-- A `removed` block (`lifecycle { destroy = false }`) makes OpenTofu FORGET the legacy OAI in state instead of scheduling a provider destroy.
-- `terraform_data.legacy_oai_destroy_gate` does the real destroy out-of-band: local-exec polls `get-distribution` until `Deployed` (≤30 min), then looks up the legacy OAI **by its pre-#335 comment `OAI for <site_domain>`** and deletes it via CLI with `--if-match` ETag. Dev and prod share AWS account 750620721302, so ids are account-global — never hardcode one environment's id. No match / `NoSuch` passes idempotently; more than one exact comment match fails loudly and deletes nothing; `InUse` retries ~20 min.
-- `aws_s3_bucket_policy.static` keeps its `depends_on` on the gate (principal flip must wait for the cutover to Deploy).
-
-Do not reintroduce an `aws_cloudfront_origin_access_identity` resource or a `count = 0` + `depends_on` ordering pattern; `tests/unit/test_cloudfront_oac.py` asserts the strict no-OAI contract.
+`aws_cloudfront_origin_access_identity` is gone from every environment (state forgotten via a `removed` block, real destroy done out-of-band by a `terraform_data` gate in PR 377) and the one-time scaffold has been removed from `tofu/application/modules/cloudfront/main.tf`. Do not reintroduce an `aws_cloudfront_origin_access_identity` resource or a `count = 0` + `depends_on` ordering pattern (`depends_on` inside a `count = 0` block is inert — no graph node); `tests/unit/test_cloudfront_oac.py` asserts the strict no-OAI contract.
