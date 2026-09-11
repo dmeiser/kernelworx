@@ -218,7 +218,7 @@ import_ephemeral_resources() {
 
   # IAM roles
   log "   Importing IAM roles..."
-  local lambda_exec_role="kernelworx-lambda-exec${suffix}"
+  local lambda_post_auth_exec_role="kernelworx-lambda-post-auth-exec${suffix}"
   local lambda_admin_exec_role="kernelworx-lambda-admin-exec${suffix}"
   local lambda_campaign_exec_role="kernelworx-lambda-campaign-exec${suffix}"
   local lambda_profile_sharing_exec_role="kernelworx-lambda-profile-sharing-exec${suffix}"
@@ -228,7 +228,9 @@ import_ephemeral_resources() {
   local cognito_sms_role="kernelworx${suffix}-UserPoolsmsRole"
   local appsync_logging_role="kernelworx-api${suffix}-logs"
 
-  import_resource "$run_id" "module.iam.aws_iam_role.lambda_execution" "$lambda_exec_role"
+  # #355 retired the monolithic shared execution role (kernelworx-lambda-exec-*);
+  # it has no import here because it no longer exists in the configuration.
+  import_resource "$run_id" "module.iam.aws_iam_role.lambda_post_auth_execution" "$lambda_post_auth_exec_role"
   import_resource "$run_id" "module.iam.aws_iam_role.lambda_admin_execution" "$lambda_admin_exec_role"
   import_resource "$run_id" "module.iam.aws_iam_role.lambda_campaign_execution" "$lambda_campaign_exec_role"
   import_resource "$run_id" "module.iam.aws_iam_role.lambda_profile_sharing_execution" "$lambda_profile_sharing_exec_role"
@@ -241,10 +243,8 @@ import_ephemeral_resources() {
   # IAM policy attachments and inline policies. These must be in state so that
   # `tofu destroy` can detach/delete them before removing the parent roles.
   log "   Importing IAM policies..."
-  import_resource "$run_id" "module.iam.aws_iam_role_policy_attachment.lambda_basic" "${lambda_exec_role}/arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
-  import_resource "$run_id" "module.iam.aws_iam_role_policy.lambda_dynamodb" "${lambda_exec_role}:dynamodb-access"
-  import_resource "$run_id" "module.iam.aws_iam_role_policy.lambda_s3" "${lambda_exec_role}:s3-access"
-  import_resource "$run_id" "module.iam.aws_iam_role_policy.lambda_cloudfront" "${lambda_exec_role}:cloudfront-invalidation"
+  import_resource "$run_id" "module.iam.aws_iam_role_policy_attachment.lambda_post_auth_basic" "${lambda_post_auth_exec_role}/arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+  import_resource "$run_id" "module.iam.aws_iam_role_policy.lambda_post_auth_dynamodb" "${lambda_post_auth_exec_role}:dynamodb-access"
 
   import_resource "$run_id" "module.iam.aws_iam_role_policy_attachment.lambda_admin_basic" "${lambda_admin_exec_role}/arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
   import_resource "$run_id" "module.iam.aws_iam_role_policy.lambda_admin_dynamodb" "${lambda_admin_exec_role}:dynamodb-access"

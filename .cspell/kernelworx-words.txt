@@ -37,6 +37,7 @@ awsjson
 awsurl
 backend
 boto
+botocore
 Bricolage
 bucketName
 Bundler

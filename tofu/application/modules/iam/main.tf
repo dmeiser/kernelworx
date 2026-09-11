@@ -52,29 +52,22 @@ locals {
 }
 
 # =============================================================================
-# Lambda Execution Role
+# Shared Lambda assume-role policy and admin-role policy documents
 # =============================================================================
-
-# TODO(#75): This is a shared execution role used by every Lambda. It currently
-# grants broad DynamoDB/S3 access to all functions. Hardening step: split into
-# per-function roles scoped to the tables/buckets each handler actually needs.
+#
+# #326 (completed by #355): the monolithic shared Lambda execution role
+# (kernelworx-lambda-exec-*) was retired once every Lambda function moved to a
+# scoped per-domain role (campaign #351, profile/sharing #352, payment #353,
+# account/reporting #354) or the Cognito-trigger roles below (post-auth here,
+# pre-signup on the admin role via #121). No function falls back to a shared
+# role anymore; the lambda module fails the plan loudly if a function lacks a
+# role entry.
 #
 # #121: Cognito admin/destructive actions (AdminDeleteUser,
 # AdminResetUserPassword, AdminLinkProviderForUser, ListUsers) are isolated on
 # the separate aws_iam_role.lambda_admin_execution role, assigned only to the
-# admin-operations, delete-account, and pre-signup functions. The shared role
-# below no longer grants any Cognito admin permissions, so a buggy or
+# admin-operations, delete-account, and pre-signup functions, so a buggy or
 # compromised non-admin handler cannot delete users or reset passwords.
-
-resource "aws_iam_role" "lambda_execution" {
-  name = "${var.name_prefix}-lambda-exec${local.role_suffix}"
-
-  assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
-
-  lifecycle {
-    prevent_destroy = var.prevent_destroy
-  }
-}
 
 data "aws_iam_policy_document" "lambda_assume_role" {
   statement {
@@ -88,12 +81,9 @@ data "aws_iam_policy_document" "lambda_assume_role" {
   }
 }
 
-resource "aws_iam_role_policy_attachment" "lambda_basic" {
-  role       = aws_iam_role.lambda_execution.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
-}
-
 # Lambda DynamoDB Access
+# Shared by the admin role's inline policy; the scoped per-domain roles have
+# their own narrower documents.
 data "aws_iam_policy_document" "lambda_dynamodb" {
   statement {
     effect = "Allow"
@@ -109,12 +99,6 @@ data "aws_iam_policy_document" "lambda_dynamodb" {
     ]
     resources = concat(local.dynamodb_table_arns, local.dynamodb_index_arns)
   }
-}
-
-resource "aws_iam_role_policy" "lambda_dynamodb" {
-  name   = "dynamodb-access"
-  role   = aws_iam_role.lambda_execution.id
-  policy = data.aws_iam_policy_document.lambda_dynamodb.json
 }
 
 # Lambda S3 Access
@@ -140,12 +124,6 @@ data "aws_iam_policy_document" "lambda_s3" {
   }
 }
 
-resource "aws_iam_role_policy" "lambda_s3" {
-  name   = "s3-access"
-  role   = aws_iam_role.lambda_execution.id
-  policy = data.aws_iam_policy_document.lambda_s3.json
-}
-
 # Lambda CloudFront Access
 # Scope invalidations to the site distribution used by the application.
 # Omitted when no CloudFront distribution is configured (e.g. ephemeral environments).
@@ -159,12 +137,54 @@ data "aws_iam_policy_document" "lambda_cloudfront" {
   }
 }
 
-resource "aws_iam_role_policy" "lambda_cloudfront" {
-  count = var.cloudfront_distribution_arn != null ? 1 : 0
+# =============================================================================
+# Lambda Post-Auth Trigger Execution Role (#355, chunk 5 of the #326 IAM role split)
+# =============================================================================
+#
+# Scoped execution role for the Cognito post-authentication / post-confirmation
+# account-bootstrap trigger (handlers/post_authentication.py). This was the
+# last function on the retired monolithic shared role. DynamoDB scope was
+# verified against the handler source: it only creates or refreshes the
+# caller's own Account record in the accounts table —
+#   - GetItem:    existence check before create-vs-update
+#   - PutItem:    create the Account record on first sign-in
+#   - UpdateItem: refresh updatedAt (and email when present)
+# No other table, no S3, no CloudFront, no Cognito admin actions (it performs
+# no admin calls, so it does NOT belong on the #121 admin role; pre-signup
+# stays there). The trigger receives this role via the lambda module's
+# lambda_domain_role_arns map (key "post-auth") in each environment.
 
-  name   = "cloudfront-invalidation"
-  role   = aws_iam_role.lambda_execution.id
-  policy = data.aws_iam_policy_document.lambda_cloudfront[0].json
+resource "aws_iam_role" "lambda_post_auth_execution" {
+  name = "${var.name_prefix}-lambda-post-auth-exec${local.role_suffix}"
+
+  assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
+
+  lifecycle {
+    prevent_destroy = var.prevent_destroy
+  }
+}
+
+resource "aws_iam_role_policy_attachment" "lambda_post_auth_basic" {
+  role       = aws_iam_role.lambda_post_auth_execution.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+data "aws_iam_policy_document" "lambda_post_auth_dynamodb" {
+  statement {
+    effect = "Allow"
+    actions = [
+      "dynamodb:GetItem",
+      "dynamodb:PutItem",
+      "dynamodb:UpdateItem",
+    ]
+    resources = [var.dynamodb_table_arns["accounts"]]
+  }
+}
+
+resource "aws_iam_role_policy" "lambda_post_auth_dynamodb" {
+  name   = "dynamodb-access"
+  role   = aws_iam_role.lambda_post_auth_execution.id
+  policy = data.aws_iam_policy_document.lambda_post_auth_dynamodb.json
 }
 
 # =============================================================================
@@ -172,12 +192,12 @@ resource "aws_iam_role_policy" "lambda_cloudfront" {
 # =============================================================================
 #
 # Separate role for the small set of Lambda handlers that perform Cognito admin
-# actions (admin-operations, delete-account, pre-signup). It carries the same
-# DynamoDB/S3/CloudFront access as the shared role, plus the Cognito admin
-# policy attached in the cognito module (see lambda_admin_execution_role_arn).
-# Isolating these destructive actions means the other ~16 functions cannot
-# delete Cognito users or reset passwords even if their handler is buggy or
-# compromised. See issue #121.
+# actions (admin-operations, delete-account, pre-signup). It carries broad
+# DynamoDB/S3/CloudFront access (the shared policy documents above), plus the
+# Cognito admin policy attached in the cognito module (see
+# lambda_admin_execution_role_arn). Isolating these destructive actions means
+# the other functions cannot delete Cognito users or reset passwords even if
+# their handler is buggy or compromised. See issue #121.
 
 resource "aws_iam_role" "lambda_admin_execution" {
   name = "${var.name_prefix}-lambda-admin-exec${local.role_suffix}"
@@ -236,7 +256,7 @@ resource "aws_iam_role_policy" "lambda_admin_cloudfront" {
 # batch_writer issues BatchWriteItem, which cannot be restricted to
 # delete-only at the IAM action level). No S3, CloudFront, or Cognito
 # permissions: neither handler touches those services. The monolithic shared
-# role is intentionally NOT narrowed here — that is the final chunk (#355).
+# role was retired in #355 (chunk 5), the final chunk of the #326 split.
 
 locals {
   campaign_table_keys = ["campaigns", "orders", "profiles", "shares"]
@@ -315,8 +335,8 @@ resource "aws_iam_role_policy" "lambda_campaign_dynamodb" {
 # reports/<profileId>/ in the exports bucket (ListBucketVersions +
 # DeleteObject/DeleteObjectVersion on that prefix only). The other two
 # handlers do not touch S3. No CloudFront or Cognito permissions.
-# The monolithic shared role is intentionally NOT narrowed here — that is the
-# final chunk (#355).
+# The monolithic shared role was retired in #355 (chunk 5), the final chunk of
+# the #326 split.
 
 locals {
   profile_sharing_table_keys = ["profiles", "shares", "invites", "campaigns", "orders"]
@@ -461,8 +481,8 @@ resource "aws_iam_role_policy" "lambda_profile_sharing_s3" {
 # (the pre-signed GET from generate-qr-code-presigned-url is authorized by
 # the s3:GetObject grant below). Scoped to the payment-qr-codes/* prefix
 # only. No KMS (bucket is not SSE-KMS), CloudFront, or Cognito permissions.
-# The monolithic shared role is intentionally NOT narrowed here — that is the
-# final chunk (#355).
+# The monolithic shared role was retired in #355 (chunk 5), the final chunk of
+# the #326 split.
 
 locals {
   payment_table_keys         = ["accounts", "profiles", "shares"]
@@ -595,8 +615,8 @@ resource "aws_iam_role_policy" "lambda_payment_s3" {
 # role's policy, so the role must also hold s3:GetObject on the reports
 # prefix (same reasoning as the #353 payment role's QR prefix). Scoped to
 # the reports/* prefix only. No CloudFront or Cognito permissions. The
-# monolithic shared role is intentionally NOT narrowed here — that is the
-# final chunk (#355).
+# monolithic shared role was retired in #355 (chunk 5), the final chunk of
+# the #326 split.
 
 locals {
   account_reporting_table_keys = ["profiles", "shares", "campaigns", "orders", "catalogs"]
@@ -791,14 +811,9 @@ resource "aws_iam_role_policy" "cognito_sms" {
 # Outputs
 # =============================================================================
 
-output "lambda_execution_role_arn" {
-  description = "ARN of the Lambda execution role"
-  value       = aws_iam_role.lambda_execution.arn
-}
-
-output "lambda_execution_role_name" {
-  description = "Name of the Lambda execution role"
-  value       = aws_iam_role.lambda_execution.name
+output "lambda_post_auth_execution_role_arn" {
+  description = "ARN of the scoped Lambda execution role for the Cognito post-auth account-bootstrap trigger (accounts table only). Added in #355 (chunk 5 of the #326 per-domain role split) when the monolithic shared role was retired; wired via lambda_domain_role_arns with key post-auth."
+  value       = aws_iam_role.lambda_post_auth_execution.arn
 }
 
 output "lambda_admin_execution_role_arn" {

@@ -15,26 +15,23 @@ variable "name_prefix" {
   type        = string
 }
 
-variable "lambda_role_arn" {
-  description = "IAM role ARN assumed by the Lambda functions"
-  type        = string
-}
-
 variable "lambda_admin_role_arn" {
-  description = "IAM role ARN for the small set of handlers that perform Cognito admin/destructive actions (admin-operations, delete-account, pre-signup). When null, those functions use lambda_role_arn. See issue #121."
+  description = "IAM role ARN for the small set of handlers that perform Cognito admin/destructive actions (admin-operations, delete-account, pre-signup). When null, those functions must have entries in lambda_domain_role_arns like every other function. See issue #121."
   type        = string
   default     = null
 }
 
-# #326 IAM role split: map of function key to a scoped per-domain execution
-# role ARN. This is the reusable wiring mechanism for the per-domain roles
-# created in the iam module — each follow-up chunk adds its domain role as a
-# new iam-module output plus entries here mapping its function keys to that
-# ARN. The admin role (when set) still takes precedence for admin handlers;
-# otherwise a domain-role entry takes precedence over the shared monolithic
-# role. Unknown keys are ignored so domains can be added incrementally without breaking planning.
+# #326 IAM role split (completed by #355): map of Lambda function key (app or
+# Cognito trigger) to a scoped per-domain execution role ARN. This is the
+# reusable wiring mechanism for the per-domain roles created in the iam
+# module — each chunk added its domain role as a new iam-module output plus
+# entries here mapping its function keys to that ARN. The monolithic shared
+# role was retired in #355, so EVERY non-admin function must have an entry;
+# the resolution locals below index this map directly and a missing entry
+# fails the plan loudly instead of silently falling back to a broad role.
+# The admin role (when set) still takes precedence for admin handlers.
 variable "lambda_domain_role_arns" {
-  description = "Map of app function key to a scoped per-domain Lambda execution role ARN (#326 IAM role split). Takes precedence over lambda_role_arn; the admin role still wins for admin handlers."
+  description = "Map of Lambda function key (app or trigger) to a scoped per-domain Lambda execution role ARN (#326 IAM role split). Every non-admin function must have an entry; the admin role still wins for admin handlers."
   type        = map(string)
   default     = {}
 }
@@ -197,20 +194,21 @@ locals {
   admin_trigger_keys  = ["pre-signup"]
 }
 
-# Role resolution per app function, in precedence order:
-#   1. Admin role (#121) when configured and the function is an admin handler.
-#   2. Domain role (#326) when the function key has an entry in
-#      var.lambda_domain_role_arns — the per-domain role split mechanism that
-#      follow-up chunks extend with their own role(s).
-#   3. The shared monolithic role.
+# Role resolution per function, in precedence order:
+#   1. Admin role (#121) when configured and the function is an admin handler
+#      or Cognito admin trigger (pre-signup).
+#   2. Domain role (#326) via var.lambda_domain_role_arns. Every other
+#      function MUST have an entry — the monolithic shared role was retired
+#      in #355, so the direct map index fails the plan loudly when an entry
+#      is missing rather than silently falling back to a broad role.
 locals {
   app_role_arn = {
     for k in keys(local.functions) :
-    k => (var.lambda_admin_role_arn != null && contains(local.admin_function_keys, k) ? var.lambda_admin_role_arn : lookup(var.lambda_domain_role_arns, k, var.lambda_role_arn))
+    k => (var.lambda_admin_role_arn != null && contains(local.admin_function_keys, k) ? var.lambda_admin_role_arn : var.lambda_domain_role_arns[k])
   }
   trigger_role_arn = {
     for k in keys(local.trigger_functions) :
-    k => (var.lambda_admin_role_arn != null && contains(local.admin_trigger_keys, k) ? var.lambda_admin_role_arn : var.lambda_role_arn)
+    k => (var.lambda_admin_role_arn != null && contains(local.admin_trigger_keys, k) ? var.lambda_admin_role_arn : var.lambda_domain_role_arns[k])
   }
 }
 

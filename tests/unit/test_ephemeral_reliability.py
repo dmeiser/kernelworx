@@ -540,11 +540,14 @@ class TestImportEphemeralResources:
         result = run_bash(repo_root, script)
         assert result.returncode == 0, result.stderr
         calls = recorded.read_text()
-        assert "module.iam.aws_iam_role.lambda_execution" in calls
+        # #355 retired the monolithic shared role (module.iam.aws_iam_role.lambda_execution)
+        # and its policies; the post-auth scoped role replaces it in recovery imports.
+        assert "module.iam.aws_iam_role.lambda_execution" not in calls
+        assert "module.iam.aws_iam_role.lambda_post_auth_execution" in calls
         assert "module.iam.aws_iam_role.lambda_admin_execution" in calls
-        assert "module.iam.aws_iam_role_policy_attachment.lambda_basic" in calls
+        assert "module.iam.aws_iam_role_policy_attachment.lambda_post_auth_basic" in calls
         assert "module.iam.aws_iam_role_policy_attachment.lambda_admin_basic" in calls
-        assert "module.iam.aws_iam_role_policy.lambda_dynamodb" in calls
+        assert "module.iam.aws_iam_role_policy.lambda_post_auth_dynamodb" in calls
         assert "module.iam.aws_iam_role_policy.lambda_admin_dynamodb" in calls
         assert "module.iam.aws_iam_role_policy.lambda_admin_s3" in calls
         assert "module.iam.aws_iam_role_policy.lambda_admin_cloudfront" in calls
@@ -613,7 +616,7 @@ class TestImportEphemeralResources:
         calls = recorded.read_text()
         # Despite accounts failing, subsequent tables and resources should still have been imported
         assert "module.dynamodb.aws_dynamodb_table.catalogs" in calls
-        assert "module.iam.aws_iam_role.lambda_execution" in calls
+        assert "module.iam.aws_iam_role.lambda_post_auth_execution" in calls
 
 
 class TestEmptyEphemeralS3Buckets:

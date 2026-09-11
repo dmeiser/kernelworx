@@ -58,15 +58,11 @@ variable "sms_role_arn" {
   type        = string
 }
 
-variable "lambda_execution_role_arn" {
-  description = "ARN of the Lambda execution role. The scoped Cognito admin policy is attached to lambda_admin_execution_role_arn when set, otherwise to this role (legacy)."
-  type        = string
-}
-
+# #355 retired the monolithic shared Lambda execution role; the scoped
+# Cognito admin policy always attaches to the dedicated admin role (#121).
 variable "lambda_admin_execution_role_arn" {
-  description = "ARN of the dedicated Lambda admin execution role that should receive the Cognito admin policy. When null, the policy falls back to lambda_execution_role_arn for backward compatibility."
+  description = "ARN of the dedicated Lambda admin execution role that receives the Cognito admin policy (always set; there is no shared-role fallback since #355)."
   type        = string
-  default     = null
 }
 
 variable "enable_google_idp" {
@@ -306,9 +302,9 @@ data "aws_iam_policy_document" "lambda_cognito_admin" {
 
 resource "aws_iam_role_policy" "lambda_cognito_admin" {
   name = "cognito-admin"
-  # Attach to the dedicated admin role when configured (#121); otherwise fall
-  # back to the shared execution role for backward compatibility.
-  role   = regex("^.*/(.+)$", coalesce(var.lambda_admin_execution_role_arn, var.lambda_execution_role_arn))[0]
+  # Attach to the dedicated admin role (#121). The monolithic shared
+  # execution role was retired in #355, so there is no fallback target.
+  role   = regex("^.*/(.+)$", var.lambda_admin_execution_role_arn)[0]
   policy = data.aws_iam_policy_document.lambda_cognito_admin.json
 }
 
