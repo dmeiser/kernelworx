@@ -191,9 +191,9 @@ module "cognito" {
   callback_urls                = local.cognito_callback_urls
   logout_urls                  = local.cognito_logout_urls
 
-  lambda_execution_role_arn = module.iam.lambda_execution_role_arn
-  # #121: attach the Cognito admin policy to the isolated admin role, not the
-  # shared execution role used by every Lambda.
+  # #121: attach the Cognito admin policy to the isolated admin role. The
+  # monolithic shared execution role was retired in #355, so there is no
+  # fallback role to attach it to.
   lambda_admin_execution_role_arn = module.iam.lambda_admin_execution_role_arn
   # Cognito trigger Lambdas (restored from CDK configuration)
   enable_lambda_triggers       = true
@@ -209,15 +209,15 @@ module "cognito" {
 module "lambda" {
   source = "../../modules/lambda"
 
-  environment     = var.environment
-  region_abbrev   = var.region_abbrev
-  name_prefix     = local.name_prefix
-  lambda_role_arn = module.iam.lambda_execution_role_arn
+  environment   = var.environment
+  region_abbrev = var.region_abbrev
+  name_prefix   = local.name_prefix
   # #121: admin-operations, delete-account, and pre-signup use the isolated
   # admin role that carries the Cognito admin policy.
   lambda_admin_role_arn = module.iam.lambda_admin_execution_role_arn
-  # #351 (chunk 1 of #326): campaign-domain handlers use the scoped campaign
-  # execution role. Follow-up chunks add their domain functions to this map.
+  # #326 per-domain role split (completed by #355): every non-admin function
+  # maps to a scoped domain role below. The monolithic shared role is retired,
+  # so a function missing from this map fails the plan.
   lambda_domain_role_arns = {
     "delete-campaign-orders" = module.iam.lambda_campaign_execution_role_arn
     "unit-reporting"         = module.iam.lambda_campaign_execution_role_arn
@@ -238,6 +238,10 @@ module "lambda" {
     "list-catalogs-in-use"        = module.iam.lambda_account_reporting_execution_role_arn
     "list-unit-catalogs"          = module.iam.lambda_account_reporting_execution_role_arn
     "list-unit-campaign-catalogs" = module.iam.lambda_account_reporting_execution_role_arn
+    # #355 (chunk 5 of #326, final): the Cognito post-auth account-bootstrap
+    # trigger uses its own scoped role (accounts table only). The monolithic
+    # shared role is retired.
+    "post-auth" = module.iam.lambda_post_auth_execution_role_arn
   }
   exports_bucket_name = module.s3.exports_bucket_name
 
