@@ -45,7 +45,7 @@ Chunk 1 (#351) established the pattern chunks 2-4 reused; chunk 5 (#355) retired
 
 ### Lambda IAM role isolation for Cognito admin actions (#121)
 
-Destructive Cognito actions (`AdminDeleteUser`, `AdminResetUserPassword`, `AdminLinkProviderForUser`, `ListUsers`) are isolated on a dedicated `aws_iam_role.lambda_admin_execution` role, assigned only to the `admin-operations`, `delete-account`, and `pre-signup` functions. When adding a new handler that needs these APIs, add its logical key to `local.admin_function_keys` or `local.admin_trigger_keys` in `tofu/application/modules/lambda/main.tf` so it receives the admin role. The shared Lambda execution role no longer grants any Cognito admin permissions.
+Destructive Cognito actions (`AdminDeleteUser`, `AdminResetUserPassword`, `AdminLinkProviderForUser`, `ListUsers`) are isolated on a dedicated `aws_iam_role.lambda_admin_execution` role, assigned only to the `admin-operations`, `delete-account`, and `pre-signup` functions. When adding a new handler that needs these APIs, add its logical key to `local.admin_function_keys` or `local.admin_trigger_keys` in `tofu/application/modules/lambda/main.tf` so it receives the admin role. Only this role carries Cognito admin permissions — the monolithic shared execution role was retired in #355, so no non-admin handler can delete users or reset passwords.
 
 ### AppSync pipeline function/datasource deletion ordering (#198, #298–#301)
 

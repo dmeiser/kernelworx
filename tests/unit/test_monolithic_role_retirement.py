@@ -109,9 +109,7 @@ class TestMonolithicRoleRemoved:
 
     def test_iam_module_declares_no_monolithic_role(self) -> None:
         assert all(label != "lambda_execution" for label, _ in resources(IAM_DOC, "aws_iam_role"))
-        assert all(
-            label != "lambda_basic" for label, _ in resources(IAM_DOC, "aws_iam_role_policy_attachment")
-        )
+        assert all(label != "lambda_basic" for label, _ in resources(IAM_DOC, "aws_iam_role_policy_attachment"))
         retired_policies = {"lambda_dynamodb", "lambda_s3", "lambda_cloudfront"}
         policy_labels = {label for label, _ in resources(IAM_DOC, "aws_iam_role_policy")}
         assert retired_policies.isdisjoint(policy_labels), (
@@ -193,7 +191,5 @@ class TestEveryFunctionHasScopedRole:
     def test_environments_pass_no_monolithic_wiring(self) -> None:
         for env in ENVIRONMENTS:
             attrs = _lambda_module_block(env)
-            legacy = {"lambda_role_arn", "lambda_execution_role_arn"} & {
-                k for k in attrs if not k.startswith("__")
-            }
+            legacy = {"lambda_role_arn", "lambda_execution_role_arn"} & {k for k in attrs if not k.startswith("__")}
             assert not legacy, f"{env}: legacy monolithic/shared role wiring remains: {sorted(legacy)}"
