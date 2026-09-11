@@ -18,6 +18,7 @@
     "cspell.json",
     "**/node_modules/**",
     "frontend/dist/**",
+    "tofu/application/appsync/dist/**",
     "frontend/coverage/**",
     "frontend/playwright-report/**",
     "frontend/test-results/**",
