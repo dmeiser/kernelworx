@@ -7,10 +7,8 @@ from src.utils.validation import (
     MAX_SELLER_NAME_LENGTH,
     VALID_UNIT_TYPES,
     CreateCampaignInput,
-    CreateProfileInput,
     CreateSellerProfileInput,
     UpdateCampaignInput,
-    UpdateProfileInput,
     UpdateSellerProfileInput,
     _extract_field,
     normalize_phone,
@@ -457,7 +455,7 @@ class TestExtractField:
 
 
 class TestCreateSellerProfileInput:
-    """Tests for CreateSellerProfileInput and CreateProfileInput."""
+    """Tests for CreateSellerProfileInput."""
 
     def test_minimal_valid_initialization(self) -> None:
         """Test creating model with only required seller_name."""
@@ -535,13 +533,9 @@ class TestCreateSellerProfileInput:
         d = model.to_dict(exclude_none=True)
         assert d == {"sellerName": "Scout", "unitType": "Pack"}
 
-    def test_alias_create_profile_input(self) -> None:
-        """Test CreateProfileInput is alias of CreateSellerProfileInput."""
-        assert CreateProfileInput is CreateSellerProfileInput
-
 
 class TestUpdateSellerProfileInput:
-    """Tests for UpdateSellerProfileInput and UpdateProfileInput."""
+    """Tests for UpdateSellerProfileInput."""
 
     def test_valid_initialization(self) -> None:
         """Test valid update profile initialization."""
@@ -603,10 +597,6 @@ class TestUpdateSellerProfileInput:
         assert "unitType" in model.to_dict()
         assert "unitType" not in model.to_dict(exclude_none=True)
         assert model.to_dict(camel_case=False)["profile_id"] == "p-1"
-
-    def test_alias_update_profile_input(self) -> None:
-        """Test UpdateProfileInput is alias of UpdateSellerProfileInput."""
-        assert UpdateProfileInput is UpdateSellerProfileInput
 
 
 class TestCreateCampaignInput:

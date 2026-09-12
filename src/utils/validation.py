@@ -2,6 +2,12 @@
 Input validation utilities.
 
 Validates customer information, phone numbers, addresses, etc.
+
+The typed input models in this module (CreateSellerProfileInput,
+UpdateSellerProfileInput, CreateCampaignInput, UpdateCampaignInput) are
+additive: they mirror the AppSync resolver validation semantics but are not
+yet wired into request handling. That wiring is tracked as follow-up task
+KW-VALIDATION-WIRING-1.
 """
 
 import re
@@ -344,8 +350,6 @@ class CreateSellerProfileInput:
         return res
 
 
-CreateProfileInput = CreateSellerProfileInput
-
 
 @dataclass
 class UpdateSellerProfileInput:
@@ -403,8 +407,6 @@ class UpdateSellerProfileInput:
             return {k: v for k, v in res.items() if v is not None}
         return res
 
-
-UpdateProfileInput = UpdateSellerProfileInput
 
 
 @dataclass
