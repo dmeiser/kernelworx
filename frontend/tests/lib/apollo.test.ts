@@ -29,6 +29,11 @@ describe('lib/apollo', () => {
       const msg = mapErrorCodeToMessage('UNKNOWN_CODE', 'fallback');
       expect(msg).toBe('fallback');
     });
+
+    it('preserves exact "MFA required" message regardless of error code', () => {
+      expect(mapErrorCodeToMessage('FORBIDDEN', 'MFA required')).toBe('MFA required');
+      expect(mapErrorCodeToMessage(undefined, 'MFA required')).toBe('MFA required');
+    });
   });
 
   describe('getAuthContext', () => {
@@ -90,6 +95,53 @@ describe('lib/apollo', () => {
       expect(ev.detail.message).toContain('You do not have permission');
 
       window.removeEventListener('graphql-error', handler as any);
+    });
+
+    it('dispatches mfa-required event when GraphQL error message is "MFA required"', () => {
+      const mfaHandler = vi.fn();
+      window.addEventListener('mfa-required', mfaHandler as any);
+
+      const graphQLErrors = [
+        {
+          message: 'MFA required',
+          locations: [{ line: 1, column: 1 }],
+          path: ['adminDeleteUser'],
+          extensions: { errorCode: 'FORBIDDEN' },
+        },
+      ];
+
+      const error = new CombinedGraphQLErrors({
+        errors: graphQLErrors,
+      });
+
+      handleApolloError({
+        error,
+        operation: { operationName: 'AdminDeleteUser' },
+      } as any);
+
+      expect(mfaHandler).toHaveBeenCalledTimes(1);
+      const ev = (mfaHandler.mock.calls[0] as any)[0];
+      expect(ev.detail).toMatchObject({ message: 'MFA required', operation: 'AdminDeleteUser' });
+
+      window.removeEventListener('mfa-required', mfaHandler as any);
+    });
+
+    it('dispatches mfa-required event when network error message is "MFA required"', () => {
+      const mfaHandler = vi.fn();
+      window.addEventListener('mfa-required', mfaHandler as any);
+
+      const error = new Error('MFA required');
+
+      handleApolloError({
+        error,
+        operation: { operationName: 'AdminOperation' },
+      } as any);
+
+      expect(mfaHandler).toHaveBeenCalledTimes(1);
+      const ev = (mfaHandler.mock.calls[0] as any)[0];
+      expect(ev.detail).toMatchObject({ message: 'MFA required', operation: 'AdminOperation' });
+
+      window.removeEventListener('mfa-required', mfaHandler as any);
     });
 
     it('dispatches network error event for generic errors', () => {
