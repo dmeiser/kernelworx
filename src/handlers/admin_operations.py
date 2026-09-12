@@ -14,7 +14,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
-from typing import TYPE_CHECKING, Any, Dict, NoReturn, Optional, cast
+from typing import TYPE_CHECKING, Any, Callable, Dict, NoReturn, Optional, cast
 
 import boto3
 from botocore.exceptions import ClientError
@@ -98,6 +98,11 @@ def _raise_batch_lookup_error(operation: str, logger: Any, error: Exception, **c
     raise AppError(ErrorCode.INTERNAL_ERROR, f"Failed to {operation}") from error
 
 
+def _batch_get_unprocessed_keys(response: Dict[str, Any], table_name: str) -> list[Dict[str, Any]]:
+    """Extract the unprocessed keys DynamoDB reports for a table in a BatchGetItem response."""
+    return cast(list[Dict[str, Any]], response.get("UnprocessedKeys", {}).get(table_name, {}).get("Keys", []))
+
+
 def _get_user_groups(cognito: Any, user_pool_id: str, username: str, logger: Any) -> list[str]:
     """Get the groups a user belongs to; failures raise a typed AppError (#291)."""
     try:
@@ -118,25 +123,95 @@ def _batch_get_user_groups(cognito: Any, user_pool_id: str, usernames: list[str]
     AppError (retryable RESOURCE_BUSY on throttling) so the admin UI shows an
     error instead of silently incomplete group data (#291).
     """
-    groups_map: dict[str, list[str]] = {}
     unique_usernames = list(dict.fromkeys(u for u in usernames if u))
     if not unique_usernames:
-        return groups_map
+        return {}
 
     def _fetch(username: str) -> tuple[str, list[str]]:
         return username, _get_user_groups(cognito, user_pool_id, username, logger)
 
+    return _collect_parallel_keyed_results(_fetch, unique_usernames, "load user groups", logger)
+
+
+def _collect_parallel_keyed_results(
+    fetch: Callable[[Any], tuple[Any, Any]], items: list[Any], operation: str, logger: Any
+) -> dict[Any, Any]:
+    """Run per-item fetch calls in parallel and collect (key, value) pairs into a dict.
+
+    AppErrors (including retryable RESOURCE_BUSY) propagate unchanged; any other
+    exception is translated via _raise_batch_lookup_error.
+    """
+    results: dict[Any, Any] = {}
     try:
         with ThreadPoolExecutor(max_workers=10) as executor:
-            results = executor.map(_fetch, unique_usernames)
-        for username, groups in results:
-            groups_map[username] = groups
+            for key, value in executor.map(fetch, items):
+                results[key] = value
     except AppError:
         raise
     except Exception as e:
-        _raise_batch_lookup_error("load user groups", logger, e)
+        _raise_batch_lookup_error(operation, logger, e)
+    return results
 
-    return groups_map
+
+# DynamoDB caps BatchGetItem at 100 keys per request.
+_ACCOUNTS_BATCH_GET_LIMIT = 100
+
+
+def _dedupe_account_keys(account_ids: list[str]) -> list[Dict[str, str]]:
+    """Build the de-duplicated BatchGetItem keys for the Accounts table."""
+    seen: set[str] = set()
+    keys: list[Dict[str, str]] = []
+    for account_id in account_ids:
+        db_account_id = account_id if account_id.startswith("ACCOUNT#") else f"ACCOUNT#{account_id}"
+        if db_account_id in seen:
+            continue
+        seen.add(db_account_id)
+        keys.append({"accountId": db_account_id})
+    return keys
+
+
+def _apply_display_name_item(item: Dict[str, Any], display_names: dict[str, str]) -> None:
+    """Store an account item's display name (when it has one) in the map."""
+    raw_id = item.get("accountId", "")
+    key = raw_id[8:] if raw_id.startswith("ACCOUNT#") else raw_id
+    given_name = str(item.get("givenName", ""))
+    family_name = str(item.get("familyName", ""))
+    if given_name or family_name:
+        display_names[key] = f"{given_name} {family_name}".strip()
+
+
+def _fetch_display_name_attempt(
+    keys_to_fetch: list[Dict[str, str]],
+    accounts_table_name: str,
+    display_names: dict[str, str],
+    attempt: int,
+    logger: Any,
+) -> list[Dict[str, Any]]:
+    """Run one BatchGetItem attempt; store returned names and return unprocessed keys."""
+    response = get_dynamodb_resource().batch_get_item(RequestItems={accounts_table_name: {"Keys": keys_to_fetch}})
+    for item in response.get("Responses", {}).get(accounts_table_name, []):
+        _apply_display_name_item(item, display_names)
+
+    unprocessed = _batch_get_unprocessed_keys(response, accounts_table_name)
+    if unprocessed and attempt < 2:
+        logger.warning(
+            "Unprocessed display-name keys, retrying",
+            attempt=attempt + 1,
+            count=len(unprocessed),
+        )
+        time.sleep(0.05 * (2**attempt))
+    return unprocessed
+
+
+def _fetch_display_names_chunk(
+    keys: list[Dict[str, str]], accounts_table_name: str, display_names: dict[str, str], logger: Any
+) -> None:
+    """Fetch one 100-key chunk, retrying unprocessed keys for up to 3 attempts."""
+    keys_to_fetch = keys
+    for attempt in range(3):
+        if not keys_to_fetch:
+            break
+        keys_to_fetch = _fetch_display_name_attempt(keys_to_fetch, accounts_table_name, display_names, attempt, logger)
 
 
 def _batch_get_display_names(account_ids: list[str], logger: Any) -> dict[str, str]:
@@ -146,47 +221,17 @@ def _batch_get_display_names(account_ids: list[str], logger: Any) -> dict[str, s
     so the admin UI shows an error instead of silently incomplete names (#291).
     """
     display_names: dict[str, str] = {}
-    if not account_ids:
+    keys = _dedupe_account_keys(account_ids)
+    if not keys:
         return display_names
-
-    seen: set[str] = set()
-    keys: list[Dict[str, str]] = []
-    for account_id in account_ids:
-        db_account_id = account_id if account_id.startswith("ACCOUNT#") else f"ACCOUNT#{account_id}"
-        if db_account_id in seen:
-            continue
-        seen.add(db_account_id)
-        keys.append({"accountId": db_account_id})
 
     accounts_table_name = _get_required_env("ACCOUNTS_TABLE_NAME")
 
     try:
-        for i in range(0, len(keys), 100):
-            batch = keys[i : i + 100]
-            keys_to_fetch = batch
-            for attempt in range(3):
-                if not keys_to_fetch:
-                    break
-                response = get_dynamodb_resource().batch_get_item(
-                    RequestItems={accounts_table_name: {"Keys": keys_to_fetch}}
-                )
-                for item in response.get("Responses", {}).get(accounts_table_name, []):
-                    raw_id = item.get("accountId", "")
-                    key = raw_id[8:] if raw_id.startswith("ACCOUNT#") else raw_id
-                    given_name = str(item.get("givenName", ""))
-                    family_name = str(item.get("familyName", ""))
-                    if given_name or family_name:
-                        display_names[key] = f"{given_name} {family_name}".strip()
-
-                unprocessed = response.get("UnprocessedKeys", {}).get(accounts_table_name, {}).get("Keys", [])
-                keys_to_fetch = unprocessed
-                if keys_to_fetch and attempt < 2:
-                    logger.warning(
-                        "Unprocessed display-name keys, retrying",
-                        attempt=attempt + 1,
-                        count=len(keys_to_fetch),
-                    )
-                    time.sleep(0.05 * (2**attempt))
+        for i in range(0, len(keys), _ACCOUNTS_BATCH_GET_LIMIT):
+            _fetch_display_names_chunk(
+                keys[i : i + _ACCOUNTS_BATCH_GET_LIMIT], accounts_table_name, display_names, logger
+            )
     except Exception as e:
         _raise_batch_lookup_error("load display names", logger, e)
 
@@ -418,6 +463,81 @@ def _scan_accounts_page(paginator_params: Dict[str, Any]) -> tuple[list[Dict[str
     return items, last_key
 
 
+# Limit search results to prevent overwhelming responses.
+_ACCOUNT_SEARCH_MAX_RESULTS = 50
+# Safety limit on how many account items a search scan may read.
+_ACCOUNTS_SCAN_SAFETY_LIMIT = 1000
+
+
+def _looks_like_full_email(query: str) -> bool:
+    """Check whether the query is a full email (local@domain.tld)."""
+    return "@" in query and bool(re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", query))
+
+
+def _try_email_index_gsi(query: str, query_lower: str, max_results: int, logger: Any) -> list[Dict[str, Any]] | None:
+    """Look a full email up via the email-index GSI.
+
+    Returns the matching items (capped at max_results), or None when the
+    query is not a full email or the GSI lookup fails or returns nothing,
+    in which case the caller falls back to a scan.
+    """
+    if not _looks_like_full_email(query):
+        return None
+    try:
+        gsi_response = tables.accounts.query(
+            IndexName="email-index",
+            KeyConditionExpression="email = :email",
+            ExpressionAttributeValues={":email": query_lower},
+        )
+        gsi_items = cast(list[Dict[str, Any]], gsi_response.get("Items", []))
+        if gsi_items:
+            return gsi_items[:max_results]
+    except ClientError as e:
+        logger.warning(
+            "DynamoDB email-index query failed, falling back to scan",
+            error=str(e),
+            query=mask_email(query),
+        )
+    return None
+
+
+def _scan_accounts_page_into(
+    paginator_params: Dict[str, Any], query_lower: str, matches: list[Dict[str, Any]], max_results: int
+) -> tuple[int, Dict[str, Any] | None]:
+    """Scan one page and append its matching accounts to matches. Returns (page_size, last_key)."""
+    items, last_key = _scan_accounts_page(paginator_params)
+    _filter_matching_accounts(items, query_lower, matches, max_results)
+    return len(items), last_key
+
+
+def _warn_if_accounts_scan_truncated(
+    scanned_count: int, last_key: Dict[str, Any] | None, query: str, logger: Any
+) -> None:
+    """Warn when the account scan stopped at the safety limit with more pages left."""
+    if scanned_count >= _ACCOUNTS_SCAN_SAFETY_LIMIT and last_key:
+        logger.warning(
+            "DynamoDB accounts search reached max scan limit; results may be truncated",
+            query=mask_email(query),
+            scanned_count=scanned_count,
+        )
+
+
+def _scan_accounts_matches(query: str, query_lower: str, max_results: int, logger: Any) -> list[Dict[str, Any]]:
+    """Scan the Accounts table, collecting matches until the result/scan limits are hit."""
+    matches: list[Dict[str, Any]] = []
+    scanned_count = 0
+    paginator_params: Dict[str, Any] = {}
+    last_key: Dict[str, Any] | None = None
+    while scanned_count < _ACCOUNTS_SCAN_SAFETY_LIMIT and len(matches) < max_results:
+        count, last_key = _scan_accounts_page_into(paginator_params, query_lower, matches, max_results)
+        scanned_count += count
+        if not last_key:
+            break
+        paginator_params["ExclusiveStartKey"] = last_key
+    _warn_if_accounts_scan_truncated(scanned_count, last_key, query, logger)
+    return matches
+
+
 def _search_accounts_in_dynamodb(query: str, logger: Any) -> list[Dict[str, Any]]:
     """
     Search DynamoDB Accounts table with case-insensitive partial matching.
@@ -427,56 +547,12 @@ def _search_accounts_in_dynamodb(query: str, logger: Any) -> list[Dict[str, Any]
     Returns all matching accounts (up to max_results limit).
     """
     query_lower = query.lower()
-    matches: list[Dict[str, Any]] = []
-    max_results = 50  # Limit results to prevent overwhelming responses
 
     try:
-        # Check email-index GSI first for full email queries
-        if "@" in query and re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", query):
-            try:
-                gsi_response = tables.accounts.query(
-                    IndexName="email-index",
-                    KeyConditionExpression="email = :email",
-                    ExpressionAttributeValues={":email": query_lower},
-                )
-                gsi_items = cast(list[Dict[str, Any]], gsi_response.get("Items", []))
-                if gsi_items:
-                    return gsi_items[:max_results]
-            except ClientError as e:
-                logger.warning(
-                    "DynamoDB email-index query failed, falling back to scan",
-                    error=str(e),
-                    query=mask_email(query),
-                )
-
-        # Scan accounts and filter in Python for case-insensitive matching
-        paginator_params: Dict[str, Any] = {}
-        scanned_count = 0
-        max_scan = 1000  # Safety limit
-
-        last_key: Dict[str, Any] | None = None
-        while scanned_count < max_scan and len(matches) < max_results:
-            items, last_key = _scan_accounts_page(paginator_params)
-
-            _filter_matching_accounts(items, query_lower, matches, max_results)
-
-            scanned_count += len(items)
-
-            # Check for more pages
-            if last_key:
-                paginator_params["ExclusiveStartKey"] = last_key
-            else:
-                break
-
-        if scanned_count >= max_scan and last_key:
-            logger.warning(
-                "DynamoDB accounts search reached max scan limit; results may be truncated",
-                query=mask_email(query),
-                scanned_count=scanned_count,
-            )
-
-        return matches
-
+        gsi_items = _try_email_index_gsi(query, query_lower, _ACCOUNT_SEARCH_MAX_RESULTS, logger)
+        if gsi_items is not None:
+            return gsi_items
+        return _scan_accounts_matches(query, query_lower, _ACCOUNT_SEARCH_MAX_RESULTS, logger)
     except ClientError as e:
         logger.warning("DynamoDB search failed", error=str(e), query=mask_email(query))
         return []
@@ -850,19 +926,12 @@ def admin_delete_user(event: Dict[str, Any], context: Any) -> bool:
     return True
 
 
-def _validate_and_process_product(product: Dict[str, Any]) -> Dict[str, Any]:
-    """Validate and process a catalog product, returning processed product dict.
+def _parse_product_price(price: Any) -> Decimal:
+    """Convert a product price (number or numeric string) to a validated Decimal.
 
-    Price may arrive as a number or a numeric string (e.g. from AppSync JSON
-    deserialization); it is converted to Decimal before validation and storage.
-    Non-numeric or unparsable values raise INVALID_INPUT.
+    A missing price, a non-numeric/unparsable value, or a negative price
+    raises INVALID_INPUT.
     """
-    product_name = product.get("productName", "").strip()
-    price = product.get("price")
-    sort_order = product.get("sortOrder", 0)
-
-    if not product_name:
-        raise AppError(ErrorCode.INVALID_INPUT, "Product name is required")
     if price is None:
         raise AppError(ErrorCode.INVALID_INPUT, "Valid product price is required")
 
@@ -873,12 +942,26 @@ def _validate_and_process_product(product: Dict[str, Any]) -> Dict[str, Any]:
 
     if price_decimal < 0:
         raise AppError(ErrorCode.INVALID_INPUT, "Valid product price is required")
+    return price_decimal
+
+
+def _validate_and_process_product(product: Dict[str, Any]) -> Dict[str, Any]:
+    """Validate and process a catalog product, returning processed product dict.
+
+    Price may arrive as a number or a numeric string (e.g. from AppSync JSON
+    deserialization); it is converted to Decimal before validation and storage.
+    Non-numeric or unparsable values raise INVALID_INPUT.
+    """
+    product_name = product.get("productName", "").strip()
+
+    if not product_name:
+        raise AppError(ErrorCode.INVALID_INPUT, "Product name is required")
 
     processed_product: Dict[str, Any] = {
         "productId": f"PRODUCT#{uuid.uuid4()}",
         "productName": product_name,
-        "price": price_decimal,
-        "sortOrder": sort_order,
+        "price": _parse_product_price(product.get("price")),
+        "sortOrder": product.get("sortOrder", 0),
     }
 
     description = product.get("description", "").strip()
@@ -1349,6 +1432,78 @@ def _extract_unique_catalog_ids(campaigns: list[Dict[str, Any]]) -> list[str]:
     return catalog_ids
 
 
+def _fetch_catalog_batch_attempt(
+    keys_to_fetch: list[Dict[str, str]],
+    catalogs_table_name: str,
+    catalog_map: Dict[str, Dict[str, Any]],
+    attempt: int,
+    logger: Any,
+) -> list[Dict[str, Any]]:
+    """Run one BatchGetItem attempt; store returned items and return unprocessed keys."""
+    response = get_dynamodb_resource().batch_get_item(RequestItems={catalogs_table_name: {"Keys": keys_to_fetch}})
+    for item in response.get("Responses", {}).get(catalogs_table_name, []):
+        catalog_map[item["catalogId"]] = item
+
+    unprocessed = _batch_get_unprocessed_keys(response, catalogs_table_name)
+    if unprocessed and attempt < 2:
+        logger.warning(
+            "Unprocessed catalog keys, retrying",
+            attempt=attempt + 1,
+            count=len(unprocessed),
+        )
+        time.sleep(0.05 * (2**attempt))
+    return unprocessed
+
+
+def _fetch_catalog_keys_with_retry(
+    keys: list[Dict[str, str]], catalogs_table_name: str, catalog_map: Dict[str, Dict[str, Any]], logger: Any
+) -> list[Dict[str, Any]]:
+    """Fetch one 100-key chunk, retrying unprocessed keys for up to 3 attempts.
+
+    Returns the keys still unprocessed after the final attempt.
+    """
+    keys_to_fetch = keys
+    for attempt in range(3):
+        if not keys_to_fetch:
+            break
+        keys_to_fetch = _fetch_catalog_batch_attempt(keys_to_fetch, catalogs_table_name, catalog_map, attempt, logger)
+    return keys_to_fetch
+
+
+def _batch_get_catalog_items(
+    catalog_ids: list[str], catalogs_table_name: str, logger: Any
+) -> Dict[str, Dict[str, Any]]:
+    """Chunked BatchGetItem over catalog ids; raises AppError if keys stay unprocessed."""
+    catalog_map: Dict[str, Dict[str, Any]] = {}
+    for i in range(0, len(catalog_ids), _CATALOG_BATCH_GET_LIMIT):
+        batch = [{"catalogId": catalog_id} for catalog_id in catalog_ids[i : i + _CATALOG_BATCH_GET_LIMIT]]
+        keys_to_fetch = _fetch_catalog_keys_with_retry(batch, catalogs_table_name, catalog_map, logger)
+        if keys_to_fetch:
+            raise AppError(
+                ErrorCode.INTERNAL_ERROR,
+                f"DynamoDB BatchGetItem failed to return {len(keys_to_fetch)} keys after retries",
+            )
+    return catalog_map
+
+
+def _campaign_catalog_value(catalog: Dict[str, Any] | None, treat_deleted_as_null: bool) -> Dict[str, Any] | None:
+    """Map a fetched catalog to its Campaign/SharedCampaign catalog contract value."""
+    if catalog is not None and treat_deleted_as_null and catalog.get("isDeleted") is True:
+        return None
+    return catalog
+
+
+def _attach_campaign_catalogs(
+    campaigns: list[Dict[str, Any]], catalog_map: Dict[str, Dict[str, Any]], treat_deleted_as_null: bool
+) -> None:
+    """Attach each campaign's fetched catalog, mapping missing/soft-deleted per contract."""
+    for campaign in campaigns:
+        catalog_id = campaign.get("catalogId")
+        if not catalog_id:
+            continue
+        campaign["catalog"] = _campaign_catalog_value(catalog_map.get(catalog_id), treat_deleted_as_null)
+
+
 def _batch_get_campaign_catalogs(campaigns: list[Dict[str, Any]], treat_deleted_as_null: bool, logger: Any) -> None:
     """Batch-fetch the catalogs referenced by campaigns and attach each as `catalog`.
 
@@ -1370,49 +1525,14 @@ def _batch_get_campaign_catalogs(campaigns: list[Dict[str, Any]], treat_deleted_
         return
 
     catalogs_table_name = _get_required_env("CATALOGS_TABLE_NAME")
-    catalog_map: Dict[str, Dict[str, Any]] = {}
-
     try:
-        for i in range(0, len(catalog_ids), _CATALOG_BATCH_GET_LIMIT):
-            batch = [{"catalogId": catalog_id} for catalog_id in catalog_ids[i : i + _CATALOG_BATCH_GET_LIMIT]]
-            keys_to_fetch = batch
-            for attempt in range(3):
-                if not keys_to_fetch:
-                    break
-                response = get_dynamodb_resource().batch_get_item(
-                    RequestItems={catalogs_table_name: {"Keys": keys_to_fetch}}
-                )
-                for item in response.get("Responses", {}).get(catalogs_table_name, []):
-                    catalog_map[item["catalogId"]] = item
-
-                unprocessed = response.get("UnprocessedKeys", {}).get(catalogs_table_name, {}).get("Keys", [])
-                keys_to_fetch = unprocessed
-                if keys_to_fetch and attempt < 2:
-                    logger.warning(
-                        "Unprocessed catalog keys, retrying",
-                        attempt=attempt + 1,
-                        count=len(keys_to_fetch),
-                    )
-                    time.sleep(0.05 * (2**attempt))
-            if keys_to_fetch:
-                raise AppError(
-                    ErrorCode.INTERNAL_ERROR,
-                    f"DynamoDB BatchGetItem failed to return {len(keys_to_fetch)} keys after retries",
-                )
+        catalog_map = _batch_get_catalog_items(catalog_ids, catalogs_table_name, logger)
     except AppError:
         raise
     except Exception as e:
         _raise_batch_lookup_error("load campaign catalogs", logger, e)
 
-    for campaign in campaigns:
-        catalog_id = campaign.get("catalogId")
-        if not catalog_id:
-            continue
-        catalog = catalog_map.get(catalog_id)
-        if catalog is not None and treat_deleted_as_null and catalog.get("isDeleted") is True:
-            campaign["catalog"] = None
-        else:
-            campaign["catalog"] = catalog
+    _attach_campaign_catalogs(campaigns, catalog_map, treat_deleted_as_null)
 
 
 def _get_campaigns_for_profiles(profiles: list[Dict[str, Any]], logger: Any) -> list[Dict[str, Any]]:
