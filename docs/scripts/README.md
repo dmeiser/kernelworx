@@ -202,7 +202,7 @@ lock cleanup, state recovery, resource importing, and CloudWatch log group clean
 
 ### GitHub Actions workflows (`.github/workflows/`)
 
-- **`ci.yml`** — Standard CI pipeline (spellcheck + lint + typecheck + test + guards)
+- **`ci.yml`** — Standard CI pipeline (spellcheck + lint + typecheck + complexity + test + guards)
 - **`deploy-dev.yml`** / **`deploy-prod.yml`** — Environment deployment workflows
 - **`deploy-shared.yml`** — Shared infrastructure (Cognito, CloudFront, WAF) deployment
 - **`ephemeral-test.yml`** — Ephemeral environment test creation/destruction
@@ -236,6 +236,15 @@ lock cleanup, state recovery, resource importing, and CloudWatch log group clean
 
 ## Development Notes
 
+- **Complexity gate (xenon over radon)** — CI fails when the average cyclomatic
+  complexity of `src/` exceeds Grade A (<=5) or any single block exceeds Grade B
+  (<=10): `uv run xenon --max-average A --max-absolute B src/`. Three files
+  (`src/handlers/admin_operations.py`, `src/utils/payment_methods.py`,
+  `src/utils/logging.py`) are excluded because they contain legacy Grade C blocks
+  (5 functions, CC 11-17); drop their exclusions as those functions are
+  refactored, then tighten `--max-absolute` to A once every function grades A.
+  Radon remains the analysis engine — run `uv run radon cc src/ -a -s` for
+  per-function detail.
 - **`build-resolvers.mjs`** must be run (or triggered automatically by deploy scripts) before
   any `tofu` command that references AppSync functions or resolvers, because `file()` calls
   in the OpenTofu configuration evaluate the bundled output.
