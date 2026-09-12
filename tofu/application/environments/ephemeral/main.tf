@@ -67,7 +67,7 @@ provider "aws" {
 variable "encryption_passphrase" {
   type        = string
   sensitive   = true
-  description = "Passphrase for state encryption (from ENCRYPTION_PASSPHRASE env var)"
+  description = "Passphrase for state encryption (from TF_VAR_encryption_passphrase env var)"
 }
 
 variable "aws_region" {
