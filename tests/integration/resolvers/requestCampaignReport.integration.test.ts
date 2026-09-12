@@ -141,6 +141,45 @@ const REVOKE_SHARE = gql`
   }
 `;
 
+const GET_PROFILE = gql`
+  query GetProfile($profileId: ID!) {
+    getProfile(profileId: $profileId) {
+      profileId
+      sellerName
+    }
+  }
+`;
+
+/**
+ * Wait until a freshly created profile is visible through the read path used
+ * by campaign mutations. createCampaign/deleteCampaign authorize via the
+ * eventually-consistent profileId-index GSI (verify_profile_write_access_fn),
+ * so a profile created moments earlier can still raise `Profile not found`.
+ * getProfile reads the same GSI, making it a truthful poll target.
+ */
+async function waitForProfileVisible(client: any, profileId: string): Promise<void> {
+  const maxAttempts = 20;
+  const delayMs = 500;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const result = await client.query({
+        query: GET_PROFILE,
+        variables: { profileId },
+        fetchPolicy: 'network-only',
+      });
+      if (result.data?.getProfile?.profileId) {
+        return;
+      }
+    } catch (err: any) {
+      if (!err?.message?.includes('Profile not found') || attempt === maxAttempts) {
+        throw err;
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+  }
+  throw new Error(`Profile ${profileId} did not become visible via profileId-index GSI`);
+}
+
 async function requestReportWithRetry(
   client: any,
   input: { campaignId: string; format?: string },
@@ -208,6 +247,7 @@ describe('requestCampaignReport Integration Tests', () => {
       },
     });
     testProfileId = profileResponse.data.createSellerProfile.profileId;
+    await waitForProfileVisible(ownerClient, testProfileId);
 
     // Create test catalog
     const catalogResponse = await ownerClient.mutate({
@@ -527,6 +567,7 @@ describe('requestCampaignReport Integration Tests', () => {
         },
       });
       const unsharedProfileId = unsharedProfileResponse.data.createSellerProfile.profileId;
+      await waitForProfileVisible(ownerClient, unsharedProfileId);
 
       const unsharedCatalogResponse = await ownerClient.mutate({
         mutation: CREATE_CATALOG,
