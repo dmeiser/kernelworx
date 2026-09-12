@@ -339,7 +339,7 @@ resource "aws_dynamodb_table" "campaigns" {
 # ============================================================================
 # Orders Table
 # PK: campaignId, SK: orderId
-# GSI: orderId-index, profileId-index (profileId, createdAt)
+# GSI: orderId-index
 # ============================================================================
 resource "aws_dynamodb_table" "orders" {
   name                        = "${var.name_prefix}-orders${local.table_suffix}"
@@ -358,16 +358,6 @@ resource "aws_dynamodb_table" "orders" {
     type = "S"
   }
 
-  attribute {
-    name = "profileId"
-    type = "S"
-  }
-
-  attribute {
-    name = "createdAt"
-    type = "S"
-  }
-
   global_secondary_index {
     name            = "orderId-index"
     projection_type = "ALL"
@@ -375,21 +365,6 @@ resource "aws_dynamodb_table" "orders" {
     key_schema {
       attribute_name = "orderId"
       key_type       = "HASH"
-    }
-  }
-
-  global_secondary_index {
-    name            = "profileId-index"
-    projection_type = "ALL"
-
-    key_schema {
-      attribute_name = "profileId"
-      key_type       = "HASH"
-    }
-
-    key_schema {
-      attribute_name = "createdAt"
-      key_type       = "RANGE"
     }
   }
 

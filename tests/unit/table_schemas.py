@@ -185,7 +185,6 @@ def create_orders_table_schema() -> dict[str, Any]:
     Key structure: PK=campaignId, SK=orderId
     GSIs:
     - orderId-index: direct order lookup
-    - profileId-index: list all orders for a profile
     """
     return {
         "TableName": "kernelworx-orders-v2-ue1-dev",
@@ -196,20 +195,12 @@ def create_orders_table_schema() -> dict[str, Any]:
         "AttributeDefinitions": [
             {"AttributeName": "campaignId", "AttributeType": "S"},
             {"AttributeName": "orderId", "AttributeType": "S"},
-            {"AttributeName": "profileId", "AttributeType": "S"},
         ],
         "GlobalSecondaryIndexes": [
             {
                 "IndexName": "orderId-index",
                 "KeySchema": [
                     {"AttributeName": "orderId", "KeyType": "HASH"},
-                ],
-                "Projection": {"ProjectionType": "ALL"},
-            },
-            {
-                "IndexName": "profileId-index",
-                "KeySchema": [
-                    {"AttributeName": "profileId", "KeyType": "HASH"},
                 ],
                 "Projection": {"ProjectionType": "ALL"},
             },
