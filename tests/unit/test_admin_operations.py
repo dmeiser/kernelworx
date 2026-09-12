@@ -5529,9 +5529,7 @@ class TestBatchGetCampaignCatalogs:
 
     def test_soft_deleted_contract_matches_field_resolvers(self, dynamodb_table: Any, catalogs_table: Any) -> None:
         """Campaign keeps the raw soft-deleted item; SharedCampaign maps it to None."""
-        catalogs_table.put_item(
-            Item={"catalogId": "CATALOG#deleted", "catalogName": "Old", "isDeleted": True}
-        )
+        catalogs_table.put_item(Item={"catalogId": "CATALOG#deleted", "catalogName": "Old", "isDeleted": True})
         campaign = [{"campaignId": "C1", "catalogId": "CATALOG#deleted"}]
         shared = [{"sharedCampaignCode": "S1", "catalogId": "CATALOG#deleted"}]
 
@@ -5552,8 +5550,16 @@ class TestBatchGetCampaignCatalogs:
 
         with patch("src.handlers.admin_operations.get_dynamodb_resource") as mock_resource:
             mock_resource.return_value.batch_get_item.side_effect = [
-                {"Responses": {}, "UnprocessedKeys": {"kernelworx-catalogs-ue1-dev": {"Keys": [{"catalogId": "CATALOG#a"}]}}},
-                {"Responses": {"kernelworx-catalogs-ue1-dev": [{"catalogId": "CATALOG#a", "catalogName": "Catalog A"}]}, "UnprocessedKeys": {}},
+                {
+                    "Responses": {},
+                    "UnprocessedKeys": {"kernelworx-catalogs-ue1-dev": {"Keys": [{"catalogId": "CATALOG#a"}]}},
+                },
+                {
+                    "Responses": {
+                        "kernelworx-catalogs-ue1-dev": [{"catalogId": "CATALOG#a", "catalogName": "Catalog A"}]
+                    },
+                    "UnprocessedKeys": {},
+                },
             ]
 
             _batch_get_campaign_catalogs(campaigns, treat_deleted_as_null=False, logger=MagicMock())
