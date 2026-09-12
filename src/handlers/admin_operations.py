@@ -157,7 +157,7 @@ def _collect_parallel_keyed_results(
 _ACCOUNTS_BATCH_GET_LIMIT = 100
 
 
-def _dedupe_account_keys(account_ids: list[str]) -> list[Dict[str, str]]:
+def _dedup_account_keys(account_ids: list[str]) -> list[Dict[str, str]]:
     """Build the de-duplicated BatchGetItem keys for the Accounts table."""
     seen: set[str] = set()
     keys: list[Dict[str, str]] = []
@@ -221,7 +221,7 @@ def _batch_get_display_names(account_ids: list[str], logger: Any) -> dict[str, s
     so the admin UI shows an error instead of silently incomplete names (#291).
     """
     display_names: dict[str, str] = {}
-    keys = _dedupe_account_keys(account_ids)
+    keys = _dedup_account_keys(account_ids)
     if not keys:
         return display_names
 
