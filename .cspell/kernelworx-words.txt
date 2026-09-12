@@ -53,6 +53,7 @@ cfield
 changelog
 chdir
 checkmarx
+checkpointed
 chipProps
 cityState
 clsx
@@ -112,6 +113,8 @@ fieldset
 fileName
 finditer
 findme
+firstmate
+Firstmate
 fontSize
 fontsource
 formData
@@ -259,6 +262,7 @@ pycache
 pyproject
 pytest
 pytestmark
+pyvenv
 QLAPI
 qrcode
 qrCode
