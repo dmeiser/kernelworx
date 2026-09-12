@@ -22,8 +22,10 @@ import pytest
 from botocore.exceptions import ClientError
 
 from src.handlers.admin_operations import (
+    _batch_get_campaign_catalogs,
     _batch_get_display_names,
     _batch_get_user_groups,
+    _extract_unique_catalog_ids,
     admin_delete_user,
     admin_list_users,
     admin_reset_user_password,
@@ -5421,6 +5423,181 @@ class TestAdminGetUserSharedCampaigns:
             mock_query_all.assert_called_once()
             call_kwargs = mock_query_all.call_args[0][1]
             assert call_kwargs["IndexName"] == "GSI1"
+
+    def test_get_user_shared_campaigns_batch_resolves_catalogs(
+        self,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+    ) -> None:
+        """Catalogs are pre-resolved via BatchGetItem, not per-item GetItem (#332)."""
+        catalog = {"catalogId": "CATALOG#cat-1", "catalogName": "Fall Sale"}
+        campaigns = [
+            {"sharedCampaignCode": "ABC123", "catalogId": "CATALOG#cat-1"},
+            {"sharedCampaignCode": "DEF456", "catalogId": "CATALOG#missing"},
+        ]
+
+        with (
+            patch("src.handlers.admin_operations.query_all_items", return_value=campaigns),
+            patch("src.handlers.admin_operations.get_dynamodb_resource") as mock_resource,
+            patch("src.handlers.admin_operations.tables") as mock_tables,
+        ):
+            mock_resource.return_value.batch_get_item.return_value = {
+                "Responses": {"kernelworx-catalogs-ue1-dev": [catalog]},
+                "UnprocessedKeys": {},
+            }
+
+            admin_appsync_event["info"]["fieldName"] = "adminGetUserSharedCampaigns"
+            admin_appsync_event["arguments"] = {"accountId": "batch-catalog-user"}
+
+            result = lambda_handler(admin_appsync_event, lambda_context)
+
+            assert result[0]["catalog"] == catalog
+            assert result[1]["catalog"] is None
+            mock_resource.return_value.batch_get_item.assert_called_once()
+            # The per-item field-resolver read must not run for the catalog.
+            mock_tables.catalogs.get_item.assert_not_called()
+
+    def test_get_user_shared_campaigns_chunks_batch_get_item(
+        self,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+    ) -> None:
+        """A page with >100 distinct catalogs is chunked into 100-key BatchGetItem requests."""
+        campaigns = [{"sharedCampaignCode": f"CODE{i}", "catalogId": f"CATALOG#{i}"} for i in range(150)]
+
+        with (
+            patch("src.handlers.admin_operations.query_all_items", return_value=campaigns),
+            patch("src.handlers.admin_operations.get_dynamodb_resource") as mock_resource,
+        ):
+            mock_resource.return_value.batch_get_item.return_value = {
+                "Responses": {"kernelworx-catalogs-ue1-dev": []},
+                "UnprocessedKeys": {},
+            }
+
+            admin_appsync_event["info"]["fieldName"] = "adminGetUserSharedCampaigns"
+            admin_appsync_event["arguments"] = {"accountId": "big-batch-user"}
+
+            result = lambda_handler(admin_appsync_event, lambda_context)
+
+            assert len(result) == 150
+            assert mock_resource.return_value.batch_get_item.call_count == 2
+            first_keys = mock_resource.return_value.batch_get_item.call_args_list[0][1]["RequestItems"][
+                "kernelworx-catalogs-ue1-dev"
+            ]["Keys"]
+            second_keys = mock_resource.return_value.batch_get_item.call_args_list[1][1]["RequestItems"][
+                "kernelworx-catalogs-ue1-dev"
+            ]["Keys"]
+            assert len(first_keys) == 100
+            assert len(second_keys) == 50
+
+
+class TestBatchGetCampaignCatalogs:
+    """Tests for the #332 admin-side catalog batching helpers."""
+
+    def test_extract_unique_catalog_ids_preserves_first_seen_order(self) -> None:
+        campaigns = [
+            {"campaignId": "C1", "catalogId": "CATALOG#a"},
+            {"campaignId": "C2", "catalogId": "CATALOG#b"},
+            {"campaignId": "C3", "catalogId": "CATALOG#a"},
+            {"campaignId": "C4"},
+            {"campaignId": "C5", "catalogId": "CATALOG#c"},
+        ]
+        assert _extract_unique_catalog_ids(campaigns) == ["CATALOG#a", "CATALOG#b", "CATALOG#c"]
+
+    def test_attaches_catalogs_and_maps_missing_to_none(self, dynamodb_table: Any, catalogs_table: Any) -> None:
+        catalogs_table.put_item(Item={"catalogId": "CATALOG#a", "catalogName": "Catalog A"})
+        campaigns = [
+            {"campaignId": "C1", "catalogId": "CATALOG#a"},
+            {"campaignId": "C2", "catalogId": "CATALOG#missing"},
+            {"campaignId": "C3", "catalogId": ""},
+            {"campaignId": "C4"},
+        ]
+
+        _batch_get_campaign_catalogs(campaigns, treat_deleted_as_null=False, logger=MagicMock())
+
+        assert campaigns[0]["catalog"] == {"catalogId": "CATALOG#a", "catalogName": "Catalog A"}
+        assert campaigns[1]["catalog"] is None
+        assert "catalog" not in campaigns[2]
+        assert "catalog" not in campaigns[3]
+
+    def test_campaign_without_catalog_id_left_untouched(self, dynamodb_table: Any) -> None:
+        campaigns = [{"campaignId": "C1"}]
+
+        _batch_get_campaign_catalogs(campaigns, treat_deleted_as_null=False, logger=MagicMock())
+
+        assert "catalog" not in campaigns[0]
+
+    def test_soft_deleted_contract_matches_field_resolvers(self, dynamodb_table: Any, catalogs_table: Any) -> None:
+        """Campaign keeps the raw soft-deleted item; SharedCampaign maps it to None."""
+        catalogs_table.put_item(Item={"catalogId": "CATALOG#deleted", "catalogName": "Old", "isDeleted": True})
+        campaign = [{"campaignId": "C1", "catalogId": "CATALOG#deleted"}]
+        shared = [{"sharedCampaignCode": "S1", "catalogId": "CATALOG#deleted"}]
+
+        _batch_get_campaign_catalogs(campaign, treat_deleted_as_null=False, logger=MagicMock())
+        _batch_get_campaign_catalogs(shared, treat_deleted_as_null=True, logger=MagicMock())
+
+        assert campaign[0]["catalog"]["isDeleted"] is True
+        assert shared[0]["catalog"] is None
+
+    def test_no_catalog_ids_skips_dynamodb_call(self, dynamodb_table: Any) -> None:
+        with patch("src.handlers.admin_operations.get_dynamodb_resource") as mock_resource:
+            _batch_get_campaign_catalogs([{"campaignId": "C1"}], treat_deleted_as_null=False, logger=MagicMock())
+            mock_resource.return_value.batch_get_item.assert_not_called()
+
+    def test_unprocessed_keys_are_retried(self, dynamodb_table: Any, catalogs_table: Any) -> None:
+        catalogs_table.put_item(Item={"catalogId": "CATALOG#a", "catalogName": "Catalog A"})
+        campaigns = [{"campaignId": "C1", "catalogId": "CATALOG#a"}]
+
+        with patch("src.handlers.admin_operations.get_dynamodb_resource") as mock_resource:
+            mock_resource.return_value.batch_get_item.side_effect = [
+                {
+                    "Responses": {},
+                    "UnprocessedKeys": {"kernelworx-catalogs-ue1-dev": {"Keys": [{"catalogId": "CATALOG#a"}]}},
+                },
+                {
+                    "Responses": {
+                        "kernelworx-catalogs-ue1-dev": [{"catalogId": "CATALOG#a", "catalogName": "Catalog A"}]
+                    },
+                    "UnprocessedKeys": {},
+                },
+            ]
+
+            _batch_get_campaign_catalogs(campaigns, treat_deleted_as_null=False, logger=MagicMock())
+
+            assert mock_resource.return_value.batch_get_item.call_count == 2
+            assert campaigns[0]["catalog"]["catalogName"] == "Catalog A"
+
+    def test_unprocessed_after_retries_raises(self, dynamodb_table: Any) -> None:
+        campaigns = [{"campaignId": "C1", "catalogId": "CATALOG#stuck"}]
+
+        with (
+            patch("src.handlers.admin_operations.get_dynamodb_resource") as mock_resource,
+            patch("src.handlers.admin_operations.time.sleep"),
+        ):
+            mock_resource.return_value.batch_get_item.return_value = {
+                "Responses": {},
+                "UnprocessedKeys": {"kernelworx-catalogs-ue1-dev": {"Keys": [{"catalogId": "CATALOG#stuck"}]}},
+            }
+
+            with pytest.raises(AppError) as exc_info:
+                _batch_get_campaign_catalogs(campaigns, treat_deleted_as_null=False, logger=MagicMock())
+
+            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+
+    def test_throttling_raises_retryable_resource_busy(self, dynamodb_table: Any) -> None:
+        campaigns = [{"campaignId": "C1", "catalogId": "CATALOG#a"}]
+        throttling = ClientError(
+            {"Error": {"Code": "ThrottlingException", "Message": "throttled"}},
+            "BatchGetItem",
+        )
+
+        with patch("src.handlers.admin_operations.get_dynamodb_resource") as mock_resource:
+            mock_resource.return_value.batch_get_item.side_effect = throttling
+
+            with pytest.raises(AppError) as exc_info:
+                _batch_get_campaign_catalogs(campaigns, treat_deleted_as_null=False, logger=MagicMock())
+
+            assert exc_info.value.error_code == ErrorCode.RESOURCE_BUSY
 
 
 class TestAdminGetProfileShares:

@@ -1333,6 +1333,88 @@ def _get_user_profiles(db_account_id: str, logger: Any) -> list[Dict[str, Any]]:
     )
 
 
+# DynamoDB caps BatchGetItem at 100 keys per request.
+_CATALOG_BATCH_GET_LIMIT = 100
+
+
+def _extract_unique_catalog_ids(campaigns: list[Dict[str, Any]]) -> list[str]:
+    """Extract the de-duplicated catalogIds from a campaign array, preserving first-seen order."""
+    catalog_ids: list[str] = []
+    seen: set[str] = set()
+    for campaign in campaigns:
+        catalog_id = campaign.get("catalogId")
+        if catalog_id and catalog_id not in seen:
+            seen.add(catalog_id)
+            catalog_ids.append(catalog_id)
+    return catalog_ids
+
+
+def _batch_get_campaign_catalogs(campaigns: list[Dict[str, Any]], treat_deleted_as_null: bool, logger: Any) -> None:
+    """Batch-fetch the catalogs referenced by campaigns and attach each as `catalog`.
+
+    Mirrors the #332 list-query pipeline batching (batch_get_catalogs_fn.js /
+    batch_get_shared_campaign_catalogs_fn.js) inside the admin Lambda, which
+    can chunk and loop where AppSync pipeline functions cannot. AppSync always
+    executes the attached Campaign.catalog / SharedCampaign.catalog field
+    resolver; since check_source_catalog_fn.js short-circuits when the source
+    already carries `catalog`, attaching it here replaces the per-item GetItem
+    (N+1) the admin campaign lists previously paid.
+
+    Deleted-catalog contract matches the field resolvers: Campaign.catalog
+    returns the raw item including soft-deleted catalogs (treat_deleted_as_null
+    = False); SharedCampaign.catalog maps soft-deleted or missing catalogs to
+    None (treat_deleted_as_null = True).
+    """
+    catalog_ids = _extract_unique_catalog_ids(campaigns)
+    if not catalog_ids:
+        return
+
+    catalogs_table_name = _get_required_env("CATALOGS_TABLE_NAME")
+    catalog_map: Dict[str, Dict[str, Any]] = {}
+
+    try:
+        for i in range(0, len(catalog_ids), _CATALOG_BATCH_GET_LIMIT):
+            batch = [{"catalogId": catalog_id} for catalog_id in catalog_ids[i : i + _CATALOG_BATCH_GET_LIMIT]]
+            keys_to_fetch = batch
+            for attempt in range(3):
+                if not keys_to_fetch:
+                    break
+                response = get_dynamodb_resource().batch_get_item(
+                    RequestItems={catalogs_table_name: {"Keys": keys_to_fetch}}
+                )
+                for item in response.get("Responses", {}).get(catalogs_table_name, []):
+                    catalog_map[item["catalogId"]] = item
+
+                unprocessed = response.get("UnprocessedKeys", {}).get(catalogs_table_name, {}).get("Keys", [])
+                keys_to_fetch = unprocessed
+                if keys_to_fetch and attempt < 2:
+                    logger.warning(
+                        "Unprocessed catalog keys, retrying",
+                        attempt=attempt + 1,
+                        count=len(keys_to_fetch),
+                    )
+                    time.sleep(0.05 * (2**attempt))
+            if keys_to_fetch:
+                raise AppError(
+                    ErrorCode.INTERNAL_ERROR,
+                    f"DynamoDB BatchGetItem failed to return {len(keys_to_fetch)} keys after retries",
+                )
+    except AppError:
+        raise
+    except Exception as e:
+        _raise_batch_lookup_error("load campaign catalogs", logger, e)
+
+    for campaign in campaigns:
+        catalog_id = campaign.get("catalogId")
+        if not catalog_id:
+            continue
+        catalog = catalog_map.get(catalog_id)
+        if catalog is not None and treat_deleted_as_null and catalog.get("isDeleted") is True:
+            campaign["catalog"] = None
+        else:
+            campaign["catalog"] = catalog
+
+
 def _get_campaigns_for_profiles(profiles: list[Dict[str, Any]], logger: Any) -> list[Dict[str, Any]]:
     """Query campaigns for each profile."""
     all_campaigns = []
@@ -1369,6 +1451,9 @@ def admin_get_user_campaigns(event: Dict[str, Any], context: Any) -> list[Dict[s
 
     # Now query campaigns for each profile
     all_campaigns = _get_campaigns_for_profiles(profiles, logger)
+    # Pre-resolve catalogs in one chunked BatchGetItem so the Campaign.catalog
+    # field resolver short-circuits instead of doing per-item GetItem reads (#332).
+    _batch_get_campaign_catalogs(all_campaigns, treat_deleted_as_null=False, logger=logger)
     logger.info("Retrieved user campaigns", account_id=account_id, count=len(all_campaigns))
     return all_campaigns
 
@@ -1396,6 +1481,10 @@ def admin_get_user_shared_campaigns(event: Dict[str, Any], context: Any) -> list
             },
         },
     )
+
+    # Pre-resolve catalogs in one chunked BatchGetItem so the SharedCampaign.catalog
+    # field resolver short-circuits instead of doing per-item GetItem reads (#332).
+    _batch_get_campaign_catalogs(campaigns, treat_deleted_as_null=True, logger=logger)
 
     logger.info("Retrieved user shared campaigns", account_id=account_id, count=len(campaigns))
     return campaigns
