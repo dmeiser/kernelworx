@@ -8,7 +8,7 @@ theme using the Atkinson Hyperlegible and Bricolage Grotesque brand fonts
 
 ## Prerequisites
 
-- Node.js >= 24 (see `.node-version`; `engines` in `package.json`)
+- Node.js >= 24 (see `../.node-version` at the repo root; `engines` in `package.json`)
 - Dependencies installed with `npm ci` from this directory:
 
 ```bash
