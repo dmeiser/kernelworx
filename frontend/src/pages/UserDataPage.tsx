@@ -61,7 +61,7 @@ import { LoadingState } from '../components/LoadingState';
 import { NavBreadcrumbs } from '../components/NavBreadcrumbs';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { formatDisplayDate } from '../lib/date-utils';
-import type { SellerProfile, Catalog, AdminUser } from '../types';
+import type { GqlSellerProfile, GqlCatalog, GqlAdminUser } from '../types';
 
 interface Campaign {
   campaignId: string;
@@ -134,7 +134,7 @@ export const UserDataPage: React.FC = () => {
   const [currentTab, setCurrentTab] = useState(0);
   const [transferProfileId, setTransferProfileId] = useState<string | null>(null);
   const [newOwnerSearch, setNewOwnerSearch] = useState('');
-  const [selectedNewOwner, setSelectedNewOwner] = useState<AdminUser | null>(null);
+  const [selectedNewOwner, setSelectedNewOwner] = useState<GqlAdminUser | null>(null);
   const [editingCampaignId, setEditingCampaignId] = useState<string | null>(null);
   const [editingSharedCode, setEditingSharedCode] = useState('');
   const [selectedProfileForCampaigns, setSelectedProfileForCampaigns] = useState<string | null>(null);
@@ -145,7 +145,7 @@ export const UserDataPage: React.FC = () => {
     loading: profilesLoading,
     error: profilesError,
     refetch: refetchProfiles,
-  } = useQuery<{ adminGetUserProfiles: SellerProfile[] }>(ADMIN_GET_USER_PROFILES, {
+  } = useQuery<{ adminGetUserProfiles: GqlSellerProfile[] }>(ADMIN_GET_USER_PROFILES, {
     variables: { accountId },
     skip: !accountId,
   });
@@ -155,7 +155,7 @@ export const UserDataPage: React.FC = () => {
     data: catalogsData,
     loading: catalogsLoading,
     error: catalogsError,
-  } = useQuery<{ adminGetUserCatalogs: Catalog[] }>(ADMIN_GET_USER_CATALOGS, {
+  } = useQuery<{ adminGetUserCatalogs: GqlCatalog[] }>(ADMIN_GET_USER_CATALOGS, {
     variables: { accountId },
     skip: !accountId,
   });
@@ -199,7 +199,7 @@ export const UserDataPage: React.FC = () => {
 
   // Search for new owner
   const [searchNewOwner, { data: searchData, loading: searchLoading }] = useLazyQuery<{
-    adminSearchUser: AdminUser[];
+    adminSearchUser: GqlAdminUser[];
   }>(ADMIN_SEARCH_USER);
 
   // Transfer ownership mutation

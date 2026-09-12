@@ -16,7 +16,7 @@ import { ErrorAlert } from './ErrorAlert';
 import { LIST_ORDERS_BY_CAMPAIGN } from '../lib/graphql';
 import { ensureCampaignId } from '../lib/ids';
 import { formatCurrency } from '../lib/api-utils';
-import type { Order } from '../types';
+import type { GqlOrder } from '../types';
 
 interface CampaignSummaryTilesProps {
   campaignId: string;
@@ -29,7 +29,7 @@ export const CampaignSummaryTiles: React.FC<CampaignSummaryTilesProps> = ({ camp
     data: ordersData,
     loading,
     error,
-  } = useQuery<{ listOrdersByCampaign: { orders: Order[] } }>(LIST_ORDERS_BY_CAMPAIGN, {
+  } = useQuery<{ listOrdersByCampaign: { orders: GqlOrder[] } }>(LIST_ORDERS_BY_CAMPAIGN, {
     variables: { campaignId: dbCampaignId },
     skip: !dbCampaignId,
   });

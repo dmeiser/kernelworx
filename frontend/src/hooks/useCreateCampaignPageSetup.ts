@@ -14,7 +14,7 @@ import { useSharedCampaignDiscovery } from './useSharedCampaignDiscovery';
 import { useSharedCampaignDiscoveryTrigger } from './useSharedCampaignDiscoveryTrigger';
 import { useCreateCampaignSubmitHandler } from './useCreateCampaignSubmitHandler';
 import { useNavigate } from 'react-router-dom';
-import type { SharedCampaign } from '../types/entities';
+import type { GqlSharedCampaign } from '../types/graphql-generated';
 
 export const useCreateCampaignPageSetup = (effectiveSharedCampaignCode: string | undefined) => {
   const navigate = useNavigate();
@@ -29,7 +29,7 @@ export const useCreateCampaignPageSetup = (effectiveSharedCampaignCode: string |
     data: sharedCampaignData,
     loading: sharedCampaignLoading,
     error: sharedCampaignError,
-  } = useQuery<{ getSharedCampaign: SharedCampaign | null }>(GET_SHARED_CAMPAIGN, {
+  } = useQuery<{ getSharedCampaign: GqlSharedCampaign | null }>(GET_SHARED_CAMPAIGN, {
     variables: { sharedCampaignCode: effectiveSharedCampaignCode },
     skip: !effectiveSharedCampaignCode,
   });

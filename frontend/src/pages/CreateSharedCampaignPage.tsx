@@ -33,7 +33,7 @@ import {
 } from '../lib/graphql';
 import { StateAutocomplete } from '../components/StateAutocomplete';
 import { PageHeader } from '../components/PageHeader';
-import type { Catalog, SharedCampaign } from '../types';
+import type { GqlCatalog, GqlSharedCampaign } from '../types';
 
 /* eslint-disable complexity */
 
@@ -85,8 +85,8 @@ interface CatalogSectionProps {
   catalogId: string;
   onCatalogChange: (value: string) => void;
   catalogsLoading: boolean;
-  filteredPublicCatalogs: Catalog[];
-  myCatalogs: Catalog[];
+  filteredPublicCatalogs: GqlCatalog[];
+  myCatalogs: GqlCatalog[];
 }
 
 const CatalogSection: React.FC<CatalogSectionProps> = ({
@@ -398,13 +398,13 @@ function getArrayOrEmpty<T>(arr: T[] | undefined | null): T[] {
   return arr ?? [];
 }
 
-function filterDuplicateCatalogs(publicCatalogs: Catalog[], myCatalogs: Catalog[]): Catalog[] {
+function filterDuplicateCatalogs(publicCatalogs: GqlCatalog[], myCatalogs: GqlCatalog[]): GqlCatalog[] {
   const myIdSet = new Set(myCatalogs.map((c) => c.catalogId));
   return publicCatalogs.filter((c) => !myIdSet.has(c.catalogId));
 }
 
 function usePublicCatalogs() {
-  const { data, loading } = useQuery<{ listManagedCatalogs: Catalog[] }>(LIST_MANAGED_CATALOGS);
+  const { data, loading } = useQuery<{ listManagedCatalogs: GqlCatalog[] }>(LIST_MANAGED_CATALOGS);
   const allCatalogs = getArrayOrEmpty(data?.listManagedCatalogs);
   // Only include admin-managed catalogs for shared campaigns
   const catalogs = allCatalogs.filter((c) => c.catalogType === 'ADMIN_MANAGED');
@@ -412,7 +412,7 @@ function usePublicCatalogs() {
 }
 
 function useMyCatalogs() {
-  const { data, loading } = useQuery<{ listMyCatalogs: Catalog[] }>(LIST_MY_CATALOGS);
+  const { data, loading } = useQuery<{ listMyCatalogs: GqlCatalog[] }>(LIST_MY_CATALOGS);
   return { catalogs: getArrayOrEmpty(data?.listMyCatalogs), loading };
 }
 
@@ -425,7 +425,7 @@ function useCatalogs() {
 }
 
 function useCanCreateSharedCampaign() {
-  const { data } = useQuery<{ listMySharedCampaigns: SharedCampaign[] }>(LIST_MY_SHARED_CAMPAIGNS, {
+  const { data } = useQuery<{ listMySharedCampaigns: GqlSharedCampaign[] }>(LIST_MY_SHARED_CAMPAIGNS, {
     fetchPolicy: 'network-only',
   });
   const sharedCampaigns = getArrayOrEmpty(data?.listMySharedCampaigns);
@@ -463,12 +463,12 @@ export const CreateSharedCampaignPage: React.FC = () => {
 
   // Create mutation. Update the cached list immediately so the newly created
   // campaign is visible when the user is redirected back to /shared-campaigns.
-  const [createSharedCampaign] = useMutation<{ createSharedCampaign: SharedCampaign }>(CREATE_SHARED_CAMPAIGN, {
+  const [createSharedCampaign] = useMutation<{ createSharedCampaign: GqlSharedCampaign }>(CREATE_SHARED_CAMPAIGN, {
     update: (cache, { data }) => {
       const created = data?.createSharedCampaign;
       if (!created) return;
 
-      const existing = cache.readQuery<{ listMySharedCampaigns: SharedCampaign[] }>({
+      const existing = cache.readQuery<{ listMySharedCampaigns: GqlSharedCampaign[] }>({
         query: LIST_MY_SHARED_CAMPAIGNS,
       });
 

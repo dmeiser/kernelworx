@@ -38,9 +38,9 @@ import { PageHeader } from '../components/PageHeader';
 import { LoadingState } from '../components/LoadingState';
 import { UNIT_TYPES } from '../constants/unitTypes';
 import { brand } from '../lib/theme';
-import type { SharedCampaign, SellerProfile } from '../types';
+import type { GqlSharedCampaign, GqlSellerProfile } from '../types';
 
-type Profile = Pick<SellerProfile, 'profileId' | 'sellerName' | 'isOwner'>;
+type Profile = Pick<GqlSellerProfile, 'profileId' | 'sellerName' | 'isOwner'>;
 
 // ============================================================================
 // Loading & Error States
@@ -300,7 +300,7 @@ const UnitInfoSection: React.FC<UnitInfoSectionProps> = ({
 };
 
 interface SharedCampaignSectionProps {
-  sharedCampaign: SharedCampaign;
+  sharedCampaign: GqlSharedCampaign;
 }
 
 const SharedCampaignSection: React.FC<SharedCampaignSectionProps> = ({ sharedCampaign }) => (

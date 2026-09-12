@@ -5,13 +5,14 @@
 import { describe, test, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { CatalogSelect } from '../src/components/CatalogSelect';
+import type { GqlCatalog } from '../src/types';
 
 const publicCatalogs = [
   { catalogId: 'CAT~1', catalogName: '2025 Popcorn', isPublic: true },
   { catalogId: 'CAT~2', catalogName: '2025 Nuts', isPublic: true, catalogType: 'ADMIN_MANAGED' },
-];
+] as unknown as GqlCatalog[];
 
-const myCatalogs = [{ catalogId: 'CAT~3', catalogName: 'My Custom', isPublic: false }];
+const myCatalogs = [{ catalogId: 'CAT~3', catalogName: 'My Custom', isPublic: false }] as unknown as GqlCatalog[];
 
 describe('CatalogSelect', () => {
   test('renders with default label', () => {

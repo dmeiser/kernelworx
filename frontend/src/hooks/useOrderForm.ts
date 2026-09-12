@@ -3,17 +3,11 @@
  */
 
 import { useState, useCallback, type Dispatch, type SetStateAction } from 'react';
+import type { GqlAddress } from '../types';
 
 export interface LineItemInput {
   productId: string;
   quantity: number;
-}
-
-interface OrderAddress {
-  street?: string;
-  city?: string;
-  state?: string;
-  zipCode?: string;
 }
 
 interface OrderLineItem {
@@ -25,7 +19,7 @@ interface OrderData {
   orderId: string;
   customerName?: string;
   customerPhone?: string;
-  customerAddress?: OrderAddress;
+  customerAddress?: GqlAddress;
   paymentMethod?: string;
   notes?: string;
   lineItems: OrderLineItem[];
@@ -62,12 +56,12 @@ function loadCustomerInfo(
   setCustomerPhone(order.customerPhone ?? '');
 }
 
-function getOrDefault(value: string | undefined): string {
+function getOrDefault(value: string | null | undefined): string {
   return value ?? '';
 }
 
 function loadAddressInfo(
-  address: OrderAddress | undefined,
+  address: GqlAddress | undefined,
   setStreet: (v: string) => void,
   setCity: (v: string) => void,
   setState: (v: string) => void,

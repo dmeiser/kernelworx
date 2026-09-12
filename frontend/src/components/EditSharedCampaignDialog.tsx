@@ -22,12 +22,12 @@ import {
   Chip,
   CircularProgress,
 } from '@mui/material';
-import type { SharedCampaign } from '../types';
+import type { GqlSharedCampaign } from '../types';
 import { useFormState } from '../hooks/useFormState';
 
 interface EditSharedCampaignDialogProps {
   open: boolean;
-  sharedCampaign: SharedCampaign;
+  sharedCampaign: GqlSharedCampaign;
   onClose: () => void;
   onSave: (
     sharedCampaignCode: string,
@@ -51,7 +51,7 @@ const DetailRow: React.FC<{ label: string; children: React.ReactNode }> = ({ lab
   </Box>
 );
 
-const ReadOnlyInfo: React.FC<{ sharedCampaign: SharedCampaign }> = ({ sharedCampaign }) => (
+const ReadOnlyInfo: React.FC<{ sharedCampaign: GqlSharedCampaign }> = ({ sharedCampaign }) => (
   <Box sx={{ bgcolor: 'grey.50', p: 2, borderRadius: 1 }}>
     <Typography variant="subtitle2" color="text.secondary" gutterBottom>
       Campaign Details (Read-Only)
@@ -159,7 +159,7 @@ interface SharedCampaignFormValues {
   isActive: boolean;
 }
 
-const useEditFormState = (sharedCampaign: SharedCampaign) => {
+const useEditFormState = (sharedCampaign: GqlSharedCampaign) => {
   const form = useFormState<SharedCampaignFormValues>({
     initialValues: {
       description: sharedCampaign.description || '',
@@ -189,7 +189,7 @@ const useEditFormState = (sharedCampaign: SharedCampaign) => {
 };
 
 const useSubmitHandler = (
-  sharedCampaign: SharedCampaign,
+  sharedCampaign: GqlSharedCampaign,
   creatorMessage: string,
   description: string,
   isActive: boolean,
@@ -231,7 +231,7 @@ const useSubmitHandler = (
 interface DialogViewProps {
   open: boolean;
   onClose: () => void;
-  sharedCampaign: SharedCampaign;
+  sharedCampaign: GqlSharedCampaign;
   formState: ReturnType<typeof useEditFormState>;
   submitState: ReturnType<typeof useSubmitHandler>;
 }

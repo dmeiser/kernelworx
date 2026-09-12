@@ -34,10 +34,10 @@ import { useSnackbar } from '../hooks/useSnackbar';
 import { GET_UNIT_REPORT, LIST_MY_SHARED_CAMPAIGNS } from '../lib/graphql';
 import { formatCurrency } from '../lib/api-utils';
 import { sanitizeReportValue } from '../lib/reportExport';
-import type { SharedCampaign, OrderLineItem } from '../types';
+import type { GqlSharedCampaign, GqlLineItem } from '../types';
 
 // Type alias for clarity in this module
-type LineItem = OrderLineItem;
+type LineItem = GqlLineItem;
 
 interface UnitOrderDetail {
   orderId: string;
@@ -71,7 +71,7 @@ type SellerOrder = UnitOrderDetail & { sellerName: string };
 
 type ProductTotals = Record<string, number>;
 
-const getActiveCampaigns = (data?: { listMySharedCampaigns: SharedCampaign[] }) =>
+const getActiveCampaigns = (data?: { listMySharedCampaigns: GqlSharedCampaign[] }) =>
   data?.listMySharedCampaigns?.filter((campaign) => campaign.isActive) || [];
 
 const getProductList = (report?: UnitReport): string[] => {
@@ -225,10 +225,10 @@ const buildOrderDetailsWorkbook = async (report: UnitReport, allOrders: SellerOr
 };
 
 interface CampaignSelectorProps {
-  campaigns: SharedCampaign[];
+  campaigns: GqlSharedCampaign[];
   selectedCode: string;
   loading: boolean;
-  selectedCampaign: SharedCampaign | undefined;
+  selectedCampaign: GqlSharedCampaign | undefined;
   onSelect: (code: string) => void;
   onGenerate: () => void;
   canGenerate: boolean;
@@ -288,9 +288,9 @@ const CampaignSelectorShell: React.FC<{ children: React.ReactNode }> = ({ childr
 );
 
 const CampaignSelectorForm: React.FC<{
-  campaigns: SharedCampaign[];
+  campaigns: GqlSharedCampaign[];
   selectedCode: string;
-  selectedCampaign: SharedCampaign | undefined;
+  selectedCampaign: GqlSharedCampaign | undefined;
   onSelect: (code: string) => void;
   onGenerate: () => void;
   canGenerate: boolean;
@@ -326,7 +326,7 @@ const CampaignSelectorForm: React.FC<{
   </Stack>
 );
 
-const CampaignDetails: React.FC<{ campaign: SharedCampaign }> = ({ campaign }) => (
+const CampaignDetails: React.FC<{ campaign: GqlSharedCampaign }> = ({ campaign }) => (
   <Paper variant="outlined" sx={{ p: 2, bgcolor: 'grey.50' }}>
     <Typography variant="subtitle2" gutterBottom>
       Campaign Details:
@@ -766,7 +766,7 @@ const useSharedCampaignSelection = () => {
   const [selectedSharedCampaignCode, setSelectedSharedCampaignCode] = useState<string>('');
 
   const { data: sharedCampaignsData, loading: sharedCampaignsLoading } = useQuery<{
-    listMySharedCampaigns: SharedCampaign[];
+    listMySharedCampaigns: GqlSharedCampaign[];
   }>(LIST_MY_SHARED_CAMPAIGNS);
 
   const campaigns = useMemo(() => getActiveCampaigns(sharedCampaignsData), [sharedCampaignsData]);
@@ -793,7 +793,7 @@ const useSharedCampaignSelection = () => {
 };
 
 // Helper: Extract unit report variables from campaign
-const getUnitReportVariables = (campaign: SharedCampaign | undefined) => {
+const getUnitReportVariables = (campaign: GqlSharedCampaign | undefined) => {
   if (!campaign) {
     return {
       unitType: undefined,
@@ -816,7 +816,7 @@ const getUnitReportVariables = (campaign: SharedCampaign | undefined) => {
   };
 };
 
-const useUnitReport = (selectedCampaign: SharedCampaign | undefined, canGenerateReport: boolean) => {
+const useUnitReport = (selectedCampaign: GqlSharedCampaign | undefined, canGenerateReport: boolean) => {
   const variables = getUnitReportVariables(selectedCampaign);
   const { data, loading, error, refetch } = useQuery<{
     getUnitReport: UnitReport;

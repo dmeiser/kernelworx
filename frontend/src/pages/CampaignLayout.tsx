@@ -30,7 +30,7 @@ import { LoadingState } from '../components/LoadingState';
 import { ErrorAlert } from '../components/ErrorAlert';
 import { PageHeader } from '../components/PageHeader';
 import { NavBreadcrumbs } from '../components/NavBreadcrumbs';
-import type { Campaign, SellerProfile } from '../types';
+import type { GqlCampaign, GqlSellerProfile } from '../types';
 
 // --- Helper Functions ---
 
@@ -78,12 +78,12 @@ const CampaignBreadcrumbs: React.FC<CampaignBreadcrumbsProps> = ({
 );
 
 interface CampaignHeaderProps {
-  campaign: Campaign;
+  campaign: GqlCampaign;
   onBack: () => void;
 }
 
 const CampaignHeader: React.FC<CampaignHeaderProps> = ({ campaign, onBack }) => {
-  const dateRange = formatDateRange(campaign.startDate, campaign.endDate);
+  const dateRange = formatDateRange(campaign.startDate ?? undefined, campaign.endDate ?? undefined);
 
   return (
     <PageHeader
@@ -126,13 +126,13 @@ const CampaignRoutes: React.FC = () => (
 
 // --- Custom Hook ---
 
-function getWritePermission(profile: SellerProfile | undefined): boolean {
+function getWritePermission(profile: GqlSellerProfile | undefined): boolean {
   if (!profile) return false;
   return profile.isOwner || profile.permissions?.includes('WRITE') || false;
 }
 
 function useCampaignQuery(dbCampaignId: string | null) {
-  const result = useQuery<{ getCampaign: Campaign }>(GET_CAMPAIGN, {
+  const result = useQuery<{ getCampaign: GqlCampaign }>(GET_CAMPAIGN, {
     variables: { campaignId: dbCampaignId },
     skip: !dbCampaignId,
   });
@@ -145,7 +145,7 @@ function useCampaignQuery(dbCampaignId: string | null) {
 }
 
 function useProfileQuery(dbProfileId: string | null) {
-  const result = useQuery<{ getProfile: SellerProfile }>(GET_PROFILE, {
+  const result = useQuery<{ getProfile: GqlSellerProfile }>(GET_PROFILE, {
     variables: { profileId: dbProfileId },
     skip: !dbProfileId,
   });
@@ -186,8 +186,8 @@ function useRouteParams() {
 interface CampaignContentProps {
   profileId: string;
   tabValue: string;
-  campaign: Campaign;
-  profile: SellerProfile | undefined;
+  campaign: GqlCampaign;
+  profile: GqlSellerProfile | undefined;
   navHandlers: ReturnType<typeof useNavigationHandlers>;
 }
 

@@ -2,30 +2,10 @@
  * Report export utilities for generating CSV/XLSX files from order data
  */
 
-interface LineItem {
-  productId: string;
-  productName: string;
-  quantity: number;
-  pricePerUnit: number;
-  subtotal: number;
-}
+import type { GqlOrder, GqlAddress } from '../types';
 
-interface Address {
-  street?: string;
-  city?: string;
-  state?: string;
-  zipCode?: string;
-}
-
-interface Order {
-  orderId: string;
-  customerName: string;
-  customerPhone?: string;
-  customerAddress?: Address;
-  paymentMethod: string;
-  lineItems: LineItem[];
-  totalAmount: number;
-}
+/** Minimal order shape needed for report export (structurally satisfied by GqlOrder). */
+type ReportOrder = Pick<GqlOrder, 'customerName' | 'customerPhone' | 'customerAddress' | 'lineItems' | 'totalAmount'>;
 
 function formatPhone(phone?: string): string {
   if (!phone) return '';
@@ -44,13 +24,13 @@ function formatPhone(phone?: string): string {
   return phone;
 }
 
-function formatAddress(address?: Address): string {
+function formatAddress(address?: GqlAddress | null): string {
   if (!address) return '';
   const cityStateZip = [address.city, address.state, address.zipCode].filter(Boolean).join(' ');
   return [address.street, cityStateZip].filter(Boolean).join(', ');
 }
 
-function getUniqueProducts(orders: Order[]): string[] {
+function getUniqueProducts(orders: ReportOrder[]): string[] {
   return Array.from(new Set(orders.flatMap((order) => order.lineItems.map((item) => item.productName)))).sort();
 }
 
@@ -65,7 +45,7 @@ export function sanitizeReportValue(value: string | number): string | number {
   return value;
 }
 
-function prepareReportData(orders: Order[]) {
+function prepareReportData(orders: ReportOrder[]) {
   const allProducts = getUniqueProducts(orders);
   const headers: (string | number)[] = ['Name', 'Phone', 'Address', ...allProducts, 'Total'].map(sanitizeReportValue);
 
@@ -84,7 +64,7 @@ function prepareReportData(orders: Order[]) {
 
       return [
         sanitizeReportValue(order.customerName),
-        sanitizeReportValue(formatPhone(order.customerPhone)),
+        sanitizeReportValue(formatPhone(order.customerPhone ?? undefined)),
         sanitizeReportValue(formatAddress(order.customerAddress)),
         ...productCounts.map(sanitizeReportValue),
         order.totalAmount,
@@ -101,7 +81,7 @@ function escapeCsvCell(value: string | number): string {
   return `"${str.replace(/"/g, '""')}"`;
 }
 
-export function downloadAsCSV(orders: Order[], campaignId: string): void {
+export function downloadAsCSV(orders: ReportOrder[], campaignId: string): void {
   const { rows } = prepareReportData(orders);
 
   // Convert to CSV
@@ -122,7 +102,7 @@ export function downloadAsCSV(orders: Order[], campaignId: string): void {
   URL.revokeObjectURL(url);
 }
 
-export async function downloadAsXLSX(orders: Order[], campaignId: string): Promise<void> {
+export async function downloadAsXLSX(orders: ReportOrder[], campaignId: string): Promise<void> {
   const { rows } = prepareReportData(orders);
 
   // Dynamically import xlsx only when XLSX export is requested so it is not
