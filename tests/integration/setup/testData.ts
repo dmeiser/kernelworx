@@ -342,7 +342,7 @@ export function getTestPrefix(): string {
 export async function waitForGSIConsistency<T>(
   queryFn: () => Promise<T[]>,
   checkFn: (items: T[]) => boolean,
-  maxAttempts: number = 20,
+  maxAttempts: number = 30,
   delayMs: number = 1000
 ): Promise<T[]> {
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {

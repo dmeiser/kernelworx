@@ -25,10 +25,13 @@ Design decisions
   its own user in a ``finally`` block, so the corresponding Account rows
   created by the post-confirmation trigger are removed from DynamoDB too.
 * ``admin-confirm-sign-up`` retries ``UserNotFoundException`` with
-  exponential backoff capped at 60 s (~14 minutes of backoff across 18
+  exponential backoff capped at 15 s (~50 s of backoff across 5
   attempts): a freshly created Cognito user is not always visible to admin
   reads immediately (read-after-write propagation), and "not found yet" is
-  the expected transient, not an error.
+  the expected transient, not an error. The budget is deliberately tight:
+  Cognito admin reads are single-region and converge in seconds, so a user
+  that is still absent after a minute was never durably created — retrying
+  for many minutes only masks that environmental failure as propagation lag.
 * A failed ``signUp`` renders a MUI *error* alert (``AlertMessages`` in
   ``SignupPage.tsx`` renders error and success alerts with the same
   ``role="alert"``). The verification wait must therefore never treat a
@@ -129,16 +132,20 @@ def _submit_signup_and_wait_for_verification(page: Page, email: str, password: s
 # expected transient. Note this retry does NOT help when ``signUp`` itself
 # was rejected (e.g. Cognito's daily email quota exhausted) — no user exists
 # to find; that case is caught much earlier by
-# ``_submit_signup_and_wait_for_verification``. Budget: ~14 minutes of
-# backoff across 18 attempts (exponential, capped at 60 s); every other
-# failure and every other command still fail on the first attempt.
-_CONFIRM_SIGNUP_MAX_ATTEMPTS = 18
-_CONFIRM_SIGNUP_BACKOFF_CAP_SECONDS = 60
+# ``_submit_signup_and_wait_for_verification``. Budget: ~50 s of
+# backoff across 5 attempts (exponential, capped at 15 s): long enough for
+# real propagation, short enough that a user Cognito rolled back after a
+# nominally successful ``SignUp`` (the daily-email-quota signature) fails
+# fast and truthfully instead of burning ~14 minutes pretending propagation
+# might still converge. Every other failure and every other command still
+# fail on the first attempt.
+_CONFIRM_SIGNUP_MAX_ATTEMPTS = 5
+_CONFIRM_SIGNUP_BACKOFF_CAP_SECONDS = 15
 _CONFIRM_SIGNUP_BACKOFF_BASE_SECONDS = 5
 
 
 def _confirm_signup_backoff_seconds(attempt: int) -> int:
-    """Exponential backoff for attempt ``n``: 5, 10, 20, 40, then 60 s cap."""
+    """Exponential backoff for attempt ``n``: 5, 10, then 15 s cap."""
     return min(
         _CONFIRM_SIGNUP_BACKOFF_CAP_SECONDS,
         _CONFIRM_SIGNUP_BACKOFF_BASE_SECONDS << attempt,
@@ -169,6 +176,15 @@ def _cognito_cli(*args: str, retry_user_not_found: bool = False) -> None:
             break
         if attempt < _CONFIRM_SIGNUP_MAX_ATTEMPTS - 1:
             time.sleep(_confirm_signup_backoff_seconds(attempt))
+    if retry_user_not_found and "UserNotFoundException" in result.stderr:
+        raise RuntimeError(
+            f"aws cognito-idp {' '.join(args)} failed: {result.stderr}\n"
+            "SignUp reported success, but the user never became visible to admin reads "
+            f"within {_CONFIRM_SIGNUP_MAX_ATTEMPTS} attempts — Cognito admin reads are "
+            "single-region and converge in seconds, so this is not propagation lag. It "
+            "matches Cognito rolling the user back after a nominally successful SignUp "
+            "when the account's daily email quota is saturated."
+        )
     raise RuntimeError(f"aws cognito-idp {' '.join(args)} failed: {result.stderr}")
 
 

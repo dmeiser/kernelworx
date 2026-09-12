@@ -67,6 +67,20 @@ class CatalogsPage(BasePage):
         catalog_uuid = catalog_id.replace("CATALOG#", "")
         encoded = urllib.parse.quote(catalog_uuid, safe="")
         self.navigate(f"/catalogs/{encoded}/preview")
+        self._wait_for_preview_ready()
+
+    def _wait_for_preview_ready(self, timeout: int = 15_000) -> None:
+        """Wait until the preview page has loaded its catalog.
+
+        ``wait_for_loading`` alone can return in the gap between the URL
+        change and the preview query's spinner, while the catalog list is
+        still mounted; reading ``table tbody`` then yields the catalog list
+        instead of the products. The preview heading only renders after
+        ``getCatalog`` resolves, so waiting for it ties every later table
+        read to the preview page actually being ready.
+        """
+        expect(self.page).to_have_url(re.compile(r"/catalogs/.+/preview"), timeout=timeout)
+        expect(self.page.locator(self._PREVIEW_CATALOG_NAME_SEL).first).to_be_visible(timeout=timeout)
         self.wait_for_loading()
 
     # ------------------------------------------------------------------
@@ -334,8 +348,7 @@ class CatalogsPage(BasePage):
         """
         row = self._catalog_row(name)
         row.get_by_role("button", name=self._VIEW_BTN, exact=True).click()
-        self.page.wait_for_url("**/catalogs/**/preview", timeout=10_000)
-        self.wait_for_loading()
+        self._wait_for_preview_ready()
 
     def get_preview_catalog_name(self) -> str:
         """Return the catalog name displayed on the preview page.
