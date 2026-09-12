@@ -46,6 +46,17 @@ jobs:
       - name: Mypy (type check)
         run: uv run mypy src/
 
+      - name: Xenon (complexity)
+        # radon-based gate: average cyclomatic complexity must stay Grade A (<=5)
+        # and no single block may exceed Grade B (<=10). A non-zero exit fails
+        # the job. The excluded files hold legacy Grade C blocks (CC 11-17) that
+        # predate this gate; drop exclusions as those functions are refactored,
+        # then tighten --max-absolute to A once every function grades A.
+        run: |
+          uv run xenon --max-average A --max-absolute B \
+            --exclude '*admin_operations.py,*payment_methods.py,*logging.py' \
+            src/
+
       - name: Pytest (unit coverage)
         run: uv run pytest tests/unit --cov=src --cov-fail-under=100 -v --cov-report=term-missing
 
@@ -56,6 +67,7 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "- Ruff (linting)" >> $GITHUB_STEP_SUMMARY
           echo "- Mypy (type checking - strict mode)" >> $GITHUB_STEP_SUMMARY
+          echo "- Xenon (complexity gate)" >> $GITHUB_STEP_SUMMARY
           echo "- Pytest (100% coverage required)" >> $GITHUB_STEP_SUMMARY
 
   frontend:
