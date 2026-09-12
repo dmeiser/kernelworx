@@ -2,9 +2,9 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { EditSharedCampaignDialog } from '../src/components/EditSharedCampaignDialog';
 import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
-import type { SharedCampaign } from '../src/types';
+import type { GqlSharedCampaign as SharedCampaign } from '../src/types';
 
-const baseSharedCampaign: SharedCampaign = {
+const baseSharedCampaign = {
   sharedCampaignCode: 'SC-TEST',
   catalogId: 'CAT#1',
   campaignName: 'Test Campaign',
@@ -24,7 +24,7 @@ const baseSharedCampaign: SharedCampaign = {
     catalogId: 'CAT#1',
     catalogName: 'Popcorn 2025',
   },
-};
+} as unknown as SharedCampaign;
 
 describe('EditSharedCampaignDialog', () => {
   let onClose: Mock<() => void>;

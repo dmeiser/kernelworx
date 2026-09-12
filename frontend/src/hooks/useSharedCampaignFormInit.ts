@@ -2,7 +2,7 @@
  * Custom hook for shared campaign form initialization
  */
 import { useEffect } from 'react';
-import type { SharedCampaign } from '../types/entities';
+import type { GqlSharedCampaign } from '../types/graphql-generated';
 
 interface FormSetters {
   setCampaignName: (name: string) => void;
@@ -16,7 +16,7 @@ interface FormSetters {
   setState: (state: string) => void;
 }
 
-const applySharedCampaignToForm = (sharedCampaign: SharedCampaign, setters: FormSetters): void => {
+const applySharedCampaignToForm = (sharedCampaign: GqlSharedCampaign, setters: FormSetters): void => {
   setters.setCampaignName(sharedCampaign.campaignName);
   setters.setCampaignYear(sharedCampaign.campaignYear);
   setters.setCatalogId(sharedCampaign.catalogId);
@@ -29,7 +29,7 @@ const applySharedCampaignToForm = (sharedCampaign: SharedCampaign, setters: Form
 };
 
 export const useSharedCampaignFormInit = (
-  sharedCampaign: SharedCampaign | null | undefined,
+  sharedCampaign: GqlSharedCampaign | null | undefined,
   setCampaignName: (name: string) => void,
   setCampaignYear: (year: number) => void,
   setCatalogId: (id: string) => void,

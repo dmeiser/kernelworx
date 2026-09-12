@@ -58,14 +58,14 @@ import {
 import { ensureProfileId } from '../lib/ids';
 import { formatDisplayDate } from '../lib/date-utils';
 import { brand } from '../lib/theme';
-import type { SellerProfile, Share, ProfileInvite } from '../types';
+import type { GqlSellerProfile, GqlShare, GqlProfileInvite } from '../types';
 
 // Helper to get display email for a share
-const getShareDisplayEmail = (share: Share): string =>
+const getShareDisplayEmail = (share: GqlShare): string =>
   share.targetAccount?.email || `User ${share.targetAccountId.substring(0, 8)}...`;
 
 // Helper to get full name from target account if available
-const getShareFullName = (share: Share): string | null => {
+const getShareFullName = (share: GqlShare): string | null => {
   const account = share.targetAccount;
   if (account?.givenName && account?.familyName) {
     return `${account.givenName} ${account.familyName}`;
@@ -80,14 +80,14 @@ const decodeUrlParam = (encoded: string | undefined): string => (encoded ? decod
 const shouldSkipQuery = (id: string): boolean => !id;
 
 // Helper to get profile from query data
-const getProfile = (data: { getProfile: SellerProfile } | undefined): SellerProfile | undefined => data?.getProfile;
+const getProfile = (data: { getProfile: GqlSellerProfile } | undefined): GqlSellerProfile | undefined => data?.getProfile;
 
 // Helper to get invites from query data
-const getInvites = (data: { listInvitesByProfile: ProfileInvite[] } | undefined): ProfileInvite[] =>
+const getInvites = (data: { listInvitesByProfile: GqlProfileInvite[] } | undefined): GqlProfileInvite[] =>
   data?.listInvitesByProfile || [];
 
 // Helper to get shares from query data
-const getShares = (data: { listSharesByProfile: Share[] } | undefined): Share[] => data?.listSharesByProfile || [];
+const getShares = (data: { listSharesByProfile: GqlShare[] } | undefined): GqlShare[] => data?.listSharesByProfile || [];
 
 // Helper to get user display name for confirmation
 const getUserDisplayName = (email: string | undefined, accountId: string): string =>
@@ -123,10 +123,10 @@ const isCreateInviteDisabled = (creating: boolean, permissions: string[]): boole
 const getCreateInviteText = (isCreating: boolean): string => (isCreating ? 'Creating...' : 'Generate New Invite');
 
 // Helper to check if invites list is empty
-const hasInvites = (invites: ProfileInvite[]): boolean => invites.length > 0;
+const hasInvites = (invites: GqlProfileInvite[]): boolean => invites.length > 0;
 
 // Helper to check if shares list is empty
-const hasShares = (shares: Share[]): boolean => shares.length > 0;
+const hasShares = (shares: GqlShare[]): boolean => shares.length > 0;
 
 // Helper to get delete profile button text
 const getDeleteProfileButtonText = (isDeleting: boolean): string => (isDeleting ? 'Deleting...' : 'Delete Permanently');
@@ -269,7 +269,7 @@ export const togglePermission = (
 };
 
 // Helper to initialize profile name from profile data
-const initializeProfileName = (profile: SellerProfile | undefined, setProfileName: (v: string) => void): void => {
+const initializeProfileName = (profile: GqlSellerProfile | undefined, setProfileName: (v: string) => void): void => {
   if (profile) {
     setProfileName(profile.sellerName);
   }
@@ -285,7 +285,7 @@ const FullNameDisplay: React.FC<{ fullName: string | null }> = ({ fullName }) =>
 
 // Helper component for a single share row
 const ShareRow: React.FC<{
-  share: Share;
+  share: GqlShare;
   onTransferOwnership: (targetAccountId: string, email: string | undefined) => void;
   onRevokeShare: (targetAccountId: string, email: string | undefined) => void;
 }> = ({ share, onTransferOwnership, onRevokeShare }) => {
@@ -330,7 +330,7 @@ const ShareRow: React.FC<{
 
 // Helper component for shares section (only renders if shares exist)
 const SharesSection: React.FC<{
-  shares: Share[];
+  shares: GqlShare[];
   onTransferOwnership: (targetAccountId: string, email: string | undefined) => void;
   onRevokeShare: (targetAccountId: string, email: string | undefined) => void;
 }> = ({ shares, onTransferOwnership, onRevokeShare }) =>
@@ -425,7 +425,7 @@ export const ScoutManagementPage: React.FC = () => {
     loading,
     refetch,
   } = useQuery<{
-    getProfile: SellerProfile;
+    getProfile: GqlSellerProfile;
   }>(GET_PROFILE, {
     variables: { profileId: dbProfileId! },
     skip: shouldSkipQuery(dbProfileId!),
@@ -433,7 +433,7 @@ export const ScoutManagementPage: React.FC = () => {
 
   // Fetch invites
   const { data: invitesData, refetch: refetchInvites } = useQuery<{
-    listInvitesByProfile: ProfileInvite[];
+    listInvitesByProfile: GqlProfileInvite[];
   }>(LIST_INVITES_BY_PROFILE, {
     variables: { profileId: dbProfileId! },
     skip: shouldSkipQuery(dbProfileId!),
@@ -441,7 +441,7 @@ export const ScoutManagementPage: React.FC = () => {
 
   // Fetch shares (accounts with access to this profile)
   const { data: sharesData } = useQuery<{
-    listSharesByProfile: Share[];
+    listSharesByProfile: GqlShare[];
   }>(LIST_SHARES_BY_PROFILE, {
     variables: { profileId: dbProfileId! },
     skip: shouldSkipQuery(dbProfileId!),

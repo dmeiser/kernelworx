@@ -26,7 +26,7 @@ import { LIST_MANAGED_CATALOGS, LIST_MY_CATALOGS, CREATE_SHARED_CAMPAIGN } from 
 import { useFormState } from '../hooks/useFormState';
 import { StateAutocomplete } from './StateAutocomplete';
 import { CatalogSelect } from './CatalogSelect';
-import type { Catalog } from '../types';
+import type { GqlCatalog } from '../types';
 
 interface CreateSharedCampaignDialogProps {
   open: boolean;
@@ -69,11 +69,11 @@ const validateForm = (formState: FormState): boolean =>
 
 const useCatalogLists = (open: boolean) => {
   const { data: publicCatalogsData, loading: publicLoading } = useQuery<{
-    listManagedCatalogs: Catalog[];
+    listManagedCatalogs: GqlCatalog[];
   }>(LIST_MANAGED_CATALOGS, { skip: !open });
 
   const { data: myCatalogsData, loading: myLoading } = useQuery<{
-    listMyCatalogs: Catalog[];
+    listMyCatalogs: GqlCatalog[];
   }>(LIST_MY_CATALOGS, { skip: !open });
 
   const publicCatalogs = useMemo(() => publicCatalogsData?.listManagedCatalogs || [], [publicCatalogsData]);
@@ -181,8 +181,8 @@ interface CampaignFormFieldsProps {
   formState: FormState;
   formSetters: FormSetters;
   catalogsLoading: boolean;
-  filteredPublicCatalogs: Catalog[];
-  myCatalogs: Catalog[];
+  filteredPublicCatalogs: GqlCatalog[];
+  myCatalogs: GqlCatalog[];
 }
 
 const CampaignFormFields: React.FC<CampaignFormFieldsProps> = ({

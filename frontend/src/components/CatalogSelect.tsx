@@ -5,13 +5,13 @@
 
 import React, { useMemo, useId } from 'react';
 import { FormControl, InputLabel, Select, MenuItem, CircularProgress } from '@mui/material';
-import type { Catalog } from '../types';
+import type { GqlCatalog } from '../types';
 
 interface CatalogSelectProps {
   value: string;
   onChange: (value: string) => void;
-  myCatalogs: Catalog[];
-  publicCatalogs: Catalog[];
+  myCatalogs: GqlCatalog[];
+  publicCatalogs: GqlCatalog[];
   loading?: boolean;
   disabled?: boolean;
   fullWidth?: boolean;
@@ -26,8 +26,8 @@ interface CatalogSelectProps {
 function buildCatalogMenuItems(
   loading: boolean,
   hasNoCatalogs: boolean,
-  myCatalogs: Catalog[],
-  publicCatalogs: Catalog[],
+  myCatalogs: GqlCatalog[],
+  publicCatalogs: GqlCatalog[],
 ): React.ReactNode[] {
   if (loading) {
     return [

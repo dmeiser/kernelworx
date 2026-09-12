@@ -10,7 +10,7 @@ import type { MockedResponse } from '@apollo/client/testing';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { CampaignSettingsPage } from '../src/pages/CampaignSettingsPage';
 import { dateToISO } from '../src/lib/date-utils';
-import type { Campaign } from '../src/types';
+import type { GqlCampaign as Campaign } from '../src/types';
 import {
   GET_CAMPAIGN,
   UPDATE_CAMPAIGN,

@@ -27,7 +27,7 @@ import { Add as AddIcon, Share as ShareIcon, ArrowBack as BackIcon } from '@mui/
 import { GET_CATALOG } from '../lib/graphql';
 import { LoadingState } from '../components/LoadingState';
 import { ErrorAlert } from '../components/ErrorAlert';
-import type { Catalog, Product } from '../types';
+import type { GqlCatalog, GqlProduct } from '../types';
 
 interface CatalogPreviewPageProps {
   onCreateCampaign?: (catalogId: string) => void;
@@ -60,14 +60,14 @@ export const CatalogPreviewPage: React.FC<CatalogPreviewPageProps> = ({
   const catalogId = catalogUuid?.startsWith('CATALOG#') ? catalogUuid : `CATALOG#${catalogUuid}`;
 
   // Always call hooks unconditionally - this is required by React rules
-  const { data, loading, error } = useQuery<{ getCatalog: Catalog }>(GET_CATALOG, {
+  const { data, loading, error } = useQuery<{ getCatalog: GqlCatalog }>(GET_CATALOG, {
     variables: { catalogId },
     skip: !catalogId, // Skip the query if no catalogId
     fetchPolicy: 'network-only',
   });
 
-  const catalog: Catalog | undefined = data?.getCatalog;
-  const products: Product[] = useMemo(() => catalog?.products || [], [catalog?.products]);
+  const catalog: GqlCatalog | undefined = data?.getCatalog;
+  const products: GqlProduct[] = useMemo(() => catalog?.products || [], [catalog?.products]);
 
   React.useEffect(() => {
     if (catalogId) {

@@ -15,12 +15,12 @@ import { PageHeader } from '../components/PageHeader';
 import { NavBreadcrumbs } from '../components/NavBreadcrumbs';
 import { GET_PROFILE, LIST_CAMPAIGNS_BY_PROFILE } from '../lib/graphql';
 import { ensureProfileId } from '../lib/ids';
-import type { Campaign, SellerProfile } from '../types';
+import type { GqlCampaign, GqlSellerProfile } from '../types';
 
 /* eslint-disable complexity */
 
 // Use SellerProfile with only the fields we need
-type Profile = Pick<SellerProfile, 'profileId' | 'sellerName' | 'isOwner' | 'permissions'>;
+type Profile = Pick<GqlSellerProfile, 'profileId' | 'sellerName' | 'isOwner' | 'permissions'>;
 
 // --- Helper Functions ---
 
@@ -29,9 +29,9 @@ function getDecodedProfileId(encodedProfileId: string | undefined): string {
 }
 
 // Separate campaigns into active and inactive
-function separateCampaigns(campaigns: Campaign[]): { active: Campaign[]; inactive: Campaign[] } {
-  const active: Campaign[] = [];
-  const inactive: Campaign[] = [];
+function separateCampaigns(campaigns: GqlCampaign[]): { active: GqlCampaign[]; inactive: GqlCampaign[] } {
+  const active: GqlCampaign[] = [];
+  const inactive: GqlCampaign[] = [];
 
   for (const campaign of campaigns) {
     if (campaign.isActive === false) {
@@ -65,7 +65,7 @@ const PageBreadcrumbs: React.FC<PageBreadcrumbsProps> = ({ sellerName, onNavigat
 );
 
 interface CampaignsGridProps {
-  campaigns: Campaign[];
+  campaigns: GqlCampaign[];
   profileId: string;
   sectionTitle?: string;
 }
@@ -86,8 +86,8 @@ const CampaignsGrid: React.FC<CampaignsGridProps> = ({ campaigns, profileId, sec
               campaignId={campaign.campaignId}
               campaignName={campaign.campaignName}
               campaignYear={campaign.campaignYear}
-              totalOrders={campaign.totalOrders}
-              totalRevenue={campaign.totalRevenue}
+              totalOrders={campaign.totalOrders ?? undefined}
+              totalRevenue={campaign.totalRevenue ?? undefined}
               profileId={profileId}
             />
           </Grid>
@@ -113,7 +113,7 @@ function useProfileData(dbProfileId: string) {
 
 function useCampaignsData(dbProfileId: string) {
   const { data, loading, error, refetch } = useQuery<{
-    listCampaignsByProfile: { campaigns: Campaign[] };
+    listCampaignsByProfile: { campaigns: GqlCampaign[] };
   }>(LIST_CAMPAIGNS_BY_PROFILE, {
     variables: { profileId: dbProfileId },
     skip: !dbProfileId,
@@ -133,7 +133,7 @@ function useCampaignsData(dbProfileId: string) {
 interface ScoutCampaignsContentProps {
   profile: Profile | undefined;
   profileId: string;
-  campaigns: Campaign[];
+  campaigns: GqlCampaign[];
   loading: boolean;
   error: ReturnType<typeof useQuery>['error'];
 }
@@ -199,7 +199,7 @@ const ScoutCampaignsContent: React.FC<ScoutCampaignsContentProps> = ({
 
 interface ScoutCampaignsPageData {
   profile: Profile | undefined;
-  campaigns: Campaign[];
+  campaigns: GqlCampaign[];
   loading: boolean;
   error: ReturnType<typeof useQuery>['error'];
 }

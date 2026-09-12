@@ -7,13 +7,14 @@ import { describe, test, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import type { SelectProps } from '@mui/material';
 import { CatalogSection } from '../src/components/CatalogSection';
+import type { GqlCatalog } from '../src/types';
 
 const publicCatalogs = [
   { catalogId: 'CAT~1', catalogName: '2025 Popcorn', products: [], isPublic: true },
   { catalogId: 'CAT~2', catalogName: '2025 Nuts', products: [], isPublic: true },
-];
+] as unknown as GqlCatalog[];
 
-const myCatalogs = [{ catalogId: 'CAT~3', catalogName: 'My Custom', products: [], isPublic: false }];
+const myCatalogs = [{ catalogId: 'CAT~3', catalogName: 'My Custom', products: [], isPublic: false }] as unknown as GqlCatalog[];
 
 describe('CatalogSection', () => {
   test('renders default label and select', () => {

@@ -32,10 +32,10 @@ import { ensureCampaignId } from '../lib/ids';
 import { downloadAsCSV, downloadAsXLSX } from '../lib/reportExport';
 import { formatCurrency, formatPhoneNumber } from '../lib/api-utils';
 import { useSnackbar } from '../hooks/useSnackbar';
-import type { Order } from '../types';
+import type { GqlOrder } from '../types';
 
 // Helper to format city/state/zip into a single string
-const formatCityStateZip = (address: Order['customerAddress']): string =>
+const formatCityStateZip = (address: GqlOrder['customerAddress']): string =>
   [address?.city, address?.state, address?.zipCode].filter(Boolean).join(' ');
 
 // Helper to check if address has displayable content
@@ -43,7 +43,7 @@ const hasAddressContent = (street: boolean, cityStateZip: string): boolean => st
 
 // Helper component to render customer address
 const CustomerAddressCell: React.FC<{
-  address: Order['customerAddress'];
+  address: GqlOrder['customerAddress'];
 }> = ({ address }) => {
   if (!address) return <>-</>;
 
@@ -64,19 +64,19 @@ const CustomerAddressCell: React.FC<{
 const decodeUrlParam = (encoded: string | undefined): string => (encoded ? decodeURIComponent(encoded) : '');
 
 // Helper to get orders from query data
-const getOrdersFromData = (data: { listOrdersByCampaign: { orders: Order[] } } | undefined): Order[] =>
+const getOrdersFromData = (data: { listOrdersByCampaign: { orders: GqlOrder[] } } | undefined): GqlOrder[] =>
   data?.listOrdersByCampaign.orders || [];
 
 // Helper to determine if query should be skipped
 const shouldSkipQuery = (id: string): boolean => !id;
 
 // Helper to get all unique products from orders
-const getAllProducts = (orders: Order[]): string[] =>
+const getAllProducts = (orders: GqlOrder[]): string[] =>
   Array.from(new Set(orders.flatMap((order) => order.lineItems.map((item) => item.productName)))).sort();
 
 // Helper component for order table content
 const OrderTableContent: React.FC<{
-  orders: Order[];
+  orders: GqlOrder[];
   ordersLoading: boolean;
 }> = ({ orders, ordersLoading }) => {
   if (ordersLoading) {
@@ -132,10 +132,10 @@ const OrderTableContent: React.FC<{
 };
 
 // Helper component for single order row
-const OrderRow: React.FC<{ order: Order; allProducts: string[] }> = ({ order, allProducts }) => (
+const OrderRow: React.FC<{ order: GqlOrder; allProducts: string[] }> = ({ order, allProducts }) => (
   <TableRow>
     <TableCell>{order.customerName}</TableCell>
-    <TableCell>{formatPhoneNumber(order.customerPhone)}</TableCell>
+    <TableCell>{formatPhoneNumber(order.customerPhone ?? undefined)}</TableCell>
     <TableCell>
       <CustomerAddressCell address={order.customerAddress} />
     </TableCell>
@@ -156,7 +156,7 @@ const OrderRow: React.FC<{ order: Order; allProducts: string[] }> = ({ order, al
 );
 
 // Helper component for download buttons
-const DownloadButtons: React.FC<{ orders: Order[]; campaignId: string }> = ({ orders, campaignId }) => {
+const DownloadButtons: React.FC<{ orders: GqlOrder[]; campaignId: string }> = ({ orders, campaignId }) => {
   const {
     message: snackbarMessage,
     open: snackbarOpen,
@@ -250,7 +250,7 @@ export const ReportsPage: React.FC = () => {
   void reportFormat; // Used for future report format selection
 
   const { data: ordersData, loading: ordersLoading } = useQuery<{
-    listOrdersByCampaign: { orders: Order[] };
+    listOrdersByCampaign: { orders: GqlOrder[] };
   }>(LIST_ORDERS_BY_CAMPAIGN, {
     variables: { campaignId: dbCampaignId },
     skip: shouldSkipQuery(dbCampaignId ?? ''),
