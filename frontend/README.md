@@ -23,13 +23,13 @@ npm ci
 | Path | Contents |
 | --- | --- |
 | `src/App.tsx` | Router and provider wiring. Every route is lazy-loaded via `lazyRoute()` (React.lazy + a per-route `ErrorBoundary`). Public routes render bare; everything else goes through `ProtectedAppRoute`, which nests `ProtectedRoute` (auth, optional `requireAdmin`) → `AppLayout` → `ErrorBoundary`. Campaign tabs live under the `/scouts/:profileId/campaigns/:campaignId/*` wildcard rendered by `CampaignLayout`. |
-| `src/pages/` | One file per route page (26 pages, flat). |
+| `src/pages/` | One file per route page (27 pages, flat, plus `CampaignLayout.tsx`). |
 | `src/components/` | Shared UI components (flat), plus `components/settings/` for the settings feature. |
 | `src/contexts/AuthContext.tsx` | `AuthProvider`/`useAuth`: Amplify session handling, OAuth redirect restore, and the admin flag from the Cognito `cognito:groups` claim. |
 | `src/hooks/` | Form and feature hooks (campaign form state machine, order form, MFA, passkeys, snackbar, ...), with an `index.ts` barrel for the user-settings hooks. |
 | `src/lib/` | Infrastructure and utilities: the Apollo client (`apollo.ts`), Amplify/Cognito configuration (`amplify.ts`, `cognitoDomain.ts`), the GraphQL operations (`graphql.ts`), the MUI theme (`theme.ts`), and assorted helpers (dates, ids, report export, error handling, ...). |
 | `src/constants/` | Shared enums/constants (campaign, unit types). |
-| `src/types/` | `entities.ts` (hand-maintained types), `graphql-generated.ts` (generated — see below), re-exported from `index.ts`. |
+| `src/types/` | `auth.ts` (hand-maintained types), `graphql-generated.ts` (generated — see below), re-exported from `index.ts`. |
 
 State management is Apollo's normalized cache plus React context; there is no Redux or
 similar store. The provider nesting in `App.tsx` is:
@@ -67,7 +67,7 @@ npm run codegen
   whenever the schema or the operations change, and commit the result.
 - **Convention**: generated types carry a `Gql` prefix (`GqlCampaign`,
   `GqlListMyProfilesQuery`, ...) so they never collide with the hand-maintained types in
-  `entities.ts`. Import them from `types` (barrel) or `types/graphql-generated`.
+  `auth.ts`. Import them from `types` (barrel) or `types/graphql-generated`.
 - Config lives in `codegen.ts`; the output is auto-formatted with Prettier after
   generation.
 
