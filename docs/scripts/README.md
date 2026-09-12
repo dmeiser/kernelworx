@@ -10,6 +10,7 @@ the script's actual `--help` output or usage text.
 ## Scripts Reference
 
 ### `scripts/ephemeral-env.sh`
+
 **Manage ephemeral per-run test environments.**
 
 - **`up <run-id>`** — Builds the Lambda layer, initializes the OpenTofu backend, plans
@@ -21,33 +22,40 @@ the script's actual `--help` output or usage text.
   CloudWatch log groups, and tears down AWS resources.
 
 **Key flags/arguments:**
+
 - `<up|env|down>` — Required action
 - `<run-id>` — Required run identifier string
 - The script sources `./.env` for `TF_VAR_encryption_passphrase` and AWS credentials.
 
 ### `scripts/recover-deploy.sh`
+
 **Restore missing S3 state and import existing AWS resources for a run-id into OpenTofu
 state.** Does NOT destroy anything. Used when a prior partial run left resources but the
 state file is missing.
 
 **Key flags/arguments:**
+
 - `<run-id>` — Required run identifier.
 
 ### `scripts/recover-destroy.sh`
+
 **Restore missing S3 state from the latest version, import existing AWS resources, then
 destroy orphaned resources for a run-id.** Imports whatever still exists, then runs
 `tofu destroy`.
 
 **Key flags/arguments:**
+
 - `<run-id>` — Required run identifier.
 
 ### `scripts/appsync-ensure-resolver-order.sh`
+
 **Work around AWS AppSync provider ordering issues.** When a Terraform plan would destroy
 `aws_appsync_function` or `aws_appsync_datasource` resources, this script runs a
 targeted apply for the affected resolver(s) first, so the resolver drops its references
 to the old functions/data sources before the full apply deletes them.
 
 **Key flags/arguments:**
+
 - `-d <tofu-dir>` — Target OpenTofu directory (defaults to CWD).
 - `-t <resolver-target>` — One or more `-target` addresses to apply first (e.g.
   `module.appsync.aws_appsync_resolver.create_order`). Can be specified multiple times.
@@ -55,6 +63,7 @@ to the old functions/data sources before the full apply deletes them.
   (plan/apply).
 
 ### `scripts/build-resolvers.mjs`
+
 **Build AppSync resolver JavaScript bundles using esbuild.** Reads resolver source from
 `tofu/application/appsync/js-resolvers/` and outputs bundled files to
 `tofu/application/appsync/dist/`. Must be run before any `tofu plan`/`apply`/`import`
@@ -65,15 +74,18 @@ to the old functions/data sources before the full apply deletes them.
 repo root first, then retry."
 
 ### `scripts/create-ephemeral-test-users.sh`
+
 **Create ephemeral run-scoped test users in a Cognito User Pool.** Creates Owner
 (added to ADMIN group), Contributor, and Read-only users with emails patterned as
 `<run-id>-owner@kernelworx.test` etc. so they never collide with dev/prod users.
 
 **Key flags/arguments:**
+
 - `<run-id>` — Required run identifier.
 - `<user-pool-id>` — Required Cognito User Pool ID.
 
 ### `scripts/create-screenshot-user.sh`
+
 **Create the Alex Kernel screenshot/marketing user in Cognito.** Idempotent: safe to
 re-run if the user already exists.
 
@@ -81,6 +93,7 @@ re-run if the user already exists.
 `TEST_ALEX_PASSWORD` from `./.env`.
 
 ### `scripts/create-test-users.sh`
+
 **Create test users in Cognito for integration tests.** Uses credentials from `./.env`.
 Creates Owner, Contributor, and Read-only users.
 
@@ -88,6 +101,7 @@ Creates Owner, Contributor, and Read-only users.
 `TEST_OWNER_PASSWORD`, `TEST_REGION` in environment.
 
 ### `scripts/delete-screenshot-user.sh`
+
 **Delete the Alex Kernel Cognito user.** Removes only the Cognito user; the DynamoDB
 Account record, seller profiles, campaigns, orders, payment methods, and shares are
 preserved by default.
@@ -96,6 +110,7 @@ preserved by default.
 from `./.env`.
 
 ### `scripts/delete-test-catalogs.py`
+
 **Delete managed catalogs owned by test users.** Scans the DynamoDB catalogs table for
 items where `GSI1PK` matches `MANAGED_CATALOG#{sub}` for each test user, then deletes
 their METADATA items.
@@ -104,6 +119,7 @@ their METADATA items.
 and test user emails from environment.
 
 ### `scripts/migrate_shares_prefix.py`
+
 **One-off migration: add `ACCOUNT#` prefix to `createdByAccountId` in the shares table.**
 Scans the shares table and conditionally updates any `createdByAccountId` missing the
 prefix. Dev-only script.
@@ -112,6 +128,7 @@ prefix. Dev-only script.
 via `.env`). Run with: `uv run python scripts/migrate_shares_prefix.py`.
 
 ### `scripts/contrast_check.py`
+
 **WCAG contrast checker for KernelWorx brand colors.** Audits all text/background
 combinations defined in the brand palette against AAA and AA thresholds, printing a
 pass/fail matrix.
@@ -119,22 +136,27 @@ pass/fail matrix.
 **Key flags/arguments:** None. Run from repo root: `python3 scripts/contrast_check.py`.
 
 ### `scripts/sync-to-cloudflare.sh`
+
 **Sync Route53 DNS records to CloudFlare.** Fetches all Route53 resource record sets
 (excluding NS/SOA) and creates/updates matching records in a CloudFlare zone.
 
 **Key flags/arguments:**
+
 - `ROUTE53_ZONE_ID` — Required Route53 hosted zone ID.
 - `ENVIRONMENT` — Optional environment name, default `prod`. Examples: `dev`, `prod`.
 
 ### `scripts/update-integration-env.sh`
+
 **Update integration test environment variables from AWS.** Fetches the Cognito User Pool
 Client ID from the named stack and writes it to `./.env`.
 
 **Key flags/arguments:**
+
 - `ENVIRONMENT` — Optional environment name, default `dev`. Stack name pattern is
   `kernelworx-ue1-<ENVIRONMENT>`.
 
 ### `scripts/ephemeral-recover-common.sh`
+
 **Common helpers for ephemeral environment recovery workflows.** Not intended to be run
 directly; sourced by `ephemeral-env.sh`, `recover-deploy.sh`, and `recover-destroy.sh`.
 Provides functions for env loading, backend initialization, S3 bucket emptying, stale
@@ -147,6 +169,7 @@ lock cleanup, state recovery, resource importing, and CloudWatch log group clean
 ## Repo-Root Operational Tooling
 
 ### `Makefile`
+
 **Build, test, lint, and deployment commands.** Top-level targets include:
 
 - `make all` — Format + lint + typecheck + test (backend + frontend)
@@ -162,6 +185,7 @@ lock cleanup, state recovery, resource importing, and CloudWatch log group clean
 - `make help` — Print this help text
 
 ### GitHub Actions workflows (`.github/workflows/`)
+
 - **`ci.yml`** — Standard CI pipeline (spellcheck + lint + typecheck + test + guards)
 - **`deploy-dev.yml`** / **`deploy-prod.yml`** — Environment deployment workflows
 - **`deploy-shared.yml`** — Shared infrastructure (Cognito, CloudFront, WAF) deployment
@@ -175,22 +199,22 @@ lock cleanup, state recovery, resource importing, and CloudWatch log group clean
 
 ## When to Run Which Script
 
-| Goal | Script |
-|------|--------|
-| Create/manage a temporary test environment | `scripts/ephemeral-env.sh up/down` |
-| Recover from a missing state file | `scripts/recover-deploy.sh` |
-| Recover and destroy orphaned resources | `scripts/recover-destroy.sh` |
+| Goal                                                        | Script                                     |
+| ----------------------------------------------------------- | ------------------------------------------ |
+| Create/manage a temporary test environment                  | `scripts/ephemeral-env.sh up/down`         |
+| Recover from a missing state file                           | `scripts/recover-deploy.sh`                |
+| Recover and destroy orphaned resources                      | `scripts/recover-destroy.sh`               |
 | Ensure resolver ordering before destructive AppSync changes | `scripts/appsync-ensure-resolver-order.sh` |
-| Build resolver JS bundles before any ToFu operation | `scripts/build-resolvers.mjs` |
-| Create test users for a new ephemeral run | `scripts/create-ephemeral-test-users.sh` |
-| Set up the Alex Kernel marketing user | `scripts/create-screenshot-user.sh` |
-| Create generic test users for integration tests | `scripts/create-test-users.sh` |
-| Delete the Alex Kernel Cognito user (preserving data) | `scripts/delete-screenshot-user.sh` |
-| Delete test user catalogs | `scripts/delete-test-catalogs.py` |
-| Run shares table migration (dev only) | `scripts/migrate_shares_prefix.py` |
-| Check WCAG contrast of brand colors | `scripts/contrast_check.py` |
-| Sync Route53 DNS to CloudFlare | `scripts/sync-to-cloudflare.sh` |
-| Update .env with latest Cognito Client ID | `scripts/update-integration-env.sh` |
+| Build resolver JS bundles before any ToFu operation         | `scripts/build-resolvers.mjs`              |
+| Create test users for a new ephemeral run                   | `scripts/create-ephemeral-test-users.sh`   |
+| Set up the Alex Kernel marketing user                       | `scripts/create-screenshot-user.sh`        |
+| Create generic test users for integration tests             | `scripts/create-test-users.sh`             |
+| Delete the Alex Kernel Cognito user (preserving data)       | `scripts/delete-screenshot-user.sh`        |
+| Delete test user catalogs                                   | `scripts/delete-test-catalogs.py`          |
+| Run shares table migration (dev only)                       | `scripts/migrate_shares_prefix.py`         |
+| Check WCAG contrast of brand colors                         | `scripts/contrast_check.py`                |
+| Sync Route53 DNS to CloudFlare                              | `scripts/sync-to-cloudflare.sh`            |
+| Update .env with latest Cognito Client ID                   | `scripts/update-integration-env.sh`        |
 
 ---
 
