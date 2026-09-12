@@ -95,13 +95,12 @@ Global Secondary Indexes:
 Primary Key: `campaignId` + `orderId` (Composite)
 Global Secondary Indexes:
 - `orderId-index` (orderId)
-- `profileId-index` (profileId + createdAt)
 
 | Attribute | Type | Purpose |
 |-----------|------|---------|
 | campaignId | String | PK - Campaign |
 | orderId | String | SK - Order ID, also in GSI |
-| profileId | String | GSI - For cross-campaign queries |
+| profileId | String | Profile ID |
 | customerName | String | Customer name |
 | customerEmail | String | Customer email |
 | customerPhone | String | Customer phone |
@@ -110,7 +109,7 @@ Global Secondary Indexes:
 | paymentMethod | String | Payment type |
 | deliveryStatus | String | Delivery state |
 | notes | String | Order notes |
-| createdAt | DateTime | GSI - Sorting |
+| createdAt | DateTime | Timestamp |
 | updatedAt | DateTime | Timestamp |
 
 ### catalogs
