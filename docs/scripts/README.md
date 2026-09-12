@@ -145,15 +145,31 @@ pass/fail matrix.
 - `ROUTE53_ZONE_ID` — Required Route53 hosted zone ID.
 - `ENVIRONMENT` — Optional environment name, default `prod`. Examples: `dev`, `prod`.
 
-### `scripts/update-integration-env.sh`
+### `scripts/generate_integration_env.py`
 
-**Update integration test environment variables from AWS.** Fetches the Cognito User Pool
-Client ID from the named stack and writes it to `./.env`.
+**Generate the integration test environment config from OpenTofu outputs.** Reads
+`tofu output -json` for the dev or ephemeral stack and writes the managed keys to the
+integration test env file (default `./.env`) and, optionally, the frontend env file —
+replacing the hand-maintained values that used to be looked up by naming convention.
+Existing files are updated in place; every unmanaged line (secrets, test user
+credentials, comments) is preserved. A missing target file is created from the matching
+committed template (`.env.example` / `frontend/.env.example`). Managed keys:
+`TEST_APPSYNC_ENDPOINT`, `TEST_USER_POOL_ID`, `TEST_USER_POOL_CLIENT_ID`, `TEST_REGION`,
+`E2E_BASE_URL` (when the stack exposes `site_url`), and the `VITE_*` frontend keys.
 
 **Key flags/arguments:**
 
-- `ENVIRONMENT` — Optional environment name, default `dev`. Stack name pattern is
-  `kernelworx-ue1-<ENVIRONMENT>`.
+- `--env <name>` — Stack to read: `dev` (default) or `ephemeral/<run-id>`.
+- `--out <file>` — Integration test env file to write or check (default `.env`).
+- `--frontend-out <file>` — Frontend env file to write or check (e.g. `frontend/.env`).
+- `--outputs-json <file>` — Read a captured `tofu output -json` document instead of the
+  live stack (no AWS access needed).
+- `--check` — Verify the existing file(s) without writing: managed keys must be present
+  and non-empty; with `--outputs-json`, values must also match the OpenTofu outputs.
+
+The live stack path sources `./.env` for `TF_VAR_encryption_passphrase` and AWS
+credentials and only runs `tofu init` (ephemeral backend selection) and
+`tofu output -json` — never `tofu apply`/`destroy`.
 
 ### `scripts/ephemeral-recover-common.sh`
 
@@ -214,7 +230,7 @@ lock cleanup, state recovery, resource importing, and CloudWatch log group clean
 | Run shares table migration (dev only)                       | `scripts/migrate_shares_prefix.py`         |
 | Check WCAG contrast of brand colors                         | `scripts/contrast_check.py`                |
 | Sync Route53 DNS to CloudFlare                              | `scripts/sync-to-cloudflare.sh`            |
-| Update .env with latest Cognito Client ID                   | `scripts/update-integration-env.sh`        |
+| Generate integration test env config from tofu outputs      | `scripts/generate_integration_env.py`      |
 
 ---
 
