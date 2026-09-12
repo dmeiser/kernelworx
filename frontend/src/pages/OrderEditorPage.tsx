@@ -59,7 +59,7 @@ interface PaymentMethodOption {
 }
 
 // ============================================================================
-// Types (page-specific types not in shared entities)
+// Types (page-specific types not in the generated GraphQL types)
 // ============================================================================
 
 interface CampaignData {
