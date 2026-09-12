@@ -28,7 +28,7 @@ tofu/
 1. **OpenTofu 1.7+** installed
 2. **AWS CLI** configured with appropriate credentials
 3. **jq** installed for JSON processing
-4. **ENCRYPTION_PASSPHRASE** set in root `.env` file
+4. **TF_VAR_encryption_passphrase** set in root `.env` file
 
 ## Quick Start
 
@@ -49,7 +49,7 @@ cd environments/dev
 
 ## State Encryption
 
-State files are encrypted using PBKDF2+AES-GCM with the passphrase from `ENCRYPTION_PASSPHRASE` environment variable.
+State files are encrypted using PBKDF2+AES-GCM with the passphrase from `TF_VAR_encryption_passphrase` environment variable.
 
 **⚠️ IMPORTANT**: If you lose the passphrase, you cannot decrypt the state file!
 
