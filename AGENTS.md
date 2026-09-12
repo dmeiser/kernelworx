@@ -11,6 +11,20 @@ Do not repeat what the codebase already shows; point to the authoritative file o
 Prefer rewriting or pruning existing entries over appending new ones.
 When updating this file, preserve this bar for all agents and keep entries concise.
 
+## Integration test env config from tofu outputs (#342)
+
+The root `.env` (loaded by `tests/integration/setup.ts`) and `frontend/.env` are no longer
+hand-maintained for infrastructure values: `scripts/generate_integration_env.py` reads
+`tofu output -json` for the dev or `ephemeral/<run-id>` stack and writes the managed keys
+(`TEST_APPSYNC_ENDPOINT`, `TEST_USER_POOL_ID`, `TEST_USER_POOL_CLIENT_ID`, `TEST_REGION`,
+`E2E_BASE_URL` when `site_url` is present; `VITE_*` keys with `--frontend-out`), preserving
+every unmanaged line. A missing target file is created from the committed
+`.env.example`/`frontend/.env.example` templates, so those templates must keep a
+placeholder line for every managed key (structural `--check` tests in
+`tests/unit/test_generate_integration_env.py` guard this). `--check` never writes and
+never touches a stack; `--outputs-json` accepts a captured `tofu output -json` document so
+no AWS access is needed. This supersedes the deleted `scripts/update-integration-env.sh`.
+
 ## Ephemeral PR environments
 
 Ephemeral per-PR stacks live in `tofu/application/environments/ephemeral` and are managed by `scripts/ephemeral-env.sh`. The `.github/workflows/ephemeral-test.yml` workflow has two jobs: `ephemeral-test` deploys the stack for same-repo pull requests only (it needs a PR number to form the run-id), and `sweep` runs on the nightly schedule to tear down leaked `pr-*` stacks; both jobs use the `ephemeral` environment so they can assume the AWS role.
