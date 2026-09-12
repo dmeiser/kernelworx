@@ -20,6 +20,7 @@ dev = [
     "pytest-cov>=7.0.0",
     "types-openpyxl>=3.1.5.20250919",
     "radon>=6.0.1",
+    "xenon>=0.9.3",
     "playwright>=1.51.0",
     "pytest-playwright>=0.7.0",
     "python-dotenv>=1.2.1",
@@ -81,9 +82,11 @@ precision = 2
 # F (41+): Very high - error-prone, unstable block
 #
 # POLICY: All functions must be Grade A (complexity <= 5)
-# Run: uv run radon cc src/ -a -s --total-average
-# Check for violations: uv run radon cc src/ -a -nb (shows B or worse)
-# CI check: uv run radon cc src/ --total-average -nb --json | jq 'to_entries | map(select(.value | length > 0)) | length' (should be 0)
+# CI gate (xenon wraps radon; see .github/workflows/ci.yml, backend job):
+#   uv run xenon --max-average A --max-absolute B --exclude '...' src/
+#   average must stay Grade A (<=5) and no block may exceed Grade B (<=10);
+#   tighten --max-absolute to A once every function grades A.
+# Manual inspection with radon directly: uv run radon cc src/ -a -s --total-average
 cc_min = "A"
 show_complexity = true
 average = true

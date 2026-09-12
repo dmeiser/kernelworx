@@ -11,6 +11,24 @@ Do not repeat what the codebase already shows; point to the authoritative file o
 Prefer rewriting or pruning existing entries over appending new ones.
 When updating this file, preserve this bar for all agents and keep entries concise.
 
+## Complexity gate: xenon over radon (#403)
+
+CI (`.github/workflows/ci.yml`, backend job) runs `uv run xenon --max-average A --max-absolute B --exclude '*admin_operations.py,*payment_methods.py,*logging.py' src/` and fails the job on breach: the average cyclomatic complexity of `src/` must stay Grade A (<=5) and no single block may exceed Grade B (<=10). Xenon (dev dependency) is a CI wrapper around radon, which stays the analysis engine (`uv run radon cc src/ -a -s` for per-function detail). The three `--exclude`d files hold legacy Grade C blocks (5 functions, CC 11-17: `_batch_get_campaign_catalogs`, `_batch_get_display_names`, `_search_accounts_in_dynamodb` in `src/handlers/admin_operations.py`; `delete_all_user_qr_codes` in `src/utils/payment_methods.py`; `StructuredLogger._log` in `src/utils/logging.py`). Refactoring one of those functions to CC<=10 should drop its file's exclusion only when no other breaching block remains in it; once every function grades A, tighten `--max-absolute` to A and remove the exclusion list. Xenon's `--exclude` matches glob patterns against file paths, so it is file-level, not per-function.
+
+## Integration test env config from tofu outputs (#342)
+
+The root `.env` (loaded by `tests/integration/setup.ts`) and `frontend/.env` are no longer
+hand-maintained for infrastructure values: `scripts/generate_integration_env.py` reads
+`tofu output -json` for the dev or `ephemeral/<run-id>` stack and writes the managed keys
+(`TEST_APPSYNC_ENDPOINT`, `TEST_USER_POOL_ID`, `TEST_USER_POOL_CLIENT_ID`, `TEST_REGION`,
+`E2E_BASE_URL` when `site_url` is present; `VITE_*` keys with `--frontend-out`), preserving
+every unmanaged line. A missing target file is created from the committed
+`.env.example`/`frontend/.env.example` templates, so those templates must keep a
+placeholder line for every managed key (structural `--check` tests in
+`tests/unit/test_generate_integration_env.py` guard this). `--check` never writes and
+never touches a stack; `--outputs-json` accepts a captured `tofu output -json` document so
+no AWS access is needed. This supersedes the deleted `scripts/update-integration-env.sh`.
+
 ## Ephemeral PR environments
 
 Ephemeral per-PR stacks live in `tofu/application/environments/ephemeral` and are managed by `scripts/ephemeral-env.sh`. The `.github/workflows/ephemeral-test.yml` workflow has two jobs: `ephemeral-test` deploys the stack for same-repo pull requests only (it needs a PR number to form the run-id), and `sweep` runs on the nightly schedule to tear down leaked `pr-*` stacks; both jobs use the `ephemeral` environment so they can assume the AWS role.
