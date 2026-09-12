@@ -125,12 +125,12 @@ class TestOrdersTableSchema:
             {"AttributeName": "orderId", "KeyType": "RANGE"},
         ]
 
-    def test_has_order_and_profile_indexes(self):
-        """Schema includes orderId and profileId GSIs."""
+    def test_has_order_index(self):
+        """Schema includes orderId GSI and excludes dropped profileId-index."""
         schema = create_orders_table_schema()
         gsi_names = [gsi["IndexName"] for gsi in schema["GlobalSecondaryIndexes"]]
         assert "orderId-index" in gsi_names
-        assert "profileId-index" in gsi_names
+        assert "profileId-index" not in gsi_names
 
 
 class TestSharesTableSchema:
