@@ -149,8 +149,8 @@ lock cleanup, state recovery, resource importing, and CloudWatch log group clean
 ### `Makefile`
 **Build, test, lint, and deployment commands.** Top-level targets include:
 
-- `make all` — Format + lint + typecheck + test
-- `make ci` — Spellcheck + lint + typecheck + test + guards
+- `make all` — Format + lint + typecheck + test (backend + frontend)
+- `make ci` — Spellcheck + lint + typecheck + test (backend + frontend) + guards
 - `make test` — Python unit tests
 - `make test-e2e` — Python E2E smoke tests
 - `make test-all` — All tests (unit + guards + frontend + integration + e2e)
