@@ -35,11 +35,16 @@ Integration tests validate AppSync resolvers by making real GraphQL requests aga
      --message-action SUPPRESS
    ```
 
-4. **Set environment variables:**
+4. **Set environment variables** in the root `.env` (loaded by the setup file). The
+   infrastructure values come from OpenTofu outputs:
    ```bash
-   export APPSYNC_ENDPOINT="https://your-api-id.appsync-api.us-east-1.amazonaws.com/graphql"
-   export USER_POOL_ID="us-east-1_xxxxxxxxx"
-   export USER_POOL_CLIENT_ID="xxxxxxxxxxxxxxxxxxxxxxxxxx"
+   python3 scripts/generate_integration_env.py   # dev stack -> ./.env
+   ```
+   Then fill in the test user credentials (created in step 3):
+   ```bash
+   export TEST_APPSYNC_ENDPOINT="https://your-api-id.appsync-api.us-east-1.amazonaws.com/graphql"
+   export TEST_USER_POOL_ID="us-east-1_xxxxxxxxx"
+   export TEST_USER_POOL_CLIENT_ID="xxxxxxxxxxxxxxxxxxxxxxxxxx"
    export TEST_OWNER_EMAIL="integration-test-owner@example.com"
    export TEST_OWNER_PASSWORD="PermPass123!"
    export TEST_CONTRIBUTOR_EMAIL="integration-test-contributor@example.com"
