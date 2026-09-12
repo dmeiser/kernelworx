@@ -41,7 +41,7 @@ Global Secondary Indexes: `email-index` (email)
 | state | String | Location |
 | unitType | String | Scout unit type |
 | unitNumber | Integer | Scout unit number |
-| isAdmin | Boolean | Admin flag |
+| isAdmin | Boolean | Admin flag (derived from Cognito ADMIN group at read time, not stored — see `src/utils/auth.py`) |
 | preferences | JSON | User settings |
 | createdAt | DateTime | Timestamp |
 | updatedAt | DateTime | Timestamp |

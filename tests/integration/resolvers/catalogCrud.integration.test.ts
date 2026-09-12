@@ -1110,9 +1110,10 @@ describe('Catalog CRUD Integration Tests', () => {
         }
       });
 
-      // TODO: These tests require an admin user to be properly configured
-      // The isAdmin flag needs to be set in the Account record in DynamoDB
-      // Skip until admin user setup is implemented in test infrastructure
+      // NOTE: The owner test user is an admin. Test infrastructure adds the owner
+      // Cognito user to the ADMIN group (deploy-shared.yml "Ensure owner test user
+      // is in ADMIN group"; scripts/create-ephemeral-test-users.sh), and
+      // `isAdmin` is derived from that group at read time in admin_operations.py.
 
       it('SECURITY: Cannot delete catalog that is in use by campaigns', async () => {
         // Arrange: Create a public catalog that multiple users can use
