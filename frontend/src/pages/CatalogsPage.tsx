@@ -503,8 +503,8 @@ const CatalogsInfoAlert: React.FC = () => (
   <Alert severity="info" sx={{ mb: 3 }}>
     <Typography variant="body2">
       <strong style={{ color: 'inherit' }}>Managed catalogs</strong> are admin-maintained catalogs visible to all users.
-      <strong style={{ color: 'inherit' }}> Private catalogs</strong> are only visible to you and can be used for your owned tracking and use in
-      shared campaigns.
+      <strong style={{ color: 'inherit' }}> Private catalogs</strong> are only visible to you and can be used for your
+      owned tracking and use in shared campaigns.
     </Typography>
   </Alert>
 );

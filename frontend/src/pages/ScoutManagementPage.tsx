@@ -80,14 +80,16 @@ const decodeUrlParam = (encoded: string | undefined): string => (encoded ? decod
 const shouldSkipQuery = (id: string): boolean => !id;
 
 // Helper to get profile from query data
-const getProfile = (data: { getProfile: GqlSellerProfile } | undefined): GqlSellerProfile | undefined => data?.getProfile;
+const getProfile = (data: { getProfile: GqlSellerProfile } | undefined): GqlSellerProfile | undefined =>
+  data?.getProfile;
 
 // Helper to get invites from query data
 const getInvites = (data: { listInvitesByProfile: GqlProfileInvite[] } | undefined): GqlProfileInvite[] =>
   data?.listInvitesByProfile || [];
 
 // Helper to get shares from query data
-const getShares = (data: { listSharesByProfile: GqlShare[] } | undefined): GqlShare[] => data?.listSharesByProfile || [];
+const getShares = (data: { listSharesByProfile: GqlShare[] } | undefined): GqlShare[] =>
+  data?.listSharesByProfile || [];
 
 // Helper to get user display name for confirmation
 const getUserDisplayName = (email: string | undefined, accountId: string): string =>

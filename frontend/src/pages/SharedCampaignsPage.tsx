@@ -68,7 +68,8 @@ const getSharedCampaigns = (data: { listMySharedCampaigns: GqlSharedCampaign[] }
   data?.listMySharedCampaigns || [];
 
 // Helper to count active shared campaigns
-const countActiveSharedCampaigns = (campaigns: GqlSharedCampaign[]): number => campaigns.filter((p) => p.isActive).length;
+const countActiveSharedCampaigns = (campaigns: GqlSharedCampaign[]): number =>
+  campaigns.filter((p) => p.isActive).length;
 
 // Helper to check if can create more shared campaigns
 const canCreateMoreSharedCampaigns = (activeCount: number): boolean => activeCount < MAX_SHARED_CAMPAIGNS;

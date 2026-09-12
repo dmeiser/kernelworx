@@ -7,7 +7,6 @@ import type { GqlOrder, GqlAddress } from '../types';
 /** Minimal order shape needed for report export (structurally satisfied by GqlOrder). */
 type ReportOrder = Pick<GqlOrder, 'customerName' | 'customerPhone' | 'customerAddress' | 'lineItems' | 'totalAmount'>;
 
-
 function formatPhone(phone?: string): string {
   if (!phone) return '';
   // Remove all non-digit characters
