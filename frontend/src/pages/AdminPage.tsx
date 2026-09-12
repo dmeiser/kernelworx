@@ -70,7 +70,7 @@ import {
 } from '../lib/graphql';
 import { CatalogEditorDialog } from '../components/CatalogEditorDialog';
 import { formatDisplayDate } from '../lib/date-utils';
-import type { Catalog, AdminUser } from '../types';
+import type { GqlCatalog, GqlAdminUser, GqlProductInput } from '../types/graphql-generated';
 import type {
   GqlAdminDeleteUserMutation,
   GqlAdminDeleteUserMutationVariables,
@@ -128,10 +128,10 @@ const UserStatusChip: React.FC<{ status: string; enabled: boolean }> = ({ status
 
 // --- User Row ---
 interface UserRowProps {
-  user: AdminUser;
-  onResetPassword: (user: AdminUser) => void;
-  onDeleteUser: (user: AdminUser) => void;
-  onViewDetails: (user: AdminUser) => void;
+  user: GqlAdminUser;
+  onResetPassword: (user: GqlAdminUser) => void;
+  onDeleteUser: (user: GqlAdminUser) => void;
+  onViewDetails: (user: GqlAdminUser) => void;
 }
 
 const UserRow: React.FC<UserRowProps> = ({ user, onResetPassword, onDeleteUser, onViewDetails }) => (
@@ -207,11 +207,11 @@ interface UsersTabContentProps {
   onSearch: () => void;
   loading: boolean;
   error: Error | undefined;
-  searchedUsers: AdminUser[];
+  searchedUsers: GqlAdminUser[];
   hasSearched: boolean;
-  onResetPassword: (user: AdminUser) => void;
-  onDeleteUser: (user: AdminUser) => void;
-  onViewDetails: (user: AdminUser) => void;
+  onResetPassword: (user: GqlAdminUser) => void;
+  onDeleteUser: (user: GqlAdminUser) => void;
+  onViewDetails: (user: GqlAdminUser) => void;
 }
 
 const UsersTabContent: React.FC<UsersTabContentProps> = ({
@@ -312,9 +312,9 @@ const UsersTabContent: React.FC<UsersTabContentProps> = ({
 
 // --- Catalog Card ---
 interface CatalogCardProps {
-  catalog: Catalog;
-  onEdit: (catalog: Catalog) => void;
-  onDelete: (catalog: Catalog) => void;
+  catalog: GqlCatalog;
+  onEdit: (catalog: GqlCatalog) => void;
+  onDelete: (catalog: GqlCatalog) => void;
 }
 
 const CatalogCard: React.FC<CatalogCardProps> = ({ catalog, onEdit, onDelete }) => (
@@ -353,10 +353,10 @@ const CatalogCard: React.FC<CatalogCardProps> = ({ catalog, onEdit, onDelete }) 
 interface CatalogsTabContentProps {
   loading: boolean;
   error: Error | undefined;
-  catalogs: Catalog[];
+  catalogs: GqlCatalog[];
   onCreateCatalog: () => void;
-  onEditCatalog: (catalog: Catalog) => void;
-  onDeleteCatalog: (catalog: Catalog) => void;
+  onEditCatalog: (catalog: GqlCatalog) => void;
+  onDeleteCatalog: (catalog: GqlCatalog) => void;
 }
 
 const CatalogsTabContent: React.FC<CatalogsTabContentProps> = ({
@@ -448,12 +448,12 @@ export const AdminPage: React.FC = () => {
 
   // User search state
   const [userSearchQuery, setUserSearchQuery] = useState('');
-  const [searchedUsers, setSearchedUsers] = useState<AdminUser[]>([]);
+  const [searchedUsers, setSearchedUsers] = useState<GqlAdminUser[]>([]);
   const [hasSearched, setHasSearched] = useState(false);
 
   // Dialog states
-  const [resetPasswordUser, setResetPasswordUser] = useState<AdminUser | null>(null);
-  const [deleteUserTarget, setDeleteUserTarget] = useState<AdminUser | null>(null);
+  const [resetPasswordUser, setResetPasswordUser] = useState<GqlAdminUser | null>(null);
+  const [deleteUserTarget, setDeleteUserTarget] = useState<GqlAdminUser | null>(null);
   const {
     message: snackbarMessage,
     open: snackbarOpen,
@@ -464,8 +464,8 @@ export const AdminPage: React.FC = () => {
 
   // Catalog editor state
   const [catalogEditorOpen, setCatalogEditorOpen] = useState(false);
-  const [editingCatalog, setEditingCatalog] = useState<Catalog | null>(null);
-  const [deleteCatalogTarget, setDeleteCatalogTarget] = useState<Catalog | null>(null);
+  const [editingCatalog, setEditingCatalog] = useState<GqlCatalog | null>(null);
+  const [deleteCatalogTarget, setDeleteCatalogTarget] = useState<GqlCatalog | null>(null);
 
   // Cascading delete progress state
   const [deleteProgress, setDeleteProgress] = useState<{
@@ -476,7 +476,7 @@ export const AdminPage: React.FC = () => {
 
   // Search users (lazy query)
   const [searchUser, { loading: usersLoading, error: usersError, data: searchUserData }] = useLazyQuery<{
-    adminSearchUser: AdminUser[];
+    adminSearchUser: GqlAdminUser[];
   }>(ADMIN_SEARCH_USER, {
     fetchPolicy: 'network-only',
   });
@@ -495,7 +495,7 @@ export const AdminPage: React.FC = () => {
     loading: catalogsLoading,
     error: catalogsError,
     refetch: refetchCatalogs,
-  } = useQuery<{ listManagedCatalogs: Catalog[] }>(LIST_MANAGED_CATALOGS);
+  } = useQuery<{ listManagedCatalogs: GqlCatalog[] }>(LIST_MANAGED_CATALOGS);
 
   // Mutations
   const [resetPassword, { loading: resettingPassword }] = useMutation(ADMIN_RESET_USER_PASSWORD);
@@ -568,12 +568,12 @@ export const AdminPage: React.FC = () => {
     setCatalogEditorOpen(true);
   };
 
-  const handleEditCatalog = (catalog: Catalog) => {
+  const handleEditCatalog = (catalog: GqlCatalog) => {
     setEditingCatalog(catalog);
     setCatalogEditorOpen(true);
   };
 
-  const handleDeleteCatalog = (catalog: Catalog) => {
+  const handleDeleteCatalog = (catalog: GqlCatalog) => {
     setDeleteCatalogTarget(catalog);
   };
 
@@ -587,12 +587,7 @@ export const AdminPage: React.FC = () => {
   const handleSaveCatalog = async (catalogData: {
     catalogName: string;
     isPublic: boolean;
-    products: Array<{
-      productId?: string;
-      productName: string;
-      description?: string;
-      price: number;
-    }>;
+    products: GqlProductInput[];
   }) => {
     if (editingCatalog) {
       await updateCatalog({
@@ -605,11 +600,11 @@ export const AdminPage: React.FC = () => {
     setEditingCatalog(null);
   };
 
-  const handleResetPassword = (user: AdminUser) => {
+  const handleResetPassword = (user: GqlAdminUser) => {
     setResetPasswordUser(user);
   };
 
-  const handleDeleteUser = (user: AdminUser) => {
+  const handleDeleteUser = (user: GqlAdminUser) => {
     setDeleteUserTarget(user);
   };
 

@@ -47,7 +47,7 @@ import { LoadingState } from '../components/LoadingState';
 import { EmptyState } from '../components/EmptyState';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { EditSharedCampaignDialog } from '../components/EditSharedCampaignDialog';
-import type { SharedCampaign } from '../types';
+import type { GqlSharedCampaign } from '../types';
 
 const MAX_SHARED_CAMPAIGNS = 50;
 const BASE_URL = window.location.origin;
@@ -64,23 +64,24 @@ const StatusChip: React.FC<{ isActive: boolean }> = ({ isActive }) =>
 const getDescription = (description: string | undefined): string => description || '-';
 
 // Helper to get shared campaigns from query data
-const getSharedCampaigns = (data: { listMySharedCampaigns: SharedCampaign[] } | undefined): SharedCampaign[] =>
+const getSharedCampaigns = (data: { listMySharedCampaigns: GqlSharedCampaign[] } | undefined): GqlSharedCampaign[] =>
   data?.listMySharedCampaigns || [];
 
 // Helper to count active shared campaigns
-const countActiveSharedCampaigns = (campaigns: SharedCampaign[]): number => campaigns.filter((p) => p.isActive).length;
+const countActiveSharedCampaigns = (campaigns: GqlSharedCampaign[]): number =>
+  campaigns.filter((p) => p.isActive).length;
 
 // Helper to check if can create more shared campaigns
 const canCreateMoreSharedCampaigns = (activeCount: number): boolean => activeCount < MAX_SHARED_CAMPAIGNS;
 
 // Helper to check if download is available
-const canDownloadQRCode = (qrCodeDataUrl: string | null, qrSharedCampaign: SharedCampaign | null): boolean =>
+const canDownloadQRCode = (qrCodeDataUrl: string | null, qrSharedCampaign: GqlSharedCampaign | null): boolean =>
   Boolean(qrCodeDataUrl && qrSharedCampaign);
 
 // Helper to download QR code
 const downloadQRCodeImage = (
   qrCodeDataUrl: string | null,
-  sharedCampaign: SharedCampaign | null,
+  sharedCampaign: GqlSharedCampaign | null,
   showSnackbar: (message: string) => void,
 ): void => {
   /* v8 ignore start -- Download button only enabled after QR data is generated */
@@ -139,14 +140,14 @@ const generateQRCode = async (
 };
 
 // Helper to check if list has items
-const hasSharedCampaigns = (campaigns: SharedCampaign[]): boolean => campaigns.length > 0;
+const hasSharedCampaigns = (campaigns: GqlSharedCampaign[]): boolean => campaigns.length > 0;
 
 // Helper to get short link for a shared campaign
 const getShortLinkForCode = (code: string): string => `${BASE_URL}/c/${code}`;
 
 // Deactivate details component (only renders when campaign exists)
 const DeactivateDetails: React.FC<{
-  campaign: SharedCampaign | null;
+  campaign: GqlSharedCampaign | null;
 }> = ({ campaign }) =>
   campaign ? (
     <Box mt={2}>
@@ -162,7 +163,7 @@ const DeactivateDetails: React.FC<{
 
 // QR dialog title suffix component
 const QRDialogTitleSuffix: React.FC<{
-  campaign: SharedCampaign | null;
+  campaign: GqlSharedCampaign | null;
 }> = ({ campaign }) =>
   campaign ? (
     <> - {campaign.sharedCampaignCode}</>
@@ -193,7 +194,7 @@ const QRCodeImage: React.FC<{
 
 // QR link display component
 const QRLinkDisplay: React.FC<{
-  campaign: SharedCampaign | null;
+  campaign: GqlSharedCampaign | null;
 }> = ({ campaign }) =>
   campaign ? (
     <Box sx={{ textAlign: 'center', width: '100%' }}>
@@ -209,12 +210,12 @@ const QRLinkDisplay: React.FC<{
 
 // Campaigns list component (table or empty state)
 const CampaignsList: React.FC<{
-  campaigns: SharedCampaign[];
+  campaigns: GqlSharedCampaign[];
   onCreateClick: () => void;
   onCopyLink: (code: string) => void;
-  onShowQR: (campaign: SharedCampaign) => void;
-  onEdit: (campaign: SharedCampaign) => void;
-  onDeactivate: (campaign: SharedCampaign) => void;
+  onShowQR: (campaign: GqlSharedCampaign) => void;
+  onEdit: (campaign: GqlSharedCampaign) => void;
+  onDeactivate: (campaign: GqlSharedCampaign) => void;
 }> = ({ campaigns, onCreateClick, onCopyLink, onShowQR, onEdit, onDeactivate }) =>
   hasSharedCampaigns(campaigns) ? (
     <TableContainer component={Paper} sx={{ width: '100%', overflowX: 'auto' }}>
@@ -256,7 +257,7 @@ const CampaignsList: React.FC<{
 
 // Edit dialog wrapper component
 const EditDialogWrapper: React.FC<{
-  campaign: SharedCampaign | null;
+  campaign: GqlSharedCampaign | null;
   onClose: () => void;
   onSave: (
     code: string,
@@ -273,11 +274,11 @@ const EditDialogWrapper: React.FC<{
 
 // Shared campaign row actions component
 const SharedCampaignActions: React.FC<{
-  sharedCampaign: SharedCampaign;
+  sharedCampaign: GqlSharedCampaign;
   onCopyLink: (code: string) => void;
-  onShowQR: (sharedCampaign: SharedCampaign) => void;
-  onEdit: (sharedCampaign: SharedCampaign) => void;
-  onDeactivate: (sharedCampaign: SharedCampaign) => void;
+  onShowQR: (sharedCampaign: GqlSharedCampaign) => void;
+  onEdit: (sharedCampaign: GqlSharedCampaign) => void;
+  onDeactivate: (sharedCampaign: GqlSharedCampaign) => void;
 }> = ({ sharedCampaign, onCopyLink, onShowQR, onEdit, onDeactivate }) => (
   <Stack direction="row" spacing={0.5} justifyContent="flex-end" flexWrap="wrap">
     <Tooltip title="Copy Link">
@@ -307,11 +308,11 @@ const SharedCampaignActions: React.FC<{
 
 // Single shared campaign row component
 const SharedCampaignRow: React.FC<{
-  sharedCampaign: SharedCampaign;
+  sharedCampaign: GqlSharedCampaign;
   onCopyLink: (code: string) => void;
-  onShowQR: (sharedCampaign: SharedCampaign) => void;
-  onEdit: (sharedCampaign: SharedCampaign) => void;
-  onDeactivate: (sharedCampaign: SharedCampaign) => void;
+  onShowQR: (sharedCampaign: GqlSharedCampaign) => void;
+  onEdit: (sharedCampaign: GqlSharedCampaign) => void;
+  onDeactivate: (sharedCampaign: GqlSharedCampaign) => void;
 }> = ({ sharedCampaign, onCopyLink, onShowQR, onEdit, onDeactivate }) => (
   <TableRow>
     <TableCell>
@@ -329,7 +330,7 @@ const SharedCampaignRow: React.FC<{
           whiteSpace: 'nowrap',
         }}
       >
-        {getDescription(sharedCampaign.description)}
+        {getDescription(sharedCampaign.description ?? undefined)}
       </Typography>
     </TableCell>
     <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>{stripPrefix(sharedCampaign.catalogId)}</TableCell>
@@ -359,27 +360,27 @@ const SharedCampaignRow: React.FC<{
 
 interface SharedCampaignsPageContentProps {
   error?: ErrorLike | undefined;
-  sharedCampaigns: SharedCampaign[];
+  sharedCampaigns: GqlSharedCampaign[];
   activeSharedCampaignCount: number;
   canCreateMore: boolean;
   onCreateClick: () => void;
   onCopyLink: (code: string) => void;
-  onShowQR: (campaign: SharedCampaign) => void;
-  onEdit: (campaign: SharedCampaign) => void;
-  onDeactivate: (campaign: SharedCampaign) => void;
-  editingSharedCampaign: SharedCampaign | null;
+  onShowQR: (campaign: GqlSharedCampaign) => void;
+  onEdit: (campaign: GqlSharedCampaign) => void;
+  onDeactivate: (campaign: GqlSharedCampaign) => void;
+  editingSharedCampaign: GqlSharedCampaign | null;
   onEditDialogDismiss: () => void;
   onSaveEdit: (
     sharedCampaignCode: string,
     updates: { description?: string; creatorMessage?: string; isActive?: boolean },
   ) => Promise<void>;
   deactivateDialogOpen: boolean;
-  sharedCampaignToDeactivate: SharedCampaign | null;
+  sharedCampaignToDeactivate: GqlSharedCampaign | null;
   onDeactivateDialogDismiss: () => void;
   onConfirmDeactivate: () => Promise<void>;
   qrDialogOpen: boolean;
   qrCodeDataUrl: string | null;
-  qrSharedCampaign: SharedCampaign | null;
+  qrSharedCampaign: GqlSharedCampaign | null;
   onQrDialogDismiss: () => void;
   onDownloadQRCode: () => void;
   snackbarKey: number | undefined;
@@ -516,12 +517,12 @@ const SharedCampaignsPageContent: React.FC<SharedCampaignsPageContentProps> = ({
 
 export const SharedCampaignsPage: React.FC = () => {
   const navigate = useNavigate();
-  const [editingSharedCampaign, setEditingSharedCampaign] = useState<SharedCampaign | null>(null);
+  const [editingSharedCampaign, setEditingSharedCampaign] = useState<GqlSharedCampaign | null>(null);
   const [deactivateDialogOpen, setDeactivateDialogOpen] = useState(false);
-  const [sharedCampaignToDeactivate, setSharedCampaignToDeactivate] = useState<SharedCampaign | null>(null);
+  const [sharedCampaignToDeactivate, setSharedCampaignToDeactivate] = useState<GqlSharedCampaign | null>(null);
   const [qrDialogOpen, setQrDialogOpen] = useState(false);
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string | null>(null);
-  const [qrSharedCampaign, setQrSharedCampaign] = useState<SharedCampaign | null>(null);
+  const [qrSharedCampaign, setQrSharedCampaign] = useState<GqlSharedCampaign | null>(null);
   const {
     message: snackbarMessage,
     open: snackbarOpen,
@@ -540,7 +541,7 @@ export const SharedCampaignsPage: React.FC = () => {
   // Use errorPolicy 'all' so that a stale or partially-deleted catalog does
   // not block the entire list from rendering.
   const { data, loading, error, refetch } = useQuery<{
-    listMySharedCampaigns: SharedCampaign[];
+    listMySharedCampaigns: GqlSharedCampaign[];
   }>(LIST_MY_SHARED_CAMPAIGNS, {
     errorPolicy: 'all',
     fetchPolicy: 'network-only',
@@ -588,7 +589,7 @@ export const SharedCampaignsPage: React.FC = () => {
     );
   };
 
-  const handleShowQRCode = async (sharedCampaign: SharedCampaign) => {
+  const handleShowQRCode = async (sharedCampaign: GqlSharedCampaign) => {
     const link = getShortLink(sharedCampaign.sharedCampaignCode);
     await generateQRCode(
       link,
@@ -605,11 +606,11 @@ export const SharedCampaignsPage: React.FC = () => {
     downloadQRCodeImage(qrCodeDataUrl, qrSharedCampaign, showSnackbar);
   };
 
-  const handleEdit = (sharedCampaign: SharedCampaign) => {
+  const handleEdit = (sharedCampaign: GqlSharedCampaign) => {
     setEditingSharedCampaign(sharedCampaign);
   };
 
-  const handleDeactivate = (sharedCampaign: SharedCampaign) => {
+  const handleDeactivate = (sharedCampaign: GqlSharedCampaign) => {
     setSharedCampaignToDeactivate(sharedCampaign);
     setDeactivateDialogOpen(true);
   };

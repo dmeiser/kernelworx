@@ -4,21 +4,15 @@
 import { useMemo } from 'react';
 import { useQuery } from '@apollo/client/react';
 import { LIST_MANAGED_CATALOGS, LIST_MY_CATALOGS } from '../lib/graphql';
-
-interface Catalog {
-  catalogId: string;
-  catalogName: string;
-  catalogType: string;
-  isDeleted?: boolean;
-}
+import type { GqlCatalog } from '../types';
 
 export const useCatalogsData = (isSharedCampaignMode: boolean) => {
   const { data: publicCatalogsData, loading: publicLoading } = useQuery<{
-    listManagedCatalogs: Catalog[];
+    listManagedCatalogs: GqlCatalog[];
   }>(LIST_MANAGED_CATALOGS, { skip: isSharedCampaignMode });
 
   const { data: myCatalogsData, loading: myLoading } = useQuery<{
-    listMyCatalogs: Catalog[];
+    listMyCatalogs: GqlCatalog[];
   }>(LIST_MY_CATALOGS, { skip: isSharedCampaignMode });
 
   const { filteredPublicCatalogs, filteredMyCatalogs } = useMemo(() => {

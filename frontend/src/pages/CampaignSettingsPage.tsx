@@ -38,7 +38,7 @@ import { ConfirmDialog } from '../components/ConfirmDialog';
 import { UnitInfoSection } from '../components/UnitInfoSection';
 import { ensureCampaignId, ensureCatalogId, ensureProfileId, toUrlId } from '../lib/ids';
 import { dateToISO } from '../lib/date-utils';
-import type { Campaign, Catalog } from '../types';
+import type { GqlCampaign, GqlCatalog } from '../types';
 
 /* eslint-disable complexity */
 
@@ -49,17 +49,17 @@ const extractDatePart = (isoDate: string | undefined): string => isoDate?.split(
 const decodeUrlParam = (encoded: string | undefined): string => (encoded ? decodeURIComponent(encoded) : '');
 
 // Helper to get catalogs with fallback
-const getPublicCatalogs = (data: { listManagedCatalogs?: Catalog[] } | undefined): Catalog[] =>
+const getPublicCatalogs = (data: { listManagedCatalogs?: GqlCatalog[] } | undefined): GqlCatalog[] =>
   data?.listManagedCatalogs || [];
 
-const getMyCatalogs = (data: { listMyCatalogs?: Catalog[] } | undefined): Catalog[] => data?.listMyCatalogs || [];
+const getMyCatalogs = (data: { listMyCatalogs?: GqlCatalog[] } | undefined): GqlCatalog[] => data?.listMyCatalogs || [];
 
 // Helper to get campaign from query data
-const getCampaign = (data: { getCampaign: Campaign } | undefined): Campaign | undefined => data?.getCampaign;
+const getCampaign = (data: { getCampaign: GqlCampaign } | undefined): GqlCampaign | undefined => data?.getCampaign;
 
 // Helper to check if unit-related fields have changed
 const hasUnitFieldsChanged = (
-  campaign: Campaign | undefined,
+  campaign: GqlCampaign | undefined,
   formName: string,
   formCatalog: string,
   formUnitType: string,
@@ -107,7 +107,7 @@ const buildUpdateInput = (
   unitNumber: string,
   city: string,
   state: string,
-  campaign: Campaign | undefined,
+  campaign: GqlCampaign | undefined,
 ): Record<string, string | boolean | number | null> => {
   const input: Record<string, string | boolean | number | null> = {
     campaignId: dbCampaignId,
@@ -157,7 +157,7 @@ const shouldSkipCampaignQuery = (id: string): boolean => !id;
 const canDeleteCampaign = (campaignId: string): boolean => Boolean(campaignId);
 
 // Helper to check if campaign has shared campaign code
-const hasSharedCampaignCode = (campaign: Campaign | undefined): boolean => Boolean(campaign?.sharedCampaignCode);
+const hasSharedCampaignCode = (campaign: GqlCampaign | undefined): boolean => Boolean(campaign?.sharedCampaignCode);
 
 // Type for save click action result
 type SaveAction = 'confirm' | 'save';
@@ -192,7 +192,7 @@ const maybeDeleteCampaign = async (
 };
 
 // Helper component for shared campaign warning
-const SharedCampaignWarning: React.FC<{ campaign: Campaign | undefined }> = ({ campaign }) =>
+const SharedCampaignWarning: React.FC<{ campaign: GqlCampaign | undefined }> = ({ campaign }) =>
   hasSharedCampaignCode(campaign) ? (
     <Alert severity="warning" icon={<WarningIcon />} sx={{ mb: 3 }}>
       <AlertTitle>Shared Campaign</AlertTitle>
@@ -215,11 +215,11 @@ const checkFormChanges = (
   formUnitNumber: string,
   formCity: string,
   formState: string,
-  campaign: Campaign | undefined,
+  campaign: GqlCampaign | undefined,
 ): boolean => {
   if (!campaign) return false;
-  const origStart = extractDatePart(campaign.startDate);
-  const origEnd = extractDatePart(campaign.endDate);
+  const origStart = extractDatePart(campaign.startDate ?? undefined);
+  const origEnd = extractDatePart(campaign.endDate ?? undefined);
   return (
     formName !== campaign.campaignName ||
     formStart !== origStart ||
@@ -234,12 +234,12 @@ const checkFormChanges = (
 };
 
 // Helper to get all non-deleted catalogs
-const getAllCatalogs = (publicCatalogs: Catalog[], myCatalogs: Catalog[]): Catalog[] =>
+const getAllCatalogs = (publicCatalogs: GqlCatalog[], myCatalogs: GqlCatalog[]): GqlCatalog[] =>
   [...publicCatalogs, ...myCatalogs].filter((c) => c.isDeleted !== true);
 
 // Helper to initialize form fields from campaign
 const initializeFormFromCampaign = (
-  campaign: Campaign | undefined,
+  campaign: GqlCampaign | undefined,
   setCampaignName: (v: string) => void,
   setStartDate: (v: string) => void,
   setEndDate: (v: string) => void,
@@ -253,9 +253,9 @@ const initializeFormFromCampaign = (
 ): void => {
   if (campaign) {
     setCampaignName(campaign.campaignName);
-    setStartDate(extractDatePart(campaign.startDate));
-    setEndDate(extractDatePart(campaign.endDate));
-    setCatalogId(campaign.catalogId);
+    setStartDate(extractDatePart(campaign.startDate ?? undefined));
+    setEndDate(extractDatePart(campaign.endDate ?? undefined));
+    setCatalogId(campaign.catalogId ?? '');
     setIsActive(campaign.isActive ?? true);
     setUnitType(campaign.unitType ?? '');
     setUnitNumber(campaign.unitNumber !== undefined && campaign.unitNumber !== null ? String(campaign.unitNumber) : '');
@@ -294,7 +294,7 @@ export const CampaignSettingsPage: React.FC = () => {
     data: campaignData,
     loading,
     refetch,
-  } = useQuery<{ getCampaign: Campaign }>(GET_CAMPAIGN, {
+  } = useQuery<{ getCampaign: GqlCampaign }>(GET_CAMPAIGN, {
     variables: { campaignId: dbCampaignId },
     skip: shouldSkipCampaignQuery(dbCampaignId ?? ''),
   });
@@ -303,13 +303,13 @@ export const CampaignSettingsPage: React.FC = () => {
   // pages (e.g. CatalogsPage) are always visible without relying on cache
   // updates from the createCatalog mutation.
   const { data: publicCatalogsData } = useQuery<{
-    listManagedCatalogs: Catalog[];
+    listManagedCatalogs: GqlCatalog[];
   }>(LIST_MANAGED_CATALOGS, {
     fetchPolicy: 'network-only',
   });
 
   const { data: myCatalogsData } = useQuery<{
-    listMyCatalogs: Catalog[];
+    listMyCatalogs: GqlCatalog[];
   }>(LIST_MY_CATALOGS, {
     fetchPolicy: 'network-only',
   });

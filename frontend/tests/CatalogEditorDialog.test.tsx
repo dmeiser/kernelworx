@@ -6,12 +6,12 @@ import { describe, test, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { CatalogEditorDialog } from '../src/components/CatalogEditorDialog';
-import type { Catalog } from '../src/types';
+import type { GqlCatalog as Catalog } from '../src/types';
 
 const mockOnClose = vi.fn();
 const mockOnSave = vi.fn();
 
-const existingCatalog: Catalog = {
+const existingCatalog = {
   catalogId: 'CAT~1',
   catalogName: '2025 Popcorn',
   isPublic: true,
@@ -19,7 +19,7 @@ const existingCatalog: Catalog = {
     { productId: 'PROD~1', productName: 'Caramel Corn', price: 20, description: 'Delicious caramel' },
     { productId: 'PROD~2', productName: 'Butter Popcorn', price: 15 },
   ],
-};
+} as unknown as Catalog;
 
 describe('CatalogEditorDialog', () => {
   beforeEach(() => {
@@ -227,12 +227,12 @@ describe('CatalogEditorDialog', () => {
   describe('edit mode', () => {
     test('validates empty products list when catalog has no products', async () => {
       const user = userEvent.setup();
-      const emptyCatalog: Catalog = {
+      const emptyCatalog = {
         catalogId: 'CAT~EMPTY',
         catalogName: 'Empty Catalog',
         isPublic: true,
         products: [],
-      };
+      } as unknown as Catalog;
       render(
         <CatalogEditorDialog
           open={true}
@@ -265,10 +265,10 @@ describe('CatalogEditorDialog', () => {
     });
 
     test('handles catalog without explicit isPublic field', () => {
-      const catalogWithoutIsPublic: Catalog = {
+      const catalogWithoutIsPublic = {
         ...existingCatalog,
         isPublic: undefined,
-      };
+      } as unknown as Catalog;
       render(
         <CatalogEditorDialog
           open={true}
@@ -283,11 +283,11 @@ describe('CatalogEditorDialog', () => {
     });
 
     test('handles catalog without products field', () => {
-      const catalogWithoutProducts: Catalog = {
+      const catalogWithoutProducts = {
         catalogId: 'CAT~NOPRODS',
         catalogName: 'No Products Catalog',
         isPublic: true,
-      };
+      } as unknown as Catalog;
       render(
         <CatalogEditorDialog
           open={true}

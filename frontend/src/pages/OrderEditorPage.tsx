@@ -50,7 +50,7 @@ import { NavBreadcrumbs } from '../components/NavBreadcrumbs';
 import { ensureProfileId, ensureCampaignId, ensureOrderId, toUrlId } from '../lib/ids';
 import { formatCurrency, formatPhoneNumber } from '../lib/api-utils';
 import { useOrderForm, type OrderFormState, type LineItemInput } from '../hooks/useOrderForm';
-import type { Product, Catalog, OrderAddress } from '../types';
+import type { GqlProduct, GqlCatalog, GqlAddress, GqlLineItem } from '../types';
 
 // Payment method interface for dynamic payment methods
 interface PaymentMethodOption {
@@ -59,12 +59,12 @@ interface PaymentMethodOption {
 }
 
 // ============================================================================
-// Types (page-specific types not in shared entities)
+// Types (page-specific types not in the generated GraphQL types)
 // ============================================================================
 
 interface CampaignData {
   campaignId: string;
-  catalog?: Catalog;
+  catalog?: GqlCatalog;
 }
 
 interface ProfileData {
@@ -73,26 +73,21 @@ interface ProfileData {
   permissions?: string[];
 }
 
-interface OrderLineItem {
-  productId: string;
-  quantity: number;
-}
-
 interface OrderData {
   orderId: string;
   customerName?: string;
   customerPhone?: string;
-  customerAddress?: OrderAddress;
+  customerAddress?: GqlAddress;
   paymentMethod?: string;
   notes?: string;
-  lineItems: OrderLineItem[];
+  lineItems: GqlLineItem[];
 }
 
 // ============================================================================
 // Helper Functions
 // ============================================================================
 
-function calculateTotal(lineItems: LineItemInput[], products: Product[]): number {
+function calculateTotal(lineItems: LineItemInput[], products: GqlProduct[]): number {
   return lineItems.reduce((sum, item) => {
     const product = products.find((p) => p.productId === item.productId);
     return sum + (product?.price || 0) * item.quantity;
@@ -324,7 +319,7 @@ const CustomerInfoForm: React.FC<CustomerInfoFormProps> = ({ formState, loading 
 interface LineItemRowProps {
   item: LineItemInput;
   index: number;
-  products: Product[];
+  products: GqlProduct[];
   loading: boolean;
   canRemove: boolean;
   onProductChange: (value: string) => void;
@@ -392,7 +387,7 @@ const LineItemRow: React.FC<LineItemRowProps> = ({
 
 interface LineItemsTableProps {
   lineItems: LineItemInput[];
-  products: Product[];
+  products: GqlProduct[];
   loading: boolean;
   onAddItem: () => void;
   onRemoveItem: (index: number) => void;
@@ -777,7 +772,7 @@ async function executeOrderMutation(
 // ============================================================================
 
 interface UseOrderDataResult {
-  products: Product[];
+  products: GqlProduct[];
   hasWritePermission: boolean;
   isOwnerOrWrite: boolean;
   paymentMethods: PaymentMethodOption[];
@@ -786,7 +781,7 @@ interface UseOrderDataResult {
   orderData: OrderData | undefined;
 }
 
-function extractProducts(campaignData: { getCampaign: CampaignData } | undefined): Product[] {
+function extractProducts(campaignData: { getCampaign: CampaignData } | undefined): GqlProduct[] {
   return campaignData?.getCampaign?.catalog?.products ?? [];
 }
 
@@ -988,7 +983,7 @@ export const OrderEditorPage: React.FC = () => {
 interface OrderEditorContentProps {
   urlParams: ParsedOrderParams;
   formState: OrderFormState;
-  products: Product[];
+  products: GqlProduct[];
   paymentMethods: PaymentMethodOption[];
   paymentMethodsLoading: boolean;
   isOwnerOrWrite: boolean;

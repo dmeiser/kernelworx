@@ -19,7 +19,7 @@ import {
   AlertTitle,
 } from '@mui/material';
 import { Add as AddIcon, Delete as DeleteIcon } from '@mui/icons-material';
-import type { ProductInput, Catalog, Product } from '../types';
+import type { GqlProductInput, GqlCatalog, GqlProduct } from '../types';
 import { useFormState } from '../hooks/useFormState';
 
 // Local Catalog type for editing (products may not have IDs yet)
@@ -27,7 +27,7 @@ interface CatalogInput {
   catalogId?: string;
   catalogName: string;
   isPublic: boolean;
-  products: ProductInput[];
+  products: GqlProductInput[];
   isDeleted?: boolean;
 }
 
@@ -35,7 +35,7 @@ interface CatalogEditorDialogProps {
   open: boolean;
   onClose: () => void;
   onSave: (catalog: Omit<CatalogInput, 'catalogId'>) => Promise<void>;
-  initialCatalog?: Catalog | null;
+  initialCatalog?: GqlCatalog | null;
 }
 
 interface CatalogFormValues {
@@ -47,7 +47,7 @@ export const CatalogEditorDialog: React.FC<CatalogEditorDialogProps> = ({ open, 
   const form = useFormState<CatalogFormValues>({
     initialValues: { catalogName: '', isPublic: true }, // Default to public for admin catalogs
   });
-  const [products, setProducts] = useState<ProductInput[]>([]);
+  const [products, setProducts] = useState<GqlProductInput[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const initializedRef = useRef(false);
@@ -56,12 +56,12 @@ export const CatalogEditorDialog: React.FC<CatalogEditorDialogProps> = ({ open, 
 
   const resetForm = useCallback(() => {
     resetTo({ catalogName: '', isPublic: true }); // Default to public for admin catalogs
-    setProducts([{ productName: '', description: '', price: 0 }]);
+    setProducts([{ productName: '', description: '', price: 0, sortOrder: 0 }]);
     setError(null);
   }, [resetTo]);
 
   const initFromCatalog = useCallback(
-    (catalog: Catalog) => {
+    (catalog: GqlCatalog) => {
       resetTo({ catalogName: catalog.catalogName, isPublic: catalog.isPublic ?? false });
       setProducts([...(catalog.products ?? [])]);
       setError(null);
@@ -83,7 +83,7 @@ export const CatalogEditorDialog: React.FC<CatalogEditorDialogProps> = ({ open, 
   }, [open, initialCatalog, initFromCatalog, resetForm]);
 
   const handleAddProduct = () => {
-    setProducts([...products, { productName: '', description: '', price: 0 }]);
+    setProducts([...products, { productName: '', description: '', price: 0, sortOrder: products.length }]);
   };
 
   const handleRemoveProduct = (index: number) => {
@@ -93,7 +93,7 @@ export const CatalogEditorDialog: React.FC<CatalogEditorDialogProps> = ({ open, 
     }
   };
 
-  const handleProductChange = (index: number, field: keyof Product, value: string | number) => {
+  const handleProductChange = (index: number, field: keyof GqlProduct, value: string | number) => {
     const updated = [...products];
     updated[index] = { ...updated[index], [field]: value };
     setProducts(updated);

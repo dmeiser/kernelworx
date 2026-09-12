@@ -7,7 +7,7 @@ import type { CodegenConfig } from '@graphql-codegen/cli';
  * Run with: npm run codegen
  *
  * The generated types are placed in src/types/graphql-generated.ts
- * and can be imported alongside the manually maintained types in entities.ts.
+ * and are the canonical source for all shared domain types (Gql-prefixed).
  */
 const config: CodegenConfig = {
   // Path to the GraphQL schema (relative to frontend/)

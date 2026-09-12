@@ -42,14 +42,14 @@ import {
   DELETE_CATALOG,
 } from '../lib/graphql';
 import { formatDisplayDate } from '../lib/date-utils';
-import type { Catalog } from '../types';
+import type { GqlCatalog, GqlProductInput } from '../types';
 
 // Helper: Build "My Catalogs" list - includes owned catalogs + used managed catalogs
 const buildMyCatalogs = (
-  myOwnedCatalogs: Catalog[],
-  publicCatalogs: Catalog[],
+  myOwnedCatalogs: GqlCatalog[],
+  publicCatalogs: GqlCatalog[],
   catalogsInUse: Set<string>,
-): Catalog[] => {
+): GqlCatalog[] => {
   const activeOwned = myOwnedCatalogs.filter((c) => c.isDeleted !== true);
 
   // Add managed catalogs that are in use but not owned
@@ -78,7 +78,7 @@ const EmptyCatalogState: React.FC<EmptyCatalogStateProps> = ({ isMyTab }) => (
   </Paper>
 );
 
-// Sub-component: Catalog type chips
+// Sub-component: GqlCatalog type chips
 interface CatalogTypeChipsProps {
   inUse: boolean;
 }
@@ -89,11 +89,11 @@ const CatalogTypeChips: React.FC<CatalogTypeChipsProps> = ({ inUse }) => (
   </Stack>
 );
 
-// Sub-component: Catalog action buttons
+// Sub-component: GqlCatalog action buttons
 interface CatalogActionsProps {
-  catalog: Catalog;
+  catalog: GqlCatalog;
   isOwned: boolean;
-  onEdit: (catalog: Catalog) => void;
+  onEdit: (catalog: GqlCatalog) => void;
   onDelete: (catalogId: string, catalogName: string) => void;
   onView: (catalogId: string) => void;
 }
@@ -136,13 +136,13 @@ const CatalogActions: React.FC<CatalogActionsProps> = ({ catalog, isOwned, onEdi
   );
 };
 
-// Sub-component: Catalog table row
+// Sub-component: GqlCatalog table row
 interface CatalogRowProps {
-  catalog: Catalog;
+  catalog: GqlCatalog;
   showActions: boolean;
   inUse: boolean;
   isOwned: boolean;
-  onEdit: (catalog: Catalog) => void;
+  onEdit: (catalog: GqlCatalog) => void;
   onDelete: (catalogId: string, catalogName: string) => void;
   onView: (catalogId: string) => void;
 }
@@ -167,13 +167,13 @@ const CatalogRow: React.FC<CatalogRowProps> = ({ catalog, showActions, inUse, is
   </TableRow>
 );
 
-// Sub-component: Catalog table
+// Sub-component: GqlCatalog table
 interface CatalogTableProps {
-  catalogs: Catalog[];
+  catalogs: GqlCatalog[];
   showActionsColumn: boolean;
   catalogsInUse: Set<string>;
   myOwnedCatalogIds: Set<string>;
-  onEdit: (catalog: Catalog) => void;
+  onEdit: (catalog: GqlCatalog) => void;
   onDelete: (catalogId: string, catalogName: string) => void;
   onView: (catalogId: string) => void;
 }
@@ -229,7 +229,7 @@ function useCatalogsInUse(): Set<string> {
   return useMemo(() => new Set(data?.listCatalogsInUse || []), [data]);
 }
 
-// Custom hook: Catalog mutations
+// Custom hook: GqlCatalog mutations
 interface CatalogMutations {
   createCatalog: ReturnType<typeof useMutation>[0];
   updateCatalog: ReturnType<typeof useMutation>[0];
@@ -252,12 +252,12 @@ function useCatalogMutations(refetchAll: () => void): CatalogMutations {
 
 // Helper: Extract catalogs from query data
 // Only include truly managed (admin-maintained) catalogs in the Managed tab
-function extractCatalogs(data: { listManagedCatalogs: Catalog[] } | undefined): Catalog[] {
+function extractCatalogs(data: { listManagedCatalogs: GqlCatalog[] } | undefined): GqlCatalog[] {
   const catalogs = data?.listManagedCatalogs || [];
   return catalogs.filter((c) => c.catalogType === 'ADMIN_MANAGED');
 }
 
-function extractMyCatalogs(data: { listMyCatalogs: Catalog[] } | undefined): Catalog[] {
+function extractMyCatalogs(data: { listMyCatalogs: GqlCatalog[] } | undefined): GqlCatalog[] {
   return data?.listMyCatalogs || [];
 }
 
@@ -273,8 +273,8 @@ function extractErrorMessage(publicError: Error | undefined, myError: Error | un
 
 // Custom hook: Fetch public and user catalogs
 interface CatalogQueries {
-  publicCatalogs: Catalog[];
-  myOwnedCatalogs: Catalog[];
+  publicCatalogs: GqlCatalog[];
+  myOwnedCatalogs: GqlCatalog[];
   isLoading: boolean;
   errorMessage: string | undefined;
   refetchAll: () => void;
@@ -286,14 +286,14 @@ function useCatalogQueries(): CatalogQueries {
     loading: publicLoading,
     error: publicError,
     refetch: refetchPublic,
-  } = useQuery<{ listManagedCatalogs: Catalog[] }>(LIST_MANAGED_CATALOGS);
+  } = useQuery<{ listManagedCatalogs: GqlCatalog[] }>(LIST_MANAGED_CATALOGS);
 
   const {
     data: myData,
     loading: myLoading,
     error: myError,
     refetch: refetchMy,
-  } = useQuery<{ listMyCatalogs: Catalog[] }>(LIST_MY_CATALOGS);
+  } = useQuery<{ listMyCatalogs: GqlCatalog[] }>(LIST_MY_CATALOGS);
 
   const refetchAll = () => {
     void refetchPublic();
@@ -311,8 +311,8 @@ function useCatalogQueries(): CatalogQueries {
 
 // Data returned by useCatalogsPageData
 interface CatalogsPageData {
-  publicCatalogs: Catalog[];
-  myCatalogs: Catalog[];
+  publicCatalogs: GqlCatalog[];
+  myCatalogs: GqlCatalog[];
   myOwnedCatalogIds: Set<string>;
   catalogsInUse: Set<string>;
   isLoading: boolean;
@@ -344,11 +344,11 @@ function useCatalogsPageData(): CatalogsPageData {
 interface CatalogsContentProps {
   currentTab: number;
   onTabChange: (tab: number) => void;
-  myCatalogs: Catalog[];
-  publicCatalogs: Catalog[];
+  myCatalogs: GqlCatalog[];
+  publicCatalogs: GqlCatalog[];
   catalogsInUse: Set<string>;
   myOwnedCatalogIds: Set<string>;
-  onEdit: (catalog: Catalog) => void;
+  onEdit: (catalog: GqlCatalog) => void;
   onDelete: (catalogId: string, catalogName: string) => void;
   onCreateCatalog: () => void;
   onView: (catalogId: string) => void;
@@ -410,7 +410,7 @@ export const CatalogsPage: React.FC = () => {
   const navigate = useNavigate();
   const [currentTab, setCurrentTab] = useState(0);
   const [editorOpen, setEditorOpen] = useState(false);
-  const [editingCatalog, setEditingCatalog] = useState<Catalog | null>(null);
+  const [editingCatalog, setEditingCatalog] = useState<GqlCatalog | null>(null);
 
   const { publicCatalogs, myCatalogs, myOwnedCatalogIds, catalogsInUse, isLoading, errorMessage, mutations } =
     useCatalogsPageData();
@@ -420,7 +420,7 @@ export const CatalogsPage: React.FC = () => {
     setEditorOpen(true);
   };
 
-  const handleEditCatalog = (catalog: Catalog) => {
+  const handleEditCatalog = (catalog: GqlCatalog) => {
     setEditingCatalog(catalog);
     setEditorOpen(true);
   };
@@ -440,11 +440,7 @@ export const CatalogsPage: React.FC = () => {
   const handleSaveCatalog = async (catalogData: {
     catalogName: string;
     isPublic: boolean;
-    products: Array<{
-      productName: string;
-      description?: string;
-      price: number;
-    }>;
+    products: GqlProductInput[];
   }) => {
     await saveCatalog(catalogData, editingCatalog, mutations);
   };
@@ -488,13 +484,9 @@ async function saveCatalog(
   catalogData: {
     catalogName: string;
     isPublic: boolean;
-    products: Array<{
-      productName: string;
-      description?: string;
-      price: number;
-    }>;
+    products: GqlProductInput[];
   },
-  editingCatalog: Catalog | null,
+  editingCatalog: GqlCatalog | null,
   mutations: CatalogMutations,
 ): Promise<void> {
   if (editingCatalog) {
@@ -510,9 +502,9 @@ async function saveCatalog(
 const CatalogsInfoAlert: React.FC = () => (
   <Alert severity="info" sx={{ mb: 3 }}>
     <Typography variant="body2">
-      <strong>Managed catalogs</strong> are admin-maintained catalogs visible to all users.
-      <strong> Private catalogs</strong> are only visible to you and can be used for your owned tracking and use in
-      shared campaigns.
+      <strong style={{ color: 'inherit' }}>Managed catalogs</strong> are admin-maintained catalogs visible to all users.
+      <strong style={{ color: 'inherit' }}> Private catalogs</strong> are only visible to you and can be used for your
+      owned tracking and use in shared campaigns.
     </Typography>
   </Alert>
 );

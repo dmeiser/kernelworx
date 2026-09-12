@@ -12,14 +12,14 @@ import { ErrorAlert } from '../components/ErrorAlert';
 import { LIST_ORDERS_BY_CAMPAIGN, GET_PAYMENT_METHODS_FOR_PROFILE } from '../lib/graphql';
 import { ensureCampaignId, ensureProfileId } from '../lib/ids';
 import { formatCurrency } from '../lib/api-utils';
-import type { Order } from '../types';
+import type { GqlOrder } from '../types';
 import type { GqlPaymentMethod } from '../types/graphql-generated';
 
 // Helper to safely decode URL component
 const decodeUrlParam = (encoded: string | undefined): string => (encoded ? decodeURIComponent(encoded) : '');
 
 // Helper to get orders from query data
-const getOrders = (data: { listOrdersByCampaign: { orders: Order[] } } | undefined): Order[] =>
+const getOrders = (data: { listOrdersByCampaign: { orders: GqlOrder[] } } | undefined): GqlOrder[] =>
   data?.listOrdersByCampaign.orders || [];
 
 // Helper to get active payment method names (lowercase for comparison)
@@ -33,7 +33,7 @@ interface PaymentTotal {
   isActive: boolean;
 }
 
-const calculatePaymentTotals = (orders: Order[], activeMethodNames: Set<string>): Record<string, PaymentTotal> =>
+const calculatePaymentTotals = (orders: GqlOrder[], activeMethodNames: Set<string>): Record<string, PaymentTotal> =>
   orders.reduce(
     (acc, order) => {
       const methodName = order.paymentMethod;
@@ -56,7 +56,7 @@ const getSortedPaymentTotals = (totals: Record<string, PaymentTotal>): [string, 
   Object.entries(totals).sort((a, b) => a[0].toLowerCase().localeCompare(b[0].toLowerCase()));
 
 // Helper to calculate product breakdown from orders
-const calculateProductBreakdown = (orders: Order[]): Record<string, { quantity: number; revenue: number }> =>
+const calculateProductBreakdown = (orders: GqlOrder[]): Record<string, { quantity: number; revenue: number }> =>
   orders.reduce(
     (acc, order) => {
       order.lineItems.forEach((item) => {
@@ -156,7 +156,7 @@ function useCampaignSummaryData(dbCampaignId: string | null, dbProfileId: string
     data: ordersData,
     loading: ordersLoading,
     error: ordersError,
-  } = useQuery<{ listOrdersByCampaign: { orders: Order[] } }>(LIST_ORDERS_BY_CAMPAIGN, {
+  } = useQuery<{ listOrdersByCampaign: { orders: GqlOrder[] } }>(LIST_ORDERS_BY_CAMPAIGN, {
     variables: { campaignId: dbCampaignId },
     skip: !dbCampaignId,
   });

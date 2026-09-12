@@ -38,10 +38,10 @@ import { LIST_ORDERS_BY_CAMPAIGN, DELETE_ORDER, GET_PROFILE } from '../lib/graph
 import { ensureProfileId, ensureCampaignId, ensureOrderId, toUrlId } from '../lib/ids';
 import { formatCurrency, formatPhoneNumber } from '../lib/api-utils';
 import { formatDisplayDate } from '../lib/date-utils';
-import type { SellerProfile, Order, OrderLineItem } from '../types';
+import type { GqlSellerProfile, GqlOrder, GqlLineItem } from '../types';
 
 // Use SellerProfile with only the fields we need for permission checking
-type ProfilePermissions = Pick<SellerProfile, 'profileId' | 'isOwner' | 'permissions'>;
+type ProfilePermissions = Pick<GqlSellerProfile, 'profileId' | 'isOwner' | 'permissions'>;
 
 // --- Helper Functions (extracted outside component) ---
 
@@ -57,7 +57,7 @@ const getPaymentMethodColor = (method: string): 'default' | 'primary' | 'seconda
   return colors[method] ?? 'default';
 };
 
-const getTotalItems = (lineItems: OrderLineItem[]): number => {
+const getTotalItems = (lineItems: GqlLineItem[]): number => {
   return lineItems.reduce((sum, item) => sum + item.quantity, 0);
 };
 
@@ -115,7 +115,7 @@ const OrdersHeader: React.FC<OrdersHeaderProps> = ({ hasWritePermission, onCreat
 );
 
 interface OrderRowProps {
-  order: Order;
+  order: GqlOrder;
   hasWritePermission: boolean;
   onEdit: (orderId: string) => void;
   onDelete: (orderId: string) => void;
@@ -177,7 +177,7 @@ const OrderRow: React.FC<OrderRowProps> = ({ order, hasWritePermission, onEdit, 
 );
 
 interface OrdersTableProps {
-  orders: Order[];
+  orders: GqlOrder[];
   hasWritePermission: boolean;
   onEdit: (orderId: string) => void;
   onDelete: (orderId: string) => void;
@@ -247,7 +247,7 @@ const useOrdersData = ({ profileId, campaignId }: UseOrdersDataParams) => {
     loading: ordersLoading,
     error: ordersError,
     refetch: refetchOrders,
-  } = useQuery<{ listOrdersByCampaign: { orders: Order[] } }>(LIST_ORDERS_BY_CAMPAIGN, {
+  } = useQuery<{ listOrdersByCampaign: { orders: GqlOrder[] } }>(LIST_ORDERS_BY_CAMPAIGN, {
     variables: { campaignId: dbCampaignId },
     skip: !dbCampaignId,
   });
@@ -270,7 +270,7 @@ const useOrdersData = ({ profileId, campaignId }: UseOrdersDataParams) => {
 // --- Main Component ---
 
 interface OrdersContentProps {
-  orders: Order[];
+  orders: GqlOrder[];
   hasWritePermission: boolean;
   summaryExpanded: boolean;
   onToggleSummary: () => void;
