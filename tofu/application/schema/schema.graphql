@@ -5,24 +5,36 @@
 # Scalars
 # ============================================================================
 
+"""A timestamp with timezone in ISO-8601 format (for example 2025-01-15T12:30:00Z). Used for created/updated times and order/campaign event dates."""
 scalar AWSDateTime
+"""A calendar date without a time component in ISO-8601 format (for example 2025-01-15). Used for campaign start and end windows."""
 scalar AWSDate
+"""An RFC-5322 email address."""
 scalar AWSEmail
+"""A phone number."""
 scalar AWSPhone
+"""An RFC-3986 URL."""
 scalar AWSURL
+"""An arbitrary JSON value (object, array, or scalar). Used for the Account preferences blob and S3 upload form fields."""
 scalar AWSJSON
 
 # ============================================================================
 # Enums
 # ============================================================================
 
+"""The level of access a seller profile is granted to another account through a share. WRITE implies READ: a WRITE holder can view and modify, a READ holder can only view."""
 enum PermissionType {
+  """View the profile and its campaigns, orders, and generated reports."""
   READ
+  """View and modify the profile's campaigns and orders (place and update orders)."""
   WRITE
 }
 
+"""How a catalog is provisioned."""
 enum CatalogType {
+  """A global catalog created by an admin (via createManagedCatalog) that is available to every user."""
   ADMIN_MANAGED
+  """A catalog created by a regular user for use in their own campaigns."""
   USER_CREATED
 }
 
@@ -30,240 +42,431 @@ enum CatalogType {
 # Core Types
 # ============================================================================
 
+"""A named payment method a seller can assign to orders.
+
+In addition to the caller's stored methods, two built-in methods, "Cash" and "Check", are always returned by the payment-method queries. `qrCodeUrl` is a short-lived pre-signed S3 GET URL when a QR code has been uploaded for the method, or null otherwise."""
 type PaymentMethod {
+  """The display name of the payment method."""
   name: String!
+  """A pre-signed S3 GET URL for the method's uploaded QR code, or null when no QR code is stored or the caller may not view it."""
   qrCodeUrl: String
 }
 
+"""Credentials for uploading a file directly to S3 via a pre-signed POST request."""
 type S3UploadInfo {
+  """The pre-signed S3 URL to POST the file to."""
   uploadUrl: String!
+  """The form fields to include in the POST body (for example key, policy, and signature)."""
   fields: AWSJSON!
+  """The S3 object key where the file will be stored; pass this back to confirmPaymentMethodQRCodeUpload."""
   s3Key: String!
 }
 
+"""An authenticated user's account, stored in the Accounts table.
+
+`getMyAccount` creates the row automatically on first read if it does not yet exist. `preferences` is an opaque JSON blob managed with `updateMyPreferences`."""
 type Account {
+  """The account's unique ID (the Cognito user sub, with the ACCOUNT# prefix)."""
   accountId: ID!
+  """The account's Cognito email address."""
   email: AWSEmail!
+  """The account's first name."""
   givenName: String
+  """The account's last name."""
   familyName: String
+  """City, used for unit identification when a scout unit is specified."""
   city: String
+  """State (postal code), used for unit identification when a scout unit is specified."""
   state: String
+  """The scout unit type (for example Pack, Troop, Crew, Ship, Post)."""
   unitType: String
+  """The scout unit number (a positive integer), set together with unitType."""
   unitNumber: Int
+  """A free-form JSON blob of user preferences, managed via updateMyPreferences."""
   preferences: AWSJSON
+  """When the account was first created."""
   createdAt: AWSDateTime!
+  """When the account was last modified."""
   updatedAt: AWSDateTime!
 }
 
-# Admin-only type: Cognito user info merged with DynamoDB Account data
+"""An admin view of a Cognito user, merging Cognito identity data with the stored Account record. Admin-only."""
 type AdminUser {
-  accountId: ID!           # Cognito sub
+  """The user's Cognito sub (account ID)."""
+  accountId: ID!
+  """The user's Cognito email address."""
   email: AWSEmail!
-  displayName: String      # From DynamoDB Account (givenName + familyName)
-  status: String!          # Cognito status: CONFIRMED, UNCONFIRMED, FORCE_CHANGE_PASSWORD, etc.
-  enabled: Boolean!        # Whether the Cognito user is enabled
-  emailVerified: Boolean!  # Whether email is verified in Cognito
-  isAdmin: Boolean!        # Whether user is in ADMIN group
-  createdAt: AWSDateTime!  # Cognito user creation date
-  lastModifiedAt: AWSDateTime  # Cognito last modified date
+  """Display name built from the stored Account's givenName and familyName, if present."""
+  displayName: String
+  """Cognito user status (for example CONFIRMED, UNCONFIRMED, or FORCE_CHANGE_PASSWORD)."""
+  status: String!
+  """Whether the Cognito user is enabled."""
+  enabled: Boolean!
+  """Whether the user's email is verified in Cognito."""
+  emailVerified: Boolean!
+  """Whether the user belongs to the ADMIN Cognito group."""
+  isAdmin: Boolean!
+  """When the Cognito user was created."""
+  createdAt: AWSDateTime!
+  """When the Cognito user was last modified, if known."""
+  lastModifiedAt: AWSDateTime
 }
 
+"""A page of AdminUser results from adminListUsers, with a token for fetching the next page."""
 type AdminUserConnection {
+  """The users on this page."""
   users: [AdminUser!]!
+  """Token to pass to adminListUsers to fetch the next page, or null if there are no more results."""
   nextToken: String
 }
 
+"""A page of the caller's own seller profiles from listMyProfiles, with a token for fetching the next page."""
 type SellerProfileConnection {
+  """The seller profiles owned by the caller on this page."""
   profiles: [SellerProfile!]!
+  """Token to pass to listMyProfiles to fetch the next page, or null if there are no more results."""
   nextToken: String
 }
 
+"""A seller (scout unit) profile that owns campaigns. Returned for the caller's own profiles and for profiles shared to them."""
 type SellerProfile {
+  """The profile's unique ID (with the PROFILE# prefix)."""
   profileId: ID!
+  """The ID of the account that owns this profile (with the ACCOUNT# prefix)."""
   ownerAccountId: ID!
+  """The seller's display name."""
   sellerName: String!
+  """The scout unit type, if the profile is scoped to a unit."""
   unitType: String
+  """The scout unit number, set together with unitType."""
   unitNumber: Int
+  """When the profile was created."""
   createdAt: AWSDateTime!
+  """When the profile was last updated."""
   updatedAt: AWSDateTime!
+  """True if the requesting account is the profile's owner."""
   isOwner: Boolean!
+  """The caller's permissions on this profile: [READ, WRITE] for the owner, the granted share permissions for a shared profile, or null if the caller has no share."""
   permissions: [PermissionType!]
-  latestCampaign: Campaign  # Field resolver: Most recent campaign for this profile
-}
-
-type Campaign {
-  campaignId: ID!
-  profileId: ID!
-  campaignName: String!
-  campaignYear: Int!
-  startDate: AWSDateTime
-  endDate: AWSDateTime
-  catalogId: ID!
-  unitType: String          # NEW: Optional unit information
-  unitNumber: Int           # NEW: Required when unitType provided
-  city: String              # NEW: Required when unitType provided (for unit uniqueness)
-  state: String             # NEW: Required when unitType provided (for unit uniqueness)
-  sharedCampaignCode: String       # NEW: If campaign was created from shared campaign
-  isActive: Boolean!        # NEW: Whether campaign is active (default true)
-  createdAt: AWSDateTime!
-  updatedAt: AWSDateTime!
-  catalog: Catalog
-  totalOrders: Int
-  totalRevenue: Float
-}
-
-type Catalog @aws_cognito_user_pools {
-  catalogId: ID!
-  catalogName: String!
-  catalogType: CatalogType!
-  isPublic: Boolean!
-  isDeleted: Boolean
-  products: [Product!]!
-  createdAt: AWSDateTime!
-  updatedAt: AWSDateTime!
-}
-
-type Product @aws_cognito_user_pools {
-  productId: ID!
-  productName: String!
-  description: String
-  price: Float!
-  sortOrder: Int!
-}
-
-type SharedCampaign {
-  sharedCampaignCode: String!
-  catalogId: ID!
-  catalog: Catalog
-  campaignName: String!
-  campaignYear: Int!
-  startDate: AWSDate
-  endDate: AWSDate
-  unitType: String!
-  unitNumber: Int!
-  city: String!
-  state: String!
-  createdBy: ID!
-  createdByName: String!
-  creatorMessage: String
-  description: String
-  isActive: Boolean!
-  createdAt: AWSDateTime!
-}
-
-type Order {
-  orderId: ID!
-  profileId: ID!
-  campaignId: ID!
-  customerName: String!
-  customerPhone: String
-  customerAddress: Address
-  orderDate: AWSDateTime!
-  paymentMethod: String!
-  lineItems: [LineItem!]!
-  totalAmount: Float!
-  notes: String
-  createdAt: AWSDateTime!
-  updatedAt: AWSDateTime!
-}
-
-type OrderConnection {
-  orders: [Order!]!
-  nextToken: String
-}
-
-type CampaignConnection {
-  campaigns: [Campaign!]!
-  nextToken: String
-}
-
-type LineItem {
-  productId: ID!
-  productName: String!
-  quantity: Int!
-  pricePerUnit: Float!
-  subtotal: Float!
-}
-
-type Address {
-  street: String
-  city: String
-  state: String
-  zipCode: String
-}
-
-type Share {
-  shareId: ID!
-  profileId: ID!
-  targetAccountId: ID!
-  targetAccount: Account
-  permissions: [PermissionType!]!
-  createdAt: AWSDateTime!
-  createdByAccountId: ID!
-}
-
-# Lightweight share info (deprecated - use SharedProfile from listMyShares)
-type ShareInfo {
-  profileId: ID!
-  permissions: [PermissionType!]!
-}
-
-# Full profile data with share permissions - returned by listMyShares
-type SharedProfile {
-  profileId: ID!
-  ownerAccountId: ID!
-  sellerName: String!
-  unitType: String
-  unitNumber: Int
-  createdAt: AWSDateTime!
-  updatedAt: AWSDateTime!
-  isOwner: Boolean!
-  permissions: [PermissionType!]!
+  """The profile's most recent active campaign (by creation time), or null if it has no active campaigns."""
   latestCampaign: Campaign
 }
 
-type ProfileInvite {
-  inviteCode: ID!
+"""A fundraising campaign owned by a seller profile, tied to a catalog for a season."""
+type Campaign {
+  """The campaign's unique ID (with the CAMPAIGN# prefix)."""
+  campaignId: ID!
+  """The ID of the profile that owns this campaign."""
   profileId: ID!
-  permissions: [PermissionType!]!
-  expiresAt: AWSDateTime!
+  """The campaign's display name (for example "Fall" or "Spring")."""
+  campaignName: String!
+  """The campaign's year (for example 2024)."""
+  campaignYear: Int!
+  """The campaign's start date, if set."""
+  startDate: AWSDateTime
+  """The campaign's end date, if set."""
+  endDate: AWSDateTime
+  """The ID of the catalog this campaign sells from."""
+  catalogId: ID!
+  """The scout unit type, if the campaign is scoped to a unit."""
+  unitType: String
+  """The scout unit number; set together with city and state when unitType is provided."""
+  unitNumber: Int
+  """The city, used (with unitType, unitNumber, and state) to identify the unit."""
+  city: String
+  """The state, used (with unitType, unitNumber, and city) to identify the unit."""
+  state: String
+  """Set when this campaign was created from a shared campaign; holds the shared campaign's code."""
+  sharedCampaignCode: String
+  """Whether the campaign is active. New campaigns are active by default; deactivating hides it from latest-campaign and shared lookups."""
+  isActive: Boolean!
+  """When the campaign was created."""
   createdAt: AWSDateTime!
+  """When the campaign was last updated."""
+  updatedAt: AWSDateTime!
+  """The catalog this campaign sells from. Returns the stored catalog (including soft-deleted ones), or null if the catalog is missing."""
+  catalog: Catalog
+  """The number of orders placed in this campaign."""
+  totalOrders: Int
+  """The sum of totalAmount across this campaign's orders."""
+  totalRevenue: Float
+}
+
+"""A catalog of products that campaigns sell from.
+
+Catalogs are visible to any authenticated user by ID (getCatalog performs no ownership check). `listManagedCatalogs` returns only public ADMIN_MANAGED catalogs and `listMyCatalogs` returns the caller's own catalogs; both exclude soft-deleted catalogs, which are still retrievable by ID."""
+type Catalog @aws_cognito_user_pools {
+  """The catalog's unique ID (with the CATALOG# prefix)."""
+  catalogId: ID!
+  """The catalog's display name."""
+  catalogName: String!
+  """Whether the catalog is admin-managed (global) or user-created."""
+  catalogType: CatalogType!
+  """Whether the catalog is public. Public admin-managed catalogs appear in listManagedCatalogs."""
+  isPublic: Boolean!
+  """Soft-delete flag. Set by deleteCatalog instead of removing the row; soft-deleted catalogs are hidden from list queries."""
+  isDeleted: Boolean
+  """The products in this catalog."""
+  products: [Product!]!
+  """When the catalog was created."""
+  createdAt: AWSDateTime!
+  """When the catalog was last updated."""
+  updatedAt: AWSDateTime!
+}
+
+"""A product in a catalog, with a price and an ordering position within the catalog."""
+type Product @aws_cognito_user_pools {
+  """The product's unique ID."""
+  productId: ID!
+  """The product's display name."""
+  productName: String!
+  """A free-text description of the product."""
+  description: String
+  """The product's unit price."""
+  price: Float!
+  """The display order of the product within the catalog."""
+  sortOrder: Int!
+}
+
+"""A campaign shared by its creator so other scouts and units can clone it into their own campaigns.
+
+Looked up by its bearer `sharedCampaignCode` (getSharedCampaign) or by an exact unit-and-season match (findSharedCampaigns). Inactive shared campaigns resolve to null and are filtered out of lists."""
+type SharedCampaign {
+  """The shared campaign's code, the credential used to look up and redeem it."""
+  sharedCampaignCode: String!
+  """The ID of the catalog this shared campaign sells from."""
+  catalogId: ID!
+  """The catalog this shared campaign sells from; null if the catalog is soft-deleted or missing."""
+  catalog: Catalog
+  """The campaign's display name (for example "Fall" or "Spring")."""
+  campaignName: String!
+  """The campaign's year (for example 2024)."""
+  campaignYear: Int!
+  """The campaign's start date, if set."""
+  startDate: AWSDate
+  """The campaign's end date, if set."""
+  endDate: AWSDate
+  """The scout unit type."""
+  unitType: String!
+  """The scout unit number."""
+  unitNumber: Int!
+  """The city, part of the unit's identity."""
+  city: String!
+  """The state, part of the unit's identity."""
+  state: String!
+  """The ID of the account that created this shared campaign."""
+  createdBy: ID!
+  """The display name of the creator."""
+  createdByName: String!
+  """A message from the creator to whoever uses the shared campaign."""
+  creatorMessage: String
+  """A description of the campaign."""
+  description: String
+  """Whether the shared campaign is active. Inactive shared campaigns are not returned by lookups or lists."""
+  isActive: Boolean!
+  """When the shared campaign was created."""
+  createdAt: AWSDateTime!
+}
+
+"""A customer order placed in a campaign."""
+type Order {
+  """The order's unique ID (with the ORDER# prefix)."""
+  orderId: ID!
+  """The ID of the profile the order belongs to."""
+  profileId: ID!
+  """The ID of the campaign the order belongs to."""
+  campaignId: ID!
+  """The customer's name."""
+  customerName: String!
+  """The customer's phone number, if provided."""
+  customerPhone: String
+  """The customer's address, if provided."""
+  customerAddress: Address
+  """When the order was placed."""
+  orderDate: AWSDateTime!
+  """The name of the payment method used for this order."""
+  paymentMethod: String!
+  """The ordered products and quantities, with prices captured from the catalog at order time."""
+  lineItems: [LineItem!]!
+  """The order's total amount (the sum of the line-item subtotals)."""
+  totalAmount: Float!
+  """Free-text notes about the order."""
+  notes: String
+  """When the order was created."""
+  createdAt: AWSDateTime!
+  """When the order was last updated."""
+  updatedAt: AWSDateTime!
+}
+
+"""A page of Order results from listOrdersByCampaign, with a token for fetching the next page."""
+type OrderConnection {
+  """The orders on this page."""
+  orders: [Order!]!
+  """Token to pass to listOrdersByCampaign to fetch the next page, or null if there are no more results."""
+  nextToken: String
+}
+
+"""A page of Campaign results from listCampaignsByProfile, with a token for fetching the next page."""
+type CampaignConnection {
+  """The campaigns on this page."""
+  campaigns: [Campaign!]!
+  """Token to pass to listCampaignsByProfile to fetch the next page, or null if there are no more results."""
+  nextToken: String
+}
+
+"""A single product line within an order."""
+type LineItem {
+  """The ID of the product."""
+  productId: ID!
+  """The product's display name."""
+  productName: String!
+  """The quantity ordered."""
+  quantity: Int!
+  """The product's unit price captured from the catalog at order time."""
+  pricePerUnit: Float!
+  """quantity times pricePerUnit."""
+  subtotal: Float!
+}
+
+"""A physical mailing address."""
+type Address {
+  """Street address."""
+  street: String
+  """City."""
+  city: String
+  """State."""
+  state: String
+  """ZIP/postal code."""
+  zipCode: String
+}
+
+"""A grant of access to a seller profile, letting another account (the target) view and/or modify it."""
+type Share {
+  """The share's unique ID (with the SHARE# prefix)."""
+  shareId: ID!
+  """The ID of the profile this share grants access to."""
+  profileId: ID!
+  """The ID of the account that was granted access (the share's target)."""
+  targetAccountId: ID!
+  """The account that was granted access; null if that account no longer exists."""
+  targetAccount: Account
+  """The permissions this share grants (READ and/or WRITE)."""
+  permissions: [PermissionType!]!
+  """When the share was created."""
+  createdAt: AWSDateTime!
+  """The ID of the account that created the share."""
   createdByAccountId: ID!
 }
 
+"""A lightweight share reference. Deprecated: use the SharedProfile returned by listMyShares instead."""
+type ShareInfo {
+  """The ID of the profile the share is for."""
+  profileId: ID!
+  """The permissions the share grants."""
+  permissions: [PermissionType!]!
+}
+
+"""A seller profile shared to the caller, combining the profile's data with the share's permissions. Returned by listMyShares."""
+type SharedProfile {
+  """The profile's unique ID."""
+  profileId: ID!
+  """The ID of the account that owns the profile."""
+  ownerAccountId: ID!
+  """The seller's display name."""
+  sellerName: String!
+  """The scout unit type, if the profile is scoped to a unit."""
+  unitType: String
+  """The scout unit number, set together with unitType."""
+  unitNumber: Int
+  """When the profile was created."""
+  createdAt: AWSDateTime!
+  """When the profile was last updated."""
+  updatedAt: AWSDateTime!
+  """True if the caller is the profile's owner (false for a profile merely shared to them)."""
+  isOwner: Boolean!
+  """The permissions the caller holds on this profile via the share."""
+  permissions: [PermissionType!]!
+  """The profile's most recent active campaign, or null if it has none."""
+  latestCampaign: Campaign
+}
+
+"""An invitation for another account to join a seller profile, redeemable by its invite code."""
+type ProfileInvite {
+  """The invite's code, the credential the recipient redeems to gain access."""
+  inviteCode: ID!
+  """The ID of the profile the invite grants access to."""
+  profileId: ID!
+  """The permissions the invite grants once redeemed."""
+  permissions: [PermissionType!]!
+  """When the invite expires; it can no longer be redeemed after this time."""
+  expiresAt: AWSDateTime!
+  """When the invite was created."""
+  createdAt: AWSDateTime!
+  """The ID of the account that created the invite."""
+  createdByAccountId: ID!
+}
+
+"""A unit-level sales report aggregating sellers (profiles) and their orders for a unit and season."""
 type UnitReport {
+  """The scout unit type the report covers."""
   unitType: String!
+  """The scout unit number the report covers."""
   unitNumber: Int!
+  """The campaign name the report covers (for example "Fall" or "Spring")."""
   campaignName: String!
+  """The campaign year the report covers."""
   campaignYear: Int!
+  """One summary per seller (profile) in the unit, limited to profiles the caller can read."""
   sellers: [UnitSellerSummary!]!
+  """Total sales across all sellers in the report."""
   totalSales: Float!
+  """Total orders across all sellers in the report."""
   totalOrders: Int!
 }
 
+"""A per-seller (profile) summary within a unit report."""
 type UnitSellerSummary {
+  """The seller's profile ID."""
   profileId: ID!
+  """The seller's display name."""
   sellerName: String!
+  """The seller's total sales in the report."""
   totalSales: Float!
+  """The number of orders the seller has in the report."""
   orderCount: Int!
+  """The seller's individual orders in the report."""
   orders: [UnitOrderDetail!]!
 }
 
+"""An individual order within a unit report."""
 type UnitOrderDetail {
+  """The order's unique ID."""
   orderId: ID!
+  """The order's customer name."""
   customerName: String!
+  """When the order was placed."""
   orderDate: AWSDateTime!
+  """The order's total amount."""
   totalAmount: Float!
+  """The order's product lines."""
   lineItems: [LineItem!]!
 }
 
+"""A generated report for a campaign (Excel or CSV), stored in S3 with a time-limited pre-signed download URL."""
 type CampaignReport {
+  """The report's unique ID (with the REPORT# prefix)."""
   reportId: ID!
+  """The ID of the campaign the report covers."""
   campaignId: ID!
+  """The ID of the profile that owns the campaign."""
   profileId: ID!
+  """A pre-signed S3 URL to download the report (valid for a few hours)."""
   reportUrl: AWSURL
+  """The report's generation status (COMPLETED once it has been generated and uploaded)."""
   status: String!
+  """When the report was requested and generated."""
   createdAt: AWSDateTime!
+  """When the pre-signed download URL expires."""
   expiresAt: AWSDateTime
 }
 
@@ -271,150 +474,261 @@ type CampaignReport {
 # Input Types
 # ============================================================================
 
+"""Input for createSellerProfile."""
 input CreateSellerProfileInput {
+  """The seller's display name (required, up to 100 characters)."""
   sellerName: String!
 }
 
+"""Input for updateSellerProfile."""
 input UpdateSellerProfileInput {
+  """The ID of the profile to update."""
   profileId: ID!
+  """The seller's new display name."""
   sellerName: String!
 }
 
+"""Input for createCampaign. Creates a new active campaign on a profile.
+
+Either provide `catalogId` directly, or provide `sharedCampaignCode` to copy the name, year, catalog, and unit details from an existing shared campaign."""
 input CreateCampaignInput {
+  """The ID of the profile to create the campaign on (the caller must have WRITE access)."""
   profileId: ID!
+  """The campaign's display name (for example "Fall" or "Spring"). Required unless a shared campaign supplies it."""
   campaignName: String
+  """The campaign's year (for example 2024). Required unless a shared campaign supplies it."""
   campaignYear: Int
+  """The campaign's start date."""
   startDate: AWSDateTime
+  """The campaign's end date."""
   endDate: AWSDateTime
+  """The ID of the catalog the campaign sells from. Required unless a shared campaign supplies it."""
   catalogId: ID
+  """The scout unit type, to scope the campaign to a unit."""
   unitType: String
+  """The scout unit number (a positive integer), with city and state."""
   unitNumber: Int
+  """The city, with unitType, unitNumber, and state, to identify the unit."""
   city: String
+  """The state, with unitType, unitNumber, and city, to identify the unit."""
   state: String
+  """Create this campaign from the shared campaign with this code; name, year, catalog, and unit details are copied from it."""
   sharedCampaignCode: String
+  """Used with sharedCampaignCode: also share the new campaign back to the shared campaign's creator."""
   shareWithCreator: Boolean
 }
 
+"""Input for updateCampaign. Only the provided fields are changed."""
 input UpdateCampaignInput {
+  """The ID of the campaign to update."""
   campaignId: ID!
+  """New display name for the campaign."""
   campaignName: String
+  """New year for the campaign."""
   campaignYear: Int
+  """New start date."""
   startDate: AWSDateTime
+  """New end date."""
   endDate: AWSDateTime
+  """New catalog ID."""
   catalogId: ID
+  """Set to true or false to activate or deactivate the campaign."""
   isActive: Boolean
+  """New scout unit type."""
   unitType: String
+  """New scout unit number."""
   unitNumber: Int
+  """New city."""
   city: String
+  """New state."""
   state: String
 }
 
+"""Input for createCatalog and createManagedCatalog. Defines a catalog and its products."""
 input CreateCatalogInput {
+  """The catalog's display name."""
   catalogName: String!
+  """Whether the catalog is public."""
   isPublic: Boolean!
+  """The products to include in the catalog."""
   products: [ProductInput!]!
 }
 
+"""Input for a product within a catalog."""
 input ProductInput {
+  """The product's display name."""
   productName: String!
+  """A free-text description of the product."""
   description: String
+  """The product's unit price."""
   price: Float!
+  """The display order of the product within the catalog."""
   sortOrder: Int!
 }
 
+"""Input for createOrder. Places a new order in a campaign."""
 input CreateOrderInput {
+  """The ID of the profile the order belongs to (the caller must have WRITE access)."""
   profileId: ID!
+  """The ID of the campaign the order belongs to."""
   campaignId: ID!
+  """The customer's name."""
   customerName: String!
+  """The customer's phone number."""
   customerPhone: String
+  """The customer's address."""
   customerAddress: AddressInput
+  """When the order was placed."""
   orderDate: AWSDateTime!
+  """The name of the payment method used for this order."""
   paymentMethod: String!
+  """The products and quantities to order; prices are looked up from the campaign's catalog."""
   lineItems: [LineItemInput!]!
+  """Free-text notes about the order."""
   notes: String
 }
 
+"""Input for updateOrder. Only the provided fields are changed; providing lineItems replaces all existing line items."""
 input UpdateOrderInput {
+  """The ID of the order to update."""
   orderId: ID!
+  """New customer name."""
   customerName: String
+  """New customer phone number."""
   customerPhone: String
+  """New customer address."""
   customerAddress: AddressInput
+  """New order date."""
   orderDate: AWSDateTime
+  """New payment method name."""
   paymentMethod: String
+  """New line items; replaces the existing ones and recomputes the total."""
   lineItems: [LineItemInput!]
+  """New notes."""
   notes: String
 }
 
+"""Input for a product line within an order; the price is looked up from the catalog."""
 input LineItemInput {
+  """The ID of the product to order."""
   productId: ID!
+  """The quantity to order (at least 1)."""
   quantity: Int!
 }
 
+"""Input for a physical mailing address."""
 input AddressInput {
+  """Street address."""
   street: String
+  """City."""
   city: String
+  """State."""
   state: String
+  """ZIP/postal code."""
   zipCode: String
 }
 
+"""Input for createSharedCampaign. Publishes a campaign so other units can find and clone it."""
 input CreateSharedCampaignInput {
+  """The ID of the catalog the shared campaign sells from."""
   catalogId: ID!
+  """The campaign's display name (for example "Fall" or "Spring")."""
   campaignName: String!
+  """The campaign's year (for example 2024)."""
   campaignYear: Int!
+  """The campaign's start date."""
   startDate: AWSDate
+  """The campaign's end date."""
   endDate: AWSDate
+  """The scout unit type."""
   unitType: String!
+  """The scout unit number."""
   unitNumber: Int!
+  """The city, part of the unit's identity."""
   city: String!
+  """The state, part of the unit's identity."""
   state: String!
+  """A message from the creator to whoever uses the shared campaign."""
   creatorMessage: String
+  """A description of the campaign."""
   description: String
 }
 
+"""Input for updateSharedCampaign. Only the provided fields are changed."""
 input UpdateSharedCampaignInput {
+  """The shared campaign's code."""
   sharedCampaignCode: String!
+  """New creator message."""
   creatorMessage: String
+  """New description."""
   description: String
+  """Set to true or false to activate or deactivate the shared campaign."""
   isActive: Boolean
 }
 
+"""Input for createProfileInvite. Creates a redeemable invite to join a profile (owner only)."""
 input CreateProfileInviteInput {
+  """The ID of the profile to invite to (the caller must own it)."""
   profileId: ID!
+  """The permissions the invite grants once redeemed (READ and/or WRITE)."""
   permissions: [PermissionType!]!
+  """How many days until the invite expires; defaults to 14 if omitted."""
   expiresInDays: Int
 }
 
+"""Input for redeemProfileInvite. Redeems an invite code to gain access to a profile."""
 input RedeemProfileInviteInput {
+  """The invite code to redeem."""
   inviteCode: ID!
 }
 
+"""Input for shareProfileDirect. Shares a profile directly with another account by email (owner only)."""
 input ShareProfileDirectInput {
+  """The ID of the profile to share (the caller must own it)."""
   profileId: ID!
+  """The email address of the account to grant access to; the account must already exist in Cognito."""
   targetAccountEmail: AWSEmail!
+  """The permissions to grant (READ and/or WRITE)."""
   permissions: [PermissionType!]!
 }
 
+"""Input for revokeShare. Removes a share's access to a profile (owner only)."""
 input RevokeShareInput {
+  """The ID of the profile the share is on."""
   profileId: ID!
+  """The ID of the account whose access should be revoked."""
   targetAccountId: ID!
 }
 
+"""Input for transferProfileOwnership. Transfers a profile's ownership to an account that already has a share."""
 input TransferProfileOwnershipInput {
+  """The ID of the profile to transfer (the caller must be the owner or an admin)."""
   profileId: ID!
+  """The ID of the account to become the new owner; it must already hold a share on the profile."""
   newOwnerAccountId: ID!
 }
 
+"""Input for updateMyAccount. Updates profile fields on the caller's own account; at least one field must be provided."""
 input UpdateMyAccountInput {
+  """New first name."""
   givenName: String
+  """New last name."""
   familyName: String
+  """New city."""
   city: String
+  """New state."""
   state: String
+  """New scout unit type."""
   unitType: String
+  """New scout unit number (a positive integer)."""
   unitNumber: Int
 }
 
+"""Input for requestCampaignReport. Requests a generated Excel or CSV report for a campaign."""
 input RequestCampaignReportInput {
+  """The ID of the campaign to generate the report for (the caller must have read access to its profile)."""
   campaignId: ID!
+  """The report format: "xlsx" or "csv". Defaults to "xlsx" if omitted."""
   format: String
 }
 
@@ -422,124 +736,444 @@ input RequestCampaignReportInput {
 # Query Root
 # ============================================================================
 
+"""The root query object for the KernelWorx API."""
 type Query {
   # Account queries
+  """The authenticated caller's account. The row is created automatically on first read if it does not yet exist."""
   getMyAccount: Account!
-  
-  # Profile queries
-  getProfile(profileId: ID!): SellerProfile
-  listMyProfiles(limit: Int, nextToken: String): SellerProfileConnection!
-  listMyShares: [SharedProfile!]!
-  
-  # Campaign queries
-  getCampaign(campaignId: ID!): Campaign
-  listCampaignsByProfile(profileId: ID!, limit: Int, nextToken: String): CampaignConnection!
-  
-  # Catalog queries
-  getCatalog(catalogId: ID!): Catalog @aws_cognito_user_pools
-  listManagedCatalogs: [Catalog!]! @aws_cognito_user_pools
-  listMyCatalogs: [Catalog!]!
-  listCatalogsInUse: [ID!]!  # Returns catalog IDs used by any campaign the user has access to
-  
-  # Order queries
-  getOrder(orderId: ID!): Order
-  listOrdersByCampaign(campaignId: ID!, limit: Int, nextToken: String): OrderConnection!
-  
-  # Share queries
-  listSharesByProfile(profileId: ID!): [Share!]!
-  listInvitesByProfile(profileId: ID!): [ProfileInvite!]!
-  
-  # Shared campaign queries
-  getSharedCampaign(sharedCampaignCode: String!): SharedCampaign @aws_cognito_user_pools
-  listMySharedCampaigns: [SharedCampaign!]!
-  findSharedCampaigns(unitType: String!, unitNumber: Int!, city: String!, state: String!, campaignName: String!, campaignYear: Int!): [SharedCampaign!]!
-  
-  # Unit reporting
-  listUnitCatalogs(unitType: String!, unitNumber: Int!, campaignName: String!, campaignYear: Int!): [Catalog!]!
-  listUnitCampaignCatalogs(unitType: String!, unitNumber: Int!, city: String!, state: String!, campaignName: String!, campaignYear: Int!): [Catalog!]!
-  getUnitReport(unitType: String!, unitNumber: Int!, city: String, state: String, campaignName: String!, campaignYear: Int!, catalogId: ID!): UnitReport
-  
-  # Payment method queries
-  myPaymentMethods: [PaymentMethod!]!
-  paymentMethodsForProfile(profileId: ID!): [PaymentMethod!]!
 
-  # Admin queries (requires ADMIN Cognito group)
-  adminListUsers(limit: Int, nextToken: String): AdminUserConnection!
-  adminSearchUser(query: String!): [AdminUser!]!
-  adminGetUserProfiles(accountId: ID!): [SellerProfile!]!
-  adminGetUserCatalogs(accountId: ID!): [Catalog!]!
-  adminGetUserCampaigns(accountId: ID!): [Campaign!]!
-  adminGetUserSharedCampaigns(accountId: ID!): [SharedCampaign!]!
-  adminGetProfileShares(profileId: ID!): [Share!]!
+  # Profile queries
+  """Fetch a single seller profile by ID. Returns the profile if the caller owns it or has read access via a share, otherwise null."""
+  getProfile(
+    """The profile's ID."""
+    profileId: ID!
+  ): SellerProfile
+  """List the seller profiles the caller owns, with pagination."""
+  listMyProfiles(
+    """Maximum number of items to return in the page."""
+    limit: Int,
+    """Opaque cursor from a previous page; omit to start from the first page."""
+    nextToken: String
+  ): SellerProfileConnection!
+  """List seller profiles that have been shared to the caller, each annotated with the caller's permissions."""
+  listMyShares: [SharedProfile!]!
+
+  # Campaign queries
+  """Fetch a single campaign by ID. Returns the campaign if the caller has read access to its profile, otherwise null."""
+  getCampaign(
+    """The campaign's ID."""
+    campaignId: ID!
+  ): Campaign
+  """List the campaigns on a profile, with pagination. The caller must have read access to the profile."""
+  listCampaignsByProfile(
+    """The profile's ID."""
+    profileId: ID!,
+    """Maximum number of items to return in the page."""
+    limit: Int,
+    """Opaque cursor from a previous page; omit to start from the first page."""
+    nextToken: String
+  ): CampaignConnection!
+
+  # Catalog queries
+  """Fetch a single catalog by ID. Any authenticated user may view a catalog by ID (no ownership check); returns null when not found."""
+  getCatalog(
+    """The catalog's ID."""
+    catalogId: ID!
+  ): Catalog @aws_cognito_user_pools
+  """List the public, admin-managed catalogs available to all users (soft-deleted catalogs excluded)."""
+  listManagedCatalogs: [Catalog!]! @aws_cognito_user_pools
+  """List the catalogs the caller has created (soft-deleted catalogs excluded)."""
+  listMyCatalogs: [Catalog!]!
+  """Return the IDs of every catalog used by a campaign the caller owns or has access to via a share."""
+  listCatalogsInUse: [ID!]!
+
+  # Order queries
+  """Fetch a single order by ID. Returns the order if the caller has read access to its profile, otherwise null."""
+  getOrder(
+    """The order's ID."""
+    orderId: ID!
+  ): Order
+  """List the orders in a campaign, with pagination. The caller must have read access to the campaign's profile."""
+  listOrdersByCampaign(
+    """The campaign's ID."""
+    campaignId: ID!,
+    """Maximum number of items to return in the page."""
+    limit: Int,
+    """Opaque cursor from a previous page; omit to start from the first page."""
+    nextToken: String
+  ): OrderConnection!
+
+  # Share queries
+  """List the shares (access grants) on a profile. The caller must have write access to the profile."""
+  listSharesByProfile(
+    """The profile's ID."""
+    profileId: ID!
+  ): [Share!]!
+  """List the pending invites on a profile. The caller must have write access to the profile."""
+  listInvitesByProfile(
+    """The profile's ID."""
+    profileId: ID!
+  ): [ProfileInvite!]!
+
+  # Shared campaign queries
+  """Fetch a single shared campaign by its bearer code. Returns null when the code is unknown or the shared campaign is inactive."""
+  getSharedCampaign(
+    """The shared campaign's code."""
+    sharedCampaignCode: String!
+  ): SharedCampaign @aws_cognito_user_pools
+  """List the active shared campaigns the caller has created, most recent first."""
+  listMySharedCampaigns: [SharedCampaign!]!
+  """Find active shared campaigns that exactly match the given unit and season (unitType, unitNumber, city, state, campaignName, and campaignYear). Inactive shared campaigns are excluded."""
+  findSharedCampaigns(
+    """The scout unit type."""
+    unitType: String!,
+    """The scout unit number."""
+    unitNumber: Int!,
+    """The city."""
+    city: String!,
+    """The state."""
+    state: String!,
+    """The campaign name to match (for example "Fall" or "Spring")."""
+    campaignName: String!,
+    """The campaign year to match (for example 2024)."""
+    campaignYear: Int!
+  ): [SharedCampaign!]!
+
+  # Unit reporting
+  """List the distinct catalogs used by campaigns in a unit and season, limited to profiles the caller can read."""
+  listUnitCatalogs(
+    """The scout unit type."""
+    unitType: String!,
+    """The scout unit number."""
+    unitNumber: Int!,
+    """The campaign name (for example "Fall" or "Spring")."""
+    campaignName: String!,
+    """The campaign year (for example 2024)."""
+    campaignYear: Int!
+  ): [Catalog!]!
+  """List the distinct catalogs used by campaigns in a unit and season (matched with city and state), limited to profiles the caller can read."""
+  listUnitCampaignCatalogs(
+    """The scout unit type."""
+    unitType: String!,
+    """The scout unit number."""
+    unitNumber: Int!,
+    """The city, to identify the unit."""
+    city: String!,
+    """The state, to identify the unit."""
+    state: String!,
+    """The campaign name (for example "Fall" or "Spring")."""
+    campaignName: String!,
+    """The campaign year (for example 2024)."""
+    campaignYear: Int!
+  ): [Catalog!]!
+  """Generate a unit-level sales report for a unit and season, covering only the sellers (profiles) the caller can read. catalogId is required so the report reflects a single catalog."""
+  getUnitReport(
+    """The scout unit type."""
+    unitType: String!,
+    """The scout unit number."""
+    unitNumber: Int!,
+    """The city, to identify the unit."""
+    city: String,
+    """The state, to identify the unit."""
+    state: String,
+    """The campaign name (for example "Fall" or "Spring")."""
+    campaignName: String!,
+    """The campaign year (for example 2024)."""
+    campaignYear: Int!,
+    """The catalog ID to build the report from."""
+    catalogId: ID!
+  ): UnitReport
+
+  # Payment method queries
+  """The payment methods available to the caller: the caller's stored custom methods plus the built-in "Cash" and "Check" methods, sorted by name."""
+  myPaymentMethods: [PaymentMethod!]!
+  """The payment methods stored for a profile's owner. The caller must have access to the profile; READ-only callers see the method names but not their QR codes (qrCodeUrl is null)."""
+  paymentMethodsForProfile(
+    """The profile's ID."""
+    profileId: ID!
+  ): [PaymentMethod!]!
+
+  # Admin queries (requires the ADMIN Cognito group)
+  """List all Cognito users, merged with their stored Account data, with pagination (admin only)."""
+  adminListUsers(
+    """Maximum number of users to return in the page."""
+    limit: Int,
+    """Opaque cursor from a previous page; omit to start from the first page."""
+    nextToken: String
+  ): AdminUserConnection!
+  """Search users by email, name, or accountId (admin only)."""
+  adminSearchUser(
+    """The text to search for (matches email, display name, or account ID)."""
+    query: String!
+  ): [AdminUser!]!
+  """List all seller profiles owned by the given account (admin only)."""
+  adminGetUserProfiles(
+    """The account ID to look up."""
+    accountId: ID!
+  ): [SellerProfile!]!
+  """List all catalogs owned by the given account (admin only)."""
+  adminGetUserCatalogs(
+    """The account ID to look up."""
+    accountId: ID!
+  ): [Catalog!]!
+  """List all campaigns owned by the given account (admin only)."""
+  adminGetUserCampaigns(
+    """The account ID to look up."""
+    accountId: ID!
+  ): [Campaign!]!
+  """List all shared campaigns created by the given account (admin only)."""
+  adminGetUserSharedCampaigns(
+    """The account ID to look up."""
+    accountId: ID!
+  ): [SharedCampaign!]!
+  """List all shares (access grants) on a profile (admin only)."""
+  adminGetProfileShares(
+    """The profile's ID."""
+    profileId: ID!
+  ): [Share!]!
 }
 
 # ============================================================================
 # Mutation Root
 # ============================================================================
 
+"""The root mutation object for the KernelWorx API."""
 type Mutation {
   # Account mutations
-  updateMyAccount(input: UpdateMyAccountInput!): Account!
-  updateMyPreferences(preferences: AWSJSON!): Account!
+  """Update profile fields on the caller's own account. At least one field must be provided. Returns the updated account."""
+  updateMyAccount(
+    """The fields to update."""
+    input: UpdateMyAccountInput!
+  ): Account!
+  """Replace the caller's account preferences blob. Returns the updated account."""
+  updateMyPreferences(
+    """The new preferences value."""
+    preferences: AWSJSON!
+  ): Account!
+  """Delete the caller's account and all associated data (profiles, campaigns, orders, shares, and invites; catalogs are preserved) and remove the user from Cognito. Returns true on success."""
   deleteMyAccount: Boolean!
-  
+
   # Profile mutations
-  createSellerProfile(input: CreateSellerProfileInput!): SellerProfile!
-  updateSellerProfile(input: UpdateSellerProfileInput!): SellerProfile!
-  deleteSellerProfile(profileId: ID!): Boolean!
-  
+  """Create a new seller profile owned by the caller. Returns the created profile."""
+  createSellerProfile(
+    """The new profile's details."""
+    input: CreateSellerProfileInput!
+  ): SellerProfile!
+  """Update a seller profile the caller owns. Returns the updated profile."""
+  updateSellerProfile(
+    """The profile ID and new details."""
+    input: UpdateSellerProfileInput!
+  ): SellerProfile!
+  """Delete a seller profile the caller owns, along with all of its campaigns, orders, shares, and invites. Returns true on success."""
+  deleteSellerProfile(
+    """The profile's ID."""
+    profileId: ID!
+  ): Boolean!
+
   # Campaign mutations
-  createCampaign(input: CreateCampaignInput!): Campaign!
-  updateCampaign(input: UpdateCampaignInput!): Campaign!
-  deleteCampaign(campaignId: ID!): Boolean!
-  
+  """Create a new active campaign on a profile the caller has write access to. Returns the created campaign."""
+  createCampaign(
+    """The new campaign's details."""
+    input: CreateCampaignInput!
+  ): Campaign!
+  """Update a campaign on a profile the caller has write access to. Only provided fields change. Returns the updated campaign."""
+  updateCampaign(
+    """The campaign ID and fields to update."""
+    input: UpdateCampaignInput!
+  ): Campaign!
+  """Delete a campaign and all of its orders, on a profile the caller has write access to. Returns true on success."""
+  deleteCampaign(
+    """The campaign's ID."""
+    campaignId: ID!
+  ): Boolean!
+
   # Catalog mutations
-  createCatalog(input: CreateCatalogInput!): Catalog!
-  updateCatalog(catalogId: ID!, input: CreateCatalogInput!): Catalog!
-  deleteCatalog(catalogId: ID!): Boolean!
-  
+  """Create a catalog owned by the caller. Returns the created catalog."""
+  createCatalog(
+    """The new catalog's details and products."""
+    input: CreateCatalogInput!
+  ): Catalog!
+  """Update a catalog the caller owns, replacing its name, visibility, and products. Returns the updated catalog."""
+  updateCatalog(
+    """The catalog's ID."""
+    catalogId: ID!,
+    """The new catalog's details and products."""
+    input: CreateCatalogInput!
+  ): Catalog!
+  """Soft-delete a catalog the caller owns (it is hidden from list queries but kept for reference). Returns true on success."""
+  deleteCatalog(
+    """The catalog's ID."""
+    catalogId: ID!
+  ): Boolean!
+
   # Order mutations
-  createOrder(input: CreateOrderInput!): Order!
-  updateOrder(input: UpdateOrderInput!): Order!
-  deleteOrder(orderId: ID!): Boolean!
-  
+  """Place a new order in a campaign on a profile the caller has write access to. Returns the created order."""
+  createOrder(
+    """The new order's details."""
+    input: CreateOrderInput!
+  ): Order!
+  """Update an order on a profile the caller has write access to. Only provided fields change. Returns the updated order."""
+  updateOrder(
+    """The order ID and fields to update."""
+    input: UpdateOrderInput!
+  ): Order!
+  """Delete an order on a profile the caller has write access to. Returns true on success."""
+  deleteOrder(
+    """The order's ID."""
+    orderId: ID!
+  ): Boolean!
+
   # Shared campaign mutations
-  createSharedCampaign(input: CreateSharedCampaignInput!): SharedCampaign!
-  
-  updateSharedCampaign(input: UpdateSharedCampaignInput!): SharedCampaign!
-  
-  deleteSharedCampaign(sharedCampaignCode: String!): Boolean!
-  
+  """Create a shared campaign so other units can find and clone it. Returns the created shared campaign."""
+  createSharedCampaign(
+    """The new shared campaign's details."""
+    input: CreateSharedCampaignInput!
+  ): SharedCampaign!
+
+  """Update a shared campaign the caller created. Only provided fields change. Returns the updated shared campaign."""
+  updateSharedCampaign(
+    """The shared campaign's code and fields to update."""
+    input: UpdateSharedCampaignInput!
+  ): SharedCampaign!
+
+  """Delete a shared campaign the caller created. Returns true on success."""
+  deleteSharedCampaign(
+    """The shared campaign's code."""
+    sharedCampaignCode: String!
+  ): Boolean!
+
   # Sharing mutations
-  createProfileInvite(input: CreateProfileInviteInput!): ProfileInvite!
-  deleteProfileInvite(profileId: ID!, inviteCode: ID!): Boolean!
-  redeemProfileInvite(input: RedeemProfileInviteInput!): Share!
-  shareProfileDirect(input: ShareProfileDirectInput!): Share!
-  revokeShare(input: RevokeShareInput!): Boolean!
-  transferProfileOwnership(input: TransferProfileOwnershipInput!): SellerProfile!
-  
+  """Create a redeemable invite to join a profile the caller owns. Returns the created invite."""
+  createProfileInvite(
+    """The new invite's details."""
+    input: CreateProfileInviteInput!
+  ): ProfileInvite!
+  """Delete (revoke) an invite on a profile the caller owns. Returns true on success."""
+  deleteProfileInvite(
+    """The profile's ID."""
+    profileId: ID!,
+    """The invite's code."""
+    inviteCode: ID!
+  ): Boolean!
+  """Redeem an invite code to grant the caller access to a profile. Returns the created share."""
+  redeemProfileInvite(
+    """The invite code to redeem."""
+    input: RedeemProfileInviteInput!
+  ): Share!
+  """Share a profile the caller owns directly with another account by email. Returns the created share."""
+  shareProfileDirect(
+    """The profile, target email, and permissions."""
+    input: ShareProfileDirectInput!
+  ): Share!
+  """Remove a share's access to a profile the caller owns. Returns true on success."""
+  revokeShare(
+    """The profile and account whose access should be revoked."""
+    input: RevokeShareInput!
+  ): Boolean!
+  """Transfer a profile's ownership to an account that already has a share (the caller must be the owner or an admin). Returns the updated profile."""
+  transferProfileOwnership(
+    """The profile and the new owner's account ID."""
+    input: TransferProfileOwnershipInput!
+  ): SellerProfile!
+
   # Report generation
-  requestCampaignReport(input: RequestCampaignReportInput!): CampaignReport!
-  
+  """Generate an Excel or CSV report for a campaign and store it in S3. Returns the report with a pre-signed download URL."""
+  requestCampaignReport(
+    """The campaign and report format."""
+    input: RequestCampaignReportInput!
+  ): CampaignReport!
+
   # Payment method mutations
-  createPaymentMethod(name: String!): PaymentMethod!
-  updatePaymentMethod(currentName: String!, newName: String!): PaymentMethod!
-  deletePaymentMethod(name: String!): Boolean!
-  requestPaymentMethodQRCodeUpload(paymentMethodName: String!): S3UploadInfo!
-  confirmPaymentMethodQRCodeUpload(paymentMethodName: String!, s3Key: String!): PaymentMethod!
-  deletePaymentMethodQRCode(paymentMethodName: String!): Boolean!
-  
-  # Admin mutations (requires ADMIN Cognito group)
-  adminResetUserPassword(email: AWSEmail!): Boolean!
-  adminDeleteUser(accountId: ID!): Boolean!
-  adminDeleteUserOrders(accountId: ID!): Int!
-  adminDeleteUserCampaigns(accountId: ID!): Int!
-  adminDeleteUserShares(accountId: ID!): Int!
-  adminDeleteUserProfiles(accountId: ID!): Int!
-  adminDeleteUserCatalogs(accountId: ID!): Int!
-  adminDeleteShare(profileId: ID!, targetAccountId: ID!): Boolean!
-  adminUpdateCampaignSharedCode(campaignId: ID!, sharedCampaignCode: String): Campaign!
-  createManagedCatalog(input: CreateCatalogInput!): Catalog!
+  """Create a new payment method for the caller. The name must be unique and not a reserved name (Cash or Check). Returns the created payment method."""
+  createPaymentMethod(
+    """The new payment method's name."""
+    name: String!
+  ): PaymentMethod!
+  """Rename one of the caller's payment methods. Returns the updated payment method."""
+  updatePaymentMethod(
+    """The current payment method's name."""
+    currentName: String!,
+    """The new name for the payment method."""
+    newName: String!
+  ): PaymentMethod!
+  """Delete one of the caller's payment methods and its stored QR code. Returns true on success."""
+  deletePaymentMethod(
+    """The payment method's name."""
+    name: String!
+  ): Boolean!
+  """Get pre-signed S3 credentials to upload a QR code for one of the caller's payment methods."""
+  requestPaymentMethodQRCodeUpload(
+    """The payment method's name."""
+    paymentMethodName: String!
+  ): S3UploadInfo!
+  """Confirm a QR code upload for a payment method after the S3 upload completes. Returns the updated payment method."""
+  confirmPaymentMethodQRCodeUpload(
+    """The payment method's name."""
+    paymentMethodName: String!,
+    """The S3 key returned by requestPaymentMethodQRCodeUpload."""
+    s3Key: String!
+  ): PaymentMethod!
+  """Delete the stored QR code for a payment method. Returns true on success."""
+  deletePaymentMethodQRCode(
+    """The payment method's name."""
+    paymentMethodName: String!
+  ): Boolean!
+
+  # Admin mutations (requires the ADMIN Cognito group)
+  """Send a password-reset email to a user by email (admin only). Returns true once the reset is initiated."""
+  adminResetUserPassword(
+    """The user's email address."""
+    email: AWSEmail!
+  ): Boolean!
+  """Delete a user from Cognito and DynamoDB (admin only). The caller cannot delete their own account. Returns true on success."""
+  adminDeleteUser(
+    """The account ID to delete."""
+    accountId: ID!
+  ): Boolean!
+  """Delete all orders across all campaigns of all profiles owned by the given account (admin only). Returns the number of orders deleted."""
+  adminDeleteUserOrders(
+    """The account ID to clean up."""
+    accountId: ID!
+  ): Int!
+  """Delete all campaigns across all profiles owned by the given account (admin only). Returns the number of campaigns deleted."""
+  adminDeleteUserCampaigns(
+    """The account ID to clean up."""
+    accountId: ID!
+  ): Int!
+  """Delete all shares across all profiles owned by the given account (admin only). Returns the number of shares deleted."""
+  adminDeleteUserShares(
+    """The account ID to clean up."""
+    accountId: ID!
+  ): Int!
+  """Delete all profiles owned by the given account (admin only). Returns the number of profiles deleted."""
+  adminDeleteUserProfiles(
+    """The account ID to clean up."""
+    accountId: ID!
+  ): Int!
+  """Soft-delete all catalogs owned by the given account (admin only). Returns the number of catalogs soft-deleted."""
+  adminDeleteUserCatalogs(
+    """The account ID to clean up."""
+    accountId: ID!
+  ): Int!
+  """Delete a specific share, revoking that account's access to a profile (admin only). Returns true on success."""
+  adminDeleteShare(
+    """The profile's ID."""
+    profileId: ID!,
+    """The account whose access should be revoked."""
+    targetAccountId: ID!
+  ): Boolean!
+  """Set or clear a campaign's sharedCampaignCode, associating it with a shared campaign (admin only). Returns the updated campaign."""
+  adminUpdateCampaignSharedCode(
+    """The campaign's ID."""
+    campaignId: ID!,
+    """The shared campaign's code to associate, or null to clear it."""
+    sharedCampaignCode: String
+  ): Campaign!
+  """Create an admin-managed global catalog available to all users (admin only). Returns the created catalog."""
+  createManagedCatalog(
+    """The new catalog's details and products."""
+    input: CreateCatalogInput!
+  ): Catalog!
 }
 
 # ============================================================================
