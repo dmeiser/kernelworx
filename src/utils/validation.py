@@ -350,7 +350,6 @@ class CreateSellerProfileInput:
         return res
 
 
-
 @dataclass
 class UpdateSellerProfileInput:
     """Input model for updating a seller profile."""
@@ -406,7 +405,6 @@ class UpdateSellerProfileInput:
         if exclude_none:
             return {k: v for k, v in res.items() if v is not None}
         return res
-
 
 
 @dataclass
