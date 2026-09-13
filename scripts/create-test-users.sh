@@ -2,8 +2,14 @@
 
 # Create test users in Cognito for integration tests
 # Uses credentials from .env file
+#
+# Also provisions (or re-provisions) a TOTP device for the owner user: the
+# #336 admin gate requires the amr 'mfa' claim, so the owner admin needs MFA.
+# The fresh TOTP secret is written to .env as TEST_OWNER_TOTP_SECRET.
 
 set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Load environment variables from .env
 if [ -f .env ]; then
@@ -14,9 +20,9 @@ else
 fi
 
 # Validate required environment variables
-if [ -z "$TEST_USER_POOL_ID" ] || [ -z "$TEST_OWNER_EMAIL" ] || [ -z "$TEST_OWNER_PASSWORD" ]; then
+if [ -z "$TEST_USER_POOL_ID" ] || [ -z "$TEST_USER_POOL_CLIENT_ID" ] || [ -z "$TEST_OWNER_EMAIL" ] || [ -z "$TEST_OWNER_PASSWORD" ]; then
   echo "Error: Required environment variables not set in .env"
-  echo "Required: TEST_USER_POOL_ID, TEST_OWNER_EMAIL, TEST_OWNER_PASSWORD, etc."
+  echo "Required: TEST_USER_POOL_ID, TEST_USER_POOL_CLIENT_ID, TEST_OWNER_EMAIL, TEST_OWNER_PASSWORD, etc."
   exit 1
 fi
 
@@ -65,6 +71,20 @@ create_or_update_user() {
 create_or_update_user "Owner" "$TEST_OWNER_EMAIL" "$TEST_OWNER_PASSWORD"
 create_or_update_user "Contributor" "$TEST_CONTRIBUTOR_EMAIL" "$TEST_CONTRIBUTOR_PASSWORD"
 create_or_update_user "Read-only" "$TEST_READONLY_EMAIL" "$TEST_READONLY_PASSWORD"
+
+echo ""
+echo "🔐 Provisioning TOTP MFA for the owner admin user (#336)..."
+OWNER_TOTP_SECRET=$("$SCRIPT_DIR/provision-user-totp.sh" \
+  "$TEST_USER_POOL_ID" "$TEST_USER_POOL_CLIENT_ID" "$TEST_OWNER_EMAIL" "$TEST_OWNER_PASSWORD")
+
+# Persist the fresh secret in .env so integration and e2e test harnesses can
+# answer the owner's SOFTWARE_TOKEN_MFA challenge.
+if grep -q '^TEST_OWNER_TOTP_SECRET=' .env; then
+  sed -i.bak "s|^TEST_OWNER_TOTP_SECRET=.*|TEST_OWNER_TOTP_SECRET=$OWNER_TOTP_SECRET|" .env
+  rm -f .env.bak
+else
+  printf '\n# TOTP secret for the owner admin test user (provisioned by this script, #336)\nTEST_OWNER_TOTP_SECRET=%s\n' "$OWNER_TOTP_SECRET" >> .env
+fi
 
 echo ""
 echo "✅ Test users created successfully!"

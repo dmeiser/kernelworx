@@ -25,13 +25,13 @@ from .campaign_operations import _verify_campaign_deleted, _verify_order_keys_de
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
-    from utils.auth import is_admin
+    from utils.auth import require_admin_mfa
     from utils.dynamodb import get_dynamodb_resource, tables
     from utils.errors import AppError, ErrorCode
     from utils.logging import get_logger, mask_email
     from utils.payment_methods import delete_all_user_qr_codes
 except ModuleNotFoundError:  # pragma: no cover
-    from ..utils.auth import is_admin
+    from ..utils.auth import require_admin_mfa
     from ..utils.dynamodb import get_dynamodb_resource, tables
     from ..utils.errors import AppError, ErrorCode
     from ..utils.logging import get_logger, mask_email
@@ -275,8 +275,7 @@ def admin_list_users(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
     logger = get_logger(__name__)
 
-    if not is_admin(event):
-        raise AppError(ErrorCode.FORBIDDEN, "Admin access required")
+    require_admin_mfa(event)
 
     arguments = event.get("arguments", {})
     limit = max(1, min(arguments.get("limit", 20), 60))
@@ -334,8 +333,7 @@ def admin_search_user(event: Dict[str, Any], context: Any) -> list[Dict[str, Any
     """
     logger = get_logger(__name__)
 
-    if not is_admin(event):
-        raise AppError(ErrorCode.FORBIDDEN, "Admin access required")
+    require_admin_mfa(event)
 
     query = str(event.get("arguments", {}).get("query", "")).strip()
     if not query:
@@ -383,8 +381,7 @@ def _search_by_uuid(query: str, cognito: Any, user_pool_id: str, logger: Any) ->
 
 def _validate_admin_and_get_account_id(event: Dict[str, Any]) -> str:
     """Validate admin access and extract account ID from event."""
-    if not is_admin(event):
-        raise AppError(ErrorCode.FORBIDDEN, "Admin access required")
+    require_admin_mfa(event)
 
     arguments = event.get("arguments", {})
     account_id = str(arguments.get("accountId", "")).strip()
@@ -842,8 +839,7 @@ def admin_reset_user_password(event: Dict[str, Any], context: Any) -> bool:
     logger = get_logger(__name__)
 
     # Verify caller is admin and extract email
-    if not is_admin(event):
-        raise AppError(ErrorCode.FORBIDDEN, "Admin access required")
+    require_admin_mfa(event)
 
     arguments = event.get("arguments", {})
     email = arguments.get("email", "").strip().lower()
@@ -1018,8 +1014,7 @@ def _persist_catalog(catalog_item: Dict[str, Any], logger: Any) -> None:
 
 def _validate_admin_and_get_caller_id(event: Dict[str, Any]) -> str:
     """Validate admin access and extract caller ID."""
-    if not is_admin(event):
-        raise AppError(ErrorCode.FORBIDDEN, "Admin access required")
+    require_admin_mfa(event)
 
     identity = event.get("identity", {})
     caller_id = identity.get("sub")
@@ -1630,8 +1625,7 @@ def _query_profile_shares(db_profile_id: str) -> list[Dict[str, Any]]:
 
 def _validate_admin_and_get_profile_id(event: Dict[str, Any]) -> str:
     """Validate admin access and extract profile ID with prefix."""
-    if not is_admin(event):
-        raise AppError(ErrorCode.FORBIDDEN, "Admin access required")
+    require_admin_mfa(event)
 
     arguments = event.get("arguments", {})
     profile_id = arguments.get("profileId", "").strip()
@@ -1671,8 +1665,7 @@ def _normalize_profile_and_account_ids(profile_id: str, target_account_id: str) 
 
 def _validate_and_get_share_ids(event: Dict[str, Any]) -> tuple[str, str]:
     """Validate admin and extract profile/account IDs."""
-    if not is_admin(event):
-        raise AppError(ErrorCode.FORBIDDEN, "Admin access required")
+    require_admin_mfa(event)
 
     arguments = event.get("arguments", {})
     profile_id = arguments.get("profileId", "").strip()
@@ -1742,8 +1735,7 @@ def _update_campaign_shared_code(
 
 def _validate_admin_and_get_campaign_id(event: Dict[str, Any]) -> tuple[str, Optional[str]]:
     """Validate admin access and extract campaign ID and shared code."""
-    if not is_admin(event):
-        raise AppError(ErrorCode.FORBIDDEN, "Admin access required")
+    require_admin_mfa(event)
 
     arguments = event.get("arguments", {})
     campaign_id = arguments.get("campaignId", "").strip()

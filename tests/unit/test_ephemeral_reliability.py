@@ -63,6 +63,7 @@ class TestBashSyntax:
             repo_root / "scripts" / "recover-deploy.sh",
             repo_root / "scripts" / "recover-destroy.sh",
             repo_root / "scripts" / "create-ephemeral-test-users.sh",
+            repo_root / "scripts" / "provision-user-totp.sh",
             repo_root / "tofu" / "application" / "scripts" / "deploy.sh",
         ]
         for script in scripts:

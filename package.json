@@ -12,6 +12,7 @@
   "devDependencies": {
     "@aws-sdk/client-appsync": "^3.955.0",
     "@aws-sdk/client-cloudformation": "^3.955.0",
+    "@aws-sdk/client-cognito-identity-provider": "3.955.0",
     "esbuild": "0.28.2",
     "eslint": "^8.57.0",
     "jsdom": "^27.3.0",

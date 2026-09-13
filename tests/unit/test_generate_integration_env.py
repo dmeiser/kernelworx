@@ -367,6 +367,7 @@ class TestWiring:
         user_provided = {
             "TEST_OWNER_EMAIL",
             "TEST_OWNER_PASSWORD",
+            "TEST_OWNER_TOTP_SECRET",
             "TEST_CONTRIBUTOR_EMAIL",
             "TEST_CONTRIBUTOR_PASSWORD",
             "TEST_READONLY_EMAIL",
