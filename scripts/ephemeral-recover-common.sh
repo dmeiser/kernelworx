@@ -309,12 +309,16 @@ import_ephemeral_resources() {
     # imported so the following apply does not try to recreate them.
     local pre_signup_name="kernelworx-pre-signup${suffix}"
     local post_auth_name="kernelworx-post-auth${suffix}"
+    local pre_token_generation_name="kernelworx-pre-token-generation${suffix}"
     if aws lambda get-function --function-name "$pre_signup_name" --region "$region" >/dev/null 2>&1; then
       import_resource "$run_id" "module.cognito.aws_lambda_permission.cognito_pre_signup[0]" "AllowCognitoInvokePreSignup/${pre_signup_name}"
     fi
     if aws lambda get-function --function-name "$post_auth_name" --region "$region" >/dev/null 2>&1; then
       import_resource "$run_id" "module.cognito.aws_lambda_permission.cognito_post_auth[0]" "AllowCognitoInvokePostAuth/${post_auth_name}"
       import_resource "$run_id" "module.cognito.aws_lambda_permission.cognito_post_confirmation[0]" "AllowCognitoInvokePostConfirmation/${post_auth_name}"
+    fi
+    if aws lambda get-function --function-name "$pre_token_generation_name" --region "$region" >/dev/null 2>&1; then
+      import_resource "$run_id" "module.cognito.aws_lambda_permission.cognito_pre_token_generation[0]" "AllowCognitoInvokePreTokenGeneration/${pre_token_generation_name}"
     fi
 
     # Cognito inline policy attached to the Lambda admin execution role.
@@ -402,7 +406,7 @@ $names"
     local base_name
     base_name=$(echo "$func_name" | sed "s/^kernelworx-//;s/${suffix}$//")
     case "$base_name" in
-      post-auth|pre-signup)
+      post-auth|pre-signup|pre-token-generation)
         import_resource "$run_id" "module.lambda.aws_lambda_function.trigger_functions[\"${base_name}\"]" "$func_name"
         import_resource "$run_id" "module.lambda.aws_cloudwatch_log_group.trigger_functions[\"${base_name}\"]" "/aws/lambda/${func_name}"
         ;;

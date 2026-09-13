@@ -184,19 +184,30 @@ locals {
       timeout     = 10
       memory_size = 256
     }
+    "pre-token-generation" = {
+      # DLQ intentionally not configured for the Cognito Pre Token Generation trigger.
+      # Cognito invokes this synchronously before token issuance and the handler always
+      # returns the event (it fails closed rather than raising), so a failure never
+      # blocks sign-in and there is nothing for a DLQ to reprocess asynchronously.
+      handler     = "handlers.pre_token_generation.lambda_handler"
+      timeout     = 10
+      memory_size = 256
+    }
   }
 
   # Functions that perform Cognito admin/destructive actions and therefore use
   # the isolated admin execution role when lambda_admin_role_arn is set (#121).
   # pre-signup uses AdminLinkProviderForUser; admin-operations uses AdminDeleteUser
-  # / AdminResetUserPassword / ListUsers; delete-account uses AdminDeleteUser.
+  # / AdminResetUserPassword / ListUsers; delete-account uses AdminDeleteUser;
+  # pre-token-generation reads the user's MFA preference via AdminGetUser to set the
+  # custom 'mfa' token claim (#336).
   admin_function_keys = ["admin-operations", "delete-account"]
-  admin_trigger_keys  = ["pre-signup"]
+  admin_trigger_keys  = ["pre-signup", "pre-token-generation"]
 }
 
 # Role resolution per function, in precedence order:
 #   1. Admin role (#121) when configured and the function is an admin handler
-#      or Cognito admin trigger (pre-signup).
+#      or Cognito admin trigger (pre-signup, pre-token-generation).
 #   2. Domain role (#326) via var.lambda_domain_role_arns. Every other
 #      function MUST have an entry — the monolithic shared role was retired
 #      in #355, so the direct map index fails the plan loudly when an entry

@@ -215,10 +215,11 @@ module "cognito" {
   lambda_admin_execution_role_arn = module.iam.lambda_admin_execution_role_arn
 
   # Cognito trigger Lambdas
-  enable_lambda_triggers       = true
-  pre_signup_lambda_arn        = module.lambda.trigger_function_arns["pre-signup"]
-  post_auth_lambda_arn         = module.lambda.trigger_function_arns["post-auth"]
-  post_confirmation_lambda_arn = module.lambda.trigger_function_arns["post-auth"]
+  enable_lambda_triggers          = true
+  pre_signup_lambda_arn           = module.lambda.trigger_function_arns["pre-signup"]
+  post_auth_lambda_arn            = module.lambda.trigger_function_arns["post-auth"]
+  post_confirmation_lambda_arn    = module.lambda.trigger_function_arns["post-auth"]
+  pre_token_generation_lambda_arn = module.lambda.trigger_function_arns["pre-token-generation"]
 
   # WebAuthn / passkey sign-in against localhost
   enable_webauthn            = true

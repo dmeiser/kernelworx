@@ -89,6 +89,12 @@ variable "post_confirmation_lambda_arn" {
   default     = null
 }
 
+variable "pre_token_generation_lambda_arn" {
+  description = "ARN of the Pre Token Generation Lambda trigger. If null, no pre-token-generation trigger is configured."
+  type        = string
+  default     = null
+}
+
 variable "enable_lambda_triggers" {
   description = "Whether Cognito Lambda triggers are configured. Use a static bool (known at plan time) rather than deriving from ARN nullability to avoid unknown count/for_each values during greenfield applies."
   type        = bool
@@ -98,9 +104,10 @@ variable "enable_lambda_triggers" {
     condition = !var.enable_lambda_triggers || (
       var.pre_signup_lambda_arn != null &&
       var.post_auth_lambda_arn != null &&
-      var.post_confirmation_lambda_arn != null
+      var.post_confirmation_lambda_arn != null &&
+      var.pre_token_generation_lambda_arn != null
     )
-    error_message = "When enable_lambda_triggers is true, pre_signup_lambda_arn, post_auth_lambda_arn, and post_confirmation_lambda_arn must all be non-null."
+    error_message = "When enable_lambda_triggers is true, pre_signup_lambda_arn, post_auth_lambda_arn, post_confirmation_lambda_arn, and pre_token_generation_lambda_arn must all be non-null."
   }
 }
 
@@ -236,6 +243,14 @@ resource "aws_cognito_user_pool" "main" {
     pre_sign_up         = var.pre_signup_lambda_arn
     post_authentication = var.post_auth_lambda_arn
     post_confirmation   = var.post_confirmation_lambda_arn
+    # Pre Token Generation trigger: sets the custom boolean 'mfa' claim on the ID
+    # and access tokens (#336). V2_0 (not the default V1_0) is required so the claim
+    # can be a JSON boolean; V1_0 trigger responses only accept string values.
+    # Provider 6.x exposes this as a nested block with required lambda_arn + lambda_version.
+    pre_token_generation_config {
+      lambda_arn     = var.pre_token_generation_lambda_arn
+      lambda_version = "V2_0"
+    }
   }
 
   tags = local.tags
@@ -281,10 +296,22 @@ resource "aws_lambda_permission" "cognito_post_confirmation" {
   source_arn    = aws_cognito_user_pool.main.arn
 }
 
+resource "aws_lambda_permission" "cognito_pre_token_generation" {
+  count = var.enable_lambda_triggers ? 1 : 0
+
+  statement_id  = "AllowCognitoInvokePreTokenGeneration"
+  action        = "lambda:InvokeFunction"
+  function_name = var.pre_token_generation_lambda_arn
+  principal     = "cognito-idp.amazonaws.com"
+  source_arn    = aws_cognito_user_pool.main.arn
+}
+
 # Least-privilege Cognito admin policy for Lambda handlers.
 # Scopes actions to the created user pool. Only actions actually used by the
-# Lambda handlers (list/search users, list groups, delete/reset/link users) are
-# granted. AdminCreateUser/AdminSetUserPassword/AdminGetUser are not used.
+# Lambda handlers (list/search users, list groups, read the MFA preference,
+# delete/reset/link users) are granted. AdminCreateUser/AdminSetUserPassword
+# are not used. AdminGetUser is used by the pre-token-generation trigger to
+# read PreferredMfaSetting for the custom 'mfa' claim (#336).
 # kics-scan ignore-line
 data "aws_iam_policy_document" "lambda_cognito_admin" {
   statement {
@@ -292,6 +319,7 @@ data "aws_iam_policy_document" "lambda_cognito_admin" {
     actions = [
       "cognito-idp:ListUsers",
       "cognito-idp:AdminListGroupsForUser",
+      "cognito-idp:AdminGetUser",
       "cognito-idp:AdminDeleteUser",
       "cognito-idp:AdminResetUserPassword",
       "cognito-idp:AdminLinkProviderForUser",
