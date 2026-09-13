@@ -38,6 +38,7 @@ import {
 import { LoadingState } from '../components/LoadingState';
 import { ErrorAlert } from '../components/ErrorAlert';
 import { PageHeader } from '../components/PageHeader';
+import { AmrTripwireBanner } from '../components/AmrTripwireBanner';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { useSnackbar } from '../hooks/useSnackbar';
 import {
@@ -684,6 +685,8 @@ export const AdminPage: React.FC = () => {
   return (
     <Box>
       <PageHeader title="Admin Console" />
+
+      <AmrTripwireBanner />
 
       <Alert severity="warning" sx={{ mb: 3 }}>
         <strong>Administrator Access:</strong> You have elevated privileges. Use this console responsibly.

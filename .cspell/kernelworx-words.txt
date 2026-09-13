@@ -280,6 +280,7 @@ repo
 repr
 reqs
 reraises
+retireable
 returncode
 reusability
 rname
