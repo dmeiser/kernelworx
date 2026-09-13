@@ -391,7 +391,7 @@ resource "aws_cognito_user_pool_client" "web" {
   # required, so it is omitted to reduce token exposure in the browser.
   allowed_oauth_flows                  = ["code"]
   allowed_oauth_flows_user_pool_client = true
-  allowed_oauth_scopes                 = ["email", "openid", "profile"]
+  allowed_oauth_scopes                 = ["email", "openid", "profile", "aws.cognito.signin.user.admin"]
 
   prevent_user_existence_errors = "ENABLED"
 
