@@ -436,6 +436,34 @@ jobs:
             --group-name ADMIN
           echo "Owner test user is in the ADMIN group."
 
+      - name: Ensure owner test user has TOTP MFA
+        env:
+          TEST_OWNER_EMAIL: ${{ secrets.TEST_OWNER_EMAIL }}
+          TEST_OWNER_PASSWORD: ${{ secrets.TEST_OWNER_PASSWORD }}
+          TEST_USER_POOL_ID: ${{ secrets.TEST_USER_POOL_ID }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+        run: |
+          test -n "$TEST_OWNER_EMAIL"
+          test -n "$TEST_OWNER_PASSWORD"
+          test -n "$TEST_USER_POOL_ID"
+
+          # Admin-gated API operations require the amr 'mfa' claim (#336), so
+          # the owner test user must authenticate with a TOTP device. A fresh
+          # device is provisioned on every deploy (the secret cannot be
+          # recovered from Cognito), and the new secret is exported for the
+          # smoke tests below. Local runs refresh it via
+          # scripts/create-test-users.sh.
+          CLIENT_ID=$(aws cognito-idp list-user-pool-clients \
+            --user-pool-id "$TEST_USER_POOL_ID" \
+            --region "$AWS_REGION" \
+            --max-results 1 \
+            --query 'UserPoolClients[0].ClientId' --output text)
+
+          TOTP_SECRET=$(scripts/provision-user-totp.sh \
+            "$TEST_USER_POOL_ID" "$CLIENT_ID" "$TEST_OWNER_EMAIL" "$TEST_OWNER_PASSWORD")
+
+          echo "TEST_OWNER_TOTP_SECRET=$TOTP_SECRET" >> "$GITHUB_ENV"
+
       - name: Run E2E smoke tests
         if: ${{ inputs.e2e-base-url != '' }}
         env:
