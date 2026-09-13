@@ -9,6 +9,7 @@ from src.utils.auth import (
     check_profile_access,
     get_account,
     get_dynamodb_resource,
+    has_mfa,
     is_admin,
     is_profile_owner,
     require_profile_access,
@@ -1478,6 +1479,156 @@ class TestIsAdmin:
 
         with pytest.raises(RuntimeError, match="boom"):
             is_admin(event)
+
+
+class TestHasMfa:
+    """Tests for has_mfa function - checks JWT amr claim for MFA."""
+
+    def test_mfa_in_amr_returns_true(self) -> None:
+        """Test that amr containing 'mfa' returns True."""
+        event = {
+            "identity": {
+                "claims": {
+                    "amr": ["mfa"],
+                    "sub": "test-user-123",
+                }
+            }
+        }
+
+        result = has_mfa(event)
+
+        assert result is True
+
+    def test_mfa_among_other_authenticators_returns_true(self) -> None:
+        """Test that amr containing 'mfa' alongside other methods returns True."""
+        event = {
+            "identity": {
+                "claims": {
+                    "amr": ["password", "mfa"],
+                    "sub": "test-user-123",
+                }
+            }
+        }
+
+        result = has_mfa(event)
+
+        assert result is True
+
+    def test_mfa_as_string_returns_true(self) -> None:
+        """Test that amr as a string (not list) containing 'mfa' returns True."""
+        event = {
+            "identity": {
+                "claims": {
+                    "amr": "mfa",
+                    "sub": "test-user-123",
+                }
+            }
+        }
+
+        result = has_mfa(event)
+
+        assert result is True
+
+    def test_no_mfa_returns_false(self) -> None:
+        """Test that amr without 'mfa' returns False."""
+        event = {
+            "identity": {
+                "claims": {
+                    "amr": ["password"],
+                    "sub": "test-user-123",
+                }
+            }
+        }
+
+        result = has_mfa(event)
+
+        assert result is False
+
+    def test_empty_amr_returns_false(self) -> None:
+        """Test that an empty amr list returns False."""
+        event = {
+            "identity": {
+                "claims": {
+                    "amr": [],
+                    "sub": "test-user-123",
+                }
+            }
+        }
+
+        result = has_mfa(event)
+
+        assert result is False
+
+    def test_missing_amr_claim_returns_false(self) -> None:
+        """Test that a missing amr claim returns False."""
+        event = {
+            "identity": {
+                "claims": {
+                    "cognito:groups": ["ADMIN"],
+                    "sub": "test-user-123",
+                }
+            }
+        }
+
+        result = has_mfa(event)
+
+        assert result is False
+
+    def test_missing_identity_returns_false(self) -> None:
+        """Test that missing identity field returns False."""
+        event: Dict[str, Any] = {}
+
+        result = has_mfa(event)
+
+        assert result is False
+
+    def test_none_event_returns_false(self) -> None:
+        """Test that None event returns False (malformed event)."""
+        result = has_mfa(None)  # type: ignore[arg-type]
+
+        assert result is False
+
+    def test_non_dict_event_returns_false(self) -> None:
+        """Test that non-dict event returns False (malformed event)."""
+        result = has_mfa("not-an-event")  # type: ignore[arg-type]
+
+        assert result is False
+
+    def test_non_dict_identity_returns_false(self) -> None:
+        """Test that non-dict identity returns False (malformed event)."""
+        event: Dict[str, Any] = {
+            "identity": "not-a-dict",  # Invalid type
+        }
+
+        result = has_mfa(event)
+
+        assert result is False
+
+    def test_non_dict_claims_returns_false(self) -> None:
+        """Test that non-dict claims returns False (malformed event)."""
+        event: Dict[str, Any] = {
+            "identity": {
+                "claims": "not-a-dict",  # Invalid type
+            }
+        }
+
+        result = has_mfa(event)
+
+        assert result is False
+
+    def test_amr_unexpected_type_returns_false(self) -> None:
+        """Test that non-str/non-list amr claim returns False."""
+        event: Dict[str, Any] = {
+            "identity": {
+                "claims": {
+                    "amr": 123,  # Invalid type
+                }
+            }
+        }
+
+        result = has_mfa(event)
+
+        assert result is False
 
 
 class TestHasRequiredPermissionEdgeCases:

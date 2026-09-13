@@ -394,6 +394,34 @@ def get_account(account_id: str) -> Optional[Dict[str, Any]]:
     return response.get("Item")
 
 
+def _get_claims(event: Any) -> Optional[Dict[str, Any]]:
+    """
+    Extract the JWT claims dict from a Lambda/AppSync event.
+
+    Validates the event structure explicitly rather than relying on broad
+    exception handling. Malformed events (None, non-dict, missing keys,
+    wrong types) are legitimate "no claims" signals and return None;
+    genuinely unexpected errors propagate so they are visible in logs and
+    monitoring instead of being silently swallowed. Shared by ``is_admin``
+    and ``has_mfa`` so both read the same claims path.
+
+    Args:
+        event: Lambda event with identity.claims from AppSync
+
+    Returns:
+        The claims dict, or None if the event is malformed.
+    """
+    if not isinstance(event, dict):
+        return None
+    identity = event.get("identity")
+    if not isinstance(identity, dict):
+        return None
+    claims = identity.get("claims")
+    if not isinstance(claims, dict):
+        return None
+    return claims
+
+
 def is_admin(event: Dict[str, Any]) -> bool:
     """
     Check if caller has admin privileges from JWT cognito:groups claim.
@@ -408,18 +436,8 @@ def is_admin(event: Dict[str, Any]) -> bool:
     Returns:
         True if caller is in ADMIN Cognito group, False otherwise
     """
-    # Validate the event structure explicitly rather than relying on broad
-    # exception handling. Malformed events (None, non-dict, missing keys,
-    # wrong types) are legitimate "not admin" signals and return False;
-    # genuinely unexpected errors propagate so they are visible in logs and
-    # monitoring instead of being silently swallowed as a False result.
-    if not isinstance(event, dict):
-        return False
-    identity = event.get("identity")
-    if not isinstance(identity, dict):
-        return False
-    claims = identity.get("claims")
-    if not isinstance(claims, dict):
+    claims = _get_claims(event)
+    if claims is None:
         return False
     groups = claims.get("cognito:groups", [])
     # cognito:groups can be a string or list in JWT
@@ -428,3 +446,54 @@ def is_admin(event: Dict[str, Any]) -> bool:
     elif not isinstance(groups, list):
         return False
     return "ADMIN" in groups
+
+
+def has_mfa(event: Dict[str, Any]) -> bool:
+    """
+    Check if caller authenticated with MFA, from the JWT amr claim.
+
+    AppSync passes through the raw Cognito JWT claims. Cognito populates
+    ``amr`` (authenticator methods) with ``"mfa"`` only when the user
+    completed a multi-factor authentication step. Like ``is_admin`` this
+    checks the JWT claim, NOT DynamoDB.
+
+    Args:
+        event: Lambda event with identity.claims from AppSync
+
+    Returns:
+        True if the amr claim contains "mfa", False otherwise (including a
+        missing amr or missing claims).
+    """
+    claims = _get_claims(event)
+    if claims is None:
+        return False
+    amr = claims.get("amr", [])
+    # amr can be a string or list in JWT
+    if isinstance(amr, str):
+        amr = [amr]
+    elif not isinstance(amr, list):
+        return False
+    return "mfa" in amr
+
+
+def require_admin_mfa(event: Dict[str, Any]) -> None:
+    """
+    Require the caller to be an admin who authenticated with MFA (#336).
+
+    Central gate for admin-only operations. Preserves the historical
+    "Admin access required" denial for non-admins, and adds an "MFA
+    required" denial for admins whose token lacks the amr "mfa"
+    authenticator. The denial message is exactly "MFA required" because the
+    frontend matches on that string.
+
+    Args:
+        event: Lambda event with identity.claims from AppSync
+
+    Raises:
+        AppError: FORBIDDEN "Admin access required" if not an admin.
+        AppError: FORBIDDEN "MFA required" if admin without MFA.
+    """
+    if not is_admin(event):
+        raise AppError(ErrorCode.FORBIDDEN, "Admin access required")
+    if not has_mfa(event):
+        raise AppError(ErrorCode.FORBIDDEN, "MFA required")
