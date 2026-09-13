@@ -58,6 +58,9 @@ import {
   ADMIN_UPDATE_CAMPAIGN_SHARED_CODE,
 } from '../lib/graphql';
 import { LoadingState } from '../components/LoadingState';
+import { MfaSetupRequiredState } from '../components/MfaSetupRequiredState';
+import { useAdminMfa } from '../hooks/useAdminMfa';
+import { isMfaRequiredError } from '../lib/mfaErrors';
 import { NavBreadcrumbs } from '../components/NavBreadcrumbs';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { formatDisplayDate } from '../lib/date-utils';
@@ -129,6 +132,7 @@ function TabPanel(props: TabPanelProps) {
 
 /* eslint-disable complexity -- UserDataPage has multiple tabs and data management flows */
 export const UserDataPage: React.FC = () => {
+  const { isMfaRequired } = useAdminMfa();
   const { accountId } = useParams<{ accountId: string }>();
   const navigate = useNavigate();
   const [currentTab, setCurrentTab] = useState(0);
@@ -299,6 +303,17 @@ export const UserDataPage: React.FC = () => {
         <Alert severity="error">No account ID provided</Alert>
       </Box>
     );
+  }
+
+  const mfaRequired =
+    isMfaRequired ||
+    isMfaRequiredError(profilesError) ||
+    isMfaRequiredError(catalogsError) ||
+    isMfaRequiredError(campaignsError) ||
+    isMfaRequiredError(sharedCampaignsError);
+
+  if (mfaRequired) {
+    return <MfaSetupRequiredState />;
   }
 
   const profileIdWithoutPrefix = accountId.replace('ACCOUNT#', '');

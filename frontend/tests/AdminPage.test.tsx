@@ -495,4 +495,64 @@ describe('AdminPage', () => {
       expect(screen.getByText(/No managed catalogs found/i)).toBeInTheDocument();
     });
   });
+
+  test('shows MFA setup required state when catalogs query returns MFA required error', async () => {
+    const mocks = [
+      {
+        request: { query: LIST_MY_PROFILES },
+        result: { data: { listMyProfiles: { profiles: [], nextToken: null } } },
+      },
+      {
+        request: { query: LIST_MANAGED_CATALOGS },
+        error: new Error('MFA required'),
+      },
+    ];
+
+    render(
+      <MockedProvider mocks={mocks}>
+        <BrowserRouter>
+          <AdminPage />
+        </BrowserRouter>
+      </MockedProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mfa-setup-required-state')).toBeInTheDocument();
+      expect(screen.getByText('MFA Setup Required')).toBeInTheDocument();
+    });
+  });
+
+  test('gracefully degrades to MFA setup required state when mfa-required event fires', async () => {
+    const mocks = [
+      {
+        request: { query: LIST_MY_PROFILES },
+        result: { data: { listMyProfiles: { profiles: [], nextToken: null } } },
+      },
+      {
+        request: { query: LIST_MANAGED_CATALOGS },
+        result: { data: { listManagedCatalogs: [] } },
+      },
+    ];
+
+    render(
+      <MockedProvider mocks={mocks}>
+        <BrowserRouter>
+          <AdminPage />
+        </BrowserRouter>
+      </MockedProvider>,
+    );
+
+    expect(screen.getByText('Admin Console')).toBeInTheDocument();
+
+    window.dispatchEvent(
+      new CustomEvent('mfa-required', {
+        detail: { message: 'MFA required' },
+      }),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mfa-setup-required-state')).toBeInTheDocument();
+      expect(screen.getByText('MFA Setup Required')).toBeInTheDocument();
+    });
+  });
 });
