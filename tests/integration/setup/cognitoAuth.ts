@@ -85,7 +85,7 @@ async function respondToSoftwareTokenMfa(
       Session: session,
       ChallengeResponses: {
         USERNAME: email,
-        SOFTWARE_TOKEN_MFA_CODE: generateTotp(totpSecret),
+        SOFTWARE_TOKEN_MFA_CODE: await generateTotp(totpSecret),
       },
     }),
   );
