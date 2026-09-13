@@ -58,6 +58,13 @@ ACCESS_TOKEN=$(aws cognito-idp initiate-auth \
   --auth-flow USER_PASSWORD_AUTH \
   --auth-parameters "USERNAME=${USERNAME},PASSWORD=${PASSWORD}" \
   --region "$REGION" \
+  --query 'AuthenticationResult.AccessToken' --output text 2>/dev/null) || \
+ACCESS_TOKEN=$(aws cognito-idp admin-initiate-auth \
+  --user-pool-id "$USER_POOL_ID" \
+  --client-id "$CLIENT_ID" \
+  --auth-flow ADMIN_NO_SRP_AUTH \
+  --auth-parameters "USERNAME=${USERNAME},PASSWORD=${PASSWORD}" \
+  --region "$REGION" \
   --query 'AuthenticationResult.AccessToken' --output text)
 
 TOTP_SECRET=$(aws cognito-idp associate-software-token \
