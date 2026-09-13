@@ -63,7 +63,20 @@ Chunk 1 (#351) established the pattern chunks 2-4 reused; chunk 5 (#355) retired
 
 ### Lambda IAM role isolation for Cognito admin actions (#121)
 
-Destructive Cognito actions (`AdminDeleteUser`, `AdminResetUserPassword`, `AdminLinkProviderForUser`, `ListUsers`) are isolated on a dedicated `aws_iam_role.lambda_admin_execution` role, assigned only to the `admin-operations`, `delete-account`, and `pre-signup` functions. When adding a new handler that needs these APIs, add its logical key to `local.admin_function_keys` or `local.admin_trigger_keys` in `tofu/application/modules/lambda/main.tf` so it receives the admin role. Only this role carries Cognito admin permissions — the monolithic shared execution role was retired in #355, so no non-admin handler can delete users or reset passwords.
+Destructive Cognito actions (`AdminDeleteUser`, `AdminResetUserPassword`, `AdminLinkProviderForUser`, `ListUsers`) are isolated on a dedicated `aws_iam_role.lambda_admin_execution` role, assigned only to the `admin-operations` and `delete-account` functions and the `pre-signup` and `pre-token-generation` Cognito triggers (#121/#336). When adding a new handler that needs these APIs, add its logical key to `local.admin_function_keys` or `local.admin_trigger_keys` in `tofu/application/modules/lambda/main.tf` so it receives the admin role. Only this role carries Cognito admin permissions — the monolithic shared execution role was retired in #355, so no non-admin handler can delete users or reset passwords.
+
+### Pre-token-generation Cognito trigger: custom `mfa` claim (#336)
+
+The `pre-token-generation` trigger (`src/handlers/pre_token_generation.py`; IaC in `tofu/application/modules/{lambda,cognito}/main.tf`) injects a custom **boolean** `mfa` claim (true only when the user's `PreferredMfaSetting` is `SOFTWARE_TOKEN_MFA`) into BOTH the ID and access tokens at issuance. It is the stack base for #336; the enforcement guard lands in #406 and the frontend in #405 (both read `mfa` from the ID token). Sharp edges:
+
+- **`amr` is NOT injectable** — Cognito owns the `amr` claim and rejects overrides; the feature ships a custom `mfa` claim instead. A missing `mfa` claim unambiguously means the trigger is not in the token path.
+- **Provider 6.56 shape is a nested block, not a plain attribute.** Inside `lambda_config` the trigger is `pre_token_generation_config { lambda_arn, lambda_version }` — BOTH are required. The `pre_token_generation = <arn>` form in older docs/versions is wrong for 6.56; verify with `tofu providers schema -json`.
+- **`lambda_version = "V2_0"` is required for non-string claims** (V1_0 responses accept strings only). V2_0 also exposes `accessTokenGeneration.claimsToAddOrOverride`, so the claim lands on the access token too. All pools are Essentials+, which supports V2_0.
+- **Fail-closed by construction:** the handler ALWAYS sets `mfa` explicitly (never raises — a raised trigger fails token issuance for every sign-in) and yields `mfa: false` on any lookup failure, never `true`.
+- **`cognito:groups` preservation:** the handler copies `request.groupConfiguration` → `response.groupOverrideDetails` ONLY when present; an absent config must not be emitted (an empty/null `groupOverrideDetails` suppresses groups).
+- Runs on the **admin role** — it calls `cognito-idp:AdminGetUser`, so `pre-token-generation` is in `admin_trigger_keys` and needs NO `lambda_domain_role_arns` entry.
+
+**Adding any Cognito trigger function** (reusable sharp edge): a `trigger_functions["<key>"]` entry in the lambda module is NOT enough — `scripts/ephemeral-recover-common.sh` hardcodes trigger keys. Also add the key to the `case "$base_name" in …)` there and a per-trigger `aws_lambda_permission` import line. `tests/unit/test_ephemeral_reliability.py::test_dynamic_resource_import_coverage` extracts `trigger_functions` keys dynamically and fails on any missing import line — it is the gate that catches a missed recover-script spot.
 
 ### AppSync pipeline function/datasource deletion ordering (#198, #298–#301)
 
