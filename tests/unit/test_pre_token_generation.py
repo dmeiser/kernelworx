@@ -2,7 +2,7 @@
 Tests for the Pre Token Generation Lambda trigger.
 
 Covers injection of the custom boolean `mfa` claim into the ID and access tokens,
-fail-closed behaviour on lookup failures, and cognito:groups preservation.
+fail-closed behavior on lookup failures, and cognito:groups preservation.
 """
 
 from typing import Any
