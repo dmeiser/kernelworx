@@ -114,5 +114,8 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 "pre-token-generation: could not set mfa=false; returning event unmodified",
                 exc_info=True,
             )
-    logger.info(f"pre-token-generation: set mfa={value}")
+    # Static message: do not interpolate the (event-derived) mfa value into the
+    # log. CodeQL taint-tracks values derived from the trigger event as sensitive
+    # and flags clear-text logging of them (clear-text logging of sensitive info).
+    logger.info("pre-token-generation: mfa claim set on issued tokens")
     return event
