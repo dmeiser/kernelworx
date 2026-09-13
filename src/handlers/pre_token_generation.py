@@ -5,7 +5,8 @@ Injects a custom boolean `mfa` claim into the ID and access tokens that Cognito
 issues at sign-in and on token refresh (issue #336).
 
 The claim is ALWAYS set explicitly:
-  - true  when AdminGetUser reports PreferredMfaSetting == SOFTWARE_TOKEN_MFA
+  - true  when AdminGetUser reports PreferredMfaSetting is an enabled MFA factor
+            (SOFTWARE_TOKEN_MFA / TOTP, or SMS_MFA) -- any enabled MFA counts
   - false otherwise, including a missing subject or any AdminGetUser error
 
 A missing `mfa` claim therefore unambiguously means this trigger is not in the
@@ -13,6 +14,17 @@ token path, so the enforcement guard (#406) can deny on a missing claim. We neve
 write the reserved `amr` claim: AWS documents that the pre-token-generation
 trigger cannot add, modify, or suppress `amr` (it is read-only for this trigger),
 which is why a custom claim is used instead of amr.
+
+Passkeys (WebAuthn) are intentionally NOT detected here. A passkey is a first
+authentication factor in Cognito -- a peer of password, not a second/MFA factor --
+and this trigger has no per-session signal that a given sign-in used one: the
+V2_0/V3_0 trigger event carries no auth-method field (only userAttributes/scopes/
+groupConfiguration/clientMetadata), and the passkey-credential APIs (for example
+ListWebAuthnCredentials) require the signed-in user's own access token -- the very
+token being minted -- so they are unavailable to this trigger. AdminGetUser reports
+MFA preference only, never passkey state. Whether Cognito stamps a native `amr`
+claim on passkey sessions (which the #406 guard may honor) is a property of the
+guard, not of this trigger.
 """
 
 import logging
@@ -24,8 +36,12 @@ import boto3
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-# The Cognito TOTP software-token MFA setting value reported by AdminGetUser.
+# Cognito PreferredMfaSetting values (AdminGetUser) that denote an enabled MFA
+# factor. The captain uses multiple factors, so any enabled MFA counts; this
+# widens the original TOTP-only check to also accept SMS.
 SOFTWARE_TOKEN_MFA = "SOFTWARE_TOKEN_MFA"
+SMS_MFA = "SMS_MFA"
+MFA_PREFERENCES = frozenset({SOFTWARE_TOKEN_MFA, SMS_MFA})
 # Custom claim name. Must stay exactly "mfa": the #405 (frontend) and #406
 # (backend) guards both read it from the ID token.
 MFA_CLAIM = "mfa"
@@ -35,9 +51,11 @@ def _resolve_mfa(event: Dict[str, Any]) -> bool:
     """
     Determine the `mfa` claim value for this token issuance.
 
-    True only when the user's preferred MFA is a TOTP software token. Fails
-    closed (False) on a missing subject/user pool or any AdminGetUser error so a
-    Cognito API hiccup can never grant MFA access.
+    True when the user's preferred MFA is an enabled MFA factor (a TOTP software
+    token or SMS). Passkeys are a separate first factor this trigger cannot detect
+    (see the module docstring), so they are not counted here. Fails closed (False)
+    on a missing subject/user pool or any AdminGetUser error so a Cognito API
+    hiccup can never grant MFA access.
     """
     user_pool_id = event.get("userPoolId", "")
     user_attributes = event.get("request", {}).get("userAttributes", {})
@@ -56,7 +74,7 @@ def _resolve_mfa(event: Dict[str, Any]) -> bool:
         )
         return False
     preferred: str | None = response.get("PreferredMfaSetting")
-    return preferred == SOFTWARE_TOKEN_MFA
+    return preferred in MFA_PREFERENCES
 
 
 def _set_mfa_claim(event: Dict[str, Any], value: bool) -> None:
@@ -86,9 +104,9 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
     Cognito Pre Token Generation trigger handler.
 
-    Sets the custom boolean `mfa` claim (true only when the user's preferred MFA
-    is a TOTP software token) on the issued ID and access tokens. The claim is
-    always set explicitly and the handler always returns the event so a trigger
+    Sets the custom boolean `mfa` claim (true when the user's preferred MFA is an
+    enabled MFA factor: TOTP or SMS) on the issued ID and access tokens. The claim
+    is always set explicitly and the handler always returns the event so a trigger
     error can never block sign-in.
 
     Args:

@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.handlers.pre_token_generation import MFA_CLAIM, SOFTWARE_TOKEN_MFA, lambda_handler
+from src.handlers.pre_token_generation import MFA_CLAIM, SMS_MFA, SOFTWARE_TOKEN_MFA, lambda_handler
 
 
 @pytest.fixture
@@ -72,13 +72,29 @@ class TestMfaClaimResolution:
         assert details["idTokenGeneration"]["claimsToAddOrOverride"] == {MFA_CLAIM: True}
         assert details["accessTokenGeneration"]["claimsToAddOrOverride"] == {MFA_CLAIM: True}
 
-    def test_non_totp_preference_sets_mfa_false(
-        self, pre_token_event: dict[str, Any], lambda_context: MagicMock
-    ) -> None:
-        """An SMS preference is not TOTP and must set mfa=false."""
+    def test_sms_preference_sets_mfa_true(self, pre_token_event: dict[str, Any], lambda_context: MagicMock) -> None:
+        """An SMS MFA preference is an enabled MFA factor and must set mfa=true."""
         with patch("boto3.client") as mock_client:
             mock_cognito = MagicMock()
-            mock_cognito.admin_get_user.return_value = {"PreferredMfaSetting": "SMS_MFA"}
+            mock_cognito.admin_get_user.return_value = {"PreferredMfaSetting": SMS_MFA}
+            mock_client.return_value = mock_cognito
+            result = lambda_handler(pre_token_event, lambda_context)
+
+        details = _details(result)
+        assert details["idTokenGeneration"]["claimsToAddOrOverride"] == {MFA_CLAIM: True}
+        assert details["accessTokenGeneration"]["claimsToAddOrOverride"] == {MFA_CLAIM: True}
+
+    def test_passkey_only_user_sets_mfa_false(self, pre_token_event: dict[str, Any], lambda_context: MagicMock) -> None:
+        """
+        A passkey-only user has no TOTP/SMS preference (PreferredMfaSetting is
+        NONE), so the trigger sets mfa=false. Passkeys are a first factor this
+        trigger cannot detect (no per-session signal in the event; the credential
+        APIs need the user's own token), so passkey acceptance is not provided by
+        this trigger -- it depends on the guard's native-amr handling.
+        """
+        with patch("boto3.client") as mock_client:
+            mock_cognito = MagicMock()
+            mock_cognito.admin_get_user.return_value = {"PreferredMfaSetting": "NONE"}
             mock_client.return_value = mock_cognito
             result = lambda_handler(pre_token_event, lambda_context)
 
