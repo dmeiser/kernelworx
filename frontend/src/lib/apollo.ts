@@ -18,6 +18,7 @@ import { ErrorLink } from '@apollo/client/link/error';
 import { CombinedGraphQLErrors } from '@apollo/client/errors';
 import type { GraphQLFormattedError } from 'graphql';
 import { fetchAuthSession } from 'aws-amplify/auth';
+import { isMfaRequiredError } from './mfaErrors';
 
 /**
  * HTTP link to AppSync endpoint
@@ -71,58 +72,91 @@ interface GraphQLErrorWithExtensions extends GraphQLFormattedError {
 }
 
 /**
+ * Dispatch MFA required event for UI degraded state
+ */
+const dispatchMfaRequiredEvent = (operationName: string | undefined): void => {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(
+      new CustomEvent('mfa-required', {
+        detail: {
+          message: 'MFA required',
+          operation: operationName,
+        },
+      }),
+    );
+  }
+};
+
+/**
+ * Dispatch GraphQL error event for toast display
+ */
+const dispatchGraphQLErrorEvent = (
+  errorCode: string | undefined,
+  message: string,
+  operationName: string | undefined,
+): void => {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(
+      new CustomEvent('graphql-error', {
+        detail: {
+          errorCode,
+          message,
+          operation: operationName,
+        },
+      }),
+    );
+  }
+};
+
+const processGraphQLError = (
+  err: GraphQLFormattedError,
+  operationName: string | undefined,
+): void => {
+  const typedErr = err as GraphQLErrorWithExtensions;
+  const { message, locations, path, extensions } = typedErr;
+  const errorCode = extensions?.errorCode;
+
+  if (import.meta.env.DEV) {
+    console.error(
+      `[GraphQL error]: Message: ${message}, Code: ${errorCode}, Location: ${locations}, Path: ${path}`,
+    );
+  }
+
+  if (isMfaRequiredError(typedErr)) {
+    dispatchMfaRequiredEvent(operationName);
+  }
+
+  const userMessage = mapErrorCodeToMessage(errorCode, message);
+  dispatchGraphQLErrorEvent(errorCode, userMessage, operationName);
+};
+
+const processNetworkError = (
+  networkError: ErrorLike,
+  operationName: string | undefined,
+): void => {
+  if (import.meta.env.DEV) {
+    console.error(`[Network/Error]: ${networkError.message}`);
+  }
+
+  if (isMfaRequiredError(networkError)) {
+    dispatchMfaRequiredEvent(operationName);
+  }
+
+  dispatchGraphQLErrorEvent(
+    'NETWORK_ERROR',
+    'Network error. Please check your connection and try again.',
+    operationName,
+  );
+};
+
+/**
  * Error handler used by the ErrorLink (extracted for testability)
  */
 export const handleApolloError = ({ operation, error }: ErrorLink.ErrorHandlerOptions) => {
-  // Check if this is a GraphQL error
   if (CombinedGraphQLErrors.is(error)) {
-    error.errors.forEach((err: GraphQLFormattedError) => {
-      const typedErr = err as GraphQLErrorWithExtensions;
-      const { message, locations, path, extensions } = typedErr;
-      const errorCode = extensions?.errorCode;
-
-      if (import.meta.env.DEV) {
-        console.error(
-          `[GraphQL error]: Message: ${message}, Code: ${errorCode}, Location: ${locations}, Path: ${path}`,
-        );
-      }
-
-      // Map errorCode to user-facing messages
-      // These will be displayed via toast notifications in the UI
-      const userMessage = mapErrorCodeToMessage(errorCode, message);
-
-      // Emit custom event for UI to handle
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(
-          new CustomEvent('graphql-error', {
-            detail: {
-              errorCode,
-              message: userMessage,
-              operation: operation.operationName,
-            },
-          }),
-        );
-      }
-    });
+    error.errors.forEach((err) => processGraphQLError(err, operation.operationName));
   } else {
-    // Network or other error
-    const networkError = error as ErrorLike;
-    if (import.meta.env.DEV) {
-      console.error(`[Network/Error]: ${networkError.message}`);
-    }
-
-    // Emit network error event
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(
-        new CustomEvent('graphql-error', {
-          detail: {
-            errorCode: 'NETWORK_ERROR',
-            message: 'Network error. Please check your connection and try again.',
-            operation: operation.operationName,
-          },
-        }),
-      );
-    }
+    processNetworkError(error as ErrorLike, operation.operationName);
   }
 };
 
@@ -135,6 +169,7 @@ const errorLink = new ErrorLink(handleApolloError);
  * Map GraphQL error codes to user-friendly messages
  */
 export function mapErrorCodeToMessage(errorCode: string | undefined, defaultMessage: string): string {
+  if (defaultMessage === 'MFA required') return 'MFA required';
   if (!errorCode) return defaultMessage;
 
   const errorMessages: Record<string, string> = {

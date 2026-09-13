@@ -5,11 +5,30 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, act } from '@testing-library/react';
 import { ProtectedRoute } from '../src/components/ProtectedRoute';
 import { AuthProvider } from '../src/contexts/AuthContext';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import * as amplifyAuth from 'aws-amplify/auth';
+
+// Mock Apollo Client
+vi.mock('../src/lib/apollo', () => ({
+  apolloClient: {
+    query: vi.fn().mockResolvedValue({
+      data: {
+        getMyAccount: {
+          id: 'user-123',
+          email: 'test@example.com',
+          name: 'Test User',
+          displayName: 'Tester',
+          isAdmin: false,
+          createdAt: '2024-01-01T00:00:00Z',
+          updatedAt: '2024-01-01T00:00:00Z',
+        },
+      },
+    }),
+  },
+}));
 
 // Mock AWS Amplify
 vi.mock('aws-amplify/auth', () => ({
@@ -32,7 +51,14 @@ const mockLoadingState = () => {
 
 const mockAuthenticatedState = (isAdmin: boolean) => {
   vi.mocked(amplifyAuth.fetchAuthSession).mockResolvedValue({
-    tokens: { idToken: { toString: () => 'mock-token' } },
+    tokens: {
+      idToken: {
+        toString: () => 'mock-token',
+        payload: {
+          'cognito:groups': isAdmin ? ['ADMIN'] : [],
+        },
+      },
+    },
   } as any);
   vi.mocked(amplifyAuth.getCurrentUser).mockResolvedValue({
     userId: isAdmin ? 'admin-123' : 'user-123',
@@ -152,13 +178,15 @@ describe('ProtectedRoute', () => {
   });
 
   it('renders children when requireAdmin is true and user is admin', async () => {
-    // Note: Current AuthContext implementation returns isAdmin: false from placeholder fetchAccountData
-    // This test will need to be updated when Apollo Client integration adds real account fetching
-    // For now, we'll test that the component properly checks the isAdmin flag
+    renderWithRouter(
+      <ProtectedRoute requireAdmin={true}>
+        <div>Admin Content</div>
+      </ProtectedRoute>,
+      { isAuthenticated: true, isAdmin: true },
+    );
 
-    // Skip this test until Apollo Client is integrated with real account data
-    // The test structure is correct but needs real GraphQL mocking
-    expect(true).toBe(true);
+    await screen.findByText('Admin Content');
+    expect(screen.getByText('Admin Content')).toBeInTheDocument();
   });
 
   it('uses replace navigation when redirecting to login', async () => {
@@ -189,5 +217,48 @@ describe('ProtectedRoute', () => {
 
     // Should allow access since requireAdmin defaults to false
     expect(screen.getByText('Content')).toBeInTheDocument();
+  });
+
+  it('keeps normal users unaffected when mfa-required event fires on non-admin routes', async () => {
+    renderWithRouter(
+      <ProtectedRoute requireAdmin={false}>
+        <div>Regular User Content</div>
+      </ProtectedRoute>,
+      { isAuthenticated: true, isAdmin: false },
+    );
+
+    await screen.findByText('Regular User Content');
+
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent('mfa-required', {
+          detail: { message: 'MFA required' },
+        }),
+      );
+    });
+
+    expect(screen.getByText('Regular User Content')).toBeInTheDocument();
+    expect(screen.queryByTestId('mfa-setup-required-state')).not.toBeInTheDocument();
+  });
+
+  it('blocks admin route with MFA setup required state when MFA is required', async () => {
+    renderWithRouter(
+      <ProtectedRoute requireAdmin={true}>
+        <div>Admin Content</div>
+      </ProtectedRoute>,
+      { isAuthenticated: true, isAdmin: true },
+    );
+
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent('mfa-required', {
+          detail: { message: 'MFA required' },
+        }),
+      );
+    });
+
+    expect(await screen.findByTestId('mfa-setup-required-state')).toBeInTheDocument();
+    expect(screen.getByText('MFA Setup Required')).toBeInTheDocument();
+    expect(screen.queryByText('Admin Content')).not.toBeInTheDocument();
   });
 });
