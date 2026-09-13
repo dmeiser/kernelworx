@@ -14,8 +14,10 @@
 # or as a CI environment export).
 #
 # Requires: aws CLI, python3 (stdlib only), and IAM permissions for
-# cognito-idp admin-initiate-auth / associate-software-token /
-# verify-software-token / admin-set-user-mfa-preference / admin-get-user.
+# cognito-idp associate-software-token / verify-software-token /
+# admin-set-user-mfa-preference / admin-get-user. The access token comes
+# from the non-admin initiate-auth USER_PASSWORD_AUTH flow, so the pool
+# client must allow USER_PASSWORD_AUTH (no admin auth flow is required).
 
 set -e
 
@@ -51,10 +53,9 @@ if aws cognito-idp admin-get-user \
     --region "$REGION" >/dev/null
 fi
 
-ACCESS_TOKEN=$(aws cognito-idp admin-initiate-auth \
-  --user-pool-id "$USER_POOL_ID" \
+ACCESS_TOKEN=$(aws cognito-idp initiate-auth \
   --client-id "$CLIENT_ID" \
-  --auth-flow ADMIN_NO_SRP_AUTH \
+  --auth-flow USER_PASSWORD_AUTH \
   --auth-parameters "USERNAME=${USERNAME},PASSWORD=${PASSWORD}" \
   --region "$REGION" \
   --query 'AuthenticationResult.AccessToken' --output text)
