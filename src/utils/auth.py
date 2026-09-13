@@ -450,23 +450,28 @@ def is_admin(event: Dict[str, Any]) -> bool:
 
 def has_mfa(event: Dict[str, Any]) -> bool:
     """
-    Check if caller authenticated with MFA, from the JWT amr claim.
+    Check if caller authenticated with MFA, from the JWT claims.
 
-    AppSync passes through the raw Cognito JWT claims. Cognito populates
-    ``amr`` (authenticator methods) with ``"mfa"`` only when the user
-    completed a multi-factor authentication step. Like ``is_admin`` this
-    checks the JWT claim, NOT DynamoDB.
+    AppSync passes through the raw Cognito JWT claims. Two signals are
+    honored: the custom boolean ``mfa`` claim (injected by the
+    pre-token-generation trigger when the user completed a multi-factor
+    authentication step) and the native ``amr`` authenticator list, which
+    Cognito populates with ``"mfa"`` for MFA sign-ins (native, for future
+    AWS emission). Like ``is_admin`` this checks the JWT claim, NOT
+    DynamoDB.
 
     Args:
         event: Lambda event with identity.claims from AppSync
 
     Returns:
-        True if the amr claim contains "mfa", False otherwise (including a
-        missing amr or missing claims).
+        True if the mfa claim is True or the amr claim contains "mfa",
+        False otherwise (including a missing amr/mfa or missing claims).
     """
     claims = _get_claims(event)
     if claims is None:
         return False
+    if claims.get("mfa") is True:
+        return True
     amr = claims.get("amr", [])
     # amr can be a string or list in JWT
     if isinstance(amr, str):

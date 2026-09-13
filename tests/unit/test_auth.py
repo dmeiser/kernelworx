@@ -1482,7 +1482,86 @@ class TestIsAdmin:
 
 
 class TestHasMfa:
-    """Tests for has_mfa function - checks JWT amr claim for MFA."""
+    """Tests for has_mfa function - checks the mfa claim and JWT amr claim for MFA."""
+
+    def test_mfa_claim_true_returns_true(self) -> None:
+        """Test that a true mfa claim returns True without amr."""
+        event = {
+            "identity": {
+                "claims": {
+                    "mfa": True,
+                    "sub": "test-user-123",
+                }
+            }
+        }
+
+        result = has_mfa(event)
+
+        assert result is True
+
+    def test_mfa_claim_true_with_amr_returns_true(self) -> None:
+        """Test that a true mfa claim returns True alongside amr."""
+        event = {
+            "identity": {
+                "claims": {
+                    "mfa": True,
+                    "amr": ["password"],
+                    "sub": "test-user-123",
+                }
+            }
+        }
+
+        result = has_mfa(event)
+
+        assert result is True
+
+    def test_mfa_claim_false_returns_false(self) -> None:
+        """Test that a false mfa claim without amr returns False."""
+        event = {
+            "identity": {
+                "claims": {
+                    "mfa": False,
+                    "amr": ["password"],
+                    "sub": "test-user-123",
+                }
+            }
+        }
+
+        result = has_mfa(event)
+
+        assert result is False
+
+    def test_mfa_claim_false_amr_still_honored(self) -> None:
+        """Test that amr 'mfa' still returns True when the mfa claim is False."""
+        event = {
+            "identity": {
+                "claims": {
+                    "mfa": False,
+                    "amr": ["mfa"],
+                    "sub": "test-user-123",
+                }
+            }
+        }
+
+        result = has_mfa(event)
+
+        assert result is True
+
+    def test_mfa_claim_string_true_returns_false(self) -> None:
+        """Test that a non-boolean truthy mfa claim returns False."""
+        event = {
+            "identity": {
+                "claims": {
+                    "mfa": "true",
+                    "amr": ["password"],
+                    "sub": "test-user-123",
+                }
+            }
+        }
+
+        result = has_mfa(event)
+
+        assert result is False
 
     def test_mfa_in_amr_returns_true(self) -> None:
         """Test that amr containing 'mfa' returns True."""
