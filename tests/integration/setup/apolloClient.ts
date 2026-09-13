@@ -80,8 +80,13 @@ export async function createAuthenticatedClient(
     throw new Error(`Credentials not set for ${userType} user`);
   }
 
-  // Sign in and get tokens + account ID
-  const authResult = await signInUser(email, password);
+  // Sign in and get tokens + account ID. The owner admin has a TOTP device
+  // (#336), so pass its secret to answer the SOFTWARE_TOKEN_MFA challenge.
+  const authResult = await signInUser(
+    email,
+    password,
+    userType === 'owner' ? process.env.TEST_OWNER_TOTP_SECRET : undefined,
+  );
 
   // Create HTTP link
   const httpLink = new HttpLink({

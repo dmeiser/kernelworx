@@ -152,7 +152,8 @@ case "$ACTION" in
     log ""
     log "👤 Creating ephemeral test users..."
     USER_POOL_ID=$(tofu output -raw cognito_user_pool_id)
-    "$ROOT_DIR/scripts/create-ephemeral-test-users.sh" "$RUN_ID" "$USER_POOL_ID"
+    USER_POOL_CLIENT_ID=$(tofu output -raw cognito_client_id)
+    "$ROOT_DIR/scripts/create-ephemeral-test-users.sh" "$RUN_ID" "$USER_POOL_ID" "$USER_POOL_CLIENT_ID"
 
     log ""
     log "📤 Environment exports (eval this output):"
