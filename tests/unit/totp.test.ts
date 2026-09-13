@@ -13,6 +13,13 @@ import {
  */
 const SECRET_B32 = 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ';
 
+/**
+ * Dedicated secret for the live-generation test. Consumed-window state is
+ * persisted per secret under tmpdir, so a unique value keeps the test
+ * hermetic (and separate from any other TOTP state on the machine).
+ */
+const LIVE_SECRET_B32 = 'MZXW6YTBOIJKMZG5AYFK3EEYQ4';
+
 const RFC6238_SHA1_VECTORS: Array<[number, string]> = [
   [59, '287082'],
   [1111111109, '081804'],
@@ -24,7 +31,7 @@ const RFC6238_SHA1_VECTORS: Array<[number, string]> = [
 
 describe('generateTotp', () => {
   beforeEach(() => {
-    resetTotpWindowTracking();
+    resetTotpWindowTracking(LIVE_SECRET_B32);
   });
 
   afterEach(() => {
@@ -60,16 +67,19 @@ describe('generateTotp', () => {
     });
   });
 
-  it('waits out the current window when the secret already answered it', async () => {
+  it('waits out the current window when the code was already consumed', async () => {
     vi.useFakeTimers({ now: 1_700_000_000_010_000 });
     // The first live generation consumes the current 30-second window.
-    await generateTotp(SECRET_B32);
+    await generateTotp(LIVE_SECRET_B32);
     // The second must not answer with the same code: it waits for the
-    // next window boundary before generating.
-    const pending = generateTotp(SECRET_B32);
+    // next window boundary before generating, even though module state
+    // (and Cognito) only knows the window from the persisted state file.
+    const pending = generateTotp(LIVE_SECRET_B32);
+    // The wait timer is scheduled only after the async lock acquisition
+    // resolves, so flush microtasks before asserting on the timer count.
+    await vi.advanceTimersByTimeAsync(0);
     expect(vi.getTimerCount()).toBeGreaterThan(0);
     await vi.advanceTimersByTimeAsync(30_000);
-    const code = await pending;
-    expect(code).toMatch(/^\d{6}$/);
+    expect(await pending).toMatch(/^\d{6}$/);
   });
 });

@@ -47,7 +47,7 @@ function authResult() {
 describe('signInUser SOFTWARE_TOKEN_MFA challenge', () => {
   beforeEach(() => {
     vi.useFakeTimers({ now: FIXED_NOW_MS });
-    resetTotpWindowTracking();
+    resetTotpWindowTracking(SECRET_B32);
     sendMock.mockReset();
     process.env.TEST_USER_POOL_ID = 'us-east-1_pool';
     process.env.TEST_USER_POOL_CLIENT_ID = 'client-id';
