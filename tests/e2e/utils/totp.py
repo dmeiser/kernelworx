@@ -30,7 +30,9 @@ def generate_totp(secret: str, timestamp: float | None = None) -> str:
     Returns:
         The 6-digit TOTP code for the current (or given) 30-second step.
     """
-    key = base64.b32decode(secret.upper())
+    # Cognito issues the secret unpadded; b32decode requires RFC 4648 padding.
+    padded = secret.upper() + "=" * (-len(secret) % 8)
+    key = base64.b32decode(padded)
     counter = int((time.time() if timestamp is None else timestamp) // _TOTP_PERIOD_SECONDS)
     digest = hmac.new(key, struct.pack(">Q", counter), hashlib.sha1).digest()
     offset = digest[-1] & 0x0F

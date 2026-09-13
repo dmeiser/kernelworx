@@ -67,7 +67,10 @@ TOTP_SECRET=$(aws cognito-idp associate-software-token \
 
 TOTP_CODE=$(TOTP_SECRET="$TOTP_SECRET" python3 - <<'PY'
 import base64, hashlib, hmac, os, struct, time
-key = base64.b32decode(os.environ["TOTP_SECRET"].upper())
+# Cognito issues the secret unpadded; b32decode requires RFC 4648 padding.
+secret = os.environ["TOTP_SECRET"].upper()
+secret += "=" * (-len(secret) % 8)
+key = base64.b32decode(secret)
 counter = int(time.time() // 30)
 digest = hmac.new(key, struct.pack(">Q", counter), hashlib.sha1).digest()
 offset = digest[-1] & 0x0F

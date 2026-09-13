@@ -28,3 +28,12 @@ def test_generate_totp_always_returns_zero_padded_six_digits() -> None:
     code = generate_totp(SECRET_B32, timestamp=1234567890)
     assert len(code) == 6
     assert code.isdigit()
+
+
+def test_generate_totp_accepts_unpadded_cognito_secret() -> None:
+    # Cognito issues TOTP secrets without base32 padding (#336); a bare
+    # b32decode of the 26-char form raises binascii.Error('Incorrect padding').
+    unpadded = "GEZDGNBVGY3TQOJQGEZDGNBVGY"
+    assert len(unpadded) % 8 != 0
+    padded = unpadded + "=" * (-len(unpadded) % 8)
+    assert generate_totp(unpadded, timestamp=1234567890) == generate_totp(padded, timestamp=1234567890)
