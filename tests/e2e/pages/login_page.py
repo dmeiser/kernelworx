@@ -1,6 +1,9 @@
 """Login page object for Cognito username/password authentication."""
 
+import os
+
 from playwright.sync_api import Locator, Page, expect
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from .base_page import BasePage
 
@@ -81,6 +84,36 @@ class LoginPage(BasePage):
         self._email_input().fill(email)
         self._password_input().fill(password)
         self._submit_button().click()
+
+    def answer_totp_challenge(self, secret: str | None = None) -> bool:
+        """Answer a TOTP MFA challenge when the login flow presents one (#336).
+
+        Args:
+            secret: Base32 TOTP secret. Defaults to ``TEST_OWNER_TOTP_SECRET``.
+
+        Returns:
+            ``True`` when a challenge was answered, ``False`` when none appeared.
+
+        Raises:
+            EnvironmentError: If a challenge appears but ``TEST_OWNER_TOTP_SECRET``
+                is not set (re-run ``scripts/create-test-users.sh`` to refresh it).
+        """
+        mfa_input = self.page.locator('input[autocomplete="one-time-code"]')
+        try:
+            mfa_input.wait_for(state="visible", timeout=5_000)
+        except PlaywrightTimeoutError:
+            return False
+        totp_secret = secret or os.environ.get("TEST_OWNER_TOTP_SECRET")
+        if not totp_secret:
+            raise EnvironmentError(
+                "The login flow presented an MFA challenge but TEST_OWNER_TOTP_SECRET is not set. "
+                "Re-run scripts/create-test-users.sh to provision a fresh TOTP device and refresh .env."
+            )
+        from tests.e2e.utils.totp import generate_totp
+
+        mfa_input.fill(generate_totp(totp_secret))
+        self.page.get_by_role("button", name="Verify").click()
+        return True
 
     def wait_for_redirect(self, destination: str = "/home", timeout: int = 15_000) -> None:
         """Block until the browser navigates away to *destination*.
