@@ -26,7 +26,7 @@ vi.mock('@aws-sdk/client-cognito-identity-provider', () => ({
 }));
 
 import { signInUser } from '../integration/setup/cognitoAuth';
-import { generateTotp } from '../integration/setup/totp';
+import { generateTotp, resetTotpWindowTracking } from '../integration/setup/totp';
 
 const FIXED_NOW_MS = 1_700_000_000_000;
 const SECRET_B32 = 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ';
@@ -47,6 +47,7 @@ function authResult() {
 describe('signInUser SOFTWARE_TOKEN_MFA challenge', () => {
   beforeEach(() => {
     vi.useFakeTimers({ now: FIXED_NOW_MS });
+    resetTotpWindowTracking();
     sendMock.mockReset();
     process.env.TEST_USER_POOL_ID = 'us-east-1_pool';
     process.env.TEST_USER_POOL_CLIENT_ID = 'client-id';
@@ -91,7 +92,7 @@ describe('signInUser SOFTWARE_TOKEN_MFA challenge', () => {
       ChallengeResponses: {
         USERNAME: 'owner@kernelworx.test',
         // Same fixed timestamp as the fake clock, so this is deterministic.
-        SOFTWARE_TOKEN_MFA_CODE: generateTotp(SECRET_B32, FIXED_NOW_MS),
+        SOFTWARE_TOKEN_MFA_CODE: await generateTotp(SECRET_B32, FIXED_NOW_MS),
       },
     });
     expect(result.tokens.refreshToken).toBe('refresh-token');

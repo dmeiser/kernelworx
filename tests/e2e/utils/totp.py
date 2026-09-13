@@ -19,6 +19,12 @@ import time
 _TOTP_PERIOD_SECONDS = 30
 _TOTP_DIGITS = 6
 
+# Cognito rejects reuse of a TOTP code within the same 30-second window
+# (ExpiredCodeException). The e2e suite signs the admin owner in from many
+# test files, so track the window each secret last answered a challenge in
+# and wait out a reused window before generating (#336).
+_last_window_by_secret: dict[str, int] = {}
+
 
 def generate_totp(secret: str, timestamp: float | None = None) -> str:
     """Generate a zero-padded 6-digit TOTP code for the given base32 secret.
@@ -33,7 +39,15 @@ def generate_totp(secret: str, timestamp: float | None = None) -> str:
     # Cognito issues the secret unpadded; b32decode requires RFC 4648 padding.
     padded = secret.upper() + "=" * (-len(secret) % 8)
     key = base64.b32decode(padded)
-    counter = int((time.time() if timestamp is None else timestamp) // _TOTP_PERIOD_SECONDS)
+    if timestamp is None:
+        counter = int(time.time() // _TOTP_PERIOD_SECONDS)
+        # Reused-window guard (live generations only; fixed timestamps are tests).
+        while _last_window_by_secret.get(secret) == counter:
+            time.sleep((counter + 1) * _TOTP_PERIOD_SECONDS - time.time())
+            counter = int(time.time() // _TOTP_PERIOD_SECONDS)
+        _last_window_by_secret[secret] = counter
+    else:
+        counter = int(timestamp // _TOTP_PERIOD_SECONDS)
     digest = hmac.new(key, struct.pack(">Q", counter), hashlib.sha1).digest()
     offset = digest[-1] & 0x0F
     code = struct.unpack(">I", digest[offset : offset + 4])[0] & 0x7FFFFFFF
