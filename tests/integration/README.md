@@ -66,6 +66,12 @@ Integration tests validate AppSync resolvers by making real GraphQL requests aga
    CI does this automatically (deploy-shared.yml "Ensure owner test user is in
    ADMIN group"; ephemeral stacks via `scripts/create-ephemeral-test-users.sh`).
 
+   **MFA setup:** admin-gated operations require the owner to authenticate with
+   MFA (#336): the API denies admin calls whose JWT `amr` claim lacks `mfa`.
+   Run `scripts/create-test-users.sh` to provision (or re-provision) a TOTP
+   device for the owner; it writes the fresh `TEST_OWNER_TOTP_SECRET` into
+   `.env`. Ephemeral CI exports the same variable automatically.
+
 ## Running Tests
 
 ```bash

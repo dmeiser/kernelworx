@@ -14,6 +14,7 @@ import os
 from playwright.sync_api import Page
 
 from tests.e2e.pages.login_page import LoginPage
+from tests.e2e.utils.totp import generate_totp
 
 
 def _require_env(key: str) -> str:
@@ -33,15 +34,50 @@ def _base_url() -> str:
     return os.getenv("E2E_BASE_URL", "https://localhost:5173").rstrip("/")
 
 
+def _answer_totp_challenge(page: Page) -> bool:
+    """Answer a TOTP MFA challenge when the login flow presents one (#336).
+
+    The admin owner test user has a provisioned TOTP device, so Cognito
+    continues the sign-in with a 6-digit code form after the password step.
+    Test users without MFA never trigger this path.
+
+    Args:
+        page: Playwright page mid-login (credentials already submitted).
+
+    Returns:
+        ``True`` when a challenge was answered, ``False`` when none appeared.
+
+    Raises:
+        EnvironmentError: If a challenge appears but ``TEST_OWNER_TOTP_SECRET``
+            is not set (re-run ``scripts/create-test-users.sh`` to refresh it).
+    """
+    mfa_input = page.locator('input[autocomplete="one-time-code"]')
+    try:
+        mfa_input.wait_for(state="visible", timeout=5_000)
+    except TimeoutError:
+        return False
+    secret = os.environ.get("TEST_OWNER_TOTP_SECRET")
+    if not secret:
+        raise EnvironmentError(
+            "The login flow presented an MFA challenge but TEST_OWNER_TOTP_SECRET is not set. "
+            "Re-run scripts/create-test-users.sh to provision a fresh TOTP device and refresh .env."
+        )
+    mfa_input.fill(generate_totp(secret))
+    page.get_by_role("button", name="Verify").click()
+    return True
+
+
 def login(page: Page, email: str, password: str) -> None:
     """Navigate to the app login page and authenticate with the given credentials.
 
     Delegates entirely to :class:`~tests.e2e.pages.login_page.LoginPage` so
-    that selector logic lives in exactly one place.
+    that selector logic lives in exactly one place. Completes a TOTP MFA
+    challenge when the user has a provisioned device.
     """
     login_page = LoginPage(page)
     login_page.goto()
     login_page.login(email, password)
+    _answer_totp_challenge(page)
     login_page.wait_for_redirect()
 
 
