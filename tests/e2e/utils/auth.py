@@ -12,6 +12,7 @@ Selector strategy (in priority order):
 import os
 
 from playwright.sync_api import Page
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from tests.e2e.pages.login_page import LoginPage
 from tests.e2e.utils.totp import generate_totp
@@ -44,6 +45,10 @@ def _answer_totp_challenge(page: Page) -> bool:
     Args:
         page: Playwright page mid-login (credentials already submitted).
 
+    The catch uses Playwright's ``TimeoutError`` (imported from
+    ``playwright.sync_api``), which is NOT a subclass of the builtin
+    ``TimeoutError``.
+
     Returns:
         ``True`` when a challenge was answered, ``False`` when none appeared.
 
@@ -54,7 +59,7 @@ def _answer_totp_challenge(page: Page) -> bool:
     mfa_input = page.locator('input[autocomplete="one-time-code"]')
     try:
         mfa_input.wait_for(state="visible", timeout=5_000)
-    except TimeoutError:
+    except PlaywrightTimeoutError:
         return False
     secret = os.environ.get("TEST_OWNER_TOTP_SECRET")
     if not secret:
