@@ -13,6 +13,13 @@
 # secret across runs must persist the printed value themselves (e.g. in .env
 # or as a CI environment export).
 #
+# After verifying the new device, this script waits (up to 30 seconds) for
+# the current 30-second TOTP window to roll over: verify-software-token
+# consumes the code for that window, and Cognito rejects a second submission
+# of the same code within the same window (ExpiredCodeException). Without the
+# wait, the first browser login right after provisioning would resubmit the
+# same code and fail its MFA step.
+#
 # Requires: aws CLI, python3 (stdlib only), and IAM permissions for
 # cognito-idp associate-software-token / verify-software-token /
 # admin-set-user-mfa-preference / admin-get-user. The access token comes
@@ -89,6 +96,17 @@ aws cognito-idp verify-software-token \
   --access-token "$ACCESS_TOKEN" \
   --user-code "$TOTP_CODE" \
   --region "$REGION" >/dev/null
+
+# The verify-software-token call above consumed the TOTP code for the current
+# 30-second window. Cognito rejects a second submission of the same code
+# within that window (ExpiredCodeException), which would break the first
+# browser login run right after provisioning (e.g. the first owner sign-in of
+# the dev smoke suite). Wait for the window to roll over so every later code
+# generated from this secret is a fresh one.
+NOW=$(date +%s)
+WAIT=$((30 - NOW % 30))
+log "  (waiting ${WAIT}s for the next TOTP window)"
+sleep "$WAIT"
 
 aws cognito-idp admin-set-user-mfa-preference \
   --user-pool-id "$USER_POOL_ID" \
