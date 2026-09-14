@@ -29,6 +29,12 @@ placeholder line for every managed key (structural `--check` tests in
 never touches a stack; `--outputs-json` accepts a captured `tofu output -json` document so
 no AWS access is needed. This supersedes the deleted `scripts/update-integration-env.sh`.
 
+## Deploy smoke TOTP provisioning: client identity and Cognito flow naming (#336)
+
+The deploy smoke's "Ensure owner test user has TOTP MFA" step (`.github/workflows/deploy-shared.yml`) must target the web client `KernelWorx-Web` (`module.cognito.client_id` = `aws_cognito_user_pool_client.web.id` in `tofu/application/modules/cognito/main.tf`, exposed as the `cognito_client_id` env output and the deploy job's `client_id` output). It resolves `CLIENT_ID` from `needs.deploy.outputs.client_id` first, with a list lookup by the name `KernelWorx-Web` as intermediate fallback. Do NOT resolve the client via `list-user-pool-clients --max-results 1`: that returns the first client in pool order, which is a separately created, non-tofu-managed client that lacks `ALLOW_USER_PASSWORD_AUTH` and fails `initiate-auth --auth-flow USER_PASSWORD_AUTH` with `InvalidParameterException: USER_PASSWORD_AUTH flow not enabled for this client` (deploy run 34775015216). `scripts/provision-user-totp.sh` tries client-side `USER_PASSWORD_AUTH` first, then falls back to `admin-initiate-auth ADMIN_NO_SRP_AUTH`; both flows must stay in the client's `explicit_auth_flows`.
+
+Never mix bare legacy flow names (`USER_PASSWORD_AUTH`) with `ALLOW_*` names in one `explicit_auth_flows` list: Cognito rejects the client update at `UpdateUserPoolClient` with `Auth flow name with prefix ALLOW cannot be used with legacy auth flow names` (deploy run 34776778257). `ALLOW_USER_PASSWORD_AUTH` already enables the client-side `USER_PASSWORD_AUTH` auth flow.
+
 ## Ephemeral PR environments
 
 Ephemeral per-PR stacks live in `tofu/application/environments/ephemeral` and are managed by `scripts/ephemeral-env.sh`. The `.github/workflows/ephemeral-test.yml` workflow has two jobs: `ephemeral-test` deploys the stack for same-repo pull requests only (it needs a PR number to form the run-id), and `sweep` runs on the nightly schedule to tear down leaked `pr-*` stacks; both jobs use the `ephemeral` environment so they can assume the AWS role.
