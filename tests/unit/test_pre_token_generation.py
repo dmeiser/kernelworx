@@ -1,21 +1,31 @@
 """
 Tests for the Pre Token Generation Lambda trigger.
 
-Covers injection of the custom boolean `mfa` claim into the ID and access tokens,
-fail-closed behavior on lookup failures, and cognito:groups preservation.
+Covers injection of the custom boolean `mfa` claim into the ID and access tokens:
+  - Federated (social) identities always mint mfa=false, bypassing enrollment checks.
+  - Native users mint mfa=true for enabled MFA factors (TOTP or SMS), mfa=false otherwise.
+  - Fail-closed behavior on lookup failures.
+  - cognito:groups preservation and absence of reserved amr mutations.
 """
 
+import copy
 from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.handlers.pre_token_generation import MFA_CLAIM, SMS_MFA, SOFTWARE_TOKEN_MFA, lambda_handler
+from src.handlers.pre_token_generation import (
+    MFA_CLAIM,
+    SMS_MFA,
+    SOFTWARE_TOKEN_MFA,
+    _is_federated,
+    lambda_handler,
+)
 
 
 @pytest.fixture
 def pre_token_event() -> dict[str, Any]:
-    """Sample Cognito Pre Token Generation (V2_0) event for a TOTP user with groups."""
+    """Sample Cognito Pre Token Generation (V2_0) event for a native user with groups."""
     return {
         "version": "2",
         "triggerSource": "TokenGeneration_Authentication",
@@ -43,6 +53,18 @@ def pre_token_event() -> dict[str, Any]:
 
 
 @pytest.fixture
+def federated_pre_token_event(pre_token_event: dict[str, Any]) -> dict[str, Any]:
+    """Sample Cognito Pre Token Generation (V2_0) event for a federated (Google) user."""
+    event = copy.deepcopy(pre_token_event)
+    event["userName"] = "Google_1234567890"
+    event["request"]["userAttributes"]["identities"] = (
+        '[{"userId":"1234567890","providerName":"Google","providerType":"Google",'
+        '"issuer":null,"primary":true,"dateCreated":1726000000000}]'
+    )
+    return event
+
+
+@pytest.fixture
 def lambda_context() -> MagicMock:
     """Mock Lambda context."""
     context = MagicMock()
@@ -55,13 +77,98 @@ def _details(event: dict[str, Any]) -> dict[str, Any]:
     return event["response"]["claimsAndScopeOverrideDetails"]
 
 
-class TestMfaClaimResolution:
-    """Tests for resolving the mfa claim value from PreferredMfaSetting."""
+class TestFederatedIdentities:
+    """
+    Tests that federated (social) identities always mint mfa=false.
+
+    Federated sign-ins can never present an MFA factor in Cognito. Even when a
+    social admin has enrolled TOTP in their profile, their social sign-in did not
+    challenge for TOTP, so mfa must stay false to close the enrollment-as-proof hole.
+    Admin access requires a native password sign-in.
+    """
+
+    def test_federated_user_with_totp_enrolled_sets_mfa_false_and_skips_api_call(
+        self,
+        federated_pre_token_event: dict[str, Any],
+        lambda_context: MagicMock,
+    ) -> None:
+        """Federated user with TOTP enrollment must get mfa=false without invoking AdminGetUser."""
+        with (
+            patch("src.handlers.pre_token_generation.logger.info") as mock_log_info,
+            patch("boto3.client") as mock_client,
+        ):
+            result = lambda_handler(federated_pre_token_event, lambda_context)
+
+        # AdminGetUser must be completely bypassed for federated users
+        mock_client.assert_not_called()
+
+        details = _details(result)
+        assert details["idTokenGeneration"]["claimsToAddOrOverride"] == {MFA_CLAIM: False}
+        assert details["accessTokenGeneration"]["claimsToAddOrOverride"] == {MFA_CLAIM: False}
+        mock_log_info.assert_any_call("pre-token-generation: federated identity -> mfa=false")
+
+    def test_federated_user_with_sms_enrolled_sets_mfa_false(
+        self,
+        federated_pre_token_event: dict[str, Any],
+        lambda_context: MagicMock,
+    ) -> None:
+        """Federated user with SMS enrollment must still get mfa=false."""
+        with patch("boto3.client") as mock_client:
+            result = lambda_handler(federated_pre_token_event, lambda_context)
+
+        mock_client.assert_not_called()
+        details = _details(result)
+        assert details["idTokenGeneration"]["claimsToAddOrOverride"] == {MFA_CLAIM: False}
+        assert details["accessTokenGeneration"]["claimsToAddOrOverride"] == {MFA_CLAIM: False}
+
+    def test_federated_user_without_mfa_sets_mfa_false(
+        self,
+        federated_pre_token_event: dict[str, Any],
+        lambda_context: MagicMock,
+    ) -> None:
+        """Federated user with no MFA enrolled gets mfa=false."""
+        with patch("boto3.client") as mock_client:
+            result = lambda_handler(federated_pre_token_event, lambda_context)
+
+        mock_client.assert_not_called()
+        details = _details(result)
+        assert details["idTokenGeneration"]["claimsToAddOrOverride"] == {MFA_CLAIM: False}
+        assert details["accessTokenGeneration"]["claimsToAddOrOverride"] == {MFA_CLAIM: False}
+
+    def test_federated_user_with_parsed_list_identities(
+        self,
+        pre_token_event: dict[str, Any],
+        lambda_context: MagicMock,
+    ) -> None:
+        """Parsed list identities attribute is correctly identified as federated."""
+        pre_token_event["request"]["userAttributes"]["identities"] = [{"providerName": "Google"}]
+        with patch("boto3.client") as mock_client:
+            result = lambda_handler(pre_token_event, lambda_context)
+
+        mock_client.assert_not_called()
+        assert _details(result)["idTokenGeneration"]["claimsToAddOrOverride"] == {MFA_CLAIM: False}
+
+    def test_is_federated_helper_branches(self) -> None:
+        """Unit tests covering all branches of _is_federated helper."""
+        assert _is_federated({}) is False
+        assert _is_federated({"identities": None}) is False
+        assert _is_federated({"identities": ""}) is False
+        assert _is_federated({"identities": "[]"}) is False
+        assert _is_federated({"identities": "  []  "}) is False
+        assert _is_federated({"identities": '[{"providerName":"Google"}]'}) is True
+        assert _is_federated({"identities": []}) is False
+        assert _is_federated({"identities": [{"providerName": "Google"}]}) is True
+        assert _is_federated({"identities": {"providerName": "Google"}}) is True
+        assert _is_federated({"identities": 12345}) is True
+
+
+class TestNativeMfaClaimResolution:
+    """Tests for resolving the mfa claim value for native Cognito users from PreferredMfaSetting."""
 
     def test_totp_preference_sets_mfa_true_in_both_tokens(
         self, pre_token_event: dict[str, Any], lambda_context: MagicMock
     ) -> None:
-        """A TOTP software-token preference must set mfa=true on the ID and access tokens."""
+        """A native user with TOTP software-token preference must set mfa=true on ID and access tokens."""
         with patch("boto3.client") as mock_client:
             mock_cognito = MagicMock()
             mock_cognito.admin_get_user.return_value = {"PreferredMfaSetting": SOFTWARE_TOKEN_MFA}
@@ -73,7 +180,7 @@ class TestMfaClaimResolution:
         assert details["accessTokenGeneration"]["claimsToAddOrOverride"] == {MFA_CLAIM: True}
 
     def test_sms_preference_sets_mfa_true(self, pre_token_event: dict[str, Any], lambda_context: MagicMock) -> None:
-        """An SMS MFA preference is an enabled MFA factor and must set mfa=true."""
+        """A native user with SMS MFA preference is an enabled MFA factor and must set mfa=true."""
         with patch("boto3.client") as mock_client:
             mock_cognito = MagicMock()
             mock_cognito.admin_get_user.return_value = {"PreferredMfaSetting": SMS_MFA}
@@ -86,7 +193,7 @@ class TestMfaClaimResolution:
 
     def test_passkey_only_user_sets_mfa_false(self, pre_token_event: dict[str, Any], lambda_context: MagicMock) -> None:
         """
-        A passkey-only user has no TOTP/SMS preference (PreferredMfaSetting is
+        A native passkey-only user has no TOTP/SMS preference (PreferredMfaSetting is
         NONE), so the trigger sets mfa=false. Passkeys are a first factor this
         trigger cannot detect (no per-session signal in the event; the credential
         APIs need the user's own token), so passkey acceptance is not provided by
@@ -103,7 +210,7 @@ class TestMfaClaimResolution:
         assert details["accessTokenGeneration"]["claimsToAddOrOverride"] == {MFA_CLAIM: False}
 
     def test_absent_preference_sets_mfa_false(self, pre_token_event: dict[str, Any], lambda_context: MagicMock) -> None:
-        """A user with no PreferredMfaSetting attribute must get mfa=false (never true)."""
+        """A native user with no PreferredMfaSetting attribute must get mfa=false (never true)."""
         with patch("boto3.client") as mock_client:
             mock_cognito = MagicMock()
             mock_cognito.admin_get_user.return_value = {}
@@ -111,6 +218,20 @@ class TestMfaClaimResolution:
             result = lambda_handler(pre_token_event, lambda_context)
 
         assert _details(result)["idTokenGeneration"]["claimsToAddOrOverride"] == {MFA_CLAIM: False}
+
+    def test_empty_identities_string_treated_as_native(
+        self, pre_token_event: dict[str, Any], lambda_context: MagicMock
+    ) -> None:
+        """An empty identities string is treated as a native user and proceeds to enrollment check."""
+        pre_token_event["request"]["userAttributes"]["identities"] = ""
+        with patch("boto3.client") as mock_client:
+            mock_cognito = MagicMock()
+            mock_cognito.admin_get_user.return_value = {"PreferredMfaSetting": SOFTWARE_TOKEN_MFA}
+            mock_client.return_value = mock_cognito
+            result = lambda_handler(pre_token_event, lambda_context)
+
+        mock_cognito.admin_get_user.assert_called_once()
+        assert _details(result)["idTokenGeneration"]["claimsToAddOrOverride"] == {MFA_CLAIM: True}
 
     def test_claim_value_is_boolean_not_string(
         self, pre_token_event: dict[str, Any], lambda_context: MagicMock
