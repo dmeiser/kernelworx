@@ -233,6 +233,8 @@ openpyxl
 OpenTofu
 openxmlformats
 opsz
+otpauth
+Otpauth
 ownerAccountId
 pageProps
 Paper

@@ -1,5 +1,5 @@
 /**
- * Dialog for setting up TOTP Multi-Factor Authentication (MFA)
+ * Dialog for setting up TOTP Multi-Factor Authentication (MFA) or showing federated admin restriction
  */
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
@@ -20,14 +20,19 @@ import {
   setUpTOTP,
   verifyTOTPSetup,
   updateMFAPreference,
-  signOut,
 } from 'aws-amplify/auth';
 import QRCode from 'qrcode';
+import {
+  checkIsFederatedSession,
+  attemptSignOut,
+  handleSignOutAndRedirect,
+} from '../lib/authUtils';
 
 export interface MfaSetupDialogProps {
   open: boolean;
   onClose: () => void;
   onSuccess?: () => void;
+  isFederated?: boolean;
 }
 
 const getErrorMessage = (err: unknown, fallback: string): string => {
@@ -36,18 +41,6 @@ const getErrorMessage = (err: unknown, fallback: string): string => {
     return String((err as { message: unknown }).message);
   }
   return fallback;
-};
-
-const attemptSignOut = async (): Promise<void> => {
-  try {
-    await signOut({ global: true });
-  } catch {
-    try {
-      await signOut();
-    } catch {
-      // Ignored: sign out attempt handled
-    }
-  }
 };
 
 const fetchTotpSetup = async (
@@ -75,9 +68,7 @@ const fetchTotpSetup = async (
 
 const MfaSuccessView: React.FC = () => {
   const handleSignInAgain = () => {
-    void attemptSignOut().finally(() => {
-      window.location.href = '/login';
-    });
+    void handleSignOutAndRedirect();
   };
 
   return (
@@ -94,6 +85,17 @@ const MfaSuccessView: React.FC = () => {
     </Box>
   );
 };
+
+const FederatedNoticeView: React.FC = () => (
+  <Box sx={{ py: 1 }}>
+    <Alert severity="warning" sx={{ mb: 2 }}>
+      <strong>Administrator Security Policy:</strong> Admin operations require Multi-Factor Authentication (MFA).
+    </Alert>
+    <Typography variant="body1" color="text.secondary" paragraph>
+      This account signs in through a social provider which cannot present MFA. Administrator functions require signing in with an email and password with Multi-Factor Authentication (MFA) enabled. Please sign out and sign in with your password.
+    </Typography>
+  </Box>
+);
 
 const MfaQrSection: React.FC<{ qrCodeUrl: string | null }> = ({ qrCodeUrl }) => {
   if (!qrCodeUrl) return null;
@@ -179,8 +181,14 @@ const MfaFormView: React.FC<MfaFormViewProps> = ({
   </Stack>
 );
 
-const MfaDialogTitle: React.FC<{ success: boolean }> = ({ success }) => (
-  <DialogTitle>{success ? 'MFA Enabled' : 'Set Up Multi-Factor Authentication'}</DialogTitle>
+const getDialogTitleText = (isFederated: boolean, success: boolean): string => {
+  if (isFederated) return 'Admin access requires a password sign-in';
+  if (success) return 'MFA Enabled';
+  return 'Set Up Multi-Factor Authentication';
+};
+
+const MfaDialogTitle: React.FC<{ isFederated: boolean; success: boolean }> = ({ isFederated, success }) => (
+  <DialogTitle>{getDialogTitleText(isFederated, success)}</DialogTitle>
 );
 
 const MfaErrorAlert: React.FC<{ error: string | null }> = ({ error }) => {
@@ -193,12 +201,16 @@ const MfaErrorAlert: React.FC<{ error: string | null }> = ({ error }) => {
 };
 
 interface MfaDialogBodyProps {
+  isFederated: boolean;
   loading: boolean;
   success: boolean;
   formProps: MfaFormViewProps;
 }
 
-const MfaDialogBody: React.FC<MfaDialogBodyProps> = ({ loading, success, formProps }) => {
+const MfaDialogBody: React.FC<MfaDialogBodyProps> = ({ isFederated, loading, success, formProps }) => {
+  if (isFederated) {
+    return <FederatedNoticeView />;
+  }
   if (loading) {
     return (
       <Box display="flex" justifyContent="center" py={4}>
@@ -213,6 +225,7 @@ const MfaDialogBody: React.FC<MfaDialogBodyProps> = ({ loading, success, formPro
 };
 
 interface MfaDialogActionsProps {
+  isFederated: boolean;
   success: boolean;
   verifying: boolean;
   loading: boolean;
@@ -221,7 +234,38 @@ interface MfaDialogActionsProps {
   onVerify: () => void;
 }
 
+const FederatedDialogActions: React.FC<{ onClose: () => void }> = ({ onClose }) => (
+  <DialogActions>
+    <Button onClick={onClose}>Back</Button>
+    <Button variant="contained" color="primary" onClick={() => void handleSignOutAndRedirect()}>
+      Sign Out
+    </Button>
+  </DialogActions>
+);
+
+const NativeDialogActions: React.FC<{
+  verifying: boolean;
+  loading: boolean;
+  codeLength: number;
+  onClose: () => void;
+  onVerify: () => void;
+}> = ({ verifying, loading, codeLength, onClose, onVerify }) => (
+  <DialogActions>
+    <Button onClick={onClose} disabled={verifying}>
+      Cancel
+    </Button>
+    <Button
+      onClick={onVerify}
+      variant="contained"
+      disabled={verifying || loading || codeLength !== 6}
+    >
+      {verifying ? <CircularProgress size={24} /> : 'Verify & Enable'}
+    </Button>
+  </DialogActions>
+);
+
 const MfaDialogActions: React.FC<MfaDialogActionsProps> = ({
+  isFederated,
   success,
   verifying,
   loading,
@@ -229,25 +273,24 @@ const MfaDialogActions: React.FC<MfaDialogActionsProps> = ({
   onClose,
   onVerify,
 }) => {
+  if (isFederated) {
+    return <FederatedDialogActions onClose={onClose} />;
+  }
   if (success) return null;
 
   return (
-    <DialogActions>
-      <Button onClick={onClose} disabled={verifying}>
-        Cancel
-      </Button>
-      <Button
-        onClick={onVerify}
-        variant="contained"
-        disabled={verifying || loading || codeLength !== 6}
-      >
-        {verifying ? <CircularProgress size={24} /> : 'Verify & Enable'}
-      </Button>
-    </DialogActions>
+    <NativeDialogActions
+      verifying={verifying}
+      loading={loading}
+      codeLength={codeLength}
+      onClose={onClose}
+      onVerify={onVerify}
+    />
   );
 };
 
-const useMfaSetupFlow = (open: boolean, onSuccess?: () => void) => {
+const useMfaSetupFlow = (open: boolean, isFederatedProp?: boolean, onSuccess?: () => void) => {
+  const [isFederated, setIsFederated] = useState<boolean>(isFederatedProp ?? false);
   const [loading, setLoading] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const [sharedSecret, setSharedSecret] = useState<string | null>(null);
@@ -259,14 +302,28 @@ const useMfaSetupFlow = (open: boolean, onSuccess?: () => void) => {
   const hasFetchedRef = useRef(false);
 
   useEffect(() => {
-    if (open && !hasFetchedRef.current) {
-      hasFetchedRef.current = true;
-      void fetchTotpSetup(setSharedSecret, setOtpauthUrl, setQrCodeUrl, setError, setLoading);
-    }
     if (!open) {
       hasFetchedRef.current = false;
+      return;
     }
-  }, [open]);
+
+    if (typeof isFederatedProp === 'boolean') {
+      setIsFederated(isFederatedProp);
+      if (!isFederatedProp && !hasFetchedRef.current) {
+        hasFetchedRef.current = true;
+        void fetchTotpSetup(setSharedSecret, setOtpauthUrl, setQrCodeUrl, setError, setLoading);
+      }
+      return;
+    }
+
+    void checkIsFederatedSession().then((federated) => {
+      setIsFederated(federated);
+      if (!federated && !hasFetchedRef.current) {
+        hasFetchedRef.current = true;
+        void fetchTotpSetup(setSharedSecret, setOtpauthUrl, setQrCodeUrl, setError, setLoading);
+      }
+    });
+  }, [open, isFederatedProp]);
 
   const handleVerify = useCallback(async () => {
     if (verificationCode.length !== 6) return;
@@ -287,6 +344,7 @@ const useMfaSetupFlow = (open: boolean, onSuccess?: () => void) => {
   }, [verificationCode, onSuccess]);
 
   return {
+    isFederated,
     loading,
     verifying,
     sharedSecret,
@@ -300,15 +358,21 @@ const useMfaSetupFlow = (open: boolean, onSuccess?: () => void) => {
   };
 };
 
-export const MfaSetupDialog: React.FC<MfaSetupDialogProps> = ({ open, onClose, onSuccess }) => {
-  const flow = useMfaSetupFlow(open, onSuccess);
+export const MfaSetupDialog: React.FC<MfaSetupDialogProps> = ({
+  open,
+  onClose,
+  onSuccess,
+  isFederated: isFederatedProp,
+}) => {
+  const flow = useMfaSetupFlow(open, isFederatedProp, onSuccess);
 
   return (
     <Dialog open={open} onClose={flow.success ? undefined : onClose} maxWidth="sm" fullWidth>
-      <MfaDialogTitle success={flow.success} />
+      <MfaDialogTitle isFederated={flow.isFederated} success={flow.success} />
       <DialogContent>
         <MfaErrorAlert error={flow.error} />
         <MfaDialogBody
+          isFederated={flow.isFederated}
           loading={flow.loading}
           success={flow.success}
           formProps={{
@@ -322,6 +386,7 @@ export const MfaSetupDialog: React.FC<MfaSetupDialogProps> = ({ open, onClose, o
         />
       </DialogContent>
       <MfaDialogActions
+        isFederated={flow.isFederated}
         success={flow.success}
         verifying={flow.verifying}
         loading={flow.loading}
