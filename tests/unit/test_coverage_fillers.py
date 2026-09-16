@@ -333,7 +333,7 @@ def test_transfer_profile_ownership_admin_transfer():
     event = {
         "identity": {
             "sub": "admin-user",
-            "claims": {"cognito:groups": ["ADMIN"]},
+            "claims": {"cognito:groups": ["ADMIN"], "amr": ["mfa"]},
         },
         "arguments": {"input": {"profileId": "PROFILE#abc", "newOwnerAccountId": "new456"}},
     }

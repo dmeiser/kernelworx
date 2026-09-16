@@ -168,7 +168,7 @@ class TestTransferProfileOwnership:
         event = {
             "identity": {
                 "sub": "admin-123",
-                "claims": {"cognito:groups": ["ADMIN"]},
+                "claims": {"cognito:groups": ["ADMIN"], "amr": ["mfa"]},
             },
             "arguments": {
                 "input": {
@@ -199,7 +199,7 @@ class TestTransferProfileOwnership:
         event = {
             "identity": {
                 "sub": "admin-123",
-                "claims": {"cognito:groups": ["ADMIN"]},
+                "claims": {"cognito:groups": ["ADMIN"], "amr": ["mfa"]},
             },
             "arguments": {
                 "input": {
@@ -409,6 +409,56 @@ class TestTransferProfileOwnership:
         result = lambda_handler(event, None)
         assert result["__isError"] is True
         assert result["errorCode"] == ErrorCode.FORBIDDEN
+
+    def test_owner_transfer_without_mfa_succeeds(self, profiles_table: Any, shares_table: Any) -> None:
+        """An owner transfers their own profile without MFA (owner path, no MFA needed)."""
+        owner_id = "owner-1"
+        new_owner_id = "new-owner"
+        profile_id = "profile-owner-no-mfa"
+
+        _seed_profile(profiles_table, owner_id, profile_id)
+        _seed_share(shares_table, profile_id, new_owner_id, owner_id)
+
+        event = {
+            "identity": {"sub": owner_id},  # no claims: not admin, no MFA
+            "arguments": {
+                "input": {
+                    "profileId": profile_id,
+                    "newOwnerAccountId": new_owner_id,
+                }
+            },
+        }
+
+        result = lambda_handler(event, None)
+
+        assert result["ownerAccountId"] == f"ACCOUNT#{new_owner_id}"
+
+    def test_admin_transfer_without_mfa_forbidden(self, profiles_table: Any, shares_table: Any) -> None:
+        """An admin (not the owner) without MFA gets exactly 'MFA required' (#336)."""
+        owner_id = "owner-1"
+        new_owner_id = "new-owner"
+        profile_id = "profile-admin-no-mfa"
+
+        _seed_profile(profiles_table, owner_id, profile_id)
+
+        event = {
+            "identity": {
+                "sub": "admin-123",
+                "claims": {"cognito:groups": ["ADMIN"]},  # no amr claim
+            },
+            "arguments": {
+                "input": {
+                    "profileId": profile_id,
+                    "newOwnerAccountId": new_owner_id,
+                }
+            },
+        }
+
+        result = lambda_handler(event, None)
+
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.FORBIDDEN
+        assert result["message"] == "MFA required"
 
     def test_new_owner_missing_share_raises_invalid_input(self, profiles_table: Any, shares_table: Any) -> None:
         """Non-admin transfer to user without existing share raises INVALID_INPUT."""
