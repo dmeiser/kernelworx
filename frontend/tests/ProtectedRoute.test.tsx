@@ -34,6 +34,16 @@ vi.mock('../src/lib/apollo', () => ({
 vi.mock('aws-amplify/auth', () => ({
   fetchAuthSession: vi.fn(),
   getCurrentUser: vi.fn(),
+  setUpTOTP: vi.fn(),
+  verifyTOTPSetup: vi.fn(),
+  updateMFAPreference: vi.fn(),
+  signOut: vi.fn(),
+}));
+
+vi.mock('qrcode', () => ({
+  default: {
+    toDataURL: vi.fn().mockResolvedValue('data:image/png;base64,mockqrcode'),
+  },
 }));
 
 vi.mock('aws-amplify/utils', () => ({
@@ -49,21 +59,33 @@ const mockLoadingState = () => {
   );
 };
 
-const mockAuthenticatedState = (isAdmin: boolean) => {
+const buildTokenPayload = (isAdmin: boolean, isFederated: boolean) => {
+  const groups = isAdmin ? ['ADMIN'] : [];
+  if (isFederated) {
+    return { 'cognito:groups': groups, identities: [{ providerName: 'Google' }] };
+  }
+  return { 'cognito:groups': groups };
+};
+
+const buildMockUser = (isAdmin: boolean) => {
+  if (isAdmin) {
+    return { userId: 'admin-123', username: 'admin' };
+  }
+  return { userId: 'user-123', username: 'user' };
+};
+
+const mockAuthenticatedState = (isAdmin: boolean, isFederated: boolean) => {
+  const payload = buildTokenPayload(isAdmin, isFederated);
+  const user = buildMockUser(isAdmin);
   vi.mocked(amplifyAuth.fetchAuthSession).mockResolvedValue({
     tokens: {
       idToken: {
         toString: () => 'mock-token',
-        payload: {
-          'cognito:groups': isAdmin ? ['ADMIN'] : [],
-        },
+        payload,
       },
     },
   } as any);
-  vi.mocked(amplifyAuth.getCurrentUser).mockResolvedValue({
-    userId: isAdmin ? 'admin-123' : 'user-123',
-    username: isAdmin ? 'admin' : 'user',
-  } as any);
+  vi.mocked(amplifyAuth.getCurrentUser).mockResolvedValue(user as any);
 };
 
 const mockUnauthenticatedState = () => {
@@ -73,11 +95,17 @@ const mockUnauthenticatedState = () => {
 };
 
 // Helper: Determine which mock to apply based on auth state
-type AuthParams = { isAuthenticated?: boolean; isAdmin?: boolean; loading?: boolean };
+type AuthParams = { isAuthenticated?: boolean; isAdmin?: boolean; loading?: boolean; isFederated?: boolean };
+
+const mockAuthForParams = (params: AuthParams) => {
+  const isAdmin = Boolean(params.isAdmin);
+  const isFederated = Boolean(params.isFederated);
+  mockAuthenticatedState(isAdmin, isFederated);
+};
 
 const getAuthMockFn = (params: AuthParams): (() => void) => {
   if (params.loading) return mockLoadingState;
-  if (params.isAuthenticated) return () => mockAuthenticatedState(params.isAdmin ?? false);
+  if (params.isAuthenticated) return () => mockAuthForParams(params);
   return mockUnauthenticatedState;
 };
 
@@ -87,7 +115,7 @@ const setupAuthMock = (params: AuthParams) => getAuthMockFn(params)();
 // Helper to render with routing context
 const renderWithRouter = (
   ui: React.ReactElement,
-  params: { isAuthenticated?: boolean; isAdmin?: boolean; loading?: boolean } = {},
+  params: AuthParams = {},
 ) => {
   setupAuthMock(params);
   return render(
@@ -260,5 +288,27 @@ describe('ProtectedRoute', () => {
     expect(await screen.findByTestId('mfa-setup-required-state')).toBeInTheDocument();
     expect(screen.getByText('MFA Setup Required')).toBeInTheDocument();
     expect(screen.queryByText('Admin Content')).not.toBeInTheDocument();
+  });
+
+  it('blocks federated admin with password sign-in required dialog when MFA is required', async () => {
+    renderWithRouter(
+      <ProtectedRoute requireAdmin={true}>
+        <div>Admin Content</div>
+      </ProtectedRoute>,
+      { isAuthenticated: true, isAdmin: true, isFederated: true },
+    );
+
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent('mfa-required', {
+          detail: { message: 'MFA required' },
+        }),
+      );
+    });
+
+    expect(await screen.findAllByRole('heading', { name: /Admin access requires a password sign-in/i })).not.toHaveLength(0);
+    expect(screen.getAllByText(/social provider which cannot present MFA/i).length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: /Set Up MFA/i })).not.toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /Sign Out/i }).length).toBeGreaterThan(0);
   });
 });

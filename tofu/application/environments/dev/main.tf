@@ -121,15 +121,23 @@ locals {
 
   cognito_callback_urls = [
     "https://${local.site_domain}",
+    "https://${local.site_domain}/",
     "https://${local.site_domain}/callback",
     "http://localhost:5173",
+    "http://localhost:5173/",
+    "http://localhost:5173/callback",
     "https://local.dev.appworx.app:5173",
+    "https://local.dev.appworx.app:5173/",
+    "https://local.dev.appworx.app:5173/callback",
   ]
 
   cognito_logout_urls = [
     "https://${local.site_domain}",
+    "https://${local.site_domain}/",
     "http://localhost:5173",
+    "http://localhost:5173/",
     "https://local.dev.appworx.app:5173",
+    "https://local.dev.appworx.app:5173/",
   ]
 }
 

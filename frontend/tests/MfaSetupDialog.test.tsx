@@ -7,6 +7,7 @@ import QRCode from 'qrcode';
 
 // Mock Amplify Auth
 vi.mock('aws-amplify/auth', () => ({
+  fetchAuthSession: vi.fn(),
   setUpTOTP: vi.fn(),
   verifyTOTPSetup: vi.fn(),
   updateMFAPreference: vi.fn(),
@@ -21,17 +22,28 @@ vi.mock('qrcode', () => ({
 }));
 
 describe('MfaSetupDialog', () => {
+  /* cspell:disable */
   const mockSharedSecret = 'JBSWY3DPEHPK3PXP';
   const mockOtpauthUrl = 'otpauth://totp/KernelWorx:admin@example.com?secret=JBSWY3DPEHPK3PXP&issuer=KernelWorx';
   const mockQrDataUrl = 'data:image/png;base64,mockqrcode';
+  /* cspell:enable */
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(amplifyAuth.fetchAuthSession).mockResolvedValue({
+      tokens: {
+        idToken: {
+          payload: {
+            email: 'native@example.com',
+          },
+        },
+      },
+    } as any);
     vi.mocked(amplifyAuth.setUpTOTP).mockResolvedValue({
       sharedSecret: mockSharedSecret,
       getSetupUri: vi.fn(() => new URL(mockOtpauthUrl)),
     } as any);
-    vi.mocked(QRCode.toDataURL).mockResolvedValue(mockQrDataUrl);
+    (vi.mocked(QRCode.toDataURL) as any).mockResolvedValue(mockQrDataUrl);
     vi.mocked(amplifyAuth.verifyTOTPSetup).mockResolvedValue(undefined as any);
     vi.mocked(amplifyAuth.updateMFAPreference).mockResolvedValue(undefined as any);
     vi.mocked(amplifyAuth.signOut).mockResolvedValue(undefined as any);
@@ -42,22 +54,21 @@ describe('MfaSetupDialog', () => {
     expect(screen.queryByText(/Set Up Multi-Factor Authentication/i)).not.toBeInTheDocument();
   });
 
-  it('calls setUpTOTP and displays secret, otpauth URL, and QR code when open', async () => {
+  it('calls setUpTOTP and displays secret, otpauth URL, and QR code for native user', async () => {
     render(<MfaSetupDialog open={true} onClose={vi.fn()} />);
-
-    expect(amplifyAuth.setUpTOTP).toHaveBeenCalled();
 
     await waitFor(() => {
       expect(screen.getByText(mockSharedSecret)).toBeInTheDocument();
     });
 
+    expect(amplifyAuth.setUpTOTP).toHaveBeenCalled();
     expect(screen.getByText(mockOtpauthUrl)).toBeInTheDocument();
     const qrImg = screen.getByAltText('MFA QR Code');
     expect(qrImg).toBeInTheDocument();
     expect(qrImg).toHaveAttribute('src', mockQrDataUrl);
   });
 
-  it('displays error if setUpTOTP fails', async () => {
+  it('displays error if setUpTOTP fails for native user', async () => {
     vi.mocked(amplifyAuth.setUpTOTP).mockRejectedValue(new Error('Cognito network error'));
 
     render(<MfaSetupDialog open={true} onClose={vi.fn()} />);
@@ -141,5 +152,69 @@ describe('MfaSetupDialog', () => {
     await user.click(cancelButton);
 
     expect(handleClose).toHaveBeenCalled();
+  });
+
+  describe('federated session handling', () => {
+    it('detects federated session from token and renders password-sign-in dialog with no TOTP setup', async () => {
+      vi.mocked(amplifyAuth.fetchAuthSession).mockResolvedValue({
+        tokens: {
+          idToken: {
+            payload: {
+              identities: [{ providerName: 'Google' }],
+            },
+          },
+        },
+      } as any);
+
+      render(<MfaSetupDialog open={true} onClose={vi.fn()} />);
+
+      await waitFor(() => {
+        expect(screen.getByRole('heading', { name: /Admin access requires a password sign-in/i })).toBeInTheDocument();
+      });
+
+      expect(screen.getByText(/social provider which cannot present MFA/i)).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Sign Out/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Back/i })).toBeInTheDocument();
+
+      // Must NOT call setUpTOTP or render TOTP setup elements
+      expect(amplifyAuth.setUpTOTP).not.toHaveBeenCalled();
+      expect(screen.queryByLabelText(/Verification Code/i)).not.toBeInTheDocument();
+      expect(screen.queryByAltText('MFA QR Code')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /Verify & Enable/i })).not.toBeInTheDocument();
+    });
+
+    it('renders password-sign-in dialog when isFederated prop is explicitly true', async () => {
+      render(<MfaSetupDialog open={true} onClose={vi.fn()} isFederated={true} />);
+
+      expect(screen.getByRole('heading', { name: /Admin access requires a password sign-in/i })).toBeInTheDocument();
+      expect(screen.getByText(/social provider which cannot present MFA/i)).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Sign Out/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Back/i })).toBeInTheDocument();
+
+      expect(amplifyAuth.setUpTOTP).not.toHaveBeenCalled();
+    });
+
+    it('calls signOut and redirects when Sign Out is clicked on federated dialog', async () => {
+      const user = userEvent.setup();
+      render(<MfaSetupDialog open={true} onClose={vi.fn()} isFederated={true} />);
+
+      const signOutButton = screen.getByRole('button', { name: /Sign Out/i });
+      await user.click(signOutButton);
+
+      await waitFor(() => {
+        expect(amplifyAuth.signOut).toHaveBeenCalled();
+      });
+    });
+
+    it('calls onClose when Back is clicked on federated dialog', async () => {
+      const user = userEvent.setup();
+      const handleClose = vi.fn();
+      render(<MfaSetupDialog open={true} onClose={handleClose} isFederated={true} />);
+
+      const backButton = screen.getByRole('button', { name: /Back/i });
+      await user.click(backButton);
+
+      expect(handleClose).toHaveBeenCalled();
+    });
   });
 });
