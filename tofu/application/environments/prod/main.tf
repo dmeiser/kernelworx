@@ -121,11 +121,13 @@ locals {
 
   cognito_callback_urls = [
     "https://${local.site_domain}",
+    "https://${local.site_domain}/",
     "https://${local.site_domain}/callback",
   ]
 
   cognito_logout_urls = [
     "https://${local.site_domain}",
+    "https://${local.site_domain}/",
   ]
 }
 

@@ -93,14 +93,18 @@ locals {
 
   cognito_callback_urls = [
     "http://localhost:4173",
+    "http://localhost:4173/",
     "http://localhost:4173/callback",
     "http://localhost:5173",
+    "http://localhost:5173/",
     "http://localhost:5173/callback",
   ]
 
   cognito_logout_urls = [
     "http://localhost:4173",
+    "http://localhost:4173/",
     "http://localhost:5173",
+    "http://localhost:5173/",
   ]
 }
 

@@ -238,7 +238,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       // in dev/prod, so this routes through the site's auth proxy behaviors.
       const domain = getCognitoDomain();
       const clientId = import.meta.env.VITE_COGNITO_USER_POOL_CLIENT_ID;
-      const logoutUri = encodeURIComponent(import.meta.env.VITE_OAUTH_REDIRECT_SIGNOUT);
+      const rawLogoutUri =
+        import.meta.env.VITE_OAUTH_REDIRECT_SIGNOUT ||
+        (typeof window !== 'undefined' ? window.location.origin : '');
+      const logoutUri = encodeURIComponent(rawLogoutUri);
       window.location.href = `https://${domain}/logout?client_id=${clientId}&logout_uri=${logoutUri}`;
     }
   }, []);

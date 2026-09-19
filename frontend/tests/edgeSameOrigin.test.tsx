@@ -125,14 +125,14 @@ describe('Apollo endpoint resolution (#165 same-origin)', () => {
 });
 
 describe('Cognito OAuth domain resolution (#166 same-origin auth proxy)', () => {
-  it('falls back to the site host when VITE_COGNITO_DOMAIN is unset (dev/prod)', async () => {
+  it('resolves the Cognito custom domain when VITE_COGNITO_DOMAIN is unset (dev/prod)', async () => {
     await import('../src/lib/amplify');
 
     expect(configureMock).toHaveBeenCalledTimes(1);
     const config = configureMock.mock.calls[0][0] as {
       Auth: { Cognito: { loginWith: { oauth: { domain: string } } } };
     };
-    expect(config.Auth.Cognito.loginWith.oauth.domain).toBe('dev.kernelworx.app');
+    expect(config.Auth.Cognito.loginWith.oauth.domain).toBe(LOGIN_DOMAIN);
   });
 
   it('honors VITE_COGNITO_DOMAIN when set (ephemeral / vite dev)', async () => {
@@ -148,7 +148,7 @@ describe('Cognito OAuth domain resolution (#166 same-origin auth proxy)', () => 
 });
 
 describe('Manual logout fallback URL (AuthContext)', () => {
-  it('routes the fallback logout through the same-origin auth proxy paths', async () => {
+  it('routes the fallback logout to the Cognito custom domain', async () => {
     const setHref = vi.fn();
     const originalLocation = window.location;
     // Replace location with a stub so we can observe the navigation target
@@ -179,9 +179,8 @@ describe('Manual logout fallback URL (AuthContext)', () => {
 
       expect(setHref).toHaveBeenCalledTimes(1);
       const target = new URL(setHref.mock.calls[0][0] as string);
-      // Logout goes to the site host (proxied to Cognito at /logout), not to a
-      // separate login subdomain.
-      expect(target.host).toBe('dev.kernelworx.app');
+      // Logout targets Cognito's custom domain to clear cookies on the auth domain
+      expect(target.host).toBe(LOGIN_DOMAIN);
       expect(target.pathname).toBe('/logout');
       expect(target.searchParams.get('logout_uri')).toBe(SITE_URL);
     } finally {
