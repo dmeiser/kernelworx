@@ -70,6 +70,17 @@ describe('get_catalog_for_delete_fn response', () => {
         assert.strictEqual(ctx.stash.authorized, undefined);
     });
 
+    it('denies an admin when mfa claim is a non-boolean string "true"', () => {
+        const ctx = makeCtx(
+            { 'cognito:groups': ['ADMIN'], mfa: 'true' },
+            { ...baseCatalog, ownerAccountId: 'ACCOUNT#somebody-else' },
+            'admin-123'
+        );
+
+        assert.throws(() => response(ctx), /FORBIDDEN: MFA required/);
+        assert.strictEqual(ctx.stash.authorized, undefined);
+    });
+
     it('denies an admin without MFA with exactly "MFA required"', () => {
         const ctx = makeCtx(
             { 'cognito:groups': ['admin'] }, // no mfa claim

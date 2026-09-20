@@ -43,7 +43,7 @@ export function response(ctx) {
     const isAdmin = groups.includes('admin') || groups.includes('ADMIN');
     // MFA status from the injected JWT mfa claim (source of truth) (#336).
     // An admin may only use admin privileges after MFA.
-    const hasMfa = Boolean(ctx.identity && ctx.identity.claims && ctx.identity.claims['mfa'] === true);
+    const hasMfa = ctx.identity && ctx.identity.claims ? ctx.identity.claims['mfa'] === true : false;
     // ownerAccountId now has 'ACCOUNT#' prefix
     const isOwner = catalog.ownerAccountId === 'ACCOUNT#' + callerId;
     
