@@ -94,6 +94,9 @@ const getAccountFromData = (data: { getMyAccount: Account } | undefined): Accoun
 // Helper to get email from account
 const getAccountEmail = (account: Account | undefined): string | undefined => account?.email;
 
+// Helper to get isAdmin from account
+const getAccountIsAdmin = (account: Account | undefined): boolean => Boolean(account?.isAdmin);
+
 // Conditional success alert component
 const SuccessAlert: React.FC<{ show: boolean }> = ({ show }) =>
   show ? (
@@ -140,6 +143,7 @@ export const UserSettingsPage: React.FC = () => {
 
   // Merge GraphQL account data with AuthContext account (which has isAdmin from JWT token)
   const account = mergeAccountData(getAccountFromData(accountData), authAccount);
+  const isAdmin = getAccountIsAdmin(account);
 
   // Load MFA and passkey status on mount
   useEffect(() => {
@@ -155,9 +159,13 @@ export const UserSettingsPage: React.FC = () => {
   }, [updateSuccess, setUpdateSuccess]);
 
   // Wrapper handlers for cross-feature interactions
-  const handleSetupMFA = () => mfaHook.handleSetupMFA(passkeyHook.passkeys, passkeyHook.loadPasskeys);
+  const handleSetupMFA = () => {
+    void mfaHook.handleSetupMFA();
+  };
 
-  const handleRegisterPasskey = () => passkeyHook.handleRegisterPasskey(mfaHook.mfaEnabled, mfaHook.setMfaEnabled);
+  const handleRegisterPasskey = () => {
+    void passkeyHook.handleRegisterPasskey();
+  };
 
   // Wrapper handlers for email hook (needs access to account email, logout, navigate)
   const handleRequestEmailUpdate = () => emailHook.handleRequestEmailUpdate(getAccountEmail(account));
@@ -216,13 +224,19 @@ export const UserSettingsPage: React.FC = () => {
       <PasswordSection hook={passwordHook} />
 
       {/* Multi-Factor Authentication Section */}
-      <MfaSection mfaHook={mfaHook} passkeyCount={passkeyHook.passkeys.length} onSetupMFA={handleSetupMFA} />
+      <MfaSection
+        mfaHook={mfaHook}
+        passkeyCount={passkeyHook.passkeys.length}
+        onSetupMFA={handleSetupMFA}
+        isAdmin={isAdmin}
+      />
 
       {/* Passkeys Section */}
       <PasskeySection
         passkeyHook={passkeyHook}
         mfaEnabled={mfaHook.mfaEnabled}
         onRegisterPasskey={handleRegisterPasskey}
+        isAdmin={isAdmin}
       />
 
       {/* Delete Account Section */}
