@@ -67,6 +67,14 @@ const handleTokenRefresh = (checkAuthSession: () => Promise<void>) => {
   void checkAuthSession();
 };
 
+// A direct sign-in (password, MFA confirmSignIn, passkey/first-factor) completes by
+// dispatching a `signedIn` auth event. Re-check the session so isAuthenticated flips
+// true immediately; without this the post-MFA redirect lands on a guarded route that
+// still sees the stale unauthenticated state and bounces the user back to /login.
+const handleSignedIn = (checkAuthSession: () => Promise<void>) => {
+  void checkAuthSession();
+};
+
 const handleTokenRefreshFailure = (handlers: AuthEventHandlers) => {
   handlers.onTokenRefreshFailure();
 };
@@ -78,6 +86,7 @@ const createAuthEventHandler = (
   handlers: AuthEventHandlers,
 ) => {
   const eventHandlers: Record<string, () => void> = {
+    signedIn: () => handleSignedIn(checkAuthSession),
     signInWithRedirect: () => handleSignInWithRedirect(checkAuthSession),
     signInWithRedirect_failure: () => handleSignInFailure(setLoading),
     signedOut: () => handlers.onSignedOut(),
