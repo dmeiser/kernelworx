@@ -152,3 +152,8 @@ One CloudFront distribution (`tofu/application/modules/cloudfront/`) serves ever
 ### Legacy-OAI migration complete (#335/#359/#377, scaffold removed in KW-OAI-SCAFFOLD-CLEANUP-1)
 
 `aws_cloudfront_origin_access_identity` is gone from every environment (state forgotten via a `removed` block, real destroy done out-of-band by a `terraform_data` gate in PR 377) and the one-time scaffold has been removed from `tofu/application/modules/cloudfront/main.tf`. Do not reintroduce an `aws_cloudfront_origin_access_identity` resource or a `count = 0` + `depends_on` ordering pattern (`depends_on` inside a `count = 0` block is inert — no graph node); `tests/unit/test_cloudfront_oac.py` asserts the strict no-OAI contract.
+
+### Cognito WebAuthn FactorConfiguration provider workaround (#336)
+
+The AWS Terraform provider (~> 6.56) lacks `factor_configuration` in `aws_cognito_user_pool.web_authn_configuration` (upstream issue #47598). Setting `FactorConfiguration=MULTI_FACTOR_WITH_USER_VERIFICATION` is required for two-path MFA (allowing passkey sign-in for users with TOTP enrolled and letting passkey-with-UV satisfy MFA). It is applied out-of-band via `terraform_data.webauthn_factor_configuration` running AWS CLI `set-user-pool-mfa-config`. It does not fight tofu state because `factor_configuration` is absent from the provider schema. Device remembering is deliberately omitted/disabled to prevent TOTP challenge suppression on password sign-ins.
+
