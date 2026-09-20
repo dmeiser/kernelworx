@@ -149,6 +149,35 @@ locals {
     ManagedBy   = "opentofu"
     Project     = var.name_prefix
   }
+
+  # Content hash of every input that feeds aws_cognito_user_pool.main.
+  #
+  # The hashicorp/aws provider (verified against 6.63.0, the latest release)
+  # has no schema support for web_authn_configuration.factor_configuration
+  # (still an open upstream PR: hashicorp/terraform-provider-aws#48388), so
+  # FactorConfiguration=MULTI_FACTOR_WITH_USER_VERIFICATION is applied
+  # out-of-band via the AWS CLI (terraform_data.webauthn_factor_configuration).
+  # The provider re-sends the entire WebAuthnConfiguration - WITHOUT
+  # FactorConfiguration - on EVERY UpdateUserPool call, silently resetting it
+  # to SINGLE_FACTOR. A TOTP-activated user is then refused passkey-first
+  # sign-in ("Password Challenge is Required to SignIn").
+  #
+  # Keying the CLI's triggers_replace to this hash makes it re-run after ANY
+  # pool input change (i.e. after every pool update), re-applying the
+  # FactorConfiguration. Over-triggering is harmless: set-user-pool-mfa-config
+  # is idempotent. If a new variable is added to the pool, add it here too.
+  user_pool_input_hash = sha1(jsonencode({
+    name_prefix                  = var.name_prefix
+    region_abbrev                = var.region_abbrev
+    environment                  = var.environment
+    aws_region                   = var.aws_region
+    sms_role_arn                 = var.sms_role_arn
+    enable_webauthn              = var.enable_webauthn
+    web_authn_relying_party_id   = var.web_authn_relying_party_id
+    pre_signup_lambda_arn        = var.pre_signup_lambda_arn
+    post_auth_lambda_arn         = var.post_auth_lambda_arn
+    post_confirmation_lambda_arn = var.post_confirmation_lambda_arn
+  }))
 }
 
 # User Pool
@@ -273,15 +302,18 @@ resource "aws_cognito_user_pool" "main" {
 # TOTP enabled are not locked out of passkey sign-in (eliminating the SINGLE_FACTOR lockout).
 #
 # This terraform_data resource runs out-of-band via AWS CLI when WebAuthn is enabled.
-# triggers_replace ensures it re-runs if the pool is recreated or relying party ID changes.
-# It does not fight tofu state because factor_configuration is omitted from the provider's
-# resource schema.
+# triggers_replace keys on local.user_pool_input_hash (a content hash of every pool
+# input) so the CLI re-runs after ANY pool update, not only on pool recreation or
+# relying-party changes: the provider re-sends WebAuthnConfiguration without
+# FactorConfiguration on every UpdateUserPool and would otherwise silently revert it
+# to SINGLE_FACTOR. It does not fight tofu state because factor_configuration is
+# omitted from the provider's resource schema.
 resource "terraform_data" "webauthn_factor_configuration" {
   count = var.enable_webauthn ? 1 : 0
 
   triggers_replace = [
     aws_cognito_user_pool.main.id,
-    var.web_authn_relying_party_id,
+    local.user_pool_input_hash,
   ]
 
   depends_on = [aws_cognito_user_pool.main]
