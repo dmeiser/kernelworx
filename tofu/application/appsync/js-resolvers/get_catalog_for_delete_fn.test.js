@@ -38,7 +38,7 @@ describe('get_catalog_for_delete_fn response', () => {
 
     it('authorizes an MFA-verified admin for any catalog', () => {
         const ctx = makeCtx(
-            { 'cognito:groups': ['admin'], amr: ['mfa'] },
+            { 'cognito:groups': ['admin'], mfa: true },
             { ...baseCatalog, ownerAccountId: 'ACCOUNT#somebody-else' },
             'admin-123'
         );
@@ -48,21 +48,31 @@ describe('get_catalog_for_delete_fn response', () => {
         assert.strictEqual(ctx.stash.authorized, true);
     });
 
-    it('authorizes an MFA-verified admin when amr is a string', () => {
+    it('denies an admin with amr claim but without mfa:true', () => {
         const ctx = makeCtx(
-            { 'cognito:groups': ['ADMIN'], amr: 'mfa' },
+            { 'cognito:groups': ['ADMIN'], amr: ['mfa', 'pwd'] },
             { ...baseCatalog, ownerAccountId: 'ACCOUNT#somebody-else' },
             'admin-123'
         );
 
-        response(ctx);
+        assert.throws(() => response(ctx), /FORBIDDEN: MFA required/);
+        assert.strictEqual(ctx.stash.authorized, undefined);
+    });
 
-        assert.strictEqual(ctx.stash.authorized, true);
+    it('denies an admin when mfa claim is false even with amr present', () => {
+        const ctx = makeCtx(
+            { 'cognito:groups': ['ADMIN'], mfa: false, amr: ['mfa', 'pwd', 'webauthn'] },
+            { ...baseCatalog, ownerAccountId: 'ACCOUNT#somebody-else' },
+            'admin-123'
+        );
+
+        assert.throws(() => response(ctx), /FORBIDDEN: MFA required/);
+        assert.strictEqual(ctx.stash.authorized, undefined);
     });
 
     it('denies an admin without MFA with exactly "MFA required"', () => {
         const ctx = makeCtx(
-            { 'cognito:groups': ['admin'] }, // no amr claim
+            { 'cognito:groups': ['admin'] }, // no mfa claim
             { ...baseCatalog, ownerAccountId: 'ACCOUNT#somebody-else' },
             'admin-123'
         );
