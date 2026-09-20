@@ -225,9 +225,14 @@ resource "aws_cognito_user_pool" "main" {
     for_each = var.enable_webauthn ? [1] : []
     content {
       relying_party_id  = var.web_authn_relying_party_id
-      user_verification = "preferred"
+      user_verification = "required"
     }
   }
+
+  # Device configuration: intentionally omitted / disabled.
+  # Device remembering can suppress the TOTP challenge on password sign-ins
+  # for remembered devices, which would allow admins to obtain mfa: true without
+  # presenting TOTP on subsequent logins (reopening enrollment-as-proof).
 
   # Lambda triggers (restored from CDK; omitted during CDK → OpenTofu migration)
   # Use a static block (not dynamic) so the block is always emitted; null values are
@@ -242,6 +247,64 @@ resource "aws_cognito_user_pool" "main" {
 
   lifecycle {
     prevent_destroy = var.prevent_destroy
+  }
+}
+
+# Workaround for hashicorp/aws provider gap:
+# The AWS provider does not support `factor_configuration` inside
+# `web_authn_configuration` (open upstream issue hashicorp/terraform-provider-aws#47598).
+# Setting FactorConfiguration=MULTI_FACTOR_WITH_USER_VERIFICATION is required so
+# that passkeys with user verification independently satisfy MFA and users with
+# TOTP enabled are not locked out of passkey sign-in (eliminating the SINGLE_FACTOR lockout).
+#
+# This terraform_data resource runs out-of-band via AWS CLI when WebAuthn is enabled.
+# triggers_replace ensures it re-runs if the pool is recreated or relying party ID changes.
+# It does not fight tofu state because factor_configuration is omitted from the provider's
+# resource schema.
+resource "terraform_data" "webauthn_factor_configuration" {
+  count = var.enable_webauthn ? 1 : 0
+
+  triggers_replace = [
+    aws_cognito_user_pool.main.id,
+    var.web_authn_relying_party_id,
+  ]
+
+  depends_on = [aws_cognito_user_pool.main]
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      set -eu
+
+      USER_POOL_ID="${aws_cognito_user_pool.main.id}"
+      REGION="${var.aws_region}"
+      RP_ID="${var.web_authn_relying_party_id}"
+      MAX_ATTEMPTS=5
+      DELAY=5
+
+      echo "Configuring WebAuthn FactorConfiguration=MULTI_FACTOR_WITH_USER_VERIFICATION on Cognito user pool $${USER_POOL_ID}..."
+
+      ATTEMPT=1
+      while true; do
+        if aws cognito-idp set-user-pool-mfa-config \
+            --region "$${REGION}" \
+            --user-pool-id "$${USER_POOL_ID}" \
+            --mfa-configuration OPTIONAL \
+            --software-token-mfa-configuration Enabled=true \
+            --web-authn-configuration RelyingPartyId="$${RP_ID}",UserVerification=required,FactorConfiguration=MULTI_FACTOR_WITH_USER_VERIFICATION; then
+          echo "Successfully configured WebAuthn FactorConfiguration on user pool $${USER_POOL_ID}."
+          break
+        fi
+
+        if [ "$${ATTEMPT}" -ge "$${MAX_ATTEMPTS}" ]; then
+          echo "ERROR: Failed to set WebAuthn FactorConfiguration on user pool $${USER_POOL_ID} after $${MAX_ATTEMPTS} attempts." >&2
+          exit 1
+        fi
+
+        echo "Transient failure setting user pool MFA config; retrying in $${DELAY}s (attempt $${ATTEMPT}/$${MAX_ATTEMPTS})..." >&2
+        sleep "$${DELAY}"
+        ATTEMPT=$((ATTEMPT + 1))
+      done
+    EOT
   }
 }
 

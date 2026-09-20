@@ -1119,7 +1119,7 @@ class TestEphemeralResourceImportCoverage:
         cognito_res = set()
         for m in re.finditer(r'resource\s+"([^"]+)"\s+"([^"]+)"', cognito_tf):
             rtype, rname = m.group(1), m.group(2)
-            if "custom" in rname or "google" in rname:
+            if not rtype.startswith("aws_") or "custom" in rname or "google" in rname:
                 continue
             if rtype == "aws_cognito_user_pool_domain" and rname == "prefix":
                 cognito_res.add(f"module.cognito.{rtype}.{rname}[0]")
