@@ -1,19 +1,17 @@
 /**
  * Custom hook for MFA (TOTP) functionality
  */
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback } from 'react';
 import {
   setUpTOTP,
   verifyTOTPSetup,
   updateMFAPreference,
   fetchMFAPreference,
-  deleteWebAuthnCredential,
-  type AuthWebAuthnCredential,
 } from 'aws-amplify/auth';
 import QRCode from 'qrcode';
 
 export interface MfaPendingConfirmation {
-  type: 'disable' | 'removePasskeys';
+  type: 'disable';
   message: string;
 }
 
@@ -29,7 +27,7 @@ export interface UseMfaReturn {
   mfaLoading: boolean;
   mfaEnabled: boolean;
   pendingConfirmation: MfaPendingConfirmation | null;
-  handleSetupMFA: (passkeys: AuthWebAuthnCredential[], loadPasskeys: () => Promise<void>) => void;
+  handleSetupMFA: () => Promise<void>;
   confirmSetupMFA: () => Promise<void>;
   handleVerifyMFA: (e: React.FormEvent) => Promise<void>;
   handleDisableMFA: () => void;
@@ -50,7 +48,6 @@ const getErrorMessage = (err: unknown, fallback: string): string => {
 
 const MFA_MESSAGES = {
   disable: 'Are you sure you want to disable multi-factor authentication? This will make your account less secure.',
-  removePasskeys: 'TOTP MFA and Passkeys cannot be used together. Do you want to delete all passkeys and enable MFA?',
 };
 
 const runMfaSetup = async (
@@ -83,10 +80,6 @@ export const useMfa = (): UseMfaReturn => {
   const [mfaLoading, setMfaLoading] = useState(false);
   const [mfaEnabled, setMfaEnabled] = useState(false);
   const [pendingConfirmation, setPendingConfirmation] = useState<MfaPendingConfirmation | null>(null);
-  const pendingSetupArgsRef = useRef<{
-    passkeys: AuthWebAuthnCredential[];
-    loadPasskeys: () => Promise<void>;
-  } | null>(null);
 
   const checkMfaStatus = useCallback(async () => {
     try {
@@ -97,39 +90,14 @@ export const useMfa = (): UseMfaReturn => {
     }
   }, []);
 
-  const handleSetupMFA = (passkeys: AuthWebAuthnCredential[], loadPasskeys: () => Promise<void>) => {
+  const handleSetupMFA = async () => {
     setPendingConfirmation(null);
-    pendingSetupArgsRef.current = { passkeys, loadPasskeys };
-
-    if (passkeys.length > 0) {
-      setPendingConfirmation({ type: 'removePasskeys', message: MFA_MESSAGES.removePasskeys });
-      return;
-    }
-
-    void runMfaSetup(setMfaSetupCode, setQrCodeUrl, setMfaError, setMfaLoading);
+    await runMfaSetup(setMfaSetupCode, setQrCodeUrl, setMfaError, setMfaLoading);
   };
 
   const confirmSetupMFA = async () => {
     setPendingConfirmation(null);
     setMfaError(null);
-
-    const { passkeys, loadPasskeys } = pendingSetupArgsRef.current ?? {};
-    if (!loadPasskeys) return;
-
-    try {
-      await Promise.all(
-        (passkeys ?? [])
-          .filter((passkey) => passkey.credentialId)
-          .map((passkey) => deleteWebAuthnCredential({ credentialId: passkey.credentialId! })),
-      );
-      await loadPasskeys();
-    } catch (err: unknown) {
-      setMfaError(getErrorMessage(err, 'Failed to remove passkeys'));
-      return;
-    } finally {
-      pendingSetupArgsRef.current = null;
-    }
-
     await runMfaSetup(setMfaSetupCode, setQrCodeUrl, setMfaError, setMfaLoading);
   };
 
@@ -176,7 +144,6 @@ export const useMfa = (): UseMfaReturn => {
 
   const cancelMfaConfirmation = () => {
     setPendingConfirmation(null);
-    pendingSetupArgsRef.current = null;
   };
 
   const resetMfaSetup = () => {

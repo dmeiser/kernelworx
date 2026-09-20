@@ -26,11 +26,12 @@ import type { UsePasskeysReturn } from '../../hooks/usePasskeys';
 
 interface PasskeySectionProps {
   passkeyHook: UsePasskeysReturn;
-  mfaEnabled: boolean;
+  mfaEnabled?: boolean;
   onRegisterPasskey: () => void;
+  isAdmin?: boolean;
 }
 
-export const PasskeySection: React.FC<PasskeySectionProps> = ({ passkeyHook, mfaEnabled, onRegisterPasskey }) => {
+export const PasskeySection: React.FC<PasskeySectionProps> = ({ passkeyHook, onRegisterPasskey, isAdmin }) => {
   return (
     <Paper sx={{ p: 3 }}>
       <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }}>
@@ -39,25 +40,21 @@ export const PasskeySection: React.FC<PasskeySectionProps> = ({ passkeyHook, mfa
       </Stack>
 
       <Typography variant="body2" color="text.secondary" paragraph>
-        Passkeys let you sign in securely without a password - using your fingerprint, face, or device PIN.
+        Passkeys let you sign in securely without a password - using your fingerprint, face, or device PIN. Both an authenticator app and passkeys are supported together.
       </Typography>
-      <PasskeyConflictWarning show={mfaEnabled} />
+      <Alert severity="info" sx={{ mb: 2 }}>
+        Both an authenticator app and passkeys are supported together. You can register passkeys for fast, secure sign-in alongside your authenticator app.
+      </Alert>
+      {isAdmin && (
+        <Alert severity="warning" sx={{ mb: 2 }}>
+          <strong>Administrator notice:</strong> Admin operations need an authenticator app (TOTP) enrolled; a passkey alone signs you in but does not grant admin.
+        </Alert>
+      )}
       <PasskeyStatusAlerts hook={passkeyHook} />
       <RegisteredPasskeys hook={passkeyHook} />
       <RegisterPasskeyForm hook={passkeyHook} onRegisterPasskey={onRegisterPasskey} />
       <PasskeyConfirmDialog hook={passkeyHook} />
     </Paper>
-  );
-};
-
-const PasskeyConflictWarning: React.FC<{ show: boolean }> = ({ show }) => {
-  if (!show) return null;
-
-  return (
-    <Alert severity="warning" sx={{ mb: 2 }}>
-      <strong>Note:</strong> Passkeys and TOTP MFA cannot be used together. Registering a passkey will disable your
-      current MFA setup. Passkeys provide strong authentication without requiring a separate MFA app.
-    </Alert>
   );
 };
 
@@ -176,14 +173,14 @@ const PasskeyConfirmDialog: React.FC<{ hook: UsePasskeysReturn }> = ({ hook }) =
 
   return (
     <Dialog open onClose={hook.cancelPasskeyConfirmation}>
-      <DialogTitle>{hook.pendingConfirmation.type === 'delete' ? 'Delete Passkey?' : 'Disable MFA?'}</DialogTitle>
+      <DialogTitle>Delete Passkey?</DialogTitle>
       <DialogContent>
         <Typography>{hook.pendingConfirmation.message}</Typography>
       </DialogContent>
       <DialogActions>
         <Button onClick={hook.cancelPasskeyConfirmation}>Cancel</Button>
         <Button onClick={() => void hook.confirmPasskeyAction()} color="error" variant="contained">
-          {hook.pendingConfirmation.type === 'delete' ? 'Delete' : 'Continue'}
+          Delete
         </Button>
       </DialogActions>
     </Dialog>
