@@ -5,9 +5,15 @@ Injects a custom boolean `mfa` claim into the ID and access tokens that Cognito
 issues at sign-in and on token refresh (issue #336).
 
 The claim is ALWAYS set explicitly:
-  - true  when AdminGetUser reports PreferredMfaSetting is an enabled MFA factor
-            (SOFTWARE_TOKEN_MFA / TOTP, or SMS_MFA) -- any enabled MFA counts
-  - false otherwise, including a missing subject or any AdminGetUser error
+  - false when the session is for a federated identity (e.g. Google sign-in).
+          Federated sign-ins can never present an MFA factor in Cognito, so they
+          always mint mfa=false to close the enrollment-as-proof hole for social
+          users (admin requires a native password sign-in).
+  - true  for native users when AdminGetUser reports PreferredMfaSetting is an
+          enabled MFA factor (SOFTWARE_TOKEN_MFA / TOTP, or SMS_MFA) -- any
+          enabled MFA counts.
+  - false otherwise for native users (e.g. no MFA preference, passkey-only,
+          missing subject, or any AdminGetUser error).
 
 A missing `mfa` claim therefore unambiguously means this trigger is not in the
 token path, so the enforcement guard (#406) can deny on a missing claim. We never
@@ -47,18 +53,51 @@ MFA_PREFERENCES = frozenset({SOFTWARE_TOKEN_MFA, SMS_MFA})
 MFA_CLAIM = "mfa"
 
 
+def _is_federated(user_attributes: Dict[str, Any]) -> bool:
+    """
+    Determine whether the user authenticated via a federated identity provider.
+
+    Cognito populates the `identities` user attribute exclusively for federated
+    (social / SAML / OIDC) users as a JSON-encoded array containing provider
+    metadata (e.g. providerName, providerType, userId). For native Cognito users
+    (email/password), `identities` is absent.
+
+    AWS Documentation reference: Amazon Cognito User Pools Developer Guide,
+    'Managing External Identity Provider (IdP) user profiles' and 'User pool
+    attributes' (identities attribute). Also documented in trigger event fixtures
+    (e.g., src/handlers/post_authentication.py:50).
+    """
+    identities = user_attributes.get("identities")
+    if not identities:
+        return False
+    if isinstance(identities, str):
+        return bool(identities.strip() and identities.strip() != "[]")
+    if isinstance(identities, (list, dict)):
+        return bool(identities)
+    return True
+
+
 def _resolve_mfa(event: Dict[str, Any]) -> bool:
     """
     Determine the `mfa` claim value for this token issuance.
 
-    True when the user's preferred MFA is an enabled MFA factor (a TOTP software
-    token or SMS). Passkeys are a separate first factor this trigger cannot detect
-    (see the module docstring), so they are not counted here. Fails closed (False)
-    on a missing subject/user pool or any AdminGetUser error so a Cognito API
-    hiccup can never grant MFA access.
+    Federated (social) identities ALWAYS mint mfa=false: federated sign-ins can
+    never present an MFA factor in Cognito, closing the enrollment-as-proof hole
+    where a social admin with enrolled TOTP would receive mfa:true without presenting
+    a factor code. Admin access requires a native password sign-in.
+
+    For native users, true when the user's preferred MFA is an enabled MFA factor
+    (a TOTP software token or SMS). Passkeys are a separate first factor this trigger
+    cannot detect (see the module docstring), so they are not counted here. Fails
+    closed (False) on a missing subject/user pool or any AdminGetUser error so a
+    Cognito API hiccup can never grant MFA access.
     """
-    user_pool_id = event.get("userPoolId", "")
     user_attributes = event.get("request", {}).get("userAttributes", {})
+    if _is_federated(user_attributes):
+        logger.info("pre-token-generation: federated identity -> mfa=false")
+        return False
+
+    user_pool_id = event.get("userPoolId", "")
     sub = user_attributes.get("sub")
     username = sub or event.get("userName", "")
     if not user_pool_id or not username:
@@ -104,10 +143,14 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
     Cognito Pre Token Generation trigger handler.
 
-    Sets the custom boolean `mfa` claim (true when the user's preferred MFA is an
-    enabled MFA factor: TOTP or SMS) on the issued ID and access tokens. The claim
-    is always set explicitly and the handler always returns the event so a trigger
-    error can never block sign-in.
+    Sets the custom boolean `mfa` claim on the issued ID and access tokens:
+      - false for federated (social) identities, regardless of MFA enrollment.
+      - true for native users when their preferred MFA is an enabled factor
+        (TOTP software token or SMS).
+      - false for native users without enabled MFA or upon lookup failure.
+
+    The claim is always set explicitly and the handler always returns the event
+    so a trigger error can never block sign-in.
 
     Args:
         event: Cognito Pre Token Generation trigger event (version two)
