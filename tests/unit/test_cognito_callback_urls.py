@@ -150,10 +150,29 @@ def test_cognito_webauthn_and_mfa_configuration():
     explicit_flows = _normalize_list(client["explicit_auth_flows"])
     assert "ALLOW_USER_AUTH" in explicit_flows
 
-    # terraform_data workaround for FactorConfiguration=MULTI_FACTOR_WITH_USER_VERIFICATION
+    # terraform_data workaround for FactorConfiguration=MULTI_FACTOR_WITH_USER_VERIFICATION.
+    # The provider re-sends WebAuthnConfiguration (without FactorConfiguration) on every
+    # UpdateUserPool, so the CLI must re-run after ANY pool input change - not only on
+    # pool recreation or relying-party changes. triggers_replace therefore keys on a
+    # content hash of every pool input (local.user_pool_input_hash).
     triggers = _normalize_list(terraform_data_res["triggers_replace"])
     assert "${aws_cognito_user_pool.main.id}" in triggers
-    assert "${var.web_authn_relying_party_id}" in triggers
+    assert "${local.user_pool_input_hash}" in triggers
+
+    # The hash local must exist and cover the WebAuthn inputs (so a webauthn change
+    # re-triggers the CLI) plus the other pool inputs.
+    locs = get_locals(doc)
+    assert "user_pool_input_hash" in locs, "local user_pool_input_hash must exist"
+    hash_expr = locs["user_pool_input_hash"]
+    assert "sha1" in hash_expr and "jsonencode" in hash_expr
+    for needle in (
+        "var.enable_webauthn",
+        "var.web_authn_relying_party_id",
+        "var.pre_signup_lambda_arn",
+        "var.post_auth_lambda_arn",
+        "var.post_confirmation_lambda_arn",
+    ):
+        assert needle in hash_expr, f"user_pool_input_hash must cover {needle}"
 
     depends_on = _normalize_list(terraform_data_res["depends_on"])
     assert "${aws_cognito_user_pool.main}" in depends_on
