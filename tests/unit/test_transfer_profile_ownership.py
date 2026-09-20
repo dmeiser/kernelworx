@@ -168,7 +168,7 @@ class TestTransferProfileOwnership:
         event = {
             "identity": {
                 "sub": "admin-123",
-                "claims": {"cognito:groups": ["ADMIN"], "amr": ["mfa"]},
+                "claims": {"cognito:groups": ["ADMIN"], "mfa": True},
             },
             "arguments": {
                 "input": {
@@ -199,7 +199,7 @@ class TestTransferProfileOwnership:
         event = {
             "identity": {
                 "sub": "admin-123",
-                "claims": {"cognito:groups": ["ADMIN"], "amr": ["mfa"]},
+                "claims": {"cognito:groups": ["ADMIN"], "mfa": True},
             },
             "arguments": {
                 "input": {
@@ -444,7 +444,61 @@ class TestTransferProfileOwnership:
         event = {
             "identity": {
                 "sub": "admin-123",
-                "claims": {"cognito:groups": ["ADMIN"]},  # no amr claim
+                "claims": {"cognito:groups": ["ADMIN"]},  # no mfa claim
+            },
+            "arguments": {
+                "input": {
+                    "profileId": profile_id,
+                    "newOwnerAccountId": new_owner_id,
+                }
+            },
+        }
+
+        result = lambda_handler(event, None)
+
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.FORBIDDEN
+        assert result["message"] == "MFA required"
+
+    def test_admin_transfer_with_pwd_amr_raises_forbidden(self, profiles_table: Any) -> None:
+        """Admin transfer with bare amr=['pwd'] raises FORBIDDEN 'MFA required'."""
+        owner_id = "owner-1"
+        new_owner_id = "new-owner-1"
+        profile_id = "profile-admin-pwd-amr"
+
+        _seed_profile(profiles_table, owner_id, profile_id)
+
+        event = {
+            "identity": {
+                "sub": "admin-123",
+                "claims": {"cognito:groups": ["ADMIN"], "amr": ["pwd"]},
+            },
+            "arguments": {
+                "input": {
+                    "profileId": profile_id,
+                    "newOwnerAccountId": new_owner_id,
+                }
+            },
+        }
+
+        result = lambda_handler(event, None)
+
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.FORBIDDEN
+        assert result["message"] == "MFA required"
+
+    def test_admin_transfer_with_mfa_false_and_amr_raises_forbidden(self, profiles_table: Any) -> None:
+        """Admin transfer with mfa:False and amr=['mfa'] raises FORBIDDEN 'MFA required' (#336)."""
+        owner_id = "owner-1"
+        new_owner_id = "new-owner-1"
+        profile_id = "profile-admin-mfa-false"
+
+        _seed_profile(profiles_table, owner_id, profile_id)
+
+        event = {
+            "identity": {
+                "sub": "admin-123",
+                "claims": {"cognito:groups": ["ADMIN"], "mfa": False, "amr": ["mfa"]},
             },
             "arguments": {
                 "input": {

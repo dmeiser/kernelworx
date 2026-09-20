@@ -452,33 +452,24 @@ def has_mfa(event: Dict[str, Any]) -> bool:
     """
     Check if caller authenticated with MFA, from the JWT claims.
 
-    AppSync passes through the raw Cognito JWT claims. Two signals are
-    honored: the custom boolean ``mfa`` claim (injected by the
-    pre-token-generation trigger when the user completed a multi-factor
-    authentication step) and the native ``amr`` authenticator list, which
-    Cognito populates with ``"mfa"`` for MFA sign-ins (native, for future
-    AWS emission). Like ``is_admin`` this checks the JWT claim, NOT
-    DynamoDB.
+    AppSync passes through the raw Cognito JWT claims. The custom boolean
+    ``mfa`` claim (injected by the pre-token-generation trigger) is the ONLY
+    positive evidence that grants admin (#336). First-factor authenticator
+    evidence in the native ``amr`` claim (such as "pwd", federated markers,
+    or webauthn) is NOT MFA evidence and is not honored. Like ``is_admin``
+    this checks the JWT claim, NOT DynamoDB.
 
     Args:
         event: Lambda event with identity.claims from AppSync
 
     Returns:
-        True if the mfa claim is True or the amr claim contains "mfa",
-        False otherwise (including a missing amr/mfa or missing claims).
+        True if the mfa claim is True, False otherwise (including missing
+        or false mfa claim, regardless of any amr claim present).
     """
     claims = _get_claims(event)
     if claims is None:
         return False
-    if claims.get("mfa") is True:
-        return True
-    amr = claims.get("amr", [])
-    # amr can be a string or list in JWT
-    if isinstance(amr, str):
-        amr = [amr]
-    elif not isinstance(amr, list):
-        return False
-    return "mfa" in amr
+    return claims.get("mfa") is True
 
 
 def require_admin_mfa(event: Dict[str, Any]) -> None:
@@ -487,9 +478,9 @@ def require_admin_mfa(event: Dict[str, Any]) -> None:
 
     Central gate for admin-only operations. Preserves the historical
     "Admin access required" denial for non-admins, and adds an "MFA
-    required" denial for admins whose token lacks the amr "mfa"
-    authenticator. The denial message is exactly "MFA required" because the
-    frontend matches on that string.
+    required" denial for admins whose token lacks the injected mfa claim.
+    The denial message is exactly "MFA required" because the frontend
+    matches on that string.
 
     Args:
         event: Lambda event with identity.claims from AppSync

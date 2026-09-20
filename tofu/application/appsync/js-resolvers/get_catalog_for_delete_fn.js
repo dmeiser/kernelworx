@@ -41,16 +41,9 @@ export function response(ctx) {
     }
     // Check for 'admin' (lowercase) - standard Cognito group name
     const isAdmin = groups.includes('admin') || groups.includes('ADMIN');
-    // MFA status from the JWT amr claim (source of truth), mirroring is_admin's
-    // claims path. An admin may only use admin privileges after MFA (#336).
-    const amrClaim = ctx.identity.claims['amr'];
-    let amr = [];
-    if (Array.isArray(amrClaim)) {
-        amr = amrClaim;
-    } else if (typeof amrClaim === 'string') {
-        amr = [amrClaim];
-    }
-    const hasMfa = amr.includes('mfa');
+    // MFA status from the injected JWT mfa claim (source of truth) (#336).
+    // An admin may only use admin privileges after MFA.
+    const hasMfa = Boolean(ctx.identity && ctx.identity.claims && ctx.identity.claims['mfa'] === true);
     // ownerAccountId now has 'ACCOUNT#' prefix
     const isOwner = catalog.ownerAccountId === 'ACCOUNT#' + callerId;
     
