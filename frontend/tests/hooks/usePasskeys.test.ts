@@ -5,12 +5,18 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import * as amplifyAuth from 'aws-amplify/auth';
 import { usePasskeys } from '../../src/hooks/usePasskeys';
+import { enablePasskeyMfa, PASSKEY_MFA_ENABLE_FAILED_MESSAGE } from '../../src/lib/passkeyMfa';
 
 vi.mock('aws-amplify/auth', () => ({
   associateWebAuthnCredential: vi.fn(),
   listWebAuthnCredentials: vi.fn(),
   deleteWebAuthnCredential: vi.fn(),
   updateMFAPreference: vi.fn(),
+}));
+
+vi.mock('../../src/lib/passkeyMfa', () => ({
+  enablePasskeyMfa: vi.fn(),
+  PASSKEY_MFA_ENABLE_FAILED_MESSAGE: 'Passkey was registered, but passkey sign-in could not be enabled.',
 }));
 
 describe('usePasskeys', () => {
@@ -30,6 +36,7 @@ describe('usePasskeys', () => {
     });
     vi.mocked(amplifyAuth.associateWebAuthnCredential).mockResolvedValue(undefined as any);
     vi.mocked(amplifyAuth.deleteWebAuthnCredential).mockResolvedValue(undefined as any);
+    vi.mocked(enablePasskeyMfa).mockResolvedValue(undefined);
   });
 
   it('initializes with empty defaults', () => {
@@ -75,7 +82,7 @@ describe('usePasskeys', () => {
     expect(amplifyAuth.associateWebAuthnCredential).not.toHaveBeenCalled();
   });
 
-  it('registers passkey directly without disabling TOTP MFA (coexistence)', async () => {
+  it('registers passkey, enables passkey MFA, and leaves TOTP untouched (coexistence)', async () => {
     const { result } = renderHook(() => usePasskeys());
 
     act(() => {
@@ -87,6 +94,9 @@ describe('usePasskeys', () => {
     });
 
     expect(amplifyAuth.associateWebAuthnCredential).toHaveBeenCalledTimes(1);
+    // Per-user "User verification with passkey" MFA must be enabled the
+    // same way the Cognito console toggle does (SetUserMFAPreference)
+    expect(enablePasskeyMfa).toHaveBeenCalledTimes(1);
     // Crucial two-path MFA assertion: updateMFAPreference is NEVER called to disable TOTP
     expect(amplifyAuth.updateMFAPreference).not.toHaveBeenCalled();
     // No confirmation dialog needed
@@ -96,7 +106,7 @@ describe('usePasskeys', () => {
     expect(amplifyAuth.listWebAuthnCredentials).toHaveBeenCalled();
   });
 
-  it('sets error message when associateWebAuthnCredential fails', async () => {
+  it('does not enable passkey MFA when registration fails', async () => {
     vi.mocked(amplifyAuth.associateWebAuthnCredential).mockRejectedValue(new Error('Passkey rejected'));
     const { result } = renderHook(() => usePasskeys());
 
@@ -108,8 +118,29 @@ describe('usePasskeys', () => {
       await result.current.handleRegisterPasskey();
     });
 
+    expect(enablePasskeyMfa).not.toHaveBeenCalled();
     expect(result.current.passkeyError).toBe('Passkey rejected');
     expect(result.current.passkeySuccess).toBe(false);
+  });
+
+  it('reports an error but keeps the credential when passkey MFA enablement fails', async () => {
+    vi.mocked(enablePasskeyMfa).mockRejectedValue(new Error('WebAuthn MFA not enabled on pool'));
+    const { result } = renderHook(() => usePasskeys());
+
+    act(() => {
+      result.current.setPasskeyName('Phone');
+    });
+
+    await act(async () => {
+      await result.current.handleRegisterPasskey();
+    });
+
+    expect(amplifyAuth.associateWebAuthnCredential).toHaveBeenCalledTimes(1);
+    expect(enablePasskeyMfa).toHaveBeenCalledTimes(1);
+    expect(result.current.passkeySuccess).toBe(false);
+    expect(result.current.passkeyError).toBe(PASSKEY_MFA_ENABLE_FAILED_MESSAGE);
+    // The registered credential is still listed for the user to see
+    expect(amplifyAuth.listWebAuthnCredentials).toHaveBeenCalled();
   });
 
   it('handles deleting a passkey with confirmation flow', async () => {

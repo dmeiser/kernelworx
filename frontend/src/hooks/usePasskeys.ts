@@ -8,6 +8,7 @@ import {
   deleteWebAuthnCredential,
   type AuthWebAuthnCredential,
 } from 'aws-amplify/auth';
+import { enablePasskeyMfa, PASSKEY_MFA_ENABLE_FAILED_MESSAGE } from '../lib/passkeyMfa';
 
 export interface PasskeyPendingConfirmation {
   type: 'delete';
@@ -63,6 +64,16 @@ const registerPasskey = async (
 
   try {
     await associateWebAuthnCredential();
+    // Registering the credential alone does not enable passkey sign-in;
+    // enable the per-user "User verification with passkey" MFA method
+    // (same end state as the Cognito console toggle). TOTP is untouched.
+    try {
+      await enablePasskeyMfa();
+    } catch {
+      setPasskeyError(PASSKEY_MFA_ENABLE_FAILED_MESSAGE);
+      await loadPasskeys();
+      return;
+    }
     setPasskeySuccess(true);
     setPasskeyName('');
     await loadPasskeys();
