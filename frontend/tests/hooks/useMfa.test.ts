@@ -26,11 +26,11 @@ vi.mock('qrcode', () => ({
   },
 }));
 
-describe('useMfa', () => {
-  /* cspell:disable */
-  const mockSharedSecret = 'JBSWY3DPEHPK3PXP';
-  const mockQrDataUrl = 'data:image/png;base64,mockqrcode';
+/* cspell:disable */
+const mockSharedSecret = 'JBSWY3DPEHPK3PXP';
+const mockQrDataUrl = 'data:image/png;base64,mockqrcode';
 
+describe('useMfa', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(amplifyAuth.setUpTOTP).mockResolvedValue({
@@ -226,5 +226,106 @@ describe('useMfa', () => {
     expect(result.current.mfaVerificationCode).toBe('');
     expect(result.current.mfaSetupCode).toBeNull();
     expect(result.current.qrCodeUrl).toBeNull();
+  });
+});
+
+describe('useMfa error paths and confirmSetupMFA', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(amplifyAuth.setUpTOTP).mockResolvedValue({
+      sharedSecret: mockSharedSecret,
+      getSetupUri: vi.fn(() => new URL('otpauth://totp/PopcornManager:user?secret=JBSWY3DPEHPK3PXP')),
+    } as any);
+    (vi.mocked(QRCode.toDataURL) as any).mockResolvedValue(mockQrDataUrl);
+    vi.mocked(amplifyAuth.verifyTOTPSetup).mockResolvedValue(undefined as any);
+    vi.mocked(amplifyAuth.updateMFAPreference).mockResolvedValue(undefined as any);
+    vi.mocked(amplifyAuth.fetchMFAPreference).mockResolvedValue({ preferred: 'TOTP' } as any);
+  });
+
+  it('regenerates the TOTP setup via confirmSetupMFA and clears prior errors', async () => {
+    const { result } = renderHook(() => useMfa());
+
+    act(() => {
+      result.current.setMfaError('stale error');
+      result.current.handleDisableMFA();
+    });
+
+    await act(async () => {
+      await result.current.confirmSetupMFA();
+    });
+
+    expect(result.current.mfaError).toBeNull();
+    expect(result.current.mfaSetupCode).toBe(mockSharedSecret);
+    expect(result.current.qrCodeUrl).toBe(mockQrDataUrl);
+    expect(result.current.pendingConfirmation).toBeNull();
+  });
+
+  it('surfaces the object error message when setup fails with a non-Error object', async () => {
+    vi.mocked(amplifyAuth.setUpTOTP).mockRejectedValue({ message: 'totp exploded' } as any);
+    const { result } = renderHook(() => useMfa());
+
+    await act(async () => {
+      await result.current.confirmSetupMFA();
+    });
+
+    expect(result.current.mfaError).toBe('totp exploded');
+  });
+
+  it('falls back to the static message when setup fails with a non-object error', async () => {
+    vi.mocked(amplifyAuth.setUpTOTP).mockRejectedValue('totp-string' as any);
+    const { result } = renderHook(() => useMfa());
+
+    await act(async () => {
+      await result.current.handleSetupMFA();
+    });
+
+    expect(result.current.mfaError).toBe('Failed to set up MFA');
+  });
+
+  it('uses the verification fallback message for non-Error, non-object failures', async () => {
+    vi.mocked(amplifyAuth.verifyTOTPSetup).mockRejectedValue('verify-string' as any);
+    const { result } = renderHook(() => useMfa());
+
+    const mockEvent = { preventDefault: vi.fn() } as unknown as React.FormEvent;
+    await act(async () => {
+      await result.current.handleVerifyMFA(mockEvent);
+    });
+
+    expect(result.current.mfaError).toBe('Invalid verification code. Please try again.');
+  });
+
+  it('surfaces the object message when verification fails with a non-Error object', async () => {
+    vi.mocked(amplifyAuth.verifyTOTPSetup).mockRejectedValue({ message: 'code rejected' } as any);
+    const { result } = renderHook(() => useMfa());
+
+    const mockEvent = { preventDefault: vi.fn() } as unknown as React.FormEvent;
+    await act(async () => {
+      await result.current.handleVerifyMFA(mockEvent);
+    });
+
+    expect(result.current.mfaError).toBe('code rejected');
+  });
+
+  it('captures the error message when disabling MFA fails with a non-Error object', async () => {
+    vi.mocked(amplifyAuth.updateMFAPreference).mockRejectedValue({ message: 'disable exploded' } as any);
+    const { result } = renderHook(() => useMfa());
+
+    await act(async () => {
+      await result.current.confirmDisableMFA();
+    });
+
+    expect(result.current.mfaError).toBe('disable exploded');
+    expect(result.current.mfaLoading).toBe(false);
+  });
+
+  it('falls back to the static message when disabling MFA fails with a primitive', async () => {
+    vi.mocked(amplifyAuth.updateMFAPreference).mockRejectedValue('disable-string' as any);
+    const { result } = renderHook(() => useMfa());
+
+    await act(async () => {
+      await result.current.confirmDisableMFA();
+    });
+
+    expect(result.current.mfaError).toBe('Failed to disable MFA');
   });
 });

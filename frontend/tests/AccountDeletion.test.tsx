@@ -223,6 +223,39 @@ describe('DeleteAccountSection & AccountDeletionDialog', () => {
     );
   });
 
+  test('keeps the dialog open when the user tries to close it while processing', async () => {
+    const user = userEvent.setup();
+
+    // Never-complete deleteProfile mocks keep the hook in its processing state
+    const hangingDelete = (profileId: string) =>
+      ({
+        request: { query: DELETE_SELLER_PROFILE, variables: { profileId } },
+        result: new Promise(() => {}),
+      }) as any;
+
+    render(
+      <MockedProvider
+        mocks={[createListProfilesMock(), hangingDelete('PROFILE#scout-1'), hangingDelete('PROFILE#scout-2')]}
+      >
+        <DeleteAccountSection userEmail="scoutparent@example.com" onAccountDeleted={vi.fn().mockResolvedValue(undefined)} />
+      </MockedProvider>
+    );
+
+    await user.click(screen.getByRole('button', { name: /Delete My Account/i }));
+    await user.type(screen.getByPlaceholderText('Type DELETE to confirm'), 'DELETE');
+    await user.click(screen.getByRole('button', { name: 'Delete Account' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Discover account profiles')).toBeInTheDocument();
+    });
+
+    // Escape must not dismiss the dialog while deletion is in flight
+    await user.keyboard('{Escape}');
+    await waitFor(() => {
+      expect(screen.getByText('Discover account profiles')).toBeInTheDocument();
+    });
+  });
+
   test('treats already-deleted profile (not found) as completed', async () => {
     const user = userEvent.setup();
     const onAccountDeleted = vi.fn().mockResolvedValue(undefined);
@@ -682,5 +715,84 @@ describe('DeleteAccountSection & AccountDeletionDialog', () => {
       expect(screen.getByText(/Failed to load seller profiles: Token expired/i)).toBeInTheDocument();
     });
     expect(screen.queryByText(/No seller profiles found\./i)).not.toBeInTheDocument();
+  });
+
+  test('notifies the user when the account deletion step fails and resumes to success', async () => {
+    const user = userEvent.setup();
+    const failingAccountMock = {
+      request: { query: DELETE_MY_ACCOUNT },
+      result: { errors: [new GraphQLError('account delete failed')] },
+    };
+
+    render(
+      <MockedProvider
+        mocks={[
+          createListProfilesMock(),
+          createDeleteProfileMock('PROFILE#scout-1'),
+          createDeleteProfileMock('PROFILE#scout-2'),
+          failingAccountMock,
+          createDeleteAccountMock(),
+        ]}
+      >
+        <DeleteAccountSection userEmail="acctfail@example.com" onAccountDeleted={vi.fn().mockResolvedValue(undefined)} />
+      </MockedProvider>
+    );
+
+    await user.click(screen.getByRole('button', { name: /Delete My Account/i }));
+    await user.type(screen.getByPlaceholderText('Type DELETE to confirm'), 'DELETE');
+    await user.click(screen.getByRole('button', { name: 'Delete Account' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Deletion Interrupted')).toBeInTheDocument();
+      expect(screen.getAllByText(/account delete failed/i).length).toBeGreaterThan(0);
+    });
+
+    await user.click(screen.getByRole('button', { name: /Resume Deletion/i }));
+    await waitFor(
+      () => {
+        expect(screen.getByText('Account Deleted')).toBeInTheDocument();
+      },
+      { timeout: 3000 }
+    );
+  });
+
+  test('skips already-completed profiles when resuming deletion', async () => {
+    const user = userEvent.setup();
+
+    // The SECOND profile fails first, so profile 1 has already completed by
+    // the time the user resumes; the loop must skip it without re-deleting.
+    const failingSecond = createDeleteProfileMock('PROFILE#scout-2', 'Second profile error');
+    const retrySecond = createDeleteProfileMock('PROFILE#scout-2');
+
+    render(
+      <MockedProvider
+        mocks={[
+          createListProfilesMock(),
+          createDeleteProfileMock('PROFILE#scout-1'),
+          failingSecond,
+          retrySecond,
+          createDeleteAccountMock(),
+        ]}
+      >
+        <DeleteAccountSection userEmail="skipscompleted@example.com" />
+      </MockedProvider>
+    );
+
+    await user.click(screen.getByRole('button', { name: /Delete My Account/i }));
+    await user.type(screen.getByPlaceholderText('Type DELETE to confirm'), 'DELETE');
+    await user.click(screen.getByRole('button', { name: 'Delete Account' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Deletion Interrupted')).toBeInTheDocument();
+      expect(screen.getAllByText(/Second profile error/i).length).toBeGreaterThan(0);
+    });
+
+    await user.click(screen.getByRole('button', { name: /Resume Deletion/i }));
+    await waitFor(
+      () => {
+        expect(screen.getByText('Account Deleted')).toBeInTheDocument();
+      },
+      { timeout: 3000 }
+    );
   });
 });

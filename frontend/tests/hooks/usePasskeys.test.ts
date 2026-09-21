@@ -191,3 +191,112 @@ describe('usePasskeys', () => {
     expect(amplifyAuth.deleteWebAuthnCredential).not.toHaveBeenCalled();
   });
 });
+
+describe('usePasskeys error-message variants', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(amplifyAuth.listWebAuthnCredentials).mockResolvedValue({ credentials: [] } as any);
+    vi.mocked(amplifyAuth.associateWebAuthnCredential).mockResolvedValue(undefined as any);
+    vi.mocked(amplifyAuth.deleteWebAuthnCredential).mockResolvedValue(undefined as any);
+    vi.mocked(enablePasskeyMfa).mockResolvedValue(undefined);
+  });
+
+  it('surfaces the object message when registration fails with a non-Error object', async () => {
+    vi.mocked(amplifyAuth.associateWebAuthnCredential).mockRejectedValue({ message: 'webauthn exploded' } as any);
+    const { result } = renderHook(() => usePasskeys());
+
+    act(() => {
+      result.current.setPasskeyName('Phone');
+    });
+    await act(async () => {
+      await result.current.handleRegisterPasskey();
+    });
+
+    expect(result.current.passkeyError).toBe('webauthn exploded');
+  });
+
+  it('falls back to the static message when registration fails with a primitive', async () => {
+    vi.mocked(amplifyAuth.associateWebAuthnCredential).mockRejectedValue('rejected-string' as any);
+    const { result } = renderHook(() => usePasskeys());
+
+    act(() => {
+      result.current.setPasskeyName('Phone');
+    });
+    await act(async () => {
+      await result.current.handleRegisterPasskey();
+    });
+
+    expect(result.current.passkeyError).toBe(
+      'Failed to register passkey. Make sure your browser supports passkeys and you have a compatible authenticator.',
+    );
+  });
+
+  it('surfaces the object message when deletion fails with a non-Error object', async () => {
+    vi.mocked(amplifyAuth.deleteWebAuthnCredential).mockRejectedValue({ message: 'delete exploded' } as any);
+    const { result } = renderHook(() => usePasskeys());
+
+    act(() => {
+      result.current.handleDeletePasskey('cred-123');
+    });
+    await act(async () => {
+      await result.current.confirmPasskeyAction();
+    });
+
+    expect(result.current.passkeyError).toBe('delete exploded');
+  });
+
+  it('falls back to the static message when deletion fails with a primitive', async () => {
+    vi.mocked(amplifyAuth.deleteWebAuthnCredential).mockRejectedValue('delete-string' as any);
+    const { result } = renderHook(() => usePasskeys());
+
+    act(() => {
+      result.current.handleDeletePasskey('cred-123');
+    });
+    await act(async () => {
+      await result.current.confirmPasskeyAction();
+    });
+
+    expect(result.current.passkeyError).toBe('Failed to delete passkey');
+  });
+
+  it('skips the delete API call when the confirmation has no credentialId', async () => {
+    const { result } = renderHook(() => usePasskeys());
+
+    // handleDeletePasskey accepts an id; passing undefined exercises the
+    // defensive branch in confirmPasskeyAction.
+    act(() => {
+      result.current.handleDeletePasskey(undefined as unknown as string);
+    });
+    expect(result.current.pendingConfirmation?.credentialId).toBeUndefined();
+
+    await act(async () => {
+      await result.current.confirmPasskeyAction();
+    });
+
+    expect(amplifyAuth.deleteWebAuthnCredential).not.toHaveBeenCalled();
+    expect(result.current.passkeyLoading).toBe(false);
+    expect(result.current.pendingConfirmation).toBeNull();
+  });
+});
+
+describe('usePasskeys defensive paths', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(amplifyAuth.listWebAuthnCredentials).mockResolvedValue({ credentials: [] } as any);
+    vi.mocked(amplifyAuth.associateWebAuthnCredential).mockResolvedValue(undefined as any);
+    vi.mocked(amplifyAuth.deleteWebAuthnCredential).mockResolvedValue(undefined as any);
+    vi.mocked(enablePasskeyMfa).mockResolvedValue(undefined);
+  });
+
+  it('does nothing when confirming with no pending confirmation', async () => {
+    const { result } = renderHook(() => usePasskeys());
+
+    await act(async () => {
+      await result.current.confirmPasskeyAction();
+    });
+
+    expect(amplifyAuth.deleteWebAuthnCredential).not.toHaveBeenCalled();
+    expect(amplifyAuth.listWebAuthnCredentials).not.toHaveBeenCalled();
+    expect(result.current.pendingConfirmation).toBeNull();
+  });
+});

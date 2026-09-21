@@ -18,6 +18,10 @@ describe('redirect validation', () => {
       expect(isSafeRedirect('//evil.com')).toBe(false);
     });
 
+    it('rejects paths containing backslashes', () => {
+      expect(isSafeRedirect('/back\\slash')).toBe(false);
+    });
+
     it('rejects non-string and javascript values', () => {
       expect(isSafeRedirect('javascript:alert(1)')).toBe(false);
       expect(isSafeRedirect('')).toBe(false);

@@ -166,4 +166,15 @@ describe('passkeyMfa', () => {
     expect(passkeyMfaFailureMessage(null)).toBe(PASSKEY_MFA_ENABLE_FAILED_MESSAGE);
     expect(passkeyMfaFailureMessage(new Error(''))).toBe(PASSKEY_MFA_ENABLE_FAILED_MESSAGE);
   });
+
+  it('surfaces object errors without a message field as the static message', () => {
+    expect(passkeyMfaFailureMessage({ code: 'SomeException' })).toBe(PASSKEY_MFA_ENABLE_FAILED_MESSAGE);
+  });
+
+  it('throws a descriptive error when the pool id has no region separator', async () => {
+    vi.stubEnv('VITE_COGNITO_USER_POOL_ID', 'not-a-regional-pool-id');
+
+    await expect(enablePasskeyMfa()).rejects.toThrow('Cognito user pool id is not configured');
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
 });

@@ -217,4 +217,60 @@ describe('MfaSetupDialog', () => {
       expect(handleClose).toHaveBeenCalled();
     });
   });
+
+  describe('verification error variants', () => {
+    const typeCodeAndVerify = async (user: ReturnType<typeof userEvent.setup>) => {
+      const input = screen.getByLabelText(/Verification Code/i);
+      await user.type(input, '654321');
+      await user.click(screen.getByRole('button', { name: /Verify & Enable/i }));
+    };
+
+    it('surfaces the object message when verification fails with a non-Error object', async () => {
+      const user = userEvent.setup();
+      vi.mocked(amplifyAuth.verifyTOTPSetup).mockRejectedValue({ message: 'object code error' } as any);
+      render(<MfaSetupDialog open={true} onClose={vi.fn()} />);
+
+      await waitFor(() => {
+        expect(screen.getByText(mockSharedSecret)).toBeInTheDocument();
+      });
+      await typeCodeAndVerify(user);
+
+      await waitFor(() => {
+        expect(screen.getByText('object code error')).toBeInTheDocument();
+      });
+      expect(amplifyAuth.signOut).not.toHaveBeenCalled();
+    });
+
+    it('falls back to the static message when verification fails with a primitive', async () => {
+      const user = userEvent.setup();
+      vi.mocked(amplifyAuth.verifyTOTPSetup).mockRejectedValue('primitive failure' as any);
+      render(<MfaSetupDialog open={true} onClose={vi.fn()} />);
+
+      await waitFor(() => {
+        expect(screen.getByText(mockSharedSecret)).toBeInTheDocument();
+      });
+      await typeCodeAndVerify(user);
+
+      await waitFor(() => {
+        expect(screen.getByText(/Invalid verification code/i)).toBeInTheDocument();
+      });
+    });
+
+    it('surfaces the preference update failure after a successful verify', async () => {
+      const user = userEvent.setup();
+      vi.mocked(amplifyAuth.updateMFAPreference).mockRejectedValue(new Error('preference update failed'));
+      render(<MfaSetupDialog open={true} onClose={vi.fn()} />);
+
+      await waitFor(() => {
+        expect(screen.getByText(mockSharedSecret)).toBeInTheDocument();
+      });
+      await typeCodeAndVerify(user);
+
+      await waitFor(() => {
+        expect(screen.getByText('preference update failed')).toBeInTheDocument();
+      });
+      expect(amplifyAuth.signOut).not.toHaveBeenCalled();
+      expect(screen.queryByText(/MFA enabled — sign in again/i)).not.toBeInTheDocument();
+    });
+  });
 });

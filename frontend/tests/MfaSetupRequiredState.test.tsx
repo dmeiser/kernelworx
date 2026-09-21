@@ -143,4 +143,26 @@ describe('MfaSetupRequiredState', () => {
       backSpy.mockRestore();
     });
   });
+
+  it('renders custom title and message when provided', () => {
+    render(<MfaSetupRequiredState isFederated={false} title="Custom title" message="Custom message" />);
+
+    expect(screen.getByText('Custom title')).toBeInTheDocument();
+    expect(screen.getByText('Custom message')).toBeInTheDocument();
+    expect(screen.queryByText('MFA Setup Required')).not.toBeInTheDocument();
+  });
+
+  it('does not navigate back when there is no history to return to', async () => {
+    const user = userEvent.setup();
+    const backSpy = vi.spyOn(window.history, 'back').mockImplementation(() => {});
+    // jsdom history persists across tests in a file; force a single entry
+    vi.spyOn(window, 'history', 'get').mockReturnValue({ ...window.history, length: 1 } as History);
+    render(<MfaSetupRequiredState isFederated={true} />);
+
+    await user.click(screen.getByRole('button', { name: 'Back' }));
+
+    expect(backSpy).not.toHaveBeenCalled();
+    backSpy.mockRestore();
+    vi.restoreAllMocks();
+  });
 });

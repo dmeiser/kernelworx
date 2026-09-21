@@ -29,6 +29,11 @@ describe('PageHeader', () => {
     const button = screen.getByRole('button', { name: /go back/i });
     expect(button).toBeInTheDocument();
 
+    // Without an explicit aria-label the icon button falls back to 'Back'
+    const { unmount } = render(<PageHeader title="Page" backButton={{ onClick }} />);
+    expect(screen.getByRole('button', { name: 'Back' })).toBeInTheDocument();
+    unmount();
+
     fireEvent.click(button);
     expect(onClick).toHaveBeenCalled();
   });
