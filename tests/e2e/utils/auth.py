@@ -12,10 +12,8 @@ Selector strategy (in priority order):
 import os
 
 from playwright.sync_api import Page
-from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from tests.e2e.pages.login_page import LoginPage
-from tests.e2e.utils.totp import generate_totp
 
 
 def _require_env(key: str) -> str:
