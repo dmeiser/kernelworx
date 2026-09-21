@@ -6,6 +6,7 @@ import { renderHook, act } from '@testing-library/react';
 import * as amplifyAuth from 'aws-amplify/auth';
 import QRCode from 'qrcode';
 import { useMfa } from '../../src/hooks/useMfa';
+import { getMfaEnabledFromCognito } from '../../src/lib/mfaStatus';
 
 vi.mock('aws-amplify/auth', () => ({
   setUpTOTP: vi.fn(),
@@ -13,6 +14,10 @@ vi.mock('aws-amplify/auth', () => ({
   updateMFAPreference: vi.fn(),
   fetchMFAPreference: vi.fn(),
   deleteWebAuthnCredential: vi.fn(),
+}));
+
+vi.mock('../../src/lib/mfaStatus', () => ({
+  getMfaEnabledFromCognito: vi.fn(),
 }));
 
 vi.mock('qrcode', () => ({
@@ -51,9 +56,46 @@ describe('useMfa', () => {
     expect(result.current.pendingConfirmation).toBeNull();
   });
 
-  it('checks MFA status and updates mfaEnabled', async () => {
+  it('checks MFA status from the raw Cognito read and updates mfaEnabled', async () => {
+    vi.mocked(getMfaEnabledFromCognito).mockResolvedValue(true);
     const { result } = renderHook(() => useMfa());
 
+    await act(async () => {
+      await result.current.checkMfaStatus();
+    });
+
+    // TOTP-only user: the raw read is the gate, Amplify is not consulted.
+    expect(getMfaEnabledFromCognito).toHaveBeenCalledTimes(1);
+    expect(amplifyAuth.fetchMFAPreference).not.toHaveBeenCalled();
+    expect(result.current.mfaEnabled).toBe(true);
+
+    vi.mocked(getMfaEnabledFromCognito).mockResolvedValue(false);
+    await act(async () => {
+      await result.current.checkMfaStatus();
+    });
+    expect(result.current.mfaEnabled).toBe(false);
+  });
+
+  it('treats a passkey-MFA-preferred user as MFA-enabled', async () => {
+    // PreferredMfaSetting WEB_AUTHN_MFA: the pinned aws-amplify
+    // fetchMFAPreference reads this user back as "no MFA", but the raw
+    // GetUser read reports the enabled WEB_AUTHN_MFA setting.
+    vi.mocked(getMfaEnabledFromCognito).mockResolvedValue(true);
+    vi.mocked(amplifyAuth.fetchMFAPreference).mockResolvedValue({ preferred: undefined } as any);
+    const { result } = renderHook(() => useMfa());
+
+    await act(async () => {
+      await result.current.checkMfaStatus();
+    });
+
+    expect(result.current.mfaEnabled).toBe(true);
+  });
+
+  it('falls back to fetchMFAPreference when the direct read fails', async () => {
+    vi.mocked(getMfaEnabledFromCognito).mockRejectedValue(new Error('network'));
+    const { result } = renderHook(() => useMfa());
+
+    // beforeEach default: fetchMFAPreference -> { preferred: 'TOTP' }
     await act(async () => {
       await result.current.checkMfaStatus();
     });
@@ -65,6 +107,18 @@ describe('useMfa', () => {
     await act(async () => {
       await result.current.checkMfaStatus();
     });
+    expect(result.current.mfaEnabled).toBe(false);
+  });
+
+  it('leaves mfaEnabled false when both the direct read and the fallback fail', async () => {
+    vi.mocked(getMfaEnabledFromCognito).mockRejectedValue(new Error('network'));
+    vi.mocked(amplifyAuth.fetchMFAPreference).mockRejectedValue(new Error('no session'));
+    const { result } = renderHook(() => useMfa());
+
+    await act(async () => {
+      await result.current.checkMfaStatus();
+    });
+
     expect(result.current.mfaEnabled).toBe(false);
   });
 

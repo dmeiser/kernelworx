@@ -9,6 +9,7 @@ import {
   fetchMFAPreference,
 } from 'aws-amplify/auth';
 import QRCode from 'qrcode';
+import { getMfaEnabledFromCognito } from '../lib/mfaStatus';
 
 export interface MfaPendingConfirmation {
   type: 'disable';
@@ -83,10 +84,21 @@ export const useMfa = (): UseMfaReturn => {
 
   const checkMfaStatus = useCallback(async () => {
     try {
-      const mfaPreference = await fetchMFAPreference();
-      setMfaEnabled(mfaPreference.preferred === 'TOTP');
+      // The raw Cognito GetUser read is authoritative for this gate: the
+      // pinned aws-amplify fetchMFAPreference cannot surface a WEB_AUTHN_MFA
+      // preference, so a passkey-MFA user would otherwise read as "no MFA"
+      // and be shown the forced TOTP QR setup block.
+      setMfaEnabled(await getMfaEnabledFromCognito());
     } catch {
-      // Ignore load MFA preference error
+      try {
+        // Fallback only when the direct read is unavailable; it agrees with
+        // the raw result for every user it can answer (TOTP-preferred ->
+        // true, no MFA -> false).
+        const mfaPreference = await fetchMFAPreference();
+        setMfaEnabled(mfaPreference.preferred === 'TOTP');
+      } catch {
+        // Ignore load MFA preference error
+      }
     }
   }, []);
 

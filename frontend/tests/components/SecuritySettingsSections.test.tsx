@@ -81,6 +81,24 @@ describe('MfaSection', () => {
       screen.queryByText(/Admin operations need an authenticator app \(TOTP\) enrolled/i),
     ).not.toBeInTheDocument();
   });
+
+  it('shows the enabled state and never the QR setup block when MFA is enabled (TOTP or passkey)', () => {
+    const mfaHook = createMockMfaHook({ mfaEnabled: true });
+    render(<MfaSection mfaHook={mfaHook} onSetupMFA={vi.fn()} />);
+
+    expect(screen.getByText('MFA is currently enabled')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Set Up MFA/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Scan QR Code/i)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Disable MFA/i })).toBeInTheDocument();
+  });
+
+  it('shows the forced setup block when the user has no MFA', () => {
+    const mfaHook = createMockMfaHook({ mfaEnabled: false });
+    render(<MfaSection mfaHook={mfaHook} onSetupMFA={vi.fn()} />);
+
+    expect(screen.queryByText('MFA is currently enabled')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Set Up MFA/i })).toBeInTheDocument();
+  });
 });
 
 describe('PasskeySection', () => {

@@ -69,7 +69,7 @@ export function passkeyMfaFailureMessage(error: unknown): string {
  * Resolves the Cognito IDP endpoint for the configured user pool by
  * deriving the region from the pool id prefix (`us-east-1_XXXXXXXX`).
  */
-function getCognitoIdpEndpoint(): string {
+export function getCognitoIdpEndpoint(): string {
   const userPoolId = import.meta.env.VITE_COGNITO_USER_POOL_ID;
   if (!userPoolId || !userPoolId.includes('_')) {
     throw new Error('Cognito user pool id is not configured');
@@ -129,7 +129,7 @@ export async function enablePasskeyMfa(): Promise<void> {
  * Reads the Cognito error `message` from an error response body,
  * falling back to the HTTP status when the body is not JSON.
  */
-async function extractCognitoErrorMessage(response: Response): Promise<string> {
+export async function extractCognitoErrorMessage(response: Response): Promise<string> {
   const fallback = `Cognito error (HTTP ${response.status})`;
   try {
     const body = (await response.json()) as { message?: string };
