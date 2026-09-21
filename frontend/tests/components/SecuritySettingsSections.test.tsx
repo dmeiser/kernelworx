@@ -325,8 +325,16 @@ describe('PasskeySection states and interactions', () => {
                 credentialId: 'cred-1',
                 friendlyCredentialName: 'My iPhone',
                 createdAt: new Date('2025-01-15T00:00:00Z'),
+                relyingPartyId: 'login.dev.kernelworx.app',
+                authenticatorTransports: ['internal'],
               },
-              { credentialId: undefined, friendlyCredentialName: undefined, createdAt: undefined },
+              {
+                credentialId: undefined,
+                friendlyCredentialName: undefined,
+                createdAt: undefined,
+                relyingPartyId: undefined,
+                authenticatorTransports: undefined,
+              },
             ],
             handleDeletePasskey,
           }) as any
@@ -354,7 +362,15 @@ describe('PasskeySection states and interactions', () => {
       <PasskeySection
         passkeyHook={
           createMockPasskeyHook({
-            passkeys: [{ credentialId: 'cred-1', friendlyCredentialName: 'My iPhone', createdAt: undefined }],
+            passkeys: [
+              {
+                credentialId: 'cred-1',
+                friendlyCredentialName: 'My iPhone',
+                createdAt: undefined,
+                relyingPartyId: 'login.dev.kernelworx.app',
+                authenticatorTransports: ['internal'],
+              },
+            ],
             passkeyLoading: true,
           }) as any
         }

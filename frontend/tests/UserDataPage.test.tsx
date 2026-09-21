@@ -92,38 +92,51 @@ vi.mock('@apollo/client/react', async () => {
     return [execute, { data, loading }];
   };
 
-  const makeMutationHandler =
-    (mockFn: any, capture: (opts: any) => void) =>
-    (mutation: any, opts: any) => {
-      capture(opts);
-      const run = async (args: any) => {
-        const res = await mockFn(args);
-        if (res.error) {
-          opts?.onError?.(res.error);
-        } else {
-          opts?.onCompleted?.(res.data);
-        }
-        return res;
-      };
-      return [run, { loading: false, data: null }];
+  const callIfPresent = (fn: any, arg: any) => fn?.(arg);
+
+  const notifyMutationCallbacks = (opts: any, res: any) => {
+    if (res.error) {
+      callIfPresent(opts?.onError, res.error);
+    } else {
+      callIfPresent(opts?.onCompleted, res.data);
+    }
+  };
+
+  const makeMutationHandler = (mockFn: any, capture: (opts: any) => void) => (opts: any) => {
+    capture(opts);
+    const run = async (args: any) => {
+      const res = await mockFn(args);
+      notifyMutationCallbacks(opts, res);
+      return res;
     };
+    return [run, { loading: false, data: null }];
+  };
+
+  const mutationRoutes: Record<string, { mock: any; setOptions: (o: any) => void }> = {
+    TransferProfileOwnership: {
+      mock: state.transferMock,
+      setOptions: (o: any) => {
+        state.transferOptions = o;
+      },
+    },
+    AdminDeleteShare: {
+      mock: state.deleteShareMock,
+      setOptions: (o: any) => {
+        state.deleteShareOptions = o;
+      },
+    },
+    AdminUpdateCampaignSharedCode: {
+      mock: state.updateCodeMock,
+      setOptions: (o: any) => {
+        state.updateCodeOptions = o;
+      },
+    },
+  };
 
   const useMutation = (mutation: any, opts: any) => {
-    const name = getOpName(mutation) ?? '';
-    if (name === 'TransferProfileOwnership') {
-      return makeMutationHandler(state.transferMock, (o: any) => {
-        state.transferOptions = o;
-      })(mutation, opts);
-    }
-    if (name === 'AdminDeleteShare') {
-      return makeMutationHandler(state.deleteShareMock, (o: any) => {
-        state.deleteShareOptions = o;
-      })(mutation, opts);
-    }
-    if (name === 'AdminUpdateCampaignSharedCode') {
-      return makeMutationHandler(state.updateCodeMock, (o: any) => {
-        state.updateCodeOptions = o;
-      })(mutation, opts);
+    const route = mutationRoutes[getOpName(mutation) ?? ''];
+    if (route) {
+      return makeMutationHandler(route.mock, route.setOptions)(opts);
     }
     return [vi.fn().mockResolvedValue({ data: {} }), { loading: false, data: null }];
   };

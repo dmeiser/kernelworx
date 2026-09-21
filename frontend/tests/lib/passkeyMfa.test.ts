@@ -12,6 +12,7 @@ import * as amplifyAuth from 'aws-amplify/auth';
 import {
   enablePasskeyMfa,
   passkeyMfaFailureMessage,
+  extractCognitoErrorMessage,
   PASSKEY_MFA_ENABLE_FAILED_MESSAGE,
 } from '../../src/lib/passkeyMfa';
 
@@ -169,6 +170,27 @@ describe('passkeyMfa', () => {
 
   it('surfaces object errors without a message field as the static message', () => {
     expect(passkeyMfaFailureMessage({ code: 'SomeException' })).toBe(PASSKEY_MFA_ENABLE_FAILED_MESSAGE);
+  });
+
+  it('surfaces a plain string error verbatim in the failure message', () => {
+    expect(passkeyMfaFailureMessage('WebAuthn MFA requires enabling an additional MFA setting.')).toBe(
+      `${PASSKEY_MFA_ENABLE_FAILED_MESSAGE} WebAuthn MFA requires enabling an additional MFA setting.`,
+    );
+  });
+
+  it('omits the MFA methods block when fetchMFAPreference reports no enabled list', async () => {
+    vi.mocked(amplifyAuth.fetchMFAPreference).mockResolvedValue({} as never);
+
+    await enablePasskeyMfa();
+
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string);
+    expect(body).toEqual({ AccessToken: 'test-access-token', WebAuthnMfaSettings: { Enabled: true } });
+  });
+
+  it('falls back to the HTTP status when the error body is JSON without a message', async () => {
+    const message = await extractCognitoErrorMessage(new Response(JSON.stringify({ __type: 'InternalError' }), { status: 502 }));
+    expect(message).toBe('Cognito error (HTTP 502)');
   });
 
   it('throws a descriptive error when the pool id has no region separator', async () => {
