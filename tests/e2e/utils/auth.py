@@ -33,15 +33,25 @@ def _base_url() -> str:
     return os.getenv("E2E_BASE_URL", "https://localhost:5173").rstrip("/")
 
 
+def _answer_totp_challenge(page: Page) -> bool:
+    """Answer a TOTP MFA challenge when the login flow presents one (#336).
+
+    Delegates to :meth:`~tests.e2e.pages.login_page.LoginPage.answer_totp_challenge`.
+    """
+    return LoginPage(page).answer_totp_challenge()
+
+
 def login(page: Page, email: str, password: str) -> None:
     """Navigate to the app login page and authenticate with the given credentials.
 
     Delegates entirely to :class:`~tests.e2e.pages.login_page.LoginPage` so
-    that selector logic lives in exactly one place.
+    that selector logic lives in exactly one place. Completes a TOTP MFA
+    challenge when the user has a provisioned device.
     """
     login_page = LoginPage(page)
     login_page.goto()
     login_page.login(email, password)
+    login_page.answer_totp_challenge()
     login_page.wait_for_redirect()
 
 

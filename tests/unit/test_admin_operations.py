@@ -56,7 +56,7 @@ def sample_account_id() -> str:
 
 @pytest.fixture
 def admin_appsync_event(sample_account_id: str) -> Dict[str, Any]:
-    """Base AppSync event structure for admin user."""
+    """Base AppSync event structure for admin user (MFA-verified, per #336)."""
     return {
         "arguments": {},
         "identity": {
@@ -64,6 +64,7 @@ def admin_appsync_event(sample_account_id: str) -> Dict[str, Any]:
             "username": "adminuser",
             "claims": {
                 "cognito:groups": ["ADMIN"],
+                "mfa": True,
             },
         },
         "requestContext": {
@@ -1292,6 +1293,219 @@ class TestAdminResetUserPassword:
             _validate_email_for_filter(long_email)
 
         assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+
+
+class TestAdminMfaRequired:
+    """Tests that admin operations require MFA (#336).
+
+    The gate is ``require_admin_mfa``: a non-admin is denied with "Admin
+    access required" (unchanged), and an admin whose token lacks the
+    injected "mfa" claim is denied with exactly "MFA required" (#336).
+    """
+
+    def _admin_event_without_mfa(self, sample_account_id: str) -> Dict[str, Any]:
+        """Admin event with the ADMIN group but no mfa claim."""
+        return {
+            "arguments": {},
+            "identity": {
+                "sub": sample_account_id,
+                "username": "adminuser",
+                "claims": {
+                    "cognito:groups": ["ADMIN"],
+                },
+            },
+            "requestContext": {"requestId": "test-correlation-id"},
+            "info": {"fieldName": "testField", "parentTypeName": "Mutation"},
+        }
+
+    def test_admin_with_mfa_passes(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """An admin whose token has injected mfa:true is allowed to proceed."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+
+        event = {
+            **admin_appsync_event,
+            "arguments": {"email": "test@example.com"},
+        }
+
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+            mock_cognito = MagicMock()
+            mock_cognito.list_users.return_value = {"Users": [{"Username": "test-user-123"}]}
+            mock_cognito.admin_reset_user_password.return_value = {}
+            mock_get_client.return_value = mock_cognito
+
+            result = admin_reset_user_password(event, lambda_context)
+
+        assert result is True
+
+    def test_admin_without_mfa_forbidden(
+        self,
+        dynamodb_table: Any,
+        sample_account_id: str,
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """An admin whose token lacks mfa:true gets exactly 'MFA required'."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+
+        event = {
+            **self._admin_event_without_mfa(sample_account_id),
+            "arguments": {"email": "test@example.com"},
+        }
+
+        result = admin_reset_user_password(event, lambda_context)
+
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.FORBIDDEN
+        assert result["message"] == "MFA required"
+
+    def test_admin_with_amr_pwd_only_forbidden(
+        self,
+        dynamodb_table: Any,
+        sample_account_id: str,
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """An admin with bare amr=['pwd'] is rejected with 'MFA required'."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+
+        event = {
+            "arguments": {"email": "test@example.com"},
+            "identity": {
+                "sub": sample_account_id,
+                "username": "adminuser",
+                "claims": {
+                    "cognito:groups": ["ADMIN"],
+                    "amr": ["pwd"],
+                },
+            },
+            "requestContext": {"requestId": "test-correlation-id"},
+            "info": {"fieldName": "testField", "parentTypeName": "Mutation"},
+        }
+
+        result = admin_reset_user_password(event, lambda_context)
+
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.FORBIDDEN
+        assert result["message"] == "MFA required"
+
+    def test_admin_with_mfa_false_and_amr_mfa_forbidden(
+        self,
+        dynamodb_table: Any,
+        sample_account_id: str,
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """An admin with mfa:False is rejected even with amr=['mfa'] (#336)."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+
+        event = {
+            "arguments": {"email": "test@example.com"},
+            "identity": {
+                "sub": sample_account_id,
+                "username": "adminuser",
+                "claims": {
+                    "cognito:groups": ["ADMIN"],
+                    "mfa": False,
+                    "amr": ["mfa"],
+                },
+            },
+            "requestContext": {"requestId": "test-correlation-id"},
+            "info": {"fieldName": "testField", "parentTypeName": "Mutation"},
+        }
+
+        result = admin_reset_user_password(event, lambda_context)
+
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.FORBIDDEN
+        assert result["message"] == "MFA required"
+
+    def test_admin_with_federated_amr_and_mfa_false_forbidden(
+        self,
+        dynamodb_table: Any,
+        sample_account_id: str,
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """An admin with federated amr and mfa:False is rejected with 'MFA required'."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+
+        event = {
+            "arguments": {"email": "test@example.com"},
+            "identity": {
+                "sub": sample_account_id,
+                "username": "adminuser",
+                "claims": {
+                    "cognito:groups": ["ADMIN"],
+                    "mfa": False,
+                    "amr": ["accounts.google.com"],
+                },
+            },
+            "requestContext": {"requestId": "test-correlation-id"},
+            "info": {"fieldName": "testField", "parentTypeName": "Mutation"},
+        }
+
+        result = admin_reset_user_password(event, lambda_context)
+
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.FORBIDDEN
+        assert result["message"] == "MFA required"
+
+    def test_admin_with_webauthn_amr_and_no_mfa_forbidden(
+        self,
+        dynamodb_table: Any,
+        sample_account_id: str,
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """An admin with passkey/webauthn amr without mfa:true gets 'MFA required'."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+
+        event = {
+            "arguments": {"email": "test@example.com"},
+            "identity": {
+                "sub": sample_account_id,
+                "username": "adminuser",
+                "claims": {
+                    "cognito:groups": ["ADMIN"],
+                    "amr": ["webauthn"],
+                },
+            },
+            "requestContext": {"requestId": "test-correlation-id"},
+            "info": {"fieldName": "testField", "parentTypeName": "Mutation"},
+        }
+
+        result = admin_reset_user_password(event, lambda_context)
+
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.FORBIDDEN
+        assert result["message"] == "MFA required"
+
+    def test_non_admin_without_mfa_gets_admin_access_required(
+        self,
+        dynamodb_table: Any,
+        non_admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """A non-admin without MFA is denied by the admin gate, not the MFA gate."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+
+        event = {
+            **non_admin_appsync_event,
+            "arguments": {"email": "test@example.com"},
+        }
+
+        result = admin_reset_user_password(event, lambda_context)
+
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.FORBIDDEN
+        assert result["message"] == "Admin access required"
 
 
 class TestAdminDeleteUser:
@@ -2572,7 +2786,7 @@ class TestCreateManagedCatalog:
             **admin_appsync_event,
             "identity": {
                 "username": "adminuser",
-                "claims": {"cognito:groups": ["ADMIN"]},
+                "claims": {"cognito:groups": ["ADMIN"], "mfa": True},
             },
             "arguments": {
                 "input": {

@@ -326,4 +326,16 @@ describe('CatalogEditorDialog', () => {
       });
     });
   });
+
+  test('adds and removes a second product in create mode', async () => {
+    const user = userEvent.setup();
+    render(<CatalogEditorDialog open={true} onClose={mockOnClose} onSave={mockOnSave} />);
+
+    await user.click(screen.getByRole('button', { name: /add product/i }));
+    expect(screen.getByText('Product 2')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Remove product 2' }));
+    expect(screen.queryByText('Product 2')).not.toBeInTheDocument();
+    expect(screen.getByText('Product 1')).toBeInTheDocument();
+  });
 });

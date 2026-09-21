@@ -5,16 +5,45 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, act } from '@testing-library/react';
 import { ProtectedRoute } from '../src/components/ProtectedRoute';
 import { AuthProvider } from '../src/contexts/AuthContext';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import * as amplifyAuth from 'aws-amplify/auth';
 
+// Mock Apollo Client
+vi.mock('../src/lib/apollo', () => ({
+  apolloClient: {
+    query: vi.fn().mockResolvedValue({
+      data: {
+        getMyAccount: {
+          id: 'user-123',
+          email: 'test@example.com',
+          name: 'Test User',
+          displayName: 'Tester',
+          isAdmin: false,
+          createdAt: '2024-01-01T00:00:00Z',
+          updatedAt: '2024-01-01T00:00:00Z',
+        },
+      },
+    }),
+  },
+}));
+
 // Mock AWS Amplify
 vi.mock('aws-amplify/auth', () => ({
   fetchAuthSession: vi.fn(),
   getCurrentUser: vi.fn(),
+  setUpTOTP: vi.fn(),
+  verifyTOTPSetup: vi.fn(),
+  updateMFAPreference: vi.fn(),
+  signOut: vi.fn(),
+}));
+
+vi.mock('qrcode', () => ({
+  default: {
+    toDataURL: vi.fn().mockResolvedValue('data:image/png;base64,mockqrcode'),
+  },
 }));
 
 vi.mock('aws-amplify/utils', () => ({
@@ -30,14 +59,33 @@ const mockLoadingState = () => {
   );
 };
 
-const mockAuthenticatedState = (isAdmin: boolean) => {
+const buildTokenPayload = (isAdmin: boolean, isFederated: boolean) => {
+  const groups = isAdmin ? ['ADMIN'] : [];
+  if (isFederated) {
+    return { 'cognito:groups': groups, identities: [{ providerName: 'Google' }] };
+  }
+  return { 'cognito:groups': groups };
+};
+
+const buildMockUser = (isAdmin: boolean) => {
+  if (isAdmin) {
+    return { userId: 'admin-123', username: 'admin' };
+  }
+  return { userId: 'user-123', username: 'user' };
+};
+
+const mockAuthenticatedState = (isAdmin: boolean, isFederated: boolean) => {
+  const payload = buildTokenPayload(isAdmin, isFederated);
+  const user = buildMockUser(isAdmin);
   vi.mocked(amplifyAuth.fetchAuthSession).mockResolvedValue({
-    tokens: { idToken: { toString: () => 'mock-token' } },
+    tokens: {
+      idToken: {
+        toString: () => 'mock-token',
+        payload,
+      },
+    },
   } as any);
-  vi.mocked(amplifyAuth.getCurrentUser).mockResolvedValue({
-    userId: isAdmin ? 'admin-123' : 'user-123',
-    username: isAdmin ? 'admin' : 'user',
-  } as any);
+  vi.mocked(amplifyAuth.getCurrentUser).mockResolvedValue(user as any);
 };
 
 const mockUnauthenticatedState = () => {
@@ -47,11 +95,17 @@ const mockUnauthenticatedState = () => {
 };
 
 // Helper: Determine which mock to apply based on auth state
-type AuthParams = { isAuthenticated?: boolean; isAdmin?: boolean; loading?: boolean };
+type AuthParams = { isAuthenticated?: boolean; isAdmin?: boolean; loading?: boolean; isFederated?: boolean };
+
+const mockAuthForParams = (params: AuthParams) => {
+  const isAdmin = Boolean(params.isAdmin);
+  const isFederated = Boolean(params.isFederated);
+  mockAuthenticatedState(isAdmin, isFederated);
+};
 
 const getAuthMockFn = (params: AuthParams): (() => void) => {
   if (params.loading) return mockLoadingState;
-  if (params.isAuthenticated) return () => mockAuthenticatedState(params.isAdmin ?? false);
+  if (params.isAuthenticated) return () => mockAuthForParams(params);
   return mockUnauthenticatedState;
 };
 
@@ -61,7 +115,7 @@ const setupAuthMock = (params: AuthParams) => getAuthMockFn(params)();
 // Helper to render with routing context
 const renderWithRouter = (
   ui: React.ReactElement,
-  params: { isAuthenticated?: boolean; isAdmin?: boolean; loading?: boolean } = {},
+  params: AuthParams = {},
 ) => {
   setupAuthMock(params);
   return render(
@@ -152,13 +206,15 @@ describe('ProtectedRoute', () => {
   });
 
   it('renders children when requireAdmin is true and user is admin', async () => {
-    // Note: Current AuthContext implementation returns isAdmin: false from placeholder fetchAccountData
-    // This test will need to be updated when Apollo Client integration adds real account fetching
-    // For now, we'll test that the component properly checks the isAdmin flag
+    renderWithRouter(
+      <ProtectedRoute requireAdmin={true}>
+        <div>Admin Content</div>
+      </ProtectedRoute>,
+      { isAuthenticated: true, isAdmin: true },
+    );
 
-    // Skip this test until Apollo Client is integrated with real account data
-    // The test structure is correct but needs real GraphQL mocking
-    expect(true).toBe(true);
+    await screen.findByText('Admin Content');
+    expect(screen.getByText('Admin Content')).toBeInTheDocument();
   });
 
   it('uses replace navigation when redirecting to login', async () => {
@@ -189,5 +245,70 @@ describe('ProtectedRoute', () => {
 
     // Should allow access since requireAdmin defaults to false
     expect(screen.getByText('Content')).toBeInTheDocument();
+  });
+
+  it('keeps normal users unaffected when mfa-required event fires on non-admin routes', async () => {
+    renderWithRouter(
+      <ProtectedRoute requireAdmin={false}>
+        <div>Regular User Content</div>
+      </ProtectedRoute>,
+      { isAuthenticated: true, isAdmin: false },
+    );
+
+    await screen.findByText('Regular User Content');
+
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent('mfa-required', {
+          detail: { message: 'MFA required' },
+        }),
+      );
+    });
+
+    expect(screen.getByText('Regular User Content')).toBeInTheDocument();
+    expect(screen.queryByTestId('mfa-setup-required-state')).not.toBeInTheDocument();
+  });
+
+  it('blocks admin route with MFA setup required state when MFA is required', async () => {
+    renderWithRouter(
+      <ProtectedRoute requireAdmin={true}>
+        <div>Admin Content</div>
+      </ProtectedRoute>,
+      { isAuthenticated: true, isAdmin: true },
+    );
+
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent('mfa-required', {
+          detail: { message: 'MFA required' },
+        }),
+      );
+    });
+
+    expect(await screen.findByTestId('mfa-setup-required-state')).toBeInTheDocument();
+    expect(screen.getByText('MFA Setup Required')).toBeInTheDocument();
+    expect(screen.queryByText('Admin Content')).not.toBeInTheDocument();
+  });
+
+  it('blocks federated admin with password sign-in required dialog when MFA is required', async () => {
+    renderWithRouter(
+      <ProtectedRoute requireAdmin={true}>
+        <div>Admin Content</div>
+      </ProtectedRoute>,
+      { isAuthenticated: true, isAdmin: true, isFederated: true },
+    );
+
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent('mfa-required', {
+          detail: { message: 'MFA required' },
+        }),
+      );
+    });
+
+    expect(await screen.findAllByRole('heading', { name: /Admin access requires a password sign-in/i })).not.toHaveLength(0);
+    expect(screen.getAllByText(/social provider which cannot present MFA/i).length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: /Set Up MFA/i })).not.toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /Sign Out/i }).length).toBeGreaterThan(0);
   });
 });

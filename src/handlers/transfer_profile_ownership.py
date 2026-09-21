@@ -24,14 +24,14 @@ from botocore.exceptions import ClientError
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
-    from utils.auth import is_admin
+    from utils.auth import has_mfa, is_admin
     from utils.dynamodb import tables
     from utils.errors import AppError, ErrorCode
     from utils.ids import ensure_account_id, ensure_profile_id
     from utils.logging import get_logger
     from utils.pagination import query_all_items
 except ModuleNotFoundError:  # pragma: no cover
-    from ..utils.auth import is_admin
+    from ..utils.auth import has_mfa, is_admin
     from ..utils.dynamodb import tables
     from ..utils.errors import AppError, ErrorCode
     from ..utils.ids import ensure_account_id, ensure_profile_id
@@ -68,8 +68,12 @@ def _get_and_verify_profile(db_profile_id: str, db_caller_id: str, event: Dict[s
     caller_is_owner = profile["ownerAccountId"] == db_caller_id
     caller_is_admin = is_admin(event)
 
-    if not caller_is_owner and not caller_is_admin:
-        raise AppError(ErrorCode.FORBIDDEN, "Only the profile owner or an admin can transfer ownership")
+    if not caller_is_owner:
+        if not caller_is_admin:
+            raise AppError(ErrorCode.FORBIDDEN, "Only the profile owner or an admin can transfer ownership")
+        # An admin (not the owner) may transfer any profile, but only with MFA (#336).
+        if not has_mfa(event):
+            raise AppError(ErrorCode.FORBIDDEN, "MFA required")
 
     return profile
 
@@ -183,7 +187,9 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     db_caller_id = ensure_account_id(caller_account_id) or ""
 
     profile = _get_and_verify_profile(db_profile_id, db_caller_id, event)
-    caller_is_admin = is_admin(event)
+    # Only an MFA-verified admin skips the share check; everyone else (including a
+    # plain owner) must transfer to a user who already has a share (#336).
+    caller_is_admin = is_admin(event) and has_mfa(event)
     _verify_new_owner_has_share(db_profile_id, db_new_owner_id, caller_is_admin)
     _transfer_ownership(profile, db_profile_id, db_new_owner_id)
     _update_shares_after_transfer(db_profile_id, db_new_owner_id)

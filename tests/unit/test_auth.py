@@ -9,8 +9,10 @@ from src.utils.auth import (
     check_profile_access,
     get_account,
     get_dynamodb_resource,
+    has_mfa,
     is_admin,
     is_profile_owner,
+    require_admin_mfa,
     require_profile_access,
 )
 from src.utils.errors import AppError, ErrorCode
@@ -1478,6 +1480,413 @@ class TestIsAdmin:
 
         with pytest.raises(RuntimeError, match="boom"):
             is_admin(event)
+
+
+class TestHasMfa:
+    """Tests for has_mfa function - honors only the injected mfa claim (#336)."""
+
+    def test_mfa_claim_true_returns_true(self) -> None:
+        """Test that a true mfa claim returns True without amr."""
+        event = {
+            "identity": {
+                "claims": {
+                    "mfa": True,
+                    "sub": "test-user-123",
+                }
+            }
+        }
+
+        result = has_mfa(event)
+
+        assert result is True
+
+    def test_mfa_claim_true_with_amr_returns_true(self) -> None:
+        """Test that a true mfa claim returns True alongside amr."""
+        event = {
+            "identity": {
+                "claims": {
+                    "mfa": True,
+                    "amr": ["password"],
+                    "sub": "test-user-123",
+                }
+            }
+        }
+
+        result = has_mfa(event)
+
+        assert result is True
+
+    def test_mfa_claim_true_with_pwd_amr_returns_true(self) -> None:
+        """Test that a true mfa claim returns True alongside pwd amr."""
+        event = {
+            "identity": {
+                "claims": {
+                    "mfa": True,
+                    "amr": ["pwd"],
+                    "sub": "test-user-123",
+                }
+            }
+        }
+
+        result = has_mfa(event)
+
+        assert result is True
+
+    def test_mfa_claim_true_with_webauthn_amr_returns_true(self) -> None:
+        """Test that a true mfa claim returns True alongside webauthn amr."""
+        event = {
+            "identity": {
+                "claims": {
+                    "mfa": True,
+                    "amr": ["webauthn"],
+                    "sub": "test-user-123",
+                }
+            }
+        }
+
+        result = has_mfa(event)
+
+        assert result is True
+
+    def test_mfa_claim_false_returns_false(self) -> None:
+        """Test that a false mfa claim returns False."""
+        event = {
+            "identity": {
+                "claims": {
+                    "mfa": False,
+                    "sub": "test-user-123",
+                }
+            }
+        }
+
+        result = has_mfa(event)
+
+        assert result is False
+
+    def test_mfa_claim_false_with_pwd_amr_rejected(self) -> None:
+        """Test that mfa:false is rejected even when amr contains 'pwd'."""
+        event = {
+            "identity": {
+                "claims": {
+                    "mfa": False,
+                    "amr": ["pwd"],
+                    "sub": "test-user-123",
+                }
+            }
+        }
+
+        result = has_mfa(event)
+
+        assert result is False
+
+    def test_mfa_claim_false_with_mfa_amr_rejected(self) -> None:
+        """Test that mfa:false is rejected even when amr contains 'mfa' (#336)."""
+        event = {
+            "identity": {
+                "claims": {
+                    "mfa": False,
+                    "amr": ["mfa"],
+                    "sub": "test-user-123",
+                }
+            }
+        }
+
+        result = has_mfa(event)
+
+        assert result is False
+
+    def test_mfa_claim_false_with_webauthn_amr_rejected(self) -> None:
+        """Test that mfa:false is rejected when amr contains 'webauthn'."""
+        event = {
+            "identity": {
+                "claims": {
+                    "mfa": False,
+                    "amr": ["webauthn"],
+                    "sub": "test-user-123",
+                }
+            }
+        }
+
+        result = has_mfa(event)
+
+        assert result is False
+
+    def test_mfa_claim_false_with_federated_amr_rejected(self) -> None:
+        """Test that mfa:false is rejected when amr contains federated markers."""
+        event = {
+            "identity": {
+                "claims": {
+                    "mfa": False,
+                    "amr": ["accounts.google.com"],
+                    "sub": "test-user-123",
+                }
+            }
+        }
+
+        result = has_mfa(event)
+
+        assert result is False
+
+    def test_missing_mfa_claim_with_pwd_amr_rejected(self) -> None:
+        """Test that bare amr=['pwd'] without mfa claim returns False."""
+        event = {
+            "identity": {
+                "claims": {
+                    "amr": ["pwd"],
+                    "sub": "test-user-123",
+                }
+            }
+        }
+
+        result = has_mfa(event)
+
+        assert result is False
+
+    def test_missing_mfa_claim_with_mfa_amr_rejected(self) -> None:
+        """Test that amr containing 'mfa' without injected mfa claim returns False."""
+        event = {
+            "identity": {
+                "claims": {
+                    "amr": ["mfa"],
+                    "sub": "test-user-123",
+                }
+            }
+        }
+
+        result = has_mfa(event)
+
+        assert result is False
+
+    def test_missing_mfa_claim_with_webauthn_amr_rejected(self) -> None:
+        """Test that amr containing 'webauthn' without mfa claim returns False."""
+        event = {
+            "identity": {
+                "claims": {
+                    "amr": ["webauthn"],
+                    "sub": "test-user-123",
+                }
+            }
+        }
+
+        result = has_mfa(event)
+
+        assert result is False
+
+    def test_missing_mfa_claim_with_federated_amr_rejected(self) -> None:
+        """Test that amr containing federated markers without mfa claim returns False."""
+        event = {
+            "identity": {
+                "claims": {
+                    "amr": ["Google", "accounts.google.com"],
+                    "sub": "test-user-123",
+                }
+            }
+        }
+
+        result = has_mfa(event)
+
+        assert result is False
+
+    def test_mfa_claim_string_true_returns_false(self) -> None:
+        """Test that a non-boolean truthy mfa claim returns False."""
+        event = {
+            "identity": {
+                "claims": {
+                    "mfa": "true",
+                    "amr": ["password"],
+                    "sub": "test-user-123",
+                }
+            }
+        }
+
+        result = has_mfa(event)
+
+        assert result is False
+
+    def test_missing_mfa_claim_returns_false(self) -> None:
+        """Test that a token without mfa claim returns False."""
+        event = {
+            "identity": {
+                "claims": {
+                    "cognito:groups": ["ADMIN"],
+                    "sub": "test-user-123",
+                }
+            }
+        }
+
+        result = has_mfa(event)
+
+        assert result is False
+
+    def test_missing_identity_returns_false(self) -> None:
+        """Test that missing identity field returns False."""
+        event: Dict[str, Any] = {}
+
+        result = has_mfa(event)
+
+        assert result is False
+
+    def test_none_event_returns_false(self) -> None:
+        """Test that None event returns False (malformed event)."""
+        result = has_mfa(None)  # type: ignore[arg-type]
+
+        assert result is False
+
+    def test_non_dict_event_returns_false(self) -> None:
+        """Test that non-dict event returns False (malformed event)."""
+        result = has_mfa("not-an-event")  # type: ignore[arg-type]
+
+        assert result is False
+
+    def test_non_dict_identity_returns_false(self) -> None:
+        """Test that non-dict identity returns False (malformed event)."""
+        event: Dict[str, Any] = {
+            "identity": "not-a-dict",  # Invalid type
+        }
+
+        result = has_mfa(event)
+
+        assert result is False
+
+    def test_non_dict_claims_returns_false(self) -> None:
+        """Test that non-dict claims returns False (malformed event)."""
+        event: Dict[str, Any] = {
+            "identity": {
+                "claims": "not-a-dict",  # Invalid type
+            }
+        }
+
+        result = has_mfa(event)
+
+        assert result is False
+
+
+class TestRequireAdminMfa:
+    """Tests for require_admin_mfa central gate (#336)."""
+
+    def test_admin_with_injected_mfa_passes(self) -> None:
+        """Admin with injected mfa:True succeeds."""
+        event = {
+            "identity": {
+                "claims": {
+                    "cognito:groups": ["ADMIN"],
+                    "mfa": True,
+                    "sub": "admin-123",
+                }
+            }
+        }
+
+        # Should not raise
+        require_admin_mfa(event)
+
+    def test_admin_without_mfa_raises_forbidden(self) -> None:
+        """Admin without mfa claim raises FORBIDDEN 'MFA required'."""
+        event = {
+            "identity": {
+                "claims": {
+                    "cognito:groups": ["ADMIN"],
+                    "sub": "admin-123",
+                }
+            }
+        }
+
+        with pytest.raises(AppError) as exc_info:
+            require_admin_mfa(event)
+
+        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
+        assert exc_info.value.message == "MFA required"
+
+    def test_admin_with_mfa_false_and_amr_mfa_raises_forbidden(self) -> None:
+        """Admin with mfa:False is rejected even with amr=['mfa'] (#336)."""
+        event = {
+            "identity": {
+                "claims": {
+                    "cognito:groups": ["ADMIN"],
+                    "mfa": False,
+                    "amr": ["mfa"],
+                    "sub": "admin-123",
+                }
+            }
+        }
+
+        with pytest.raises(AppError) as exc_info:
+            require_admin_mfa(event)
+
+        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
+        assert exc_info.value.message == "MFA required"
+
+    def test_admin_with_amr_pwd_only_raises_forbidden(self) -> None:
+        """Admin with bare amr=['pwd'] raises FORBIDDEN 'MFA required'."""
+        event = {
+            "identity": {
+                "claims": {
+                    "cognito:groups": ["ADMIN"],
+                    "amr": ["pwd"],
+                    "sub": "admin-123",
+                }
+            }
+        }
+
+        with pytest.raises(AppError) as exc_info:
+            require_admin_mfa(event)
+
+        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
+        assert exc_info.value.message == "MFA required"
+
+    def test_admin_with_amr_webauthn_only_raises_forbidden(self) -> None:
+        """Admin with bare amr=['webauthn'] raises FORBIDDEN 'MFA required'."""
+        event = {
+            "identity": {
+                "claims": {
+                    "cognito:groups": ["ADMIN"],
+                    "amr": ["webauthn"],
+                    "sub": "admin-123",
+                }
+            }
+        }
+
+        with pytest.raises(AppError) as exc_info:
+            require_admin_mfa(event)
+
+        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
+        assert exc_info.value.message == "MFA required"
+
+    def test_admin_with_federated_amr_and_mfa_false_raises_forbidden(self) -> None:
+        """Admin with social/federated amr and mfa:False raises FORBIDDEN 'MFA required'."""
+        event = {
+            "identity": {
+                "claims": {
+                    "cognito:groups": ["ADMIN"],
+                    "mfa": False,
+                    "amr": ["accounts.google.com"],
+                    "sub": "admin-123",
+                }
+            }
+        }
+
+        with pytest.raises(AppError) as exc_info:
+            require_admin_mfa(event)
+
+        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
+        assert exc_info.value.message == "MFA required"
+
+    def test_non_admin_raises_forbidden_admin_access_required(self) -> None:
+        """Non-admin caller is rejected with 'Admin access required' even with mfa:True."""
+        event = {
+            "identity": {
+                "claims": {
+                    "cognito:groups": ["USER"],
+                    "mfa": True,
+                    "sub": "user-123",
+                }
+            }
+        }
+
+        with pytest.raises(AppError) as exc_info:
+            require_admin_mfa(event)
+
+        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
+        assert exc_info.value.message == "Admin access required"
 
 
 class TestHasRequiredPermissionEdgeCases:

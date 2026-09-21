@@ -89,6 +89,12 @@ variable "post_confirmation_lambda_arn" {
   default     = null
 }
 
+variable "pre_token_generation_lambda_arn" {
+  description = "ARN of the Pre Token Generation Lambda trigger. If null, no pre-token-generation trigger is configured."
+  type        = string
+  default     = null
+}
+
 variable "enable_lambda_triggers" {
   description = "Whether Cognito Lambda triggers are configured. Use a static bool (known at plan time) rather than deriving from ARN nullability to avoid unknown count/for_each values during greenfield applies."
   type        = bool
@@ -98,9 +104,10 @@ variable "enable_lambda_triggers" {
     condition = !var.enable_lambda_triggers || (
       var.pre_signup_lambda_arn != null &&
       var.post_auth_lambda_arn != null &&
-      var.post_confirmation_lambda_arn != null
+      var.post_confirmation_lambda_arn != null &&
+      var.pre_token_generation_lambda_arn != null
     )
-    error_message = "When enable_lambda_triggers is true, pre_signup_lambda_arn, post_auth_lambda_arn, and post_confirmation_lambda_arn must all be non-null."
+    error_message = "When enable_lambda_triggers is true, pre_signup_lambda_arn, post_auth_lambda_arn, post_confirmation_lambda_arn, and pre_token_generation_lambda_arn must all be non-null."
   }
 }
 
@@ -142,6 +149,35 @@ locals {
     ManagedBy   = "opentofu"
     Project     = var.name_prefix
   }
+
+  # Content hash of every input that feeds aws_cognito_user_pool.main.
+  #
+  # The hashicorp/aws provider (verified against 6.63.0, the latest release)
+  # has no schema support for web_authn_configuration.factor_configuration
+  # (still an open upstream PR: hashicorp/terraform-provider-aws#48388), so
+  # FactorConfiguration=MULTI_FACTOR_WITH_USER_VERIFICATION is applied
+  # out-of-band via the AWS CLI (terraform_data.webauthn_factor_configuration).
+  # The provider re-sends the entire WebAuthnConfiguration - WITHOUT
+  # FactorConfiguration - on EVERY UpdateUserPool call, silently resetting it
+  # to SINGLE_FACTOR. A TOTP-activated user is then refused passkey-first
+  # sign-in ("Password Challenge is Required to SignIn").
+  #
+  # Keying the CLI's triggers_replace to this hash makes it re-run after ANY
+  # pool input change (i.e. after every pool update), re-applying the
+  # FactorConfiguration. Over-triggering is harmless: set-user-pool-mfa-config
+  # is idempotent. If a new variable is added to the pool, add it here too.
+  user_pool_input_hash = sha1(jsonencode({
+    name_prefix                  = var.name_prefix
+    region_abbrev                = var.region_abbrev
+    environment                  = var.environment
+    aws_region                   = var.aws_region
+    sms_role_arn                 = var.sms_role_arn
+    enable_webauthn              = var.enable_webauthn
+    web_authn_relying_party_id   = var.web_authn_relying_party_id
+    pre_signup_lambda_arn        = var.pre_signup_lambda_arn
+    post_auth_lambda_arn         = var.post_auth_lambda_arn
+    post_confirmation_lambda_arn = var.post_confirmation_lambda_arn
+  }))
 }
 
 # User Pool
@@ -225,9 +261,14 @@ resource "aws_cognito_user_pool" "main" {
     for_each = var.enable_webauthn ? [1] : []
     content {
       relying_party_id  = var.web_authn_relying_party_id
-      user_verification = "preferred"
+      user_verification = "required"
     }
   }
+
+  # Device configuration: intentionally omitted / disabled.
+  # Device remembering can suppress the TOTP challenge on password sign-ins
+  # for remembered devices, which would allow admins to obtain mfa: true without
+  # presenting TOTP on subsequent logins (reopening enrollment-as-proof).
 
   # Lambda triggers (restored from CDK; omitted during CDK → OpenTofu migration)
   # Use a static block (not dynamic) so the block is always emitted; null values are
@@ -236,12 +277,81 @@ resource "aws_cognito_user_pool" "main" {
     pre_sign_up         = var.pre_signup_lambda_arn
     post_authentication = var.post_auth_lambda_arn
     post_confirmation   = var.post_confirmation_lambda_arn
+    # Pre Token Generation trigger: sets the custom boolean 'mfa' claim on the ID
+    # and access tokens (#336). V2_0 (not the default V1_0) is required so the claim
+    # can be a JSON boolean; V1_0 trigger responses only accept string values.
+    # Provider 6.x exposes this as a nested block with required lambda_arn + lambda_version.
+    pre_token_generation_config {
+      lambda_arn     = var.pre_token_generation_lambda_arn
+      lambda_version = "V2_0"
+    }
   }
 
   tags = local.tags
 
   lifecycle {
     prevent_destroy = var.prevent_destroy
+  }
+}
+
+# Workaround for hashicorp/aws provider gap:
+# The AWS provider does not support `factor_configuration` inside
+# `web_authn_configuration` (open upstream issue hashicorp/terraform-provider-aws#47598).
+# Setting FactorConfiguration=MULTI_FACTOR_WITH_USER_VERIFICATION is required so
+# that passkeys with user verification independently satisfy MFA and users with
+# TOTP enabled are not locked out of passkey sign-in (eliminating the SINGLE_FACTOR lockout).
+#
+# This terraform_data resource runs out-of-band via AWS CLI when WebAuthn is enabled.
+# triggers_replace keys on local.user_pool_input_hash (a content hash of every pool
+# input) so the CLI re-runs after ANY pool update, not only on pool recreation or
+# relying-party changes: the provider re-sends WebAuthnConfiguration without
+# FactorConfiguration on every UpdateUserPool and would otherwise silently revert it
+# to SINGLE_FACTOR. It does not fight tofu state because factor_configuration is
+# omitted from the provider's resource schema.
+resource "terraform_data" "webauthn_factor_configuration" {
+  count = var.enable_webauthn ? 1 : 0
+
+  triggers_replace = [
+    aws_cognito_user_pool.main.id,
+    local.user_pool_input_hash,
+  ]
+
+  depends_on = [aws_cognito_user_pool.main]
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      set -eu
+
+      USER_POOL_ID="${aws_cognito_user_pool.main.id}"
+      REGION="${var.aws_region}"
+      RP_ID="${var.web_authn_relying_party_id}"
+      MAX_ATTEMPTS=5
+      DELAY=5
+
+      echo "Configuring WebAuthn FactorConfiguration=MULTI_FACTOR_WITH_USER_VERIFICATION on Cognito user pool $${USER_POOL_ID}..."
+
+      ATTEMPT=1
+      while true; do
+        if aws cognito-idp set-user-pool-mfa-config \
+            --region "$${REGION}" \
+            --user-pool-id "$${USER_POOL_ID}" \
+            --mfa-configuration OPTIONAL \
+            --software-token-mfa-configuration Enabled=true \
+            --web-authn-configuration RelyingPartyId="$${RP_ID}",UserVerification=required,FactorConfiguration=MULTI_FACTOR_WITH_USER_VERIFICATION; then
+          echo "Successfully configured WebAuthn FactorConfiguration on user pool $${USER_POOL_ID}."
+          break
+        fi
+
+        if [ "$${ATTEMPT}" -ge "$${MAX_ATTEMPTS}" ]; then
+          echo "ERROR: Failed to set WebAuthn FactorConfiguration on user pool $${USER_POOL_ID} after $${MAX_ATTEMPTS} attempts." >&2
+          exit 1
+        fi
+
+        echo "Transient failure setting user pool MFA config; retrying in $${DELAY}s (attempt $${ATTEMPT}/$${MAX_ATTEMPTS})..." >&2
+        sleep "$${DELAY}"
+        ATTEMPT=$((ATTEMPT + 1))
+      done
+    EOT
   }
 }
 
@@ -281,10 +391,22 @@ resource "aws_lambda_permission" "cognito_post_confirmation" {
   source_arn    = aws_cognito_user_pool.main.arn
 }
 
+resource "aws_lambda_permission" "cognito_pre_token_generation" {
+  count = var.enable_lambda_triggers ? 1 : 0
+
+  statement_id  = "AllowCognitoInvokePreTokenGeneration"
+  action        = "lambda:InvokeFunction"
+  function_name = var.pre_token_generation_lambda_arn
+  principal     = "cognito-idp.amazonaws.com"
+  source_arn    = aws_cognito_user_pool.main.arn
+}
+
 # Least-privilege Cognito admin policy for Lambda handlers.
 # Scopes actions to the created user pool. Only actions actually used by the
-# Lambda handlers (list/search users, list groups, delete/reset/link users) are
-# granted. AdminCreateUser/AdminSetUserPassword/AdminGetUser are not used.
+# Lambda handlers (list/search users, list groups, read the MFA preference,
+# delete/reset/link users) are granted. AdminCreateUser/AdminSetUserPassword
+# are not used. AdminGetUser is used by the pre-token-generation trigger to
+# read PreferredMfaSetting for the custom 'mfa' claim (#336).
 # kics-scan ignore-line
 data "aws_iam_policy_document" "lambda_cognito_admin" {
   statement {
@@ -292,6 +414,7 @@ data "aws_iam_policy_document" "lambda_cognito_admin" {
     actions = [
       "cognito-idp:ListUsers",
       "cognito-idp:AdminListGroupsForUser",
+      "cognito-idp:AdminGetUser",
       "cognito-idp:AdminDeleteUser",
       "cognito-idp:AdminResetUserPassword",
       "cognito-idp:AdminLinkProviderForUser",
@@ -348,6 +471,7 @@ resource "aws_cognito_user_pool_client" "web" {
     "ALLOW_USER_SRP_AUTH",
     "ALLOW_REFRESH_TOKEN_AUTH",
     "ALLOW_USER_PASSWORD_AUTH",
+    "ALLOW_ADMIN_USER_PASSWORD_AUTH",
     "ALLOW_USER_AUTH"
   ]
 
@@ -362,7 +486,7 @@ resource "aws_cognito_user_pool_client" "web" {
   # required, so it is omitted to reduce token exposure in the browser.
   allowed_oauth_flows                  = ["code"]
   allowed_oauth_flows_user_pool_client = true
-  allowed_oauth_scopes                 = ["email", "openid", "profile"]
+  allowed_oauth_scopes                 = ["email", "openid", "profile", "aws.cognito.signin.user.admin"]
 
   prevent_user_existence_errors = "ENABLED"
 

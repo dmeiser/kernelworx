@@ -38,6 +38,7 @@ import {
 import { LoadingState } from '../components/LoadingState';
 import { ErrorAlert } from '../components/ErrorAlert';
 import { PageHeader } from '../components/PageHeader';
+import { AmrTripwireBanner } from '../components/AmrTripwireBanner';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { useSnackbar } from '../hooks/useSnackbar';
 import {
@@ -69,6 +70,9 @@ import {
   DELETE_CATALOG,
 } from '../lib/graphql';
 import { CatalogEditorDialog } from '../components/CatalogEditorDialog';
+import { MfaSetupRequiredState } from '../components/MfaSetupRequiredState';
+import { useAdminMfa } from '../hooks/useAdminMfa';
+import { isMfaRequiredError } from '../lib/mfaErrors';
 import { formatDisplayDate } from '../lib/date-utils';
 import type { GqlCatalog, GqlAdminUser, GqlProductInput } from '../types/graphql-generated';
 import type {
@@ -443,6 +447,7 @@ const SystemInfoTabContent: React.FC = () => (
 // --- Main Component ---
 // eslint-disable-next-line complexity -- Admin page with multiple tabs and state management
 export const AdminPage: React.FC = () => {
+  const { isMfaRequired } = useAdminMfa();
   const navigate = useNavigate();
   const [currentTab, setCurrentTab] = useState(0);
 
@@ -496,6 +501,8 @@ export const AdminPage: React.FC = () => {
     error: catalogsError,
     refetch: refetchCatalogs,
   } = useQuery<{ listManagedCatalogs: GqlCatalog[] }>(LIST_MANAGED_CATALOGS);
+
+  const mfaRequired = isMfaRequired || isMfaRequiredError(usersError) || isMfaRequiredError(catalogsError);
 
   // Mutations
   const [resetPassword, { loading: resettingPassword }] = useMutation(ADMIN_RESET_USER_PASSWORD);
@@ -613,8 +620,19 @@ export const AdminPage: React.FC = () => {
     if (!resetPasswordUser) return;
     /* v8 ignore stop */
     const targetEmail = resetPasswordUser.email;
-    await resetPassword({ variables: { email: targetEmail } });
-    showSnackbar(`Password reset email sent to ${targetEmail}`);
+    try {
+      await resetPassword({ variables: { email: targetEmail } });
+      showSnackbar(`Password reset email sent to ${targetEmail}`);
+    } catch (error) {
+      if (isMfaRequiredError(error)) {
+        window.dispatchEvent(
+          new CustomEvent('mfa-required', {
+            detail: { message: 'MFA required' },
+          }),
+        );
+      }
+      showSnackbar(`Error resetting password: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
   };
 
   // eslint-disable-next-line complexity -- Cascading delete requires sequential steps
@@ -665,6 +683,13 @@ export const AdminPage: React.FC = () => {
       setSearchedUsers([]);
       setHasSearched(false);
     } catch (error) {
+      if (isMfaRequiredError(error)) {
+        window.dispatchEvent(
+          new CustomEvent('mfa-required', {
+            detail: { message: 'MFA required' },
+          }),
+        );
+      }
       setDeleteProgress({
         step: 'Error occurred',
         completed,
@@ -681,9 +706,15 @@ export const AdminPage: React.FC = () => {
 
   const deletingUser = deleteProgress !== null;
 
+  if (mfaRequired) {
+    return <MfaSetupRequiredState />;
+  }
+
   return (
     <Box>
       <PageHeader title="Admin Console" />
+
+      <AmrTripwireBanner />
 
       <Alert severity="warning" sx={{ mb: 3 }}>
         <strong>Administrator Access:</strong> You have elevated privileges. Use this console responsibly.

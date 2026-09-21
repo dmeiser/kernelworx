@@ -1,10 +1,13 @@
 import {
   CognitoIdentityProviderClient,
   InitiateAuthCommand,
+  RespondToAuthChallengeCommand,
   AuthFlowType,
   type InitiateAuthResponse,
+  type RespondToAuthChallengeResponse,
 } from '@aws-sdk/client-cognito-identity-provider';
 import { getAwsConfig } from './awsConfig';
+import { generateTotp } from './totp';
 
 export interface CognitoTokens {
   accessToken: string;
@@ -54,16 +57,61 @@ function isResourceNotFound(error: unknown): boolean {
 }
 
 /**
- * Sign in a user and return Cognito tokens with account ID.
+ * Answer a Cognito SOFTWARE_TOKEN_MFA challenge.
+ *
+ * The admin owner test user has a provisioned TOTP device (#336), so its
+ * password auth returns an MFA challenge instead of tokens.
  */
-export async function signInUser(email: string, password: string): Promise<AuthResult> {
+async function respondToSoftwareTokenMfa(
+  client: CognitoIdentityProviderClient,
+  clientId: string,
+  email: string,
+  session: string | undefined,
+  totpSecret: string | undefined,
+): Promise<RespondToAuthChallengeResponse> {
+  if (!session) {
+    throw new Error('Cognito returned a SOFTWARE_TOKEN_MFA challenge without a session');
+  }
+  if (!totpSecret) {
+    throw new Error(
+      'Cognito returned a SOFTWARE_TOKEN_MFA challenge but no TOTP secret was provided. ' +
+        'Set TEST_OWNER_TOTP_SECRET (provisioned by scripts/create-test-users.sh or exported by ephemeral CI).',
+    );
+  }
+  return client.send(
+    new RespondToAuthChallengeCommand({
+      ClientId: clientId,
+      ChallengeName: 'SOFTWARE_TOKEN_MFA',
+      Session: session,
+      ChallengeResponses: {
+        USERNAME: email,
+        SOFTWARE_TOKEN_MFA_CODE: await generateTotp(totpSecret),
+      },
+    }),
+  );
+}
+
+/**
+ * Sign in a user and return Cognito tokens with account ID.
+ *
+ * @param email - User email address
+ * @param password - User password
+ * @param totpSecret - Base32 TOTP secret for users with a provisioned MFA
+ *   device (the admin owner). Required when Cognito answers the password
+ *   auth with a SOFTWARE_TOKEN_MFA challenge.
+ */
+export async function signInUser(
+  email: string,
+  password: string,
+  totpSecret?: string,
+): Promise<AuthResult> {
   // Get config dynamically from AWS
   const config = await getAwsConfig();
   const { userPoolId, userPoolClientId, region } = config;
 
   const client = new CognitoIdentityProviderClient({ region });
 
-  let response: InitiateAuthResponse;
+  let response: InitiateAuthResponse | RespondToAuthChallengeResponse;
   for (let attempt = 0; ; attempt++) {
     try {
       response = await client.send(
@@ -98,6 +146,16 @@ export async function signInUser(email: string, password: string): Promise<AuthR
   }
 
   try {
+    if (response.ChallengeName === 'SOFTWARE_TOKEN_MFA') {
+      response = await respondToSoftwareTokenMfa(
+        client,
+        userPoolClientId,
+        email,
+        response.Session,
+        totpSecret,
+      );
+    }
+
     if (!response.AuthenticationResult) {
       throw new Error('Authentication failed - no tokens returned');
     }

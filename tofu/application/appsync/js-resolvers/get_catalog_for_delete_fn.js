@@ -41,14 +41,23 @@ export function response(ctx) {
     }
     // Check for 'admin' (lowercase) - standard Cognito group name
     const isAdmin = groups.includes('admin') || groups.includes('ADMIN');
+    // MFA status from the injected JWT mfa claim (source of truth) (#336).
+    // An admin may only use admin privileges after MFA.
+    const hasMfa = ctx.identity && ctx.identity.claims ? ctx.identity.claims['mfa'] === true : false;
     // ownerAccountId now has 'ACCOUNT#' prefix
     const isOwner = catalog.ownerAccountId === 'ACCOUNT#' + callerId;
     
     // Authorization logic:
-    // - Owner can delete their own catalogs
-    // - Admin can delete ANY catalog (both USER_CREATED and ADMIN_MANAGED)
-    if (isOwner || isAdmin) {
+    // - Owner can delete their own catalogs (no MFA needed)
+    // - Admin can delete ANY catalog (both USER_CREATED and ADMIN_MANAGED),
+    //   but only with MFA
+    if (isOwner) {
         ctx.stash.authorized = true;
+    } else if (isAdmin && hasMfa) {
+        ctx.stash.authorized = true;
+    } else if (isAdmin) {
+        // Admin without MFA. Message must be exactly 'MFA required' (#336).
+        util.error('MFA required', 'FORBIDDEN');
     } else {
         util.error('Not authorized to delete this catalog', 'FORBIDDEN');
     }

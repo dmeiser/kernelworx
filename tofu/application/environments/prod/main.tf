@@ -121,11 +121,13 @@ locals {
 
   cognito_callback_urls = [
     "https://${local.site_domain}",
+    "https://${local.site_domain}/",
     "https://${local.site_domain}/callback",
   ]
 
   cognito_logout_urls = [
     "https://${local.site_domain}",
+    "https://${local.site_domain}/",
   ]
 }
 
@@ -193,10 +195,11 @@ module "cognito" {
   # fallback role to attach it to.
   lambda_admin_execution_role_arn = module.iam.lambda_admin_execution_role_arn
   # Cognito trigger Lambdas (restored from CDK configuration)
-  enable_lambda_triggers       = true
-  pre_signup_lambda_arn        = module.lambda.trigger_function_arns["pre-signup"]
-  post_auth_lambda_arn         = module.lambda.trigger_function_arns["post-auth"]
-  post_confirmation_lambda_arn = module.lambda.trigger_function_arns["post-auth"]
+  enable_lambda_triggers          = true
+  pre_signup_lambda_arn           = module.lambda.trigger_function_arns["pre-signup"]
+  post_auth_lambda_arn            = module.lambda.trigger_function_arns["post-auth"]
+  post_confirmation_lambda_arn    = module.lambda.trigger_function_arns["post-auth"]
+  pre_token_generation_lambda_arn = module.lambda.trigger_function_arns["pre-token-generation"]
 
   # WebAuthn / passkey sign-in
   enable_webauthn            = true

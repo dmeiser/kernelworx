@@ -1,17 +1,17 @@
 /**
  * Custom hook for passkey (WebAuthn) functionality
  */
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback } from 'react';
 import {
   associateWebAuthnCredential,
   listWebAuthnCredentials,
   deleteWebAuthnCredential,
-  updateMFAPreference,
   type AuthWebAuthnCredential,
 } from 'aws-amplify/auth';
+import { enablePasskeyMfa, passkeyMfaFailureMessage } from '../lib/passkeyMfa';
 
 export interface PasskeyPendingConfirmation {
-  type: 'disableMfa' | 'delete';
+  type: 'delete';
   message: string;
   credentialId?: string;
 }
@@ -27,7 +27,7 @@ export interface UsePasskeysReturn {
   passkeyLoading: boolean;
   pendingConfirmation: PasskeyPendingConfirmation | null;
   loadPasskeys: () => Promise<void>;
-  handleRegisterPasskey: (mfaEnabled: boolean, setMfaEnabled: (enabled: boolean) => void) => void;
+  handleRegisterPasskey: () => Promise<void>;
   confirmPasskeyAction: () => Promise<void>;
   cancelPasskeyConfirmation: () => void;
   handleDeletePasskey: (credentialId: string) => void;
@@ -42,7 +42,6 @@ const getErrorMessage = (err: unknown, fallback: string): string => {
 };
 
 const PASSKEY_MESSAGES = {
-  disableMfa: 'Passkeys and TOTP MFA cannot be used together. Do you want to disable MFA and register this passkey?',
   delete: 'Are you sure you want to delete this passkey?',
 };
 
@@ -65,6 +64,19 @@ const registerPasskey = async (
 
   try {
     await associateWebAuthnCredential();
+    // Registering the credential alone does not enable passkey sign-in;
+    // enable the per-user "User verification with passkey" MFA method
+    // (same end state as the Cognito console toggle). TOTP is untouched.
+    try {
+      await enablePasskeyMfa();
+    } catch (err: unknown) {
+      // Surface Cognito's actual service message (e.g. "WebAuthn MFA
+      // requires enabling an additional MFA setting.") alongside the
+      // static guidance instead of hiding it.
+      setPasskeyError(passkeyMfaFailureMessage(err));
+      await loadPasskeys();
+      return;
+    }
     setPasskeySuccess(true);
     setPasskeyName('');
     await loadPasskeys();
@@ -87,10 +99,6 @@ export const usePasskeys = (): UsePasskeysReturn => {
   const [passkeySuccess, setPasskeySuccess] = useState(false);
   const [passkeyLoading, setPasskeyLoading] = useState(false);
   const [pendingConfirmation, setPendingConfirmation] = useState<PasskeyPendingConfirmation | null>(null);
-  const registerArgsRef = useRef<{
-    mfaEnabled: boolean;
-    setMfaEnabled: (enabled: boolean) => void;
-  } | null>(null);
 
   const loadPasskeys = useCallback(async () => {
     try {
@@ -114,19 +122,7 @@ export const usePasskeys = (): UsePasskeysReturn => {
     }
   };
 
-  const disableMfaAndRegister = async (setMfaEnabled: (enabled: boolean) => void) => {
-    setPasskeyError(null);
-    setPasskeyLoading(true);
-
-    try {
-      await updateMFAPreference({ totp: 'DISABLED' });
-      setMfaEnabled(false);
-    } catch (err: unknown) {
-      setPasskeyError(getErrorMessage(err, 'Failed to disable MFA'));
-      setPasskeyLoading(false);
-      return;
-    }
-
+  const handleRegisterPasskey = async () => {
     await registerPasskey(
       passkeyName,
       setPasskeyName,
@@ -137,25 +133,6 @@ export const usePasskeys = (): UsePasskeysReturn => {
     );
   };
 
-  const handleRegisterPasskey = (mfaEnabled: boolean, setMfaEnabled: (enabled: boolean) => void) => {
-    registerArgsRef.current = { mfaEnabled, setMfaEnabled };
-
-    if (mfaEnabled) {
-      setPendingConfirmation({ type: 'disableMfa', message: PASSKEY_MESSAGES.disableMfa });
-      return;
-    }
-
-    void registerPasskey(
-      passkeyName,
-      setPasskeyName,
-      setPasskeyError,
-      setPasskeySuccess,
-      setPasskeyLoading,
-      loadPasskeys,
-    );
-  };
-
-  // eslint-disable-next-line complexity -- Confirmation dispatch for delete / disable MFA
   const confirmPasskeyAction = async () => {
     if (!pendingConfirmation) return;
 
@@ -164,19 +141,11 @@ export const usePasskeys = (): UsePasskeysReturn => {
       setPendingConfirmation(null);
       if (!credentialId) return;
       await deletePasskey(credentialId);
-      return;
     }
-
-    const { mfaEnabled, setMfaEnabled } = registerArgsRef.current ?? {};
-    setPendingConfirmation(null);
-    if (!mfaEnabled || !setMfaEnabled) return;
-
-    await disableMfaAndRegister(setMfaEnabled);
   };
 
   const cancelPasskeyConfirmation = () => {
     setPendingConfirmation(null);
-    registerArgsRef.current = null;
   };
 
   const handleDeletePasskey = (credentialId: string) => {

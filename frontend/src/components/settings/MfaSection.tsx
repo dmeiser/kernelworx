@@ -26,26 +26,10 @@ import type { UseMfaReturn } from '../../hooks/useMfa';
 
 interface MfaSectionProps {
   mfaHook: UseMfaReturn;
-  passkeyCount: number;
+  passkeyCount?: number;
   onSetupMFA: () => void;
+  isAdmin?: boolean;
 }
-
-interface MfaConflictWarningProps {
-  show: boolean;
-  passkeyCount: number;
-}
-
-const MfaConflictWarning: React.FC<MfaConflictWarningProps> = ({ show, passkeyCount }) => {
-  if (!show) return null;
-
-  return (
-    <Alert severity="warning" sx={{ mb: 2 }}>
-      <strong>Note:</strong> You have {passkeyCount} passkey
-      {passkeyCount > 1 ? 's' : ''} registered. TOTP MFA and Passkeys cannot be used together. Enabling MFA will delete
-      all your passkeys.
-    </Alert>
-  );
-};
 
 interface MfaStatusAlertsProps {
   hook: UseMfaReturn;
@@ -179,31 +163,23 @@ interface MfaConfirmDialogProps {
 const MfaConfirmDialog: React.FC<MfaConfirmDialogProps> = ({ hook }) => {
   if (!hook.pendingConfirmation) return null;
 
-  const handleConfirm = () => {
-    if (hook.pendingConfirmation?.type === 'disable') {
-      void hook.confirmDisableMFA();
-    } else {
-      void hook.confirmSetupMFA();
-    }
-  };
-
   return (
     <Dialog open onClose={hook.cancelMfaConfirmation}>
-      <DialogTitle>{hook.pendingConfirmation.type === 'disable' ? 'Disable MFA?' : 'Remove Passkeys?'}</DialogTitle>
+      <DialogTitle>Disable MFA?</DialogTitle>
       <DialogContent>
         <Typography>{hook.pendingConfirmation.message}</Typography>
       </DialogContent>
       <DialogActions>
         <Button onClick={hook.cancelMfaConfirmation}>Cancel</Button>
-        <Button onClick={handleConfirm} color="error" variant="contained">
-          {hook.pendingConfirmation.type === 'disable' ? 'Disable' : 'Continue'}
+        <Button onClick={() => void hook.confirmDisableMFA()} color="error" variant="contained">
+          Disable
         </Button>
       </DialogActions>
     </Dialog>
   );
 };
 
-export const MfaSection: React.FC<MfaSectionProps> = ({ mfaHook, passkeyCount, onSetupMFA }) => (
+export const MfaSection: React.FC<MfaSectionProps> = ({ mfaHook, onSetupMFA, isAdmin }) => (
   <Paper sx={{ p: 3, mb: 3 }}>
     <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }}>
       <SecurityIcon color="primary" />
@@ -211,10 +187,15 @@ export const MfaSection: React.FC<MfaSectionProps> = ({ mfaHook, passkeyCount, o
     </Stack>
 
     <Typography variant="body2" color="text.secondary" paragraph>
-      Add an extra layer of security to your account by requiring a verification code from your phone.
+      Add an extra layer of security to your account with TOTP multi-factor authentication. Both an authenticator app and passkeys are supported together.
     </Typography>
 
-    <MfaConflictWarning show={passkeyCount > 0 && !mfaHook.mfaEnabled} passkeyCount={passkeyCount} />
+    {isAdmin && (
+      <Alert severity="info" sx={{ mb: 2 }}>
+        <strong>Administrator notice:</strong> Admin operations need an authenticator app (TOTP) enrolled; a passkey alone signs you in but does not grant admin.
+      </Alert>
+    )}
+
     <MfaStatusAlerts hook={mfaHook} />
     <MfaPrimaryActions hook={mfaHook} onSetup={onSetupMFA} />
     <MfaSetupSection hook={mfaHook} />
