@@ -8,7 +8,7 @@ import {
   deleteWebAuthnCredential,
   type AuthWebAuthnCredential,
 } from 'aws-amplify/auth';
-import { enablePasskeyMfa, PASSKEY_MFA_ENABLE_FAILED_MESSAGE } from '../lib/passkeyMfa';
+import { enablePasskeyMfa, passkeyMfaFailureMessage } from '../lib/passkeyMfa';
 
 export interface PasskeyPendingConfirmation {
   type: 'delete';
@@ -69,8 +69,11 @@ const registerPasskey = async (
     // (same end state as the Cognito console toggle). TOTP is untouched.
     try {
       await enablePasskeyMfa();
-    } catch {
-      setPasskeyError(PASSKEY_MFA_ENABLE_FAILED_MESSAGE);
+    } catch (err: unknown) {
+      // Surface Cognito's actual service message (e.g. "WebAuthn MFA
+      // requires enabling an additional MFA setting.") alongside the
+      // static guidance instead of hiding it.
+      setPasskeyError(passkeyMfaFailureMessage(err));
       await loadPasskeys();
       return;
     }

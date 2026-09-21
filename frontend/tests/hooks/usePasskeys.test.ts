@@ -5,7 +5,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import * as amplifyAuth from 'aws-amplify/auth';
 import { usePasskeys } from '../../src/hooks/usePasskeys';
-import { enablePasskeyMfa, PASSKEY_MFA_ENABLE_FAILED_MESSAGE } from '../../src/lib/passkeyMfa';
+import { enablePasskeyMfa, passkeyMfaFailureMessage } from '../../src/lib/passkeyMfa';
 
 vi.mock('aws-amplify/auth', () => ({
   associateWebAuthnCredential: vi.fn(),
@@ -14,10 +14,18 @@ vi.mock('aws-amplify/auth', () => ({
   updateMFAPreference: vi.fn(),
 }));
 
-vi.mock('../../src/lib/passkeyMfa', () => ({
-  enablePasskeyMfa: vi.fn(),
-  PASSKEY_MFA_ENABLE_FAILED_MESSAGE: 'Passkey was registered, but passkey sign-in could not be enabled.',
-}));
+vi.mock('../../src/lib/passkeyMfa', () => {
+  const staticMessage = 'Passkey was registered, but passkey sign-in could not be enabled.';
+  return {
+    enablePasskeyMfa: vi.fn(),
+    // Mirrors the real helper: static guidance + Cognito service message.
+    passkeyMfaFailureMessage: vi.fn((error: unknown) => {
+      const detail = error instanceof Error ? error.message : '';
+      return detail ? `${staticMessage} ${detail}` : staticMessage;
+    }),
+    PASSKEY_MFA_ENABLE_FAILED_MESSAGE: staticMessage,
+  };
+});
 
 describe('usePasskeys', () => {
   const mockCredentials = [
@@ -138,7 +146,11 @@ describe('usePasskeys', () => {
     expect(amplifyAuth.associateWebAuthnCredential).toHaveBeenCalledTimes(1);
     expect(enablePasskeyMfa).toHaveBeenCalledTimes(1);
     expect(result.current.passkeySuccess).toBe(false);
-    expect(result.current.passkeyError).toBe(PASSKEY_MFA_ENABLE_FAILED_MESSAGE);
+    // The Cognito service message is surfaced alongside the static guidance
+    expect(passkeyMfaFailureMessage).toHaveBeenCalledWith(expect.any(Error));
+    expect(result.current.passkeyError).toBe(
+      'Passkey was registered, but passkey sign-in could not be enabled. WebAuthn MFA not enabled on pool',
+    );
     // The registered credential is still listed for the user to see
     expect(amplifyAuth.listWebAuthnCredentials).toHaveBeenCalled();
   });
