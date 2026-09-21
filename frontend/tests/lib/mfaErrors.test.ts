@@ -88,5 +88,19 @@ describe('mfaErrors', () => {
       };
       expect(isMfaRequiredError(customErr)).toBe(true);
     });
+
+    it('ignores networkError results whose message and errors do not match', () => {
+      const netErr = {
+        networkError: {
+          result: {
+            message: 'Some other failure',
+            errors: [{ message: 'Not the MFA message' }],
+          },
+        },
+      };
+      expect(isMfaRequiredError(netErr)).toBe(false);
+
+      expect(isMfaRequiredError({ networkError: { result: {} } })).toBe(false);
+    });
   });
 });
