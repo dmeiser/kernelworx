@@ -3,7 +3,9 @@ Tests for the Pre Token Generation Lambda trigger.
 
 Covers injection of the custom boolean `mfa` claim into the ID and access tokens:
   - Federated (social) identities always mint mfa=false, bypassing enrollment checks.
-  - Native users mint mfa=true for enabled MFA factors (TOTP or SMS), mfa=false otherwise.
+  - Native users mint mfa=true when at least one MFA method is enabled: a
+    recognized PreferredMfaSetting (TOTP, SMS, or passkey MFA / WEB_AUTHN_MFA)
+    or any activated method in UserMFASettingList. mfa=false otherwise.
   - Fail-closed behavior on lookup failures.
   - cognito:groups preservation and absence of reserved amr mutations.
 """
@@ -18,6 +20,7 @@ from src.handlers.pre_token_generation import (
     MFA_CLAIM,
     SMS_MFA,
     SOFTWARE_TOKEN_MFA,
+    WEB_AUTHN_MFA,
     _is_federated,
     lambda_handler,
 )
@@ -163,7 +166,7 @@ class TestFederatedIdentities:
 
 
 class TestNativeMfaClaimResolution:
-    """Tests for resolving the mfa claim value for native Cognito users from PreferredMfaSetting."""
+    """Tests for resolving the mfa claim value for native Cognito users from AdminGetUser."""
 
     def test_totp_preference_sets_mfa_true_in_both_tokens(
         self, pre_token_event: dict[str, Any], lambda_context: MagicMock
@@ -191,23 +194,135 @@ class TestNativeMfaClaimResolution:
         assert details["idTokenGeneration"]["claimsToAddOrOverride"] == {MFA_CLAIM: True}
         assert details["accessTokenGeneration"]["claimsToAddOrOverride"] == {MFA_CLAIM: True}
 
-    def test_passkey_only_user_sets_mfa_false(self, pre_token_event: dict[str, Any], lambda_context: MagicMock) -> None:
+    def test_passkey_first_factor_only_user_sets_mfa_false(
+        self, pre_token_event: dict[str, Any], lambda_context: MagicMock
+    ) -> None:
         """
-        A native passkey-only user has no TOTP/SMS preference (PreferredMfaSetting is
-        NONE), so the trigger sets mfa=false. Passkeys are a first factor this
-        trigger cannot detect (no per-session signal in the event; the credential
-        APIs need the user's own token), so passkey acceptance is not provided by
-        this trigger -- it depends on the guard's native-amr handling.
+        A native user whose passkey is only a first (passwordless) factor -- no MFA
+        method enabled (no UserMFASettingList, PreferredMfaSetting NONE) -- gets
+        mfa=false. The trigger is enrollment-based: passkey MFA (an enabled MFA
+        method, WEB_AUTHN_MFA) mints true, but a bare first-factor passkey is not
+        MFA enrollment.
         """
         with patch("boto3.client") as mock_client:
             mock_cognito = MagicMock()
-            mock_cognito.admin_get_user.return_value = {"PreferredMfaSetting": "NONE"}
+            mock_cognito.admin_get_user.return_value = {
+                "PreferredMfaSetting": "NONE",
+                "UserMFASettingList": [],
+            }
             mock_client.return_value = mock_cognito
             result = lambda_handler(pre_token_event, lambda_context)
 
         details = _details(result)
         assert details["idTokenGeneration"]["claimsToAddOrOverride"] == {MFA_CLAIM: False}
         assert details["accessTokenGeneration"]["claimsToAddOrOverride"] == {MFA_CLAIM: False}
+
+    def test_webauthn_preference_sets_mfa_true(
+        self, pre_token_event: dict[str, Any], lambda_context: MagicMock
+    ) -> None:
+        """A native user whose PreferredMfaSetting is WEB_AUTHN_MFA (passkey MFA) is enrolled."""
+        with patch("boto3.client") as mock_client:
+            mock_cognito = MagicMock()
+            mock_cognito.admin_get_user.return_value = {"PreferredMfaSetting": WEB_AUTHN_MFA}
+            mock_client.return_value = mock_cognito
+            result = lambda_handler(pre_token_event, lambda_context)
+
+        details = _details(result)
+        assert details["idTokenGeneration"]["claimsToAddOrOverride"] == {MFA_CLAIM: True}
+        assert details["accessTokenGeneration"]["claimsToAddOrOverride"] == {MFA_CLAIM: True}
+
+    def test_webauthn_in_setting_list_with_no_preference_sets_mfa_true(
+        self, pre_token_event: dict[str, Any], lambda_context: MagicMock
+    ) -> None:
+        """
+        Passkey MFA enabled: UserMFASettingList contains the WEB_AUTHN_MFA entry
+        (alongside the required co-enabled method) and PreferredMfaSetting is
+        absent. Any activated entry in the list is enrollment evidence.
+        """
+        with patch("boto3.client") as mock_client:
+            mock_cognito = MagicMock()
+            mock_cognito.admin_get_user.return_value = {
+                "UserMFASettingList": [SOFTWARE_TOKEN_MFA, WEB_AUTHN_MFA]
+            }
+            mock_client.return_value = mock_cognito
+            result = lambda_handler(pre_token_event, lambda_context)
+
+        details = _details(result)
+        assert details["idTokenGeneration"]["claimsToAddOrOverride"] == {MFA_CLAIM: True}
+        assert details["accessTokenGeneration"]["claimsToAddOrOverride"] == {MFA_CLAIM: True}
+
+    def test_webauthn_in_setting_list_with_unrecognized_preference_sets_mfa_true(
+        self, pre_token_event: dict[str, Any], lambda_context: MagicMock
+    ) -> None:
+        """
+        The live #336 regression: passkey MFA activation can move the account's
+        PreferredMfaSetting off the recognized values (the WebAuthnMfaSettings
+        object has no PreferredMfa field, so it may report an unrecognized
+        setting). The activated-method list must carry the truth: TOTP plus
+        passkey MFA entries with an unrecognized preferred value still mint true.
+        """
+        with patch("boto3.client") as mock_client:
+            mock_cognito = MagicMock()
+            mock_cognito.admin_get_user.return_value = {
+                "PreferredMfaSetting": "NONE",
+                "UserMFASettingList": [SOFTWARE_TOKEN_MFA, WEB_AUTHN_MFA],
+            }
+            mock_client.return_value = mock_cognito
+            result = lambda_handler(pre_token_event, lambda_context)
+
+        assert _details(result)["idTokenGeneration"]["claimsToAddOrOverride"] == {MFA_CLAIM: True}
+
+    def test_totp_only_in_setting_list_without_preference_sets_mfa_true(
+        self, pre_token_event: dict[str, Any], lambda_context: MagicMock
+    ) -> None:
+        """TOTP is the only activated method and no preference is reported: still enrolled."""
+        with patch("boto3.client") as mock_client:
+            mock_cognito = MagicMock()
+            mock_cognito.admin_get_user.return_value = {"UserMFASettingList": [SOFTWARE_TOKEN_MFA]}
+            mock_client.return_value = mock_cognito
+            result = lambda_handler(pre_token_event, lambda_context)
+
+        assert _details(result)["idTokenGeneration"]["claimsToAddOrOverride"] == {MFA_CLAIM: True}
+
+    def test_sms_only_in_setting_list_sets_mfa_true(
+        self, pre_token_event: dict[str, Any], lambda_context: MagicMock
+    ) -> None:
+        """SMS is the only activated method in the list: enrolled."""
+        with patch("boto3.client") as mock_client:
+            mock_cognito = MagicMock()
+            mock_cognito.admin_get_user.return_value = {"UserMFASettingList": [SMS_MFA]}
+            mock_client.return_value = mock_cognito
+            result = lambda_handler(pre_token_event, lambda_context)
+
+        assert _details(result)["idTokenGeneration"]["claimsToAddOrOverride"] == {MFA_CLAIM: True}
+
+    def test_email_otp_in_setting_list_sets_mfa_true(
+        self, pre_token_event: dict[str, Any], lambda_context: MagicMock
+    ) -> None:
+        """
+        Any activated method in UserMFASettingList counts, including EMAIL_OTP
+        (email-message MFA per the GetUser API reference): Cognito challenges it
+        at sign-in, so it is enabled-MFA enrollment evidence.
+        """
+        with patch("boto3.client") as mock_client:
+            mock_cognito = MagicMock()
+            mock_cognito.admin_get_user.return_value = {"UserMFASettingList": ["EMAIL_OTP"]}
+            mock_client.return_value = mock_cognito
+            result = lambda_handler(pre_token_event, lambda_context)
+
+        assert _details(result)["idTokenGeneration"]["claimsToAddOrOverride"] == {MFA_CLAIM: True}
+
+    def test_empty_setting_list_and_no_preference_sets_mfa_false(
+        self, pre_token_event: dict[str, Any], lambda_context: MagicMock
+    ) -> None:
+        """An explicitly empty UserMFASettingList with no preferred setting is not enrolled."""
+        with patch("boto3.client") as mock_client:
+            mock_cognito = MagicMock()
+            mock_cognito.admin_get_user.return_value = {"UserMFASettingList": []}
+            mock_client.return_value = mock_cognito
+            result = lambda_handler(pre_token_event, lambda_context)
+
+        assert _details(result)["idTokenGeneration"]["claimsToAddOrOverride"] == {MFA_CLAIM: False}
 
     def test_absent_preference_sets_mfa_false(self, pre_token_event: dict[str, Any], lambda_context: MagicMock) -> None:
         """A native user with no PreferredMfaSetting attribute must get mfa=false (never true)."""
