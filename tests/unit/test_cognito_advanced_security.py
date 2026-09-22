@@ -8,6 +8,7 @@ a deliberate, cost-bearing upgrade decision and must not appear here.
 from pathlib import Path
 
 import hcl2
+import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 COGNITO_MAIN = REPO_ROOT / "tofu" / "application" / "modules" / "cognito" / "main.tf"
@@ -50,6 +51,21 @@ def test_user_pool_add_ons_is_audit_mode():
     (block,) = add_ons
     assert block["advanced_security_mode"] == "AUDIT", (
         f"advanced_security_mode must be AUDIT, got {block['advanced_security_mode']!r}"
+    )
+
+
+def test_threat_protection_requires_plus_tier():
+    """AWS rejects user_pool_add_ons on an ESSENTIALS pool (TierChangeNotAllowedException).
+
+    Advanced Security (AUDIT or ENFORCED) requires the PLUS feature tier; the
+    pool must not be pinned to ESSENTIALS/LITE while the add-ons block is set.
+    """
+    pool = _user_pool(_load(COGNITO_MAIN))
+    if not pool.get("user_pool_add_ons"):
+        pytest.skip("no user_pool_add_ons block to validate against")
+    assert pool.get("user_pool_tier") == "PLUS", (
+        f"user_pool_add_ons requires the PLUS tier, got {pool.get('user_pool_tier')!r} "
+        "(AWS: TierChangeNotAllowedException on UpdateUserPool)"
     )
 
 

@@ -204,6 +204,8 @@ resource "aws_cognito_user_pool" "main" {
   # AUDIT mode: Cognito evaluates the risk signals and logs the detections but
   # does not block sign-ins - no per-active-user Advanced Security enforcement
   # cost. Upgrading to ENFORCED is a separate, cost-bearing decision.
+  # Advanced Security (Threat Protection) requires the PLUS feature tier; AWS
+  # rejects AUDIT/ENFORCED on ESSENTIALS pools (TierChangeNotAllowedException).
   user_pool_add_ons {
     advanced_security_mode = "AUDIT"
   }
@@ -254,9 +256,11 @@ resource "aws_cognito_user_pool" "main" {
     attributes_require_verification_before_update = ["email"]
   }
 
-  # WebAuthn / passkey sign-in
-  # user_pool_tier must be ESSENTIALS or PLUS to use WebAuthn.
-  user_pool_tier = var.enable_webauthn ? "ESSENTIALS" : "LITE"
+  # Feature tier. PLUS is required: Advanced Security (user_pool_add_ons above)
+  # is only available on PLUS, and WebAuthn requires ESSENTIALS or PLUS. PLUS
+  # also carries per-MAU tier pricing (not just ENFORCED enforcement billing);
+  # the first 10,000 MAU/month are free, so the dev/PR pools stay at zero cost.
+  user_pool_tier = "PLUS"
 
   dynamic "sign_in_policy" {
     for_each = var.enable_webauthn ? [1] : []
