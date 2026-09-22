@@ -200,6 +200,14 @@ resource "aws_cognito_user_pool" "main" {
     temporary_password_validity_days = 7
   }
 
+  # Advanced Security (compromised-credential detection + adaptive auth).
+  # AUDIT mode: Cognito evaluates the risk signals and logs the detections but
+  # does not block sign-ins - no per-active-user Advanced Security enforcement
+  # cost. Upgrading to ENFORCED is a separate, cost-bearing decision.
+  user_pool_add_ons {
+    advanced_security_mode = "AUDIT"
+  }
+
   # MFA configuration
   mfa_configuration = "OPTIONAL"
 
