@@ -6,5 +6,11 @@
 #else
     ## READ ACCESS: Anyone can view catalog by ID (no authorization check)
     ## Note: ownerAccountId is removed from GraphQL schema but still in DynamoDB for WRITE auth
+    #set($isPublicVal = $ctx.result.isPublic)
+    #if("$isPublicVal" == "true")
+        $util.qr($ctx.result.put("isPublic", true))
+    #elseif("$isPublicVal" == "false")
+        $util.qr($ctx.result.put("isPublic", false))
+    #end
     $util.toJson($ctx.result)
 #end

@@ -1,4 +1,5 @@
 import { util } from '@aws-appsync/utils';
+import { normalizeCatalogsIsPublic } from './lib/normalize_catalog.js';
 
 export function request(ctx) {
     // Query for public catalogs, then filter for ADMIN_MANAGED only
@@ -24,5 +25,5 @@ export function response(ctx) {
     if (ctx.error) {
         util.error(ctx.error.message, ctx.error.type);
     }
-    return ctx.result.items || [];
+    return normalizeCatalogsIsPublic(ctx.result.items || []);
 }
