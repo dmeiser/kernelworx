@@ -12,7 +12,10 @@ How it works:
 1. When a federated user (e.g., Google) attempts to sign in for the first time
 2. Cognito triggers Pre Sign Up before creating the user
 3. This Lambda checks if a native user with the same email already exists
-4. If so, it links the federated identity to the existing user
+4. If so, it links the federated identity to the existing user, but ONLY when
+   that existing account is CONFIRMED and its email is verified (otherwise it
+   fails closed — an unconfirmed signup could be an attacker account created
+   with the victim's verified email)
 5. Then raises an exception to prevent duplicate user creation
 6. The user is then signed in with the existing account
 """
