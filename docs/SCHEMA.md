@@ -131,6 +131,8 @@ Global Secondary Indexes:
 | createdAt | DateTime | GSI - Sorting |
 | updatedAt | DateTime | Timestamp |
 
+> **Legacy rows:** catalogs written before the `isPublic` BOOL fix (issue #428) may still store `isPublic` as the DynamoDB String `"true"`/`"false"`. They are repaired on their next `updateCatalog` write; until then every read path (AppSync resolvers and the catalog-returning Lambda handlers) coerces the legacy String back to a Boolean before GraphQL serialization. No backfill is performed.
+
 ### shares
 Primary Key: `profileId` + `targetAccountId` (Composite)
 Global Secondary Indexes: `targetAccountId-index` (targetAccountId)
