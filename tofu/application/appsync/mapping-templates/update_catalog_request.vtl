@@ -44,7 +44,7 @@
         "expression": "SET catalogName = :catalogName, isPublic = :isPublic, isPublicStr = :isPublicStr, products = :products, updatedAt = :updatedAt",
         "expressionValues": {
         ":catalogName": $util.dynamodb.toDynamoDBJson($ctx.args.input.catalogName),
-        ":isPublic": $util.dynamodb.toDynamoDBJson($isPublicStr),
+        ":isPublic": $util.dynamodb.toDynamoDBJson($ctx.args.input.isPublic),
         ":isPublicStr": $util.dynamodb.toDynamoDBJson($isPublicStr),
         ":products": $util.dynamodb.toDynamoDBJson($productsWithIds),
         ":updatedAt": $util.dynamodb.toDynamoDBJson($now)
