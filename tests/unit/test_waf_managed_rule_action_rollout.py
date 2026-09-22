@@ -73,8 +73,8 @@ def module_default(doc: dict, name: str):
     raise AssertionError(f"variable {name} not found")
 
 
-def override_subblocks_for(doc: dict, action: str) -> set[str]:
-    """Resolve which override_action sub-blocks render for a given action value.
+def override_blocks_for(doc: dict, action: str) -> set[str]:
+    """Resolve which override_action blocks render for a given action value.
 
     The module expresses the choice as dynamic blocks keyed on
     ``var.managed_rule_action == "<value>" ? [1] : []``; a literal match on
@@ -111,13 +111,13 @@ def test_prod_renders_override_none_so_managed_rules_block():
     waf = load_hcl(WAF_MODULE)
     # override_action { none {} } leaves the rule group's own actions in
     # force: every CommonRuleSet signature ships with action Block.
-    assert override_subblocks_for(waf, effective_action("prod")) == {"none"}
+    assert override_blocks_for(waf, effective_action("prod")) == {"none"}
 
 
 def test_dev_stays_in_count_and_renders_count_override():
     assert effective_action("dev") == "Count"
     waf = load_hcl(WAF_MODULE)
-    assert override_subblocks_for(waf, effective_action("dev")) == {"count"}
+    assert override_blocks_for(waf, effective_action("dev")) == {"count"}
 
 
 def test_ephemeral_creates_no_waf_and_overrides_nothing():
