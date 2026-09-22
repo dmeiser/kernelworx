@@ -31,8 +31,8 @@ def _load(path: Path) -> dict:
     # into plain nested dicts.
     resources: dict = {}
     for entry in _clean(doc).get("resource", []):
-        for rtype, rnames in entry.items():
-            resources.setdefault(rtype, {}).update(rnames)
+        for rtype, names in entry.items():
+            resources.setdefault(rtype, {}).update(names)
     return resources
 
 
