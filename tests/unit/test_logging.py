@@ -110,7 +110,7 @@ class TestStructuredLogger:
         log_entry = json.loads(captured.out.strip())
         assert log_entry["message"] == "Should appear by default"
 
-    def test_serializes_non_jsonable_kwargs(self, capsys: Any) -> None:
+    def test_serializes_non_json_serializable_kwargs(self, capsys: Any) -> None:
         """Test that non-JSON-serializable kwargs (e.g. Decimal) do not raise."""
         logger = StructuredLogger("test", "test-id")
 
