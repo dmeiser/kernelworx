@@ -1,6 +1,7 @@
 """Tests for logging utilities."""
 
 import json
+from decimal import Decimal
 from typing import Any, Dict
 
 from src.utils.logging import StructuredLogger, get_correlation_id, mask_email
@@ -108,6 +109,18 @@ class TestStructuredLogger:
         captured = capsys.readouterr()
         log_entry = json.loads(captured.out.strip())
         assert log_entry["message"] == "Should appear by default"
+
+    def test_serializes_non_json_serializable_kwargs(self, capsys: Any) -> None:
+        """Test that non-JSON-serializable kwargs (e.g. Decimal) do not raise."""
+        logger = StructuredLogger("test", "test-id")
+
+        logger.info("Total price", total=Decimal("100.50"))
+
+        captured = capsys.readouterr()
+        log_entry = json.loads(captured.out.strip())
+
+        assert log_entry["message"] == "Total price"
+        assert log_entry["total"] == "100.50"
 
     def test_extra_dict_merged(self, capsys: Any) -> None:
         """Test that the extra dict is merged into the log entry."""
