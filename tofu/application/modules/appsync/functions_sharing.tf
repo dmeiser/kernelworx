@@ -91,15 +91,10 @@ resource "aws_appsync_function" "verify_profile_write_access" {
   code = file("${local.js_resolvers_dir}/verify_profile_write_access_fn.js")
 }
 
-# Step 2 of the two-phase write-access check (#438). AWS does not support
-# duplicate function IDs in a pipeline config, so the second pipeline step is a
-# separate function resource with the SAME code as verify_profile_write_access.
-# It runs only when the strongly consistent owner read proves the caller is not
-# the owner, and performs the eventually consistent GSI query for the share path.
-resource "aws_appsync_function" "verify_profile_write_access_fallback" {
+resource "aws_appsync_function" "verify_profile_write_access_step2" {
   api_id      = aws_appsync_graphql_api.main.id
   data_source = aws_appsync_datasource.profiles.name
-  name        = "VerifyProfileWriteAccessFallbackFn${local.env_suffix}"
+  name        = "VerifyProfileWriteAccessStep2Fn${local.env_suffix}"
 
   runtime {
     name            = "APPSYNC_JS"
