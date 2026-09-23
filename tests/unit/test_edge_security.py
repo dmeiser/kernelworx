@@ -18,7 +18,10 @@ python-hcl2) and assert the *meaning* of the edge architecture contract:
   forward all cookies and run the viewer-response Location-rewrite function.
 - The response headers policy on the default behavior enforces CSP including
   frame-ancestors 'none', XFO DENY, nosniff, Referrer-Policy, and HSTS
-  max-age=300 with override=true on all of them.
+  with override=true on all of them. HSTS max-age/includeSubDomains are
+  module inputs: the module default keeps the 300s dev ramp, and only prod
+  passes one year + includeSubDomains (#430); preload is never set without
+  its own go/no-go.
 - Dev/prod wire the WAF into the distribution; ephemeral passes create =
   false and has no CloudFront at all. The api Route53 record is gone while
   the load-bearing login record remains.
@@ -381,8 +384,14 @@ def test_response_headers_policy_enforces_security_headers(cloudfront_module):
     assert ref["override"] is True
 
     hsts = block(sec["strict_transport_security"])
-    assert hsts["access_control_max_age_sec"] == 300
+    assert hsts["access_control_max_age_sec"] == "${var.hsts_max_age_sec}"
+    assert hsts["include_subdomains"] == "${var.hsts_include_subdomains}"
     assert hsts["override"] is True
+
+    # Module defaults keep the 300s dev ramp (#430); environments opt in.
+    defaults = variable_defaults(cloudfront_module["response_headers"])
+    assert defaults["hsts_max_age_sec"] == 300
+    assert defaults["hsts_include_subdomains"] is False
 
     # The policy is attached to the default (/*) behavior.
     dist = first_resource(cloudfront_module, "aws_cloudfront_distribution", "site")
@@ -417,6 +426,20 @@ def test_env_wires_single_waf_into_distribution(env_name):
         '${replace(replace(module.appsync.api_url, "https://", ""), "/graphql", "")}'
     )
     assert cf_mods[0]["auth_origin_domain"] == "${local.login_domain}"
+
+
+def test_prod_hsts_one_year_include_subdomains_dev_keeps_ramp():
+    """#430: only prod opts into one-year HSTS with includeSubDomains."""
+    prod = modules(load_hcl(TF_APP / "environments" / "prod" / "main.tf"), "cloudfront")
+    assert len(prod) == 1
+    assert prod[0]["hsts_max_age_sec"] == 31536000
+    assert prod[0]["hsts_include_subdomains"] is True
+
+    dev = modules(load_hcl(TF_APP / "environments" / "dev" / "main.tf"), "cloudfront")
+    assert len(dev) == 1
+    # Dev stays on the module-default 300s ramp: no explicit overrides.
+    assert "hsts_max_age_sec" not in dev[0]
+    assert "hsts_include_subdomains" not in dev[0]
 
 
 def test_ephemeral_waf_noops_without_cloudfront():

@@ -5,6 +5,13 @@
  * has a QR code) and before delete_payment_method_from_prefs so the Lambda
  * still finds the method in the account's preferences.
  *
+ * The Lambda is invoked with purgeS3Only: it must NOT write preferences here.
+ * delete_payment_method_from_prefs conditions its write on the preferences
+ * snapshot stashed by get_payment_method_for_delete BEFORE this step ran, so
+ * any preferences write in between would stale the snapshot and fail the
+ * optimistic lock (#433). The method entry (including its qrCodeUrl) is
+ * removed entirely by the following step, making the clear redundant.
+ *
  * Best-effort by design: a QR deletion failure must not block the payment
  * method deletion, mirroring the Python delete_payment_method path. Failures
  * are logged at error level, stashed for diagnostics, and the pipeline
@@ -26,6 +33,9 @@ export function request(ctx) {
             identity: {
                 sub: ctx.stash.accountId,
             },
+            // See file header: a preferences write here would stale the
+            // optimistic-lock snapshot carried to delete_payment_method_from_prefs.
+            purgeS3Only: true,
         },
     };
 }
