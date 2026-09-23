@@ -156,7 +156,7 @@ function ConfirmationView({
       <DialogContent>
         <DialogContentText>
           This will permanently delete your account (<strong>{userEmail}</strong>), associated profiles, custom payment
-          methods &amp; QR codes, campaigns, and orders.
+          methods &amp; QR codes, campaigns, orders, and generated report exports.
         </DialogContentText>
 
         <ProfilesPreviewList
