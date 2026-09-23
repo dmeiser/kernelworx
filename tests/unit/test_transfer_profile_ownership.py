@@ -534,6 +534,95 @@ class TestTransferProfileOwnership:
         assert result["__isError"] is True
         assert result["errorCode"] == ErrorCode.INVALID_INPUT
 
+    def test_stale_gsi_owner_projection_does_not_authorize_transfer(
+        self, profiles_table: Any, shares_table: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """After an ownership transfer the profileId-index GSI can keep projecting the
+        previous owner; the previous owner must still be rejected because ownership
+        is confirmed via a strongly consistent base-table read (#438)."""
+        new_owner_id = "new-owner"
+        old_owner_id = "old-owner"
+        profile_id = "profile-stale-gsi"
+
+        # The profile now belongs to new-owner (base table is authoritative).
+        _seed_profile(profiles_table, new_owner_id, profile_id)
+        # Simulate the stale GSI: it still projects the previous owner.
+        def stale_gsi_query(*args: Any, **kwargs: Any) -> Any:
+            return {
+                "Items": [
+                    {
+                        "ownerAccountId": f"ACCOUNT#{old_owner_id}",
+                        "profileId": f"PROFILE#{profile_id}",
+                        "sellerName": "Stale",
+                    }
+                ]
+            }
+
+        monkeypatch.setattr(transfer_profile_ownership.tables.profiles, "query", stale_gsi_query)
+
+        event = {
+            "identity": {"sub": old_owner_id},
+            "arguments": {
+                "input": {
+                    "profileId": profile_id,
+                    "newOwnerAccountId": "someother-owner",
+                }
+            },
+        }
+
+        result = lambda_handler(event, None)
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.FORBIDDEN
+
+        # No transfer happened: the current owner's record is untouched.
+        prof = profiles_table.get_item(
+            Key={"ownerAccountId": f"ACCOUNT#{new_owner_id}", "profileId": f"PROFILE#{profile_id}"}
+        )
+        assert "Item" in prof
+
+    def test_owner_confirmation_uses_consistent_base_table_read(
+        self, profiles_table: Any, shares_table: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Owner confirmation is a strongly consistent GetItem on the caller's
+        {ownerAccountId, profileId} key, issued before any GSI fallback."""
+        owner_id = "owner-consistent"
+        new_owner_id = "new-owner-consistent"
+        profile_id = "profile-consistent-read"
+
+        _seed_profile(profiles_table, owner_id, profile_id)
+        _seed_share(shares_table, profile_id, new_owner_id, owner_id)
+
+        get_item_calls: list[Dict[str, Any]] = []
+        real_get_item = profiles_table.get_item
+
+        def spy_get_item(*args: Any, **kwargs: Any) -> Any:
+            get_item_calls.append(kwargs)
+            return real_get_item(*args, **kwargs)
+
+        monkeypatch.setattr(transfer_profile_ownership.tables.profiles, "get_item", spy_get_item)
+
+        event = {
+            "identity": {"sub": owner_id},
+            "arguments": {
+                "input": {
+                    "profileId": profile_id,
+                    "newOwnerAccountId": new_owner_id,
+                }
+            },
+        }
+
+        result = lambda_handler(event, None)
+        assert result["ownerAccountId"] == f"ACCOUNT#{new_owner_id}"
+
+        # The base-table read for owner confirmation used a consistent read on the
+        # caller's key (the shares get_item call is on a different table/resource).
+        consistent_calls = [c for c in get_item_calls if c.get("ConsistentRead") is True]
+        assert consistent_calls, "expected a ConsistentRead=True get_item call"
+        assert consistent_calls[0]["Key"] == {
+            "ownerAccountId": f"ACCOUNT#{owner_id}",
+            "profileId": f"PROFILE#{profile_id}",
+        }
+
     def test_transact_write_client_error_raises_internal_error(
         self, profiles_table: Any, shares_table: Any, monkeypatch: pytest.MonkeyPatch
     ) -> None:

@@ -15,7 +15,7 @@ so stale shares are automatically rejected by subsequent authorization checks.
 """
 
 import os
-from typing import TYPE_CHECKING, Any, Dict
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
 import boto3
 from boto3.dynamodb.conditions import Key
@@ -54,22 +54,44 @@ logger = get_logger(__name__)
 _type_serializer = TypeSerializer()
 
 
+def _confirm_ownership_strongly_consistently(db_profile_id: str, db_caller_id: str) -> Optional[Dict[str, Any]]:
+    """Return the profile iff a strongly consistent base-table read proves ownership.
+
+    Ownership is encoded in the base-table hash key (ownerAccountId), so an item
+    returned by a consistent GetItem under the caller's key proves the caller is
+    the current owner. The profileId-index GSI is eventually consistent and can
+    keep projecting the previous owner immediately after a transfer, so it is
+    never used as the authoritative owner signal (#438).
+    """
+    response = tables.profiles.get_item(
+        Key={"ownerAccountId": db_caller_id, "profileId": db_profile_id}, ConsistentRead=True
+    )
+    item: Optional[Dict[str, Any]] = response.get("Item")
+    return item
+
+
 def _get_and_verify_profile(db_profile_id: str, db_caller_id: str, event: Dict[str, Any]) -> Dict[str, Any]:
     """Get profile and verify caller is owner or admin."""
-    profile_response = tables.profiles.query(
-        IndexName="profileId-index", KeyConditionExpression=Key("profileId").eq(db_profile_id)
-    )
-
-    if not profile_response.get("Items"):
-        raise AppError(ErrorCode.NOT_FOUND, f"Profile not found: {db_profile_id}")
-
-    profile: Dict[str, Any] = profile_response["Items"][0]
-
-    caller_is_owner = profile["ownerAccountId"] == db_caller_id
-    caller_is_admin = is_admin(event)
+    # Strongly consistent owner confirmation first; only fall back to the
+    # eventually consistent GSI query when the base-table read is negative.
+    profile = _confirm_ownership_strongly_consistently(db_profile_id, db_caller_id)
+    if profile is not None:
+        # A consistent read under the caller's key proves ownership.
+        caller_is_owner = True
+    else:
+        # Ownership could not be established. The GSI query is used only to
+        # locate the profile (NOT_FOUND vs forbidden); its stale projection
+        # must never be treated as proof of ownership (#438).
+        profile_response = tables.profiles.query(
+            IndexName="profileId-index", KeyConditionExpression=Key("profileId").eq(db_profile_id)
+        )
+        if not profile_response.get("Items"):
+            raise AppError(ErrorCode.NOT_FOUND, f"Profile not found: {db_profile_id}")
+        profile = profile_response["Items"][0]
+        caller_is_owner = False
 
     if not caller_is_owner:
-        if not caller_is_admin:
+        if not is_admin(event):
             raise AppError(ErrorCode.FORBIDDEN, "Only the profile owner or an admin can transfer ownership")
         # An admin (not the owner) may transfer any profile, but only with MFA (#336).
         if not has_mfa(event):
