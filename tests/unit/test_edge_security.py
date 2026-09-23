@@ -33,6 +33,7 @@ python-hcl2) and assert the *meaning* of the edge architecture contract:
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import hcl2
@@ -372,6 +373,22 @@ def test_response_headers_policy_enforces_security_headers(cloudfront_module):
     assert "fonts.gstatic.com" not in csp_text
     assert "fonts.googleapis.com" not in csp_text
 
+    # #440: img-src is enumerated, not wildcarded - no bare `https:` scheme.
+    img_src = csp_text.split("img-src ")[1].split(";")[0]
+    assert "https:" not in img_src.split()
+    assert "'self'" in img_src
+    assert "data:" in img_src
+    assert "blob:" in img_src
+    # Payment QR presigned GET URLs load from the exports bucket's exact
+    # S3 virtual-hosted origin, interpolated per environment.
+    assert "https://${var.exports_bucket_name}.s3.${var.aws_region}.amazonaws.com" in img_src
+
+    # #440: no WebSocket schemes in connect-src (downgrade risk; app is
+    # plain HTTPS only).
+    connect_src = csp_text.split("connect-src ")[1].split(";")[0]
+    assert "ws:" not in connect_src
+    assert "wss:" not in connect_src
+
     frame = block(sec["frame_options"])
     assert frame["frame_option"] == "DENY"
     assert frame["override"] is True
@@ -397,6 +414,32 @@ def test_response_headers_policy_enforces_security_headers(cloudfront_module):
     dist = first_resource(cloudfront_module, "aws_cloudfront_distribution", "site")
     default = block(dist["default_cache_behavior"])
     assert default["response_headers_policy_id"] == ("${aws_cloudfront_response_headers_policy.security.id}")
+
+
+def test_index_html_meta_csp_mirrors_headers_policy():
+    """#440: the frontend <meta> CSP stays consistent with the header CSP.
+
+    The meta policy is baked into one build for all environments, so it lists
+    the concrete dev/prod exports buckets instead of the terraform
+    interpolation; the effective policy on dev/prod is the intersection of
+    meta and the per-environment response header policy.
+    """
+    html = (REPO_ROOT / "frontend" / "index.html").read_text()
+    match = re.search(r'http-equiv="Content-Security-Policy"\s+content="([^"]+)"', html)
+    assert match, "index.html must carry the meta CSP"
+    csp = match.group(1)
+
+    img_src = csp.split("img-src ")[1].split(";")[0]
+    assert "https:" not in img_src.split(), "img-src must not allow arbitrary https: images"
+    assert "'self'" in img_src
+    assert "data:" in img_src
+    assert "blob:" in img_src
+    for env in ("dev", "prod"):
+        assert f"https://kernelworx-exports-ue1-{env}.s3.us-east-1.amazonaws.com" in img_src
+
+    connect_src = csp.split("connect-src ")[1].split(";")[0]
+    assert "ws:" not in connect_src
+    assert "wss:" not in connect_src
 
 
 def test_spa_fallback_and_s3_default_behavior_unchanged(cloudfront_module):
