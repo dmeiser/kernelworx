@@ -546,6 +546,7 @@ class TestTransferProfileOwnership:
 
         # The profile now belongs to new-owner (base table is authoritative).
         _seed_profile(profiles_table, new_owner_id, profile_id)
+
         # Simulate the stale GSI: it still projects the previous owner.
         def stale_gsi_query(*args: Any, **kwargs: Any) -> Any:
             return {
@@ -565,7 +566,7 @@ class TestTransferProfileOwnership:
             "arguments": {
                 "input": {
                     "profileId": profile_id,
-                    "newOwnerAccountId": "someother-owner",
+                    "newOwnerAccountId": "other-owner",
                 }
             },
         }

@@ -17,8 +17,6 @@ aws_appsync_function at most once.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from tests.unit.test_edge_security import TF_APP, load_hcl
 
 APPSYNC_DIR = TF_APP / "modules" / "appsync"
@@ -72,8 +70,8 @@ def test_two_phase_write_check_uses_distinct_functions() -> None:
                     functions.update(instances)
     assert "verify_profile_write_access" in functions
     assert "verify_profile_write_access_step2" in functions
-    step1 = f"${{aws_appsync_function.verify_profile_write_access.function_id}}"
-    step2 = f"${{aws_appsync_function.verify_profile_write_access_step2.function_id}}"
+    step1 = "${aws_appsync_function.verify_profile_write_access.function_id}"
+    step2 = "${aws_appsync_function.verify_profile_write_access_step2.function_id}"
     write_mutations = (
         "create_campaign",
         "update_campaign",
@@ -92,11 +90,7 @@ def test_two_phase_write_check_uses_distinct_functions() -> None:
     }
     for mutation in write_mutations:
         attrs = resolvers[mutation]
-        pipeline = [
-            fn
-            for cfg in attrs.get("pipeline_config", [])
-            for fn in cfg.get("functions", [])
-        ]
+        pipeline = [fn for cfg in attrs.get("pipeline_config", []) for fn in cfg.get("functions", [])]
         assert pipeline.index(step1) < pipeline.index(step2), (
             f"{mutation} must run the ownership read before the share-path lookup"
         )

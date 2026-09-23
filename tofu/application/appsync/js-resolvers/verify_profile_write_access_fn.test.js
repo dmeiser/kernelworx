@@ -173,7 +173,7 @@ describe('verify_profile_write_access_fn response (step 1)', () => {
     it('does NOT require ownerAccountId to match sub: existence under the caller key is authoritative', () => {
         // Simulate the stale-GSI race: an item present under the caller key is
         // authoritative regardless of any attribute value.
-        const profile = { ownerAccountId: 'SOMEWEIRDVALUE', profileId: 'PROFILE#prof-456' };
+        const profile = { ownerAccountId: 'UNRELATED-OWNER', profileId: 'PROFILE#prof-456' };
         const ctx = baseCtx({ result: profile });
 
         response(ctx);
