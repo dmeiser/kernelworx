@@ -278,17 +278,34 @@ describe('Share Query Operations Integration Tests', () => {
   // ========================================
 
   describe('5.13.1: listSharesByProfile', () => {
-    test('Happy Path: Returns all shares for a profile', async () => {
-      const { data }: any = await ownerClient.query({
-        query: LIST_SHARES_BY_PROFILE,
-        variables: { profileId: testProfileId },
-        fetchPolicy: 'network-only',
-      });
+    // The pipeline's ownership check reads the profileId-index GSI, which can lag
+    // or throttle in heavily loaded test environments (Bug #21), transiently
+    // yielding an empty share list for a profile that exists. Poll with the same
+    // retry pattern used in profileQueries.integration.test.ts.
+    const listSharesWithRetry = async (checkFn: (shares: any[]) => boolean): Promise<any[]> =>
+      waitForGSIConsistency(
+        async () => {
+          const { data }: any = await ownerClient.query({
+            query: LIST_SHARES_BY_PROFILE,
+            variables: { profileId: testProfileId },
+            fetchPolicy: 'network-only',
+          });
+          return data.listSharesByProfile;
+        },
+        checkFn,
+        120, // maxAttempts (2 minutes of polling)
+        1000 // delayMs
+      );
 
-      expect(data.listSharesByProfile).toBeDefined();
-      expect(data.listSharesByProfile.length).toBeGreaterThan(0);
-      
-      const shareIds = data.listSharesByProfile.map((s: any) => s.shareId);
+    test('Happy Path: Returns all shares for a profile', async () => {
+      const shares = await listSharesWithRetry((items: any[]) =>
+        items.some((s: any) => s.shareId === testShareId)
+      );
+
+      expect(shares).toBeDefined();
+      expect(shares.length).toBeGreaterThan(0);
+
+      const shareIds = shares.map((s: any) => s.shareId);
       expect(shareIds).toContain(testShareId);
     });
 
@@ -304,39 +321,29 @@ describe('Share Query Operations Integration Tests', () => {
     });
 
     test('Happy Path: Includes share permissions', async () => {
-      const { data }: any = await ownerClient.query({
-        query: LIST_SHARES_BY_PROFILE,
-        variables: { profileId: testProfileId },
-        fetchPolicy: 'network-only',
-      });
+      const shares = await listSharesWithRetry((items: any[]) =>
+        items.some((s: any) => s.shareId === testShareId)
+      );
 
-      const share = data.listSharesByProfile.find((s: any) => s.shareId === testShareId);
+      const share = shares.find((s: any) => s.shareId === testShareId);
       expect(share).toBeDefined();
       expect(share.permissions).toBeDefined();
       expect(share.permissions.length).toBeGreaterThan(0);
     });
 
     test('Happy Path: Includes targetAccountId for each share', async () => {
-      const { data }: any = await ownerClient.query({
-        query: LIST_SHARES_BY_PROFILE,
-        variables: { profileId: testProfileId },
-        fetchPolicy: 'network-only',
-      });
+      const shares = await listSharesWithRetry((items: any[]) => items.length > 0);
 
-      const share = data.listSharesByProfile[0];
+      const share = shares[0];
       expect(share).toHaveProperty('targetAccountId');
       expect(share.targetAccountId).toBeDefined();
     });
 
     test('Authorization: Profile owner can list shares', async () => {
-      const { data }: any = await ownerClient.query({
-        query: LIST_SHARES_BY_PROFILE,
-        variables: { profileId: testProfileId },
-        fetchPolicy: 'network-only',
-      });
+      const shares = await listSharesWithRetry((items: any[]) => items.length > 0);
 
-      expect(data.listSharesByProfile).toBeDefined();
-      expect(data.listSharesByProfile.length).toBeGreaterThan(0);
+      expect(shares).toBeDefined();
+      expect(shares.length).toBeGreaterThan(0);
     });
 
     test('Authorization: Shared user with WRITE can list shares', async () => {
@@ -402,13 +409,11 @@ describe('Share Query Operations Integration Tests', () => {
 
     test('Data Integrity: Listing shares includes both READ and WRITE permissions', async () => {
       // The testShareId share was created with ['READ', 'WRITE'] permissions
-      const { data }: any = await ownerClient.query({
-        query: LIST_SHARES_BY_PROFILE,
-        variables: { profileId: testProfileId },
-        fetchPolicy: 'network-only',
-      });
+      const shares = await listSharesWithRetry((items: any[]) =>
+        items.some((s: any) => s.shareId === testShareId)
+      );
 
-      const share = data.listSharesByProfile.find((s: any) => s.shareId === testShareId);
+      const share = shares.find((s: any) => s.shareId === testShareId);
       expect(share).toBeDefined();
       expect(share.permissions).toContain('READ');
       expect(share.permissions).toContain('WRITE');

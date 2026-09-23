@@ -289,6 +289,13 @@ module "cloudfront" {
   # #165: one CLOUDFRONT-scope WAF on the distribution (the only WAF).
   web_acl_id = module.waf.web_acl_arn
 
+  # #430: production HSTS — one year, all subdomains. Browsers clamp on
+  # max-age decrease, so this direction is safe; do not lower it later.
+  # `preload` is intentionally not enabled (irreversible preload-listing
+  # commitment; needs its own go/no-go).
+  hsts_max_age_sec        = 31536000
+  hsts_include_subdomains = true
+
   # Same-origin API and auth proxy through the distribution. The AppSync
   # origin is the default endpoint hostname: the served TLS cert matches it,
   # unlike the custom-domain name.
