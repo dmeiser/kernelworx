@@ -37,6 +37,15 @@ describe('get_payment_method_for_delete_fn response', () => {
         assert.strictEqual(ctx.stash.hasQR, false);
     });
 
+    it('stashes the raw read preferences snapshot for the optimistic lock', () => {
+        const ctx = makeCtx('venmo', [{ name: 'Venmo', qrCodeUrl: 's3://bucket/qr.png' }]);
+
+        response(ctx);
+
+        assert.strictEqual(ctx.stash.readPreferencesExisted, true);
+        assert.deepStrictEqual(ctx.stash.readPreferences, ctx.result.preferences);
+    });
+
     it('errors when no method matches case-insensitively', () => {
         const ctx = makeCtx('venmo', [{ name: 'PayPal' }]);
 

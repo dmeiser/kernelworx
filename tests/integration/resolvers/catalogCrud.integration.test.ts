@@ -420,9 +420,49 @@ describe('Catalog CRUD Integration Tests', () => {
         await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId } });
       });
 
-      it('should accept or reject catalog with negative price product', async () => {
-        // Arrange - Negative prices might represent discounts/credits
-        // System should either accept or reject based on business logic
+      it('should reject catalog with empty catalog name', async () => {
+        const input = {
+          catalogName: '   ',
+          isPublic: true,
+          products: [
+            {
+              productName: 'Sample Product',
+              price: 10.0,
+              sortOrder: 1,
+            },
+          ],
+        };
+
+        await expect(
+          ownerClient.mutate({
+            mutation: CREATE_CATALOG,
+            variables: { input },
+          })
+        ).rejects.toThrow(/Catalog name is required|INVALID_INPUT/i);
+      });
+
+      it('should reject product with empty name', async () => {
+        const input = {
+          catalogName: 'Sample Catalog',
+          isPublic: true,
+          products: [
+            {
+              productName: '   ',
+              price: 10.0,
+              sortOrder: 1,
+            },
+          ],
+        };
+
+        await expect(
+          ownerClient.mutate({
+            mutation: CREATE_CATALOG,
+            variables: { input },
+          })
+        ).rejects.toThrow(/Product name is required|INVALID_INPUT/i);
+      });
+
+      it('should reject catalog with negative price product', async () => {
         const input = {
           catalogName: 'Negative Price Test Catalog',
           isPublic: false,
@@ -435,23 +475,12 @@ describe('Catalog CRUD Integration Tests', () => {
           ],
         };
 
-        try {
-          // Act
-          const { data } = await ownerClient.mutate({
+        await expect(
+          ownerClient.mutate({
             mutation: CREATE_CATALOG,
             variables: { input },
-          });
-
-          // If accepted, the system allows negative prices
-          const catalogId = data.createCatalog.catalogId;
-          expect(data.createCatalog.products[0].price).toBe(-5.0);
-
-          // Cleanup
-          await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId } });
-        } catch (error: any) {
-          // If rejected, the system validates against negative prices
-          expect(error.message).toMatch(/price|negative|invalid|validation/i);
-        }
+          })
+        ).rejects.toThrow(/Valid product price is required|INVALID_INPUT/i);
       });
     });
 
@@ -769,6 +798,99 @@ describe('Catalog CRUD Integration Tests', () => {
             variables: { catalogId: catalogId, input: updateInput },
           })
         ).rejects.toThrow(/Products array cannot be empty/i);
+
+        // Cleanup
+        await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId } });
+      });
+
+      it('should reject update with empty catalog name', async () => {
+        // Arrange: Create catalog
+        const createInput = {
+          catalogName: 'Catalog to Update Name',
+          isPublic: true,
+          products: [{ productName: 'Product', price: 10.0, sortOrder: 1 }],
+        };
+        const { data: createData } = await ownerClient.mutate({
+          mutation: CREATE_CATALOG,
+          variables: { input: createInput },
+        });
+        const catalogId = createData.createCatalog.catalogId;
+
+        const updateInput = {
+          catalogName: '   ',
+          isPublic: true,
+          products: [{ productName: 'Product', price: 10.0, sortOrder: 1 }],
+        };
+
+        // Act & Assert
+        await expect(
+          ownerClient.mutate({
+            mutation: UPDATE_CATALOG,
+            variables: { catalogId, input: updateInput },
+          })
+        ).rejects.toThrow(/Catalog name is required|INVALID_INPUT/i);
+
+        // Cleanup
+        await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId } });
+      });
+
+      it('should reject update with empty product name', async () => {
+        // Arrange: Create catalog
+        const createInput = {
+          catalogName: 'Catalog to Update Product',
+          isPublic: true,
+          products: [{ productName: 'Product', price: 10.0, sortOrder: 1 }],
+        };
+        const { data: createData } = await ownerClient.mutate({
+          mutation: CREATE_CATALOG,
+          variables: { input: createInput },
+        });
+        const catalogId = createData.createCatalog.catalogId;
+
+        const updateInput = {
+          catalogName: 'Updated Catalog',
+          isPublic: true,
+          products: [{ productName: '   ', price: 10.0, sortOrder: 1 }],
+        };
+
+        // Act & Assert
+        await expect(
+          ownerClient.mutate({
+            mutation: UPDATE_CATALOG,
+            variables: { catalogId, input: updateInput },
+          })
+        ).rejects.toThrow(/Product name is required|INVALID_INPUT/i);
+
+        // Cleanup
+        await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId } });
+      });
+
+      it('should reject update with negative price product', async () => {
+        // Arrange: Create catalog
+        const createInput = {
+          catalogName: 'Catalog to Update Price',
+          isPublic: true,
+          products: [{ productName: 'Product', price: 10.0, sortOrder: 1 }],
+        };
+        const { data: createData } = await ownerClient.mutate({
+          mutation: CREATE_CATALOG,
+          variables: { input: createInput },
+        });
+        const catalogId = createData.createCatalog.catalogId;
+
+        const updateInput = {
+          catalogName: 'Updated Catalog',
+          isPublic: true,
+          products: [{ productName: 'Product', price: -5.0, sortOrder: 1 }],
+        };
+
+        // Act & Assert
+        await expect(
+          ownerClient.mutate({
+            mutation: UPDATE_CATALOG,
+            variables: { catalogId, input: updateInput },
+          })
+        ).rejects.toThrow(/Valid product price is required|INVALID_INPUT/i);
 
         // Cleanup
         await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId } });
