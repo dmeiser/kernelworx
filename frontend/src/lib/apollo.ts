@@ -108,27 +108,20 @@ const dispatchGraphQLErrorEvent = (
   }
 };
 
-const extractErrorCode = (
-  extensions: GraphQLErrorWithExtensions['extensions'],
-): string | undefined => {
+const extractErrorCode = (extensions: GraphQLErrorWithExtensions['extensions']): string | undefined => {
   if (!extensions) {
     return undefined;
   }
   return extensions.errorCode || extensions.code || extensions.errorType;
 };
 
-const processGraphQLError = (
-  err: GraphQLFormattedError,
-  operationName: string | undefined,
-): void => {
+const processGraphQLError = (err: GraphQLFormattedError, operationName: string | undefined): void => {
   const typedErr = err as GraphQLErrorWithExtensions;
   const { message, locations, path, extensions } = typedErr;
   const errorCode = extractErrorCode(extensions);
 
   if (import.meta.env.DEV) {
-    console.error(
-      `[GraphQL error]: Message: ${message}, Code: ${errorCode}, Location: ${locations}, Path: ${path}`,
-    );
+    console.error(`[GraphQL error]: Message: ${message}, Code: ${errorCode}, Location: ${locations}, Path: ${path}`);
   }
 
   if (isMfaRequiredError(typedErr)) {
@@ -139,10 +132,7 @@ const processGraphQLError = (
   dispatchGraphQLErrorEvent(errorCode, userMessage, operationName);
 };
 
-const processNetworkError = (
-  networkError: ErrorLike,
-  operationName: string | undefined,
-): void => {
+const processNetworkError = (networkError: ErrorLike, operationName: string | undefined): void => {
   if (import.meta.env.DEV) {
     console.error(`[Network/Error]: ${networkError.message}`);
   }
