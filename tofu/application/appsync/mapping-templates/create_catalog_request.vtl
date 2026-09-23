@@ -1,5 +1,9 @@
+## Validate catalog name is a non-empty string
+#if(!$util.isString($ctx.args.input.catalogName) || $util.isNullOrBlank($ctx.args.input.catalogName))
+    $util.error("Catalog name is required", "INVALID_INPUT")
+#end
 ## Validate products array is not empty
-#if($ctx.args.input.products.size() == 0)
+#if(!$util.isList($ctx.args.input.products) || $ctx.args.input.products.size() == 0)
     $util.error("Products array cannot be empty", "INVALID_INPUT")
 #end
 #set($catalogId = "CATALOG#$util.autoId()")
@@ -7,6 +11,16 @@
 ## Add productId to each product
 #set($productsWithIds = [])
 #foreach($product in $ctx.args.input.products)
+    #if(!$util.isString($product.productName) || $util.isNullOrBlank($product.productName))
+        $util.error("Product name is required", "INVALID_INPUT")
+    #end
+    #if(!$util.isNumber($product.price) || !($product.price >= 0))
+        $util.error("Valid product price is required", "INVALID_INPUT")
+    #end
+    #set($priceStr = "$product.price")
+    #if($priceStr == "Infinity" || $priceStr == "+Infinity" || $priceStr == "-Infinity" || $priceStr == "NaN")
+        $util.error("Valid product price is required", "INVALID_INPUT")
+    #end
     #set($productId = "PRODUCT#$util.autoId()")
     #set($productWithId = {
         "productId": $productId,
