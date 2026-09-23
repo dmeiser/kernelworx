@@ -56,5 +56,14 @@ export function response(ctx) {
     }
 
     ctx.stash.existingMethods = methods;
+
+    // Carry the raw read preferences snapshot so the mutation step can apply an
+    // optimistic lock (preferences = :readPrefs) against concurrent writes.
+    const readPreferences = account.preferences;
+    ctx.stash.readPreferencesExisted = readPreferences !== undefined;
+    if (ctx.stash.readPreferencesExisted) {
+        ctx.stash.readPreferences = readPreferences;
+    }
+
     return {};
 }
