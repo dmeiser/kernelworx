@@ -2,7 +2,7 @@ import '../setup.ts';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { ApolloClient, gql, HttpLink, InMemoryCache } from '@apollo/client';
 import { createAuthenticatedClient, AuthenticatedClientResult } from '../setup/apolloClient';
-import { getTestPrefix, deleteTestAccounts, TABLE_NAMES } from '../setup/testData';
+import { getTestPrefix, deleteTestAccounts, TABLE_NAMES, waitForGSIConsistency } from '../setup/testData';
 import { DynamoDBClient, QueryCommand, DeleteItemCommand } from '@aws-sdk/client-dynamodb';
 
 // DynamoDB client for direct cleanup
@@ -1122,14 +1122,21 @@ describe('Profile Sharing Integration Tests', () => {
         })
       ).rejects.toThrow(/already shared/i);
 
-      // Verify there's only one share and permissions were not updated
-      const { data: shares } = await ownerClient.query({
-        query: LIST_SHARES,
-        variables: { profileId },
-        fetchPolicy: 'network-only',
-      });
-      expect(shares.listSharesByProfile).toHaveLength(1);
-      expect(shares.listSharesByProfile[0].permissions).toEqual(['READ']);
+      // Verify there's only one share and permissions were not updated.
+      // listSharesByProfile reads a GSI, so poll until the just-created share is projected.
+      const shareList = await waitForGSIConsistency(
+        async () => {
+          const { data } = await ownerClient.query({
+            query: LIST_SHARES,
+            variables: { profileId },
+            fetchPolicy: 'network-only',
+          });
+          return data.listSharesByProfile;
+        },
+        (shares) => shares.length === 1
+      );
+      expect(shareList).toHaveLength(1);
+      expect(shareList[0].permissions).toEqual(['READ']);
     });
 
     it('rejects missing profileId', async () => {
