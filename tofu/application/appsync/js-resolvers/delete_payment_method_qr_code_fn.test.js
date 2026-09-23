@@ -17,6 +17,9 @@ describe('delete_payment_method_qr_code_fn request', () => {
         assert.strictEqual(result.operation, 'Invoke');
         assert.strictEqual(result.payload.arguments.paymentMethodName, 'Venmo');
         assert.strictEqual(result.payload.identity.sub, 'user-123');
+        // The Lambda must not write preferences: the final pipeline step's
+        // optimistic lock uses a snapshot taken before this function ran.
+        assert.strictEqual(result.payload.purgeS3Only, true);
     });
 
     it('early-returns when the payment method has no QR code', () => {
