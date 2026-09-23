@@ -15,10 +15,7 @@ from pathlib import Path
 import hcl2
 import pytest
 
-S3_MODULE = (
-    Path(__file__).resolve().parent.parent.parent
-    / "tofu/application/modules/s3/main.tf"
-)
+S3_MODULE = Path(__file__).resolve().parent.parent.parent / "tofu/application/modules/s3/main.tf"
 
 
 def _norm(key: str) -> str:
@@ -31,11 +28,7 @@ def _norm(key: str) -> str:
 def _clean(value):
     """Drop python-hcl2 bookkeeping keys and decode interpolated strings."""
     if isinstance(value, dict):
-        return {
-            _norm(k): _clean(v)
-            for k, v in value.items()
-            if k not in ("__is_block__", "__comments__")
-        }
+        return {_norm(k): _clean(v) for k, v in value.items() if k not in ("__is_block__", "__comments__")}
     if isinstance(value, list):
         return [_clean(v) for v in value]
     if isinstance(value, str) and value.startswith('"') and value.endswith('"'):
@@ -109,9 +102,7 @@ def test_expired_object_delete_markers_cleaned_by_separate_rule():
         (r for r in rules if r.get("id") == "expire-reports-delete-markers"),
         None,
     )
-    assert marker_rule is not None, (
-        "expected a dedicated rule removing expired object delete markers"
-    )
+    assert marker_rule is not None, "expected a dedicated rule removing expired object delete markers"
     assert marker_rule["status"] == "Enabled"
     assert marker_rule["filter"][0]["prefix"] == "reports/"
 
