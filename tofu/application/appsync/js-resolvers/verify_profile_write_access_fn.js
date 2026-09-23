@@ -1,7 +1,9 @@
 import { util } from '@aws-appsync/utils';
 
-// This function is listed TWICE in each write-mutation pipeline (see
-// resolvers_mutations.tf) so it can perform a two-phase authorization:
+// This code backs TWO aws_appsync_function resources (verify_profile_write_access
+// and verify_profile_write_access_step2 in functions_sharing.tf) that run
+// back-to-back in each write-mutation pipeline so it can perform a two-phase
+// authorization:
 //
 //   Step 1: a strongly consistent base-table GetItem keyed
 //           {ownerAccountId: <caller>, profileId}. An item can only live under
