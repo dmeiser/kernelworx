@@ -1,5 +1,4 @@
 import { util } from '@aws-appsync/utils';
-import { normalizeCatalogsIsPublic } from './lib/normalize_catalog.js';
 
 export function request(ctx) {
     const ownerAccountId = 'ACCOUNT#' + ctx.identity.sub;
@@ -21,5 +20,5 @@ export function response(ctx) {
     if (ctx.error) {
         util.error(ctx.error.message, ctx.error.type);
     }
-    return normalizeCatalogsIsPublic(ctx.result.items || []);
+    return ctx.result.items || [];
 }

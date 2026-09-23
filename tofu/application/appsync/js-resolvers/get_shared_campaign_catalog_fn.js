@@ -1,5 +1,4 @@
 import { util, runtime } from '@aws-appsync/utils';
-import { normalizeCatalogIsPublic } from './lib/normalize_catalog.js';
 
 /**
  * GetItem step of the SharedCampaign.catalog pipeline field resolver (#332).
@@ -30,5 +29,5 @@ export function response(ctx) {
     if (!ctx.result || ctx.result.isDeleted == true) {
         return null;
     }
-    return normalizeCatalogIsPublic(ctx.result);
+    return ctx.result;
 }

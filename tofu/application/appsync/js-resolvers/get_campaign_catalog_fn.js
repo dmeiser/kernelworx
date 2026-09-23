@@ -1,5 +1,4 @@
 import { util, runtime } from '@aws-appsync/utils';
-import { normalizeCatalogIsPublic } from './lib/normalize_catalog.js';
 
 /**
  * GetItem step of the Campaign.catalog pipeline field resolver (see #332).
@@ -27,5 +26,5 @@ export function response(ctx) {
     if (ctx.error) {
         util.error(ctx.error.message, ctx.error.type);
     }
-    return normalizeCatalogIsPublic(ctx.result);
+    return ctx.result;
 }

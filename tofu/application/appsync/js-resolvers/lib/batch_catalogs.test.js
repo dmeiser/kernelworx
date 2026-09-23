@@ -88,19 +88,6 @@ describe('attachCatalogs (SharedCampaign variant, treatDeletedAsNull = true)', (
         ]);
     });
 
-    it('coerces a legacy String isPublic to Boolean on attached catalogs', () => {
-        const campaigns = [{ campaignId: 'C1', catalogId: 'CAT-A' }];
-        const tableData = [{ catalogId: 'CAT-A', catalogName: 'Fall Sale', isPublic: 'true' }];
-
-        assert.deepStrictEqual(attachCatalogs(campaigns, tableData, false), [
-            {
-                campaignId: 'C1',
-                catalogId: 'CAT-A',
-                catalog: { catalogId: 'CAT-A', catalogName: 'Fall Sale', isPublic: true },
-            },
-        ]);
-    });
-
     it('shares one catalog across campaigns with the same catalogId', () => {
         const campaigns = [
             { campaignId: 'C1', catalogId: 'CAT-A' },

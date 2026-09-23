@@ -5,8 +5,6 @@
  * without rendering Terraform.
  */
 
-import { normalizeCatalogIsPublic } from './normalize_catalog.js';
-
 /**
  * Extract the de-duplicated set of catalogIds from a campaign array,
  * preserving first-seen order.
@@ -39,7 +37,7 @@ export function attachCatalogs(campaigns, tableData, treatDeletedAsNull) {
     if (Array.isArray(tableData)) {
         for (const catalog of tableData) {
             if (catalog && catalog.catalogId) {
-                catalogMap[catalog.catalogId] = normalizeCatalogIsPublic(catalog);
+                catalogMap[catalog.catalogId] = catalog;
             }
         }
     }

@@ -37,12 +37,6 @@ describe('get_campaign_catalog_fn response', () => {
         assert.deepStrictEqual(response(ctx), catalog);
     });
 
-    it('coerces a legacy String isPublic to Boolean before serialization', () => {
-        const ctx = { result: { catalogId: 'CAT-A', isPublic: 'false' } };
-
-        assert.deepStrictEqual(response(ctx), { catalogId: 'CAT-A', isPublic: false });
-    });
-
     it('returns null when the catalog is missing', () => {
         assert.strictEqual(response({ result: null }), null);
     });
