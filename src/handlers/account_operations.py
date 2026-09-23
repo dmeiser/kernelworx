@@ -37,8 +37,28 @@ else:  # pragma: no cover
 logger = get_logger(__name__)
 
 
+def _delete_user_s3_reports(account_id: str, logger: Any) -> int:
+    """Delete all S3 report objects and versions for all profiles owned by the user.
+
+    Returns the count of deleted S3 report versions.
+    """
+    from .admin_operations import _get_user_profiles, _normalize_account_id
+    from .delete_profile_cascade import _delete_s3_reports
+
+    db_account_id = _normalize_account_id(account_id)
+    profiles = _get_user_profiles(db_account_id, logger)
+    total_deleted = 0
+    for profile in profiles:
+        profile_id = profile.get("profileId")
+        if profile_id:
+            total_deleted += _delete_s3_reports(str(profile_id))
+
+    logger.info("Deleted user S3 reports", account_id=account_id, count=total_deleted)
+    return total_deleted
+
+
 def _delete_all_user_data(account_id: str, context: Any, logger: Any) -> None:
-    """Delete all user data from DynamoDB using shared deletion internals."""
+    """Delete all user data from DynamoDB and S3 using shared deletion internals."""
     from .admin_operations import (
         _delete_inbound_shares,
         _delete_invites_for_owned_profiles,
@@ -53,6 +73,7 @@ def _delete_all_user_data(account_id: str, context: Any, logger: Any) -> None:
     _delete_user_shares(account_id, logger)
     _delete_invites_for_owned_profiles(account_id, logger)
     _delete_inbound_shares(account_id, logger)
+    _delete_user_s3_reports(account_id, logger)
     _delete_user_profiles(account_id, logger)
     # Catalogs are preserved per product design and should never be deleted.
     # Delete payment method QR codes from S3 per captain decision

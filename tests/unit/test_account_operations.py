@@ -52,6 +52,19 @@ class TestDeleteMyAccount:
         qr_key = f"payment-qr-codes/{sample_account_id}/venmo.png"
         s3_bucket.put_object(Bucket=os.environ["EXPORTS_BUCKET"], Key=qr_key, Body=b"fake-qr-code")
 
+        # 0b. Put report objects in S3 (both prefixed and unprefixed)
+        clean_profile_id = profile_id.replace("PROFILE#", "")
+        s3_bucket.put_object(
+            Bucket=os.environ["EXPORTS_BUCKET"],
+            Key=f"reports/{profile_id}/c1/report.xlsx",
+            Body=b"fake-report",
+        )
+        s3_bucket.put_object(
+            Bucket=os.environ["EXPORTS_BUCKET"],
+            Key=f"reports/{clean_profile_id}/c1/report.xlsx",
+            Body=b"fake-report",
+        )
+
         # 1. Create account
         accounts_table.put_item(
             Item={
@@ -229,6 +242,17 @@ class TestDeleteMyAccount:
         )
         assert "Contents" not in s3_objects or len(s3_objects["Contents"]) == 0
 
+        # 11. Verify S3 reports were deleted for both prefixed and unprefixed keys
+        s3_reports_prefixed = s3_bucket.list_objects_v2(
+            Bucket=os.environ["EXPORTS_BUCKET"], Prefix=f"reports/{profile_id}/"
+        )
+        assert "Contents" not in s3_reports_prefixed or len(s3_reports_prefixed["Contents"]) == 0
+
+        s3_reports_unprefixed = s3_bucket.list_objects_v2(
+            Bucket=os.environ["EXPORTS_BUCKET"], Prefix=f"reports/{clean_profile_id}/"
+        )
+        assert "Contents" not in s3_reports_unprefixed or len(s3_reports_unprefixed["Contents"]) == 0
+
     def test_cannot_delete_another_users_account(
         self,
         dynamodb_table: Any,
@@ -299,6 +323,7 @@ class TestDeleteMyAccount:
         appsync_event: Dict[str, Any],
         lambda_context: Any,
         monkeypatch: Any,
+        s3_bucket: Any,
     ) -> None:
         """Test deleting account with multiple profiles/campaigns/orders."""
         from src.handlers.account_operations import delete_my_account
@@ -376,6 +401,13 @@ class TestDeleteMyAccount:
                 }
             )
 
+            # S3 Report
+            s3_bucket.put_object(
+                Bucket=os.environ["EXPORTS_BUCKET"],
+                Key=f"reports/{profile_id}/export.xlsx",
+                Body=b"fake-report",
+            )
+
         # Verify all items exist
         profiles_response = profiles_table.scan(
             FilterExpression="ownerAccountId = :owner", ExpressionAttributeValues={":owner": account_id_key}
@@ -394,9 +426,12 @@ class TestDeleteMyAccount:
         assert len(catalogs_response["Items"]) == 3
 
         # Mock Cognito and delete
+        orig_boto_client = boto3.client
         with patch("boto3.client") as mock_boto_client:
             mock_cognito = MagicMock()
-            mock_boto_client.return_value = mock_cognito
+            mock_boto_client.side_effect = lambda svc, **kwargs: (
+                mock_cognito if svc == "cognito-idp" else orig_boto_client(svc, **kwargs)
+            )
             mock_cognito.list_users.return_value = {"Users": [{"Username": "testuser@example.com"}]}
 
             event = {
@@ -422,6 +457,13 @@ class TestDeleteMyAccount:
         assert len(catalogs_response["Items"]) == 3
         for catalog in catalogs_response["Items"]:
             assert catalog.get("isDeleted") is not True
+
+        # S3 reports should be deleted for all profiles
+        for i in range(3):
+            s3_reports = s3_bucket.list_objects_v2(
+                Bucket=os.environ["EXPORTS_BUCKET"], Prefix=f"reports/PROFILE#profile-{i}/"
+            )
+            assert "Contents" not in s3_reports or len(s3_reports["Contents"]) == 0
 
     def test_delete_account_with_no_data(
         self,
@@ -913,3 +955,130 @@ class TestDeleteMyAccount:
                 assert result is True
                 assert mock_sleep.call_count == 1
                 assert mock_cognito.list_users.call_count == 2
+
+    def test_delete_user_s3_reports_missing_profile_id(
+        self,
+        dynamodb_table: Any,
+        sample_account_id: str,
+        monkeypatch: Any,
+    ) -> None:
+        """Test _delete_user_s3_reports handles profiles missing profileId attribute."""
+        from src.handlers.account_operations import _delete_user_s3_reports
+
+        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
+        account_id_key = f"ACCOUNT#{sample_account_id}"
+
+        # Insert a profile item missing profileId (or with None/empty)
+        # With mock query, test the exact if profile_id branch.
+        mock_logger = MagicMock()
+        with patch("src.handlers.admin_operations._get_user_profiles") as mock_get_profiles:
+            mock_get_profiles.return_value = [{"ownerAccountId": account_id_key}]
+            count = _delete_user_s3_reports(sample_account_id, mock_logger)
+            assert count == 0
+
+    def test_delete_user_s3_reports_no_bucket(
+        self,
+        dynamodb_table: Any,
+        sample_account_id: str,
+        monkeypatch: Any,
+    ) -> None:
+        """Test _delete_user_s3_reports returns 0 when EXPORTS_BUCKET is not set."""
+        from src.handlers.account_operations import _delete_user_s3_reports
+
+        monkeypatch.delenv("EXPORTS_BUCKET", raising=False)
+        mock_logger = MagicMock()
+
+        with patch("src.handlers.admin_operations._get_user_profiles") as mock_get_profiles:
+            mock_get_profiles.return_value = [{"ownerAccountId": f"ACCOUNT#{sample_account_id}", "profileId": "p1"}]
+            count = _delete_user_s3_reports(sample_account_id, mock_logger)
+            assert count == 0
+
+    def test_delete_account_s3_reports_error_fails(
+        self,
+        dynamodb_table: Any,
+        sample_account_id: str,
+        appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """Test delete_my_account fails when S3 report deletion raises AppError."""
+        from src.handlers.account_operations import delete_my_account
+        from src.utils.errors import AppError
+
+        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
+        monkeypatch.setenv("USER_POOL_ID", "us-east-1_test123")
+        monkeypatch.setenv("EXPORTS_BUCKET", "test-reports-bucket")
+
+        dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
+        accounts_table = dynamodb.Table("kernelworx-accounts-ue1-dev")
+        profiles_table = dynamodb.Table("kernelworx-profiles-v2-ue1-dev")
+        account_id_key = f"ACCOUNT#{sample_account_id}"
+        profile_id = "PROFILE#p-error-test"
+
+        accounts_table.put_item(
+            Item={
+                "accountId": account_id_key,
+                "email": "test@example.com",
+                "createdAt": datetime.now(timezone.utc).isoformat(),
+                "updatedAt": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+        profiles_table.put_item(
+            Item={
+                "ownerAccountId": account_id_key,
+                "profileId": profile_id,
+                "sellerName": "Test Scout",
+                "createdAt": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+
+        with patch("boto3.client") as mock_boto_client:
+            mock_cognito = MagicMock()
+            mock_boto_client.return_value = mock_cognito
+            mock_cognito.list_users.return_value = {"Users": [{"Username": "testuser@example.com"}]}
+
+            with patch(
+                "src.handlers.delete_profile_cascade._delete_s3_reports",
+                side_effect=AppError(ErrorCode.INTERNAL_ERROR, "Failed to delete S3 reports"),
+            ):
+                event = {
+                    **appsync_event,
+                    "identity": {"sub": sample_account_id},
+                }
+
+                result = delete_my_account(event, lambda_context)
+                assert result["__isError"] is True
+                assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
+
+    def test_delete_user_s3_reports_versions_and_markers(
+        self,
+        dynamodb_table: Any,
+        sample_account_id: str,
+        monkeypatch: Any,
+    ) -> None:
+        """Test _delete_user_s3_reports deletes versions and markers across prefixes."""
+        from src.handlers.account_operations import _delete_user_s3_reports
+
+        monkeypatch.setenv("EXPORTS_BUCKET", "test-reports-bucket")
+        mock_s3 = MagicMock()
+        mock_paginator = MagicMock()
+        mock_paginator.paginate.return_value = [
+            {
+                "Versions": [
+                    {"Key": "reports/PROFILE#p1/r1.xlsx", "VersionId": "v1"},
+                    {"Key": "reports/PROFILE#p1/r2.xlsx", "VersionId": "v2"},
+                ],
+                "DeleteMarkers": [
+                    {"Key": "reports/PROFILE#p1/r1.xlsx", "VersionId": "dm1"},
+                ],
+            }
+        ]
+        mock_s3.get_paginator.return_value = mock_paginator
+        mock_logger = MagicMock()
+
+        with patch("src.handlers.admin_operations._get_user_profiles") as mock_get_profiles:
+            mock_get_profiles.return_value = [{"profileId": "PROFILE#p1"}]
+            with patch("src.handlers.delete_profile_cascade.s3_client", mock_s3):
+                count = _delete_user_s3_reports(sample_account_id, mock_logger)
+                assert count >= 3
+                mock_s3.delete_objects.assert_called()

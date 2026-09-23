@@ -307,6 +307,12 @@ def _clear_qr_url_in_payment_method(caller_id: str, payment_method_name: str) ->
 def delete_qr_code(event: Dict[str, Any], context: Any) -> bool:
     """
     Delete QR code from S3 and clear qrCodeUrl in DynamoDB for a payment method.
+
+    When invoked from the deletePaymentMethod pipeline (purgeS3Only), skips the
+    DynamoDB write: the pipeline's delete_payment_method_from_prefs step removes
+    the whole method entry immediately after and its optimistic-lock condition is
+    based on a preferences snapshot taken before this Lambda ran — writing here
+    would stale that snapshot and fail the deletion.
     """
     logger = get_logger(__name__)
 
@@ -314,6 +320,7 @@ def delete_qr_code(event: Dict[str, Any], context: Any) -> bool:
 
     arguments = event.get("arguments", {})
     payment_method_name = arguments.get("paymentMethodName", "").strip()
+    purge_s3_only = event.get("purgeS3Only") is True
 
     if not payment_method_name:
         raise AppError(ErrorCode.INVALID_INPUT, "Payment method name is required")
@@ -325,7 +332,8 @@ def delete_qr_code(event: Dict[str, Any], context: Any) -> bool:
     stored_qr_key = target.get("qrCodeUrl")
 
     _delete_qr_from_s3_storage(stored_qr_key, caller_id, payment_method_name)
-    _clear_qr_url_in_payment_method(caller_id, payment_method_name)
+    if not purge_s3_only:
+        _clear_qr_url_in_payment_method(caller_id, payment_method_name)
 
     logger.info("Deleted QR code", account_id=caller_id, payment_method=payment_method_name)
     return True
