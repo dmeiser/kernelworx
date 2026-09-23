@@ -65,6 +65,11 @@ def _delete_all_user_data(account_id: str, context: Any, logger: Any) -> None:
 
 def _lookup_cognito_user_with_retry(cognito: Any, user_pool_id: str, account_id: str, logger: Any) -> str | None:
     """Look up Cognito username by sub with retry for transient errors."""
+    # Validate before interpolating into the Cognito filter to prevent
+    # quote-injection / filter breakage (#124, #441).
+    from .admin_operations import _validate_sub_for_filter
+
+    _validate_sub_for_filter(account_id)
     attempt = 0
     max_retries = 3
     while True:
