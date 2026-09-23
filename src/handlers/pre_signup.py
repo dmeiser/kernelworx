@@ -12,7 +12,10 @@ How it works:
 1. When a federated user (e.g., Google) attempts to sign in for the first time
 2. Cognito triggers Pre Sign Up before creating the user
 3. This Lambda checks if a native user with the same email already exists
-4. If so, it links the federated identity to the existing user
+4. If so, it links the federated identity to the existing user, but ONLY when
+   that existing account is CONFIRMED and its email is verified (otherwise it
+   fails closed — an unconfirmed signup could be an attacker account created
+   with the victim's verified email)
 5. Then raises an exception to prevent duplicate user creation
 6. The user is then signed in with the existing account
 """
@@ -92,11 +95,39 @@ def _link_federated_identity(cognito: Any, user_pool_id: str, existing_username:
     )
 
 
+def _existing_user_email_verified(existing_user: Dict[str, Any]) -> bool:
+    """Return True when an existing (ListUsers) user's email is verified."""
+    for attr in existing_user.get("Attributes", []):
+        if attr.get("Name") == "email_verified":
+            return str(attr.get("Value", "")).lower() == "true"
+    return False
+
+
 def _handle_existing_user(
     cognito: Any, user_pool_id: str, email: str, username: str, existing_user: Dict[str, Any]
 ) -> NoReturn:
-    """Handle linking when an existing user is found."""
+    """Handle linking when an existing user is found.
+
+    Only links when the existing account is confirmed and its email is verified.
+    An unconfirmed native signup made with the victim's verified email could be
+    an attacker account, so fail closed instead of handing it the identity.
+    """
     existing_username = existing_user["Username"]
+
+    if existing_user.get("UserStatus") != "CONFIRMED":
+        logger.warning(f"Refusing to link: existing user {mask_email(existing_username)} is not confirmed")
+        raise FederatedIdentityLinkedException(
+            "An account with this email already exists but is not fully set up. "
+            "Please resolve the existing account before signing in."
+        )
+
+    if not _existing_user_email_verified(existing_user):
+        logger.warning(f"Refusing to link: existing user {mask_email(existing_username)} has an unverified email")
+        raise FederatedIdentityLinkedException(
+            "An account with this email already exists but its email is not verified. "
+            "Please resolve the existing account before signing in."
+        )
+
     logger.info(f"Found existing user {mask_email(existing_username)} for email {mask_email(email)}, linking identity")
     _link_federated_identity(cognito, user_pool_id, existing_username, username)
 
