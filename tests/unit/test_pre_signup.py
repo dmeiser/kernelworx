@@ -146,6 +146,7 @@ class TestFederatedSignupExistingUser:
                         "UserStatus": "CONFIRMED",
                         "Attributes": [
                             {"Name": "email", "Value": "user@example.com"},
+                            {"Name": "email_verified", "Value": "true"},
                             {"Name": "sub", "Value": "existing-user-uuid"},
                         ],
                     }
@@ -194,6 +195,7 @@ class TestFederatedSignupExistingUser:
                     {
                         "Username": "existing-user-uuid",
                         "UserStatus": "CONFIRMED",
+                        "Attributes": [{"Name": "email_verified", "Value": "true"}],
                     }
                 ]
             }
@@ -226,6 +228,7 @@ class TestFederatedSignupExistingUser:
                     {
                         "Username": "existing-user-uuid",
                         "UserStatus": "CONFIRMED",
+                        "Attributes": [{"Name": "email_verified", "Value": "true"}],
                     }
                 ]
             }
@@ -244,6 +247,119 @@ class TestFederatedSignupExistingUser:
             assert "SignInWithApple" in str(exc_info.value)
 
 
+class TestExistingUserStateCheck:
+    """Tests that linking is refused when the existing account is not confirmed/verified."""
+
+    @staticmethod
+    def _run_with_existing_user(
+        user: dict[str, Any], event: dict[str, Any], context: MagicMock
+    ) -> tuple[MagicMock, str]:
+        """Patch boto3 with a ListUsers result of ``user`` and run the handler.
+
+        Returns (mock_cognito, raised_message); always raises FederatedIdentityLinkedException.
+        """
+        with patch("boto3.client") as mock_client:
+            mock_cognito = MagicMock()
+            mock_cognito.list_users.return_value = {"Users": [user]}
+            mock_client.return_value = mock_cognito
+            with pytest.raises(FederatedIdentityLinkedException) as exc_info:
+                lambda_handler(event, context)
+            return mock_cognito, str(exc_info.value)
+
+    def test_unconfirmed_existing_user_does_not_link(
+        self,
+        federated_signup_event: dict[str, Any],
+        lambda_context: MagicMock,
+    ) -> None:
+        """An unconfirmed existing native signup must not receive the federated identity."""
+        mock_cognito, message = self._run_with_existing_user(
+            {
+                "Username": "existing-user-uuid",
+                "UserStatus": "UNCONFIRMED",
+                "Attributes": [{"Name": "email_verified", "Value": "true"}],
+            },
+            federated_signup_event,
+            lambda_context,
+        )
+
+        mock_cognito.admin_link_provider_for_user.assert_not_called()
+        assert "not fully set up" in message
+
+    def test_pending_existing_user_does_not_link(
+        self,
+        federated_signup_event: dict[str, Any],
+        lambda_context: MagicMock,
+    ) -> None:
+        """A PENDING existing account must not receive the federated identity."""
+        mock_cognito, message = self._run_with_existing_user(
+            {"Username": "existing-user-uuid", "UserStatus": "PENDING"},
+            federated_signup_event,
+            lambda_context,
+        )
+
+        mock_cognito.admin_link_provider_for_user.assert_not_called()
+        assert "not fully set up" in message
+
+    def test_missing_user_status_does_not_link(
+        self,
+        federated_signup_event: dict[str, Any],
+        lambda_context: MagicMock,
+    ) -> None:
+        """A ListUsers result without UserStatus must fail closed."""
+        mock_cognito, message = self._run_with_existing_user(
+            {
+                "Username": "existing-user-uuid",
+                "Attributes": [{"Name": "email_verified", "Value": "true"}],
+            },
+            federated_signup_event,
+            lambda_context,
+        )
+
+        mock_cognito.admin_link_provider_for_user.assert_not_called()
+        assert "not fully set up" in message
+
+    def test_unverified_email_does_not_link(
+        self,
+        federated_signup_event: dict[str, Any],
+        lambda_context: MagicMock,
+    ) -> None:
+        """A confirmed account whose email is not verified must not be linked."""
+        mock_cognito, message = self._run_with_existing_user(
+            {
+                "Username": "existing-user-uuid",
+                "UserStatus": "CONFIRMED",
+                "Attributes": [
+                    {"Name": "email", "Value": "user@example.com"},
+                    {"Name": "email_verified", "Value": "false"},
+                ],
+            },
+            federated_signup_event,
+            lambda_context,
+        )
+
+        mock_cognito.admin_link_provider_for_user.assert_not_called()
+        assert "email is not verified" in message
+
+    def test_missing_email_verified_attribute_does_not_link(
+        self,
+        federated_signup_event: dict[str, Any],
+        lambda_context: MagicMock,
+    ) -> None:
+        """A confirmed account without an email_verified attribute must not be linked."""
+        mock_cognito, message = self._run_with_existing_user(
+            {
+                "Username": "existing-user-uuid",
+                "UserStatus": "CONFIRMED",
+                "Attributes": [{"Name": "email", "Value": "user@example.com"}],
+            },
+            federated_signup_event,
+            lambda_context,
+        )
+
+        mock_cognito.admin_link_provider_for_user.assert_not_called()
+        assert "email is not verified" in message
+
+
 class TestErrorHandling:
     """Tests for error handling scenarios"""
 
@@ -257,7 +373,15 @@ class TestErrorHandling:
 
         with patch("boto3.client") as mock_client:
             mock_cognito = MagicMock()
-            mock_cognito.list_users.return_value = {"Users": [{"Username": "existing-user-uuid"}]}
+            mock_cognito.list_users.return_value = {
+                "Users": [
+                    {
+                        "Username": "existing-user-uuid",
+                        "UserStatus": "CONFIRMED",
+                        "Attributes": [{"Name": "email_verified", "Value": "true"}],
+                    }
+                ]
+            }
             mock_cognito.admin_link_provider_for_user.side_effect = ClientError(
                 {
                     "Error": {
@@ -286,7 +410,15 @@ class TestErrorHandling:
 
         with patch("boto3.client") as mock_client:
             mock_cognito = MagicMock()
-            mock_cognito.list_users.return_value = {"Users": [{"Username": "existing-user-uuid"}]}
+            mock_cognito.list_users.return_value = {
+                "Users": [
+                    {
+                        "Username": "existing-user-uuid",
+                        "UserStatus": "CONFIRMED",
+                        "Attributes": [{"Name": "email_verified", "Value": "true"}],
+                    }
+                ]
+            }
             mock_cognito.admin_link_provider_for_user.side_effect = ClientError(
                 {
                     "Error": {
@@ -331,7 +463,15 @@ class TestErrorHandling:
 
         with patch("boto3.client") as mock_client:
             mock_cognito = MagicMock()
-            mock_cognito.list_users.return_value = {"Users": [{"Username": "existing-user-uuid"}]}
+            mock_cognito.list_users.return_value = {
+                "Users": [
+                    {
+                        "Username": "existing-user-uuid",
+                        "UserStatus": "CONFIRMED",
+                        "Attributes": [{"Name": "email_verified", "Value": "true"}],
+                    }
+                ]
+            }
             mock_client.return_value = mock_cognito
 
             with pytest.raises(Exception) as exc_info:
