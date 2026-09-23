@@ -7,13 +7,11 @@ from boto3.dynamodb.conditions import Key
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
     from utils.auth import batch_check_profile_access
-    from utils.catalogs import normalize_catalog_is_public
     from utils.dynamodb import tables
     from utils.logging import get_logger
     from utils.pagination import query_all_items
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.auth import batch_check_profile_access
-    from ..utils.catalogs import normalize_catalog_is_public
     from ..utils.dynamodb import tables
     from ..utils.logging import get_logger
     from ..utils.pagination import query_all_items
@@ -67,7 +65,7 @@ def _fetch_catalogs(catalog_ids: Set[str]) -> List[Dict[str, Any]]:
         try:
             catalog_response = tables.catalogs.get_item(Key={"catalogId": catalog_id})
             if "Item" in catalog_response:
-                catalogs.append(normalize_catalog_is_public(catalog_response["Item"]))
+                catalogs.append(catalog_response["Item"])
         except Exception as e:
             logger.warning(f"Failed to fetch catalog {catalog_id}: {str(e)}")
     catalogs.sort(key=lambda c: c.get("catalogName", ""))

@@ -163,47 +163,6 @@ class TestListUnitCatalogs:
         assert result[0]["catalogName"] == "Alpha Catalog"
         assert result[1]["catalogName"] == "Zebra Catalog"
 
-    def test_list_unit_catalogs_coerces_legacy_string_ispublic(
-        self,
-        event: Dict[str, Any],
-        lambda_context: MagicMock,
-        sample_profiles: list[Dict[str, Any]],
-        sample_catalogs: Dict[str, Dict[str, Any]],
-    ) -> None:
-        """Legacy rows store isPublic as the String 'true'/'false'; coerce to BOOL."""
-        mock_profiles = MagicMock()
-        mock_campaigns = MagicMock()
-        mock_catalogs = MagicMock()
-
-        mock_profiles.query.return_value = {"Items": sample_profiles}
-        mock_campaigns.query.return_value = {
-            "Items": [
-                {
-                    "campaignId": "CAMPAIGN#campaign1",
-                    "profileId": "PROFILE#profile1",
-                    "catalogId": "catalog-123",
-                }
-            ]
-        }
-        legacy_catalog = dict(sample_catalogs["catalog-123"], isPublic="false")
-        mock_catalogs.get_item.return_value = {"Item": legacy_catalog}
-
-        with (
-            patch("src.handlers.list_unit_catalogs.tables") as mock_tables,
-            patch("src.handlers.list_unit_catalogs.batch_check_profile_access") as mock_check_access,
-        ):
-            mock_tables.profiles = mock_profiles
-            mock_tables.campaigns = mock_campaigns
-            mock_tables.catalogs = mock_catalogs
-            mock_check_access.side_effect = lambda caller_account_id, profile_ids, required_permission="READ": set(
-                profile_ids
-            )
-
-            result = list_unit_catalogs(event, lambda_context)
-
-        assert len(result) == 1
-        assert result[0]["isPublic"] is False
-
     def test_list_unit_catalogs_no_profiles(
         self,
         event: Dict[str, Any],

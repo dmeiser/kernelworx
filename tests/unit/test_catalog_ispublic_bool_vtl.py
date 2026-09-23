@@ -12,9 +12,8 @@ These tests render the actual VTL templates with a minimal Velocity engine
 and assert on the emitted DynamoDB operation documents: the PutItem /
 UpdateItem ``attributeValues`` must carry ``isPublic`` as a DynamoDB BOOL and
 ``isPublicStr`` as the separate String keying the ``isPublic-createdAt-index``
-GSI. The read-side tests render ``get_catalog_response.vtl`` and assert that a
-legacy row whose ``isPublic`` is the String ``"true"``/``"false"`` is coerced
-to a real Boolean before GraphQL serialization.
+GSI. The read-side tests render ``get_catalog_response.vtl`` and assert the
+catalog item serializes unchanged for GraphQL.
 """
 
 from __future__ import annotations
@@ -518,21 +517,11 @@ class TestUpdateCatalogRequestVtl:
 
 
 class TestGetCatalogResponseVtl:
-    """Legacy String isPublic rows must be coerced to Boolean before serialization."""
+    """The response template serializes the raw catalog item unchanged."""
 
     @staticmethod
     def _context_with_result(result: Any) -> Dict[str, Any]:
         return {"ctx": {"result": result}}
-
-    def test_legacy_string_true_coerced_to_boolean(self):
-        result = {"catalogId": "CATALOG#legacy", "isPublic": "true", "catalogName": "Old"}
-        output = _render_json(GET_CATALOG_RESPONSE_VTL, self._context_with_result(result))
-        assert output["isPublic"] is True
-
-    def test_legacy_string_false_coerced_to_boolean(self):
-        result = {"catalogId": "CATALOG#legacy", "isPublic": "false", "catalogName": "Old"}
-        output = _render_json(GET_CATALOG_RESPONSE_VTL, self._context_with_result(result))
-        assert output["isPublic"] is False
 
     def test_native_bool_passthrough(self):
         result = {"catalogId": "CATALOG#new", "isPublic": False, "catalogName": "New"}

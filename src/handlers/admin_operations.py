@@ -26,14 +26,12 @@ from .campaign_operations import _verify_campaign_deleted, _verify_order_keys_de
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
     from utils.auth import require_admin_mfa
-    from utils.catalogs import normalize_catalog_is_public
     from utils.dynamodb import get_dynamodb_resource, tables
     from utils.errors import AppError, ErrorCode
     from utils.logging import get_logger, mask_email
     from utils.payment_methods import delete_all_user_qr_codes
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.auth import require_admin_mfa
-    from ..utils.catalogs import normalize_catalog_is_public
     from ..utils.dynamodb import get_dynamodb_resource, tables
     from ..utils.errors import AppError, ErrorCode
     from ..utils.logging import get_logger, mask_email
@@ -1399,7 +1397,7 @@ def admin_get_user_catalogs(event: Dict[str, Any], context: Any) -> list[Dict[st
     )
 
     logger.info("Retrieved user catalogs", account_id=account_id, count=len(catalogs))
-    return [normalize_catalog_is_public(catalog) for catalog in catalogs]
+    return catalogs
 
 
 def _get_user_profiles(db_account_id: str, logger: Any) -> list[Dict[str, Any]]:
@@ -1439,7 +1437,7 @@ def _fetch_catalog_batch_attempt(
     """Run one BatchGetItem attempt; store returned items and return unprocessed keys."""
     response = get_dynamodb_resource().batch_get_item(RequestItems={catalogs_table_name: {"Keys": keys_to_fetch}})
     for item in response.get("Responses", {}).get(catalogs_table_name, []):
-        catalog_map[item["catalogId"]] = normalize_catalog_is_public(item)
+        catalog_map[item["catalogId"]] = item
 
     unprocessed = _batch_get_unprocessed_keys(response, catalogs_table_name)
     if unprocessed and attempt < 2:

@@ -5270,31 +5270,6 @@ class TestAdminGetUserCatalogs:
         assert result[0]["catalogId"] == "CATALOG#cat-1"
         assert result[0]["catalogName"] == "Test Catalog"
 
-    def test_get_user_catalogs_coerces_legacy_string_ispublic(
-        self,
-        dynamodb_table: Any,
-        admin_appsync_event: Dict[str, Any],
-        lambda_context: Any,
-        catalogs_table: Any,
-    ) -> None:
-        """Legacy rows store isPublic as the String 'true'/'false'; coerce to BOOL."""
-        catalogs_table.put_item(
-            Item={
-                "ownerAccountId": "ACCOUNT#target-user-legacy",
-                "catalogId": "CATALOG#legacy",
-                "catalogName": "Legacy Catalog",
-                "isPublic": "true",
-            }
-        )
-
-        admin_appsync_event["info"]["fieldName"] = "adminGetUserCatalogs"
-        admin_appsync_event["arguments"] = {"accountId": "target-user-legacy"}
-
-        result = lambda_handler(admin_appsync_event, lambda_context)
-
-        assert len(result) == 1
-        assert result[0]["isPublic"] is True
-
     def test_get_user_catalogs_excludes_deleted(
         self,
         dynamodb_table: Any,
