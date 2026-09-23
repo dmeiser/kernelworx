@@ -25,7 +25,7 @@
     <!--
       CSP (#440): mirrors the CloudFront response headers policy in
       tofu/application/modules/cloudfront/response-headers.tf. img-src is
-      enumerated, not wildcarded: payment QR codes load from the exports
+      an explicit allowlist, not a wildcard: payment QR codes load from the exports
       bucket's S3 virtual-hosted origin (presigned GET URLs), the MFA TOTP QR
       is a data: URL, and the QR upload preview uses a blob: object URL.
       connect-src carries no ws:/wss: - the app uses no WebSockets.

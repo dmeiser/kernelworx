@@ -373,7 +373,7 @@ def test_response_headers_policy_enforces_security_headers(cloudfront_module):
     assert "fonts.gstatic.com" not in csp_text
     assert "fonts.googleapis.com" not in csp_text
 
-    # #440: img-src is enumerated, not wildcarded - no bare `https:` scheme.
+    # #440: img-src is an explicit allowlist - no bare `https:` scheme.
     img_src = csp_text.split("img-src ")[1].split(";")[0]
     assert "https:" not in img_src.split()
     assert "'self'" in img_src
