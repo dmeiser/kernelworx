@@ -744,6 +744,56 @@ class TestDeleteQRCode:
         assert result["__isError"] is True
         assert result["errorCode"] == ErrorCode.INVALID_INPUT
 
+    def test_delete_qr_purge_s3_only_skips_preferences_write(
+        self, dynamodb_tables: Dict[str, Any], s3_bucket: Any, sample_account: Dict[str, Any], sample_account_id: str
+    ) -> None:
+        """Pipeline mode (purgeS3Only) purges S3 without touching preferences.
+
+        delete_payment_method_from_prefs conditions on a preferences snapshot taken
+        before this Lambda ran, so the pipeline invocation must leave qrCodeUrl in
+        place; the following pipeline step removes the whole method entry.
+        """
+        from src.handlers.payment_methods_handlers import delete_qr_code
+        from src.utils.dynamodb import tables
+
+        create_payment_method(sample_account_id, "Venmo")
+
+        s3_key = f"payment-qr-codes/{sample_account_id}/venmo.png"
+        bucket_name = os.environ.get("EXPORTS_BUCKET", "test-exports-bucket")
+        s3_bucket.put_object(Bucket=bucket_name, Key=s3_key, Body=b"fake-qr-data")
+
+        account_id_key = f"ACCOUNT#{sample_account_id}"
+        response = tables.accounts.get_item(Key={"accountId": account_id_key})
+        preferences = response["Item"]["preferences"]
+        for m in preferences["paymentMethods"]:
+            if m["name"] == "Venmo":
+                m["qrCodeUrl"] = s3_key
+        tables.accounts.update_item(
+            Key={"accountId": account_id_key},
+            UpdateExpression="SET preferences = :prefs",
+            ExpressionAttributeValues={":prefs": preferences},
+        )
+
+        event = {
+            "identity": {"sub": sample_account_id},
+            "arguments": {"paymentMethodName": "Venmo"},
+            "purgeS3Only": True,
+        }
+
+        result = delete_qr_code(event, None)
+
+        assert result is True
+
+        # S3 object is purged...
+        with pytest.raises(ClientError):
+            s3_bucket.head_object(Bucket=bucket_name, Key=s3_key)
+
+        # ...but preferences are untouched: qrCodeUrl is still stored.
+        response = tables.accounts.get_item(Key={"accountId": account_id_key})
+        methods = response["Item"]["preferences"]["paymentMethods"]
+        venmo = next(m for m in methods if m["name"] == "Venmo")
+        assert venmo["qrCodeUrl"] == s3_key
+
     def test_delete_qr_detects_concurrent_modification(
         self, dynamodb_tables: Dict[str, Any], sample_account: Dict[str, Any], sample_account_id: str
     ) -> None:

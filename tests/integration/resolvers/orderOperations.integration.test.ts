@@ -2,7 +2,7 @@ import '../setup.ts';
 import { describe, test, expect, beforeAll, afterAll } from 'vitest';
 import { ApolloClient, NormalizedCacheObject, gql } from '@apollo/client';
 import { createAuthenticatedClient } from '../setup/apolloClient';
-import { deleteTestAccounts } from '../setup/testData';
+import { deleteCatalogWithRetry, deleteTestAccounts } from '../setup/testData';
 
 
 /**
@@ -1723,7 +1723,9 @@ describe('Order Operations Integration Tests', () => {
       // Cleanup
       await ownerClient.mutate({ mutation: DELETE_ORDER, variables: { orderId: orderData.createOrder.orderId } });
       await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId: campaignId } });
-      await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId: catalogId } });
+      // GSI (catalogId-index) is eventually consistent: the just-deleted campaign may
+      // still appear in the usage check, so retry the catalog delete.
+      await deleteCatalogWithRetry(ownerClient, catalogId);
     }, 30000);
 
     test('order with very large quantity', async () => {
@@ -1814,7 +1816,9 @@ describe('Order Operations Integration Tests', () => {
       // Cleanup
       await ownerClient.mutate({ mutation: DELETE_ORDER, variables: { orderId: orderData.createOrder.orderId } });
       await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId: campaignId } });
-      await ownerClient.mutate({ mutation: DELETE_CATALOG, variables: { catalogId: catalogId } });
+      // GSI (catalogId-index) is eventually consistent: the just-deleted campaign may
+      // still appear in the usage check, so retry the catalog delete.
+      await deleteCatalogWithRetry(ownerClient, catalogId);
     }, 15000);
 
     test('concurrent order creation for same campaign', async () => {

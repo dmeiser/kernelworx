@@ -65,7 +65,7 @@ class StructuredLogger:
         # Remove None values
         log_entry = {k: v for k, v in log_entry.items() if v is not None}
 
-        print(json.dumps(log_entry), file=sys.stdout, flush=True)
+        print(json.dumps(log_entry, default=str), file=sys.stdout, flush=True)
 
     def info(self, message: str, **kwargs: Any) -> None:
         """Log info level message."""
