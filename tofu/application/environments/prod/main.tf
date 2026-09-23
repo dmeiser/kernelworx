@@ -310,10 +310,11 @@ module "cloudfront" {
 module "waf" {
   source = "../../modules/waf"
 
-  name_prefix        = local.name_prefix
-  environment        = var.environment
-  log_retention_days = var.environment == "prod" ? 30 : 7
-  github_token       = var.github_token
+  name_prefix         = local.name_prefix
+  environment         = var.environment
+  managed_rule_action = "Block"
+  log_retention_days  = var.environment == "prod" ? 30 : 7
+  github_token        = var.github_token
 }
 
 module "route53" {
