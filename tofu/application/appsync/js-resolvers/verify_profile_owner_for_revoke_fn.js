@@ -17,7 +17,7 @@ export function response(ctx) {
     }
     const profile = ctx.result;
     if (!profile) {
-        util.error('Forbidden: Only profile owner can revoke shares', 'UNAUTHORIZED');
+        util.error('Forbidden: Only profile owner can revoke shares', 'FORBIDDEN');
     }
     ctx.stash.profile = profile;
     return profile;

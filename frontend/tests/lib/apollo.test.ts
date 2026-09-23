@@ -97,6 +97,36 @@ describe('lib/apollo', () => {
       window.removeEventListener('graphql-error', handler as any);
     });
 
+    it('dispatches graphql-error event for AppSync JS resolver error with extensions.errorType FORBIDDEN', () => {
+      const handler = vi.fn();
+      window.addEventListener('graphql-error', handler as any);
+
+      const graphQLErrors = [
+        {
+          message: 'Forbidden: Only profile owner can create invites',
+          locations: [{ line: 1, column: 2 }],
+          path: ['createProfileInvite'],
+          extensions: { errorType: 'FORBIDDEN' },
+        },
+      ];
+
+      const error = new CombinedGraphQLErrors({
+        errors: graphQLErrors,
+      });
+
+      handleApolloError({
+        error,
+        operation: { operationName: 'CreateProfileInvite' },
+      } as any);
+
+      expect(handler).toHaveBeenCalledTimes(1);
+      const ev = (handler.mock.calls[0] as any)[0];
+      expect(ev.detail).toMatchObject({ errorCode: 'FORBIDDEN', operation: 'CreateProfileInvite' });
+      expect(ev.detail.message).toBe('You do not have permission to perform this action.');
+
+      window.removeEventListener('graphql-error', handler as any);
+    });
+
     it('dispatches mfa-required event when GraphQL error message is "MFA required"', () => {
       const mfaHandler = vi.fn();
       window.addEventListener('mfa-required', mfaHandler as any);

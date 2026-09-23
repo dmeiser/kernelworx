@@ -18,7 +18,7 @@ export function response(ctx) {
     }
     const profile = ctx.result;
     if (!profile) {
-        util.error('Forbidden: Only profile owner can delete invites', 'UNAUTHORIZED');
+        util.error('Forbidden: Only profile owner can delete invites', 'FORBIDDEN');
     }
     ctx.stash.inviteCode = ctx.args.inviteCode;
     ctx.stash.authorized = true;
