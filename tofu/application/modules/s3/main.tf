@@ -130,8 +130,7 @@ resource "aws_s3_bucket_lifecycle_configuration" "exports" {
     status = "Enabled"
 
     expiration {
-      days                         = 7
-      expired_object_delete_marker = true
+      days = 7
     }
 
     noncurrent_version_expiration {
@@ -140,6 +139,23 @@ resource "aws_s3_bucket_lifecycle_configuration" "exports" {
 
     abort_incomplete_multipart_upload {
       days_after_initiation = 7
+    }
+
+    filter {
+      prefix = "reports/"
+    }
+  }
+
+  # Delete markers with no remaining noncurrent versions are not covered by
+  # the days-based expiration above: AWS forbids combining Days with
+  # ExpiredObjectDeleteMarker in one Expiration, so cleanup needs its own
+  # rule (a prefix filter is allowed; only tag filters are forbidden here).
+  rule {
+    id     = "expire-reports-delete-markers"
+    status = "Enabled"
+
+    expiration {
+      expired_object_delete_marker = true
     }
 
     filter {
