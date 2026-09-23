@@ -124,6 +124,10 @@ The APPSYNC_JS 1.0.0 runtime rejects resolver/function code at `CreateFunction`/
 
 `aws_appsync_function` resources that load code with `templatefile()` — currently `delete_campaign_orders_fn.js`, `batch_get_catalogs_fn.js`, and `batch_get_shared_campaign_catalogs_fn.js` in `tofu/application/appsync/js-resolvers/` — interpolate every literal `${...}` in the source as a Terraform expression, even inside JS comments and JSDoc. Any stray JS template literal or comment placeholder breaks every `tofu plan`/`apply` touching that function with `Invalid expression`. Keep those files free of unintended `${...}` sequences (escape as `$${...}` or write the placeholder in prose); each file carries a header warning and the load site in `tofu/application/modules/appsync/functions_*.tf` repeats it. Prefer `file()` for new functions unless a table name genuinely must be injected.
 
+### Unit-testing AppSync VTL mapping templates (#434)
+
+`tests/unit/appsync_vtl_harness.ts` is a minimal evaluator for the AppSync request-mapping-template VTL subset used by the DynamoDB templates under `tofu/application/appsync/mapping-templates/`. AppSync VTL is not standard Apache Velocity (it extends it with map/list literals in `#set`, `$util.qr`, `$util.dynamodb`, ...), so off-the-shelf Velocity engines cannot execute these templates. Unit tests for a template must `renderVtlTemplate` the real source and assert the emitted request JSON or the raised `VtlError` (message + errorType) — never grep/match template text, which proves nothing about behavior and breaks on mechanical refactors (`tests/unit/catalog_request_vtl.test.ts` is the reference example). Unsupported directives fail loudly; extend the harness rather than reverting to source-content assertions.
+
 ### AppSync resolver-only authorization posture (#71)
 
 KernelWorx uses Amazon Cognito User Pools for AppSync authentication and `default_action = "ALLOW"` on the user pool config. AppSync therefore admits any authenticated Cognito user to every field by default; schema-level directives do not enforce ownership or share-based access control.
