@@ -125,6 +125,9 @@ resource "aws_s3_bucket_public_access_block" "exports" {
 resource "aws_s3_bucket_lifecycle_configuration" "exports" {
   bucket = aws_s3_bucket.exports.id
 
+  # Short-lived report files are the ONLY thing current-object-expired, and
+  # only under reports/: the bucket also stores payment-method QR codes under
+  # a different prefix, and those must NOT be deleted after 7 days (#442).
   rule {
     id     = "expire-old-reports"
     status = "Enabled"
@@ -133,33 +136,34 @@ resource "aws_s3_bucket_lifecycle_configuration" "exports" {
       days = 7
     }
 
-    noncurrent_version_expiration {
-      noncurrent_days = 7
-    }
-
-    abort_incomplete_multipart_upload {
-      days_after_initiation = 7
-    }
-
     filter {
       prefix = "reports/"
     }
   }
 
-  # Delete markers with no remaining noncurrent versions are not covered by
-  # the days-based expiration above: AWS forbids combining Days with
-  # ExpiredObjectDeleteMarker in one Expiration, so cleanup needs its own
-  # rule (a prefix filter is allowed; only tag filters are forbidden here).
+  # Versioning is enabled on the whole bucket, so noncurrent versions,
+  # expired-object delete markers, and abandoned multipart uploads accumulate
+  # outside reports/ too and must be cleaned up bucket-wide (no filter).
+  #
+  # S3 allows at most ONE whole-bucket (prefix-less) rule per configuration,
+  # so all three cleanup actions share this single rule. (The 7-day
+  # current-object expiration cannot be folded in here: Days and
+  # ExpiredObjectDeleteMarker are mutually exclusive in one Expiration block,
+  # and current QR-code objects must never expire.)
   rule {
-    id     = "expire-reports-delete-markers"
+    id     = "whole-bucket-expiration"
     status = "Enabled"
 
     expiration {
       expired_object_delete_marker = true
     }
 
-    filter {
-      prefix = "reports/"
+    noncurrent_version_expiration {
+      noncurrent_days = 7
+    }
+
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
     }
   }
 }

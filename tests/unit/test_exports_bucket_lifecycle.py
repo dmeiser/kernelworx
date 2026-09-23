@@ -1,12 +1,24 @@
-"""Exports-bucket lifecycle contract (issue #442).
+"""Exports-bucket lifecycle contract (issue #442, widened bucket-wide).
 
-The exports bucket has versioning enabled, so its lifecycle configuration must
-expire the accumulated noncurrent object versions and expired-object delete
-markers, and abort abandoned multipart uploads — not just expire current
-objects under reports/. This test parses the s3 module with python-hcl2 into a
-semantic model and asserts the *meaning* of that contract (the same approach as
+The exports bucket has versioning enabled. The lifecycle configuration must:
+
+* Expire the accumulated noncurrent object versions and expired-object delete
+  markers, and abort abandoned multipart uploads, across the WHOLE bucket — not
+  just under reports/. The bucket also stores payment-method QR-code images
+  under a different prefix, and with versioning on, their versions and
+  delete-markers would otherwise accumulate forever (#442).
+* Keep the 7-day CURRENT-object expiration scoped to reports/ only: QR codes
+  must NOT be deleted after 7 days.
+
+S3 allows at most one whole-bucket (prefix-less) rule per configuration, so the
+three cleanup actions share a single rule; the reports/-scoped current-object
+expiration is a separate, filtered rule.
+
+This test parses the s3 module with python-hcl2 into a semantic model and
+asserts the *meaning* of that contract (the same approach as
 test_cloudfront_oac.py / test_edge_security.py), rather than grepping for
-strings. It fails on the pre-#442 configuration and passes after the fix.
+strings. It fails on the pre-widen configuration (which scoped every rule to
+reports/) and passes after the fix.
 """
 
 import json
@@ -64,54 +76,80 @@ def _exports_lifecycle_rules(doc: dict) -> list:
     return rules
 
 
+def _has_filter(rule: dict) -> bool:
+    """True when the rule carries a Filter (any prefix), i.e. is not whole-bucket."""
+    return "filter" in rule and bool(rule["filter"])
+
+
 def test_exports_bucket_versioning_enabled():
     versioning = _resources(_load_module(), "aws_s3_bucket_versioning")
     assert "exports" in versioning, "no versioning block for the exports bucket"
     assert versioning["exports"]["versioning_configuration"][0]["status"] == "Enabled"
 
 
-def test_reports_lifecycle_expires_all_accumulated_objects():
+def test_cleanup_actions_are_whole_bucket():
+    """NCV expiration, delete-marker cleanup, and multipart abort cover the
+    whole bucket (no prefix filter). S3 allows only one prefix-less rule, so
+    exactly one filter-less rule exists and it carries all three actions."""
     rules = _exports_lifecycle_rules(_load_module())
     assert rules, "no lifecycle configuration found for the exports bucket"
 
-    rule = next((r for r in rules if r.get("id") == "expire-old-reports"), None)
-    assert rule is not None, "expected the expire-old-reports lifecycle rule"
-    assert rule["status"] == "Enabled"
-    assert rule["filter"][0]["prefix"] == "reports/"
-
-    # Current objects still expire after 7 days. AWS forbids combining Days
-    # with ExpiredObjectDeleteMarker in one Expiration block, so the delete
-    # marker must live in its own rule (see the second test below).
-    expiration = rule["expiration"][0]
-    assert expiration["days"] == 7
-    assert "expired_object_delete_marker" not in expiration
+    unfiltered = [r for r in rules if not _has_filter(r)]
+    assert len(unfiltered) == 1, (
+        f"expected exactly one whole-bucket (filter-less) rule, "
+        f"found {len(unfiltered)}"
+    )
+    whole = unfiltered[0]
+    assert whole["status"] == "Enabled"
 
     # Noncurrent versions must expire, or they accumulate permanently (#442).
-    noncurrent = rule["noncurrent_version_expiration"][0]
+    noncurrent = whole["noncurrent_version_expiration"][0]
     assert noncurrent["noncurrent_days"] > 0
 
     # Abandoned multipart uploads must be aborted (#442).
-    abort = rule["abort_incomplete_multipart_upload"][0]
+    abort = whole["abort_incomplete_multipart_upload"][0]
     assert abort["days_after_initiation"] > 0
 
-
-def test_expired_object_delete_markers_cleaned_by_separate_rule():
-    rules = _exports_lifecycle_rules(_load_module())
-
-    marker_rule = next(
-        (r for r in rules if r.get("id") == "expire-reports-delete-markers"),
-        None,
-    )
-    assert marker_rule is not None, "expected a dedicated rule removing expired object delete markers"
-    assert marker_rule["status"] == "Enabled"
-    assert marker_rule["filter"][0]["prefix"] == "reports/"
-
-    expiration = marker_rule["expiration"][0]
+    # Expired-object delete markers must be removed (#442). This action cannot
+    # share a rule with a Days-based Expiration, but it CAN share a rule with
+    # NoncurrentVersionExpiration, which is why it lives on the whole-bucket
+    # rule rather than its own (S3 permits only one prefix-less rule).
+    expiration = whole["expiration"][0]
     assert expiration["expired_object_delete_marker"] is True
     # Days/Date and ExpiredObjectDeleteMarker are mutually exclusive in one
-    # S3 Lifecycle Expiration, so the marker rule must set neither.
+    # S3 Lifecycle Expiration, so the marker-carrying rule sets neither.
     assert "days" not in expiration
     assert "date" not in expiration
+
+
+def test_current_object_expiration_stays_reports_scoped():
+    """The 7-day CURRENT-object expiration applies to reports/ only, so QR
+    codes under a different prefix are never deleted after 7 days."""
+    rules = _exports_lifecycle_rules(_load_module())
+
+    report_rule = next(
+        (r for r in rules if r.get("filter") and r["filter"][0].get("prefix") == "reports/"),
+        None,
+    )
+    assert report_rule is not None, "expected the reports/-scoped lifecycle rule"
+    assert report_rule["status"] == "Enabled"
+
+    expiration = report_rule["expiration"][0]
+    assert expiration["days"] == 7
+    assert "expired_object_delete_marker" not in expiration
+
+    # The reports/-scoped rule must not also carry the whole-bucket cleanup
+    # actions; those belong on the single filter-less rule.
+    assert "noncurrent_version_expiration" not in report_rule
+    assert "abort_incomplete_multipart_upload" not in report_rule
+
+    # No other rule may expire current objects (no second Days-based rule).
+    for r in rules:
+        if r is report_rule:
+            continue
+        if "expiration" in r:
+            exp = r["expiration"][0]
+            assert "days" not in exp, "a second Days-based current-object rule must not exist"
 
 
 if __name__ == "__main__":
