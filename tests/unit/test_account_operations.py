@@ -562,6 +562,58 @@ class TestDeleteMyAccount:
         # Account should still be deleted from DynamoDB
         assert accounts_table.get_item(Key={"accountId": account_id_key}).get("Item") is None
 
+    def test_delete_account_missing_identity(
+        self,
+        lambda_context: Any,
+    ) -> None:
+        """Test deletion fails with UNAUTHORIZED if caller identity is missing entirely."""
+        from src.handlers.account_operations import delete_my_account
+
+        result = delete_my_account({}, lambda_context)
+
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.UNAUTHORIZED
+        assert "Caller identity is required" in result["message"]
+
+    def test_delete_account_null_identity(
+        self,
+        lambda_context: Any,
+    ) -> None:
+        """Test deletion fails with UNAUTHORIZED if identity is None."""
+        from src.handlers.account_operations import delete_my_account
+
+        result = delete_my_account({"identity": None}, lambda_context)
+
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.UNAUTHORIZED
+        assert "Caller identity is required" in result["message"]
+
+    def test_delete_account_missing_sub_claim(
+        self,
+        lambda_context: Any,
+    ) -> None:
+        """Test deletion fails with UNAUTHORIZED if identity lacks sub claim."""
+        from src.handlers.account_operations import delete_my_account
+
+        result = delete_my_account({"identity": {"username": "test-user"}}, lambda_context)
+
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.UNAUTHORIZED
+        assert "Caller identity is required" in result["message"]
+
+    def test_delete_account_empty_sub_claim(
+        self,
+        lambda_context: Any,
+    ) -> None:
+        """Test deletion fails with UNAUTHORIZED if identity sub claim is empty."""
+        from src.handlers.account_operations import delete_my_account
+
+        result = delete_my_account({"identity": {"sub": ""}}, lambda_context)
+
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.UNAUTHORIZED
+        assert "Caller identity is required" in result["message"]
+
     def test_delete_account_missing_user_pool_id(
         self,
         dynamodb_table: Any,

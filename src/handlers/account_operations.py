@@ -166,7 +166,9 @@ def delete_my_account(event: Dict[str, Any], context: Any) -> bool:
     """
     logger.info("delete_my_account handler invoked")
 
-    account_id = event["identity"]["sub"]
+    account_id = (event.get("identity") or {}).get("sub")
+    if not account_id:
+        raise AppError(ErrorCode.UNAUTHORIZED, "Caller identity is required")
     logger.info(f"Deleting account for: {account_id}")
 
     user_pool_id = os.environ.get("USER_POOL_ID")
