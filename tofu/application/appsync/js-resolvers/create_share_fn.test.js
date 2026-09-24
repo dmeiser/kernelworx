@@ -134,7 +134,7 @@ describe('create_share_fn request', () => {
 
         assert.throws(
             () => request(ctx),
-            /INVALID_INPUT: permissions must contain at least one supported permission \(READ or WRITE\)/
+            /INVALID_INPUT: permissions must contain only supported permissions \(READ or WRITE\)/
         );
     });
 
@@ -155,7 +155,50 @@ describe('create_share_fn request', () => {
 
         assert.throws(
             () => request(ctx),
-            /INVALID_INPUT: permissions must contain at least one supported permission \(READ or WRITE\)/
+            /INVALID_INPUT: permissions must contain only supported permissions \(READ or WRITE\)/
+        );
+    });
+
+    it('rejects mixed valid and garbage permissions (#449)', () => {
+        const ctx = {
+            args: {
+                input: {
+                    profileId: 'PROFILE#p1',
+                    permissions: ['WRITE', 'DELETE'],
+                },
+            },
+            stash: {
+                targetAccountId: 'ACCOUNT#user1',
+                profile: { ownerAccountId: 'ACCOUNT#owner1' },
+            },
+            identity: { sub: 'owner1' },
+        };
+
+        assert.throws(
+            () => request(ctx),
+            /INVALID_INPUT: permissions must contain only supported permissions \(READ or WRITE\)/
+        );
+    });
+
+    it('rejects garbage permissions stored on the invite in stash (#449)', () => {
+        const ctx = {
+            args: {
+                input: {},
+            },
+            stash: {
+                targetAccountId: 'ACCOUNT#user2',
+                invite: {
+                    profileId: 'PROFILE#p2',
+                    permissions: ['READ', 'OWNER'],
+                    ownerAccountId: 'ACCOUNT#owner2',
+                },
+            },
+            identity: { sub: 'user2' },
+        };
+
+        assert.throws(
+            () => request(ctx),
+            /INVALID_INPUT: permissions must contain only supported permissions \(READ or WRITE\)/
         );
     });
 
@@ -177,7 +220,7 @@ describe('create_share_fn request', () => {
 
         assert.throws(
             () => request(ctx),
-            /INVALID_INPUT: permissions must contain at least one supported permission \(READ or WRITE\)/
+            /INVALID_INPUT: permissions must contain only supported permissions \(READ or WRITE\)/
         );
     });
 
