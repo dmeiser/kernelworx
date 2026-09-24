@@ -334,4 +334,3 @@ def test_put_item_client_error_other_than_conditional_check_failed(
 
     # Auth flow must still return event even if DynamoDB put_item failed
     assert result == cognito_event
-
