@@ -97,6 +97,28 @@ describe('create_share_fn request', () => {
         assert.strictEqual(result.attributeValues.createdByAccountId, 'ACCOUNT#user2');
     });
 
+    it('stamps the current profile owner when invite and profile owners match (#453)', () => {
+        const ctx = {
+            args: {
+                input: {},
+            },
+            stash: {
+                targetAccountId: 'ACCOUNT#user2',
+                invite: {
+                    profileId: 'PROFILE#p2',
+                    permissions: ['READ'],
+                    ownerAccountId: 'ACCOUNT#owner2',
+                },
+                profile: { ownerAccountId: 'ACCOUNT#owner2' },
+            },
+            identity: { sub: 'user2' },
+        };
+
+        const result = request(ctx);
+
+        assert.strictEqual(result.attributeValues.ownerAccountId, 'ACCOUNT#owner2');
+    });
+
     it('throws error when ownerAccountId cannot be determined', () => {
         const ctx = {
             args: {
