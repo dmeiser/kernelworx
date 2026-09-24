@@ -457,7 +457,7 @@ class TestTransferProfileOwnership:
         result = lambda_handler(event, None)
 
         assert result["__isError"] is True
-        assert result["errorCode"] == ErrorCode.FORBIDDEN
+        assert result["errorCode"] == ErrorCode.MFA_REQUIRED
         assert result["message"] == "MFA required"
 
     def test_admin_transfer_with_pwd_amr_raises_forbidden(self, profiles_table: Any) -> None:
@@ -484,7 +484,7 @@ class TestTransferProfileOwnership:
         result = lambda_handler(event, None)
 
         assert result["__isError"] is True
-        assert result["errorCode"] == ErrorCode.FORBIDDEN
+        assert result["errorCode"] == ErrorCode.MFA_REQUIRED
         assert result["message"] == "MFA required"
 
     def test_admin_transfer_with_mfa_false_and_amr_raises_forbidden(self, profiles_table: Any) -> None:
@@ -511,7 +511,7 @@ class TestTransferProfileOwnership:
         result = lambda_handler(event, None)
 
         assert result["__isError"] is True
-        assert result["errorCode"] == ErrorCode.FORBIDDEN
+        assert result["errorCode"] == ErrorCode.MFA_REQUIRED
         assert result["message"] == "MFA required"
 
     def test_new_owner_missing_share_raises_invalid_input(self, profiles_table: Any, shares_table: Any) -> None:

@@ -1793,7 +1793,7 @@ class TestRequireAdminMfa:
         with pytest.raises(AppError) as exc_info:
             require_admin_mfa(event)
 
-        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
+        assert exc_info.value.error_code == ErrorCode.MFA_REQUIRED
         assert exc_info.value.message == "MFA required"
 
     def test_admin_with_mfa_false_and_amr_mfa_raises_forbidden(self) -> None:
@@ -1812,7 +1812,7 @@ class TestRequireAdminMfa:
         with pytest.raises(AppError) as exc_info:
             require_admin_mfa(event)
 
-        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
+        assert exc_info.value.error_code == ErrorCode.MFA_REQUIRED
         assert exc_info.value.message == "MFA required"
 
     def test_admin_with_amr_pwd_only_raises_forbidden(self) -> None:
@@ -1830,7 +1830,7 @@ class TestRequireAdminMfa:
         with pytest.raises(AppError) as exc_info:
             require_admin_mfa(event)
 
-        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
+        assert exc_info.value.error_code == ErrorCode.MFA_REQUIRED
         assert exc_info.value.message == "MFA required"
 
     def test_admin_with_amr_webauthn_only_raises_forbidden(self) -> None:
@@ -1848,7 +1848,7 @@ class TestRequireAdminMfa:
         with pytest.raises(AppError) as exc_info:
             require_admin_mfa(event)
 
-        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
+        assert exc_info.value.error_code == ErrorCode.MFA_REQUIRED
         assert exc_info.value.message == "MFA required"
 
     def test_admin_with_federated_amr_and_mfa_false_raises_forbidden(self) -> None:
@@ -1867,7 +1867,7 @@ class TestRequireAdminMfa:
         with pytest.raises(AppError) as exc_info:
             require_admin_mfa(event)
 
-        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
+        assert exc_info.value.error_code == ErrorCode.MFA_REQUIRED
         assert exc_info.value.message == "MFA required"
 
     def test_non_admin_raises_forbidden_admin_access_required(self) -> None:
