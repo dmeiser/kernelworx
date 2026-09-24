@@ -85,17 +85,6 @@ def login_as_readonly(page: Page) -> None:
     login(page, email, password)
 
 
-def login_as_smoke_user(page: Page) -> None:
-    """Navigate to the app and log in as the pre-created smoke test user (#483).
-
-    Credentials are read from TEST_SMOKE_EMAIL / TEST_SMOKE_PASSWORD env vars,
-    falling back to TEST_OWNER_EMAIL / TEST_OWNER_PASSWORD if unset.
-    """
-    email = os.environ.get("TEST_SMOKE_EMAIL") or _require_env("TEST_OWNER_EMAIL")
-    password = os.environ.get("TEST_SMOKE_PASSWORD") or _require_env("TEST_OWNER_PASSWORD")
-    login(page, email, password)
-
-
 def logout(page: Page) -> None:
     """Log out the currently authenticated user.
 
