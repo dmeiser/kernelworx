@@ -134,6 +134,125 @@ describe('create_invite_fn request', () => {
         );
     });
 
+    it('accepts the maximum expiry of 90 days', () => {
+        const ctx = {
+            args: {
+                input: {
+                    profileId: 'PROFILE#p1',
+                    permissions: ['READ'],
+                    expiresInDays: 90,
+                },
+            },
+            stash: {
+                profile: { ownerAccountId: 'ACCOUNT#owner1' },
+            },
+            identity: { sub: 'owner1' },
+        };
+
+        const result = request(ctx);
+
+        assert.strictEqual(result.attributeValues.expiresAt, 1711843200);
+    });
+
+    it('defaults to 14 days when expiresInDays is omitted', () => {
+        const ctx = {
+            args: {
+                input: {
+                    profileId: 'PROFILE#p1',
+                    permissions: ['READ'],
+                },
+            },
+            stash: {
+                profile: { ownerAccountId: 'ACCOUNT#owner1' },
+            },
+            identity: { sub: 'owner1' },
+        };
+
+        const result = request(ctx);
+
+        assert.strictEqual(result.attributeValues.expiresAt, 1705276800);
+    });
+
+    it('rejects an expiry over 90 days', () => {
+        const ctx = {
+            args: {
+                input: {
+                    profileId: 'PROFILE#p1',
+                    permissions: ['READ'],
+                    expiresInDays: 91,
+                },
+            },
+            stash: {
+                profile: { ownerAccountId: 'ACCOUNT#owner1' },
+            },
+            identity: { sub: 'owner1' },
+        };
+
+        assert.throws(
+            () => request(ctx),
+            /INVALID_INPUT: expiresInDays must be an integer between 1 and 90/
+        );
+    });
+
+    it('rejects a zero or negative expiry', () => {
+        const base = {
+            stash: { profile: { ownerAccountId: 'ACCOUNT#owner1' } },
+            identity: { sub: 'owner1' },
+        };
+
+        for (const expiresInDays of [0, -1]) {
+            assert.throws(
+                () => request({
+                    ...base,
+                    args: { input: { profileId: 'PROFILE#p1', permissions: ['READ'], expiresInDays } },
+                }),
+                /INVALID_INPUT: expiresInDays must be an integer between 1 and 90/
+            );
+        }
+    });
+
+    it('rejects a fractional expiry', () => {
+        const ctx = {
+            args: {
+                input: {
+                    profileId: 'PROFILE#p1',
+                    permissions: ['READ'],
+                    expiresInDays: 1.5,
+                },
+            },
+            stash: {
+                profile: { ownerAccountId: 'ACCOUNT#owner1' },
+            },
+            identity: { sub: 'owner1' },
+        };
+
+        assert.throws(
+            () => request(ctx),
+            /INVALID_INPUT: expiresInDays must be an integer between 1 and 90/
+        );
+    });
+
+    it('rejects a non-numeric expiry', () => {
+        const ctx = {
+            args: {
+                input: {
+                    profileId: 'PROFILE#p1',
+                    permissions: ['READ'],
+                    expiresInDays: '7',
+                },
+            },
+            stash: {
+                profile: { ownerAccountId: 'ACCOUNT#owner1' },
+            },
+            identity: { sub: 'owner1' },
+        };
+
+        assert.throws(
+            () => request(ctx),
+            /INVALID_INPUT: expiresInDays must be an integer between 1 and 90/
+        );
+    });
+
     it('accepts lowercase read permission', () => {
         const ctx = {
             args: {

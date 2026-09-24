@@ -12,6 +12,21 @@ function validatePermissions(permissions) {
     }
 }
 
+const DEFAULT_EXPIRY_DAYS = 14;
+const MAX_EXPIRY_DAYS = 90;
+
+// #453: expiry must be a whole number of days within [1, MAX_EXPIRY_DAYS];
+// an unbounded expiry would allow years-long invite validity.
+function resolveExpiryDays(expiresInDays) {
+    if (expiresInDays === undefined || expiresInDays === null) {
+        return DEFAULT_EXPIRY_DAYS;
+    }
+    if (typeof expiresInDays !== 'number' || expiresInDays % 1 !== 0 || expiresInDays < 1 || expiresInDays > MAX_EXPIRY_DAYS) {
+        util.error(`expiresInDays must be an integer between 1 and ${MAX_EXPIRY_DAYS}`, 'INVALID_INPUT');
+    }
+    return expiresInDays;
+}
+
 export function request(ctx) {
     const input = ctx.args.input;
     const profileId = input.profileId;
@@ -26,8 +41,8 @@ export function request(ctx) {
     // Generate invite code (first 10 chars of UUID, uppercase)
     const inviteCode = util.autoId().substring(0, 10).toUpperCase();
     
-    // Calculate expiry (default 14 days, or custom expiresInDays if provided)
-    const daysUntilExpiry = input.expiresInDays || 14;
+    // Calculate expiry (default 14 days, or custom expiresInDays bounded to 90)
+    const daysUntilExpiry = resolveExpiryDays(input.expiresInDays);
     const expirySeconds = daysUntilExpiry * 24 * 60 * 60;
     const expiresAtEpoch = util.time.nowEpochSeconds() + expirySeconds;
     const now = util.time.nowISO8601();

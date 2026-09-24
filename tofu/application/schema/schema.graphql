@@ -672,7 +672,7 @@ input CreateProfileInviteInput {
   profileId: ID!
   """The permissions the invite grants once redeemed (READ and/or WRITE)."""
   permissions: [PermissionType!]!
-  """How many days until the invite expires; defaults to 14 if omitted."""
+  """How many days until the invite expires; defaults to 14 if omitted. Must be an integer between 1 and 90."""
   expiresInDays: Int
 }
 
