@@ -76,8 +76,10 @@ repo root first, then retry."
 ### `scripts/create-ephemeral-test-users.sh`
 
 **Create ephemeral run-scoped test users in a Cognito User Pool.** Creates Owner
-(added to ADMIN group), Contributor, and Read-only users with emails patterned as
-`<run-id>-owner@kernelworx.test` etc. so they never collide with dev/prod users.
+(added to ADMIN group), Contributor, Read-only, and Smoke users with emails patterned
+as `<run-id>-owner@kernelworx.test` etc. so they never collide with dev/prod users.
+The Smoke user is pre-confirmed so smoke suites run without burning Cognito's daily
+email quota (#483); its credentials are exported as `TEST_SMOKE_EMAIL`/`TEST_SMOKE_PASSWORD`.
 
 **Key flags/arguments:**
 
@@ -95,7 +97,9 @@ re-run if the user already exists.
 ### `scripts/create-test-users.sh`
 
 **Create test users in Cognito for integration tests.** Uses credentials from `./.env`.
-Creates Owner, Contributor, and Read-only users.
+Creates Owner, Contributor, and Read-only users, plus a pre-confirmed Smoke user when
+`TEST_SMOKE_EMAIL`/`TEST_SMOKE_PASSWORD` are set, so smoke suites don't burn Cognito's
+daily email quota (#483).
 
 **Key flags/arguments:** None. Requires `TEST_USER_POOL_ID`, `TEST_OWNER_EMAIL`,
 `TEST_OWNER_PASSWORD`, `TEST_REGION` in environment.
