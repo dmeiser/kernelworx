@@ -1,5 +1,15 @@
 """Smoke tests for the signup UI.
 
+In dev and ephemeral environments the pre-signup Lambda auto-confirms
+smoke-test sign-ups (``smoke+...@example-test.invalid``), so Cognito sends no
+confirmation email and Amplify's ``signUp`` returns the ``DONE`` step: the UI
+shows *Account created successfully!* and redirects to the login page. In a
+pool WITHOUT that gate (e.g. production) the same submit shows the
+verification-code prompt and the completion test falls back to server-side
+``admin-confirm-sign-up``. Both shapes are accepted here; the gate itself is
+unit-tested in ``tests/unit/test_pre_signup.py`` and its tofu wiring in
+``tests/unit/test_smoke_auto_confirm_gate.py``.
+
 ``admin-confirm-sign-up`` races Cognito's read-after-write propagation: a
 ``SignUp`` that has just returned can still yield ``UserNotFoundException``
 from immediate admin reads, so the confirmation step retries with backoff.
@@ -9,11 +19,14 @@ user pool is accessible from the dev environment.
 
 Design decisions
 ----------------
-* Tests stop **before** the verification-code entry step — no test email
-  inbox integration is in scope, so the emailed code cannot be read here.
+* In non-prod pools (dev/ephemeral) smoke sign-ups are auto-confirmed, so
+  the UI shows *Account created successfully!* and redirects to login; in
+  pools without the gate the verification prompt appears and the tests use
+  the backend-confirmation fallback. No test email inbox integration is in
+  scope in either case.
 * ``test_signup_shows_verification_prompt`` submits to the real Cognito pool
-  (``smoke+<random>@example-test.invalid``) and stops once the verification
-  UI appears.
+  (``smoke+<random>@example-test.invalid``) and asserts the signup succeeds,
+  accepting either post-submit shape.
 * ``test_signup_completes_after_backend_confirmation`` completes the flow
   without the emailed code: the new user is confirmed server-side via
   ``aws cognito-idp admin-confirm-sign-up`` (the AWS CLI, so the same
@@ -87,12 +100,17 @@ _SMOKE_PASSWORD = "SmokeT3st!2026"
 _DAILY_EMAIL_LIMIT_RE = re.compile(r"Exceeded daily email limit", re.IGNORECASE)
 
 
-def _submit_signup_and_wait_for_verification(page: Page, email: str, password: str) -> None:
-    """Fill and submit the signup form, then wait for the verification UI.
+_SUCCESS_TEXT_RE = re.compile("account created successfully", re.IGNORECASE)
 
-    After a successful Cognito ``signUp`` call the UI transitions to the
-    verification step showing text containing "check your email" or
-    "verification" (case-insensitive).
+
+def _submit_signup_and_wait(page: Page, email: str, password: str) -> bool:
+    """Fill and submit the signup form, then wait for a post-submit signal.
+
+    Returns ``True`` when the user was auto-confirmed server-side (the
+    dev/ephemeral smoke gate): Amplify's ``signUp`` returns the ``DONE`` step
+    and the UI shows *Account created successfully!* before redirecting to
+    login. Returns ``False`` when the verification-code prompt appears (pools
+    without the auto-confirm gate, e.g. production).
 
     A failed ``signUp`` renders a MUI *error* alert instead (``AlertMessages``
     in ``SignupPage.tsx`` gives error and success alerts the same
@@ -117,13 +135,15 @@ def _submit_signup_and_wait_for_verification(page: Page, email: str, password: s
     verification_text = page.get_by_text(re.compile("check your email", re.IGNORECASE)).or_(
         page.get_by_text(re.compile("verification", re.IGNORECASE))
     )
+    success_text = page.get_by_text(_SUCCESS_TEXT_RE)
     error_alert = page.locator(".MuiAlert-standardError")
-    expect(verification_text.first.or_(error_alert.first)).to_be_visible(timeout=20_000)
+    expect(verification_text.first.or_(success_text.first).or_(error_alert.first)).to_be_visible(timeout=20_000)
     if error_alert.first.is_visible():
         message = error_alert.first.inner_text()
         if _DAILY_EMAIL_LIMIT_RE.search(message):
             pytest.skip(f"Cognito daily email quota exhausted, native signup untestable: {message}")
         pytest.fail(f"SignUp failed unexpectedly: {message}")
+    return success_text.first.is_visible()
 
 
 # Retry budget for admin-confirm-sign-up only. This tolerates genuine
@@ -132,7 +152,7 @@ def _submit_signup_and_wait_for_verification(page: Page, email: str, password: s
 # expected transient. Note this retry does NOT help when ``signUp`` itself
 # was rejected (e.g. Cognito's daily email quota exhausted) — no user exists
 # to find; that case is caught much earlier by
-# ``_submit_signup_and_wait_for_verification``. Budget: ~50 s of
+# ``_submit_signup_and_wait``. Budget: ~50 s of
 # backoff across 5 attempts (exponential, capped at 15 s): long enough for
 # real propagation, short enough that a user Cognito rolled back after a
 # nominally successful ``SignUp`` (the daily-email-quota signature) fails
@@ -218,8 +238,9 @@ def test_signup_shows_verification_prompt(page: Page) -> None:
     The test stops after confirming the verification UI is shown — it does not
     attempt to enter a code or complete registration.
 
-    Success criterion: the page transitions away from the form and displays
-    text referencing email or a verification code within 20 s.
+    Success criterion: the page transitions away from the form within 20 s,
+    showing either the verification-code prompt (pool without the
+    auto-confirm gate) or the auto-confirmed success message (dev/ephemeral).
     """
     base = BasePage(page)
     base.navigate(_SIGNUP_PATH)
@@ -227,17 +248,20 @@ def test_signup_shows_verification_prompt(page: Page) -> None:
 
     email = _random_smoke_email()
 
-    _submit_signup_and_wait_for_verification(page, email, _SMOKE_PASSWORD)
+    _submit_signup_and_wait(page, email, _SMOKE_PASSWORD)
 
 
 @pytest.mark.smoke
 def test_signup_completes_after_backend_confirmation(page: Page) -> None:
-    """Complete signup end-to-end via backend confirmation, then sign in.
+    """Complete signup end-to-end, then sign in.
 
-    No test email inbox integration is in scope, so the emailed verification
-    code cannot be read here.  Instead the new user is confirmed server-side
-    via ``aws cognito-idp admin-confirm-sign-up``, then the *Back to Login*
-    path and the real login page are exercised to reach the dashboard.
+    No test email inbox integration is in scope, so an emailed verification
+    code cannot be read here. In dev/ephemeral pools the pre-signup trigger
+    auto-confirms the smoke user (no email sent, the UI redirects to login on
+    its own). In pools without that gate the new user is confirmed
+    server-side via ``aws cognito-idp admin-confirm-sign-up``, then the *Back
+    to Login* path is exercised. Both paths then use the real login page to
+    reach the dashboard.
     """
     base = BasePage(page)
     base.navigate(_SIGNUP_PATH)
@@ -245,23 +269,30 @@ def test_signup_completes_after_backend_confirmation(page: Page) -> None:
 
     email = _random_smoke_email()
 
-    _submit_signup_and_wait_for_verification(page, email, _SMOKE_PASSWORD)
+    auto_confirmed = _submit_signup_and_wait(page, email, _SMOKE_PASSWORD)
 
     user_pool_id = os.environ.get("TEST_USER_POOL_ID")
     if not user_pool_id:
         pytest.fail("TEST_USER_POOL_ID is not set in environment.")
 
-    _cognito_cli(
-        "admin-confirm-sign-up",
-        "--user-pool-id",
-        user_pool_id,
-        "--username",
-        email,
-        retry_user_not_found=True,
-    )
+    if auto_confirmed:
+        # The non-prod smoke gate confirmed the user at SignUp; Cognito sent
+        # no email and the UI redirects to /login on its own.
+        page.wait_for_url("**/login", timeout=10_000)
+    else:
+        # Pool without the auto-confirm gate (e.g. production): confirm
+        # server-side, then take the Back to Login path.
+        _cognito_cli(
+            "admin-confirm-sign-up",
+            "--user-pool-id",
+            user_pool_id,
+            "--username",
+            email,
+            retry_user_not_found=True,
+        )
 
-    page.get_by_role("button", name="Back to Login").click()
-    page.wait_for_url("**/login", timeout=10_000)
+        page.get_by_role("button", name="Back to Login").click()
+        page.wait_for_url("**/login", timeout=10_000)
 
     from tests.e2e.utils.auth import login
 
@@ -270,9 +301,9 @@ def test_signup_completes_after_backend_confirmation(page: Page) -> None:
 
         expect(page).to_have_url(re.compile(r"/(scouts|home)"), timeout=15_000)
     finally:
-        # admin-confirm-sign-up flips the user to CONFIRMED, which the
-        # smoke+ cleanup stages skip; delete it here so the pool and its
-        # post-confirmation Account row do not accumulate across runs.
+        # The user ends up CONFIRMED (by the gate or by admin-confirm-sign-up),
+        # which the smoke+ cleanup stages skip; delete it here so the pool and
+        # its post-confirmation Account row do not accumulate across runs.
         _cognito_cli(
             "admin-delete-user",
             "--user-pool-id",
