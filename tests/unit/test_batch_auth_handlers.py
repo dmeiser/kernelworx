@@ -308,7 +308,8 @@ class TestListUnitCatalogsBatchAuth:
         # These legacy shares omit ownerAccountId, so only two BatchGetItem
         # calls are needed (ownership + shares). Shares that include ownerAccountId
         # trigger a third validation call against the profiles base table.
-        assert batch_get_item_calls == 2
+        # An additional BatchGetItem call fetches the catalogs in batch (#450).
+        assert batch_get_item_calls == 3
 
 
 class TestListUnitCampaignCatalogsBatchAuth:
@@ -443,4 +444,5 @@ class TestListUnitCampaignCatalogsBatchAuth:
         # These legacy shares omit ownerAccountId, so only two BatchGetItem
         # calls are needed (ownership + shares). Shares that include ownerAccountId
         # trigger a third validation call against the profiles base table.
-        assert batch_get_item_calls == 2
+        # An additional BatchGetItem call fetches the catalogs in batch (#450).
+        assert batch_get_item_calls == 3

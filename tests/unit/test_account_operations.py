@@ -647,6 +647,7 @@ class TestDeleteMyAccount:
         appsync_event: Dict[str, Any],
         lambda_context: Any,
         monkeypatch: Any,
+        capsys: Any,
     ) -> None:
         """Test deletion handles Cognito client errors."""
         from botocore.exceptions import ClientError
@@ -688,7 +689,15 @@ class TestDeleteMyAccount:
 
             assert result["__isError"] is True
             assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
-            assert "Failed to verify account in Cognito" in result["message"]
+            assert result["message"] == "Failed to delete account"
+            assert "AccessDenied" not in result["message"]
+            assert "ListUsers" not in result["message"]
+            assert "Cognito" not in result["message"]
+
+            captured = capsys.readouterr().out
+            assert "Cognito lookup failed before deletion" in captured
+            assert "AccessDenied" in captured
+            assert "ListUsers" in captured
         # Account should NOT be deleted from DynamoDB if pre-check fails
         assert accounts_table.get_item(Key={"accountId": account_id_key}).get("Item") is not None
 
@@ -699,6 +708,7 @@ class TestDeleteMyAccount:
         appsync_event: Dict[str, Any],
         lambda_context: Any,
         monkeypatch: Any,
+        capsys: Any,
     ) -> None:
         """Test deletion handles Cognito admin_delete_user errors (covers line 171)."""
         from botocore.exceptions import ClientError
@@ -746,12 +756,20 @@ class TestDeleteMyAccount:
                 "identity": {"sub": sample_account_id},
             }
 
-            # The AppError from line 171 is converted to an error payload by the decorator.
+            # The AppError is converted to an error payload by the decorator.
             result = delete_my_account(event, lambda_context)
 
             assert result["__isError"] is True
             assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
-            assert "Failed to delete account from Cognito" in result["message"]
+            assert result["message"] == "Failed to delete account"
+            assert "InternalError" not in result["message"]
+            assert "AdminDeleteUser" not in result["message"]
+            assert "Cognito" not in result["message"]
+
+            captured = capsys.readouterr().out
+            assert "Cognito error during account deletion" in captured
+            assert "InternalError" in captured
+            assert "AdminDeleteUser" in captured
 
     def test_delete_account_unexpected_exception(
         self,
@@ -953,6 +971,10 @@ class TestDeleteMyAccount:
 
                 assert result["__isError"] is True
                 assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
+                assert result["message"] == "Failed to delete account"
+                assert "TooManyRequestsException" not in result["message"]
+                assert "AdminDeleteUser" not in result["message"]
+                assert "Cognito" not in result["message"]
                 assert mock_sleep.call_count == 2
                 assert mock_cognito.admin_delete_user.call_count == 3
 

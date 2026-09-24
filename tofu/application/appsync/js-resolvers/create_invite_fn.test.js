@@ -71,7 +71,7 @@ describe('create_invite_fn request', () => {
 
         assert.throws(
             () => request(ctx),
-            /INVALID_INPUT: permissions must contain at least one supported permission \(READ or WRITE\)/
+            /INVALID_INPUT: permissions must contain only supported permissions \(READ or WRITE\)/
         );
     });
 
@@ -91,7 +91,47 @@ describe('create_invite_fn request', () => {
 
         assert.throws(
             () => request(ctx),
-            /INVALID_INPUT: permissions must contain at least one supported permission \(READ or WRITE\)/
+            /INVALID_INPUT: permissions must contain only supported permissions \(READ or WRITE\)/
+        );
+    });
+
+    it('rejects mixed valid and garbage permissions (#449)', () => {
+        const ctx = {
+            args: {
+                input: {
+                    profileId: 'PROFILE#p1',
+                    permissions: ['READ', 'ADMIN'],
+                },
+            },
+            stash: {
+                profile: { ownerAccountId: 'ACCOUNT#owner1' },
+            },
+            identity: { sub: 'owner1' },
+        };
+
+        assert.throws(
+            () => request(ctx),
+            /INVALID_INPUT: permissions must contain only supported permissions \(READ or WRITE\)/
+        );
+    });
+
+    it('rejects garbage permission alongside valid non-string value (#449)', () => {
+        const ctx = {
+            args: {
+                input: {
+                    profileId: 'PROFILE#p1',
+                    permissions: ['WRITE', 42],
+                },
+            },
+            stash: {
+                profile: { ownerAccountId: 'ACCOUNT#owner1' },
+            },
+            identity: { sub: 'owner1' },
+        };
+
+        assert.throws(
+            () => request(ctx),
+            /INVALID_INPUT: permissions must contain only supported permissions \(READ or WRITE\)/
         );
     });
 
@@ -111,7 +151,7 @@ describe('create_invite_fn request', () => {
 
         assert.throws(
             () => request(ctx),
-            /INVALID_INPUT: permissions must contain at least one supported permission \(READ or WRITE\)/
+            /INVALID_INPUT: permissions must contain only supported permissions \(READ or WRITE\)/
         );
     });
 
@@ -130,7 +170,7 @@ describe('create_invite_fn request', () => {
 
         assert.throws(
             () => request(ctx),
-            /INVALID_INPUT: permissions must contain at least one supported permission \(READ or WRITE\)/
+            /INVALID_INPUT: permissions must contain only supported permissions \(READ or WRITE\)/
         );
     });
 
