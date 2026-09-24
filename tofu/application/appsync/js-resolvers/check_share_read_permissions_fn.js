@@ -52,6 +52,19 @@ export function response(ctx) {
         return { authorized: false };
     }
     
+    // Stale share check (#432): a share records the ownerAccountId from when it was
+    // created. A profile ownership transfer updates third-party shares best-effort, so
+    // stale shares outlive the old owner. Deny when the share's owner no longer matches
+    // the profile's current owner, matching the Python auth layer (src/utils/auth.py
+    // _is_share_valid) and check_share_permissions_fn.js. Shares without ownerAccountId
+    // (legacy rows) are accepted, mirroring the backward-compat behavior there.
+    const profile = ctx.stash.profile;
+    const currentOwner = profile && profile.ownerAccountId;
+    if (share.ownerAccountId && currentOwner && share.ownerAccountId !== currentOwner) {
+        ctx.stash.authorized = false;
+        return { authorized: false };
+    }
+
     // Has READ or WRITE permission - authorized
     if (share.permissions.includes('READ') || share.permissions.includes('WRITE')) {
         ctx.stash.authorized = true;

@@ -121,9 +121,16 @@ def _transfer_ownership(profile: Dict[str, Any], db_profile_id: str, db_new_owne
             ]
         )
     except ClientError as e:
+        logger.error(
+            "Failed to transfer profile ownership in DynamoDB",
+            profile_id=db_profile_id,
+            new_owner_account_id=db_new_owner_id,
+            error=str(e),
+            exc_info=True,
+        )
         raise AppError(
             ErrorCode.INTERNAL_ERROR,
-            f"Failed to transfer profile ownership: {e}",
+            "Failed to transfer profile ownership",
         ) from e
 
     # Keep the returned profile dict in sync with the persisted record.

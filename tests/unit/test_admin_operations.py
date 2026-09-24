@@ -655,6 +655,33 @@ class TestAdminListUsers:
                 Limit=1,  # Clamped to min
             )
 
+    def test_limit_explicit_none_defaults(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """Test that explicit null limit defaults to 20 without raising TypeError."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+
+        event = {
+            **admin_appsync_event,
+            "arguments": {"limit": None},
+        }
+
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+            mock_cognito = MagicMock()
+            mock_cognito.list_users.return_value = {"Users": []}
+            mock_get_client.return_value = mock_cognito
+
+            admin_list_users(event, lambda_context)
+
+            mock_cognito.list_users.assert_called_once_with(
+                UserPoolId="test-pool-id",
+                Limit=20,
+            )
+
     def test_non_admin_forbidden(
         self,
         dynamodb_table: Any,
