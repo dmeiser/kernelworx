@@ -214,14 +214,7 @@ module "lambda" {
   name_prefix   = local.name_prefix
   # #121: admin-operations, delete-account, and pre-signup use the isolated
   # admin role that carries the Cognito admin policy.
-  # Smoke auto-confirm gate: prod keeps the module default (false) so native
-  # signups always go through normal email confirmation; dev and ephemeral
-  # enable it so e2e smoke sign-ups are confirmed without Cognito email
-  # delivery (suites have no mailbox; the account's 50-emails/day quota
-  # exhausts under fleet-wide parallel runs and then SignUp itself fails
-  # with LimitExceededException).
-  auto_confirm_smoke_users = false
-  lambda_admin_role_arn    = module.iam.lambda_admin_execution_role_arn
+  lambda_admin_role_arn = module.iam.lambda_admin_execution_role_arn
   # #326 per-domain role split (completed by #355): every non-admin function
   # maps to a scoped domain role below. The monolithic shared role is retired,
   # so a function missing from this map fails the plan.

@@ -57,12 +57,6 @@ variable "lambda_src_dir" {
   default     = ""
 }
 
-variable "auto_confirm_smoke_users" {
-  description = "When true, the pre-signup Lambda auto-confirms native sign-ups whose email matches the smoke-test shape (smoke+...@example-test.invalid), skipping Cognito's confirmation email. Must be true ONLY in dev/ephemeral; production signups must keep normal email confirmation."
-  type        = bool
-  default     = false
-}
-
 variable "lambda_payload_dir" {
   type        = string
   description = "Path to directory for Lambda payload zip files"
@@ -186,18 +180,9 @@ locals {
       # DLQ intentionally not configured for Cognito Pre Sign-Up trigger.
       # Cognito manages retries for this trigger; failures are surfaced to the client
       # and are not suitable for asynchronous reprocessing via a DLQ.
-      #
-      # Smoke auto-confirm gate: dev/ephemeral environments pass
-      # auto_confirm_smoke_users = true so smoke-test sign-ups are confirmed
-      # without Cognito sending email (the suites have no mailbox and the
-      # account's 50-emails/day quota exhausts under parallel runs). The flag
-      # stays false/absent in prod so production confirmation is untouched.
       handler     = "handlers.pre_signup.lambda_handler"
       timeout     = 10
       memory_size = 256
-      extra_env = var.auto_confirm_smoke_users ? {
-        AUTO_CONFIRM_SMOKE_USERS = "true"
-      } : {}
     }
     "pre-token-generation" = {
       # DLQ intentionally not configured for the Cognito Pre Token Generation trigger.
@@ -303,7 +288,7 @@ resource "aws_lambda_function" "trigger_functions" {
   layers = [aws_lambda_layer_version.shared.arn]
 
   environment {
-    variables = merge(local.common_env, lookup(each.value, "extra_env", {}))
+    variables = local.common_env
   }
 }
 

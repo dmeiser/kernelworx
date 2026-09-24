@@ -277,12 +277,7 @@ export const SignupPage: React.FC = () => {
       setSuccess('Please check your email for a verification code');
       return;
     }
-    // DONE: sign-up complete without auto sign-in armed.
-    // COMPLETE_AUTO_SIGN_IN: Cognito already confirmed the user server-side
-    // (e.g. the dev/ephemeral smoke-test auto-confirm gate), so Amplify skips
-    // the verification step. The sign-up form offers no code-entry UI for
-    // either step, so both land on the success message + login redirect.
-    if (signUpStep === 'DONE' || signUpStep === 'COMPLETE_AUTO_SIGN_IN') {
+    if (signUpStep === 'DONE') {
       setSuccess('Account created successfully!');
       scheduleRedirect(() => {
         void navigate('/login');

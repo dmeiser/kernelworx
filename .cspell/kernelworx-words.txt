@@ -434,7 +434,6 @@ wrongpassword
 xlarge
 xlink
 xs
-xsmoke
 xxlarge
 xxs
 xxxs

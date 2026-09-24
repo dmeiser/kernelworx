@@ -67,10 +67,13 @@ create_or_update_user() {
   echo "  ✓ $user_type user created/updated"
 }
 
-# Create the three test users
+# Create test users
 create_or_update_user "Owner" "$TEST_OWNER_EMAIL" "$TEST_OWNER_PASSWORD"
 create_or_update_user "Contributor" "$TEST_CONTRIBUTOR_EMAIL" "$TEST_CONTRIBUTOR_PASSWORD"
 create_or_update_user "Read-only" "$TEST_READONLY_EMAIL" "$TEST_READONLY_PASSWORD"
+if [ -n "$TEST_SMOKE_EMAIL" ] && [ -n "$TEST_SMOKE_PASSWORD" ]; then
+  create_or_update_user "Smoke" "$TEST_SMOKE_EMAIL" "$TEST_SMOKE_PASSWORD"
+fi
 
 echo ""
 echo "🔐 Provisioning TOTP MFA for the owner admin user (#336)..."
@@ -93,5 +96,8 @@ echo "Credentials:"
 echo "  Owner:       $TEST_OWNER_EMAIL / $TEST_OWNER_PASSWORD"
 echo "  Contributor: $TEST_CONTRIBUTOR_EMAIL / $TEST_CONTRIBUTOR_PASSWORD"
 echo "  Read-only:   $TEST_READONLY_EMAIL / $TEST_READONLY_PASSWORD"
+if [ -n "$TEST_SMOKE_EMAIL" ]; then
+  echo "  Smoke:       $TEST_SMOKE_EMAIL / $TEST_SMOKE_PASSWORD"
+fi
 echo ""
 echo "Integration tests can now be run with: npm run test"

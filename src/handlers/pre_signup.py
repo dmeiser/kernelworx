@@ -1,22 +1,14 @@
 """
 Cognito Pre-Sign-Up Lambda Trigger
 
-Two responsibilities:
-
-1. Automatically links federated identity providers (Google, Facebook) to existing
+Automatically links federated identity providers (Google, Facebook) to existing
 Cognito users with the same verified email. This prevents duplicate accounts when a user
 signs up with email/password first, then later signs in with a social provider.
-
-2. Auto-confirms smoke-test sign-ups (``smoke+...@example-test.invalid``) in non-production
-environments only, gated on the ``AUTO_CONFIRM_SMOKE_USERS`` env var that OpenTofu sets
-only in dev/ephemeral. The e2e suites cannot read a mailbox, and each native sign-up burns
-one of the account's 50-emails/day Cognito emails; see AGENTS.md "Smoke-test signup
-auto-confirm gate". Production signups always keep normal email confirmation.
 
 Trigger: Pre Sign Up
 Event: Before a new user is created (for both native and federated sign-ups)
 
-How federated linking works:
+How it works:
 1. When a federated user (e.g., Google) attempts to sign in for the first time
 2. Cognito triggers Pre Sign Up before creating the user
 3. This Lambda checks if a native user with the same email already exists
@@ -29,7 +21,6 @@ How federated linking works:
 """
 
 import logging
-import os
 import re
 from typing import Any, Dict, NoReturn, Optional
 
@@ -50,21 +41,6 @@ logger.setLevel(logging.INFO)
 # interpolated into a Cognito ListUsers filter string. This rejects characters that
 # could break filter syntax or be used for injection (e.g. unescaped quotes/backslashes).
 EMAIL_PATTERN = re.compile(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$")
-
-# Smoke-test users created by the e2e suites. These addresses live on the
-# non-deliverable example-test.invalid TLD, and the suites cannot read a
-# mailbox, so Cognito's normal confirmation email is both undeliverable and
-# burns the account's 50-emails/day Cognito email quota (which, once
-# exhausted, makes every native SignUp fail with LimitExceededException).
-# The exact shape produced by tests/e2e (e.g. smoke+<random>@example-test.invalid).
-SMOKE_EMAIL_PATTERN = re.compile(r"^smoke\+[a-z0-9._-]+@example-test\.invalid$", re.IGNORECASE)
-
-
-# Environment-variable gate set by OpenTofu on the pre-signup Lambda in dev and
-# ephemeral environments ONLY. It is deliberately absent (or "false") in
-# production so production signups always keep normal email confirmation.
-def _smoke_auto_confirm_enabled() -> bool:
-    return os.environ.get("AUTO_CONFIRM_SMOKE_USERS", "").lower() == "true"
 
 
 class FederatedIdentityLinkedException(Exception):
@@ -223,14 +199,6 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     email = user_attributes.get("email", "")
 
     logger.info(f"Pre-signup trigger: source={trigger_source}, username={username}, email={mask_email(email)}")
-
-    # Auto-confirm smoke-test users in non-production environments only.
-    # The flag is set by OpenTofu on the Lambda in dev/ephemeral; when it is
-    # absent (prod) this branch never runs and native signups keep the normal
-    # email-confirmation flow.
-    if trigger_source == "PreSignUp_SignUp" and _smoke_auto_confirm_enabled() and SMOKE_EMAIL_PATTERN.fullmatch(email):
-        logger.info(f"Auto-confirming smoke-test sign-up for {mask_email(email)} (non-prod gate)")
-        return _auto_confirm_event(event)
 
     # Only process federated sign-ups (external providers)
     if trigger_source != "PreSignUp_ExternalProvider":
