@@ -1039,7 +1039,8 @@ class TestDeleteAllUserQRCodes:
             with pytest.raises(AppError) as exc_info:
                 payment_methods.delete_all_user_qr_codes(sample_account_id, logger=mock_logger)
             assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
-            assert "Failed to purge payment QR codes from S3" in exc_info.value.message
+            assert exc_info.value.message == "Failed to purge payment QR codes from S3"
+            assert "S3 error" not in exc_info.value.message
             mock_logger.error.assert_called()
 
 
