@@ -1268,19 +1268,31 @@ describe('Campaign Query Resolvers Integration Tests', () => {
       });
       const campaignId = campaignData.createCampaign.campaignId;
 
-      // Act: Get campaign with catalog field
-      const { data } = await ownerClient.query({
-        query: GET_CAMPAIGN_WITH_COMPUTED,
-        variables: { campaignId: campaignId },
-        fetchPolicy: 'network-only',
-      });
+      // Act: Poll getCampaign until the GSI (campaignId-index) reflects the newly
+      // created campaign, then read it. getCampaign reads the campaignId-index GSI,
+      // which is eventually consistent and can lag the base table right after a
+      // create (Bug #21 eventual consistency); a single immediate read can return
+      // null even though the campaign exists. Same tolerance as the adjacent test.
+      const campaigns = await waitForGSIConsistency(
+        async () => {
+          const res = await ownerClient.query({
+            query: GET_CAMPAIGN_WITH_COMPUTED,
+            variables: { campaignId: campaignId },
+            fetchPolicy: 'network-only',
+          });
+          return res.data?.getCampaign ? [res.data.getCampaign] : [];
+        },
+        (items) => items.length > 0,
+        10,
+        1000
+      );
 
       // Assert: Catalog should be populated via field resolver
-      expect(data.getCampaign.catalog).toBeDefined();
-      expect(data.getCampaign.catalog.catalogName).toBe(catalogName);
-      expect(data.getCampaign.catalog.products).toHaveLength(1);
-      expect(data.getCampaign.catalog.products[0].productName).toBe('Caramel Corn');
-      expect(data.getCampaign.catalog.products[0].price).toBe(12.50);
+      expect(campaigns[0].catalog).toBeDefined();
+      expect(campaigns[0].catalog.catalogName).toBe(catalogName);
+      expect(campaigns[0].catalog.products).toHaveLength(1);
+      expect(campaigns[0].catalog.products[0].productName).toBe('Caramel Corn');
+      expect(campaigns[0].catalog.products[0].price).toBe(12.50);
 
       // Cleanup
       await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId } });

@@ -567,6 +567,44 @@ class TestDeletePaymentMethod:
         response = accounts_table.get_item(Key={"accountId": account_id_key})
         assert response["Item"].get("preferences", {}).get("paymentMethods", []) == []
 
+    def test_save_preferences_failure_preserves_s3_qr(
+        self, dynamodb_tables: Dict[str, Any], sample_account: Dict[str, Any], s3_bucket: Any, sample_account_id: str
+    ) -> None:
+        """Regression test for issue #447: if _save_preferences fails (e.g. a concurrent
+        write collision surfaces as ConditionalCheckFailedException), the payment method
+        stays active, so the QR code image in S3 must NOT be deleted."""
+        uuid_s3_key = f"payment-qr-codes/{sample_account_id}/{'b' * 32}.png"
+
+        tables_dict = dynamodb_tables
+        accounts_table = tables_dict["accounts"]
+        accounts_table.put_item(
+            Item={
+                "accountId": f"ACCOUNT#{sample_account_id}",
+                "preferences": {"paymentMethods": [{"name": "Venmo", "qrCodeUrl": uuid_s3_key}]},
+            }
+        )
+
+        bucket_name = os.environ.get("EXPORTS_BUCKET")
+        s3_bucket.put_object(Bucket=bucket_name, Key=uuid_s3_key, Body=b"fake-qr-image")
+
+        with (
+            patch(
+                "src.utils.payment_methods._save_preferences",
+                side_effect=AppError(ErrorCode.RESOURCE_BUSY, "Concurrent modification detected"),
+            ),
+            patch("src.utils.payment_methods.delete_qr_by_key") as mock_delete_key,
+            patch("src.utils.payment_methods.delete_qr_from_s3") as mock_delete_slug,
+            pytest.raises(AppError),
+        ):
+            payment_methods.delete_payment_method(sample_account_id, "Venmo")
+
+        # QR deletion must not have been attempted before a successful preferences write
+        mock_delete_key.assert_not_called()
+        mock_delete_slug.assert_not_called()
+
+        # The S3 object must still be intact
+        s3_bucket.head_object(Bucket=bucket_name, Key=uuid_s3_key)
+
     def test_delete_method_with_multiple(
         self, dynamodb_tables: Dict[str, Any], sample_account: Dict[str, Any], sample_account_id: str
     ) -> None:
@@ -1001,7 +1039,8 @@ class TestDeleteAllUserQRCodes:
             with pytest.raises(AppError) as exc_info:
                 payment_methods.delete_all_user_qr_codes(sample_account_id, logger=mock_logger)
             assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
-            assert "Failed to purge payment QR codes from S3" in exc_info.value.message
+            assert exc_info.value.message == "Failed to purge payment QR codes from S3"
+            assert "S3 error" not in exc_info.value.message
             mock_logger.error.assert_called()
 
 
