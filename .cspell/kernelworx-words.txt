@@ -17,6 +17,7 @@ adminuser
 Aero
 affordances
 aioboto
+aiobotocore
 America
 Amplify
 anomalymonitor
@@ -273,6 +274,7 @@ pycache
 pyproject
 pytest
 pytestmark
+pyupgrade
 pyvenv
 QLAPI
 qrcode
