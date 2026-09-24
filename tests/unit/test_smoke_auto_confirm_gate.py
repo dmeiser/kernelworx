@@ -58,13 +58,13 @@ def test_trigger_functions_merge_extra_env() -> None:
 def test_lambda_module_sets_flag_only_when_enabled() -> None:
     """The pre-signup trigger gets AUTO_CONFIRM_SMOKE_USERS only when the flag is on."""
     for entry in LAMBDA_DOC.get("locals", []):
-        funcs = entry.get("trigger_functions")
-        if not funcs or "pre-signup" not in funcs:
+        triggers = entry.get("trigger_functions")
+        if not triggers or "pre-signup" not in triggers:
             continue
         # hcl2 parses the conditional expression as a raw interpolation
         # string; assert the flag drives it and the emitted key/value are
         # exactly the Lambda contract.
-        expr = funcs["pre-signup"].get("extra_env")
+        expr = triggers["pre-signup"].get("extra_env")
         assert expr is not None, "pre-signup trigger lost its extra_env wiring"
         assert "var.auto_confirm_smoke_users" in expr
         assert 'AUTO_CONFIRM_SMOKE_USERS = "true"' in expr

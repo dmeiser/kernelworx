@@ -2,8 +2,9 @@
 
 In dev and ephemeral environments the pre-signup Lambda auto-confirms
 smoke-test sign-ups (``smoke+...@example-test.invalid``), so Cognito sends no
-confirmation email and Amplify's ``signUp`` returns the ``DONE`` step: the UI
-shows *Account created successfully!* and redirects to the login page. In a
+confirmation email and Amplify's ``signUp`` (``autoSignIn: true``) returns
+the ``COMPLETE_AUTO_SIGN_IN`` step: the UI shows *Account created successfully!*
+and redirects to the login page. In a
 pool WITHOUT that gate (e.g. production) the same submit shows the
 verification-code prompt and the completion test falls back to server-side
 ``admin-confirm-sign-up``. Both shapes are accepted here; the gate itself is
@@ -107,7 +108,8 @@ def _submit_signup_and_wait(page: Page, email: str, password: str) -> bool:
     """Fill and submit the signup form, then wait for a post-submit signal.
 
     Returns ``True`` when the user was auto-confirmed server-side (the
-    dev/ephemeral smoke gate): Amplify's ``signUp`` returns the ``DONE`` step
+    dev/ephemeral smoke gate): Amplify's ``signUp`` (``autoSignIn: true``)
+    returns the ``COMPLETE_AUTO_SIGN_IN`` step
     and the UI shows *Account created successfully!* before redirecting to
     login. Returns ``False`` when the verification-code prompt appears (pools
     without the auto-confirm gate, e.g. production).

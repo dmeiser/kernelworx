@@ -326,6 +326,7 @@ Shelbyville
 Signin
 signout
 Signup
+signups
 singleline
 slowmo
 slugification
@@ -433,6 +434,7 @@ wrongpassword
 xlarge
 xlink
 xs
+xsmoke
 xxlarge
 xxs
 xxxs
