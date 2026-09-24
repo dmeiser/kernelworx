@@ -5,8 +5,15 @@ import { request, response } from './create_invite_fn.js';
 
 describe('create_invite_fn request', () => {
     const originalAutoId = util.autoId;
+    let autoIdCalls;
     beforeEach(() => {
-        util.autoId = () => 'c73bcdcc-2669-4bf6-81d3-e4ae73fb11fd';
+        autoIdCalls = 0;
+        util.autoId = () => {
+            autoIdCalls += 1;
+            return autoIdCalls === 1
+                ? 'c73bcdcc-2669-4bf6-81d3-e4ae73fb11fd'
+                : '9f1c2ab3-7e54-4d8f-9a3b-1c2d3e4f5a6b';
+        };
     });
     afterEach(() => {
         util.autoId = originalAutoId;
@@ -38,7 +45,8 @@ describe('create_invite_fn request', () => {
         assert.strictEqual(result.attributeValues.inviteCode.length, 16);
         assert.strictEqual(result.attributeValues.inviteCode, result.attributeValues.inviteCode.toUpperCase());
         assert.match(result.attributeValues.inviteCode, /^[A-Z0-9]{16}$/);
-        assert.strictEqual(result.attributeValues.inviteCode, 'C73BCDCC26694BF6');
+        assert.strictEqual(autoIdCalls, 2);
+        assert.strictEqual(result.attributeValues.inviteCode, 'C73BCDCC26699F1C');
         assert.strictEqual(result.attributeValues.expiresAt, 1704672000);
         assert.strictEqual(result.condition.expression, 'attribute_not_exists(inviteCode)');
         assert.strictEqual(ctx.stash.inviteCode, result.attributeValues.inviteCode);
