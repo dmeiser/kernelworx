@@ -1,5 +1,7 @@
 import { util } from '@aws-appsync/utils';
 
+const MAX_PAGE_LIMIT = 100;
+
 export function request(ctx) {
     // If campaign not found or not authorized, return empty query (will return empty array)
     if (ctx.stash.campaignNotFound || !ctx.stash.authorized) {
@@ -28,7 +30,7 @@ export function request(ctx) {
 
     const limit = ctx.args.limit;
     if (typeof limit === 'number' && limit > 0) {
-        request.limit = limit;
+        request.limit = Math.min(limit, MAX_PAGE_LIMIT);
     }
     if (ctx.args.nextToken) {
         request.nextToken = ctx.args.nextToken;
