@@ -9,8 +9,10 @@ from unittest.mock import MagicMock, patch
 
 import boto3
 import pytest
+from botocore.exceptions import ClientError
 
 from src.handlers.post_authentication import lambda_handler
+from src.utils.dynamodb import tables
 
 
 @pytest.fixture
@@ -260,3 +262,75 @@ def test_create_new_account_from_post_confirmation_trigger(
 
     assert "Item" in response
     assert response["Item"]["email"] == "user@example.com"
+
+
+def test_concurrent_account_creation_preserves_concurrently_written_attributes(
+    cognito_event: dict[str, Any],
+    lambda_context: MagicMock,
+    dynamodb_table: Any,
+    monkeypatch: Any,
+) -> None:
+    """Test that concurrent account creation (e.g. from GraphQL ensure_my_account_exists)
+    is not overwritten by post-authentication put_item due to ConditionExpression."""
+    monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
+    account_id_key = "ACCOUNT#a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+
+    modified_account = {
+        "accountId": account_id_key,
+        "email": "user@example.com",
+        "givenName": "Jane",
+        "familyName": "Doe",
+        "city": "Seattle",
+        "state": "WA",
+        "unitType": "PACK",
+        "preferences": {
+            "paymentMethods": [{"id": "pm_custom_123", "type": "VENMO", "details": {"venmoHandle": "@jane"}}]
+        },
+        "createdAt": "2024-01-01T12:00:00+00:00",
+        "updatedAt": "2024-01-01T12:00:00+00:00",
+    }
+
+    # Simulate race: get_item returns empty (as if account was absent when checked),
+    # but concurrent process writes modified_account before post-auth put_item runs.
+    def simulate_race_get_item(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        tables.accounts.put_item(Item=modified_account)
+        return {}
+
+    with patch.object(tables.accounts, "get_item", side_effect=simulate_race_get_item):
+        result = lambda_handler(cognito_event, lambda_context)
+
+    # Auth flow must succeed and return event unmodified
+    assert result == cognito_event
+
+    # Verify that the concurrent account was NOT overwritten by post-auth put_item
+    response = get_accounts_table().get_item(Key={"accountId": account_id_key})
+    assert "Item" in response
+    saved_account = response["Item"]
+    assert saved_account["city"] == "Seattle"
+    assert saved_account["state"] == "WA"
+    assert saved_account["unitType"] == "PACK"
+    assert saved_account["preferences"]["paymentMethods"] == [
+        {"id": "pm_custom_123", "type": "VENMO", "details": {"venmoHandle": "@jane"}}
+    ]
+    assert saved_account["createdAt"] == "2024-01-01T12:00:00+00:00"
+
+
+def test_put_item_client_error_other_than_conditional_check_failed(
+    cognito_event: dict[str, Any],
+    lambda_context: MagicMock,
+    dynamodb_table: Any,
+    monkeypatch: Any,
+) -> None:
+    """Test that ClientError other than ConditionalCheckFailedException is re-raised and caught by outer handler."""
+    monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
+
+    client_error = ClientError(
+        {"Error": {"Code": "ProvisionedThroughputExceededException", "Message": "Throughput exceeded"}},
+        "PutItem",
+    )
+
+    with patch.object(tables.accounts, "put_item", side_effect=client_error):
+        result = lambda_handler(cognito_event, lambda_context)
+
+    # Auth flow must still return event even if DynamoDB put_item failed
+    assert result == cognito_event
