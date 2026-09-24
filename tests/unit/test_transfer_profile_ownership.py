@@ -535,7 +535,7 @@ class TestTransferProfileOwnership:
         assert result["errorCode"] == ErrorCode.INVALID_INPUT
 
     def test_transact_write_client_error_raises_internal_error(
-        self, profiles_table: Any, shares_table: Any, monkeypatch: pytest.MonkeyPatch
+        self, profiles_table: Any, shares_table: Any, monkeypatch: pytest.MonkeyPatch, capsys: Any
     ) -> None:
         """ClientError during transact_write_items raises INTERNAL_ERROR."""
         owner_id = "owner-1"
@@ -567,3 +567,12 @@ class TestTransferProfileOwnership:
         result = lambda_handler(event, None)
         assert result["__isError"] is True
         assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
+        assert result["message"] == "Failed to transfer profile ownership"
+        assert "TransactionCanceledException" not in result["message"]
+        assert "TransactWriteItems" not in result["message"]
+        assert "DynamoDB" not in result["message"]
+
+        captured = capsys.readouterr().out
+        assert "Failed to transfer profile ownership in DynamoDB" in captured
+        assert "TransactionCanceledException" in captured
+        assert "TransactWriteItems" in captured

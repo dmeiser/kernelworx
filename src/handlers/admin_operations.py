@@ -278,7 +278,8 @@ def admin_list_users(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     require_admin_mfa(event)
 
     arguments = event.get("arguments", {})
-    limit = max(1, min(arguments.get("limit", 20), 60))
+    raw_limit = arguments.get("limit")
+    limit = max(1, min(raw_limit or 20, 60))
     next_token = arguments.get("nextToken")
 
     user_pool_id = _get_required_env("USER_POOL_ID")
