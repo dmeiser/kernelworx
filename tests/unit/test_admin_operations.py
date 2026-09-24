@@ -4968,9 +4968,7 @@ class TestAdminSearchUserThrottling:
         "error_code",
         ["TooManyRequestsException", "ThrottlingException", "ProvisionedThroughputExceededException"],
     )
-    def test_search_users_in_cognito_by_email_prefix_throttling_raises_resource_busy(
-        self, error_code: str
-    ) -> None:
+    def test_search_users_in_cognito_by_email_prefix_throttling_raises_resource_busy(self, error_code: str) -> None:
         """Throttling in _search_users_in_cognito_by_email_prefix raises retryable RESOURCE_BUSY."""
         mock_cognito = MagicMock()
         mock_cognito.list_users.side_effect = ClientError(
