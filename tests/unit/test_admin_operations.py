@@ -22,10 +22,13 @@ import pytest
 from botocore.exceptions import ClientError
 
 from src.handlers.admin_operations import (
+    _THROTTLING_ERROR_CODES,
     _batch_get_campaign_catalogs,
     _batch_get_display_names,
     _batch_get_user_groups,
     _extract_unique_catalog_ids,
+    _search_user_by_sub,
+    _search_users_in_cognito_by_email_prefix,
     admin_delete_user,
     admin_list_users,
     admin_reset_user_password,
@@ -4769,6 +4772,265 @@ class TestAdminSearchUser:
                 assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
                 assert "Failed to search user" in result["message"]
 
+    def test_search_user_by_uuid_throttled_returns_resource_busy(
+        self,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """UUID search throttled by Cognito returns structured RESOURCE_BUSY error (#456)."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+
+        uuid_str = "12345678-1234-1234-1234-123456789abc"
+        event = {
+            **admin_appsync_event,
+            "info": {"fieldName": "adminSearchUser"},
+            "arguments": {"query": uuid_str},
+        }
+
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+            mock_client = MagicMock()
+            mock_get_client.return_value = mock_client
+            mock_client.list_users.side_effect = ClientError(
+                {"Error": {"Code": "TooManyRequestsException", "Message": "Throttled"}},
+                "ListUsers",
+            )
+
+            result = admin_search_user(event, lambda_context)
+
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.RESOURCE_BUSY
+            assert result["message"] == "Temporarily unable to load data. Please retry."
+
+    def test_search_user_by_account_id_throttled_returns_resource_busy(
+        self,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """ACCOUNT#UUID search throttled by Cognito returns structured RESOURCE_BUSY error (#456)."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+
+        event = {
+            **admin_appsync_event,
+            "info": {"fieldName": "adminSearchUser"},
+            "arguments": {"query": "ACCOUNT#12345678-1234-1234-1234-123456789abc"},
+        }
+
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+            mock_client = MagicMock()
+            mock_get_client.return_value = mock_client
+            mock_client.list_users.side_effect = ClientError(
+                {"Error": {"Code": "TooManyRequestsException", "Message": "Throttled"}},
+                "ListUsers",
+            )
+
+            result = admin_search_user(event, lambda_context)
+
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.RESOURCE_BUSY
+            assert result["message"] == "Temporarily unable to load data. Please retry."
+
+    def test_search_user_general_query_sub_lookup_throttled_returns_resource_busy(
+        self,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """DynamoDB-matched user sub lookup throttled by Cognito returns structured RESOURCE_BUSY error (#456)."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+
+        event = {
+            **admin_appsync_event,
+            "info": {"fieldName": "adminSearchUser"},
+            "arguments": {"query": "test"},
+        }
+
+        with (
+            patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client,
+            patch("src.handlers.admin_operations.tables") as mock_tables,
+        ):
+            mock_client = MagicMock()
+            mock_get_client.return_value = mock_client
+
+            mock_tables.accounts.scan.return_value = {
+                "Items": [{"accountId": "ACCOUNT#test-sub-123", "email": "test@example.com"}]
+            }
+
+            mock_client.list_users.side_effect = ClientError(
+                {"Error": {"Code": "TooManyRequestsException", "Message": "Throttled"}},
+                "ListUsers",
+            )
+
+            result = admin_search_user(event, lambda_context)
+
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.RESOURCE_BUSY
+            assert result["message"] == "Temporarily unable to load data. Please retry."
+
+    def test_search_user_general_query_email_prefix_throttled_returns_resource_busy(
+        self,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """Cognito email prefix search throttled returns structured RESOURCE_BUSY error (#456)."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+
+        event = {
+            **admin_appsync_event,
+            "info": {"fieldName": "adminSearchUser"},
+            "arguments": {"query": "test"},
+        }
+
+        with (
+            patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client,
+            patch("src.handlers.admin_operations.tables") as mock_tables,
+        ):
+            mock_client = MagicMock()
+            mock_get_client.return_value = mock_client
+
+            mock_tables.accounts.scan.return_value = {"Items": []}
+
+            mock_client.list_users.side_effect = ClientError(
+                {"Error": {"Code": "TooManyRequestsException", "Message": "Throttled"}},
+                "ListUsers",
+            )
+
+            result = admin_search_user(event, lambda_context)
+
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.RESOURCE_BUSY
+            assert result["message"] == "Temporarily unable to load data. Please retry."
+
+
+class TestAdminSearchUserThrottling:
+    """Tests for throttling error handling in Cognito search helpers (#456)."""
+
+    @pytest.mark.parametrize(
+        "error_code",
+        ["TooManyRequestsException", "ThrottlingException", "ProvisionedThroughputExceededException"],
+    )
+    def test_search_user_by_sub_throttling_raises_resource_busy(self, error_code: str) -> None:
+        """Throttling in _search_user_by_sub raises retryable RESOURCE_BUSY."""
+        mock_cognito = MagicMock()
+        mock_cognito.list_users.side_effect = ClientError(
+            {"Error": {"Code": error_code, "Message": "Throttled"}},
+            "ListUsers",
+        )
+        mock_logger = MagicMock()
+
+        with pytest.raises(AppError) as exc_info:
+            _search_user_by_sub(mock_cognito, "pool-id", "sub-123", mock_logger)
+
+        assert exc_info.value.error_code == ErrorCode.RESOURCE_BUSY
+        assert exc_info.value.message == "Temporarily unable to load data. Please retry."
+        mock_logger.warning.assert_called_once()
+        log_kwargs = mock_logger.warning.call_args[1]
+        assert log_kwargs["error_code"] == error_code
+        assert log_kwargs["sub"] == "sub-123"
+
+    def test_search_user_by_sub_non_throttling_client_error_returns_none(self) -> None:
+        """Non-throttling ClientError in _search_user_by_sub logs warning and returns None."""
+        mock_cognito = MagicMock()
+        mock_cognito.list_users.side_effect = ClientError(
+            {"Error": {"Code": "InternalErrorException", "Message": "Service error"}},
+            "ListUsers",
+        )
+        mock_logger = MagicMock()
+
+        result = _search_user_by_sub(mock_cognito, "pool-id", "sub-123", mock_logger)
+        assert result is None
+        mock_logger.warning.assert_called_once()
+        assert "Cognito search by sub failed" in mock_logger.warning.call_args[0][0]
+
+    def test_search_user_by_sub_genuine_not_found_returns_none(self) -> None:
+        """Empty Cognito Users list in _search_user_by_sub returns None."""
+        mock_cognito = MagicMock()
+        mock_cognito.list_users.return_value = {"Users": []}
+        mock_logger = MagicMock()
+
+        result = _search_user_by_sub(mock_cognito, "pool-id", "sub-123", mock_logger)
+        assert result is None
+        mock_logger.warning.assert_not_called()
+
+    def test_search_user_by_sub_success_returns_user(self) -> None:
+        """Successful search in _search_user_by_sub returns the first user dict."""
+        mock_cognito = MagicMock()
+        user = {"Username": "user-1", "Attributes": [{"Name": "sub", "Value": "sub-123"}]}
+        mock_cognito.list_users.return_value = {"Users": [user]}
+        mock_logger = MagicMock()
+
+        result = _search_user_by_sub(mock_cognito, "pool-id", "sub-123", mock_logger)
+        assert result == user
+        mock_logger.warning.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "error_code",
+        ["TooManyRequestsException", "ThrottlingException", "ProvisionedThroughputExceededException"],
+    )
+    def test_search_users_in_cognito_by_email_prefix_throttling_raises_resource_busy(
+        self, error_code: str
+    ) -> None:
+        """Throttling in _search_users_in_cognito_by_email_prefix raises retryable RESOURCE_BUSY."""
+        mock_cognito = MagicMock()
+        mock_cognito.list_users.side_effect = ClientError(
+            {"Error": {"Code": error_code, "Message": "Throttled"}},
+            "ListUsers",
+        )
+        mock_logger = MagicMock()
+
+        with pytest.raises(AppError) as exc_info:
+            _search_users_in_cognito_by_email_prefix(mock_cognito, "pool-id", "user@", mock_logger)
+
+        assert exc_info.value.error_code == ErrorCode.RESOURCE_BUSY
+        assert exc_info.value.message == "Temporarily unable to load data. Please retry."
+        mock_logger.warning.assert_called_once()
+        log_kwargs = mock_logger.warning.call_args[1]
+        assert log_kwargs["error_code"] == error_code
+        assert log_kwargs["query"] == "user@"
+
+    def test_search_users_in_cognito_by_email_prefix_non_throttling_client_error_returns_empty(self) -> None:
+        """Non-throttling ClientError in _search_users_in_cognito_by_email_prefix logs warning and returns []."""
+        mock_cognito = MagicMock()
+        mock_cognito.list_users.side_effect = ClientError(
+            {"Error": {"Code": "InternalErrorException", "Message": "Service error"}},
+            "ListUsers",
+        )
+        mock_logger = MagicMock()
+
+        result = _search_users_in_cognito_by_email_prefix(mock_cognito, "pool-id", "user@", mock_logger)
+        assert result == []
+        mock_logger.warning.assert_called_once()
+        assert "Cognito email prefix search failed" in mock_logger.warning.call_args[0][0]
+
+    def test_search_users_in_cognito_by_email_prefix_genuine_not_found_returns_empty(self) -> None:
+        """Empty Cognito Users list in _search_users_in_cognito_by_email_prefix returns []."""
+        mock_cognito = MagicMock()
+        mock_cognito.list_users.return_value = {"Users": []}
+        mock_logger = MagicMock()
+
+        result = _search_users_in_cognito_by_email_prefix(mock_cognito, "pool-id", "user@", mock_logger)
+        assert result == []
+        mock_logger.warning.assert_not_called()
+
+    def test_search_users_in_cognito_by_email_prefix_success_returns_users(self) -> None:
+        """Successful search in _search_users_in_cognito_by_email_prefix returns users list."""
+        mock_cognito = MagicMock()
+        users = [{"Username": "user-1"}, {"Username": "user-2"}]
+        mock_cognito.list_users.return_value = {"Users": users}
+        mock_logger = MagicMock()
+
+        result = _search_users_in_cognito_by_email_prefix(mock_cognito, "pool-id", "user@", mock_logger)
+        assert result == users
+        mock_logger.warning.assert_not_called()
+
+    def test_throttling_error_codes_contains_too_many_requests(self) -> None:
+        """_THROTTLING_ERROR_CODES includes TooManyRequestsException (#456)."""
+        assert "TooManyRequestsException" in _THROTTLING_ERROR_CODES
+        assert "ThrottlingException" in _THROTTLING_ERROR_CODES
+        assert "ProvisionedThroughputExceededException" in _THROTTLING_ERROR_CODES
+
 
 class TestBatchHelpers:
     """Tests for the batched DynamoDB display-name and Cognito group helpers."""
@@ -5117,6 +5379,22 @@ class TestBatchHelpers:
         mock_cognito = MagicMock()
         mock_cognito.admin_list_groups_for_user.side_effect = ClientError(
             {"Error": {"Code": "ThrottlingException", "Message": "throttled"}},
+            "AdminListGroupsForUser",
+        )
+
+        with pytest.raises(AppError) as exc_info:
+            _batch_get_user_groups(mock_cognito, "pool-id", ["user-1"], MagicMock())
+
+        assert exc_info.value.error_code == ErrorCode.RESOURCE_BUSY
+        assert exc_info.value.message == "Temporarily unable to load data. Please retry."
+
+    def test_batch_get_user_groups_per_user_too_many_requests_raises_retryable(
+        self,
+    ) -> None:
+        """A per-user group lookup throttled with TooManyRequestsException raises RESOURCE_BUSY (#456)."""
+        mock_cognito = MagicMock()
+        mock_cognito.admin_list_groups_for_user.side_effect = ClientError(
+            {"Error": {"Code": "TooManyRequestsException", "Message": "throttled"}},
             "AdminListGroupsForUser",
         )
 
