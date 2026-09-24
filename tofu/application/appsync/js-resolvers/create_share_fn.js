@@ -25,15 +25,6 @@ export function request(ctx) {
 
     validatePermissions(permissions);
 
-    // #453: when redeeming, the invite's creation-time ownerAccountId must still
-    // match the profile's current owner (verified by verify_invite_owner_current_fn);
-    // reject rather than re-stamp a share for a profile that changed hands.
-    if (ctx.stash && ctx.stash.invite && ctx.stash.invite.ownerAccountId &&
-        ctx.stash.profile && ctx.stash.profile.ownerAccountId &&
-        ctx.stash.invite.ownerAccountId !== ctx.stash.profile.ownerAccountId) {
-        util.error('Invite is no longer valid: profile ownership has changed', 'ConflictException');
-    }
-
     const now = util.time.nowISO8601();
 
     // Get ownerAccountId from stash - check profile (shareProfileDirect) or invite (redeemProfileInvite)

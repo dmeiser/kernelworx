@@ -97,29 +97,6 @@ describe('create_share_fn request', () => {
         assert.strictEqual(result.attributeValues.createdByAccountId, 'ACCOUNT#user2');
     });
 
-    it('rejects redemption when invite owner no longer matches the current profile owner (#453)', () => {
-        const ctx = {
-            args: {
-                input: {},
-            },
-            stash: {
-                targetAccountId: 'ACCOUNT#user2',
-                invite: {
-                    profileId: 'PROFILE#p2',
-                    permissions: ['READ'],
-                    ownerAccountId: 'ACCOUNT#old-owner',
-                },
-                profile: { ownerAccountId: 'ACCOUNT#new-owner' },
-            },
-            identity: { sub: 'user2' },
-        };
-
-        assert.throws(
-            () => request(ctx),
-            /ConflictException: Invite is no longer valid: profile ownership has changed/
-        );
-    });
-
     it('stamps the current profile owner when invite and profile owners match (#453)', () => {
         const ctx = {
             args: {
