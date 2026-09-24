@@ -98,12 +98,12 @@ class TestFederatedIdentities:
         """Federated user with TOTP enrollment must get mfa=false without invoking AdminGetUser."""
         with (
             patch("src.handlers.pre_token_generation.logger.info") as mock_log_info,
-            patch("boto3.client") as mock_client,
+            patch("src.handlers.pre_token_generation.cognito") as mock_cognito,
         ):
             result = lambda_handler(federated_pre_token_event, lambda_context)
 
         # AdminGetUser must be completely bypassed for federated users
-        mock_client.assert_not_called()
+        mock_cognito.admin_get_user.assert_not_called()
 
         details = _details(result)
         assert details["idTokenGeneration"]["claimsToAddOrOverride"] == {MFA_CLAIM: False}
@@ -116,10 +116,10 @@ class TestFederatedIdentities:
         lambda_context: MagicMock,
     ) -> None:
         """Federated user with SMS enrollment must still get mfa=false."""
-        with patch("boto3.client") as mock_client:
+        with patch("src.handlers.pre_token_generation.cognito") as mock_cognito:
             result = lambda_handler(federated_pre_token_event, lambda_context)
 
-        mock_client.assert_not_called()
+        mock_cognito.admin_get_user.assert_not_called()
         details = _details(result)
         assert details["idTokenGeneration"]["claimsToAddOrOverride"] == {MFA_CLAIM: False}
         assert details["accessTokenGeneration"]["claimsToAddOrOverride"] == {MFA_CLAIM: False}
@@ -130,10 +130,10 @@ class TestFederatedIdentities:
         lambda_context: MagicMock,
     ) -> None:
         """Federated user with no MFA enrolled gets mfa=false."""
-        with patch("boto3.client") as mock_client:
+        with patch("src.handlers.pre_token_generation.cognito") as mock_cognito:
             result = lambda_handler(federated_pre_token_event, lambda_context)
 
-        mock_client.assert_not_called()
+        mock_cognito.admin_get_user.assert_not_called()
         details = _details(result)
         assert details["idTokenGeneration"]["claimsToAddOrOverride"] == {MFA_CLAIM: False}
         assert details["accessTokenGeneration"]["claimsToAddOrOverride"] == {MFA_CLAIM: False}
@@ -145,10 +145,10 @@ class TestFederatedIdentities:
     ) -> None:
         """Parsed list identities attribute is correctly identified as federated."""
         pre_token_event["request"]["userAttributes"]["identities"] = [{"providerName": "Google"}]
-        with patch("boto3.client") as mock_client:
+        with patch("src.handlers.pre_token_generation.cognito") as mock_cognito:
             result = lambda_handler(pre_token_event, lambda_context)
 
-        mock_client.assert_not_called()
+        mock_cognito.admin_get_user.assert_not_called()
         assert _details(result)["idTokenGeneration"]["claimsToAddOrOverride"] == {MFA_CLAIM: False}
 
     def test_is_federated_helper_branches(self) -> None:
@@ -172,10 +172,8 @@ class TestNativeMfaClaimResolution:
         self, pre_token_event: dict[str, Any], lambda_context: MagicMock
     ) -> None:
         """A native user with TOTP software-token preference must set mfa=true on ID and access tokens."""
-        with patch("boto3.client") as mock_client:
-            mock_cognito = MagicMock()
+        with patch("src.handlers.pre_token_generation.cognito") as mock_cognito:
             mock_cognito.admin_get_user.return_value = {"PreferredMfaSetting": SOFTWARE_TOKEN_MFA}
-            mock_client.return_value = mock_cognito
             result = lambda_handler(pre_token_event, lambda_context)
 
         details = _details(result)
@@ -184,10 +182,8 @@ class TestNativeMfaClaimResolution:
 
     def test_sms_preference_sets_mfa_true(self, pre_token_event: dict[str, Any], lambda_context: MagicMock) -> None:
         """A native user with SMS MFA preference is an enabled MFA factor and must set mfa=true."""
-        with patch("boto3.client") as mock_client:
-            mock_cognito = MagicMock()
+        with patch("src.handlers.pre_token_generation.cognito") as mock_cognito:
             mock_cognito.admin_get_user.return_value = {"PreferredMfaSetting": SMS_MFA}
-            mock_client.return_value = mock_cognito
             result = lambda_handler(pre_token_event, lambda_context)
 
         details = _details(result)
@@ -204,13 +200,11 @@ class TestNativeMfaClaimResolution:
         method, WEB_AUTHN_MFA) mints true, but a bare first-factor passkey is not
         MFA enrollment.
         """
-        with patch("boto3.client") as mock_client:
-            mock_cognito = MagicMock()
+        with patch("src.handlers.pre_token_generation.cognito") as mock_cognito:
             mock_cognito.admin_get_user.return_value = {
                 "PreferredMfaSetting": "NONE",
                 "UserMFASettingList": [],
             }
-            mock_client.return_value = mock_cognito
             result = lambda_handler(pre_token_event, lambda_context)
 
         details = _details(result)
@@ -221,10 +215,8 @@ class TestNativeMfaClaimResolution:
         self, pre_token_event: dict[str, Any], lambda_context: MagicMock
     ) -> None:
         """A native user whose PreferredMfaSetting is WEB_AUTHN_MFA (passkey MFA) is enrolled."""
-        with patch("boto3.client") as mock_client:
-            mock_cognito = MagicMock()
+        with patch("src.handlers.pre_token_generation.cognito") as mock_cognito:
             mock_cognito.admin_get_user.return_value = {"PreferredMfaSetting": WEB_AUTHN_MFA}
-            mock_client.return_value = mock_cognito
             result = lambda_handler(pre_token_event, lambda_context)
 
         details = _details(result)
@@ -239,12 +231,10 @@ class TestNativeMfaClaimResolution:
         (alongside the required co-enabled method) and PreferredMfaSetting is
         absent. Any activated entry in the list is enrollment evidence.
         """
-        with patch("boto3.client") as mock_client:
-            mock_cognito = MagicMock()
+        with patch("src.handlers.pre_token_generation.cognito") as mock_cognito:
             mock_cognito.admin_get_user.return_value = {
                 "UserMFASettingList": [SOFTWARE_TOKEN_MFA, WEB_AUTHN_MFA]
             }
-            mock_client.return_value = mock_cognito
             result = lambda_handler(pre_token_event, lambda_context)
 
         details = _details(result)
@@ -261,13 +251,11 @@ class TestNativeMfaClaimResolution:
         setting). The activated-method list must carry the truth: TOTP plus
         passkey MFA entries with an unrecognized preferred value still mint true.
         """
-        with patch("boto3.client") as mock_client:
-            mock_cognito = MagicMock()
+        with patch("src.handlers.pre_token_generation.cognito") as mock_cognito:
             mock_cognito.admin_get_user.return_value = {
                 "PreferredMfaSetting": "NONE",
                 "UserMFASettingList": [SOFTWARE_TOKEN_MFA, WEB_AUTHN_MFA],
             }
-            mock_client.return_value = mock_cognito
             result = lambda_handler(pre_token_event, lambda_context)
 
         assert _details(result)["idTokenGeneration"]["claimsToAddOrOverride"] == {MFA_CLAIM: True}
@@ -276,10 +264,8 @@ class TestNativeMfaClaimResolution:
         self, pre_token_event: dict[str, Any], lambda_context: MagicMock
     ) -> None:
         """TOTP is the only activated method and no preference is reported: still enrolled."""
-        with patch("boto3.client") as mock_client:
-            mock_cognito = MagicMock()
+        with patch("src.handlers.pre_token_generation.cognito") as mock_cognito:
             mock_cognito.admin_get_user.return_value = {"UserMFASettingList": [SOFTWARE_TOKEN_MFA]}
-            mock_client.return_value = mock_cognito
             result = lambda_handler(pre_token_event, lambda_context)
 
         assert _details(result)["idTokenGeneration"]["claimsToAddOrOverride"] == {MFA_CLAIM: True}
@@ -288,10 +274,8 @@ class TestNativeMfaClaimResolution:
         self, pre_token_event: dict[str, Any], lambda_context: MagicMock
     ) -> None:
         """SMS is the only activated method in the list: enrolled."""
-        with patch("boto3.client") as mock_client:
-            mock_cognito = MagicMock()
+        with patch("src.handlers.pre_token_generation.cognito") as mock_cognito:
             mock_cognito.admin_get_user.return_value = {"UserMFASettingList": [SMS_MFA]}
-            mock_client.return_value = mock_cognito
             result = lambda_handler(pre_token_event, lambda_context)
 
         assert _details(result)["idTokenGeneration"]["claimsToAddOrOverride"] == {MFA_CLAIM: True}
@@ -304,10 +288,8 @@ class TestNativeMfaClaimResolution:
         (email-message MFA per the GetUser API reference): Cognito challenges it
         at sign-in, so it is enabled-MFA enrollment evidence.
         """
-        with patch("boto3.client") as mock_client:
-            mock_cognito = MagicMock()
+        with patch("src.handlers.pre_token_generation.cognito") as mock_cognito:
             mock_cognito.admin_get_user.return_value = {"UserMFASettingList": ["EMAIL_OTP"]}
-            mock_client.return_value = mock_cognito
             result = lambda_handler(pre_token_event, lambda_context)
 
         assert _details(result)["idTokenGeneration"]["claimsToAddOrOverride"] == {MFA_CLAIM: True}
@@ -316,20 +298,16 @@ class TestNativeMfaClaimResolution:
         self, pre_token_event: dict[str, Any], lambda_context: MagicMock
     ) -> None:
         """An explicitly empty UserMFASettingList with no preferred setting is not enrolled."""
-        with patch("boto3.client") as mock_client:
-            mock_cognito = MagicMock()
+        with patch("src.handlers.pre_token_generation.cognito") as mock_cognito:
             mock_cognito.admin_get_user.return_value = {"UserMFASettingList": []}
-            mock_client.return_value = mock_cognito
             result = lambda_handler(pre_token_event, lambda_context)
 
         assert _details(result)["idTokenGeneration"]["claimsToAddOrOverride"] == {MFA_CLAIM: False}
 
     def test_absent_preference_sets_mfa_false(self, pre_token_event: dict[str, Any], lambda_context: MagicMock) -> None:
         """A native user with no PreferredMfaSetting attribute must get mfa=false (never true)."""
-        with patch("boto3.client") as mock_client:
-            mock_cognito = MagicMock()
+        with patch("src.handlers.pre_token_generation.cognito") as mock_cognito:
             mock_cognito.admin_get_user.return_value = {}
-            mock_client.return_value = mock_cognito
             result = lambda_handler(pre_token_event, lambda_context)
 
         assert _details(result)["idTokenGeneration"]["claimsToAddOrOverride"] == {MFA_CLAIM: False}
@@ -339,10 +317,8 @@ class TestNativeMfaClaimResolution:
     ) -> None:
         """An empty identities string is treated as a native user and proceeds to enrollment check."""
         pre_token_event["request"]["userAttributes"]["identities"] = ""
-        with patch("boto3.client") as mock_client:
-            mock_cognito = MagicMock()
+        with patch("src.handlers.pre_token_generation.cognito") as mock_cognito:
             mock_cognito.admin_get_user.return_value = {"PreferredMfaSetting": SOFTWARE_TOKEN_MFA}
-            mock_client.return_value = mock_cognito
             result = lambda_handler(pre_token_event, lambda_context)
 
         mock_cognito.admin_get_user.assert_called_once()
@@ -352,10 +328,8 @@ class TestNativeMfaClaimResolution:
         self, pre_token_event: dict[str, Any], lambda_context: MagicMock
     ) -> None:
         """The mfa claim must be a JSON boolean (V2_0), not a string."""
-        with patch("boto3.client") as mock_client:
-            mock_cognito = MagicMock()
+        with patch("src.handlers.pre_token_generation.cognito") as mock_cognito:
             mock_cognito.admin_get_user.return_value = {"PreferredMfaSetting": SOFTWARE_TOKEN_MFA}
-            mock_client.return_value = mock_cognito
             result = lambda_handler(pre_token_event, lambda_context)
 
         value = _details(result)["idTokenGeneration"]["claimsToAddOrOverride"][MFA_CLAIM]
@@ -366,10 +340,8 @@ class TestNativeMfaClaimResolution:
         self, pre_token_event: dict[str, Any], lambda_context: MagicMock
     ) -> None:
         """AdminGetUser is called with the sub when it is present."""
-        with patch("boto3.client") as mock_client:
-            mock_cognito = MagicMock()
+        with patch("src.handlers.pre_token_generation.cognito") as mock_cognito:
             mock_cognito.admin_get_user.return_value = {"PreferredMfaSetting": SOFTWARE_TOKEN_MFA}
-            mock_client.return_value = mock_cognito
             lambda_handler(pre_token_event, lambda_context)
 
             mock_cognito.admin_get_user.assert_called_once_with(
@@ -382,10 +354,8 @@ class TestNativeMfaClaimResolution:
     ) -> None:
         """When there is no sub, the userName is used as the AdminGetUser identifier."""
         del pre_token_event["request"]["userAttributes"]["sub"]
-        with patch("boto3.client") as mock_client:
-            mock_cognito = MagicMock()
+        with patch("src.handlers.pre_token_generation.cognito") as mock_cognito:
             mock_cognito.admin_get_user.return_value = {"PreferredMfaSetting": SOFTWARE_TOKEN_MFA}
-            mock_client.return_value = mock_cognito
             lambda_handler(pre_token_event, lambda_context)
 
             mock_cognito.admin_get_user.assert_called_once_with(
@@ -403,12 +373,10 @@ class TestFailClosed:
         """A Cognito API error must fail closed (mfa=false), never grant access."""
         from botocore.exceptions import ClientError
 
-        with patch("boto3.client") as mock_client:
-            mock_cognito = MagicMock()
+        with patch("src.handlers.pre_token_generation.cognito") as mock_cognito:
             mock_cognito.admin_get_user.side_effect = ClientError(
                 {"Error": {"Code": "InternalErrorException", "Message": "boom"}}, "AdminGetUser"
             )
-            mock_client.return_value = mock_cognito
             result = lambda_handler(pre_token_event, lambda_context)
 
         assert _details(result)["idTokenGeneration"]["claimsToAddOrOverride"] == {MFA_CLAIM: False}
@@ -419,17 +387,27 @@ class TestFailClosed:
         """With neither a sub nor a userName, no Cognito call is made and mfa is false."""
         del pre_token_event["request"]["userAttributes"]["sub"]
         del pre_token_event["userName"]
-        with patch("boto3.client") as mock_client:
+        with patch("src.handlers.pre_token_generation.cognito") as mock_cognito:
             result = lambda_handler(pre_token_event, lambda_context)
 
-        mock_client.assert_not_called()
+        mock_cognito.admin_get_user.assert_not_called()
         assert _details(result)["idTokenGeneration"]["claimsToAddOrOverride"] == {MFA_CLAIM: False}
 
-    def test_client_creation_failure_still_sets_mfa_false(
+    def test_client_call_failure_still_sets_mfa_false(
         self, pre_token_event: dict[str, Any], lambda_context: MagicMock
     ) -> None:
-        """Even a failing boto3 client must produce mfa=false, never a raised trigger."""
-        with patch("boto3.client", side_effect=Exception("no credentials")):
+        """Even a failing cognito client must produce mfa=false, never a raised trigger."""
+        with patch("src.handlers.pre_token_generation.cognito") as mock_cognito:
+            mock_cognito.admin_get_user.side_effect = Exception("no credentials")
+            result = lambda_handler(pre_token_event, lambda_context)
+
+        assert _details(result)["idTokenGeneration"]["claimsToAddOrOverride"] == {MFA_CLAIM: False}
+
+    def test_unexpected_cognito_exception_still_sets_mfa_false(
+        self, pre_token_event: dict[str, Any], lambda_context: MagicMock
+    ) -> None:
+        """Even if the module-level cognito object raises unexpectedly, mfa is false."""
+        with patch("src.handlers.pre_token_generation.cognito", None):
             result = lambda_handler(pre_token_event, lambda_context)
 
         assert _details(result)["idTokenGeneration"]["claimsToAddOrOverride"] == {MFA_CLAIM: False}
@@ -443,20 +421,16 @@ class TestNeverRaises:
     ) -> None:
         """A malformed response object must not escape the handler."""
         pre_token_event["response"] = "not-a-dict"
-        with patch("boto3.client") as mock_client:
-            mock_cognito = MagicMock()
+        with patch("src.handlers.pre_token_generation.cognito") as mock_cognito:
             mock_cognito.admin_get_user.return_value = {"PreferredMfaSetting": SOFTWARE_TOKEN_MFA}
-            mock_client.return_value = mock_cognito
             result = lambda_handler(pre_token_event, lambda_context)
 
         assert result is pre_token_event
 
     def test_returns_the_event_object(self, pre_token_event: dict[str, Any], lambda_context: MagicMock) -> None:
         """The handler returns the (mutated) event so Cognito can continue."""
-        with patch("boto3.client") as mock_client:
-            mock_cognito = MagicMock()
+        with patch("src.handlers.pre_token_generation.cognito") as mock_cognito:
             mock_cognito.admin_get_user.return_value = {"PreferredMfaSetting": SOFTWARE_TOKEN_MFA}
-            mock_client.return_value = mock_cognito
             result = lambda_handler(pre_token_event, lambda_context)
 
         assert result is pre_token_event
@@ -469,10 +443,8 @@ class TestGroupPreservation:
         self, pre_token_event: dict[str, Any], lambda_context: MagicMock
     ) -> None:
         """The request groupConfiguration is copied into groupOverrideDetails verbatim."""
-        with patch("boto3.client") as mock_client:
-            mock_cognito = MagicMock()
+        with patch("src.handlers.pre_token_generation.cognito") as mock_cognito:
             mock_cognito.admin_get_user.return_value = {"PreferredMfaSetting": SOFTWARE_TOKEN_MFA}
-            mock_client.return_value = mock_cognito
             result = lambda_handler(pre_token_event, lambda_context)
 
         assert _details(result)["groupOverrideDetails"] == pre_token_event["request"]["groupConfiguration"]
@@ -482,10 +454,8 @@ class TestGroupPreservation:
     ) -> None:
         """When there is no groupConfiguration, no groupOverrideDetails is emitted (not emptied)."""
         del pre_token_event["request"]["groupConfiguration"]
-        with patch("boto3.client") as mock_client:
-            mock_cognito = MagicMock()
+        with patch("src.handlers.pre_token_generation.cognito") as mock_cognito:
             mock_cognito.admin_get_user.return_value = {"PreferredMfaSetting": SOFTWARE_TOKEN_MFA}
-            mock_client.return_value = mock_cognito
             result = lambda_handler(pre_token_event, lambda_context)
 
         assert "groupOverrideDetails" not in _details(result)
@@ -496,10 +466,8 @@ class TestAmrNotWritten:
 
     def test_amr_is_never_written(self, pre_token_event: dict[str, Any], lambda_context: MagicMock) -> None:
         """Neither token generation block may contain an 'amr' claim."""
-        with patch("boto3.client") as mock_client:
-            mock_cognito = MagicMock()
+        with patch("src.handlers.pre_token_generation.cognito") as mock_cognito:
             mock_cognito.admin_get_user.return_value = {"PreferredMfaSetting": SOFTWARE_TOKEN_MFA}
-            mock_client.return_value = mock_cognito
             result = lambda_handler(pre_token_event, lambda_context)
 
         details = _details(result)
@@ -508,12 +476,18 @@ class TestAmrNotWritten:
 
     def test_only_mfa_claim_is_added(self, pre_token_event: dict[str, Any], lambda_context: MagicMock) -> None:
         """The handler adds exactly one claim (mfa); it does not fabricate others."""
-        with patch("boto3.client") as mock_client:
-            mock_cognito = MagicMock()
+        with patch("src.handlers.pre_token_generation.cognito") as mock_cognito:
             mock_cognito.admin_get_user.return_value = {"PreferredMfaSetting": SOFTWARE_TOKEN_MFA}
-            mock_client.return_value = mock_cognito
             result = lambda_handler(pre_token_event, lambda_context)
 
         details = _details(result)
         assert set(details["idTokenGeneration"]["claimsToAddOrOverride"]) == {MFA_CLAIM}
         assert set(details["accessTokenGeneration"]["claimsToAddOrOverride"]) == {MFA_CLAIM}
+
+
+def test_cognito_client_is_module_level() -> None:
+    """cognito client must be initialized once at module scope (issue #458)."""
+    import src.handlers.pre_token_generation as mod
+
+    assert mod.cognito is not None
+    assert hasattr(mod.cognito, "admin_get_user")

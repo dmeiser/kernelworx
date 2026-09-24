@@ -68,6 +68,10 @@ MFA_PREFERENCES = frozenset({SOFTWARE_TOKEN_MFA, SMS_MFA, WEB_AUTHN_MFA})
 # (backend) guards both read it from the ID token.
 MFA_CLAIM = "mfa"
 
+# Cognito IDP client initialized at module scope so connection pools and TLS
+# sessions are reused across warm Lambda executions (issue #458).
+cognito = boto3.client("cognito-idp")
+
 
 def _is_federated(user_attributes: Dict[str, Any]) -> bool:
     """
@@ -123,7 +127,6 @@ def _resolve_mfa(event: Dict[str, Any]) -> bool:
         logger.warning("pre-token-generation: missing userPoolId or sub; setting mfa=false")
         return False
     try:
-        cognito = boto3.client("cognito-idp")
         response = cognito.admin_get_user(UserPoolId=user_pool_id, Username=username)
     except Exception:
         logger.warning(
