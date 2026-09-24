@@ -592,7 +592,7 @@ describe('Profile Sharing Integration Tests', () => {
       
       // All codes should be valid format
       for (const code of inviteCodes) {
-        expect(code).toMatch(/^[A-Z0-9-]{10}$/);
+        expect(code).toMatch(/^[A-Z0-9]{16}$/);
       }
     });
   });
