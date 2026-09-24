@@ -107,9 +107,7 @@ class TestSmokeAutoConfirm:
     @pytest.fixture
     def smoke_signup_event(self, native_signup_event: dict[str, Any]) -> dict[str, Any]:
         """Native sign-up event carrying a smoke-test email address."""
-        native_signup_event["request"]["userAttributes"]["email"] = (
-            "smoke+abc123def@example-test.invalid"
-        )
+        native_signup_event["request"]["userAttributes"]["email"] = "smoke+abc123def@example-test.invalid"
         return native_signup_event
 
     def test_smoke_signup_auto_confirmed_when_enabled(
@@ -211,9 +209,7 @@ class TestSmokeAutoConfirm:
         # Federated handling is unchanged (auto-confirmed by its own path).
         assert result["response"]["autoConfirmUser"] is True
 
-    def test_flag_reads_current_environment(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_flag_reads_current_environment(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Sanity: the gate reads os.environ at invoke time, not import time."""
         from src.handlers.pre_signup import _smoke_auto_confirm_enabled
 

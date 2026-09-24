@@ -1,14 +1,22 @@
 """
 Cognito Pre-Sign-Up Lambda Trigger
 
-Automatically links federated identity providers (Google, Facebook) to existing
+Two responsibilities:
+
+1. Automatically links federated identity providers (Google, Facebook) to existing
 Cognito users with the same verified email. This prevents duplicate accounts when a user
 signs up with email/password first, then later signs in with a social provider.
+
+2. Auto-confirms smoke-test sign-ups (``smoke+...@example-test.invalid``) in non-production
+environments only, gated on the ``AUTO_CONFIRM_SMOKE_USERS`` env var that OpenTofu sets
+only in dev/ephemeral. The e2e suites cannot read a mailbox, and each native sign-up burns
+one of the account's 50-emails/day Cognito emails; see AGENTS.md "Smoke-test signup
+auto-confirm gate". Production signups always keep normal email confirmation.
 
 Trigger: Pre Sign Up
 Event: Before a new user is created (for both native and federated sign-ups)
 
-How it works:
+How federated linking works:
 1. When a federated user (e.g., Google) attempts to sign in for the first time
 2. Cognito triggers Pre Sign Up before creating the user
 3. This Lambda checks if a native user with the same email already exists
