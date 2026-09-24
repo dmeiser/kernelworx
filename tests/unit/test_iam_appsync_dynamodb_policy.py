@@ -91,8 +91,5 @@ def test_appsync_dynamodb_policy_scoped_to_tables_and_indexes():
     raw = raw if isinstance(raw, list) else [raw]
     # hcl2 parses a function-call resources value as a single ${...}
     # interpolation string; unwrap before comparing the semantic reference.
-    resources = [
-        r[2:-1] if isinstance(r, str) and r.startswith("${") and r.endswith("}") else r
-        for r in raw
-    ]
+    resources = [r[2:-1] if isinstance(r, str) and r.startswith("${") and r.endswith("}") else r for r in raw]
     assert resources == ["concat(local.dynamodb_table_arns, local.dynamodb_index_arns)"]
