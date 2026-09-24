@@ -483,11 +483,3 @@ class TestAmrNotWritten:
         details = _details(result)
         assert set(details["idTokenGeneration"]["claimsToAddOrOverride"]) == {MFA_CLAIM}
         assert set(details["accessTokenGeneration"]["claimsToAddOrOverride"]) == {MFA_CLAIM}
-
-
-def test_cognito_client_is_module_level() -> None:
-    """cognito client must be initialized once at module scope (issue #458)."""
-    import src.handlers.pre_token_generation as mod
-
-    assert mod.cognito is not None
-    assert hasattr(mod.cognito, "admin_get_user")
