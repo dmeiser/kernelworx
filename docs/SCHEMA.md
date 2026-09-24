@@ -147,14 +147,14 @@ Global Secondary Indexes: `targetAccountId-index` (targetAccountId)
 ### invites
 Primary Key: `inviteCode` (String)
 Global Secondary Indexes: `profileId-index` (profileId)
-TTL: `expiresAt` (default 14 days, max 90)
+TTL: `expiresAt` (default 14 days, max 14)
 
 | Attribute | Type | Purpose |
 |-----------|------|---------|
 | inviteCode | String | PK - 8-char code |
 | profileId | String | GSI - Profile being invited to |
 | permissions | StringSet | READ, WRITE permissions |
-| expiresAt | DateTime | TTL - Auto-delete after expiry (default 14 days, max 90) |
+| expiresAt | DateTime | TTL - Auto-delete after expiry (default 14 days, max 14) |
 | createdAt | DateTime | Timestamp |
 
 ### shared_campaigns
@@ -242,7 +242,7 @@ sequenceDiagram
     Frontend->>GraphQL: CreateInvite(profileId, permissions)
     GraphQL->>Lambda: Generate 8-char code
     Lambda->>INVITE: Put invite (PK: inviteCode)
-    Lambda->>INVITE: Set expiresAt = now + expiresInDays (default 14, max 90)
+    Lambda->>INVITE: Set expiresAt = now + expiresInDays (default 14, max 14)
     Lambda->>Frontend: Return invite code & URL
     Frontend->>Owner: Display shareable link
     
@@ -359,7 +359,7 @@ graph LR
 
 ```mermaid
 flowchart TD
-    A["Invite created"] -->|expiresAt = now + N days (default 14, max 90)| B["TTL enabled"]
+    A["Invite created"] -->|expiresAt = now + N days (default 14, max 14)| B["TTL enabled"]
     B -->|After expiry| C["DynamoDB auto-deletes"]
     C -->|No manual cleanup needed| D["Cost efficient"]
     

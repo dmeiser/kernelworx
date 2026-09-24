@@ -134,13 +134,13 @@ describe('create_invite_fn request', () => {
         );
     });
 
-    it('accepts the maximum expiry of 90 days', () => {
+    it('accepts the maximum expiry of 14 days', () => {
         const ctx = {
             args: {
                 input: {
                     profileId: 'PROFILE#p1',
                     permissions: ['READ'],
-                    expiresInDays: 90,
+                    expiresInDays: 14,
                 },
             },
             stash: {
@@ -151,7 +151,7 @@ describe('create_invite_fn request', () => {
 
         const result = request(ctx);
 
-        assert.strictEqual(result.attributeValues.expiresAt, 1711843200);
+        assert.strictEqual(result.attributeValues.expiresAt, 1705276800);
     });
 
     it('defaults to 14 days when expiresInDays is omitted', () => {
@@ -173,13 +173,13 @@ describe('create_invite_fn request', () => {
         assert.strictEqual(result.attributeValues.expiresAt, 1705276800);
     });
 
-    it('rejects an expiry over 90 days', () => {
+    it('rejects an expiry over 14 days', () => {
         const ctx = {
             args: {
                 input: {
                     profileId: 'PROFILE#p1',
                     permissions: ['READ'],
-                    expiresInDays: 91,
+                    expiresInDays: 15,
                 },
             },
             stash: {
@@ -190,7 +190,7 @@ describe('create_invite_fn request', () => {
 
         assert.throws(
             () => request(ctx),
-            /INVALID_INPUT: expiresInDays must be an integer between 1 and 90/
+            /INVALID_INPUT: expiresInDays must be an integer between 1 and 14/
         );
     });
 
@@ -206,7 +206,7 @@ describe('create_invite_fn request', () => {
                     ...base,
                     args: { input: { profileId: 'PROFILE#p1', permissions: ['READ'], expiresInDays } },
                 }),
-                /INVALID_INPUT: expiresInDays must be an integer between 1 and 90/
+                /INVALID_INPUT: expiresInDays must be an integer between 1 and 14/
             );
         }
     });
@@ -228,7 +228,7 @@ describe('create_invite_fn request', () => {
 
         assert.throws(
             () => request(ctx),
-            /INVALID_INPUT: expiresInDays must be an integer between 1 and 90/
+            /INVALID_INPUT: expiresInDays must be an integer between 1 and 14/
         );
     });
 
@@ -249,7 +249,7 @@ describe('create_invite_fn request', () => {
 
         assert.throws(
             () => request(ctx),
-            /INVALID_INPUT: expiresInDays must be an integer between 1 and 90/
+            /INVALID_INPUT: expiresInDays must be an integer between 1 and 14/
         );
     });
 

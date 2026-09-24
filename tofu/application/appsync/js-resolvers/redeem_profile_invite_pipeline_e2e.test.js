@@ -94,7 +94,7 @@ describe('#453 end-to-end: createProfileInvite expiry bound', () => {
     it('rejects a years-long expiry (365 days) with the standard validation error', () => {
         assert.throws(
             () => createInvite.request(createInviteCtx(365)),
-            /INVALID_INPUT: expiresInDays must be an integer between 1 and 90/
+            /INVALID_INPUT: expiresInDays must be an integer between 1 and 14/
         );
     });
 
@@ -102,15 +102,15 @@ describe('#453 end-to-end: createProfileInvite expiry bound', () => {
         for (const bad of [91, 0, -5, 1.5, '30']) {
             assert.throws(
                 () => createInvite.request(createInviteCtx(bad)),
-                /INVALID_INPUT: expiresInDays must be an integer between 1 and 90/,
+                /INVALID_INPUT: expiresInDays must be an integer between 1 and 14/,
                 `expected expiresInDays=${bad} to be rejected`
             );
         }
     });
 
-    it('accepts the 90-day maximum and stamps expiresAt accordingly', () => {
-        const op = createInvite.request(createInviteCtx(90));
-        assert.strictEqual(op.attributeValues.expiresAt, NOW_EPOCH_SECONDS + 90 * DAY);
+    it('accepts the 14-day maximum and stamps expiresAt accordingly', () => {
+        const op = createInvite.request(createInviteCtx(14));
+        assert.strictEqual(op.attributeValues.expiresAt, NOW_EPOCH_SECONDS + 14 * DAY);
     });
 
     it('defaults to 14 days when expiresInDays is omitted', () => {
