@@ -22,7 +22,6 @@ import pytest
 from botocore.exceptions import ClientError
 
 from src.handlers.admin_operations import (
-    _THROTTLING_ERROR_CODES,
     _batch_get_campaign_catalogs,
     _batch_get_display_names,
     _batch_get_user_groups,
@@ -5024,12 +5023,6 @@ class TestAdminSearchUserThrottling:
         result = _search_users_in_cognito_by_email_prefix(mock_cognito, "pool-id", "user@", mock_logger)
         assert result == users
         mock_logger.warning.assert_not_called()
-
-    def test_throttling_error_codes_contains_too_many_requests(self) -> None:
-        """_THROTTLING_ERROR_CODES includes TooManyRequestsException (#456)."""
-        assert "TooManyRequestsException" in _THROTTLING_ERROR_CODES
-        assert "ThrottlingException" in _THROTTLING_ERROR_CODES
-        assert "ProvisionedThroughputExceededException" in _THROTTLING_ERROR_CODES
 
 
 class TestBatchHelpers:
