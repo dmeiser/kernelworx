@@ -197,6 +197,11 @@ class TestValidateInviteCode:
         result = validate_invite_code("ABCD1234EFGH")
         assert result == "ABCD1234EFGH"
 
+    def test_valid_16_char_code(self) -> None:
+        """Test valid 16-character code."""
+        result = validate_invite_code("ABCD1234EFGH5678")
+        assert result == "ABCD1234EFGH5678"
+
     def test_lowercase_converted_to_uppercase(self) -> None:
         """Test that lowercase is converted to uppercase."""
         result = validate_invite_code("abc12345")
@@ -217,7 +222,7 @@ class TestValidateInviteCode:
     def test_too_long_raises_error(self) -> None:
         """Test that code too long raises error."""
         with pytest.raises(AppError) as exc_info:
-            validate_invite_code("ABCD1234EFGH5")
+            validate_invite_code("ABCD1234EFGH56789")
 
         assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
 

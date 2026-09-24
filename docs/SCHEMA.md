@@ -151,7 +151,7 @@ TTL: `expiresAt` (14 days)
 
 | Attribute | Type | Purpose |
 |-----------|------|---------|
-| inviteCode | String | PK - 8-char code |
+| inviteCode | String | PK - 16-char code |
 | profileId | String | GSI - Profile being invited to |
 | permissions | StringSet | READ, WRITE permissions |
 | expiresAt | DateTime | TTL - Auto-delete after 14 days |
@@ -240,7 +240,7 @@ sequenceDiagram
 sequenceDiagram
     Owner->>Frontend: Generate invite for profile
     Frontend->>GraphQL: CreateInvite(profileId, permissions)
-    GraphQL->>Lambda: Generate 8-char code
+    GraphQL->>Lambda: Generate 16-char code
     Lambda->>INVITE: Put invite (PK: inviteCode)
     Lambda->>INVITE: Set expiresAt = now + 14 days
     Lambda->>Frontend: Return invite code & URL

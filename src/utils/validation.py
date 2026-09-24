@@ -233,11 +233,11 @@ def validate_invite_code(invite_code: str) -> str:
     """
     code = invite_code.strip().upper()
 
-    # Invite codes should be 8-12 alphanumeric characters
-    if not re.match(r"^[A-Z0-9]{8,12}$", code):
+    # Invite codes should be 8-16 alphanumeric characters
+    if not re.match(r"^[A-Z0-9]{8,16}$", code):
         raise AppError(
             ErrorCode.INVALID_INPUT,
-            "Invite code must be 8-12 alphanumeric characters",
+            "Invite code must be 8-16 alphanumeric characters",
             {"inviteCode": invite_code},
         )
 
